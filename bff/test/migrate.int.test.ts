@@ -959,3 +959,31 @@ test('migrate: v0.55.8 distinguishes Rescan-missing legacy tombstones from prove
     await q('DELETE FROM lib_series WHERE id = ANY($1)', [ids]).catch(() => {});
   }
 });
+
+test('migrate: v0.61.0 only adds -- the release radar and the smart checks\' switch -- and v0.60.1 keeps writing its rows', { skip }, async () => {
+  // v0.60.1 boots on this schema after a rollback and never names either. The radar's only required column is its key
+  // (v0.60.1 never writes a row), and the switch is off unless an admin turns it on: an upgrade must not change how
+  // often a sweep asks the sources. Reintroduce DEFAULT true on update_smart: "update_smart is not off by default".
+  const required = await q<{ column_name: string }>(
+    `SELECT column_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'series_radar' AND is_nullable = 'NO' AND column_default IS NULL`);
+  assert.deepEqual(required.map((r) => r.column_name), ['series_id']);
+  const [smart] = await q<{ data_type: string; column_default: string | null; is_nullable: string }>(
+    `SELECT data_type, column_default, is_nullable FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'server_settings' AND column_name = 'update_smart'`);
+  assert.deepEqual([smart?.data_type, smart?.column_default, smart?.is_nullable], ['boolean', 'false', 'NO'], 'update_smart is not off by default');
+  // A series v0.60.1 deletes outright -- its Forget names the tables it knows, and the radar is not one -- takes its
+  // radar with it rather than failing on a foreign key. In a transaction that is rolled back.
+  await withClient(async (c) => {
+    await c.query('BEGIN');
+    try {
+      await c.query(`INSERT INTO lib_series (id, source, title, folder) VALUES ('t-radar', 'test', 'T', 'T!radar-m/T')`);
+      await c.query(`INSERT INTO series_radar (series_id) VALUES ('t-radar')`);
+      await c.query(`DELETE FROM lib_series WHERE id = 't-radar'`);
+      const { rows } = await c.query(`SELECT 1 FROM series_radar WHERE series_id = 't-radar'`);
+      assert.equal(rows.length, 0, 'the radar outlives a series v0.60.1 deletes');
+    } finally {
+      await c.query('ROLLBACK');
+    }
+  });
+});

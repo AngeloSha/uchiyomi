@@ -335,6 +335,13 @@ function sortSql(sort?: string, perUser = false): string {
   if (!sort) return 'title ASC';
   const [field, dir0] = String(sort).split(',');
   const dir = (dir0 || 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+  // v0.61.0, Releasing soon: the release radar's estimate (lib/releaseRadar.ts), soonest first -- only while the
+  // series is monitored and not yet quiet; one with no estimate, a quiet one and one nobody updates come after every
+  // dated series, whichever the direction, then by title. FIRST, so no older branch's pattern can take the field.
+  // Reintroduce by dropping it: "Releasing soon orders the Library by the radar" in releaseRadar.int.test.ts reads A-Z.
+  if (/releasing/i.test(field)) {
+    return `(SELECT CASE WHEN r.quiet_after > now() AND sv.auto_update THEN r.next_at END FROM series_radar r WHERE r.series_id = sv.id) ${dir} NULLS LAST, title ASC`;
+  }
   if (/random/i.test(field)) return 'random()';
   if (/title|name/i.test(field)) return `title ${dir}`;
   if (/created|added/i.test(field)) return `created_at ${dir}`;

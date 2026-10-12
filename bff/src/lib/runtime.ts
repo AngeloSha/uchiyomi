@@ -42,6 +42,8 @@ export const runtime: {
     /** Chapters recovered from another source, saved with placeholders, or completed from an earlier run. */
     switched?: number; partial?: number; completed?: number;
     healthy?: boolean; stopped?: 'budget' | 'disk' | 'shutdown' | 'cancelled';
+    /** v0.61.0: monitored series the smart update checks left for a later sweep (lib/releaseRadar.ts isDue). */
+    rested?: number;
   } | null;
   updating: boolean;
   /**

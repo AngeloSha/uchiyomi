@@ -29,6 +29,7 @@ import { aliasParts, partRulesApply } from './partAlias';
 import { isListedNotice } from './noticeChapters';
 import { seriesHidesNotices } from './noticeSettings';
 import { heldBy, rangeEnd, rawRangeEnd } from './chapterRanges';
+import { isDue, refreshRadar } from './releaseRadar';
 
 /**
  * Why a series produced nothing this run.
@@ -740,6 +741,13 @@ export async function runUpdateAll(opts: {
   onlyFavorites?: boolean; maxNew?: number; sweepMax?: number;
   /** The run's card (lib/downloadJobs.ts): progress written to it as the sweep goes, and its cancel flag obeyed. */
   card?: RunCard;
+  /**
+   * v0.61.0, the smart update checks (Admin -> Settings, server_settings.update_smart, off by default): only the
+   * series that are due by lib/releaseRadar.ts isDue are visited, `hoursMs` being the update interval. Passed by the
+   * scheduled tick alone (server.ts) and only while the switch is on: Run now, Check now, Fetch newest, the repair, Fix
+   * everything and the slow archive ask every series they mean to, as before.
+   */
+  smart?: { hoursMs: number };
 } = {}): Promise<{
   series: number; visited: number; added: number; failed: number; chapterFailures: number; capped: number;
   outcomes: Record<UpdateOutcome | 'threw' | 'skipped', number>; healthy: boolean; stopped?: SweepStop;
@@ -750,6 +758,11 @@ export async function runUpdateAll(opts: {
   /** Every series this sweep landed chapters for, with its title and how many: the digest's material
    *  (lib/notify, #70). Optional so a test's stand-in sweep need not invent one. */
   newChapters?: DigestSeries[];
+  /**
+   * v0.61.0: monitored series the smart checks left for a later sweep, quiet and not due (`smart`); 0 without it.
+   * Not in `series`, which counts what this sweep set out to visit, nor in `outcomes.skipped`.
+   */
+  rested: number;
 }> {
   const sweepMax = opts.sweepMax ?? SWEEP_MAX;
   // Rows never checked sort first, so the first sweep after this change visits in the old order.
@@ -757,10 +770,37 @@ export async function runUpdateAll(opts: {
   // What each series is asked through, for its queue below: its followers in follow order, and its numbering.
   const routing = `ARRAY(SELECT ss.source_id FROM series_sources ss WHERE ss.series_id = s.id ORDER BY ss.created_at, ss.source_id) AS extra,
     s.numbering, s.numbering_source`;
-  type SweepRow = { id: string; source_id: string | null; title: string; folder: string; extra: string[] | null; numbering: string | null; numbering_source: string | null };
-  const rows = opts.onlyFavorites
-      ? await q<SweepRow>(`SELECT DISTINCT s.id, s.source_id, s.title, s.folder, s.source_checked_at, s.latest_mtime, ${routing} FROM favorites f JOIN lib_series s ON s.id = f.series_id WHERE s.auto_update AND ${visibleToAll('s')} ${order}`)
-      : await q<SweepRow>(`SELECT s.id, s.source_id, s.title, s.folder, ${routing} FROM lib_series s WHERE s.auto_update AND ${visibleToAll('s')} ${order}`);
+  // What the smart checks read (lib/releaseRadar.ts DueInput): selected only for a smart sweep, so every other sweep's
+  // query is the one it always was.
+  const dueCols = opts.smart
+    ? `, s.source_checked_at AS checked_at, s.source_missing, s.latest_mtime AS latest_ms, s.created_at,
+       (SELECT r.next_at FROM series_radar r WHERE r.series_id = s.id) AS next_at,
+       (SELECT r.due_until FROM series_radar r WHERE r.series_id = s.id) AS due_until,
+       (SELECT r.last_at FROM series_radar r WHERE r.series_id = s.id) AS last_at`
+    : '';
+  type SweepRow = {
+    id: string; source_id: string | null; title: string; folder: string; extra: string[] | null; numbering: string | null; numbering_source: string | null;
+    checked_at?: Date | null; source_missing?: number | null; latest_ms?: number | string | null; created_at?: Date | null;
+    next_at?: Date | null; due_until?: Date | null; last_at?: Date | null;
+  };
+  let rows = opts.onlyFavorites
+      ? await q<SweepRow>(`SELECT DISTINCT s.id, s.source_id, s.title, s.folder, s.source_checked_at, s.latest_mtime, ${routing}${dueCols} FROM favorites f JOIN lib_series s ON s.id = f.series_id WHERE s.auto_update AND ${visibleToAll('s')} ${order}`)
+      : await q<SweepRow>(`SELECT s.id, s.source_id, s.title, s.folder, ${routing}${dueCols} FROM lib_series s WHERE s.auto_update AND ${visibleToAll('s')} ${order}`);
+  // v0.61.0: the smart checks rest the series that are not due BEFORE the per-source queues are built, so a rested
+  // series costs its source nothing, takes no turn and no pause, and is not counted on the run's card. Reintroduce by
+  // filtering nothing: "a smart sweep rests the quiet series that are not due, and asks the rest" in smartSweep.int.test.ts
+  // finds the quiet one asked.
+  let rested = 0;
+  if (opts.smart) {
+    const now = Date.now();
+    const t = (v: Date | null | undefined) => (v ? new Date(v).getTime() : null);
+    const due = rows.filter((r) => isDue({
+      checkedAt: t(r.checked_at), sourceMissing: r.source_missing ?? null, nextAt: t(r.next_at), dueUntil: t(r.due_until),
+      lastAt: t(r.last_at), latestMtime: Number(r.latest_ms) || null, createdAt: t(r.created_at),
+    }, now, opts.smart!.hoursMs));
+    rested = rows.length - due.length;
+    rows = due;
+  }
   const card = opts.card;
   const titles = new Map(rows.map((r) => [r.id, r.title] as const));
   const folders = new Map(rows.map((r) => [r.id, r.folder] as const));
@@ -803,7 +843,7 @@ export async function runUpdateAll(opts: {
   // catching it into `{ added: 0 }` is what made "the database went away mid-sweep" read as "nothing new".
   // `skipped` is what the budget, a parked source or a hold (below) left unvisited: not a failure, and not nothing either.
   const outcomes: Record<UpdateOutcome | 'threw' | 'skipped', number> = { ok: 0, busy: 0, gone: 0, unrouted: 0, blocked: 0, source_error: 0, renumber_pending: 0, off: 0, paused: 0, threw: 0, skipped: 0 };
-  const dated: { folder: string; chapters: SourceChapter[]; landed: Landed[] }[] = [];
+  const dated: { id: string; folder: string; chapters: SourceChapter[]; landed: Landed[] }[] = [];
   const newChapters: DigestSeries[] = [];
 
   sweep: while (queues.size) {
@@ -845,7 +885,7 @@ export async function runUpdateAll(opts: {
       partial += r.partial ?? 0;
       spent += r.added + (r.failed ?? 0);
       outcomes[r.outcome] = (outcomes[r.outcome] ?? 0) + 1;
-      if (r.added && r.folder && r.chapters?.length) dated.push({ folder: r.folder, chapters: r.chapters, landed: r.landed });
+      if (r.added && r.folder && r.chapters?.length) dated.push({ id, folder: r.folder, chapters: r.chapters, landed: r.landed });
       // The throw fallback above has `added: 0` and no title, so it can never reach the digest.
       if (r.added && (r as { title?: string }).title) newChapters.push({ id, title: (r as { title: string }).title, added: r.added });
       if (card) { card.done = visited; card.fetched = added; card.failed = chapterFailures; }
@@ -930,12 +970,16 @@ export async function runUpdateAll(opts: {
   for (const d of dated) { // stamp the books the scan just created
     await setBookDates(d.folder, d.chapters).catch(() => {});
     await setBookMeta(d.folder, d.landed).catch(() => {});
+    // v0.61.0: the chapters that just arrived are the radar's newest evidence (lib/releaseRadar.ts), and the listing
+    // refresh inside updateSeries ran before they were downloaded. Reintroduce by dropping it: "a sweep that lands a
+    // chapter dates the radar from it" in releaseRadar.int.test.ts keeps the radar of before the chapter came.
+    await refreshRadar(d.id).catch(() => null);
   }
   // `healthy` is the question the admin panel should have been asking all along: was this a quiet night, or
   // did nothing work? A run where every source failed now looks nothing like one where nothing was new.
   const broken = outcomes.source_error + outcomes.threw;
   return {
-    series: rows.length, visited, added, failed: broken, chapterFailures, capped, outcomes, stopped, switched, partial, completed,
+    series: rows.length, visited, added, failed: broken, chapterFailures, capped, outcomes, stopped, switched, partial, completed, rested,
     healthy: broken === 0 && chapterFailures === 0 && stopped !== 'disk' && stopped !== 'shutdown',
     newChapters,
   };
@@ -1015,11 +1059,15 @@ export function runSweep(opts: SweepOpts & { by?: string | null }, log: SweepLog
         series: r.series, visited: r.visited, added: r.added, failed: r.failed,
         chapterFailures: r.chapterFailures, switched: r.switched, partial: r.partial,
         completed: r.completed, healthy: r.healthy, stopped: r.stopped,
+        // v0.61.0: the series the smart checks left for a later sweep (Admin -> Tasks: "184 quiet series not due").
+        rested: r.rested ?? 0,
       };
       // A sweep that added nothing because nothing was new, and one that added nothing because every source
       // was down, used to print the identical line. They no longer do. Nor does a sweep that finished look
       // like one the budget or the disk cut short.
-      const scope = `visited ${r.visited} of ${r.series} series${r.stopped ? ` (stopped: ${r.stopped})` : ''}`;
+      // v0.61.0: and how many quiet series the smart checks left for a later sweep, when the switch rested any.
+      const scope = `visited ${r.visited} of ${r.series} series${r.stopped ? ` (stopped: ${r.stopped})` : ''}`
+        + (r.rested ? ` (${r.rested} quiet series not due)` : '');
       // What the fallback chain did, when it did anything: a chapter taken from another followed source,
       // one saved with placeholder pages, a partial from an earlier night made whole. Silent when zero,
       // so a quiet night's line is the line it always was.

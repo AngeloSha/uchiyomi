@@ -28,6 +28,7 @@ import { scheduleAniListScores } from './lib/anilistScores';
 import { notifyAdmins } from './lib/push';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
+import { refreshMissingRadars } from './lib/releaseRadar';
 import { runRepair, setRepairNext, REPAIR_HOURS } from './lib/repair';
 import { AFTER_NIGHTLY_AUTOFIX, autofixSettled, closeInterruptedAutofix, startAutofix } from './lib/autofix';
 import { startArchive } from './lib/archive';
@@ -232,8 +233,13 @@ async function main() {
       let hours = 6;
       let retryIn = 0;
       try {
-        const s = await pool.query('SELECT updater_hours FROM server_settings WHERE id = 1');
+        const s = await pool.query('SELECT updater_hours, update_smart FROM server_settings WHERE id = 1');
         hours = Math.min(168, Math.max(1, s.rows[0]?.updater_hours || 6));
+        // v0.61.0: Admin -> Settings "Smart update checks" (off by default), read every tick so the switch applies to
+        // the next sweep: only THIS sweep rests the quiet series (lib/releaseRadar.ts isDue). Run now, Check now and
+        // everything else a person starts asks every series it means to. Reintroduce by passing it always: "the
+        // scheduled sweep is smart only while the switch is on" in smartSweep.int.test.ts finds it unconditional.
+        const smart = s.rows[0]?.update_smart === true ? { hoursMs: hours * 3_600_000 } : null;
         // ⚠️ Never beside a repair. Both download into the same series folders and both write lib_books for
         // what landed, so a chapter the repair is replacing could be the very file this sweep scans, and two
         // persistScans racing one folder mint rows twice. `runSweep` refuses on its own, but a refusal here
@@ -245,7 +251,7 @@ async function main() {
         } else {
           // The running flag, the stored result and the summary line all live in runSweep now, so the panel's
           // "Run now" button gets the same treatment as this tick -- and this tick can see the button's sweep.
-          const run = runSweep({ maxNew: 5 }, app.log);
+          const run = smart ? runSweep({ maxNew: 5, smart }, app.log) : runSweep({ maxNew: 5 }, app.log);
           if (run) await run;
           else app.log.info('updater: the previous sweep is still running, skipping this tick');
         }
@@ -274,6 +280,14 @@ async function main() {
       app.log.info(`updater: first sweep in ${Math.round(delay / 60000)} min` + (last ? ` (last completed ${new Date(last).toISOString()})` : ' (no completed sweep on record)'));
       setTimeout(tick, delay).unref();
     })();
+    // v0.61.0, the release radar (lib/releaseRadar.ts): once, a minute after boot, every series with a source and no
+    // radar yet is dated from what is already stored -- its listing and its chapters' arrivals, no source asked -- so
+    // an upgrade's Releasing soon and Expected this week are not empty until each series' next check.
+    setTimeout(() => {
+      void refreshMissingRadars()
+        .then((n) => { if (n) app.log.info(`radar: ${n} series dated from what is already here`); })
+        .catch((e) => app.log.warn(`radar: the boot pass failed: ${(e as Error)?.message || e}`));
+    }, 60 * 1000).unref();
   }
 
   /**

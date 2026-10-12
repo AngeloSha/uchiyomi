@@ -70,7 +70,28 @@ const WEEKS = 12;
 /** How many of the newest release days the rhythm is judged from: enough to smooth one late week, few enough to notice a group that slowed down this year. */
 /** Uploads closer together than this are one release (a batch), whatever the calendar says. */
 const RELEASE_GAP_MS = 12 * 60 * 60 * 1000;
-const CADENCE_WINDOW = 10;
+/** Exported (v0.61.0) for lib/releaseRadar.ts, which judges how regular a rhythm is over the same releases. */
+export const CADENCE_WINDOW = 10;
+
+/**
+ * When each RELEASE began, newest first: the dates (ms, any order) clustered as cadenceOf clusters them -- walking
+ * newest-first, a timestamp starts a new release only when it is more than half a day before the current one's
+ * earliest upload, and a release begins at its batch's earliest upload.
+ *
+ * Exported (v0.61.0) so the release radar (lib/releaseRadar.ts) counts releases exactly as the "who scanlates this"
+ * cadence does, from source dates and from arrival dates alike. cadenceOf calls it unchanged; groupStats.test.ts's
+ * batch tests are its guard ("ten chapters dropped in one hour a month apart ship monthly", "a batch that crosses
+ * midnight is one release").
+ */
+export function releaseStarts(dates: number[]): number[] {
+  const valid = [...new Set(dates.filter((t) => Number.isFinite(t)))].sort((a, b) => b - a);
+  const starts: number[] = [];
+  for (const t of valid) {
+    if (!starts.length || starts[starts.length - 1] - t > RELEASE_GAP_MS) starts.push(t);
+    else starts[starts.length - 1] = t; // the batch's earliest upload is when the release began
+  }
+  return starts;
+}
 
 /**
  * A group's rhythm from its release dates (ms, any order, one per chapter).
@@ -100,12 +121,8 @@ export function cadenceOf(dates: number[], now = Date.now()): Cadence {
   // Reintroduce by taking `valid.slice(0, CADENCE_WINDOW)` and dividing the raw gaps by DAY_MS: "two
   // chapters a week at a time still ships weekly" reads daily and "ten chapters dropped in one hour a
   // month apart ship monthly" reads daily and quiet; bucket by UTC day instead and "a batch that crosses
-  // midnight is one release" reads daily.
-  const starts: number[] = [];
-  for (const t of valid) {
-    if (!starts.length || starts[starts.length - 1] - t > RELEASE_GAP_MS) starts.push(t);
-    else starts[starts.length - 1] = t; // the batch's earliest upload is when the release began
-  }
+  // midnight is one release" reads daily. (The walk is releaseStarts, above, since v0.61.0.)
+  const starts = releaseStarts(valid);
   const recent = starts.slice(0, CADENCE_WINDOW);
   if (recent.length < 2) {
     return { kind: 'unknown', intervalDays: null, daysSince, quiet: daysSince != null && daysSince > 45 };

@@ -52,6 +52,12 @@ test('v0.55.8 personal settings contracts', { skip }, async () => {
     assert.equal(saved.librarySortDir, 'asc', 'v0.60.0: the Library sort order');
     const back = await put({ librarySortDir: null });
     assert.equal(back.statusCode, 200, 'null goes back to the sort\'s own direction');
+    // v0.61.0: Releasing soon (the release radar's estimate) is one of the Library's orders, so it may be saved too.
+    // Deliberately widened with the enum in routes/personal.ts; any other word is still refused below.
+    const soon = await put({ librarySort: 'soon' });
+    assert.equal(soon.statusCode, 200, soon.body);
+    assert.equal(soon.json().librarySort, 'soon');
+    assert.equal((await put({ librarySort: 'unread' })).statusCode, 200);
     assert.equal(saved.showAllChapters, true);
     assert.deepEqual(saved.homeCollections, [owned[1], owned[0]], 'deduplicated without changing order');
     assert.deepEqual(saved.futureSetting, { kept: true }, 'unknown settings remain forwards-compatible');

@@ -190,6 +190,29 @@ components:
                   said: { $ref: '#/components/schemas/AutofixSaid' }
                   action: { type: object, additionalProperties: true }
         log: { type: array, items: { $ref: '#/components/schemas/AutofixSaid' } }
+    SeriesRadar:
+      type: object
+      description: >-
+        Since v0.61.0, `yomi.radar` on every enriched series: the release radar's estimate of its next chapter, from
+        the dates its sources list (`basis: source`) or, when they date too little, from when its chapters arrived on
+        this server (`arrival`); null while nothing dates the series or it has no source. Times are ISO. `nextAt` and
+        `dueUntil` are null unless the rhythm is clear -- four releases or more, mostly evenly spaced, shipping daily,
+        weekly or monthly -- and the series is not ended or on hiatus; from `nextAt` to `dueUntil` it is "due any
+        day", after that "running late", and from `quietAfter` on quiet. `every` is the median gap in days, `kind`
+        the cadence (daily | weekly | monthly | irregular | unknown), `steady` whether its releases keep one weekday
+        (the estimate is moved onto it), `ended` whether its status says it is finished. An estimate, always: the
+        web says "~Friday" and "usually Fridays".
+      required: [nextAt, dueUntil, quietAfter, lastAt, every, kind, steady, ended, basis]
+      properties:
+        nextAt: { type: [string, "null"], format: date-time }
+        dueUntil: { type: [string, "null"], format: date-time }
+        quietAfter: { type: [string, "null"], format: date-time }
+        lastAt: { type: [string, "null"], format: date-time }
+        every: { type: [number, "null"] }
+        kind: { type: string, enum: [daily, weekly, monthly, irregular, unknown] }
+        steady: { type: boolean }
+        ended: { type: boolean }
+        basis: { type: [string, "null"], enum: [source, arrival, null] }
     AccountSettings:
       type: object
       additionalProperties: true
@@ -199,10 +222,10 @@ components:
       properties:
         librarySort:
           type: string
-          enum: [updated, new, az, unread, popular, score, rating, chapters, read]
+          enum: [updated, new, az, unread, popular, score, rating, chapters, read, soon]
           description: >-
             The Library's saved default sort (since v0.58.0 also Most popular, Top rated, My rating, Most chapters
-            and Recently read). A valid `sort` in the Library URL wins for that visit; opening a shared URL does not
+            and Recently read; since v0.61.0 Releasing soon, `soon`). A valid `sort` in the Library URL wins for that visit; opening a shared URL does not
             change this setting.
         librarySortDir:
           type: string
@@ -1718,7 +1741,10 @@ paths:
                     its checked AniList link; a series with none comes after every series with one, either
                     direction), `rating` (your own stars, unrated after rated), `chapters` (the chapters the series
                     shows) and `lastRead` (when you last read in it). The per-user ones (`unread`, `favorites`,
-                    `rating`, `lastRead`) need a signed-in caller and fall back to title order without one.
+                    `rating`, `lastRead`) need a signed-in caller and fall back to title order without one. Since
+                    v0.61.0 `releasing`: the release radar's estimate of the next chapter (`yomi.radar.nextAt`),
+                    soonest first in `asc`; a series without one in force -- no estimate, gone quiet, or not
+                    monitored -- comes after every dated series in either direction, then by title.
                   type: string
                 condition:
                   type: object
@@ -1777,6 +1803,18 @@ paths:
                         properties:
                           seed: { type: integer }
                       - type: "null"
+                  yomi:
+                    type: object
+                    additionalProperties: true
+                    description: >-
+                      The caller's own state over the series (favourite, rating, unread, newCount, anilist,
+                      lastReadAt), and since v0.61.0 `radar`, the release radar's estimate (the same on every
+                      enriched series: the Library, Home's rails, Updates).
+                    properties:
+                      radar:
+                        oneOf:
+                          - $ref: "#/components/schemas/SeriesRadar"
+                          - type: "null"
                   sources:
                     type: array
                     description: Where the chapters come from, primary first, then followed sources in the order they were added. Present for every viewer.
@@ -1932,6 +1970,41 @@ paths:
       responses:
         "200":
           description: OK
+        "401":
+          description: Not authenticated
+  /api/updates/expected:
+    get:
+      tags:
+        - library
+      summary: Expected this week -- the caller's series whose next chapter is likely within seven days.
+      operationId: getApiUpdatesExpected
+      description: >-
+        Since v0.61.0. The series the caller follows -- a favourite, or one they read in the last 90 days -- whose
+        release radar (`yomi.radar`, see SeriesRadar) puts the next chapter before seven days from now, due or running
+        late but not yet quiet; monitored series only, soonest first, at most 30. Only what this caller may list:
+        their libraries, age cap and 18+ switch. Each series is enriched, so it carries `yomi.radar`. An estimate,
+        never a promise: the web says so under the heading.
+      parameters:
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "`{content: Series[]}`"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
         "401":
           description: Not authenticated
   /api/series/{id}/color:
@@ -6280,7 +6353,8 @@ paths:
         includes scanlator_prefs, the server-wide release preferences (ScanlatorPrefs; the default is no
         priority, nothing blocked, two days of patience), backup_hour, the local hour (0-23) of the nightly
         backup, and auto_follow_on_failure, the on-by-default bounded source hunt after an ordinary scheduled
-        chapter failure. The hunt never runs for interactive Add/Fetch or after a 403/429 refusal.
+        chapter failure. The hunt never runs for interactive Add/Fetch or after a 403/429 refusal. Since v0.61.0
+        update_smart, the smart update checks (off by default; see updateSmart on PATCH).
       security:
         - bearer: []
       responses:
@@ -6419,6 +6493,15 @@ paths:
                   type: boolean
                 updateCheck:
                   description: Ask GitHub whether a newer release exists. Sends nothing about this install.
+                  type: boolean
+                updateSmart:
+                  description: >-
+                    Since v0.61.0, Smart update checks (off by default): the SCHEDULED sweep asks a series that has
+                    been quiet a long time less often -- a seventh of its silence, never less than every three days
+                    (or the update interval, when that is longer) -- and every series at the usual interval while its
+                    next chapter is due or its sources list chapters this server lacks. Run now, Check now, Fetch
+                    newest, the repair, Fix everything and the slow archive always ask at once. The sweep's result
+                    gains `rested`, the series left for a later sweep.
                   type: boolean
                 installPing:
                   description: >-
@@ -6689,6 +6772,8 @@ paths:
         /api/admin/tasks/rescan/apply), persisted in server_settings.rescan_last_run / rescan_last_result.
         The `fingerprint` entry's `lastResult` is this process's last pass, {done, failed, young, ms} -- `young`
         (since v0.55.7) the files a pass the server started left for a later one, written in the last minute.
+        Since v0.61.0 the `update` entry's `lastResult` carries `rested`: monitored series the smart update checks
+        (server_settings.update_smart) left for a later sweep, 0 when the switch is off or the sweep was Run now.
       security:
         - bearer: []
       responses:

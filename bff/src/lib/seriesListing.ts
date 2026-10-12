@@ -27,6 +27,7 @@ import { listedShown } from './noticeChapters';
 import { sameLanguage } from './lang';
 import { sourceLanguage } from './seriesLang';
 import { cleanSourceOrder, rankSources, type SourcePriority } from './sourcePrefs';
+import { refreshRadar } from './releaseRadar';
 
 /**
  * `covered` (v0.50.0, lib/partAlias.ts R2): another site's split of a chapter on disk -- its 78.1 ... 78.9 where 78
@@ -397,6 +398,12 @@ export async function replaceListing(seriesId: string, rows: ListingRow[]): Prom
       );
     }
   });
+  // v0.61.0: the release radar (lib/releaseRadar.ts) from the listing just written -- here, at the end, so every way a
+  // listing is written refreshes it: the sweep, Check now, a listing-only refresh and the add paths. After the
+  // transaction has committed, never inside it: it reads the rows the transaction wrote, and its own write takes no
+  // lock the listing's order above has to account for. Best effort: a radar never fails a listing.
+  // Reintroduce by dropping it: "a listing refresh writes the series' radar" in releaseRadar.int.test.ts finds no row.
+  await refreshRadar(seriesId).catch(() => null);
 }
 
 /**

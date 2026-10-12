@@ -980,6 +980,7 @@ GET    /api/random                GET    /api/genres
 GET    /api/genres/overview       GET    /api/libraries
 GET    /api/library/sources       GET    /api/adult-filter
 GET    /api/updates               POST   /api/updates/seen
+GET    /api/updates/expected
 POST   /api/refresh               GET    /api/refresh
 GET    /api/series/:id            GET    /api/series/:id/books
 GET    /api/series/:id/similar    GET    /api/series/:id/color
@@ -1390,7 +1391,7 @@ takes top-level keys directly and merges them into that object (an object value 
 accepted and retained for compatibility. v0.55.8 validates three public keys:
 
 - `librarySort: 'updated' | 'new' | 'az' | 'unread'` (since v0.58.0 also `'popular' | 'score' | 'rating' | 'chapters'
-  | 'read'`), the Library's saved default. A valid URL sort wins for that
+  | 'read'`, since v0.61.0 `'soon'`, Releasing soon), the Library's saved default. A valid URL sort wins for that
   visit; the web writes this key only from a direct sort-control click, so opening a shared URL does not change it.
 - `librarySortDir: 'asc' | 'desc' | null` (since v0.60.0), the Library's saved sort order (High to low is `desc`); null
   goes back to the sort's own direction. A valid `dir` in the Library URL wins for that visit.
@@ -1411,6 +1412,25 @@ sorts by `popularity`, `score`, `rating`, `chapters` and `lastRead` (see the Ope
 - `showAllChapters: boolean`, the account-wide unpaged chapter-list switch.
 
 The earlier `reader` object (including `coverEdges`) and `listSorts` map remain additive keys on the same object.
+
+**Release radar** (since v0.61.0). Every enriched series also carries `yomi.radar: {nextAt, dueUntil, quietAfter,
+lastAt, every, kind, steady, ended, basis} | null` — the server's estimate of when its next chapter comes (`series_radar`,
+one row per series, ISO times). The evidence is the dates its sources list for the chosen copies of what it may take
+(`basis: 'source'`; a blocked number and a hidden notice never count), or, where those date too little or have gone
+stale, when its chapters arrived on this server (`'arrival'`: a chapter counts only if its number is above every one
+that came before it, so a re-download, a filled gap or the slow archive's back catalogue is never a release). Both are
+clustered into releases as the scanlation-group cadence is (uploads under twelve hours apart are one). `kind` and
+`every` (the median gap in days) are that cadence; `nextAt` and `dueUntil` are null unless there are four releases or
+more, mostly evenly spaced, shipping daily, weekly or monthly, from a series not ended or on hiatus. `steady` is a
+series that keeps one weekday (the estimate sits on it). From `nextAt` to `dueUntil` the next chapter is due any day,
+after that it is late, and from `quietAfter` (three intervals, a fortnight at least, or 45 days with no rhythm) the
+series is quiet. The row is rewritten after every listing refresh (the sweep, Check now, the add) and after a sweep or a
+Check now lands chapters, and once at boot for a series that has a source and none. `null` for a series with no
+source or nothing dated. `POST /api/series/search` sorts by `releasing` (Releasing soon: soonest first, a series with
+no estimate in force after the rest), and `GET /api/updates/expected` answers `{content: Series[]}`, the caller's
+Expected this week: their favourites and the series they read in the last 90 days whose `nextAt` is before seven days
+from now and that are not yet quiet, monitored series only, soonest first, at most 30, each as a listing shows it to
+them (libraries, age cap, 18+ switch).
 
 **Lists** (collections; the app's *Lists*). `GET /api/collections/:id` answers `{id, name, accent, sort_order, items}`:
 the list's series in its own order (`position`, which `PUT /api/collections/:id/items {seriesIds}` rewrites; since
@@ -1571,7 +1591,7 @@ they are manual actions; clients should say that those actions may contact AniLi
 `updater_hours`, `extension_hours`, `extension_auto_update`, `update_check`, `install_ping`, `install_ping_last`,
 `cleanup_read`, `cleanup_read_days`, `backup_hour`, `scanlator_prefs`, `auto_follow_on_failure`,
 `repair_enabled`, `source_prefs`, `group_upgrade`, `borrow_names`, `mangadex_langs`, `unstated_lang`,
-`deleted_as_ghosts`, plus
+`deleted_as_ghosts`, `update_smart` (since v0.61.0), plus
 `extensions_configured` and `mangadex_available` (computed). `auto_follow_on_failure` defaults to true and
 controls the bounded once-per-series-per-day source hunt after an ordinary scheduled-download failure; it
 never makes an interactive Add/Fetch hunt and never runs after a refusal. `PATCH
@@ -1584,7 +1604,12 @@ after; `GET /api/admin/tasks` shows the backup's `schedule` as `daily at HH:00` 
 `borrowNames` (chapter names from another source, off by default; switching it off clears the names it wrote),
 `hideNoticeTypes` (notice chapters, below),
 `deletedAsGhosts` (deliberate tombstones as ghosts, off by default; missing/rescan-missing evidence is excluded),
-`autoFollowOnFailure`, and `repairEnabled` (the nightly library repair, on by
+`autoFollowOnFailure`, `updateSmart` (since v0.61.0, Smart update checks, off by default: the SCHEDULED sweep
+asks a series that has been quiet a long time less often — a seventh of its silence, never less than every three days,
+or the update interval when that is longer — and every series at the usual interval while its next chapter is due by
+its release radar or its sources list chapters this server lacks; Run now, Check now and everything else a person
+starts ask at once, and the sweep's result and the Tasks row's `lastResult` gain `rested`, the series left for a
+later sweep), and `repairEnabled` (the nightly library repair, on by
 default — switching it off stops the schedule only, since nothing it does deletes, merges or renumbers
 anything). Since v0.52.0 it also takes `mangadexLangs` and `unstatedLang`: `mangadexLangs` is the MangaDex
 languages besides English to switch on, replaced whole, as app codes from `mangadex_available` (every language
