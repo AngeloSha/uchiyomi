@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3594
+    "strings": 3608
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -3597,5 +3597,19 @@
   "Couldn’t load your library": "Não foi possível carregar sua biblioteca",
   "Couldn’t load more": "Não foi possível carregar mais",
   "AniList score": "Nota no AniList",
-  "Actions for {title}": "Ações de {title}"
+  "Actions for {title}": "Ações de {title}",
+  "That is a client ID, not the token.": "Isso é um ID de cliente, não o token.",
+  "That looks like an app’s client ID or secret, not the token.": "Isso parece o ID de cliente ou o segredo de um app, não o token.",
+  "Could not reach {name} from this server. Check its internet connection and try again.": "Não foi possível acessar o {name} a partir deste servidor. Verifique a conexão do servidor com a internet e tente de novo.",
+  "{name} refused the request (HTTP {status}). That is not about your token: try again later.": "O {name} recusou a solicitação (HTTP {status}). Não é um problema do seu token: tente de novo mais tarde.",
+  "{name} refused the request. That is not about your token: try again later.": "O {name} recusou a solicitação. Não é um problema do seu token: tente de novo mais tarde.",
+  "It works: {name} answers as {account}.": "Funciona: o {name} reconhece você como {account}.",
+  "{name} no longer accepts this token. Disconnect, then connect again with a new one.": "O {name} não aceita mais este token. Desconecte e conecte de novo com um novo.",
+  "This token has expired. Disconnect, then connect again with a new one.": "Este token expirou. Desconecte e conecte de novo com um novo.",
+  "Six tests a minute at most — try again shortly": "No máximo seis testes por minuto — tente de novo daqui a pouco",
+  "Test connection": "Testar conexão",
+  "Get a token from {name}": "Obter um token no {name}",
+  "Approve Uchiyomi there, copy the token {name} shows, and paste it here.": "Autorize o Uchiyomi lá, copie o token que o {name} mostra e cole aqui.",
+  "{name} shows no token on any page, so getting one takes a few steps outside Uchiyomi.": "O {name} não mostra token em nenhuma página, então conseguir um exige alguns passos fora do Uchiyomi.",
+  "How to get a {name} token": "Como conseguir um token do {name}"
 }

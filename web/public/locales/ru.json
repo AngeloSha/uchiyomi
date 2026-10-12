@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3594
+    "strings": 3608
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -3597,5 +3597,19 @@
   "Couldn’t load your library": "Не удалось загрузить библиотеку",
   "Couldn’t load more": "Не удалось загрузить ещё",
   "AniList score": "Оценка на AniList",
-  "Actions for {title}": "Действия: {title}"
+  "Actions for {title}": "Действия: {title}",
+  "That is a client ID, not the token.": "Это ID клиента, а не токен.",
+  "That looks like an app’s client ID or secret, not the token.": "Это похоже на ID клиента или секрет приложения, а не на токен.",
+  "Could not reach {name} from this server. Check its internet connection and try again.": "Не удалось связаться с {name} с этого сервера. Проверьте подключение сервера к интернету и попробуйте ещё раз.",
+  "{name} refused the request (HTTP {status}). That is not about your token: try again later.": "{name} отклонил запрос (HTTP {status}). Дело не в вашем токене: попробуйте позже.",
+  "{name} refused the request. That is not about your token: try again later.": "{name} отклонил запрос. Дело не в вашем токене: попробуйте позже.",
+  "It works: {name} answers as {account}.": "Работает: {name} узнаёт вас как {account}.",
+  "{name} no longer accepts this token. Disconnect, then connect again with a new one.": "{name} больше не принимает этот токен. Отключите его и подключитесь заново с новым.",
+  "This token has expired. Disconnect, then connect again with a new one.": "Срок действия этого токена истёк. Отключите его и подключитесь заново с новым.",
+  "Six tests a minute at most — try again shortly": "Не больше шести тестов в минуту — попробуйте чуть позже",
+  "Test connection": "Проверить подключение",
+  "Get a token from {name}": "Получить токен на {name}",
+  "Approve Uchiyomi there, copy the token {name} shows, and paste it here.": "Разрешите там доступ Uchiyomi, скопируйте токен, который покажет {name}, и вставьте его сюда.",
+  "{name} shows no token on any page, so getting one takes a few steps outside Uchiyomi.": "{name} не показывает токен ни на одной странице, поэтому, чтобы его получить, нужно сделать несколько шагов вне Uchiyomi.",
+  "How to get a {name} token": "Как получить токен {name}"
 }
