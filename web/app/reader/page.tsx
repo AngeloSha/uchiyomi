@@ -1750,6 +1750,7 @@ function ReaderInner() {
             setDevice={setDevice}
             autoApplied={autoApplied}
             padConnected={padConnected}
+            rtlTrack={pagedRtl}
             onClose={() => setShowSettings(false)}
             // The series' own source, by name. With no name there is no row at all: a raw source id is
             // never shown (an extension's is nineteen digits).

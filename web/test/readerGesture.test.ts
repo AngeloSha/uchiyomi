@@ -157,4 +157,11 @@ test('the reader turns a physical zone through the track\'s direction and a read
   assert.match(src, /if \(o\.tap\) acted\.current = \{ kind: 'scroll', top: el\.scrollTop, at: Date\.now\(\) \};/);
   assert.match(src, /else if \(a\.kind === 'scroll' && el\) el\.scrollTo\(\{ top: a\.top \}\);/);
   assert.match(src, /const hold = a\?\.kind === 'turn' \|\| a\?\.kind === 'scroll' \? undoLeft\(a\.at, Date\.now\(\)\) : 0;/);
+  // The sheet's sketch of each layout is the same map: physical (never mirrored by the Arabic interface), and on a
+  // right-to-left track its left edge is drawn as going on, because it does. Seen in a browser: the Arabic sheet drew
+  // every sketch mirrored. Reintroduce by dropping `dir="ltr"` or `rtlTrack` from TapSketch: this fails.
+  const sheet = readFileSync(join(__dirname, '..', 'components/ReaderSettings.tsx'), 'utf8');
+  assert.match(sheet, /<span aria-hidden dir="ltr" className="grid grid-cols-3/, 'the tap sketches mirror with the interface');
+  assert.match(sheet, /const back = z === 'prev' \|\| \(z === 'back' && !rtlTrack\) \|\| \(z === 'forward' && rtlTrack\);/);
+  assert.match(src, /rtlTrack=\{pagedRtl\}/, 'the sheet is not told which way the track runs');
 });

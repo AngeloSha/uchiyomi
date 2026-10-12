@@ -110,7 +110,7 @@ export function ReaderKeys({ mode, keys, pad, padConnected, onKeys, onPad }: {
       <span className="flex flex-wrap items-center justify-end gap-1.5">
         {!caps.length && !waiting && <span className="text-xs text-fog-500">{tr('Not set')}</span>}
         {caps.map((c) => (
-          <button key={c.id} type="button" dir="ltr" onClick={c.remove} className="btn-key min-w-8 font-mono"
+          <button key={c.id} type="button" dir="ltr" onClick={c.remove} className="btn-key min-w-8"
             aria-label={tr('Remove {key}', { key: c.label })}>{c.label}</button>
         ))}
         {waiting

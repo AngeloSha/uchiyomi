@@ -17,13 +17,17 @@ import { useLayer } from '@/lib/layers';
  * A tap layout drawn as the 3 x 3 grid it divides the page into (v0.61.0): shaded where a tap goes back, lit where it
  * goes on, plain where it shows the controls. Still -- a picture of the zones, not a demonstration of them. Paged mode's
  * zones; Automatic in the webtoon column turns nothing, as the help line under them says.
+ * ⚠️ `dir="ltr"`, and `rtlTrack`: the edges are PHYSICAL -- the left of the screen is the left under the Arabic
+ * interface too -- and on a right-to-left track the left edge goes ON, so the picture says what a tap will do here.
  */
-function TapSketch({ layout }: { layout: TapLayout }) {
+function TapSketch({ layout, rtlTrack }: { layout: TapLayout; rtlTrack: boolean }) {
   return (
-    <span aria-hidden className="grid grid-cols-3 gap-px overflow-hidden rounded-[3px] border border-ink-600">
+    <span aria-hidden dir="ltr" className="grid grid-cols-3 gap-px overflow-hidden rounded-[3px] border border-ink-600">
       {Array.from({ length: 9 }, (_, i) => {
         const z = tapZone((i % 3) * 10 + 5, Math.floor(i / 3) * 10 + 5, 30, 30, layout, 'paged');
-        return <span key={i} className={`h-2.5 w-3 ${z === 'back' || z === 'prev' ? 'bg-fog-500' : z === 'forward' || z === 'next' ? 'bg-accent' : 'bg-ink-800'}`} />;
+        const back = z === 'prev' || (z === 'back' && !rtlTrack) || (z === 'forward' && rtlTrack);
+        const on = z === 'next' || (z === 'forward' && !rtlTrack) || (z === 'back' && rtlTrack);
+        return <span key={i} className={`h-2.5 w-3 ${back ? 'bg-fog-500' : on ? 'bg-accent' : 'bg-ink-800'}`} />;
       })}
     </span>
   );
@@ -47,6 +51,7 @@ export function ReaderSettings({
   setDevice,
   autoApplied,
   padConnected = false,
+  rtlTrack = false,
   onClose,
   sourceName,
   sourceDefault,
@@ -61,6 +66,8 @@ export function ReaderSettings({
   autoApplied?: AutoGuess | null;
   /** Whether a game controller is connected now (lib/useGamepad.ts), for the controller's bindings. */
   padConnected?: boolean;
+  /** Whether the paged track runs right to left now: its left edge then turns ON (the tap sketches say so). */
+  rtlTrack?: boolean;
   onClose: () => void;
   /** The source this chapter came from, named for the button. Absent for a copy with no source on record. */
   sourceName?: string;
@@ -257,7 +264,7 @@ export function ReaderSettings({
             {([['auto', tr('Automatic')], ['edges', tr('Edges')], ['lshape', tr('L shape')], ['kindle', tr('Kindle-style')], ['off', tr('Off')]] as [TapLayout, string][]).map(([v, label]) => (
               <button key={v} type="button" aria-pressed={device.tapLayout === v} onClick={() => setDevice({ tapLayout: v })}
                 className={`flex flex-col items-center gap-1.5 rounded-2xl border px-1 py-2.5 text-xs ${device.tapLayout === v ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>
-                <TapSketch layout={v} />
+                <TapSketch layout={v} rtlTrack={rtlTrack} />
                 {label}
               </button>
             ))}
