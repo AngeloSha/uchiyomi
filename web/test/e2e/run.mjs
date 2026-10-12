@@ -1503,6 +1503,90 @@ try {
     }
   }
 
+  // ---------------------------------------------------------------- signing up (v0.61.0)
+  //
+  // Admin → Settings → Open registration had no form behind it on the sign-in screen until v0.61.0. With it on, a
+  // stranger's browser sees "Create an account" under the sign-in form, signs up and lands in the app; the same name in
+  // capitals is then taken (the server refuses lookalikes); with it off again the link is gone. All in a fresh browser
+  // context, so the admin's session in `page` is never touched, and the account and the switch are put back after.
+  // Two sign-ups: the route allows five per address per ten minutes. Reintroduce the form-less screen (drop the link in
+  // components/LoginScreen.tsx): "the sign-in form offers Create an account" fails.
+  console.log('\n  signing up');
+  {
+    const SIGNUP = { username: `e2e-signup-${Date.now().toString(36)}`, password: 'e2e-signup-passw0rd-1' };
+    const tok = await login(USER, PASS);
+    const adminApi = (path, init = {}) => fetch(`${BASE}${path}`, {
+      ...init, headers: { 'content-type': 'application/json', authorization: `Bearer ${tok}`, ...(init.headers || {}) },
+    });
+    const setOpen = (on) => adminApi('/api/admin/settings', { method: 'PATCH', body: JSON.stringify({ allowRegistration: on }) });
+    let was = false;
+    let ctx = null;
+    try {
+      if (!tok) throw new Error('could not sign in over HTTP to open registration');
+      was = (await (await adminApi('/api/admin/settings')).json().catch(() => ({}))).allow_registration === true;
+      if (!(await setOpen(true)).ok) throw new Error('could not turn Open registration on');
+      ctx = await browser.createBrowserContext();
+      const p2 = await ctx.newPage();
+      await p2.setViewport({ width: 1440, height: 900 });
+      const createLink = () => p2.$('[data-create-account]');
+      /** Open the sign-up form from a fresh sign-in screen, fill it in and send it. False when there was no form. */
+      const signUp = async (name) => {
+        await p2.goto(BASE, { waitUntil: 'networkidle2', timeout: 60000 });
+        await p2.waitForSelector('[data-create-account]', { timeout: 15000 }).catch(() => {});
+        const link = await createLink();
+        if (!link) return false;
+        await link.click();
+        await p2.waitForFunction(() => document.querySelectorAll('form input[type=password]').length === 2, { timeout: 10000 }).catch(() => {});
+        const fields = await p2.$$('form input');
+        if (fields.length !== 3) return false;
+        await fields[0].type(name);
+        await fields[1].type(SIGNUP.password);
+        await fields[2].type(SIGNUP.password);
+        await p2.keyboard.press('Enter');
+        return true;
+      };
+
+      if (!(await signUp(SIGNUP.username))) bad('the sign-in form offers Create an account while Open registration is on -- it does not, or its form has no name and two password fields');
+      else {
+        await sleep(4000);
+        const after = await p2.evaluate(() => ({ form: !!document.querySelector('input[type=password]'), nav: !!document.querySelector('nav a') }));
+        await p2.screenshot({ path: `${OUT}/${String(++step).padStart(2, '0')}-signed-up.png` });
+        after.form || !after.nav ? bad('still on a form after signing up') : ok('signed up from the sign-in screen and landed in the app');
+
+        // A real sign-out: the refresh cookie is HttpOnly, so only /auth/logout drops it.
+        await p2.evaluate(() => fetch('/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {}));
+        await p2.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
+        await p2.deleteCookie(...(await p2.cookies()));
+        if (!(await signUp(SIGNUP.username.toUpperCase()))) bad('after signing out, the sign-up form could not be filled in again');
+        else {
+          await sleep(2500);
+          const said = await p2.evaluate(() => document.body.innerText || '');
+          /That username is taken\./.test(said)
+            ? ok('the same name in capitals is taken')
+            : bad(`a lookalike name was not refused: ${said.slice(0, 160).replace(/\s+/g, ' ')}`);
+        }
+      }
+
+      // Off again: the link goes.
+      await setOpen(false);
+      await p2.goto(BASE, { waitUntil: 'networkidle2', timeout: 60000 });
+      await p2.waitForSelector('input[type=password]', { timeout: 30000 }).catch(() => {});
+      await sleep(1500);
+      (await createLink()) ? bad('Open registration is off, but the sign-in form still offers Create an account') : ok('with Open registration off, the link is gone');
+    } catch (e) {
+      bad(`signing up: ${e.message}`);
+    } finally {
+      await ctx?.close().catch(() => {});
+      if (tok) {
+        const users = await (await adminApi('/api/admin/users')).json().catch(() => ({ content: [] }));
+        for (const u of users.content ?? []) {
+          if (String(u.username ?? '').toLowerCase() === SIGNUP.username) await adminApi(`/api/admin/users/${u.id}`, { method: 'DELETE' });
+        }
+        await setOpen(was);
+      }
+    }
+  }
+
   // --------------------------------------------------------- the reader, when it cannot open a chapter
   //
   // There was no failure state at all. A book that will not load set `ready` with nothing behind it, which
