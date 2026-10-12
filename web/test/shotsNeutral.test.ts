@@ -62,7 +62,7 @@ test('the library shots and the tour are taken behind neutralNames, and the tour
   assert.match(main, /const page = await ctx\.newPage\(\);[\s\S]{0,400}await neutralNames\(page, \{ fixtures: \[people, librariesFixture\(\)\] \}\);\s*await login\(page\);/, 'the library shots are not neutralised, or Admin → Library shows its real names');
   assert.match(main, /const people = peopleFixture\(me\.user\.id\);/, 'the people on the shots are the real ones');
   assert.match(main, /await meetNames\(page, BASE\);/, 'the names are not met before the shots');
-  assert.match(cap, /const ph = await ctx\.newPage\(\);\s*await neutralNames\(ph, \{ fixtures: \[people\] \}\);/, 'the phone shots are not neutralised');
+  assert.match(cap, /const ph = await ctx\.newPage\(\);\s*await neutralNames\(ph, \{ fixtures: \[people, librariesFixture\(\)\] \}\);/, 'the phone shots are not neutralised');
   const rec = read('record.mjs');
   assert.match(rec, /await neutralNames\(page, \{ fixtures: \[extensionFixture\(\{ repos: \[FIXTURE_REPO_STORED\] \}\), peopleFixture\(me\.user\.id\)\] \}\);/, 'the tour is not neutralised, its extension catalogue is the real one, or its people are');
   assert.ok(rec.indexOf('await meetNames(page, BASE);') > 0 && rec.indexOf('await meetNames(page, BASE);') < rec.indexOf("client.send('Page.startScreencast'"), 'the tour meets the names only after it starts filming');

@@ -603,10 +603,24 @@ async function main() {
     console.log('  ✓ phone-sources');
     await ph2.close();
   }
+  // The small-screen stand-in for crop-addsite (/manga-server): the same card at phone width, its text the app's own
+  // size. Hand-cut from the desktop shot until v0.60.1, a cut that stopped fitting the moment the layout moved.
+  if (want('phone-providers')) {
+    const ph3 = await sourcesPage(PROFILES.phone, { repos: [FIXTURE_REPO_STORED] });
+    await tabOn(ph3, 'Sources&view=add');
+    await ph3.waitForSelector('[data-sources-add-site]', { timeout: 15000 });
+    await settle(ph3, 300);
+    const box = await clipOf(ph3, '[data-sources-add-site]', '[data-sources-add-site]', 8);
+    if (!box) throw new Error('phone-providers: no Add a site by address');
+    await sleep(600);
+    await ph3.screenshot({ path: `${OUT}/phone-providers.png`, clip: box });
+    console.log('  ✓ phone-providers');
+    await ph3.close();
+  }
 
   // ---- phone ----
   const ph = await ctx.newPage();
-  await neutralNames(ph, { fixtures: [people] });
+  await neutralNames(ph, { fixtures: [people, librariesFixture()] });
   await ph.setViewport(PROFILES.phone);
   await ph.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
   await meetNames(ph, BASE);
@@ -639,6 +653,35 @@ async function main() {
     await ph.mouse.click(PROFILES.phone.width / 2, PROFILES.phone.height / 2);
     await sleep(900);
     await shot(ph, 'phone-reader');
+  }
+
+  // The marketing site's phone plates for its admin figures (/faq's Settings, /vs's Libraries): the cards themselves at
+  // phone width, so their text is the app's own size rather than a desktop shot shrunk to a fifth. Hand-cut from the
+  // desktop shots until v0.60.1, cuts that stopped fitting the moment the layout moved.
+  const phoneCard = async (name, path, mark) => {
+    await ph.goto(`${BASE}${path}`, { waitUntil: 'networkidle2', timeout: 60000 });
+    await settle(ph, 700);
+    const marked = await ph.evaluate(mark);
+    const box = marked ? await clipOf(ph, '[data-shot-from]', '[data-shot-to]', 8) : null;
+    if (!box) { console.log(`  · skipped ${name} (nothing to clip)`); return; }
+    await sleep(600);
+    await ph.screenshot({ path: `${OUT}/${name}.png`, clip: box });
+    console.log(`  ✓ ${name}`);
+  };
+  if (want('phone-settings')) {
+    await phoneCard('phone-settings', '/admin/?tab=Settings', () => {
+      const card = [...document.querySelectorAll('h2,h3,p,span')].find((e) => (e.textContent || '').trim() === 'Server')?.closest('.card');
+      card?.setAttribute('data-shot-from', ''); card?.setAttribute('data-shot-to', '');
+      return !!card;
+    });
+  }
+  if (want('phone-libraries')) {
+    // The first two libraries (fixtures.mjs librariesFixture names them), one under the other at this width.
+    await phoneCard('phone-libraries', '/admin/?tab=Library', () => {
+      const cards = document.querySelectorAll('[data-library-card]');
+      cards[0]?.setAttribute('data-shot-from', ''); cards[Math.min(1, cards.length - 1)]?.setAttribute('data-shot-to', '');
+      return cards.length > 0;
+    });
   }
 
   await browser.close();
