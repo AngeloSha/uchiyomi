@@ -650,6 +650,15 @@ function DiscoverInner() {
         </div>
       </header>
 
+      {/* v0.61.0: "Because you read {title}", above the wall while browsing, only with something on it -- under the
+          header, so the source picker stays beside the wall it narrows. The title is isolated: a Latin title inside an
+          Arabic sentence takes its order, as Home's rail of that name does. */}
+      {mode === 'newest' && because?.seed && becauseRail.length > 0 && (
+        <AniListRail kind="because" className="pt-6"
+          title={tr('Because you read {title}', { title: `\u2068${because.seed.title}\u2069` })}
+          items={becauseRail} onPick={pickRail} />
+      )}
+
       {/*
         In both modes, not just while browsing. The picker is the only place the chosen source is visible or
         clearable, so hiding it during a search -- while the search itself is narrowed to that source --
@@ -721,14 +730,6 @@ function DiscoverInner() {
         <p className="mt-2 text-end">
           <Link href={downloadsHref()} className="text-xs font-medium text-accent hover:underline">{tr('See all')}</Link>
         </p>
-      )}
-
-      {/* v0.61.0: "Because you read {title}", above the wall while browsing, only with something on it. The title is
-          isolated: a Latin title inside an Arabic sentence takes its order, as Home's rail of that name does. */}
-      {mode === 'newest' && because?.seed && becauseRail.length > 0 && (
-        <AniListRail kind="because" className="pt-6"
-          title={tr('Because you read {title}', { title: `\u2068${because.seed.title}\u2069` })}
-          items={becauseRail} onPick={pickRail} />
       )}
 
       <div className="mb-3 mt-6 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">

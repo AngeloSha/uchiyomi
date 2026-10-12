@@ -54,7 +54,7 @@ export function OutsideCard({ item, note, mayAdd }: { item: RelatedOutside; note
           </span>
         )}
       </div>
-      <p dir="auto" className="mt-2 line-clamp-2 px-0.5 text-start text-[13px] font-medium leading-tight text-fog-200 transition group-hover:text-fog-50">
+      <p className="mt-2 line-clamp-2 px-0.5 text-start text-[13px] font-medium leading-tight text-fog-200 transition group-hover:text-fog-50">
         {item.title}
       </p>
       {note && <p data-card-note className="mt-0.5 truncate px-0.5 text-start text-[11px] leading-tight text-fog-500">{note}</p>}
