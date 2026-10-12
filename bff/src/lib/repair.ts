@@ -74,7 +74,8 @@ import { assess, gapsOf, splitAtFloor } from './fill';
 // The Health page's own query for "which sources blame the solver", shared rather than copied: the solver
 // step clears state only when something is really failing inside the solver, and that must be the same
 // question the page answers or the button and the page disagree about whether there is anything to do.
-import { solverBlaming, gapsAnswered, plausibleNumbers, type StoredGaps } from './health';
+import { solverBlaming, gapsAnswered, plausibleNumbers, measured, MEASURE_PER_REPORT, type StoredGaps } from './health';
+import { longStrip, type PageDim } from './longStrip';
 import { visibleToAll } from './visibility';
 import { detectDirections } from './readingDirection';
 import { withOrigin } from './downloadActivity';
@@ -842,6 +843,8 @@ type ShortBook = {
   id: string; series_id: string; number: number; pages: number; root: string; file: string; source_id: string | null;
   title: string; folder: string; summary: string | null; author: string | null; genres: string[] | null;
   web: string | null; status: string | null;
+  /** The reader's and Health's page-size cache (lib_books.page_dims), read by longStrip(): null until measured. */
+  page_dims: PageDim[] | null;
 };
 
 /** The hunt verdicts that PROVE nothing else has this chapter. `cooldown` is silence, not an answer. */
@@ -863,9 +866,9 @@ const noteShort = (bookId: string, res: { why: ShortWhy; asked: number; answered
  * `detail` so the row can say it. The candidate query's own rules, in the order a person would check them.
  */
 async function whyNotShort(bookId: string): Promise<string> {
-  const b = await one<{ file: string; root: string | null; number: number; pages: number; gone: boolean; confirmed: boolean; partial: boolean; folder: string }>(
-    `SELECT b.file, b.root, b.number::float8 AS number, b.pages, b.pruned_at IS NOT NULL AS gone,
-            b.short_confirmed_at IS NOT NULL AS confirmed, b.missing_pages IS NOT NULL AS partial, s.folder
+  const b = await one<{ id: string; file: string; root: string | null; number: number; pages: number; gone: boolean; confirmed: boolean; partial: boolean; page_dims: PageDim[] | null; folder: string }>(
+    `SELECT b.id, b.file, b.root, b.number::float8 AS number, b.pages, b.pruned_at IS NOT NULL AS gone,
+            b.short_confirmed_at IS NOT NULL AS confirmed, b.missing_pages IS NOT NULL AS partial, b.page_dims, s.folder
        FROM lib_books b JOIN lib_series s ON s.id = b.series_id AND ${visibleToAll('s')}
       WHERE b.id = $1`, [bookId],
   ).catch(() => null);
@@ -875,6 +878,8 @@ async function whyNotShort(bookId: string): Promise<string> {
   if (b.partial) return 'partial';
   const n = Number(b.number);
   if (b.pages < 1 || b.pages > 2 || n !== Math.floor(n)) return 'not_short';
+  // A chapter stitched into long strips is the chapter, not a failed download (lib/longStrip.ts, v0.60.1).
+  if (longStrip(await measured(b, { left: 1 }))) return 'not_short';
   return 'not_owned';
 }
 
@@ -910,8 +915,9 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
   // ⚠️ `b.file = <folder>/Chapter <n>.cbz` is chapterFileRel (lib/downloader.ts) written in SQL, which is
   // safe only because `b.number = floor(b.number)` is in the same WHERE: the cast to int is exact for a
   // whole number and nothing else. A file under any other name is somebody's own copy, not ours.
+  const cap = opts.bookId ? REPAIR_SHORT_MAX : opts.autofix ? UNCAPPED : REPAIR_SHORT_MAX;
   const rows0 = await q<ShortBook>(
-    `SELECT b.id, b.series_id, b.number::float8 AS number, b.pages, b.root, b.file, b.source_id,
+    `SELECT b.id, b.series_id, b.number::float8 AS number, b.pages, b.root, b.file, b.source_id, b.page_dims,
             s.title, s.folder, s.summary, s.author, s.genres, s.web, s.status
        FROM lib_books b JOIN lib_series s ON s.id = b.series_id AND ${visibleToAll('s')}
       WHERE b.pages BETWEEN 1 AND 2 AND b.number = floor(b.number)
@@ -919,13 +925,28 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
         AND b.root = $1 AND b.file = s.folder || '/Chapter ' || (b.number::int)::text || '.cbz'
         ${opts.bookId ? 'AND b.id = $3' : 'AND s.auto_update'}
       ORDER BY b.mtime DESC LIMIT $2`,
-    opts.bookId ? [DL_ROOT, REPAIR_SHORT_MAX, opts.bookId] : [DL_ROOT, opts.autofix ? UNCAPPED : REPAIR_SHORT_MAX],
+    // Ten times the cap: long strips are dropped below BEFORE the cap applies (see there).
+    opts.bookId ? [DL_ROOT, REPAIR_SHORT_MAX, opts.bookId] : [DL_ROOT, Math.min(cap * 10, UNCAPPED)],
   );
   // And then asked again in TypeScript, of the real function. The SQL above is the bound (it is what makes
   // the LIMIT mean "twenty candidates"); this is the answer. If the two ever disagree -- a rename of the
   // downloader's layout, a locale that formats a number differently -- this one wins, and it fails in the
   // safe direction: a chapter skipped, never somebody's read-library file replaced.
-  const books = rows0.filter((b) => b.file === chapterFileRel(b.folder, Number(b.number)));
+  const named = rows0.filter((b) => b.file === chapterFileRel(b.folder, Number(b.number)));
+  // ...and a chapter stitched into one or two long strips is left alone (v0.60.1, found in Squeaks72's fork): that is
+  // what the series IS, not a failed download -- the rule Health has reported by since v0.55.10 (lib/longStrip.ts), which
+  // this step never asked. So the nightly hunted other sources for intact webtoon chapters Health no longer showed, and
+  // replaced them with any copy that had more pages: a site that slices the strip, possibly another group's. Measured as
+  // Health measures (the cache, else the file, at most MEASURE_PER_REPORT reads a run; an unmeasured chapter answers no
+  // and stays a candidate), and dropped BEFORE the cap: filtered after it, long strips -- which stay candidates forever --
+  // could hold every one of the nightly's REPAIR_SHORT_MAX slots. Reintroduce by dropping the `longStrip` test: "the
+  // repair leaves a chapter stitched into long strips alone" in repair.int.test.ts finds it hunted.
+  const measuring = { left: MEASURE_PER_REPORT };
+  const books: ShortBook[] = [];
+  for (const b of named) {
+    if (books.length >= cap) break;
+    if (!longStrip(await measured(b, measuring))) books.push(b);
+  }
   planned('short', books.length);
   if (!books.length) {
     // A person pressed Fix on this one chapter and the step will not touch it: say why, or the press reads

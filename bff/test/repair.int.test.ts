@@ -437,6 +437,37 @@ test('a follower with more pages replaces a short chapter, and everyone keeps th
   await q('DELETE FROM users WHERE id = $1', [user]);
 });
 
+test('the repair leaves a chapter stitched into long strips alone, and they never use up its cap (v0.60.1)', { skip }, async () => {
+  // Health has left these alone since v0.55.10 (lib/longStrip.ts), but the short step never asked: the nightly hunted
+  // other sources for intact webtoon chapters and replaced them with any copy that had more pages (found in Squeaks72's
+  // fork). And filtered after the SQL cap, strips -- candidates forever -- would hold every slot: here REPAIR_SHORT_MAX
+  // (20) of them are newer than the one real short chapter. Reintroduce by dropping the `longStrip` test from stepShort:
+  // the strips are looked at and replaced, and the real chapter, 21st, is never reached.
+  const STRIPS = range(140, 159);
+  const REAL = 160;
+  const tall = JSON.stringify([{ width: 689, height: 54000 }, { width: 689, height: 54000 }]);
+  for (const n of STRIPS) {
+    await seedBook(`b_short_${n}`, SHORT, T.short, n, { pages: 2, src: A, mtime: 5000 + n });
+    await q('UPDATE lib_books SET page_dims = $1 WHERE id = $2', [tall, `b_short_${n}`]);
+    pagesFor.set(cid(B, T.short, n), 40);
+  }
+  const real = `b_short_${REAL}`;
+  await seedBook(real, SHORT, T.short, REAL, { pages: 2, src: A, mtime: 1000 });
+  pagesFor.set(cid(A, T.short, REAL), 2);
+  pagesFor.set(cid(B, T.short, REAL), 12);
+  await follow(B);
+  for (const s of [A, B]) setCatalog(s, T.short, [...range(1, 9), ...STRIPS, REAL]);
+
+  const r = await runRepair(undefined, { only: ['short'], userId: null });
+  assert.deepEqual(r.short, { looked: 1, replaced: 1, confirmed: 0, left: 0 }, 'only the real short chapter is looked at');
+  assert.equal((await book(real)).pages, 12, 'the real short chapter is still replaced');
+  for (const n of STRIPS) assert.equal((await book(`b_short_${n}`)).pages, 2, `strip ${n} is left as it is`);
+
+  // A Fix pressed on a strip says why nothing happens, rather than reading as a run that found nothing wrong.
+  const pressed = await runRepair(undefined, { only: ['short'], bookId: `b_short_${STRIPS[0]}`, userId: null });
+  assert.deepEqual(pressed.skips?.map((k: any) => [k.why, k.detail]), [['not_eligible', 'not_short']]);
+});
+
 test("a clean series' short chapter is replaced from the adult source it follows (v0.55.9)", { skip }, async () => {
   // The short step asks the chapter's own source first. On a clean series whose own source is an extension marked
   // NSFW, the adult rule -- which is for sources reached on the series' behalf, #177's chosen copy -- refused it, and

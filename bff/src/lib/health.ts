@@ -714,15 +714,18 @@ async function numberingCheck(): Promise<HealthCheck | null> {
   };
 }
 
-/** The most chapters one report reads page sizes from: the rest are measured by the next report (the cache keeps them). */
-const MEASURE_PER_REPORT = 100;
+/**
+ * The most chapters one report reads page sizes from: the rest are measured by the next report (the cache keeps them).
+ * The repair's short step takes the same share per run (repair.ts stepShort, v0.60.1).
+ */
+export const MEASURE_PER_REPORT = 100;
 
 /**
  * A short chapter's page sizes: the reader's cache (lib_books.page_dims, lib/ownedCatalog.ts bookPages), else read from
  * the file and cached the same way, so the next report and the reader open nothing. Null for a file that cannot be read,
  * or past this report's share of reads (`budget`): a chapter not measured stays a finding.
  */
-async function measured(
+export async function measured(
   r: { id: string; root: string | null; file: string; page_dims: PageDim[] | null }, budget: { left: number },
 ): Promise<PageDim[] | null> {
   if (Array.isArray(r.page_dims) && r.page_dims.length) return r.page_dims;
