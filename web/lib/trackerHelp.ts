@@ -16,7 +16,11 @@ import { t as tr } from './i18n';
 /** The project's public AniList API client (redirect: https://anilist.co/api/v2/oauth/pin). Public by design. */
 export const ANILIST_CLIENT_ID = 53603;
 
-/** AniList's implicit grant for a client: approve, and AniList's pin page shows the access token to copy. */
+/**
+ * AniList's implicit grant for a client: approve, and AniList's pin page shows the access token to copy. Reintroduce
+ * `response_type=code` (a flow that needs the client secret this app never holds): "the AniList link is the implicit
+ * grant …" in web/test/trackerHelp.test.ts fails.
+ */
 export const anilistTokenUrl = (clientId: number = ANILIST_CLIENT_ID): string =>
   `https://anilist.co/api/v2/oauth/authorize?client_id=${clientId}&response_type=token`;
 
@@ -45,6 +49,8 @@ const ACCESS_TOKEN = /(?:^|[#?&\s"'{,])access_token(?:=|"\s*:\s*")([^&\s"'#]+)/;
 /**
  * The token in a paste: out of a link, a fragment or a JSON answer when the paste carries `access_token`, otherwise the
  * paste itself, trimmed. Only ever narrows what was pasted; a paste with no `access_token` in it is sent as it is.
+ * Reintroduce sending every paste as it is: "tokenFromPaste takes the token out of a link …" in
+ * web/test/trackerHelp.test.ts fails.
  */
 export function tokenFromPaste(raw: string): string {
   const s = raw.trim();
@@ -74,6 +80,7 @@ export function tokenShape(raw: string): TokenShape {
 /**
  * The providers whose tokens a shape can rule out. Not Kitsu: its access tokens are opaque strings that can be exactly
  * 32 to 64 letters and digits, so "that looks like a client secret" would be said of a real token Kitsu had expired.
+ * Reintroduce the hint for Kitsu: "Connect says why, by code first" in web/test/trackerHelp.test.ts fails.
  */
 const JWT_TOKENS = new Set(['anilist', 'myanimelist']);
 

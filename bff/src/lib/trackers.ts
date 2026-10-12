@@ -196,7 +196,8 @@ export interface TestResult { ok: boolean; verdict: TestVerdict; account?: strin
  *
  * `not_connected` is no row, a disabled one (GET /api/trackers says `connected: false` for it), or a token this server
  * can no longer unseal -- each needs a new token pasted, which is what reconnecting is. `expired` is said without
- * sending the token, as a push would not send it either (pushOne).
+ * sending the token, as a push would not send it either (pushOne). Reintroduce a write (markError on a failure, say):
+ * "test: each verdict, and nothing about the connection is written" in trackerVerdicts.int.test.ts fails.
  */
 export async function testConnection(userId: string, provider: Provider): Promise<TestResult> {
   const row = await one<{ access_token: string; expires_at: string | null; enabled: boolean }>(

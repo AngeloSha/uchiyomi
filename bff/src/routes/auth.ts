@@ -372,10 +372,11 @@ export default async function authRoutes(app: FastifyInstance) {
   //  * a name that differs from an existing one only in case is taken. uq_users_username is case-sensitive, so a
   //    stranger could sign up as `Admin` beside `admin` and be told apart only by a capital letter. Reintroduce by
   //    comparing `username = $1`: "a lookalike of an existing name is taken" in register.int.test.ts gets a 200;
-  //  * check and insert run under one advisory lock on the lower-cased name, so two sign-ups racing for `bob` and
-  //    `Bob` end in one account and one 409; and a unique violation from any other writer (an admin creating the
-  //    same name that instant) is a 409 too, never a 500. Reintroduce by dropping the lock: "two sign-ups racing for
-  //    one name in two cases" in register.int.test.ts sees two accounts.
+  //  * check and insert run under one advisory lock on the lower-cased name, so sign-ups racing for `bob` and `Bob`
+  //    end in one account and 409s; and a unique violation from any other writer (an admin creating the same name
+  //    that instant) is a 409 too, never a 500. Reintroduce by dropping the lock: "sign-ups racing for one name in
+  //    different cases end in one account" in register.int.test.ts sees several; drop the 23505 mapping: "a unique
+  //    violation from another writer is a 409, not a 500" sees a 500.
   app.post('/auth/register', { config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } }, async (req, reply) => {
     const s = await one<{ allow_registration: boolean }>('SELECT allow_registration FROM server_settings WHERE id = 1');
     if (!s?.allow_registration) return reply.code(403).send({ error: 'registration_disabled', message: 'Registration is disabled.' });

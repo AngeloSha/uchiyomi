@@ -143,8 +143,9 @@ const NO_ANSWER = new Set([
  * connection refused or a name that did not resolve -- is `unreachable`. An answer that turned the request down for
  * another reason -- a 403 from the edge, a 429, a 5xx, a 400 that is not "Invalid token" -- is `refused`, with the
  * status when there was one (a GraphQL error inside a 200, or a body that is not JSON, has none).
- * Reintroduce "every failure is the token's" by returning `rejected` last: "a network throw is unreachable" in
- * trackerVerdicts.int.test.ts fails.
+ * Reintroduce the old reading by answering `rejected` for every error that carries no status: "every adapter: a
+ * network throw is unreachable, …" and "verdictOf: only the service's word on the token is …" in
+ * trackerVerdicts.int.test.ts fail.
  */
 export function verdictOf(e: unknown): { verdict: CallVerdict; status?: number } {
   const err = (e ?? {}) as { authFailed?: unknown; status?: unknown; name?: unknown; message?: unknown; code?: unknown; cause?: { code?: unknown } };
@@ -244,6 +245,7 @@ export const anilistAdapter: TrackerAdapter = {
   label: 'AniList',
   // It said "anilist.co → Settings → Developer → create a client, then copy the access token" until v0.61.0 (#190):
   // that page shows a client ID and a secret, never a token, so the one instruction led to a paste AniList refused.
+  // Reintroduce it: "the AniList adapter offers the token page …" in trackerVerdicts.int.test.ts fails.
   tokenHelp: `Open ${ANILIST_TOKEN_URL}, approve Uchiyomi, and paste the token AniList shows.`,
   authorizeUrl: ANILIST_TOKEN_URL,
   tokenDays: 365,

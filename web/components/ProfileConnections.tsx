@@ -254,7 +254,8 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
  * Where this provider's token comes from (v0.61.0, #190), in the reader's words: for AniList a key to the page that
  * shows one (the project's public client, lib/trackerHelp.ts) and the three steps; for MyAnimeList and Kitsu the honest
  * sentence that no page shows a token, and the guide's steps. A provider the web does not know keeps the server's
- * English help.
+ * English help. Reintroduce `{t.tokenHelp && <p …>{t.tokenHelp}</p>}` for every provider: "the Connections row: the
+ * web's help, …" in web/test/trackerHelp.test.ts fails.
  */
 function TokenHelp({ provider, name, fallback }: { provider: string; name: string; fallback?: string }) {
   const src = tokenSource(provider);

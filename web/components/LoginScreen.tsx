@@ -283,7 +283,8 @@ export function LoginScreen() {
  * The form that makes an account (v0.61.0): first-run setup's admin, and a member signing up while Open registration is
  * on. One form so the two cannot drift -- setup passes exactly the words and classes its form always had. Each label
  * names its field, and autoComplete tells a password manager this is a new account: it offers to make the password
- * and saves it under the name typed.
+ * and saves it under the name typed. "signing up is first-run setup's form …" in web/test/signUp.test.ts holds setup's
+ * words and classes to it; a second copy of the form fails it.
  */
 function AccountForm({ onSubmit, nameLabel, namePlaceholder, submitLabel, footer, username, setUsername, pw, setPw, confirm, setConfirm,
   busy, errMsg, inputCls, labelCls }: {
