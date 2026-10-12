@@ -52,7 +52,10 @@ test('the search is a query keyed on the submitted term, not on the field', () =
   assert.match(src, /queryKey: \['search-all', term, selected, ratingAsked, adultOn\]/, 'the search is not keyed on the submitted term and the chosen source (or is keyed on the field)');
   assert.match(src, /const only = selected \? `&source=\$\{encodeURIComponent\(selected\)\}` : '';/, 'the chosen source is not sent');
   assert.match(src, /SEARCH_POLL_WAIT_MS\}\$\{only\}\$\{rated\}`, \{ signal \}\)/, 'the chosen source is not sent');
-  assert.match(src, /const \[term, setTerm\] = useState\(''\)/, 'there is no separate submitted term');
+  // v0.61.0: the submitted term starts as the arrival's `?q=` (empty without one, so the field and the submitted term
+  // still start apart from any typing). Updated deliberately from `useState('')`, which this pinned before Discover read
+  // the address; v610Related.test.ts pins how the arrival is read.
+  assert.match(src, /const \[term, setTerm\] = useState\(arrivedQ\)/, 'there is no separate submitted term');
   assert.match(src, /enabled: mode === 'search' && !!term/, 'the search runs outside search mode or with an empty term');
   assert.doesNotMatch(src, /setSearchHits|setSearching|useState<SourceItem\[\]>\(\[\]\)/, 'the imperative search is back');
   assert.doesNotMatch(src, /await api<\{ content: SearchGroup\[\] \}>/, 'the search is awaited in a handler again');
