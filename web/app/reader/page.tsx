@@ -23,7 +23,8 @@ import { deviceId } from '@/lib/device';
 import { getOfflineChapter, getPageBlob, queueProgress, noteOfflineProgress, listSeriesDownloads, setOfflinePageJunk } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
 import { COLOR_FILTER, glide, loadDevicePrefs, saveDevicePrefs, type DevicePrefs } from '@/lib/readerDevice';
-import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER, loadSourcePrefs, saveSourcePrefs, clearSourcePrefs, globalPrefsChange, seriesPinChange, titleLook, mergePulled, rememberSeriesSource, seriesSourceOf } from '@/lib/readerPrefs';
+import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER, loadSourcePrefs, saveSourcePrefs, clearSourcePrefs, globalPrefsChange, seriesPinChange, titleLook, mergePulled, rememberSeriesSource, seriesSourceOf, rememberSeriesType, seriesTypeOf } from '@/lib/readerPrefs';
+import { guessMode, type AutoGuess } from '@/lib/readerAuto';
 import { ReaderSettings } from '@/components/ReaderSettings';
 import { Rail, SectionTitle, useImgRetry, useRtl } from '@/components/ui';
 import { PageGrid } from '@/components/PageGrid';
@@ -155,6 +156,13 @@ function ReaderInner() {
   const [prefs, setPrefs] = useState<ReaderPrefs>(loadPrefs());
   /** Whether the open title's look is in `prefs` yet: a pull of the account's settings then leaves the look alone (mergePulled). */
   const titleOpen = useRef(false);
+  /**
+   * The mode the automatic pick chose for the open title (v0.61.0, lib/readerAuto.ts), or null when the mode is a
+   * default's or a memory's -- the sheet says which. `autoGuess` is the pick itself, kept to apply again when the
+   * switch is turned on in the sheet.
+   */
+  const [autoApplied, setAutoApplied] = useState<AutoGuess | null>(null);
+  const autoGuess = useRef<AutoGuess | null>(null);
   /** This device's own reader settings (v0.61.0, lib/readerDevice.ts): kept in this browser, never synced. */
   const [device, setDeviceState] = useState<DevicePrefs>(loadDevicePrefs);
   const setDevice = (p: Partial<DevicePrefs>) => setDeviceState((cur) => { const n = { ...cur, ...p }; saveDevicePrefs(n); return n; });
@@ -231,7 +239,22 @@ function ReaderInner() {
   const pinch = useRef<{ dist: number; zoom: number } | null>(null);
 
   const seriesId0 = chapters[0]?.seriesId || '';
-  const setPref = (p: Partial<ReaderPrefs>) =>
+  const setPref = (p: Partial<ReaderPrefs>) => {
+    // v0.61.0: switching the automatic pick on or off decides the open title's MODE again -- by the same rules it opened
+    // by (titleLook), so a title with a mode of its own keeps it -- and nothing else about it.
+    if (p.autoMode !== undefined) {
+      savePrefs({ ...loadPrefs(), autoMode: p.autoMode });
+      if (seriesId0) {
+        const look = titleLook(loadPrefs(), seriesSource ? loadSourcePrefs(seriesSource.id) : {}, loadSeriesPrefs(seriesId0), autoGuess.current);
+        setAutoApplied(look.autoApplied);
+        setPrefs((cur) => ({ ...cur, autoMode: p.autoMode!, mode: look.prefs.mode }));
+      } else {
+        setPrefs((cur) => ({ ...cur, autoMode: p.autoMode! }));
+      }
+      return;
+    }
+    // Tapping Mode makes it the title's own, automatic or not (seriesPinChange pins it).
+    if (p.mode) setAutoApplied(null);
     setPrefs((cur) => {
       const n = { ...cur, ...p };
       // The global default takes only what this change touched, and never a title's look while a title is
@@ -241,10 +264,12 @@ function ReaderInner() {
       if (Object.keys(g).length) savePrefs({ ...loadPrefs(), ...g });
       // The title's own memory takes the look, and the direction only when it was the direction that changed
       // (seriesPinChange says why: pinning it on every change kept the profile's direction out, #102).
-      const pin = seriesId0 ? seriesPinChange(p, n) : null;
+      // A mode the automatic pick chose is left out of a pin that a theme or a spread caused (v0.61.0).
+      const pin = seriesId0 ? seriesPinChange(p, n, { autoApplied: p.mode ? null : autoApplied }) : null;
       if (pin) saveSeriesPrefs(seriesId0, pin);
       return n;
     });
+  };
   const applyZoom = (z: number) => {
     const clamped = Math.max(1, Math.min(3, z));
     setZoom(clamped);
@@ -338,10 +363,17 @@ function ReaderInner() {
       }
       // reading direction (drives double-spread pair order for RTL manga)
       let src: { id: string; name: string } | null = null;
+      // What the automatic pick reads (v0.61.0): the series' type and direction, from the server -- or, offline, the type
+      // this device last saw and the downloaded record's direction. The pages' shape is the chapter's own, either way.
+      let seriesType = first.offline ? seriesTypeOf(first.seriesId) : null;
+      let readsRtl = first.readingDirection === 'RIGHT_TO_LEFT';
       try {
         const s = await api<Series>(`/api/series/${first.seriesId}`);
         if (alive) {
           setRtl(s?.metadata?.readingDirection === 'RIGHT_TO_LEFT');
+          readsRtl = s?.metadata?.readingDirection === 'RIGHT_TO_LEFT';
+          seriesType = s?.seriesType ?? null;
+          rememberSeriesType(first.seriesId, seriesType);
           setEditions((s?.edition?.editions?.length ?? 0) > 1 ? s.edition!.editions! : null);
           // The followed sources' display names, for the caption on a page the source never served. Free:
           // this request is made anyway, and `sources` is sent to every viewer, unlike /api/sources.
@@ -359,6 +391,7 @@ function ReaderInner() {
         // offline: the downloaded record's direction, set above, stands, and the series' source is the one
         // this device saw the last time it opened the series online.
         src = seriesSourceOf(first.seriesId);
+        seriesType = seriesTypeOf(first.seriesId);
         if (alive) setSeriesSource(src);
       }
       if (!alive) return;
@@ -367,8 +400,13 @@ function ReaderInner() {
       // arrive a render later, from an effect declared after the initial scroll: that scroll ran on the global mode,
       // the source's mode then swapped the scroller under it, and a resume at page 9 opened on page 1 with a counter
       // saying 9. The zoom is the series' memory too, and comes with it.
+      // v0.61.0: and, when Pick the mode for each series is on, the mode the title's pages and type call for -- only where
+      // neither its memory nor its source holds one (titleLook).
       const memory = loadSeriesPrefs(first.seriesId);
-      setPrefs(titleLook(loadPrefs(), src ? loadSourcePrefs(src.id) : {}, memory));
+      autoGuess.current = guessMode({ pages: first.pages, type: seriesType, rtl: readsRtl });
+      const look = titleLook(loadPrefs(), src ? loadSourcePrefs(src.id) : {}, memory, autoGuess.current);
+      setPrefs(look.prefs);
+      setAutoApplied(look.autoApplied);
       setZoom(memory.zoom && memory.zoom >= 1 ? memory.zoom : 1);
       titleOpen.current = true;
       setReady(true);
@@ -1681,6 +1719,7 @@ function ReaderInner() {
             set={setPref}
             device={device}
             setDevice={setDevice}
+            autoApplied={autoApplied}
             onClose={() => setShowSettings(false)}
             // The series' own source, by name. With no name there is no row at all: a raw source id is
             // never shown (an extension's is nineteen digits).

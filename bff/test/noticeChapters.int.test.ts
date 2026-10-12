@@ -189,8 +189,12 @@ test('notice chapters: off by default, hidden everywhere by type or by series, a
       const mg = (await get(`/api/series/${MG}`, asAdmin)).json();
       assert.equal(mg.seriesType, 'manga');
       assert.equal(mg.overrides.seriesType, 'manga');
-      // Members are not told any of it.
-      assert.equal((await get(`/api/series/${HW}`, asMember)).json().seriesType, undefined);
+      // v0.61.0: members are told the type -- the reader's automatic mode opens a manhwa as a webtoon -- and still nothing
+      // of the evidence behind it. Updated deliberately: before v0.61.0 `seriesType` was admins only.
+      const asSeenByMember = (await get(`/api/series/${HW}`, asMember)).json();
+      assert.equal(asSeenByMember.seriesType, 'manhwa');
+      assert.equal(asSeenByMember.detectedType, undefined);
+      assert.equal(asSeenByMember.hideNoticesEffective, undefined);
     });
 
     await t.test('series types: a genre menu or a lone Manga is no evidence, so the source and AniList decide', async () => {

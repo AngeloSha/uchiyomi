@@ -888,8 +888,10 @@ their pages -- and neither the updater nor the slow archive downloads a fraction
 them. A file holding a range of chapters is never a notice either way. *What is a notice* below is the rule while it
 is on.
 
-A series' type is `seriesType` on `GET /api/series/:id` for admins (`unknown` when nothing is known), with
-`detectedType {type, from}` naming the evidence. Most trusted first, the evidence is:
+A series' type is `seriesType` on `GET /api/series/:id` (`unknown` when nothing is known): the admin's override, else
+the evidence's. Since v0.61.0 every viewer gets it -- the reader's *Pick the mode for each series* opens a manhwa or a
+webtoon as a long strip and a manga page by page -- while `detectedType {type, from}`, naming the evidence, stays an
+admin's. Most trusted first, the evidence is:
 
 1. `genre`: a genre naming one origin. A genre list naming several (a site's whole genre menu) is no evidence,
    and neither is `Manga` alone, which many sites file everything under.

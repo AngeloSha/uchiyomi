@@ -1865,8 +1865,10 @@ paths:
                       - type: "null"
                   seriesType:
                     description: >-
-                      Admins only. What kind of comic the series is, as the notice-chapter switches read it: the
-                      admin's override (`overrides.seriesType`), else `detectedType`, else `unknown`.
+                      What kind of comic the series is, as the notice-chapter switches read it: the admin's override
+                      (`overrides.seriesType`), else what the evidence learned (`detectedType`), else `unknown`. Every
+                      viewer since v0.61.0, for the reader's automatic mode (admins only before); the evidence itself,
+                      `detectedType`, is still admins only.
                     type: string
                     enum: [manga, manhwa, manhua, webtoon, comic, unknown]
                   detectedType:

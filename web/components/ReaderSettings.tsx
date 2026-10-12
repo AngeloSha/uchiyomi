@@ -3,6 +3,8 @@ import { motion } from 'framer-motion';
 import { useRef } from 'react';
 import { ReaderPrefs } from '@/lib/readerPrefs';
 import type { ColorFilter, DevicePrefs } from '@/lib/readerDevice';
+import type { AutoGuess } from '@/lib/readerAuto';
+import { seriesTypeKey } from '@/lib/seriesTypes';
 import { IcX } from './icons';
 import { Switch } from './Switch';
 import { t as tr } from '@/lib/i18n';
@@ -24,6 +26,7 @@ export function ReaderSettings({
   set,
   device,
   setDevice,
+  autoApplied,
   onClose,
   sourceName,
   sourceDefault,
@@ -34,6 +37,8 @@ export function ReaderSettings({
   /** This device's own settings (v0.61.0, lib/readerDevice.ts): kept in this browser, never synced. */
   device: DevicePrefs;
   setDevice: (p: Partial<DevicePrefs>) => void;
+  /** The mode the automatic pick chose for this title, and why; null when the mode is not the pick's. */
+  autoApplied?: AutoGuess | null;
   onClose: () => void;
   /** The source this chapter came from, named for the button. Absent for a copy with no source on record. */
   sourceName?: string;
@@ -81,6 +86,23 @@ export function ReaderSettings({
             ))}
           </div>
         </Row>
+
+        {/* v0.61.0: Webtoon or Paged picked for each series from its pages and its type, where neither the series nor its
+            source has a mode of its own. Every title, synced. Says what it picked for this one, and why. */}
+        <div className="flex items-center justify-between gap-3 pb-3">
+          <span className="text-sm font-medium text-fog-200">{tr('Pick the mode for each series')}</span>
+          <Switch on={prefs.autoMode} onChange={(autoMode) => set({ autoMode })} label={tr('Pick the mode for each series')} />
+        </div>
+        {autoApplied && (
+          <p data-auto-mode={autoApplied.mode} className="-mt-1 pb-3 text-[11px] leading-snug text-fog-500">
+            {(() => {
+              const mode = autoApplied.mode === 'vertical' ? tr('Webtoon (scroll)') : tr('Paged (swipe)');
+              if (autoApplied.reason === 'strips') return tr('Picked for this series: {mode} · long strips', { mode });
+              if (autoApplied.reason === 'rtl') return tr('Picked for this series: {mode} · right to left', { mode });
+              return tr('Picked for this series: {mode} · {type}', { mode, type: tr(seriesTypeKey(autoApplied.reason)) });
+            })()}
+          </p>
+        )}
 
         <Row label={tr('Theme')}>
           <div className="grid grid-cols-3 gap-2">

@@ -281,6 +281,10 @@ function ReadingSection({ weeklyGoal }: { weeklyGoal: number }) {
       <Choice label={tr('Mode')} value={prefs.mode}
         options={[{ value: 'vertical', label: tr('Webtoon (scroll)') }, { value: 'paged', label: tr('Paged (swipe)') }]}
         onChange={(mode) => set({ mode })} />
+      {/* v0.61.0: the mode above is then the default only for a title the pick cannot place. Through `set`, the one writer. */}
+      <SwitchRow label={tr('Pick the mode for each series')}
+        help={tr('Long strips and webtoons open in Webtoon mode, manga and right-to-left series in Paged. A series or a source you have set yourself keeps its own.')}
+        on={prefs.autoMode} onChange={(autoMode) => set({ autoMode })} />
       <Choice label={tr('Theme')} value={prefs.theme}
         options={[{ value: 'amoled', label: tr('AMOLED') }, { value: 'sepia', label: tr('Sepia') }, { value: 'gray', label: tr('Gray') }]}
         onChange={(theme) => set({ theme })} />
