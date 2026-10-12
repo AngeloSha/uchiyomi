@@ -652,11 +652,6 @@ export const serveLibSeriesThumb = async (req: FastifyRequest, reply: FastifyRep
     return { buffer, contentType: 'image/webp' };
   });
 };
-// A chapter file that is not on disk -- deleted by the read-chapter cleanup or an admin (the row stays as
-// a tombstone), or a library not mounted right now -- is a 404, not a 500. Every chapter row used to ask
-// for its thumbnail regardless, and the ENOENT from the zip reader surfaced as a server error in the log
-// and the browser console for each one. Reintroduce by calling cbzPageAt directly: "a deleted chapter's
-// thumbnail is a 404, not a server error" in prunedBooks.int.test.ts sees 500.
 /** WebP holds no image taller (or wider) than this; JPEG holds 65,535. */
 const WEBP_MAX_SIDE = 16383;
 const JPEG_MAX_SIDE = 65535;
@@ -699,6 +694,11 @@ export async function pageAtWidth(input: Buffer, w: number, quality: number): Pr
   return { buffer: input, contentType: `image/${size.format === 'jpg' || !size.format ? 'jpeg' : size.format}` };
 }
 
+// A chapter file that is not on disk -- deleted by the read-chapter cleanup or an admin (the row stays as
+// a tombstone), or a library not mounted right now -- is a 404, not a 500. Every chapter row used to ask
+// for its thumbnail regardless, and the ENOENT from the zip reader surfaced as a server error in the log
+// and the browser console for each one. Reintroduce by calling cbzPageAt directly: "a deleted chapter's
+// thumbnail is a 404, not a server error" in prunedBooks.int.test.ts sees 500.
 const pageOrGone = async (abs: string, index: number) => {
   try {
     return await cbzPageAt(abs, index);

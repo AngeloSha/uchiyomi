@@ -214,6 +214,150 @@ export const NEUTRAL_GROUP_NAMES = ['Example Scans', 'Sample Translations', 'Dem
 const KEEP = /^mangadex$/i;
 
 /**
+ * The people on a real server are not ours to publish (v0.60.1). Admin → Members, the profile's household board and
+ * the sessions list showed the household's real names and usernames until then -- in the public repo and on the
+ * marketing site. Every answer that lists people is fetched for real and handed back with sample names (the same
+ * person, the same sample name, on every screen) and no avatar; roles, states and counts are kept, so the screen is the
+ * real one. The capture account itself (`meId`) keeps its own. Not done as a text swap (neutralNames): real display
+ * names are words like "me", which a page-wide swap would rewrite in every sentence.
+ * ⚠️ Silent like the rest of the rig: a NEW route that lists people is not covered until it is added here. Look at the
+ * output.
+ */
+/**
+ * Sign in through the API as the capture account: its id (so peopleFixture leaves it its own name) and a token for the
+ * calls the rig makes itself (capture.mjs seedReading). One login more than the page's; the limit is ten in five minutes.
+ * @param {string} base @param {string} user @param {string} pass
+ * @returns {Promise<{ accessToken: string, user: { id: string } }>}
+ */
+export async function apiLogin(base, user, pass) {
+  const r = await fetch(`${base}/auth/login`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: user, password: pass }),
+  });
+  if (!r.ok) throw new Error(`API sign-in answered ${r.status}`);
+  const j = await r.json();
+  if (!j?.accessToken || !j?.user?.id) throw new Error('API sign-in answered without a token or an id');
+  return j;
+}
+
+/**
+ * A reading life for the capture account. Without one every per-reader screen photographed a stranger (v0.60.1): no
+ * progress bars on the covers, "Start reading" on every series, empty stars, no favourites, no Keep reading.
+ *
+ * capture.mjs and record.mjs call it only when run.sh asks (SHOT_SEED=1), which it does for the throwaway account it creates and deletes, never for
+ * `--login`, which may be somebody's account. Written through the app's own API, as a reader's "Mark read" is
+ * (`silent`: no reading events, so nobody's weekly board or Top 10 moves while the rig runs), and every row is the
+ * account's own: run.sh's DELETE of the account removes them all (each foreign key to users is ON DELETE CASCADE).
+ * The covers it reads are the Library's first screen in its default order (lib/librarySort.ts SORTS[0], no filter,
+ * 18+ hidden, as the page asks), and the series the series shot shows, to different depths so the bars differ.
+ */
+export async function seedReading(base, token, seriesId = '') {
+  const call = async (method, path, json) => {
+    const r = await fetch(`${base}${path}`, {
+      method,
+      headers: { authorization: `Bearer ${token}`, ...(json ? { 'content-type': 'application/json' } : {}) },
+      body: json ? JSON.stringify(json) : undefined,
+    });
+    if (!r.ok) throw new Error(`seed: ${method} ${path} answered ${r.status}`);
+    return r.json().catch(() => null);
+  };
+  const shelf = await call('POST', '/api/series/search', { page: 0, size: 18, sort: 'lastModified,desc', collapseEditions: true });
+  const ids = [...new Set([seriesId, ...(shelf?.content ?? []).map((x) => x.id)].filter(Boolean))];
+  const DEPTHS = [0.55, 0.3, 0.8, 0.15, 0.65, 0.4, 0.9, 0.25, 0.5, 0.7, 0.35, 0.6];
+  const at = (b) => Number(b.metadata?.numberSort ?? b.number ?? 0);
+  let marked = 0;
+  for (const [i, id] of ids.entries()) {
+    const books = ((await call('GET', `/api/series/${encodeURIComponent(id)}/books?size=2000`))?.content ?? []).sort((a, b) => at(a) - at(b));
+    if (books.length < 3) continue;
+    const done = Math.max(1, Math.floor(books.length * DEPTHS[i % DEPTHS.length]));
+    for (const b of books.slice(0, done)) {
+      await call('PUT', `/api/books/${encodeURIComponent(b.id)}/progress`, { page: Math.max(0, (b.media?.pagesCount ?? 1) - 1), completed: true, seriesId: id, silent: true });
+      marked++;
+    }
+    // Part-way into the next one on the series shot and every third cover: "Continue · Ch. N" rather than "Next".
+    if (i % 3 === 0 && books[done]) {
+      await call('PUT', `/api/books/${encodeURIComponent(books[done].id)}/progress`, { page: 3, completed: false, seriesId: id, silent: true });
+    }
+  }
+  if (seriesId) {
+    await call('PUT', `/api/ratings/${encodeURIComponent(seriesId)}`, { stars: 4 });
+    await call('POST', '/api/favorites', { seriesId });
+  }
+  console.log(`  · seeded: ${marked} chapters read across ${ids.length} series${seriesId ? ', the shot series rated and favourited' : ''}`);
+}
+
+export const SAMPLE_PEOPLE = ['Alex', 'Sam', 'Jordan', 'Robin', 'Kai', 'Riley', 'Casey', 'Taylor'];
+const PEOPLE_ROUTES = new Set(['/api/admin/users', '/api/leaderboard', '/api/admin/sessions']);
+/** @param {string} meId the capture account's id @returns {(url: URL, req: any) => Promise<any>} a fixture */
+export function peopleFixture(meId) {
+  /** @type {Map<string, string>} person id -> sample name */
+  const named = new Map();
+  const nameFor = (key) => {
+    if (!named.has(key)) {
+      const i = named.size;
+      named.set(key, i < SAMPLE_PEOPLE.length ? SAMPLE_PEOPLE[i] : `${SAMPLE_PEOPLE[i % SAMPLE_PEOPLE.length]} ${Math.floor(i / SAMPLE_PEOPLE.length) + 1}`);
+    }
+    return named.get(key);
+  };
+  return async (url, req) => {
+    if (!PEOPLE_ROUTES.has(url.pathname) || req.method() !== 'GET') return null;
+    // Only what the app itself sends: the bearer token. Cookies and the browser's own headers stay with the browser.
+    const auth = req.headers().authorization;
+    const r = await fetch(url, { headers: { accept: 'application/json', ...(auth ? { authorization: auth } : {}) } });
+    const text = await r.text();
+    let j;
+    try { j = JSON.parse(text); } catch { return { status: r.status, contentType: r.headers.get('content-type') || 'text/plain', body: text }; }
+    for (const row of Array.isArray(j?.content) ? j.content : []) {
+      const who = String(row.user_id ?? row.userId ?? row.id ?? '');
+      if (!who || who === meId) continue;
+      const name = nameFor(who);
+      for (const k of ['display_name', 'displayName']) if (k in row) row[k] = name;
+      for (const k of ['username', 'userName']) if (k in row) row[k] = name.toLowerCase().replace(/\s+/g, '');
+      if ('avatar' in row) row.avatar = null;
+    }
+    return { status: r.status, json: j };
+  };
+}
+
+/**
+ * Admin → Library on a real server: its libraries' names and folders, who may open each, and the top-level folders it
+ * suggests splitting out -- which a downloader names after the sites it fetched from, and an 18+ library after one
+ * (v0.60.1). The answer is fetched for real and handed back with the default library as it is, every other one named
+ * from SAMPLE_LIBRARIES with a folder to match, the members as sample people, and the suggested folders as made-up
+ * source names; counts, age ratings and switches are kept.
+ */
+export const SAMPLE_LIBRARIES = ['Family', 'Grown-ups', 'Comics', 'Webtoons', 'Classics', 'Shared'];
+/** @param {string} meName the capture account's display name, kept @returns {(url: URL, req: any) => Promise<any>} */
+export function librariesFixture(meName = 'Admin') {
+  const people = new Map();
+  const person = (n) => {
+    if (n === meName) return n;
+    if (!people.has(n)) people.set(n, SAMPLE_PEOPLE[people.size % SAMPLE_PEOPLE.length]);
+    return people.get(n);
+  };
+  return async (url, req) => {
+    if (url.pathname !== '/api/admin/libraries' || req.method() !== 'GET') return null;
+    const auth = req.headers().authorization;
+    const r = await fetch(url, { headers: { accept: 'application/json', ...(auth ? { authorization: auth } : {}) } });
+    const text = await r.text();
+    let j;
+    try { j = JSON.parse(text); } catch { return { status: r.status, contentType: r.headers.get('content-type') || 'text/plain', body: text }; }
+    let named = 0;
+    for (const lib of Array.isArray(j?.content) ? j.content : []) {
+      if (Array.isArray(lib.members)) lib.members = lib.members.map((m) => (typeof m === 'string' ? person(m) : m));
+      if (lib.id === 'lib' || !lib.path) continue; // the default library: "Library", over every root, no folder of its own
+      const name = SAMPLE_LIBRARIES[named++ % SAMPLE_LIBRARIES.length];
+      lib.name = name;
+      lib.path = name;
+      if (Array.isArray(lib.paths)) lib.paths = lib.paths.map((_, i) => (i ? `${name} ${i + 1}` : name));
+    }
+    if (Array.isArray(j?.candidates)) {
+      j.candidates = j.candidates.map((c, i) => ({ ...c, path: NEUTRAL_SOURCE_NAMES[i % NEUTRAL_SOURCE_NAMES.length] + (i >= NEUTRAL_SOURCE_NAMES.length ? ` ${Math.floor(i / NEUTRAL_SOURCE_NAMES.length) + 1}` : '') }));
+    }
+    return { status: r.status, json: j };
+  };
+}
+
+/**
  * The source and group names one API answer carries, as [kind, name] pairs (pure: capture.mjs, record.mjs and a
  * test read it the same way).
  * @param {string} path the request's pathname @param {unknown} j its JSON

@@ -31,7 +31,7 @@ services:
       # Uchiyomi does the downloading and owns the library; the engine must never write a copy of its own.
       AUTO_DOWNLOAD_CHAPTERS: "false"
       DOWNLOAD_AS_CBZ: "true"
-      # Nothing opens the engine's own web page; Uchiyomi's Admin -> Extensions is the interface.
+      # Nothing opens the engine's own web page; Uchiyomi's Admin -> Sources is the interface.
       WEB_UI_ENABLED: "false"
       # The listing's solver. Suwayomi has no browser of its own, and without this a site behind Cloudflare
       # fails with "Cloudflare bypass currently disabled".
@@ -77,7 +77,7 @@ x-casaos:
     en_US: |
       The optional extension engine for Uchiyomi: Suwayomi-Server, run headless, which runs Mihon/Tachiyomi
       extensions so Uchiyomi can search, follow and download from them. You never open it yourself; add
-      repositories and install extensions in Uchiyomi's Admin -> Extensions. It uses about 750 MB of memory
+      repositories and install extensions in Uchiyomi's Admin -> Sources. It uses about 750 MB of memory
       while it runs and is capped at 1.5 GB.
   tips:
     before_install:

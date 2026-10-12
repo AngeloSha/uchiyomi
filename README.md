@@ -53,13 +53,22 @@ sites' terms and your local law.
 **Your library**
 
 - **Files you already own** — CBZ, CBR, PDF, image EPUB or a folder of images, in any folder layout.
-- **Library management** — several libraries, a filter panel (sort, read state, status, format, genres),
-  *Select all* with bulk fetch and removal, editable metadata that survives a rescan, merge, delete, restore
-  and forget.
+- **A Library you can find things in** — search it, one **Sort** menu where every order runs both ways (newest,
+  recently read, most popular and top rated on AniList, your own stars, most chapters, A–Z), **Comfortable,
+  Compact or List**, covers that show how far you are, and filters (read state, status, source, format, genres)
+  in rows that fold.
+- **Library management** — several libraries, each over as many folders as you like, *Select all* with bulk
+  fetch and removal, editable metadata that survives a rescan, merge (each chapter kept once), delete, restore
+  and forget, and *Rescan everything* for files changed behind its back.
+- **Language editions** — the same series in English and in Spanish is one card, with chips to switch between
+  them on the series page and in the reader; each language keeps its own chapters, folder and progress.
+- **Your stars beside AniList's score** — one panel on the series page, the Library sorts by either, and Home
+  has a *Most popular* rail.
 - **Health** — finds chapter gaps, suspiciously short chapters, bad downloads, duplicates and failing sources,
-  and names the step a source fails at. Every fix says what it does and how long it usually takes before you
-  press it, shows its progress live, and keeps what it did; *Verify chapter files* re-checks that what the
-  database claims is on disk actually is.
+  and names the step a source fails at. **Fix everything** works through every card by itself, once or every
+  night, and then says what only you can decide. Every fix says what it does before you press it, shows its
+  progress live, and keeps what it did; *Verify chapter files* re-checks that what the database claims is on
+  disk actually is.
 - **Import what you already track** — a Mihon backup, a MangaDex list, a pasted list of titles, or your
   AniList / MyAnimeList / Kitsu list. Every match is **reviewed before it lands**, with a confidence score,
   *Change* and *Skip*, and batches you can resume.
@@ -69,11 +78,13 @@ sites' terms and your local law.
 - **~1,400 Mihon / Tachiyomi extensions** from a repository you add, plus generic engines for common site
   families (paste a URL) and MangaDex. Nothing is enabled until you choose it, and each extension's own settings
   are one click away, as in Mihon.
-- **Discover** — what your sources just published, grouped by language, and a search that **answers
-  progressively**: results appear as each source replies instead of waiting for the slowest, and every
-  source says whether it answered, failed or timed out.
+- **Discover** — what your sources just published, **one card per series** with each source's icon, leaving
+  out what you already own, from every source at once; and a search that **answers progressively**: results
+  appear as each source replies instead of waiting for the slowest, and every source says whether it answered,
+  failed or timed out.
 - **Follows a series on more than one source**, and when a chapter will not come down it tries the other
-  copies, then other sources, before giving up.
+  copies, then other sources, before giving up. When a site dies for good, *Find other sources* and **Replace
+  a source** move its series to sources that work, after you have looked at each match.
 - **Chooses the translation** — prefer or block scanlation groups, server-wide or per series; wait a couple
   of days for a preferred group; see every version of a chapter and fetch a specific one. The group is
   written into the file as ComicInfo `<Translator>`.

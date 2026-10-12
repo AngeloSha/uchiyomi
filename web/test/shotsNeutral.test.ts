@@ -59,14 +59,89 @@ test('the library shots and the tour are taken behind neutralNames, and the tour
   const cap = read('capture.mjs');
   assert.match(cap, /from '\.\/fixtures\.mjs'/);
   const main = cap.slice(cap.indexOf('// ---- everything else, one login reused for every shot ----'));
-  assert.match(main, /const page = await ctx\.newPage\(\);[\s\S]{0,400}await neutralNames\(page\);\s*await login\(page\);/, 'the library shots are not neutralised');
+  assert.match(main, /const page = await ctx\.newPage\(\);[\s\S]{0,400}await neutralNames\(page, \{ fixtures: \[people, librariesFixture\(\)\] \}\);\s*await login\(page\);/, 'the library shots are not neutralised, or Admin → Library shows its real names');
+  assert.match(main, /const people = peopleFixture\(me\.user\.id\);/, 'the people on the shots are the real ones');
   assert.match(main, /await meetNames\(page, BASE\);/, 'the names are not met before the shots');
-  assert.match(cap, /const ph = await ctx\.newPage\(\);\s*await neutralNames\(ph\);/, 'the phone shots are not neutralised');
+  // The phone page is made on first use since the v0.60.1 re-shoot (phone-home is taken beside home, before the desktop
+  // reader moves Keep reading), and every phone shot gets that one page.
+  assert.match(cap, /phonePage = await ctx\.newPage\(\);\s*await neutralNames\(phonePage, \{ fixtures: \[people, librariesFixture\(\)\] \}\);/, 'the phone shots are not neutralised');
+  assert.match(cap, /const ph = await phone\(\);/, 'the phone section makes its own page, without neutralNames');
   const rec = read('record.mjs');
-  assert.match(rec, /await neutralNames\(page, \{ fixtures: \[extensionFixture\(\{ repos: \[FIXTURE_REPO_STORED\] \}\)\] \}\);/, 'the tour is not neutralised, or its extension catalogue is the real one');
+  assert.match(rec, /await neutralNames\(page, \{ fixtures: \[extensionFixture\(\{ repos: \[FIXTURE_REPO_STORED\] \}\), peopleFixture\(me\.user\.id\)\] \}\);/, 'the tour is not neutralised, its extension catalogue is the real one, or its people are');
   assert.ok(rec.indexOf('await meetNames(page, BASE);') > 0 && rec.indexOf('await meetNames(page, BASE);') < rec.indexOf("client.send('Page.startScreencast'"), 'the tour meets the names only after it starts filming');
   const reader = rec.slice(rec.indexOf('if (BOOK_ID) {'));
   assert.ok(reader.indexOf('paused = true;') >= 0 && reader.indexOf('paused = true;') < reader.indexOf('/reader/?book='), 'the tour films the reader opening');
   assert.ok(reader.indexOf('paused = false;') > reader.indexOf('el.scrollTop = Math.floor(el.scrollHeight * 0.2);'), 'the tour resumes before the jump past the first page');
   assert.match(rec, /if \(!paused\) frames\.push\(/, 'paused frames are kept');
+});
+
+test('the people on a real server are shown with sample names: the same person the same name, the capture account its own', async () => {
+  // Admin → Members and the profile's household board showed the household's real names and usernames until v0.60.1,
+  // in the repo and on the marketing site. Reintroduce by answering the members list as it is (dropping the rewrite
+  // loop in fixtures.mjs peopleFixture): every assertion below on a real name fails.
+  const { peopleFixture, SAMPLE_PEOPLE } = (await import(pathToFileURL(join(SHOTS, 'fixtures.mjs')).href)) as {
+    peopleFixture: (meId: string) => (url: URL, req: unknown) => Promise<{ status: number; json?: any } | null>;
+    SAMPLE_PEOPLE: string[];
+  };
+  const answers: Record<string, unknown> = {
+    '/api/admin/users': { content: [
+      { id: 'u-me', username: 'shotbot', display_name: 'Admin', avatar: null, role: 'admin' },
+      { id: 'u-1', username: 'realperson', display_name: 'Real Person', avatar: { emoji: 'x', color: 'red' }, role: 'user', disabled: true },
+      { id: 'u-2', username: 'another', display_name: 'Another One', avatar: null, role: 'admin' },
+    ] },
+    '/api/leaderboard': { content: [
+      { id: 'u-2', display_name: 'Another One', avatar: null, week: 3, total: 40 },
+      { id: 'u-me', display_name: 'Admin', avatar: null, week: 1, total: 2 },
+    ] },
+  };
+  const seen: Array<{ url: string; auth?: string }> = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: URL, init: { headers: Record<string, string> }) => {
+    seen.push({ url: String(url), auth: init.headers.authorization });
+    return new Response(JSON.stringify(answers[new URL(String(url)).pathname]), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as unknown as typeof fetch;
+  try {
+    const fixture = peopleFixture('u-me');
+    const req = (method = 'GET') => ({ method: () => method, headers: () => ({ authorization: 'Bearer t', cookie: 'not=forwarded' }) });
+    const members = (await fixture(new URL('http://app/api/admin/users'), req()))!.json.content;
+    assert.deepEqual(members.map((m: any) => [m.display_name, m.username]), [
+      ['Admin', 'shotbot'], [SAMPLE_PEOPLE[0], SAMPLE_PEOPLE[0].toLowerCase()], [SAMPLE_PEOPLE[1], SAMPLE_PEOPLE[1].toLowerCase()],
+    ], 'everyone but the capture account has a sample name');
+    assert.equal(members[1].avatar, null, 'and no avatar');
+    assert.equal(members[1].disabled, true, 'the rest of the row is the real one');
+    const board = (await fixture(new URL('http://app/api/leaderboard'), req()))!.json.content;
+    assert.deepEqual(board.map((m: any) => m.display_name), [SAMPLE_PEOPLE[1], 'Admin'], 'the same person keeps the same sample name');
+    assert.equal(seen[0].auth, 'Bearer t', 'the app\'s own token is sent');
+    assert.equal(await fixture(new URL('http://app/api/series'), req()), null, 'other answers are left alone');
+    assert.equal(await fixture(new URL('http://app/api/admin/users'), req('POST')), null, 'and so is anything but a read');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("Admin → Library is shown with sample libraries, people and folders, and the default library as it is", async () => {
+  // Admin → Library on the live server named an 18+ library after the site it came from, its folders after sites, and
+  // who may open each by their real names. Reintroduce by answering /api/admin/libraries as it is (dropping the
+  // rewrite in fixtures.mjs librariesFixture): every assertion below on a real name fails.
+  const { librariesFixture, SAMPLE_LIBRARIES, SAMPLE_PEOPLE, NEUTRAL_SOURCE_NAMES } = (await import(pathToFileURL(join(SHOTS, 'fixtures.mjs')).href)) as any;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    content: [
+      { id: 'lib', name: 'Library', path: '', paths: [], n: 300, age_rating: null, members: ['Admin', 'Real Person'] },
+      { id: 'lib_x', name: 'A Real Adult Site (ALL)', path: 'A Real Adult Site (ALL)', paths: ['A Real Adult Site (ALL)'], n: 2, age_rating: 18, members: ['Real Person'] },
+    ],
+    candidates: [{ path: 'A Real Site (EN)', series: 12, looksLikeSource: true }, { path: 'Another Real Site', series: 3, looksLikeSource: true }],
+  }), { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch;
+  try {
+    const req = { method: () => 'GET', headers: () => ({ authorization: 'Bearer t' }) };
+    const j = (await librariesFixture('Admin')(new URL('http://app/api/admin/libraries'), req))!.json;
+    assert.deepEqual(j.content.map((l: any) => [l.name, l.path, l.age_rating]), [['Library', '', null], [SAMPLE_LIBRARIES[0], SAMPLE_LIBRARIES[0], 18]]);
+    assert.deepEqual(j.content[1].paths, [SAMPLE_LIBRARIES[0]]);
+    assert.deepEqual(j.content[0].members, ['Admin', SAMPLE_PEOPLE[0]], 'the capture account keeps its name; everyone else is a sample');
+    assert.deepEqual(j.content[1].members, [SAMPLE_PEOPLE[0]], 'the same person, the same sample name');
+    assert.deepEqual(j.candidates.map((c: any) => [c.path, c.series]), [[NEUTRAL_SOURCE_NAMES[0], 12], [NEUTRAL_SOURCE_NAMES[1], 3]]);
+    assert.equal(JSON.stringify(j).includes('Real'), false, 'no real name is left');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

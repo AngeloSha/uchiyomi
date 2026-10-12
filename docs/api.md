@@ -1423,7 +1423,7 @@ POST   /api/push/unsubscribe
 
 **Account settings.** `GET /api/settings` answers the caller's whole forwards-compatible object; `PUT /api/settings`
 takes top-level keys directly and merges them into that object (an object value is replaced whole). Unknown keys stay
-accepted and retained for compatibility. v0.55.8 validates three public keys:
+accepted and retained for compatibility. v0.55.8 validates three public keys, and v0.60.0 a fourth:
 
 - `librarySort: 'updated' | 'new' | 'az' | 'unread'` (since v0.58.0 also `'popular' | 'score' | 'rating' | 'chapters'
   | 'read'`, since v0.61.0 `'soon'`, Releasing soon), the Library's saved default. A valid URL sort wins for that

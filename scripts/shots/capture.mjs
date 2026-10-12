@@ -23,6 +23,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // how each kind of shot is kept neutral.
 import {
   FIXTURE_REPO, FIXTURE_REPO_STORED, extensionFixture, sourcesFixture, fixturePage, neutralNames, meetNames,
+  apiLogin, peopleFixture, librariesFixture, seedReading,
 } from './fixtures.mjs';
 
 // Viewports. `desk` matches the existing good assets and the app's own lg: breakpoint; phone is iPhone-14
@@ -46,6 +47,23 @@ async function settle(page, extra = 0) {
     .catch(() => {});
   await page.evaluate(() => document.fonts?.ready).catch(() => {});
   await sleep(500 + extra);
+}
+
+/**
+ * Hold Home's hero still. It crossfades to its next slide every 6.5 s, over 0.9 s (web/components/HeroCarousel.tsx),
+ * and a shot that lands inside the fade shows the last slide ghosting through the next -- phone-home did, on the
+ * v0.60.1 re-shoot. The carousel pauses while the pointer is over it, so the pointer rests on an empty corner of it
+ * (top end: the arrows sit at mid-height, the title and keys lower down), and a fade already under way gets to finish.
+ */
+async function heroAtRest(page) {
+  const corner = await page.evaluate(() => {
+    const hero = document.querySelector('button[aria-label="Slide 1"]')?.parentElement?.parentElement;
+    const r = hero?.getBoundingClientRect();
+    return r && r.height > 0 ? { x: r.right - 24, y: r.top + 24 } : null;
+  });
+  if (!corner) return;
+  await page.mouse.move(corner.x, corner.y);
+  await sleep(1300);
 }
 
 /** Click a control by its visible text — the app has few stable test ids and this survives restyling. */
@@ -150,20 +168,57 @@ async function main() {
   }
 
   // ---- everything else, one login reused for every shot ----
+  // The account's id first (sample names for everyone else, fixtures.mjs peopleFixture), and its reading life when
+  // run.sh asks for one (seedReading), before the first screen is drawn.
+  const me = await apiLogin(BASE, USER, PASS);
+  if (process.env.SHOT_SEED === '1') await seedReading(BASE, me.accessToken, SERIES_ID);
+  const people = peopleFixture(me.user.id);
   const ctx = await browser.createBrowserContext();
   const page = await ctx.newPage();
   await page.setViewport(PROFILES.desk);
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
   // A real library: its sources' and groups' names are shown as made-up ones (fixtures.mjs neutralNames) --
-  // series.webp's supply line named a real site and its groups until v0.45.0.
-  await neutralNames(page);
+  // series.webp's supply line named a real site and its groups until v0.45.0 -- and its people as sample ones.
+  await neutralNames(page, { fixtures: [people, librariesFixture()] });
   await login(page);
   console.log('  · signed in');
   await meetNames(page, BASE);
+  // The admin's Health banner ("…checks found something · Take a look · Not now") is the live server's state, not a
+  // feature of the screen being shot: answer it "Not now", as a person would. It is remembered in this browser context,
+  // so the phone page below never shows it either (components/HealthAlert.tsx, lib/healthAlert.ts writeSeen).
+  await page.goto(`${BASE}/`, { waitUntil: 'networkidle2', timeout: 60000 });
+  await settle(page, 300);
+  const notNow = await page.$('[data-health-banner] button');
+  if (notNow) { await notNow.click(); await sleep(400); console.log('  · Health banner: Not now'); }
 
   const go = async (path, extra = 0) => {
     await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle2', timeout: 60000 });
     await settle(page, extra);
+  };
+  /**
+   * A crop for the marketing site's "What's new" cards, which show a 3:1 band (its styles.css .road-shot): the element
+   * (from `selector`, or its `closest` container, down to `to`) whole, and the page around it filling the band out to
+   * 3:1, downwards, rather than a sliver the band would blow up. Document coordinates, for page.screenshot's clip.
+   */
+  const bandAround = (selector, { to = null, closest = null, ratio = 3, pad = 16, padBottom = pad, grow = 'down' } = {}) => page.evaluate((selector, to, closest, ratio, pad, padBottom, grow) => {
+    const pick = (sel) => [...document.querySelectorAll(sel)].find((e) => e.getBoundingClientRect().height > 0) || null;
+    let a = pick(selector);
+    if (a && closest) a = a.closest(closest) || a;
+    const b = to ? pick(to) : a;
+    if (!a || !b) return null;
+    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    const left = Math.min(ra.left, rb.left) - pad, right = Math.max(ra.right, rb.right) + pad;
+    const minH = (right - left) / ratio;
+    let top = Math.min(ra.top, rb.top) - pad;
+    let bottom = Math.max(ra.bottom, rb.bottom) + padBottom;
+    // Out to the band's shape: downwards, or upwards when what lies below would be cut through.
+    if (grow === 'up') top = Math.min(top, bottom - minH); else bottom = Math.max(bottom, top + minH);
+    return { x: left + window.scrollX, y: Math.max(0, top + window.scrollY), width: right - left, height: bottom - top };
+  }, selector, to, closest, ratio, pad, padBottom, grow);
+  const bandShot = async (name, box) => {
+    if (!box) { console.log(`  · skipped ${name} (nothing to crop)`); return; }
+    await page.screenshot({ path: `${OUT}/${name}.png`, clip: box });
+    console.log(`  ✓ ${name}`);
   };
   const adminTab = async (name) => {
     await go('/admin/', 300);
@@ -171,9 +226,76 @@ async function main() {
     await settle(page, 700);
   };
 
-  if (want('home')) { await go('/', 900); await shot(page, 'home'); }
-  if (want('library')) { await go('/library/', 600); await shot(page, 'library'); }
-  if (want('series') && SERIES_ID) { await go(`/series/?id=${SERIES_ID}`, 1200); await shot(page, 'series'); }
+  // The phone page, made on first use. phone-home is taken here, beside home and before the desktop reader below: the
+  // reader shot opens a chapter, which moves its series to the front of Keep reading, and in the v0.60.1 re-shoot the
+  // phone rail then led with the shot series' part-read chapter, whose thumbnail is the top of a strip that opens on a
+  // white title card -- a blank card on the marketing site's phone. Taken first, both Home shots show the same rail.
+  let phonePage = null;
+  const phone = async () => {
+    if (phonePage) return phonePage;
+    phonePage = await ctx.newPage();
+    await neutralNames(phonePage, { fixtures: [people, librariesFixture()] });
+    await phonePage.setViewport(PROFILES.phone);
+    await phonePage.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+    await meetNames(phonePage, BASE);
+    return phonePage;
+  };
+
+  if (want('home')) { await go('/', 900); await heroAtRest(page); await shot(page, 'home'); }
+  if (want('phone-home')) {
+    const ph = await phone();
+    await ph.goto(`${BASE}/`, { waitUntil: 'networkidle2', timeout: 60000 });
+    await settle(ph, 900); await heroAtRest(ph); await shot(ph, 'phone-home');
+    await ph.goto('about:blank');
+  }
+  if (want('library') || want('crop-library')) {
+    await go('/library/', 600);
+    if (want('library')) await shot(page, 'library');
+    // The toolbar and the first row of covers, with their progress bars (v0.60.0). The row is measured from the tiles
+    // themselves: the grid's first child is a wrapper around all of them, and a first run cropped the whole shelf.
+    if (want('crop-library')) {
+      await bandShot('crop-library', await page.evaluate(() => {
+        const bar = [...document.querySelectorAll('[data-library-toolbar]')].find((e) => e.getBoundingClientRect().height > 0);
+        const tiles = [...document.querySelectorAll('[data-library-grid] a[href*="/series/"]')]
+          .map((a) => a.getBoundingClientRect()).filter((r) => r.height > 0);
+        if (!bar || !tiles.length) return null;
+        const top0 = Math.min(...tiles.map((r) => r.top));
+        const row = tiles.filter((r) => r.top < top0 + 8);
+        const a = bar.getBoundingClientRect();
+        const left = Math.min(a.left, ...row.map((r) => r.left)) - 16;
+        const right = Math.max(a.right, ...row.map((r) => r.right)) + 16;
+        const top = a.top - 16;
+        const bottom = Math.max(...row.map((r) => r.bottom)) + 16;
+        return { x: left + window.scrollX, y: Math.max(0, top + window.scrollY), width: right - left, height: bottom - top };
+      }));
+    }
+  }
+  // The series page since v0.60.0: Continue, the four keys and the ratings sit under the cover, and at 860 px tall the
+  // keys fell just below the frame. The window is scrolled just far enough to show them, so the shot keeps the 16:10
+  // the marketing site frames it in. Then More, opened: USAGE.md sends readers to "More → …" for a dozen things.
+  if ((want('series') || want('series-more') || want('crop-ratings')) && SERIES_ID) {
+    await go(`/series/?id=${SERIES_ID}`, 1200);
+    const more = await page.evaluateHandle(() =>
+      [...document.querySelectorAll('button[data-series-more]')].find((b) => b.getBoundingClientRect().height > 0) || null);
+    const key = more.asElement();
+    if (!key) throw new Error('series: no visible More key (button[data-series-more])');
+    await page.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      if (r.bottom > window.innerHeight - 24) window.scrollBy({ top: r.bottom - window.innerHeight + 48, behavior: 'instant' });
+    }, key);
+    await settle(page, 400);
+    if (want('series')) await shot(page, 'series');
+    // The ratings panel (v0.60.0): AniList's score and readers beside the account's own stars.
+    // Grown upwards: the supply line sits 12 px under the panel, and a band grown downwards cut it in half.
+    if (want('crop-ratings')) await bandShot('crop-ratings', await bandAround('[data-ratings-panel]', { grow: 'up', padBottom: 6 }));
+    if (want('series-more')) {
+      await key.click();
+      await page.waitForSelector('[role="menu"]', { timeout: 5000 });
+      await sleep(700);
+      await shot(page, 'series-more');
+      await page.keyboard.press('Escape');
+    }
+  }
   if (want('wrapped')) { await go('/wrapped/', 1500); await shot(page, 'wrapped'); }
 
   // A desktop capture of the reader as well as the phone one: the marketing tour shows screens in a browser
@@ -191,8 +313,8 @@ async function main() {
   }
 
   if (want('discover')) {
-    // The WALL, not a search. Discover was rebuilt around what your sources just published -- the hero, the
-    // language chips and the grid are the page now, and search is a field in the corner. This used to type
+    // The WALL, not a search. Discover was rebuilt around what your sources just published -- the hero and the grid
+    // (one card per work since v0.56.0) are the page now, and search is a field in the corner. This used to type
     // "solo leveling" and photograph the results, so every screenshot in the docs and on the marketing site
     // illustrated the one thing the page had stopped leading with.
     await go('/discover/', 600);
@@ -228,6 +350,12 @@ async function main() {
     await page.evaluate(() => document.querySelector('main')?.scrollTo({ top: 0, behavior: 'instant' }));
     await settle(page, 1400);
     await shot(page, 'admin-health');
+  }
+  // Health's header row, with Fix everything (v0.55.0), and the first cards under it.
+  if (want('crop-fix-everything')) {
+    await adminTab('Health');
+    await settle(page, 1000);
+    await bandShot('crop-fix-everything', await bandAround('[data-fix-everything]', { closest: '.full' }));
   }
   // admin-extensions, admin-providers and the extension crops are taken on a fixture page: see "fixture shots".
   // Libraries sit at the top of the Library tab, above the removed-series list. v0.8.0 added the section
@@ -425,7 +553,8 @@ async function main() {
   // A later visit: one repository, three extensions installed and one out of date -- the engine's strip, Needs
   // attention with the update, and Your sources (v0.54.0; Installed in v0.53.0). The crop is Your sources alone,
   // from its row of views to its last row.
-  if (want('admin-extensions') || want('crop-extensions') || want('ext-strip-1')) {
+  const strips = want('ext-strip-1') || want('ext-strip-2') || want('ext-strip-3');
+  if (want('admin-extensions') || want('crop-extensions') || strips) {
     const xp = await sourcesPage(PROFILES.desk, { repos: [FIXTURE_REPO_STORED] });
     await tabOn(xp, 'Sources');
     await xp.waitForFunction(() => document.body.innerText.includes('Example Manga (EN)'), { timeout: 15000 });
@@ -442,7 +571,7 @@ async function main() {
     //
     // Deliberately NOT screenshots of the list, and since v0.45.0 not the real icons either: a site's icon is
     // its logo, and a third of the old strips spelled the site's name. They are the fixture's generated tiles.
-    if (want('ext-strip-1')) {
+    if (strips) {
       // Browse, every page of it (v0.53.0: the list is the page's, a page at a time, with Show more under it).
       await xp.goto(`${BASE}/admin/?tab=Sources&view=add`, { waitUntil: 'networkidle2', timeout: 60000 });
       await xp.waitForSelector('[data-ext-list] img', { timeout: 15000 });
@@ -539,17 +668,23 @@ async function main() {
     console.log('  ✓ phone-sources');
     await ph2.close();
   }
-
-  // ---- phone ----
-  const ph = await ctx.newPage();
-  await neutralNames(ph);
-  await ph.setViewport(PROFILES.phone);
-  await ph.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
-  await meetNames(ph, BASE);
-  if (want('phone-home')) {
-    await ph.goto(`${BASE}/`, { waitUntil: 'networkidle2', timeout: 60000 });
-    await settle(ph, 900); await shot(ph, 'phone-home');
+  // The small-screen stand-in for crop-addsite (/manga-server): the same card at phone width, its text the app's own
+  // size. Hand-cut from the desktop shot until v0.60.1, a cut that stopped fitting the moment the layout moved.
+  if (want('phone-providers')) {
+    const ph3 = await sourcesPage(PROFILES.phone, { repos: [FIXTURE_REPO_STORED] });
+    await tabOn(ph3, 'Sources&view=add');
+    await ph3.waitForSelector('[data-sources-add-site]', { timeout: 15000 });
+    await settle(ph3, 300);
+    const box = await clipOf(ph3, '[data-sources-add-site]', '[data-sources-add-site]', 8);
+    if (!box) throw new Error('phone-providers: no Add a site by address');
+    await sleep(600);
+    await ph3.screenshot({ path: `${OUT}/phone-providers.png`, clip: box });
+    console.log('  ✓ phone-providers');
+    await ph3.close();
   }
+
+  // ---- phone ---- (phone-home is taken earlier, beside home)
+  const ph = await phone();
   if (want('phone-library')) {
     await ph.goto(`${BASE}/library/`, { waitUntil: 'networkidle2', timeout: 60000 });
     await settle(ph, 900); await shot(ph, 'phone-library');
@@ -575,6 +710,37 @@ async function main() {
     await ph.mouse.click(PROFILES.phone.width / 2, PROFILES.phone.height / 2);
     await sleep(900);
     await shot(ph, 'phone-reader');
+  }
+
+  // The marketing site's phone plates for its admin figures (/faq's Settings, /vs's Libraries): the cards themselves at
+  // phone width, so their text is the app's own size rather than a desktop shot shrunk to a fifth. Hand-cut from the
+  // desktop shots until v0.60.1, cuts that stopped fitting the moment the layout moved.
+  const phoneCard = async (name, path, mark) => {
+    await ph.goto(`${BASE}${path}`, { waitUntil: 'networkidle2', timeout: 60000 });
+    await settle(ph, 700);
+    const marked = await ph.evaluate(mark);
+    const box = marked ? await clipOf(ph, '[data-shot-from]', '[data-shot-to]', 8) : null;
+    if (!box) { console.log(`  · skipped ${name} (nothing to clip)`); return; }
+    await sleep(600);
+    await ph.screenshot({ path: `${OUT}/${name}.png`, clip: box });
+    console.log(`  ✓ ${name}`);
+  };
+  if (want('phone-settings')) {
+    await phoneCard('phone-settings', '/admin/?tab=Settings', () => {
+      // By the section's id (components/settings.tsx Section): the admin menu's own "Server" group label comes first by
+      // text, and it is in no card -- the first run of this capture found nothing to clip.
+      const card = document.querySelector('section#server');
+      card?.setAttribute('data-shot-from', ''); card?.setAttribute('data-shot-to', '');
+      return !!card;
+    });
+  }
+  if (want('phone-libraries')) {
+    // The first two libraries (fixtures.mjs librariesFixture names them), one under the other at this width.
+    await phoneCard('phone-libraries', '/admin/?tab=Library', () => {
+      const cards = document.querySelectorAll('[data-library-card]');
+      cards[0]?.setAttribute('data-shot-from', ''); cards[Math.min(1, cards.length - 1)]?.setAttribute('data-shot-to', '');
+      return cards.length > 0;
+    });
   }
 
   await browser.close();

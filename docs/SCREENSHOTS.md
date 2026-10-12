@@ -61,7 +61,7 @@ provided. They are listed here so nobody later mistakes them for mockups.
 - **The extension and sources shots** — `admin-extensions`, `crop-extensions`, `crop-repo-empty`,
   `crop-repo-added`, `crop-repo-toast` (the success notice, taken the moment the add answers: since v0.49.0 a
   card at the bottom of the window, bottom-right on a laptop, for about 6 s), `ext-strip-1..3`,
-  `admin-providers`, and the site's phone plates `phone-repo-empty`,
+  `admin-providers`, `crop-addsite`, and the site's phone plates `phone-repo-empty`,
   `phone-repo-added`, `phone-extensions` and `phone-sources`. Since v0.45.0 no screenshot may show a real
   extension, site or repository name (the owner's rule): the live catalogue is a legible wall of third-party site
   names, some 18+, and a shot of the repository row would show the live server's repository address. So these
@@ -106,37 +106,47 @@ the standalone payload staged: `node desktop/scripts/stage.mjs`). It needs Linux
 shell page is trimmed. The tray menus and native dialogs cannot be reached from the page, so they are
 described in words, not pictured; operating-system dialogs (SmartScreen, Gatekeeper) are never faked.
 
-## Per-user screens look empty, and that is correct
+## The capture account reads a little, and everyone else is a sample name
 
-The rig signs in as a freshly created account, so anything scoped to one user renders with nothing in it:
-`profile-stats` shows zero chapters and no streak, `crop-tokens` shows "No tokens yet". For documenting a
-feature that is honest and fine. For marketing it usually is not, so don't reach for `profile-stats` or
-`wrapped` to illustrate a claim about a busy library. Use a screen that is server-wide instead, like
-`library`, `admin-members`, `admin-libraries` or `admin-health`.
+The rig signs in as a freshly created account, and until v0.60.1 anything scoped to one user rendered with nothing in
+it: no progress bars on the covers, *Start reading* on every series, empty stars, no Keep reading. Since then, on a
+live run (never with `--login`), `fixtures.mjs` `seedReading` first marks chapters read through the app's own API, as a
+reader's *Mark read* does: the first eighteen series of the Library's default order and the series the `series` shot
+shows, each to a different depth, one chapter part-read in every third, and the shot series rated four stars and
+favourited. Those marks are *silent*, so they are not reading events: nobody's weekly board or Top 10 moves while the
+rig runs, and `profile-stats` and `wrapped` still show an account that has read nothing this week. Every row is the
+account's own, and run.sh's delete of the account removes it with them (each foreign key to `users` cascades).
+`crop-tokens` still shows "No tokens yet". Don't reach for `profile-stats` or `wrapped` to illustrate a claim about a
+busy library.
 
-Capturing a populated stats page would mean signing in as a real reader, which the rig deliberately cannot
+The people on a real server are not ours to publish. Since v0.60.1 every answer that lists them (`/api/admin/users`,
+`/api/leaderboard`, `/api/admin/sessions`) is fetched for real and handed to the page with sample names (*Alex*,
+*Sam*, …, the same person the same name on every screen) and no avatar, by `fixtures.mjs` `peopleFixture`; the
+capture account keeps its own. Before that, `admin-members` and `profile-stats` showed the household's real display
+names and usernames. A new screen that lists people is not covered until its route is added there: look at the
+output.
+
+Capturing a really populated stats page would mean signing in as a real reader, which the rig deliberately cannot
 do: the real accounts have 2FA, and working around that is worse than the screenshot is worth.
 
 ## Currency
 
-The whole set was re-captured against **v0.40.0** on 2026-09-22, along with the tour video, so nothing in
-`docs/shots/` currently shows a retired screen. For **v0.45.0** the extension and sources shots were retaken on
-the fixture above and the desktop pages added. Then everything that showed a third-party name was retaken
-behind `neutralNames()`: **the tour** (`tour.webp`, and the site's `tour.mp4`/`tour.webm`/posters: a real site
-and its groups in the series supply line, a scanlator's credits page with its site address and a Discord invite,
-the live extension catalogue), **`series`** (the same supply line), **`home`** (a scraped summary naming a
-site), **`library`** (a site's name as a format tag, a scanlator's logo on a cover), **`admin-libraries`** (a
-library named after a site, and folders named after sites and scanlators — the site's `phone-libraries` plate is
-a crop of it), **`phone-home`** (a credits page as the Keep reading thumbnail), **`phone-library`**, and
-**`reader`**, **`phone-reader`** and **`discover`** with them. They were taken on a throwaway instance
-(`--login`, no account created anywhere) holding a small library of MangaDex series — the rig's live-library run
-creates an account on the server, which is not done for a fix — with a readiness-only solver stand-in so Health
-reads as a healthy server, one extra library ("Family", 13+) so the Libraries shot has two, and
-`SHOT_PALETTE_QUERY` / `SHOT_DISCOVER_QUERY` set to words that library matches. `admin-health`, `admin-members`
-and the per-user shots show no third-party name and were not retaken; the next live run takes every library
-shot behind `neutralNames()` automatically.
+Every capture except the desktop app's was retaken against **v0.60.1** on 2026-10-12, with the tour video, on the live
+library behind `neutralNames()`, `peopleFixture` and `librariesFixture` (see above), with the capture account's reading
+life: the series page's Continue, four keys and ratings, *More* open (`series-more`), the Library's toolbar and progress
+bars, Discover's one card per work, Health with *Fix everything*, Admin → Sources, and three new crops for the marketing
+site's "What's new" cards (`crop-library`, `crop-ratings`, `crop-fix-everything`). The desktop shots (`desktop-*`) are
+v0.45.0's: those pages have not changed since. The reader stills and the tour open the shot series' first chapter
+numbered 1 or more (run.sh): a chapter 0 is often a prologue of a few panels on black, and this run's first pass
+photographed one.
 
-Two things that run were worth writing down, because both had been silently wrong for weeks:
+Before that, the whole set was re-captured against **v0.40.0** on 2026-09-22; for **v0.45.0** the extension and sources
+shots were retaken on the fixture above and the desktop pages added, and everything that showed a third-party name was
+retaken behind `neutralNames()` on a throwaway instance; on 2026-10-03 the extension and sources shots were retaken for
+v0.53.0 and v0.54.0's Admin → Sources. The marketing site's copies of those 10-03 shots were not refreshed until
+2026-10-12: a fixed shot reaches the site only through a run with `--site`.
+
+Two things the 2026-09-22 run turned up were worth writing down, because both had been silently wrong for weeks:
 
 - `profile-security` and `profile-stats` had been **byte-identical**. The Account capture navigates to
   `/profile/?tab=Account`, and `?tab=` addresses only arrived in v0.39.0 — before that the deep link was

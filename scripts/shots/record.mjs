@@ -18,7 +18,7 @@
 // kept while the reader opens: it starts a fifth of the way in, never on page one.
 import { mkdir, writeFile } from 'node:fs/promises';
 import puppeteer from 'puppeteer';
-import { neutralNames, meetNames, extensionFixture, FIXTURE_REPO_STORED } from './fixtures.mjs';
+import { neutralNames, meetNames, extensionFixture, FIXTURE_REPO_STORED, apiLogin, peopleFixture, seedReading } from './fixtures.mjs';
 
 const BASE = process.env.SHOT_BASE || 'http://uchiyomi:3000';
 const OUT = process.env.SHOT_OUT || '/out';
@@ -37,9 +37,13 @@ async function main() {
   const browser = await puppeteer.launch({
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--force-color-profile=srgb', '--hide-scrollbars'],
   });
+  // The account's id, for sample names on everyone else, and its reading life when run.sh asks (fixtures.mjs), so the
+  // tour's covers, Continue and stars show what a reader sees (v0.60.1).
+  const me = await apiLogin(BASE, USER, PASS);
+  if (process.env.SHOT_SEED === '1') await seedReading(BASE, me.accessToken, SERIES_ID);
   const page = await browser.newPage();
   await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
-  await neutralNames(page, { fixtures: [extensionFixture({ repos: [FIXTURE_REPO_STORED] })] });
+  await neutralNames(page, { fixtures: [extensionFixture({ repos: [FIXTURE_REPO_STORED] }), peopleFixture(me.user.id)] });
 
   // sign in before recording starts — nobody wants to watch a login
   await page.goto(`${BASE}/`, { waitUntil: 'networkidle2', timeout: 60000 });
@@ -52,6 +56,10 @@ async function main() {
   if (await page.$('input[type=password]')) throw new Error('login failed');
   // Every source name, and this series' groups, known before the first frame (fixtures.mjs meetNames).
   await meetNames(page, BASE);
+  // The admin's Health banner is the live server's state, not part of the tour: answer it "Not now" before filming.
+  await page.goto(`${BASE}/`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+  const notNow = await page.$('[data-health-banner] button');
+  if (notNow) { await notNow.click(); await sleep(400); }
   if (SERIES_ID) await page.goto(`${BASE}/series/?id=${SERIES_ID}`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
 
   await page.goto(`${BASE}/`, { waitUntil: 'networkidle2', timeout: 60000 });
