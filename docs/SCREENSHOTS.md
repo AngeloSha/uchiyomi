@@ -140,6 +140,14 @@ v0.45.0's: those pages have not changed since. The reader stills and the tour op
 numbered 1 or more (run.sh): a chapter 0 is often a prologue of a few panels on black, and this run's first pass
 photographed one.
 
+After **v0.61.0** went live the same evening, three crops were added for the site's "What's new" cards, and only
+they were taken: `crop-radar` (the Library in its Releasing soon order, narrowed to the series the capture account is
+part-way through, because the soonest of all series are the ones running late; the covers and their *~Thu* / *~Sun*
+captions), `crop-related` (the Related row of the series whose AniList entry has the most related works, picked by
+run.sh, so the row is a row) and `crop-reader-comfort` (the reader's settings from *Wide pages*). v0.61.0 adds to some
+of the other screens (Related on the series page, Home's new rails, a Library order, reading time) without making
+them wrong; the next full run takes them.
+
 Before that, the whole set was re-captured against **v0.40.0** on 2026-09-22; for **v0.45.0** the extension and sources
 shots were retaken on the fixture above and the desktop pages added, and everything that showed a third-party name was
 retaken behind `neutralNames()` on a throwaway instance; on 2026-10-03 the extension and sources shots were retaken for
