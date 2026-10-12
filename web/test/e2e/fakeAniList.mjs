@@ -13,13 +13,18 @@
 //                                        AniList answers a search with no match;
 //            Media(search, type:ANIME)   the anime banner lookup: always 404;
 //            Page(...) search            the Art picker's candidates: the table's entry for the title, if any;
-//            Page(...) TRENDING_DESC     Discover's Trending rail: nothing;
+//            Page(...) TRENDING_DESC     Discover's trending rails, by `variables.country` (v0.61.0): what POST
+//                                        /__trending set for that country, else nothing;
+//            Page(...) recommendations   the related works job (v0.61.0, bff lib/anilistRelated.ts), told apart from the
+//                                        other by-id reads before them: RELATED's relations and recommendations for the
+//                                        ids, an empty answer for an entry of the table, nothing for any other id;
 //            Page(...) id_in             the online-match check (lib/matchCheck.ts) and the direction backfill: the
 //                                        entries the table holds under those ids.
 //            Anything else is AniList's 400.
 // Control (never part of AniList's API):
-//   GET /__log    every request answered: { kind, s?, ids?, status }
-//   POST /__reset the log cleared
+//   GET /__log       every request answered: { kind, s?, ids?, country?, status }
+//   POST /__reset    the log cleared
+//   POST /__trending { KR?, JP?, CN? }: each country's trending titles from now on, `[{ id, title, genres? }]` (v0.61.0)
 //   GET /media/…  the pictures the entries name: a small PNG. The app never fetches them -- they are on the rig's private
 //                 network, which its cover fetch refuses (lib/ssrfGuard.ts) -- but a browser could.
 import http from 'node:http';
@@ -56,6 +61,38 @@ const ENTRIES = [
       synonyms: ['Nightfall (Walk)'], countryOfOrigin: 'KR', type: 'MANGA' },
   },
 ];
+/**
+ * v0.61.0 (v610Walk.mjs): what the related works job is answered for an entry -- AniList's relations and its readers'
+ * recommendations, in the related query's shape. The walk writes the same into anilist_related itself (the job runs on a
+ * six-hour tick), so this is what the job would store had it asked.
+ */
+const node = (id, title) => ({
+  id, type: 'MANGA', format: 'MANGA', status: 'RELEASING', isAdult: false, countryOfOrigin: 'KR',
+  title: { romaji: title, english: title, native: null }, synonyms: [], coverImage: { large: picture('cover', id) },
+  genres: ['Action'], averageScore: 75,
+});
+const RELATED = {
+  990301: {
+    relations: { edges: [
+      { relationType: 'SEQUEL', node: node(990302, 'Mixed Formats') },
+      { relationType: 'SEQUEL', node: node(990350, 'Repeated Pages Two') },
+      { relationType: 'PREQUEL', node: node(990351, 'Repeated Pages Zero') },
+    ] },
+    recommendations: { nodes: [
+      { rating: 50, mediaRecommendation: node(990302, 'Mixed Formats') },
+      { rating: 40, mediaRecommendation: node(990360, 'Walk Rec One') },
+      { rating: 30, mediaRecommendation: node(990361, 'Walk Rec Two') },
+      { rating: 20, mediaRecommendation: node(990362, 'Walk Rec Three') },
+      { rating: 10, mediaRecommendation: node(990363, 'Walk Rec Four') },
+    ] },
+  },
+};
+/** Each country's trending titles, as POST /__trending set them: nothing until a walk asks, so no other walk sees a hero. */
+const TRENDS = { KR: [], JP: [], CN: [] };
+const asTrending = (t) => ({
+  id: t.id, title: { romaji: t.title, english: t.title }, coverImage: { extraLarge: picture('cover', t.id), large: picture('cover', t.id) },
+  bannerImage: null, description: '', genres: Array.isArray(t.genres) ? t.genres : ['Action'], averageScore: 70, chapters: null, status: 'RELEASING',
+});
 const fold = (s) => String(s ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
 const bySearch = (s) => ENTRIES.find((e) => e.asked.includes(fold(s)))?.media ?? null;
 const byId = (id) => ENTRIES.find((e) => e.media.id === Number(id))?.media ?? null;
@@ -89,6 +126,11 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url || '/', 'http://anilist');
     if (url.pathname === '/__log') return sendJson(res, 200, log);
     if (url.pathname === '/__reset' && req.method === 'POST') { log.length = 0; return sendJson(res, 200, { ok: true }); }
+    if (url.pathname === '/__trending' && req.method === 'POST') {
+      const body = await bodyOf(req);
+      for (const c of Object.keys(TRENDS)) if (Array.isArray(body[c])) TRENDS[c] = body[c].filter((t) => Number.isInteger(t?.id) && t.title);
+      return sendJson(res, 200, TRENDS);
+    }
     if (url.pathname.startsWith('/media/')) {
       res.writeHead(200, { 'content-type': 'image/png', 'content-length': PNG.length });
       return res.end(PNG);
@@ -100,11 +142,23 @@ const server = http.createServer(async (req, res) => {
     const { query = '', variables = {} } = await bodyOf(req);
     const q = String(query);
     const answer = (kind, status, value, extra = {}) => { log.push({ kind, status, ...extra }); return sendJson(res, status, value); };
+    // v0.61.0: the related works query is by id too (`id_in`), so it is told apart first, by its recommendations.
+    if (/recommendations\(/.test(q)) {
+      const ids = Array.isArray(variables.ids) ? variables.ids : [];
+      const media = ids.flatMap((id) => (RELATED[id] ? [{ id, ...RELATED[id] }]
+        : byId(id) ? [{ id, relations: { edges: [] }, recommendations: { nodes: [] } }] : []));
+      return answer('related', 200, { data: { Page: { media } } }, { ids });
+    }
+    if (/TRENDING_DESC/.test(q)) {
+      const country = String(variables.country ?? '');
+      // Page 1 only: a second page is asked when the first cannot fill the rail, and there is no more.
+      const media = Number(variables.page ?? 1) === 1 ? (TRENDS[country] ?? []).map(asTrending) : [];
+      return answer('trending', 200, { data: { Page: { media } } }, { country });
+    }
     if (/\bid_in\b/.test(q)) {
       const ids = Array.isArray(variables.ids) ? variables.ids : [];
       return answer('ids', 200, { data: { Page: { media: ids.map(byId).filter(Boolean).map(asListed) } } }, { ids });
     }
-    if (/TRENDING_DESC/.test(q)) return answer('trending', 200, { data: { Page: { media: [] } } });
     // v0.56.0: Discover's identity lookup (bff lib/anilist.ts WORKS), told apart by its novel filter: the entry, with its id
     // and every name, for the app to keep only when one of them IS the name it asked about.
     if (/format_not_in/.test(q)) {
