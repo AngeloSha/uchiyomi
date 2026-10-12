@@ -56,6 +56,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * an id exists is not theirs to learn.
  */
 export async function listFor(uid: string, id: string): Promise<ListRow | null> {
+  // Reintroduce by dropping this: "another account's private list, and a malformed id, are 404" in lists.int.test.ts
+  // reads 500.
   if (!UUID.test(id)) return null;
   return one<ListRow>(`SELECT ${COLS} FROM collections c WHERE c.id = $1 AND (c.user_id = $2 OR c.shared)`, [id, uid]);
 }
@@ -117,6 +119,8 @@ export async function listsFor(uid: string, ctx: ViewCtx, scope: 'manual' | 'all
       const query = parseQuery(r.query);
       if (query) n = (await evaluate(ctx, query, 0, 1)).totalElements;
     }
+    // Reintroduce by keeping it: "a shared list that shows a member nothing is left out for them" in lists.int.test.ts
+    // finds it listed with 0.
     if (!mine && n === 0) continue;
     const query = mine && kind === 'smart' ? parseQuery(r.query) : null;
     out.push({

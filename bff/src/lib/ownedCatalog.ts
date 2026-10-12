@@ -649,7 +649,8 @@ export const owned = {
    * for -- not in this series, and not in any other language edition of its work (another member reading the English
    * edition is not a gem in Spanish). One card per work, the best-scored edition; best score first, then the more
    * popular. A series with no score is never a gem: there is nothing to say it is good. Reintroduce by checking the
-   * series alone: "a work read in another edition is no gem" in homeRails.int.test.ts finds the Spanish edition.
+   * series alone, or by dropping DISTINCT ON: "Hidden gems: well rated, read by nobody in any edition, one card per work"
+   * in homeRails.int.test.ts finds the Spanish edition, or a second edition of one work.
    */
   seriesGems: async (ctx: ViewCtx, pg = 0, size = 20) => {
     const p = new Params();

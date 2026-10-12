@@ -215,7 +215,8 @@ export default async function personalRoutes(app: FastifyInstance) {
   // listing -- answers for any list the caller may read: their own, or one shared with the household. Changing one --
   // PATCH, DELETE and the item routes -- only for its owner: a shared list is read-only for everyone else (the owner's
   // ruling), and someone else's list answers 404, never 403, so an id says nothing about whether it exists. Reintroduce
-  // by reading through listFor in a write: "another member cannot change a shared list" in lists.int.test.ts sees 200.
+  // by reading through listFor in a write: "a shared list is read-only for everyone but its owner" in lists.int.test.ts
+  // sees 200.
   const listName = z.string().min(1).max(120);
 
   /** The caller's own hand-picked list for the item routes, or the answer that refuses it (already sent). */
@@ -958,7 +959,9 @@ export default async function personalRoutes(app: FastifyInstance) {
       if (ids.length > 3) return reply.code(400).send({ error: 'bad_settings', message: 'Choose up to three lists for Home.' });
       if (ids.length) {
         // The caller's own lists, or one shared with the household (v0.61.0) -- never another member's private list,
-        // which would let Home say whether an id exists. A malformed id is no list, not a uuid cast error.
+        // which would let Home say whether an id exists. A malformed id is no list, not a uuid cast error. Reintroduce by
+        // dropping `user_id = $1 OR`: "Home's lists take a shared list and refuse another member's private one" in
+        // lists.int.test.ts saves the private id.
         const uuids = ids.filter((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
         const readable = uuids.length === ids.length
           ? await q<{ id: string }>('SELECT id FROM collections WHERE (user_id = $1 OR shared) AND id = ANY($2::uuid[])', [uid, ids])

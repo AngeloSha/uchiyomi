@@ -44,7 +44,9 @@ export async function onDeckPicks(uid: string, ctx: ViewCtx, o: { window: DeckWi
   const p = new Params();
   const uidP = p.add(uid);
   // Keep reading filters the rows to the window before grouping, as it always has; Pick back up has to see every row of
-  // a series to know that none is recent, so it groups first and asks of the group.
+  // a series to know that none is recent, so it groups first and asks of the group. Reintroduce by dropping either edge
+  // or the finished-chapter count: "Pick back up and Keep reading split at 90 days and never share a series" in
+  // homeRails.int.test.ts finds a series this week's, one of three years ago, or one only peeked at.
   const rows = o.window === 'recent' ? `AND rp.updated_at > now() - interval '${RECENT_DAYS} days'` : '';
   const group = o.window === 'stale'
     ? `HAVING max(rp.updated_at) <= now() - interval '${RECENT_DAYS} days'
