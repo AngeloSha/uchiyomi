@@ -965,6 +965,15 @@ POST   /auth/totp/disable
 GET    /auth/oidc/start             GET    /auth/oidc/callback
 ```
 
+**Signing up** (the form since v0.61.0). `POST /auth/register` `{username, password, displayName?, deviceId?,
+deviceName?}` works only while **Admin → Settings → Open registration** is on — `GET /auth/config` says so as
+`allowRegistration`, which the sign-in screen reads to offer *Create an account*, and which is always false on
+Uchiyomi Desktop — and is otherwise **403** `registration_disabled`. It makes a member (role `user`) and signs them in
+exactly as `/auth/login` does: the same body, cookies and session, named by `deviceId`/`deviceName` like a sign-in's.
+A name that differs from an existing one only in case is taken (**409** `username_taken`, as is the name itself),
+and two sign-ups racing for one name end in one account and a 409, never a 500. **400** is `bad_request` (a name
+outside letters, numbers, `.`, `_`, `-`, 2–64 long) or `weak_password`.
+
 **Two-factor enrolment is one way.** `POST /auth/totp/setup` writes a *pending* secret and answers
 `{secret, otpauth, qr}`; nothing is enforced until `POST /auth/totp/enable` `{code}` confirms a code from
 the app and answers the recovery codes once. While two-factor is already on, setup is **409**

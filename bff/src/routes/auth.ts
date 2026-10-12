@@ -3,7 +3,7 @@ import QRCode from 'qrcode';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { env } from '../env';
-import { one, q } from '../lib/db';
+import { one, q, tx } from '../lib/db';
 import { logAudit } from '../lib/audit';
 import {
   IMG_COOKIE,
@@ -365,24 +365,56 @@ export default async function authRoutes(app: FastifyInstance) {
   }
 
   // self-registration (only when the admin enabled it) → creates a plain user + logs in
+  //
+  // v0.61.0: the sign-in screen has a form for this at last (web/components/LoginScreen.tsx -- Open registration in
+  // Admin → Settings did nothing visible before), so it answers like a sign-in in three more ways:
+  //  * the device names itself, as at /auth/login, so the new session reads as this phone in the sessions list;
+  //  * a name that differs from an existing one only in case is taken. uq_users_username is case-sensitive, so a
+  //    stranger could sign up as `Admin` beside `admin` and be told apart only by a capital letter. Reintroduce by
+  //    comparing `username = $1`: "a lookalike of an existing name is taken" in register.int.test.ts gets a 200;
+  //  * check and insert run under one advisory lock on the lower-cased name, so two sign-ups racing for `bob` and
+  //    `Bob` end in one account and one 409; and a unique violation from any other writer (an admin creating the
+  //    same name that instant) is a 409 too, never a 500. Reintroduce by dropping the lock: "two sign-ups racing for
+  //    one name in two cases" in register.int.test.ts sees two accounts.
   app.post('/auth/register', { config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } }, async (req, reply) => {
     const s = await one<{ allow_registration: boolean }>('SELECT allow_registration FROM server_settings WHERE id = 1');
     if (!s?.allow_registration) return reply.code(403).send({ error: 'registration_disabled', message: 'Registration is disabled.' });
-    const b = z.object({ username: z.string().min(2).max(64).regex(/^[a-zA-Z0-9._-]+$/), password: z.string(), displayName: z.string().max(64).optional() }).safeParse(req.body);
+    const b = z.object({
+      username: z.string().min(2).max(64).regex(/^[a-zA-Z0-9._-]+$/),
+      password: z.string(),
+      displayName: z.string().max(64).optional(),
+      deviceId: z.string().max(128).optional(),
+      deviceName: z.string().max(128).optional(),
+    }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const pwErr = passwordError(b.data.password);
     if (pwErr) return reply.code(400).send({ error: 'weak_password', message: pwErr });
-    if (await one('SELECT id FROM users WHERE username = $1', [b.data.username])) return reply.code(409).send({ error: 'username_taken' });
-    const row = await one<{ id: string }>(
-      `INSERT INTO users (display_name, username, role, password_hash, auth_kind) VALUES ($1, $2, 'user', $3, 'password') RETURNING id`,
-      [b.data.displayName || b.data.username, b.data.username, await hash(b.data.password)],
-    );
-    if (row) await q(`INSERT INTO app_settings (user_id, data) VALUES ($1, '{}'::jsonb) ON CONFLICT (user_id) DO NOTHING`, [row.id]);
-    await logAudit('user.register', { userId: row?.id, username: b.data.username, req });
-    const refresh = await issueRefreshToken(row!.id, { ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null });
+    const { username, deviceId, deviceName } = b.data;
+    const taken = () => reply.code(409).send({ error: 'username_taken', message: 'That username is taken.' });
+    // Hashed before the lock is taken, so the lock is held for two short statements and not for argon2.
+    const passwordHash = await hash(b.data.password);
+    let row: { id: string } | null;
+    try {
+      row = await tx(async (qq) => {
+        await qq('SELECT pg_advisory_xact_lock(hashtextextended(lower($1), 6100))', [username]);
+        if ((await qq('SELECT 1 FROM users WHERE lower(username) = lower($1)', [username])).length) return null;
+        const [made] = await qq<{ id: string }>(
+          `INSERT INTO users (display_name, username, role, password_hash, auth_kind) VALUES ($1, $2, 'user', $3, 'password') RETURNING id`,
+          [b.data.displayName || username, username, passwordHash],
+        );
+        await qq(`INSERT INTO app_settings (user_id, data) VALUES ($1, '{}'::jsonb) ON CONFLICT (user_id) DO NOTHING`, [made.id]);
+        return made;
+      });
+    } catch (e) {
+      if ((e as { code?: string })?.code === '23505') return taken();
+      throw e;
+    }
+    if (!row) return taken();
+    await logAudit('user.register', { userId: row.id, username, req });
+    const refresh = await issueRefreshToken(row.id, { deviceId, deviceName, ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null });
     reply.setCookie(REFRESH_COOKIE, refresh, cookieOptions());
-    setImgCookie(app, reply, row!.id);
-    return reply.send({ ...signAccess(app, row!.id, 'user'), user: await userPayload(row!.id), refreshExpiresAt: refreshExpiresAt() });
+    setImgCookie(app, reply, row.id);
+    return reply.send({ ...signAccess(app, row.id, 'user'), user: await userPayload(row.id), refreshExpiresAt: refreshExpiresAt() });
   });
 
   app.post('/auth/refresh', async (req, reply) => {

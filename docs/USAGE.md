@@ -73,6 +73,12 @@ Setup is in [docs/api.md](api.md#single-sign-on-oidc).
 Log in with the username/password you set in `setup.sh` (the first account is `admin`). If you've turned on
 two-factor auth, you'll be asked for your 6-digit code (or a recovery code) after the password.
 
+**Creating your own account** (since v0.61.0). When the admin has turned on **Admin → Settings → Open registration**,
+the sign-in form offers **Create an account** under it: a username (letters, numbers, `.`, `_` and `-`), a password
+of at least 8 characters, typed twice, and you are signed in as a member. A name someone already has is taken,
+whatever its capital letters: with `admin` here, `Admin` is taken too. With the switch off there is no such link,
+and accounts come from the admin (**Admin → Members**). The desktop app never offers it.
+
 ---
 
 ## 3. Your library
@@ -2526,7 +2532,7 @@ stuck.
 ![Settings](shots/admin-settings.webp)
 
 **Settings** (`/admin/?tab=Settings`) is five sections. **Server**: the server name, an **Open registration**
-switch (let anyone sign up), **Check for updates** and the anonymous **install count**, each of the last two
+switch (let anyone sign up: the sign-in screen then offers *Create an account*, section 2), **Check for updates** and the anonymous **install count**, each of the last two
 with a fold (*How this works* / *What is sent, once a day*) that spells out exactly what leaves the server.
 **Updates & schedules**: the **Library update interval (hours)** (how often followed series are asked for new
 chapters), the **Backup time (hour, 0–23)** of the nightly backup — change it and the pending timer is re-armed at

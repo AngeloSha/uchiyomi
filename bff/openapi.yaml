@@ -1171,29 +1171,51 @@ paths:
         - auth
       summary: Create an account, when registration is open.
       operationId: postAuthRegister
+      description: >-
+        Only while Admin → Settings → Open registration is on (`allowRegistration` in GET /auth/config; never on
+        Uchiyomi Desktop). Makes a member (role `user`) and signs them in exactly as POST /auth/login does: the same
+        body and the same refresh and image cookies. Since v0.61.0 the web sign-in screen has a form for it, the
+        device names itself as at sign-in (`deviceId`, `deviceName`, shown in the sessions list), and a name that
+        differs from an existing one only in case is taken. Five per address per ten minutes.
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
+              required: [username, password]
               properties:
                 username:
                   type: string
+                  minLength: 2
+                  maxLength: 64
+                  pattern: "^[a-zA-Z0-9._-]+$"
                 password:
                   type: string
+                  minLength: 8
                 displayName:
                   type: string
+                  maxLength: 64
+                deviceId:
+                  type: string
+                  maxLength: 128
+                  description: Since v0.61.0. The device's own id, as POST /auth/login takes it.
+                deviceName:
+                  type: string
+                  maxLength: 128
+                  description: Since v0.61.0. Shown for this session in GET /auth/sessions.
       security: []
       responses:
         "200":
-          description: OK
+          description: Signed in as the new account, as from POST /auth/login.
         "400":
-          description: Malformed body or parameter
+          description: "`bad_request` (a name outside the rules, or a malformed body) or `weak_password`"
         "403":
-          description: "Forbidden: token scope, account permission or age limit"
+          description: "`registration_disabled`: Open registration is off"
         "409":
-          description: "Conflict: already exists, already running, or duplicate"
+          description: "`username_taken`: the name, or one that differs from it only in case, is taken"
+        "429":
+          description: More than five sign-ups in ten minutes from this address
   /auth/refresh:
     post:
       tags:
