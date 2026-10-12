@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3612
+    "strings": 3639
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -3615,5 +3615,32 @@
   "Long strips and webtoons open in Webtoon mode, manga and right-to-left series in Paged. A series or a source you have set yourself keeps its own.": "Lange Streifen und Webtoons öffnen sich im Webtoon-Modus, Manga und Serien von rechts nach links seitenweise. Eine Serie oder Quelle, die du selbst eingestellt hast, behält ihre Einstellung.",
   "Picked for this series: {mode} · long strips": "Für diese Serie gewählt: {mode} · lange Streifen",
   "Picked for this series: {mode} · {type}": "Für diese Serie gewählt: {mode} · {type}",
-  "Picked for this series: {mode} · right to left": "Für diese Serie gewählt: {mode} · von rechts nach links"
+  "Picked for this series: {mode} · right to left": "Für diese Serie gewählt: {mode} · von rechts nach links",
+  "Next page": "Nächste Seite",
+  "Previous page": "Vorherige Seite",
+  "Page to the left": "Seite nach links",
+  "Page to the right": "Seite nach rechts",
+  "Full screen": "Vollbild",
+  "Show or hide the controls": "Bedienelemente ein- oder ausblenden",
+  "Leave the reader": "Leser verlassen",
+  "Space": "Leertaste",
+  "{key} moved here from {action}": "{key} wurde von „{action}“ hierher verschoben",
+  "Remove {key}": "{key} entfernen",
+  "Keyboard": "Tastatur",
+  "Add a key": "Taste hinzufügen",
+  "Press a key…": "Taste drücken …",
+  "Esc always leaves the reader, or closes what is open over it. Tab is never bound.": "Esc verlässt immer den Leser oder schließt, was darüber geöffnet ist. Tab wird nie belegt.",
+  "Controller": "Gamecontroller",
+  "Add a button": "Knopf hinzufügen",
+  "Press a button…": "Knopf drücken …",
+  "A controller works only on a secure (https) address.": "Ein Controller funktioniert nur unter einer sicheren (https-)Adresse.",
+  "Connect a controller and press any of its buttons.": "Schließe einen Controller an und drücke einen seiner Knöpfe.",
+  "Reset to defaults": "Auf Standard zurücksetzen",
+  "Tap zones": "Tippbereiche",
+  "Edges": "Ränder",
+  "L shape": "L-Form",
+  "Kindle-style": "Wie Kindle",
+  "Off": "Aus",
+  "Where a tap turns the page: the shaded part goes back, the lit part goes on, the rest shows the controls. Automatic turns pages in Paged mode only.": "Wo ein Tippen umblättert: der schattierte Teil zurück, der helle vor, der Rest zeigt die Bedienelemente. Automatisch blättert nur im seitenweisen Modus.",
+  "Keys and controller": "Tasten und Controller"
 }

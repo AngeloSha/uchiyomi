@@ -37,6 +37,15 @@ test('a stored device setting is made whole, and anything unknown is today\'s re
   assert.deepEqual(d.loadDevicePrefs(), d.DEFAULT_DEVICE, 'unreadable storage');
   d.saveDevicePrefs({ ...d.DEFAULT_DEVICE, colorFilter: 'invert' });
   assert.equal(d.loadDevicePrefs().colorFilter, 'invert');
+  // Tap zones, keys and controller buttons (G5): unknown layouts are Automatic, bindings that are not keys are dropped.
+  assert.equal(d.DEFAULT_DEVICE.tapLayout, 'auto', 'the default taps are not today\'s');
+  assert.deepEqual([d.DEFAULT_DEVICE.keys, d.DEFAULT_DEVICE.pad], [{}, {}], 'the default keys are not today\'s');
+  assert.equal(d.migrateDevicePrefs({ tapLayout: 'corners' }).tapLayout, 'auto');
+  assert.equal(d.migrateDevicePrefs({ tapLayout: 'lshape' }).tapLayout, 'lshape');
+  const keys = d.migrateDevicePrefs({ keys: { next: ['j', 'Escape', 'Control+n'], nope: ['x'] }, pad: { menu: [9, 99, 'x'] } });
+  assert.deepEqual(keys.keys, { next: ['j'] });
+  assert.deepEqual(keys.pad, { menu: [9] });
+  assert.deepEqual(d.migrateDevicePrefs({ keys: 'j', pad: [1] }).keys, {});
   mem.clear();
 });
 

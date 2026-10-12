@@ -6,6 +6,9 @@
 //
 // ⚠️ The key must never start with `yomi_rs_` or `yomi_rp_`: lib/readerPrefs.ts collects every key under those
 // prefixes and pushes it to the account as a series' or a source's reader memory.
+import { TAP_LAYOUTS, type TapLayout } from './readerGesture';
+import { cleanKeyOverrides, type KeyOverrides } from './readerKeys';
+import { cleanPadOverrides, type PadOverrides } from './readerPad';
 
 /** A filter over the page images (never the reader's own cards): none, light-for-dark, grey, or e-ink. */
 export type ColorFilter = 'none' | 'invert' | 'grayscale' | 'eink';
@@ -13,10 +16,18 @@ export const COLOR_FILTERS: readonly ColorFilter[] = ['none', 'invert', 'graysca
 
 export interface DevicePrefs {
   colorFilter: ColorFilter;
+  /** Where taps turn the page (lib/readerGesture.ts). `auto` is the reader as it always was. */
+  tapLayout: TapLayout;
+  /** This device's own keys and controller buttons, per action; an action not here keeps its defaults. */
+  keys: KeyOverrides;
+  pad: PadOverrides;
 }
 
 export const DEFAULT_DEVICE: DevicePrefs = {
   colorFilter: 'none',
+  tapLayout: 'auto',
+  keys: {},
+  pad: {},
 };
 
 export const DEVICE_KEY = 'yomi_reader_device';
@@ -26,6 +37,11 @@ export function migrateDevicePrefs(raw: unknown): DevicePrefs {
   const r = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Partial<DevicePrefs>;
   return {
     colorFilter: COLOR_FILTERS.includes(r.colorFilter as ColorFilter) ? r.colorFilter! : DEFAULT_DEVICE.colorFilter,
+    tapLayout: TAP_LAYOUTS.includes(r.tapLayout as TapLayout) ? r.tapLayout! : DEFAULT_DEVICE.tapLayout,
+    // A binding that is reserved (Escape, Tab), carries Ctrl/Alt/Meta, or is not a key at all is dropped; so is a
+    // button index that is not one.
+    keys: cleanKeyOverrides(r.keys),
+    pad: cleanPadOverrides(r.pad),
   };
 }
 

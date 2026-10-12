@@ -12,6 +12,9 @@ import { openableChapters } from '@/lib/chapterRows';
 import { buildFlow, startIndex, renderWindow } from '@/lib/readerFlow';
 import { AHEAD_SCREENS, APPEND_SCREENS, BEHIND_SCREENS, KEEP_SCREENS, MAX_WINDOW_PAGES, anchorAt, nearEnd, prefetchList, screenRange, scrollTopFor, windowSet, type IndexRange } from '@/lib/readerWindow';
 import { readTap, undoLeft, undoWindow, type TapZone } from '@/lib/readerGesture';
+import { PAGE_ACTIONS, actionForKey, keyMapFor, type ReaderAction } from '@/lib/readerKeys';
+import { padMapFor } from '@/lib/readerPad';
+import { useGamepad } from '@/lib/useGamepad';
 import { ARM_MS, pagesAfter, skipNeedsConfirm, stillArmed } from '@/lib/readerNav';
 import { Book, EditionRow, Page, PageInfo, Series } from '@/lib/types';
 import { useAuth, canDownload } from '@/lib/auth';
@@ -227,7 +230,7 @@ function ReaderInner() {
    * that far: the OS decides how long a double-click may take (Windows defaults to 500 ms), so the single
    * click of a slow double-click has already acted by the time the browser says the two were one gesture.
    */
-  const acted = useRef<{ kind: 'turn'; slide: number; at: number } | { kind: 'chrome'; at: number } | null>(null);
+  const acted = useRef<{ kind: 'turn'; slide: number; at: number } | { kind: 'scroll'; top: number; at: number } | { kind: 'chrome'; at: number } | null>(null);
   /** When the pointer path handled a double-tap itself. A touch double-tap also raises `dblclick`, and
    *  zooming for both halves of the same gesture would put the zoom straight back where it started. */
   const handledDouble = useRef(0);
@@ -534,7 +537,7 @@ function ReaderInner() {
   const pageBoxes = useRef<Map<string, ReturnType<typeof measurePage>>>(new Map());
   const sideCrops = useRef<Map<string, { l: number; r: number }>>(new Map());
   const measuring = useRef<Set<string>>(new Set());
-  const [boxVersion, setBoxVersion] = useState(0);
+  const [, setBoxVersion] = useState(0);
   const [sideVersion, setSideVersion] = useState(0);
   const chaptersRef = useRef(chapters);
   chaptersRef.current = chapters;
@@ -926,7 +929,8 @@ function ReaderInner() {
     // progress, which is what moves Continue and lets read-chapter cleanup take the file. Held, not dropped:
     // `prevPos` is left alone while held, so a chapter crossed during the hold still counts as finished.
     const a = acted.current;
-    const hold = a?.kind === 'turn' ? undoLeft(a.at, Date.now()) : 0;
+    // v0.61.0: a tapped step down the column (Tap zones → Edges, L shape, Kindle-style) is held the same way.
+    const hold = a?.kind === 'turn' || a?.kind === 'scroll' ? undoLeft(a.at, Date.now()) : 0;
     if (hold > 0) {
       const t = setTimeout(() => setTurnSettled((n) => n + 1), hold + 20);
       return () => clearTimeout(t);
@@ -1150,10 +1154,52 @@ function ReaderInner() {
     return () => clearTimeout(t);
   }, [chrome, showSettings]);
 
+  // ---- one place that does what a key, a controller button or a tap asks (v0.61.0) ----
+  /**
+   * Do `action` (lib/readerKeys.ts). The keyboard, a controller and the tap zones all come here, so a page turn is the
+   * same turn whatever asked for it. `tap` marks one that a double-click may still take back (onTrackDoubleClick).
+   */
+  const perform = (action: ReaderAction, o: { tap?: boolean } = {}) => {
+    const el = scrollRef.current;
+    if (PAGE_ACTIONS.has(action)) {
+      if (!el) return;
+      // Next and back are reading order, whichever way the pages run. The page to the left or the right is PHYSICAL,
+      // like the arrow keys and the thirds: on a right-to-left read the next page is to the left.
+      const d = action === 'next' ? 1 : action === 'prev' ? -1 : (action === 'pageRight' ? 1 : -1) * trackSign;
+      if (prefs.mode === 'paged') {
+        // Paged mode turns its own pages instead of leaving keys to the browser: the track is a snap-x container,
+        // and a native arrow keypress only nudges it a few pixels before the snap pulls it back.
+        // ONE SLIDE FROM THE ONE ON SCREEN, never "one width from wherever the scroll is": a relative scrollBy
+        // stacked on a smooth scroll still in flight, so two quick presses (or a held key) landed one or two
+        // pages on. And from the slide ON SCREEN (v0.61.0, F4), as a tap always did: `slideOf[current]` is a split
+        // page's FIRST half, so from its second half the next press went back to the half already on screen.
+        const last = Math.max(0, el.children.length - 1); // page slides, then Up Next / the failure card
+        const from = slideNow();
+        const to = Math.max(0, Math.min(last, from + d));
+        if (o.tap) acted.current = { kind: 'turn', slide: from, at: Date.now() };
+        lastMoved.current = Date.now(); // before the first scroll event arrives
+        el.scrollTo({ left: trackSign * to * (el.clientWidth || window.innerWidth), behavior });
+      } else {
+        // The column scrolls most of a screen, so a line of the page before stays in view.
+        if (o.tap) acted.current = { kind: 'scroll', top: el.scrollTop, at: Date.now() };
+        el.scrollBy({ top: d * el.clientHeight * 0.88, behavior });
+      }
+      return;
+    }
+    if (action === 'nextChapter') goChapter(nextId);
+    else if (action === 'prevChapter') goChapter(prevId, true);
+    else if (action === 'fullscreen') toggleFullscreen();
+    else if (action === 'menu') setChrome((c) => !c);
+    else if (action === 'exit') back();
+  };
+  const performRef = useRef(perform);
+  performRef.current = perform;
+
   // ---- keyboard (desktop) ----
+  // The keys in force: this mode's defaults with this device's own bindings (lib/readerKeys.ts reproduces v0.60's).
+  const keyMap = useMemo(() => keyMapFor(prefs.mode, device.keys), [prefs.mode, device.keys]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const el = scrollRef.current;
       // Alt+← is the browser's Back and Ctrl/Cmd+F its Find: a key with a modifier is never the reader's.
       // (Shift is not a modifier here -- Shift+Space means "back a page", as in any scrolling view.)
       if (e.altKey || e.ctrlKey || e.metaKey) return;
@@ -1164,46 +1210,29 @@ function ReaderInner() {
         if (e.key === 'Escape') { setShowSettings(false); setShowPages(false); setShowChapters(false); }
         return;
       }
-      const paged = prefs.mode === 'paged';
-      // Paged mode turns its own pages instead of leaving arrows to the browser: the track is a snap-x
-      // container, and a native arrow keypress only nudges it a few pixels before the snap pulls it back.
-      // ONE SLIDE FROM THE ONE ON SCREEN, never "one width from wherever the scroll is": a relative scrollBy
-      // stacked on a smooth scroll still in flight, so two quick presses (or a held key) landed one or two
-      // pages on. `d` is in reading order; the track's sign turns it into a scroll position.
-      const step = (d: 1 | -1) => {
-        if (!el) return;
-        const last = Math.max(0, el.children.length - 1); // page slides, then Up Next / the failure card
-        // From the slide ON SCREEN (v0.61.0, F4), as a tap does: `slideOf[current]` is a split page's FIRST half, so
-        // from its second half the next press went back to the half already on screen, and stayed there.
-        const to = Math.max(0, Math.min(last, slideNow() + d));
-        lastMoved.current = Date.now(); // before the first scroll event arrives
-        el.scrollTo({ left: trackSign * to * (el.clientWidth || window.innerWidth), behavior });
-      };
+      // Escape is reserved, never bound: it leaves the reader. ⚠️ Once a press -- Escape repeating called
+      // history.back() until it left the reader for wherever came before.
+      if (e.key === 'Escape') { if (!e.repeat) back(); return; }
       // A focused control owns its keys: the page slider its arrows, a button or link its Space and Enter
       // (turning the page instead swallowed the click), a text field everything.
       const t = e.target as HTMLElement | null;
       const owned = !!t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable
         || !!t.closest('button, a, [role="button"], [role="dialog"]'));
-      // ⚠️ A held key repeats. `]` repeating walked the reader through chapter after chapter, and Escape
-      // repeating called history.back() until it left the reader for wherever came before. A press, once.
-      if (e.repeat && (e.key === '[' || e.key === ']' || e.key === 'f' || e.key === 'Escape')) return;
-      if (e.key === '[') goChapter(prevId, true);
-      else if (e.key === ']') goChapter(nextId);
-      else if (e.key === 'f') toggleFullscreen();
-      else if (e.key === 'Escape') back();
-      // ← and → are PHYSICAL, like the tap zones: on a right-to-left read the next page is to the left.
-      // Space, PageDown and ↓ mean "next" whichever way the pages run, and their opposites "back".
-      else if (el && paged && !owned && e.key === 'ArrowRight') { e.preventDefault(); step(trackSign as 1 | -1); }
-      else if (el && paged && !owned && e.key === 'ArrowLeft') { e.preventDefault(); step(-trackSign as 1 | -1); }
-      else if (el && paged && !owned && ((e.key === ' ' && !e.shiftKey) || e.key === 'ArrowDown' || e.key === 'PageDown')) { e.preventDefault(); step(1); }
-      else if (el && paged && !owned && ((e.key === ' ' && e.shiftKey) || e.key === 'ArrowUp' || e.key === 'PageUp')) { e.preventDefault(); step(-1); }
-      else if (el && prefs.mode === 'vertical' && !owned && ((e.key === ' ' && !e.shiftKey) || e.key === 'ArrowDown')) { e.preventDefault(); el.scrollBy({ top: el.clientHeight * 0.88, behavior }); }
-      else if (el && prefs.mode === 'vertical' && !owned && ((e.key === ' ' && e.shiftKey) || e.key === 'ArrowUp')) { e.preventDefault(); el.scrollBy({ top: -el.clientHeight * 0.88, behavior }); }
+      const action = actionForKey(e, keyMap, { owned });
+      if (!action) return;
+      // A bound key is the reader's: the browser's own handling of it (Space scrolling the page) is stopped.
+      e.preventDefault();
+      performRef.current(action);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prevId, nextId, prefs.mode, seriesId, current, slideOf, trackSign, showSettings, showPages, showChapters, behavior]);
+  }, [keyMap, seriesId, showSettings, showPages, showChapters]);
+
+  // ---- a game controller (v0.61.0, lib/readerPad.ts) ----
+  // Polled only while one is connected and the tab is visible; still while a sheet is open over the pages.
+  const padMap = useMemo(() => padMapFor(device.pad), [device.pad]);
+  const padConnected = useGamepad((a) => performRef.current(a), padMap, showSettings || showPages || showChapters);
 
   // ---- tap / double-tap / pinch (no overlay -> native scroll works) ----
   const onPointerDown = (e: React.PointerEvent) => {
@@ -1246,6 +1275,9 @@ function ReaderInner() {
       from: s,
       to: { x: e.clientX, y: e.clientY, t: now },
       width: scrollRef.current?.clientWidth || window.innerWidth,
+      height: scrollRef.current?.clientHeight || window.innerHeight,
+      layout: device.tapLayout,
+      mode: prefs.mode,
       lastTapAt: lastTapAt.current,
       doubleDetect: e.pointerType !== 'mouse',
       lastDoubleAt: lastDoubleAt.current,
@@ -1277,26 +1309,20 @@ function ReaderInner() {
     return el ? Math.round(Math.abs(el.scrollLeft) / Math.max(1, el.clientWidth)) : 0;
   };
 
-  /** What a tap does once the double window has closed, remembered well enough to be taken back. */
+  /**
+   * What a tap does once the double window has closed, remembered well enough to be taken back. The zone is the tap
+   * layout's (lib/readerGesture.ts tapZone, Reader → Tap zones): the physical edges turn through the track's direction
+   * as the arrow keys do -- the left edge of the screen is still the left edge on a right-to-left read -- and the L's
+   * and the Kindle map's zones are reading order. Through `perform`, so a tap turns exactly as a key does: an absolute
+   * target, one slide from the one on screen.
+   */
   const runTap = (zone: TapZone) => {
-    const el = scrollRef.current;
-    if (prefs.mode === 'paged' && el && zone !== 'chrome') {
-      const w = el.clientWidth || window.innerWidth;
-      // Physical, as the arrow keys are: an RTL track turns the other way round, but the left edge of the
-      // screen is still the left edge of the screen.
-      // ⚠️ An absolute target, one slide from the one on screen -- the way the arrow keys do it. A relative
-      // scrollBy stacks on a smooth scroll still in flight, so a second tap landing mid-animation went two
-      // pages on.
-      const from = slideNow();
-      const last = Math.max(0, el.children.length - 1);
-      const to = Math.max(0, Math.min(last, from + (zone === 'back' ? -1 : 1) * trackSign));
-      acted.current = { kind: 'turn', slide: from, at: Date.now() };
-      lastMoved.current = Date.now();
-      el.scrollTo({ left: trackSign * to * w, behavior });
+    if (zone === 'chrome') {
+      acted.current = { kind: 'chrome', at: Date.now() };
+      setChrome((c) => !c);
       return;
     }
-    acted.current = { kind: 'chrome', at: Date.now() };
-    setChrome((c) => !c);
+    perform(zone === 'back' ? 'pageLeft' : zone === 'forward' ? 'pageRight' : zone, { tap: true });
   };
 
   /**
@@ -1319,6 +1345,7 @@ function ReaderInner() {
     if (a && undoWindow(a.at, Date.now())) {
       const el = scrollRef.current;
       if (a.kind === 'turn' && el) el.scrollTo({ left: trackSign * a.slide * (el.clientWidth || window.innerWidth) });
+      else if (a.kind === 'scroll' && el) el.scrollTo({ top: a.top });
       else if (a.kind === 'chrome') setChrome((c) => !c);
     }
     applyZoom(zoom > 1 ? 1 : 2);
@@ -1720,6 +1747,7 @@ function ReaderInner() {
             device={device}
             setDevice={setDevice}
             autoApplied={autoApplied}
+            padConnected={padConnected}
             onClose={() => setShowSettings(false)}
             // The series' own source, by name. With no name there is no row at all: a raw source id is
             // never shown (an extension's is nineteen digits).

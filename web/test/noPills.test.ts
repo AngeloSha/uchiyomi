@@ -92,6 +92,10 @@ const SURFACES = [
   'components/LibraryFilters.tsx',
   'lib/librarySort.ts',
   'lib/libraryLayout.ts',
+  // v0.61.0, Reader → Keys and controller: every binding a squared key cap, Add a key / Add a button, Reset to defaults.
+  'components/ReaderKeys.tsx',
+  'lib/readerKeys.ts',
+  'lib/readerPad.ts',
 ];
 
 /**

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3612
+    "strings": 3639
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3615,5 +3615,32 @@
   "Long strips and webtoons open in Webtoon mode, manga and right-to-left series in Paged. A series or a source you have set yourself keeps its own.": "长条图和条漫以条漫模式打开，漫画和从右往左读的作品以翻页模式打开。你自己设置过的作品或来源保持原样。",
   "Picked for this series: {mode} · long strips": "为这部作品选择：{mode} · 长条图",
   "Picked for this series: {mode} · {type}": "为这部作品选择：{mode} · {type}",
-  "Picked for this series: {mode} · right to left": "为这部作品选择：{mode} · 从右往左"
+  "Picked for this series: {mode} · right to left": "为这部作品选择：{mode} · 从右往左",
+  "Next page": "下一页",
+  "Previous page": "上一页",
+  "Page to the left": "左侧一页",
+  "Page to the right": "右侧一页",
+  "Full screen": "全屏",
+  "Show or hide the controls": "显示或隐藏控件",
+  "Leave the reader": "退出阅读器",
+  "Space": "空格",
+  "{key} moved here from {action}": "{key} 已从“{action}”移到这里",
+  "Remove {key}": "移除 {key}",
+  "Keyboard": "键盘",
+  "Add a key": "添加按键",
+  "Press a key…": "请按一个键…",
+  "Esc always leaves the reader, or closes what is open over it. Tab is never bound.": "Esc 始终退出阅读器，或关闭在其上打开的内容。Tab 永远不会被绑定。",
+  "Controller": "手柄",
+  "Add a button": "添加按钮",
+  "Press a button…": "请按一个按钮…",
+  "A controller works only on a secure (https) address.": "手柄只能在安全（https）地址下使用。",
+  "Connect a controller and press any of its buttons.": "连接手柄并按下它的任意按钮。",
+  "Reset to defaults": "恢复默认",
+  "Tap zones": "点按区域",
+  "Edges": "两侧",
+  "L shape": "L 形",
+  "Kindle-style": "Kindle 式",
+  "Off": "关闭",
+  "Where a tap turns the page: the shaded part goes back, the lit part goes on, the rest shows the controls. Automatic turns pages in Paged mode only.": "点按哪里翻页：阴影部分后退，亮色部分前进，其余部分显示控件。“自动”只在翻页模式下翻页。",
+  "Keys and controller": "按键与手柄"
 }

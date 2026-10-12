@@ -5,10 +5,29 @@ import { ReaderPrefs } from '@/lib/readerPrefs';
 import type { ColorFilter, DevicePrefs } from '@/lib/readerDevice';
 import type { AutoGuess } from '@/lib/readerAuto';
 import { seriesTypeKey } from '@/lib/seriesTypes';
+import { tapZone, type TapLayout } from '@/lib/readerGesture';
+import { Disclosure } from './settings';
+import { ReaderKeys } from './ReaderKeys';
 import { IcX } from './icons';
 import { Switch } from './Switch';
 import { t as tr } from '@/lib/i18n';
 import { useLayer } from '@/lib/layers';
+
+/**
+ * A tap layout drawn as the 3 x 3 grid it divides the page into (v0.61.0): shaded where a tap goes back, lit where it
+ * goes on, plain where it shows the controls. Still -- a picture of the zones, not a demonstration of them. Paged mode's
+ * zones; Automatic in the webtoon column turns nothing, as the help line under them says.
+ */
+function TapSketch({ layout }: { layout: TapLayout }) {
+  return (
+    <span aria-hidden className="grid grid-cols-3 gap-px overflow-hidden rounded-[3px] border border-ink-600">
+      {Array.from({ length: 9 }, (_, i) => {
+        const z = tapZone((i % 3) * 10 + 5, Math.floor(i / 3) * 10 + 5, 30, 30, layout, 'paged');
+        return <span key={i} className={`h-2.5 w-3 ${z === 'back' || z === 'prev' ? 'bg-fog-500' : z === 'forward' || z === 'next' ? 'bg-accent' : 'bg-ink-800'}`} />;
+      })}
+    </span>
+  );
+}
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -27,6 +46,7 @@ export function ReaderSettings({
   device,
   setDevice,
   autoApplied,
+  padConnected = false,
   onClose,
   sourceName,
   sourceDefault,
@@ -39,6 +59,8 @@ export function ReaderSettings({
   setDevice: (p: Partial<DevicePrefs>) => void;
   /** The mode the automatic pick chose for this title, and why; null when the mode is not the pick's. */
   autoApplied?: AutoGuess | null;
+  /** Whether a game controller is connected now (lib/useGamepad.ts), for the controller's bindings. */
+  padConnected?: boolean;
   onClose: () => void;
   /** The source this chapter came from, named for the button. Absent for a copy with no source on record. */
   sourceName?: string;
@@ -228,6 +250,30 @@ export function ReaderSettings({
               className={`rounded-2xl border py-3 text-sm ${!prefs.fitWidth ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{tr('Original')}</button>
           </div>
         </Row>
+
+        {/* v0.61.0: where a tap turns the page, on this device. Automatic is the reader as it always was. */}
+        <Row label={`${tr('Tap zones')} · ${tr('This device')}`}>
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+            {([['auto', tr('Automatic')], ['edges', tr('Edges')], ['lshape', tr('L shape')], ['kindle', tr('Kindle-style')], ['off', tr('Off')]] as [TapLayout, string][]).map(([v, label]) => (
+              <button key={v} type="button" aria-pressed={device.tapLayout === v} onClick={() => setDevice({ tapLayout: v })}
+                className={`flex flex-col items-center gap-1.5 rounded-2xl border px-1 py-2.5 text-xs ${device.tapLayout === v ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>
+                <TapSketch layout={v} />
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] leading-snug text-fog-500">
+            {tr('Where a tap turns the page: the shaded part goes back, the lit part goes on, the rest shows the controls. Automatic turns pages in Paged mode only.')}
+          </p>
+        </Row>
+
+        {/* v0.61.0: the keys and a game controller, on this device. Folded: most readers never change them. */}
+        <div className="py-3">
+          <Disclosure label={`${tr('Keys and controller')} · ${tr('This device')}`}>
+            <ReaderKeys mode={prefs.mode} keys={device.keys} pad={device.pad} padConnected={padConnected}
+              onKeys={(keys) => setDevice({ keys })} onPad={(pad) => setDevice({ pad })} />
+          </Disclosure>
+        </div>
 
         {/*
           One source is a good proxy for one FORMAT: a webtoon source wants continuous vertical scroll, a

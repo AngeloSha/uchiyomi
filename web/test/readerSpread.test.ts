@@ -177,7 +177,8 @@ test('the paged track counts a key press from the slide on screen, and re-anchor
   // F4. `slideOf[current]` is a split page's FIRST half: from its second half the next press went back to the half
   // already on screen. Reintroduce `(slideOf[current] ?? current) + d` in the keyboard's step: this fails.
   const src = code(readFileSync(join(ROOT, 'app/reader/page.tsx'), 'utf8'));
-  assert.match(src, /const to = Math\.max\(0, Math\.min\(last, slideNow\(\) \+ d\)\);/, 'the keyboard counts from slideOf[current] again');
+  // (v0.61.0, G5: keys, the controller and taps all turn through `perform`, which counts from `from = slideNow()`.)
+  assert.match(src, /const from = slideNow\(\);\s*const to = Math\.max\(0, Math\.min\(last, from \+ d\)\);/, 'the keyboard counts from slideOf[current] again');
   assert.doesNotMatch(src, /\(slideOf\[current\] \?\? current\) \+ d/, 'a key press counts from the page, not the slide on screen');
   // Turning the phone adds or removes a slide for every wide page before the one being read.
   assert.match(src, /laidOutSplit\.current === splitTrack\) return;\s*laidOutSplit\.current = splitTrack;\s*el\.scrollLeft = trackSign \* \(slideOf\[current\] \?\? current\) \* el\.clientWidth;/,
