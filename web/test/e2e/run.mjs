@@ -440,12 +440,24 @@ try {
       else {
         ok(`downloaded ${saved.length} chapters`);
         let cutApi = true;
+        // ⚠️ Past the service worker, or the cut is not a cut: request interception sees only what the PAGE sends to the
+        // network, and a page the worker controls hands its /api calls to the worker, whose own fetches go out untouched
+        // -- the chapter list came back live, from the real server. That had always made this section test nothing on a
+        // run where the worker took control in time; since v0.61.0's webtoon column appends the next chapter while it is
+        // within six screens of the end, it also showed the series' real end card, "You finished" (all three chapters are
+        // here), and failed on main's CI for v0.61.0. Reintroduce by dropping this line: on a run where the worker
+        // controls the reader, "offline reader claims the series is finished" can fail again.
+        await page.setBypassServiceWorker(true);
+        // The cut is now real, so its aborted /api requests reach the console: they are this section's condition, held
+        // in the walk's cut window like the whole-network cuts (networkCut.mjs) -- noted, not counted.
+        cuts.asking();
         await page.setRequestInterception(true);
         const cut = (r) => {
           if (cutApi && new URL(r.url()).pathname.startsWith('/api/')) r.abort('internetdisconnected').catch(() => {});
           else r.continue().catch(() => {});
         };
         page.on('request', cut);
+        cuts.cut();
         try {
           await page.goto(BASE + saved[Math.floor(saved.length / 2)], { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
           await sleep(9000);
@@ -492,6 +504,8 @@ try {
           cutApi = false;
           page.off('request', cut);
           await page.setRequestInterception(false).catch(() => {});
+          await page.setBypassServiceWorker(false).catch(() => {});
+          cuts.back();
         }
       }
     }
