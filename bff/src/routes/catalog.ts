@@ -482,6 +482,11 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // Where the chapters come from: the primary source first, then any followed ones. Every viewer gets
     // this -- it is what the "Sources" line under the title shows, and nothing in it names the host.
     out.sources = await seriesSourcesFor(id).catch(() => []);
+    // v0.61.0: what kind of comic it is -- the admin's override, else what the evidence learned, else unknown -- for EVERY
+    // viewer: the reader's "Pick the mode for each series" opens a manhwa as a webtoon and a manga page by page. The
+    // evidence behind it (`detectedType`) stays an admin's, below. Additive: the admin block sets the same value.
+    const typeRow = await one<{ series_type: string | null }>('SELECT series_type FROM lib_series WHERE id = $1', [id]).catch(() => null);
+    out.seriesType = ov?.series_type ?? typeRow?.series_type ?? 'unknown';
     // v0.52.0 (#72): the other language editions of this work this viewer may open, for the series page's switcher
     // and the reader's; null for a series on its own. `lang` (the DTO's) is the language it is in.
     out.edition = await editionInfo(id, vc(req), userIdOf(req)).catch(() => null);

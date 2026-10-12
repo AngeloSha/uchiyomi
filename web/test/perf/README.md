@@ -156,3 +156,27 @@ read 12.3 / 9 and 8.9 / 8.7 / 11.7).
 | `will-change: transform` on the mesh | **7.8** | – |
 
 None bought a frame, so the default was left exactly as v0.42.0 drew it.
+
+## The webtoon column (v0.61.0): `reader.mjs`
+
+`reader.mjs` scrolls the reader's column at a steady fling (60 px a frame, 12 s, 390 × 844 at 2×) through the comfort
+library's chapter of long strips and its chapter of 120 slices (`seed.py <lib> --comfort`), and prints frame times,
+long tasks, the most full-size page images decoded at once and the pixels they hold, and the JS heap. It drives
+Playwright's Chromium, like walk180.mjs (`PLAYWRIGHT_FROM=<a folder with playwright installed>` if it is not in web/).
+
+Measured 2026-10-12 against both builds, one after the other on the same machine:
+
+| build | chapter | fps | decoded at once | pixels decoded |
+|---|---|---|---|---|
+| v0.60.1 | 2 strips of 689 × 20,000, then slices | 60 | 9 | 33 Mpx |
+| v0.61.0 | same | 60 | 12 | 28 Mpx |
+| v0.60.1 | 120 slices of 720 × 1,000 | 60 | 9 | 6 Mpx |
+| v0.61.0 | same | 60 | 12 | 9 Mpx |
+
+Frame times are the same headless: the images are cheap to draw. What changed is what is held: v0.61.0 keeps the
+pages within a few SCREENS (1.5 behind, 4 ahead, at most 40 pages) where v0.60 kept 2 pages behind and 6 ahead,
+whatever their size -- so more of the small slices, fewer of the strips. On this library a chapter holds only two
+strips; a run of strip chapters (Eleceed 215 on the live server, two 689 × 54,000 strips, and its neighbours) put up
+to nine strips in v0.60's window, about 1.3 GB decoded, and holds at most three now -- the browser walk
+(test/e2e/v610Walk-reader.mjs, "mid-strip, at most three full-size images are decoded") counts seven on v0.60.1 at
+1280 wide on this library.

@@ -44,8 +44,27 @@ export interface TapPoint {
   t: number;
 }
 
-/** Which part of the track a tap landed on. In vertical mode only `chrome` is used: nothing turns pages. */
-export type TapZone = 'back' | 'forward' | 'chrome';
+/**
+ * Which part of the track a tap landed on, and so what it does.
+ *
+ * `back` and `forward` are PHYSICAL -- the left and the right of the screen -- and the reader turns them through the
+ * track's direction, as it always has: on a right-to-left read the left edge goes forward. `prev` and `next` (v0.61.0)
+ * are reading order, whichever way the track runs: the L shape's and the Kindle-style map's, as Mihon draws them,
+ * where the bottom of the screen is the next page in either direction. `chrome` shows or hides the controls.
+ */
+export type TapZone = 'back' | 'forward' | 'prev' | 'next' | 'chrome';
+
+/**
+ * Where taps turn the page (v0.61.0, Reader → Tap zones, per device):
+ *  - `auto`, the reader as it always was: paged, the left and right thirds turn and the middle shows the controls;
+ *    the webtoon column turns nothing, every tap is the controls.
+ *  - `edges`: the thirds, in both modes -- in the column the left third scrolls back and the right third on.
+ *  - `lshape`: Mihon's L. The top row and the middle-left cell go back, the bottom row and the middle-right cell go on.
+ *  - `kindle`: the top third shows the controls, a narrow left column goes back, everything else goes on.
+ *  - `off`: no tap turns anything; every tap is the controls.
+ */
+export type TapLayout = 'auto' | 'edges' | 'lshape' | 'kindle' | 'off';
+export const TAP_LAYOUTS: readonly TapLayout[] = ['auto', 'edges', 'lshape', 'kindle', 'off'];
 
 export type TapAction =
   /** A scroll, a long press, or a pinch that ended: not a tap at all. */
@@ -63,16 +82,30 @@ export function isTap(from: TapPoint, to: TapPoint): boolean {
 }
 
 /**
- * The thirds of the track: back | chrome | forward, at 30% and 70%.
+ * What a tap at (`x`, `y`) on a `width` x `height` track does, under `layout`, in `mode`.
  *
- * Physical, not reading-order: an RTL track turns the other way, but the left edge of the screen is still
- * the left edge of the screen. The reader maps the zone through its own direction sign.
+ * The thirds are back | chrome | forward at 30 % and 70 %: physical, not reading order -- an RTL track turns the other
+ * way, but the left edge of the screen is still the left edge of the screen, and the reader maps the zone through its
+ * own direction sign. The L and the Kindle-style map divide the screen into thirds both ways (33 % and 66 %, Mihon's).
+ * A track not measured yet (zero wide or tall) is never divided by zero: it is taken as one pixel.
  */
-export function tapZone(x: number, width: number): TapZone {
+export function tapZone(x: number, y: number, width: number, height: number, layout: TapLayout = 'auto', mode: 'paged' | 'vertical' = 'paged'): TapZone {
   const w = Math.max(1, width);
-  if (x < w * 0.3) return 'back';
-  if (x > w * 0.7) return 'forward';
-  return 'chrome';
+  const h = Math.max(1, height);
+  const thirds = (): TapZone => (x < w * 0.3 ? 'back' : x > w * 0.7 ? 'forward' : 'chrome');
+  if (layout === 'off') return 'chrome';
+  if (layout === 'auto') return mode === 'paged' ? thirds() : 'chrome';
+  if (layout === 'edges') return thirds();
+  const col = x < w * 0.33 ? 0 : x < w * 0.66 ? 1 : 2;
+  const row = y < h * 0.33 ? 0 : y < h * 0.66 ? 1 : 2;
+  if (layout === 'lshape') {
+    if (row === 0 || (row === 1 && col === 0)) return 'prev';
+    if (row === 2 || (row === 1 && col === 2)) return 'next';
+    return 'chrome';
+  }
+  // kindle
+  if (row === 0) return 'chrome';
+  return col === 0 ? 'prev' : 'next';
 }
 
 /** The delay before a single tap may act. Equal to the double window, which is the point of this module. */
@@ -90,19 +123,24 @@ export function readTap(args: {
   from: TapPoint;
   to: TapPoint;
   width: number;
+  /** The track's height, for a layout that divides it top to bottom (v0.61.0). */
+  height?: number;
+  /** Reader → Tap zones on this device, and the mode it reads in (v0.61.0): `auto` in paged mode is the thirds. */
+  layout?: TapLayout;
+  mode?: 'paged' | 'vertical';
   lastTapAt: number;
   doubleDetect: boolean;
   /** When the last double (touch or mouse) was recognised; 0 when there is none. */
   lastDoubleAt?: number;
 }): TapAction {
-  const { from, to, width, lastTapAt, doubleDetect, lastDoubleAt = 0 } = args;
+  const { from, to, width, height = 0, layout = 'auto', mode = 'paged', lastTapAt, doubleDetect, lastDoubleAt = 0 } = args;
   if (!isTap(from, to)) return { kind: 'none' };
   // ⚠️ A third press right behind a double is the tail of the same flurry, not a new single. Without this a
   // triple-click (or a triple-tap) zoomed and then, 300 ms later, turned a page: the double reset the pairing
   // state, so the third press looked like the first of a fresh gesture.
   if (lastDoubleAt > 0 && to.t - lastDoubleAt < TAP_WINDOW_MS) return { kind: 'none' };
   if (doubleDetect && lastTapAt > 0 && to.t - lastTapAt < TAP_WINDOW_MS) return { kind: 'double' };
-  return { kind: 'single', zone: tapZone(to.x, width), after: singleTapDelay() };
+  return { kind: 'single', zone: tapZone(to.x, to.y, width, height, layout, mode), after: singleTapDelay() };
 }
 
 /** Whether a `dblclick` arriving at `now` should take back a single click's action from `at`. */

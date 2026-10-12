@@ -226,3 +226,17 @@ test('a direction chosen for one title is kept, Series default included', async 
   assert.deepEqual(putBodies.at(-1).readerSeries['webtoon-1'],
     { mode: 'paged', theme: 'gray', spread: false, pagedDirection: 'series', directionChosen: true });
 });
+
+test("the series' type is remembered for opening it offline, and junk reads back as nothing (v0.61.0)", () => {
+  // The automatic mode reads `seriesType`, which only the server knows; offline it reads what this device last saw.
+  // Reintroduce by keying it under `yomi_rs_`: the push below would carry it as a series override.
+  prefs.rememberSeriesType('series-1', 'manhwa');
+  assert.equal(prefs.seriesTypeOf('series-1'), 'manhwa');
+  assert.equal(prefs.seriesTypeOf('series-never-opened'), null);
+  prefs.rememberSeriesType('series-2', 'novel' as any);
+  assert.equal(prefs.seriesTypeOf('series-2'), null, 'an unknown type was kept');
+  localStorage.setItem('yomi_stype_series-3', 'scroll');
+  assert.equal(prefs.seriesTypeOf('series-3'), null, 'junk in storage reads as a type');
+  assert.ok(![...mem.keys()].some((k) => k.startsWith('yomi_rs_') || k.startsWith('yomi_rp_')), 'the type was stored where the account sync collects');
+  mem.clear();
+});

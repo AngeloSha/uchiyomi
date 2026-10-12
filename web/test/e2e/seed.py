@@ -185,10 +185,90 @@ def cascade(root: str) -> None:
     print(f'  seeded {series}')
 
 
+def _rows_png(w: int, h: int, row_for) -> bytes:
+    """A PNG built a row at a time from `row_for(y)` (w * 3 bytes): fast enough for a 20,000-row strip."""
+    raw = bytearray()
+    for y in range(h):
+        raw += b'\x00'
+        raw += row_for(y)
+    return _png_from_raw(w, h, bytes(raw))
+
+
+def _patterns(w: int, seed: int, n: int, lo: int = 40, span: int = 150):
+    """`n` distinct mid-tone rows: no channel near white or near black, so a crop finds no paper in them."""
+    out = []
+    for k in range(n):
+        row = bytearray()
+        for x in range(w):
+            v = lo + (x * 7 + k * 31 + seed * 13) % span
+            row += bytes((v, lo + (v * 3 + k) % span, lo + (v + 2 * k + seed) % span))
+        out.append(bytes(row))
+    return out
+
+
+def strip_png(w: int, h: int, seed: int) -> bytes:
+    """A long strip, art edge to edge: bands of patterned rows, a new band every 250 rows."""
+    pats = _patterns(w, seed, 16)
+    return _rows_png(w, h, lambda y: pats[(y // 250 + seed) % 16])
+
+
+def bordered_png(w: int, h: int, seed: int, border: int = 80, halves: bool = False) -> bytes:
+    """A scanned page: white paper, `border` px of it all round, art inside. `halves`: a double spread whose left
+    half is dark art and right half light art, so a walk can tell which half is on screen."""
+    white = b'\xff' * (w * 3)
+    edge = b'\xff' * (border * 3)
+    inner = w - 2 * border
+    if halves:
+        left = _patterns(w // 2 - border, seed, 12, lo=20, span=90)
+        right = _patterns(w // 2 - border, seed + 50, 12, lo=120, span=90)
+        art = [l + r for l, r in zip(left, right)]
+    else:
+        art = _patterns(inner, seed, 12)
+    return _rows_png(w, h, lambda y: white if y < border or y >= h - border else edge + art[(y // 90 + seed) % 12] + edge)
+
+
+def comfort(root: str) -> None:
+    """The v0.61.0 reader walk's library (v610Walk-reader.mjs): the reader comfort pack.
+
+    Only on request (`seed.py <root> --comfort`). Two series, every page different from every other:
+      - Strip Long (left to right): chapter 1 is two 689 x 20,000 strips, chapter 2 is 120 slices of 720 x 1,000,
+        chapter 3 two strips again -- the window by screens, the append six screens from the end, the zoom that keeps
+        its place mid-strip, the automatic pick's "long strips", and a crop that finds nothing to trim.
+      - Margins Manga (right to left, ComicInfo `YesAndRightToLeft`): two twelve-page chapters of 1,200 x 1,700 pages
+        with 80 px of white paper all round, pages 10 and 12 of each a 2,400 x 1,700 double spread whose halves are
+        told apart by their art (dark left, light right) -- Crop page borders, Wide pages, and the automatic pick's
+        right-to-left.
+    """
+    strip = os.path.join(root, 'Test Source', 'Strip Long')
+    os.makedirs(strip, exist_ok=True)
+    for ch, kind in ((1, 'strips'), (2, 'slices'), (3, 'strips')):
+        with zipfile.ZipFile(os.path.join(strip, f'Chapter {ch:03d}.cbz'), 'w', zipfile.ZIP_STORED) as z:
+            if kind == 'strips':
+                for i in (1, 2):
+                    z.writestr(f'{i:03d}.png', strip_png(689, 20000, ch * 10 + i))
+            else:
+                for i in range(1, 121):
+                    z.writestr(f'{i:03d}.png', strip_png(720, 1000, 1000 + i))
+            z.writestr('ComicInfo.xml', '<?xml version="1.0"?><ComicInfo><Series>Strip Long</Series>'
+                       f'<Number>{ch}</Number><Manga>No</Manga></ComicInfo>')
+    manga = os.path.join(root, 'Test Source', 'Margins Manga')
+    os.makedirs(manga, exist_ok=True)
+    for ch in (1, 2):
+        with zipfile.ZipFile(os.path.join(manga, f'Chapter {ch:03d}.cbz'), 'w', zipfile.ZIP_STORED) as z:
+            for i in range(1, 13):
+                spread = i in (10, 12)
+                z.writestr(f'{i:03d}.png', bordered_png(2400 if spread else 1200, 1700, ch * 100 + i, halves=spread))
+            z.writestr('ComicInfo.xml', '<?xml version="1.0"?><ComicInfo><Series>Margins Manga</Series>'
+                       f'<Number>{ch}</Number><Manga>YesAndRightToLeft</Manga></ComicInfo>')
+    print(f'  seeded {strip} and {manga}')
+
+
 if __name__ == '__main__':
     if '--rtl' in sys.argv[2:]:
         rtl(sys.argv[1])
     elif '--cascade' in sys.argv[2:]:
         cascade(sys.argv[1])
+    elif '--comfort' in sys.argv[2:]:
+        comfort(sys.argv[1])
     else:
         main(sys.argv[1])

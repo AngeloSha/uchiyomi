@@ -1,3 +1,7 @@
+import type { WidePages } from './readerSpread';
+import type { AutoGuess } from './readerAuto';
+import type { SeriesType } from './types';
+
 export type ReaderTheme = 'amoled' | 'sepia' | 'gray';
 
 /**
@@ -51,7 +55,25 @@ export interface ReaderPrefs {
    * does. Stored settings without the key pick up the default through the spread in `migratePrefs`.
    */
   coverEdges: boolean;
+  /**
+   * What a wide page -- a double-page spread scanned as one image -- becomes on a screen held upright (v0.61.0):
+   * `whole` as it always was, `split` into its two halves one after the other, `rotate` turned on its side. One
+   * setting for every title, synced with the account like `coverEdges`; not a title's look (LOOK_KEYS).
+   */
+  widePages: WidePages;
+  /**
+   * Trim the blank margins of scanned pages (v0.61.0), measured from each page's pixels in the browser
+   * (lib/readerCrop.ts). Off by default; one setting for every title, synced like `coverEdges`, not a look.
+   */
+  cropBorders: boolean;
+  /**
+   * Pick Webtoon or Paged for each series from the shape of its pages and its type (v0.61.0, lib/readerAuto.ts), for a
+   * title whose own memory and source default hold no mode. Off by default; synced, not a look.
+   */
+  autoMode: boolean;
 }
+
+const WIDE_PAGES: readonly WidePages[] = ['whole', 'split', 'rotate'];
 
 export const DEFAULT_PREFS: ReaderPrefs = {
   junkPages: 'collapse',
@@ -65,6 +87,9 @@ export const DEFAULT_PREFS: ReaderPrefs = {
   spread: false,
   pagedDirection: 'series',
   coverEdges: true,
+  widePages: 'whole',
+  cropBorders: false,
+  autoMode: false,
 };
 
 const KEY = 'yomi_reader_prefs';
@@ -108,6 +133,11 @@ export function migratePrefs(raw: unknown): ReaderPrefs {
   if (!PAGED_DIRECTIONS.includes(p.pagedDirection)) p.pagedDirection = DEFAULT_PREFS.pagedDirection;
   // Only a real `false` turns the edges off: anything else out of storage keeps the default look.
   if (typeof p.coverEdges !== 'boolean') p.coverEdges = DEFAULT_PREFS.coverEdges;
+  // v0.61.0: anything but a known value (an older build's row has none) is the default, which is today's reader.
+  if (!WIDE_PAGES.includes(p.widePages)) p.widePages = DEFAULT_PREFS.widePages;
+  // Only a real `true` crops: an older row, or junk, reads as the default -- off.
+  if (p.cropBorders !== true) p.cropBorders = false;
+  if (p.autoMode !== true) p.autoMode = false;
   p.skipJunk = p.junkPages !== 'show';
   return p;
 }
@@ -258,6 +288,49 @@ export function withTitleLook(cur: ReaderPrefs, sp: SeriesPrefs): ReaderPrefs {
 }
 
 /**
+ * The reader's settings for one title (v0.61.0): the global default, the source's default laid over it, then the
+ * series' own memory -- global < source < series.
+ *
+ * ⚠️ ONE pure answer, given to the reader in the same render as `ready`. It used to be two steps: the chapter became
+ * ready on the global default, the initial scroll ran on that, and an effect declared after it laid the source's and
+ * the series' look over the top a render later. With a global Webtoon default and a source default of Paged, a resume
+ * at page 9 scrolled the vertical column, the paged track then replaced it at slide 0 while the counter said 9, and
+ * the first swipe sent page 2 and rewound the progress. `base` is the STORED default, never the reader's live state:
+ * live state carries the previous title's look, and an edition switch (another series) inherited it.
+ * Reintroduce by laying the look over the live prefs instead of `loadPrefs()`: readerAuto.test.ts "a title's look is
+ * built from the stored default" fails.
+ */
+export function titleLook(base: ReaderPrefs, source: SourcePrefs, series: SeriesPrefs, auto: AutoGuess | null = null): TitleLook {
+  const prefs = withTitleLook(withTitleLook(base, source), series);
+  // v0.61.0, Pick the mode for each series: series > source > automatic > global. The guess fills the mode only when
+  // neither memory holds one -- an old incidental pin counts as a choice, which is the safe side: the reader keeps
+  // opening that title as it has been opening it.
+  // Reintroduce by applying the guess whenever it has one: readerAuto.test.ts "the automatic mode never overrides a
+  // source's or a series' mode" fails.
+  if (base.autoMode && auto && !source.mode && !series.mode) return { prefs: { ...prefs, mode: auto.mode }, autoApplied: auto };
+  return { prefs, autoApplied: null };
+}
+
+/** A title's look, and the automatic guess it took its mode from (null: the mode is a default's or a memory's). */
+export interface TitleLook { prefs: ReaderPrefs; autoApplied: AutoGuess | null }
+
+/**
+ * What a pull of the account's settings (`syncPrefsFromServer`) may change in the reader's live state (v0.61.0).
+ *
+ * The pull answers the GLOBAL default. Once a title is open, the live look is that title's (its memory, its source's
+ * default) and a late answer laid over it whole put the global look back over the title -- a series set to Paged
+ * flipped to Webtoon a second after it opened. So with a title open only what is not a look is taken; the look is
+ * adopted from storage the next time a title opens, which is where the pull wrote it.
+ * Reintroduce by spreading `pulled` over `cur` unconditionally: readerAuto.test.ts "a late pull keeps the open
+ * title's look" fails.
+ */
+export function mergePulled(cur: ReaderPrefs, pulled: ReaderPrefs, titleOpen: boolean): ReaderPrefs {
+  const out = { ...cur, ...pulled };
+  if (titleOpen) for (const k of LOOK_KEYS) (out as Record<string, unknown>)[k] = cur[k];
+  return out;
+}
+
+/**
  * What a change made in the reader, with a title open, pins to that title's memory -- or null for nothing.
  *
  * Any change to the look pins the look as it now stands (mode, theme, spread): that is how a title keeps what
@@ -270,9 +343,15 @@ export function withTitleLook(cur: ReaderPrefs, sp: SeriesPrefs): ReaderPrefs {
  * Reintroduce by adding `pagedDirection: n.pagedDirection` to the look: readerSourcePrefs.test.ts "a change to
  * the look does not pin the direction" finds it pinned.
  */
-export function seriesPinChange(p: Partial<ReaderPrefs>, n: ReaderPrefs): SeriesPrefs | null {
+export function seriesPinChange(p: Partial<ReaderPrefs>, n: ReaderPrefs, o: { autoApplied?: AutoGuess | null } = {}): SeriesPrefs | null {
   if (!(p.mode || p.theme || p.spread !== undefined || p.pagedDirection)) return null;
   const out: SeriesPrefs = { mode: n.mode, theme: n.theme, spread: n.spread };
+  // v0.61.0: a mode the automatic pick chose is not pinned by a change to something else -- a theme, a spread, the
+  // direction -- or the guess would be frozen into the title's memory and never revisited, and switching the automatic
+  // pick off would no longer reach that title. Tapping Mode pins it, as it always did.
+  // Reintroduce by pinning `n.mode` whatever chose it: readerAuto.test.ts "an automatic mode is not pinned by a theme
+  // change" fails.
+  if (o.autoApplied && !p.mode) delete out.mode;
   if (p.pagedDirection) { out.pagedDirection = p.pagedDirection; out.directionChosen = true; }
   return out;
 }
@@ -380,6 +459,24 @@ export function seriesSourceOf(seriesId: string): { id: string; name: string } |
   try {
     const v = JSON.parse(localStorage.getItem(`${SERIES_SOURCE_KEY}${seriesId}`) || 'null');
     return v && typeof v.id === 'string' && v.id ? { id: v.id, name: typeof v.name === 'string' ? v.name : '' } : null;
+  } catch { return null; }
+}
+
+/**
+ * What kind of comic a series is (`seriesType`, v0.61.0), remembered on this device for the automatic mode when the
+ * series is opened offline. Its own prefix: not `yomi_rs_`/`yomi_rp_`, which the account sync collects.
+ */
+const SERIES_TYPE_KEY = 'yomi_stype_';
+const SERIES_TYPES: readonly SeriesType[] = ['manga', 'manhwa', 'manhua', 'webtoon', 'comic', 'unknown'];
+export function rememberSeriesType(seriesId: string, type: SeriesType | null | undefined) {
+  if (!seriesId || !type || !SERIES_TYPES.includes(type)) return;
+  try { localStorage.setItem(`${SERIES_TYPE_KEY}${seriesId}`, type); } catch {}
+}
+export function seriesTypeOf(seriesId: string): SeriesType | null {
+  if (typeof window === 'undefined' || !seriesId) return null;
+  try {
+    const v = localStorage.getItem(`${SERIES_TYPE_KEY}${seriesId}`) as SeriesType | null;
+    return v && SERIES_TYPES.includes(v) ? v : null;
   } catch { return null; }
 }
 

@@ -284,6 +284,10 @@ function ReadingSection({ weeklyGoal }: { weeklyGoal: number }) {
       <Choice label={tr('Mode')} value={prefs.mode}
         options={[{ value: 'vertical', label: tr('Webtoon (scroll)') }, { value: 'paged', label: tr('Paged (swipe)') }]}
         onChange={(mode) => set({ mode })} />
+      {/* v0.61.0: the mode above is then the default only for a title the pick cannot place. Through `set`, the one writer. */}
+      <SwitchRow label={tr('Pick the mode for each series')}
+        help={tr('Long strips and webtoons open in Webtoon mode, manga and right-to-left series in Paged. A series or a source you have set yourself keeps its own.')}
+        on={prefs.autoMode} onChange={(autoMode) => set({ autoMode })} />
       <Choice label={tr('Theme')} value={prefs.theme}
         options={[{ value: 'amoled', label: tr('AMOLED') }, { value: 'sepia', label: tr('Sepia') }, { value: 'gray', label: tr('Gray') }]}
         onChange={(theme) => set({ theme })} />
@@ -304,6 +308,14 @@ function ReadingSection({ weeklyGoal }: { weeklyGoal: number }) {
           options={[{ value: 'series', label: tr('Series default') }, { value: 'ltr', label: tr('Left to right') }, { value: 'rtl', label: tr('Right to left') }]}
           onChange={(v) => set({ pagedDirection: v })} />
       )}
+      {/* v0.61.0: what a double-page spread becomes on a screen held upright. Through `set`, the one writer. */}
+      <Choice label={tr('Wide pages')} value={prefs.widePages}
+        help={tr('On a screen held upright, a double-page spread can be split into its two pages, or turned on its side to fill the screen.')}
+        options={[{ value: 'whole', label: tr('Whole') }, { value: 'split', label: tr('Split') }, { value: 'rotate', label: tr('Rotate') }]}
+        onChange={(widePages) => set({ widePages })} />
+      <SwitchRow label={tr('Crop page borders')}
+        help={tr('Trims the blank margins around scanned pages. In Webtoon mode only the sides are trimmed, by the same amount for a whole chapter.')}
+        on={prefs.cropBorders} onChange={(cropBorders) => set({ cropBorders })} />
       {/* Set in both modes. ⚠️ It cannot LOOK the same in both: a page-by-page view has no thin slide --
           every slide is exactly one viewport wide -- so Collapse falls back to removing there, where an
           unwanted page costs one swipe rather than a scroll and there is no flow to interrupt. */}

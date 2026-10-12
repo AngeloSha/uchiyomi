@@ -112,6 +112,10 @@ const SURFACES = [
   'lib/lists.ts',
   'lib/libraryQuery.ts',
   'lib/incognito.ts',
+  // v0.61.0, Reader → Keys and controller: every binding a squared key cap, Add a key / Add a button, Reset to defaults.
+  'components/ReaderKeys.tsx',
+  'lib/readerKeys.ts',
+  'lib/readerPad.ts',
 ];
 
 /**

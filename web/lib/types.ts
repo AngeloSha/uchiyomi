@@ -248,7 +248,10 @@ export interface Series {
   borrowNames?: boolean | null;
   /** Admins only: whether names are borrowed for this series once the server setting is applied. */
   borrowNamesEffective?: boolean;
-  /** Admins only: the type the notice-chapter switches go by -- the override, else the evidence's, else unknown. */
+  /**
+   * The type the notice-chapter switches go by -- the override, else the evidence's, else unknown. Every viewer since
+   * v0.61.0 (the reader's automatic mode reads it); admins only before, so an older server sends members nothing.
+   */
   seriesType?: SeriesType;
   /** Admins only: what the evidence alone says the series is, and which evidence. null when nothing has said. */
   detectedType?: { type: Exclude<SeriesType, 'unknown'>; from: 'genre' | 'source' | 'anilist' | 'webtoon' | null } | null;
