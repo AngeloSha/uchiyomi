@@ -217,10 +217,11 @@ components:
           uniqueItems: true
           items: { type: string, minLength: 1, maxLength: 64 }
           description: >-
-            Ordered ids of up to three Lists owned by this account. Missing preserves the legacy first-three-
-            nonempty Home rails; an explicit empty array means no List rails. Empty selected Lists retain their
-            slot. Already-stored stale or unowned ids are ignored by Home and omitted on the next edit;
-            a request that tries to add one is refused.
+            Ordered ids of up to three Lists owned by this account -- or, since v0.61.0, shared with the household by
+            another member. Missing preserves the legacy first-three-nonempty Home rails; an explicit empty array means
+            no List rails. Empty selected Lists retain their slot. Already-stored stale or unreadable ids are ignored by
+            Home and omitted on the next edit; a request that tries to add one (another member's private List, a
+            malformed id) is refused.
         showAllChapters:
           type: boolean
           description: Show one unpaged chapter list, including all grey rows and unfolded older runs.
@@ -234,6 +235,24 @@ components:
             type: string
             enum: [az, za, read, unread, latest]
           description: Per-List display sorts; absence for a List means its own order.
+    SmartListQuery:
+      type: object
+      additionalProperties: false
+      required: [v, sort]
+      description: >-
+        Since v0.61.0, a smart list's saved Library search, in the Library URL's own words. Answered with the Library's
+        own search for whoever opens the list.
+      properties:
+        v: { type: integer, enum: [1] }
+        q: { type: string, minLength: 1, maxLength: 200, description: Title search. }
+        read: { type: string, enum: [UNREAD, IN_PROGRESS, READ] }
+        status: { type: string, minLength: 1, maxLength: 40 }
+        genres: { type: array, maxItems: 20, items: { type: string, minLength: 1, maxLength: 60 } }
+        lib: { type: string, minLength: 1, maxLength: 120, description: Library id. }
+        src: { type: string, minLength: 1, maxLength: 120, description: "Main source id; '-' is No source." }
+        anysrc: { type: string, minLength: 1, maxLength: 120, description: Any source id. }
+        sort: { type: string, enum: [updated, read, new, popular, score, rating, chapters, unread, az] }
+        dir: { type: string, enum: [asc, desc] }
     AdminBulkDeleteResult:
       type: object
       required: [id, outcome, chapters, bytes, kept, paused, chapterSkips]
@@ -4532,7 +4551,15 @@ paths:
     get:
       tags:
         - personal
-      summary: The caller's collections.
+      summary: The caller's collections (Lists); with scope=all, smart and shared ones too.
+      description: >-
+        Without `scope`: the caller's own hand-picked lists, `{id, name, accent, sort_order, item_count}` with the
+        stored count, as before v0.61.0 (the series page's "Add to collection" sheet offers these). `scope=all`
+        (v0.61.0): the caller's own lists of both kinds, then those other members share with the household, each
+        `{id, name, accent, sort_order, item_count, kind: manual|smart, shared, mine, owner?: {id, name, avatar},
+        query?}` -- `item_count` is how many series it shows THIS caller (their libraries, age cap and 18+ switch),
+        `owner` names whoever made someone else's list, and `query`, a smart list's saved search, goes to its owner
+        alone. A shared list that shows the caller nothing is left out.
       operationId: getApiCollections
       parameters:
         - name: adult
@@ -4540,6 +4567,12 @@ paths:
           required: false
           schema:
             type: string
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [all]
       security:
         - bearer: []
       responses:
@@ -4550,7 +4583,13 @@ paths:
     post:
       tags:
         - personal
-      summary: Create a collection.
+      summary: Create a collection (a List), hand-picked or smart, private or shared.
+      description: >-
+        Since v0.61.0 `query` makes a smart list -- a saved Library search, the Library's own URL words
+        `{v: 1, q?, read?: UNREAD|IN_PROGRESS|READ, status?, genres?, lib?, src? ('-' is No source), anysrc?, sort, dir?:
+        asc|desc}`, `sort` one of updated, read, new, popular, score, rating, chapters, unread, az -- answered afresh for
+        whoever opens it; a list's kind is fixed when it is made. `shared: true` lets the rest of the household read it
+        (never change it). An unknown or oversized query key is 400.
       operationId: postApiCollections
       requestBody:
         required: false
@@ -4561,6 +4600,12 @@ paths:
               properties:
                 name:
                   type: string
+                accent:
+                  type: string
+                query:
+                  $ref: '#/components/schemas/SmartListQuery'
+                shared:
+                  type: boolean
       security:
         - bearer: []
       responses:
@@ -4574,7 +4619,10 @@ paths:
     patch:
       tags:
         - personal
-      summary: Rename a collection.
+      summary: Rename a collection, change a smart list's search, or share it.
+      description: >-
+        The owner's only: someone else's list, shared or not, is 404. Since v0.61.0 `query` replaces a smart list's
+        search (400 `not_smart` on a hand-picked list) and `shared` shares the list with the household or stops it.
       operationId: patchApiCollectionsId
       parameters:
         - name: id
@@ -4591,13 +4639,21 @@ paths:
               properties:
                 name:
                   type: string
+                accent:
+                  type: string
+                sortOrder:
+                  type: integer
+                query:
+                  $ref: '#/components/schemas/SmartListQuery'
+                shared:
+                  type: boolean
       security:
         - bearer: []
       responses:
         "200":
           description: OK
         "400":
-          description: Malformed body or parameter
+          description: Malformed body or parameter, or `not_smart`
         "401":
           description: Not authenticated
         "404":
@@ -4630,7 +4686,11 @@ paths:
         `{id, name, accent, sort_order, items}`: the series in the list's own order, enriched like every listing
         (`yomi.unread` is the unread badge), a series hidden by the 18+ switch or an age cap left out. Since v0.55.7 (#164)
         each item also carries `lastReadAt` (when the caller last read in it, their own progress only; null if never)
-        and `latestChapterAt` (when its newest chapter arrived; null without one), for the list's sorts.
+        and `latestChapterAt` (when its newest chapter arrived; null without one), for the list's sorts. Since v0.61.0
+        also a list shared with the household by another member (404 for anyone else's private list, and for a
+        malformed id), with `kind`, `shared`, `mine`, `owner` (someone else's list), `query` (the owner's own smart
+        list) and `total`, how many series it shows this caller in all: a smart list is answered for the caller, in
+        its saved order, and capped at `limit` items (200 without one).
       operationId: getApiCollectionsId
       parameters:
         - name: id
@@ -4643,6 +4703,13 @@ paths:
           required: false
           schema:
             type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
       security:
         - bearer: []
       responses:
@@ -4657,7 +4724,10 @@ paths:
       tags:
         - personal
       summary: Add a series to a collection.
-      description: At the end of the list's own order (since v0.55.7; before, at position 0), as the bulk add puts them.
+      description: >-
+        At the end of the list's own order (since v0.55.7; before, at position 0), as the bulk add puts them. The
+        owner's hand-picked lists only: since v0.61.0 someone else's list is 404 (it answered `{ok: false}`), and a
+        smart list is 409 `smart_list` -- it holds what its search finds. The same for the other item routes.
       operationId: postApiCollectionsIdItems
       parameters:
         - name: id
@@ -4685,6 +4755,8 @@ paths:
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+        "409":
+          description: "`smart_list`: a smart list holds what its search finds (v0.61.0)"
     put:
       tags:
         - personal
@@ -4718,6 +4790,8 @@ paths:
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+        "409":
+          description: "`smart_list`: a smart list holds what its search finds (v0.61.0)"
   /api/collections/{id}/items/{seriesId}:
     delete:
       tags:
@@ -4744,6 +4818,8 @@ paths:
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+        "409":
+          description: "`smart_list`: a smart list holds what its search finds (v0.61.0)"
   /api/ratings/{seriesId}:
     put:
       tags:
@@ -5149,6 +5225,8 @@ paths:
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+        "409":
+          description: "`smart_list`: a smart list holds what its search finds (v0.61.0)"
   /api/library/bulk/newest:
     post:
       tags:

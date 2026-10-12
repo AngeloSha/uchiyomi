@@ -18,7 +18,8 @@ import { statusFor, saveConnection, disconnect, whoAmI, pushSeriesProgress, push
 import { ADAPTERS, isProvider, type Provider } from '../lib/trackerProviders';
 import { logAudit } from '../lib/audit';
 import { noticeBook } from '../lib/noticeChapters';
-import { listFor, listsFor, listItems } from '../lib/lists';
+import { listFor, ownListFor, listsFor, listItems, kindOf, ownerOf, type ListRow } from '../lib/lists';
+import { smartQuery, parseQuery } from '../lib/smartLists';
 
 function computeStreaks(days: string[]): { current: number; longest: number } {
   if (!days.length) return { current: 0, longest: 0 };
@@ -62,6 +63,21 @@ async function listDates(userId: string, ids: string[]): Promise<{ read: Map<str
   return {
     read: new Map(read.map((r) => [r.series_id, new Date(r.at).toISOString()])),
     latest: new Map(latest.map((r) => [r.id, new Date(Number(r.mt)).toISOString()])),
+  };
+}
+
+/**
+ * A list as the Lists routes describe it (v0.61.0): its kind and sharing, whether it is the caller's own, and -- for its
+ * owner alone -- a smart list's search, which Edit filters opens. Someone else never receives the search: it may name a
+ * library or a source they do not have.
+ */
+function listOut(l: ListRow, uid: string) {
+  const mine = l.user_id === uid;
+  const query = mine && kindOf(l) === 'smart' ? parseQuery(l.query) : null;
+  return {
+    id: l.id, name: l.name, accent: l.accent, sort_order: l.sort_order,
+    kind: kindOf(l), shared: l.shared === true, mine,
+    ...(query ? { query } : {}),
   };
 }
 
@@ -193,88 +209,146 @@ export default async function personalRoutes(app: FastifyInstance) {
     return { ok: true, favorite: false };
   });
 
-  // ---- collections ----
-  app.get('/api/collections', async (req) => ({ content: await listsFor(userIdOf(req)) }));
+  // ---- collections (the app's Lists) ----
+  //
+  // v0.61.0: smart and shared lists (lib/lists.ts, lib/smartLists.ts). Reading a list -- GET of one, or the ?scope=all
+  // listing -- answers for any list the caller may read: their own, or one shared with the household. Changing one --
+  // PATCH, DELETE and the item routes -- only for its owner: a shared list is read-only for everyone else (the owner's
+  // ruling), and someone else's list answers 404, never 403, so an id says nothing about whether it exists. Reintroduce
+  // by reading through listFor in a write: "another member cannot change a shared list" in lists.int.test.ts sees 200.
+  const listName = z.string().min(1).max(120);
 
-  app.post('/api/collections', async (req) => {
-    const uid = userIdOf(req);
-    const { name, accent } = z.object({ name: z.string().min(1).max(120), accent: z.string().max(32).optional() }).parse(req.body);
-    return one('INSERT INTO collections (user_id, name, accent) VALUES ($1, $2, $3) RETURNING id, name, accent, sort_order', [uid, name, accent ?? null]);
+  /** The caller's own hand-picked list for the item routes, or the answer that refuses it (already sent). */
+  const pickedList = async (req: any, reply: any): Promise<ListRow | null> => {
+    const list = await ownListFor(userIdOf(req), (req.params as { id: string }).id);
+    if (!list) { reply.code(404).send({ error: 'not_found' }); return null; }
+    // A smart list holds what its search finds; there is nothing to add by hand, remove or reorder.
+    if (kindOf(list) === 'smart') {
+      reply.code(409).send({ error: 'smart_list', message: 'A smart list holds what its filters find. Change its filters instead.' });
+      return null;
+    }
+    return list;
+  };
+
+  // No `scope`: the caller's own hand-picked lists with the stored count, as before v0.61.0 -- the series page's "Add to
+  // collection" sheet offers these, and an older client reads them. `scope=all`: theirs of both kinds and the
+  // household's shared ones, counted for this viewer (lib/lists.ts listsFor).
+  app.get('/api/collections', async (req) => {
+    const { scope } = req.query as { scope?: string };
+    return { content: await listsFor(userIdOf(req), vc(req), scope === 'all' ? 'all' : 'manual') };
   });
 
-  app.patch('/api/collections/:id', async (req) => {
+  app.post('/api/collections', async (req, reply) => {
     const uid = userIdOf(req);
-    const { id } = req.params as { id: string };
-    const body = z.object({ name: z.string().min(1).max(120).optional(), accent: z.string().max(32).nullable().optional(), sortOrder: z.number().int().optional() }).parse(req.body);
-    return one(
+    const b = z.object({
+      name: listName,
+      accent: z.string().max(32).optional(),
+      // v0.61.0: a smart list's saved Library search, and whether the household may read the list.
+      query: smartQuery.optional(),
+      shared: z.boolean().optional(),
+    }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Give the list a name; a smart list needs a valid search.' });
+    const row = await one<ListRow>(
+      `INSERT INTO collections (user_id, name, accent, query, shared) VALUES ($1, $2, $3, $4::jsonb, $5)
+       RETURNING id, user_id, name, accent, sort_order, query, shared`,
+      [uid, b.data.name, b.data.accent ?? null, b.data.query ? JSON.stringify(b.data.query) : null, b.data.shared === true],
+    );
+    return listOut(row!, uid);
+  });
+
+  app.patch('/api/collections/:id', async (req, reply) => {
+    const uid = userIdOf(req);
+    const b = z.object({
+      name: listName.optional(),
+      accent: z.string().max(32).nullable().optional(),
+      sortOrder: z.number().int().optional(),
+      query: smartQuery.optional(),
+      shared: z.boolean().optional(),
+    }).safeParse(req.body ?? {});
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const list = await ownListFor(uid, (req.params as { id: string }).id);
+    if (!list) return reply.code(404).send({ error: 'not_found' });
+    // A list's kind is fixed when it is made: a hand-picked list has no search to change, and a smart one cannot be
+    // turned into a hand-picked list by sending no search.
+    if (b.data.query && kindOf(list) !== 'smart') return reply.code(400).send({ error: 'not_smart', message: 'Only a smart list has filters to change.' });
+    const row = await one<ListRow>(
       `UPDATE collections SET
          name = COALESCE($3, name),
          accent = COALESCE($4, accent),
-         sort_order = COALESCE($5, sort_order)
-       WHERE id = $1 AND user_id = $2 RETURNING id, name, accent, sort_order`,
-      [id, uid, body.name ?? null, body.accent ?? null, body.sortOrder ?? null],
+         sort_order = COALESCE($5, sort_order),
+         query = COALESCE($6::jsonb, query),
+         shared = COALESCE($7, shared)
+       WHERE id = $1 AND user_id = $2 RETURNING id, user_id, name, accent, sort_order, query, shared`,
+      [list.id, uid, b.data.name ?? null, b.data.accent ?? null, b.data.sortOrder ?? null,
+        b.data.query ? JSON.stringify(b.data.query) : null, b.data.shared ?? null],
     );
+    return listOut(row!, uid);
   });
 
-  app.delete('/api/collections/:id', async (req) => {
+  app.delete('/api/collections/:id', async (req, reply) => {
     const uid = userIdOf(req);
-    const { id } = req.params as { id: string };
-    await q('DELETE FROM collections WHERE id = $1 AND user_id = $2', [id, uid]);
+    const list = await ownListFor(uid, (req.params as { id: string }).id);
+    if (!list) return reply.code(404).send({ error: 'not_found' });
+    await q('DELETE FROM collections WHERE id = $1 AND user_id = $2', [list.id, uid]);
     return { ok: true };
   });
 
+  // One list and its series, for its owner or -- shared -- for anyone in the household. `limit` (1-200) caps the items, a
+  // Home rail asking for twelve; a smart list is capped at 200 without it, a hand-picked one is whole as it always was.
+  // `total` is how many there are in all for this viewer, so a capped smart list can say so.
   app.get('/api/collections/:id', async (req, reply) => {
     const uid = userIdOf(req);
     const { id } = req.params as { id: string };
+    const raw = (req.query as { limit?: string }).limit;
+    const limit = raw === undefined ? undefined : Math.max(1, Math.min(200, Math.floor(Number(raw)) || 200));
     const list = await listFor(uid, id);
     if (!list) return reply.code(404).send({ error: 'not_found' });
-    const col = { id: list.id, name: list.name, accent: list.accent, sort_order: list.sort_order };
-    // The series this viewer may see, in the list's own order (lib/lists.ts).
-    const items = await enrichSeries(req, (await listItems(list, vc(req))).items);
+    const kind = kindOf(list);
+    const { items: found, total } = await listItems(list, vc(req), 0, kind === 'smart' ? (limit ?? 200) : limit);
+    // Someone else's shared list exists for a member only while it shows them something, as the listing has it.
+    if (list.user_id !== uid && total === 0) return reply.code(404).send({ error: 'not_found' });
+    const items = await enrichSeries(req, found);
     // The list's sorts (#164) order by two dates no series payload carries; they ride on these items alone. The items
     // stay in the list's own order: the web sorts them, a list being one request and never paged.
     const dates = await listDates(uid, items.map((s: any) => s.id));
     return {
-      ...col,
+      ...listOut(list, uid),
+      ...(list.user_id === uid ? {} : { owner: await ownerOf(list) }),
+      total,
       items: items.map((s: any) => ({ ...s, lastReadAt: dates.read.get(s.id) ?? null, latestChapterAt: dates.latest.get(s.id) ?? null })),
     };
   });
 
-  app.post('/api/collections/:id/items', async (req) => {
-    const uid = userIdOf(req);
-    const { id } = req.params as { id: string };
+  app.post('/api/collections/:id/items', async (req, reply) => {
     const { seriesId } = z.object({ seriesId: z.string().min(1) }).parse(req.body);
-    const owns = await one('SELECT id FROM collections WHERE id = $1 AND user_id = $2', [id, uid]);
-    if (!owns) return { ok: false };
+    const list = await pickedList(req, reply);
+    if (!list) return reply;
     // At the end of the list's own order, where the bulk add puts them. The column's default, 0, tied a series added
     // to a list someone had ordered by hand with its first entry -- and the list's own order is its default sort.
     await q(
       `INSERT INTO collection_items (collection_id, series_id, position)
        VALUES ($1, $2, COALESCE((SELECT max(position) + 1 FROM collection_items WHERE collection_id = $1), 0))
        ON CONFLICT DO NOTHING`,
-      [id, seriesId],
+      [list.id, seriesId],
     );
     return { ok: true };
   });
 
-  app.delete('/api/collections/:id/items/:seriesId', async (req) => {
-    const uid = userIdOf(req);
-    const { id, seriesId } = req.params as { id: string; seriesId: string };
-    const owns = await one('SELECT id FROM collections WHERE id = $1 AND user_id = $2', [id, uid]);
-    if (!owns) return { ok: false };
-    await q('DELETE FROM collection_items WHERE collection_id = $1 AND series_id = $2', [id, seriesId]);
+  app.delete('/api/collections/:id/items/:seriesId', async (req, reply) => {
+    const { seriesId } = req.params as { id: string; seriesId: string };
+    const list = await pickedList(req, reply);
+    if (!list) return reply;
+    await q('DELETE FROM collection_items WHERE collection_id = $1 AND series_id = $2', [list.id, seriesId]);
     return { ok: true };
   });
 
   // Reorder a collection: the full series-id list in its new order rewrites the positions.
-  app.put('/api/collections/:id/items', async (req) => {
-    const uid = userIdOf(req);
-    const { id } = req.params as { id: string };
+  app.put('/api/collections/:id/items', async (req, reply) => {
     const { seriesIds } = z.object({ seriesIds: z.array(z.string().min(1)).max(500) }).parse(req.body);
-    const owns = await one('SELECT id FROM collections WHERE id = $1 AND user_id = $2', [id, uid]);
-    if (!owns) return { ok: false };
+    const list = await pickedList(req, reply);
+    if (!list) return reply;
     for (let i = 0; i < seriesIds.length; i++)
-      await q('UPDATE collection_items SET position = $3 WHERE collection_id = $1 AND series_id = $2', [id, seriesIds[i], i]);
+      await q('UPDATE collection_items SET position = $3 WHERE collection_id = $1 AND series_id = $2', [list.id, seriesIds[i], i]);
     return { ok: true };
   });
 
@@ -701,12 +775,12 @@ export default async function personalRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/collections/:id/items/bulk', async (req, reply) => {
-    const { id } = req.params as { id: string };
     const b = bulkBody.safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
-    const uid = userIdOf(req);
-    const owns = await one('SELECT id FROM collections WHERE id = $1 AND user_id = $2', [id, uid]);
-    if (!owns) return reply.code(404).send({ error: 'not_found' });
+    // The owner's hand-picked list only (v0.61.0): 404 for anyone else's, 409 for a smart list.
+    const list = await pickedList(req, reply);
+    if (!list) return reply;
+    const id = list.id;
     const live = await liveSeries(b.data.seriesIds, vc(req));
     await q(
       `INSERT INTO collection_items (collection_id, series_id, position)
@@ -877,8 +951,13 @@ export default async function personalRoutes(app: FastifyInstance) {
       const ids = [...new Set(parsed.data)];
       if (ids.length > 3) return reply.code(400).send({ error: 'bad_settings', message: 'Choose up to three lists for Home.' });
       if (ids.length) {
-        const owned = await q<{ id: string }>('SELECT id FROM collections WHERE user_id = $1 AND id = ANY($2)', [uid, ids]);
-        if (owned.length !== ids.length) {
+        // The caller's own lists, or one shared with the household (v0.61.0) -- never another member's private list,
+        // which would let Home say whether an id exists. A malformed id is no list, not a uuid cast error.
+        const uuids = ids.filter((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
+        const readable = uuids.length === ids.length
+          ? await q<{ id: string }>('SELECT id FROM collections WHERE (user_id = $1 OR shared) AND id = ANY($2::uuid[])', [uid, ids])
+          : [];
+        if (readable.length !== ids.length) {
           return reply.code(400).send({ error: 'bad_settings', message: 'One of those lists is no longer available.' });
         }
       }
