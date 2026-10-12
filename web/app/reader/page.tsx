@@ -10,6 +10,7 @@ import { fetchAllBooks } from '@/lib/seriesBooks';
 import { chapterOutcome } from '@/lib/readerState';
 import { openableChapters } from '@/lib/chapterRows';
 import { buildFlow, startIndex, renderWindow } from '@/lib/readerFlow';
+import { AHEAD_SCREENS, APPEND_SCREENS, BEHIND_SCREENS, KEEP_SCREENS, MAX_WINDOW_PAGES, anchorAt, nearEnd, prefetchList, screenRange, scrollTopFor, windowSet, type IndexRange } from '@/lib/readerWindow';
 import { readTap, undoLeft, undoWindow, type TapZone } from '@/lib/readerGesture';
 import { ARM_MS, pagesAfter, skipNeedsConfirm, stillArmed } from '@/lib/readerNav';
 import { Book, EditionRow, Page, PageInfo, Series } from '@/lib/types';
@@ -38,8 +39,13 @@ interface Chapter { id: string; seriesId: string; seriesTitle: string; title: st
 interface ChapterRef { id: string; label: string }
 interface FlatItem { ci: number; number: number; width: number | null; height: number | null; key: string; firstOfChapter: boolean; junk?: boolean; missing?: boolean; collapsed?: boolean }
 
+/** Paged mode's render window, in pages: a slide is one screen, so pages and screens are the same thing there. */
 const WINDOW_BEHIND = 2;
 const WINDOW_AHEAD = 6;
+/** How far down the screen the page being read is taken from -- in the webtoon column, the page under this line. */
+const PROBE = 0.4;
+/** What the webtoon column fetches ahead of its window, as bytes only (lib/readerWindow.ts prefetchList). */
+const PREFETCH = { pages: 6, pixels: 48e6 };
 /**
  * How tall a collapsed page is. Enough to read as a band OF SOMETHING -- you can see it is a credit page --
  * without being tall enough to interrupt a scroll. A sibling of DIVIDER_H, and reserved the same way.
@@ -231,6 +237,8 @@ function ReaderInner() {
     completedSent.current.clear();
     prevPos.current = null;
     setExpanded(new Set());   // a page opened by hand belongs to the chapter it was opened in
+    setWin({ from: 0, to: -1 });
+    anchorRef.current = null;
     blobUrls.current.forEach((u) => URL.revokeObjectURL(u));
     blobUrls.current.clear();
     (async () => {
@@ -464,14 +472,16 @@ function ReaderInner() {
     return () => window.removeEventListener('resize', measure);
   }, [prefs.fitWidth, ready, zoom]);
 
-  // keep the page roughly centered/in-place when zooming
+  // keep the page roughly centered when zooming
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || !didInitScroll.current) return;
     // Centre a zoomed webtoon column. In paged mode scrollLeft is the PAGE: centring it jumped a double-tap
     // to the middle of the chapter (and to page 1 on a right-to-left track).
+    // ⚠️ Across only (v0.61.0, F5). This also put the column back at the TOP of the page being read, which on a
+    // 689 x 54,000 strip is a double-tap zoom thrown fifty screens back up the strip. The place down the column is
+    // kept by the anchor below, which holds the point being read through any change of layout.
     if (zoom > 1 && prefs.mode === 'vertical') el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
-    if (prefs.mode === 'vertical' && tops[current] != null) el.scrollTop = tops[current];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoom, colW]);
 
@@ -498,14 +508,63 @@ function ReaderInner() {
     return { heights: hs, tops: ts };
   }, [flat, colW, prefs.gap, collapsing, expanded]);
 
+  /** Each page's place in the flow, by key (v0.61.0): the anchor, the downloaded pages' images and the page grid look
+   *  a page up here. They used to scan the flow for it, once per page -- per blob, per grid tile, per page turn. */
+  const indexOfKey = useMemo(() => new Map(flat.map((p, i): [string, number] => [p.key, i])), [flat]);
+
+  // ---- the webtoon column's window (v0.61.0, lib/readerWindow.ts) ----
+  // Which pages hold a full-size image is decided by SCREENS, from where the column is scrolled to: a window of pages
+  // put nine long strips (about 1.3 GB decoded) in memory, and two screens of thin slices. `win` is the span of the
+  // flow the screen in view touches, widened behind and ahead; `tail` is whether the end of what is loaded is near.
+  const [win, setWin] = useState<IndexRange>({ from: 0, to: -1 });
+  const [tail, setTail] = useState(false);
+  /**
+   * The point being read, kept through any change of layout: the page under the probe line and how far down it, with
+   * that page's top and height when it was taken. A zoom, a page above it opening or closing, a crop measured -- the
+   * layout effect below puts the same point of the same page back under the line. Keyed by the page, not its index,
+   * because Hide puts pages back into the flow ahead of it.
+   */
+  const anchorRef = useRef<{ key: string; frac: number; top: number; height: number } | null>(null);
+  /** Read the webtoon column: the page being read (the one under the probe, as always), the anchor, the window, the tail. */
+  const readColumn = (el: HTMLElement): number => {
+    const view = { top: el.scrollTop, height: el.clientHeight };
+    const a = anchorAt(tops, heights, view.top + view.height * PROBE);
+    const it = flat[a.index];
+    anchorRef.current = it ? { key: it.key, frac: a.frac, top: tops[a.index], height: heights[a.index] } : null;
+    const next = screenRange(tops, heights, view, BEHIND_SCREENS, AHEAD_SCREENS);
+    setWin((w) => (w.from === next.from && w.to === next.to ? w : next));
+    const total = tops.length ? tops[tops.length - 1] + heights[heights.length - 1] : 0;
+    const t = nearEnd(total, view, APPEND_SCREENS);
+    setTail((x) => (x === t ? x : t));
+    return a.index;
+  };
+  // ⚠️ Replaces `el.scrollTop = tops[current]` in the zoom effect above (F5), and absorbs every other height change: a
+  // repeated page opened above, a crop or a split measured. Skipped when the anchored page did not move -- an append at
+  // the end of the column moves nothing above it, and setting scrollTop mid-fling stops an iPhone's momentum dead.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || prefs.mode !== 'vertical' || !didInitScroll.current) return;
+    const a = anchorRef.current;
+    const i = a ? indexOfKey.get(a.key) : undefined;
+    if (a && i != null && (tops[i] !== a.top || heights[i] !== a.height)) {
+      const target = scrollTopFor({ index: i, frac: a.frac }, tops, heights, el.clientHeight * PROBE);
+      if (Math.abs(el.scrollTop - target) >= 1) el.scrollTop = target;
+    }
+    readColumn(el);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tops, heights]);
+
   // ---- active render window ----
   // ⚠️ Memoised on `flat` itself, not `flat.length`. Expanding a page changes what is in the window without
   // changing how many items there are, and the blob prefetch below keys off this set's identity -- on
   // `flat.length` the set never changes, so an expanded page of a DOWNLOADED chapter would sit on its number
   // placeholder forever. Invisible online, where the image URL always works.
+  // Paged keeps its window of pages; the webtoon column's is by screens (above).
   const activeSet = useMemo(
-    () => renderWindow(flat, current, WINDOW_BEHIND, WINDOW_AHEAD),
-    [flat, current],
+    () => (prefs.mode === 'vertical'
+      ? windowSet(flat, win, current, MAX_WINDOW_PAGES)
+      : renderWindow(flat, current, WINDOW_BEHIND, WINDOW_AHEAD)),
+    [flat, current, win, prefs.mode],
   );
 
   // ---- offline blob URLs within window ----
@@ -522,16 +581,42 @@ function ReaderInner() {
           if (blob && alive) map.set(it.key, URL.createObjectURL(blob));
         }
       }
-      for (const [k] of map) {
-        const idx = flat.findIndex((p) => p.key === k);
-        if (idx < current - 12 || idx > current + 18) {
-          URL.revokeObjectURL(map.get(k)!);
+      // Released by distance (v0.61.0): in the webtoon column, further than KEEP_SCREENS screens from the one in view
+      // -- twelve pages behind was a dozen screens of slices or a whole volume of strips -- and paged, twelve pages
+      // behind or eighteen ahead, as before. Looked up by key; a page no longer in the flow is released too.
+      const el = scrollRef.current;
+      const keep = prefs.mode === 'vertical' && el
+        ? screenRange(tops, heights, { top: el.scrollTop, height: el.clientHeight }, KEEP_SCREENS, KEEP_SCREENS)
+        : { from: current - 12, to: current + 18 };
+      for (const [k, u] of map) {
+        const idx = indexOfKey.get(k);
+        if (idx == null || idx < keep.from || idx > keep.to) {
+          URL.revokeObjectURL(u);
           map.delete(k);
         }
       }
       if (alive) force((n) => n + 1);
     })();
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSet]);
+
+  // ---- the webtoon column fetches ahead of its window, as bytes (v0.61.0) ----
+  // The pages after the window are fetched and dropped: the server serves a page `private, max-age=31536000,
+  // immutable`, so the <img> that the window brings later is answered from the browser's cache, and the decode -- the
+  // memory -- is spent only once the page is near. Online pages only: a downloaded page is already on this device.
+  const prefetched = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (prefs.mode !== 'vertical' || !activeSet.size) return;
+    for (const i of prefetchList(flat, Math.max(...activeSet), PREFETCH)) {
+      const it = flat[i];
+      const ch = chapters[it.ci];
+      if (!ch || ch.offline || prefetched.current.has(it.key)) continue;
+      prefetched.current.add(it.key);
+      void fetch(img.page(ch.id, it.number), { credentials: 'same-origin', priority: 'low' } as RequestInit)
+        .then((r) => (r.ok ? r.arrayBuffer() : null))
+        .catch(() => { prefetched.current.delete(it.key); });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSet]);
 
@@ -577,6 +662,9 @@ function ReaderInner() {
     laidOutSign.current = trackSign;
     laidOutMode.current = prefs.mode;
     didInitScroll.current = true;
+    // The column's window and anchor from where it now stands: a resume on page 1 scrolls nowhere, so no scroll event
+    // would ever bring them.
+    if (prefs.mode === 'vertical' && scrollRef.current) readColumn(scrollRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, colW, tops]);
 
@@ -593,6 +681,7 @@ function ReaderInner() {
       el.scrollLeft = trackSign * (slideOf[current] ?? current) * el.clientWidth;
     } else {
       el.scrollTop = tops[current] ?? 0;
+      readColumn(el);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefs.mode]);
@@ -625,16 +714,19 @@ function ReaderInner() {
       setCurrent((c) => (c === i ? c : i));
       return;
     }
-    const probe = el.scrollTop + el.clientHeight * 0.4;
-    let lo = 0, hi = tops.length - 1, ans = 0;
-    while (lo <= hi) { const mid = (lo + hi) >> 1; if (tops[mid] <= probe) { ans = mid; lo = mid + 1; } else hi = mid - 1; }
+    // The page under the probe line, 40 % down the screen, as it always was; reading the column also keeps the anchor,
+    // the window and the tail up to date (readColumn).
+    const ans = readColumn(el);
     setCurrent((c) => (c === ans ? c : ans));
-  }, [tops, prefs.mode, slides]); // the sign-free Math.abs above needs no trackSign dep
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tops, heights, flat, prefs.mode, slides]); // the sign-free Math.abs above needs no trackSign dep
 
   // ---- continuous reading: append next chapter near the end ----
   useEffect(() => {
     if (!ready || !flat.length || appending.current || noMore.current) return;
-    if (current < flat.length - 4) return;
+    // Four pages from the end, as always -- or, in the webtoon column, within APPEND_SCREENS screens of it (v0.61.0):
+    // four thin slices before the end is less than a screen, and the next chapter arrived after the reader did.
+    if (current < flat.length - 4 && !(prefs.mode === 'vertical' && tail)) return;
     appending.current = true;
     // Every slide added below lands on a still track when the track runs right to left (untilStill).
     const rtlTrack = pagedRtl;
@@ -660,7 +752,7 @@ function ReaderInner() {
       appending.current = false;
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, ready, flat.length, chapterRefs]);
+  }, [current, ready, flat.length, chapterRefs, tail]);
 
   // ---- submit progress for the active chapter ----
   // Two paths: (a) regular page progress, debounced 600ms; (b) chapter COMPLETION, sent immediately —
@@ -805,13 +897,17 @@ function ReaderInner() {
    * and `jumpTo` clamps -1 to 0, so tapping a dimmed tile scrolled to the top of the whole library. The
    * comment here used to claim it revealed the chapter instead; nothing ever did that.
    */
+  // ⚠️ Built only while the grid is open, and each tile's place looked up by key (v0.61.0, F6): this ran on every page
+  // turn with a scan of the whole flow per tile -- every page of every loaded chapter, times the pages of this one.
+  // `startIndex` still answers for a page Hide took out of the flow.
   const gridPages = useMemo(() => {
+    if (!showPages) return [];
     const ci = flat[current]?.ci;
     if (ci == null) return [];
     const ch = chapters[ci];
     if (!ch) return [];
     return ch.pages.map((p) => ({
-      idx: startIndex(flat, ci, p.number),
+      idx: indexOfKey.get(`${ch.id}:${p.number}`) ?? startIndex(flat, ci, p.number),
       // A missing placeholder may carry an old junk flag, but it is not furniture and cannot be skipped.
       junk: !!p.junk && !p.missing,
       missing: !!p.missing,
@@ -820,7 +916,7 @@ function ReaderInner() {
       // the same blob is the thumbnail.
       src: ch.offline ? blobUrls.current.get(`${ch.id}:${p.number}`) || null : img.page(ch.id, p.number, 200),
     }));
-  }, [flat, current, chapters]);
+  }, [showPages, flat, current, chapters, indexOfKey]);
   const activeIdx = chapterRefs.findIndex((c) => c.id === activeChapter?.id);
   const prevId = activeIdx > 0 ? chapterRefs[activeIdx - 1]?.id : undefined;
   const nextId = activeIdx >= 0 && activeIdx < chapterRefs.length - 1 ? chapterRefs[activeIdx + 1]?.id : undefined;
