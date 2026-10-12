@@ -86,7 +86,9 @@ const waitFor = async (fn, ms = 60000, every = 1000) => {
 // A scan runs at most once a minute, and up.sh asks for one as it starts the instance: ask until one runs (walk48.mjs).
 const scan = await waitFor(async () => { const s = await api('/api/refresh', { method: 'POST', body: '{}' }); return s?.scanned ? s : null; }, 120000, 5000);
 if (!scan) { console.error('the library scan never ran'); process.exit(1); }
-const seriesNamed = async (name) => (await api('/api/series/search', { method: 'POST', body: JSON.stringify({ query: '', size: 200 }) })).content.find((s) => s.name === name)?.id ?? null;
+// 100: the search route refuses a bigger page (400 bad_request, `size`); the mock backend this walk was first run
+// against took anything, and the real one answered every lookup with an error the waitFor below swallowed.
+const seriesNamed = async (name) => (await api('/api/series/search', { method: 'POST', body: JSON.stringify({ query: '', size: 100 }) })).content.find((s) => s.name === name)?.id ?? null;
 const SL = await waitFor(() => seriesNamed('Strip Long'), 60000);
 const MM = await waitFor(() => seriesNamed('Margins Manga'), 60000);
 if (!SL || !MM) { console.error(`the scan did not list the walk's series: ${SL} ${MM}`); process.exit(1); }
