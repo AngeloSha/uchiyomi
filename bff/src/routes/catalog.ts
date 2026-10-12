@@ -138,6 +138,8 @@ async function tasteRecs(req: FastifyRequest): Promise<any[]> {
 
 // How many series the Continue Reading rail carries. 20 hid 33 of the heaviest user's 53 in progress.
 const ON_DECK_LIMIT = 60;
+/** v0.61.0: how many series Pick back up offers; a rail of things you put down should not be a backlog. */
+const PICK_UP_LIMIT = 20;
 
 /**
  * How long POST /api/refresh waits for the library scan before it answers that the scan is still running (v0.55.6):
@@ -340,12 +342,24 @@ export default async function catalogRoutes(app: FastifyInstance) {
       onDeckP = onDeckPicks(uid, vc(req), { window: 'recent', limit: ON_DECK_LIMIT }).then(resolvePicks);
     }
 
-    const [onDeck, updated, fresh, popular] = await Promise.all([
+    // v0.61.0, Pick back up: the same pick over series put down three months to two years ago, each saying when
+    // (`stoppedAt`). Kept apart from Keep reading by construction (lib/onDeck.ts): no series is on both.
+    const pickUpP = onDeckPicks(uid, vc(req), { window: 'stale', limit: PICK_UP_LIMIT })
+      .then(async (picks) => {
+        const at = new Map(picks.map((r) => [r.bookId, r.lastRead]));
+        return (await resolvePicks(picks)).map((b) => ({ ...b, stoppedAt: at.get(b.id) ?? null }));
+      })
+      .catch(() => []);
+
+    const [onDeck, updated, fresh, popular, pickUp, gems] = await Promise.all([
       onDeckP,
       komga.seriesUpdated(vc(req), 0, 20).catch(() => ({ content: [] })),
       komga.seriesNew(vc(req), 0, 20).catch(() => ({ content: [] })),
       // v0.58.0: Most popular in your library (lib/anilistScores.ts).
       komga.seriesPopular(vc(req), 0, 20).catch(() => ({ content: [] })),
+      pickUpP,
+      // v0.61.0, Hidden gems (lib/ownedCatalog.ts seriesGems).
+      komga.seriesGems(vc(req), 0, 20).catch(() => ({ content: [] })),
     ]);
 
     // Which device each in-progress book was last read on. Reading progress is already shared across devices;
@@ -399,6 +413,9 @@ export default async function catalogRoutes(app: FastifyInstance) {
       new: await enrichSeries(req, (fresh as any).content ?? []),
       favorites: await enrichSeries(req, favorites),
       popular: await enrichSeries(req, (popular as any).content ?? []),
+      // v0.61.0: Home draws each only when it has something in it.
+      pickUp,
+      gems: await enrichSeries(req, (gems as any).content ?? []),
       updatesCount,
     };
   });

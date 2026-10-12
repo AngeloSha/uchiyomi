@@ -1686,7 +1686,11 @@ paths:
         caller's library that have an outside popularity (AniList, through the series' checked AniList link), the
         most listed first -- Home's "Most popular in your library". Every series carries `yomi.anilist {id, score,
         popularity}` (or null; `id`, the AniList entry's id, since v0.60.0) beside the caller's own `yomi.rating`, and
-        `yomi.lastReadAt`.
+        `yomi.lastReadAt`. Since v0.61.0 also `pickUp`, up to 20 books shaped like `onDeck`, each with `stoppedAt`
+        (when the caller last read in the series): the chapter to pick a series back up at, for series last read 90
+        days to two years ago in which the caller finished at least one chapter (never a series `onDeck` holds); and
+        `gems`, up to 20 series with an AniList score of at least 75 that nobody on the server has read in any
+        language edition, one per work, best score first (empty on a Komga backend).
       operationId: getApiHome
       parameters:
         - name: adult

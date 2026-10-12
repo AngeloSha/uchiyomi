@@ -1453,6 +1453,12 @@ for `read`. `GET /api/collections` with no `scope` is unchanged -- the caller's 
 -- and `?scope=all` adds their smart lists and the household's shared ones, counted for the caller, a shared list that
 shows them nothing left out.
 
+**Pick back up and Hidden gems** (since v0.61.0). `GET /api/home` carries `pickUp`, up to twenty books shaped like
+`onDeck` with `stoppedAt`: the chapter to resume each series last read 90 days to two years ago in which the caller
+finished at least one chapter -- never one `onDeck` holds -- most recent first; and `gems`, up to twenty series with an
+AniList score of at least 75 that nobody on the server has read in any language edition, one per work, best score
+first (empty on a Komga backend).
+
 **Progress trackers.** `GET /api/trackers` is the caller's own connections, every provider listed connected
 or not; `POST /api/trackers/:provider/connect` takes a pasted token and `DELETE /api/trackers/:provider`
 drops it. A push goes out for the caller alone when they finish a chapter of a linked series, never below
