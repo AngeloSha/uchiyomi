@@ -670,7 +670,9 @@ async function main() {
   };
   if (want('phone-settings')) {
     await phoneCard('phone-settings', '/admin/?tab=Settings', () => {
-      const card = [...document.querySelectorAll('h2,h3,p,span')].find((e) => (e.textContent || '').trim() === 'Server')?.closest('.card');
+      // By the section's id (components/settings.tsx Section): the admin menu's own "Server" group label comes first by
+      // text, and it is in no card -- the first run of this capture found nothing to clip.
+      const card = document.querySelector('section#server');
       card?.setAttribute('data-shot-from', ''); card?.setAttribute('data-shot-to', '');
       return !!card;
     });
