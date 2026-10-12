@@ -10,10 +10,21 @@ import { loadCustomSites } from './customSites';
 import { loadSuwayomiSources, scheduleSuwayomiRetry } from './suwayomi/register';
 
 export async function reloadAll(): Promise<{ loaded: number; files: number; suwayomi: number }> {
-  const r = reloadSources(); // clears registry + rescans SOURCES_DIR (pack)
-  loadBuiltins();
-  loadCustomSites();
-  const sw = await loadSuwayomiSources().catch(() => null);
+  let r = { loaded: 0, files: 0 };
+  let swapped = false;
+  const swap = () => {
+    swapped = true;
+    r = reloadSources(); // clears registry + rescans SOURCES_DIR (pack)
+    loadBuiltins();
+    loadCustomSites();
+  };
+  // The engine is asked FIRST and the registry swapped after, in one synchronous step (register.ts `beforeRegister`):
+  // clearing it before the question left every extension source unregistered for as long as the engine took to answer
+  // (v0.60.1). A load that throws before it reaches the swap (a database read) still reloads, as it always did.
+  const sw = await loadSuwayomiSources(undefined, { beforeRegister: swap }).catch(() => {
+    if (!swapped) swap();
+    return null;
+  });
   // ⚠️ The registry was just cleared, so an engine that is down right now takes every extension source with
   // it -- and before v0.49.0 nothing registered them again when it came back: a reload during an outage lost
   // them until someone reloaded by hand. The same retry the boot starts brings them back (#72); it is one loop,
