@@ -42,13 +42,19 @@ sites' terms and your local law.
 
 **Reading**
 
-- **Webtoon-first reader** — vertical scroll or paged, RTL, double-page spreads, per-series settings.
+- **Webtoon-first reader** — vertical scroll or paged, RTL, double-page spreads, per-series settings, and the mode
+  picked for each series from its pages. Wide spreads split or turned on a phone, borders cropped, an e-ink, grayscale
+  or inverted filter, tap zones, rebindable keys and a game controller, each set per device.
 - **Skips the pages that are not the story** — the scanlator credit page that opens every chapter is found
   by repetition and collapsed into a band you can tap open (or hide entirely, or show everything).
 - **True-black OLED interface**, built for a phone and installable as a PWA.
 - **Offline downloads** — save chapters to the device and read them with no connection at all.
 - **Moments** — star a page and it lands on its own screen as the panel itself, with notes.
-- **Reading Studio & Wrapped** — a year heat-map, chapters by month and weekday, your top series and genres.
+- **Reading Studio & Wrapped** — a year heat-map, chapters by month and weekday, your top series and genres, and
+  how long you read: hours, minutes a chapter, by hour of the day and by device.
+- **Release radar** — when each series' next chapter is likely, said as an estimate (*~Friday*, *usually Fridays*,
+  *running late*), with an *Expected this week* list and a *Releasing soon* order.
+- **Incognito reading** — keep your place without leaving history, stats or tracker updates, on every device.
 
 **Your library**
 
@@ -63,7 +69,11 @@ sites' terms and your local law.
 - **Language editions** — the same series in English and in Spanish is one card, with chips to switch between
   them on the series page and in the reader; each language keeps its own chapters, folder and progress.
 - **Your stars beside AniList's score** — one panel on the series page, the Library sorts by either, and Home
-  has a *Most popular* rail.
+  has *Most popular* and *Hidden gems* rails.
+- **Related works** — sequels, side stories and spin-offs from AniList on each series page, *Next in the story*
+  at the end of the reader, and recommendations you already own first in *More like this*.
+- **Smart and shared lists** — save any Library view as a live list, share a list with the household (view
+  only), and show lists on Home and in OPDS readers.
 - **Health** — finds chapter gaps, suspiciously short chapters, bad downloads, duplicates and failing sources,
   and names the step a source fails at. **Fix everything** works through every card by itself, once or every
   night, and then says what only you can decide. Every fix says what it does before you press it, shows its
@@ -81,7 +91,7 @@ sites' terms and your local law.
 - **Discover** — what your sources just published, **one card per series** with each source's icon, leaving
   out what you already own, from every source at once; and a search that **answers progressively**: results
   appear as each source replies instead of waiting for the slowest, and every source says whether it answered,
-  failed or timed out.
+  failed or timed out. *Because you read* and trending manhwa, manga and manhua rails come from AniList.
 - **Follows a series on more than one source**, and when a chapter will not come down it tries the other
   copies, then other sources, before giving up. When a site dies for good, *Find other sources* and **Replace
   a source** move its series to sources that work, after you have looked at each match.

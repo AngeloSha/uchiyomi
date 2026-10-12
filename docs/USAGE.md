@@ -109,7 +109,8 @@ filters currently show.
 
 Since v0.55.8 ([discussion #150](https://github.com/AngeloSha/uchiyomi/discussions/150)), the sort you pick —
 **Updated**, **Newest**, **A–Z**, **Most unread** and, since v0.58.0, **Most popular**, **Top rated**, **My rating**,
-**Most chapters** and **Recently read**, grouped in the toolbar's **Sort** menu since v0.60.0 — becomes this account's
+**Most chapters**, **Recently read** and, since v0.61.0, **Releasing soon** (section 4, *When the next chapter is
+likely*), grouped in the toolbar's **Sort** menu since v0.60.0 — becomes this account's
 Library default on every device, and so does its order: since v0.60.0 every sort runs both ways (*Newest first* or
 *Oldest first*, *Most first* or *Fewest first*, *A–Z* or *Z–A*). Most popular and Top
 rated come from AniList (how many people list a series there, and its score), for every series linked to its AniList
@@ -137,6 +138,19 @@ with the earlier/later arrows. Home follows that order and shows up to twelve se
 keeps its position and appears as soon as it has a series; a deleted List is ignored and disappears from the saved
 choice on the next edit. Choosing none is deliberate and shows no List rails. Until you edit this once, Home keeps the
 old behaviour: the first three nonempty Lists.
+
+**Smart and shared lists** (since v0.61.0). In the Library, set the filters and order you want and press **Save as
+list** (the key at the end of the filter row; **Update "…"** when you opened the Library from that list). The list is
+*live*: it shows whatever in your library matches those filters now, as the Library would, and grows and shrinks with
+it. **Edit filters** on its page opens the Library with them on. Any list, smart or hand-picked, can be **shared with
+the household**: everyone else then finds it under **Shared with you** on Lists, can read it and put it on their Home,
+and can never change it; each of them sees only the series they may open, and a shared list that would show someone
+nothing is not listed for them at all. A smart list's filters are seen only by you. An OPDS reader gets each of your
+lists as a shelf, beside *Keep reading* and *Favourites*.
+
+Since v0.61.0 Home also has **Pick back up**, the series you stopped part-way through between three months and two
+years ago (Keep reading has the last three months), and **Hidden gems**, series AniList's readers score 75 or more
+that nobody on this server has read yet, one card per work.
 
 **Right-click a series** anywhere it appears — the library grid, Home's rails, Up next in the reader — or press
 and hold it on a touchscreen, for a short menu (since v0.48.0): **Open in a new tab**, **Copy link**,
@@ -173,6 +187,22 @@ language and in English, and so do a few words people type instead (*flaresolver
 where it is (*Admin → Settings*), and choosing it opens that page on that tab, scrolled to that card once it has
 loaded. Admin pages are listed for admins only, and what the desktop app does not have is not listed there. On a phone,
 the **Search** tab lists the same ones under the series it finds.
+
+### Your reading: time, Wrapped and Incognito
+
+**Reading time** (since v0.61.0). **Profile → You → Reading studio** shows how long you have read in the last 7 days,
+the last 30 days and this year, about how long a chapter takes you, the hours of the day you read and on which
+devices. It is worked out from the page turns Uchiyomi already records, so it covers your reading from before the
+update too: a pause of more than five minutes is a break, not reading, and two devices reading at once are never
+counted twice. **Wrapped** adds the year's hours, and a series page says how long catching up would take (*Catch up
+in ~2 h*). The household's weekly board stays a count of chapters.
+
+**Incognito reading** (since v0.61.0, **Profile → Settings → Reading**, or the reader's own settings). While it is
+on, your place is still kept — Keep reading and every resume work as usual — but what you read leaves no trace: no
+history, no stats or streaks, nothing on the household's boards or rails, and nothing sent to AniList, MyAnimeList or
+Kitsu. It covers your whole account, on every device and in Mihon too, because the server applies it. A line at the
+top of every page says it is on, with **Turn off**, and the reader shows *Incognito*. Turning it off does not send
+what you read meanwhile; a tracker catches up at the next chapter you finish.
 
 ### What counts as a chapter
 
@@ -376,6 +406,35 @@ says how many are in hand. The chips:
   hidden when the library is rescanned instead of reappearing as a new one, and adding the same title again
   from a source puts the same series back, history and all. What each kind of delete does and does not
   erase is spelled out in section 12, *Where your data lives and how to delete for good*.
+
+### When the next chapter is likely
+
+Since v0.61.0 Uchiyomi estimates **when a series' next chapter is likely to come** — the *release radar*. It goes by
+when the series' chapters usually come: the dates its sources list, or, where they list none (most don't), when the
+chapters arrived on this server. It gives an estimate only for a series that keeps a rhythm — four releases or more,
+mostly evenly spaced, still running and followed for new chapters — and always says it as one: *Next chapter ~Friday ·
+usually Fridays*, *due any day*, *running late*. A series that ships in bursts, or has ended or paused, gets none.
+
+- On the **series page**, the line under your reading progress: *Next chapter ~Friday · usually Fridays*, and *Catch
+  up in ~45 min* when you are behind.
+- **Updates → Expected this week**: your favourites and the series you read in the last 90 days whose next chapter is
+  due within a week, soonest first, the late ones on top.
+- The Library's **Releasing soon** order, each card saying *~Fri*, *Due* or *Running late*.
+- The reader's last page: *You're all caught up* with what is coming, when a series has more on the way.
+
+A series that goes quiet for three of its usual intervals (two weeks at least) stops being *late* and drops off these
+lists until it releases again. The estimates are refreshed after every check for new chapters and, after an update,
+for every series a minute after the server starts.
+
+### Related works
+
+Since v0.61.0 a series linked to AniList has a **Related** row on its page: its sequels, prequels, main story, side
+stories, spin-offs and alternative versions, from AniList. One you already have opens in your library; one you don't
+opens Discover searching your sources for it (or, for an account that may not add series, says it is not in the
+library). The reader's last page has **Next in the story**, and **More like this** puts first what AniList's readers
+recommend that you already have. These are kept up in the background with the AniList scores, about every six hours;
+nothing asks AniList when a page opens, a library with AniList lookups off sends nothing, and the 18+ switch and age
+limits apply as everywhere else.
 
 ### Cover and banner
 
@@ -1344,7 +1403,12 @@ again.
 
 **Discover** is how you add new series to your library.
 
-- **Trending** rail: popular manhwa you don't already have. Each card shows the description + chapter count.
+- **Trending** rails: popular manhwa, and since v0.61.0 manga and manhua, that you don't already have. Each card shows
+  the description + chapter count.
+- **Because you read …** (since v0.61.0, for accounts that may add series): what AniList's readers recommend after
+  something you read lately, leaving out what you have. A card searches your sources for it.
+- A Discover link with `?q=` opens on that search: `/discover/?q=solo%20leveling`. The series page's Related row
+  uses it for a work you don't have.
 - **Newest / Popular:** the wall under the heading is what your sources published most recently, or what is
   popular on them, and the heading says which (*Newest from your sources*, *Popular on your sources*). Next to
   the toggle sits one chip — three favicons, **All sources**, *{n} sources*, and *{n} with issues* in amber
@@ -2586,7 +2650,10 @@ stuck.
 switch (let anyone sign up: the sign-in screen then offers *Create an account*, section 2), **Check for updates** and the anonymous **install count**, each of the last two
 with a fold (*How this works* / *What is sent, once a day*) that spells out exactly what leaves the server.
 **Updates & schedules**: the **Library update interval (hours)** (how often followed series are asked for new
-chapters), the **Backup time (hour, 0–23)** of the nightly backup — change it and the pending timer is re-armed at
+chapters), **Smart update checks** (since v0.61.0, off by default: the scheduled check asks a series that has been
+quiet for a long time less often, at least every three days, and every series at the normal rate while its next chapter
+is due by the release radar; *Check now* and everything you start yourself always ask at once), the **Backup time (hour,
+0–23)** of the nightly backup — change it and the pending timer is re-armed at
 once, so the next run is at the new hour — and, when the extension engine is configured, **Update extensions
 automatically** and its check interval. **Look for failed chapters on other sources** controls the bounded,
 once-a-day source hunt described in section 4 and is on by default. **Library housekeeping**: **Delete read chapters** and its **Wait
