@@ -2,8 +2,11 @@
 
 ## v0.61.2 — 2026-10-13
 
-**AniList, MyAnimeList and Kitsu no longer mark a series Completed while it is still coming out.** Reported by
-**@CheetahDoesStuff** ([#201](https://github.com/AngeloSha/uchiyomi/issues/201)). Thank you.
+**AniList, MyAnimeList and Kitsu no longer mark a series Completed while it is still coming out. The Library's unread
+count no longer stops at 99+, and dashboards can show how many chapters you have.** All three came from
+**@CheetahDoesStuff** ([#201](https://github.com/AngeloSha/uchiyomi/issues/201),
+[#202](https://github.com/AngeloSha/uchiyomi/issues/202), [#204](https://github.com/AngeloSha/uchiyomi/issues/204)).
+Thank you.
 
 ### Completed only when a series has ended
 
@@ -15,6 +18,21 @@
   tracker never moves backwards.
 - **Series this already marked Completed** go back to Reading the next time you finish a new chapter of them. You can
   also fix them on the tracker straight away.
+
+### The whole unread count
+
+- **The unread tag on a series shows the whole number**, for example "1,150", instead of stopping at "99+". Before,
+  nearly every long series showed the same "99+". Hover the tag to see that it counts unread chapters.
+
+### Chapter totals, and Homepage
+
+- **Admin → Overview** shows how many chapters your library holds, next to the series count.
+- **[Homepage](https://gethomepage.dev)'s own Komga widget works with Uchiyomi.** It shows your libraries, series
+  and chapters, with a read token and nothing to map. The user guide has the snippet (section 9, *On a dashboard*).
+- `GET /api/admin/stats` also gives `booksTotal`, every chapter as one number, for your own dashboard tiles.
+  Uchiyomi doesn't record volumes, so there is no volume count.
+- For Komga apps, `GET /api/v1/books` now lists every chapter you can see; before, it was always empty. So the
+  *Books* type in Mihon's Komga extension lists them too.
 
 ### Upgrading
 
