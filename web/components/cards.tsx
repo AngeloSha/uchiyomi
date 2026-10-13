@@ -20,6 +20,18 @@ import { publicCoverFallback } from '@/lib/coverFallback';
 import { anilistNumbers, type SortValue } from '@/lib/sortValue';
 import { coverProgress, seriesProgress } from '@/lib/seriesProgress';
 
+/**
+ * The unread count on a series' tag (v0.61.2, #202): the whole number, grouped the way the reader's language groups
+ * digits ("1,150"). It stopped at "99+", which in a library of long series said the same thing on nearly every cover.
+ * The tooltip says what it counts, because a bare number on a cover reads as the chapter total (that is how #202 read
+ * it). The direction stays on the TEXT, as before: a grouped number is one left-to-right run in Arabic too.
+ * Reintroduce the cap: "the unread tag says the whole count" in v600Library.test.ts reads "99+".
+ */
+function UnreadCount({ n }: { n: number }) {
+  const label = tr('{n} unread', { n: numberText(n) });
+  return <span dir="ltr" data-unread={n} className="tabular-nums" title={label} aria-label={label}>{numberText(n)}</span>;
+}
+
 /** Pointer-tracked 3D tilt + moving glare for cover cards. Desktop-only (hover+fine pointer),
  *  disabled under prefers-reduced-motion; on touch the handlers never fire so nothing changes. */
 function useTilt() {
@@ -176,13 +188,13 @@ export function SeriesCard({ series, w = 'w-32', eager = false, note }: {
             <IcHeart width={14} height={14} fill="currentColor" stroke="none" />
           </span>
         )}
-        {/* dir="ltr": "99+" is a number and a sign, and in Arabic the paragraph's direction put the sign first ("+99").
-            Squared (v0.60.0), as every count tag in the app is since "no more pills". ⚠️ The direction on the TEXT, never
+        {/* dir="ltr" (UnreadCount): "99+" was a number and a sign, and in Arabic the paragraph's direction put the sign
+            first ("+99"); a grouped count is one run too. Squared (v0.60.0), as every count tag in the app is since "no more pills". ⚠️ The direction on the TEXT, never
             on the positioned box: a box's own direction decides which side `end` is, and an ltr box sat top-right in an
             Arabic page (discoverSearch.test.ts says the same of Discover's 18+ mark). */}
         {unread > 0 && (
           <span className="absolute end-2 top-2 z-10 rounded-[4px] bg-accent px-2 py-0.5 text-[11px] font-bold text-black shadow-glow">
-            <span dir="ltr" data-unread={unread}>{unread > 99 ? '99+' : unread}</span>
+            <UnreadCount n={unread} />
           </span>
         )}
         {/* Bottom-end: NEW owns bottom-start, the unread count owns top-end, favourite owns top-start -- logical sides, so
@@ -324,11 +336,11 @@ export function SeriesTile({ series, eager = false, selectable, selected, onTogg
             <IcWifiOff width={11} height={11} />
           </span>
         )}
-        {/* dir="ltr" on the text, as SeriesCard's: "99+" read "+99" in Arabic, and on the box it put the box top-right there.
+        {/* dir="ltr" on the text (UnreadCount), as SeriesCard's: "99+" read "+99" in Arabic, and on the box it put the box top-right there.
             Squared, as SeriesCard's. */}
         {unread > 0 && (
           <span className={`absolute end-1.5 top-1.5 z-10 rounded-[4px] bg-accent font-bold text-black ${compact ? 'px-1 text-[9px]' : 'px-1.5 py-0.5 text-[10px]'}`}>
-            <span dir="ltr" data-unread={unread}>{unread > 99 ? '99+' : unread}</span>
+            <UnreadCount n={unread} />
           </span>
         )}
         {(series.yomi?.newCount ?? 0) > 0 && (
@@ -432,7 +444,7 @@ export function SeriesRow({ series, eager = false, selectable, selected, onToggl
           )}
           {unread > 0 && (
             <span className="rounded-[4px] bg-accent px-1.5 py-0.5 text-[10px] font-bold text-black">
-              <span dir="ltr" data-unread={unread}>{unread > 99 ? '99+' : unread}</span>
+              <UnreadCount n={unread} />
             </span>
           )}
         </span>

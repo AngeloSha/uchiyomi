@@ -95,14 +95,18 @@ let persistScan: () => Promise<any>, runCleanupOnce: () => Promise<any>;
 let readerId = '', otherId = '';
 const tok: Record<string, string> = {};
 
-/** The MAL push, the only tracker call a stub can see (trackers.int.test.ts does the same). */
+/** The MAL push, the only tracker call a stub can see (trackers.int.test.ts does the same). Since v0.61.2 (#201) a push
+ *  reads the series first -- a GET, answered as a series still coming out and not on the list -- and only the write
+ *  counts. */
 const pushes: Array<{ url: string; body: string }> = [];
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (u: any, init?: any) => {
   const url = String(u);
   if (!/api\.myanimelist\.net/.test(url)) return realFetch(u, init);
+  const answer = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: { 'content-type': 'application/json' } });
+  if (String(init?.method ?? 'GET') === 'GET') return answer({ status: 'currently_publishing', num_chapters: 0 });
   pushes.push({ url, body: String(init?.body ?? '') });
-  return new Response(JSON.stringify({ status: 'reading' }), { status: 200, headers: { 'content-type': 'application/json' } });
+  return answer({ status: 'reading' });
 }) as typeof fetch;
 
 before(async () => {

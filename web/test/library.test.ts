@@ -661,17 +661,22 @@ test('the Library asks for one card per work, and the card names the work\'s lan
   assert.match(cards, /libraryCaption\(series\.edition\.langs, series\.lang\)/, 'the shown edition is not the one marked');
 });
 
-test('a capped count reads "99+" in Arabic too: every "99+" sits in a left-to-right box', () => {
+test('a count reads the same in Arabic: the unread tag and the nav ring\'s "99+" sit in a left-to-right box', () => {
   // v0.55.7 integration (lane C's report): the Library tile's unread badge read "+99" in Arabic -- "99+" is a number and
-  // a sign, and the sign took the right-to-left paragraph's side. The tiles' badges and the nav ring's count say it.
-  // Reintroduce by dropping a `dir="ltr"`: the element that renders that "99+" is named.
-  for (const f of ['components/cards.tsx', 'components/ProgressRing.tsx']) {
-    const src = code(read(f));
-    // Each element that renders a capped count -- `'99+'` inline, or ringCount's -- opens with dir="ltr".
-    const opens = [...src.matchAll(/<span\b[^>]*>\s*\{(?:unread > 99 \? '99\+' : unread|n)\}/g)].map((m) => m[0]);
-    assert.ok(opens.length > 0, `${f}: no capped count found -- the scan no longer sees the badge`);
-    for (const o of opens) assert.match(o, /\bdir="ltr"/, `${f}: a capped count is not left-to-right: ${o.replace(/\s+/g, ' ').slice(0, 140)}`);
-  }
-  // ringCount is where the nav ring's count is capped, and the one place it is.
+  // a sign, and the sign took the right-to-left paragraph's side. Since v0.61.2 (#202) the tiles say the whole count
+  // ("1,150", one grouped run) through UnreadCount; the nav ring's count is still capped. Reintroduce by dropping a
+  // `dir="ltr"`: the element is named.
+  const cards = code(read('components/cards.tsx'));
+  const tag = /function UnreadCount\([^)]*\) \{[\s\S]*?return (<span\b[^>]*>)\{numberText\(n\)\}<\/span>;/.exec(cards);
+  assert.ok(tag, 'cards.tsx: UnreadCount no longer renders the count -- the scan no longer sees the tag');
+  assert.match(tag![1], /\bdir="ltr"/, `cards.tsx: the unread count is not left-to-right: ${tag![1]}`);
+  assert.equal((cards.match(/<UnreadCount n=\{unread\} \/>/g) ?? []).length, 3, 'every unread tag (card, tile, row) goes through UnreadCount');
+  assert.doesNotMatch(cards, /'99\+'/, 'cards.tsx caps a count again');
+  const ring = code(read('components/ProgressRing.tsx'));
+  const opens = [...ring.matchAll(/<span\b[^>]*>\s*\{n\}/g)].map((m) => m[0]);
+  assert.ok(opens.length > 0, 'ProgressRing.tsx: no ring count found -- the scan no longer sees it');
+  for (const o of opens) assert.match(o, /\bdir="ltr"/, `ProgressRing.tsx: the ring count is not left-to-right: ${o.replace(/\s+/g, ' ').slice(0, 140)}`);
+  // ringCount is where the nav ring's count is capped, and the one place it is: three characters, so the tag on an icon
+  // keeps its shape.
   assert.match(read('lib/ring.ts'), /return n > 99 \? '99\+' : String\(Math\.floor\(n\)\);/);
 });

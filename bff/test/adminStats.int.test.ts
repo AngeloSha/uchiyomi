@@ -109,6 +109,27 @@ test('admin member activity', { skip }, async (t) => {
       assert.equal(r.total, 0);
     });
 
+    await t.test('it counts every chapter the way the series list does, over the series it counts (#204)', async () => {
+      // v0.61.2: a dashboard (Homepage's custom API widget) maps top-level numbers and cannot sum each series'
+      // booksCount, so the chapters went uncounted. Reintroduce by dropping `booksTotal` from the route: undefined here.
+      const stats = async () => (await app.inject({ method: 'GET', url: '/api/admin/stats', headers: auth })).json();
+      try {
+        const before = await stats();
+        assert.equal(typeof before.booksTotal, 'number', 'no booksTotal in the stats');
+        // The stored count is what each series' booksCount says, so that is what is summed.
+        await q(`UPDATE lib_series SET books_count = 41 WHERE id = 's_as_old'`);
+        const more = await stats();
+        assert.equal(more.booksTotal - before.booksTotal, 40, 'a series grown by 40 chapters adds 40');
+        // A deleted series leaves both numbers together: the chapters are counted over the series seriesTotal counts.
+        await q(`UPDATE lib_series SET deleted_at = now() WHERE id = 's_as_old'`);
+        const gone = await stats();
+        assert.equal(more.booksTotal - gone.booksTotal, 41, 'a deleted series took its chapters with it');
+        assert.equal(more.seriesTotal - gone.seriesTotal, 1, 'and itself');
+      } finally {
+        await q(`UPDATE lib_series SET books_count = 1, deleted_at = NULL WHERE id = 's_as_old'`);
+      }
+    });
+
     await t.test('it says which version is running, for the foot of the admin menu (#150)', async () => {
       // v0.55.4: the admin rail and the phone hero print it; before, only Health's Version card knew it. Reintroduce by
       // dropping `version: appVersion()` from the route: this finds no version.

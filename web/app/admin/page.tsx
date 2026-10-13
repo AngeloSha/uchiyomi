@@ -8,7 +8,7 @@ import { api, ApiError, img } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { triggerRefresh } from '@/lib/refresh';
 import { scheduleText, taskResult } from '@/lib/tasks';
-import { bytes, relativeTime } from '@/lib/format';
+import { bytes, numberText, relativeTime } from '@/lib/format';
 import { shownDeviceName } from '@/lib/device';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
@@ -180,7 +180,11 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
   // Intl.PluralRules and a rules table; "1 members" does need fixing, and every language here can express
   // both forms as two strings.
   const facts = [
-    stats ? (stats.seriesTotal === 1 ? tr('1 series') : tr('{n} series', { n: stats.seriesTotal })) : null,
+    stats ? (stats.seriesTotal === 1 ? tr('1 series') : tr('{n} series', { n: numberText(stats.seriesTotal) })) : null,
+    // v0.61.2 (#204): every chapter across them, as the series list counts them; grouped, because it runs to tens of
+    // thousands. A server older than the field sends none, and the fact is simply left out.
+    typeof stats?.booksTotal === 'number'
+      ? (stats.booksTotal === 1 ? tr('1 chapter') : tr('{n} chapters', { n: numberText(stats.booksTotal) })) : null,
     // Desktop is one person: "1 member" there would describe a household that does not exist.
     stats && !isDesktop() ? (stats.members === 1 ? tr('1 member') : tr('{n} members', { n: stats.members })) : null,
     stats ? tr('{size} cached', { size: bytes(stats.cacheBytes) }) : null,

@@ -735,6 +735,35 @@ export const owned = {
     return page(rows.map((r) => bookDto({ ...r, series_title: st })), t, pg, size);
   },
 
+  /**
+   * Every chapter this viewer may list, a page of them (v0.61.2, #204): the Komga API's GET /api/v1/books, which a
+   * Komga client reads for the library's chapter count (`totalElements`) -- Homepage's Komga widget, for its Books
+   * tile. Listed as the Library lists series (browsable: soft delete, merge, the grants, the age cap and the 18+ hide)
+   * and as each series lists its chapters (booksSrc: overrides, hidden notice chapters left out); by series title, then
+   * number. `search` matches a chapter's or its series' name; `readyOnly` leaves out pruned tombstones.
+   */
+  allBooks: async (ctx: ViewCtx, o: { page: number; size: number; desc: boolean; search: string | null; libraryIds: string[]; readyOnly: boolean }) => {
+    const p = new Params();
+    const from = `${booksSrc(ctx, p, 'b')} ${SERIES_TITLE_JOIN.replace('%col%', 'b.series_id')}`;
+    const where = [browsable('s', ctx, p)];
+    if (o.search) {
+      const term = p.add(`%${o.search}%`);
+      where.push(`(b.title ILIKE ${term} OR ${SERIES_TITLE_SQL} ILIKE ${term})`);
+    }
+    if (o.libraryIds.length) where.push(`s.library_id = ANY(${p.add(o.libraryIds)})`);
+    if (o.readyOnly) where.push('b.pruned_at IS NULL');
+    const cond = where.join(' AND ');
+    const t = (await one<{ c: number }>(`SELECT count(*)::int AS c FROM ${from} WHERE ${cond}`, [...p.values] as any[]))?.c ?? 0;
+    const dir = o.desc ? 'DESC' : 'ASC';
+    const rows = await q(
+      `SELECT b.*, ${SERIES_TITLE_SQL} AS series_title FROM ${from} WHERE ${cond}
+        ORDER BY ${SERIES_TITLE_SQL} ${dir}, b.series_id ${dir}, b.number ${dir}, b.file ${dir}
+        LIMIT ${p.add(o.size)} OFFSET ${p.add(o.page * o.size)}`,
+      p.values as any[],
+    );
+    return page(rows.map(bookDto), t, o.page, o.size);
+  },
+
   book: async (ctx: ViewCtx, id: string) => {
     const p = new Params();
     const bsrc = booksSrc(ctx, p, 'b');

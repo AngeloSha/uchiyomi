@@ -1657,7 +1657,9 @@ PATCH  /api/admin/import/candidates/:cid
 ```
 
 **Overview.** `GET /api/admin/stats` is what the admin header and Overview show: `libraries`, `seriesTotal`,
-`members`, `cacheBytes`, `lastScan`, `backlog` {chapters, series}, `database` (`embedded` or `external`) and each
+`booksTotal` (since v0.61.2, [#204](https://github.com/AngeloSha/uchiyomi/issues/204): every chapter across those
+series, as each series' `booksCount` counts them), `members`, `cacheBytes`, `lastScan`, `backlog` {chapters, series},
+`database` (`embedded` or `external`) and each
 member's recent reading (`activity`). Since v0.55.4 ([#150](https://github.com/AngeloSha/uchiyomi/issues/150)) it also
 answers `version`, the running version as the server's own package.json says it, or null when that cannot be read; the
 foot of the admin menu prints it. Whether a newer one exists is Health's `update` check (`GET /api/admin/health`), which
@@ -2837,7 +2839,9 @@ accepted and ignored), the same bytes and cache as `/img/lib/books/:id/page/:n`;
 same bytes as their `/img/lib/…/thumb` twins (`?w=800|1600` on the series cover). Every image is served
 `Cache-Control: private` — the whole image cache is, since this release, because those bytes are authorised
 per viewer and `public` told a shared proxy they were the same for everyone. `GET /api/v1/books` (the
-extension's Books search type) is always an empty page: there is no chapter-level search. `genres` and
+extension's Books type) lists every chapter the credential may list, a page at a time, by series title then number,
+with `search` (a chapter's or its series' name), `library_id` and `media_status=READY` (since v0.61.2, #204; it was
+always an empty page): its `totalElements` is the library's chapter count, which Homepage's Komga widget shows. `genres` and
 `authors` (each `{name, role: 'writer'}`) are real over the browsable series; `tags` and `publishers` are
 `[]`; `collections`, `collections/:id/series` and `readlists` are **empty pages** on purpose — a collection
 would name series this credential's cap or grants hide, and an id is a disclosure — and `readlists/:id` and

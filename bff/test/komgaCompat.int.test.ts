@@ -529,7 +529,8 @@ test('the Komga-compatible API: credentials, the session cookie, and what a view
       assert.deepEqual((await get('/api/v1/tags', key(tok.read))).json(), []);
       assert.deepEqual((await get('/api/v1/publishers', key(tok.read))).json(), []);
       assert.deepEqual((await get('/api/v1/authors', key(tok.read))).json(), [{ name: 'Someone', role: 'writer' }]);
-      for (const url of ['/api/v1/collections?unpaged=true', '/api/v1/collections/c1/series?page=0', '/api/v1/readlists?search=&page=0', '/api/v1/books?search=&page=0']) {
+      // (/api/v1/books left this list in v0.61.2: it lists the chapters now, the next test.)
+      for (const url of ['/api/v1/collections?unpaged=true', '/api/v1/collections/c1/series?page=0', '/api/v1/readlists?search=&page=0']) {
         const r = await get(url, key(tok.read));
         assert.equal(r.statusCode, 200, url);
         assert.deepEqual(Object.keys(r.json()).sort(), PAGE_KEYS, url);
@@ -540,6 +541,37 @@ test('the Komga-compatible API: credentials, the session cookie, and what a view
       assert.equal(me.statusCode, 200);
       assert.deepEqual({ id: me.json().id, email: me.json().email, roles: me.json().roles, all: me.json().sharedAllLibraries }, { id: reader, email: READER, roles: ['USER'], all: true });
       assert.equal(me.headers['cache-control'], 'no-store');
+    });
+
+    await t.test('the books list is every chapter the token may see, as Komga answers it (#204)', async () => {
+      // v0.61.2: it was always an empty page, so Homepage's Komga widget, which reads `totalElements` for its Books tile,
+      // showed 0 for every library. Reintroduce the empty page (springPage([], 0, …) in the route): every total reads 0.
+      const list = async (url: string, tk = tok.read) => {
+        const r = await get(url, key(tk));
+        assert.equal(r.statusCode, 200, url);
+        return r.json();
+      };
+      // The extension's own call for its "Books" type, and the widget's (no query at all).
+      const plain = await list('/api/v1/books?search=&page=0&size=2');
+      assert.deepEqual(Object.keys(plain).sort(), PAGE_KEYS, 'the page shape every Komga client reads');
+      assert.equal(plain.totalElements, 3, 'the shelf\'s three chapters, the read-and-pruned one included, and no 18+ one');
+      assert.deepEqual(plain.content.map((b: any) => b.id), [B1, B2], 'by series, then number, two to a page');
+      assert.equal(plain.last, false);
+      assert.deepEqual((await list('/api/v1/books?page=1&size=2')).content.map((b: any) => b.id), [B3]);
+      assert.equal((await list('/api/v1/books')).totalElements, 3, 'no query at all: the count Homepage shows');
+      // As the chapter list reads its filters: READY leaves the tombstone out.
+      assert.equal((await list('/api/v1/books?media_status=READY')).totalElements, 2);
+      // The same 18+ rule as the series list: a show_adult token lists the grown-up shelf and the rated title too.
+      const adult = await list('/api/v1/books?size=10', tok.adult);
+      assert.equal(adult.totalElements, 5);
+      assert.deepEqual(adult.content.map((b: any) => b.id), [BX, B1, B2, B3, BR], 'by series title: Grown, Main, Rated');
+      // `search` matches a chapter or its series by name.
+      assert.deepEqual((await list('/api/v1/books?search=grown', tok.adult)).content.map((b: any) => b.id), [BX]);
+      assert.equal((await list('/api/v1/books?search=grown')).totalElements, 0, 'not for a token that hides 18+');
+      assert.equal((await list('/api/v1/books?library_id=lib_nothing')).totalElements, 0, 'library_id narrows it');
+      // Every row is the book the single-book route answers.
+      assert.equal(plain.content[0].seriesId, S_MAIN);
+      assert.equal(plain.content[0].seriesTitle, 'Kc Main Title');
     });
 
     await t.test('the PUT validates its body and treats zero as a no-op', async () => {

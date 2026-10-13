@@ -314,8 +314,9 @@ test('the tags are squared and mirror in Arabic, and the select bubble no longer
   const fav = series({ yomi: { favorite: true, rating: null, unread: 120, newCount: 2 } });
   for (const [name, el] of [['tile', SeriesTile], ['card', SeriesCard], ['row', SeriesRow]] as const) {
     const html = mounted(createElement(el as typeof SeriesTile, { series: fav }));
-    const unread = /<span ([^>]*)><span dir="ltr" data-unread="120">99\+<\/span><\/span>/.exec(html);
-    assert.ok(unread, `${name}: the unread count is not capped "99+" in a left-to-right box`);
+    // v0.61.2 (#202): the whole count, no "99+", with a tooltip that says it is the UNREAD count.
+    const unread = /<span ([^>]*)><span dir="ltr" data-unread="120" class="tabular-nums" title="120 unread" aria-label="120 unread">120<\/span><\/span>/.exec(html);
+    assert.ok(unread, `${name}: the unread tag does not say the whole count, left to right, with what it counts`);
     assert.match(unread![1], /^class="[^"]*"$/, `${name}: the tag carries its own direction (or another attribute)`);
     assert.match(unread![1], /rounded-\[4px\]/, `${name}: a capsule tag`);
     assert.doesNotMatch(unread![1], /rounded-full/, `${name}: a capsule tag`);
@@ -419,4 +420,16 @@ test('the toolbar sticks under the top bar, the filter panel clears it, and the 
   // The phone's filter sheet pins Clear all and Done under the list.
   const sheet = slice(src, "<Sheet title={tr('Filters')}", '</Sheet>');
   assert.match(sheet, /footer=\{[\s\S]*?clearAll\(false\)[\s\S]*?\{tr\('Clear all'\)\}[\s\S]*?setSheet\(false\)\} className="btn-key btn-key-primary h-10 flex-1">\{tr\('Done'\)\}/, 'Done is not pinned under the filters');
+});
+
+test('the unread tag says the whole count, grouped as the language groups digits (#202)', () => {
+  // It stopped at "99+": on a library of long series nearly every cover said the same thing, and the reporter read it as
+  // the chapter total. Reintroduce the cap in UnreadCount (components/cards.tsx): every tag below reads "99+".
+  const big = series({ yomi: { favorite: false, rating: null, unread: 1150, newCount: 0 } });
+  for (const [name, el] of [['tile', SeriesTile], ['card', SeriesCard], ['row', SeriesRow]] as const) {
+    const html = mounted(createElement(el as typeof SeriesTile, { series: big }));
+    assert.match(html, /<span dir="ltr" data-unread="1150" class="tabular-nums" title="1,150 unread" aria-label="1,150 unread">1,150<\/span>/,
+      `${name}: 1150 unread is not said in full`);
+    assert.doesNotMatch(html, /99\+/, `${name}: a capped count is left`);
+  }
 });

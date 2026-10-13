@@ -11967,6 +11967,11 @@ paths:
                 properties:
                   libraries: { type: array, items: { type: object, properties: { name: { type: string } } } }
                   seriesTotal: { type: integer }
+                  booksTotal:
+                    type: integer
+                    description: >-
+                      Since v0.61.2 (#204), every chapter in the series seriesTotal counts, as each series' booksCount
+                      counts them (a notice chapter the admin hides left out).
                   cacheBytes: { type: integer }
                   lastScan: { type: [integer, "null"], description: When the last scan started, in ms since the epoch. }
                   members: { type: integer }
@@ -12275,12 +12280,20 @@ paths:
     get:
       tags:
         - komga
-      summary: "The extension's Books search type. Always an empty page: this library has no chapter-level search."
+      summary: Every chapter the credential may list, a page at a time (since v0.61.2; an empty page before).
+      description: >-
+        The extension's Books type, and the chapter count a Komga client reads from `totalElements` (Homepage's Komga
+        widget shows it as its Books tile, #204). Listed as the series list lists series -- soft delete, merge, the grants,
+        the age cap and the token's 18+ hide -- and as each series lists its chapters (overrides; a notice chapter the
+        admin hides left out), by series title then number. `search` matches a chapter's or its series' name.
       operationId: getApiV1Books
       parameters:
         - { name: search, in: query, required: false, schema: { type: string } }
         - { name: page, in: query, required: false, schema: { type: integer, minimum: 0 } }
         - { name: size, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500 } }
+        - { name: sort, in: query, required: false, schema: { type: string }, description: "`…,desc` reverses the order." }
+        - { name: library_id, in: query, required: false, schema: { type: string }, description: Only these libraries (repeatable). }
+        - { name: media_status, in: query, required: false, schema: { type: string }, description: "`READY` leaves out the read chapters the cleanup pruned." }
       security:
         - komgaApiKey: []
         - komgaBearer: []
@@ -12288,7 +12301,7 @@ paths:
         - komgaSession: []
       responses:
         "200":
-          description: An empty KomgaPage (content [], last true).
+          description: A KomgaPage of KomgaBooks; `totalElements` is the whole count.
         "401":
           description: Not authenticated
         "429":

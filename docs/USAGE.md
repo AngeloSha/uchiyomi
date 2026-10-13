@@ -2834,6 +2834,40 @@ token on a non-admin account still can't reach the admin API. See [docs/api.md](
 
 ![API tokens](shots/crop-tokens.webp)
 
+### On a dashboard (Homepage)
+
+[Homepage](https://gethomepage.dev)'s own **Komga** widget works with Uchiyomi (since v0.61.2,
+[#204](https://github.com/AngeloSha/uchiyomi/issues/204)). It shows your libraries, series and chapters, with
+nothing to map. Make a **read** token above and give it to the widget:
+
+```yaml
+- Uchiyomi:
+    href: https://manga.example.com
+    widget:
+      type: komga
+      url: http://192.168.1.10:8080   # the address you open Uchiyomi at
+      key: uy_your_read_token
+```
+
+Leave out `version`: Uchiyomi answers the Komga API that Homepage's default version expects. The tile counts what
+the token's account may see: its libraries, its age limit, and 18+ titles only if the token includes them.
+
+For your own tiles, `GET /api/admin/stats` with an **admin** token answers `seriesTotal` and `booksTotal` (every
+chapter) as plain numbers, which Homepage's **Custom API** widget can show:
+
+```yaml
+    widget:
+      type: customapi
+      url: http://192.168.1.10:8080/api/admin/stats
+      headers:
+        Authorization: Bearer uy_your_admin_token
+      mappings:
+        - { field: seriesTotal, label: Series, format: number }
+        - { field: booksTotal, label: Chapters, format: number }
+```
+
+Uchiyomi does not record volumes, so there is no volume count.
+
 ## 10. Tracking: AniList, MyAnimeList and Kitsu
 
 Connect your AniList account once under **Profile → Connections → Progress tracking** (tap **Connect** on the

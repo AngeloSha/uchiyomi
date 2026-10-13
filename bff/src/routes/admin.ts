@@ -59,7 +59,7 @@ import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSour
 import { cleanSourceOrder, invalidateSourcePrefs } from '../lib/sourcePrefs';
 import { borrowNamesFor, clearBorrowedNames } from '../lib/borrowNames';
 import { lookupsChanged } from '../lib/discoverIdentity';
-import { sanitiseNoticeTypes } from '../lib/noticeChapters';
+import { sanitiseNoticeTypes, visibleBookCount } from '../lib/noticeChapters';
 import { seriesHidesNotices, hiddenCount, refreshNoticesActive } from '../lib/noticeSettings';
 import { SERIES_TYPES, isKnownSeriesType, learnTypeFromAniList } from '../lib/seriesType';
 import {
@@ -4468,9 +4468,13 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/admin/stats', async () => {
-    const [libs, seriesPage, cb, members, backlog, activity] = await Promise.all([
+    const [libs, seriesPage, books, cb, members, backlog, activity] = await Promise.all([
       komga.libraries(SYSTEM_CTX).catch(() => [] as any[]),
       komga.searchSeries(SYSTEM_CTX, {}, 0, 1).catch(() => ({ totalElements: 0 } as any)),
+      // v0.61.2 (#204): every chapter, as each series' booksCount counts them (a notice chapter the admin hides left out),
+      // over the series seriesTotal counts. A dashboard reads one number instead of paging the series list to sum it.
+      one<{ c: number }>(`SELECT coalesce(sum(${visibleBookCount('s')}), 0)::int AS c FROM lib_series s WHERE ${visibleToAll('s')}`)
+        .catch(() => null),
       cacheBytes().catch(() => 0),
       one<{ c: number }>('SELECT count(*)::int AS c FROM users'),
       // How far behind the library is, from what the sources said last time the updater asked. Before the
@@ -4512,6 +4516,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     return {
       libraries: (libs as any[]).map((l) => ({ name: l.name })),
       seriesTotal: (seriesPage as any).totalElements ?? 0,
+      booksTotal: books?.c ?? 0,
       cacheBytes: cb,
       lastScan: runtime.lastScan || null,
       members: members?.c ?? 0,
