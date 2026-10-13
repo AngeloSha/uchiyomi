@@ -1,5 +1,7 @@
 # Uchiyomi — User Guide
 
+> 🌐 The tour, the reader on phones and tablets, and the downloader explained: [uchiyomi.com](https://uchiyomi.com) · [manga reader](https://uchiyomi.com/manga-reader) · [manga downloader](https://uchiyomi.com/manga-downloader).
+
 Everything you can do in Uchiyomi, screen by screen. To install it see [INSTALL.md](INSTALL.md); for
 environment variables see [CONFIGURATION.md](CONFIGURATION.md).
 

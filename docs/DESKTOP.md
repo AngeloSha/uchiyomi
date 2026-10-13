@@ -1,5 +1,7 @@
 # Uchiyomi Desktop (beta)
 
+> 🌐 Downloads and a tour: [uchiyomi.com/download](https://uchiyomi.com/download).
+
 Uchiyomi Desktop is Uchiyomi as a program for **Windows** and **Mac**. The first time you open it, it asks how
 you want to use it:
 

@@ -1,5 +1,7 @@
 # Extensions (Mihon / Tachiyomi sources)
 
+> 🌐 Adding a repository, with pictures: [uchiyomi.com/extensions](https://uchiyomi.com/extensions). What a server adds to Mihon: [uchiyomi.com/mihon-server](https://uchiyomi.com/mihon-server).
+
 Uchiyomi ships **generic engines** that reach whole families of manga sites by URL, and MangaDex. On top of
 that it can use the **Mihon / Tachiyomi extension ecosystem** — the same extensions those apps use, well over a
 thousand of them.

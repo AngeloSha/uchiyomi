@@ -1,5 +1,7 @@
 # Installing Uchiyomi
 
+> 🌐 The same install as a guided walk-through, with the compose file explained line by line: [uchiyomi.com/manga-server](https://uchiyomi.com/manga-server).
+
 The two-command quick start lives in the [README](../README.md). This page is everything else: the one-click
 app stores, what each container is for, keeping it up to date, and putting it behind a domain.
 
