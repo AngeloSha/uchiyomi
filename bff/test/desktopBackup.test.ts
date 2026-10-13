@@ -90,3 +90,29 @@ test('a desktop backup runs the bundled pg_dump without the password on its comm
   assert.equal(r.configEmpty, false);
   assert.ok(!existsSync(join(r.dir, 'config.tar.gz')));
 });
+
+test('a backups folder inside the config folder is never zipped into the config (#199)', async () => {
+  // The server's tar is backupSkips.test.ts; this is the desktop's own walker. Reintroduce by dropping
+  // `if (skip.includes(name)) continue;` from zipConfig: the second run's config.zip holds the first run's db.sql.gz.
+  const { runBackup } = await import('../src/lib/backup');
+  const { env } = await import('../src/env');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const AdmZip = require('adm-zip');
+  const was = env.BACKUP_DIR;
+  env.BACKUP_DIR = join(DATA, 'config', 'backups');
+  process.env.PG_DUMP_PATH = FAKE;
+  try {
+    await new Promise((r) => setTimeout(r, 1100));
+    const first = await runBackup();
+    await new Promise((r) => setTimeout(r, 1100));
+    const second = await runBackup();
+    const names: string[] = new AdmZip(join(second.dir, 'config.zip')).getEntries().map((e: any) => e.entryName);
+    assert.ok(names.includes('sites.json'), `the config itself is zipped: ${names.join(' ')}`);
+    assert.deepEqual(names.filter((n) => n.startsWith('backups/')), [], 'the backups folder went into the config zip');
+    assert.ok(existsSync(join(first.dir, 'db.sql.gz')), 'the first run is still there to have been left out');
+    assert.deepEqual(readdirSync(second.dir).sort(), ['config.zip', 'db.sql.gz'], 'the run left its marker behind');
+  } finally {
+    delete process.env.PG_DUMP_PATH;
+    env.BACKUP_DIR = was;
+  }
+});

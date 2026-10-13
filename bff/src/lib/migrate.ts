@@ -1729,6 +1729,13 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS update_smart boolean NOT NU
 ALTER TABLE collections ADD COLUMN IF NOT EXISTS query jsonb;
 ALTER TABLE collections ADD COLUMN IF NOT EXISTS shared boolean NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS collections_shared_idx ON collections (shared) WHERE shared;
+
+-- v0.61.1 (#199): the nightly backup in Admin -> Settings -> Updates & schedules (lib/backup.ts backupSettings).
+-- backup_enabled false skips the nightly run (Run now still backs up); backup_keep is how many runs to keep, NULL meaning
+-- BACKUP_KEEP (14 unless set), so an install that set the variable keeps its number until one is saved there.
+-- Additive: v0.61.0 boots on this schema and ignores both.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS backup_enabled boolean NOT NULL DEFAULT true;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS backup_keep int;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

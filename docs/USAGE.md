@@ -2652,9 +2652,10 @@ with a fold (*How this works* / *What is sent, once a day*) that spells out exac
 **Updates & schedules**: the **Library update interval (hours)** (how often followed series are asked for new
 chapters), **Smart update checks** (since v0.61.0, off by default: the scheduled check asks a series that has been
 quiet for a long time less often, at least every three days, and every series at the normal rate while its next chapter
-is due by the release radar; *Check now* and everything you start yourself always ask at once), the **Backup time (hour,
-0–23)** of the nightly backup — change it and the pending timer is re-armed at
-once, so the next run is at the new hour — and, when the extension engine is configured, **Update extensions
+is due by the release radar; *Check now* and everything you start yourself always ask at once), **Nightly backup**
+(since v0.61.1, on by default), the **Backup time (hour, 0–23)** of the nightly backup — change it and the pending timer
+is re-armed at once, so the next run is at the new hour — and **Backups to keep** (since v0.61.1; section 12 has all
+three), and, when the extension engine is configured, **Update extensions
 automatically** and its check interval. **Look for failed chapters on other sources** controls the bounded,
 once-a-day source hunt described in section 4 and is on by default. **Library housekeeping**: **Delete read chapters** and its **Wait
 (days)**, below, **Repair the library nightly** (on by default), the job described under *Health* above, and
@@ -2979,7 +2980,8 @@ keeps its own separate storage. Private / Incognito windows keep nothing at all 
 
 Uchiyomi backs itself up. Every night (03:00 by default) it writes a compressed dump of the database plus an
 archive of your config to `/backups`, keeping the most recent 14 runs. You can also run it on demand from
-**Admin → Tasks → Backup database & config → Run now**, which shows the last run time and size.
+**Admin → Tasks → Backup database & config → Run now**, which shows the last run time and size. All three — whether
+it runs at night, the hour and how many runs to keep — are under **Admin → Settings → Updates & schedules** (below).
 
 > Worth doing once, on any install: confirm the image can actually dump, rather than trusting the panel.
 >
@@ -3006,10 +3008,24 @@ BACKUP_PATH=/mnt/backups/uchiyomi
 The directory must be writable by uid `10002` (the app's user):
 `docker run --rm -v /mnt/backups:/b alpine chown 10002:10002 /b/uchiyomi`
 
-Tune with `BACKUP_KEEP` (how many runs to retain, default 14) and the hour under
-**Admin → Settings → Updates & schedules → Backup time** (local time; since v0.39.0 it is a field there, and the
-pending timer is re-armed as soon as you change it, so the next run is at the new hour). Scripts can set the same
-thing with `PATCH /api/admin/settings {"backupHour": 4}`; the column is `server_settings.backup_hour`.
+**Admin → Settings → Updates & schedules** has three rows for it:
+
+- **Nightly backup** (since v0.61.1, on by default) — switch it off if you back up another way. Nothing then runs at
+  night and the Tasks row says *switched off · on demand*; **Run now** still makes a backup.
+- **Backup time** — the hour, local time (a field there since v0.39.0). The pending timer is re-armed as soon as you
+  change it, so the next run is at the new hour.
+- **Backups to keep** (since v0.61.1, 1–365) — how many runs are kept. Saving a lower number deletes nothing at once:
+  the oldest beyond it go after the next backup. The `BACKUP_KEEP` variable (default 14) is only where the field
+  starts, until you save a number there.
+
+Scripts can set the same things with `PATCH /api/admin/settings {"backupHour": 4, "backupKeep": 7, "backupEnabled": true}`;
+the columns are `server_settings.backup_hour`, `backup_keep` and `backup_enabled`.
+
+**A backup never includes the backup folder** (since v0.61.1), even when it is mapped inside the config folder —
+`/backups` on `appdata/uchiyomi/config/backups`, say, or both on one folder. Before v0.61.1 that layout made each
+backup carry every earlier one, so the folder grew exponentially whatever the number kept ([#199](https://github.com/AngeloSha/uchiyomi/issues/199)).
+If yours grew like that, you can delete the old oversized runs yourself; the new ones are small again, and the
+oversized ones also age out as new backups are kept.
 
 ### Restoring
 

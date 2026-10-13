@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3719
+    "strings": 3723
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -3722,5 +3722,9 @@
   "Kindle-style": "Façon Kindle",
   "Off": "Désactivé",
   "Where a tap turns the page: the shaded part goes back, the lit part goes on, the rest shows the controls. Automatic turns pages in Paged mode only.": "Où un toucher tourne la page : la partie ombrée revient en arrière, la partie claire avance, le reste affiche les commandes. Automatique ne tourne les pages qu’en mode par pages.",
-  "Keys and controller": "Touches et manette"
+  "Keys and controller": "Touches et manette",
+  "Nightly backup": "Sauvegarde nocturne",
+  "Save the database and the config folder every night. Turn it off if you back up another way; Run now under Tasks still makes one.": "Enregistre chaque nuit la base de données et le dossier de configuration. Désactivez-la si vous sauvegardez autrement ; « Lancer maintenant » dans Tâches en crée toujours une.",
+  "Backups to keep": "Sauvegardes à conserver",
+  "After each backup, the oldest beyond this number are deleted.": "Après chaque sauvegarde, les plus anciennes au-delà de ce nombre sont supprimées."
 }

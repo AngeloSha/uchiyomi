@@ -61,7 +61,7 @@ async function setup() {
 
 async function teardown(app: any, q: any) {
   await app.close();
-  await q('UPDATE server_settings SET backup_hour = 3, auto_follow_on_failure = true WHERE id = 1').catch(() => {});
+  await q('UPDATE server_settings SET backup_hour = 3, backup_enabled = true, backup_keep = NULL, auto_follow_on_failure = true WHERE id = 1').catch(() => {});
   await q(`DELETE FROM users WHERE username = $1`, [USER]).catch(() => {});
 }
 
@@ -132,6 +132,56 @@ test('the failed-chapter source hunt switch round-trips through admin settings',
     assert.equal(on.statusCode, 200, on.body);
     assert.equal(on.json().auto_follow_on_failure, true);
   } finally {
+    await teardown(app, q);
+  }
+});
+
+test('the nightly backup switch and the number to keep round-trip, and reach the Tasks list (v0.61.1, #199)', { skip }, async () => {
+  const { app, auth, patch, get, q, runtime } = await setup();
+  const { env } = await import('../src/env');
+  let rearmed = 0;
+  runtime.rearmBackup = () => { rearmed += 1; };
+  const backupTask = async () =>
+    (await app.inject({ method: 'GET', url: '/api/admin/tasks', headers: auth })).json().content.find((x: any) => x.id === 'backup');
+  try {
+    await q('UPDATE server_settings SET backup_enabled = true, backup_keep = NULL WHERE id = 1');
+    // Nothing saved yet: the page shows what the next run will keep, BACKUP_KEEP, not a blank or a guess.
+    // Reintroduce by returning the bare column: GET says null and the field shows 14 whatever the variable says.
+    assert.equal((await get()).backup_keep, env.BACKUP_KEEP);
+    assert.equal((await get()).backup_enabled, true, 'on by default');
+
+    // Off: stored, answered back, said on the Tasks row, and the scheduler told.
+    // Reintroduce by dropping backupEnabled from the zod schema: the PATCH is accepted and nothing changes.
+    const off = await patch({ backupEnabled: false });
+    assert.equal(off.statusCode, 200, off.body);
+    assert.equal(off.json().backup_enabled, false);
+    assert.equal((await get()).backup_enabled, false);
+    assert.equal(rearmed, 1, 'switching it did not re-arm the scheduler');
+    const task = await backupTask();
+    assert.equal(task?.schedule, 'switched off · on demand', `the Tasks list shows ${task?.schedule}`);
+    assert.equal(task?.scheduleKey, 'switched off · on demand', 'the page has no key to translate it by');
+
+    // The count: stored as given and refused outside 1-365, and saving it re-arms nothing (it deletes nothing either).
+    const keep = await patch({ backupKeep: 3 });
+    assert.equal(keep.statusCode, 200, keep.body);
+    assert.equal(keep.json().backup_keep, 3);
+    assert.equal((await q('SELECT backup_keep AS k FROM server_settings WHERE id = 1'))[0]?.k, 3);
+    for (const bad of [0, 366, 2.5, -1]) {
+      const rr = await patch({ backupKeep: bad });
+      assert.equal(rr.statusCode, 400, `backupKeep ${bad} was accepted`);
+    }
+    assert.equal((await get()).backup_keep, 3, 'a refused value was written anyway');
+    assert.equal(rearmed, 1, 'the count re-armed the scheduler');
+
+    // An unrelated save leaves both alone; back on, the row says the hour again.
+    await patch({ updaterHours: 6 });
+    assert.equal((await get()).backup_enabled, false);
+    const on = await patch({ backupEnabled: true });
+    assert.equal(on.json().backup_enabled, true);
+    assert.equal(rearmed, 2);
+    assert.equal((await backupTask())?.schedule, 'daily at 03:00');
+  } finally {
+    runtime.rearmBackup = null;
     await teardown(app, q);
   }
 });

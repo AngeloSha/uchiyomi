@@ -6812,7 +6812,8 @@ paths:
         priority, nothing blocked, two days of patience), backup_hour, the local hour (0-23) of the nightly
         backup, and auto_follow_on_failure, the on-by-default bounded source hunt after an ordinary scheduled
         chapter failure. The hunt never runs for interactive Add/Fetch or after a 403/429 refusal. Since v0.61.0
-        update_smart, the smart update checks (off by default; see updateSmart on PATCH).
+        update_smart, the smart update checks (off by default; see updateSmart on PATCH). Since v0.61.1
+        backup_enabled and backup_keep, the nightly backup's switch and how many runs it keeps.
       security:
         - bearer: []
       responses:
@@ -6860,6 +6861,18 @@ paths:
                     minimum: 0
                     maximum: 23
                     description: Local hour of the nightly backup. Default 3.
+                  backup_enabled:
+                    type: boolean
+                    description: >-
+                      Since v0.61.1, whether the nightly backup runs. On by default. Off skips the nightly run only;
+                      Run now under Tasks still backs up.
+                  backup_keep:
+                    type: integer
+                    minimum: 1
+                    maximum: 365
+                    description: >-
+                      Since v0.61.1, how many backup runs are kept: the saved number, or BACKUP_KEEP (14 unless set)
+                      while none has been saved. The oldest beyond it are deleted after each backup.
                   auto_follow_on_failure:
                     type: boolean
                     description: >-
@@ -6999,6 +7012,18 @@ paths:
                   description: >-
                     Local hour of the nightly backup. The pending timer is re-armed at once, so the change
                     applies to the next run rather than the one after.
+                backupEnabled:
+                  type: boolean
+                  description: >-
+                    Since v0.61.1 (#199), the nightly backup's switch. Off skips the nightly run (the Tasks row says
+                    `switched off · on demand`); Run now still backs up.
+                backupKeep:
+                  type: integer
+                  minimum: 1
+                  maximum: 365
+                  description: >-
+                    Since v0.61.1 (#199), how many backup runs to keep. Saving deletes nothing; the oldest beyond
+                    it go after the next backup.
                 autoFollowOnFailure:
                   type: boolean
                   description: >-

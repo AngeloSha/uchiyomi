@@ -455,9 +455,18 @@ function SchedulesSection({ data, save }: { data: any; save: Save }) {
       <SwitchRow label={tr('Smart update checks')}
         help={tr('Ask series that have been quiet for a long time less often, at least every 3 days, and every series as usual while its next chapter is due. Check now always asks at once.')}
         on={data.update_smart === true} onChange={(next) => save({ updateSmart: next })} />
+      {/* v0.61.1 (#199): the nightly's switch and how many runs to keep. ON by default (`backup_enabled NOT NULL DEFAULT
+          true`), which `!== false` reads as: a server that does not send the key yet backs up. The keep count deletes
+          nothing when saved; the oldest go after the next backup (bff lib/backup.ts), which the help says. */}
+      <SwitchRow label={tr('Nightly backup')}
+        help={tr('Save the database and the config folder every night. Turn it off if you back up another way; Run now under Tasks still makes one.')}
+        on={data.backup_enabled !== false} onChange={(next) => save({ backupEnabled: next })} />
       <NumberRow label={tr('Backup time (hour, 0–23)')} min={0} max={23} value={data.backup_hour ?? 3}
         help={isDesktop() ? `${nightly} ${tr('If the PC is off then, it runs the next time Uchiyomi opens.')}` : nightly}
         onSave={(n) => save({ backupHour: n })} />
+      <NumberRow label={tr('Backups to keep')} min={1} max={365} value={data.backup_keep ?? 14}
+        help={tr('After each backup, the oldest beyond this number are deleted.')}
+        onSave={(n) => save({ backupKeep: n })} />
       {data.extensions_configured && (
         <>
           <SwitchRow label={tr('Update extensions automatically')}

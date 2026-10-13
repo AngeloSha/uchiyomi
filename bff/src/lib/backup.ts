@@ -9,12 +9,13 @@
 // it cannot exec into the db container. `postgresql-client` is installed in the runtime image for this.
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
-import { createWriteStream } from 'fs';
+import { createWriteStream, type Dirent } from 'fs';
 import { createGzip } from 'zlib';
+import { randomBytes } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import { env } from '../env';
-import { q } from './db';
+import { q, one } from './db';
 import { isDesktop, forDesktop, DESKTOP_FLOORS } from './desktop';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const AdmZip = require('adm-zip');
@@ -110,16 +111,18 @@ function dumpSql(target: string): Promise<void> {
  * is pure JavaScript, and the shell's "Restore backup…" unpacks .zip (and a server's .tar.gz).
  * Written as `.part` and renamed, the same rule as the dump: a half-written archive must never look like one.
  */
-export async function zipConfig(from: string, to: string): Promise<void> {
+export async function zipConfig(from: string, to: string, skip: string[] = []): Promise<void> {
   const part = `${to}.part`;
   try {
     // Walked by hand rather than addLocalFolder: that stores directory entries with the platform separator
     // (`series-art\` on Windows), and its async twin strips every non-ASCII character from the names. Here
-    // every entry is a file, named with `/`, spelled exactly as on disk.
+    // every entry is a file, named with `/`, spelled exactly as on disk. `skip` is backupSkips(): the backup
+    // folder, wherever it shows up inside this one, is never part of it.
     const zip = new AdmZip();
     const walk = async (dir: string, rel: string): Promise<void> => {
       for (const e of await fs.readdir(dir, { withFileTypes: true })) {
         const name = rel ? `${rel}/${e.name}` : e.name;
+        if (skip.includes(name)) continue;
         if (e.isDirectory()) await walk(path.join(dir, e.name), name);
         else if (e.isFile()) zip.addFile(name, await fs.readFile(path.join(dir, e.name)));
       }
@@ -159,12 +162,78 @@ async function dirSize(dir: string): Promise<number> {
   return total;
 }
 
+/** The folders this task makes, one per run. Nothing else in BACKUP_DIR is ever pruned or left out. */
+const RUN_DIR = /^\d{8}-\d{6}$/;
+
+/**
+ * The nightly switch and how many runs to keep, as Admin → Settings → Updates & schedules has them (v0.61.1, #199).
+ * `backup_keep` NULL is "what BACKUP_KEEP says" (14 unless set), so an install that set the variable keeps its number
+ * until someone saves one on that page. Unreadable settings read as the defaults, on and BACKUP_KEEP: a database hiccup
+ * must neither skip a night nor prune by a number nobody chose.
+ */
+export async function backupSettings(): Promise<{ enabled: boolean; keep: number }> {
+  const row = await one<{ enabled: boolean | null; keep: number | null }>(
+    'SELECT backup_enabled AS enabled, backup_keep AS keep FROM server_settings WHERE id = 1',
+  ).catch(() => null);
+  const keep = Number(row?.keep);
+  return { enabled: row?.enabled !== false, keep: Number.isInteger(keep) && keep >= 1 && keep <= 365 ? keep : env.BACKUP_KEEP };
+}
+
+/** A folder name as tar's --exclude matches it literally: both tars (BusyBox in the all-in-one, GNU in the API image)
+ *  read the pattern with fnmatch, where a backslash makes the next character plain. */
+export const globLiteral = (s: string): string => s.replace(/[\\*?[\]]/g, '\\$&');
+
+/**
+ * The server's config archive: `tar` over CONFIG_DIR, leaving out `skip` (backupSkips). `./name` because members are
+ * named `./…` under `-C dir .`, which also anchors the pattern: `./backups` leaves out that folder and never a
+ * `series-art/backups` or a `backupsX`. Both tars were run against these arguments, odd names included.
+ */
+export const configTarArgs = (to: string, from: string, skip: string[]): string[] =>
+  ['-czf', to, ...skip.map((s) => `--exclude=./${globLiteral(s)}`), '-C', from, '.'];
+
+/**
+ * What to leave out of the config archive: wherever this run's backup folder shows up inside CONFIG_DIR.
+ *
+ * #199: with the backup folder inside the config folder -- `/backups` and `/config` mapped to one host folder, or to a
+ * folder and one inside it -- every config archive carried every earlier backup, each of which carried the ones before
+ * it, so the folder grew exponentially however few runs were kept. Inside the container the two never look alike
+ * (`/backups` and `/config/backups` are two mounts of one host folder), and an inode cannot be trusted to say so:
+ * Unraid's shfs gives several disks one st_dev, and v0.48.2 dropped real folders on such a match. So the run looks for
+ * ITSELF: its folder holds a file with a random name (`marker`), and a folder under CONFIG_DIR through which that file
+ * is reached is the backup folder. Links are not followed, as tar follows none.
+ *
+ * A folder inside CONFIG_DIR is left out whole. CONFIG_DIR itself (both mapped to one folder) keeps its config and
+ * loses only the run folders. Relative paths, with `/`.
+ * Reintroduce by returning []: backup.int.test.ts "a backup folder inside the config folder" finds the earlier run
+ * inside the new archive.
+ */
+export async function backupSkips(configDir: string, runDir: string, marker: string): Promise<string[]> {
+  const run = path.basename(runDir);
+  const holdsThisRun = (dir: string) => fs.lstat(path.join(dir, run, marker)).then((st) => st.isFile(), () => false);
+  if (await holdsThisRun(configDir)) {
+    return (await fs.readdir(configDir, { withFileTypes: true })).filter((e) => e.isDirectory() && RUN_DIR.test(e.name)).map((e) => e.name);
+  }
+  const skips: string[] = [];
+  const walk = async (dir: string, rel: string): Promise<void> => {
+    let entries: Dirent[];
+    try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const name = rel ? `${rel}/${e.name}` : e.name;
+      if (await holdsThisRun(path.join(dir, e.name))) skips.push(name);
+      else await walk(path.join(dir, e.name), name);
+    }
+  };
+  await walk(configDir, '');
+  return skips;
+}
+
 /** Delete all but the newest `keep` backup folders. Only touches dirs this task created. */
 export async function pruneBackups(keep = env.BACKUP_KEEP): Promise<string[]> {
   let entries: string[];
   try {
     entries = (await fs.readdir(env.BACKUP_DIR, { withFileTypes: true }))
-      .filter((e) => e.isDirectory() && /^\d{8}-\d{6}$/.test(e.name))
+      .filter((e) => e.isDirectory() && RUN_DIR.test(e.name))
       .map((e) => e.name)
       .sort(); // lexicographic == chronological for this format
   } catch {
@@ -221,15 +290,21 @@ export async function runBackup(): Promise<BackupResult> {
   }
 
   // config: jwt.secret, sites.json, series-art/ overrides. Small; tar keeps permissions/layout intact.
+  // Never the backup folder, when it sits inside this one (#199, backupSkips): the marker lets the run find itself.
   let configEmpty = false;
+  const marker = `.uchiyomi-run-${randomBytes(8).toString('hex')}`;
   try {
     const items = await fs.readdir(env.CONFIG_DIR);
-    if (items.length) {
-      if (isDesktop()) await zipConfig(env.CONFIG_DIR, path.join(dir, 'config.zip'));
-      else await run('tar', ['-czf', path.join(dir, 'config.tar.gz'), '-C', env.CONFIG_DIR, '.'], { timeout: 5 * 60 * 1000 });
+    await fs.writeFile(path.join(dir, marker), '');
+    const skip = await backupSkips(env.CONFIG_DIR, dir, marker);
+    if (items.some((n) => !skip.includes(n))) {
+      if (isDesktop()) await zipConfig(env.CONFIG_DIR, path.join(dir, 'config.zip'), skip);
+      else await run('tar', configTarArgs(path.join(dir, 'config.tar.gz'), env.CONFIG_DIR, skip), { timeout: 5 * 60 * 1000 });
     } else configEmpty = true;
   } catch {
     configEmpty = true; // no config dir mounted — the dump alone is still worth keeping
+  } finally {
+    await fs.rm(path.join(dir, marker), { force: true }).catch(() => {});
   }
 
   // `bytes` is the ONLY health signal this task has ever shown, so it must never be able to report the
@@ -237,7 +312,8 @@ export async function runBackup(): Promise<BackupResult> {
   // rendered a complete backup as '0 B' -- the identical signal to the empty-archive bug this file was
   // rewritten to prevent. `null` says "not measured", which is a different sentence from "nothing here".
   const bytes = await dirSize(dir).catch(() => null);
-  await pruneBackups().catch(() => {});
+  // How many to keep is a setting since v0.61.1 (#199); the oldest beyond it go here, after a run, never on save.
+  await pruneBackups((await backupSettings()).keep).catch(() => {});
   const res: BackupResult = { dir, bytes: bytes ?? 0, sizeUnknown: bytes === null, ms: Date.now() - started, configEmpty };
 
   // persist last-run so the admin UI still reports it after a container restart (runtime.* is in-memory)

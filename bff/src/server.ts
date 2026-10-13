@@ -42,7 +42,7 @@ import { runExtensionMonitor } from './lib/extensionMonitor';
 import { startEngineCacheKeeper } from './lib/sources/suwayomi/cache';
 import { startSweeper } from './lib/imageCache';
 import { startActivityLog, flushActivityLog } from './lib/activityLog';
-import { runBackup, backupDelay, stampDelay } from './lib/backup';
+import { runBackup, backupDelay, backupSettings, stampDelay } from './lib/backup';
 import { firstRunFloor, DESKTOP_FLOORS } from './lib/desktop';
 import { KomgaError } from './lib/komga';
 import { ZodError } from 'zod';
@@ -633,6 +633,10 @@ async function main() {
     // Bumped by every arm(); an arm that is no longer the newest when its SELECT resolves stands down.
     let gen = 0;
     const backupTick = async () => {
+      // v0.61.1 (#199): switched off in Admin → Settings, read as the timer fires so the switch needs no restart. The
+      // night passes and the timer is set for the next one; Run now under Tasks still backs up (routes/admin.ts).
+      // Reintroduce by deleting this line: backupHour.test.ts "a nightly switched off does not run" finds no check.
+      if (!(await backupSettings()).enabled) { void arm(); return; }
       try {
         runtime.backingUp = true;
         // Before the run, success or not: the desktop catch-up reads it (backupDelay in lib/backup.ts).
@@ -654,13 +658,17 @@ async function main() {
     const nextBackupDelay = async (): Promise<number> => {
       let hour = 3;
       let lastRun: number | null = null;
+      // A nightly switched off has no night to catch up on: without this the desktop's catch-up would wake every five
+      // minutes to find it off (v0.61.1).
+      let on = true;
       try {
-        const s = await pool.query('SELECT backup_hour, backup_last_run FROM server_settings WHERE id = 1');
+        const s = await pool.query('SELECT backup_hour, backup_last_run, backup_enabled FROM server_settings WHERE id = 1');
         const h = Number(s.rows[0]?.backup_hour);
         if (Number.isInteger(h) && h >= 0 && h <= 23) hour = h;
         lastRun = s.rows[0]?.backup_last_run ? new Date(s.rows[0].backup_last_run).getTime() : null;
+        on = s.rows[0]?.backup_enabled !== false;
       } catch { /* settings not readable yet — keep 03:00 */ }
-      return backupDelay({ hour, lastRun, lastAttempt: runtime.lastBackupAttempt, now: Date.now(), desktop: isDesktop() });
+      return backupDelay({ hour, lastRun, lastAttempt: runtime.lastBackupAttempt, now: Date.now(), desktop: isDesktop() && on });
     };
     const arm = async () => {
       // The clear sits AFTER the await, right before the set, with nothing between them. Clearing before the

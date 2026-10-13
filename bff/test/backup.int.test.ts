@@ -19,7 +19,7 @@
 // Needs TEST_DATABASE_URL and a pg_dump at least as new as the server (GitHub's runner has one).
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -112,6 +112,30 @@ test('a backup reports what it really captured', { skip }, async (t) => {
     const p = await persisted();
     assert.equal(p.configEmpty, true,
       'this is the assertion that matters: the flag has to SURVIVE to the thing that displays it');
+  });
+
+  await t.test('keeps as many runs as Backups to keep says, and BACKUP_KEEP until one is saved (v0.61.1, #199)', async () => {
+    const { env } = await import('../src/env');
+    const runs = () => readdirSync(process.env.BACKUP_DIR!).filter((n) => /^\d{8}-\d{6}$/.test(n)).sort();
+    const wasKeep = env.BACKUP_KEEP;
+    try {
+      // Reintroduce by calling pruneBackups() with no count again: the saved 2 is ignored and all of them stay.
+      await q('UPDATE server_settings SET backup_keep = 2 WHERE id = 1');
+      for (let i = 0; i < 3; i++) {
+        await new Promise((r) => setTimeout(r, 1100)); // a folder of its own each time
+        await runBackup();
+      }
+      assert.equal(runs().length, 2, `kept ${runs().join(', ')}`);
+      // Nothing saved: the variable's number, read when the run prunes.
+      await q('UPDATE server_settings SET backup_keep = NULL WHERE id = 1');
+      env.BACKUP_KEEP = 1;
+      await new Promise((r) => setTimeout(r, 1100));
+      const last = await runBackup();
+      assert.deepEqual(runs(), [last.dir.split('/').pop()], 'BACKUP_KEEP is not the count while none is saved');
+    } finally {
+      env.BACKUP_KEEP = wasKeep;
+      await q('UPDATE server_settings SET backup_keep = NULL WHERE id = 1').catch(() => {});
+    }
   });
 
   await t.test('bytes is never silently zero on a run that worked', async () => {

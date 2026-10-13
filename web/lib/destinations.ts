@@ -24,6 +24,7 @@ const LABELS = keys(
   // Settings people ask for by name.
   'Check for updates', 'Open registration', 'Backup time', 'Delete read chapters', 'Show missing chapters in Mihon',
   'Slow archive', 'Cloudflare solver', 'Version', 'Import a list', 'Rescan everything', 'Smart update checks',
+  'Backups to keep',
   // The profile: its tabs, its cards and its settings by name.
   'You', 'Connections', 'Account', 'Badges', 'Reading studio', 'Appearance', 'Language', 'Reduce effects', 'Reading',
   'Weekly goal', 'Reading direction', 'Offline downloads', 'This device', 'New-chapter alerts', 'Progress tracking',
@@ -105,6 +106,9 @@ export const DESTINATIONS: readonly Destination[] = [
     keywords: ['sign up', 'signup', 'register'] },
   { key: 'backup-time', label: 'Backup time', where: ADMIN_SETTINGS, href: settings('schedules'), admin: true,
     keywords: ['backup', 'database backup', 'dump'] },
+  // v0.61.1 (#199): looked for and not found while it was only BACKUP_KEEP. The nightly's switch is the row above it.
+  { key: 'backups-keep', label: 'Backups to keep', where: ADMIN_SETTINGS, href: settings('schedules'), admin: true,
+    keywords: ['backup limit', 'retention', 'old backups', 'nightly backup', 'turn off backups'] },
   // v0.61.0: the release radar's schedule switch, beside the update interval it bends.
   { key: 'smart-checks', label: 'Smart update checks', where: ADMIN_SETTINGS, href: settings('schedules'), admin: true,
     keywords: ['smart', 'quiet series', 'check less often', 'release radar', 'sweep'] },

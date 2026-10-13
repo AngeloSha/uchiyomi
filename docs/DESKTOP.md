@@ -413,6 +413,10 @@ under **Admin → Settings → Updates & schedules**, 03:00 by default. A comput
   slept through catches up straight away.
 - A failed run counts as a run: it is not retried in a loop.
 
+**Nightly backup** and **Backups to keep** sit beside the hour (since v0.61.1): switched off, nothing runs at night and
+nothing catches up, while **Run now** under Tasks still makes one; the oldest runs beyond the number kept (14 by default)
+are deleted after each backup. The `before-restore-…` safety copies below are never counted or deleted.
+
 **Admin → Tasks** has **Open backups folder** and **Restore a backup…**; the icon's menu has **Restore a
 backup…** too. Restoring:
 

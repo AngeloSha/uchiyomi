@@ -205,9 +205,10 @@ test('the backup catch-up is wired, and a desktop wake re-arms the backup', () =
   // an attempt, and with the database down every re-arm tries again in five minutes.
   assert.match(tick, /runtime\.lastBackupAttempt = Date\.now\(\);\s*const r = await runBackup\(\);/, 'the attempt is not stamped before the run');
   const next = s.slice(s.indexOf('const nextBackupDelay'), s.indexOf('const arm = async ()'));
-  assert.match(next, /SELECT backup_hour, backup_last_run FROM server_settings/);
-  // Reintroduce by passing `desktop: true`: the server would back up five minutes after any boot a day late.
-  assert.match(next, /return backupDelay\(\{ hour, lastRun, lastAttempt: runtime\.lastBackupAttempt, now: Date\.now\(\), desktop: isDesktop\(\) \}\);/);
+  assert.match(next, /SELECT backup_hour, backup_last_run, backup_enabled FROM server_settings/);
+  // Reintroduce by passing `desktop: true`: the server would back up five minutes after any boot a day late. (Since
+  // v0.61.1 `&& on`: a nightly switched off has nothing to catch up on, backupHour.test.ts.)
+  assert.match(next, /return backupDelay\(\{ hour, lastRun, lastAttempt: runtime\.lastBackupAttempt, now: Date\.now\(\), desktop: isDesktop\(\) && on \}\);/);
   // Reintroduce by deleting the wake block: a laptop asleep through 03:00 backs up hours late, or not that day.
   assert.match(s, /if \(isDesktop\(\)\) \{\s*const EVERY = 60 \* 1000;\s*const SLEPT = 5 \* 60 \* 1000;[\s\S]{0,400}?if \(now - wall > EVERY \+ SLEPT\) \{[\s\S]{0,200}?runtime\.rearmBackup\?\.\(\);/,
     'no desktop wake-from-sleep re-arm of the backup');
@@ -219,7 +220,10 @@ test('backup.ts keeps the server dump and the tar archive exactly, behind isDesk
   // stray PG_DUMP_PATH and zip its config instead of the tar its restore docs describe.
   const b = code(read('lib/backup.ts'));
   assert.match(b, /const pg = isDesktop\(\)\s*\? desktopDump\(\[[^\]]*\]\)\s*: spawn\('pg_dump', \['--no-owner', '--no-acl', '--clean', '--if-exists', env\.DATABASE_URL\]\);/);
-  assert.match(b, /if \(isDesktop\(\)\) await zipConfig\(env\.CONFIG_DIR, path\.join\(dir, 'config\.zip'\)\);\s*else await run\('tar', \['-czf', path\.join\(dir, 'config\.tar\.gz'\), '-C', env\.CONFIG_DIR, '\.'\], \{ timeout: 5 \* 60 \* 1000 \}\);/);
+  // Since v0.61.1 both leave out the backup folder when it sits inside the config folder (#199, backupSkips): the tar's
+  // arguments are configTarArgs, pinned here to `-czf <to> [--exclude…] -C <from> .` as before.
+  assert.match(b, /if \(isDesktop\(\)\) await zipConfig\(env\.CONFIG_DIR, path\.join\(dir, 'config\.zip'\), skip\);\s*else await run\('tar', configTarArgs\(path\.join\(dir, 'config\.tar\.gz'\), env\.CONFIG_DIR, skip\), \{ timeout: 5 \* 60 \* 1000 \}\);/);
+  assert.match(b, /export const configTarArgs = \(to: string, from: string, skip: string\[\]\): string\[\] =>\s*\['-czf', to, \.\.\.skip\.map\(\(s\) => `--exclude=\.\/\$\{globLiteral\(s\)\}`\), '-C', from, '\.'\];/);
   // The custom sites file keeps its literal on the server even when CONFIG_DIR moved (the sites would vanish).
   assert.match(code(read('lib/sources/customSites.ts')), /process\.env\.CUSTOM_SITES_FILE\s*\|\| forDesktop\('\/config\/sites\.json', /);
 });

@@ -19,7 +19,7 @@ import { editionFollowing, linkEdition, linkPair, unlinkEdition, workRows } from
 import { toStoredRel, trimTrailingSlashes } from '../lib/relPath';
 import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fingerprintJob';
 import { runPageHashBackfill, pageHashRemaining, phState } from '../lib/pageHashJob';
-import { runBackup } from '../lib/backup';
+import { runBackup, backupSettings } from '../lib/backup';
 import { runUpdateAll, updateSeries, runSweep, runsInside } from '../lib/updater';
 import { refreshRadar } from '../lib/releaseRadar';
 import { ARCHIVE_SETTINGS_COLS, ARCHIVE_SETTINGS_SHAPE, archiveWindowPair, applyArchiveSettings, archiveFreeGb } from '../lib/archive';
@@ -615,7 +615,7 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // ---- server settings ----
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
-    + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, auto_follow_on_failure, '
+    + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, backup_enabled, auto_follow_on_failure, '
     + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, discover_lookups, '
     + 'mangadex_langs, unstated_lang, hide_notice_types, deleted_as_ghosts, update_smart, '
     + ARCHIVE_SETTINGS_COLS;
@@ -630,8 +630,12 @@ export default async function adminRoutes(app: FastifyInstance) {
     // v0.55.3 (#147): "Only hide short ones" -- the notice switches' rule (lib/noticeChapters.ts). Read apart and said
     // as the contract names it, as nightlyMode is; on unless the column says off.
     const shortOnly = await one<{ s: boolean | null }>('SELECT hide_notice_short_only AS s FROM server_settings WHERE id = 1').catch(() => null);
+    // v0.61.1 (#199): how many backups to keep, as the next run will use it -- the stored number, or BACKUP_KEEP while
+    // none has been saved (lib/backup.ts backupSettings).
+    const backups = await backupSettings();
     return {
       ...row,
+      backup_keep: backups.keep,
       nightlyMode: mode?.m === 'autofix' ? 'autofix' : 'repair',
       hideNoticeShortOnly: shortOnly?.s !== false,
       extensions_configured: suwayomiConfigured(),
@@ -712,6 +716,10 @@ export default async function adminRoutes(app: FastifyInstance) {
       cleanupReadDays: z.number().int().min(0).max(3650).optional(),
       // The local hour of the nightly backup. Until v0.39.0 it was shown under Tasks and editable nowhere.
       backupHour: z.number().int().min(0).max(23).optional(),
+      // v0.61.1 (#199): the nightly backup's switch -- off skips the night, Run now still backs up -- and how many runs
+      // to keep. The oldest beyond that go after the NEXT backup, never on save: a number typed in passing deletes nothing.
+      backupEnabled: z.boolean().optional(),
+      backupKeep: z.number().int().min(1).max(365).optional(),
       // The nightly repair (lib/repair.ts). Off stops the SCHEDULE only: "Run now" and the Health page's
       // chips keep working, because nothing the repair does is destructive -- it never deletes, merges or
       // renumbers anything. The tick re-reads this column every time, so switching it off takes effect
@@ -852,6 +860,9 @@ export default async function adminRoutes(app: FastifyInstance) {
     // The scheduler is re-armed at once, so the change applies to the NEXT run rather than the one after: the
     // timer used to re-read the hour only when it fired (server.ts, the backup block says why).
     if (b.backupHour !== undefined) { await q('UPDATE server_settings SET backup_hour = $1, updated_at = now() WHERE id = 1', [b.backupHour]); runtime.rearmBackup?.(); }
+    // Re-armed too: switched back on, a desktop that missed nights catches up at once rather than at the next hour.
+    if (b.backupEnabled !== undefined) { await q('UPDATE server_settings SET backup_enabled = $1, updated_at = now() WHERE id = 1', [b.backupEnabled]); runtime.rearmBackup?.(); }
+    if (b.backupKeep !== undefined) await q('UPDATE server_settings SET backup_keep = $1, updated_at = now() WHERE id = 1', [b.backupKeep]);
     if (b.komgaGhostChapters !== undefined) await q('UPDATE server_settings SET komga_ghost_chapters = $1, updated_at = now() WHERE id = 1', [b.komgaGhostChapters]);
     if (b.deletedAsGhosts !== undefined) await q('UPDATE server_settings SET deleted_as_ghosts = $1, updated_at = now() WHERE id = 1', [b.deletedAsGhosts]);
     // Sanitised here as well as in visibility.ts: what is stored should be what is enforced, so a
@@ -928,8 +939,8 @@ export default async function adminRoutes(app: FastifyInstance) {
     scheduleVars: vars,
   });
   app.get('/api/admin/tasks', async (req) => {
-    const s = await one<{ updater_hours: number; backup_hour: number; backup_last_run: string | null; backup_last_result: any; extension_hours: number; extension_auto_update: boolean; extension_last_run: string | null; extension_last_result: any; cleanup_read: boolean; cleanup_read_days: number; cleanup_read_last_run: string | null; cleanup_read_last_result: any; verify_last_run: string | null; verify_last_result: any; repair_enabled: boolean; repair_last_run: string | null; repair_last_result: any; rescan_last_run: string | null; rescan_last_result: any; match_check_last_run: string | null; match_check_last_result: any }>(
-      `SELECT updater_hours, backup_hour, backup_last_run, backup_last_result,
+    const s = await one<{ updater_hours: number; backup_hour: number; backup_enabled: boolean; backup_last_run: string | null; backup_last_result: any; extension_hours: number; extension_auto_update: boolean; extension_last_run: string | null; extension_last_result: any; cleanup_read: boolean; cleanup_read_days: number; cleanup_read_last_run: string | null; cleanup_read_last_result: any; verify_last_run: string | null; verify_last_result: any; repair_enabled: boolean; repair_last_run: string | null; repair_last_result: any; rescan_last_run: string | null; rescan_last_result: any; match_check_last_run: string | null; match_check_last_result: any }>(
+      `SELECT updater_hours, backup_hour, backup_enabled, backup_last_run, backup_last_result,
               extension_hours, extension_auto_update, extension_last_run, extension_last_result,
               cleanup_read, cleanup_read_days, cleanup_read_last_run, cleanup_read_last_result,
               verify_last_run, verify_last_result,
@@ -960,7 +971,17 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { content: [
       { id: 'scan', name: 'Library scan', ...sched('on demand'), lastRun: runtime.lastScan || null, running: false },
       { id: 'update', name: 'Check for new chapters', ...sched('every {h}h', { h: s?.updater_hours ?? 6 }), lastRun: runtime.lastUpdate || null, lastResult: runtime.lastUpdateResult, running: runtime.updating },
-      { id: 'backup', name: 'Backup database & config', ...sched('daily at {hh}:00', { hh: String(s?.backup_hour ?? 3).padStart(2, '0') }), lastRun: backupLast, lastResult: runtime.lastBackupResult ?? s?.backup_last_result ?? null, running: runtime.backingUp },
+      // Switched off (v0.61.1), the repair's own words: the nightly is off, Run now still backs up.
+      {
+        id: 'backup',
+        name: 'Backup database & config',
+        ...(s?.backup_enabled === false
+          ? sched('switched off · on demand')
+          : sched('daily at {hh}:00', { hh: String(s?.backup_hour ?? 3).padStart(2, '0') })),
+        lastRun: backupLast,
+        lastResult: runtime.lastBackupResult ?? s?.backup_last_result ?? null,
+        running: runtime.backingUp,
+      },
       {
         id: 'fingerprint',
         name: 'Fingerprint library files',
@@ -1308,7 +1329,9 @@ export default async function adminRoutes(app: FastifyInstance) {
       if (runtime.backingUp) return { ok: false, error: 'busy' };
       runtime.backingUp = true;
       runBackup()
-        .then((r) => { runtime.lastBackup = Date.now(); runtime.lastBackupResult = { bytes: r.bytes, ms: r.ms }; })
+        // The whole result, as the nightly keeps it (server.ts): `{ bytes, ms }` alone showed a Run now that lost the config
+        // as a clean run until the next restart.
+        .then((r) => { runtime.lastBackup = Date.now(); runtime.lastBackupResult = { bytes: r.bytes, ms: r.ms, configEmpty: r.configEmpty, sizeUnknown: r.sizeUnknown }; })
         // Never swallow this. An admin pressing Backup and seeing the panel still report yesterday's healthy
         // run is worse than an error: runBackup persists the failure itself, and this logs it so the reason
         // is in `docker logs` too.

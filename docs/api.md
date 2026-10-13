@@ -1686,7 +1686,7 @@ they are manual actions; clients should say that those actions may contact AniLi
 `updater_hours`, `extension_hours`, `extension_auto_update`, `update_check`, `install_ping`, `install_ping_last`,
 `cleanup_read`, `cleanup_read_days`, `backup_hour`, `scanlator_prefs`, `auto_follow_on_failure`,
 `repair_enabled`, `source_prefs`, `group_upgrade`, `borrow_names`, `mangadex_langs`, `unstated_lang`,
-`deleted_as_ghosts`, `update_smart` (since v0.61.0), plus
+`deleted_as_ghosts`, `update_smart` (since v0.61.0), `backup_enabled` and `backup_keep` (since v0.61.1), plus
 `extensions_configured` and `mangadex_available` (computed). `auto_follow_on_failure` defaults to true and
 controls the bounded once-per-series-per-day source hunt after an ordinary scheduled-download failure; it
 never makes an interactive Add/Fetch hunt and never runs after a refusal. `PATCH
@@ -1695,6 +1695,10 @@ never makes an interactive Add/Fetch hunt and never runs after a refusal. `PATCH
 `cleanupReadDays` (0–3650; 0 is a value, "at the next run"), `backupHour` (0–23, the local hour of the nightly
 backup — the pending timer is re-armed at once, so the change applies to the next run rather than the one
 after; `GET /api/admin/tasks` shows the backup's `schedule` as `daily at HH:00` from the same column),
+`backupEnabled` (since v0.61.1, the nightly backup, on by default: off skips the nightly run, the Tasks row says
+`switched off · on demand`, and Run now still backs up), `backupKeep` (since v0.61.1, 1–365, how many backup runs are
+kept; saving deletes nothing, the oldest beyond it go after the next backup; `backup_keep` reads `BACKUP_KEEP`, 14
+unless set, until a number is saved),
 `scanlatorPrefs` and `sourcePrefs` (both below), `groupUpgrade` (the repair's group upgrades, off by default),
 `borrowNames` (chapter names from another source, off by default; switching it off clears the names it wrote),
 `hideNoticeTypes` (notice chapters, below),
