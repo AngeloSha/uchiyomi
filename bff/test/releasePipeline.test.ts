@@ -319,6 +319,23 @@ test('the Umbrel package is the one under review: proxy block, PUID, digest pin,
   assert.match(f?.image ?? '', /^ghcr\.io\/flaresolverr\/flaresolverr:v\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$/, 'the solver sidecar is not pinned by release tag and digest');
 });
 
+test('the Umbrel package is never more than one release behind', () => {
+  // deploy/umbrel pins the image by digest, and a digest exists only once a tag's release run has published it, so
+  // the release PR itself can never carry its own version here. Nothing asked for the follow-up either, and from
+  // v0.40.0 to v0.61.2 nobody did it, while docs/INSTALL.md told Umbrel users this package was current. The rule:
+  // it pins the version in package.json or the release before it. A release PR goes red until the package pins the
+  // release that is already out; the merge job of release.yml prints that digest, and so does
+  //   docker buildx imagetools inspect ghcr.io/angelosha/uchiyomi:v<version>
+  // Reintroduce by leaving the pin behind at a release: this test fails on that release's PR.
+  const now = JSON.parse(read('bff/package.json')).version as string;
+  const released = [...read('CHANGELOG.md').matchAll(/^## v(\d+\.\d+\.\d+) /gm)].map((x) => x[1]);
+  const before = released.find((v) => v !== now);
+  assert.ok(before, 'CHANGELOG.md names no earlier release');
+  const pinned = String(parseYaml(read('deploy/umbrel/uchiyomi/umbrel-app.yml')).version);
+  assert.ok([now, before].includes(pinned),
+    `deploy/umbrel pins v${pinned}, more than one release behind v${now}: pin v${now} if its images are published, else v${before} -- the version in umbrel-app.yml, the image tag and digest in docker-compose.yml`);
+});
+
 test('an Unraid or Umbrel user can still get from the README to their manifest', () => {
   // The property is that the path exists, not that it is one hop. The per-platform install moved out of the
   // README in v0.24.0 -- it was longer on its own than five comparable projects' entire READMEs -- so this

@@ -111,8 +111,8 @@ keep working; it points here.
 
 **On Umbrel?** Uchiyomi is [submitted to the Umbrel App Store](https://github.com/getumbrel/umbrel-apps/pull/6055)
 and the submission is still open. Until it is listed, install the package at
-[`deploy/umbrel/uchiyomi`](../deploy/umbrel/uchiyomi) yourself — it is kept pinned to the current release by
-digest, so it may be a version ahead of the one in the pull request. It runs the database inside the container,
+[`deploy/umbrel/uchiyomi`](../deploy/umbrel/uchiyomi) yourself — it is pinned by digest to the current release or
+the one before it, so it may be ahead of the one in the pull request. It runs the database inside the container,
 reads your library from *Downloads/manga* (on umbrelOS 2.0 you can pick another folder in the app's settings), and
 includes the Cloudflare solver; the Mihon extension engine is not part of it.
 
