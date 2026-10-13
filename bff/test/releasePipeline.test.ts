@@ -277,6 +277,13 @@ test('the Umbrel package is the one under review: proxy block, PUID, digest pin,
   // OPDS readers and API-token scripts cannot carry the Umbrel cookie; first-run setup must stay behind it.
   assert.match(String(c.services.app_proxy.environment.PROXY_AUTH_WHITELIST), /\/opds\/\*.*\/img\/\*.*\/api\/\*/);
   assert.match(String(c.services.app_proxy.environment.PROXY_AUTH_BLACKLIST), /\/api\/setup/, 'first-run setup is reachable without Umbrel login');
+  // The Mihon/Tachiyomi extension (AngeloSha/uchiyomi-extension, probeServer/probeToken) tests a server address on
+  // GET /healthz and a token on GET /auth/me before it browses /api and /img. Behind the Umbrel login both answer
+  // with Umbrel's sign-in page, and the extension reports "No Uchiyomi at ..." for a server that works. Exact paths:
+  // the rest of /auth (sign-in, registration) stays behind Umbrel, like first-run setup.
+  const whitelisted = String(c.services.app_proxy.environment.PROXY_AUTH_WHITELIST).split(',');
+  for (const p of ['/healthz', '/auth/me']) assert.ok(whitelisted.includes(p), `${p} is behind the Umbrel login: the Mihon extension's connection check fails there`);
+  assert.deepEqual(whitelisted.filter((p) => p.startsWith('/auth')), ['/auth/me'], 'more of /auth than /auth/me is outside the Umbrel login');
   const s = c.services.server;
   // PUID/PGID, not user:: the image has a permission-fixing root entrypoint (the store guide's own rule).
   assert.equal(s.user, undefined, 'user: forces a uid on an image whose entrypoint must start as root');
@@ -286,19 +293,30 @@ test('the Umbrel package is the one under review: proxy block, PUID, digest pin,
   assert.ok(!('DATABASE_URL' in (s.environment ?? {})), 'DATABASE_URL set: the embedded database is off and there is no other');
   assert.ok(s.volumes.some((v: string) => v.startsWith('${APP_DATA_DIR}/data/db:') && v.endsWith(':/data')), 'the database must live under app-data');
   assert.ok(s.volumes.some((v: string) => v.includes('/data/storage/downloads/') && v.endsWith(':/library')), 'the library must come from Umbrel Downloads');
+  // umbrelOS 2.0 (2026-09-22). `storage` lets a user move the app's data to an external drive (ext4 only), and a
+  // version without it cannot start an install whose data was moved -- so once declared it is never removed. It moves
+  // `${APP_DATA_DIR}/data` and nothing else, which is why every app-data mount must come from under data/.
+  assert.deepEqual(m.storage, { dataRoot: 'data' }, 'storage was removed: installs whose data was moved cannot start');
+  for (const v of s.volumes.filter((v: string) => v.startsWith('${APP_DATA_DIR}'))) assert.match(v, /^\$\{APP_DATA_DIR\}\/data\/[a-z]+:/, `${v} is outside data/, which umbrelOS moves with the app`);
+  // The library's folder setting. umbrelOS makes one from the Downloads mount on its own, with the id
+  // `umbrel-downloads:<folder>` (umbreld apps/app.ts); this entry gives it a name and a note. A different id, service
+  // or target would be a second, empty setting, and changing the id later drops every user's chosen folder.
+  const lib = (m.folderAccess ?? []).find((x: any) => x.id === 'umbrel-downloads:manga');
+  assert.ok(lib && lib.name && lib.note, 'the library has no named folder setting (folderAccess umbrel-downloads:manga)');
+  assert.deepEqual(lib.mounts, [{ service: 'server', targetPath: '/library' }]);
+  assert.ok(s.volumes.includes('${UMBREL_ROOT}/data/storage/downloads/manga:/library'), 'the folder setting no longer names the compose mount');
   assert.match(String(s.stop_grace_period), /40s/);
   assert.ok(s.image.includes(`:v${m.version}@`), `manifest version ${m.version} does not match the pinned image ${s.image}`);
   assert.match(String(s.environment.JWT_SECRET), /APP_UCHIYOMI_JWT_SECRET/, 'the session secret should come from exports.sh');
   // v0.49.0 (#72): Admin → Extensions opens its engine setup steps on the platform this hint names (bff
   // lib/platform.ts), and Umbrel's say that an Umbrel app cannot add the optional engine. Nothing else gives an
   // Umbrel install away -- no HOST_OS, no EXTENSION_ENGINE -- so without the line it reads as 'unknown' and opens on
-  // steps it cannot follow. Carried into the store package with its next version bump (the store PR holds v0.40.0).
-  // Reintroduce by deleting the line from the compose file: this assertion names it.
+  // steps it cannot follow. Reintroduce by deleting the line from the compose file: this assertion names it.
   assert.equal(s.environment.UCHIYOMI_PLATFORM, 'umbrel', 'the Umbrel compose does not tell the app it runs on Umbrel (UCHIYOMI_PLATFORM: umbrel)');
   assert.match(read('deploy/umbrel/uchiyomi/exports.sh'), /derive_entropy/, 'exports.sh does not derive the secret');
   for (const d of ['db', 'config', 'cache', 'downloads', 'backups']) assert.ok(existsSync(join(REPO, `deploy/umbrel/uchiyomi/data/${d}/.gitkeep`)), `data/${d} is not committed; Umbrel would mount an empty root-owned path`);
   const f = c.services.flaresolverr;
-  assert.ok(f && /@sha256:[0-9a-f]{64}$/.test(f.image), 'the solver sidecar is not pinned by digest');
+  assert.match(f?.image ?? '', /^ghcr\.io\/flaresolverr\/flaresolverr:v\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$/, 'the solver sidecar is not pinned by release tag and digest');
 });
 
 test('an Unraid or Umbrel user can still get from the README to their manifest', () => {
