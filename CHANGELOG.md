@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.61.1 — 2026-10-13
+
+**Backups stay small wherever the backup folder is mapped, and you choose how many to keep, or switch the nightly backup
+off.** Both came from **@Wolf92s**'s report ([#199](https://github.com/AngeloSha/uchiyomi/issues/199)). Thank you.
+
+### Backups that stay small
+
+- **A backup no longer includes the backup folder.** With the backup folder mapped inside the config folder, or onto
+  the same folder, every backup carried all the earlier ones, which carried the ones before them. The folder grew
+  exponentially, however few backups were kept. Each run now finds its own folder inside the config folder and leaves
+  it out, whatever the mapping. If yours grew like that, you can delete the old, oversized backups yourself.
+- **Admin → Settings → Updates & schedules** has two new rows beside the backup time:
+  - **Nightly backup**, on by default. Switch it off if you back up another way; *Run now* under Tasks still makes a
+    backup.
+  - **Backups to keep**, from 1 to 365. The oldest backups beyond that number are deleted after each backup, never
+    when you save the number. Until you save one, it is `BACKUP_KEEP`: 14, unless you set that variable.
+- **Run now on the backup** now reports a backup that missed the config folder, as the nightly one already did.
+
+### Dependency updates
+
+- The server's Fastify plugins and argon2, Next.js 16.4 and framer-motion 14 in the web app, and Electron 44.7 in the
+  desktop app ([#195](https://github.com/AngeloSha/uchiyomi/pull/195),
+  [#196](https://github.com/AngeloSha/uchiyomi/pull/196), [#197](https://github.com/AngeloSha/uchiyomi/pull/197),
+  [#198](https://github.com/AngeloSha/uchiyomi/pull/198)). Nothing should look or work differently.
+
+### Upgrading
+
+- **Database:** two new settings columns, `backup_enabled` and `backup_keep`, added automatically. v0.61.0 still runs
+  on the new schema if you need to go back.
+- Nothing else to do.
+
 ## v0.61.0 — 2026-10-12
 
 **When the next chapter is due, how long you've read, what to read next, lists that keep themselves up to date, and a
