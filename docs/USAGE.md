@@ -1079,7 +1079,7 @@ the start — a number sent to a tracker cannot be taken back there, so a lone t
 - A gap in what the sources list stops the run: a source listing only 951–1000, plus a mark on 951, still
   sends 12.
 - A run ending on a fractional mark is rounded down (12.6 sends 12).
-- Whether the series is *finished* on the tracker is still decided by the chapters on the server alone.
+- Whether the series is *completed* on the tracker is the tracker's own answer (since v0.61.2, section 10).
 - Marking a chapter unread never sends anything, so the tracker stays ahead — the safe direction.
 
 With that switch off, marks never reach a tracker at all, and marking alone sends nothing.
@@ -2861,6 +2861,19 @@ error to retry on the next chapter, never a verdict on the token, so it does not
 Disconnect at any time. MyAnimeList and Kitsu connect the same way, each on its own row, and more than one can
 be connected at once; each syncs on its own.
 
+**Reading or Completed** (since v0.61.2, [#201](https://github.com/AngeloSha/uchiyomi/issues/201)). Before each
+update Uchiyomi asks the tracker about the series and about your entry:
+
+- The series moves to **Completed** only when the tracker says it has **ended** and you have reached its **last
+  chapter**. Reading every chapter on this server is not enough: a series still coming out always has more to come.
+- Otherwise it is **Reading**. A series you had planned, paused or dropped becomes Reading again when you finish a
+  new chapter of it.
+- A **re-read** stays a re-read.
+- A series the tracker already has **at or past your chapter is left alone**, so the tracker never moves backwards.
+
+Before v0.61.2 a series still coming out was marked Completed whenever you caught up with it. The next new chapter
+you finish puts it back to Reading, or you can fix it on the tracker straight away.
+
 Uchiyomi finds each series' AniList entry by itself, from the same lookup its art comes from, and since v0.55.7 only
 an entry that carries the series' name (section 4, *Cover and banner*); a series it cannot match has no link, and
 importing your list (below) links every title on it to its own entry.
@@ -2876,8 +2889,8 @@ number for every entry, higher or lower, which is how a correction made on the t
 if you have since finished a chapter above the old mark here, the next one you finish pushes as usual. A
 *not syncing* note the card picked up before that stays until the next chapter that pushes clears it.
 Nothing is written to the tracker by the import. One thing the mark cannot see is status: a *Finished*
-entry the tracker holds at chapter 0 gets no mark, and the first chapter finished here may set it back to
-Reading.
+entry the tracker holds at chapter 0 gets no mark. Since v0.61.2 the push reads the entry first, so it stays
+Completed when the series has ended, and only a series still coming out goes back to Reading.
 
 **Chapters you marked read without downloading them** (since v0.43.0, section 4) reach a tracker only when an
 admin has switched on **Show missing chapters in Mihon**, and only as part of an unbroken run of read chapters

@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.61.2 — 2026-10-13
+
+**AniList, MyAnimeList and Kitsu no longer mark a series Completed while it is still coming out.** Reported by
+**@CheetahDoesStuff** ([#201](https://github.com/AngeloSha/uchiyomi/issues/201)). Thank you.
+
+### Completed only when a series has ended
+
+- **A series still coming out stays Reading.** Once you had read every chapter on the server, your tracker was told you
+  had completed the series, even while it was still releasing. So it moved to your Completed list every time you
+  caught up. Now Uchiyomi asks the tracker first. It moves a series to Completed only when the tracker says the series
+  has ended and you've reached its last chapter, the rule Mihon uses.
+- **A re-read stays a re-read.** A series the tracker already has at or past your chapter is left alone, so the
+  tracker never moves backwards.
+- **Series this already marked Completed** go back to Reading the next time you finish a new chapter of them. You can
+  also fix them on the tracker straight away.
+
+### Upgrading
+
+- **Database:** no changes.
+- Nothing else to do.
+
 ## v0.61.1 — 2026-10-13
 
 **Backups stay small wherever the backup folder is mapped, and you choose how many to keep, or switch the nightly backup

@@ -1546,7 +1546,14 @@ means the token is bad. `POST /api/trackers/:provider/test` asks the service whe
 and answers **200** `{ok, verdict, account?, status?}` with `verdict` one of `connected`, `rejected`,
 `unreachable`, `refused`, `expired` or `not_connected`; it writes nothing (not even `last_error`), sends no token
 past its `expires_at`, and allows six tests a minute per account (**429** after). A push goes out for the caller alone when they finish a chapter of a linked series, never below
-the floor `tracker_progress` holds for them (see the reviewable import under Admin, `/run`). Only a **401**
+the floor `tracker_progress` holds for them (see the reviewable import under Admin, `/run`). Since v0.61.2
+([#201](https://github.com/AngeloSha/uchiyomi/issues/201)) a push first reads the series and the caller's entry from
+the service and sends nothing when the entry is already at or past that chapter. The status it sends comes from what it
+read: *completed* only when the service says the series has ended (AniList `FINISHED`/`CANCELLED`, MyAnimeList
+`finished`/`discontinued`, Kitsu `finished`) and gives a chapter count the push reaches; a re-read stays one (AniList
+`REPEATING`, MyAnimeList `is_rereading`, Kitsu `reconsuming`); an entry completed on a series that has ended stays
+completed; anything else is *reading*. Before, every chapter on this server read meant *completed*, a series still
+coming out included. Pushes in one account's lane to one service are 2.4 s apart (a read and a write each). Only a **401**
 from the service — or AniList's "Invalid token" **400** — is a verdict on the token, and disables the
 connection with `last_error` = `the tracker rejected the saved token -- reconnect to resume syncing`; a
 **403** (Cloudflare in front of AniList, MyAnimeList's request block, a forbidden Kitsu action) is recorded
@@ -1554,7 +1561,8 @@ as a plain sync error and retried on the next chapter, the connection kept. A to
 is not sent: `last_error` reads `the access token has expired -- reconnect to resume syncing`, connection
 kept. `POST /api/trackers/:provider/resync/:seriesId` is the one deliberate way **down**: it deletes the
 caller's floor for that series on **that provider** only (`anilist`, `myanimelist` or `kitsu` — any other
-name is **404** `unknown_provider`) and pushes the current local count at once, lower or not. No web
+name is **404** `unknown_provider`) and pushes the current local count at once, lower or not, even below what the
+service's own entry holds (since v0.61.2 every other push leaves such an entry alone). No web
 control calls it; the app's own repair for a floor the tracker has since corrected is to read the list
 again. A local count that drops below a number this app already sent is refused with `last_error` =
 `not syncing: this series now works out to chapter N, below the M already sent. Import your list again under

@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.61.1
+  version: 0.61.2
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -5848,9 +5848,11 @@ paths:
         The one deliberate way down. Progress is otherwise monotonic per series (a tracker takes a lower
         number and rewrites the entry with no undo): this deletes the caller's `tracker_progress` floor for
         the series on THAT provider only -- `anilist`, `myanimelist` or `kitsu`; any other name is 404
-        `unknown_provider` -- and pushes the current local count at once, lower or not. The other providers'
-        floors are untouched. No web control calls it; a floor the tracker has since corrected is taken by
-        reading the list again (POST /api/admin/import/batches with `origin: tracker` replaces the floor).
+        `unknown_provider` -- and pushes the current local count at once, lower or not, even below what the
+        service's own entry holds (since v0.61.2 every other push reads the entry first and leaves one at or past
+        the chapter alone). The other providers' floors are untouched. No web control calls it; a floor the
+        tracker has since corrected is taken by reading the list again (POST /api/admin/import/batches with
+        `origin: tracker` replaces the floor).
       parameters:
         - name: provider
           in: path
