@@ -1,7 +1,8 @@
 // The release radar in words (v0.61.0, lib/radar.ts): where a series stands against its estimate, the line the series
 // page and the reader's end card say, the note a Releasing soon card says, and the end card's label.
 //
-// Pure: the clock is a parameter, and the suite runs in UTC (TZ=UTC), so "tomorrow" and "Friday" are fixed.
+// Pure: the clock is a parameter. CI runs in UTC, but the two midnight cases below are built in LOCAL time, so the file
+// also passes on a machine set to another time zone (it failed on a Europe/Berlin host: 23:30Z is 01:30 there).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -43,8 +44,8 @@ test('the days: today, tomorrow, a weekday within the week, a date beyond it', (
   assert.equal(dayText(NOW + 4 * DAY, NOW, 'short'), 'Fri');
   assert.equal(dayText(NOW + 12 * DAY, NOW), 'Oct 24');
   // Local days, not 24-hour spans: 23:30 is still today, and half past midnight is tomorrow.
-  assert.equal(dayText(Date.parse('2026-10-12T23:30:00Z'), NOW), 'today');
-  assert.equal(dayText(Date.parse('2026-10-13T00:30:00Z'), NOW), 'tomorrow');
+  assert.equal(dayText(new Date(2026, 9, 12, 23, 30).getTime(), NOW), 'today');
+  assert.equal(dayText(new Date(2026, 9, 13, 0, 30).getTime(), NOW), 'tomorrow');
 });
 
 test('the line: next chapter, its weekday or its rhythm; due any day; running late', () => {
