@@ -1023,7 +1023,9 @@ export default async function personalRoutes(app: FastifyInstance) {
     if (!isProvider(provider)) return reply.code(404).send({ error: 'unknown_provider' });
     const uid = userIdOf(req);
     await clearTrackerFloor(uid, seriesId, provider);
-    await pushSeriesProgress(uid, seriesId).catch(() => {});
+    // `lower`: since v0.61.2 a push sends nothing to a service already at or past this chapter (pushStatus), and this
+    // route is the one place a lower number is the point. Only for the provider asked about.
+    await pushSeriesProgress(uid, seriesId, { lower: provider }).catch(() => {});
     return { ok: true };
   });
 

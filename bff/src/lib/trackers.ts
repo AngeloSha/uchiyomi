@@ -13,7 +13,7 @@
 import { q, one } from './db';
 import { seal, open as unseal } from './secretbox';
 import { withGate } from './gate';
-import { ADAPTERS, PROVIDERS, verdictOf, type Provider } from './trackerProviders';
+import { ADAPTERS, PROVIDERS, verdictOf, type Provider, type PushStatus, type SeriesState } from './trackerProviders';
 import { ghostsEnabled, ghostNumbers } from './komgaGhosts';
 import { continuousRun, marksFor, mergeRun, realRows } from './listingProgress';
 import { noticeShown } from './noticeChapters';
@@ -223,7 +223,8 @@ export async function testConnection(userId: string, provider: Provider): Promis
 
 /**
  * What we would tell a tracker about this series: the highest chapter number the user has *completed*,
- * and whether every chapter is done.
+ * and whether every chapter here is done. ⚠️ Since v0.61.2 (#201) `finished` no longer decides the status a
+ * tracker is told: every chapter on this server read is not the series read, so pushStatus asks the service.
  *
  * Deliberately the maximum completed chapter rather than the one just finished — re-reading chapter 3 of a
  * series you're 200 chapters into must not rewind the tracker, and a backfill pushing chapters in arbitrary
@@ -281,17 +282,38 @@ export async function seriesProgressFor(userId: string, seriesId: string): Promi
 }
 
 /**
- * Push a series' progress for one user. Resolves the highest completed chapter rather than the chapter
- * just finished, so reading out of order (or backfilling) can't move a tracker backwards.
+ * What a push tells a tracker, from what the service already holds (v0.61.2, #201) -- or null, nothing at all.
+ *
+ * - The service holds this chapter or a later one: nothing. Saying it again could only rewind the entry, or move it
+ *   between lists for no new reading. `lower` is the resync's deliberate way down (POST /api/trackers/:p/resync).
+ * - COMPLETED only when the SERVICE says the series has ended and gives a chapter count this reaches: Mihon's rule.
+ *   It used to be "every chapter on this server is read", which a series still coming out reaches at every catch-up,
+ *   so the entry sat under Completed between releases (#201). An ended series with no count stays reading.
+ * - A re-read stays a re-read; an entry completed on a series that has ended stays completed (the person put it
+ *   there, and Mihon keeps it too).
+ * - Everything else is reading: a planned, paused or dropped entry picked up again, a new entry, and an entry left
+ *   under Completed on a series still coming out -- which is how the ones this bug completed come back.
+ * Reintroduce the old rule by returning 'completed' for any entry at the end of the local chapters:
+ * trackerStatus.test.ts "a series still coming out, read to its newest chapter, stays reading" fails.
  */
+export function pushStatus(chapters: number, s: SeriesState, opts: { lower?: boolean } = {}): PushStatus | null {
+  const e = s.entry;
+  if (e && e.progress >= chapters && !opts.lower) return null;
+  if (s.ended && s.total != null && chapters >= s.total) return 'completed';
+  if (e?.status === 'rereading') return 'rereading';
+  if (e?.status === 'completed' && s.ended) return 'completed';
+  return 'reading';
+}
+
 /**
- * Push one series to every tracker this user has connected.
+ * Push one series to every tracker this user has connected. The highest completed chapter is resolved rather
+ * than the chapter just finished, so reading out of order (or backfilling) can't move a tracker backwards.
  *
  * Fans out because a user may have AniList and MyAnimeList on at once, and one service being down or having
  * rejected its token must not stop the other from receiving progress. Each connection keeps its own error,
- * its own high-water mark, and its own gate lane.
+ * its own high-water mark, and its own gate lane. `lower` names the one provider a resync may take DOWN.
  */
-export async function pushSeriesProgress(userId: string, seriesId: string): Promise<void> {
+export async function pushSeriesProgress(userId: string, seriesId: string, opts: { lower?: Provider } = {}): Promise<void> {
   const conns = await q<{ provider: Provider; access_token: string; expires_at: string | null }>(
     `SELECT provider, access_token, expires_at FROM user_trackers
       WHERE user_id = $1 AND enabled = true`,
@@ -299,10 +321,10 @@ export async function pushSeriesProgress(userId: string, seriesId: string): Prom
   );
   if (!conns.length) return;
 
-  const { chapters, finished } = await seriesProgressFor(userId, seriesId);
+  const { chapters } = await seriesProgressFor(userId, seriesId);
   if (chapters <= 0) return;
 
-  await Promise.all(conns.map((conn) => pushOne(userId, seriesId, conn, chapters, finished)));
+  await Promise.all(conns.map((conn) => pushOne(userId, seriesId, conn, chapters, opts.lower === conn.provider)));
 }
 
 async function pushOne(
@@ -310,7 +332,7 @@ async function pushOne(
   seriesId: string,
   conn: { provider: Provider; access_token: string; expires_at: string | null },
   chapters: number,
-  finished: boolean,
+  lower: boolean,
 ): Promise<void> {
   const adapter = ADAPTERS[conn.provider];
   if (!adapter) return;
@@ -377,12 +399,19 @@ async function pushOne(
   }
 
   // one lane per user AND provider: a burst of completions trickles out politely to each service, and a slow
-  // one cannot hold up a fast one.
+  // one cannot hold up a fast one. 2.4 s apart since v0.61.2: a push is a read and a write now, so the calls per
+  // minute are what the 1.2 s of one write each used to be.
   await withGate(`tracker:${userId}:${conn.provider}`, async () => {
     try {
-      await adapter.setProgress(token, link.external_id, chapters, finished);
+      // What the service holds first (v0.61.2, #201): whether the series has ended, its chapter count, and this
+      // account's entry -- pushStatus decides from those, never from the chapters on this server alone.
+      const state = await adapter.seriesState(token, link.external_id);
+      const status = pushStatus(chapters, state, { lower });
+      if (status) await adapter.setProgress(token, link.external_id, chapters, status, state);
       await q('UPDATE user_trackers SET last_sync_at = now(), last_error = NULL WHERE user_id=$1 AND provider=$2',
         [userId, conn.provider]);
+      // The service is level or ahead and nothing was sent: no floor to raise, nothing this app said.
+      if (!status) return;
       // raise the floor only after the tracker actually accepted it
       await q(
         `INSERT INTO tracker_progress (user_id, series_id, provider, chapters, pushed_at)
@@ -401,7 +430,7 @@ async function pushOne(
         await markError(userId, conn.provider, err.message?.slice(0, 200) || 'sync failed');
       }
     }
-  }, { concurrency: 1, minGapMs: 1200 });
+  }, { concurrency: 1, minGapMs: 2400 });
 }
 
 async function markError(userId: string, provider: Provider, msg: string): Promise<void> {

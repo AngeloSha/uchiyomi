@@ -129,14 +129,21 @@ test('tracker progress reflects the highest completed chapter', { skip: DSN ? fa
 // Load list again is how a person takes a downward correction they made on the tracker.
 //
 // MyAnimeList is the provider here because its push is a PATCH the stub can see; the rule is provider-blind.
+// Since v0.61.2 (#201) a push READS first (GET /manga/:id, the series and the entry), so the stub answers that from
+// `malState` -- by default a series still coming out, not on the list -- and only the write counts as a push.
 const FLOOR_SERIES = 's_trk_floor';
 const pushes: Array<{ method: string; url: string; body: string }> = [];
+const RUNNING = { status: 'currently_publishing', num_chapters: 0 };
+let malState: Record<string, unknown> = RUNNING;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (u: any, init?: any) => {
   const url = String(u);
   if (!/api\.myanimelist\.net/.test(url)) return realFetch(u, init);
-  pushes.push({ method: String(init?.method ?? 'GET'), url, body: String(init?.body ?? '') });
-  return new Response(JSON.stringify({ status: 'reading' }), { status: 200, headers: { 'content-type': 'application/json' } });
+  const method = String(init?.method ?? 'GET');
+  const answer = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: { 'content-type': 'application/json' } });
+  if (method === 'GET') return answer(malState);
+  pushes.push({ method, url, body: String(init?.body ?? '') });
+  return answer({ status: 'reading' });
 }) as typeof fetch;
 
 test('the push floor a tracker import seeds', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async (t) => {
@@ -342,7 +349,11 @@ test('resync clears the floor for MAL and Kitsu too', { skip: DSN ? false : 'set
     await t.test('a MAL resync clears the MAL floor only, and the lower number goes out', async () => {
       // Reintroduce by `provider !== 'anilist' → 400` in the route: this is a 400 and the floor stands.
       pushes.length = 0;
+      // The service holds the 50 too (v0.61.2): a push never goes below what the service holds, and the resync is the
+      // one that may. Reintroduce by calling pushSeriesProgress without `lower` in the route: nothing is pushed.
+      malState = { ...RUNNING, my_list_status: { status: 'reading', num_chapters_read: 50, is_rereading: false } };
       const r = await resync('myanimelist');
+      malState = RUNNING;
       assert.equal(r.statusCode, 200, r.body);
       // Reintroduce by `clearTrackerFloor(uid, seriesId)` without the provider: the default is anilist, so
       // the AniList floor goes and the MAL one stays.
@@ -533,5 +544,89 @@ test('the editions of one work share their tracker entry\'s floor', { skip: DSN 
   } finally {
     await q(`DELETE FROM users WHERE username = $1`, ['tracker-editions']);
     await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [[EN_ED, ES_ED]]);
+  }
+});
+
+// ---- #201: the status a push sends comes from the service, not from this server's chapters -------------------------
+//
+// CheetahDoesStuff read every chapter they had of a series still coming out, and their list moved it to Completed: a
+// push said COMPLETED whenever every chapter on THIS server was read. Since v0.61.2 it reads the series and the entry
+// first (the stub's `malState` above) and pushStatus decides; these drive that through pushSeriesProgress.
+const STATUS_SERIES = 's_trk_status201';
+
+test('a series still coming out is never completed by a push (#201)', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async (t) => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q, one } = await import('../src/lib/db');
+  const trackers = await import('../src/lib/trackers');
+  await migrate();
+  await q(`DELETE FROM users WHERE username = $1`, ['tracker-status201']);
+  await q(`DELETE FROM lib_series WHERE id = $1`, [STATUS_SERIES]);
+  await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ($1,'test','Still Running',$1)`, [STATUS_SERIES]);
+  const userId = (await q(`INSERT INTO users (username, display_name, password_hash, role) VALUES ($1,$1,'x','user') RETURNING id`, ['tracker-status201']))[0].id as string;
+  const read = async (n: number) => {
+    await q(`INSERT INTO lib_books (id, series_id, source, file, title, number) VALUES ($1,$2,'test',$3,$4,$5) ON CONFLICT (id) DO NOTHING`,
+      [`b_s201_${n}`, STATUS_SERIES, `/test/s201/${n}.cbz`, `Chapter ${n}`, n]);
+    await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed) VALUES ($1,$2,$3,1,true) ON CONFLICT (user_id, book_id) DO NOTHING`,
+      [userId, `b_s201_${n}`, STATUS_SERIES]);
+  };
+  // Each case starts with no floor of this app's own, so only what the service holds decides.
+  const push = async (state: Record<string, unknown>, opts: { lower?: 'myanimelist' } = {}) => {
+    await q(`DELETE FROM tracker_progress WHERE user_id = $1 AND series_id = $2`, [userId, STATUS_SERIES]);
+    malState = state;
+    pushes.length = 0;
+    await trackers.pushSeriesProgress(userId, STATUS_SERIES, opts);
+  };
+  const sent = () => Object.fromEntries(new URLSearchParams(pushes.at(-1)?.body ?? ''));
+  const entry = (status: string, read: number, rereading = false) => ({ my_list_status: { status, num_chapters_read: read, is_rereading: rereading } });
+  const lastError = async () => (await one<{ last_error: string | null }>(
+    `SELECT last_error FROM user_trackers WHERE user_id = $1 AND provider = 'myanimelist'`, [userId]))?.last_error ?? null;
+  try {
+    await trackers.saveConnection(userId, 'myanimelist', 'tok-mal', 'me-on-mal', new Date(Date.now() + 86_400_000));
+    await trackers.linkSeries(STATUS_SERIES, '901', 'Still Running', userId, 'myanimelist');
+    for (const n of [1, 2, 3]) await read(n);
+
+    await t.test('every chapter here read, the series still coming out: reading', async () => {
+      assert.equal((await trackers.seriesProgressFor(userId, STATUS_SERIES)).finished, true, 'PREMISE: every chapter here is read');
+      await push(RUNNING);
+      // Reintroduce the old rule (completed when every chapter here is read): this sends status=completed.
+      assert.deepEqual(sent(), { num_chapters_read: '3', status: 'reading' });
+    });
+
+    await t.test('finished, and this server reaches its last chapter: completed', async () => {
+      await push({ status: 'finished', num_chapters: 3 });
+      assert.deepEqual(sent(), { num_chapters_read: '3', status: 'completed' });
+    });
+
+    await t.test('finished, but this server stops short of its last chapter: reading', async () => {
+      await push({ status: 'finished', num_chapters: 10 });
+      assert.deepEqual(sent(), { num_chapters_read: '3', status: 'reading' });
+    });
+
+    await t.test('an entry the old rule completed comes back to reading with the next chapter', async () => {
+      await push({ ...RUNNING, ...entry('completed', 3) });
+      assert.equal(pushes.length, 0, 'level with the service: nothing to send');
+      assert.equal(await lastError(), null, 'and nothing wrong');
+      await read(4);
+      await push({ ...RUNNING, ...entry('completed', 3) });
+      assert.deepEqual(sent(), { num_chapters_read: '4', status: 'reading' });
+    });
+
+    await t.test('a re-read stays one, and a service ahead of this server is never rewound', async () => {
+      await push({ status: 'finished', num_chapters: 100, ...entry('completed', 2, true) });
+      assert.deepEqual(sent(), { num_chapters_read: '4', is_rereading: 'true' });
+      // Reintroduce by pushing whatever the service holds: chapter 4 rewrites the 120 the service has.
+      await push({ ...RUNNING, ...entry('reading', 120) });
+      assert.equal(pushes.length, 0, 'the service is at 120: chapter 4 here sends nothing');
+      assert.equal(await lastError(), null, 'and it is not an error');
+    });
+
+    await t.test('a resync still takes it down', async () => {
+      await push({ ...RUNNING, ...entry('reading', 120) }, { lower: 'myanimelist' });
+      assert.deepEqual(sent(), { num_chapters_read: '4', status: 'reading' });
+    });
+  } finally {
+    malState = RUNNING;
+    await q(`DELETE FROM users WHERE username = $1`, ['tracker-status201']);
+    await q(`DELETE FROM lib_series WHERE id = $1`, [STATUS_SERIES]);
   }
 });

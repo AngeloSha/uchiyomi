@@ -47,8 +47,12 @@ before(async () => {
   globalThis.fetch = (async (u: any, init?: any) => {
     const url = String(u);
     if (!/api\.myanimelist\.net/.test(url)) return realFetch(u, init);
+    const answer = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: { 'content-type': 'application/json' } });
+    // Since v0.61.2 (#201) a push reads the series first: a GET, answered as a series still coming out and not on the
+    // list. Only the write is a push.
+    if (String(init?.method ?? 'GET') === 'GET') return answer({ status: 'currently_publishing', num_chapters: 0 });
     pushes.push(String(init?.body ?? ''));
-    return new Response(JSON.stringify({ status: 'reading' }), { status: 200, headers: { 'content-type': 'application/json' } });
+    return answer({ status: 'reading' });
   }) as typeof fetch;
   const { migrate } = await import('../src/lib/migrate');
   ({ q } = (await import('../src/lib/db')) as any);

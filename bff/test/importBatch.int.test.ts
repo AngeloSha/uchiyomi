@@ -1383,6 +1383,10 @@ test('a rejected tracker token disables the connection with the same message as 
   const sid = newSeriesId();
   const bookId = `${T36}-book`;
   const origSetProgress = ADAPTERS.anilist.setProgress;
+  // A push reads the series first since v0.61.2 (#201): answered here, so it is the WRITE that refuses the token, as
+  // before, and nothing reaches the real AniList.
+  const origSeriesState = ADAPTERS.anilist.seriesState;
+  ADAPTERS.anilist.seriesState = async () => ({ ended: false, total: null, entry: null });
   const authFail = (): never => { throw Object.assign(new Error('Invalid token'), { authFailed: true }); };
   const connection = async () => (await q('SELECT enabled, last_error FROM user_trackers WHERE user_id = $1 AND provider = $2', [uid, 'anilist']))[0];
   let restore = () => {};
@@ -1432,6 +1436,7 @@ test('a rejected tracker token disables the connection with the same message as 
     });
   } finally {
     ADAPTERS.anilist.setProgress = origSetProgress;
+    ADAPTERS.anilist.seriesState = origSeriesState;
     restore();
     for (const id of batchIds) await q('DELETE FROM import_batches WHERE id = $1', [id]);
     await q('DELETE FROM read_progress WHERE book_id = $1', [bookId]);

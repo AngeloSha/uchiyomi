@@ -78,6 +78,8 @@ test('every provider has a complete adapter', async () => {
     assert.ok(a.tokenHelp, `${p}: needs to tell the user where to get a token, or nobody can connect it`);
     assert.equal(typeof a.whoAmI, 'function');
     assert.equal(typeof a.setProgress, 'function');
+    // v0.61.2 (#201): a push reads the series and the entry first, so the status comes from the service.
+    assert.equal(typeof a.seriesState, 'function', `${p}: a push decides the status from what this reads`);
     assert.equal(typeof a.listLibrary, 'function', `${p}: the import intake reads the list through this`);
   }
   assert.ok(isProvider('kitsu'));
@@ -252,7 +254,7 @@ test("Kitsu progress goes to the caller's own entry: patched when it exists, cre
     return json({ errors: [{ status: '404' }] }, 404);
   });
 
-  await kitsuAdapter.setProgress('tok', '14916', 12, false);
+  await kitsuAdapter.setProgress('tok', '14916', 12, 'reading');
   const lookup = calls.find((c) => c.method === 'GET' && c.url.pathname === '/api/edge/library-entries');
   assert.ok(lookup, 'the entry is looked up, not assumed');
   assert.equal(lookup!.url.searchParams.get('filter[userId]'), '42', "the CALLER's entry -- another member must not write the importer's");
@@ -264,7 +266,7 @@ test("Kitsu progress goes to the caller's own entry: patched when it exists, cre
   assert.ok(!calls.some((c) => c.method === 'POST'), 'nothing is created when an entry exists');
 
   calls.length = 0;
-  await kitsuAdapter.setProgress('tok', '555', 3, true);
+  await kitsuAdapter.setProgress('tok', '555', 3, 'completed');
   assert.ok(!calls.some((c) => c.method === 'PATCH'), 'nothing to patch');
   const post = calls.find((c) => c.method === 'POST');
   assert.equal(post?.url.pathname, '/api/edge/library-entries', 'no entry yet: one is created on this account');
@@ -317,17 +319,141 @@ test('a text/plain 403 (Cloudflare) is a plain error, never authFailed', async (
   reset(cloudflare);
   await assert.rejects(anilistAdapter.listLibrary('good', opts), plain403, 'AniList list: a 403 keeps the connection');
   reset(cloudflare);
-  await assert.rejects(anilistAdapter.setProgress('good', '1', 5, false), plain403, 'AniList push: a 403 keeps the connection');
+  await assert.rejects(anilistAdapter.setProgress('good', '1', 5, 'reading'), plain403, 'AniList push: a 403 keeps the connection');
 
   reset(() => json({ error: 'forbidden', message: 'DoS protection' }, 403));
   await assert.rejects(malAdapter.listLibrary('good', opts), plain403, 'MAL list: a 403 keeps the connection');
   reset(() => json({ error: 'forbidden', message: 'DoS protection' }, 403));
-  await assert.rejects(malAdapter.setProgress('good', '1', 5, false), plain403, 'MAL push: a 403 keeps the connection');
+  await assert.rejects(malAdapter.setProgress('good', '1', 5, 'reading'), plain403, 'MAL push: a 403 keeps the connection');
 
   reset(() => json({ errors: [{ status: '403' }] }, 403));
   await assert.rejects(kitsuAdapter.listLibrary('good', opts), plain403, 'Kitsu list: a 403 keeps the connection');
   reset(() => json({ errors: [{ status: '403' }] }, 403));
-  await assert.rejects(kitsuAdapter.setProgress('good', '1', 5, false), plain403, 'Kitsu push: a 403 keeps the connection');
+  await assert.rejects(kitsuAdapter.setProgress('good', '1', 5, 'reading'), plain403, 'Kitsu push: a 403 keeps the connection');
+
+  // v0.61.2: the read a push now starts with holds to the same rule.
+  reset(cloudflare);
+  await assert.rejects(anilistAdapter.seriesState('good', '1'), plain403, 'AniList state: a 403 keeps the connection');
+  reset(() => json({ error: 'forbidden', message: 'DoS protection' }, 403));
+  await assert.rejects(malAdapter.seriesState('good', '1'), plain403, 'MAL state: a 403 keeps the connection');
+  reset(() => json({ errors: [{ status: '403' }] }, 403));
+  await assert.rejects(kitsuAdapter.seriesState('good', '1'), plain403, 'Kitsu state: a 403 keeps the connection');
+});
+
+// ---- #201: what a push reads first, and what it writes ---------------------------------------------------
+//
+// A push used to write COMPLETED whenever every chapter on this server was read, a series still coming out
+// included. Since v0.61.2 it reads the series and the account's entry first (seriesState) and trackers.ts pushStatus
+// decides; these hold each adapter to reading the service's own words, and to writing the status it is given.
+
+test('AniList state: ended, count and the viewer\'s entry from one query; a re-read is told apart', async () => {
+  const { anilistAdapter } = await import('../src/lib/trackerProviders');
+  let answer: any = null;
+  reset((c) => (c.url.hostname === 'graphql.anilist.co' ? json({ data: { Media: answer } }) : null));
+
+  answer = { status: 'RELEASING', chapters: null, mediaListEntry: { status: 'CURRENT', progress: 50 } };
+  assert.deepEqual(await anilistAdapter.seriesState('tok', '30013'),
+    { ended: false, total: null, entry: { status: 'reading', progress: 50 } });
+  assert.match(calls[0].body.query, /mediaListEntry\s*\{\s*status progress\s*\}/, 'the entry is read in the same query');
+  assert.equal(calls[0].body.variables.id, 30013);
+
+  answer = { status: 'FINISHED', chapters: 100, mediaListEntry: null };
+  assert.deepEqual(await anilistAdapter.seriesState('tok', '1'), { ended: true, total: 100, entry: null }, 'not on the list');
+  answer = { status: 'CANCELLED', chapters: 0, mediaListEntry: { status: 'REPEATING', progress: 3 } };
+  // Reintroduce by mapping REPEATING through the list import's buckets: this reads `reading` and the re-read is lost.
+  assert.deepEqual(await anilistAdapter.seriesState('tok', '1'),
+    { ended: true, total: null, entry: { status: 'rereading', progress: 3 } }, 'cancelled has ended; 0 chapters is unknown');
+  answer = { status: 'HIATUS', chapters: 80, mediaListEntry: { status: 'COMPLETED', progress: 80 } };
+  assert.deepEqual(await anilistAdapter.seriesState('tok', '1'),
+    { ended: false, total: 80, entry: { status: 'completed', progress: 80 } }, 'a hiatus has more to come');
+});
+
+test('AniList push: the status it is given, in AniList\'s words', async () => {
+  const { anilistAdapter } = await import('../src/lib/trackerProviders');
+  reset((c) => (c.url.hostname === 'graphql.anilist.co' ? json({ data: { SaveMediaListEntry: { id: 1 } } }) : null));
+  for (const [status, sent] of [['reading', 'CURRENT'], ['completed', 'COMPLETED'], ['rereading', 'REPEATING']] as const) {
+    calls.length = 0;
+    await anilistAdapter.setProgress('tok', '30013', 12, status);
+    assert.deepEqual(calls[0].body.variables, { mediaId: 30013, progress: 12, status: sent }, status);
+  }
+});
+
+test('MyAnimeList state and push: publishing state, count, the entry and its re-read flag', async () => {
+  const { malAdapter } = await import('../src/lib/trackerProviders');
+  let answer: any = null;
+  reset((c) => {
+    if (c.url.hostname !== 'api.myanimelist.net') return null;
+    return c.method === 'GET' ? json(answer) : json({ status: 'reading' });
+  });
+
+  answer = { id: 2, status: 'currently_publishing', num_chapters: 0, my_list_status: { status: 'reading', num_chapters_read: 50, is_rereading: false } };
+  assert.deepEqual(await malAdapter.seriesState('tok', '2'), { ended: false, total: null, entry: { status: 'reading', progress: 50 } });
+  assert.equal(calls[0].url.pathname, '/v2/manga/2');
+  assert.equal(calls[0].url.searchParams.get('fields'), 'status,num_chapters,my_list_status');
+  answer = { id: 2, status: 'finished', num_chapters: 162 };
+  assert.deepEqual(await malAdapter.seriesState('tok', '2'), { ended: true, total: 162, entry: null }, 'no my_list_status: not on the list');
+  answer = { id: 2, status: 'discontinued', num_chapters: 40, my_list_status: { status: 'completed', num_chapters_read: 12, is_rereading: true } };
+  assert.deepEqual(await malAdapter.seriesState('tok', '2'), { ended: true, total: 40, entry: { status: 'rereading', progress: 12 } });
+  answer = { id: 2, status: 'on_hiatus', num_chapters: 0 };
+  assert.equal((await malAdapter.seriesState('tok', '2')).ended, false, 'a hiatus has more to come');
+
+  const sent = async (status: 'reading' | 'completed' | 'rereading') => {
+    calls.length = 0;
+    await malAdapter.setProgress('tok', '2', 13, status);
+    const w = calls.find((c) => c.method === 'PATCH');
+    assert.equal(w?.url.pathname, '/v2/manga/2/my_list_status');
+    return Object.fromEntries(new URLSearchParams(String(w?.body)));
+  };
+  assert.deepEqual(await sent('reading'), { num_chapters_read: '13', status: 'reading' });
+  assert.deepEqual(await sent('completed'), { num_chapters_read: '13', status: 'completed' });
+  // A re-read keeps the status the person has; only the flag and the count are sent.
+  assert.deepEqual(await sent('rereading'), { num_chapters_read: '13', is_rereading: 'true' });
+});
+
+test('Kitsu state and push: the manga rides with the entry, or is asked for; reconsuming is a re-read', async () => {
+  const { kitsuAdapter } = await import('../src/lib/trackerProviders');
+  const manga: Record<string, any> = {
+    '14916': { status: 'current', chapterCount: null },
+    '555': { status: 'finished', chapterCount: 40 },
+  };
+  reset((c) => {
+    if (c.url.hostname !== 'kitsu.app') return null;
+    if (c.url.pathname === '/api/edge/users') return json({ data: [{ id: '42', attributes: { name: 'me' } }] });
+    if (c.method === 'GET' && c.url.pathname === '/api/edge/library-entries') {
+      const id = c.url.searchParams.get('filter[mangaId]')!;
+      if (id !== '14916') return json({ data: [] });
+      return json({
+        data: [{ id: '999', type: 'libraryEntries', attributes: { status: 'completed', progress: 7, reconsuming: true } }],
+        included: [{ id, type: 'manga', attributes: manga[id] }],
+      });
+    }
+    const m = /^\/api\/edge\/manga\/(\d+)$/.exec(c.url.pathname);
+    if (c.method === 'GET' && m) return json({ data: { id: m[1], type: 'manga', attributes: manga[m[1]] } });
+    if (c.method === 'PATCH') return json({ data: { id: '999' } });
+    if (c.method === 'POST') return json({ data: { id: '1000' } }, 201);
+    return json({ errors: [{ status: '404' }] }, 404);
+  });
+
+  const withEntry = await kitsuAdapter.seriesState('tok', '14916');
+  assert.deepEqual({ ...withEntry, ref: undefined }, { ended: false, total: null, entry: { status: 'rereading', progress: 7 }, ref: undefined });
+  const lookup = calls.find((c) => c.url.pathname === '/api/edge/library-entries');
+  assert.equal(lookup!.url.searchParams.get('filter[userId]'), '42', "the CALLER's entry");
+  assert.equal(lookup!.url.searchParams.get('include'), 'manga');
+  assert.ok(!calls.some((c) => c.url.pathname.startsWith('/api/edge/manga/')), 'the included manga was enough');
+
+  calls.length = 0;
+  assert.deepEqual({ ...(await kitsuAdapter.seriesState('tok', '555')), ref: undefined },
+    { ended: true, total: 40, entry: null, ref: undefined }, 'no entry: the manga is asked for on its own');
+  assert.ok(calls.some((c) => c.method === 'GET' && c.url.pathname === '/api/edge/manga/555'));
+
+  // The push writes the entry the state read found, without looking it up again.
+  calls.length = 0;
+  await kitsuAdapter.setProgress('tok', '14916', 8, 'rereading', withEntry);
+  assert.ok(!calls.some((c) => c.method === 'GET'), 'the state read already found the entry');
+  const patch = calls.find((c) => c.method === 'PATCH');
+  assert.equal(patch?.url.pathname, '/api/edge/library-entries/999');
+  // A re-read moves the progress under the status it already has.
+  assert.deepEqual(patch?.body?.data?.attributes, { progress: 8, reconsuming: true });
 });
 
 test('three-letter synonyms are not offered as alternate titles', async () => {

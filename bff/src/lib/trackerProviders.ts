@@ -19,6 +19,31 @@ export type Provider = 'anilist' | 'myanimelist' | 'kitsu';
 export const LIST_STATUSES = ['reading', 'plan_to_read', 'completed', 'on_hold', 'dropped'] as const;
 export type ListStatus = (typeof LIST_STATUSES)[number];
 
+/** An entry's bucket as a push reads it (v0.61.2, #201): the five above, or `rereading` for a re-read in progress. */
+export type EntryStatus = ListStatus | 'rereading';
+/** What a push may set, as trackers.ts pushStatus decides it: reading, completed, or a re-read kept as one. */
+export type PushStatus = 'reading' | 'completed' | 'rereading';
+
+/**
+ * What the service says before a push (v0.61.2, #201): whether the series has ENDED there -- finished, or cancelled or
+ * discontinued, no more chapters coming either way -- how many chapters it has (null while unknown, which it always is
+ * while a series runs), and this account's own entry, null when the series is not on its list yet. `ref` is the
+ * adapter's own note for its setProgress (Kitsu's entry), read nowhere else.
+ */
+export interface SeriesState {
+  ended: boolean;
+  total: number | null;
+  entry: { status: EntryStatus; progress: number } | null;
+  ref?: unknown;
+}
+
+/** A count the service gave, or null: MAL says 0 and AniList and Kitsu say null for "not known yet". */
+const positiveInt = (v: unknown): number | null => {
+  const n = Number(v);
+  return Number.isInteger(n) && n > 0 ? n : null;
+};
+const progressOf = (v: unknown): number => Math.max(0, Math.floor(Number(v) || 0));
+
 /**
  * One entry of a person's list, as the import intake wants it: a search title (English first, the way the
  * add dialog searches), the other spellings for a second try, the bucket it sits in, how far the person got
@@ -110,8 +135,16 @@ export interface TrackerAdapter {
   readonly tokenDays: number | null;
   /** Prove the token works and name the account it belongs to. Throws or returns null when rejected. */
   whoAmI(token: string): Promise<{ id: string; name: string } | null>;
-  /** Push progress. `externalId` is whatever linkSeries stored for this provider. */
-  setProgress(token: string, externalId: string, chapters: number, finished: boolean): Promise<void>;
+  /**
+   * Read the series and this account's entry on the service (v0.61.2, #201), which is what pushStatus (trackers.ts)
+   * decides the status from. Throws exactly as setProgress does.
+   */
+  seriesState(token: string, externalId: string): Promise<SeriesState>;
+  /**
+   * Push progress with the status pushStatus chose. `externalId` is whatever linkSeries stored for this provider, and
+   * `state` the seriesState this push read, when there is one.
+   */
+  setProgress(token: string, externalId: string, chapters: number, status: PushStatus, state?: SeriesState): Promise<void>;
   /**
    * Read the account's own manga list, paged by our own offsets (never by following a URL the service hands
    * back) and capped at `max` entries. Throws `authFailed` on a rejected token exactly as setProgress does;
@@ -239,6 +272,12 @@ const anilistFormat = (f: unknown): LibraryEntry['format'] =>
 const ANILIST_SAVE = `mutation($mediaId:Int,$progress:Int,$status:MediaListStatus){
   SaveMediaListEntry(mediaId:$mediaId, progress:$progress, status:$status){ id progress status }
 }`;
+/** The series and this account's entry in one query (v0.61.2, #201): `mediaListEntry` is the token's own, null when the
+ *  series is not on its list. `chapters` is null while AniList does not know the count, as for every running series. */
+const ANILIST_STATE = `query($id:Int){Media(id:$id,type:MANGA){status chapters mediaListEntry{status progress}}}`;
+/** FINISHED and CANCELLED have ended; RELEASING, HIATUS and NOT_YET_RELEASED have more chapters to come. */
+const ANILIST_ENDED = new Set(['FINISHED', 'CANCELLED']);
+const ANILIST_PUSH: Record<PushStatus, string> = { reading: 'CURRENT', completed: 'COMPLETED', rereading: 'REPEATING' };
 
 export const anilistAdapter: TrackerAdapter = {
   id: 'anilist',
@@ -291,11 +330,23 @@ export const anilistAdapter: TrackerAdapter = {
       if (!col?.hasNextChunk) return out;
     }
   },
-  async setProgress(token, externalId, chapters, finished) {
+  async seriesState(token, externalId) {
+    const d = await anilistCall(token, ANILIST_STATE, { id: Number(externalId) });
+    const m = d?.Media;
+    const e = m?.mediaListEntry;
+    // A re-read is REPEATING, which the list import reads as reading; a push keeps it apart so it can stay one.
+    const status = e ? (e.status === 'REPEATING' ? 'rereading' : fromAnilistStatus(e.status)) : null;
+    return {
+      ended: ANILIST_ENDED.has(String(m?.status)),
+      total: positiveInt(m?.chapters),
+      entry: status ? { status, progress: progressOf(e.progress) } : null,
+    };
+  },
+  async setProgress(token, externalId, chapters, status) {
     await anilistCall(token, ANILIST_SAVE, {
       mediaId: Number(externalId),
       progress: chapters,
-      status: finished ? 'COMPLETED' : 'CURRENT',
+      status: ANILIST_PUSH[status],
     });
   },
 };
@@ -309,6 +360,10 @@ const MAL_PAGE = 1000;
 const MAL_STATUS: Record<ListStatus, string> = {
   reading: 'reading', plan_to_read: 'plan_to_read', completed: 'completed', on_hold: 'on_hold', dropped: 'dropped',
 };
+/** MAL's publishing states that have ended: `finished`, `discontinued`. The others have more chapters to come. */
+const MAL_ENDED = new Set(['finished', 'discontinued']);
+const fromMalStatus = (s: unknown): ListStatus | null =>
+  (LIST_STATUSES as readonly string[]).includes(String(s)) ? (s as ListStatus) : null;
 const malFormat = (t: unknown): LibraryEntry['format'] => {
   const s = String(t ?? '');
   if (s === 'novel' || s === 'light_novel') return 'novel';
@@ -382,12 +437,25 @@ export const malAdapter: TrackerAdapter = {
     const d = await malCall(token, '/users/@me?fields=name');
     return d?.name ? { id: String(d.id ?? d.name), name: d.name } : null;
   },
-  async setProgress(token, externalId, chapters, finished) {
-    // MAL takes a form body, not JSON, and calls the field num_chapters_read.
-    const body = new URLSearchParams({
-      num_chapters_read: String(chapters),
-      status: finished ? 'completed' : 'reading',
-    });
+  async seriesState(token, externalId) {
+    // `num_chapters` is 0 while MAL does not know the count; `my_list_status` is absent when the series is not on the
+    // account's list. A re-read is `is_rereading` on whatever status the entry has.
+    const qs = new URLSearchParams({ fields: 'status,num_chapters,my_list_status' });
+    const d = await malCall(token, `/manga/${encodeURIComponent(externalId)}?${qs}`);
+    const ls = d?.my_list_status;
+    const status = ls ? (ls.is_rereading ? 'rereading' : fromMalStatus(ls.status)) : null;
+    return {
+      ended: MAL_ENDED.has(String(d?.status)),
+      total: positiveInt(d?.num_chapters),
+      entry: status ? { status, progress: progressOf(ls.num_chapters_read) } : null,
+    };
+  },
+  async setProgress(token, externalId, chapters, status) {
+    // MAL takes a form body, not JSON, and calls the field num_chapters_read. A re-read sends its flag and leaves the
+    // status as the person has it: MAL keeps a re-read under whichever status it was started from.
+    const body = new URLSearchParams({ num_chapters_read: String(chapters) });
+    if (status === 'rereading') body.set('is_rereading', 'true');
+    else body.set('status', status);
     await malCall(token, `/manga/${encodeURIComponent(externalId)}/my_list_status`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -499,21 +567,57 @@ export const kitsuAdapter: TrackerAdapter = {
     const u = d?.data?.[0];
     return u ? { id: String(u.id), name: u.attributes?.name ?? u.attributes?.slug ?? 'kitsu' } : null;
   },
-  async setProgress(token, externalId, chapters, finished) {
-    // `externalId` is the Kitsu MANGA id, the one thing about a series that is the same for every account.
-    // The entry to write is the CALLER's own, resolved here by user and manga: it used to be a stored
-    // library-entry id, which belongs to one account, so after an admin's import every other member's push
-    // would have PATCHed the admin's entry, got a 403 on every chapter, and never synced a thing.
-    // ⚠️ Reintroduce by PATCHing `/library-entries/${externalId}` directly.
+  async seriesState(token, externalId) {
+    // `externalId` is the Kitsu MANGA id, the one thing about a series that is the same for every account; the entry
+    // is the CALLER's own, found by user and manga (setProgress below says why). The manga rides along with the entry;
+    // with no entry on this account it is asked for on its own.
     const me = await kitsuAdapter.whoAmI(token);
     if (!me) throw authFail('Kitsu rejected the token');
     const qs = new URLSearchParams({
-      'filter[userId]': me.id, 'filter[mangaId]': String(externalId),
-      'fields[libraryEntries]': 'status', 'page[limit]': '1',
+      'filter[userId]': me.id, 'filter[mangaId]': String(externalId), include: 'manga',
+      'fields[libraryEntries]': 'status,progress,reconsuming,manga', 'fields[manga]': 'status,chapterCount',
+      'page[limit]': '1',
     });
     const found = await kitsuCall(token, `/library-entries?${qs}`);
-    const entryId = found?.data?.[0]?.id;
-    const attributes = { progress: chapters, status: finished ? 'completed' : 'current' };
+    const row = found?.data?.[0];
+    let manga = (found?.included ?? []).find((i: any) => i?.type === 'manga' && String(i.id) === String(externalId))?.attributes;
+    if (!manga) {
+      const mq = new URLSearchParams({ 'fields[manga]': 'status,chapterCount' });
+      manga = (await kitsuCall(token, `/manga/${encodeURIComponent(String(externalId))}?${mq}`))?.data?.attributes;
+    }
+    // A re-read is `reconsuming` on the entry; `finished` is the only manga state that has ended.
+    const status = row ? (row.attributes?.reconsuming ? 'rereading' : fromKitsuStatus(row.attributes?.status)) : null;
+    return {
+      ended: manga?.status === 'finished',
+      total: positiveInt(manga?.chapterCount),
+      entry: status ? { status, progress: progressOf(row.attributes?.progress) } : null,
+      ref: { userId: me.id, entryId: row?.id != null ? String(row.id) : null },
+    };
+  },
+  async setProgress(token, externalId, chapters, status, state) {
+    // `externalId` is the Kitsu MANGA id, the one thing about a series that is the same for every account.
+    // The entry to write is the CALLER's own, resolved by user and manga: it used to be a stored
+    // library-entry id, which belongs to one account, so after an admin's import every other member's push
+    // would have PATCHed the admin's entry, got a 403 on every chapter, and never synced a thing.
+    // ⚠️ Reintroduce by PATCHing `/library-entries/${externalId}` directly.
+    // The entry the push's seriesState found, or found here when there is no state to go on.
+    let ref = state?.ref as { userId: string; entryId: string | null } | undefined;
+    if (!ref) {
+      const me = await kitsuAdapter.whoAmI(token);
+      if (!me) throw authFail('Kitsu rejected the token');
+      const qs = new URLSearchParams({
+        'filter[userId]': me.id, 'filter[mangaId]': String(externalId),
+        'fields[libraryEntries]': 'status', 'page[limit]': '1',
+      });
+      const found = await kitsuCall(token, `/library-entries?${qs}`);
+      ref = { userId: me.id, entryId: found?.data?.[0]?.id != null ? String(found.data[0].id) : null };
+    }
+    const me = { id: ref.userId };
+    const entryId = ref.entryId;
+    // A re-read is the entry's `reconsuming` flag under the status it already has, so it moves only the progress.
+    const attributes = status === 'rereading'
+      ? { progress: chapters, reconsuming: true }
+      : { progress: chapters, status: status === 'completed' ? 'completed' : 'current' };
     if (entryId != null) {
       await kitsuCall(token, `/library-entries/${encodeURIComponent(String(entryId))}`, {
         method: 'PATCH',
