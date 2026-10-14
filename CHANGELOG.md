@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+**You decide what a new member starts with.** This is the last part of **@DrummyFloyd**'s request
+([#208](https://github.com/AngeloSha/uchiyomi/issues/208)). A server that lets people sign up, or lets them in through
+its sign-on provider, no longer gives every new account the whole library. Thank you.
+
+### What new members start with
+
+- **Admin → Members → When someone signs up** sets what an account starts with when no admin chose for it. That is
+  someone signing up while Open registration is on, or signing in through your provider for the first time with
+  `OIDC_ALLOW_SIGNUP`. The card has a member card's own three chips: downloads, which libraries they can open, and an
+  age limit. In SSO-only mode the chips are on the *New accounts* card.
+- **The account is made with them.** Even its first page view is limited. Before, you had to find each new account in
+  Members and limit it after its first visit had already seen everything.
+- **Nothing else changes.** The defaults don't apply to the server's first admin or to an account you make in Members,
+  and saving them changes no account that exists. An account your provider makes an admin (`OIDC_ADMIN_GROUP`) sees
+  everything while it is one, and has the defaults if the provider ever makes it a member.
+- **A library you remove leaves the defaults.** If it was the last one, new members see nothing until you choose again,
+  never every library.
+- **For scripts:** `newMemberDefaults` on `PATCH /api/admin/settings`, in the shapes a member's own settings take
+  ([docs/api.md](docs/api.md#admin)).
+
+### Upgrading
+
+- **Database:** three new columns on `server_settings`, all unset. Until you set a default, a new account opens every
+  library, has no age limit and may download, as before. v0.63.0 runs on the upgraded database and ignores them.
+
 ## v0.63.0 — 2026-10-14
 
 **Single sign-on can now be the only way in.** This came from **@DrummyFloyd**'s request

@@ -59,6 +59,7 @@ import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, browsableIds, nameableIds, viewCtxFor, hideAdult } from '../lib/visibility';
 import { cleanSourceOrder, invalidateSourcePrefs } from '../lib/sourcePrefs';
+import { keepRestricted, memberDefaults, memberDefaultsShape, permsShape, saveMemberDefaults } from '../lib/memberDefaults';
 import { borrowNamesFor, clearBorrowedNames } from '../lib/borrowNames';
 import { lookupsChanged } from '../lib/discoverIdentity';
 import { sanitiseNoticeTypes, visibleBookCount } from '../lib/noticeChapters';
@@ -498,20 +499,6 @@ let knownGroups: { at: number; content: Array<{ name: string; onDisk: number; li
 const KNOWN_GROUPS_TTL = 30_000;
 
 /**
- * Stop a member's grant list from collapsing into "everything".
- *
- * Removing their last row leaves zero rows, and zero rows means EVERY library. So every path that can take
- * away the last one has to backstop it, or "remove their access" reads as "give them all of it".
- */
-async function keepRestricted(qq: typeof q, userId: string): Promise<void> {
-  const n = await qq<{ c: number }>('SELECT count(*)::int AS c FROM user_libraries WHERE user_id = $1', [userId]);
-  if (!n[0]?.c) {
-    await qq('INSERT INTO user_libraries (user_id, library_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
-      [userId, NO_LIBRARIES]);
-  }
-}
-
-/**
  * Which of these series this admin may see NAMED (v0.49.0): a repair run's target and current series are a
  * listing, so they follow /api/sources/jobs' rule for a run's "now on ..." -- the count stays, the title of a
  * series the viewer may not list (the 18+ hide, above all) goes. One query, and none when there is nothing.
@@ -656,6 +643,9 @@ export default async function adminRoutes(app: FastifyInstance) {
       // v0.52.0 (#123): every language MangaDex is offered in, English first -- what Admin → Providers' picker
       // offers. `mangadex_langs` beside it is the ones besides English that are on.
       mangadex_available: MANGADEX_LANGS.map((l) => l.code),
+      // #208, item 6: what an account the server makes by itself starts with (lib/memberDefaults.ts), in the shape PATCH
+      // takes it -- Admin → Members → When someone signs up.
+      newMemberDefaults: await memberDefaults(),
     };
   };
   /**
@@ -807,6 +797,13 @@ export default async function adminRoutes(app: FastifyInstance) {
        * into parts included; a file holding a range of chapters never is, either way.
        */
       hideNoticeShortOnly: z.boolean().optional(),
+      /**
+       * #208, item 6: what an account the server makes by itself starts with -- a sign-up, or a first sign-in through the
+       * OIDC provider (lib/memberDefaults.ts). A member's own fields on PATCH /api/admin/users/:id, each on its own:
+       * `libraries` null for every library, a list for exactly these, [] for none; `maxAgeRating` null for no limit;
+       * `perms.canDownload` false to deny downloads. Changes no account that exists.
+       */
+      newMemberDefaults: memberDefaultsShape.optional(),
       // The slow archive's pause and pacing (#117, lib/archive.ts): the window's two ends together or not at all.
       ...ARCHIVE_SETTINGS_SHAPE,
     }).superRefine(archiveWindowPair).parse(req.body);
@@ -928,6 +925,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       await q('UPDATE server_settings SET hide_notice_short_only = $1, updated_at = now() WHERE id = 1', [b.hideNoticeShortOnly]);
       await refreshNoticesActive();
     }
+    if (b.newMemberDefaults !== undefined) await saveMemberDefaults(b.newMemberDefaults);
     await applyArchiveSettings(b);
     await logAudit('settings.update', { userId: userIdOf(req), detail: b, req });
     return settingsRow();
@@ -4597,10 +4595,6 @@ export default async function adminRoutes(app: FastifyInstance) {
       version: appVersion(),
     };
   });
-
-  // canDownload is the only permission that is actually enforced (sources.ts, adding a series). A flag
-  // that is toggleable and checked nowhere is worse than no flag, so there is deliberately only one.
-  const permsShape = z.object({ canDownload: z.boolean().optional() });
 
   /** SSO-only mode's answer to an account made or a password set here (v0.63.0, #208): accounts come from the provider. */
   const ssoOnlyRefusal = (reply: any) =>

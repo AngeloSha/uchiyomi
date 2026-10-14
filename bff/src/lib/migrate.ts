@@ -1743,6 +1743,16 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS backup_keep int;
 -- cleared when the file is replaced (lib/library.ts setBookMeta, lib/partial.ts restampBook). NULL: its source's. The
 -- wrong-language notice reads it (routes/catalog.ts, GET /api/series/:id/versions). Additive: v0.61.x ignores it.
 ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS lang text;
+
+-- New-member defaults (#208, item 6; Admin -> Members): what an account the server makes by itself starts with -- a
+-- sign-up, or a first sign-in through the OIDC provider with OIDC_ALLOW_SIGNUP (lib/memberDefaults.ts). Kept the way the
+-- account keeps them: new_member_libraries NULL for every library (no user_libraries rows), else exactly these library
+-- ids, none when empty; new_member_max_age_rating NULL for no limit, as users.max_age_rating; new_member_perms as
+-- users.perms, where {} allows downloads. All three unset by default, so a server that never sets them makes accounts
+-- exactly as before. Additive: v0.63.0 boots on this schema and ignores them.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS new_member_libraries      text[];
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS new_member_max_age_rating int;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS new_member_perms          jsonb NOT NULL DEFAULT '{}'::jsonb;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

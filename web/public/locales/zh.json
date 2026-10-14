@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3749
+    "strings": 3758
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3752,5 +3752,14 @@
   "Link to {name}": "关联到 {name}",
   "Linked to {name}. You can sign in with it now.": "已关联到 {name}。现在可以用它登录了。",
   "That {name} account is already linked to another account here.": "该 {name} 账号已与这里的另一个账号关联。",
-  "Could not link your account to {name}.": "无法将你的账号关联到 {name}。"
+  "Could not link your account to {name}.": "无法将你的账号关联到 {name}。",
+  "When someone signs up": "有人注册时",
+  "A member who signs up starts with these.": "自行注册的成员一开始采用这些设置。",
+  "A member who signs up, or signs in with {name} for the first time, starts with these.": "自行注册或首次通过 {name} 登录的成员，一开始采用这些设置。",
+  "Existing accounts, and accounts you make here, are not affected.": "现有账号和你在这里创建的账号不受影响。",
+  "Nobody can sign up right now: Open registration is off in Settings.": "目前没有人能注册：“开放注册”已在设置中关闭。",
+  "Each new member starts with these. Existing accounts are not affected.": "每位新成员一开始都采用这些设置。现有账号不受影响。",
+  "Can download": "可以下载",
+  "No downloads": "不能下载",
+  "New members would see nothing.": "新成员将什么也看不到。"
 }

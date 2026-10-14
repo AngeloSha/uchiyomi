@@ -209,6 +209,9 @@ OIDC_ADMIN_GROUP=uchiyomi-admins   # members of this group are admins here
 OIDC_ALLOW_SIGNUP=true              # a person the provider lets in gets an account at their first sign-in
 ```
 
+An account made this way starts with the new-member defaults in **Admin → Members**: which libraries it can open, an
+age limit and downloads. Set them before you let people in; until then a new account opens every library.
+
 **SSO-only.** Add `AUTH_MODE=oidc-only` and the server stops offering passwords at all: no setup form, no password
 sign-in, no sign-up. A new server's first admin is the first person in `OIDC_ADMIN_GROUP` to sign in, or the subject
 `OIDC_BOOTSTRAP_ADMIN_SUB` names. Accounts that already exist need linking first (*Link to Authentik* in **Profile → Account**), and `AUTH_RESCUE_ADMIN` is the way back in if the provider is ever down. The whole reference, with every
