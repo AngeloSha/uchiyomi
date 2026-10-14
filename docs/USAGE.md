@@ -130,8 +130,11 @@ beside them. Home has a **Most popular in your library** rail (its **See all** o
 `sort` in a shared Library URL wins for that visit without changing the saved default; only clicking the sort control
 saves one. The grid stays in the order you picked if saving fails, while the former default is kept for the next visit.
 
-The top bar has **Home** (a daily-pick hero + "For you" rails), **Library**, **Lists** and **Discover**,
-plus search, the updates bell, a refresh button, and your profile.
+On a computer the menu is a slim sidebar down the side (since v0.65.0): **Home** (a daily-pick hero + "For you"
+rails), **Library**, **Lists**, **Discover**, **Reading history**, **Moments**, **Offline** and **Admin**. Rest the
+pointer on it, or Tab into it, and it opens with their names. The top bar holds search, the **Updates** bell and your
+profile; **Check for new chapters** is a key on **Updates**. On a phone the bar along the bottom has **Home**,
+**Library**, **Search**, **Discover**, **Offline** and **You**.
 
 **Lists** are your own shelves — *Plan to read*, *Reading now*, anything. Make one under **Lists** with **New**, and
 add series to it from a series page with the **List** key under the reading button (*Add to list*). A list shows its series with the Library's covers
@@ -835,7 +838,7 @@ not hunt behind the person's back.
 Everything the server is fetching, whoever started it, is under **Library → Downloads** (since v0.49.0; it used
 to be a small pill in the bottom corner). While something comes in, the **Library** tab's icon on a phone wears
 a thin ring that fills as the chapters land, with a small count of the series being fetched; on a computer the
-same ring sits on the cloud button just before the Updates bell, which also leads there. An amber dot on it
+same ring sits on the sidebar's **Library** icon, and the open sidebar has a **Downloads** link under it. An amber dot on it
 means a download of yours failed (any download, for an admin). The **slow archive** never turns the ring: while
 an archive is the only thing working, the ring is a still, amber mark with an hourglass (a paused one puts no mark
 on it at all). On the Library page, the **Series |
@@ -1991,12 +1994,12 @@ another tab.
   when that finishes.*). The server keeps the newest 50 runs and every run of the last 90 days. A fix on one row
   no longer replaces the nightly's line under **Admin → Tasks** (below), which links here instead.
 
-**You don't have to go and look** (since v0.48.0). While the last report found something, an admin's top bar
-shows a warning mark beside the Updates bell — amber, or red for a problem — whose tooltip is the worst
-check's own sentence, and a one-line banner says the same once, with **Take a look** and **Not now**. *Not now*
+**You don't have to go and look** (since v0.48.0). While the last report found something, **Admin** in an admin's
+sidebar wears a warning mark — amber, or red for a problem — and the open sidebar names the worst check under it,
+linking here. A one-line banner says the same once, on a phone too, with **Take a look** and **Not now**. *Not now*
 lasts until a different check finds something (or one gets worse); a count moving inside the same check does
 not bring it back. The server runs the checks by itself every six hours for this, and whenever the Health page
-is opened; the top bar only ever reads the stored result. Other accounts see none of it.
+is opened; the mark only ever reads the stored result. Other accounts see none of it.
 
 **Library scan** (since v0.48.0) lists any folder the library scan could not index, with the scanner's own
 reason. The scan used to stop at such a folder — silently, and on every run — which left every folder after it

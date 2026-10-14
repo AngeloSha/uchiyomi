@@ -126,7 +126,7 @@ sites' terms and your local law.
   and names the step a source fails at. **Fix everything** works through every card by itself, once or every
   night, and then says what only you can decide. Every fix says what it does before you press it, shows its
   progress live, and keeps what it did; *Verify chapter files* re-checks that what the database claims is on
-  disk actually is. When something needs you, the admin's top bar turns amber or red, so you don't have to look.
+  disk actually is. When something needs you, **Admin** in the sidebar turns amber or red, so you don't have to look.
 - **Notice chapters** — the hiatus and announcement posts some sites number as chapters (*100.5*) can be hidden,
   per series type, from lists, counts, downloads and Mihon.
 - **Delete read chapters** — optional: chapters it downloaded and everyone has finished go after a wait you choose,
