@@ -131,7 +131,13 @@ do: the real accounts have 2FA, and working around that is worse than the screen
 
 ## Currency
 
-Every capture except the desktop app's was retaken against **v0.60.1** on 2026-10-12, with the tour video, on the live
+Every capture except the desktop app's was retaken against **v0.65.0** on 2026-10-14, with the tour video, because the
+UI refresh changed every screen: the sidebar on a computer, the top bar see-through over art, Home's banner as whole
+strips, the series page on its banner, Lists with covers, Offline by series, Admin's compact header and Settings index,
+Members' keys and Profile's tab strip. Same rig, same fixtures and the same capture account's reading life as the
+v0.60.1 run described next; the desktop shots (`desktop-*`) are still v0.45.0's.
+
+Before that, every capture except the desktop app's was retaken against **v0.60.1** on 2026-10-12, with the tour video, on the live
 library behind `neutralNames()`, `peopleFixture` and `librariesFixture` (see above), with the capture account's reading
 life: the series page's Continue, four keys and ratings, *More* open (`series-more`), the Library's toolbar and progress
 bars, Discover's one card per work, Health with *Fix everything*, Admin → Sources, and three new crops for the marketing
