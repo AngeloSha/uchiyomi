@@ -95,7 +95,7 @@ export function DiscoverHero({ slides, onPick }: { slides: Trending[]; onPick: (
       <span aria-hidden className="pointer-events-none absolute inset-0"
         style={{ background: 'radial-gradient(60% 70% at var(--start) 70%, rgb(var(--accent) / 0.14), transparent 70%)' }} />
 
-      <div className="relative z-10 flex h-full flex-col justify-end px-4 pb-5 lg:px-8 lg:pb-10">
+      <div className="bleed-pad relative z-10 flex h-full flex-col justify-end pb-5 lg:pb-10">
         <span className="mb-2.5 inline-flex w-fit items-center gap-1.5 rounded-full bg-black/45 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-accent backdrop-blur">
           <IcSparkle width={12} height={12} />{tr('Trending now')}
         </span>

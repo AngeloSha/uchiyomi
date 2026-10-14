@@ -827,6 +827,47 @@ async function main() {
     });
   }
 
+  // ---- views for a before/after comparison (docs/SCREENSHOTS.md, "Before and after") ----
+  // Taken only when named in --only, never in a full run, and never published: a wide screen, the narrowest desktop,
+  // the sidebar opened under the pointer, and Arabic. Each puts the page back as it found it.
+  const named = (n) => ONLY.includes(n);
+  const view = async (pg, vp, path, extra = 900) => {
+    await pg.setViewport(vp);
+    await pg.goto(`${BASE}${path}`, { waitUntil: 'networkidle2', timeout: 60000 });
+    await settle(pg, extra);
+  };
+  const WIDE = { width: 1920, height: 1080, deviceScaleFactor: 1 };
+  const NARROW = { width: 1024, height: 768, deviceScaleFactor: 2 };
+  if (named('home-1920')) { await view(page, WIDE, '/'); await heroAtRest(page); await shot(page, 'home-1920'); }
+  if (named('library-1920')) { await view(page, WIDE, '/library/', 600); await shot(page, 'library-1920'); }
+  if (named('series-1920') && SERIES_ID) { await view(page, WIDE, `/series/?id=${SERIES_ID}`, 1200); await shot(page, 'series-1920'); }
+  if (named('home-1024')) { await view(page, NARROW, '/'); await heroAtRest(page); await shot(page, 'home-1024'); }
+  if (named('library-1024')) { await view(page, NARROW, '/library/', 600); await shot(page, 'library-1024'); }
+  if (named('sidebar-open')) {
+    // The pointer resting on the sidebar's Library item (components/Sidebar.tsx); on a build without the sidebar the
+    // same spot is the page's own edge, and the picture is the page as it was.
+    await view(page, PROFILES.desk, '/library/', 600);
+    const item = await page.$('[data-sidebar] a[data-nav="library"]');
+    if (item) await item.hover(); else await page.mouse.move(30, 150);
+    await sleep(1000);
+    await shot(page, 'sidebar-open');
+    await page.mouse.move(700, 500);
+  }
+  if (named('home-ar') || named('phone-home-ar')) {
+    for (const pg of [page, ph]) await pg.evaluate(() => localStorage.setItem('uchiyomi.lang', 'ar'));
+    if (named('home-ar')) { await view(page, PROFILES.desk, '/'); await heroAtRest(page); await shot(page, 'home-ar'); }
+    if (named('phone-home-ar')) {
+      await ph.goto(`${BASE}/`, { waitUntil: 'networkidle2', timeout: 60000 });
+      await settle(ph, 900); await heroAtRest(ph); await shot(ph, 'phone-home-ar');
+    }
+    for (const pg of [page, ph]) await pg.evaluate(() => localStorage.removeItem('uchiyomi.lang'));
+  }
+  if (named('phone-series') && SERIES_ID) {
+    await ph.goto(`${BASE}/series/?id=${SERIES_ID}`, { waitUntil: 'networkidle2', timeout: 60000 });
+    await settle(ph, 1200); await shot(ph, 'phone-series');
+  }
+  await page.setViewport(PROFILES.desk);
+
   await browser.close();
   await writeFile(`${OUT}/.captured`, new Date().toISOString());
   console.log('done.');

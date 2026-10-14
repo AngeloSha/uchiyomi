@@ -212,7 +212,7 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
       <div aria-hidden className="pointer-events-none absolute inset-0"
         style={{ background: `radial-gradient(75% 120% at var(--start) 0%, ${bad ? 'rgba(245,158,11,0.20)' : 'rgb(var(--accent) / 0.22)'}, transparent 60%)` }} />
 
-      <div className="relative px-4 pb-6 pt-[max(0.9rem,calc(env(safe-area-inset-top)+0.5rem))] lg:px-8 lg:pb-8 lg:pt-8">
+      <div className="bleed-pad relative pb-6 pt-[max(0.9rem,calc(env(safe-area-inset-top)+0.5rem))] lg:pb-8 lg:pt-8">
         <div className="mb-5 flex items-center gap-2">
           <button onClick={onBack} aria-label={tr('Back')}
             className="grid h-10 w-10 place-items-center rounded-full bg-black/40 text-fog-100 backdrop-blur">

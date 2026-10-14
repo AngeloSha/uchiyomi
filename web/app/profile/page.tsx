@@ -230,7 +230,7 @@ function ProfileInner() {
             style={{ background: 'radial-gradient(70% 110% at var(--start) 100%, rgb(var(--accent) / 0.26), transparent 62%)' }} />
 
           <div className="absolute inset-0 flex flex-col justify-end">
-            <div className="px-4 pb-4 lg:px-8 lg:pb-6">
+            <div className="bleed-pad pb-4 lg:pb-6">
               <div className="lg:flex lg:items-end lg:justify-between lg:gap-10">
                 <motion.div className="min-w-0 lg:max-w-2xl"
                   initial={still ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}

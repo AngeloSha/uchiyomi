@@ -102,7 +102,7 @@ function AniListRail({ kind, title, items, onPick, className = 'pb-6' }: {
       {/* pb-3 rather than pb-1: the global scrollbar is 8px and used to be hidden, so the rail had no
           room for it and it would have sat on the card captions. */}
       <ScrollRail label={title}
-        className="bleed flex gap-3 px-4 pb-3 lg:px-8 [scroll-snap-type:x_mandatory]">
+        className="bleed bleed-pad flex gap-3 pb-3 [scroll-snap-type:x_mandatory]">
         {items.map((t, i) => (
           <Reveal key={railKey(t)} delay={Math.min(i, 12) * 28}>
             <TrendingCard t={t} onPick={onPick} />

@@ -34,7 +34,7 @@ export function IncognitoBanner() {
   const toast = useToast();
   if (!on) return null;
   return (
-    <div data-incognito-banner className="flex items-center justify-center gap-2 bg-ink-800 px-4 py-1.5 text-[11px] text-fog-300">
+    <div data-incognito-banner className="flex items-center justify-center gap-2 bg-ink-800 px-4 py-1.5 text-[11px] text-fog-300 lg:ps-[calc(var(--rail-w)+1rem)]">
       <IcEyeOff width={12} height={12} aria-hidden className="shrink-0" />
       <span className="min-w-0">{tr('Incognito reading is on: what you read is not recorded.')}</span>
       <button type="button" onClick={() => { set(false).catch(() => toast(tr('Could not save'), 'error')); }}

@@ -117,6 +117,11 @@ export const IcAlert = (p: P) => (
   <svg {...base(p)}><path d="M12 3.5 2.5 20h19L12 3.5Z" /><path d="M12 10v4.5" /><path d="M12 17.5h.01" /></svg>
 );
 // Waiting its turn: a queued cover in the Downloads view, a refused action that will run later.
+// Admin (UI refresh): the sidebar's way into the console. A shield rather than the gear, which already means a
+// person's own Settings on their profile.
+export const IcShield = (p: P) => (
+  <svg {...base(p)}><path d="M12 3 4.5 6v5.5c0 4.6 3.1 8.2 7.5 9.5 4.4-1.3 7.5-4.9 7.5-9.5V6L12 3Z" /><path d="m9 12 2.2 2.2L15.5 10" /></svg>
+);
 export const IcClock = (p: P) => (
   <svg {...base(p)}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
 );

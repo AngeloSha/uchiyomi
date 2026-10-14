@@ -7,7 +7,7 @@ import { chapterLabel, languageName, numberText, progressOf, relativeTime } from
 import { codeLabel, libraryCaption } from '@/lib/editions';
 import { deviceId, shownDeviceName } from '@/lib/device';
 import { coverTriplet } from '@/lib/theme';
-import { Img, ProgressBar } from './ui';
+import { CARD_W, Img } from './ui';
 import { IcHeart, IcMore, IcPlay, IcPlus, IcStar, IcUsers, IcWifiOff } from './icons';
 import { SourceIcon } from './SourcePicker';
 import { ProgressRing } from './ProgressRing';
@@ -156,7 +156,7 @@ function MoreKey({ menu, title, className }: { menu: ReturnType<typeof useSeries
  *
  *  `eager` skips lazy-loading for tiles that are on screen at first paint. A lazy <img> waits for layout
  *  before the browser will even queue the request, so on the first rail it is pure added latency. */
-export function SeriesCard({ series, w = 'w-32', eager = false, note }: {
+export function SeriesCard({ series, w = CARD_W, eager = false, note }: {
   series: Series; w?: string; eager?: boolean;
   /** One quiet line under the title, a rail's own fact about the series: Home's most popular says AniList's score. */
   note?: CardNote;
@@ -233,6 +233,9 @@ export function SeriesCard({ series, w = 'w-32', eager = false, note }: {
  */
 export function ContinueCard({ book, eager = false, note }: { book: Book; eager?: boolean; note?: string }) {
   const pct = progressOf(book);
+  // Where in the chapter, said as well as drawn (UI refresh): "page 12/40" beside the chapter, the bar along the edge.
+  const pages = book.media?.pagesCount || 0;
+  const page = book.readProgress && !book.readProgress.completed ? book.readProgress.page : 0;
   // Progress already syncs across devices; this just says where you left off, and only when that was
   // somewhere else — "you were reading this on the device you're holding" is noise.
   const elsewhere = book.lastDevice && book.lastDevice.id !== deviceId() ? book.lastDevice : null;
@@ -248,8 +251,9 @@ export function ContinueCard({ book, eager = false, note }: { book: Book; eager?
       <div className="absolute inset-0 bg-linear-to-t from-black via-black/45 to-black/10" />
       <div className="absolute inset-x-0 bottom-0 p-4">
         <p className="line-clamp-1 font-display text-base font-semibold text-white">{book.seriesTitle}</p>
-        <p className="mb-2 text-xs text-fog-300">
+        <p className="text-xs text-fog-300">
           {chapterLabel(book)}
+          {page > 0 && pages > 0 && <span className="tabular-nums text-fog-400" data-continue-page> · {tr('page {page}/{pages}', { page, pages })}</span>}
           {note && <span className="text-fog-500" data-continue-note> · {note}</span>}
           {!note && elsewhere && (
             // One sentence per language: relativeTime is the reader's language now, and "on iPhone vor 3 Tagen"
@@ -259,9 +263,12 @@ export function ContinueCard({ book, eager = false, note }: { book: Book; eager?
               : tr('on {device}', { device: where })}</span>
           )}
         </p>
-        <ProgressBar value={pct || 0.02} />
       </div>
-      <span className="absolute right-3 top-3 grid h-10 w-10 place-items-center rounded-full bg-accent text-black shadow-glow transition group-hover:scale-110 group-active:scale-90">
+      {/* Flush along the bottom edge, as the covers' read bar (CoverReadBar): how far into the chapter. */}
+      <span aria-hidden data-continue-progress className="absolute inset-x-0 bottom-0 h-[3px] bg-white/15">
+        <span className="block h-full bg-accent" style={{ width: `${Math.max(2, Math.round((pct || 0) * 100))}%` }} />
+      </span>
+      <span className="absolute end-3 top-3 grid h-10 w-10 place-items-center rounded-full bg-accent text-black shadow-glow transition group-hover:scale-110 group-active:scale-90">
         <IcPlay width={18} height={18} />
       </span>
     </Link>
@@ -306,14 +313,21 @@ export function SeriesTile({ series, eager = false, selectable, selected, onTogg
   const unread = series.yomi?.unread ?? series.booksUnreadCount ?? 0;
   const savedOffline = useOfflineSeries().has(series.id);
   const tint = useTileTint(series.color);
+  // The card's tilt and glare (UI refresh: a Library tile reacts like a Home card), never in Select mode, where a
+  // press toggles the tile and nothing should move under it.
+  const tilt = useTilt();
+  const tilts = !selectable;
   // Not in Select mode: there a press toggles the tile, and the Library's own bar holds the actions (#100).
   const menu = useSeriesMenu(series);
   const title = series.metadata?.title || series.name;
   const corner = compact ? 'rounded-xl' : 'rounded-2xl';
   const body = (
     <>
-      <div style={tint} className={`grad-border relative aspect-[2/3] overflow-hidden ${corner} border border-ink-700/60 transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-glow group-active:scale-[0.97]`}>
+      <div style={{ ...(tilts ? tilt.style : undefined), ...tint }}
+        onPointerMove={tilts ? tilt.onPointerMove : undefined} onPointerLeave={tilts ? tilt.onPointerLeave : undefined}
+        className={`grad-border relative aspect-[2/3] overflow-hidden ${corner} border border-ink-700/60 transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-glow group-active:scale-[0.97]`}>
         <Img src={img.seriesThumb(series.id)} alt={title} eager={eager} className="h-full w-full transition-transform duration-500 group-hover:scale-[1.07]" />
+        {tilts && <div aria-hidden className="pointer-events-none absolute inset-0 z-10" style={tilt.glare} />}
         {selectable && (
           <>
             {selected && <span className={`absolute inset-0 z-10 ${corner} border-2 border-accent bg-accent/20`} />}
@@ -365,8 +379,9 @@ export function SeriesTile({ series, eager = false, selectable, selected, onTogg
   return (
     <div className="group relative">
       <Link href={`/series/?id=${series.id}`} className="block" {...menu.bind}>{body}</Link>
-      {/* The cover's box, lifted with it, so the ⋯ stays on its corner. */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 hidden aspect-[2/3] transition-all duration-300 group-hover:-translate-y-1 lg:pointer-fine:block">
+      {/* The cover's box, lifted and tilted with it, so the ⋯ stays on its corner. */}
+      <div style={{ transform: tilt.style?.transform, transition: tilt.style?.transition }}
+        className="pointer-events-none absolute inset-x-0 top-0 hidden aspect-[2/3] transition-all duration-300 group-hover:-translate-y-1 lg:pointer-fine:block">
         <MoreKey menu={menu} title={title} className="absolute bottom-2 end-1.5 grid" />
       </div>
       {menu.element}

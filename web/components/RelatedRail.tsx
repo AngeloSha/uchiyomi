@@ -6,13 +6,14 @@
 // page never asks AniList. A work the library holds is its own card (SeriesCard), opening the series; one it does not
 // hold is AniList's cover (OutsideCard), which leads to Discover searching every source for it -- for an account that
 // may add series. Without that permission it is not a link, and says it is not in the library: Discover would refuse it.
+import { ScrollRail, CARD_RAIL } from './ScrollRail';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuth, canDownload } from '@/lib/auth';
 import { t as tr } from '@/lib/i18n';
 import { findHref, relationLabel, shownRows, type RelatedAnswer, type RelatedOutside } from '@/lib/related';
-import { Img, Rail, SectionTitle } from '@/components/ui';
+import { Img, SectionTitle } from '@/components/ui';
 import { SeriesCard, sourceCover } from '@/components/cards';
 import { IcPlus } from '@/components/icons';
 
@@ -76,11 +77,11 @@ export function RelatedRail({ seriesId }: { seriesId: string }) {
   return (
     <section className="mt-10" data-related>
       <SectionTitle>{tr('Related')}</SectionTitle>
-      <Rail>
+      <ScrollRail label={tr('Related')} className={CARD_RAIL}>
         {rows.map((r) => (r.series
           ? <SeriesCard key={`s:${r.series.id}`} series={r.series} note={relationLabel(r.relation)} />
           : <OutsideCard key={`al:${r.outside!.anilistId}`} item={r.outside!} note={relationLabel(r.relation)} mayAdd={mayAdd} />))}
-      </Rail>
+      </ScrollRail>
     </section>
   );
 }
@@ -99,11 +100,11 @@ export function NextInStory({ seriesId }: { seriesId: string }) {
   return (
     <div className="mt-12 text-start" data-next-in-story>
       <SectionTitle>{tr('Next in the story')}</SectionTitle>
-      <Rail>
+      <ScrollRail label={tr('Next in the story')} className={CARD_RAIL}>
         {rows.map((r) => (r.series
           ? <SeriesCard key={`s:${r.series.id}`} series={r.series} />
           : <OutsideCard key={`al:${r.outside!.anilistId}`} item={r.outside!} mayAdd={mayAdd} />))}
-      </Rail>
+      </ScrollRail>
     </div>
   );
 }

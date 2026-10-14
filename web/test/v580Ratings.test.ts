@@ -234,7 +234,8 @@ test('Home: "Most popular in your library" after Recently added, saying AniList\
   assert.match(rail, /\{data!\.popular!\.map\(\(s\) => <SeriesCard key=\{s\.id\} series=\{s\} note=\{sortValue\(s, 'score'\)\} \/>\)\}/,
     'the cards are not the other rails\' SeriesCard, or do not say AniList\'s score');
   assert.doesNotMatch(rail, /RailSkeleton|isLoading/, 'the rail shows without a list');
-  assert.equal((home.match(/tr\('Most popular in your library'\)/g) ?? []).length, 1);
+  // One rail: its heading once. (The rail itself is named by the same words since the UI refresh -- ScrollRail's label.)
+  assert.equal((home.match(/\{tr\('Most popular in your library'\)\}<\/SectionTitle>/g) ?? []).length, 1);
   const at = (s: string) => home.indexOf(s);
   assert.ok(at("tr('Recently added')") > 0 && at("tr('Recently added')") < at('data?.popular') && at('data?.popular') < at("tr('Top 10 in your library')"),
     'the rail is not between Recently added and Top 10 in your library');

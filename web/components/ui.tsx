@@ -307,14 +307,6 @@ export function SectionTitle({ children, action }: { children: ReactNode; action
   );
 }
 
-/** Horizontal snap rail. */
-export function Rail({ children }: { children: ReactNode }) {
-  return (
-    <div className="hide-scrollbar flex gap-3 overflow-x-auto px-4 pb-1 [scroll-snap-type:x_mandatory]">
-      {children}
-    </div>
-  );
-}
 
 export function ProgressBar({ value }: { value: number }) {
   return (
@@ -324,13 +316,19 @@ export function ProgressBar({ value }: { value: number }) {
   );
 }
 
+/**
+ * A rail card's width (UI refresh): it grows with the screen rather than staying 128 px on a 2560 px display. Shared by
+ * SeriesCard and the skeleton that stands in for it, so a rail does not jump when its covers arrive.
+ */
+export const CARD_W = 'w-32 sm:w-36 lg:w-40 3xl:w-44';
+
 export function CardSkeleton({ wide = false }: { wide?: boolean }) {
-  return <div className={`skeleton shrink-0 rounded-2xl ${wide ? 'h-44 w-72' : 'aspect-[2/3] w-32'}`} />;
+  return <div className={`skeleton shrink-0 rounded-2xl ${wide ? 'h-44 w-72' : `aspect-[2/3] ${CARD_W}`}`} />;
 }
 
 export function RailSkeleton({ wide = false }: { wide?: boolean }) {
   return (
-    <div className="hide-scrollbar flex gap-3 overflow-x-hidden px-4">
+    <div className="flex gap-3 overflow-x-hidden px-4 pb-3 pt-2">
       {Array.from({ length: 5 }).map((_, i) => (
         <CardSkeleton key={i} wide={wide} />
       ))}

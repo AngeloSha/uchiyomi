@@ -178,7 +178,8 @@ test('the toolbar: a real search field, the phone\'s Filters key, Select and Sel
   assert.match(input, /placeholder="Search your library…"/, 'the field has no prompt');
   assert.match(input, /value="blue"/, 'the field does not show the search in the URL');
   assert.match(idle, /aria-label="Clear search"/, 'a search cannot be emptied with one tap');
-  assert.match(idle, /<button type="button" aria-haspopup="dialog" class="btn-key h-9 lg:hidden btn-key-accent">[\s\S]*?Filters · 2<\/button>/,
+  // xl:hidden since the UI refresh: below 1280 the filter column folds into this key's sheet.
+  assert.match(idle, /<button type="button" aria-haspopup="dialog" class="btn-key h-9 xl:hidden btn-key-accent">[\s\S]*?Filters · 2<\/button>/,
     'the phone\'s Filters key does not count the filters, or shows beside the open sidebar');
   assert.match(idle, /<button type="button" class="btn-key h-9 ">Select<\/button>/, 'Select is not a key');
   assert.doesNotMatch(idle, />Select all</, 'Select all outside select mode');
@@ -409,11 +410,16 @@ test('the toolbar sticks under the top bar, the filter panel clears it, and the 
   // TopNav is 65 px and sticky; the sidebar used `top-6`, so its first sections slid under the bar. The phone header was
   // `px-5` over a `px-4` grid. Reintroduce either: this fails.
   const src = page();
-  assert.match(src, /<div className="sticky top-\[65px\] max-h-\[calc\(100dvh-65px\)\] overflow-y-auto pb-8 pt-6" data-lenis-prevent>/, 'the filter panel slides under the top bar');
+  // `--topbar-h` (65 px from lg, app/globals.css) since the UI refresh, rather than the number written out.
+  assert.match(src, /<div className="sticky top-\[var\(--topbar-h\)\] max-h-\[calc\(100dvh-var\(--topbar-h\)\)\] overflow-y-auto pb-8 pt-6" data-lenis-prevent>/, 'the filter panel slides under the top bar');
   assert.match(src, /<header className="safe-top sticky top-0 z-30 bg-ink-950\/85 px-4 pb-3 backdrop-blur-xl lg:contents">/, 'the phone header is not on the grid\'s gutter');
-  assert.match(src, /className="mt-3 lg:sticky lg:top-\[65px\] lg:z-20 /, 'the toolbar does not stick under the top bar');
-  assert.match(read('components/TopNav.tsx'), /<header className="sticky top-0 z-40 hidden border-b border-ink-800\/70 bg-ink-950\/80 backdrop-blur-xl lg:block">\s*<div className="shell flex items-center gap-3 py-3 xl:gap-6">/,
+  assert.match(src, /className="mt-3 lg:sticky lg:top-\[var\(--topbar-h\)\] lg:z-20 /, 'the toolbar does not stick under the top bar');
+  // 65 px: the 40 px keys, py-3 and the border, which is --topbar-h. The bar is see-through over a page's art (lib/overArt.ts)
+  // and keeps its border's width there, transparent.
+  const bar = read('components/TopNav.tsx');
+  assert.match(bar, /className=\{`sticky top-0 z-40 hidden border-b [^`]*lg:block \$\{clear \? 'border-transparent bg-transparent' : 'border-ink-800\/70 bg-ink-950\/80 backdrop-blur-xl'\}`\}>\s*<div className="shell flex items-center gap-3 py-3 xl:gap-6">/,
     'the top bar changed height: 65 px is its 40 px keys, py-3 and the border');
+  assert.match(read('app/globals.css'), /--rail-w: 4\.5rem; --topbar-h: 65px;/, '--topbar-h is not the bar\'s 65 px');
   // The filter panel is filters only; the order is the toolbar's.
   const filters = code(read('components/LibraryFilters.tsx'));
   assert.doesNotMatch(filters, /Sort by|SORTS|onSet\('sort'/, 'the filter panel still holds the orders');

@@ -82,7 +82,7 @@ test('Home\'s welcome offers the same keys, and is never shown for the second be
   // `|| featuredPending`: a full library's admin sees "Import your library" flash before its carousel -- "the welcome
   // shows while /api/featured is on its way" fails.
   const home = code(read('app/page.tsx'));
-  const hero = slice(home, '{(featured?.content?.length ?? 0) > 0 ? (', '<div className="flex items-center justify-between gap-3 px-5 pt-6 lg:px-0">');
+  const hero = slice(home, '{(featured?.content?.length ?? 0) > 0 ? (', '<div className="flex items-center justify-between gap-3 px-4 pt-6">');
   assert.match(hero, /\) : isLoading \|\| featuredPending \? \(\s*<div className="skeleton/, 'the welcome shows while /api/featured is on its way');
   assert.match(home, /const \{ data: featured, isPending: featuredPending \} = useQuery\(\{ queryKey: \['featured'\]/);
   const welcome = slice(hero, "{tr('Welcome to Uchiyomi')}", '</div>');

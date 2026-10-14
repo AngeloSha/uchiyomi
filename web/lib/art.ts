@@ -39,6 +39,13 @@ export const autoHeroUrl = (seriesId: string, seed: number, tall = false) =>
   `/img/series/${encodeURIComponent(seriesId)}/hero?v=${seed}${tall ? '&ar=tall' : ''}`;
 
 /**
+ * The automatic banner's frame, for the mosaic's tiles (components/MosaicArt.tsx, UI refresh): only when the payload
+ * offers one, under its seed, like every other hero URL here. `tall` is the 2 x 2 frame.
+ */
+export const mosaicSource = (seriesId: string, autoHero: { seed: number } | null | undefined, tall: boolean): string | null =>
+  autoHero ? autoHeroUrl(seriesId, autoHero.seed, tall) : null;
+
+/**
  * What a series' backdrop tries, in order, each the fallback of the one before: the automatic banner when the series
  * has one, then the server's backdrop (its AniList banner, or its cover over a blur of itself), then the genre art.
  * The server answers 404 for an automatic banner it cannot make, so a failure lands on today's look, never on nothing.

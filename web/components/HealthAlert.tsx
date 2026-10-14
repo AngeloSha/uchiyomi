@@ -11,7 +11,7 @@ import { IcAlert } from './icons';
 
 // lib/healthAlert.ts says what this is for and why it never runs the checks itself (#101).
 
-const HEALTH_HREF = '/admin/?tab=Health';
+export const HEALTH_HREF = '/admin/?tab=Health';
 
 /** The stored summary, for admins only. `enabled`, not a conditional hook: the order of hooks must not change. */
 export function useHealthSummary() {
@@ -26,24 +26,6 @@ export function useHealthSummary() {
 }
 
 const countLine = (n: number) => (n === 1 ? tr('1 check found something') : tr('{n} checks found something', { n }));
-
-/** The header's marker: present only while the last report was not clean, beside the Updates bell. */
-export function HealthMarker() {
-  const { data } = useHealthSummary();
-  const tone = alertTone(data);
-  if (!tone || !data) return null;
-  // The worst check's own sentence, so the header says "3 chapters across 2 sources keep failing" rather
-  // than "problems found".
-  const headline = headlineText(data);
-  const label = `${countLine(data.count)}${headline ? ` — ${headline}` : ''}`;
-  return (
-    <Link href={HEALTH_HREF} title={label} aria-label={label}
-      className={`relative grid h-10 w-10 shrink-0 place-items-center rounded-full border border-ink-700 transition hover:border-accent/50 ${tone === 'problem' ? 'text-red-400' : 'text-amber-300'}`}>
-      <IcAlert width={19} height={19} />
-      <span className={`absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full ${tone === 'problem' ? 'bg-red-400' : 'bg-amber-300'}`} />
-    </Link>
-  );
-}
 
 /** Once per finding set, on any page but the admin console, at every screen size (the header is desktop-only). */
 export function HealthBanner() {
@@ -68,7 +50,7 @@ export function HealthBanner() {
       // z-[1], the same layer as <main> (AppShell), which comes after it: every dialog is a `fixed inset-0`
       // inside main, so it covers the banner the way it covers the rest of the page. At z-[2] (v0.48.0) the
       // banner painted over every dialog, on a phone over a tall one's title and close button.
-      className={`safe-top relative z-[1] flex flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4 pb-2 text-xs lg:pt-2 ${tone === 'problem' ? 'bg-red-500/10 text-red-200' : 'bg-amber-400/10 text-amber-100'}`}>
+      className={`safe-top relative z-[1] flex flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4 pb-2 text-xs lg:ps-[calc(var(--rail-w)+1rem)] lg:pt-2 ${tone === 'problem' ? 'bg-red-500/10 text-red-200' : 'bg-amber-400/10 text-amber-100'}`}>
       <IcAlert width={14} height={14} className="shrink-0" />
       <span dir="auto" className="min-w-0">{headlineText(data) ?? countLine(data.count)}</span>
       {data.count > 1 && <span className="text-fog-400">{countLine(data.count)}</span>}

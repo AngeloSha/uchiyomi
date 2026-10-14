@@ -69,6 +69,14 @@
 
   --radius-4xl: 2rem;
 
+  /* The two small sizes the app reaches for most (UI refresh), as tokens rather than the hundreds of text-[11px] /
+     text-[10px] it writes by hand. For new and redesigned code; the arbitrary sizes elsewhere are left alone, and
+     several tests read them. */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+  --text-3xs: 0.625rem;
+  --text-3xs--line-height: 0.875rem;
+
   /* Reads --tile when a card sets one, so a cover's own colour lifts off the page on hover, and falls back
      to the accent everywhere else -- which is every surface that does not set it. */
   --shadow-glow: 0 0 0 1px rgb(var(--tile, var(--accent)) / 0.4), 0 8px 40px -8px rgb(var(--tile, var(--accent)) / 0.5);
@@ -135,10 +143,15 @@
      and a scrim lighting the wrong corner in Arabic makes the label unreadable rather than merely odd. */
   --start: 0%;
 
+  /* The desktop sidebar's width and the top bar's height (UI refresh). Both are 0 below lg, where the phone has its
+     bottom bar and no rail, so every calc() below that adds them is the old geometry on a phone. The top bar is the
+     40 px keys plus py-3 and its 1 px border: 65 px, the figure the Library's sticky toolbar already used. */
+  --rail-w: 0px;
+  --topbar-h: 0px;
 }
 [dir='rtl'] { --start: 100%; }
 @media (min-width: 640px)  { :root { --gutter: 1.25rem; } }
-@media (min-width: 1024px) { :root { --gutter: 2rem; } }
+@media (min-width: 1024px) { :root { --gutter: 2rem; --rail-w: 4.5rem; --topbar-h: 65px; } }
 
 @layer base {
   html {
@@ -179,13 +192,38 @@
     width: 100%;
     margin-inline: auto;
   }
-  @media (min-width: 1024px) { .shell { padding-inline: 2rem; } }
+  /* At lg the start edge also clears the sidebar (components/Sidebar.tsx), which is fixed over the page. */
+  @media (min-width: 1024px) { .shell { padding-inline: 2rem; padding-inline-start: calc(2rem + var(--rail-w)); } }
 
   /* The one escape hatch, for art that has to reach the edges. Logical margins, so it still reaches the
      right edges under dir="rtl" instead of tearing the layout open on one side.
      Contract: valid only on a child of a page root carrying `px-4 lg:px-0`. */
   .bleed { margin-inline: -1rem; width: calc(100% + 2rem); }
-  @media (min-width: 1024px) { .bleed { margin-inline: -2rem; width: calc(100% + 4rem); } }
+  /* At lg it reaches under the sidebar too: art runs to the window's edge and the rail floats over it. Text laid
+     inside a bleed puts itself back on the content edge with .bleed-pad. */
+  @media (min-width: 1024px) {
+    .bleed {
+      margin-inline-start: calc(-2rem - var(--rail-w)); margin-inline-end: -2rem;
+      width: calc(100% + 4rem + var(--rail-w));
+    }
+  }
+  /* The same reach at lg only, for a page root that has no phone gutter to undo (Home's hero, the series banner). */
+  @media (min-width: 1024px) {
+    .bleed-lg {
+      margin-inline-start: calc(-2rem - var(--rail-w)); margin-inline-end: -2rem;
+      width: calc(100% + 4rem + var(--rail-w));
+    }
+  }
+  /* Text inside a bleed, on the content edge: the phone gutter, and at lg the shell's own padding, rail included. */
+  .bleed-pad { padding-inline: 1rem; }
+  @media (min-width: 1024px) { .bleed-pad { padding-inline-start: calc(2rem + var(--rail-w)); padding-inline-end: 2rem; } }
+  /* Art that starts at the top of the window, under the (then transparent) top bar: lib/overArt.ts. */
+  @media (min-width: 1024px) { .under-topbar { margin-top: calc(-1 * var(--topbar-h)); } }
+  /* The same on a phone, under Home's own sticky header (app/page.tsx), which has no background of its own: its
+     height is safe-top's padding, the 40 px keys and its pb-3. */
+  @media (max-width: 1023.98px) {
+    .under-phone-header { margin-top: calc(-1 * (max(0.9rem, calc(env(safe-area-inset-top) + 0.55rem)) + 2.5rem + 0.75rem)); }
+  }
   /* One field style. It was copy-pasted as a local `fld` const in three files, which is how two of them
      drifted. max-w-md never binds inside a card and binds hard in a full-width one, which is what keeps a
      text input from stretching to two thousand pixels on a wide display. */
@@ -233,13 +271,14 @@
   .safe-top { padding-top: max(0.9rem, calc(env(safe-area-inset-top) + 0.55rem)); }
   .safe-bottom { padding-bottom: max(0.8rem, calc(env(safe-area-inset-bottom) + 0.4rem)); }
 
+  /* UI refresh: squared like every other action key (noPills.test.ts). The names stay, so no page changes. */
   .btn-accent {
-    @apply inline-flex items-center justify-center gap-2 rounded-full bg-accent px-5 py-3
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-5 py-3
            font-semibold text-black transition active:scale-[0.97];
     box-shadow: 0 8px 30px -10px rgb(var(--accent) / 0.7);
   }
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 rounded-full border border-ink-600
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-ink-600
            bg-ink-800/60 px-5 py-3 font-medium text-fog-100 backdrop-blur
            transition hover:border-ink-500 active:scale-[0.97];
   }
@@ -426,4 +465,20 @@ html.lenis, html.lenis body { height: auto; }
 
 [dir='rtl'] .scrim-soft {
   background-image: linear-gradient(to left, rgb(0 0 0 / 0.65), rgb(0 0 0 / 0.20) 45%, transparent 72%);
+}
+
+/* Home's hero: the current slide's segment filling while it shows (components/HeroCarousel.tsx). Plain CSS, not an
+   @theme token: the hero sets it inline, with the slide's own duration, and only when motion is welcome. */
+@keyframes hero-progress {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+/* The collapsed sidebar over art (components/Sidebar.tsx): dark at the window's start edge, gone by its own end, so
+   the icons read on a bright page and the art still runs under them. The same dir= twin as the scrims above. */
+.rail-scrim {
+  background-image: linear-gradient(to right, rgb(0 0 0 / 0.82), rgb(0 0 0 / 0.55) 55%, rgb(0 0 0 / 0));
+}
+[dir='rtl'] .rail-scrim {
+  background-image: linear-gradient(to left, rgb(0 0 0 / 0.82), rgb(0 0 0 / 0.55) 55%, rgb(0 0 0 / 0));
 }

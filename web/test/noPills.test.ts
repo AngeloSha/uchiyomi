@@ -110,6 +110,12 @@ const SURFACES = [
   'components/ListBits.tsx',
   'components/IncognitoBanner.tsx',
   'lib/lists.ts',
+  // UI refresh: the shell (the sidebar, the top bar), Home's hero and its art, and Updates' check key.
+  'components/Sidebar.tsx',
+  'components/TopNav.tsx',
+  'components/HeroCarousel.tsx',
+  'components/MosaicArt.tsx',
+  'components/CheckForNew.tsx',
   'lib/libraryQuery.ts',
   'lib/incognito.ts',
   // v0.61.0, Reader → Keys and controller: every binding a squared key cap, Add a key / Add a button, Reset to defaults.
@@ -134,7 +140,13 @@ const SLICES: [string, string, string, string][] = [
   // Step 5: the Library's Series | Downloads switch (its count is a squared tag), and the header's two counts
   // side by side on a desktop -- the downloads ring's and the Updates bell's, a capsule at "9+" until v0.49.0.
   ['app/library/page.tsx', 'Library: the Series | Downloads switch', 'function ViewSwitch(', 'function MoveToLibrary('],
-  ['components/TopNav.tsx', 'TopNav: the downloads ring and the Updates count', '<DownloadsNavIcon />', '<button onClick={refresh}'],
+  ['components/TopNav.tsx', 'TopNav: the Updates count and the avatar', '<Link href="/updates"', '<Link href="/profile"'],
+  // UI refresh: the series page's chapter toolbar (keys: they act on the list), its pager, and the chapter rows' keys;
+  // Home's phone header; Updates' header.
+  ['app/series/page.tsx', 'Series: the chapter toolbar', '<div data-chapter-toolbar', '{group !== ALL_GROUPS && ('],
+  ['app/series/page.tsx', 'Series: the chapter pager', 'function ChapterPager(', 'function EditionChips('],
+  ['app/page.tsx', "Home: the phone's header", '<header className="safe-top sticky top-0 z-30', '</header>'],
+  ['app/updates/page.tsx', "Updates: the header's keys", '<h1 className="font-display', '</header>'],
   // Step 8: Health's body -- the verdict marks that replaced the HEALTH_LABEL capsules, Re-check as a key, Open
   // as a text link -- and the Tasks rows' Run now.
   ['app/admin/page.tsx', 'Health: the cards, their marks and rows', 'function Health()', 'function DesktopUpdateNote('],
@@ -240,7 +252,9 @@ test('no capsule in the redesigned surfaces: no rounded-full with padding, no pi
   // Reintroduce the round count on the Library tab (`rounded-full px-1` on RingIcon's count tag), or a
   // `chip` on an action key: "components/ProgressRing.tsx: capsule" fails.
   const pills = [...componentClasses()].filter(([, body]) => isCapsule(body)).map(([name]) => name);
-  assert.deepEqual(pills.sort(), ['btn-accent', 'btn-ghost', 'chip'], 'the pill-shaped shared classes changed -- update this list deliberately');
+  // UI refresh: `.btn-accent` and `.btn-ghost` are squared (rounded-xl) like every other action key, so the filter
+  // chip is the last capsule class -- as the owner's rule has it.
+  assert.deepEqual(pills.sort(), ['chip'], 'the pill-shaped shared classes changed -- update this list deliberately');
   for (const { where, s } of surfaceStrings()) {
     if (isCapsule(s)) assert.fail(`${where}: capsule -- "${s.trim()}"`);
     for (const p of pills) {
@@ -310,7 +324,7 @@ test('the downloads counts are squared tags: the switch\'s, the ring\'s and the 
   // The Updates count beside the new desktop ring was a round tag that became a capsule at "9+": three count
   // shapes side by side. Reintroduce `rounded-full` on it: the capsule scan above fails ("TopNav … capsule")
   // and so does this.
-  const top = slice(code(read('components/TopNav.tsx')), '<DownloadsNavIcon />', '<button onClick={refresh}', 'TopNav');
+  const top = slice(code(read('components/TopNav.tsx')), '<Link href="/updates"', '<Link href="/profile"', 'TopNav');
   const count = /<span data-updates-count className="([^"]*)"/.exec(top);
   assert.ok(count, 'the Updates count is not where this test looks');
   assert.match(count![1], /rounded-\[4px\]/, 'the Updates count is not squared');

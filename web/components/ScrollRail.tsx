@@ -16,6 +16,14 @@ import { t as tr } from '@/lib/i18n';
  * from 0 down to -(scrollWidth - clientWidth). This app mirrors fully, so the sign comes from the computed
  * direction rather than being assumed, and the ends are measured on the absolute offset.
  */
+/**
+ * The card rails' scroller (UI refresh): Home's, a series page's, the reader's end card. Inside the content column
+ * like the old Rail, with room above for a card's hover lift and below for the bar, and snapping to the gutter
+ * rather than under it. Every card rail goes through ScrollRail now (rails.test.ts): the old Rail had no arrows and
+ * hid its bar, so a mouse could not move it.
+ */
+export const CARD_RAIL = 'flex gap-3 px-4 pb-3 pt-2 scroll-px-4 [scroll-snap-type:x_mandatory]';
+
 export function ScrollRail({ children, className = '', size = 'md', label }: {
   children: ReactNode;
   /** Applied to the scroller itself, for layout: `bleed`, flex direction, gap, padding. */

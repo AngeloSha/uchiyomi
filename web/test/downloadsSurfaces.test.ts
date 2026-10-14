@@ -78,13 +78,17 @@ test('the Library ring: on the phone\'s Library tab, beside the desktop bell, ne
   assert.match(nav, /href: '\/library', label: NAV_LABELS\[1\]/, 'the Library tab no longer leads to the Library');
   const ringHook = code(read('lib/useServerDownloads.ts'));
   assert.match(ringHook, /return status === 'authed' && canDownload\(user\) \? ring : \{ \.\.\.ring, show: false, attention: false, count: 0 \};/, 'the Library tab wears the ring for a viewer who may not download');
-  const top = code(read('components/TopNav.tsx'));
-  const icon = top.indexOf('<DownloadsNavIcon />');
-  assert.ok(icon > 0 && icon < top.indexOf('<Link href="/updates"'), 'the desktop ring is not just before the Updates bell');
+  // UI refresh: the desktop's ring is the sidebar's Library item's (components/Sidebar.tsx), as the phone's is the bottom
+  // bar's Library tab -- the top bar's round button is gone. Only for a viewer who may download: the mark the walks read
+  // (walk49 `a[data-downloads-ring]`), the ring itself and the "Server downloads" line under the open item. Reintroduce
+  // the mark for everyone (drop `&& downloader`): "the desktop ring shows to a viewer who may not download" fails.
+  const side = code(read('components/Sidebar.tsx'));
+  assert.match(side, /const downloader = status === 'authed' && canDownload\(user\);/, 'the sidebar does not know who may download');
+  assert.match(side, /\{main\.map\(\(i\) => i\.href === '\/library' && downloader\s*\?\s*link\(i, \{\s*mark: ringMark\(ring\),/, 'the desktop ring shows to a viewer who may not download');
+  assert.match(side, /sub: ring\.show && ring\.label \? \{ text: `\$\{tr\('Server downloads'\)\} · \$\{ring\.label\}`, href: downloadsHref\(\) \}/, 'the desktop ring does not lead to Library -> Downloads');
+  assert.match(side, /export const ringMark = \(ring: NavRing\): 'idle' \| 'active' \| 'slow' => \(ring\.show \? \(ring\.slow \? 'slow' : 'active'\) : 'idle'\);/, 'the mark walk49 reads lost a value');
   const dl = code(read('components/DownloadsRing.tsx'));
-  const btn = dl.slice(dl.indexOf('export function DownloadsNavIcon('));
-  assert.match(btn, /if \(status !== 'authed' \|\| !canDownload\(user\)\) return null;/, 'the desktop ring shows to a viewer who may not download');
-  assert.match(btn, /<Link href=\{downloadsHref\(\)\}/, 'the desktop ring does not lead to Library -> Downloads');
+  assert.doesNotMatch(dl, /DownloadsNavIcon/, 'the top bar\'s round downloads button is back');
   // The still "slow" mark while only the archive works: static, amber, the hourglass.
   const map = dl.slice(dl.indexOf('export function ringProps('), dl.indexOf('export function LibraryTabIcon('));
   assert.match(map, /static: ring\.slow,/, 'the ring turns while only the slow archive works');
@@ -196,29 +200,29 @@ test('the desktop header fits at 1024 px: round buttons keep their 40 px, and th
   // squeezed each round button into a 21 px oval (Russian ran 213 px over). Reintroduce `w-72` on the search, or
   // drop `shrink-0` from a round button: the matching assertion fails. layout.mjs measures the real thing at
   // 1024 and 1280 px in de and ru.
+  // UI refresh: the bar is the search, the Updates bell and the avatar -- the links, Moments, the downloads ring and the
+  // Health mark moved to the sidebar (components/Sidebar.tsx), and Refresh to Updates (components/CheckForNew.tsx).
   const nav = code(read('components/TopNav.tsx'));
   const header = nav.slice(nav.indexOf('<header'));
   for (const m of header.matchAll(/className=\{?[`"]([^`"]*\bh-10 w-10\b[^`"]*)[`"]/g)) {
     assert.match(m[1], /\bshrink-0\b/, `a round header button can be squeezed into an oval: ${m[1].slice(0, 80)}`);
   }
-  assert.ok([...header.matchAll(/\bh-10 w-10\b/g)].length >= 3, 'the round buttons moved -- redo this scan');
-  assert.match(code(read('components/DownloadsRing.tsx')), /className="grid h-10 w-10 shrink-0 /, 'the downloads button can be squeezed into an oval');
-  assert.match(code(read('components/HealthAlert.tsx')), /relative grid h-10 w-10 shrink-0 /, "the Health marker can be squeezed into an oval");
+  assert.ok([...header.matchAll(/\bh-10 w-10\b/g)].length >= 1, 'the round buttons moved -- redo this scan');
   assert.match(header, /<Link href="\/profile" className="shrink-0 /, 'the avatar can be squeezed');
-  // The search takes what is left: flexible, never a fixed 18 rem, its words truncating down to the icon.
-  assert.match(header, /className="ms-auto flex min-w-0 max-w-72 flex-1 /, 'the search is a fixed width again');
-  assert.doesNotMatch(header, /(?<![\w-])w-72\b/, 'the search is a fixed width again');
+  // The search takes what is left: flexible, never a fixed width, its words truncating down to the icon.
+  assert.match(header, /className="flex min-w-0 max-w-xl flex-1 /, 'the search is a fixed width again');
+  assert.doesNotMatch(header, /(?<![\w-])w-(72|96|xl)\b/, 'the search is a fixed width again');
   // Down to its icon, never to a sliver of its word (ru at 1024 px for an admin, and at exactly 1280 px, showed a
   // stroke of the "П"): the button is a size container, and the label and the ⌘K hint show only when it has room
   // for them. Reintroduce the always-shown `min-w-0 flex-1 truncate` label: "shows a sliver" fails.
-  assert.match(header, /className="ms-auto flex min-w-0 max-w-72 flex-1 @container /, 'the search is not a size container');
+  assert.match(header, /className="flex min-w-0 max-w-xl flex-1 @container /, 'the search is not a size container');
   assert.match(header, /<span data-search-label className="hidden min-w-0 flex-1 truncate text-sm text-fog-500 @\[4\.5rem\]:block">/,
     'the search label shows a sliver when the search is squeezed');
   assert.match(header, /<kbd data-search-kbd className="hidden [^"]*\bxl:@\[12rem\]:block">/, 'the ⌘K hint shows in a squeezed search');
   assert.match(header, /aria-label=\{tr\('Search…'\)\}/, 'with its label hidden the search has no accessible name');
-  // Below xl: 12 px gaps, the logo's mark alone (its words kept for screen readers), and no ⌘K hint.
+  // Below xl: 12 px gaps and no ⌘K hint. The logo is the sidebar's now.
   assert.match(header, /<div className="shell flex items-center gap-3 py-3 xl:gap-6">/, 'the header keeps its 24 px gaps at lg');
-  assert.match(header, /<Lockup className="text-2xl max-xl:sr-only" markSize=\{38\} \/>/, "the logo's words take their width at lg");
+  assert.doesNotMatch(header, /<Lockup /, 'the logo is back in the top bar beside the sidebar\'s');
 });
 
 test('the card rows of Library -> Downloads hold one column to the page: grid-cols-1, and cards that may shrink', () => {

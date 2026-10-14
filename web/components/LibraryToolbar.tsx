@@ -59,7 +59,7 @@ export function LibraryToolbar({ q, onSearch, active, dir, onSort, onDir, onSort
       {/* On a wide screen the panel is open beside the grid, so this key would open a sheet duplicating what is visible
           two inches to the left. */}
       <button type="button" onClick={onFilters} aria-haspopup="dialog"
-        className={`btn-key h-9 lg:hidden ${filterCount ? 'btn-key-accent' : ''}`}>
+        className={`btn-key h-9 xl:hidden ${filterCount ? 'btn-key-accent' : ''}`}>
         <IcFilter aria-hidden width={15} height={15} />{tr('Filters')}{filterCount > 0 ? ` · ${filterCount}` : ''}
       </button>
       {adult}

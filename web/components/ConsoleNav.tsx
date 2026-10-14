@@ -55,7 +55,8 @@ export function ConsoleNav<T extends string>({
       <div className="lg:flex lg:gap-8 xl:gap-10">
         {/* ---- desktop: a sticky sidebar, grouped ---- */}
         <nav className="hidden shrink-0 lg:block lg:w-52 xl:w-56" aria-label={ariaLabel}>
-          <div className="sticky top-6 space-y-5">
+          {/* Under the 65 px top bar, not behind it: `top-6` let the first group slide under the bar. */}
+          <div className="sticky top-[calc(var(--topbar-h)+1.5rem)] space-y-5">
             {groups.map((g) => (
               <div key={g.id}>
                 {!flat && (

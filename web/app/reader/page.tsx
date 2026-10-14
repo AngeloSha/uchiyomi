@@ -1,4 +1,5 @@
 'use client';
+import { ScrollRail, CARD_RAIL } from '@/components/ScrollRail';
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { isWide, pageHeight, pairSlides, type WidePages } from '@/lib/readerSpread';
 import Link from 'next/link';
@@ -30,7 +31,7 @@ import { COLOR_FILTER, glide, loadDevicePrefs, saveDevicePrefs, type DevicePrefs
 import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER, loadSourcePrefs, saveSourcePrefs, clearSourcePrefs, globalPrefsChange, seriesPinChange, titleLook, mergePulled, rememberSeriesSource, seriesSourceOf, rememberSeriesType, seriesTypeOf } from '@/lib/readerPrefs';
 import { guessMode, type AutoGuess } from '@/lib/readerAuto';
 import { ReaderSettings } from '@/components/ReaderSettings';
-import { Rail, SectionTitle, useImgRetry, useRtl } from '@/components/ui';
+import { SectionTitle, useImgRetry, useRtl } from '@/components/ui';
 import { PageGrid } from '@/components/PageGrid';
 import { ChapterSheet } from '@/components/ChapterSheet';
 import { SeriesCard } from '@/components/cards';
@@ -1471,7 +1472,7 @@ function ReaderInner() {
       {!offlineEnd && !!upNext?.content?.length && (
         <div className="mt-12 text-start">
           <SectionTitle>{tr('Because you finished this')}</SectionTitle>
-          <Rail>{upNext.content.map((s) => <SeriesCard key={s.id} series={s} />)}</Rail>
+          <ScrollRail label={tr('Because you finished this')} className={CARD_RAIL}>{upNext.content.map((s) => <SeriesCard key={s.id} series={s} />)}</ScrollRail>
         </div>
       )}
     </motion.div>

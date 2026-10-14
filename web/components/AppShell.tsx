@@ -5,12 +5,14 @@ import { useAuth } from '@/lib/auth';
 import { runSmartOffline } from '@/lib/offlineSync';
 import { BottomNav } from './BottomNav';
 import { TopNav } from './TopNav';
+import { Sidebar } from './Sidebar';
 import { HealthBanner } from './HealthAlert';
 import { LoginScreen } from './LoginScreen';
 import { DesktopReconnect } from './DesktopReconnect';
 import { CinematicFX } from './CinematicFX';
 import { PageTransition } from './PageTransition';
 import { CommandPalette, usePaletteHotkeys } from './CommandPalette';
+import { useWideViewport } from './ui';
 import { Mark } from './Brand';
 import { IcWifiOff } from './icons';
 import { t as tr } from '@/lib/i18n';
@@ -52,7 +54,7 @@ function OfflineLanding() {
  */
 function OfflineBanner({ name }: { name: string }) {
   return (
-    <div className="flex items-center justify-center gap-2 bg-ink-800 px-4 py-1.5 text-[11px] text-fog-300">
+    <div className="flex items-center justify-center gap-2 bg-ink-800 px-4 py-1.5 text-[11px] text-fog-300 lg:ps-[calc(var(--rail-w)+1rem)]">
       <IcWifiOff width={12} height={12} />
       <span>{tr('Offline — showing {name}’s downloads', { name })}</span>
     </div>
@@ -65,6 +67,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [palette, setPalette] = useState(false);
   const [paletteSeed, setPaletteSeed] = useState('');
+  // The desktop's sidebar is mounted from lg up only: on a phone none of it is in the document (components/Sidebar.tsx).
+  const wide = useWideViewport();
 
   /**
    * An offline launch arrives at `/` -- the manifest's `start_url` -- which is a home screen assembled
@@ -124,8 +128,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <CinematicFX />
       {status === 'offline' && <OfflineBanner name={user?.displayName || ''} />}
       {status === 'authed' && <IncognitoBanner />}
-      <TopNav onSearchFocus={() => { setPaletteSeed(''); setPalette(true); }} />
+      {/* Above the top bar (UI refresh): nothing sits between the bar and a page's art, which starts under it. */}
       {status === 'authed' && <HealthBanner />}
+      <TopNav onSearchFocus={() => { setPaletteSeed(''); setPalette(true); }} />
+      {wide && <Sidebar />}
       <main className="shell relative z-[1] pb-28 lg:pb-12">
         <PageTransition>{children}</PageTransition>
       </main>

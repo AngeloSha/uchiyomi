@@ -96,7 +96,8 @@ test('the series page asks for its banner sharp, and leaves a stand-in cover to 
   assert.equal(backdropUrl('s_1', { hero: true, banner: true, wide: true }), '/img/series/s_1/backdrop?style=hero&ar=wide');
   assert.equal(backdropUrl('s_1', {}), '/img/series/s_1/backdrop');
   const src = readFileSync(join(__dirname, '..', 'app', 'series', 'page.tsx'), 'utf8');
-  const hero = src.match(/<Backdrop seriesId=\{id\}[^>]*\/>/)?.[0] ?? '';
+  // UI refresh: the art is HeroArt (components/MosaicArt.tsx), the automatic banner as whole strips or this backdrop.
+  const hero = src.match(/<HeroArt series=\{series\}[^>]*\/>/)?.[0] ?? '';
   assert.ok(hero, 'the series page has no backdrop where this test looks');
   assert.match(hero, /\sbanner\s/, 'the series page asks for its banner blurred');
   // The title stays readable over a sharp banner: the gradient right after it is still there.

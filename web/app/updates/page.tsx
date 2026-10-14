@@ -7,6 +7,7 @@ import { Series } from '@/lib/types';
 import { relativeTime } from '@/lib/format';
 import { Img } from '@/components/ui';
 import { useToast } from '@/components/Toast';
+import { CheckForNew } from '@/components/CheckForNew';
 import { EmptyState } from '@/components/EmptyState';
 import { ART } from '@/lib/art';
 import { IcChevronLeft, IcBell, IcCheck } from '@/components/icons';
@@ -69,10 +70,13 @@ export default function UpdatesPage() {
           <IcChevronLeft width={22} height={22} />
         </button>
         <h1 className="font-display text-2xl font-bold lg:text-3xl">{tr('Updates')}</h1>
-        {items.length > 0 && (
-          <button onClick={markAll} className="ms-auto chip text-xs">
-            <IcCheck width={14} height={14} />{tr('Mark all read')}</button>
-        )}
+        <div className="ms-auto flex flex-wrap items-center justify-end gap-2">
+          <CheckForNew />
+          {items.length > 0 && (
+            <button onClick={markAll} className="btn-key">
+              <IcCheck width={14} height={14} />{tr('Mark all read')}</button>
+          )}
+        </div>
       </header>
 
       {isLoading ? (

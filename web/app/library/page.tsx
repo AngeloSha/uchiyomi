@@ -538,17 +538,19 @@ function LibraryInner() {
   return (
     <PullToRefresh onRefresh={series ? onRefresh : () => kickDownloads(qc)}>
     <div className={`min-h-screen-d ${selecting && picked.size > 0 ? 'pb-40 lg:pb-0' : ''}`}>
-      {/* Sidebar beside the grid from lg: up. `min-w-0` on the grid column is load-bearing -- a flex child
-          defaults to `min-width:auto`, so without it the grid refuses to shrink and pushes the page
-          sideways instead, which is the horizontal-overflow failure layout.mjs exists to catch. The
-          Downloads view has no filters to show, so it takes the whole width. */}
-      <div className="lg:flex lg:gap-8 xl:gap-10">
-        {series && <aside className="hidden shrink-0 lg:block lg:w-56 xl:w-64" aria-label={tr('Filters')}>
+      {/* The filter column beside the grid from xl up (UI refresh: below 1280 the sidebar's 72 px left the grid too narrow
+          beside it, and the toolbar's Filters key opens the same filters in a sheet there). `min-w-0` on the grid column
+          is load-bearing -- a flex child defaults to `min-width:auto`, so without it the grid refuses to shrink and pushes
+          the page sideways instead, which is the horizontal-overflow failure layout.mjs exists to catch. The Downloads
+          view has no filters to show, so it takes the whole width. Still an <aside> below xl, hidden: e2e/i18n.mjs takes
+          it as the page's sign it has drawn. */}
+      <div className="xl:flex xl:gap-10">
+        {series && <aside className="hidden shrink-0 xl:block xl:w-64" aria-label={tr('Filters')}>
           {/* Its own scroller: this holds six sections and up to a hundred genres, which is taller than the
               window. `data-lenis-prevent` because Lenis drives the page and would otherwise eat the wheel.
-              ⚠️ `top-[65px]`, the top bar's height (components/TopNav.tsx, sticky itself): at `top-6` the panel's first
+              ⚠️ `--topbar-h`, the top bar's height (components/TopNav.tsx, sticky itself): at `top-6` the panel's first
               sections slid under the bar once the page scrolled. */}
-          <div className="sticky top-[65px] max-h-[calc(100dvh-65px)] overflow-y-auto pb-8 pt-6" data-lenis-prevent>
+          <div className="sticky top-[var(--topbar-h)] max-h-[calc(100dvh-var(--topbar-h))] overflow-y-auto pb-8 pt-6" data-lenis-prevent>
             <LibraryFilters
               read={read} status={status} genres={genres} lib={lib} libs={libs} mainSrc={src} anySrc={anysrc}
               onSet={setParam}
@@ -614,7 +616,7 @@ function LibraryInner() {
           onSelectAll={() => setPicked(new Set(items.map((s) => s.id)))}
           onSurprise={surprise}
           adult={<AdultToggle alsoWhen={adultFilter} />}
-          className="mt-3 lg:sticky lg:top-[65px] lg:z-20 lg:mt-4 lg:border-b lg:border-ink-800/60 lg:bg-ink-950/80 lg:py-3 lg:backdrop-blur-xl"
+          className="mt-3 lg:sticky lg:top-[var(--topbar-h)] lg:z-20 lg:mt-4 lg:border-b lg:border-ink-800/60 lg:bg-ink-950/80 lg:py-3 lg:backdrop-blur-xl"
         />
         {/* What narrows the shelf is always visible, so a short library is never mysterious -- the search and an order
             running the other way included, each with its own ×. v0.61.0: and an order the address chose, for the row's
@@ -768,7 +770,7 @@ function LibraryInner() {
           returns to the bottom. Reintroduce with `bottom-0`: on a 390 px phone the Cancel chip is under
           the nav. */}
       {series && selecting && picked.size > 0 && (
-        <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:start-[var(--rail-w)] lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           {/* ⚠️ Two rows at 390 px, no more: a third row covers a third of the grid. Seven keys plus the
               count do not fit in two, so on a phone the admin actions live behind `More` (a Sheet). (The bar's
               bottom padding was `pb-8` until v0.49.0, clearance for the floating downloads pill, which is gone.)

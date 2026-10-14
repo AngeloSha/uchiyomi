@@ -574,10 +574,11 @@ test('every busy message says so: an ellipsis toast passes busy, and no finished
   }
   assert.ok(busy >= 18, `only ${busy} busy messages found -- the scan is broken`);
   assert.ok(calm >= 40, `only ${calm} other messages found -- the scan is broken`);
-  // TopNav's refresh is translated now, and its result takes the busy card's place.
-  const nav = code(read('components/TopNav.tsx'));
-  assert.match(nav, /toast\(tr\('Checking for new chapters…'\), 'info', \{ busy: true, key: 'refresh' \}\);/, 'TopNav\'s check is untranslated or not busy');
-  assert.match(nav, /toast\(tr\('Library refreshed'\), 'success', \{ key: 'refresh' \}\);/, 'TopNav\'s result is untranslated or stacks under the busy card');
+  // The check for new chapters (the top bar's Refresh until the UI refresh, a key on Updates now) is translated, and its
+  // result takes the busy card's place.
+  const nav = code(read('components/CheckForNew.tsx'));
+  assert.match(nav, /toast\(tr\('Checking for new chapters…'\), 'info', \{ busy: true, key: 'refresh' \}\);/, 'the check is untranslated or not busy');
+  assert.match(nav, /toast\(tr\('Library refreshed'\), 'success', \{ key: 'refresh' \}\);/, 'the result is untranslated or stacks under the busy card');
 });
 
 test('a sheet on a page with the bottom nav clears it; only the reader\'s sheets run to the bottom edge', () => {

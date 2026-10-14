@@ -1,7 +1,11 @@
 'use client';
+import { ScrollRail, CARD_RAIL } from '@/components/ScrollRail';
 import { Children, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion, useScroll, useTransform } from 'framer-motion';
+import { HeroArt } from '@/components/MosaicArt';
+import { useArtUnderChrome } from '@/lib/overArt';
+import { useReduceEffects } from '@/lib/effects';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
@@ -9,7 +13,7 @@ import { Book, EditionRow, Ghost, Listing, Page, Series, VersionCopy, Versions }
 import { bookCountText, chapterLabel, chapterName, isVolumeName, languageName, relativeTime, relativeTimeShort } from '@/lib/format';
 import { listDownloads, downloadChapter, deleteDownload } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
-import { Img, Backdrop, Rail, SectionTitle, useWideViewport } from '@/components/ui';
+import { Img, Backdrop, SectionTitle, useWideViewport } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
@@ -458,7 +462,8 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
     // the desktop grid a 287-px cell (three columns at 1280) leaves the caption ≈90 px beside the thumb,
     // the dot, the date and two 36-px buttons -- exactly a group name with its avatar -- and a two-digit
     // day ("29d") took 4 of them back. Five gaps at 10 rather than 12 return ten. GhostRow matches.
-    <div id={`ch-${book.number}`} className={`border-b border-ink-800/70${lit ? ' rounded-lg bg-accent/10 ring-1 ring-inset ring-accent/50' : ''}`}>
+    // UI refresh: a pointer lights the row under it, a surface just past the row's own edges (the grid's gaps have room).
+    <div id={`ch-${book.number}`} className={`border-b border-ink-800/70 transition-colors lg:-mx-2 lg:px-2 lg:pointer-fine:hover:bg-white/[0.035]${lit ? ' rounded-lg bg-accent/10 ring-1 ring-inset ring-accent/50' : ' lg:rounded-lg'}`}>
     <div className={rowClass(!!compact)} {...(selectable ? {} : menu.bind)}>
       {/* In select mode a pruned chapter is still selectable -- Mark read and Fetch again are exactly the
           things one wants for it -- so the disable only applies to opening. */}
@@ -497,7 +502,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
         // `pruned` already excludes a chapter saved on this device, so removing that copy still works --
         // which matters, because it is the only copy left.
         disabled={pruned}
-        className={`grid h-9 w-9 place-items-center rounded-full border disabled:opacity-30 ${downloaded ? 'border-accent/40 text-accent' : 'border-ink-700 text-fog-500'}`}
+        className={`grid h-9 w-9 place-items-center rounded-lg border disabled:opacity-30 ${downloaded ? 'border-accent/40 text-accent' : 'border-ink-700 text-fog-500'}`}
         // "Save offline", not "Download": the ☁ on a ghost row brings a chapter onto the server, this arrow
         // copies one to this device, and one word for both promised the wrong thing on one of them.
         aria-label={downloaded ? tr('Remove from this device') : tr('Save offline')}
@@ -506,7 +511,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
       </button>}
       <div className="relative shrink-0">
         <button onClick={(e) => menu.openFrom(e.currentTarget)} aria-label={tr('Chapter actions')} aria-haspopup="menu" aria-expanded={menu.open}
-          className="grid h-9 w-9 place-items-center rounded-full border border-ink-700 text-fog-500">
+          className="grid h-9 w-9 place-items-center rounded-lg border border-ink-700 text-fog-500">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
         </button>
       </div>
@@ -633,7 +638,7 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
       {onMark && !selectable && (
         <div className="relative shrink-0">
           <button type="button" onClick={(e) => menu.openFrom(e.currentTarget)} aria-label={tr('Chapter actions')} aria-haspopup="menu" aria-expanded={menu.open}
-            className="grid h-9 w-9 place-items-center rounded-full border border-ink-700 text-fog-500">
+            className="grid h-9 w-9 place-items-center rounded-lg border border-ink-700 text-fog-500">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
           </button>
         </div>
@@ -663,16 +668,16 @@ function readShowGhosts(): boolean {
 function ChapterPager({ page, pages, rows, asc, total, onPage }: { page: number; pages: number; rows: readonly Row[]; asc: boolean; total: number; onPage: (p: number) => void }) {
   const range = (p: number) => pageLabel(rows, p, asc);
   return (
-    <nav aria-label={tr('Chapter pages')} className="my-2 flex items-center justify-center gap-2 text-xs">
-      <button type="button" onClick={() => onPage(0)} disabled={page === 0} className="chip px-2.5 py-1 disabled:opacity-40" aria-label={tr('First page')}>«</button>
-      <button type="button" onClick={() => onPage(page - 1)} disabled={page === 0} className="chip px-2.5 py-1 disabled:opacity-40">{tr('Previous')}</button>
+    <nav aria-label={tr('Chapter pages')} data-chapter-pager className="my-2 flex items-center justify-center gap-2 text-xs">
+      <button type="button" onClick={() => onPage(0)} disabled={page === 0} className="btn-key px-2.5" aria-label={tr('First page')}>«</button>
+      <button type="button" onClick={() => onPage(page - 1)} disabled={page === 0} className="btn-key">{tr('Previous')}</button>
       <select value={page} onChange={(e) => onPage(Number(e.target.value))} aria-label={tr('Chapter pages')}
-        className="rounded-full border border-ink-700 bg-ink-850 px-3 py-1 text-fog-100">
+        className="h-8 rounded-lg border border-ink-700 bg-ink-850 px-2.5 text-fog-100">
         {Array.from({ length: pages }, (_, p) => <option key={p} value={p}>{range(p)}</option>)}
       </select>
       <span className="text-fog-500">{tr('of {n}', { n: total })}</span>
-      <button type="button" onClick={() => onPage(page + 1)} disabled={page >= pages - 1} className="chip px-2.5 py-1 disabled:opacity-40">{tr('Next')}</button>
-      <button type="button" onClick={() => onPage(pages - 1)} disabled={page >= pages - 1} className="chip px-2.5 py-1 disabled:opacity-40" aria-label={tr('Last page')}>»</button>
+      <button type="button" onClick={() => onPage(page + 1)} disabled={page >= pages - 1} className="btn-key">{tr('Next')}</button>
+      <button type="button" onClick={() => onPage(pages - 1)} disabled={page >= pages - 1} className="btn-key px-2.5" aria-label={tr('Last page')}>»</button>
     </nav>
   );
 }
@@ -1673,7 +1678,10 @@ function SeriesInner() {
 
   const Genres = !!meta?.genres?.length && (
     <div className="flex flex-wrap gap-2">
-      {meta.genres.slice(0, 8).map((g) => <span key={g} className="chip text-xs">{g}</span>)}
+      {/* Each genre opens the Library filtered by it (UI refresh): a filter, so it keeps the filter chip's shape. */}
+      {meta.genres.slice(0, 8).map((g) => (
+        <Link key={g} href={`/library/?genres=${encodeURIComponent(g)}`} data-series-genre className="chip text-xs transition hover:border-accent/50 hover:text-fog-100">{g}</Link>
+      ))}
     </div>
   );
 
@@ -1699,22 +1707,24 @@ function SeriesInner() {
           -- a nowrap row past the viewport is the 1-pixel horizontal scroll the layout check flags. */}
       <div className="mb-2 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
         <h2 className="font-display text-lg font-semibold">{tr('Chapters')}</h2>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <button onClick={markAllRead} className="chip text-xs">{tr('Mark all read')}</button>
-          <button onClick={() => setAsc((a) => !a)} className="chip text-xs">{asc ? tr('Oldest') : tr('Newest')}</button>
+        {/* Keys, not chips (UI refresh, noPills.test.ts): these act on the list rather than filter it -- even Filter
+            opens a sheet -- and they sat in a row of capsules right under the squared four keys. */}
+        <div data-chapter-toolbar className="flex flex-wrap items-center gap-1.5">
+          <button onClick={markAllRead} className="btn-key">{tr('Mark all read')}</button>
+          <button onClick={() => setAsc((a) => !a)} className="btn-key">{asc ? tr('Oldest') : tr('Newest')}</button>
           {/* The group filter and the ghost switch live in a sheet; the count of active choices is a tiny
               badge on the chip, not ` · {n}` text, which is what pushed the row past 358 px. Rendered only
               when there is something to filter by. */}
           {(groupNames.length > 0 || ghosts.length > 0 || deletedGhosts.length > 0) && (
-            <button onClick={() => setFilterOpen(true)} aria-haspopup="dialog" className={`chip relative text-xs ${activeFilters > 0 ? 'chip-active' : ''}`}>
+            <button onClick={() => setFilterOpen(true)} aria-haspopup="dialog" className={`btn-key relative ${activeFilters > 0 ? 'btn-key-accent' : ''}`}>
               {tr('Filter')}
               {activeFilters > 0 && (
-                <span data-testid="filter-count" className="absolute -end-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[10px] font-bold leading-none text-black">{activeFilters}</span>
+                <span data-testid="filter-count" className="absolute -end-1.5 -top-1.5 grid h-4 min-w-4 place-items-center rounded-[4px] bg-accent px-[3px] text-[10px] font-bold leading-none text-black">{activeFilters}</span>
               )}
             </button>
           )}
           {/* A mode, not a filter: the library's chip, so the two select modes are one habit. */}
-          <button onClick={() => { setSelecting((v) => !v); clearPicks(); }} className={`chip text-xs whitespace-nowrap ${selecting ? 'chip-active' : ''}`}>
+          <button onClick={() => { setSelecting((v) => !v); clearPicks(); }} className={`btn-key whitespace-nowrap ${selecting ? 'btn-key-accent' : ''}`}>
             {selecting ? tr('Done') : tr('Select')}
           </button>
         </div>
@@ -1827,7 +1837,7 @@ function SeriesInner() {
   // was a greyed "Delete from server" until something was ticked, and was read as the way to remove the SERIES (p3t3t3):
   // it reads "Remove 3 chapters" now, and with nothing ticked says how to use it and where the series' own Remove is.
   const Toolbar = selecting && (
-    <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+    <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:start-[var(--rail-w)] lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
       <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
         <span className="me-auto text-sm font-medium text-fog-100">{acting ? '…' : selectedText(pickedCount)}</span>
         <button disabled={acting || !pickedCount} onClick={() => bulkMark(true)} className="chip text-xs disabled:opacity-50">{tr('Mark read')}</button>
@@ -1856,31 +1866,46 @@ function SeriesInner() {
     </div>
   );
 
+  // The banner dims as the page scrolls away from it (UI refresh), and stays still under Reduce effects or reduced
+  // motion. Both switches read on every render, in this order (effects.test.ts).
+  const plain = useReduceEffects();
+  const still = useReducedMotion();
+  const reduced = plain || !!still;
+  const { scrollY } = useScroll();
+  const artDim = useTransform(scrollY, [0, 420], [1, 0.35]);
+  // Its art starts at the top of the window: the desktop top bar is see-through over it (lib/overArt.ts).
+  useArtUnderChrome();
+
   // Room under the last rows while the bar is up: on a phone that is the bar (three rows of chips at
   // 390 px) plus the nav it now sits on, so pb-24 left the last two chapters unreachable. SelectBarRoom, at the end.
   return (
-    <div className="min-h-screen-d">
-      {/* sticky back bar */}
-      <div className="safe-top sticky top-0 z-30 flex items-center gap-2 bg-linear-to-b from-ink-950 to-transparent px-4 pb-3 lg:static lg:bg-none lg:px-0 lg:py-4">
-        <button onClick={back} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-ink-800/70 text-fog-100 backdrop-blur lg:bg-ink-850">
-          <IcChevronLeft width={22} height={22} />
+    <div className="relative min-h-screen-d">
+      {/* sticky back bar on a phone; on a desktop the back key floats over the art, under the top bar (UI refresh) */}
+      {/* `top` clears the top bar: the hero's `under-topbar` margin collapses through this page's root, which therefore
+          starts under the bar too. */}
+      <div className="safe-top sticky top-0 z-30 flex items-center gap-2 bg-linear-to-b from-ink-950 to-transparent px-4 pb-3 lg:absolute lg:start-0 lg:top-[calc(var(--topbar-h)+1rem)] lg:z-20 lg:bg-none lg:p-0">
+        <button onClick={back} aria-label={tr('Back')} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-ink-800/70 text-fog-100 backdrop-blur lg:border lg:border-white/15 lg:bg-black/40">
+          <IcChevronLeft width={22} height={22} className="rtl:-scale-x-100" />
         </button>
-        <span className="truncate text-sm text-fog-300 lg:text-base">{title}</span>
+        <span className="truncate text-sm text-fog-300 lg:hidden">{title}</span>
       </div>
 
       {/* banner — real art pulled from the internet (AniList), else the one the server made from the series' own pages
           (v0.51.0), genre-banner fallback. A real banner is shown sharp (v0.53.0: it was blurred like the stand-in
           cover); a series without one keeps the blurred wash of its cover. The gradients below keep the title readable. */}
-      <div className="relative -mt-[58px] h-64 overflow-hidden lg:mt-0 lg:h-[22rem] lg:rounded-3xl">
-        {series && <Backdrop seriesId={id} genres={series.metadata?.genres} version={series.artVersion} autoHero={series.autoHero} banner className="absolute inset-0" />}
+      {/* UI refresh: the window's whole width from its top edge, under the see-through top bar (lib/overArt.ts), the
+          automatic banner as whole strips (components/MosaicArt.tsx), dimming as the page scrolls away from it. */}
+      <div data-series-hero className="bleed-lg under-topbar relative h-72 overflow-hidden max-lg:-mt-[58px] lg:h-[min(56vh,34rem)]">
+        {series && <motion.div className="absolute inset-0" style={{ opacity: reduced ? 1 : artDim }}><HeroArt series={series} version={series.artVersion} banner className="absolute inset-0" /></motion.div>}
         <div className="absolute inset-0 bg-linear-to-t from-ink-950 via-ink-950/65 to-ink-950/30" />
         <div className="pointer-events-none absolute inset-0" style={{ background: 'radial-gradient(85% 95% at 22% 0%, rgb(var(--cover, 124 92 255) / 0.32), transparent 62%)' }} />
         {/* desktop title-over-art (Jellyfin style) — offset to the right of the floating poster */}
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55, delay: 0.08, ease: [0.22, 0.61, 0.36, 1] }}
-          className="pointer-events-none absolute inset-x-0 bottom-0 hidden flex-col justify-end p-8 lg:flex lg:ps-[288px]">
+          className="pointer-events-none absolute inset-x-0 bottom-0 hidden flex-col justify-end p-8 lg:flex lg:ps-[calc(var(--rail-w)+2rem+288px)]">
           {meta?.status && (
             <div className="mb-2 flex items-center gap-2">
-              <span className="chip text-[11px] capitalize">{statusText(meta.status)}</span>
+              {/* A status, so a squared tag (noPills.test.ts), not the filter chip's capsule. */}
+              <span data-series-status className="rounded-md bg-white/10 px-2 py-0.5 text-2xs font-semibold uppercase tracking-wide text-fog-100 backdrop-blur rtl:tracking-normal">{statusText(meta.status)}</span>
             </div>
           )}
           <h1 dir="auto" className="font-display text-4xl font-bold leading-tight text-white [text-shadow:0_2px_16px_rgba(0,0,0,0.6)]">{title}</h1>
@@ -1893,7 +1918,7 @@ function SeriesInner() {
       {/* content */}
       <div className="px-4 lg:grid lg:grid-cols-[260px_1fr] lg:gap-8 lg:px-0">
         {/* cover + actions */}
-        <div className="-mt-20 lg:-mt-32 lg:sticky lg:top-20 lg:self-start">
+        <div className="-mt-20 lg:-mt-48 lg:sticky lg:top-[calc(var(--topbar-h)+1rem)] lg:self-start">
           <div className="flex items-end gap-4 lg:block">
             <motion.div initial={{ opacity: 0, y: 18, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.5, ease: [0.22, 0.61, 0.36, 1] }}
               className="h-44 w-32 shrink-0 overflow-hidden rounded-2xl border border-ink-600 shadow-lift lg:h-auto lg:w-full">
@@ -2107,7 +2132,7 @@ function SeriesInner() {
       {(similar?.content?.length ?? 0) > 0 && (
         <section className="mt-10">
           <SectionTitle>{tr('More like this')}</SectionTitle>
-          <Rail>{similar!.content.map((s) => <SeriesCard key={s.id} series={s} />)}</Rail>
+          <ScrollRail label={tr('More like this')} className={CARD_RAIL}>{similar!.content.map((s) => <SeriesCard key={s.id} series={s} />)}</ScrollRail>
         </section>
       )}
       {/* Room under the last rows for the phone's bar (ContinueBar), which can be up whenever the button has scrolled
