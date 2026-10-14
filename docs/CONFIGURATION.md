@@ -264,7 +264,7 @@ services:
       FLARESOLVERR_FALLBACK_URL: http://uchiyomi-flaresolverr:8191
 
   uchiyomi-trawl:
-    image: ghcr.io/germondai/trawl:1.7.0   # pinned: it is young, and has changed a setting once already
+    image: ghcr.io/germondai/trawl:1.8.0   # pinned: it is young and changes quickly. 1.8.0 or later (below)
     container_name: uchiyomi-trawl
     restart: unless-stopped
     shm_size: 1gb
@@ -285,7 +285,10 @@ services:
 Then `docker compose up -d`. To go back, put `FLARESOLVERR_URL` back to `http://uchiyomi-flaresolverr:8191` and drop
 the other line (and the service, if you like). The extension engine keeps the solver its own container names
 (FlareSolverr, in the shipped files); for extension sources to go through trawl too, set `FLARESOLVERR_URL` on the
-`uchiyomi-suwayomi` service to `http://uchiyomi-trawl:8191` as well. It has no backup of its own.
+`uchiyomi-suwayomi` service to `http://uchiyomi-trawl:8191` as well. It has no backup of its own. That needs trawl
+**1.8.0 or later**: the engine asks for a Madara site's lists and searches with a form post it sends without a
+`Content-Type`, and trawl 1.7.0 refuses every one (HTTP 400, *body requires a Content-Type header to be set*), so those
+lists fail on a Cloudflare-protected site. 1.8.0 sends the body as a form.
 
 ## Downloading
 

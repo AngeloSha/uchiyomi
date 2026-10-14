@@ -1640,10 +1640,10 @@ test('trawl answering at its root is trawl, named and held against its own relea
   globalThis.fetch = (async (u: any) => {
     const url = String(u);
     // Each repository's own latest: trawl is current, FlareSolverr's is a number trawl's must never be held against.
-    if (url.includes('/repos/germondai/trawl/')) return json({ tag_name: 'v1.7.0' });
+    if (url.includes('/repos/germondai/trawl/')) return json({ tag_name: 'v1.8.0' });
     if (url.startsWith('https://api.github.com/')) return json({ tag_name: 'v3.6.0' });
-    // trawl 1.7.0's own greeting, as the live one answered it (2026-10-04).
-    return json({ msg: 'TRAWL is ready!', version: '1.7.0', uptime: 7 });
+    // trawl 1.8.0's own greeting, as one answered it (2026-10-14).
+    return json({ msg: 'TRAWL is ready!', version: '1.8.0', uptime: 7 });
   }) as typeof fetch;
   resetSolverVersionCache();
   forgetSolverPing();
@@ -1654,7 +1654,7 @@ test('trawl answering at its root is trawl, named and held against its own relea
     forgetSolverPing();
     const row = await solverHealth();
     assert.equal(row.status, 'ok');
-    assert.equal(row.summary, 'Ready (trawl v1.7.0)', "trawl is named, and is not behind FlareSolverr's releases");
+    assert.equal(row.summary, 'Ready (trawl v1.8.0)', "trawl is named, and is not behind FlareSolverr's releases");
     assert.equal(englishOf(row.summarySaid), row.summary, 'the codes say the same');
     assert.equal(row.items.length, 0, 'no "newer solver" row');
   } finally {
@@ -1688,10 +1688,10 @@ test('with a backup, the card lists both solvers and says which one is not answe
   const refused = () => Promise.reject(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }));
   globalThis.fetch = (async (u: any) => {
     const url = String(u);
-    if (url.includes('/repos/germondai/trawl/')) return json({ tag_name: 'v1.7.0' });
+    if (url.includes('/repos/germondai/trawl/')) return json({ tag_name: 'v1.8.0' });
     if (url.startsWith('https://api.github.com/')) return json({ tag_name: 'v3.6.0' });
     // The owner's plan: trawl as the main, FlareSolverr kept as the backup.
-    if (url.startsWith(MAIN)) return up.main ? json({ msg: 'TRAWL is ready!', version: '1.7.0' }) : refused();
+    if (url.startsWith(MAIN)) return up.main ? json({ msg: 'TRAWL is ready!', version: '1.8.0' }) : refused();
     if (url.startsWith(BACKUP)) return up.backup ? json({ msg: 'FlareSolverr is ready!', version: '3.4.6' }) : refused();
     return realFetch(u);
   }) as typeof fetch;
@@ -1707,9 +1707,9 @@ test('with a backup, the card lists both solvers and says which one is not answe
   try {
     let c = await card(true, true);
     assert.equal(c.status, 'ok');
-    assert.equal(c.summary, 'Ready (trawl v1.7.0)');
+    assert.equal(c.summary, 'Ready (trawl v1.8.0)');
     assert.deepEqual(c.items.map((i: any) => [i.title, i.detail, !!i.info]), [
-      ['Main solver', `Ready (trawl v1.7.0) · ${MAIN}`, true],
+      ['Main solver', `Ready (trawl v1.8.0) · ${MAIN}`, true],
       ['Backup solver', `Ready (FlareSolverr v3.4.6) — v3.6.0 is available · ${BACKUP}`, true],
     ], 'the card lists both solvers, each with its kind, its version and its own newer release');
 
@@ -1724,7 +1724,7 @@ test('with a backup, the card lists both solvers and says which one is not answe
 
     c = await card(true, false);
     assert.equal(c.status, 'warn', 'a backup that would not answer turns the card amber');
-    assert.equal(c.summary, 'Ready (trawl v1.7.0); the backup is not answering');
+    assert.equal(c.summary, 'Ready (trawl v1.8.0); the backup is not answering');
     assert.deepEqual(c.items.map((i: any) => [i.title, !!i.info]), [['Main solver', true], ['Backup solver', false]]);
 
     c = await card(false, false);

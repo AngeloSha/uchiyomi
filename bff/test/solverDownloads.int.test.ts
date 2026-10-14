@@ -81,7 +81,7 @@ const solved = (url: string, name: string) => ({
   solution: { url, status: 200, response: `<html>${name}</html>`, cookies: [{ name: 'cf_clearance', value: name }], userAgent: `${name}-browser/1.0` },
 });
 const refused = (): Reply => ({ status: 500, json: { status: 'error', message: 'Error: Error solving the challenge. Timeout after 60.0 seconds.', solution: null } });
-/** trawl 1.7.0's answer when no browser of its pool frees up in time: HTTP 429 from the SOLVER (apps/api/src/routes/v1.ts). */
+/** trawl's answer (1.7.0 and 1.8.0) when no browser of its pool frees up in time: HTTP 429 from the SOLVER (routes/v1.ts). */
 const busy = (): Reply => ({ status: 429, json: { status: 'error', message: 'Browser pool exhausted: all browsers are busy', solution: { url: '', status: 0, headers: {}, response: '', cookies: [], userAgent: '' } } });
 const use = (main: string, backup: string) => { process.env.FLARESOLVERR_URL = main; process.env.FLARESOLVERR_FALLBACK_URL = backup; };
 

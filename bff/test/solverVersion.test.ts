@@ -7,6 +7,8 @@
 // a working solver reported as broken.
 import test, { before, mock } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
 process.env.DATABASE_URL = process.env.DATABASE_URL || process.env.TEST_DATABASE_URL || 'postgres://x:x@127.0.0.1:1/x';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-at-least-16-chars';
@@ -95,11 +97,25 @@ test("trawl's releases are asked of trawl's own repository, and cached apart fro
   const asked: string[] = [];
   t.mock.method(globalThis, 'fetch', async (u: unknown) => {
     asked.push(String(u));
-    return { ok: true, json: async () => ({ tag_name: String(u).includes('/repos/germondai/trawl/') ? 'v1.7.0' : 'v3.6.0' }) } as never;
+    return { ok: true, json: async () => ({ tag_name: String(u).includes('/repos/germondai/trawl/') ? 'v1.8.0' : 'v3.6.0' }) } as never;
   });
   assert.equal(await mod.latestSolverVersion(), 'v3.6.0', 'FlareSolverr, by default, as before');
-  assert.equal(await mod.latestSolverVersion(Date.now(), 'trawl'), 'v1.7.0', "trawl's own latest release");
+  assert.equal(await mod.latestSolverVersion(Date.now(), 'trawl'), 'v1.8.0', "trawl's own latest release");
   assert.deepEqual(asked.map((u) => new URL(u).pathname), ['/repos/FlareSolverr/FlareSolverr/releases/latest', '/repos/germondai/trawl/releases/latest']);
-  assert.equal(await mod.latestSolverVersion(Date.now(), 'trawl'), 'v1.7.0');
+  assert.equal(await mod.latestSolverVersion(Date.now(), 'trawl'), 'v1.8.0');
   assert.equal(asked.length, 2, 'each answer is cached for its own repository');
+});
+
+test("the trawl the docs pin takes the extension engine's form posts: 1.8.0 or later", () => {
+  // 2026-10-14: the extension engine asks a Madara site for its lists and searches with a form post that has no
+  // Content-Type (its CloudflareInterceptor hands the body over as `postData`), and trawl 1.7.0 refused every one with
+  // HTTP 400 "body requires a Content-Type header to be set": ManhuaUS's Popular and Search failed through it while every
+  // GET worked. 1.8.0 sends such a body as a form. Reintroduce by pinning 1.7.0 in docs/CONFIGURATION.md: this fails.
+  const doc = readFileSync(join(__dirname, '..', '..', 'docs', 'CONFIGURATION.md'), 'utf8');
+  const pins = [...doc.matchAll(/ghcr\.io\/germondai\/trawl:(\S+)/g)].map((m) => m[1]);
+  assert.ok(pins.length > 0, 'the docs show a trawl service to copy');
+  for (const v of pins) {
+    assert.ok(mod.parseVersion(v), `a version to compare, not "${v}"`);
+    assert.equal(mod.isBehind(v, 'v1.8.0'), false, `trawl ${v} refuses the engine's form posts`);
+  }
 });

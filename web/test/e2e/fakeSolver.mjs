@@ -2,13 +2,13 @@
 // Dependency-free fake Cloudflare solver for the browser walks (v0.55.3, the backup solver): FlareSolverr's /v1, as
 // FlareSolverr, trawl and Byparr all speak it, with a switch to stop answering.
 //
-//   node web/test/e2e/fakeSolver.mjs --name main --port 8191 [--greeting trawl|flaresolverr] [--version 1.7.0]
+//   node web/test/e2e/fakeSolver.mjs --name main --port 8191 [--greeting trawl|flaresolverr] [--version 1.8.0]
 //
 // In the rig it runs like the fake sources, with the repository mounted, on the instance's network (up.sh
 // E2E_SOLVERS=1 starts two: the main greeting as trawl, the backup as FlareSolverr), and the app gets
 // FLARESOLVERR_URL / FLARESOLVERR_FALLBACK_URL=http://<container>:8191.
 //
-//   GET  /         its greeting, as each solver words it: {"msg":"TRAWL is ready!","version":"1.7.0"} or
+//   GET  /         its greeting, as each solver words it: {"msg":"TRAWL is ready!","version":"1.8.0"} or
 //                  {"msg":"FlareSolverr is ready!","version":"3.5.2"} -- what Health names the solver by.
 //   GET  /health   {"status":"ok"}, trawl's (and Byparr's) own.
 //   POST /v1       {cmd: request.get | request.post, url, postData?}: the solver fetches `url` itself, with the
@@ -30,7 +30,7 @@ const PORT = Number(argv.get('--port') || 8191);
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) throw new Error(`bad --port ${PORT}`);
 const GREETING = argv.get('--greeting') || 'flaresolverr';
 if (!['trawl', 'flaresolverr'].includes(GREETING)) throw new Error(`bad --greeting ${GREETING}; trawl or flaresolverr`);
-const VERSION = argv.get('--version') || (GREETING === 'trawl' ? '1.7.0' : '3.5.2');
+const VERSION = argv.get('--version') || (GREETING === 'trawl' ? '1.8.0' : '3.5.2');
 const UA = `${NAME}-browser/1.0`;
 
 let mode = 'up';
