@@ -1367,10 +1367,11 @@ export default async function adminRoutes(app: FastifyInstance) {
   const LANGUAGE_SNIFF_MS = 15_000;
   /**
    * The series a site's language decides for: those it is the main source of and those that follow it. Their stored
-   * listings are re-picked when it changes (PATCH, below), as a series' own language change re-picks its own.
+   * listings are re-picked when it changes (PATCH, below), as a series' own language change re-picks its own. A removed
+   * series is among them: re-picking what is left of its listing costs nothing and changes nothing anyone sees.
    */
   const seriesOfSite = async (id: string) => (await q<{ id: string }>(
-    `SELECT id FROM lib_series WHERE source_id = $1 AND deleted_at IS NULL
+    `SELECT id FROM lib_series WHERE source_id = $1
      UNION SELECT series_id FROM series_sources WHERE source_id = $1`, [id])).map((r) => r.id);
 
   app.get('/api/admin/sources/custom', async () => ({ content: await readSites() }));

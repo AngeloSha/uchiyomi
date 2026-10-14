@@ -8,9 +8,9 @@
 //
 // v0.52.0 (#123): MangaDex is one adapter per language. This drives every one of them through every method that
 // asks for a language and reads what was actually sent, rather than the source text: each request pins exactly
-// that adapter's MangaDex code, and the adapter declares the app's code for it. English search is the one request
-// with no language at all -- it finds every title, as it always did, because English's chapter list falls back to
-// the other languages.
+// that adapter's MangaDex code, and the adapter declares the app's code for it. English included since v0.62.0: its
+// search was the one request with no language at all, because its chapter list fell back to the other languages --
+// which is how a server set to English only downloaded Spanish chapters. Neither does any more.
 import test, { before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { MANGADEX_LANGS } from '../src/lib/lang';
@@ -60,16 +60,13 @@ test('every MangaDex adapter asks for exactly its own language, and declares it'
       const urls = record();
       await run();
       const pinned = [...new Set(urls.flatMap((u) => LANG_PARAMS.flatMap((p) => new URL(u).searchParams.getAll(p))))];
-      if (code === 'en' && what === 'search') {
-        assert.deepEqual(pinned, [], 'English search must find titles in every language, as it always did');
-        continue;
-      }
+      // Reintroduce English's unfiltered search: "MangaDex search asked no language" fails.
       assert.deepEqual(pinned, [md], `${a.name} ${what} asked ${pinned.join(', ') || 'no language'}`);
     }
   }
 });
 
-test('English is the MangaDex it always was; every other language is a source of its own in one rate group', async () => {
+test('English is the MangaDex it always was by id and name; every other language is a source of its own in one rate group', async () => {
   // Reintroduce by naming English like the others ("MangaDex (EN)", `mangadex-en`): every series added from it
   // would point at a source id nothing registers.
   assert.equal(mangadex.id, 'mangadex');
@@ -85,11 +82,11 @@ test('English is the MangaDex it always was; every other language is a source of
   assert.throws(() => makeMangadex('xx'), /not offered/);
   assert.throws(() => makeMangadex('all'), /not offered/);
 
-  // English search, byte for byte as before v0.52.0.
+  // English search, byte for byte as before v0.52.0 but for its language (v0.62.0): only titles with English chapters.
   const urls = record();
   await mangadex.search('solo leveling');
   assert.deepEqual(urls, [
-    'https://api.mangadex.org/manga?title=solo%20leveling&limit=12&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica&includes[]=cover_art&includes[]=author&order[relevance]=desc',
+    'https://api.mangadex.org/manga?title=solo%20leveling&limit=12&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica&includes[]=cover_art&includes[]=author&order[relevance]=desc&availableTranslatedLanguage[]=en',
   ]);
   // A hit names the adapter it came from, so it is added from that language.
   const hits = await es.search('x');
