@@ -28,7 +28,7 @@ import { sameLanguage } from './lang';
 import { sourceLanguage } from './seriesLang';
 import { cleanSourceOrder, rankSources, type SourcePriority } from './sourcePrefs';
 import { refreshRadar } from './releaseRadar';
-import { languageRulesFor } from './copyLanguage';
+import { languageRulesFor, type LanguageRules } from './copyLanguage';
 
 /**
  * `covered` (v0.50.0, lib/partAlias.ts R2): another site's split of a chapter on disk -- its 78.1 ... 78.9 where 78
@@ -201,7 +201,32 @@ const priorityFrom = (order: string[]): SourcePriority => {
   return { order, rank: (id) => (id && at.has(id) ? at.get(id)! : order.length) };
 };
 
-async function decisionAfterSeries(qq: ListingQuery, seriesId: string, series: DecisionRow): Promise<Decision> {
+/**
+ * The series' language rules for a decision (lib/copyLanguage.ts), or none when they cannot be read. They are a filter
+ * on top of the release rules, so a failed read leaves the listing as it was before v0.62.0 rather than leaving the
+ * series with no listing at all -- as the sweep does (lib/updater.ts), so the two still agree. Inside the decision's
+ * transaction the read runs in a savepoint: a failed statement would otherwise abort the transaction whole. Reintroduce
+ * by reading them bare: "when the judgement itself throws" in autoFollow.int.test.ts hides the column the read needs,
+ * the add writes no listing, and every candidate reads too_few_listed.
+ */
+async function languageOrNone(qq: ListingQuery, seriesId: string, followOrder: string[], inTx: boolean): Promise<LanguageRules> {
+  const none = (e: unknown): LanguageRules => {
+    console.warn(`[listing] ${seriesId}: no language rules, the series' language could not be read: ${(e as Error)?.message || e}`);
+    return {};
+  };
+  if (!inTx) return languageRulesFor(seriesId, followOrder, qq).catch(none);
+  await qq('SAVEPOINT language_rules');
+  try {
+    const rules = await languageRulesFor(seriesId, followOrder, qq);
+    await qq('RELEASE SAVEPOINT language_rules');
+    return rules;
+  } catch (e) {
+    await qq('ROLLBACK TO SAVEPOINT language_rules');
+    return none(e);
+  }
+}
+
+async function decisionAfterSeries(qq: ListingQuery, seriesId: string, series: DecisionRow, inTx: boolean): Promise<Decision> {
   const global = (await qq<{ scanlator_prefs: unknown; source_prefs: unknown }>(
     'SELECT scanlator_prefs, source_prefs FROM server_settings WHERE id = 1'))[0];
   const follows = (await qq<{ source_id: string }>(
@@ -212,7 +237,7 @@ async function decisionAfterSeries(qq: ListingQuery, seriesId: string, series: D
   const followOrder = [...(series.source_id ? [series.source_id] : []), ...follows];
   // v0.62.0: the series' language (lib/copyLanguage.ts), the same rules the sweep chooses by, so the stored listing,
   // the fallback chain, repair and the slow archive never take a copy the sweep would have left out.
-  const language = await languageRulesFor(seriesId, followOrder, qq);
+  const language = await languageOrNone(qq, seriesId, followOrder, inTx);
   return {
     prefs: mergePrefs(
       storedPrefs(global?.scanlator_prefs, { priority: [], blocked: [], patienceDays: 2 }),
@@ -227,7 +252,7 @@ async function decisionAfterSeries(qq: ListingQuery, seriesId: string, series: D
 async function currentDecision(qq: ListingQuery, seriesId: string): Promise<Decision | null> {
   const series = (await qq<DecisionRow>(
     'SELECT scanlator_prefs, source_prefs, source_id FROM lib_series WHERE id = $1', [seriesId]))[0];
-  return series ? decisionAfterSeries(qq, seriesId, series) : null;
+  return series ? decisionAfterSeries(qq, seriesId, series, false) : null;
 }
 
 async function lockedDecision(qq: ListingQuery, seriesId: string): Promise<Decision | null> {
@@ -240,7 +265,7 @@ async function lockedDecision(qq: ListingQuery, seriesId: string): Promise<Decis
   const current = (await qq<DecisionRow>(
     'SELECT scanlator_prefs, source_prefs, source_id FROM lib_series WHERE id = $1', [seriesId]))[0];
   if (!current) return null;
-  return decisionAfterSeries(qq, seriesId, current);
+  return decisionAfterSeries(qq, seriesId, current, true);
 }
 
 const dateOrNull = (v: unknown): string | null => {

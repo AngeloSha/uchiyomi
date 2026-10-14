@@ -776,10 +776,11 @@ components:
         number: { type: number }
         reason:
           type: string
-          enum: [not_listed, blocked_group, already_here, source_unavailable, cooldown, duplicate]
+          enum: [not_listed, blocked_group, other_language, already_here, source_unavailable, cooldown, duplicate]
           description: >-
             `duplicate` is a second pick for a number already picked in the same body: the first pick was
-            handled, this one was not.
+            handled, this one was not. `other_language` (since v0.62.0): every copy of the number is in another
+            language than the series' -- a pick takes one anyway.
         source: { type: string, description: Present when the skipped entry was a pick, naming the copy asked for. }
         sourceId: { type: string, description: Present when the skipped entry was a pick. }
     Pick:
@@ -9413,7 +9414,7 @@ paths:
                           type: string
                         reason:
                           type: string
-                          enum: [not_found, not_owned, not_ours, not_listed, blocked_group, source_unavailable, cooldown, duplicate]
+                          enum: [not_found, not_owned, not_ours, not_listed, blocked_group, other_language, source_unavailable, cooldown, duplicate]
                         source:
                           type: string
                           description: "On a `duplicate` entry: the adapter of the pick that was ignored."

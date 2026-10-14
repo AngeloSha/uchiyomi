@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3735
+    "strings": 3736
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -3738,5 +3738,6 @@
   "{n} chapters here are in {language}": "{n} من الفصول هنا بلغة {language}",
   "The series is in {language}, and each of them has come out in {language} too.": "السلسلة بلغة {language}، وقد صدر كلٌّ منها بلغة {language} أيضًا.",
   "Fetch it again in {language}": "اجلبه مرة أخرى بلغة {language}",
-  "Fetch them again in {language}": "اجلبها مرة أخرى بلغة {language}"
+  "Fetch them again in {language}": "اجلبها مرة أخرى بلغة {language}",
+  "The file is deleted from the server. The chapter stays listed and everyone keeps their reading history, but anyone partway through it loses their place.": "يُحذف الملف من الخادم. يبقى الفصل مُدرجًا ويحتفظ الجميع بسجل قراءتهم، لكن من كان في منتصفه يفقد موضعه."
 }

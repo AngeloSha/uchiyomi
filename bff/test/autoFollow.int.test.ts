@@ -471,8 +471,9 @@ test('when the judgement itself throws, every candidate reads not_tried rather t
   // nothing at all. Faked the way visibilityFailsClosed does: `work_id`, which the judgement's language
   // read needs, is taken away for a moment. This add is not an edition and does not read it itself.
   // (`scanlator_prefs` used to be the fault point, but transactional listing replacement now correctly
-  // re-reads it before writing the primary listing.) Reintroduce by dropping the `refusals(...)` line from
-  // judgeAlsoFollow's catch: the card finishes with no results.
+  // re-reads it before writing the primary listing. Since v0.62.0 the listing reads the series' language as well, and
+  // writes itself without the language rules when that read fails: lib/seriesListing.ts languageOrNone.) Reintroduce by
+  // dropping the `refusals(...)` line from judgeAlsoFollow's catch: the card finishes with no results.
   const before = { rich: asks[RICH] ?? 0, third: asks[THIRD] ?? 0 };
   await q('ALTER TABLE lib_series RENAME COLUMN work_id TO work_id__hidden');
   let id = '', folder = '';

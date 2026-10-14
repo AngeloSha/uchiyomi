@@ -2062,7 +2062,9 @@ function SeriesInner() {
           confirmLabel={tr('Delete from server')}
           body={
             <>
-              <p>{tr('The files are deleted from the server. The chapters stay listed and everyone keeps their reading history, but anyone partway through one loses their place.')}</p>
+              <p>{confirming.books.length === 1
+                ? tr('The file is deleted from the server. The chapter stays listed and everyone keeps their reading history, but anyone partway through it loses their place.')
+                : tr('The files are deleted from the server. The chapters stay listed and everyone keeps their reading history, but anyone partway through one loses their place.')}</p>
               {/* The two skips the server applies for the same reasons the scheduled cleanup does, said
                   before the click rather than only in the toast after it. */}
               <p className="mt-2">{tr('A chapter somebody has bookmarked, and a chapter in a library you assembled yourself, is skipped.')}</p>

@@ -1298,7 +1298,8 @@ unblock the group and check again. A manual fetch resets the chapter's retry cap
 v0.48.3) `numbers` are whole chapters: 12 takes every listed chapter from 12 up to 13, so 12 and 12.5 — the
 numbers the fill scan reports, which is what the Find missing chapters dialog sends. The answer is
 `{ok, started, folder, total, skipped: [{number, reason}]}` with `reason` one of `not_listed` (run
-**Check for new chapters** first), `blocked_group`, `already_here` (a live chapter, not a tombstone),
+**Check for new chapters** first), `blocked_group`, `other_language` (since v0.62.0: every copy of the number is in
+another language than the series' -- a pick takes one anyway), `already_here` (a live chapter, not a tombstone),
 `source_unavailable` (adapter not loaded or disabled, or a source the series no longer follows), `cooldown`,
 `over_cap` (with `floored`, a chapter past the 300 the expansion reached — press again for the rest);
 **409** `nothing_to_fetch` (with `skipped`) when nothing is fetchable, **409** `busy` while a download for
@@ -1952,7 +1953,7 @@ way back but a hand copy) at exactly the path the downloader writes (`Chapter <n
 folder; `not_ours` otherwise) is eligible, because only that path lands back on the same row. This is also
 the only path back for a tombstoned chapter below a series' `chapter_floor`, which the sweep never wants
 and *Fetch newest* takes only if it is the newest listed. The listing is refreshed first, as for `POST /api/sources/fetch`, so the copy is the
-one the rules choose *now*, with the same `not_listed` / `blocked_group` / `source_unavailable` (including
+one the rules choose *now*, with the same `not_listed` / `blocked_group` / `other_language` / `source_unavailable` (including
 a source the series no longer follows) / `cooldown` skips; the old file is set aside until
 the new one lands and put back if the download fails, so a failed re-download never costs the chapter that
 was there. A chapter the cleanup deleted is eligible: this is how it comes back. Answers
