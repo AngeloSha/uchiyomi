@@ -721,3 +721,38 @@ test('pin-engine pins what the release actually serves, and only from a prerelea
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('the engine canary only reads, unless the owner switches its reporting on -- and then never touches main, a tag or a PR', () => {
+  // .github/workflows/engine-canary.yml tests every new Suwayomi-Server every week (the engine upgrade). It runs on a
+  // schedule with the repository's token, so its shape is pinned: scheduled and dispatched only (never on a push or a
+  // pull request, where a fork's code would run with it), read-only at the top, the write permissions on the report
+  // job alone and that job behind the ENGINE_CANARY_POST switch, no secret but GITHUB_TOKEN, a timeout on every job,
+  // and the one push it makes is the engine-bump/<tag> branch. Reintroduce `contents: write` at the top, a
+  // `secrets.SOMETHING`, `pull_request:` in `on`, a report job without the switch, or a `git push origin HEAD:main` in
+  // scripts/engine/report.mjs: each names itself below.
+  const y = read('.github/workflows/engine-canary.yml');
+  const wf = parseYaml(y);
+  assert.deepEqual(Object.keys(wf.on).sort(), ['schedule', 'workflow_dispatch'], 'the canary runs on something other than its schedule and a dispatch');
+  assert.equal(wf.on.schedule[0].cron, '23 5 * * 1');
+  assert.deepEqual(Object.keys(wf.on.workflow_dispatch.inputs).sort(), ['preview', 'version']);
+  assert.equal(wf.on.workflow_dispatch.inputs.preview.default, true);
+  assert.deepEqual(wf.permissions, { contents: 'read' }, 'the canary has write permissions outside its report job');
+  assert.ok(wf.concurrency?.group, 'two canaries could run at once');
+  for (const [name, job] of Object.entries<any>(wf.jobs)) {
+    assert.ok(job['timeout-minutes'], `engine-canary.yml job "${name}" has no timeout`);
+    const writes = Object.entries(job.permissions ?? {}).filter(([, v]) => v === 'write').map(([k]) => k);
+    if (name === 'report') assert.deepEqual(writes.sort(), ['contents', 'issues']);
+    else assert.deepEqual(writes, [], `job "${name}" may write`);
+  }
+  assert.match(String(wf.jobs.report.if), /vars\.ENGINE_CANARY_POST == 'on'/, 'the report job posts without the owner\'s switch');
+  const secrets = [...code(y).matchAll(/secrets\.([A-Za-z_]+)/g)].map((m) => m[1]);
+  assert.deepEqual([...new Set(secrets)], ['GITHUB_TOKEN'], 'the canary reads a secret other than its own token');
+  // The pushes: the workflow makes none itself, and report.mjs makes exactly one, to the bump branch.
+  assert.ok(!/git push|gh pr create|refs\/tags/.test(code(y)), 'the workflow pushes or opens a pull request itself');
+  const report = read('scripts/engine/report.mjs');
+  const pushes = [...report.matchAll(/git\('push'[^\n]*/g)].map((m) => m[0]);
+  assert.equal(pushes.length, 1, 'report.mjs pushes in more than one place');
+  assert.match(pushes[0], /`HEAD:refs\/heads\/\$\{branch\}`/);
+  assert.match(report, /const branch = `engine-bump\/\$\{r\.tag\}`;/, 'the branch report.mjs pushes is not engine-bump/<tag>');
+  assert.ok(!/refs\/tags|\/pulls|'main'|"main"/.test(report.replace(/^\s*\/\/.*$/gm, '')), 'report.mjs touches a tag, main or a pull request');
+});

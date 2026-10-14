@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3758
+    "strings": 3782
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -3761,5 +3761,29 @@
   "Each new member starts with these. Existing accounts are not affected.": "Jedes neue Mitglied startet mit diesen Einstellungen. Bestehende Konten sind nicht betroffen.",
   "Can download": "Downloads erlaubt",
   "No downloads": "Keine Downloads",
-  "New members would see nothing.": "Neue Mitglieder würden nichts sehen."
+  "New members would see nothing.": "Neue Mitglieder würden nichts sehen.",
+  "Not compatible with this Uchiyomi": "Nicht kompatibel mit diesem Uchiyomi",
+  "The extension engine does not match this version of Uchiyomi.": "Die Erweiterungs-Engine passt nicht zu dieser Uchiyomi-Version.",
+  "1 chapter; its source {source} can’t be reached because the extension engine does not match this Uchiyomi": "1 Kapitel; ihre Quelle {source} ist nicht erreichbar, weil die Erweiterungs-Engine nicht zu diesem Uchiyomi passt",
+  "{n} chapters; its source {source} can’t be reached because the extension engine does not match this Uchiyomi": "{n} Kapitel; ihre Quelle {source} ist nicht erreichbar, weil die Erweiterungs-Engine nicht zu diesem Uchiyomi passt",
+  "Not compatible (v{version})": "Nicht kompatibel (v{version})",
+  "Not compatible": "Nicht kompatibel",
+  "It answers, but its extensions are unavailable until the engine and Uchiyomi match. Restarting it does not help.": "Sie antwortet, aber ihre Erweiterungen bleiben nicht verfügbar, bis Engine und Uchiyomi zusammenpassen. Ein Neustart hilft nicht.",
+  "It refused what Uchiyomi asked: {error}": "Sie hat abgelehnt, was Uchiyomi angefragt hat: {error}",
+  "Update the engine to {tested}, the version this Uchiyomi was tested with.": "Aktualisiere die Engine auf {tested}, die Version, mit der dieses Uchiyomi getestet wurde.",
+  "The engine is newer than this Uchiyomi. Update Uchiyomi; until a release supports this engine, {tested} is the version that works.": "Die Engine ist neuer als dieses Uchiyomi. Aktualisiere Uchiyomi; bis eine Version diese Engine unterstützt, ist {tested} die Version, die funktioniert.",
+  "Run the version this Uchiyomi was tested with, {tested}.": "Verwende die Version, mit der dieses Uchiyomi getestet wurde: {tested}.",
+  "Back up the engine’s data first: the engine upgrades its database when it starts, and an older engine cannot read it again.": "Sichere zuerst die Daten der Engine: Die Engine aktualisiert beim Start ihre Datenbank, und eine ältere Engine kann sie danach nicht mehr lesen.",
+  "In {file}, set the engine’s image to {image}, then run {command}.": "Setze in {file} das Image der Engine auf {image} und führe dann {command} aus.",
+  "On the Docker tab, edit {service}, set its Repository to {image} and apply. Its data stays in {path}.": "Bearbeite im Docker-Tab {service}, setze das Repository auf {image} und übernimm die Änderung. Die Daten bleiben in {path}.",
+  "In CasaOS, edit the {service} app, set its image to {image} and save. Its data stays in {path}.": "Bearbeite in CasaOS die App {service}, setze ihr Image auf {image} und speichere. Die Daten bleiben in {path}.",
+  "Quit and reopen Uchiyomi. If Admin → Sources then offers to download the extension engine, download it: that is the version this Uchiyomi was tested with.": "Beende Uchiyomi und öffne es erneut. Bietet Verwaltung → Quellen dann an, die Erweiterungs-Engine herunterzuladen, lade sie herunter: Das ist die Version, mit der dieses Uchiyomi getestet wurde.",
+  "Run {image} in place of the engine you have, on the same data.": "Starte {image} anstelle deiner bisherigen Engine, mit denselben Daten.",
+  "Engine version": "Engine-Version",
+  "{version} is newer than the version this Uchiyomi was tested with ({tested}).": "{version} ist neuer als die Version, mit der dieses Uchiyomi getestet wurde ({tested}).",
+  "{version} is older than the version this Uchiyomi was tested with ({tested}). It works; updating it is recommended.": "{version} ist älter als die Version, mit der dieses Uchiyomi getestet wurde ({tested}). Sie funktioniert; ein Update wird empfohlen.",
+  "{version} is older than the oldest version this Uchiyomi works with ({oldest}).": "{version} ist älter als die älteste Version, mit der dieses Uchiyomi funktioniert ({oldest}).",
+  "To go back to {tested}, restore a backup of the engine’s data from before the update: an older engine cannot read what a newer one wrote.": "Um zu {tested} zurückzukehren, stelle eine Sicherung der Engine-Daten von vor dem Update wieder her: Eine ältere Engine kann nicht lesen, was eine neuere geschrieben hat.",
+  "Uchiyomi's extension engine refused Uchiyomi's request. Quit and reopen Uchiyomi, and download the extension engine again if Admin → Sources offers it.": "Die Erweiterungs-Engine von Uchiyomi hat die Anfrage von Uchiyomi abgelehnt. Beende Uchiyomi und öffne es erneut, und lade die Erweiterungs-Engine noch einmal herunter, wenn Verwaltung → Quellen das anbietet.",
+  "The extension engine refused Uchiyomi's request: it is older or newer than the version this Uchiyomi works with. Health → Extension engine says which, and how to change it.": "Die Erweiterungs-Engine hat die Anfrage von Uchiyomi abgelehnt: Sie ist älter oder neuer als die Version, mit der dieses Uchiyomi funktioniert. Zustand → Erweiterungs-Engine sagt, welches von beiden, und wie du das änderst."
 }

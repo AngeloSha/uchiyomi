@@ -1,0 +1,216 @@
+name: Engine canary
+
+# Every Monday, the newest stable Suwayomi-Server -- Uchiyomi's extension engine -- is put through what Uchiyomi asks of
+# it, before anybody runs it. Nothing updates the engine by itself (every install pins it; Dependabot cannot see the
+# tag), and an engine that refuses Uchiyomi's queries leaves every extension source unavailable, so the first place to
+# learn that a new engine breaks something is here, not on a user's server.
+#
+# Three engines a run (scripts/engine/latest.mjs): the pin, as the control; the newest stable when it is not the pin
+# (a stable build only: GHCR's plain vX.Y.Z can be a preview, and a stable one has vX.Y.Z-stable's digest); the newest
+# preview, reported only. Each is started fresh beside a fixture extension store and a Local manga, and held to:
+#   1. every variable the deploy files set on it, still read by its image (scripts/engine/envCheck.mjs);
+#   2. its schema, captured and compared with the pin's (scripts/engine/schemaDiff.mjs);
+#   3. every GraphQL document Uchiyomi sends, valid on that schema with no deprecated member
+#      (bff/test/suwayomiOperations.test.ts with SUWAYOMI_EXTRA_SCHEMA);
+#   4. the fake engine's conform battery against it, reported and never fatal;
+#   5. Uchiyomi's own code against it: a source end to end, a store, the page cache, preferences (engineLive.test.ts);
+#   6. the fake-engine tests against its schema (SUWAYOMI_FAKE_SCHEMA).
+#
+# Reporting (issues; for a newer stable that passes, a branch engine-bump/<tag> made by scripts/engine/bump.mjs) runs
+# only with the repository variable ENGINE_CANARY_POST set to "on", and is the only job allowed to write. It never
+# pushes to main, never pushes a tag and never opens a pull request: one made with GITHUB_TOKEN would run no workflows,
+# so a person opens it from the branch. bff/test/releasePipeline.test.ts holds this file to all of that.
+
+on:
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'A Suwayomi-Server release tag to test instead of the newest stable (vX.Y.Z)'
+        required: false
+        default: ''
+      preview:
+        description: 'Also test the newest preview (reported only)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engine-canary
+  cancel-in-progress: false
+
+defaults:
+  run:
+    # -eo pipefail: a `| tee` never hides a failing step.
+    shell: bash
+
+jobs:
+  resolve:
+    name: Which engines
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.r.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - id: r
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          PREVIEW: ${{ github.event_name == 'schedule' || inputs.preview }}
+        run: |
+          node scripts/engine/latest.mjs --version "$VERSION" --preview "$PREVIEW" --github-output "$GITHUB_OUTPUT"
+
+  probe:
+    name: ${{ matrix.kind }} ${{ matrix.tag }}
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # A preview is reported, never a red run.
+    continue-on-error: ${{ matrix.kind == 'preview' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.resolve.outputs.matrix) }}
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: uchiyomi_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://test:test@127.0.0.1:5432/uchiyomi_test
+      TZ: UTC
+      ENGINE: http://127.0.0.1:4567
+      STORE: http://host.docker.internal:8099/index.min.json
+      OUT: canary
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install
+        working-directory: ./bff
+        run: npm ci --no-audit --no-fund
+      - name: The fixture store and the Local manga
+        run: |
+          mkdir -p "$OUT"
+          nohup node scripts/engine/serveStatic.mjs scripts/engine/fixture-store 8099 > "$OUT/store.log" 2>&1 &
+          node scripts/engine/seedLocal.mjs "$RUNNER_TEMP/engine-data"
+          sudo chown -R 1000:1000 "$RUNNER_TEMP/engine-data"
+      - id: start
+        name: Start the engine as the deploy files run it
+        run: |
+          mapfile -t DEPLOY_ENV < <(node scripts/engine/envCheck.mjs --docker-args)
+          docker run -d --name engine -p 127.0.0.1:4567:4567 --add-host=host.docker.internal:host-gateway \
+            "${DEPLOY_ENV[@]}" -v "$RUNNER_TEMP/engine-data:/home/suwayomi/.local/share/Tachidesk" "${{ matrix.image }}"
+          for i in $(seq 1 90); do
+            if curl -fsS "$ENGINE/api/v1/settings/about" > "$OUT/about.json"; then cat "$OUT/about.json"; exit 0; fi
+            sleep 2
+          done
+          docker logs engine | tail -80
+          exit 1
+      - id: env
+        name: Its image reads every variable the deploy files set
+        if: ${{ !cancelled() }}
+        run: node scripts/engine/envCheck.mjs --image "${{ matrix.image }}" | tee "$OUT/env.txt"
+      - id: schema
+        name: Its schema, and what changed since the pin
+        if: ${{ !cancelled() && steps.start.outcome == 'success' }}
+        run: |
+          node bff/test/fixtures/captureSuwayomiSchema.mjs "$ENGINE" > "$OUT/schema.json"
+          node scripts/engine/schemaDiff.mjs "bff/test/fixtures/suwayomi-${{ matrix.pin }}-schema.json" "$OUT/schema.json" | tee "$OUT/schema-diff.txt"
+      - id: operations
+        name: Every document Uchiyomi sends is valid on it
+        if: ${{ !cancelled() && steps.schema.outcome == 'success' }}
+        working-directory: ./bff
+        run: SUWAYOMI_EXTRA_SCHEMA="../$OUT/schema.json" node --import tsx --test test/suwayomiOperations.test.ts 2>&1 | tee "../$OUT/operations.txt"
+      - id: conform
+        name: The fake engine against it (reported, never fatal)
+        if: ${{ !cancelled() && steps.start.outcome == 'success' }}
+        env:
+          SUWAYOMI_FAKE_SCHEMA: ${{ github.workspace }}/canary/schema.json
+        run: node bff/test/fixtures/conformFakeSuwayomi.mjs "$ENGINE" > "$OUT/conform.txt" 2>&1 || true
+      - id: live
+        name: Uchiyomi's own code against it
+        if: ${{ !cancelled() && steps.start.outcome == 'success' }}
+        working-directory: ./bff
+        env:
+          SUWAYOMI_LIVE_URL: http://127.0.0.1:4567
+          SUWAYOMI_LIVE_STORE: ${{ env.STORE }}
+        run: node --import tsx --test test/engineLive.test.ts 2>&1 | tee "../$OUT/live.txt"
+      - id: suite
+        name: The fake-engine tests on its schema
+        if: ${{ !cancelled() && steps.schema.outcome == 'success' }}
+        working-directory: ./bff
+        env:
+          SUWAYOMI_FAKE_SCHEMA: ${{ github.workspace }}/canary/schema.json
+        run: |
+          node test/run-shards.mjs fakeSuwayomi suwayomi engine extension autofix numbering postingOrder sourceCheck \
+            reloadWindow sourceLimitSwitch 2>&1 | tee "../$OUT/suite.txt"
+      - name: Record the outcome
+        if: ${{ always() }}
+        env:
+          KIND: ${{ matrix.kind }}
+          TAG: ${{ matrix.tag }}
+          PIN: ${{ matrix.pin }}
+          IMAGE: ${{ matrix.image }}
+          FRESH: ${{ matrix.fresh }}
+          PUBLISHED_AT: ${{ matrix.publishedAt }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          STEP_START: ${{ steps.start.outcome }}
+          STEP_ENV: ${{ steps.env.outcome }}
+          STEP_SCHEMA: ${{ steps.schema.outcome }}
+          STEP_OPERATIONS: ${{ steps.operations.outcome }}
+          STEP_CONFORM: ${{ steps.conform.outcome }}
+          STEP_LIVE: ${{ steps.live.outcome }}
+          STEP_SUITE: ${{ steps.suite.outcome }}
+        run: |
+          mkdir -p "$OUT"
+          docker logs engine > "$OUT/engine.log" 2>&1 || true
+          node scripts/engine/report.mjs --record "$OUT"
+      - name: Keep what it found
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: canary-${{ matrix.kind }}-${{ matrix.tag }}
+          path: canary/
+          retention-days: 30
+
+  report:
+    name: Report
+    needs: [resolve, probe]
+    # Off until the owner sets the repository variable ENGINE_CANARY_POST to "on".
+    if: ${{ always() && needs.resolve.result == 'success' && vars.ENGINE_CANARY_POST == 'on' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: canary-*
+          path: results
+      - name: Issues, and a branch for a newer stable that passed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/engine/report.mjs --report results

@@ -173,6 +173,10 @@ export const versionText = (v: string): string => (/^\d/.test(v) ? `v${v}` : v);
  */
 export function engineLine(s: ExtStatus): { state: Headline; tone: Tone; label: string } {
   const h = headline(s);
+  // The engine upgrade: an engine that answers and refuses what Uchiyomi asks is not ready, whatever else it says.
+  // Health → Extension engine quotes it and says what to do. Reintroduce by dropping this line: the strip reads "Ready"
+  // over an engine none of whose extensions can load ("an engine that refuses" in extensions.test.ts).
+  if (h === 'ready' && s.refused?.length) return { state: h, tone: 'problem', label: tr('Not compatible with this Uchiyomi') };
   if (h === 'ready') return { state: h, tone: 'ok', label: tr('Ready') };
   if (h === 'unreachable') return { state: h, tone: 'problem', label: tr('The extension engine isn’t answering') };
   if (h === 'switched_off') return { state: h, tone: 'off', label: tr('Extensions are turned off') };

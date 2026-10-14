@@ -2,6 +2,8 @@
 // Hold the fake engine against a real one: the same requests to both, the answers compared.
 //
 //   node bff/test/fixtures/conformFakeSuwayomi.mjs http://127.0.0.1:4567
+//   SUWAYOMI_FAKE_SCHEMA=bff/test/fixtures/suwayomi-v2.4.2366-schema.json node … (an engine other than the pin: the fake
+//   then validates against that engine's schema and answers its version)
 //
 // ⚠️ A THROWAWAY engine of the pinned image only, started fresh (see captureSuwayomiSchema.mjs for the two
 // docker commands). Nothing here changes anything that matters -- the writes are refused by validation, hit a
@@ -11,7 +13,10 @@
 // is refused (rule name, wording, location), how a failing fetcher and a null non-null field are reported, how
 // variables are coerced, and the built-in Local source. Messages are compared up to the "\r\n\r\n" that starts
 // the engine's stack trace; the frames themselves are the JVM's, and the fake only imitates their shape.
-// Exits 1 when any answer differs. On v2.3.2243 (2026-09-27): every case identical.
+// Exits 1 when any answer differs. On v2.3.2243 (2026-09-27): every case identical. The engine upgrade (2026-10-14)
+// took `revision`, `isNsfw` and `baseUrl` out of the cases and added fetchMangaAndChapters and the extension stores; on
+// fresh, network-less engines that day: v2.3.2243, 75 of 75 identical; v2.4.2366 (with its schema), 75 of 75 identical.
+// The weekly canary runs it against every new engine and keeps what differs with the run.
 import { startFakeEngine } from './fakeSuwayomiEngine.mjs';
 
 const REAL = (process.argv[2] || '').replace(/\/+$/, '');
@@ -75,10 +80,10 @@ const BATTERY = [
   { query: 'query Q1 { aboutServer { name } } query Q2 { aboutServer { version } }', operationName: 'Q2' },
   { query: 'query Q1 { aboutServer { name } }', operationName: 'Nope' },
   { query: '{ a: aboutServer { name } b: aboutServer { version } }' },
-  { query: '{ aboutServer { name @skip(if: true) version @include(if: false) revision } }' },
+  { query: '{ aboutServer { name @skip(if: true) version @include(if: false) buildType } }' },
   { query: '{ ... on Query { aboutServer { name } } }' },
   { query: 'query { __typename sources { __typename } }' },
-  { query: '{ aboutServer { __typename name version revision } }' },
+  { query: '{ aboutServer { __typename name version buildType } }' },
   // clearCachedImages (the page-cache keeper, lib/sources/suwayomi/cache.ts): what it answers, and how it refuses
   { query: 'mutation { clearCachedImages(input:{cachedPages:true}) { cachedPages cachedThumbnails downloadedThumbnails clientMutationId } }' },
   { query: 'mutation { clearCachedImages(input:{cachedPages:true, clientMutationId:"u"}) { cachedPages clientMutationId } }' },
@@ -89,8 +94,20 @@ const BATTERY = [
   { query: 'mutation { clearCachedImages { cachedPages } }' },
   { query: 'mutation { clearCachedImages(input:{cachedPages:true}) }' },
   { query: 'mutation { clearCachedImages(input:{cachedPages:"yes"}) { cachedPages } }' },
+  // fetchMangaAndChapters, which replaced fetchManga and fetchChapters (operations.ts): an unknown id, and its input
+  { query: 'mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchManga:false,fetchChapters:true}){ chapters { id } } }', variables: { id: 999 } },
+  { query: 'mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchManga:true,fetchChapters:false}){ manga { id title } } }', variables: { id: 999 } },
+  { query: 'mutation { fetchMangaAndChapters(input:{id:999,fetchManga:true}) { manga { id } } }' },
+  { query: 'mutation($i:FetchMangaAndChaptersInput!){ fetchMangaAndChapters(input:$i) { chapters { id } } }', variables: { i: { id: 999, fetchManga: false, fetchChapters: true, refetch: true } } },
+  // extension stores, which replaced the extensionRepos setting: an empty engine, an address that is not one, and a
+  // remove or a read of a store it does not hold
+  { query: '{ extensionStores { nodes { indexUrl name } totalCount } }' },
+  { query: 'mutation($u:String!){ addExtensionStore(input:{indexUrl:$u}){ extensionStore { indexUrl name } } }', variables: { u: 'not a url' } },
+  { query: 'mutation($u:String!){ addExtensionStore(input:{indexUrl:$u}){ extensionStore { indexUrl name } } }', variables: { u: '' } },
+  { query: 'mutation($u:String!){ removeExtensionStore(input:{indexUrl:$u}){ extensionStore { indexUrl } } }', variables: { u: 'https://example.invalid/repo.json' } },
+  { query: '{ extensionStore(indexUrl: "https://example.invalid/repo.json") { indexUrl } }' },
   // the built-in Local source, present on every engine
-  { query: '{ source(id: "0") { id name displayName lang iconUrl isNsfw supportsLatest baseUrl isConfigurable contentWarning homeUrl preferences { __typename } extension { pkgName name } } }' },
+  { query: '{ source(id: "0") { id name displayName lang iconUrl supportsLatest isConfigurable contentWarning homeUrl preferences { __typename } extension { pkgName name } } }' },
   'not json',
 ];
 

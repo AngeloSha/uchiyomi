@@ -1,27 +1,31 @@
 // Adding an extension repository (v0.45.0): what a paste becomes, and what the route keeps.
 //
 // The route is driven over HTTP against a FAKE engine -- a real HTTP server on loopback speaking the GraphQL
-// operations the routes use, shaped the way Suwayomi-Server v2.3.2243 answers them -- so the real transport,
-// the real retry loop, the real audit rows and the real scheduled check run, and no repository on the internet
-// (or the live engine) is ever touched. The fake reproduces the engine behaviours that shaped the route, each
-// one measured on a real v2.3.2243:
+// operations the routes use, shaped the way Suwayomi-Server answers them -- so the real transport, the real audit
+// rows and the real scheduled check run, and no repository on the internet (or the live engine) is ever touched.
 //
-//   * a settings change is applied asynchronously, so the first refresh after an add sees nothing new;
-//   * the RUNNING engine lists an address exactly as it was given; only after a restart does it list its own
-//     spelling of it (the repo.json beside a pasted index.min.json) -- `restart()` below. Each extension's
-//     `repo` names that own spelling;
-//   * a list-shaped index is read only at an address ending in /index.min.json; anything else (an index.json)
-//     is refused in the engine's log and yields nothing -- `accepts()` below;
-//   * an installed extension that no configured repository offers stays listed, installed and OBSOLETE under
-//     its old address, and turns non-obsolete when a repository offering it is added again.
+// Since the engine upgrade a repository is one of the engine's extension STORES, added and removed one at a time
+// (addExtensionStore / removeExtensionStore / extensionStores), and this fake models what was measured on throwaway
+// v2.3.2243 and v2.4.2366 engines with a fixture store on a network of their own (2026-10-14), identical on both:
 //
-// ⚠️ The first version of this fake swapped the stored spelling in on the next refresh, served an index.json as
-// a working repository and never marked anything obsolete. All its tests passed while the candidate had three
-// real bugs, each hidden by one of those differences: a duplicate "restored" repository after every engine
-// restart, the re-add of a removed repository refused, and an index.json alternative the engine never accepts.
+//   * an add reads the index there and then, and answers the store or the engine's error: a list-shaped index is read
+//     only at an address ending in /index.min.json ("Provided legacy store url is not valid" anywhere else, an
+//     index.json say), a missing one is "HTTP error 404" -- each as the add's own error, `{data: {addExtensionStore:
+//     null}}` with "Exception while fetching data (/addExtensionStore) : …";
+//   * it stores and answers its OWN spelling of the address (the repo.json beside a pasted index.min.json), from the
+//     start -- not only after a restart, as the deprecated `extensionRepos` setting did -- and the next
+//     fetchExtensions lists its extensions at once: nothing is applied later;
+//   * adding a store it holds changes nothing; a remove matches the address exactly, and one it does not hold answers
+//     `extensionStore: null`, with no error;
+//   * an installed extension that no store offers stays listed, installed and OBSOLETE under its old address, and turns
+//     non-obsolete when a store offering it is added again.
 //
-// Each refusal is checked for what it says AND for what it wrote to the engine: a refused paste must reach
-// the engine not at all, and a repository that yields nothing must not be left in the engine's list.
+// ⚠️ The first version of this fake (for the setting) swapped the stored spelling in on the next refresh, served an
+// index.json as a working repository and never marked anything obsolete. All its tests passed while the candidate had
+// three real bugs, each hidden by one of those differences. Keep it measured.
+//
+// Each refusal is checked for what it says AND for what it did to the engine: a refused paste must reach the engine
+// not at all, and a repository that yields nothing must not be left in the engine.
 //
 // Skipped automatically unless TEST_DATABASE_URL is set (sign-in and the audit log need Postgres).
 import test, { before, after } from 'node:test';
@@ -41,65 +45,62 @@ const USER = 'xr-admin';
 
 // ---- the fake engine -------------------------------------------------------------------------------------
 
-/** What "the internet" serves at each address, and the spelling the engine lists it under after a restart. */
+/** What "the internet" serves at each address: the store the engine makes of it, and the extensions it lists. */
 const NET: Record<string, { stored: string; exts: string[] }> = {
   'https://example.org/a/index.min.json': { stored: 'https://example.org/a/repo.json', exts: ['a.one', 'a.two'] },
   'https://example.org/b/index.min.json': { stored: 'https://example.org/b/repo.json', exts: ['b.one'] },
   // c's folder also serves the full index.json, listing the same extension -- which the engine refuses
   'https://example.org/c/index.min.json': { stored: 'https://example.org/c/repo.json', exts: ['c.one'] },
-  'https://example.org/c/index.json': { stored: 'https://example.org/c/index.json', exts: ['c.one'] },
   // a folder pasted bare: the alternative is the index.min.json inside it
   'https://example.org/d/index.min.json': { stored: 'https://example.org/d/repo.json', exts: ['d.one', 'd.two', 'd.three'] },
+  // a store that lists nothing
+  'https://example.org/empty/index.min.json': { stored: 'https://example.org/empty/repo.json', exts: [] },
+  // an index whose store is a's under another address (an index that names another, as repo.json's index_v2 does)
+  'https://mirror.example/a/index.min.json': { stored: 'https://example.org/a/repo.json', exts: ['a.one', 'a.two'] },
 };
-/**
- * v2.3.2243's rule, from its log ("IllegalArgumentException: Provided legacy store url is not valid"): a
- * list-shaped index is read only at an address ending in /index.min.json. The repo.json it respells that to
- * after a restart is its own format and is read too.
- */
-const accepts = (u: string) => /\/index\.min\.json$/i.test(u) || /\/repo\.json$/i.test(u);
-const repoAt = (u: string) => (accepts(u) ? NET[u] ?? Object.values(NET).find((n) => n.stored === u) : undefined);
+const LIST_SHAPED = new Set(['https://example.org/c/index.json']);
+/** The engine's add, as measured: the store it makes of an address, or the error it answers. */
+function fetchStore(u: string): { stored: string; exts: string[] } | { error: string } {
+  if (LIST_SHAPED.has(u)) return { error: 'Provided legacy store url is not valid' };
+  const hit = NET[u] ?? Object.values(NET).find((n) => n.stored === u);
+  return hit ?? { error: 'HTTP error 404' };
+}
+const offeredBy = (stored: string) => Object.values(NET).find((n) => n.stored === stored)?.exts ?? [];
 /** An extension installed from a repository removed long ago: the engine keeps its row and its old address. */
 const ORPHAN = { pkgName: 'gone.one', repo: 'https://example.org/gone/repo.json' };
 
 type Row = { pkgName: string; repo: string; installed: boolean; obsolete: boolean };
 const eng = {
-  repos: [] as string[],
+  stores: [] as string[],
   catalogue: [] as Row[],
   /** Installed extensions, each with the address it was last offered under. */
   installed: new Map<string, string>(),
-  seen: new Set<string>(),
+  /** Every change made to the stores, in order: ['add', what was asked] or ['remove', the address given]. */
   writes: [] as string[][],
   failRead: false,
-  failWrite: '',
+  /** An engine with no stores at all (older than v2.3.2243): the add is refused by its schema. */
+  noStores: false,
 };
 function resetEngine() {
-  eng.repos = [];
+  eng.stores = [];
   eng.installed = new Map([[ORPHAN.pkgName, ORPHAN.repo]]);
-  eng.seen = new Set();
   eng.writes = [];
   eng.failRead = false;
-  eng.failWrite = '';
+  eng.noStores = false;
   refresh();
 }
 function refresh() {
   const offered: Row[] = [];
-  for (const u of eng.repos) {
-    const hit = repoAt(u);
-    if (!hit) continue; // unreachable, not a repository, or refused: logged, kept in the list, adds nothing
-    if (!eng.seen.has(hit.stored)) { eng.seen.add(hit.stored); continue; } // applied asynchronously: nothing yet
-    for (const p of hit.exts) {
+  for (const u of eng.stores) {
+    for (const p of offeredBy(u)) {
       if (offered.some((e) => e.pkgName === p)) continue;
-      if (eng.installed.has(p)) eng.installed.set(p, hit.stored);
-      offered.push({ pkgName: p, repo: hit.stored, installed: eng.installed.has(p), obsolete: false });
+      if (eng.installed.has(p)) eng.installed.set(p, u);
+      offered.push({ pkgName: p, repo: u, installed: eng.installed.has(p), obsolete: false });
     }
   }
   const orphans = [...eng.installed].filter(([p]) => !offered.some((e) => e.pkgName === p))
     .map(([pkgName, repo]) => ({ pkgName, repo, installed: true, obsolete: true }));
   eng.catalogue = [...offered, ...orphans];
-}
-/** The engine restarting: from now on it lists its own spelling of every address it can read. */
-function restart() {
-  eng.repos = [...new Set(eng.repos.map((u) => repoAt(u)?.stored ?? u))];
 }
 
 let engine: Server;
@@ -110,24 +111,40 @@ before(async () => {
     req.on('end', () => {
       const { query, variables } = JSON.parse(body || '{}') as { query: string; variables: Record<string, unknown> };
       const send = (status: number, j: unknown) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(j)); };
-      if (/setSettings/.test(query)) {
-        eng.writes.push([...(variables.r as string[])]);
-        if (eng.failWrite) return send(200, { errors: [{ message: eng.failWrite }] });
-        eng.repos = [...new Set(variables.r as string[])];
-        return send(200, { data: { setSettings: { settings: { extensionRepos: eng.repos } } } });
+      const fetcherError = (field: string, msg: string) => send(200, {
+        data: { [field]: null },
+        errors: [{ message: `Exception while fetching data (/${field}) : ${msg}\r\n\r\njava.lang.Exception: ${msg}\n\tat suwayomi.tachidesk.X(X.kt:1)`, path: [field] }],
+      });
+      if (/addExtensionStore/.test(query)) {
+        const u = String(variables.indexUrl);
+        eng.writes.push(['add', u]);
+        if (eng.noStores) {
+          return send(200, { errors: [{ message: "Validation error (FieldUndefined@[addExtensionStore]) : Field 'addExtensionStore' in type 'Mutation' is undefined", extensions: {} }] });
+        }
+        const got = fetchStore(u);
+        if ('error' in got) return fetcherError('addExtensionStore', got.error);
+        if (!eng.stores.includes(got.stored)) eng.stores.push(got.stored);
+        return send(200, { data: { addExtensionStore: { extensionStore: { indexUrl: got.stored, name: new URL(got.stored).host } } } });
+      }
+      if (/removeExtensionStore/.test(query)) {
+        const u = String(variables.indexUrl);
+        eng.writes.push(['remove', u]);
+        const held = eng.stores.includes(u);
+        eng.stores = eng.stores.filter((x) => x !== u);
+        return send(200, { data: { removeExtensionStore: { extensionStore: held ? { indexUrl: u } : null } } });
       }
       if (/fetchExtensions/.test(query)) {
         refresh();
         return send(200, { data: { fetchExtensions: { extensions: eng.catalogue.map((e) => ({ pkgName: e.pkgName })) } } });
       }
-      if (/settings\s*\{\s*extensionRepos/.test(query)) {
+      if (/extensionStores/.test(query)) {
         if (eng.failRead) return send(500, { errors: [{ message: 'down' }] });
-        return send(200, { data: { settings: { extensionRepos: eng.repos } } });
+        return send(200, { data: { extensionStores: { nodes: eng.stores.map((indexUrl) => ({ indexUrl, name: new URL(indexUrl).host })) } } });
       }
       if (/extensions\s*\{\s*nodes/.test(query)) {
         return send(200, { data: { extensions: { nodes: eng.catalogue.map((e) => ({
           pkgName: e.pkgName, name: e.pkgName, lang: 'en', versionName: '1.0', iconUrl: null,
-          isInstalled: e.installed, hasUpdate: false, isObsolete: e.obsolete, isNsfw: false, repo: e.repo,
+          isInstalled: e.installed, hasUpdate: false, isObsolete: e.obsolete, contentWarning: 'SAFE', storeIndexUrl: e.repo,
         })) } } });
       }
       return send(400, { errors: [{ message: `the fake engine does not know ${query}` }] });
@@ -177,7 +194,7 @@ test('adding an extension repository', { skip }, async (t) => {
   try {
     await t.test('an Add-to-Mihon link is unwrapped, and the count is what THIS repository brought', async () => {
       // Reintroduce by handing `b.data.url` to the engine instead of parseRepoInput's url: the engine is
-      // sent `mihon://add-repo?…`, yields nothing, and the 200 below becomes a 422.
+      // sent `mihon://add-repo?…`, cannot read it, and the 200 below becomes a 422.
       resetEngine();
       const r = await add(`mihon://add-repo?url=${encodeURIComponent(A)}`);
       assert.equal(r.statusCode, 200, r.body);
@@ -185,10 +202,11 @@ test('adding an extension repository', { skip }, async (t) => {
       assert.equal(j.url, A);
       assert.equal(j.added, 2, 'the two extensions of repository a');
       assert.equal(j.corrected, false);
-      assert.deepEqual(eng.repos, [A], 'the running engine lists the address as it was given');
+      assert.deepEqual(eng.stores, [A_STORED], 'the engine holds its own spelling of the address from the start');
+      assert.deepEqual(eng.writes, [['add', A]], 'one add, nothing taken back out');
       // Reintroduce by deleting the syncMonitorRepos call from the add: "the monitor's copy" fails, and the
       // repository is not among the ones the scheduled check restores after a wiped engine volume.
-      assert.deepEqual(await monitorCopy(), [A], 'the monitor\'s copy');
+      assert.deepEqual(await monitorCopy(), [A_STORED], 'the monitor\'s copy, as the engine spells it');
     });
 
     await t.test('a missing https:// is added', async () => {
@@ -196,34 +214,33 @@ test('adding an extension repository', { skip }, async (t) => {
       assert.equal(r.statusCode, 200, r.body);
       assert.equal(r.json().url, B);
       assert.equal(r.json().added, 1);
-      assert.deepEqual(await monitorCopy(), [A, B]);
+      assert.deepEqual(await monitorCopy(), [A_STORED, B_STORED]);
     });
 
-    await t.test('after the engine restarts and respells them, the scheduled check leaves them alone', async () => {
-      // Reintroduce by comparing `live.includes(u)` in runExtensionCheck again: the check writes
-      // [a/repo.json, b/repo.json, A, B] to the engine, reposRestored names A and B, and the admins are told the
-      // engine "had lost 2 repository setting(s)" -- after every restart, which on the desktop app is every launch.
-      restart();
-      assert.deepEqual(eng.repos, [A_STORED, B_STORED], 'the restarted engine lists its own spelling');
+    await t.test('the scheduled check leaves the engine\'s spelling alone, and puts a wiped list back once each', async () => {
+      // Reintroduce by comparing `live.includes(u)` in runExtensionCheck again: with our copy holding what was typed,
+      // the check adds A and B back as duplicates, reposRestored names them, and the admins are told the engine "had
+      // lost 2 repository setting(s)" -- after every restart, which on the desktop app is every launch.
+      await q(`UPDATE server_settings SET extension_repos = $1::jsonb WHERE id = 1`, [JSON.stringify([A, B])]);
       eng.writes = [];
       const r = await check();
       assert.equal(r.statusCode, 200, r.body);
       assert.deepEqual(r.json().reposRestored, [], 'a respelled repository was reported as lost');
       assert.deepEqual(eng.writes, [], 'the check wrote a repository back');
-      assert.deepEqual(eng.repos, [A_STORED, B_STORED], 'a duplicate was added');
+      assert.deepEqual(eng.stores, [A_STORED, B_STORED], 'a duplicate was added');
       assert.equal(await restoredAudits(), 0);
-      // A wiped list is still put back from our copy, once each.
-      eng.repos = [];
+      // A wiped engine is put back from our copy, once each, as the engine spells them.
+      eng.stores = [];
       const w = await check();
       assert.deepEqual(w.json().reposRestored, [A, B]);
-      assert.deepEqual(eng.repos, [A, B]);
+      assert.deepEqual(eng.stores, [A_STORED, B_STORED]);
       assert.equal(await restoredAudits(), 1);
-      restart();
+      await q(`UPDATE server_settings SET extension_repos = $1::jsonb WHERE id = 1`, [JSON.stringify([A_STORED, B_STORED])]);
     });
 
     await t.test('the same repository again is a 409, however it is spelled, and nothing is written', async () => {
-      // Reintroduce by comparing `current.includes(wanted)` again: the restarted engine holds a/repo.json, so
-      // the pasted index.min.json is "new", gets written, yields nothing new, and this answers 422 not 409.
+      // Reintroduce by comparing `current.includes(wanted)` again: the engine holds a/repo.json, so the pasted
+      // index.min.json is "new", gets added, yields nothing new, and this answers 422 not 409.
       eng.writes = [];
       for (const again of [A, 'HTTPS://EXAMPLE.ORG/a/', 'https://example.org/a']) {
         const r = await add(again);
@@ -234,9 +251,21 @@ test('adding an extension repository', { skip }, async (t) => {
       assert.deepEqual(eng.writes, [], 'a duplicate reached the engine');
     });
 
+    await t.test('an address that turns out to be a store already added is a 409, and that store stays', async () => {
+      // The engine can only tell once it has read the index: this one names a's store under another address. Taking
+      // "it" back out for adding nothing new would remove a. Reintroduce by dropping the `held` check in the route's
+      // attempt(): the answer is a 422 and a/repo.json is removed.
+      eng.writes = [];
+      const r = await add('https://mirror.example/a/index.min.json');
+      assert.equal(r.statusCode, 409, r.body);
+      assert.equal(r.json().url, A_STORED);
+      assert.ok(eng.stores.includes(A_STORED), 'the store it already had was removed');
+      assert.deepEqual(eng.writes, [['add', 'https://mirror.example/a/index.min.json']], 'nothing was taken back out');
+    });
+
     await t.test('a GitHub page and a non-address are refused with advice before the engine hears of them', async () => {
-      // Reintroduce by removing the parseRepoInput refusal in the route: the page is written to the engine
-      // (eng.writes is not empty) and the answer is a 422 after seconds of retries instead of a 400 now.
+      // Reintroduce by removing the parseRepoInput refusal in the route: the page is sent to the engine
+      // (eng.writes is not empty) and the answer is a 422 instead of a 400 now.
       eng.writes = [];
       const page = await add('https://github.com/owner/name');
       assert.equal(page.statusCode, 400);
@@ -251,42 +280,52 @@ test('adding an extension repository', { skip }, async (t) => {
       assert.deepEqual(eng.writes, [], 'a refused paste reached the engine');
     });
 
-    await t.test('a broken SECOND repository is a 422 and is taken back out -- never "Added — N extensions"', async () => {
-      // Reintroduce by answering `total` (the catalogue's size) as the success count, or by keeping the URL
-      // when nothing arrived (drop the `setRepos(current)` in the empty branch): the status is 200, or the
-      // engine's list still holds the broken address, and this fails. The catalogue also carries ORPHAN, an
-      // installed extension whose repository is gone, listed obsolete as the real engine lists it; dropping
-      // the `e.obsolete` skip from contributedBy's count credits it to this address and makes the status 200.
+    await t.test('a broken SECOND repository is a 422 that says why in the engine\'s words -- never "Added — N extensions"', async () => {
+      // Reintroduce by answering `total` (the catalogue's size) as the success count: the status is 200. Reintroduce
+      // engineReason's prefix strip alone: "a refused add says why in the engine's words" -- the reason is a Java stack
+      // trace. The catalogue also carries ORPHAN, an installed extension whose repository is gone, listed obsolete as
+      // the real engine lists it.
       assert.ok(eng.catalogue.some((e) => e.pkgName === ORPHAN.pkgName && e.obsolete), 'the orphan is in the catalogue, obsolete');
-      const beforeRepos = [...eng.repos];
+      const before = [...eng.stores];
       eng.writes = [];
       const r = await add('https://example.org/broken/index.min.json');
       assert.equal(r.statusCode, 422, r.body);
       const j = r.json();
       assert.equal(j.error, 'empty');
       assert.equal(j.removed, true);
-      assert.match(j.message, /not kept/);
-      assert.deepEqual(eng.repos, beforeRepos, 'the broken address was left in the engine');
-      // It tried what was typed and nothing else -- an index.min.json has no alternative the engine could read
-      // (see altRepoUrl) -- then put the list back.
-      assert.deepEqual(eng.writes, [[...beforeRepos, 'https://example.org/broken/index.min.json'], beforeRepos]);
+      assert.equal(j.reason, 'HTTP error 404', "a refused add says why in the engine's words");
+      assert.match(j.message, /not kept\. .* The engine said: HTTP error 404$/);
+      assert.deepEqual(eng.stores, before, 'the broken address was left in the engine');
+      // It tried what was typed and nothing else -- an index.min.json has no alternative (see altRepoUrl).
+      assert.deepEqual(eng.writes, [['add', 'https://example.org/broken/index.min.json']]);
       const audit = await q<{ detail: any }>(`SELECT detail FROM audit_log WHERE event = 'extension.repo_add_refused' ORDER BY at DESC LIMIT 1`);
       assert.equal(audit[0]?.detail?.url, 'https://example.org/broken/index.min.json');
-      assert.deepEqual(await monitorCopy(), [A, B], 'the monitor copied a refused address');
+      assert.deepEqual(await monitorCopy(), [A_STORED, B_STORED], 'the monitor copied a refused address');
     });
 
-    await t.test('a pasted index.json is tried as the index.min.json beside it, the one index the engine reads', async () => {
-      // Reintroduce by altRepoUrl mapping index.min.json → index.json (and index.json to nothing) again: the
-      // engine refuses the pasted index.json in its log, there is no alternative to try, and this is a 422.
+    await t.test('a store that lists nothing new is taken back out, by the address the engine answered', async () => {
+      // Reintroduce by removing by what was typed (`removeRepo(url)`): the engine matches exactly, holds empty/repo.json
+      // and not empty/index.min.json, removes nothing, and the empty store stays.
+      const before = [...eng.stores];
+      eng.writes = [];
+      const r = await add('https://example.org/empty/index.min.json');
+      assert.equal(r.statusCode, 422, r.body);
+      assert.equal(r.json().removed, true);
+      assert.deepEqual(eng.stores, before, 'the empty store was left in the engine');
+      assert.deepEqual(eng.writes, [['add', 'https://example.org/empty/index.min.json'], ['remove', 'https://example.org/empty/repo.json']]);
+    });
+
+    await t.test('an address the engine cannot read is tried the other way: a pasted index.json as its index.min.json', async () => {
+      // The engine refuses a list-shaped index anywhere but at …/index.min.json, as the add's own error. Reintroduce by
+      // letting that refusal throw out of attempt(): the answer is a 502 and the index.min.json is never tried.
       eng.writes = [];
       const r = await add('https://example.org/c/index.json');
       assert.equal(r.statusCode, 200, r.body);
       assert.equal(r.json().url, 'https://example.org/c/index.min.json');
       assert.equal(r.json().corrected, true);
       assert.equal(r.json().added, 1);
-      assert.deepEqual(eng.writes.map((w) => w[w.length - 1]), ['https://example.org/c/index.json', 'https://example.org/c/index.min.json']);
-      assert.ok(eng.repos.includes('https://example.org/c/index.min.json'));
-      assert.ok(!eng.repos.includes('https://example.org/c/index.json'), 'the address that failed is not left behind');
+      assert.deepEqual(eng.writes, [['add', 'https://example.org/c/index.json'], ['add', 'https://example.org/c/index.min.json']]);
+      assert.ok(eng.stores.includes('https://example.org/c/repo.json'));
     });
 
     await t.test('a bare folder gets the index.min.json inside it', async () => {
@@ -296,28 +335,29 @@ test('adding an extension repository', { skip }, async (t) => {
       assert.equal(r.json().added, 3);
     });
 
-    await t.test('the engine refusing the write is a 502 with its reason, and the list is put back', async () => {
-      // Reintroduce by taking `attempt()` out of the try: the engine's refusal escapes as a 500 `internal`
-      // and the reason is lost.
-      const beforeRepos = [...eng.repos];
-      eng.failWrite = 'Validation errors: Invalid store URL format';
+    await t.test('an engine with no stores refuses the add itself: a 502 with its reason, and nothing changed', async () => {
+      // An engine older than v2.3.2243 has no addExtensionStore; its refusal is the query's, not the address's
+      // (client.ts EngineRefusedError). Reintroduce by counting every `suwayomi: ` error as the address's: the answer is
+      // a 422 "that address gave no extensions" for an engine that cannot add any address at all.
+      const before = [...eng.stores];
+      eng.noStores = true;
       const r = await add('https://example.org/e/index.min.json');
-      eng.failWrite = '';
+      eng.noStores = false;
       assert.equal(r.statusCode, 502, r.body);
       assert.equal(r.json().error, 'engine_refused');
-      assert.equal(r.json().reason, 'Validation errors: Invalid store URL format');
-      assert.match(r.json().message, /refused that address: Validation errors/);
-      assert.deepEqual(eng.repos, beforeRepos);
+      assert.match(r.json().reason, /^Validation error \(FieldUndefined@\[addExtensionStore\]\)/);
+      assert.match(r.json().message, /refused that address: Validation error/);
+      assert.deepEqual(eng.stores, before);
     });
 
     await t.test('an engine that cannot be read is a 502, and NOTHING is written', async () => {
-      // Reintroduce by `getRepos().catch(() => [])` in the add: the failed read becomes "no repositories",
-      // the write that follows replaces all four with the one pasted, and eng.writes is not empty.
+      // Reintroduce by `getRepos().catch(() => [])` in the add: the failed read becomes "no repositories", and the
+      // add goes ahead as if nothing were there.
       eng.writes = [];
       eng.failRead = true;
       const r = await add('https://example.org/f/index.min.json');
       eng.failRead = false;
-      assert.deepEqual(eng.writes, [], 'a list built from a failed read was written');
+      assert.deepEqual(eng.writes, [], 'an add went ahead on a failed read');
       assert.equal(r.statusCode, 502, r.body);
       assert.equal(r.json().error, 'unreachable');
     });
@@ -326,19 +366,19 @@ test('adding an extension repository', { skip }, async (t) => {
       // Both of a's extensions are installed: the next subtest adds it back.
       eng.installed.set('a.one', A_STORED);
       eng.installed.set('a.two', A_STORED);
-      const others = eng.repos.filter((u) => u !== A_STORED);
-      // Removed by the engine's spelling while our copy holds the typed one: syncMonitorRepos drops by key.
-      const r = await del(A_STORED);
+      const others = eng.stores.filter((u) => u !== A_STORED);
+      // Removed by what was typed while the engine holds its own spelling: by key, every spelling of it goes.
+      const r = await del(A);
       assert.equal(r.statusCode, 200, r.body);
       assert.equal(r.json().removed, 1);
-      assert.deepEqual(eng.repos, others);
+      assert.deepEqual(eng.stores, others);
       // Reintroduce by deleting the syncMonitorRepos call from the DELETE route: the monitor's copy still
-      // holds A, and the scheduled check below restores it into the engine.
-      assert.ok(!(await monitorCopy()).includes(A), 'the removed repository would be restored');
-      assert.ok((await monitorCopy()).includes(B), 'the others stay protected');
+      // holds a, and the scheduled check below restores it into the engine.
+      assert.ok(!(await monitorCopy()).includes(A_STORED), 'the removed repository would be restored');
+      assert.ok((await monitorCopy()).includes(B_STORED), 'the others stay protected');
       const c = await check();
       assert.deepEqual(c.json().reposRestored, []);
-      assert.deepEqual(eng.repos, others);
+      assert.deepEqual(eng.stores, others);
     });
 
     await t.test('a repository added back is kept, even when every extension it offers is installed', async () => {
@@ -349,21 +389,21 @@ test('adding an extension repository', { skip }, async (t) => {
       const r = await add(A);
       assert.equal(r.statusCode, 200, r.body);
       assert.equal(r.json().added, 2);
-      assert.ok(eng.repos.includes(A));
+      assert.ok(eng.stores.includes(A_STORED));
       assert.ok(['a.one', 'a.two'].every((p) => eng.catalogue.find((e) => e.pkgName === p)?.obsolete === false), 'they get updates again');
-      assert.ok((await monitorCopy()).includes(A));
+      assert.ok((await monitorCopy()).includes(A_STORED));
     });
 
     await t.test('a remove against an engine that cannot be read writes nothing', async () => {
-      // Reintroduce by `getRepos().catch(() => [])` in the DELETE: the filtered empty list is written and
-      // every repository goes, not one.
+      // Reintroduce by `getRepos().catch(() => [])` in the DELETE: nothing matches an empty list, the answer is a 200
+      // with removed 0, and the admin is told it went.
       eng.writes = [];
       eng.failRead = true;
       const r = await del(B_STORED);
       eng.failRead = false;
-      assert.deepEqual(eng.writes, [], 'a remove wrote a list built from a failed read');
+      assert.deepEqual(eng.writes, [], 'a remove went ahead on a failed read');
       assert.equal(r.statusCode, 502, r.body);
-      assert.ok(eng.repos.includes(B_STORED));
+      assert.ok(eng.stores.includes(B_STORED));
     });
   } finally {
     await app.close();

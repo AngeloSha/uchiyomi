@@ -72,3 +72,79 @@ test("the engine answering with the extension's error keeps its own shape", asyn
   }
   assert.equal((await gql<any>(ABOUT)).aboutServer.name, 'Suwayomi-Server');
 });
+
+// ---- the engine refusing the query (the engine upgrade) ----------------------------------------------------------
+
+test('a refusal is an EngineRefusedError, recorded by its operation until that operation answers again', async () => {
+  // An engine without a member Uchiyomi asks for (an older or newer one) answers 200 with no data and graphql-java's
+  // "Validation error (". Reintroduce by throwing a plain Error for it in gql(): the instanceof assertion fails, and
+  // register.ts and Health read the incompatible engine as one that is down.
+  const { gql, EngineRefusedError, engineRefusals, forgetEngineRefusals } = await client();
+  const { listRemoteSources } = await import('../src/lib/sources/suwayomi/sources');
+  forgetEngineRefusals();
+  fake.reset();
+  fake.withoutMembers(['SourceType.contentWarning']);
+  try {
+    let err: any;
+    await listRemoteSources().catch((e) => { err = e; });
+    assert.ok(err instanceof EngineRefusedError, `not an EngineRefusedError: ${err}`);
+    assert.equal(err.op, 'sources');
+    assert.match(err.message, /^suwayomi: Validation error \(FieldUndefined@\[sources\/nodes\/contentWarning\]\) : Field 'contentWarning' in type 'SourceType' is undefined$/,
+      'the engine\'s own words, after our prefix');
+    assert.deepEqual(engineRefusals().map((r) => [r.op, r.message.slice(0, 32)]), [['sources', 'Validation error (FieldUndefined']]);
+    // A query no registry holds (a test's own) is refused the same way and never recorded.
+    await assert.rejects(gql('{ aboutServer { codename } }'), (e) => e instanceof EngineRefusedError && e.op === undefined);
+    assert.equal(engineRefusals().length, 1);
+  } finally {
+    fake.withoutMembers([]);
+  }
+  // The engine takes it again (updated, or put back): the record goes. Reintroduce by never deleting it: Health would
+  // say "Not compatible" about an engine that answers everything.
+  assert.ok((await listRemoteSources()).length > 0);
+  assert.deepEqual(engineRefusals(), []);
+});
+
+test('an engine without the Cloudflare setting is unsupported, in its own words, and not an incompatible engine', async () => {
+  // graphql-java words it "Validation error (FieldUndefined@[settings/flareSolverrEnabled])"; the matcher used to
+  // know only graphql-js's "Cannot query field", so the answer was thrown and the row said "could not be read just
+  // now" for good. Reintroduce /Cannot query field/ alone in engineSolver.ts: getEngineSolver rejects. The read is
+  // optional (operations.ts): reintroduce recording optional operations in gql() and engineRefusals() lists it.
+  const { engineRefusals, forgetEngineRefusals } = await client();
+  const { getEngineSolver } = await import('../src/lib/sources/suwayomi/engineSolver');
+  forgetEngineRefusals();
+  fake.reset();
+  fake.withoutMembers(['SettingsType.flareSolverrEnabled']);
+  try {
+    assert.deepEqual(await getEngineSolver(), { supported: false });
+    assert.deepEqual(engineRefusals(), [], 'an engine without the setting was recorded as incompatible');
+  } finally {
+    fake.withoutMembers([]);
+  }
+  assert.equal((await getEngineSolver()).supported, true);
+});
+
+test("an extension's error is never a refusal, even when it quotes the engine's words", async () => {
+  // Two shapes: a failed fetcher (`data` with the field null, "Exception while fetching data …"), and
+  // fetchMangaAndChapters' stored rows with the bare message beside them -- which here OPENS with "Validation error (".
+  // Only the missing `data` key tells them apart. Reintroduce by dropping the `data` check in client.ts refused(): the
+  // chapters' error is an EngineRefusedError and an extension failing would read as an incompatible engine.
+  const { gql, EngineRefusedError, engineRefusals, forgetEngineRefusals } = await client();
+  const { OPS } = await import('../src/lib/sources/suwayomi/operations');
+  forgetEngineRefusals();
+  fake.reset();
+  const words = "Validation error (FieldUndefined@[x]) : Field 'x' in type 'Y' is undefined";
+  fake.setMode({ mode: 'extension_error', source: SOURCE_IDS.mangaBall, message: words });
+  try {
+    let search: any;
+    await gql(SEARCH, { source: SOURCE_IDS.mangaBall, query: 'ball' }).catch((e) => { search = e; });
+    assert.ok(search && !(search instanceof EngineRefusedError));
+    assert.ok(search.message.startsWith('suwayomi: Exception while fetching data (/fetchSourceManga) : Validation error ('));
+    let chapters: any;
+    await gql(OPS.fetchChapters.doc, { id: fake.manga('Ball Runner').id }).catch((e) => { chapters = e; });
+    assert.ok(chapters && !(chapters instanceof EngineRefusedError), `the extension's words were read as a refusal: ${chapters}`);
+    assert.equal(chapters.message, `suwayomi: ${words}`);
+    assert.deepEqual(engineRefusals(), []);
+  } finally {
+    fake.setMode('up');
+  }
+});

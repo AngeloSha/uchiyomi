@@ -36,7 +36,7 @@ import { reloadAll as liveReloadAll } from './sources/reload';
 import { runtime } from './runtime';
 import { gql as defaultGql, type Gql } from './sources/suwayomi/client';
 import {
-  listExtensions, refreshExtensions, setExtensionState, getRepos, setRepos, repoKey,
+  listExtensions, refreshExtensions, setExtensionState, getRepos, addRepo, repoKey,
   type ExtensionInfo,
 } from './sources/suwayomi/extensions';
 
@@ -274,11 +274,11 @@ export async function runExtensionCheck(
       settings.repos = live;
     } else if (settings.repos.length) {
       wiped = live.length === 0;
-      // By repoKey, never by the exact string. ⚠️ Suwayomi v2.3.2243 reports the address it was given until it
-      // restarts and then its own spelling of it (the repo.json beside a pasted index.min.json), while our copy
-      // keeps what was typed. An exact compare called every repository added that way "lost" after each
-      // engine restart -- on the desktop app, every launch -- wrote it back as a duplicate and told the admins
-      // it had been restored. One entry per key, too, so two spellings in our copy are never both written.
+      // By repoKey, never by the exact string. ⚠️ The engine lists its own spelling of an address (the repo.json
+      // beside a pasted index.min.json), while our copy keeps what was typed. An exact compare called every
+      // repository added that way "lost" after each engine restart -- on the desktop app, every launch -- wrote it
+      // back as a duplicate and told the admins it had been restored. One entry per key, too, so two spellings in our
+      // copy are never both written.
       const liveKeys = new Set(live.map(repoKey));
       const missing = settings.repos.filter((u) => {
         const k = repoKey(u);
@@ -286,10 +286,17 @@ export async function runExtensionCheck(
         liveKeys.add(k);
         return true;
       });
-      if (missing.length) {
-        await setRepos([...live, ...missing], deps.gql).catch(() => {});
-        result.reposRestored = missing;
-        await deps.logAudit('extension.repo_restored', { detail: { urls: missing } });
+      // One store at a time, since the engine upgrade (extensions.ts addRepo): the engine reads each address as it is
+      // added, so one it cannot read now is not restored and stays in our copy for the next check -- and only what
+      // went back in is reported. Reintroduce by reporting every missing one: "an address the engine cannot read now
+      // is not reported as put back" in extensionMonitor.test.ts finds it in reposRestored.
+      const restored: string[] = [];
+      for (const u of missing) {
+        if (await addRepo(u, deps.gql).then(() => true, () => false)) restored.push(u);
+      }
+      if (restored.length) {
+        result.reposRestored = restored;
+        await deps.logAudit('extension.repo_restored', { detail: { urls: restored } });
       }
     }
   }

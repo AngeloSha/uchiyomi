@@ -7,10 +7,16 @@
 //
 // `extensionEngine` decides from facts it is handed and is unit-tested that way; `extensionEngineCheck` gathers
 // them, through the memoised probe in extensionEngine.ts so the page never waits more than a few seconds.
+//
+// Since the engine upgrade it also says how the engine's version stands against the one this Uchiyomi was tested with
+// (sources/suwayomi/enginePin.ts), and when the engine refuses Uchiyomi's queries it says "Not compatible" -- quoting
+// the engine -- where it used to say "Not answering" and send the admin to restart a container that was fine.
 import type { HealthCheck, HealthItem } from './health';
 import { isDesktop } from './desktop';
+import { installPlatform, type InstallPlatform } from './platform';
 import { cloudflareEvidence, engineProbe, linkedSeriesCount, type CloudflareEvidence } from './extensionEngine';
-import { suwayomiConfigured } from './sources/suwayomi/client';
+import { suwayomiConfigured, type EngineRefusal } from './sources/suwayomi/client';
+import { engineStanding, OLDEST_ENGINE, TESTED_ENGINE, type EngineStanding } from './sources/suwayomi/enginePin';
 import { engineOffReason, type EngineState } from './sources/suwayomi/engineState';
 import { ourSolverUrl, solverWiring, type EngineSolver } from './sources/suwayomi/engineSolver';
 import { lastSuwayomiLoad, suwayomiRetryState } from './sources/suwayomi/register';
@@ -18,6 +24,7 @@ import { solverPingShared } from './sources/flaresolverr';
 import { detailOf, joined, noteOf, say, saidOf, summaryOf, type Part } from './said';
 
 export interface EngineCheckDeps {
+  /** `incompatible`: it answers, and refused something Uchiyomi asked (`refused` says what). */
   state: EngineState;
   /** Series added through an extension. */
   linked: number;
@@ -38,6 +45,13 @@ export interface EngineCheckDeps {
    * solverPingShared). Asked only while the engine's helper points at it; null or absent when not asked.
    */
   solverAnswering?: boolean | null;
+  /** What the engine refused, by operation, in its own words (client.ts engineRefusals). */
+  refused?: EngineRefusal[];
+  /** Where it runs, for the steps that change its version (platform.ts). Absent: the steps for "somewhere else". */
+  platform?: InstallPlatform;
+  /** The versions it is compared with; enginePin.ts's unless a test says otherwise. */
+  tested?: string;
+  oldest?: string;
 }
 
 const TITLE = 'Extension engine';
@@ -46,6 +60,100 @@ const ID = 'extension-engine';
 const named = (ev: CloudflareEvidence[]) => ({ names: ev.slice(0, 5).map((e) => e.name), more: Math.max(0, ev.length - 5), n: ev.length });
 /** A row's title the server words ("Cloudflare helper"), with its code. */
 const titled = (p: Part) => ({ title: p.text, titleSaid: saidOf(p) });
+
+/** The engine's image at a version: what each platform's step names, never translated (it is a parameter). */
+export const engineImage = (version: string) => `ghcr.io/suwayomi/suwayomi-server:${version}`;
+/** The engine's service in every shipped compose file, and its container on Unraid and CasaOS. */
+const SERVICE = 'uchiyomi-suwayomi';
+/** Where the Unraid template and the CasaOS add-on keep the engine's data (templates/, deploy/casaos/). */
+const DATA_PATH: Partial<Record<InstallPlatform, string>> = {
+  unraid: '/mnt/user/appdata/uchiyomi-suwayomi',
+  casaos: '/DATA/AppData/uchiyomi-suwayomi',
+};
+
+/**
+ * How to run `version` of the engine on this platform, as one sentence. The image, the service, the path and the
+ * command are parameters: a translator can reword the sentence and never break what someone copies out of it.
+ */
+function stepTo(version: string, platform: InstallPlatform | undefined): Part {
+  const image = engineImage(version);
+  switch (platform) {
+    case 'compose': return say('engine.stepCompose', { image, file: 'docker-compose.yml', command: `docker compose up -d ${SERVICE}` });
+    case 'unraid': return say('engine.stepUnraid', { image, service: SERVICE, path: DATA_PATH.unraid! });
+    case 'casaos': return say('engine.stepCasaos', { image, service: SERVICE, path: DATA_PATH.casaos! });
+    case 'desktop': return say('engine.stepDesktop');
+    default: return say('engine.stepOther', { image });
+  }
+}
+
+/**
+ * The version row, shown only when the engine's version is not the one this Uchiyomi was tested with: older but
+ * supported (a greyed line, with how to update), older than the oldest supported (a finding: update it), or newer (a
+ * greyed line). ⚠️ Never a downgrade without a backup: an engine migrates its own database forward when it starts, and an
+ * older one cannot read what a newer one wrote -- so for a newer engine the row says that going back needs a backup of
+ * its data from before, and nothing more.
+ */
+function versionItem(d: EngineCheckDeps, standing: EngineStanding): HealthItem | null {
+  const version = d.version || null;
+  const tested = d.tested ?? TESTED_ENGINE;
+  const oldest = d.oldest ?? OLDEST_ENGINE;
+  if (!version || standing === 'same' || standing === 'unknown') return null;
+  const title = titled(say('engine.versionTitle'));
+  if (standing === 'newer') {
+    return {
+      ...title, info: true,
+      ...detailOf([say('engine.versionNewer', { version, tested }), joined('sentence', say('engine.goBackWithBackup', { tested }))]),
+    };
+  }
+  if (standing === 'older') {
+    return {
+      ...title, info: true,
+      ...detailOf([say('engine.versionOlder', { version, tested }), joined('sentence', stepTo(tested, d.platform))]),
+    };
+  }
+  return { ...title, ...detailOf([say('engine.versionTooOld', { version, oldest }), joined('sentence', stepTo(tested, d.platform))]) };
+}
+
+/**
+ * The engine answers and refuses what Uchiyomi asks (#72's "unreachable" was this, too, until the engine upgrade). One
+ * finding quotes it and says what to do, by how its version stands: older, update the engine; newer, update Uchiyomi
+ * (or go back, with a backup); unknown or the same, run the tested version -- with a backup first, since nobody can tell
+ * which way that goes.
+ */
+function incompatible(d: EngineCheckDeps, standing: EngineStanding): HealthCheck {
+  const version = d.version || null;
+  const tested = d.tested ?? TESTED_ENGINE;
+  const words = d.refused?.[0]?.message || (d.error ?? '').replace(/^suwayomi: /, '') || null;
+  const older = standing === 'older' || standing === 'tooOld';
+  const advice = older ? say('engine.updateEngine', { tested })
+    : standing === 'newer' ? say('engine.updateUchiyomi', { tested })
+      : say('engine.matchEngine', { tested });
+  const extra = versionItem(d, standing);
+  return {
+    id: ID, title: TITLE, status: 'warn',
+    ...summaryOf([say('engine.incompatible', { version })]),
+    ...noteOf([say('engine.incompatibleNote')]),
+    items: [
+      {
+        ...titled(say('engine.incompatibleTitle')),
+        ...detailOf([
+          words ? say('engine.refused', { error: words.slice(0, 300) }) : null,
+          joined('sentence', advice),
+          !older && d.platform !== 'desktop' && joined('sentence', say('engine.backupFirst')),
+          joined('sentence', stepTo(tested, d.platform)),
+        ]),
+      },
+      // The version row says the same versions again; only a newer engine's adds anything (go back only with a backup).
+      ...(extra && standing === 'newer' ? [extra] : []),
+    ],
+  };
+}
+
+/** A check as it was, with the version row added; a version row that is a finding makes the check one. */
+function withVersion(c: HealthCheck, item: HealthItem | null): HealthCheck {
+  if (!item) return c;
+  return { ...c, status: item.info || c.status !== 'ok' ? c.status : 'warn', items: [...c.items, item] };
+}
 
 /**
  * The check, or null when there is nothing to say: no engine and nothing that depends on one (the Docker install
@@ -68,7 +176,8 @@ export function extensionEngine(d: EngineCheckDeps): HealthCheck | null {
       items: [{ ...titled(say('engine.fromExtensions')), ...detailOf([waiting]), info: true }],
     };
   }
-  if (d.desktop && d.state !== 'up' && !d.linked) return null;
+  // A desktop whose engine was never downloaded; one that answers and refuses is worth its row, linked series or not.
+  if (d.desktop && d.state === 'unreachable' && !d.linked) return null;
 
   if (d.state === 'unreachable') {
     const tries = d.retry?.attempts ?? 0;
@@ -87,7 +196,17 @@ export function extensionEngine(d: EngineCheckDeps): HealthCheck | null {
     };
   }
 
-  // Up.
+  const standing = engineStanding(d.version, d.tested ?? TESTED_ENGINE, d.oldest ?? OLDEST_ENGINE);
+  // Before "Up": an engine that refuses Uchiyomi's queries answers, so it is not "Not answering" -- and not ready.
+  // Reintroduce by dropping this branch: "a refusal is Not compatible, never Not answering" in engineHealth.test.ts
+  // reads "Ready".
+  if (d.state === 'incompatible') return incompatible(d, standing);
+  return withVersion(up(d), versionItem(d, standing));
+}
+
+/** The engine answers and takes what it is asked: its Cloudflare helper is what is left to say. */
+function up(d: EngineCheckDeps): HealthCheck {
+  const base = { id: ID, title: TITLE };
   const version = d.version || null;
   const registering = d.registering ? joined('sentence', say('engine.registering')) : null;
   // The engine's own words, on a source that is failing now (#115's evidence): "Cloudflare bypass currently
@@ -199,6 +318,8 @@ export async function extensionEngineCheck(): Promise<HealthCheck | null> {
   }
   const [probe, cloudflare] = await Promise.all([engineProbe(), cloudflareEvidence()]);
   const ours = ourSolverUrl();
+  // What it refused, as of now: the probe's own aboutServer refusal is recorded too (client.ts).
+  const refused = probe.reachable ? probe.refused : [];
   // The solver row's own ping (shared for a few seconds), and only when the engine's helper is Uchiyomi's solver: an
   // engine that is down, or points elsewhere, has nothing to learn from it. The MAIN solver's answer (v0.55.3): Connect
   // points the engine at FLARESOLVERR_URL alone, so a backup solving for Uchiyomi does nothing for the engine.
@@ -207,7 +328,7 @@ export async function extensionEngineCheck(): Promise<HealthCheck | null> {
   const viaOurs = probe.reachable && !!probe.solver && solverWiring(probe.solver, ours, desktop) === 'ok';
   const solverAnswering = viaOurs ? (await solverPingShared()).main.ok : null;
   return extensionEngine({
-    state: probe.reachable ? 'up' : 'unreachable',
+    state: !probe.reachable ? 'unreachable' : refused.length ? 'incompatible' : 'up',
     linked, desktop,
     ourSolver: ours,
     version: probe.version,
@@ -215,7 +336,9 @@ export async function extensionEngineCheck(): Promise<HealthCheck | null> {
     solver: probe.solver,
     retry: suwayomiRetryState(),
     cloudflare,
-    registering: probe.reachable && !lastSuwayomiLoad()?.reachable,
+    registering: probe.reachable && !refused.length && !lastSuwayomiLoad()?.reachable,
     solverAnswering,
+    refused,
+    platform: installPlatform(),
   });
 }

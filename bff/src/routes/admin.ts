@@ -42,11 +42,12 @@ import { runExtensionMonitor, runExtensionCheck, extState, liveStore as extensio
 import { readSites, writeSites } from '../lib/sources/customSites';
 import { reloadAll, listSources, getSource, sniffSite, listRemoteSources, suwayomiConfigured, suwayomiAbout, swAdapterId, isSwAdapterId, withTimeout } from '../lib/sources';
 import {
-  listExtensions, refreshExtensions, setExtensionState, sourcesOfExtension, getRepos, setRepos, altRepoUrl,
+  listExtensions, refreshExtensions, setExtensionState, sourcesOfExtension, getRepos, addRepo, removeRepo, altRepoUrl,
   parseRepoInput, repoKey, contributedBy, engineReason, REPO_MESSAGES, type ExtensionInfo,
 } from '../lib/sources/suwayomi/extensions';
 import { getHiddenLangs, setSourcesEnabled, adoptExtensionSources, langOverview, turnOnExtensionSources } from '../lib/sources/suwayomi/langs';
 import { lastSuwayomiLoad, limitLeftSomethingOut, rememberMissing } from '../lib/sources/suwayomi/register';
+import { EngineRefusedError } from '../lib/sources/suwayomi/client';
 import { engineStatusReport, connectEngineSolver } from '../lib/extensionEngine';
 import { env } from '../env';
 import { oidcEnabled, oidcName } from '../lib/oidc';
@@ -3584,6 +3585,12 @@ export default async function adminRoutes(app: FastifyInstance) {
    * find Remove; a broken second repository toasted "Added — 1396 extensions" (the first one's count); an
    * engine refusal was a 500 the panel showed as "Could not add that repository"; and a failed read of the
    * current list was taken as "no repositories" and the write that followed dropped all the others.
+   *
+   * Since the engine upgrade it adds one extension STORE (extensions.ts addRepo) instead of writing the whole list
+   * through the deprecated setting: the engine reads the address there and then and answers the store or why it
+   * could not (measured on v2.3.2243 and v2.4.2366). An address it cannot read counts as nothing found there, with its
+   * reason, and the alternative is still tried; a store that yields nothing is removed again by the address the engine
+   * answered. The answers -- 400, 409, 422, 502 and their bodies -- are what they were.
    */
   app.post('/api/admin/extensions/repos', async (req, reply) => {
     if (needExt(reply)) return;
@@ -3593,57 +3600,84 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (!parsed.ok) return reply.code(400).send({ error: parsed.error, message: parsed.message });
     const wanted = parsed.url;
 
-    // ⚠️ Never build the new list from a failed read: `[]` here and the write below would drop every other
-    // repository the engine has.
+    // ⚠️ Never judge an add against a failed read: `[]` here and a store the engine already holds would look new, and
+    // taking it back out for yielding nothing new would remove it.
     let current: string[];
     try {
       current = await getRepos();
     } catch (e) {
       return reply.code(502).send({ error: 'unreachable', message: `Could not reach the extension engine: ${engineReason(e)}`, reason: engineReason(e) });
     }
-    const dupe = current.find((u) => repoKey(u) === repoKey(wanted));
+    const exists = (u: string) => current.find((c) => c === u || repoKey(c) === repoKey(u));
+    const dupe = exists(wanted);
     if (dupe) return reply.code(409).send({ error: 'exists', message: 'That repository is already added.', url: dupe });
 
     const before = await listExtensions().catch((): ExtensionInfo[] => []);
     let reason: string | undefined;
     let total = before.length;
+    /** Whether every store this request took back out went. */
+    let removed = true;
+    /** The store this request added and kept, by the engine's own spelling of its address. */
+    let addedAs = '';
 
-    // Suwayomi applies a settings change asynchronously, so the FIRST read after adding a repository still
-    // sees the old list and comes back empty. Retry until this repository shows up in the catalogue.
-    const attempt = async (url: string): Promise<number> => {
-      await setRepos([...current, url]); // a throw is the engine refusing the write itself: see the catch below
-      let n = 0;
-      for (let i = 0; i < 4; i++) {
-        try {
-          await refreshExtensions();
-          reason = undefined;
-        } catch (e) {
-          reason = engineReason(e);
-        }
-        const all = await listExtensions().catch((): ExtensionInfo[] | null => null);
-        if (all) { total = all.length; n = contributedBy(all, before, current); }
-        if (n > 0) break;
-        if (i < 3) await new Promise((r) => setTimeout(r, 700));
+    /**
+     * One address. The engine reading it and saying it cannot -- its own words, "HTTP error 404" or "Provided legacy
+     * store url is not valid" -- is nothing found there, with that reason; the engine not answering, or refusing the
+     * query itself, throws. A store it adds that yields nothing is taken back out before anything else is tried.
+     * Reintroduce by letting the address's refusal throw: "an address the engine cannot read is tried the other way"
+     * in extensionRepos.int.test.ts answers 502, and a pasted index.json is never tried as its index.min.json.
+     */
+    const attempt = async (url: string): Promise<{ n: number; held?: string }> => {
+      let stored: string;
+      try {
+        stored = (await addRepo(url)).indexUrl;
+      } catch (e) {
+        if (e instanceof EngineRefusedError || !/^suwayomi: /.test((e as Error)?.message ?? '')) throw e;
+        reason = engineReason(e);
+        return { n: 0 };
       }
-      return n;
+      // An index can name a store the engine already holds under another spelling: nothing new was added, and taking
+      // "it" back out would remove that one. Reintroduce by dropping this: "an address that turns out to be a store
+      // already added" in extensionRepos.int.test.ts finds the first store gone.
+      const held = exists(stored);
+      if (held) return { n: 0, held };
+      let n = 0;
+      try {
+        await refreshExtensions();
+        reason = undefined;
+      } catch (e) {
+        reason = engineReason(e);
+      }
+      const all = await listExtensions().catch((): ExtensionInfo[] | null => null);
+      if (all) { total = all.length; n = contributedBy(all, before, current); }
+      if (n === 0) {
+        // Nothing from it: never left for someone to find and remove by hand. By the address the engine answered.
+        try { await removeRepo(stored); } catch { removed = false; }
+        return { n };
+      }
+      addedAs = stored;
+      return { n };
     };
 
     let used = wanted;
     let added = 0;
     try {
-      added = await attempt(wanted);
-      // Still nothing after retrying? Repository layouts vary, so try the one alternative form of the same
-      // address (altRepoUrl), keeping it only if it yielded something.
+      const first = await attempt(wanted);
+      if (first.held) return reply.code(409).send({ error: 'exists', message: 'That repository is already added.', url: first.held });
+      added = first.n;
+      // Nothing from what was typed? Repository layouts vary, so try the one alternative form of the same address
+      // (altRepoUrl), keeping it only if it yielded something.
       if (added === 0) {
         const alt = altRepoUrl(wanted);
-        if (alt && alt !== wanted) {
-          const n = await attempt(alt);
-          if (n > 0) { used = alt; added = n; }
+        if (alt && alt !== wanted && !exists(alt)) {
+          const second = await attempt(alt);
+          if (second.held) return reply.code(409).send({ error: 'exists', message: 'That repository is already added.', url: second.held });
+          if (second.n > 0) { used = alt; added = second.n; }
         }
       }
     } catch (e) {
-      // Put the list back as it was; the engine may have taken the first write and refused the second.
-      await setRepos(current).catch(() => {});
+      // The engine stopped answering, or refused the query itself (an engine with no stores). A store an attempt added
+      // and found empty was already taken back out; a kept one is only ever the last step.
       await logAudit('extension.repo_add_refused', { userId: userIdOf(req), detail: { url: wanted, reason: engineReason(e) }, req });
       return reply.code(502).send({
         error: 'engine_refused', message: `The extension engine refused that address: ${engineReason(e)}`, reason: engineReason(e),
@@ -3651,10 +3685,6 @@ export default async function adminRoutes(app: FastifyInstance) {
     }
 
     if (added === 0) {
-      // Nothing from it, even after the alternative: take it back out, so a wrong address is never left
-      // saved for someone to find and remove by hand.
-      let removed = true;
-      try { await setRepos(current); } catch { removed = false; }
       await logAudit('extension.repo_add_refused', { userId: userIdOf(req), detail: { url: wanted, reason: reason ?? 'no extensions', removed }, req });
       return reply.code(422).send({
         error: 'empty',
@@ -3665,11 +3695,8 @@ export default async function adminRoutes(app: FastifyInstance) {
       });
     }
 
-    // The engine's own spelling of what was just added (it may have swapped the address -- see repoKey), for
-    // the monitor's copy; what was sent if the list cannot be read back.
-    const after = await getRepos().catch((): string[] => [...current, used]);
-    const fresh = after.filter((u) => !current.some((c) => repoKey(c) === repoKey(u)));
-    await syncMonitorRepos(after, fresh.length ? fresh : [used], null);
+    // The engine's own spelling of what was just added (the add answers it -- see repoKey), for the monitor's copy.
+    await syncMonitorRepos([...current, addedAs], [addedAs], null);
     await logAudit('extension.repo_add', { userId: userIdOf(req), detail: { url: used, extensions: added }, req });
     return { ok: true, url: used, corrected: used !== wanted, added, total, error: reason };
   });
@@ -3678,8 +3705,8 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (needExt(reply)) return;
     const b = z.object({ url: z.string().min(1).max(2000) }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
-    // ⚠️ The same trap as the add: a failed read taken as `[]` made this write an empty list, removing
-    // every repository instead of one.
+    // ⚠️ The same trap as the add: never act on a failed read. Each store goes by the engine's own spelling of its
+    // address, which is what it matches, exactly.
     let current: string[];
     try {
       current = await getRepos();
@@ -3688,16 +3715,17 @@ export default async function adminRoutes(app: FastifyInstance) {
     }
     // By key, so every spelling of the one repository goes (see repoKey) and nothing else does.
     const key = repoKey(b.data.url);
-    const next = current.filter((u) => u !== b.data.url && repoKey(u) !== key);
+    const doomed = current.filter((u) => u === b.data.url || repoKey(u) === key);
+    let removed = 0;
     try {
-      await setRepos(next);
+      for (const u of doomed) if (await removeRepo(u)) removed++;
     } catch (e) {
       return reply.code(502).send({ error: 'engine_refused', message: `The extension engine refused that: ${engineReason(e)}`, reason: engineReason(e) });
     }
     await syncMonitorRepos(current, [], key);
     await refreshExtensions().catch(() => 0);
     await logAudit('extension.repo_remove', { userId: userIdOf(req), detail: { url: b.data.url }, req });
-    return { ok: true, removed: current.length - next.length };
+    return { ok: true, removed };
   });
 
   // ---- library health ----

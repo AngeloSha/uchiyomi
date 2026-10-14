@@ -5,32 +5,40 @@
 // Unraid template, a CasaOS add-on, the desktop app's download. So "switching setups never downgrades the engine"
 // (#72) holds only while every pin moves together -- and before this test nothing made them. The pin is written
 // in the four compose files, the CasaOS add-on, the Unraid engine template, the desktop app's pack builder and
-// the pin file it downloads by, and the desktop workflow's cache key; the fake engine's schema is captured from it.
+// the pin file it downloads by, and the desktop workflow's cache key; the fake engine's schema is captured from it,
+// and the server's own TESTED_ENGINE (enginePin.ts, what Health compares a running engine with) names it.
 //
-// The desktop pin file is the reference: it is what a desktop install downloads, and a pack is published under
-// the tag it names. Everything else is held equal to it.
+// The list is scripts/engine/pins.json, shared with scripts/engine/bump.mjs, which moves every one of them for a new
+// engine (the weekly canary runs it on a branch). The desktop pin file is the reference: it is what a desktop install
+// downloads, and a pack is published under the tag it names. Everything else is held equal to it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 
-const REPO = join(__dirname, '..', '..');
+// ENGINE_PINS_REPO: another checkout to hold to the same rules -- engineCanaryScripts.test.ts runs this file on a
+// temporary copy that scripts/engine/bump.mjs has just moved to a new engine.
+const REPO = process.env.ENGINE_PINS_REPO || join(__dirname, '..', '..');
 const read = (p: string) => readFileSync(join(REPO, p), 'utf8');
 
-const PIN_FILE = JSON.parse(read('desktop/src/engine-pin.json'));
+const PINS = JSON.parse(read('scripts/engine/pins.json'));
+const PIN_FILE = JSON.parse(read(PINS.pin));
 const PIN: string = PIN_FILE.version;
 
-/** Every file that runs the engine from its container image, or tells someone to. */
-const IMAGE_FILES = [
-  'deploy/docker-compose.yml',
-  'deploy/docker-compose.external-db.yml',
-  'deploy/docker-compose.split.yml',
-  'docker-compose.yml',
-  'deploy/casaos/uchiyomi-suwayomi.yml',
-  'templates/uchiyomi-suwayomi.xml',
-  // The "somewhere else" step of Admin → Extensions' setup screen: the docker run it offers to copy (#72).
-  'web/lib/engineSetup.ts',
-];
+/**
+ * Every file that runs the engine from its container image, or tells someone to -- web/lib/engineSetup.ts too, the
+ * "somewhere else" step of Admin → Extensions' setup screen, which offers a docker run to copy (#72).
+ */
+const IMAGE_FILES: string[] = PINS.images;
+
+test('the shared pin list names files that exist, and every compose file that runs the engine', () => {
+  // Reintroduce by dropping a compose file from scripts/engine/pins.json: this test stops checking it and bump.mjs stops
+  // moving it, so that setup alone would run the old engine on data a newer one already migrated.
+  for (const f of [PINS.pin, PINS.pack, PINS.workflow, PINS.tested, PINS.fake, ...IMAGE_FILES]) assert.ok(existsSync(join(REPO, f)), `${f} is gone`);
+  for (const f of ['deploy/docker-compose.yml', 'deploy/docker-compose.external-db.yml', 'deploy/docker-compose.split.yml', 'docker-compose.yml']) {
+    assert.ok(IMAGE_FILES.includes(f), `${f} runs the engine and is not in scripts/engine/pins.json`);
+  }
+});
 
 test('the desktop pin is a Suwayomi release tag', () => {
   assert.match(PIN, /^v\d+\.\d+\.\d+$/, `desktop/src/engine-pin.json names "${PIN}", which is not a Suwayomi-Server release tag`);
@@ -79,4 +87,14 @@ test("the fake engine's schema is the pinned engine's", () => {
   assert.ok(file, 'the fake engine no longer names its schema file');
   const schema = JSON.parse(read(`bff/test/fixtures/${file}`));
   assert.equal(schema.engine.version, PIN, `the fake engine validates against ${schema.engine.version}'s schema, but the pin is ${PIN}`);
+});
+
+test("the server's TESTED_ENGINE is the pin", () => {
+  // Health compares a running engine's version with it (enginePin.ts engineStanding). Left behind at a bump, every
+  // install would be told its newly pinned engine is "newer than the version this Uchiyomi was tested with".
+  // Reintroduce by bumping the pin without enginePin.ts: this names both.
+  const tested = read(PINS.tested).match(/export const TESTED_ENGINE = '([^']+)'/)?.[1];
+  assert.equal(tested, PIN, `${PINS.tested} says TESTED_ENGINE = ${tested}, but the pin is ${PIN}`);
+  const oldest = read(PINS.tested).match(/export const OLDEST_ENGINE = '([^']+)'/)?.[1];
+  assert.ok(oldest, 'OLDEST_ENGINE went missing');
 });

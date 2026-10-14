@@ -10071,7 +10071,11 @@ paths:
         the engine, this call's own look included, and whether it answered), `linkedSeries` (series added through an
         extension) and, when the engine answers, `solver` ({supported, enabled, wiring: ok | off | localhost |
         other | unsupported, connectable, url}; `url` is never sent on desktop). When the engine answers but the
-        last registration missed it, this call registers its sources before replying."
+        last registration missed it, this call registers its sources before replying. Since the engine upgrade:
+        `buildType` (Stable or Preview), `tested` and `oldest` (the engine version this Uchiyomi was tested with, and
+        the oldest it works with), `standing` (same | older | tooOld | newer | unknown: the engine's version against
+        them) and `refused` ([{op, message, at}]: the operations the engine refused, by name and in its own words).
+        An engine that refuses Uchiyomi's queries answers, so it is `reachable` -- and not compatible."
 
       security:
         - bearer: []

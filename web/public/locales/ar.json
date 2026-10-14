@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3758
+    "strings": 3782
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -3761,5 +3761,29 @@
   "Each new member starts with these. Existing accounts are not affected.": "يبدأ كل عضو جديد بهذه الإعدادات. لا يتأثر بهذا أي حساب موجود.",
   "Can download": "يمكنه التنزيل",
   "No downloads": "بدون تنزيلات",
-  "New members would see nothing.": "لن يرى الأعضاء الجدد أي شيء."
+  "New members would see nothing.": "لن يرى الأعضاء الجدد أي شيء.",
+  "Not compatible with this Uchiyomi": "غير متوافق مع نسخة Uchiyomi هذه",
+  "The extension engine does not match this version of Uchiyomi.": "محرّك الإضافات لا يتوافق مع هذا الإصدار من Uchiyomi.",
+  "1 chapter; its source {source} can’t be reached because the extension engine does not match this Uchiyomi": "فصل واحد؛ يتعذّر الوصول إلى مصدرها {source} لأن محرّك الإضافات لا يتوافق مع نسخة Uchiyomi هذه",
+  "{n} chapters; its source {source} can’t be reached because the extension engine does not match this Uchiyomi": "الفصول: {n}؛ يتعذّر الوصول إلى مصدرها {source} لأن محرّك الإضافات لا يتوافق مع نسخة Uchiyomi هذه",
+  "Not compatible (v{version})": "غير متوافق (v{version})",
+  "Not compatible": "غير متوافق",
+  "It answers, but its extensions are unavailable until the engine and Uchiyomi match. Restarting it does not help.": "إنه يستجيب، لكن إضافاته تبقى غير متاحة حتى يتوافق المحرّك مع Uchiyomi. ولن تفيد إعادة تشغيله.",
+  "It refused what Uchiyomi asked: {error}": "رفض ما طلبه Uchiyomi: {error}",
+  "Update the engine to {tested}, the version this Uchiyomi was tested with.": "حدّث المحرّك إلى {tested}، وهو الإصدار الذي اختُبر عليه Uchiyomi هذا.",
+  "The engine is newer than this Uchiyomi. Update Uchiyomi; until a release supports this engine, {tested} is the version that works.": "المحرّك أحدث من Uchiyomi هذا. حدّث Uchiyomi؛ وإلى أن يصدر إصدار يدعم هذا المحرّك، فإن {tested} هو الإصدار الذي يعمل.",
+  "Run the version this Uchiyomi was tested with, {tested}.": "شغّل الإصدار الذي اختُبر عليه Uchiyomi هذا، وهو {tested}.",
+  "Back up the engine’s data first: the engine upgrades its database when it starts, and an older engine cannot read it again.": "انسخ بيانات المحرّك احتياطيًا أولًا: فالمحرّك يرقّي قاعدة بياناته عند تشغيله، ولا يستطيع محرّك أقدم قراءتها بعد ذلك.",
+  "In {file}, set the engine’s image to {image}, then run {command}.": "في {file}، اضبط صورة المحرّك على {image}، ثم شغّل {command}.",
+  "On the Docker tab, edit {service}, set its Repository to {image} and apply. Its data stays in {path}.": "في تبويب Docker، عدّل {service}، واضبط الحقل Repository على {image} ثم طبّق. تبقى بياناته في {path}.",
+  "In CasaOS, edit the {service} app, set its image to {image} and save. Its data stays in {path}.": "في CasaOS، عدّل التطبيق {service}، واضبط صورته على {image} ثم احفظ. تبقى بياناته في {path}.",
+  "Quit and reopen Uchiyomi. If Admin → Sources then offers to download the extension engine, download it: that is the version this Uchiyomi was tested with.": "أغلق Uchiyomi وأعد فتحه. فإن عرضت صفحة الإدارة ← المصادر بعدها تنزيل محرّك الإضافات، فنزّله: فهذا هو الإصدار الذي اختُبر عليه Uchiyomi هذا.",
+  "Run {image} in place of the engine you have, on the same data.": "شغّل {image} بدلًا من محرّكك الحالي، على البيانات نفسها.",
+  "Engine version": "إصدار المحرّك",
+  "{version} is newer than the version this Uchiyomi was tested with ({tested}).": "{version} أحدث من الإصدار الذي اختُبر عليه Uchiyomi هذا ({tested}).",
+  "{version} is older than the version this Uchiyomi was tested with ({tested}). It works; updating it is recommended.": "{version} أقدم من الإصدار الذي اختُبر عليه Uchiyomi هذا ({tested}). إنه يعمل، لكن يُنصح بتحديثه.",
+  "{version} is older than the oldest version this Uchiyomi works with ({oldest}).": "{version} أقدم من أقدم إصدار يعمل معه Uchiyomi هذا ({oldest}).",
+  "To go back to {tested}, restore a backup of the engine’s data from before the update: an older engine cannot read what a newer one wrote.": "للعودة إلى {tested}، استعد نسخة احتياطية من بيانات المحرّك أُخذت قبل التحديث: فالمحرّك الأقدم لا يستطيع قراءة ما كتبه محرّك أحدث.",
+  "Uchiyomi's extension engine refused Uchiyomi's request. Quit and reopen Uchiyomi, and download the extension engine again if Admin → Sources offers it.": "رفض محرّك إضافات Uchiyomi طلب Uchiyomi. أغلق Uchiyomi وأعد فتحه، ونزّل محرّك الإضافات من جديد إن عرضت ذلك صفحة الإدارة ← المصادر.",
+  "The extension engine refused Uchiyomi's request: it is older or newer than the version this Uchiyomi works with. Health → Extension engine says which, and how to change it.": "رفض محرّك الإضافات طلب Uchiyomi: فهو أقدم أو أحدث من الإصدار الذي يعمل معه Uchiyomi هذا. توضّح صفحة الحالة ← محرّك الإضافات أيّهما، وكيفية تغييره."
 }
