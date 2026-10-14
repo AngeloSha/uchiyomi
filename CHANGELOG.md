@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### The Cloudflare solver
+
+- **trawl 1.8.0 for the extension engine.** A Madara extension asks a Cloudflare-protected site for its lists and
+  searches with a form post, and trawl 1.7.0 refused every one (*body requires a Content-Type header to be set*), so a
+  site like ManhuaUS failed its Popular and Search through it. 1.8.0 takes them, and the trawl service in
+  [the Cloudflare solver](docs/CONFIGURATION.md#the-cloudflare-solver) now pins it.
+- **Upgrading:** if you run trawl, move its image to `ghcr.io/germondai/trawl:1.8.0` and recreate its container. No
+  setting changed, and neither FlareSolverr nor Byparr is affected.
+
 ## v0.65.1 — 2026-10-14
 
 **Two requests from @klave7, the first of them promised for the new look: chapters as one list, and Mark unread on a
