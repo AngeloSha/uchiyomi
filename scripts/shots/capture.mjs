@@ -195,7 +195,12 @@ async function main() {
   const notNow = await page.$('[data-health-banner] button');
   if (notNow) { await notNow.click(); await sleep(400); console.log('  · Health banner: Not now'); }
 
+  // ⚠️ The tab in front first. The phone shots open a second tab, and the one behind it paints no frames: a screenshot
+  // still works there (it asks for a frame of its own), but puppeteer's element click and hover wait for an
+  // IntersectionObserver, which never fires without frames -- series-more hung on its More key for the full 180 s
+  // protocol timeout ("Runtime.callFunctionOn timed out") once phone-home had opened the phone's tab.
   const go = async (path, extra = 0) => {
+    await page.bringToFront();
     await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle2', timeout: 60000 });
     await settle(page, extra);
   };
@@ -236,7 +241,8 @@ async function main() {
   // white title card -- a blank card on the marketing site's phone. Taken first, both Home shots show the same rail.
   let phonePage = null;
   const phone = async () => {
-    if (phonePage) return phonePage;
+    // In front whenever it is used: see `go` above.
+    if (phonePage) { await phonePage.bringToFront(); return phonePage; }
     phonePage = await ctx.newPage();
     await neutralNames(phonePage, { fixtures: [people, librariesFixture()] });
     await phonePage.setViewport(PROFILES.phone);
@@ -832,6 +838,7 @@ async function main() {
   // the sidebar opened under the pointer, and Arabic. Each puts the page back as it found it.
   const named = (n) => ONLY.includes(n);
   const view = async (pg, vp, path, extra = 900) => {
+    await pg.bringToFront();
     await pg.setViewport(vp);
     await pg.goto(`${BASE}${path}`, { waitUntil: 'networkidle2', timeout: 60000 });
     await settle(pg, extra);
@@ -847,8 +854,12 @@ async function main() {
     // The pointer resting on the sidebar's Library item (components/Sidebar.tsx); on a build without the sidebar the
     // same spot is the page's own edge, and the picture is the page as it was.
     await view(page, PROFILES.desk, '/library/', 600);
-    const item = await page.$('[data-sidebar] a[data-nav="library"]');
-    if (item) await item.hover(); else await page.mouse.move(30, 150);
+    // The pointer to the item's centre, not ElementHandle.hover(): no scroll, no wait on an observer.
+    const at = await page.evaluate(() => {
+      const r = document.querySelector('[data-sidebar] a[data-nav="library"]')?.getBoundingClientRect();
+      return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+    });
+    await page.mouse.move(at?.x ?? 30, at?.y ?? 150);
     await sleep(1000);
     await shot(page, 'sidebar-open');
     await page.mouse.move(700, 500);
@@ -857,12 +868,14 @@ async function main() {
     for (const pg of [page, ph]) await pg.evaluate(() => localStorage.setItem('uchiyomi.lang', 'ar'));
     if (named('home-ar')) { await view(page, PROFILES.desk, '/'); await heroAtRest(page); await shot(page, 'home-ar'); }
     if (named('phone-home-ar')) {
+      await ph.bringToFront();
       await ph.goto(`${BASE}/`, { waitUntil: 'networkidle2', timeout: 60000 });
       await settle(ph, 900); await heroAtRest(ph); await shot(ph, 'phone-home-ar');
     }
     for (const pg of [page, ph]) await pg.evaluate(() => localStorage.removeItem('uchiyomi.lang'));
   }
   if (named('phone-series') && SERIES_ID) {
+    await ph.bringToFront();
     await ph.goto(`${BASE}/series/?id=${SERIES_ID}`, { waitUntil: 'networkidle2', timeout: 60000 });
     await settle(ph, 1200); await shot(ph, 'phone-series');
   }
