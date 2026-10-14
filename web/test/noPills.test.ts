@@ -195,6 +195,9 @@ const SLICES: [string, string, string, string][] = [
   ['components/ProfileYou.tsx', 'Studio: by hour and devices', '<div data-studio-hours>', ''],
   ['app/wrapped/page.tsx', 'Wrapped: the time line', '{timeLine && <p data-wrapped-time', '</div>'],
   ['app/wrapped/page.tsx', 'Wrapped: by hour', '<div data-wrapped-hours', '(data?.topSeries?.length'],
+  // v0.65.1: the series page's select bar -- Mark read, Mark unread, Save offline, Fetch, Fetch again, Remove, Cancel --
+  // keys, as the Library's has been since v0.60.0.
+  ['app/series/page.tsx', 'Series: the select bar', 'const Toolbar = selecting && (', '{isAdmin && !deletable.length && ('],
   // UI refresh, phase 2: Members' cards act through keys -- Reset, Make admin, Disable, downloads, and the openers of the
   // library and age panels, whose choices inside stay chips -- and what a new member starts with, which reuses them.
   ['app/admin/page.tsx', 'Members: the cards', 'function Members()', 'function NewMemberDefaults('],

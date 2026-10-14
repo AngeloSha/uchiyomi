@@ -18,7 +18,7 @@ import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
-import { IcChevronLeft, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcHourglass } from '@/components/icons';
+import { IcChevronLeft, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcHourglass, IcGrid, IcRows } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
 import { statusText } from '@/lib/activity';
 import { deletedText, selectedText, skippedBookmarkedText, skippedNotOursText } from '@/lib/counted';
@@ -32,6 +32,8 @@ import { effectsReduced } from '@/lib/effects';
 import { clampPage, pageCount, pageLabel, pageOf, pageSizeFor, pageSlice } from '@/lib/chapterPages';
 import { openRuns, showAllChaptersOn } from '@/lib/showAllChapters';
 import { buttonsClass, compactChaptersOn, dotHide, rowClass, thumbHide } from '@/lib/compactChapters';
+import { chapterRowsClass, chapterViewOn, setChapterView, type ChapterView } from '@/lib/chapterView';
+import { Segmented } from '@/components/settings';
 import { fetchAllBooks } from '@/lib/seriesBooks';
 import { fetchingToast } from '@/lib/jobs';
 import { ALL_GROUPS, copySourceId, groupsOfRow, matchesGroup } from '@/lib/groupFilter';
@@ -421,11 +423,15 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
 }) {
   const [busy, setBusy] = useState(false);
   const rp = book.readProgress;
-  const state = rp?.completed ? 'read' : rp ? 'reading' : 'unread';
+  // Page 0 is unread: it is what Mark unread writes (setRead), and Continue reading reads it so too (lib/continueLabel.ts).
+  // Counted as "reading", a chapter marked unread showed "page 0/19" in the accent.
+  const state = rp?.completed ? 'read' : rp && rp.page >= 1 ? 'reading' : 'unread';
   // The ⋯ button's menu, which right-click, a press-and-hold and Shift+F10 on the row now open as well (#100,
   // components/ContextMenu.tsx). It was a hand-rolled popover that clipped at the screen's edge.
   const menu = useContextMenu(() => [
-    { label: rp?.completed ? tr('Mark unread') : tr('Mark read'), onSelect: () => onMark(rp?.completed ? 'unread' : 'read') },
+    // A part-read chapter offers both (#215, klave7): finish it, or put it back to unread, its page with it.
+    ...(state !== 'read' ? [{ label: tr('Mark read'), onSelect: () => onMark('read') }] : []),
+    ...(state !== 'unread' ? [{ label: tr('Mark unread'), onSelect: () => onMark('unread') }] : []),
     { label: tr('Mark previous as read'), onSelect: () => onMark('previous') },
     ...(onVersions ? [{ label: tr('Versions'), divider: true, onSelect: onVersions }] : []),
     ...(onEdit ? [{ label: tr('Edit number & title'), divider: true, onSelect: onEdit }] : []),
@@ -979,6 +985,9 @@ function SeriesInner() {
   // export renders without localStorage, and the default row is the one to render until we know.
   const [compact, setCompact] = useState(false);
   useEffect(() => { setCompact(compactChaptersOn()); }, []);
+  // This device's chapter layout (#214, lib/chapterView.ts), read after mount for the same reason.
+  const [view, setView] = useState<ChapterView>('columns');
+  useEffect(() => { setView(chapterViewOn()); }, []);
   const [chapterPage, setChapterPage] = useState<number | null>(null);
   useEffect(() => { setChapterPage(null); }, [id, asc, group, showGhosts]);
   // Every row on one page when the account asked for the whole list (pageSizeFor): the pager then has one page and
@@ -1717,6 +1726,15 @@ function SeriesInner() {
           <button onClick={() => { setSelecting((v) => !v); clearPicks(); }} className={`btn-key whitespace-nowrap ${selecting ? 'btn-key-accent' : ''}`}>
             {selecting ? tr('Done') : tr('Select')}
           </button>
+          {/* #214: the rows in columns, or one list the page's width so a long title is read whole. From lg up, where the
+              columns are; the Library's own Layout control, so the two read as one habit (lib/chapterView.ts). */}
+          <div className="ms-auto hidden lg:block" data-chapter-view={view}>
+            <Segmented square label={tr('Layout')} value={view} onChange={(v) => { setView(v); setChapterView(v); }}
+              options={[
+                { value: 'columns', label: tr('Columns'), icon: <IcGrid aria-hidden width={15} height={15} /> },
+                { value: 'list', label: tr('List'), icon: <IcRows aria-hidden width={15} height={15} /> },
+              ]} />
+          </div>
         </div>
       </div>
       {group !== ALL_GROUPS && (
@@ -1725,7 +1743,7 @@ function SeriesInner() {
         </p>
       )}
       {pages > 1 && <ChapterPager page={shownPage} pages={pages} rows={rows} asc={asc} total={filteredBooks.length + filteredGhosts.length} onPage={(p) => goPage(p, false)} />}
-      <div className="lg:grid lg:gap-x-8 lg:[grid-template-columns:repeat(auto-fill,minmax(250px,1fr))]">
+      <div className={chapterRowsClass(view)} data-chapter-rows={view}>
         {pageRows.map((r) => {
           if (r.kind === 'book') {
             const b = r.book;
@@ -1826,22 +1844,23 @@ function SeriesInner() {
   // v0.52.0 (discussion #72): the bar is up from the moment Select is, saying what it acts on -- chapters. Its Remove
   // was a greyed "Delete from server" until something was ticked, and was read as the way to remove the SERIES (p3t3t3):
   // it reads "Remove 3 chapters" now, and with nothing ticked says how to use it and where the series' own Remove is.
+  // UI refresh: keys, as the Library's select bar has been since v0.60.0 -- they act on the picked chapters.
   const Toolbar = selecting && (
     <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:start-[var(--rail-w)] lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
       <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
         <span className="me-auto text-sm font-medium text-fog-100">{acting ? '…' : selectedText(pickedCount)}</span>
-        <button disabled={acting || !pickedCount} onClick={() => bulkMark(true)} className="chip text-xs disabled:opacity-50">{tr('Mark read')}</button>
-        <button disabled={acting || !pickedCount} onClick={() => bulkMark(false)} className="chip text-xs disabled:opacity-50">{tr('Mark unread')}</button>
+        <button disabled={acting || !pickedCount} onClick={() => bulkMark(true)} className="btn-key">{tr('Mark read')}</button>
+        <button disabled={acting || !pickedCount} onClick={() => bulkMark(false)} className="btn-key">{tr('Mark unread')}</button>
         {/* The two icons say which side each acts on: ⬇ this device, ☁ the server. */}
-        {!isDesktop() && <button disabled={acting || !saveable.length} onClick={bulkSave} className="chip text-xs disabled:opacity-50"><IcDownload width={14} height={14} />{tr('Save offline')}</button>}
-        {canDownload(user) && <button disabled={acting || !fetchable.length} onClick={bulkFetch} className="chip text-xs disabled:opacity-50"><IcCloudDownload width={14} height={14} />{tr('Fetch')}</button>}
-        {isAdmin && <button disabled={acting || !refetchable.length} onClick={() => setConfirming({ what: 'refetch', books: refetchable })} className="chip text-xs disabled:opacity-50"><IcCloudDownload width={14} height={14} />{tr('Fetch again')}</button>}
+        {!isDesktop() && <button disabled={acting || !saveable.length} onClick={bulkSave} className="btn-key"><IcDownload width={14} height={14} />{tr('Save offline')}</button>}
+        {canDownload(user) && <button disabled={acting || !fetchable.length} onClick={bulkFetch} className="btn-key"><IcCloudDownload width={14} height={14} />{tr('Fetch')}</button>}
+        {isAdmin && <button disabled={acting || !refetchable.length} onClick={() => setConfirming({ what: 'refetch', books: refetchable })} className="btn-key"><IcCloudDownload width={14} height={14} />{tr('Fetch again')}</button>}
         {isAdmin && (
-          <button disabled={acting || !deletable.length} onClick={() => setConfirming({ what: 'delete', books: deletable })} data-remove-chapters className="chip text-xs text-rose-300 disabled:opacity-50">
+          <button disabled={acting || !deletable.length} onClick={() => setConfirming({ what: 'delete', books: deletable })} data-remove-chapters className="btn-key btn-key-danger text-rose-300">
             {deletable.length === 1 ? tr('Remove 1 chapter') : deletable.length ? tr('Remove {n} chapters', { n: deletable.length }) : tr('Remove chapters')}
           </button>
         )}
-        <button disabled={acting} onClick={leaveSelect} className="chip text-xs text-fog-500 disabled:opacity-50">{tr('Cancel')}</button>
+        <button disabled={acting} onClick={leaveSelect} className="btn-key text-fog-400">{tr('Cancel')}</button>
       </div>
       {/* Nothing to remove ticked: how to, and the whole series' Remove, which this bar is not. Reintroduce by dropping
           this line: "the bar says how to remove chapters, and where the series' own Remove is" in seriesPage.test.ts. */}

@@ -219,8 +219,9 @@ try {
   await press(p2, CARD, '10+');
   check(!!(await waitFor(() => stored() === DEFAULTS, 10_000)), 'and so are 10+ and no downloads', stored());
   await shot(p2, 'local-set');
-  const lit = await p2.$$eval(`${CARD} > button.chip-active`, (bs) => bs.length);
-  check(lit === 3, 'all three chips are lit, each less than everything', `${lit} lit`);
+  // Keys since v0.65.0 (Members' actions), lit with the accent: they were chips, lit with chip-active.
+  const lit = await p2.$$eval(`${CARD} > button.btn-key-accent`, (bs) => bs.length);
+  check(lit === 3, 'all three keys are lit, each less than everything', `${lit} lit`);
 
   // Someone signs up on the sign-in screen.
   const p3 = await fresh();
