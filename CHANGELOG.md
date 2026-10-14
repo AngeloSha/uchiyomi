@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.65.1 — 2026-10-14
+
+**Two requests from @klave7, the first of them promised for the new look: chapters as one list, and Mark unread on a
+chapter you are part-way through.** Thank you.
+
+### Chapters as one list
+
+- **Layout**, at the end of a series' chapter toolbar, switches the chapters between **Columns** (side by side, as
+  before) and **List** (one row per chapter, the page's width), so a long chapter title is read whole
+  ([#214](https://github.com/AngeloSha/uchiyomi/issues/214)). It is the Library's own Layout control, remembered on
+  this device; a phone shows one list either way.
+
+### Mark unread
+
+- **A chapter you are part-way through offers Mark unread** in its menu, beside Mark read, and its page goes with it
+  ([#215](https://github.com/AngeloSha/uchiyomi/issues/215)). Before, only a finished chapter could be marked unread,
+  and one that was showed *page 0/19*.
+- **The series page's select bar** (Mark read, Mark unread, Fetch, Remove…) is keys, like the Library's.
+
+### Upgrading
+
+- Nothing to do.
+
 ## v0.65.0 — 2026-10-14
 
 **A new look.** On a computer the menu is a slim sidebar with the art running under it, Home's banner shows whole
