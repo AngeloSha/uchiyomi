@@ -481,18 +481,23 @@ test('a dialog and the phone group sheet give focus back to what opened them', (
   assert.match(sheet, /<div ref=\{ref\} className="glass[^"]*"\s*role="dialog" aria-modal="true"/, 'the ref is not on the dialog panel');
 });
 
-test('the phone pill row marks the current tab, and the rail chevrons mirror under RTL', () => {
-  // On a phone the pill row is the only tab navigation; the fill alone says nothing to a screen reader
-  // (the desktop rail already set aria-current). And the Admin/Support rows on the desktop rail, plus the
-  // You tab's "See all", kept a right-pointing chevron in Arabic while every LinkRow mirrored its own.
-  // Reintroduce by dropping `aria-current` from the pill: "the active pill is not announced" fails; by
-  // dropping `rtl:-scale-x-100` from `chev`: "the rail chevron does not mirror" fails.
+test('the underlined tab row marks the current tab, Profile is one strip of tabs with keys, and See all mirrors', () => {
+  // On a phone the tab row is the only tab navigation (and on Profile, a strip at every width since the UI refresh);
+  // the underline alone says nothing to a screen reader. Profile's Admin / Support / Sign out are keys at the row's
+  // end, not rail rows with a chevron. And the You tab's "See all" kept a right-pointing chevron in Arabic while
+  // every LinkRow mirrored its own.
+  // Reintroduce by dropping `aria-current` from the tab: "the active tab is not announced" fails; by dropping the
+  // underline: "the active tab is not underlined" fails; by taking `strip` off Profile's ConsoleNav: "Profile is not
+  // a tab strip" fails; by dropping `rtl:-scale-x-100` from See all: "the See all chevron does not mirror" fails.
   const nav = code(read('components/ConsoleNav.tsx'));
-  const pills = nav.slice(nav.indexOf('{group.tabs.map((t) => ('), nav.indexOf('{footer && flat &&'));
-  assert.ok(pills.length > 0, 'the phone pill row is not where this test looks');
-  assert.match(pills, /<button key=\{t\} onClick=\{\(\) => onTab\(t\)\}\s*aria-current=\{tab === t \? 'page' : undefined\}/, 'the active pill is not announced');
+  const tabs = nav.slice(nav.indexOf('{group.tabs.map((t) => ('), nav.indexOf('{footer && flat &&'));
+  assert.ok(tabs.length > 0, 'the tab row is not where this test looks');
+  assert.match(tabs, /<button key=\{t\} onClick=\{\(\) => onTab\(t\)\}\s*aria-current=\{tab === t \? 'page' : undefined\}/, 'the active tab is not announced');
+  assert.match(tabs, /\{tab === t && <span aria-hidden className="absolute inset-x-0 -bottom-px h-0\.5 [^"]*bg-accent" \/>\}/, 'the active tab is not underlined');
+  assert.doesNotMatch(tabs, /rounded-full/, 'the tabs are pills again');
   const profile = code(read('app/profile/page.tsx'));
-  assert.match(profile, /const chev = 'ms-auto hidden shrink-0 opacity-60 lg:block rtl:-scale-x-100';/, 'the rail chevron does not mirror');
+  assert.match(profile, /<ConsoleNav [^>]*\bflat strip\b/, 'Profile is not a tab strip');
+  assert.match(profile, /const row = 'btn-key h-9 gap-2 text-sm';/, 'the Profile actions are not keys');
   const you = code(read('components/ProfileYou.tsx'));
   assert.match(you, /\{tr\('See all'\)\}<IcChevronRight width=\{14\} height=\{14\} aria-hidden className="rtl:-scale-x-100" \/>/, 'the See all chevron does not mirror');
 });

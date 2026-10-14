@@ -54,7 +54,7 @@ test('text laid in a bleed sits on the content edge, and the fixed bars start pa
     }
   }
   assert.match(read('components/DiscoverHero.tsx'), /className="bleed-pad relative z-10 flex h-full flex-col justify-end/, 'the Discover hero\'s text');
-  assert.match(read('app/admin/page.tsx'), /className="bleed-pad relative pb-6/, 'the admin hero\'s text');
+  assert.match(read('app/admin/page.tsx'), /className=\{`bleed-pad relative /, 'the admin hero\'s text');
   assert.match(read('app/profile/page.tsx'), /className="bleed-pad pb-4 lg:pb-6"/, 'the profile hero\'s text');
   for (const f of ['app/library/page.tsx', 'app/series/page.tsx']) {
     assert.match(read(f), /className="fixed inset-x-0 bottom-\[calc\(5\.75rem\+env\(safe-area-inset-bottom\)\)\] z-40 [^"]*lg:start-\[var\(--rail-w\)\]/, `${f}: the select bar runs under the sidebar`);

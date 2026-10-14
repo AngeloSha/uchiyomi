@@ -252,3 +252,36 @@ test('GET /api/collections without a scope is what it always was', { skip }, asy
   assert.equal(Number(raw.item_count), 1, 'the stored count, an 18+ title in it included, as before');
   assert.deepEqual(Object.keys(raw).sort(), ['accent', 'id', 'item_count', 'name', 'sort_order']);
 });
+
+test("a list's card gets its first covers: the viewer's own view, in the list's order, four at most", { skip }, async () => {
+  // UI refresh: GET /api/collections?scope=all carries `preview`, the ids Lists draws as the card's covers. Reintroduce
+  // by aggregating the hand-picked ids without the visibility join (`browsable`): the 18+ series shows on the card while
+  // the switch hides it -- "the 18+ switch applies to a card's covers" fails. Drop the `[1:4]` slice: "four at most" fails.
+  // A fifth series of its own, outside GENRE so the smart-list tests above never see it.
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, genres) VALUES ('s_lst_a3','T!lst','s_lst_a3','s_lst_a3',1,$1,'{}')`, [LIB_A]);
+  try {
+    const picks = await create('lst-owner', { name: 'Lst Covers', shared: true });
+    for (const id of ['s_lst_b1', 's_lst_x1', 's_lst_a3', 's_lst_a2', 's_lst_a1']) {
+      assert.equal((await call('lst-owner', 'POST', `/api/collections/${picks.id}/items`, { seriesId: id })).statusCode, 200);
+    }
+    const rowFor = async (who: string, id: string, adult = false) =>
+      ((await call(who, 'GET', `/api/collections?scope=all${adult ? '&adult=1' : ''}`)).json().content as any[]).find((c) => c.id === id);
+    assert.deepEqual((await rowFor('lst-owner', picks.id, true)).preview, ['s_lst_b1', 's_lst_x1', 's_lst_a3', 's_lst_a2'],
+      "not the list's own first four");
+    assert.deepEqual((await rowFor('lst-owner', picks.id)).preview, ['s_lst_b1', 's_lst_a3', 's_lst_a2', 's_lst_a1'],
+      "the 18+ switch applies to a card's covers");
+    assert.deepEqual((await rowFor('lst-lib', picks.id, true)).preview, ['s_lst_a3', 's_lst_a2', 's_lst_a1'],
+      "another member's card shows a series outside their libraries");
+    assert.deepEqual((await rowFor('lst-cap', picks.id, true)).preview, ['s_lst_b1', 's_lst_a3', 's_lst_a1'],
+      "a capped member's card shows a series above the cap");
+    // A smart list's: its search's first, in its own order, four at most.
+    const smart = await create('lst-owner', { name: 'Lst Smart covers', query: { v: 1, sort: 'az' } });
+    assert.deepEqual((await rowFor('lst-owner', smart.id, true)).preview, ['s_lst_a1', 's_lst_a2', 's_lst_a3', 's_lst_b1'], 'four at most');
+    // An empty list has none.
+    const empty = await create('lst-owner', { name: 'Lst Empty covers' });
+    assert.deepEqual((await rowFor('lst-owner', empty.id)).preview, []);
+  } finally {
+    await q("DELETE FROM collection_items WHERE series_id = 's_lst_a3'");
+    await q("DELETE FROM lib_series WHERE id = 's_lst_a3'");
+  }
+});

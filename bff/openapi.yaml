@@ -4791,7 +4791,8 @@ paths:
         `{id, name, accent, sort_order, item_count, kind: manual|smart, shared, mine, owner?: {id, name, avatar},
         query?}` -- `item_count` is how many series it shows THIS caller (their libraries, age cap and 18+ switch),
         `owner` names whoever made someone else's list, and `query`, a smart list's saved search, goes to its owner
-        alone. A shared list that shows the caller nothing is left out.
+        alone. A shared list that shows the caller nothing is left out. `preview` (UI refresh): the ids of its first
+        series THIS caller may see, at most four, in the list's own order -- the covers its card shows.
       operationId: getApiCollections
       parameters:
         - name: adult

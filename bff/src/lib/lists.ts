@@ -43,7 +43,15 @@ export interface ListSummary {
   owner?: ListOwner;
   /** The owner's own smart list: its search, for Edit filters. Never sent to anyone else. */
   query?: SmartQuery;
+  /**
+   * Its first series this viewer may see, at most PREVIEW of them, in the list's own order: the covers its card shows
+   * (UI refresh). `all` scope only; absent from a server older than this.
+   */
+  preview?: string[];
 }
+
+/** How many covers a list's card shows. */
+export const PREVIEW = 4;
 
 const COLS = 'c.id, c.user_id, c.name, c.accent, c.sort_order, c.query, c.shared';
 
@@ -68,17 +76,21 @@ export async function ownListFor(uid: string, id: string): Promise<ListRow | nul
   return one<ListRow>(`SELECT ${COLS} FROM collections c WHERE c.id = $1 AND c.user_id = $2`, [id, uid]);
 }
 
-/** How many of each hand-picked list's series this viewer may see, in one query. */
-async function manualCounts(ids: string[], ctx: ViewCtx): Promise<Map<string, number>> {
+/**
+ * How many of each hand-picked list's series this viewer may see, and the first PREVIEW of them in the list's order
+ * (its card's covers), in one query.
+ */
+async function manualCounts(ids: string[], ctx: ViewCtx): Promise<Map<string, { n: number; preview: string[] }>> {
   if (!ids.length) return new Map();
   const p = new Params();
-  const rows = await q<{ id: string; n: number }>(
-    `SELECT ci.collection_id AS id, count(*)::int AS n
+  const rows = await q<{ id: string; n: number; preview: string[] | null }>(
+    `SELECT ci.collection_id AS id, count(*)::int AS n,
+            (array_agg(ci.series_id ORDER BY ci.position, ci.series_id))[1:${PREVIEW}] AS preview
        FROM collection_items ci JOIN lib_series s ON s.id = ci.series_id AND ${browsable('s', ctx, p)}
       WHERE ci.collection_id = ANY(${p.add(ids)}) GROUP BY ci.collection_id`,
     p.values as any[],
   );
-  return new Map(rows.map((r) => [r.id, r.n]));
+  return new Map(rows.map((r) => [r.id, { n: r.n, preview: r.preview ?? [] }]));
 }
 
 /**
@@ -114,17 +126,23 @@ export async function listsFor(uid: string, ctx: ViewCtx, scope: 'manual' | 'all
     const mine = r.user_id === uid;
     const kind = kindOf(r);
     let n = 0;
-    if (kind === 'manual') n = counts.get(r.id) ?? 0;
+    let preview: string[] = [];
+    if (kind === 'manual') ({ n, preview } = counts.get(r.id) ?? { n: 0, preview: [] });
     else {
       const query = parseQuery(r.query);
-      if (query) n = (await evaluate(ctx, query, 0, 1)).totalElements;
+      if (query) {
+        // The same search the count needed, asked for its first PREVIEW series rather than one.
+        const res = await evaluate(ctx, query, 0, PREVIEW);
+        n = res.totalElements;
+        preview = res.content.map((x: { id: string }) => x.id);
+      }
     }
     // Reintroduce by keeping it: "a shared list that shows a member nothing is left out for them" in lists.int.test.ts
     // finds it listed with 0.
     if (!mine && n === 0) continue;
     const query = mine && kind === 'smart' ? parseQuery(r.query) : null;
     out.push({
-      id: r.id, name: r.name, accent: r.accent, sort_order: r.sort_order, item_count: n, kind, shared: r.shared, mine,
+      id: r.id, name: r.name, accent: r.accent, sort_order: r.sort_order, item_count: n, kind, shared: r.shared, mine, preview,
       ...(mine ? {} : { owner: { id: r.user_id, name: r.owner_name || r.owner_username || '', avatar: r.owner_avatar ?? null } }),
       ...(query ? { query } : {}),
     });

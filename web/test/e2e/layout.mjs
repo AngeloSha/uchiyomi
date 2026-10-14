@@ -21,7 +21,7 @@ const PASS = process.env.E2E_PASS || 'e2e-passw0rd-123';
 // were never measured at all before this.
 // Admin → Sources (v0.54.0; Admin → Extensions' strip, Installed | Browse since v0.53.0): its strip, Your sources |
 // Add sources and their rows at every width -- each view by its own address, since the tab opens on one of them only.
-const PAGES = (process.env.PAGES || '/,/library,/library/?view=downloads,/collections,/discover,/profile,/admin,/admin/import,/moments,/profile/?tab=Settings,/profile/?tab=Connections,/profile/?tab=Account,/admin/?tab=Settings,/admin/?tab=Sources&view=yours,/admin/?tab=Sources&view=add').split(',');
+const PAGES = (process.env.PAGES || '/,/updates,/history,/library,/library/?view=downloads,/collections,/discover,/profile,/admin,/admin/import,/moments,/profile/?tab=Settings,/profile/?tab=Connections,/profile/?tab=Account,/admin/?tab=Settings,/admin/?tab=Sources&view=yours,/admin/?tab=Sources&view=add').split(',');
 
 // How much of a wide viewport the content must actually occupy. Not 100%: a settings form SHOULD have
 // margins, and prose that runs 1900px wide is unreadable. But a page using less than this is a column

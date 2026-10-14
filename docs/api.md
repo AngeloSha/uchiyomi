@@ -1540,7 +1540,8 @@ in all; `?limit=1..200` caps the items (a Home rail asks for twelve), and a smar
 What a list shows is always the caller's view of it: their libraries, age cap and 18+ switch, and their own reading
 for `read`. `GET /api/collections` with no `scope` is unchanged -- the caller's hand-picked lists with the stored count
 -- and `?scope=all` adds their smart lists and the household's shared ones, counted for the caller, a shared list that
-shows them nothing left out.
+shows them nothing left out. Each of those carries `preview`: the ids of its first series the caller may see, at most
+four, in the list's own order -- the covers on its card in Lists.
 
 **Pick back up and Hidden gems** (since v0.61.0). `GET /api/home` carries `pickUp`, up to twenty books shaped like
 `onDeck` with `stoppedAt`: the chapter to resume each series last read 90 days to two years ago in which the caller

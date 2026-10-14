@@ -17,7 +17,7 @@ import { TraceStrip } from '@/components/TraceStrip';
 import { Modal, msgOf } from '@/components/ConfirmDialog';
 import { Backdrop } from '@/components/ui';
 import { useToast } from '@/components/Toast';
-import { IcSparkle, IcChevronRight, IcPlay, IcRefresh, IcSettings, IcLogOut, IcMoments } from '@/components/icons';
+import { IcSparkle, IcPlay, IcRefresh, IcSettings, IcLogOut, IcMoments } from '@/components/icons';
 import { BadgesCard, ListsCard, StudioCard, type Stats } from '@/components/ProfileYou';
 import { ProfileSettings } from '@/components/ProfileSettings';
 import { ProfileConnections } from '@/components/ProfileConnections';
@@ -340,7 +340,7 @@ function ProfileInner() {
           behind a board of eight cards. They belong to the person, not to a panel, so they live on the rail.
           The nav is labelled "Profile", not "You": that was the first tab's name doubling as the name of the
           whole list, which read as "You › You" to a screen reader and in the phone sheet's heading. */}
-      <ConsoleNav groups={isDesktop() ? visibleGroups(PROFILE_GROUPS, DESKTOP_HIDDEN.profileTabs) : PROFILE_GROUPS} tab={tab} onTab={setTab} ariaLabel={tr('Profile')} flat
+      <ConsoleNav groups={isDesktop() ? visibleGroups(PROFILE_GROUPS, DESKTOP_HIDDEN.profileTabs) : PROFILE_GROUPS} tab={tab} onTab={setTab} ariaLabel={tr('Profile')} flat strip
         footer={<RailActions isAdmin={isAdmin} />}>
         {hiddenTab ? null : panel}
       </ConsoleNav>
@@ -362,20 +362,15 @@ function ProfileInner() {
  */
 function RailActions({ isAdmin }: { isAdmin: boolean }) {
   const { logout } = useAuth();
-  // Two shapes, one markup. On a desktop these are rail rows under the tab list; on a phone the rail does
-  // not exist and they sit under the pill row, so they take the pill's shape and wrap instead of stacking
-  // three full-width bars above the content.
-  const row = 'flex items-center gap-2 rounded-full border border-ink-700 px-3 py-1.5 text-start text-sm transition ' +
-    'lg:w-full lg:rounded-lg lg:border-0';
-  // Mirrored under RTL like LinkRow's: in Arabic the rail's chevrons pointed away from the door.
-  const chev = 'ms-auto hidden shrink-0 opacity-60 lg:block rtl:-scale-x-100';
+  // Keys (UI refresh): at the end of the tab row on a desktop, under it on a phone, where they wrap rather than stacking
+  // three full-width bars above the content. They were rail rows with a chevron, and pills on a phone.
+  const row = 'btn-key h-9 gap-2 text-sm';
   return (
     <>
       {isAdmin && (
         <Link href="/admin/" className={`${row} text-fog-400 hover:bg-ink-800/60 hover:text-fog-100`}>
           <IcSettings width={16} height={16} className="shrink-0" />
           <span className="min-w-0 truncate">{tr('Admin')}</span>
-          <IcChevronRight width={15} height={15} className={chev} />
         </Link>
       )}
       {/* Promoted out of the bottom of the Account tab, where it sat behind eight cards and a scroll. It is
@@ -385,7 +380,6 @@ function RailActions({ isAdmin }: { isAdmin: boolean }) {
         className={`${row} text-fog-400 hover:bg-ink-800/60 hover:text-fog-100`}>
         <span aria-hidden className="shrink-0 text-base leading-none">☕</span>
         <span className="min-w-0 truncate">{tr('Support Uchiyomi')}</span>
-        <IcChevronRight width={15} height={15} className={chev} />
       </a>
       {/* Not on desktop: the app signs itself back in at once, so "Sign out" there would do nothing visible. */}
       {!isDesktop() && (

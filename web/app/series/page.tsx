@@ -96,7 +96,7 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
     try {
       const c = await api<CollectionRow>('/api/collections', { json: { name: n } });
       await add(c);
-    } catch { toast(tr('Could not create the collection'), 'error'); }
+    } catch { toast(tr('Could not create the list'), 'error'); }
   };
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={onClose}>

@@ -5,6 +5,7 @@ import { sourceCover } from '@/components/cards';
 import { IcPlus, IcSparkle } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
 import { dotWindow } from '@/lib/carousel';
+import { useArtUnderChrome } from '@/lib/overArt';
 
 export interface Trending {
   /** The AniList entry (sent since v0.56.0): what Discover's AniList rails key a card by (v0.61.0). */
@@ -36,6 +37,8 @@ export function DiscoverHero({ slides, onPick }: { slides: Trending[]; onPick: (
   const [i, setI] = useState(0);
   const [paused, setPaused] = useState(false);
   const startX = useRef(0);
+  // Its art starts at the top of the window: the desktop top bar is see-through over it (lib/overArt.ts).
+  useArtUnderChrome(slides.length > 0);
 
   // 5s, not 7s. With ten slides a seven-second beat is a seventy-second loop, so the back half was seen by
   // essentially nobody; fifty seconds gives every slide a realistic chance while still leaving time to read
@@ -65,7 +68,7 @@ export function DiscoverHero({ slides, onPick }: { slides: Trending[]; onPick: (
 
   return (
     <div
-      className="bleed relative isolate h-[44vh] min-h-[300px] overflow-hidden lg:h-[54vh] lg:min-h-[400px] lg:max-h-[600px] lg:rounded-b-3xl"
+      className="bleed under-topbar relative isolate h-[44vh] min-h-[300px] overflow-hidden lg:h-[60vh] lg:max-h-[665px] lg:min-h-[465px]"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       onTouchStart={(e) => { startX.current = e.touches[0].clientX; }}
@@ -94,9 +97,11 @@ export function DiscoverHero({ slides, onPick }: { slides: Trending[]; onPick: (
       <span aria-hidden className="scrim-soft absolute inset-0" />
       <span aria-hidden className="pointer-events-none absolute inset-0"
         style={{ background: 'radial-gradient(60% 70% at var(--start) 70%, rgb(var(--accent) / 0.14), transparent 70%)' }} />
+      {/* Under the see-through top bar (UI refresh), as on Home: a short scrim keeps its search and keys legible. */}
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 hidden h-32 bg-linear-to-b from-ink-950/70 to-transparent lg:block" />
 
       <div className="bleed-pad relative z-10 flex h-full flex-col justify-end pb-5 lg:pb-10">
-        <span className="mb-2.5 inline-flex w-fit items-center gap-1.5 rounded-full bg-black/45 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-accent backdrop-blur">
+        <span className="mb-2.5 inline-flex w-fit items-center gap-1.5 rounded-md bg-black/45 px-2.5 py-1 text-2xs font-semibold uppercase tracking-wider text-accent backdrop-blur rtl:tracking-normal">
           <IcSparkle width={12} height={12} />{tr('Trending now')}
         </span>
         <h2 className="max-w-3xl font-display text-2xl font-bold leading-[1.06] text-white [text-shadow:0_2px_16px_rgba(0,0,0,0.65)] lg:text-5xl xl:text-6xl">

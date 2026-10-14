@@ -44,30 +44,33 @@ export default function HistoryPage() {
   return (
     <div className="min-h-screen-d">
       <header className="safe-top flex items-center gap-2 px-4 pb-2 lg:px-0 lg:pt-6">
-        <button onClick={() => router.back()} className="grid h-10 w-10 place-items-center rounded-full bg-ink-800/70 text-fog-100">
-          <IcChevronLeft width={22} height={22} />
+        {/* A phone's way back; on a desktop History is the sidebar's (components/Sidebar.tsx). */}
+        <button onClick={() => router.back()} aria-label={tr('Back')} className="grid h-10 w-10 place-items-center rounded-full bg-ink-800/70 text-fog-100 lg:hidden">
+          <IcChevronLeft width={22} height={22} className="rtl:-scale-x-100" />
         </button>
         <h1 className="font-display text-2xl font-bold lg:text-3xl">{tr('Reading history')}</h1>
       </header>
 
       {isLoading ? (
-        <div className="space-y-3 px-4 pt-3 lg:mx-auto lg:max-w-2xl lg:px-0">
-          {Array.from({ length: 6 }).map((_, i) => <div key={i} className="skeleton h-16 rounded-2xl" />)}
+        <div className="grid gap-2 px-4 pt-3 sm:grid-cols-2 lg:px-0 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => <div key={i} className="skeleton h-20 rounded-2xl" />)}
         </div>
       ) : rows.length === 0 ? (
         <EmptyState art={ART.emptyUpdates} title={tr('Nothing here yet')}
           sub={tr('Chapters you read will show up here, newest first.')} cta={{ href: '/library', label: tr('Browse library') }} />
       ) : (
-        <div className="px-4 pt-2 lg:mx-auto lg:max-w-2xl lg:px-0">
+        // The page's width, in columns (UI refresh: it was a 672 px column in the middle of a wide screen). Each day's
+        // heading sticks under the top bar on a desktop, not behind it.
+        <div className="px-4 pt-2 lg:px-0">
           {groups.map((g) => (
-            <section key={g.label} className="mb-5">
-              <h2 className="sticky top-0 z-10 bg-ink-950/90 py-2 text-xs font-semibold uppercase tracking-widest text-fog-500 backdrop-blur">
+            <section key={g.label} className="mb-6">
+              <h2 className="sticky top-0 z-10 bg-ink-950/90 py-2 text-xs font-semibold uppercase tracking-widest text-fog-500 backdrop-blur rtl:tracking-normal lg:top-[var(--topbar-h)]">
                 {tr(g.label)}
               </h2>
-              <div className="card divide-y divide-ink-800/70 overflow-hidden">
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                 {g.items.map((r) => (
-                  <div key={r.book_id} className="flex items-center gap-3 px-3.5 py-2.5">
-                    <Link href={`/series/?id=${r.series_id}`} className="h-14 w-10 shrink-0 overflow-hidden rounded-lg border border-ink-700">
+                  <div key={r.book_id} className="card flex items-center gap-3 px-3 py-2.5 transition-colors hover:border-ink-600">
+                    <Link href={`/series/?id=${r.series_id}`} className="h-16 w-11 shrink-0 overflow-hidden rounded-lg border border-ink-700">
                       <Img src={img.bookThumb(r.book_id)} alt="" className="h-full w-full" />
                     </Link>
                     <div className="min-w-0 flex-1">
@@ -83,7 +86,7 @@ export default function HistoryPage() {
                       </p>
                     </div>
                     <Link href={`/reader/?book=${r.book_id}`} aria-label={tr('Open in reader')}
-                      className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-accent-soft text-accent">
+                      className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent transition hover:bg-accent hover:text-black">
                       <IcPlay width={15} height={15} />
                     </Link>
                   </div>

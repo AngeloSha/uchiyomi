@@ -25,6 +25,8 @@ export interface ListRow {
   mine?: boolean;
   owner?: ListOwner;
   query?: SmartQuery;
+  /** Its first series this reader may see, at most four, in its own order: its card's covers. Absent from an older server. */
+  preview?: string[];
 }
 
 /** The list's own, or -- from an older server, which only ever sent the reader's own -- every one. */

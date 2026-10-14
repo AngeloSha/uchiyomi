@@ -29,12 +29,12 @@ function ExpectedThisWeek() {
   const list = [...(data?.content ?? [])].sort(byExpected);
   if (!list.length) return null;
   return (
-    <section data-expected className="px-4 pb-10 pt-6 lg:mx-auto lg:max-w-2xl lg:px-0">
+    <section data-expected className="px-4 pb-10 pt-6 lg:px-0">
       <h2 className="font-display text-lg font-semibold">{tr('Expected this week')}</h2>
       <p className="mb-3 mt-0.5 text-xs text-fog-500">{tr('Estimated from when chapters usually arrive, not promised.')}</p>
-      <div className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {list.map((series) => (
-          <Link key={series.id} href={`/series/?id=${series.id}`} className="card flex items-center gap-3 p-3">
+          <Link key={series.id} href={`/series/?id=${series.id}`} className="card flex items-center gap-3 p-3 transition-colors hover:border-ink-600">
             <div className="h-20 w-14 shrink-0 overflow-hidden rounded-xl border border-ink-700">
               <Img src={img.seriesThumb(series.id)} alt={series.name} className="h-full w-full" />
             </div>
@@ -80,7 +80,7 @@ export default function UpdatesPage() {
       </header>
 
       {isLoading ? (
-        <div className="space-y-3 px-4 pt-3 lg:px-0">
+        <div className="grid gap-3 px-4 pt-3 sm:grid-cols-2 lg:px-0 xl:grid-cols-3">
           {Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton h-24 rounded-2xl" />)}
         </div>
       ) : items.length === 0 ? (
@@ -88,9 +88,10 @@ export default function UpdatesPage() {
           sub={tr('Favorite some series and new chapters will appear here as Uchiyomi downloads them.')}
           cta={{ href: '/library', label: tr('Browse library') }} />
       ) : (
-        <div className="space-y-3 px-4 pt-3 lg:mx-auto lg:max-w-2xl lg:px-0">
+        // The page's width, in columns (UI refresh: it was a 672 px column in the middle of a wide screen).
+        <div className="grid gap-3 px-4 pt-3 sm:grid-cols-2 lg:px-0 xl:grid-cols-3">
           {items.map(({ series, newCount, latestAt }) => (
-            <Link key={series.id} href={`/series/?id=${series.id}`} className="card flex items-center gap-3 p-3">
+            <Link key={series.id} href={`/series/?id=${series.id}`} className="card flex items-center gap-3 p-3 transition-colors hover:border-ink-600">
               <div className="h-20 w-14 shrink-0 overflow-hidden rounded-xl border border-ink-700">
                 <Img src={img.seriesThumb(series.id)} alt={series.name} className="h-full w-full" />
               </div>
@@ -101,7 +102,8 @@ export default function UpdatesPage() {
                   {latestAt && <span className="text-fog-500"> · {relativeTime(latestAt)}</span>}
                 </p>
               </div>
-              <span className="grid h-7 min-w-7 place-items-center rounded-full bg-accent px-2 text-xs font-bold text-black">{newCount}</span>
+              {/* Squared, as every count tag is: a round one grows into a capsule from two digits. */}
+              <span className="grid h-7 min-w-7 place-items-center rounded-md bg-accent px-2 text-xs font-bold tabular-nums text-black">{newCount}</span>
             </Link>
           ))}
         </div>

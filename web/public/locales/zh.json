@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3752
+    "strings": 3757
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3755,5 +3755,10 @@
   "Could not link your account to {name}.": "无法将你的账号关联到 {name}。",
   "Main menu": "主菜单",
   "Expand menu": "展开菜单",
-  "Collapse menu": "收起菜单"
+  "Collapse menu": "收起菜单",
+  "Only the copies on this device. The chapters stay on the server.": "只删除此设备上的副本。章节仍保留在服务器上。",
+  "New list": "新建列表",
+  "List created": "已创建列表",
+  "Could not create the list": "无法创建列表",
+  "No lists yet": "还没有列表"
 }

@@ -122,7 +122,7 @@ export function ListsCard({ span = '' }: { span?: string }) {
           ))}
         </div>
       ) : (
-        <p className="text-xs text-fog-500">{tr('No collections yet')}</p>
+        <p className="text-xs text-fog-500">{tr('No lists yet')}</p>
       )}
       <Link href="/collections/" className="chip mt-3 text-xs">{tr('See all')}<IcChevronRight width={14} height={14} aria-hidden className="rtl:-scale-x-100" /></Link>
     </div>

@@ -121,7 +121,7 @@ function AdminInner() {
 
   return (
     <div className="min-h-screen-d px-4 lg:px-0">
-      <AdminHero onBack={() => router.back()} />
+      <AdminHero onBack={() => router.back()} compact={tab !== 'Overview'} />
 
       {/* The foot of the rail says which Uchiyomi this is (v0.55.4, #150): the place people looked for it. */}
       <ConsoleNav groups={isDesktop() ? visibleGroups(GROUPS, DESKTOP_HIDDEN.adminTabs) : GROUPS} tab={tab} onTab={setTab} ariaLabel={tr('Admin')}
@@ -143,7 +143,11 @@ function AdminInner() {
  * blurred and drowned under a gradient), and the headline is the verdict rather than a row of numbers. The
  * counts are still there, just demoted to the line that supports it.
  */
-function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
+/**
+ * `compact` (UI refresh): every tab but Overview. The verdict and its facts stay -- an admin opening Settings still sees
+ * at a glance that a check failed -- but in a band, not the ~480 px that pushed Settings and Members below the fold.
+ */
+function AdminHero({ onBack, compact = false }: { onBack: () => void; onScan?: undefined; compact?: boolean }) {
   const qc = useQueryClient();
   const { data: stats } = useQuery({ queryKey: ['admin-stats'], queryFn: () => api<any>('/api/admin/stats') });
   const { data: health } = useQuery({
@@ -203,7 +207,7 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
   const running: string | null = bridge()?.version || stats?.version || null;
 
   return (
-    <div className="bleed relative isolate mb-6 overflow-hidden lg:mt-2 lg:rounded-b-3xl">
+    <div data-admin-hero={compact ? 'compact' : 'full'} className={`bleed relative isolate overflow-hidden lg:mt-2 lg:rounded-b-3xl ${compact ? 'mb-4' : 'mb-6'}`}>
       {rnd?.seriesId && <Backdrop seriesId={rnd.seriesId} className="absolute inset-0" />}
       {/* Drowned deliberately: this is a wash to sit text on, not a picture to look at. */}
       <div className="absolute inset-0 bg-linear-to-t from-ink-950 via-ink-950/90 to-ink-950/70" />
@@ -212,11 +216,11 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
       <div aria-hidden className="pointer-events-none absolute inset-0"
         style={{ background: `radial-gradient(75% 120% at var(--start) 0%, ${bad ? 'rgba(245,158,11,0.20)' : 'rgb(var(--accent) / 0.22)'}, transparent 60%)` }} />
 
-      <div className="bleed-pad relative pb-6 pt-[max(0.9rem,calc(env(safe-area-inset-top)+0.5rem))] lg:pb-8 lg:pt-8">
-        <div className="mb-5 flex items-center gap-2">
+      <div className={`bleed-pad relative pt-[max(0.9rem,calc(env(safe-area-inset-top)+0.5rem))] ${compact ? 'pb-4 lg:pb-5 lg:pt-5' : 'pb-6 lg:pb-8 lg:pt-8'}`}>
+        <div className={`flex items-center gap-2 ${compact ? 'mb-3' : 'mb-5'}`}>
           <button onClick={onBack} aria-label={tr('Back')}
             className="grid h-10 w-10 place-items-center rounded-full bg-black/40 text-fog-100 backdrop-blur">
-            <IcChevronLeft width={22} height={22} />
+            <IcChevronLeft width={22} height={22} className="rtl:-scale-x-100" />
           </button>
           <span className="text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Admin')}</span>
         </div>
@@ -227,7 +231,7 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
             <span aria-hidden className={`size-2.5 shrink-0 rounded-full ${
               !health ? 'bg-fog-600' : bad ? 'bg-amber-400' : 'bg-emerald-400'
             } ${!health ? 'animate-pulse' : ''}`} />
-            <h1 className="font-display text-2xl font-bold leading-tight text-fog-50 lg:text-4xl">{verdict}</h1>
+            <h1 className={`font-display font-bold leading-tight text-fog-50 ${compact ? 'text-xl lg:text-2xl' : 'text-2xl lg:text-4xl'}`}>{verdict}</h1>
           </div>
           {(facts.length > 0 || running) && (
             <p className="mt-2 text-sm text-fog-400">
@@ -242,8 +246,8 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
         </motion.div>
 
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.08, ease: [0.22, 0.61, 0.36, 1] }} className="mt-5">
-          <button onClick={scan} disabled={scanned?.kind === 'working'} data-hero-scan className="btn-accent px-5 py-2.5 text-sm disabled:opacity-60">
+          transition={{ duration: 0.5, delay: 0.08, ease: [0.22, 0.61, 0.36, 1] }} className={compact ? 'mt-3' : 'mt-5'}>
+          <button onClick={scan} disabled={scanned?.kind === 'working'} data-hero-scan className={`btn-accent disabled:opacity-60 ${compact ? 'px-4 py-2 text-xs' : 'px-5 py-2.5 text-sm'}`}>
             <IcRefresh width={16} height={16} />{scanned?.kind === 'working' ? tr('Scanning library…') : tr('Scan library now')}
           </button>
           {scanned && scanned.kind !== 'working' && <div data-hero-scan-result className="max-w-xl"><ActionStatus state={scanned} /></div>}

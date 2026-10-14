@@ -28,6 +28,7 @@ export function ConsoleNav<T extends string>({
   onTab,
   ariaLabel,
   flat,
+  strip,
   footer,
   children,
 }: {
@@ -37,6 +38,12 @@ export function ConsoleNav<T extends string>({
   ariaLabel: string;
   /** True when every group holds one entry: suppresses the group eyebrows and the phone group sheet. */
   flat?: boolean;
+  /**
+   * The tabs as one underlined row at every width, and no rail beside the panel (UI refresh): Profile's four tabs,
+   * where a second rail beside the app's sidebar was more frame than page. The footer sits at the row's end on a
+   * desktop.
+   */
+  strip?: boolean;
   /**
    * Actions that belong to the rail rather than to any one panel, pinned under the tab list and repeated at
    * the bottom of the phone sheet. Profile puts Admin and Sign out here: both were reachable only by picking
@@ -52,9 +59,9 @@ export function ConsoleNav<T extends string>({
 
   return (
     <div>
-      <div className="lg:flex lg:gap-8 xl:gap-10">
-        {/* ---- desktop: a sticky sidebar, grouped ---- */}
-        <nav className="hidden shrink-0 lg:block lg:w-52 xl:w-56" aria-label={ariaLabel}>
+      <div className={strip ? undefined : 'lg:flex lg:gap-8 xl:gap-10'}>
+        {/* ---- desktop: a sticky sidebar, grouped (not in strip mode) ---- */}
+        {!strip && <nav className="hidden shrink-0 lg:block lg:w-52 xl:w-56" aria-label={ariaLabel}>
           {/* Under the 65 px top bar, not behind it: `top-6` let the first group slide under the bar. */}
           <div className="sticky top-[calc(var(--topbar-h)+1.5rem)] space-y-5">
             {groups.map((g) => (
@@ -81,29 +88,36 @@ export function ConsoleNav<T extends string>({
               <div className="space-y-1 border-t border-ink-800/80 pt-4">{footer}</div>
             )}
           </div>
-        </nav>
+        </nav>}
 
-        {/* ---- phone: the group is a sheet, its panels stay a pill row ---- */}
+        {/* ---- phone (and strip mode everywhere): the group is a sheet, its panels an underlined row ---- */}
         <div className="min-w-0 flex-1">
-          <div className="mb-4 flex items-center gap-2 lg:hidden">
+          <div className={`mb-4 flex items-center gap-2 ${strip ? '' : 'lg:hidden'}`}>
             {!flat && (
               <button onClick={() => setSheet(true)}
-                className="chip shrink-0 gap-1 text-xs" aria-haspopup="dialog">
+                className="btn-key shrink-0 gap-1" aria-haspopup="dialog">
                 {tr(group.label)}
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
               </button>
             )}
-            <div className="-me-4 flex gap-1.5 overflow-x-auto pe-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {/* On a phone this row is the only tab navigation, so the active pill says so the way the
-                  desktop rail does -- the fill alone is invisible to a screen reader. */}
+            {/* Underlined tabs (UI refresh: they were pills), like the Library's Series | Downloads switch. On a phone this
+                row is the only tab navigation, so the current tab says so the way the desktop rail does -- the line
+                alone is invisible to a screen reader. */}
+            {/* A landmark of its own: in strip mode there is no desktop rail to be one (only one of the two is ever shown). */}
+            <div role="navigation" aria-label={ariaLabel}
+              className={`-me-4 flex min-w-0 flex-1 gap-5 overflow-x-auto border-b border-ink-800/80 pe-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${strip ? 'lg:me-0 lg:pe-0' : ''}`}>
               {group.tabs.map((t) => (
                 <button key={t} onClick={() => onTab(t)}
                   aria-current={tab === t ? 'page' : undefined}
-                  className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
-                    tab === t ? 'bg-accent text-white' : 'bg-ink-800 text-fog-300'
-                  }`}>{tr(t)}</button>
+                  className={`relative shrink-0 pb-2.5 pt-1 text-sm font-medium transition ${
+                    tab === t ? 'text-fog-50' : 'text-fog-500 hover:text-fog-200'
+                  }`}>
+                  {tr(t)}
+                  {tab === t && <span aria-hidden className="absolute inset-x-0 -bottom-px h-0.5 rounded-[1px] bg-accent" />}
+                </button>
               ))}
             </div>
+            {strip && footer && <div className="hidden shrink-0 items-center gap-2 lg:flex">{footer}</div>}
           </div>
           {/* A flat nav has no group sheet, so on a phone the footer would have nowhere to live. */}
           {footer && flat && <div className="mb-4 flex flex-wrap gap-2 lg:hidden">{footer}</div>}
