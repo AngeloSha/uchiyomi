@@ -1,5 +1,5 @@
 {
-  "_provenance": "Request bodies exactly as the live FlareSolverr logged them (docker logs yomi-flaresolverr, 'Incoming request => POST /v1 body: ...', 2026-09-13..23, 10,000 requests). Only the URLs and cookie values are replaced. Counts over those 10 days: bffPost 6883, bffGet 3086, suwayomiGetWithCookies 17, suwayomiGetNoCookies 8. suwayomiPost is not in the log; its shape is derived from CloudflareInterceptor.kt:216-231 (a non-form POST body becomes \"\").",
+  "_provenance": "Request bodies exactly as the live FlareSolverr logged them (docker logs yomi-flaresolverr, 'Incoming request => POST /v1 body: ...', 2026-09-13..23, 10,000 requests). Only the URLs and cookie values are replaced. Counts over those 10 days: bffPost 6883, bffGet 3086, suwayomiGetWithCookies 17, suwayomiGetNoCookies 8. suwayomiPost and suwayomiPostBody are not in the log; their shape is derived from CloudflareInterceptor.kt: v2.3.2243 (216-231) sent \"\" for any POST body that was not a form, v2.4.2366 (338-348) sends every POST body, read as UTF-8 -- suwayomiPostBody is a JSON search an extension POSTs.",
   "bffGet": { "cmd": "request.get", "url": "https://madara.test/manga/some-series/", "maxTimeout": 60000 },
   "bffPost": { "cmd": "request.post", "url": "https://madara.test/manga/some-series/ajax/chapters/", "postData": "", "maxTimeout": 60000 },
   "suwayomiGetWithCookies": {
@@ -8,5 +8,6 @@
     "returnOnlyCookies": true
   },
   "suwayomiGetNoCookies": { "cmd": "request.get", "url": "https://ext.test/", "maxTimeout": 60000, "session": "suwayomi", "session_ttl_minutes": 15, "cookies": [], "returnOnlyCookies": true },
-  "suwayomiPost": { "cmd": "request.post", "url": "https://ext.test/api/search", "maxTimeout": 60000, "session": "suwayomi", "session_ttl_minutes": 15, "cookies": [], "returnOnlyCookies": true, "postData": "" }
+  "suwayomiPost": { "cmd": "request.post", "url": "https://ext.test/api/search", "maxTimeout": 60000, "session": "suwayomi", "session_ttl_minutes": 15, "cookies": [], "returnOnlyCookies": true, "postData": "" },
+  "suwayomiPostBody": { "cmd": "request.post", "url": "https://ext.test/api/search", "maxTimeout": 60000, "session": "suwayomi", "session_ttl_minutes": 15, "cookies": [], "returnOnlyCookies": true, "postData": "{\"query\":\"caf\u00e9 & \u540d\u524d\",\"page\":2,\"filters\":{\"genre\":[\"action\"]}}" }
 }

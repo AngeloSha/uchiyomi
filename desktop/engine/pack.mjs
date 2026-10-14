@@ -25,13 +25,13 @@ const { extractTarGz, extractZip, writeZip, sha256File, dirSize, readZipEntry } 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 export const SUWAYOMI = {
-  version: 'v2.3.2243',
+  version: 'v2.4.2366',
   mainClass: 'suwayomi.tachidesk.MainKt', // read from the jar manifest at build time and asserted below
   assets: {
-    'win-x64': { name: 'Suwayomi-Server-v2.3.2243-windows-x64.zip', sha256: '895843f48d5735e01bdc43d79ab66e600d6f507076a9b792ffa418a9bbcc32c2' },
-    'mac-arm64': { name: 'Suwayomi-Server-v2.3.2243-macOS-arm64.tar.gz', sha256: '884df50945c9c052ec55bea8bb6fd232f9258a5a0bb8a95d2e07850337b2481b' },
-    'mac-x64': { name: 'Suwayomi-Server-v2.3.2243-macOS-x64.tar.gz', sha256: '3021ce25ed0366bd91899621ff5e4f0ac0e11be292daa37a9c3dfac9bd7c9591' },
-    'linux-x64': { name: 'Suwayomi-Server-v2.3.2243-linux-x64.tar.gz', sha256: '7ed20b7890a6720c4d5dd51fe9c3247f537ffcab01a1cba5c2a75626743236c3' },
+    'win-x64': { name: 'Suwayomi-Server-v2.4.2366-windows-x64.zip', sha256: 'b955f374a8d94b8d1c2750ae28fa7eb2066b479957561b5ba9cf8ac993c8fc13' },
+    'mac-arm64': { name: 'Suwayomi-Server-v2.4.2366-macOS-arm64.tar.gz', sha256: '3b269855928070253a4d9f7c4a57d9ff99d0272102410233c459b02a732e87e7' },
+    'mac-x64': { name: 'Suwayomi-Server-v2.4.2366-macOS-x64.tar.gz', sha256: '18768b2e3b7fb25bf3eff9e4b4b14b6235b2dfea320701ab172ea7f902eeb97e' },
+    'linux-x64': { name: 'Suwayomi-Server-v2.4.2366-linux-x64.tar.gz', sha256: '7a469f8c820e65305f795d61f1776c783919884531497b587bdff898a7e0fa73' },
   },
 };
 

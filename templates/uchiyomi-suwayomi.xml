@@ -12,7 +12,7 @@
 -->
 <Container version="2">
   <Name>uchiyomi-suwayomi</Name>
-  <Repository>ghcr.io/suwayomi/suwayomi-server:v2.3.2243</Repository>
+  <Repository>ghcr.io/suwayomi/suwayomi-server:v2.4.2366</Repository>
   <Registry>https://github.com/Suwayomi/Suwayomi-Server/pkgs/container/suwayomi-server</Registry>
   <Network>bridge</Network>
   <Shell>bash</Shell>

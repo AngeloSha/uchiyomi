@@ -1,4 +1,4 @@
-// A fake Suwayomi-Server v2.3.2243 extension engine: GraphQL at POST /api/graphql, the REST image paths the
+// A fake Suwayomi-Server extension engine, the pinned one: GraphQL at POST /api/graphql, the REST image paths the
 // adapter stores, and a /__mode switch. Dependency-free, so the same file serves two harnesses:
 //
 //   * bff tests, in-process, through fakeSuwayomi.ts (startFakeSuwayomi);
@@ -6,8 +6,8 @@
 //
 // WHY IT IS STRICT. The engine's schema is not ours and its documentation is wrong in places (the endpoint path,
 // for one), so every query Uchiyomi sends has to be checked against the real thing. This fake validates each
-// query against suwayomi-v2.3.2243-schema.json -- a full introspection of the pinned image, deprecated members
-// included -- and answers an unknown field, argument, input field, enum value or type exactly as the engine
+// query against the pinned image's schema (SCHEMA_FILE below: a full introspection of it, deprecated members
+// included) and answers an unknown field, argument, input field, enum value or type exactly as the engine
 // does: HTTP 200, an `errors` array, no `data`, and graphql-java's own wording. A field that exists on the real
 // engine but that this fake does not serve is refused LOUDLY ("FAKE ENGINE: ... not implemented"), never
 // answered with a guess. ⚠️ extensionRepos.int.test.ts learned why: its first fake was lenient, every test
@@ -15,7 +15,8 @@
 //
 // WHAT WAS MEASURED. Each behaviour below was observed on a disposable, network-less container of
 // ghcr.io/suwayomi/suwayomi-server:v2.3.2243 (2026-09-27), or read from its bytecode where no extension could
-// be installed offline:
+// be installed offline; the pin moved to v2.4.2366 after conformFakeSuwayomi.mjs found it answering every case the
+// same (2026-10-14), dated chapters apart (below):
 //   * validation errors: status 200, `{"errors":[{message, locations, extensions:{}}]}`, and no data key;
 //   * a failing data fetcher: `{"data":{"<field>":null},"errors":[{message, locations, path}]}`, where the
 //     message is "Exception while fetching data (/<path>) : <exception message>\r\n\r\n<stack trace>" -- the
@@ -78,7 +79,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { deflateSync } from 'node:zlib';
 
-export const SCHEMA_FILE = new URL('./suwayomi-v2.3.2243-schema.json', import.meta.url);
+export const SCHEMA_FILE = new URL('./suwayomi-v2.4.2366-schema.json', import.meta.url);
 
 /** The schema the fake validates against by default: SCHEMA_FILE, or the capture SUWAYOMI_FAKE_SCHEMA names. */
 export function defaultSchemaFile() {

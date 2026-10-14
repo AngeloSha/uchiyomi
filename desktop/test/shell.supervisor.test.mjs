@@ -17,7 +17,7 @@ const { CONTRACT } = require('../src/env.js');
 
 const quiet = { info() {}, warn() {}, error() {} };
 
-function fakes(order, { installed = false, silentPort = false, lateOutput = false } = {}) {
+function fakes(order, { installed = false, silentPort = false, lateOutput = false, had = [] } = {}) {
   const opts = { silentPort, lateOutput };
   const pg = {
     port: 0, password: '', binDir: '/pg/bin', pgdata: '/pg/data',
@@ -33,6 +33,9 @@ function fakes(order, { installed = false, silentPort = false, lateOutput = fals
   };
   const engine = Object.assign(new EventEmitter(), {
     installed: () => installed,
+    // `had`: the versions an app update that moved the pin leaves installed beside the pinned one.
+    otherRuntimes: () => had,
+    install: async () => { order.push('engine.install'); },
     start: async () => { order.push('engine.start'); },
     stop: async () => { order.push('engine.stop'); return 'exited:0'; },
     status: () => ({ state: installed ? 'running' : 'absent' }),
@@ -191,6 +194,7 @@ test('a freshly installed engine restarts the bff exactly once (contract 5), wit
   try {
     await sup.start();
     assert.ok(!order.includes('engine.start'), 'not installed: not started');
+    assert.ok(!order.includes('engine.install'), 'downloaded unasked, on a computer that never had the engine');
     const restarted = new Promise((r) => sup.once('bff-restarted', r));
     f.engine.emit('installed');
     await restarted;
@@ -199,6 +203,22 @@ test('a freshly installed engine restarts the bff exactly once (contract 5), wit
     assert.equal(sup.crashes.length, 0);
     await new Promise((r) => setTimeout(r, 1300)); // longer than the first crash backoff: no third fork
     assert.equal(f.forks.length, 2);
+  } finally {
+    await sup.stop('test');
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('an update that moved the engine pin fetches the new engine by itself where the old one was in use', async () => {
+  // The runtime is per version, so after such an update the pinned engine is not installed and extensions stop.
+  // Reintroduce by dropping the otherRuntimes() branch in Supervisor.start(): "the new engine is not fetched" fails.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'uchi-sup-'));
+  const order = [];
+  const sup = make(tmp, fakes(order, { had: ['v2.3.2243'] }));
+  try {
+    await sup.start();
+    assert.ok(order.includes('engine.install'), 'the new engine is not fetched');
+    assert.ok(!order.includes('engine.start'), 'install() starts it; nothing else does');
   } finally {
     await sup.stop('test');
     fs.rmSync(tmp, { recursive: true, force: true });

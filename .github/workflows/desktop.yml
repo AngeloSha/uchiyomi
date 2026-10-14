@@ -65,7 +65,7 @@ concurrency:
 
 env:
   PG_EDB: 16.15-4
-  SUWAYOMI: v2.3.2243
+  SUWAYOMI: v2.4.2366
   ELECTRON_CACHE_KEY: electron-44.4.5-eb-26.15.3
 
 jobs:

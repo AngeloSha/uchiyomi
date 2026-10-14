@@ -4,8 +4,9 @@
 //   - the bff: its REAL client module (bff/src/lib/sources/flaresolverr.ts) and its REAL madara + manganato
 //     engines are imported and pointed at this server, so "the bff parses it" is the bff's code saying so;
 //   - Suwayomi: the response is decoded by a strict port of kotlinx.serialization's rules, driven by the
-//     verbatim DTOs from CloudflareInterceptor.kt at v2.3.2243 (fixtures/suwayomi-*.kt), with the request
-//     bodies both clients really send (fixtures/solver-requests.json, from the live FlareSolverr's log).
+//     verbatim DTOs from CloudflareInterceptor.kt at the pinned engine (fixtures/suwayomi-<pin>-FlareSolverDtos.kt,
+//     which bff/test/enginePins.test.ts holds to the pin), with the request bodies both clients really send
+//     (fixtures/solver-requests.json, from the live FlareSolverr's log), and v2.4's own test of a solve.
 //
 // Run: cd desktop && node --import tsx --test ../desktop/test/solver.contract.test.ts
 import { test, before, after } from 'node:test';
@@ -228,7 +229,7 @@ function parseDtos(src: string): Map<string, KField[]> {
 }
 // CRLF-safe: a Windows checkout rewrites the fixture's line endings.
 const fixture = (name: string) => readFileSync(join(FIX, name), 'utf8').replace(/\r\n/g, '\n');
-const DTOS = parseDtos(fixture('suwayomi-v2.3.2243-FlareSolverDtos.kt'));
+const DTOS = parseDtos(fixture('suwayomi-v2.4.2366-FlareSolverDtos.kt'));
 
 /** kotlinx.serialization with ignoreUnknownKeys=true, explicitNulls=false, isLenient=false. Throws like it would. */
 function kDecode(v: unknown, t: KType, path: string): void {
@@ -287,6 +288,66 @@ test('Suwayomi "not detected" branch: message contains it (CloudflareInterceptor
   const j: any = await (await post(REQ.suwayomiGetNoCookies)).json();
   assert.equal(j.message, 'Challenge not detected!');
   assert.ok(j.message.toLowerCase().includes('not detected'));
+});
+
+test('Suwayomi v2.4 POSTs the whole body, not only a form: the browser is handed it byte for byte', async () => {
+  // v2.3.2243 sent "" for every POST body that was not a form (CloudflareInterceptor.kt:216-231 at that tag); v2.4.2366
+  // sends each one, read as UTF-8 (338-348 at v2.4.2366): a JSON search, a form with its escapes, UTF-8 as it is,
+  // whitespace and CRLF at either end. browser.ts posts exactly Buffer.from(postData, 'utf8') (solver.electron.test.ts
+  // checks what a site receives). Reintroduce by tidying postData in parseSolveRequest (a `.trim()`, or re-encoding a
+  // form): a body below arrives changed, and the site answers another request than the extension made.
+  const bodies = [
+    REQ.suwayomiPostBody.postData,
+    'action=wp-manga-search-manga&title=caf%C3%A9+na%C3%AFve&vars%5Bpaged%5D=2',
+    'q=Jösé 名前 ✓&x=a+b',
+    '\r\n  {"a": "b"}\t\r\n',
+  ];
+  for (const body of bodies) {
+    fake.seen = [];
+    fake.handler = (r) => page(r.url, '<html>ok</html>');
+    const res = await post({ ...REQ.suwayomiPostBody, postData: body });
+    assert.equal(res.status, 200);
+    kDecode(await res.json(), { base: 'FlareSolverResponse', args: [], nullable: false }, '$');
+    assert.equal(fake.seen[0].method, 'POST');
+    assert.ok(Buffer.from(fake.seen[0].postData ?? '', 'utf8').equals(Buffer.from(body, 'utf8')), `${JSON.stringify(body)} arrived as ${JSON.stringify(fake.seen[0].postData)}`);
+  }
+});
+
+/** v2.4.2366's test of a solve (CloudflareInterceptor.kt:363, requestWithFlareSolverr): a cf_clearance among the cookies. */
+const v24Counts = (j: any) => j.solution.cookies.some((c: any) => ['cf_clearance'].includes(c.name));
+/** v2.3.2243's (CloudflareInterceptor.kt:246 at that tag): any 2xx solution.status. */
+const v23Counts = (j: any) => j.solution.status >= 200 && j.solution.status <= 299;
+
+test('Suwayomi v2.4 counts a solve only with a cf_clearance cookie: the answer carries the jar as it is', async () => {
+  // Suwayomi never sends a cf_clearance of its own (it filters COOKIE_NAMES out of the cookies it passes), so the one
+  // v2.4 looks for must come back from the solver's jar -- under its own name, whatever its domain. Reintroduce by
+  // returning only host-only cookies from solutionOf (protocol.ts): the clearance on ".ext.test" is dropped, and every
+  // solve this engine asks for fails as "Cloudflare challenge failed to resolve".
+  for (const r of [REQ.suwayomiGetWithCookies, REQ.suwayomiGetNoCookies, REQ.suwayomiPost]) {
+    assert.ok(r.cookies.every((c: any) => c.name !== 'cf_clearance'), 'PREMISE: Suwayomi sends no cf_clearance');
+  }
+  const decoded = async (r: unknown) => {
+    const j: any = await (await post(r)).json();
+    kDecode(j, { base: 'FlareSolverResponse', args: [], nullable: false }, '$');
+    return j;
+  };
+  // Solved: the browser's clearance comes back as it is.
+  fake.handler = (r) => page(r.url, '<html>ok</html>', { cookies: [cookie('cf_clearance', 'clear-2', '.ext.test'), cookie('PHPSESSID', 'abc', 'ext.test')] });
+  let j = await decoded(REQ.suwayomiGetWithCookies);
+  assert.equal(j.message, 'Challenge solved!');
+  assert.ok(v24Counts(j), 'a solved challenge that v2.4 does not count');
+  const cf = j.solution.cookies.find((c: any) => c.name === 'cf_clearance');
+  assert.deepEqual([cf.value, cf.domain.replace(/^\./, '')], ['clear-2', 'ext.test']);
+  // Not detected this time, with an earlier solve's clearance still in the session's jar: v2.4 goes on with it.
+  fake.handler = (r) => page(r.url, '<html>ok</html>', { challenged: false, cookies: [cookie('cf_clearance', 'clear-2', '.ext.test')] });
+  j = await decoded(REQ.suwayomiGetNoCookies);
+  assert.equal(j.message, 'Challenge not detected!');
+  assert.ok(v24Counts(j), "an earlier solve's clearance is not handed back");
+  // No clearance in the jar: v2.3 took the 200 for a solve, v2.4 does not -- and the solver adds nothing of its own.
+  fake.handler = (r) => page(r.url, '<html>ok</html>', { cookies: [cookie('__cf_bm', 'bm-1', '.ext.test')] });
+  j = await decoded(REQ.suwayomiPost);
+  assert.deepEqual(j.solution.cookies.map((c: any) => c.name), ['__cf_bm'], 'the solver added or dropped a cookie');
+  assert.deepEqual([v23Counts(j), v24Counts(j)], [true, false]);
 });
 
 test('solution.status stays 200 whatever the origin said; the truth is in X-Origin-Status', async () => {

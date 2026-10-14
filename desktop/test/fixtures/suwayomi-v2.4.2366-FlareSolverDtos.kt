@@ -1,5 +1,5 @@
-// Verbatim: Suwayomi-Server v2.3.2243 CloudflareInterceptor.kt lines 134-186 (the request/response DTOs)
-// https://raw.githubusercontent.com/Suwayomi/Suwayomi-Server/v2.3.2243/server/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/CloudflareInterceptor.kt
+// Verbatim: Suwayomi-Server v2.4.2366 CloudflareInterceptor.kt lines 256-308 (the request/response DTOs)
+// https://raw.githubusercontent.com/Suwayomi/Suwayomi-Server/v2.4.2366/server/src/main/kotlin/eu/kanade/tachiyomi/network/interceptor/CloudflareInterceptor.kt
 // Parsed with Json { ignoreUnknownKeys = true; explicitNulls = false } (AppModule.kt:55-60 at the same tag).
     @Serializable
     data class FlareSolverCookie(

@@ -17,7 +17,7 @@ app.on('window-all-closed', () => { /* keep running */ });
 app.dock?.hide();
 
 const TOKEN = 'e1ec7e0e1ec7e0e1ec7e0e1ec7e0e1ec';
-const hits: Array<{ method: string; path: string; ct?: string; len: number; cookie?: string }> = [];
+const hits: Array<{ method: string; path: string; ct?: string; len: number; body: Buffer; cookie?: string }> = [];
 let clickLog: Array<{ trusted: boolean; x: number; y: number }> = [];
 let oopifHit = false;
 
@@ -29,7 +29,7 @@ function fixture(): Promise<http.Server> {
     req.on('end', () => {
       const body = Buffer.concat(chunks);
       const path = (req.url || '/').split('?')[0];
-      hits.push({ method: req.method!, path, ct: req.headers['content-type'], len: body.length, cookie: req.headers.cookie });
+      hits.push({ method: req.method!, path, ct: req.headers['content-type'], len: body.length, body, cookie: req.headers.cookie });
       const cookies = String(req.headers.cookie || '');
       const html = (status: number, title: string, bodyHtml: string, headers: Record<string, string> = {}) => {
         res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', ...headers });
@@ -162,11 +162,14 @@ app.whenReady().then(async () => {
     assert.match(r.j.solution.response, /POST application\/x-www-form-urlencoded 0 \[\]/);
   });
 
-  await check('POST with a form body arrives byte-for-byte', async () => {
-    hits.length = 0;
-    await solve({ cmd: 'request.post', url: `${S}/echo`, postData: 'action=manga_get_chapters&manga=123' });
-    const h = hits.find((x) => x.path === '/echo')!;
-    assert.equal(h.len, 'action=manga_get_chapters&manga=123'.length);
+  await check('POST bodies arrive byte-for-byte: a form, and what Suwayomi v2.4 sends too (JSON, UTF-8)', async () => {
+    // v2.4.2366 forwards every POST body, not only a form (solver.contract.test.ts); the site must receive exactly it.
+    for (const postData of ['action=manga_get_chapters&manga=123', '{"query":"café & 名前","page":2,"filters":{"genre":["action"]}}', 'q=Jösé 名前 ✓&x=a+b']) {
+      hits.length = 0;
+      await solve({ cmd: 'request.post', url: `${S}/echo`, postData });
+      const h = hits.find((x) => x.path === '/echo')!;
+      assert.ok(h.body.equals(Buffer.from(postData, 'utf8')), `${JSON.stringify(postData)} arrived as ${JSON.stringify(h.body.toString())}`);
+    }
   });
 
   await check('a challenge that clears by JS timers solves in a HIDDEN window; cf_clearance returned', async () => {

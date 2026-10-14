@@ -1,4 +1,4 @@
-// The fake extension engine for bff tests: a real HTTP server on loopback that speaks Suwayomi-Server v2.3.2243's
+// The fake extension engine for bff tests: a real HTTP server on loopback that speaks the pinned Suwayomi-Server's
 // GraphQL and REST, refuses anything the real schema does not have, and can be switched down, slow or into an
 // extension failure. The engine itself lives in fakeSuwayomiEngine.mjs (dependency-free, so the browser rig
 // runs the same file); this module gives it types and the handful of handles tests reach for.
@@ -21,7 +21,7 @@ import {
 
 export { defaultSeed, catalogueSeed, catalogueExtensions, istreveliaPosts, webtoonsNumbers, f32, SOURCE_IDS, PKG, SEQUENTIAL_KEY, STAGES, MODES };
 
-/** The version of the engine whose schema the fake validates against: v2.3.2243, or SUWAYOMI_FAKE_SCHEMA's. */
+/** The version of the engine whose schema the fake validates against: the pinned one's, or SUWAYOMI_FAKE_SCHEMA's. */
 export const fakeEngineVersion = (): string => (loadSchema() as { engine: { version: string } }).engine.version;
 
 export type FakeMode = 'up' | 'down' | 'slow' | 'extension_error';
@@ -222,10 +222,17 @@ export interface FakeSuwayomiOptions {
   auth?: { username: string; password: string };
   /** Default 0: any free port. */
   port?: number;
+  /**
+   * Another engine's schema capture (test/fixtures/suwayomi-<version>-schema.json) for this one fake: it validates
+   * against it, answers that version, and dates a chapter that came with no date as that engine does. Default: the
+   * pinned engine's.
+   */
+  schemaFile?: string;
 }
 
 export async function startFakeSuwayomi(opts: FakeSuwayomiOptions = {}): Promise<FakeSuwayomi> {
-  const h = await startFakeEngine(opts);
+  const { schemaFile, ...rest } = opts;
+  const h = await startFakeEngine(schemaFile ? { ...rest, schema: loadSchema(schemaFile) } : rest);
   const e = h.engine;
   const find = <T>(v: T | undefined, what: string): T => {
     if (v === undefined) throw new Error(`the fake engine has no ${what}`);

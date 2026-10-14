@@ -63,7 +63,7 @@ test('bump.mjs moves every pin to the new engine, and the pin test passes on the
 
     const pins = await run(['--import', 'tsx', '--test', 'test/enginePins.test.ts'], { cwd: join(REPO, 'bff'), env: { ENGINE_PINS_REPO: dir } });
     assert.equal(pins.code, 0, `the pin test fails on the bumped copy:\n${pins.out}`);
-    assert.match(pins.out, /ℹ pass 7/, 'PREMISE: every pin test ran on the copy');
+    assert.match(pins.out, /ℹ pass 8/, 'PREMISE: every pin test ran on the copy');
 
     const at = (p: string) => readFileSync(join(dir, p), 'utf8');
     assert.match(at(PINS.pack), new RegExp(`name: 'Suwayomi-Server-${NEXT}-windows-x64\\.zip', sha256: '${'1'.repeat(64)}'`), "the pack's hashes are the release's own");

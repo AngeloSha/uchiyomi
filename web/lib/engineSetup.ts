@@ -76,7 +76,7 @@ export function defaultPlatform(s: Pick<EngineReport, 'platform'>): Platform {
 }
 
 /** The pinned engine. bff/test/enginePins.test.ts holds this equal to every other pin. */
-export const ENGINE_IMAGE = 'ghcr.io/suwayomi/suwayomi-server:v2.3.2243';
+export const ENGINE_IMAGE = 'ghcr.io/suwayomi/suwayomi-server:v2.4.2366';
 const RAW = 'https://raw.githubusercontent.com/AngeloSha/uchiyomi/main';
 
 /**

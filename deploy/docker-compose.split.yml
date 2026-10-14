@@ -159,10 +159,11 @@ services:
     networks: [uchiyomi_app]
 
   # Extension engine (Mihon/Tachiyomi extensions on the JVM). Browse and install them from Uchiyomi's own
-  # admin panel. Pinned rather than :stable because :stable is older than the extension API today's
-  # repository indexes require. It is a JVM and sits around 800MB of RAM.
+  # admin panel. Pinned rather than :stable: it upgrades its data one way when a newer version first starts, so the
+  # tag moves only with a release that says so (back up first: docs/extensions.md#updating-the-engine). It is a JVM and
+  # sits around 800MB of RAM.
   uchiyomi-suwayomi:
-    image: ghcr.io/suwayomi/suwayomi-server:v2.3.2243
+    image: ghcr.io/suwayomi/suwayomi-server:v2.4.2366
     container_name: uchiyomi-suwayomi
     # The switch. EXTENSION_ENGINE=0 in .env, then `docker compose up -d`: this container is not run, and the app
     # (which reads the same variable) treats extensions as off. Its data stays in the volume; delete the line and

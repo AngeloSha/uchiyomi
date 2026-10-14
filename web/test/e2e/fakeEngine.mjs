@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Dependency-free fake extension engine for the browser walks: Suwayomi-Server v2.3.2243's GraphQL and image
+// Dependency-free fake extension engine for the browser walks: the pinned Suwayomi-Server's GraphQL and image
 // paths, strict about its schema, with a switch for the states the app has to survive.
 //
 //   node web/test/e2e/fakeEngine.mjs --port 18190 [--mode up] [--host 0.0.0.0]

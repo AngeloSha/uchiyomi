@@ -16,6 +16,8 @@ import { healthLinks } from '../lib/healthLinks';
 
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
+/** The pinned engine, as bff/test/enginePins.test.ts holds every install mode to it (the desktop pin is the reference). */
+const PIN: string = JSON.parse(read('../desktop/src/engine-pin.json')).version;
 const code = (src: string): string =>
   src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
 
@@ -109,7 +111,7 @@ test('somewhere else: the shipped protections in one command, and what publishin
   assert.equal(steps[warn].command, undefined);
   const run = steps[0].command ?? '';
   for (const part of ['--memory=1536m', '-Xmx768m', 'AUTO_DOWNLOAD_CHAPTERS=false', 'DOWNLOAD_AS_CBZ=true', 'WEB_UI_ENABLED=false',
-    'FLARESOLVERR_ENABLED=true', '-v uchiyomi_suwayomi:/home/suwayomi/.local/share/Tachidesk', 'ghcr.io/suwayomi/suwayomi-server:v2.3.2243']) {
+    'FLARESOLVERR_ENABLED=true', '-v uchiyomi_suwayomi:/home/suwayomi/.local/share/Tachidesk', `ghcr.io/suwayomi/suwayomi-server:${PIN}`]) {
     assert.ok(run.includes(part), `the docker run lacks ${part}`);
   }
 });

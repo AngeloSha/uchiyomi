@@ -1,14 +1,14 @@
 # desktop/engine: the extension-engine pack
 
 Uchiyomi Desktop does not ship Suwayomi-Server in its installer. Admin → Extensions offers "Download the
-extension engine (about 200 MB)"; the app downloads the pack for its platform from the `engine-v2.3.2243`
-GitHub **prerelease**, checks it against the SHA-256 pinned in `../src/engine-pin.json` while it streams, unpacks
-it to `<data>/engine-runtime/v2.3.2243/` and runs it (`../src/engine.js`). Phase 0 spike S7 proved the recipe on
-Windows, macOS arm64 and macOS x64.
+extension engine (about 200 MB)"; the app downloads the pack for its platform from the `engine-<version>` GitHub
+**prerelease** that `../src/engine-pin.json` names (`engine-v2.4.2366` now), checks it against the SHA-256 pinned
+there while it streams, unpacks it to `<data>/engine-runtime/<version>/` and runs it (`../src/engine.js`). Phase 0
+spike S7 proved the recipe on Windows, macOS arm64 and macOS x64.
 
 | File | What it is |
 |---|---|
-| `pack.mjs` | downloads the pinned Suwayomi-Server v2.3.2243 release asset (SHA-256 pinned from its `Checksums.sha256`), keeps `jre/` + `bin/Suwayomi-Server.jar`, adds `bin/uchiyomi-shim.jar` + `engine.json`, writes `engine-pack-<platform>.zip` + `.sha256` + a sizes `.json`. Needs a JDK 21+ for the shim. |
+| `pack.mjs` | downloads the pinned Suwayomi-Server release asset (`SUWAYOMI`, moved by `scripts/engine/bump.mjs`) (SHA-256 pinned from its `Checksums.sha256`), keeps `jre/` + `bin/Suwayomi-Server.jar`, adds `bin/uchiyomi-shim.jar` + `engine.json`, writes `engine-pack-<platform>.zip` + `.sha256` + a sizes `.json`. Needs a JDK 21+ for the shim. |
 | `build-shim.mjs` | `javac --release 21` over `../engine-shim/*.java` → `uchiyomi-shim.jar` (reproducible `--date`). |
 | `run.mjs` | launches a pack exactly the way the app does, for manual runs. |
 | `lib/stubs.mjs` | a FlareSolverr stub and a fake Cloudflare site (manual runs). |

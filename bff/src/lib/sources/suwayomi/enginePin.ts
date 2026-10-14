@@ -11,7 +11,7 @@
 import { isBehind, parseVersion } from '../../githubRelease';
 
 /** The engine this Uchiyomi was tested with. bff/test/enginePins.test.ts holds it equal to the pin. */
-export const TESTED_ENGINE = 'v2.3.2243';
+export const TESTED_ENGINE = 'v2.4.2366';
 /**
  * The oldest engine this Uchiyomi still works with. Every GraphQL document it sends (operations.ts) is validated
  * against the schema of every engine from this one up (test/suwayomiOperations.test.ts), and an older one is told to

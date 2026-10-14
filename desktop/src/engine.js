@@ -169,6 +169,10 @@ class Engine extends EventEmitter {
     // The engine's own data (its H2 database, extensions): series are routed by its ids, so this is kept
     // forever and may be any path -- it reaches Java through the environment, never the command line.
     this.rootDir = o.L.engine;
+    // Which engine version last started on that data (keepDataBeforeUpgrade) -- in the data folder, so it travels with
+    // the data -- and the copies of its database kept before a new one did: beside it, where the engine never sees them.
+    this.markerFile = path.join(this.rootDir, 'uchiyomi-engine.json');
+    this.snapshotRoot = path.join(o.L.root, 'engine-snapshots');
     this.downloadDir = path.join(o.L.root, 'engine-download');
     this.logFile = path.join(o.L.logs, 'engine.log');
     /** @type {EngineStatus} */
@@ -201,6 +205,95 @@ class Engine extends EventEmitter {
 
   javaPath() {
     return path.join(this.runtimeDir, 'jre', 'bin', WIN ? 'java.exe' : 'java');
+  }
+
+  /**
+   * Engine versions installed beside the pinned one: what an app update that moved the pin leaves behind. Non-empty
+   * means this computer used extensions before, so the supervisor fetches the pinned engine by itself rather than
+   * wait for a click, and the old runtimes are deleted once the new one runs (removeOtherRuntimes).
+   * @returns {string[]}
+   */
+  otherRuntimes() {
+    let names = [];
+    try { names = fs.readdirSync(this.runtimeRoot); } catch { return []; }
+    return names.filter((n) => n !== this.pack.version && !n.includes('.partial-')
+      && fs.existsSync(path.join(this.runtimeRoot, n, 'engine.json'))).sort();
+  }
+
+  async removeOtherRuntimes() {
+    for (const v of this.otherRuntimes()) {
+      // Windows may hold a file of a runtime that just exited for a moment: retry, and never fail the install on it.
+      await fsp.rm(path.join(this.runtimeRoot, v), { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+        .then(() => this.log.info('engine: removed the runtime of an earlier engine version', { version: v }))
+        .catch((e) => this.log.warn('engine: could not remove an earlier runtime', { version: v, error: String(e) }));
+    }
+  }
+
+  /**
+   * Before a new engine version first opens the data, keep a copy of its database. Suwayomi migrates database.mv.db
+   * forward when a newer version starts on it -- one way: the older engine cannot read it again -- and this app moves
+   * its pinned engine with its own updates, so without this copy an update that went wrong would have no way back.
+   * The marker (writeMarker) says which version last started here; no database is a fresh install, nothing to keep.
+   * A copy already kept for this version stays as it is: a first start that failed half-way may have changed the
+   * database since. A copy that cannot be made stops the start, with a sentence: the old data is never migrated
+   * without one.
+   * @returns {Promise<string | null>} the folder the copy is in, or null when none was needed
+   */
+  async keepDataBeforeUpgrade() {
+    const version = this.pack.version;
+    const db = path.join(this.rootDir, 'database.mv.db');
+    const last = this.lastStarted();
+    if (last === version || !fs.existsSync(db)) return null;
+    const dir = path.join(this.snapshotRoot, `before-${version}`);
+    if (fs.existsSync(path.join(dir, 'database.mv.db'))) return dir;
+    const tmp = `${dir}.partial-${crypto.randomBytes(4).toString('hex')}`;
+    try {
+      await fsp.mkdir(tmp, { recursive: true });
+      await fsp.copyFile(db, path.join(tmp, 'database.mv.db'));
+      const conf = path.join(this.rootDir, 'server.conf');
+      if (fs.existsSync(conf)) await fsp.copyFile(conf, path.join(tmp, 'server.conf'));
+      // An install from before the marker existed: the runtime it leaves behind says which engine that was.
+      const from = last ?? this.otherRuntimes().pop() ?? null;
+      await fsp.writeFile(path.join(tmp, 'snapshot.json'), `${JSON.stringify({ before: version, from, at: new Date().toISOString(), bytes: fs.statSync(db).size }, null, 2)}\n`);
+      await fsp.rename(tmp, dir);
+    } catch (e) {
+      await fsp.rm(tmp, { recursive: true, force: true }).catch(() => {});
+      const why = /** @type {any} */ (e)?.code || String(/** @type {any} */ (e)?.message || e);
+      throw new Error(`Uchiyomi could not keep a copy of the extension engine's database before updating it (${why}), so the update was not started and nothing changed. Free some disk space, then try again.`);
+    }
+    this.log.info('engine: kept a copy of its database before a new version starts on it', { version, dir });
+    await this.pruneSnapshots();
+    return dir;
+  }
+
+  /** The two newest copies are kept: the one before this version, and the one before that. */
+  async pruneSnapshots(keep = 2) {
+    let names = [];
+    try { names = await fsp.readdir(this.snapshotRoot); } catch { return; }
+    const at = (n) => { try { return fs.statSync(path.join(this.snapshotRoot, n)).mtimeMs; } catch { return 0; } };
+    const done = names.filter((n) => n.startsWith('before-') && !n.includes('.partial-')).sort((a, b) => at(b) - at(a));
+    for (const n of [...done.slice(keep), ...names.filter((x) => x.includes('.partial-'))]) {
+      await fsp.rm(path.join(this.snapshotRoot, n), { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
+  /** The engine version that last started on this data, or null (a fresh install, or one from before the marker). */
+  lastStarted() {
+    try {
+      const v = JSON.parse(fs.readFileSync(this.markerFile, 'utf8')).version;
+      return typeof v === 'string' ? v : null;
+    } catch {
+      return null;
+    }
+  }
+
+  writeMarker() {
+    try {
+      fs.writeFileSync(this.markerFile, `${JSON.stringify({ version: this.pack.version, at: new Date().toISOString() }, null, 2)}\n`);
+    } catch (e) {
+      // Only costs a second copy at the next start, which keepDataBeforeUpgrade skips anyway (one is kept already).
+      this.log.warn('engine: could not record which version started on its data', { error: String(e) });
+    }
   }
 
   /**
@@ -245,6 +338,8 @@ class Engine extends EventEmitter {
     this.crashes = [];
     await this.start();
     this.log.info('engine: installed and running', { version: pack.version, runtime: this.runtimeDir });
+    // An earlier version's runtime (200-400 MB) has no use once this one runs on the data: it cannot read it again.
+    await this.removeOtherRuntimes();
     // The supervisor restarts the bff once on this (contract 5).
     this.emit('installed');
   }
@@ -367,6 +462,14 @@ class Engine extends EventEmitter {
     this.stopping = false;
     await fsp.mkdir(this.rootDir, { recursive: true });
     await fsp.mkdir(this.tmpDir, { recursive: true });
+    try {
+      await this.keepDataBeforeUpgrade();
+    } catch (e) {
+      const msg = String(/** @type {any} */ (e)?.message || e);
+      this.log.error('engine: not started', { error: msg });
+      this.set({ state: 'failed', error: msg });
+      throw new Error(msg);
+    }
     const { user, pass } = this.o.creds();
     const port = this.o.port();
     const l = buildLaunch({ runtimeDir: this.runtimeDir, rootDir: this.rootDir, tmpDir: this.tmpDir, port, fsUrl: this.o.solverUrl(), user, pass });
@@ -402,6 +505,8 @@ class Engine extends EventEmitter {
       if (await probeReady(port)) {
         ready = true;
         this.log.info(`engine: ready in ${Date.now() - t0} ms`, { port });
+        // Answering means it has opened (and migrated) the data: from now on it is this version's.
+        if (this.lastStarted() !== this.pack.version) this.writeMarker();
         this.set({ state: 'running' });
         return;
       }

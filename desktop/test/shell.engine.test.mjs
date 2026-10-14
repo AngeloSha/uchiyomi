@@ -227,3 +227,83 @@ test('a crash after it was running is restarted; one that dies while starting is
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('a new engine version keeps a copy of the database before it first starts on it, once, and the old runtime goes', { skip: !POSIX }, async () => {
+  // Suwayomi migrates database.mv.db forward when a newer version starts on it, and the older one cannot read it again.
+  // Reintroduce by dropping keepDataBeforeUpgrade() from doStart: "no copy was kept" fails. Overwrite a copy that is
+  // already there: "a later start replaced the copy" fails.
+  let e, L;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'uchi-engine-'));
+  const pack = await fakePack(tmp);
+  try {
+    process.env.FAKE_ENGINE_MIGRATE = '1';
+    ({ e, L } = await makeEngine(tmp, { url: pack.url, sha256: pack.sha256 }));
+    // What an app update that moved the pin finds: the data an older engine wrote, and that engine's runtime.
+    fs.mkdirSync(L.engine, { recursive: true });
+    fs.writeFileSync(path.join(L.engine, 'database.mv.db'), 'written by vold');
+    fs.writeFileSync(path.join(L.engine, 'server.conf'), 'server.port = 4567');
+    fs.mkdirSync(path.join(e.runtimeRoot, 'vold'), { recursive: true });
+    fs.writeFileSync(path.join(e.runtimeRoot, 'vold', 'engine.json'), '{"version":"vold"}');
+    assert.deepEqual(e.otherRuntimes(), ['vold'], 'PREMISE: an earlier engine is installed');
+
+    await e.install();
+    const kept = path.join(L.root, 'engine-snapshots', 'before-vtest');
+    assert.ok(fs.existsSync(path.join(kept, 'database.mv.db')), 'no copy was kept');
+    assert.equal(fs.readFileSync(path.join(kept, 'database.mv.db'), 'utf8'), 'written by vold', 'the copy is not of the database as it was');
+    assert.equal(fs.readFileSync(path.join(L.engine, 'database.mv.db'), 'utf8'), 'written by vold migrated', 'PREMISE: the new engine migrated it');
+    assert.equal(fs.readFileSync(path.join(kept, 'server.conf'), 'utf8'), 'server.port = 4567');
+    const about = JSON.parse(fs.readFileSync(path.join(kept, 'snapshot.json'), 'utf8'));
+    assert.deepEqual([about.before, about.from], ['vtest', 'vold'], 'the copy says which engine wrote it');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(L.engine, 'uchiyomi-engine.json'), 'utf8')).version, 'vtest');
+    assert.equal(fs.existsSync(path.join(e.runtimeRoot, 'vold')), false, 'the earlier runtime is left behind');
+    assert.deepEqual(fs.readdirSync(path.join(L.root, 'engine-snapshots')), ['before-vtest'], 'a partial copy is left behind');
+
+    // The same version again: nothing more to keep.
+    await e.stop();
+    await e.start();
+    assert.equal(fs.readFileSync(path.join(kept, 'database.mv.db'), 'utf8'), 'written by vold');
+    // A first start that failed after migrating left no marker: the copy from before it stays as it was.
+    await e.stop();
+    fs.rmSync(path.join(L.engine, 'uchiyomi-engine.json'));
+    await e.start();
+    assert.equal(fs.readFileSync(path.join(kept, 'database.mv.db'), 'utf8'), 'written by vold', 'a later start replaced the copy');
+  } finally {
+    await e?.stop();
+    delete process.env.FAKE_ENGINE_MIGRATE;
+    pack.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('a fresh install keeps no copy; a copy that cannot be made stops the start before the engine touches the data', { skip: !POSIX }, async () => {
+  // Reintroduce by logging the failed copy and starting anyway (catch and continue in doStart): the install no longer
+  // fails ("Missing expected rejection"), and the engine migrates the data with no copy kept.
+  let e, d;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'uchi-engine-'));
+  const pack = await fakePack(tmp);
+  try {
+    process.env.FAKE_ENGINE_MIGRATE = '1';
+    let L;
+    ({ e, L } = await makeEngine(tmp, { url: pack.url, sha256: pack.sha256 }));
+    await e.install();
+    assert.equal(fs.existsSync(path.join(L.root, 'engine-snapshots')), false, 'a fresh install has nothing to keep');
+    await e.stop();
+
+    d = await makeEngine(fs.mkdtempSync(path.join(tmp, 'b-')), { url: pack.url, sha256: pack.sha256 });
+    fs.mkdirSync(d.L.engine, { recursive: true });
+    fs.writeFileSync(path.join(d.L.engine, 'database.mv.db'), 'written by vold');
+    fs.writeFileSync(path.join(d.L.root, 'engine-snapshots'), 'a file where the folder goes'); // so the copy fails
+    await assert.rejects(() => d.e.install(), /could not keep a copy of the extension engine's database before updating it \(\w+\), so the update was not started/);
+    assert.equal(d.e.status().state, 'failed');
+    assert.match(d.e.status().error, /Free some disk space/);
+    assert.equal(d.e.child, null);
+    assert.equal(fs.readFileSync(path.join(d.L.engine, 'database.mv.db'), 'utf8'), 'written by vold', 'migrated without a copy');
+    assert.equal(fs.existsSync(path.join(d.L.engine, 'uchiyomi-engine.json')), false);
+  } finally {
+    await e?.stop();
+    await d?.e?.stop();
+    delete process.env.FAKE_ENGINE_MIGRATE;
+    pack.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

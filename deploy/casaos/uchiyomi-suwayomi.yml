@@ -12,7 +12,9 @@
 #   4. In Uchiyomi's settings, set SUWAYOMI_URL to http://uchiyomi-suwayomi:4567 and save.
 #
 # The service is the same as the uchiyomi-suwayomi service in deploy/docker-compose.yml, and pinned to the same
-# engine (bff/test/enginePins.test.ts keeps every pin equal). To remove it, uninstall it and empty SUWAYOMI_URL.
+# engine (bff/test/enginePins.test.ts keeps every pin equal). A release that moves the pin says so: the engine upgrades
+# its data one way, so back the folder up before changing the image (docs/extensions.md#updating-the-engine).
+# To remove it, uninstall it and empty SUWAYOMI_URL.
 # Keep /DATA/AppData/uchiyomi-suwayomi if you might come back: it holds the links for every series added through
 # an extension, and Uchiyomi's nightly backup does not include it.
 name: uchiyomi-suwayomi
@@ -21,7 +23,7 @@ services:
   uchiyomi-suwayomi:
     container_name: uchiyomi-suwayomi
     hostname: uchiyomi-suwayomi
-    image: ghcr.io/suwayomi/suwayomi-server:v2.3.2243
+    image: ghcr.io/suwayomi/suwayomi-server:v2.4.2366
     # A JVM with no limit sizes its heap from the whole machine's memory. The heap cap is JAVA_TOOL_OPTIONS below;
     # this ceiling turns what the heap cap does not cover (metaspace, threads, native buffers) into a restart.
     mem_limit: 1536m

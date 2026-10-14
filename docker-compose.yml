@@ -211,12 +211,13 @@ services:
   # over an API; Uchiyomi keeps owning the library, reader, downloads and updates and only asks it for
   # search/chapters/pages. Browse and install extensions from Uchiyomi's own admin panel.
   #
-  # Pinned rather than :stable on purpose -- :stable is v2.2.2100, which is older than the extension API the
-  # current repository indexes require, so it sees an empty catalogue.
+  # Pinned rather than :stable on purpose: an engine upgrades its database one way when a newer version first starts
+  # on it, so the tag moves only with a release tested with the next one, in every install mode at once
+  # (bff/test/enginePins.test.ts, scripts/engine/bump.mjs). Updating, backup first: docs/extensions.md#updating-the-engine.
   # It is a JVM and sits around 800MB of RAM. Do not want it? EXTENSION_ENGINE=0 in .env, then
   # `docker compose up -d`.
   yomi-suwayomi:
-    image: ghcr.io/suwayomi/suwayomi-server:v2.3.2243
+    image: ghcr.io/suwayomi/suwayomi-server:v2.4.2366
     container_name: yomi-suwayomi
     # The switch. EXTENSION_ENGINE=0 in .env, then `docker compose up -d`: this container is not run, and the app
     # (which reads the same variable) treats extensions as off. Its data stays in the volume; delete the line and

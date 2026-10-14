@@ -6,14 +6,15 @@
 // (#72) holds only while every pin moves together -- and before this test nothing made them. The pin is written
 // in the four compose files, the CasaOS add-on, the Unraid engine template, the desktop app's pack builder and
 // the pin file it downloads by, and the desktop workflow's cache key; the fake engine's schema is captured from it,
-// and the server's own TESTED_ENGINE (enginePin.ts, what Health compares a running engine with) names it.
+// the desktop solver's contract decodes with its FlareSolverr DTOs, and the server's own TESTED_ENGINE (enginePin.ts,
+// what Health compares a running engine with) names it.
 //
 // The list is scripts/engine/pins.json, shared with scripts/engine/bump.mjs, which moves every one of them for a new
 // engine (the weekly canary runs it on a branch). The desktop pin file is the reference: it is what a desktop install
 // downloads, and a pack is published under the tag it names. Everything else is held equal to it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 
 // ENGINE_PINS_REPO: another checkout to hold to the same rules -- engineCanaryScripts.test.ts runs this file on a
@@ -34,7 +35,7 @@ const IMAGE_FILES: string[] = PINS.images;
 test('the shared pin list names files that exist, and every compose file that runs the engine', () => {
   // Reintroduce by dropping a compose file from scripts/engine/pins.json: this test stops checking it and bump.mjs stops
   // moving it, so that setup alone would run the old engine on data a newer one already migrated.
-  for (const f of [PINS.pin, PINS.pack, PINS.workflow, PINS.tested, PINS.fake, ...IMAGE_FILES]) assert.ok(existsSync(join(REPO, f)), `${f} is gone`);
+  for (const f of [PINS.pin, PINS.pack, PINS.workflow, PINS.tested, PINS.fake, PINS.solverDtos.dir, PINS.solverDtos.test, ...IMAGE_FILES]) assert.ok(existsSync(join(REPO, f)), `${f} is gone`);
   for (const f of ['deploy/docker-compose.yml', 'deploy/docker-compose.external-db.yml', 'deploy/docker-compose.split.yml', 'docker-compose.yml']) {
     assert.ok(IMAGE_FILES.includes(f), `${f} runs the engine and is not in scripts/engine/pins.json`);
   }
@@ -97,4 +98,21 @@ test("the server's TESTED_ENGINE is the pin", () => {
   assert.equal(tested, PIN, `${PINS.tested} says TESTED_ENGINE = ${tested}, but the pin is ${PIN}`);
   const oldest = read(PINS.tested).match(/export const OLDEST_ENGINE = '([^']+)'/)?.[1];
   assert.ok(oldest, 'OLDEST_ENGINE went missing');
+});
+
+test("the solver contract reads the pinned engine's FlareSolverr DTOs, and no other engine's", () => {
+  // The desktop solver answers Suwayomi in its FlareSolverr shapes, and desktop/test/solver.contract.test.ts decodes those
+  // answers as Suwayomi does: strictly, by the request/response classes copied verbatim from CloudflareInterceptor.kt
+  // at the pinned tag. Left at another engine's classes, the contract passes while the pinned engine refuses the
+  // answers. bump.mjs moves the copy with the pin; this holds it there. Reintroduce by pointing the contract test back
+  // at suwayomi-v2.3.2243-FlareSolverDtos.kt (and restoring that file): the first assertion names it.
+  const { dir, test: contract } = PINS.solverDtos;
+  const want = `suwayomi-${PIN}-FlareSolverDtos.kt`;
+  const named = [...new Set([...read(contract).matchAll(/'(suwayomi-[^']*-FlareSolverDtos\.kt)'/g)].map((m) => m[1]))];
+  assert.deepEqual(named, [want], `${contract} decodes with ${named.join(', ') || 'no DTO fixture'}, but the pin is ${PIN}`);
+  const kept = readdirSync(join(REPO, dir)).filter((f) => /^suwayomi-.*-FlareSolverDtos\.kt$/.test(f));
+  assert.deepEqual(kept, [want], `${dir} holds ${kept.join(', ')}: the pinned engine's DTOs, and no other engine's`);
+  const head = read(`${dir}/${want}`).split('\n', 1)[0];
+  assert.match(head, new RegExp(`^// Verbatim: Suwayomi-Server ${PIN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} CloudflareInterceptor\\.kt lines \\d+-\\d+ `),
+    `${want} does not say it is ${PIN}'s CloudflareInterceptor.kt, verbatim`);
 });

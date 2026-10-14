@@ -11,6 +11,7 @@
 // than garbage entries, because an adapter that invents series and chapters would quietly poison a library.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { join } from 'path';
 
 process.env.SUWAYOMI_URL ||= 'http://suwayomi.test:4567';
 process.env.JWT_SECRET ||= 'test-secret-at-least-16-chars';
@@ -364,16 +365,24 @@ test('a date in seconds is read as one; milliseconds are unchanged; junk is no d
   assert.deepEqual((await a.listChapters('7')).map((c) => c.publishedAt), ['2026-10-14T13:30:15.000Z', '2024-01-01T00:00:00.000Z']);
 });
 
-test('against the pinned engine: a chapter the extension gave no date arrives dated now, not 1970', async () => {
-  // The fake stamps it the way v2.3.2243 does, in seconds. Reintroduce by dropping uploadedAt's `* 1000`: the chapter
-  // has no date (the 2000 floor drops the misread one; without it, 1970-01-21).
+// The pinned v2.4.2366 stamps such a chapter in milliseconds; v2.3.2243 -- still supported (OLDEST_ENGINE), and what an
+// install that has not moved its engine yet runs -- in seconds, so both are held here. Reintroduce by dropping
+// uploadedAt's `* 1000`: the v2.3.2243 run's chapter has no date (the 2000 floor drops the misread one; without it,
+// 1970-01-21).
+for (const [engine, schemaFile] of [
+  ['the pinned engine', undefined],
+  ['v2.3.2243, the oldest supported', join(__dirname, 'fixtures', 'suwayomi-v2.3.2243-schema.json')],
+] as const) test(`against ${engine}: a chapter the extension gave no date arrives dated now, not 1970`, async () => {
   const { startFakeSuwayomi, SOURCE_IDS } = await import('./fixtures/fakeSuwayomi');
   const { makeSuwayomiAdapter } = await load();
-  const fake = await startFakeSuwayomi();
+  const fake = await startFakeSuwayomi({ schemaFile });
   try {
+    let stamped: string | undefined; // chapter 5's date as the engine sent it
     const run = (async (query: string, variables: Record<string, unknown> = {}) => {
       const r = await fake.query(query, variables);
       if (r.errors?.length) throw new Error(`suwayomi: ${r.errors[0].message}`);
+      const rows: any[] = (r.data as any)?.fetchMangaAndChapters?.chapters ?? [];
+      stamped = rows.find((c) => Number(c.chapterNumber) === 5)?.uploadDate ?? stamped;
       return r.data;
     }) as never;
     const ball = fake.manga('Ball Runner');
@@ -382,6 +391,7 @@ test('against the pinned engine: a chapter the extension gave no date arrives da
     ball.chapters.unshift({ name: 'Chapter 5', url: '/title/ball-runner/5', chapterNumber: 5, scanlator: 'Ball Team', uploadDate: 0 });
     const t0 = Date.now() - 1000;
     const five = (await a.listChapters(String(ball.id))).find((c) => c.number === 5)!;
+    assert.equal(Number(stamped) < 1e11, schemaFile !== undefined, `PREMISE: ${engine} stamps it in ${schemaFile ? 'seconds' : 'milliseconds'} (${stamped})`);
     assert.ok(Date.parse(five.publishedAt!) >= t0 && Date.parse(five.publishedAt!) <= Date.now() + 1000, `dated now: ${five.publishedAt}`);
   } finally {
     await fake.close();

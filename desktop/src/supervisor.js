@@ -181,6 +181,12 @@ class Supervisor extends EventEmitter {
     // Installed: start it alongside, never wait for it -- the bff retries the engine for minutes on its own.
     if (this.engine.installed()) {
       this.engine.start().catch((e) => log.warn('engine: did not start', { error: String(e) }));
+    } else if (this.engine.otherRuntimes?.().length) {
+      // An app update moved the pinned engine, and this computer had the old one: its extensions were in use, so fetch
+      // the new engine now rather than leave them stopped until someone finds the download button again. Its first
+      // start keeps a copy of the engine's database before migrating it (engine.js keepDataBeforeUpgrade).
+      log.info('engine: this version pins another extension engine; downloading it', { pinned: this.o.enginePack?.version, had: this.engine.otherRuntimes() });
+      this.engine.install().catch((e) => log.warn('engine: the new engine did not install', { error: String(e) }));
     }
 
     this.watchPostgres();

@@ -129,9 +129,11 @@ services:
     expose:
       - "8191"
 
-  # Optional: Mihon/Tachiyomi extensions. EXTENSION_ENGINE=0 in .env drops it (see the header).
+  # Optional: Mihon/Tachiyomi extensions. EXTENSION_ENGINE=0 in .env drops it (see the header). The tag is pinned and
+  # moves only with a release that says so; the engine upgrades its data one way, so back it up first
+  # (docs/extensions.md#updating-the-engine).
   uchiyomi-suwayomi:
-    image: ghcr.io/suwayomi/suwayomi-server:v2.3.2243
+    image: ghcr.io/suwayomi/suwayomi-server:v2.4.2366
     container_name: uchiyomi-suwayomi
     # The switch. EXTENSION_ENGINE=0 in .env, then `docker compose up -d`: this container is not run, and the app
     # (which reads the same variable) treats extensions as off. Its data stays in the volume; delete the line and

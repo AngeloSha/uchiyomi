@@ -13,8 +13,11 @@ process.env.CONFIG_DIR ||= '/tmp/uchiyomi-test-config';
 
 const OURS = 'http://uchiyomi-flaresolverr:8191';
 type Deps = import('../src/lib/engineHealth').EngineCheckDeps;
+// The sentences below are written against v2.3.2243 as both the tested and the oldest engine, given here rather than
+// read from enginePin.ts: moving the pin (scripts/engine/bump.mjs) must not rewrite every expectation in this file. The
+// shipped pins have a test of their own, the last one.
 const base = (over: Partial<Deps>): Deps => ({
-  state: 'up', linked: 0, desktop: false, ourSolver: OURS, version: '2.3.2243', error: null,
+  state: 'up', linked: 0, desktop: false, ourSolver: OURS, version: '2.3.2243', error: null, tested: 'v2.3.2243', oldest: 'v2.3.2243',
   solver: { supported: true, enabled: true, url: OURS }, retry: null, cloudflare: [], ...over,
 });
 const findings = (c: { items: Array<{ info?: boolean }> }) => c.items.filter((i) => !i.info);
@@ -346,11 +349,33 @@ test('the version row: only when it is not the tested one; too old is a finding,
   const older = extensionEngine(base({ version: 'v2.3.2000', oldest: 'v2.3.0', platform: 'unraid' }))!;
   const ov = older.items.find((i) => i.title === 'Engine version')!;
   assert.equal(ov.info, true);
-  assert.match(ov.detail, /^v2\.3\.2000 is older than the version this Uchiyomi was tested with \(v2\.3\.2243\)\. It works; updating it is recommended\. On the Docker tab/);
+  assert.match(ov.detail, /^v2\.3\.2000 is older than the version this Uchiyomi was tested with \(v2\.3\.2243\)\. It works; updating it is recommended\. Back up the engine’s data first: the engine upgrades its database when it starts, and an older engine cannot read it again\. On the Docker tab/,
+    'the step to a one-way update starts with a backup');
   const tooOld = extensionEngine(base({ version: 'v2.2.2100', platform: 'compose' }))!;
   assert.equal(tooOld.status, 'warn', 'too old is a finding');
   const tv = findings(tooOld).find((i) => i.title === 'Engine version')!;
-  assert.match(tv.detail, /^v2\.2\.2100 is older than the oldest version this Uchiyomi works with \(v2\.3\.2243\)\. In docker-compose\.yml/);
+  assert.match(tv.detail, /^v2\.2\.2100 is older than the oldest version this Uchiyomi works with \(v2\.3\.2243\)\. Back up the engine’s data first: [^.]+\. In docker-compose\.yml/);
+  // The desktop app keeps a copy of the engine's database itself before a new engine first starts: no backup to make.
+  const desktopOld = extensionEngine(base({ version: 'v2.3.2000', oldest: 'v2.3.0', platform: 'desktop', desktop: true }))!;
+  assert.doesNotMatch(desktopOld.items.find((i) => i.title === 'Engine version')!.detail, /Back up/, 'a desktop is told to back up what the app keeps itself');
   // A version that is not vX.Y.Z says nothing.
   assert.ok(!extensionEngine(base({ version: 'preview-build' }))!.items.some((i) => i.title === 'Engine version'));
+});
+
+/**
+ * The pin moved from v2.3.2243 to v2.4.2366 with v2.3.2243 still supported. An install whose engine has not moved yet --
+ * an Unraid or CasaOS container keeps the image it was created with, and so does a compose file edited by hand -- is
+ * told quietly that an update is recommended: never "too old", never Not compatible. Reintroduce by moving OLDEST_ENGINE
+ * to v2.4.2366: "an engine on the previous pin turns Health amber" fails, as it would on every such install.
+ */
+test('with the shipped pins, the pinned engine has no version row and the previous pin a greyed "updating is recommended"', async () => {
+  const { extensionEngine } = await import('../src/lib/engineHealth');
+  const { TESTED_ENGINE } = await import('../src/lib/sources/suwayomi/enginePin');
+  const shipped = (version: string) => extensionEngine({ ...base({ version, platform: 'compose' }), tested: undefined, oldest: undefined })!;
+  assert.ok(!shipped(TESTED_ENGINE).items.some((i) => i.title === 'Engine version'), 'the pinned engine has a version row');
+  const previous = shipped('v2.3.2243');
+  assert.equal(previous.status, 'ok', 'an engine on the previous pin turns Health amber');
+  const row = previous.items.find((i) => i.title === 'Engine version')!;
+  assert.equal(row.info, true);
+  assert.match(row.detail, new RegExp(`^v2\\.3\\.2243 is older than the version this Uchiyomi was tested with \\(${TESTED_ENGINE.replace(/\./g, '\\.')}\\)\\. It works; updating it is recommended\\. Back up the engine’s data first: [^.]+\\. In docker-compose\\.yml`));
 });

@@ -400,6 +400,14 @@ The same in both modes:
 
 A new version may need **Open Anyway** once more on a Mac ([section 2](#macos-15-sequoia-and-newer)).
 
+**The extension engine updates with the app.** When a new version of Uchiyomi moves to a newer extension engine (as
+v0.69.0 did, to v2.4.2366), a computer that had the engine fetches the new one by itself (about 200 MB) the next
+time Uchiyomi starts: *Downloading the extension engine…* shows at the top of **Admin → Sources** meanwhile. Before
+the new engine first opens its data it upgrades that data for good, so Uchiyomi first keeps a copy of the engine's
+database in `engine-snapshots/` ([section 7](#7-where-your-files-live); going back:
+[extensions.md](extensions.md#uchiyomi-desktop)). If it cannot — a full disk — the new engine is not started, and the
+card says why.
+
 ## 6. Backups and restoring them
 
 *On this computer only* — a server backs itself up, as described in the [user guide](USAGE.md#12-backups--restore).
@@ -446,7 +454,8 @@ The data folder holds:
 - `db/pg16/` — the database (a bundled PostgreSQL 16, the same major version as the Docker image);
 - `cache/`, `sources/`, and `library/` (an empty read library; see *Hidden settings* below);
 - `engine/` — the extension engine's own data, kept for good (its series ids live here); `engine-runtime/` and
-  `engine-tmp/` — the engine itself;
+  `engine-tmp/` — the engine itself; `engine-snapshots/` — a copy of the engine's database from before each of the
+  last two engine updates;
 - `logs/` — `desktop.log`, `bff.log` (the server), `postgres.log`, `engine.log`;
 - `electron/` — the window's own browser profile: in server mode, your sign-in and offline chapters for each
   server;

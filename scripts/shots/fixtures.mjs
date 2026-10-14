@@ -75,7 +75,7 @@ export function extensionFixture(state) {
     const route = path.slice('/api/admin/extensions/'.length);
     if (route === 'status') {
       return { json: {
-        configured: true, reachable: true, version: 'v2.3.2243', enabled: sources().length, known: sources().length, registered: sources().length,
+        configured: true, reachable: true, version: 'v2.4.2366', enabled: sources().length, known: sources().length, registered: sources().length,
         skipped: 0, cap: 25, hiddenLangs: [], solver: { supported: true, enabled: true, wiring: 'ok', connectable: true },
       } };
     }

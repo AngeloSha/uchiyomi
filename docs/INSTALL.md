@@ -152,6 +152,11 @@ you first installed, indefinitely, with nothing to tell you. Watch
 Upgrading in place is safe: accounts, reading progress, downloads and settings live in named volumes, and the
 database migrates itself on boot.
 
+The extension engine (`uchiyomi-suwayomi`) is the exception: its image is pinned to the version a release was tested
+with, so `pull` fetches the same one again. When a release moves it (its notes say so, and so does **Admin → Health**),
+change that one `image:` line yourself, after backing up the engine's data:
+[Updating the engine](extensions.md#updating-the-engine).
+
 > The two upgrade warnings that used to sit here — empty backups on v0.9.0/v0.9.1, and volume ownership
 > before v0.5.1 — are long past. They are in the [changelog](../CHANGELOG.md) with the same detail, which is
 > where release history belongs.

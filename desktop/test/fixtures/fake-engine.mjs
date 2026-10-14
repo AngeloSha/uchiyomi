@@ -5,8 +5,11 @@
 //   FAKE_ENGINE_MODE=hang   never listens (the ClassGraph trap: alive, never answering)
 //   FAKE_ENGINE_MODE=die    exits 1 at once
 //   FAKE_ENGINE_MODE=crash-once  answers, then exits 3 after 300 ms, but only the first time ($FAKE_ENGINE_REPORT.crashed marks it)
+//   FAKE_ENGINE_MIGRATE=1   appends " migrated" to <root dir>/database.mv.db, if there is one, before it answers -- as a
+//                           newer Suwayomi migrates the H2 database it is started on
 import http from 'node:http';
 import fs from 'node:fs';
+import path from 'node:path';
 
 const mode = process.env.FAKE_ENGINE_MODE || 'ok';
 const port = Number((process.argv.find((a) => a.startsWith('-Dsuwayomi.tachidesk.config.server.port=')) || '').split('=')[1]);
@@ -14,6 +17,8 @@ const report = process.env.FAKE_ENGINE_REPORT;
 if (report) {
   fs.writeFileSync(report, JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), env: Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(UCHIYOMI_|TEMP$|TMP$|TMPDIR$|JAVA_TOOL_OPTIONS$|PG)/.test(k))) }));
 }
+const db = path.join(process.env.UCHIYOMI_ENGINE_ROOT_DIR || '.', 'database.mv.db');
+if (process.env.FAKE_ENGINE_MIGRATE && fs.existsSync(db)) fs.appendFileSync(db, ' migrated');
 process.stdin.on('end', () => process.exit(0));
 process.stdin.resume();
 if (mode === 'die') process.exit(1);

@@ -16,7 +16,7 @@ were two; `?tab=Extensions` leads there.)
 - [Choose your extensions](#choose-your-extensions) · [An extension's own settings](#an-extensions-own-settings)
 - [Automatic updates](#automatic-updates) · [Why there is a second container](#why-there-is-a-second-container) ·
   [How it behaves](#how-it-behaves) · [Turning it off](#turning-it-off) · [Your engine's data](#your-engines-data) ·
-  [Settings](#settings)
+  [Updating the engine](#updating-the-engine) · [Settings](#settings)
 - [Komga-compatible API](#komga-compatible-api) (Mihon reading Uchiyomi, the other direction)
 
 ## What you need first: the extension engine
@@ -34,7 +34,7 @@ Where it comes from depends on how you run Uchiyomi:
 | **Umbrel** | Not available. An Umbrel app cannot offer an optional second container, and putting the engine in the package would cost every Umbrel install about 800 MB whether it uses extensions or not. MangaDex and sites you add by address work there as everywhere. |
 
 When the engine is there, the top of **Admin → Sources** is a slim strip of two cells (since v0.53.0): **Extension
-engine** — *Ready*, with its version and how many sources are on under it (*v2.3.2243 · 12 of 25 sources on*) — and
+engine** — *Ready*, with its version and how many sources are on under it (*v2.4.2366 · 12 of 25 sources on*) — and
 **Cloudflare helper**: *Connected*, or *Not connected* with **Connect** ([how it behaves](#how-it-behaves)). The engine's
 **⋯** holds **Turning it off** ([below](#turning-it-off)); on a phone the two cells stack.
 When it is not, a **setup card** stands there instead (since v0.49.0; until v0.54.0 it was the whole tab — the
@@ -200,7 +200,7 @@ shown again, and the Health page names them. A switch in an extension's sheet is
 this standing choice alone; the sheet marks a language you hid here *Hidden in every extension*.
 
 **Only 25 extension sources can be switched on at once** (`SUWAYOMI_MAX_SOURCES`, 25 by default), because every
-one of them is searched together. The engine's strip counts them (*v2.3.2243 · 12 of 25 sources on*); when more are
+one of them is searched together. The engine's strip counts them (*v2.4.2366 · 12 of 25 sources on*); when more are
 switched on than that, the count turns amber, a line under the strip says how many were left out and how to get under
 the limit, and **Content → Health** lists them under *Extension source limit*. Hiding languages is the cheap way under it. On a Docker install, raising `SUWAYOMI_MAX_SOURCES` is the other;
 the desktop app has no setting for it. Since v0.55.0 the sources your series read through (as their main source or one
@@ -421,6 +421,99 @@ On Unraid and CasaOS, copy the folder above the same way, with the engine stoppe
 **Turning it off** says how many series depend on it, and warns you never to delete it: turning the engine off is safe, deleting its data is
 not. Moving it between setups is in [MIGRATING.md](MIGRATING.md#adding-or-removing-the-extension-engine).
 
+## Updating the engine
+
+The engine is **pinned**: every file Uchiyomi ships names one version of it, the one the release was tested with —
+**v2.4.2366** since v0.69.0, v2.3.2243 before — and a pinned tag never moves by itself. `docker compose pull`,
+Watchtower and Unraid's update check all fetch the same version again; only the extensions inside it update
+themselves ([Automatic updates](#automatic-updates)).
+
+When a release moves the pin, its notes say so, and **Admin → Health** tells a server still on the old one: the
+*Extension engine* row adds *v2.3.2243 is older than the version this Uchiyomi was tested with (v2.4.2366). It works;
+updating it is recommended*, then the backup and the step for your platform. There is no hurry: this Uchiyomi works
+with every engine from v2.3.2243 up, and only one older than that is a warning.
+
+⚠️ **Updating is one way.** The engine upgrades its database the first time a newer version starts on it, and the
+older version cannot read it again. Back up first, keep the backup until you are happy, and go back only by restoring
+it.
+
+### Docker Compose
+
+1. Stop the engine and back its data up, through the stopped container's own mount ([why](#your-engines-data)):
+
+   ```bash
+   docker compose stop uchiyomi-suwayomi
+   docker run --rm --volumes-from uchiyomi-suwayomi -v "$PWD":/b alpine tar czf /b/engine-v2.3.2243.tgz -C /home/suwayomi/.local/share/Tachidesk .
+   ```
+
+2. In `docker-compose.yml`, change only the engine's `image:` line, to `ghcr.io/suwayomi/suwayomi-server:v2.4.2366` —
+   or take the release's new file, if you never edited yours.
+3. `docker compose up -d uchiyomi-suwayomi`: it pulls the new image and upgrades its database on the way up (a
+   minute or two).
+4. Check: in **Admin → Health**, *Extension engine* reads *Ready … (v2.4.2366)* with no version row under it, and
+   **Admin → Sources** lists the extensions and repositories you had. Search one extension source.
+
+**Going back** takes the backup from step 1. It empties the volume, restores the copy with its owner (uid 1000, the
+engine's user) and nothing else:
+
+```bash
+docker compose stop uchiyomi-suwayomi
+docker run --rm --volumes-from uchiyomi-suwayomi -v "$PWD":/b alpine sh -c 'find /home/suwayomi/.local/share/Tachidesk -mindepth 1 -delete && tar xzf /b/engine-v2.3.2243.tgz -C /home/suwayomi/.local/share/Tachidesk'
+```
+
+Then put the old tag back on the `image:` line and run `docker compose up -d uchiyomi-suwayomi`. The development stack
+is the same with `yomi-suwayomi` in the root `docker-compose.yml`.
+
+### Unraid
+
+1. On the **Docker** tab, stop **uchiyomi-suwayomi**, then back its folder up in the Unraid terminal:
+
+   ```bash
+   tar czf /mnt/user/appdata/engine-v2.3.2243.tgz -C /mnt/user/appdata/uchiyomi-suwayomi .
+   ```
+
+2. Edit **uchiyomi-suwayomi**, set its **Repository** to `ghcr.io/suwayomi/suwayomi-server:v2.4.2366` and **Apply**:
+   Unraid pulls it and starts it.
+3. Check Admin → Health as above.
+
+Going back: stop it, run
+`find /mnt/user/appdata/uchiyomi-suwayomi -mindepth 1 -delete && tar xzf /mnt/user/appdata/engine-v2.3.2243.tgz -C /mnt/user/appdata/uchiyomi-suwayomi`,
+set the Repository back and **Apply**.
+
+### CasaOS
+
+1. Stop the **uchiyomi-suwayomi** app, then back its folder up over SSH:
+
+   ```bash
+   sudo tar czf /DATA/AppData/engine-v2.3.2243.tgz -C /DATA/AppData/uchiyomi-suwayomi .
+   ```
+
+2. In the app's settings, set its image to `ghcr.io/suwayomi/suwayomi-server:v2.4.2366` and **Save**.
+3. Check Admin → Health as above.
+
+Going back: stop it, run
+`sudo find /DATA/AppData/uchiyomi-suwayomi -mindepth 1 -delete && sudo tar xzf /DATA/AppData/engine-v2.3.2243.tgz -C /DATA/AppData/uchiyomi-suwayomi`,
+set the image back and **Save**.
+
+### Uchiyomi Desktop
+
+Nothing to do. On a computer that had the engine, an app update that moves the pin fetches the new one by itself
+(about 200 MB) the next time Uchiyomi starts, and before the new version first opens the engine's data, the app keeps
+a copy of its database in its data folder ([where that is](DESKTOP.md#7-where-your-files-live)):
+`engine-snapshots/before-v2.4.2366/` holds `database.mv.db`, `server.conf` and `snapshot.json`, which says what
+wrote them. The two newest copies are kept. If the copy cannot be made — a full disk — the new engine is not started,
+and the Extensions card says why.
+
+Going back means the older app too: quit Uchiyomi, install the older version, copy `database.mv.db` and `server.conf`
+from the snapshot over the ones in the `engine` folder, delete `engine/uchiyomi-engine.json`, start Uchiyomi, and
+download the extension engine again when **Admin → Sources** offers it.
+
+### An engine you run yourself
+
+The same three steps: back its data up with it stopped, change its tag, start it. This Uchiyomi works with v2.3.2243
+and newer and was tested with v2.4.2366. Health calls a newer one *newer than the version this Uchiyomi was tested
+with*: likely fine, and only a backup from before takes you back.
+
 ## Settings
 
 | Variable | Default | What it does |
@@ -445,8 +538,9 @@ as not adult, the same way an unrated series stays visible instead of vanishing 
 You can point `SUWAYOMI_URL` at a Suwayomi you already run instead of the bundled one; Uchiyomi doesn't care
 whose it is.
 
-The image is pinned rather than tracking `:stable`, because `:stable` is older than the extension API today's
-repository indexes require and would show an empty catalogue.
+The image is pinned rather than tracking `:stable`: an engine upgrades its database one way when a newer version first
+starts on it, so it moves only with a release that was tested with the next one and says so —
+[Updating the engine](#updating-the-engine).
 
 ## Komga-compatible API
 

@@ -35,9 +35,12 @@ const mode = (body: unknown) => fetch(`${base}/__mode`, { method: 'POST', body: 
 const ABOUT = '{ aboutServer { name version } }';
 const SEARCH = 'mutation($s:LongString!){ fetchSourceManga(input:{source:$s,type:SEARCH,query:"ball",page:1}){ mangas { title } } }';
 
-test('the rig\'s engine answers as v2.3.2243, and refuses a field the real one does not have', async () => {
+test('the rig\'s engine answers as the pinned engine, and refuses a field the real one does not have', async () => {
+  // The fake validates against the pinned engine's schema and answers its version (bff/test/fixtures/fakeSuwayomiEngine.mjs
+  // SCHEMA_FILE, which scripts/engine/bump.mjs moves with the pin).
+  const pin = JSON.parse(readFileSync(join(__dirname, '..', '..', 'desktop', 'src', 'engine-pin.json'), 'utf8')).version;
   const ok = await (await gql(ABOUT)).json();
-  assert.deepEqual(ok, { data: { aboutServer: { name: 'Suwayomi-Server', version: 'v2.3.2243' } } });
+  assert.deepEqual(ok, { data: { aboutServer: { name: 'Suwayomi-Server', version: pin } } });
   const bad = await (await gql('{ aboutServer { name codename } }')).json();
   assert.equal(bad.data, undefined);
   assert.match(bad.errors[0].message, /^Validation error \(FieldUndefined@\[aboutServer\/codename\]\)/);

@@ -91,7 +91,9 @@ function stepTo(version: string, platform: InstallPlatform | undefined): Part {
  * supported (a greyed line, with how to update), older than the oldest supported (a finding: update it), or newer (a
  * greyed line). ⚠️ Never a downgrade without a backup: an engine migrates its own database forward when it starts, and an
  * older one cannot read what a newer one wrote -- so for a newer engine the row says that going back needs a backup of
- * its data from before, and nothing more.
+ * its data from before, and nothing more. The step to update an older one starts with that backup too, for the same
+ * reason (since the pin moved to v2.4.2366, every install left on v2.3.2243 reads this row) -- except on the desktop
+ * app, which keeps a copy of the engine's database itself before a new engine first starts (desktop/src/engine.js).
  */
 function versionItem(d: EngineCheckDeps, standing: EngineStanding): HealthItem | null {
   const version = d.version || null;
@@ -105,13 +107,14 @@ function versionItem(d: EngineCheckDeps, standing: EngineStanding): HealthItem |
       ...detailOf([say('engine.versionNewer', { version, tested }), joined('sentence', say('engine.goBackWithBackup', { tested }))]),
     };
   }
+  const backup = d.platform !== 'desktop' && joined('sentence', say('engine.backupFirst'));
   if (standing === 'older') {
     return {
       ...title, info: true,
-      ...detailOf([say('engine.versionOlder', { version, tested }), joined('sentence', stepTo(tested, d.platform))]),
+      ...detailOf([say('engine.versionOlder', { version, tested }), backup, joined('sentence', stepTo(tested, d.platform))]),
     };
   }
-  return { ...title, ...detailOf([say('engine.versionTooOld', { version, oldest }), joined('sentence', stepTo(tested, d.platform))]) };
+  return { ...title, ...detailOf([say('engine.versionTooOld', { version, oldest }), backup, joined('sentence', stepTo(tested, d.platform))]) };
 }
 
 /**

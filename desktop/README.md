@@ -55,10 +55,16 @@ notes. `desktop/package.json`'s version moves with bff/web/openapi (`bff/test/de
 The extension engine is released separately, once per Suwayomi pin (or shim change), and BEFORE the app version
 that should download it:
 
-1. `git tag engine-v2.3.2243 && git push origin engine-v2.3.2243` (the tag `src/engine-pin.json` names) runs
+1. `git tag engine-v2.4.2366 && git push origin engine-v2.4.2366` (the tag `src/engine-pin.json` names) runs
    `.github/workflows/engine-pack.yml`: each pack is built and booted on its own OS, then all three are published
    on that tag as a **prerelease**. It refuses to replace a pack the pin already holds a hash for.
 2. `node scripts/release/pin-engine.mjs` downloads the three packs as published, checks each against its
    `.sha256`, and writes `sha256` + `bytes` into `src/engine-pin.json`. Commit it; the next `desktop.yml` run
    installs the published pack in its smokes.
 3. Then tag the app release. A new pack later is a new `engine-v*` tag and new hashes, never a replaced file.
+
+An app update that moves the pin leaves the old runtime in `engine-runtime/<old version>/`: on such a computer the
+supervisor fetches the new pack at launch without a click (`Engine.otherRuntimes()`), the new engine's first start keeps a
+copy of `database.mv.db` and `server.conf` in `engine-snapshots/before-<version>/` before it migrates them
+(`keepDataBeforeUpgrade`, the two newest kept; `engine/uchiyomi-engine.json` records which version last started on
+the data), and the old runtime is deleted once the new one runs.
