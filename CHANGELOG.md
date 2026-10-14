@@ -41,6 +41,12 @@ as well, says plainly when an engine doesn't match, and tests every new engine r
 - **Repositories are the engine's extension stores.** An address is checked when you add it, and if the engine can't
   read it, the message says why in the engine's words. Adding, removing and the nightly restore work as before.
 
+### Fixed
+
+- **Uchiyomi Desktop on Windows no longer fails to start** when another program has its `state.json` open at the moment
+  it saves it: an antivirus scan or a backup, for example. Saving that file waits up to two seconds and tries again,
+  where the first such moment stopped the start and left the loading page up for good.
+
 ### For contributors
 
 - **A weekly canary** (`.github/workflows/engine-canary.yml`) runs every new stable Suwayomi-Server, and the newest
