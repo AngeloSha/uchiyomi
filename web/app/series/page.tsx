@@ -212,6 +212,21 @@ function RenameFolderModal({ id, folder, title, onClose, onSaved }: {
   );
 }
 
+/**
+ * A phone's hero (UI refresh, phone): the series' cover, the hero's whole width and height -- real art, nothing blurred,
+ * the 1600-px copy so a 3x screen gets every pixel. Drifting slowly closer and back, unless Reduce effects or the system's
+ * reduced motion is on, where it is simply there (`still`).
+ */
+function PhoneHeroCover({ id, version, still }: { id: string; version?: number; still: boolean }) {
+  return (
+    <motion.div className="absolute inset-0" initial={false}
+      animate={still ? { scale: 1 } : { scale: [1, 1.07] }}
+      transition={still ? { duration: 0 } : { duration: 24, ease: 'easeInOut', repeat: Infinity, repeatType: 'reverse' }}>
+      <Img src={img.seriesThumb(id, version, 1600)} alt="" eager className="h-full w-full" imgClassName="object-cover object-top" />
+    </motion.div>
+  );
+}
+
 function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const [number, setNumber] = useState(String(book.number ?? ''));
@@ -1622,6 +1637,9 @@ function SeriesInner() {
   // band the bottom nav and the bar itself take -- a compact copy of it, the heart and More. Never in Select mode, whose
   // bar takes the same place, and never from lg up.
   const ctaRef = useRef<HTMLDivElement>(null);
+  // A phone's title, on the cover (UI refresh, phone): once it has scrolled under the bar, the bar turns glass and says it.
+  const heroTitleRef = useRef<HTMLHeadingElement>(null);
+  const titleOut = useOutOfView(heroTitleRef, '-72px 0px 0px 0px');
   const ctaOut = useOutOfView(ctaRef, '-64px 0px -160px 0px');
   const barShown = !wide && ctaOut && !selecting && !!series;
 
@@ -1676,10 +1694,11 @@ function SeriesInner() {
   );
 
   const Genres = !!meta?.genres?.length && (
-    <div className="flex flex-wrap gap-2">
+    // One row a phone swipes (UI refresh, phone): wrapped, eight genres took three lines before the summary.
+    <div data-lenis-prevent className="-mx-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0 [&::-webkit-scrollbar]:hidden">
       {/* Each genre opens the Library filtered by it (UI refresh): a filter, so it keeps the filter chip's shape. */}
       {meta.genres.slice(0, 8).map((g) => (
-        <Link key={g} href={`/library/?genres=${encodeURIComponent(g)}`} data-series-genre className="chip text-xs transition hover:border-accent/50 hover:text-fog-100">{g}</Link>
+        <Link key={g} href={`/library/?genres=${encodeURIComponent(g)}`} data-series-genre className="chip shrink-0 text-xs transition hover:border-accent/50 hover:text-fog-100">{g}</Link>
       ))}
     </div>
   );
@@ -1892,11 +1911,15 @@ function SeriesInner() {
       {/* sticky back bar on a phone; on a desktop the back key floats over the art, under the top bar (UI refresh) */}
       {/* `top` clears the top bar: the hero's `under-topbar` margin collapses through this page's root, which therefore
           starts under the bar too. */}
-      <div className="safe-top sticky top-0 z-30 flex items-center gap-2 bg-linear-to-b from-ink-950 to-transparent px-4 pb-3 lg:absolute lg:start-0 lg:top-[calc(var(--topbar-h)+1rem)] lg:z-20 lg:bg-none lg:p-0">
+      {/* A phone's bar is clear over the cover, and glass with the title once the cover's own title has scrolled under it
+          (UI refresh, phone). It was a fade to transparent the whole way down, and the reading button scrolling under it
+          showed through, as if the two had collided. */}
+      <div data-series-bar={!wide && titleOut ? 'glass' : 'clear'}
+        className={`safe-top sticky top-0 z-30 flex items-center gap-2 px-4 pb-3 transition-[background-color,box-shadow] duration-200 lg:absolute lg:start-0 lg:top-[calc(var(--topbar-h)+1rem)] lg:z-20 lg:p-0 ${!wide && titleOut ? 'glass-strong shadow-[0_1px_0_rgb(255_255_255/0.06)]' : ''}`}>
         <button onClick={back} aria-label={tr('Back')} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-ink-800/70 text-fog-100 backdrop-blur lg:border lg:border-white/15 lg:bg-black/40">
           <IcChevronLeft width={22} height={22} className="rtl:-scale-x-100" />
         </button>
-        <span className="truncate text-sm text-fog-300 lg:hidden">{title}</span>
+        <span aria-hidden={!titleOut} className={`truncate text-sm font-medium text-fog-100 transition-opacity duration-200 lg:hidden ${titleOut ? 'opacity-100' : 'opacity-0'}`}>{title}</span>
       </div>
 
       {/* banner — real art pulled from the internet (AniList), else the one the server made from the series' own pages
@@ -1904,10 +1927,26 @@ function SeriesInner() {
           cover); a series without one keeps the blurred wash of its cover. The gradients below keep the title readable. */}
       {/* UI refresh: the window's whole width from its top edge, under the see-through top bar (lib/overArt.ts), the
           automatic banner as whole strips (components/MosaicArt.tsx), dimming as the page scrolls away from it. */}
-      <div data-series-hero className="bleed-lg under-topbar relative h-72 overflow-hidden max-lg:-mt-[58px] lg:h-[min(56vh,34rem)]">
-        {series && <motion.div className="absolute inset-0" style={{ opacity: reduced ? 1 : artDim }}><HeroArt series={series} version={series.artVersion} banner className="absolute inset-0" /></motion.div>}
-        <div className="absolute inset-0 bg-linear-to-t from-ink-950 via-ink-950/65 to-ink-950/30" />
+      {/* A phone's hero is the cover itself (UI refresh, phone): a 2:3 cover the screen's width is the shape of a phone held
+          upright, so it fills the hero edge to edge with real art. The banner is 4.75:1, and a phone showed a slice of its
+          middle in a 288-px strip, with the cover and a four-line title squeezed beside it. */}
+      <div data-series-hero className="bleed-lg under-topbar relative h-[min(150vw,82svh)] overflow-hidden max-lg:-mt-[58px] lg:h-[min(56vh,34rem)]">
+        {series && <motion.div className="absolute inset-0" style={{ opacity: reduced ? 1 : artDim }}>{wide ? <HeroArt series={series} version={series.artVersion} banner className="absolute inset-0" /> : <PhoneHeroCover id={id} version={series.artVersion} still={reduced} />}</motion.div>}
+        {/* A phone's art is shown, so a short scrim under the bar and a fade at the foot for the title: the desktop's wash
+            darkened all of it. */}
+        <div className="absolute inset-x-0 top-0 h-32 bg-linear-to-b from-black/55 to-transparent lg:hidden" />
+        <div className="absolute inset-x-0 bottom-0 h-[62%] bg-linear-to-t from-ink-950 via-ink-950/55 to-transparent lg:hidden" />
+        <div className="absolute inset-0 hidden bg-linear-to-t from-ink-950 via-ink-950/65 to-ink-950/30 lg:block" />
         <div className="pointer-events-none absolute inset-0" style={{ background: 'radial-gradient(85% 95% at 22% 0%, rgb(var(--cover, 124 92 255) / 0.32), transparent 62%)' }} />
+        {/* a phone's title, on the cover's foot (UI refresh, phone) */}
+        <motion.div initial={reduced ? false : { opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.08, ease: [0.22, 0.61, 0.36, 1] }}
+          className="absolute inset-x-0 bottom-0 px-4 pb-3 lg:hidden">
+          {meta?.status && (
+            <span className="mb-2 inline-block rounded-md bg-white/15 px-2 py-0.5 text-2xs font-semibold uppercase tracking-wide text-white backdrop-blur rtl:tracking-normal">{statusText(meta.status)}</span>
+          )}
+          <h1 ref={heroTitleRef} dir="auto" className="line-clamp-3 break-words font-display text-[2rem] font-bold leading-[1.05] text-white [text-shadow:0_2px_18px_rgba(0,0,0,0.75)]">{title}</h1>
+          <div className="mt-2">{Meta}</div>
+        </motion.div>
         {/* desktop title-over-art (Jellyfin style) — offset to the right of the floating poster */}
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55, delay: 0.08, ease: [0.22, 0.61, 0.36, 1] }}
           className="pointer-events-none absolute inset-x-0 bottom-0 hidden flex-col justify-end p-8 lg:flex lg:ps-[calc(var(--rail-w)+2rem+288px)]">
@@ -1927,30 +1966,22 @@ function SeriesInner() {
       {/* content */}
       <div className="px-4 lg:grid lg:grid-cols-[260px_1fr] lg:gap-8 lg:px-0">
         {/* cover + actions */}
-        <div className="-mt-20 lg:-mt-48 lg:sticky lg:top-[calc(var(--topbar-h)+1rem)] lg:self-start">
-          <div className="flex items-end gap-4 lg:block">
-            <motion.div initial={{ opacity: 0, y: 18, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.5, ease: [0.22, 0.61, 0.36, 1] }}
-              className="h-44 w-32 shrink-0 overflow-hidden rounded-2xl border border-ink-600 shadow-lift lg:h-auto lg:w-full">
-              {series && <Img src={img.seriesThumb(id, series.artVersion, 800)} alt={series.name} className="aspect-[2/3] h-full w-full" />}
-            </motion.div>
-            {/* title beside cover on mobile. Positioned above the banner (v0.60.1, found in Squeaks72's fork): the row rises
-                into the banner, which is `relative` and so painted over anything unpositioned -- a title long enough to wrap
-                past the cover's top lost its first lines behind it. */}
-            <div className="relative z-10 min-w-0 pb-1 lg:hidden">
-              <h1 dir="auto" className="break-words font-display text-2xl font-bold leading-tight text-white [text-shadow:0_2px_12px_rgba(0,0,0,0.7)]">{title}</h1>
-              {Meta}
-            </div>
-          </div>
-          {/* The ratings, phone form: under the cover and the title, before anything to press. The desktop form is the
-              first row of the right column. */}
-          {series && <div className="mt-4 lg:hidden"><RatingsPanel anilist={series.yomi?.anilist} rating={rating} onRate={rate} /></div>}
-          {/* Under the cover and the title, full width: beside the cover a 390-px screen leaves the chips ~210 px. */}
-          {editions && <EditionChips editions={editions} onAdd={addLanguage} className="mt-3 lg:hidden" />}
-          {/* The supply line, phone form: under the title block, full width, before the actions. The desktop
-              form is the first row of the right column (the title block over the banner is
-              `pointer-events-none`, so a button cannot live there). */}
-          <div className="mt-3 lg:hidden"><SupplyLine parts={supplyPhone} loaded={supplyLoaded} wide={false} onOpen={() => setSourcesOpen(true)} /></div>
+        <div className="relative z-10 lg:-mt-48 lg:sticky lg:top-[calc(var(--topbar-h)+1rem)] lg:self-start">
+          {/* The poster, a desktop's: a phone's hero is the cover itself (UI refresh, phone). */}
+          <motion.div initial={{ opacity: 0, y: 18, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.5, ease: [0.22, 0.61, 0.36, 1] }}
+            className="hidden overflow-hidden rounded-2xl border border-ink-600 shadow-lift lg:block lg:w-full">
+            {series && wide && <Img src={img.seriesThumb(id, series.artVersion, 800)} alt={series.name} className="aspect-[2/3] h-full w-full" />}
+          </motion.div>
+          {/* On a phone the reading button and the four keys come first, right under the art (UI refresh, phone); the
+              ratings, the languages and the supply line follow. A desktop's left column is the poster and these. */}
           {Actions}
+          {/* The ratings, phone form. The desktop form is the first row of the right column. */}
+          {series && <div className="mt-4 lg:hidden"><RatingsPanel anilist={series.yomi?.anilist} rating={rating} onRate={rate} /></div>}
+          {/* Full width: beside a cover a 390-px screen left the chips ~210 px. */}
+          {editions && <EditionChips editions={editions} onAdd={addLanguage} className="mt-3 lg:hidden" />}
+          {/* The supply line, phone form. The desktop form is the first row of the right column (the title block over the
+              banner is `pointer-events-none`, so a button cannot live there). */}
+          <div className="mt-3 lg:hidden"><SupplyLine parts={supplyPhone} loaded={supplyLoaded} wide={false} onOpen={() => setSourcesOpen(true)} /></div>
         </div>
 
         {/* info + chapters */}

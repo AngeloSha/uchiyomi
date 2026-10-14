@@ -57,12 +57,16 @@ test('the heart is mirrored about its tip, x = 12', () => {
   assert.ok(top, 'the dip between the lobes is at x = 12');
 });
 
-test("the phone title paints above the banner, so a long title's first lines are not hidden", () => {
-  // The cover-and-title row rises into the banner (-mt-20), and the banner is `relative`, so it is painted over anything
-  // unpositioned. Reintroduce by dropping `relative z-10` from the phone title block: this fails.
+test("the phone title is on the cover, whole: never behind the art, never past the screen's edge", () => {
+  // v0.60.1: the cover-and-title row rose into the banner, which painted over a long title's first lines. Since the UI
+  // refresh's phone pass the title is IN the hero, on the cover's foot, so nothing can paint over it. Reintroduce the old
+  // row, or take the title out of the hero: this fails; drop `break-words` or `line-clamp-3`: a long word overflows, or a
+  // long title climbs up the art.
   const page = src('app/series/page.tsx');
-  assert.match(page, /<div className="relative z-10 min-w-0 pb-1 lg:hidden">/, 'the phone title block sits above the banner');
-  assert.match(page, /<h1 dir="auto" className="break-words [^"]*text-2xl/, 'and a long word wraps rather than overflowing');
+  const hero = page.slice(page.indexOf('<div data-series-hero'), page.indexOf('{/* content */}'));
+  assert.ok(hero.length > 0, 'the hero is not where this test looks');
+  assert.match(hero, /<h1 ref=\{heroTitleRef\} dir="auto" className="line-clamp-3 break-words [^"]*"/, 'the phone title is not on the cover');
+  assert.doesNotMatch(page, /<div className="relative z-10 min-w-0 pb-1 lg:hidden">/, 'the old row beside a small cover is back');
 });
 
 test('changing libraries in Admin refreshes the library list the Library page and the 18+ toggle read', () => {

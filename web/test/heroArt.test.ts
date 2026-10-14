@@ -100,7 +100,11 @@ test('the series page asks for its banner sharp, and leaves a stand-in cover to 
   const hero = src.match(/<HeroArt series=\{series\}[^>]*\/>/)?.[0] ?? '';
   assert.ok(hero, 'the series page has no backdrop where this test looks');
   assert.match(hero, /\sbanner\s/, 'the series page asks for its banner blurred');
-  // The title stays readable over a sharp banner: the gradient right after it is still there.
-  assert.match(src.slice(src.indexOf(hero)), /^[^\n]*\n\s*<div className="absolute inset-0 bg-linear-to-t from-ink-950 via-ink-950\/65 to-ink-950\/30" \/>/,
+  // The title stays readable over a sharp banner: the desktop's gradient is still in the hero, after the art -- and a
+  // phone's cover (UI refresh, phone) keeps its own fade at the foot, where its title is.
+  const heroBlock = src.slice(src.indexOf('<div data-series-hero'), src.indexOf('{/* content */}'));
+  assert.match(heroBlock, /<div className="absolute inset-0 hidden bg-linear-to-t from-ink-950 via-ink-950\/65 to-ink-950\/30 lg:block" \/>/,
     'the gradient under the series title is gone');
+  assert.match(heroBlock, /<div className="absolute inset-x-0 bottom-0 h-\[62%\] bg-linear-to-t from-ink-950 [^"]*lg:hidden" \/>/,
+    'a phone\'s title has no fade under it');
 });

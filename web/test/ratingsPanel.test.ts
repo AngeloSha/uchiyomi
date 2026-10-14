@@ -160,8 +160,9 @@ test('the series page says its ratings once: no chip over the banner, nothing in
   const mounts = [...page.matchAll(/<div className="([^"]*)"><RatingsPanel anilist=\{series\.yomi\?\.anilist\} rating=\{rating\} onRate=\{rate\}[^>]*\/><\/div>/g)].map((m) => m[1]);
   assert.deepEqual(mounts, ['mt-4 lg:hidden', 'hidden lg:block'], `the panel is not mounted once per layout: ${JSON.stringify(mounts)}`);
   assert.equal((page.match(/<RatingsPanel\b/g) ?? []).length, 2);
-  // The phone's under the cover and the title, before the reading button; the desktop's before the supply line.
-  assert.ok(page.indexOf('<div className="mt-4 lg:hidden"><RatingsPanel') < page.indexOf('{Actions}'), 'the phone\'s panel is not above the reading button');
+  // The phone's right after the reading button and the keys, which come first under the cover since the UI refresh's
+  // phone pass; the desktop's before the supply line.
+  assert.ok(page.indexOf('{Actions}') < page.indexOf('<div className="mt-4 lg:hidden"><RatingsPanel'), 'the phone\'s panel is above the reading button');
   assert.ok(page.indexOf('<div className="hidden lg:block"><RatingsPanel') < page.indexOf('<SupplyLine parts={supplyWide}'), 'the desktop panel is not the right column\'s first row');
   // Nowhere else in the app draws the panel.
   const elsewhere = ['app', 'components'].flatMap((d) => (readdirSync(join(ROOT, d), { recursive: true }) as string[])
