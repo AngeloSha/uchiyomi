@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.65.0 — 2026-10-14
+
+**A new look.** On a computer the menu is a slim sidebar with the art running under it, Home's banner shows whole
+pictures instead of slices, and a series opens on its banner at the window's full width. The rest of the app follows:
+Lists with covers, Offline downloads by series, Updates and History in columns, and Admin with a compact header and a
+Settings index. Nothing moved out of reach, and **Reduce effects** calms all of it as before.
+
+### On a computer
+
+- **A sidebar instead of the top menu.** Home, Library, Lists, Discover, History, Moments, Offline and Admin sit in a
+  rail of icons down the side, which opens into a labelled panel while the pointer rests on it (or when you Tab into
+  it). The Library's downloads ring and Admin's Health mark moved with them. The top bar keeps search, Updates and your
+  avatar, and it is see-through over a banner until you scroll.
+- **Check for new chapters** left the top bar for a key on **Updates**. The search palette and Admin still have it.
+- **Narrower than 1280 px**, the Library's filters are behind its **Filters** key, so the covers keep their room.
+
+### Home and the series page
+
+- **Home's banner shows whole pictures.** The automatic banner is four series side by side, and a narrower screen used
+  to cut the outer two in half. Now it shows three or four whole ones (two by two on a phone), faded into the page.
+- **Rails have arrows**, and their cards grow with the screen. **Continue reading** shows the page you're on.
+- **A series opens on its banner**, the window's full width, with the cover overlapping it. Its genres open the Library
+  filtered by them, and the chapter list's toolbar and pager are keys.
+
+### Everywhere else
+
+- **Lists:** each list shows its first covers, and New list and Delete use the app's own dialogs. The series page's
+  key says *Add to list*, and Lists is in the search palette.
+- **Offline downloads** are grouped by series, with their covers, even with no connection.
+- **Updates and History** use the screen's width instead of one narrow column.
+- **Admin:** the big header is on Overview only; the other tabs have a compact one. **Settings** has a row of keys that
+  jump to each section, and **Members'** actions are keys.
+- **Profile:** its tabs are one row, with Admin, Support and Sign out at its end.
+- **Tabs on a phone** are underlined rather than pills, and buttons that act are squared keys. Only filters and sorts
+  stay round.
+
+### Upgrading
+
+- Nothing to do. For scripts: `GET /api/lists` items carry `preview`, the ids of a list's first four series
+  ([docs/api.md](docs/api.md)).
+
 ## v0.64.0 — 2026-10-14
 
 **You decide what a new member starts with, and Uchiyomi is ready for the next extension engine.** The first is the
