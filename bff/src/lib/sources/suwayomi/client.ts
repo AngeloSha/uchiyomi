@@ -5,8 +5,10 @@
 // turning an installed extension into search/chapters/pages over an API -- and keep owning everything else.
 //
 // The endpoint is `/api/graphql`, NOT `/graphql`; the published docs say otherwise and the server 404s on it.
-// Verified against Suwayomi-Server v2.2.2100.
+// Verified against Suwayomi-Server v2.2.2100, v2.3.2243 and v2.4.2366. Every document sent is in operations.ts.
 import { env } from '../../../env';
+import { isRefusalMessage } from './enginePin';
+import { OPS, opOf } from './operations';
 
 export interface GqlError extends Error {
   status?: number;
@@ -111,7 +113,8 @@ export const engineAnswered = (): boolean => answered;
  *   `suwayomi unreachable: fetch failed (<code>)`  no answer at all (refused, reset, DNS)
  *   `suwayomi timeout after <n>ms`                 no answer in time
  *   `suwayomi <status>`                            the engine's HTTP layer refused (auth, 5xx)
- *   `suwayomi: <message>`                          the engine ran the query and the extension failed
+ *   `suwayomi: <message>`                          the engine ran the query and the extension failed -- or, as an
+ *                                                  EngineRefusedError, the engine refused the query itself
  * classify() still reads the first two as 'down' ("fetch failed", "timeout"), so cooldowns do not change.
  * `cause` is kept, so a caller that reads `e.cause.code` (the fake engine's own test does) still can.
  */
@@ -124,10 +127,56 @@ function transportError(e: any, timeoutMs: number): Error {
 }
 
 /**
+ * The engine refused a query: it answered, and what it answered is that Uchiyomi asked something its schema does not
+ * have -- an engine older or newer than this Uchiyomi was built for. Not the engine being down (a restart changes
+ * nothing) and not an extension failing (the site is never asked). The message keeps the engine's own words after the
+ * usual `suwayomi: `, so everything that reads messages (diagnosis, source health) still can.
+ */
+export class EngineRefusedError extends Error {
+  constructor(message: string, readonly op?: string) {
+    super(message);
+    this.name = 'EngineRefusedError';
+  }
+}
+
+/** One operation (operations.ts) the engine refused, in its own words, and when it last did. */
+export interface EngineRefusal {
+  op: string;
+  message: string;
+  at: string;
+}
+
+/**
+ * The operations the engine refused, by name, until each succeeds again: what Health's Extension engine row and the
+ * status route quote. An `optional` operation is never recorded -- its refusal is an answer (engineSolver.ts) -- and
+ * neither is a document the registry does not hold (a test's own query).
+ */
+const refusals = new Map<string, EngineRefusal>();
+export const engineRefusals = (): EngineRefusal[] => [...refusals.values()].sort((a, b) => a.op.localeCompare(b.op));
+/** For tests, and for an engine that turned out to be another version (aboutServer). */
+export function forgetEngineRefusals(): void {
+  refusals.clear();
+}
+
+/**
+ * Is this answer the engine refusing the query? graphql-java's validation, parse and variable errors come back with
+ * status 200, NO `data` key at all and one of the openings in enginePin.ts REFUSAL_HEAD (measured on v2.3.2243 and
+ * v2.4.2366). An extension's exception always has `data` (its field null, or -- fetchMangaAndChapters -- the stored
+ * rows), and its message opens "Exception while fetching data", or is the extension's own.
+ */
+function refused(j: { data?: unknown; errors?: Array<{ message?: string }> }): boolean {
+  return !Object.prototype.hasOwnProperty.call(j, 'data') && isRefusalMessage(j.errors?.[0]?.message);
+}
+
+/**
  * Run one GraphQL operation. Errors carry the HTTP status in their message on purpose: lib/sourceHealth.ts
  * `classify()` reads the message to decide blocked vs rate-limited vs down, so a failing extension server
  * lands in the existing source-health machinery with no special casing. Every error starts with "suwayomi"
  * (see transportError for the four shapes).
+ *
+ * ⚠️ Any `errors` throws, whether or not `data` came too. `fetchMangaAndChapters` answers a failed update with the
+ * STORED series and chapters and the error beside them (measured): taking that data would read a failing extension's
+ * old chapter list as a fresh one, and nothing would ever record the failure.
  */
 export async function gql<T = unknown>(query: string, variables: Record<string, unknown> = {}, timeoutMs = 30000): Promise<T> {
   if (!suwayomiConfigured()) throw new Error('suwayomi is not configured');
@@ -157,8 +206,20 @@ export async function gql<T = unknown>(query: string, variables: Record<string, 
     if (e?.name === 'SyntaxError') throw new Error('suwayomi returned no data', { cause: e });
     throw transportError(e, timeoutMs);
   }
-  if (j?.errors?.length) throw new Error(`suwayomi: ${j.errors[0]?.message || 'graphql error'}`);
+  const op = opOf(query);
+  if (j && typeof j === 'object' && j.errors?.length) {
+    const message = j.errors[0]?.message || 'graphql error';
+    if (refused(j)) {
+      // Reintroduce by recording an optional operation too: "an engine without the Cloudflare setting is not an
+      // incompatible engine" in suwayomiClient.test.ts finds solverSettings in engineRefusals().
+      if (op && !op.optional) refusals.set(op.name, { op: op.name, message: message.slice(0, 500), at: new Date().toISOString() });
+      throw new EngineRefusedError(`suwayomi: ${message}`, op?.name);
+    }
+    throw new Error(`suwayomi: ${message}`);
+  }
   if (j?.data === undefined || j?.data === null) throw new Error('suwayomi returned no data');
+  // The engine ran it: whatever it refused before, it takes now (an engine updated, or put back).
+  if (op) refusals.delete(op.name);
   return j.data;
 }
 
@@ -168,10 +229,18 @@ export type Gql = typeof gql;
 export interface ServerInfo {
   name: string;
   version: string;
-  revision: string;
+  /** "Stable" or "Preview". `revision` it replaced is in the version already, as its patch number. */
+  buildType: string;
 }
 
+/** The version the engine last said it is, to notice it becoming another one. */
+let knownVersion: string | null = null;
+
 export async function aboutServer(run: Gql = gql): Promise<ServerInfo> {
-  const d = await run<{ aboutServer: ServerInfo }>('{ aboutServer { name version revision } }', {}, 8000);
+  const d = await run<{ aboutServer: ServerInfo }>(OPS.aboutServer.doc, {}, 8000);
+  const v = d?.aboutServer?.version ?? null;
+  // Another engine answers now (updated, or put back): what the last one refused says nothing about this one.
+  if (v && knownVersion && v !== knownVersion) forgetEngineRefusals();
+  if (v) knownVersion = v;
   return d.aboutServer;
 }

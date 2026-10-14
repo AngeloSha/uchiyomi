@@ -992,8 +992,8 @@ signed in on that browser to an identity at the provider. The whole mode is unde
 **Signing up** (the form since v0.61.0). `POST /auth/register` `{username, password, displayName?, deviceId?,
 deviceName?}` works only while **Admin → Settings → Open registration** is on — `GET /auth/config` says so as
 `allowRegistration`, which the sign-in screen reads to offer *Create an account*, and which is always false on
-Uchiyomi Desktop — and is otherwise **403** `registration_disabled`. It makes a member (role `user`) and signs them in
-exactly as `/auth/login` does: the same body, cookies and session, named by `deviceId`/`deviceName` like a sign-in's.
+Uchiyomi Desktop — and is otherwise **403** `registration_disabled`. It makes a member (role `user`), with the
+new-member defaults (`newMemberDefaults` under [Admin](#admin)), and signs them in exactly as `/auth/login` does: the same body, cookies and session, named by `deviceId`/`deviceName` like a sign-in's.
 A name that differs from an existing one only in case is taken (**409** `username_taken`, as is the name itself),
 and two sign-ups racing for one name end in one account and a 409, never a 500. **400** is `bad_request` (a name
 outside letters, numbers, `.`, `_`, `-`, 2–64 long) or `weak_password`.
@@ -1713,8 +1713,8 @@ they are manual actions; clients should say that those actions may contact AniLi
 `updater_hours`, `extension_hours`, `extension_auto_update`, `update_check`, `install_ping`, `install_ping_last`,
 `cleanup_read`, `cleanup_read_days`, `backup_hour`, `scanlator_prefs`, `auto_follow_on_failure`,
 `repair_enabled`, `source_prefs`, `group_upgrade`, `borrow_names`, `mangadex_langs`, `unstated_lang`,
-`deleted_as_ghosts`, `update_smart` (since v0.61.0), `backup_enabled` and `backup_keep` (since v0.61.1), plus
-`extensions_configured` and `mangadex_available` (computed). `auto_follow_on_failure` defaults to true and
+`deleted_as_ghosts`, `update_smart` (since v0.61.0), `backup_enabled` and `backup_keep` (since v0.61.1),
+`newMemberDefaults` (below), plus `extensions_configured` and `mangadex_available` (computed). `auto_follow_on_failure` defaults to true and
 controls the bounded once-per-series-per-day source hunt after an ordinary scheduled-download failure; it
 never makes an interactive Add/Fetch hunt and never runs after a refusal. `PATCH
 /api/admin/settings` takes any subset of `serverName` (1–64 chars), `allowRegistration`, `updaterHours`
@@ -1750,6 +1750,20 @@ normalised (`pt-br` is `pt-BR`); `all`, `other` or an empty string is a **400** 
 written on its own, an out-of-range value is a **400** and nothing is written, and
 the audit row `settings.update` carries the body. The admin console's Settings tab sends one
 row per PATCH as each row is changed (the read-chapter confirmation carries the day count with the switch).
+
+**New-member defaults** ([#208](https://github.com/AngeloSha/uchiyomi/issues/208); **Admin → Members → When someone
+signs up**) are what an account the server makes by itself starts with: a sign-up (`POST /auth/register`), or a first
+sign-in through the provider with `OIDC_ALLOW_SIGNUP`, in SSO-only mode too. `PATCH /api/admin/settings
+{newMemberDefaults}` takes a member's own fields from `PATCH /api/admin/users/:id`, with their meanings, each on its own:
+`libraries` (`null`, the default: every library, including ones added later; a list: exactly these; `[]`: none),
+`maxAgeRating` (0–18; `null`, the default: no limit) and `perms` (`{canDownload: false}` denies downloads; `{}`, the
+default, allows them). A library id no library has is dropped, and a library removed later leaves the list: a list left
+empty means none, never every library. GET answers the same object. The account is made with them, in the transaction
+that makes it, and a default that cannot be read makes no account. They are not for the accounts an admin chooses: the
+first admin (`POST /api/setup`, or SSO-only mode's first sign-in), one made by `POST /api/admin/users`, and the desktop
+app's own all start with everything. An account the provider makes an admin (`OIDC_ADMIN_GROUP`) carries them too:
+unrestricted while it is an admin, it has them the day the group sync makes it a member. Saving them changes no account
+that exists.
 
 **Notification targets** (since v0.43.0, Admin → Settings → Notifications) are where notices go besides web
 push: `webhook` (a JSON POST `{event, title, message, count, series: [{id, title, added}]}`, optional
@@ -2576,6 +2590,18 @@ asked, never by itself -- answering `{ ok, enabled, wiring }`, or **400** `not_c
 has no `FLARESOLVERR_URL` to share) / `unsupported`, or **502** `unreachable`; it is audited as
 `extension.solver` with the solver's host only.
 
+**The engine's version, and an engine that does not match (the engine upgrade).** The status also carries `buildType`
+(`Stable` or `Preview`), `tested` and `oldest` -- the engine version this Uchiyomi was tested with and the oldest it
+works with -- `standing`, how the running engine's version stands against them (`same`, `older`, `tooOld`, `newer` or
+`unknown`), and `refused`: the operations the engine refused, `[{ op, message, at }]`, by their name in Uchiyomi's
+registry of GraphQL documents and in the engine's own words. An engine that refuses Uchiyomi's queries (an older or
+newer one) has answered, so it is `reachable`; Health's *Extension engine* row says *Not compatible* and quotes it,
+with the step that changes the engine's version on each platform, and a source failing that way is diagnosed
+`engine_incompatible`. A refusal is forgotten once that operation succeeds again, or the engine reports another
+version. Since the same release, a repository is the engine's own *extension store*: `GET /api/admin/extensions/repos`
+lists the stores by the engine's spelling of each address (the `repo.json` beside a pasted `index.min.json`), and the
+add and remove answer as before.
+
 ```
 GET    /api/admin/extensions/status      GET    /api/admin/extensions/catalog
 POST   /api/admin/extensions/catalog/:pkgName
@@ -3009,6 +3035,10 @@ here, which is the safe default but means nobody can get in yet. Pick one of the
   OIDC_ALLOW_SIGNUP: "true"       # create an account the first time someone signs in
 ```
 
+An account made this way starts with **Admin → Members → When someone signs up**: which libraries it can open, an age
+limit and downloads, set before anyone signs in (`newMemberDefaults`, under [Admin](#admin)). Left unset, it opens every
+library.
+
 `OIDC_LINK_BY_USERNAME` is what you usually want on a server whose users already exist. The first time
 someone signs in through SSO, their existing account is adopted: same account, same reading progress,
 favorites and history, now reachable through the identity provider as well as their password. An account
@@ -3048,8 +3078,9 @@ For a server reachable from the internet, the provider can be the only way in (s
   `OIDC_ADMIN_GROUP` does. Anyone else first is told the server is not set up yet. There is no "first visitor
   becomes admin" window.
 - **Accounts come from the provider.** With `OIDC_ALLOW_SIGNUP: "true"`, anyone the provider lets in gets an account
-  the first time they sign in, so decide who in the provider (restrict the application to a group). Without it, only
-  accounts already linked can sign in. **Admin → Members** makes no account and resets no password in this mode.
+  the first time they sign in, so decide who in the provider (restrict the application to a group). Each one starts
+  with what **Admin → Members → New accounts** sets: libraries, an age limit and downloads. Without it, only accounts
+  already linked can sign in. **Admin → Members** makes no account and resets no password in this mode.
 - **An account is its provider identity alone.** `OIDC_LINK_BY_USERNAME` is refused at startup.
 - **Existing installs.** At every start the log lists the accounts that have no link and so can no longer sign in.
   Link them first, in the default mode (above), or let each person sign in through the provider for a new account.

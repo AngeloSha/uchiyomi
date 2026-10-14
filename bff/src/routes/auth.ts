@@ -35,6 +35,7 @@ import { SESSION_COOKIE as KOMGA_SESSION_COOKIE } from '../lib/komgaSession';
 import { desktopFailAudit, desktopSecretMatches, isDesktop, isLoopback } from '../lib/desktop';
 import { desktopUserId, ensureDesktopUser } from '../lib/desktopUser';
 import { authMode, bootstrapSub, mayBootstrap, rescueAdmin, ssoOnly } from '../lib/authMode';
+import { applyMemberDefaults } from '../lib/memberDefaults';
 
 const loginBody = z.object({
   username: z.string().max(64).optional(),
@@ -459,14 +460,23 @@ export default async function authRoutes(app: FastifyInstance) {
     const placeholder = await hash(randomBytes(32).toString('base64url'));
     let username = wanted;
     for (let i = 2; await one('SELECT 1 FROM users WHERE username = $1', [username]); i++) username = `${wanted}${i}`;
-    const rows = await q<{ id: string }>(
-      `INSERT INTO users (display_name, username, role, password_hash, auth_kind, oidc_issuer, oidc_sub)
-       VALUES ($1,$2,$3,$4,'oidc',$5,$6) RETURNING id`,
-      [claims.displayName || username, username, isAdminByGroup(claims) ? 'admin' : 'user',
-       placeholder, claims.issuer, claims.sub],
-    );
-    await logAudit('user.oidc_created', { userId: rows[0].id, username, detail: { issuer: claims.issuer } });
-    return rows[0].id;
+    const role = isAdminByGroup(claims) ? 'admin' : 'user';
+    // A sign-up like /auth/register's: it starts with what Admin → Members → When someone signs up says
+    // (lib/memberDefaults.ts), written with the account so its first request already has it -- an admin by the group
+    // too, for the day the group sync makes it a member. Reintroduce by dropping the call, or by making it for members
+    // only: "a first sign-in through the provider starts with the defaults" in memberDefaults.int.test.ts finds every
+    // library open.
+    const id = await tx(async (qq) => {
+      const [row] = await qq<{ id: string }>(
+        `INSERT INTO users (display_name, username, role, password_hash, auth_kind, oidc_issuer, oidc_sub)
+         VALUES ($1,$2,$3,$4,'oidc',$5,$6) RETURNING id`,
+        [claims.displayName || username, username, role, placeholder, claims.issuer, claims.sub],
+      );
+      await applyMemberDefaults(qq, row.id);
+      return row.id;
+    });
+    await logAudit('user.oidc_created', { userId: id, username, detail: { issuer: claims.issuer } });
+    return id;
   }
 
   /**
@@ -538,6 +548,10 @@ export default async function authRoutes(app: FastifyInstance) {
           [b.data.displayName || username, username, passwordHash],
         );
         await qq(`INSERT INTO app_settings (user_id, data) VALUES ($1, '{}'::jsonb) ON CONFLICT (user_id) DO NOTHING`, [made.id]);
+        // What Admin → Members → When someone signs up says a member starts with (lib/memberDefaults.ts), in this
+        // transaction, so the session answered below already has it. Reintroduce by dropping the call: "a sign-up
+        // starts with the defaults" in memberDefaults.int.test.ts finds every library open.
+        await applyMemberDefaults(qq, made.id);
         return made;
       });
     } catch (e) {

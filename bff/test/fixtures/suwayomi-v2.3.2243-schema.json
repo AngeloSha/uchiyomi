@@ -1,6 +1,6 @@
 {
-  "_provenance": ["Introspected from Suwayomi-Server v2.3.2243 (r2243) by captureSuwayomiSchema.mjs.","Deprecated fields, arguments, input fields and enum values are included; introspection hides them by default.","Type shapes only. Types named __* (introspection) are left out."],
-  "engine": {"name":"Suwayomi-Server","version":"v2.3.2243","revision":"r2243"},
+  "_provenance": ["Introspected from Suwayomi-Server v2.3.2243 (Stable) by captureSuwayomiSchema.mjs.","Deprecated fields, arguments, input fields and enum values are included; introspection hides them by default.","Type shapes only. Types named __* (introspection) are left out."],
+  "engine": {"name":"Suwayomi-Server","version":"v2.3.2243","buildType":"Stable"},
   "roots": {"query":"Query","mutation":"Mutation","subscription":"Subscription"},
   "types": {
    "AboutServerPayload": {

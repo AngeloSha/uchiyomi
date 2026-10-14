@@ -14,15 +14,13 @@
 // engine resolves the position against, which a write with no read before it does not have (a
 // NullPointerException on the engine).
 //
-// ⚠️ THE UNION IS SELECTED WITH ALIASES. `currentValue` and `default` are Boolean on a switch, String on a list
-// and [String!] on a multi-select. graphql-java refuses two fields with one response name and different types
-// in one selection (OverlappingFieldsCanBeMerged holds even across the members of a union), so each shape gets
-// its own name. The fake engine does not model that rule (bff/test/fixtures/fakeSuwayomiEngine.mjs says so);
-// the aliases are for the real one.
+// ⚠️ THE UNION IS SELECTED WITH ALIASES (operations.ts PREF_SHAPES says why).
 //
 // Field names, argument and input shapes were read off the pinned engine's schema
 // (test/fixtures/suwayomi-v2.3.2243-schema.json: Preference, SourcePreferenceChangeInput, UpdateSourcePreferencePayload).
+// The documents are in operations.ts.
 import { gql as defaultGql, type Gql } from './client';
+import { OPS } from './operations';
 import { say, type Part } from '../../said';
 
 /** The five kinds of preference, as the settings sheet draws them. `text` is the engine's EditTextPreference. */
@@ -64,37 +62,24 @@ export interface SourcePrefs {
   preferences: SourcePref[];
 }
 
-const SHAPES = `__typename
-  ... on SwitchPreference { key title summary visible enabled bool: currentValue boolDefault: default }
-  ... on CheckBoxPreference { key title summary visible enabled bool: currentValue boolDefault: default }
-  ... on EditTextPreference { key title summary visible enabled str: currentValue strDefault: default text dialogTitle dialogMessage }
-  ... on ListPreference { key title summary visible enabled str: currentValue strDefault: default entries entryValues }
-  ... on MultiSelectListPreference { key title summary visible enabled strs: currentValue strsDefault: default entries entryValues dialogTitle dialogMessage }`;
-
 /** One source's preference screen, with the source and its extension's other sources. */
-export const SOURCE_PREFS_Q = `query($id:LongString!){ source(id:$id){ id name displayName lang
-  extension { pkgName name source { nodes { id name displayName lang } } }
-  preferences { ${SHAPES} } } }`;
+export const SOURCE_PREFS_Q = OPS.sourcePreferences.doc;
 
-/** The one state field each kind is written through (SourcePreferenceChangeInput), and its GraphQL type. */
-const STATE: Record<PrefType, { field: string; type: string }> = {
-  switch: { field: 'switchState', type: 'Boolean' },
-  checkbox: { field: 'checkBoxState', type: 'Boolean' },
-  text: { field: 'editTextState', type: 'String' },
-  list: { field: 'listState', type: 'String' },
-  multiselect: { field: 'multiSelectState', type: '[String!]' },
+/** The write for each kind: the one state field it is written through (SourcePreferenceChangeInput). */
+const WRITE: Record<PrefType, string> = {
+  switch: OPS.setSwitchPreference.doc,
+  checkbox: OPS.setCheckBoxPreference.doc,
+  text: OPS.setTextPreference.doc,
+  list: OPS.setListPreference.doc,
+  multiselect: OPS.setMultiSelectPreference.doc,
 };
 
 /**
  * The write, for one kind: the position and that kind's state alone. Only the matching field is sent -- the
  * engine reads the one field of the preference's class ("Expected change to <Class>" when it is missing) and a
- * state for another class would be noise at best. The field and its type come from STATE, never from a request.
+ * state for another class would be noise at best. The document comes from WRITE, never from a request.
  */
-export const updatePrefMutation = (type: PrefType): string => {
-  const s = STATE[type];
-  return `mutation($source:LongString!,$position:Int!,$value:${s.type}){
-  updateSourcePreference(input:{source:$source,change:{position:$position,${s.field}:$value}}){ preferences { ${SHAPES} } } }`;
-};
+export const updatePrefMutation = (type: PrefType): string => WRITE[type];
 
 /**
  * Does this preference change the chapter numbers the source gives? Then changing it moves every series from

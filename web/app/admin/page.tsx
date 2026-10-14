@@ -46,6 +46,7 @@ import { useLayer } from '@/lib/layers';
 import { SourceHealthBody } from '@/components/SourceHealthBody';
 import { releaseHref, shownVersion, updateState, type UpdateState } from '@/lib/versionLine';
 import { useSectionArrival } from '@/lib/useSectionArrival';
+import { joinsOnTheirOwn, memberDefaultsOf, type MemberDefaults } from '@/lib/memberDefaults';
 
 /** A name or a title inside a sentence, isolated: in Arabic a Latin one otherwise takes the sentence's order. */
 const iso = (s: string): string => `\u2068${s}\u2069`;
@@ -530,6 +531,8 @@ function Members() {
               ? tr('This server signs in through {name} only. Anyone {name} lets in gets an account the first time they sign in, so choose who in {name}.', { name: iso(provider) })
               : tr('This server signs in through {name} only, and makes no new accounts: only accounts already linked to {name} can sign in. OIDC_ALLOW_SIGNUP lets new people in.', { name: iso(provider) })}
           </p>
+          {/* What those accounts start with (#208, item 6): the chips of the card below in local mode. */}
+          <NewMemberDefaults sso provider={provider} signup={!!data?.auth?.signup} />
         </div>
       ) : (
       <form onSubmit={create} className="card grad-border p-4">
@@ -543,6 +546,10 @@ function Members() {
         <button type="submit" disabled={busy || !username.trim() || password.length < 8} className="btn-accent mt-3 w-full disabled:opacity-50"><IcPlus width={18} height={18} /> {busy ? tr('Creating…') : tr('Create account')}</button>
       </form>
       )}
+      {/* #208, item 6: what a member who signs up starts with. A card of its own beside New account, which is an admin
+          choosing and is left alone by it. After the users list has answered, which says whether the provider makes
+          accounts too. */}
+      {!ssoOnly && data && <NewMemberDefaults provider={provider} signup={!!data.auth?.signup} />}
 
       {(data?.content ?? []).map((u: any) => {
         const self = u.id === user?.id;
@@ -570,11 +577,16 @@ function Members() {
                 <>
                   <button onClick={() => patch(u, { role: u.role === 'admin' ? 'user' : 'admin' }, tr('Role updated'))} className="chip text-xs">{u.role === 'admin' ? tr('Make member') : tr('Make admin')}</button>
                   <button onClick={() => patch(u, { disabled: !u.disabled }, u.disabled ? tr('Account enabled') : tr('Account disabled'))} className="chip text-xs">{u.disabled ? tr('Enable') : tr('Disable')}</button>
-                  <button onClick={() => patch(u, { perms: { ...u.perms, canDownload: !canDl } }, tr('Permission updated'))} className="chip text-xs">{canDl ? tr('Deny downloads') : tr('Allow downloads')}</button>
+                  {/* A member's, like the two below: an admin downloads whatever the flag says (routes/sources.ts), so on an
+                      admin's card it toggled nothing -- and one the provider made carries the new-member default for
+                      the day it is made a member, which read here as a refusal it is not. */}
+                  {u.role !== 'admin' && <button onClick={() => patch(u, { perms: { ...u.perms, canDownload: !canDl } }, tr('Permission updated'))} className="chip text-xs">{canDl ? tr('Deny downloads') : tr('Allow downloads')}</button>}
                   {/* Library access. "All libraries" is the ABSENCE of grant rows, not a full set of them, so a
                       library added next month is visible to unrestricted accounts without editing anyone. */}
-                  {u.role !== 'admin' && <LibraryAccess user={u} onSaved={inval} />}
-                  {u.role !== 'admin' && <AgeCap user={u} onSaved={inval} />}
+                  {u.role !== 'admin' && <LibraryAccess granted={u.libraries ?? null} onSaved={inval}
+                    save={(libraries) => api(`/api/admin/users/${u.id}`, { method: 'PATCH', json: { libraries } })} />}
+                  {u.role !== 'admin' && <AgeCap cap={u.max_age_rating ?? null} onSaved={inval}
+                    save={(maxAgeRating) => api(`/api/admin/users/${u.id}`, { method: 'PATCH', json: { maxAgeRating } })} />}
                 </>
               )}
             </div>
@@ -607,6 +619,67 @@ function Members() {
           onConfirm={() => del(deleting)}
           onClose={() => setDeleting(null)}
         />
+      )}
+    </div>
+  );
+}
+
+/**
+ * What a member the server makes by itself starts with (#208, item 6; bff lib/memberDefaults.ts): one who signs up, or
+ * who signs in through the provider for the first time while it makes accounts (OIDC_ALLOW_SIGNUP). A member card's own
+ * three chips -- downloads, libraries, age limit -- with the same panels and meanings, saved to the server's settings
+ * rather than to an account: what is set here is what that account's card shows on its first day.
+ *
+ * A card of its own after New account, which is an admin choosing and is left alone by these, as every account that
+ * exists is; in SSO-only mode, inside the card that says where accounts come from. When nobody can sign up, the card
+ * says so, rather than reading as a setting that does nothing.
+ */
+function NewMemberDefaults({ sso, provider, signup }: { sso?: boolean; provider: string; signup: boolean }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  // Admin → Settings' own query: one answer and one refetch for both tabs.
+  const { data } = useQuery({ queryKey: ['admin-settings'], queryFn: () => api<any>('/api/admin/settings') });
+  if (!data) return null;
+  const d = memberDefaultsOf(data);
+  // Resolves once the refetch has landed, so a chip stays busy until it shows what was saved.
+  const saved = () => qc.invalidateQueries({ queryKey: ['admin-settings'] });
+  const save = (patch: Partial<MemberDefaults>) => api('/api/admin/settings', { method: 'PATCH', json: { newMemberDefaults: patch } });
+  const canDl = d.perms.canDownload !== false;
+  const flipDownloads = async () => {
+    setBusy(true);
+    try { await save({ perms: canDl ? { canDownload: false } : {} }); toast(tr('Permission updated'), 'success'); await saved(); }
+    catch (e) { toast(msgOf(e, tr('Could not update')), 'error'); }
+    setBusy(false);
+  };
+  // The chips say what a new member gets, lit where that is less than everything, as LibraryAccess and AgeCap are.
+  const chips = (
+    <div className="mt-2.5 flex flex-wrap gap-1.5" data-member-defaults>
+      <button onClick={flipDownloads} disabled={busy} className={`chip text-xs disabled:opacity-50 ${canDl ? '' : 'chip-active'}`}>{canDl ? tr('Can download') : tr('No downloads')}</button>
+      <LibraryAccess granted={d.libraries} save={(libraries) => save({ libraries })} onSaved={saved} nothing={tr('New members would see nothing.')} />
+      <AgeCap cap={d.maxAgeRating} save={(maxAgeRating) => save({ maxAgeRating })} onSaved={saved} />
+    </div>
+  );
+  if (sso) {
+    return (
+      <div className="mt-3 border-t border-ink-800 pt-3">
+        <p className="text-[11px] leading-relaxed text-fog-500">{tr('Each new member starts with these. Existing accounts are not affected.')}</p>
+        {chips}
+      </div>
+    );
+  }
+  return (
+    <div className="card grad-border p-4">
+      <h2 className="mb-2 font-display text-base font-semibold">{tr('When someone signs up')}</h2>
+      <p className="text-sm leading-relaxed text-fog-300">
+        {provider && signup
+          ? tr('A member who signs up, or signs in with {name} for the first time, starts with these.', { name: iso(provider) })
+          : tr('A member who signs up starts with these.')}
+      </p>
+      {chips}
+      <p className="mt-2.5 text-[11px] leading-relaxed text-fog-500">{tr('Existing accounts, and accounts you make here, are not affected.')}</p>
+      {!joinsOnTheirOwn({ registration: !!data.allow_registration, provider: provider || null, signup }) && (
+        <p className="mt-1 text-[11px] leading-relaxed text-fog-400">{tr('Nobody can sign up right now: Open registration is off in Settings.')}</p>
       )}
     </div>
   );
@@ -1041,7 +1114,7 @@ interface FolderPage { path: string; parent: string | null; folders: FolderRow[]
  * promoting one of those makes a "library" named after a scraper. Those candidates are flagged as such.
  */
 /**
- * Which libraries one member may see.
+ * Which libraries one member may see -- or, on When someone signs up, the ones a member who signs up starts with.
  *
  * "All libraries" is the absence of grant rows, not a full set of them. That distinction matters on upgrade
  * (nobody's access changes) and later (a library created next month is visible to unrestricted accounts
@@ -1050,7 +1123,7 @@ interface FolderPage { path: string; parent: string | null; folders: FolderRow[]
  * Admins are unrestricted by definition and never get this control.
  */
 /**
- * The highest age rating one member may see.
+ * The highest age rating one member may see -- or, on When someone signs up, the one a member who signs up starts with.
  *
  * Mirrors LibraryAccess deliberately: null means no cap, the same way no grant rows means every library, so
  * an account with neither restriction behaves exactly as it did before either existed.
@@ -1061,18 +1134,18 @@ interface FolderPage { path: string; parent: string | null; folders: FolderRow[]
  */
 const AGE_CAPS = [6, 10, 13, 15, 17, 18];
 
-function AgeCap({ user, onSaved }: { user: any; onSaved: () => void }) {
+function AgeCap({ cap, save: store, onSaved }: { cap: number | null; save: (next: number | null) => Promise<unknown>; onSaved: () => unknown }) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const cap: number | null = user.max_age_rating ?? null;
 
   const save = async (next: number | null) => {
     setBusy(true);
     try {
-      await api(`/api/admin/users/${user.id}`, { method: 'PATCH', json: { maxAgeRating: next } });
+      await store(next);
       toast(next === null ? tr('No age limit') : tr('Limited to {age}+ and below', { age: next }), 'success');
-      onSaved();
+      // Busy until the refetch has landed: a click before it would save from the old value.
+      await onSaved();
     } catch (e) { toast(msgOf(e, tr('Could not change that')), 'error'); }
     setBusy(false);
   };
@@ -1112,7 +1185,13 @@ function AgeCap({ user, onSaved }: { user: any; onSaved: () => void }) {
   );
 }
 
-function LibraryAccess({ user, onSaved }: { user: any; onSaved: () => void }) {
+function LibraryAccess({ granted, save: store, onSaved, nothing }: {
+  granted: string[] | null;
+  save: (next: string[] | null) => Promise<unknown>;
+  onSaved: () => unknown;
+  /** What the panel says when none are ticked. */
+  nothing?: string;
+}) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1122,14 +1201,14 @@ function LibraryAccess({ user, onSaved }: { user: any; onSaved: () => void }) {
     enabled: open,
   });
   const libs = data?.content ?? [];
-  const granted: string[] | null = user.libraries ?? null;
 
   const save = async (next: string[] | null) => {
     setBusy(true);
     try {
-      await api(`/api/admin/users/${user.id}`, { method: 'PATCH', json: { libraries: next } });
+      await store(next);
       toast(!next ? tr('All libraries') : next.length === 1 ? tr('Limited to 1 library') : tr('Limited to {n} libraries', { n: next.length }), 'success');
-      onSaved();
+      // Busy until the refetch has landed: two quick ticks both worked from the old list, and the second undid the first.
+      await onSaved();
     } catch (e) { toast(msgOf(e, tr('Could not change that')), 'error'); }
     setBusy(false);
   };
@@ -1149,7 +1228,8 @@ function LibraryAccess({ user, onSaved }: { user: any; onSaved: () => void }) {
         <div className="mt-1.5 w-full rounded-xl border border-ink-700 p-2.5">
           <label className="flex cursor-pointer items-center justify-between gap-3 text-xs">
             <span className="text-fog-200">{tr('All libraries')}<span className="ms-1 text-fog-500">{tr('(including any added later)')}</span></span>
-            <input type="checkbox" checked={!granted} disabled={busy}
+            {/* Not before the list has loaded: unticked over an empty list, "every library" was saved as none. */}
+            <input type="checkbox" checked={!granted} disabled={busy || !data}
               onChange={(e) => save(e.target.checked ? null : libs.map((l) => l.id))}
               className="size-4 shrink-0 accent-accent" />
           </label>
@@ -1161,7 +1241,7 @@ function LibraryAccess({ user, onSaved }: { user: any; onSaved: () => void }) {
                   {l.name}
                 </button>
               ))}
-              {!granted.length && <p className="text-[11px] text-amber-300">{tr('This member currently sees nothing.')}</p>}
+              {!granted.length && <p className="text-[11px] text-amber-300">{nothing ?? tr('This member currently sees nothing.')}</p>}
             </div>
           )}
         </div>

@@ -381,6 +381,56 @@ test('the extension engine, as Admin → Extensions and Health see it', { skip: 
         await backup.stop();
       }
     });
+
+    /**
+     * The engine upgrade. An engine without a member Uchiyomi asks for -- `contentWarning`, as on an engine older than
+     * v2.3 or one that dropped it -- answers, and refuses. Reintroduce the old catch in register.ts load() (every error
+     * reachable: false, no `refused`): engineState() reads 'unreachable' and Health "Not answering", whose fix, a
+     * restart, does nothing for it.
+     */
+    await t.test("an engine that refuses Uchiyomi's queries is not compatible, never not answering, and one retry brings it back", async () => {
+      const { extensionEngineCheck } = await import('../src/lib/engineHealth');
+      const { forgetEngineProbe } = await import('../src/lib/extensionEngine');
+      const { engineState } = await import('../src/lib/sources/suwayomi/engineState');
+      const { engineRefusals, forgetEngineRefusals } = await import('../src/lib/sources/suwayomi/client');
+      const { engineStanding, TESTED_ENGINE } = await import('../src/lib/sources/suwayomi/enginePin');
+      const { fakeEngineVersion } = await import('./fixtures/fakeSuwayomi');
+      forgetEngineRefusals();
+      fake.withoutMembers(['SourceType.contentWarning']);
+      try {
+        const loaded = await reg.loadSuwayomiSources();
+        assert.equal(loaded.reachable, false, 'nothing registers from an engine that refuses the sources query');
+        assert.equal(loaded.refused, true, 'and the load says why');
+        assert.equal(engineState(), 'incompatible');
+        const s = await status();
+        assert.equal(s.reachable, true, 'it answered');
+        assert.deepEqual(s.refused.map((r: { op: string }) => r.op), ['sources']);
+        assert.match(s.refused[0].message, /^Validation error \(FieldUndefined@\[sources\/nodes\/contentWarning\]\)/);
+        assert.equal(s.tested, TESTED_ENGINE);
+        assert.equal(s.standing, engineStanding(fakeEngineVersion()), 'how the engine stands is said beside what it refused');
+        assert.equal(s.buildType, 'Stable');
+        forgetEngineProbe();
+        const row = (await extensionEngineCheck())!;
+        assert.equal(row.status, 'warn');
+        assert.equal(row.summary, `Not compatible (${fakeEngineVersion()})`);
+        assert.doesNotMatch(JSON.stringify(row), /not answering/i);
+        // The retry still runs, quietly, and the first try after the engine takes the query again registers it.
+        reg.scheduleSuwayomiRetry([30], 60_000);
+      } finally {
+        fake.withoutMembers([]);
+      }
+      try {
+        for (let i = 0; i < 100 && !reg.lastSuwayomiLoad()?.reachable; i++) await new Promise((r) => setTimeout(r, 30));
+        assert.equal(reg.lastSuwayomiLoad()?.reachable, true, 'one retry registered it');
+        assert.equal(reg.lastSuwayomiLoad()?.refused, undefined);
+        assert.equal(engineState(), 'up');
+        assert.deepEqual(engineRefusals(), [], 'what it refused before is forgotten once it answers');
+        forgetEngineProbe();
+        assert.doesNotMatch((await extensionEngineCheck())!.summary, /Not compatible/);
+      } finally {
+        reg.stopSuwayomiRetry();
+      }
+    });
   } finally {
     console.warn = quiet[0];
     console.log = quiet[1];

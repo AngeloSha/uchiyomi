@@ -11,10 +11,14 @@
 // no credentials, nothing the engine stores.
 //
 // ⚠️ `includeDeprecated: true` on fields, arguments, input fields and enum values is the point of this script.
-// Introspection hides deprecated members by default, and the adapter selects several of them today
-// (SourceType.isNsfw and baseUrl, Mutation.fetchManga and fetchChapters, ExtensionType.repo,
-// SettingsType.extensionRepos, AboutServerPayload.revision). A capture without them made the fake engine
-// refuse the shipping adapter's own queries, which the real engine answers.
+// Introspection hides deprecated members by default. The adapter selected several of them until the engine
+// upgrade (SourceType.isNsfw and baseUrl, Mutation.fetchManga and fetchChapters, ExtensionType.repo,
+// SettingsType.extensionRepos, AboutServerPayload.revision): a capture without them made the fake engine refuse
+// queries the real engine answers, and the operations registry's "no deprecated member" check
+// (test/suwayomiOperations.test.ts) can only see a deprecation the capture kept.
+//
+// The capture's own query asks no deprecated member either (`buildType`, not `revision`): an engine that drops one
+// must still be capturable, since this script is how the weekly canary reads a NEW engine's schema.
 //
 // Dependency-free on purpose, like the fake engine it feeds (fakeSuwayomiEngine.mjs).
 
@@ -29,7 +33,7 @@ const auth = process.env.SUWAYOMI_USERNAME
 
 const T = 'fragment T on __Type { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } } } }';
 const QUERY = `query {
-  aboutServer { name version revision }
+  aboutServer { name version buildType }
   __schema {
     queryType { name } mutationType { name } subscriptionType { name }
     types {
@@ -92,11 +96,11 @@ for (const t of [...s.types].sort((a, b) => a.name.localeCompare(b.name))) {
 
 const doc = {
   _provenance: [
-    `Introspected from ${aboutServer.name} ${aboutServer.version} (${aboutServer.revision}) by captureSuwayomiSchema.mjs.`,
+    `Introspected from ${aboutServer.name} ${aboutServer.version} (${aboutServer.buildType}) by captureSuwayomiSchema.mjs.`,
     'Deprecated fields, arguments, input fields and enum values are included; introspection hides them by default.',
     'Type shapes only. Types named __* (introspection) are left out.',
   ],
-  engine: { name: aboutServer.name, version: aboutServer.version, revision: aboutServer.revision },
+  engine: { name: aboutServer.name, version: aboutServer.version, buildType: aboutServer.buildType },
   roots: { query: s.queryType?.name ?? null, mutation: s.mutationType?.name ?? null, subscription: s.subscriptionType?.name ?? null },
   types,
 };

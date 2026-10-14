@@ -18,6 +18,8 @@ const base = (over: Partial<Deps>): Deps => ({
   solver: { supported: true, enabled: true, url: OURS }, retry: null, cloudflare: [], ...over,
 });
 const findings = (c: { items: Array<{ info?: boolean }> }) => c.items.filter((i) => !i.info);
+/** What a v2.4-or-later engine without `contentWarning` would refuse (client.ts engineRefusals). */
+const REFUSED = [{ op: 'sources', message: "Validation error (FieldUndefined@[sources/nodes/contentWarning]) : Field 'contentWarning' in type 'SourceType' is undefined", at: '2026-10-14T00:00:00.000Z' }];
 
 test('no engine and nothing that needs one: no row at all', async () => {
   const { extensionEngine } = await import('../src/lib/engineHealth');
@@ -250,6 +252,15 @@ test('every sentence of the row carries its codes, and they say exactly its Engl
     ['solver not answering', { solverAnswering: false }],
     ['solver not answering, registering, no version', { solverAnswering: false, registering: true, version: null }],
     ['solver not answering, seen', { solverAnswering: false, cloudflare: [cf('Ball', false), cf('mangapill', true)] }],
+    // The engine upgrade: an engine that refuses, by how its version stands and where it runs, and the version row.
+    ...(['compose', 'unraid', 'casaos', 'desktop', 'unknown'] as const).flatMap((platform): Array<[string, Partial<Deps>]> => [
+      [`incompatible, newer, ${platform}`, { state: 'incompatible', version: 'v2.9.0', refused: REFUSED, platform }],
+      [`incompatible, too old, ${platform}`, { state: 'incompatible', version: 'v2.2.2100', refused: REFUSED, platform }],
+      [`incompatible, unknown, ${platform}`, { state: 'incompatible', version: null, error: 'suwayomi: Validation error (x)', refused: [], platform }],
+      [`up, newer, ${platform}`, { version: 'v2.4.2366', platform }],
+      [`up, older, ${platform}`, { version: 'v2.3.2000', oldest: 'v2.3.0', platform }],
+      [`up, too old, ${platform}`, { version: 'v2.2.2100', platform }],
+    ]),
   ];
   for (const [what, over] of states) {
     const c = extensionEngine(base(over));
@@ -262,4 +273,84 @@ test('every sentence of the row carries its codes, and they say exactly its Engl
       assert.equal(englishOf(it.detailSaid), it.detail, `${what}: "${it.detail}" -- the codes say something else`);
     }
   }
+});
+
+// ---- the engine upgrade: an engine that refuses, and how its version stands --------------------------------------
+
+test('a refusal is Not compatible, never Not answering: one finding quotes the engine and says what to do', async () => {
+  // Reintroduce by reading an engine that refuses as not answering (extensionEngineCheck: state 'unreachable' for a
+  // probe whose aboutServer was refused): the summary reads "Not answering", whose fix -- a restart -- does nothing.
+  // Drop the 'incompatible' branch in extensionEngine(): it reads "Ready".
+  const { extensionEngine } = await import('../src/lib/engineHealth');
+  const c = extensionEngine(base({ state: 'incompatible', version: 'v2.9.0', refused: REFUSED, platform: 'compose', linked: 4 }))!;
+  assert.equal(c.status, 'warn');
+  assert.equal(c.summary, 'Not compatible (v2.9.0)');
+  assert.doesNotMatch(`${c.summary} ${c.note} ${c.items.map((i) => i.detail).join(' ')}`, /not answering/i);
+  assert.equal(findings(c).length, 1, 'exactly one finding');
+  const [f] = findings(c);
+  assert.equal(f.title, 'Not compatible with this Uchiyomi');
+  assert.match(f.detail, /^It refused what Uchiyomi asked: Validation error \(FieldUndefined@\[sources\/nodes\/contentWarning\]\)/, 'the engine\'s own words');
+  // Newer than tested: update Uchiyomi, or go back -- and only ever with a backup.
+  assert.match(f.detail, /The engine is newer than this Uchiyomi\. Update Uchiyomi; until a release supports this engine, v2\.3\.2243 is the version that works\./);
+  assert.match(f.detail, /Back up the engine’s data first/);
+  assert.match(f.detail, /In docker-compose\.yml, set the engine’s image to ghcr\.io\/suwayomi\/suwayomi-server:v2\.3\.2243, then run docker compose up -d uchiyomi-suwayomi\./);
+  assert.match(c.note ?? '', /Restarting it does not help/);
+  // The version row comes along for a newer engine, as a greyed line that says going back needs a backup.
+  const v = c.items.find((i) => i.title === 'Engine version');
+  assert.ok(v?.info, 'a newer engine\'s version row is a greyed line');
+  assert.match(v!.detail, /^v2\.9\.0 is newer than the version this Uchiyomi was tested with \(v2\.3\.2243\)\. To go back to v2\.3\.2243, restore a backup/);
+
+  // Older: update the engine; no backup sentence (an update is the engine's own one-way step, never a step back).
+  const old = extensionEngine(base({ state: 'incompatible', version: 'v2.2.2100', refused: REFUSED, platform: 'compose' }))!;
+  assert.match(findings(old)[0].detail, /Update the engine to v2\.3\.2243, the version this Uchiyomi was tested with\./);
+  assert.doesNotMatch(findings(old)[0].detail, /Back up/);
+  assert.equal(old.items.length, 1, 'the version row repeats the same versions, so it is left out');
+  // No version at all (aboutServer itself refused): the tested version, with a backup first.
+  const unknown = extensionEngine(base({ state: 'incompatible', version: null, error: 'suwayomi: Validation error (FieldUndefined@[aboutServer/buildType]) : x', refused: [] }))!;
+  assert.equal(unknown.summary, 'Not compatible');
+  assert.match(findings(unknown)[0].detail, /^It refused what Uchiyomi asked: Validation error \(FieldUndefined@\[aboutServer\/buildType\]\) : x/);
+  assert.match(findings(unknown)[0].detail, /Run the version this Uchiyomi was tested with, v2\.3\.2243\. Back up the engine’s data first/);
+});
+
+test('each platform gets its own step, with the image, service and path as parameters never translated', async () => {
+  // Reintroduce one step for all (stepOther everywhere): Unraid's names no Repository field and no appdata folder.
+  const { extensionEngine } = await import('../src/lib/engineHealth');
+  const step = (platform: Deps['platform']) => findings(extensionEngine(base({ state: 'incompatible', version: 'v2.2.2100', refused: REFUSED, platform }))!)[0];
+  const image = 'ghcr.io/suwayomi/suwayomi-server:v2.3.2243';
+  const compose = step('compose');
+  assert.match(compose.detail, /docker compose up -d uchiyomi-suwayomi/);
+  assert.match(step('unraid').detail, /On the Docker tab, edit uchiyomi-suwayomi, set its Repository to ghcr\.io\/suwayomi\/suwayomi-server:v2\.3\.2243 and apply\. Its data stays in \/mnt\/user\/appdata\/uchiyomi-suwayomi\./);
+  assert.match(step('casaos').detail, /In CasaOS, edit the uchiyomi-suwayomi app, set its image to ghcr\.io\/suwayomi\/suwayomi-server:v2\.3\.2243 and save\. Its data stays in \/DATA\/AppData\/uchiyomi-suwayomi\./);
+  assert.match(step('unknown').detail, /Run ghcr\.io\/suwayomi\/suwayomi-server:v2\.3\.2243 in place of the engine you have, on the same data\./);
+  const desk = step('desktop');
+  assert.match(desk.detail, /Quit and reopen Uchiyomi\. If Admin → Sources then offers to download the extension engine, download it/);
+  assert.doesNotMatch(desk.detail, /docker|compose|container|ghcr/i, 'a desktop is sent to Docker');
+  // What someone copies is a parameter of the sentence, so a translation cannot touch it.
+  const parts = compose.detailSaid!.filter((p) => p.code === 'engine.stepCompose');
+  assert.deepEqual(parts.map((p) => p.params), [{ image, file: 'docker-compose.yml', command: 'docker compose up -d uchiyomi-suwayomi' }]);
+});
+
+test('the version row: only when it is not the tested one; too old is a finding, older and newer are greyed lines', async () => {
+  // Reintroduce by showing the row for the tested version too: "the tested engine has no version row" fails. Make too
+  // old a greyed line (info: true): the check stays "ok" over an engine that is about to stop working.
+  const { extensionEngine } = await import('../src/lib/engineHealth');
+  const same = extensionEngine(base({ version: 'v2.3.2243' }))!;
+  assert.ok(!same.items.some((i) => i.title === 'Engine version'), 'the tested engine has no version row');
+  const newer = extensionEngine(base({ version: 'v2.4.2366', platform: 'compose' }))!;
+  assert.equal(newer.status, 'ok');
+  assert.equal(newer.summary, 'Ready, and it can get past Cloudflare (v2.4.2366)');
+  const nv = newer.items.find((i) => i.title === 'Engine version')!;
+  assert.equal(nv.info, true);
+  assert.match(nv.detail, /^v2\.4\.2366 is newer than the version this Uchiyomi was tested with \(v2\.3\.2243\)\. To go back to v2\.3\.2243, restore a backup of the engine’s data from before the update/);
+  assert.doesNotMatch(nv.detail, /docker compose|set the engine’s image/, 'never a step back without a backup in front of it');
+  const older = extensionEngine(base({ version: 'v2.3.2000', oldest: 'v2.3.0', platform: 'unraid' }))!;
+  const ov = older.items.find((i) => i.title === 'Engine version')!;
+  assert.equal(ov.info, true);
+  assert.match(ov.detail, /^v2\.3\.2000 is older than the version this Uchiyomi was tested with \(v2\.3\.2243\)\. It works; updating it is recommended\. On the Docker tab/);
+  const tooOld = extensionEngine(base({ version: 'v2.2.2100', platform: 'compose' }))!;
+  assert.equal(tooOld.status, 'warn', 'too old is a finding');
+  const tv = findings(tooOld).find((i) => i.title === 'Engine version')!;
+  assert.match(tv.detail, /^v2\.2\.2100 is older than the oldest version this Uchiyomi works with \(v2\.3\.2243\)\. In docker-compose\.yml/);
+  // A version that is not vX.Y.Z says nothing.
+  assert.ok(!extensionEngine(base({ version: 'preview-build' }))!.items.some((i) => i.title === 'Engine version'));
 });

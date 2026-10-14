@@ -293,7 +293,7 @@ test('the engine being off is the reason, not the source limit', { skip: DSN ? f
   await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id)
            VALUES ($1, 'test', 'Room Fixture', $1, 2, 'sw:health-room', '1')`, [S_ROOM]);
   try {
-    const detail = async (engine: 'off' | 'switched_off' | 'unreachable' | 'up', title: string) => {
+    const detail = async (engine: 'off' | 'switched_off' | 'unreachable' | 'incompatible' | 'up', title: string) => {
       const c = await frozenSeries(noIgnores(), engine);
       await assertSaid([c]);
       return { detail: c.items.find((i) => i.title === title)!.detail, note: c.note ?? '' };
@@ -305,6 +305,10 @@ test('the engine being off is the reason, not the source limit', { skip: DSN ? f
       assert.match(r.note, /^Series that came from extensions wait for the extension engine; Admin → Sources shows how to bring it back\. /);
     }
     assert.match((await detail('unreachable', 'Engine Fixture')).detail, /because the extension engine isn’t answering$/);
+    // The engine upgrade: an engine that answers and refuses is not one that is down, nor one switched off. Reintroduce
+    // the two-way choice in frozenSeries (`engine === 'unreachable' ? engineDown : engineOff`): this reads "is off".
+    assert.match((await detail('incompatible', 'Engine Fixture')).detail,
+      /^12 chapters; its source Engine Source can’t be reached because the extension engine does not match this Uchiyomi$/);
     const actions = async (engine: 'off' | 'up', title: string) => (await frozenSeries(noIgnores(), engine)).items.find((i) => i.title === title)!;
     // v0.55.1: switched on and not loaded is over the limit only when the last load says it left the source out
     // (register.ts leftOutByLimit, which the sources overview reads too). Before any such load, an extension the engine

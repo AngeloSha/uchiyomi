@@ -34,6 +34,7 @@
 // Errors are only logged, once per run of failures: an engine that is still booting, or has gone away, must not
 // fill the log every few minutes, and nothing else waits on this succeeding.
 import { gql as defaultGql, suwayomiConfigured, engineAnswered, type Gql } from './client';
+import { OPS } from './operations';
 import { SW_PREFIX } from './sources';
 import { listActivity } from '../../downloadActivity';
 import { gateBusy } from '../../gate';
@@ -47,8 +48,8 @@ export const RETRY_MS = 5 * 60_000;
 /** How often the keeper looks. */
 export const TICK_MS = 60_000;
 
-/** The mutation, pages only; its input fields are ClearCachedImagesInput's at v2.3.2243. */
-export const CLEAR_PAGES_M = 'mutation { clearCachedImages(input: { cachedPages: true }) { cachedPages } }';
+/** The mutation, pages only; its input fields are ClearCachedImagesInput's at v2.3.2243 (operations.ts). */
+export const CLEAR_PAGES_M = OPS.clearCachedImages.doc;
 
 /**
  * Ask the engine to empty its page cache. True when it says it did; false when it could not delete everything

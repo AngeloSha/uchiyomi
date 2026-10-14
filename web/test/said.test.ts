@@ -54,6 +54,9 @@ const SAMPLE: Record<string, (c: number) => unknown> = {
   ok: (c) => c === 1, into: () => 'Walk Tale', why: () => 'time',
   // v0.55.3, solver.ready: which solver answered (bff lib/sources/flaresolverr.ts SolverKind), named before its version.
   kind: () => 'trawl',
+  // The engine upgrade: the versions an engine is held to (bff enginePin.ts), and what a step names to copy.
+  tested: () => 'v2.3.2243', oldest: () => 'v2.3.2243', image: () => 'suwayomi/suwayomi-server:v2.3.2243',
+  command: () => 'docker compose up -d uchiyomi-suwayomi', service: () => 'uchiyomi-suwayomi', path: () => '/mnt/user/appdata/uchiyomi-suwayomi',
 };
 
 /**
@@ -82,7 +85,7 @@ const DIFFERS: Record<string, string> = {
 /** Codes whose web English differs at a count of 1 only: the server's English says "1 chapter contain", "1 series use it". */
 const ONE_DIFFERS = new Set([
   'short.live', 'failures.live', 'job.saved', 'cap.detail', 'sources.uses', 'scan.indexed',
-  'frozen.noSource', 'frozen.engineDown', 'frozen.engineOff', 'frozen.switchedOff', 'frozen.overLimit', 'frozen.uninstalled',
+  'frozen.noSource', 'frozen.engineDown', 'frozen.engineOff', 'frozen.engineIncompatible', 'frozen.switchedOff', 'frozen.overLimit', 'frozen.uninstalled',
 ]);
 
 /** The parameter names a server sentence takes: its one destructured argument, read from its source. */
@@ -228,6 +231,7 @@ test('every diagnosis the server can reach reads as its English: each reason by 
     ['engine login', facts('suwayomi 401')],
     ['engine down', facts('suwayomi unreachable: ECONNREFUSED')],
     ['engine timeout', facts('suwayomi timeout after 30000ms')],
+    ['engine incompatible', facts("suwayomi: Validation error (FieldUndefined@[sources/nodes/contentWarning]) : Field 'contentWarning' in type 'SourceType' is undefined")],
     ['engine timeout, live', facts(null), live('pages', 'timeout', 'suwayomi timeout after 30000ms')],
     ['challenge', facts('Just a moment...')],
     ['403', facts('HTTP 403 Forbidden')],

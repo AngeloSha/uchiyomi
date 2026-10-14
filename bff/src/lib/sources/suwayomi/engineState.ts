@@ -14,9 +14,10 @@ export type EngineOffReason = 'switch' | 'unset';
  * - `off`: no address (SUWAYOMI_URL empty: CasaOS and Unraid until the engine is added, or turned off by hand);
  * - `switched_off`: EXTENSION_ENGINE=0 with the bundled address;
  * - `unreachable`: set up, and the last registration found nobody there (or none has run yet);
+ * - `incompatible`: the last registration reached it, and it refused Uchiyomi's query (register.ts LoadResult.refused);
  * - `up`: the last registration reached it.
  */
-export type EngineState = 'off' | 'switched_off' | 'unreachable' | 'up';
+export type EngineState = 'off' | 'switched_off' | 'unreachable' | 'incompatible' | 'up';
 
 /**
  * Null while there is an engine to talk to -- the same test as suwayomiConfigured, which is the one the routes
@@ -52,5 +53,6 @@ export function engineHost(raw: string | undefined = env.SUWAYOMI_URL): string {
  */
 export function engineState(): EngineState {
   if (!suwayomiConfigured()) return engineOffReason() === 'switch' ? 'switched_off' : 'off';
-  return lastSuwayomiLoad()?.reachable ? 'up' : 'unreachable';
+  const load = lastSuwayomiLoad();
+  return load?.reachable ? 'up' : load?.refused ? 'incompatible' : 'unreachable';
 }

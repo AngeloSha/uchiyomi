@@ -88,6 +88,29 @@ test('extension source registration', { skip: DSN ? false : 'set TEST_DATABASE_U
     assert.equal(adapter!.lang, 'en', 'the language must reach the adapter too, or it joins every group');
   });
 
+  await t.test('a MIXED source, as the engine lists it, is remembered adult and registers adult', async () => {
+    // The engine upgrade: the adult flag comes from `contentWarning` (SAFE | MIXED | NSFW), and a legacy store's 18+
+    // extension is MIXED. Reintroduce `contentWarning === 'NSFW'` in sources.ts adultOf: the row is stored clean and a
+    // capped account reaches the adapter. Through listRemoteSources itself, as registration calls it.
+    reset();
+    await q('DELETE FROM suwayomi_sources');
+    const { listRemoteSources } = await import('../src/lib/sources/suwayomi/sources');
+    const { sourceAllowedFor } = await import('../src/lib/visibility');
+    const nodes = [
+      { id: '20', name: 'Mixed', lang: 'en', contentWarning: 'MIXED' }, { id: '21', name: 'Safe', lang: 'en', contentWarning: 'SAFE' },
+      { id: '22', name: 'Unsaid', lang: 'en' },
+    ];
+    const list = () => listRemoteSources((async () => ({ sources: { nodes } })) as never);
+    await reg.loadSuwayomiSources(list);
+    const rows = await q<{ source_id: string; nsfw: boolean }>(`SELECT source_id, nsfw FROM suwayomi_sources ORDER BY source_id`);
+    assert.deepEqual(rows.map((r) => [r.source_id, r.nsfw]), [['20', true], ['21', false], ['22', true]], 'only SAFE is stored clean');
+    await q(`UPDATE suwayomi_sources SET enabled = true`);
+    await reg.loadSuwayomiSources(list);
+    assert.equal(sourceAllowedFor(loader.getSource('sw:20'), 13), false, 'a capped account reaches a MIXED source');
+    assert.equal(sourceAllowedFor(loader.getSource('sw:21'), 13), true);
+    await q('DELETE FROM suwayomi_sources');
+  });
+
   await t.test('which extension a source came out of is remembered, refreshed, and tolerated when missing', async () => {
     // One package can expose dozens of sources (3Hentai: twenty-nine language variants) and `pkgName` is
     // the only thing they share that is not a guess; the Providers page folds them into one card by it.

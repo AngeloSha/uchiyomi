@@ -4,8 +4,11 @@
 // configured on their own server, and Suwayomi does the fetching and installing. No repository URL ships in
 // this codebase, and nothing is fetched until someone adds one.
 //
-// Operation names and shapes verified live against Suwayomi-Server v2.3.2243.
+// A "repository" is what the engine calls an extension STORE since v2.3.2243: added and removed one at a time
+// (addExtensionStore / removeExtensionStore), listed by extensionStores. The documents are in operations.ts.
 import { gql as defaultGql, type Gql } from './client';
+import { adultOf } from './sources';
+import { OPS } from './operations';
 
 export interface ExtensionInfo {
   pkgName: string;
@@ -17,16 +20,15 @@ export interface ExtensionInfo {
   hasUpdate: boolean;
   obsolete: boolean;
   nsfw: boolean;
+  /** The store it was offered by, as the engine spells it (`storeIndexUrl`; it replaced `repo`). */
   repo: string | null;
 }
 
 interface RawExtension {
   pkgName: string; name?: string | null; lang?: string | null; versionName?: string | null;
   iconUrl?: string | null; isInstalled?: boolean | null; hasUpdate?: boolean | null;
-  isObsolete?: boolean | null; isNsfw?: boolean | null; repo?: string | null;
+  isObsolete?: boolean | null; contentWarning?: string | null; storeIndexUrl?: string | null;
 }
-
-const EXT_FIELDS = 'pkgName name lang versionName iconUrl isInstalled hasUpdate isObsolete isNsfw repo';
 
 const toInfo = (e: RawExtension): ExtensionInfo | null =>
   e?.pkgName
@@ -39,8 +41,9 @@ const toInfo = (e: RawExtension): ExtensionInfo | null =>
         installed: !!e.isInstalled,
         hasUpdate: !!e.hasUpdate,
         obsolete: !!e.isObsolete,
-        nsfw: !!e.isNsfw,
-        repo: e.repo || null,
+        // SAFE, MIXED or NSFW; anything but SAFE is 18+, and a value we do not know is too (sources.ts adultOf).
+        nsfw: adultOf(e.contentWarning),
+        repo: e.storeIndexUrl || null,
       }
     : null;
 
@@ -58,7 +61,7 @@ const moved = async <T>(work: Promise<T>): Promise<T> => {
 
 /** Everything the configured repositories offer, plus what is already installed. */
 export async function listExtensions(run: Gql = defaultGql): Promise<ExtensionInfo[]> {
-  const d = await run<{ extensions: { nodes: RawExtension[] } }>(`{ extensions { nodes { ${EXT_FIELDS} } } }`, {}, 30000);
+  const d = await run<{ extensions: { nodes: RawExtension[] } }>(OPS.extensions.doc, {}, 30000);
   const nodes = d?.extensions?.nodes;
   return Array.isArray(nodes) ? nodes.map(toInfo).filter((e): e is ExtensionInfo => !!e) : [];
 }
@@ -84,7 +87,7 @@ export async function extensionFacts(run: Gql = defaultGql): Promise<Map<string,
   try {
     const d = await run<{ extensions: { nodes: Array<{
       pkgName: string; versionCodeLong?: string | null; apkUrl?: string | null; jarUrl?: string | null; apkName?: string | null; storeIndexUrl?: string | null;
-    }> } }>(`{ extensions { nodes { pkgName versionCodeLong apkUrl jarUrl apkName storeIndexUrl } } }`, {}, 30000);
+    }> } }>(OPS.extensionFacts.doc, {}, 30000);
     const out = new Map<string, ExtensionFacts>();
     for (const e of d?.extensions?.nodes ?? []) {
       if (!e?.pkgName) continue;
@@ -110,19 +113,16 @@ export async function extensionFacts(run: Gql = defaultGql): Promise<Map<string,
  * nothing to do, indefinitely.
  */
 export async function refreshExtensions(run: Gql = defaultGql, timeoutMs = 120000): Promise<number> {
-  const d = await moved(run<{ fetchExtensions: { extensions: RawExtension[] } }>(
-    `mutation{ fetchExtensions(input:{}){ extensions { pkgName } } }`, {}, timeoutMs,
-  ));
+  const d = await moved(run<{ fetchExtensions: { extensions: RawExtension[] } }>(OPS.fetchExtensions.doc, {}, timeoutMs));
   return d?.fetchExtensions?.extensions?.length ?? 0;
 }
 
 export type ExtensionAction = 'install' | 'uninstall' | 'update';
 
 export async function setExtensionState(pkgName: string, action: ExtensionAction, run: Gql = defaultGql): Promise<boolean> {
-  const patch = action === 'install' ? 'install:true' : action === 'uninstall' ? 'uninstall:true' : 'update:true';
   const d = await moved(run<{ updateExtension: { extension: RawExtension | null } }>(
-    `mutation($id:String!){ updateExtension(input:{id:$id,patch:{${patch}}}){ extension { pkgName isInstalled } } }`,
-    { id: pkgName },
+    OPS.updateExtension.doc,
+    { id: pkgName, patch: { [action]: true } },
     180000, // installing downloads an APK and converts its bytecode; it is genuinely slow
   ));
   return !!d?.updateExtension?.extension;
@@ -130,29 +130,56 @@ export async function setExtensionState(pkgName: string, action: ExtensionAction
 
 /** The source ids one installed extension provides — an extension can carry several (one per language). */
 export async function sourcesOfExtension(pkgName: string, run: Gql = defaultGql): Promise<Array<{ id: string; name: string; lang: string | null; nsfw: boolean }>> {
-  const d = await run<{ extensions: { nodes: Array<{ pkgName: string; source?: { nodes?: Array<{ id: string; name?: string; lang?: string; isNsfw?: boolean }> } }> } }>(
-    `{ extensions { nodes { pkgName source { nodes { id name lang isNsfw } } } } }`, {}, 30000,
+  const d = await run<{ extensions: { nodes: Array<{ pkgName: string; source?: { nodes?: Array<{ id: string; name?: string; lang?: string; contentWarning?: string }> } }> } }>(
+    OPS.sourcesOfExtension.doc, {}, 30000,
   );
   const hit = (d?.extensions?.nodes || []).find((e) => e.pkgName === pkgName);
   return (hit?.source?.nodes || [])
     .filter((s) => s && s.id != null)
-    .map((s) => ({ id: String(s.id), name: s.name || pkgName, lang: s.lang ?? null, nsfw: !!s.isNsfw }));
+    .map((s) => ({ id: String(s.id), name: s.name || pkgName, lang: s.lang ?? null, nsfw: adultOf(s.contentWarning) }));
 }
 
-// ---- extension repositories -------------------------------------------------
+// ---- extension repositories (the engine's extension stores) ---------------------------------------------------
+//
+// Measured on throwaway v2.3.2243 and v2.4.2366 engines, with a fixture store on a network of their own, and the same
+// on both (2026-10-14):
+//   * an add fetches the index there and then and answers in tens of milliseconds -- the store, or the engine's error
+//     ("Provided legacy store url is not valid" for a list-shaped index anywhere but at …/index.min.json, "HTTP error
+//     404", a decoding error for a web page, a DNS failure). Nothing is applied later: the catalogue's next
+//     fetchExtensions lists its extensions at once;
+//   * it stores its OWN spelling and answers it: the repo.json beside a pasted index.min.json (or the index that
+//     repo.json names), so the address to remove by is the one the add answered;
+//   * adding a store it holds again is no error and changes nothing; a remove matches the address exactly, and one it
+//     does not hold answers null, with no error;
+//   * stores outlive a restart, and the deprecated `settings { extensionRepos }` -- what Uchiyomi read and wrote until
+//     then -- shows a store added this way only after one.
 
+/** The stores the engine holds, by its own spelling of each address. */
 export async function getRepos(run: Gql = defaultGql): Promise<string[]> {
-  const d = await run<{ settings: { extensionRepos: string[] | null } }>(`{ settings { extensionRepos } }`, {}, 15000);
-  return d?.settings?.extensionRepos ?? [];
+  const d = await run<{ extensionStores: { nodes: Array<{ indexUrl?: string | null }> | null } }>(OPS.extensionStores.doc, {}, 15000);
+  return (d?.extensionStores?.nodes ?? []).map((n) => n?.indexUrl).filter((u): u is string => typeof u === 'string' && !!u);
 }
 
-export async function setRepos(urls: string[], run: Gql = defaultGql): Promise<string[]> {
-  const d = await moved(run<{ setSettings: { settings: { extensionRepos: string[] | null } } }>(
-    `mutation($r:[String!]){ setSettings(input:{settings:{extensionRepos:$r}}){ settings { extensionRepos } } }`,
-    { r: urls },
-    20000,
+/**
+ * Add one store. Throws with the engine's reason when it cannot read the address -- a refusal of the ADDRESS, which the
+ * route counts as nothing found there -- and answers the address the engine stored it under.
+ */
+export async function addRepo(url: string, run: Gql = defaultGql): Promise<{ indexUrl: string; name: string | null }> {
+  const d = await moved(run<{ addExtensionStore: { extensionStore: { indexUrl?: string | null; name?: string | null } | null } | null }>(
+    OPS.addExtensionStore.doc, { indexUrl: url }, 60000,
   ));
-  return d?.setSettings?.settings?.extensionRepos ?? [];
+  const store = d?.addExtensionStore?.extensionStore;
+  // The engine answered no store and no error: not a shape it has, so not taken as an add.
+  if (!store?.indexUrl) throw new Error('suwayomi: the engine did not say which store it added');
+  return { indexUrl: store.indexUrl, name: store.name ?? null };
+}
+
+/** Remove one store by the engine's own spelling of its address. False when it held none under that address. */
+export async function removeRepo(indexUrl: string, run: Gql = defaultGql): Promise<boolean> {
+  const d = await moved(run<{ removeExtensionStore: { extensionStore: { indexUrl?: string | null } | null } | null }>(
+    OPS.removeExtensionStore.doc, { indexUrl }, 20000,
+  ));
+  return !!d?.removeExtensionStore?.extensionStore;
 }
 
 // ---- what someone pastes into "Add a repository" ----------------------------------------------------------
@@ -271,7 +298,7 @@ export function repoKey(url: string): string {
 /**
  * How many extensions THIS repository put in the catalogue.
  *
- * Judged by the engine's own per-extension repository field (`repo`, which is `storeIndexUrl` at v2.3.2243):
+ * Judged by the engine's own per-extension store field (`storeIndexUrl`, read into `repo`):
  * an extension counts when the repository it came from is none of the ones configured before the add, and it
  * was not already in the catalogue under that repository. That second clause is what keeps an installed
  * extension whose repository was removed long ago -- the engine keeps its row and its old address -- from
@@ -302,25 +329,31 @@ export function contributedBy(all: ExtensionInfo[], before: ExtensionInfo[], exi
   }).length;
 }
 
-/** The engine's own words for a failure, without our transport's `suwayomi:` prefix. */
+/**
+ * The engine's own words for a failure: without our transport's `suwayomi:` prefix, graphql-java's "Exception while
+ * fetching data (/addExtensionStore) : " in front, or the Java stack trace after the first line -- which is all an
+ * add refusal carries now that the engine reads a store's address there and then ("Provided legacy store url is not
+ * valid", "HTTP error 404"). Reintroduce the prefix strip alone: "a refused add says why in the engine's words" in
+ * extensionRepos.int.test.ts reads the stack trace.
+ */
 export function engineReason(e: unknown): string {
-  const m = String((e as Error)?.message ?? e ?? '').replace(/^suwayomi:?\s*/i, '').trim();
+  const m = String((e as Error)?.message ?? e ?? '').replace(/^suwayomi:?\s*/i, '')
+    .replace(/^Exception while fetching data \([^)]*\) : /, '').split(/\r?\n/)[0].trim();
   return (m || 'no reason given').slice(0, 300);
 }
 
 /**
- * A second URL worth trying when a repository yields nothing at all.
+ * A second URL worth trying when a repository yields nothing at all, or the engine cannot read the one typed.
  *
- * This is insurance, not a rule. The usual cause of an empty result is timing, not the URL: the server
- * applies a settings change asynchronously, so a repository read immediately after being added comes back
- * empty and needs a retry (the caller does that first). But repository layouts do vary, so when retries have
- * genuinely produced nothing, this offers one more thing to try:
+ * This is insurance, not a rule. Repository layouts vary, so when what was typed produced nothing, this offers one
+ * more thing to try:
  *
  * - `…/index.json` → the `…/index.min.json` beside it;
  * - a bare folder (`…/repo` or `…/repo/`) → `…/repo/index.min.json`, the file Mihon itself reads.
  *
- * Both point AT index.min.json because Suwayomi v2.3.2243 refuses a legacy (list-shaped) index at any address
- * that does not end in `/index.min.json` ("Provided legacy store url is not valid", only in the engine's log).
+ * Both point AT index.min.json because Suwayomi (v2.3.2243 and v2.4.2366, measured) refuses a legacy (list-shaped)
+ * index at any address that does not end in `/index.min.json` ("Provided legacy store url is not valid", the add's
+ * own error since stores replaced the setting; before, only in the engine's log).
  * ⚠️ Until v0.45.0's review the alternative ran the other way, `…/index.min.json` → `…/index.json`, which that
  * rule makes impossible: every refused add spent ~2 s and two engine writes on it, and a pasted `index.json`
  * -- the one case where an alternative helps -- got none and was refused, though the index.min.json in the

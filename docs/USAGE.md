@@ -84,8 +84,10 @@ two-factor auth, you'll be asked for your 6-digit code (or a recovery code) afte
 **Creating your own account** (since v0.61.0). When the admin has turned on **Admin → Settings → Open registration**,
 the sign-in form offers **Create an account** under it: a username (letters, numbers, `.`, `_` and `-`), a password
 of at least 8 characters, typed twice, and you are signed in as a member. A name someone already has is taken,
-whatever its capital letters: with `admin` here, `Admin` is taken too. With the switch off there is no such link,
-and accounts come from the admin (**Admin → Members**). The desktop app never offers it.
+whatever its capital letters: with `admin` here, `Admin` is taken too. What a new account can open (which
+libraries, an age limit, downloads) is the admin's choice, under **Admin → Members → When someone signs up**. With the
+switch off there is no such link, and accounts come from the admin (**Admin → Members**). The desktop app never offers
+it.
 
 ---
 
@@ -2533,6 +2535,18 @@ disable, or allow/deny downloads. Each row shows whether the member has 2FA on, 
 linked to single sign-on. On a server that signs in through its provider only (since v0.63.0), Members makes no
 account and resets no password: a card says where accounts come from instead, the provider's sign-in, and whether
 it makes new ones (`OIDC_ALLOW_SIGNUP`). Everything else here works as before.
+
+**What a new member starts with** ([#208](https://github.com/AngeloSha/uchiyomi/issues/208)). The *When someone signs
+up* card, beside *New account*, sets it for every account no admin chose for: someone who signs up while **Admin →
+Settings → Open registration** is on, or who signs in through your provider for the first time (`OIDC_ALLOW_SIGNUP`). It
+has a member card's own three chips, with the same panels: downloads, library access and the age limit. Pick one library
+there and every new account opens that library alone, from its very first visit; before, each new account had to be
+limited by hand after it had already seen everything. The defaults never change an account that exists, nor one you make
+here, and the server's first admin starts with everything; an account the provider makes an admin sees everything while
+it is one, and has the defaults if the provider ever makes it a member. Until you set one, a new account opens every
+library, has no age limit and may download, as before. Remove a library the defaults name and it leaves them; if it was
+the last, new members see nothing until you choose again, never everything. The card says when nobody can sign up. On a
+server that signs in through its provider only, the chips are on the *New accounts* card.
 
 Each member also has an **age limit**, next to their library access. Set one and anything rated above it
 disappears from that account entirely: the library page, search, the reader, the offline downloads and any

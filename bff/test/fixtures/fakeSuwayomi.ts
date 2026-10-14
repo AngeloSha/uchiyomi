@@ -15,11 +15,14 @@
 // to fakeSuwayomiEngine.mjs, measured against a throwaway engine of the pinned image (conformFakeSuwayomi.mjs
 // runs the comparison), rather than loosening the check.
 import {
-  startFakeEngine, checkQuery, defaultSeed, catalogueSeed, catalogueExtensions, istreveliaPosts, webtoonsNumbers, f32,
+  startFakeEngine, checkQuery, loadSchema, schemaWithout, defaultSeed, catalogueSeed, catalogueExtensions, istreveliaPosts, webtoonsNumbers, f32,
   SOURCE_IDS, PKG, SEQUENTIAL_KEY, STAGES, MODES,
 } from './fakeSuwayomiEngine.mjs';
 
 export { defaultSeed, catalogueSeed, catalogueExtensions, istreveliaPosts, webtoonsNumbers, f32, SOURCE_IDS, PKG, SEQUENTIAL_KEY, STAGES, MODES };
+
+/** The version of the engine whose schema the fake validates against: v2.3.2243, or SUWAYOMI_FAKE_SCHEMA's. */
+export const fakeEngineVersion = (): string => (loadSchema() as { engine: { version: string } }).engine.version;
 
 export type FakeMode = 'up' | 'down' | 'slow' | 'extension_error';
 /** Where an extension can fail: fetchSourceManga, fetchManga, fetchChapters, fetchChapterPages, a page image. */
@@ -66,7 +69,10 @@ export interface FakeChapter {
    */
   chapterNumber?: number;
   scanlator?: string | null;
-  /** Epoch milliseconds. */
+  /**
+   * Epoch milliseconds. 0 or absent: the extension gave no date, and the engine stamps one (fakeSuwayomiEngine.mjs
+   * syncChapters) -- in SECONDS on v2.3.2243.
+   */
   uploadDate?: number;
   pages?: number;
   realUrl?: string | null;
@@ -94,6 +100,8 @@ export interface FakeSource {
   pkgName: string;
   supportsLatest?: boolean;
   isNsfw?: boolean;
+  /** SAFE, MIXED or NSFW; absent, NSFW or SAFE from isNsfw. */
+  contentWarning?: string;
   baseUrl?: string | null;
   numbering?: 'webtoons';
   /** The preference screen, in order. Reorder or edit it to model an extension update; see `readPreferences`. */
@@ -116,6 +124,8 @@ export interface FakeExtension {
   versionName: string;
   installed: boolean;
   isNsfw: boolean;
+  /** SAFE, MIXED or NSFW; absent, NSFW or SAFE from isNsfw. */
+  contentWarning?: string;
   repo?: string | null;
   hasUpdate: boolean;
   obsolete: boolean;
@@ -132,6 +142,8 @@ export interface FakeSeed {
   }>;
   extensions: Array<Partial<FakeExtension> & Pick<FakeExtension, 'pkgName' | 'name' | 'lang' | 'versionName' | 'installed'>>;
   settings?: Record<string, unknown>;
+  /** Extension stores it holds at the start, by the engine's own spelling of each address. */
+  stores?: string[];
 }
 export interface FakeCall {
   seq: number;
@@ -175,6 +187,8 @@ export interface FakeSuwayomi {
   extension(pkgName: string): FakeExtension;
   /** The engine's settings as stored (setSettings writes here). */
   readonly settings: Record<string, unknown>;
+  /** The extension stores it holds, by the engine's own spelling of each address, in the order they were added. */
+  readonly stores: string[];
   /** Every preference write that took effect: the position asked for and the key it landed on. */
   readonly prefWrites: Array<{ source: string; position: number; key: string; value: unknown }>;
   /** The pages the engine keeps on disk because it served them (its manga-cache), by request path. */
@@ -190,6 +204,11 @@ export interface FakeSuwayomi {
   query<T = any>(query: string, variables?: Record<string, unknown>): Promise<GqlResponse<T>>;
   /** Back to a fresh copy of `seed` (default: the one it started with), mode `up`, an empty log. */
   reset(seed?: FakeSeed): void;
+  /**
+   * From now on, validate as an engine WITHOUT these members (`SourceType.contentWarning`), as an older or newer one
+   * would: Uchiyomi's queries that select them are refused in the engine's words. [] puts the schema back.
+   */
+  withoutMembers(members: string[]): void;
   /** Close the port for real (connection refused) ... */
   stop(): Promise<void>;
   /** ... and reopen the same one. */
@@ -223,12 +242,14 @@ export async function startFakeSuwayomi(opts: FakeSuwayomiOptions = {}): Promise
     manga: (title) => find([...e.state.mangas.values()].find((m: FakeManga) => m.title === title), `series "${title}"`),
     extension: (pkg) => find(e.state.extensions.get(pkg), `extension ${pkg}`),
     get settings() { return e.state.settings; },
+    get stores() { return [...e.state.stores.keys()]; },
     get prefWrites() { return e.state.prefWrites; },
     get pageCache() { return e.state.pageCache; },
     get thumbnailCache() { return e.state.thumbnailCache; },
     get cacheClears() { return e.state.cacheClears; },
     query: (query, variables = {}) => e.graphql({ query, variables }),
     reset: (seed) => e.reset(seed),
+    withoutMembers: (members) => e.setSchema(members.length ? schemaWithout(loadSchema(), members) : null),
     stop: () => h.stop(),
     start: () => h.start(),
     close: () => h.close(),

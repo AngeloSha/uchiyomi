@@ -21,6 +21,7 @@ import type { SourceStatus } from './sourceHealth';
 import type { Stage } from './sourceEvidence';
 import type { Said } from './said';
 import { forDesktop } from './desktop';
+import { REFUSAL_HEAD } from './sources/suwayomi/enginePin';
 
 export type DiagnosisCode =
   | 'ok'
@@ -37,6 +38,7 @@ export type DiagnosisCode =
   | 'unreachable'     // DNS failure, refused connection, gone
   | 'rate_limited'
   | 'upstream_down'   // the extension server did not answer (unreachable, refused, its own HTTP error)
+  | 'engine_incompatible' // the extension server answered and refused the query itself: it does not match this Uchiyomi
   | 'extension_error' // the extension server DID answer, with the extension's own error (#115)
   | 'unnumbered'      // chapters are listed, but none with a number Uchiyomi can use (#115)
   | 'site_offline'    // the site answers with its own offline or maintenance notice (v0.49.1, lib/sources/offline.ts)
@@ -153,7 +155,7 @@ export type FixCode =
   | 'fix.extensionFailed' | 'fix.timeout' | 'fix.disabled' | 'fix.moved' | 'fix.unreachableAt' | 'fix.cdnAnswered403'
   | 'fix.nothingToDo' | 'fix.solverBroken' | 'fix.markupChanged' | 'fix.unknownLive' | 'fix.unnumbered'
   | 'fix.emptySearch' | 'fix.emptyChapters' | 'fix.emptyPages' | 'fix.testTimeout' | 'fix.tooSlow' | 'fix.unknown'
-  | 'fix.unexplained' | 'fix.siteOffline' | 'fix.solverBusy' | 'fix.ipBlocked';
+  | 'fix.unexplained' | 'fix.siteOffline' | 'fix.solverBusy' | 'fix.ipBlocked' | 'fix.engineIncompatible';
 
 /** A fix: its English, and its code with what fills it. */
 interface Fix { text: string; said: Said }
@@ -271,6 +273,20 @@ const RULES: Array<[RegExp, (c: RuleCtx) => Diagnosis]> = [
         )), 'admin');
   }],
 
+  // The engine answered and REFUSED the query (client.ts EngineRefusedError): an engine this Uchiyomi does not match,
+  // older or newer. Not the site, not the extension, and not the engine being down -- a restart changes nothing. Right
+  // after the transport rules and ABOVE every site rule, like them: the engine's words are graphql-java's, and a field
+  // name in them must never read as something a site said. The pattern is client.ts's own, anchored after the prefix,
+  // so an extension's exception quoting those words is never one. Reintroduce by deleting this rule: "the engine
+  // refusing the query is not the extension failing" in sourceDiagnosis.test.ts reads extension_error.
+  [new RegExp(`^suwayomi: ${REFUSAL_HEAD.source.slice(1)}`), () =>
+    D('engine_incompatible', "The extension engine does not match this version of Uchiyomi.",
+      fixed('fix.engineIncompatible', forDesktop(
+        "The extension engine refused Uchiyomi's request: it is older or newer than the version this Uchiyomi works with. Health → Extension engine says which, and how to change it.",
+        "Uchiyomi's extension engine refused Uchiyomi's request. Quit and reopen Uchiyomi, and download the extension engine again if Admin → Sources offers it.",
+      )),
+      'admin')],
+
   // The engine did not answer in time: our wait, on the engine, says nothing about the site behind it.
   [/^suwayomi timeout after \d+ms/i, (c) =>
     D('timeout', 'This source did not answer in time.',
@@ -368,6 +384,7 @@ export const REASONS: Readonly<Record<DiagnosisCode, string>> = {
   unreachable: 'This source is not answering right now.',
   rate_limited: 'This source asked us to slow down.',
   upstream_down: 'The extension server did not answer.',
+  engine_incompatible: 'The extension engine does not match this version of Uchiyomi.',
   extension_error: "This source's extension reported an error.",
   unnumbered: 'This source lists chapters without numbers Uchiyomi can use.',
   site_offline: 'The site says it is offline (its own page)',

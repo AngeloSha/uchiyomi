@@ -1071,7 +1071,7 @@ export async function frozenSeries(
       ...detailOf([!r.source_id
         ? say('frozen.noSource', { n: r.books_count })
         : engineWhy(r)
-          ? say(engine === 'unreachable' ? 'frozen.engineDown' : 'frozen.engineOff', p)
+          ? say(engine === 'unreachable' ? 'frozen.engineDown' : engine === 'incompatible' ? 'frozen.engineIncompatible' : 'frozen.engineOff', p)
           : why(r, p)]),
       ...keysFor(r, ['replace_source', 'find_sources']),
     };

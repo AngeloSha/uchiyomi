@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.63.0
+  version: 0.64.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -591,6 +591,36 @@ components:
           maxItems: 100
           items: { type: string, minLength: 1, maxLength: 120 }
           description: Source ids, best first. Sources not named here rank below every named one, in the series' follow order.
+    NewMemberDefaults:
+      type: object
+      description: >-
+        What a member the server makes by itself starts with (#208): a sign-up (POST /auth/register), or a first sign-in
+        through the OIDC provider with OIDC_ALLOW_SIGNUP, in SSO-only mode too. A member's own fields from PATCH
+        /api/admin/users/{id}, with their meanings. The account is made with them in one transaction. Never applied to the
+        first admin (POST /api/setup, or SSO-only mode's first sign-in), to an account made by POST /api/admin/users, or to
+        the desktop app's own; an account the provider makes an admin (OIDC_ADMIN_GROUP) carries them too, unrestricted
+        while it is one. Saving them changes no account that exists. GET always answers all three; PATCH takes any of them,
+        an absent one left as it is.
+      properties:
+        libraries:
+          type: [array, "null"]
+          maxItems: 1000
+          items: { type: string, maxLength: 100 }
+          description: >-
+            null, the default: every library, including ones added later. A list: exactly these library ids. [] (or a
+            list whose libraries are all gone): none, never every library. An id no library has is dropped, and a
+            library removed later leaves the list.
+        maxAgeRating:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 18
+          description: The highest age rating a new member may see; null, the default, is no limit.
+        perms:
+          type: object
+          properties:
+            canDownload:
+              type: boolean
+              description: false denies downloads. Absent, or true, allows them (stored as {}), the default.
     ScanlatorPrefs:
       type: object
       description: >-
@@ -6864,7 +6894,8 @@ paths:
         backup, and auto_follow_on_failure, the on-by-default bounded source hunt after an ordinary scheduled
         chapter failure. The hunt never runs for interactive Add/Fetch or after a 403/429 refusal. Since v0.61.0
         update_smart, the smart update checks (off by default; see updateSmart on PATCH). Since v0.61.1
-        backup_enabled and backup_keep, the nightly backup's switch and how many runs it keeps.
+        backup_enabled and backup_keep, the nightly backup's switch and how many runs it keeps. newMemberDefaults
+        (#208), what a member who signs up starts with.
       security:
         - bearer: []
       responses:
@@ -6886,6 +6917,8 @@ paths:
                   hideNoticeShortOnly:
                     type: boolean
                     description: Since v0.55.3 (#147), the notice switches' rule (PATCH hideNoticeShortOnly); true unless set off.
+                  newMemberDefaults:
+                    $ref: "#/components/schemas/NewMemberDefaults"
                   cleanup_read:
                     type: boolean
                     description: Whether the opt-in read-chapter cleanup is on. Off by default.
@@ -6990,8 +7023,8 @@ paths:
         - admin
       summary: "Change server settings: name, open registration, update interval, backup hour, extension check
         interval and its kill switch, the update check, the opt-in install count, the opt-in read-chapter
-        cleanup, the bounded failed-chapter source hunt, the server-wide scanlation-group preferences, and what
-        the 18+ switch hides besides 18+ libraries."
+        cleanup, the bounded failed-chapter source hunt, the server-wide scanlation-group preferences, what
+        the 18+ switch hides besides 18+ libraries, and what a new member starts with."
       operationId: patchApiAdminSettings
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Answers
@@ -7254,6 +7287,11 @@ paths:
                     a site split into parts (12.1, 12.2) included, whatever their pages, and the sweep then downloads no
                     fractional chapter of a series that hides them. A file holding a range of chapters is never a
                     notice either way. Applies on the next request. Read back as `hideNoticeShortOnly`.
+                newMemberDefaults:
+                  description: >-
+                    #208: what a member the server makes by itself starts with (Admin → Members → When someone signs
+                    up), each field on its own. Read back as `newMemberDefaults`.
+                  $ref: "#/components/schemas/NewMemberDefaults"
       security:
         - bearer: []
       responses:
@@ -10034,7 +10072,11 @@ paths:
         the engine, this call's own look included, and whether it answered), `linkedSeries` (series added through an
         extension) and, when the engine answers, `solver` ({supported, enabled, wiring: ok | off | localhost |
         other | unsupported, connectable, url}; `url` is never sent on desktop). When the engine answers but the
-        last registration missed it, this call registers its sources before replying."
+        last registration missed it, this call registers its sources before replying. Since the engine upgrade:
+        `buildType` (Stable or Preview), `tested` and `oldest` (the engine version this Uchiyomi was tested with, and
+        the oldest it works with), `standing` (same | older | tooOld | newer | unknown: the engine's version against
+        them) and `refused` ([{op, message, at}]: the operations the engine refused, by name and in its own words).
+        An engine that refuses Uchiyomi's queries answers, so it is `reachable` -- and not compatible."
 
       security:
         - bearer: []

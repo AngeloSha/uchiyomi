@@ -1,13 +1,14 @@
 // Turn each Suwayomi source (i.e. each installed Mihon/Tachiyomi extension's source) into an Uchiyomi
-// SourceAdapter. Operation names and argument shapes below were taken from live introspection of
-// Suwayomi-Server v2.2.2100, not from documentation -- the docs are wrong about the endpoint path already.
+// SourceAdapter. The documents are in operations.ts, validated against the schema of every supported engine; the
+// docs are wrong about the endpoint path already, so nothing here was taken from them.
 //
 // Suwayomi's model is STATEFUL, which shapes the id mapping: fetchSourceManga returns manga rows carrying
-// Suwayomi's own integer ids, and fetchChapters/fetchChapterPages take those integer ids rather than any
+// Suwayomi's own integer ids, and fetchMangaAndChapters/fetchChapterPages take those integer ids rather than any
 // source-native identifier. So a series' sourceId here is Suwayomi's manga id. That is stable for as long as
 // Suwayomi's database lives; wiping it orphans the routing, same as uninstalling an extension would.
 import { UNNUMBERED, type SourceAdapter, type SourceSeries, type SourceChapter } from '../types';
 import { gql as defaultGql, suwayomiUrl, suwayomiImageHeaders, type Gql } from './client';
+import { OPS } from './operations';
 import { env } from '../../../env';
 
 export const SW_PREFIX = 'sw:';
@@ -22,9 +23,11 @@ export interface RemoteSource {
   displayName?: string | null;
   lang?: string | null;
   iconUrl?: string | null;
+  /** Adult or not, read from `contentWarning` by listRemoteSources (adultOf): the one flag the rest of the app reads. */
   isNsfw?: boolean | null;
+  /** The engine's own word: SAFE, MIXED or NSFW. */
+  contentWarning?: string | null;
   supportsLatest?: boolean | null;
-  baseUrl?: string | null;
   /**
    * The installed extension (APK) this source came out of. One package can expose many sources -- 3Hentai
    * is one extension and twenty-nine language variants -- and `pkgName` is the only thing they share that
@@ -36,60 +39,33 @@ export interface RemoteSource {
   extension?: { pkgName?: string | null; name?: string | null } | null;
 }
 
-// `extension { pkgName name }` was checked against the live engine (Suwayomi-Server v2.2.2100) before it
-// was added here; every node carried it, including the built-in local source with a fake package name.
-const SOURCES_Q = `{ sources { totalCount nodes { id name displayName lang iconUrl isNsfw supportsLatest baseUrl extension { pkgName name } } } }`;
+/**
+ * Adult, from the engine's `contentWarning` (SAFE, MIXED, NSFW), which replaced the deprecated `isNsfw`. The engine's
+ * own rule is isNsfw = contentWarning >= MIXED, so only SAFE is safe -- and a legacy store's 18+ extension is MIXED
+ * (measured). ⚠️ Fails CLOSED: a missing or unknown value is adult. A capped account loses a source it could have read
+ * until the engine says SAFE, which is the right way round; the other way, a value this Uchiyomi does not know yet
+ * would open an 18+ source to a child's account. Reintroduce `=== 'NSFW'`: "a MIXED source is adult" in
+ * suwayomiAdapter.test.ts reads it as safe.
+ */
+export const adultOf = (contentWarning: unknown): boolean => contentWarning !== 'SAFE';
 
 /** Every source Suwayomi currently exposes (one per source in each installed extension). */
 export async function listRemoteSources(run: Gql = defaultGql): Promise<RemoteSource[]> {
-  const d = await run<{ sources: { nodes: RemoteSource[] } }>(SOURCES_Q, {}, 20000);
+  const d = await run<{ sources: { nodes: RemoteSource[] } }>(OPS.sources.doc, {}, 20000);
   const nodes = d?.sources?.nodes;
-  return Array.isArray(nodes) ? nodes.filter((s) => s && s.id != null) : [];
+  return Array.isArray(nodes)
+    ? nodes.filter((s) => s && s.id != null).map((s) => ({ ...s, isNsfw: adultOf(s.contentWarning) }))
+    : [];
 }
 
-// ---- GraphQL operations used by the adapter --------------------------------
-
-const MANGA_FIELDS = `id title thumbnailUrl realUrl url description author artist genre status`;
-
-const FETCH_SOURCE_MANGA = `mutation($source:LongString!,$type:FetchSourceMangaType!,$query:String,$page:Int!){
-  fetchSourceManga(input:{source:$source,type:$type,query:$query,page:$page}){ mangas { ${MANGA_FIELDS} } }
-}`;
-
-const FETCH_MANGA = `mutation($id:Int!){ fetchManga(input:{id:$id}){ manga { ${MANGA_FIELDS} } } }`;
-
-// `sourceOrder url` (#116) were checked against the pinned engine's schema (test/fixtures, v2.3.2243: both are
-// non-null on ChapterType). sourceOrder is index + 1 over the extension's list reversed, so 1 is the OLDEST post,
-// and fetchChapters answers in sourceOrder ascending.
-const FETCH_CHAPTERS = `mutation($mangaId:Int!){
-  fetchChapters(input:{mangaId:$mangaId}){ chapters { id chapterNumber name scanlator uploadDate pageCount sourceOrder url } }
-}`;
-// The v0.48 query, for an older external engine that refuses the two fields above. Its rows still come back in
-// sourceOrder, so their position stands in for the order they no longer carry.
-const FETCH_CHAPTERS_V048 = `mutation($mangaId:Int!){
-  fetchChapters(input:{mangaId:$mangaId}){ chapters { id chapterNumber name scanlator uploadDate pageCount } }
-}`;
-
-/**
- * Engines (by their `gql`) that refused `sourceOrder url` once. Keyed by the transport rather than one module
- * flag so a test's fake engine cannot leak its answer into the next test; in the app there is one transport,
- * and so one flag for the process. It is never cleared: an engine does not lose fields, and an upgraded one is
- * picked up at the next restart.
- */
-const legacyChapterEngines = new WeakSet<Gql>();
-
-/**
- * Is this the engine's schema validation refusing the #116 fields? graphql-java words it "Validation error
- * (FieldUndefined@[fetchChapters/chapters/sourceOrder]) : Field 'sourceOrder' in type 'ChapterType' is
- * undefined", and client.ts prefixes it ("suwayomi: ..."). Unanchored on purpose, so a wrapper that keeps the
- * engine's words still matches; anything else -- a timeout, an extension's exception -- is NOT retried, because
- * the older query would fail the same way and hide the first error.
- */
-export const refusedChapterFields = (e: unknown): boolean => {
-  const msg = e instanceof Error ? e.message : String(e ?? '');
-  return /Validation error/i.test(msg) && /\b(?:sourceOrder|url)\b/.test(msg);
-};
-
-const FETCH_PAGES = `mutation($chapterId:Int!){ fetchChapterPages(input:{chapterId:$chapterId}){ pages } }`;
+// ---- the adapter --------------------------------------------------------------------------------------------------
+//
+// ⚠️ No fallback query for an older engine any more. Until the engine upgrade, listChapters retried an engine that
+// refused `sourceOrder url` with the v0.48 query (FETCH_CHAPTERS_V048, remembered per transport in
+// legacyChapterEngines, recognised by refusedChapterFields). Those engines predate v2.3.2243, the oldest one every
+// document here is validated against (enginePin.ts OLDEST_ENGINE), and an engine that old lacks
+// fetchMangaAndChapters too: a fallback would only have hidden it. Such an engine is now refused openly
+// (client.ts EngineRefusedError) and Health says to update it.
 
 interface RemoteManga {
   id: number;
@@ -109,10 +85,34 @@ interface RemoteChapter {
   chapterNumber?: number | null;
   name?: string | null;
   scanlator?: string | null;
-  uploadDate?: string | null; // epoch millis as a string (Suwayomi's LongString)
+  uploadDate?: string | null; // epoch millis as a string (Suwayomi's LongString); seconds on v2.3.2243 sometimes (uploadedAt)
   pageCount?: number | null;
-  sourceOrder?: number | null; // absent from the v0.48 query
+  sourceOrder?: number | null;
   url?: string | null;
+}
+
+/** 2000-01-01: no chapter an extension lists was posted before it, and anything earlier is a misread number. */
+const EARLIEST_UPLOAD_MS = Date.UTC(2000, 0, 1);
+
+/**
+ * A chapter's upload date as an ISO string, or undefined when the engine's number is not a date.
+ *
+ * ⚠️ Seconds or milliseconds. v2.3.2243 gives a NEW chapter the extension listed without a date the current time in
+ * epoch SECONDS (Chapter.updateChapterListDatabase, `Instant.now().epochSecond`; measured on a throwaway engine:
+ * "1791984615" beside a dated chapter's "1704067200000"). Read as milliseconds that is 1970-01-21, which the release
+ * radar, a group's posting history, the Komga API's releaseDate and the catalogue then showed. v2.4 stamps
+ * milliseconds. A value under 1e11 is seconds -- in milliseconds it would be before March 1973 -- and anything before
+ * 2000 is no date at all. migrate.ts `suwayomi-chapter-dates-in-seconds` repairs what the bug already stored.
+ * Reintroduce by dropping the `* 1000`: "a date in seconds is read as one" in suwayomiAdapter.test.ts finds no date
+ * where there is one (and without the 2000 floor too, 1970-01-21 again).
+ */
+export function uploadedAt(raw: unknown): string | undefined {
+  let ms = typeof raw === 'string' && raw.trim() ? Number(raw) : typeof raw === 'number' ? raw : NaN;
+  if (!Number.isFinite(ms) || ms <= 0) return undefined;
+  if (ms < 1e11) ms *= 1000;
+  if (ms < EARLIEST_UPLOAD_MS) return undefined;
+  const d = new Date(ms);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
 }
 
 /** Suwayomi's MangaStatus enum is SCREAMING_CASE; the rest of the app shows this verbatim. */
@@ -149,7 +149,6 @@ function toChapter(c: RemoteChapter, position: number): SourceChapter | null {
   // A chapter with no usable number can't be ordered, named or diffed against the library — drop it rather
   // than inventing 0, which would collide with a real chapter 0.
   if (!Number.isFinite(num) || num < 0) return null;
-  const when = Number(c.uploadDate);
   const out: SourceChapter = {
     sourceId: String(c.id),
     // The extension's number, raw, even when many posts share it (#116): what to do about that is decided per
@@ -157,7 +156,7 @@ function toChapter(c: RemoteChapter, position: number): SourceChapter | null {
     number: num,
     title: c.name?.trim() || `Chapter ${num}`,
     pages: typeof c.pageCount === 'number' && c.pageCount > 0 ? c.pageCount : undefined,
-    publishedAt: Number.isFinite(when) && when > 0 ? new Date(when).toISOString() : undefined,
+    publishedAt: uploadedAt(c.uploadDate),
     // Mihon's free-text scanlator column, verbatim. Blank means the extension does not know, and the
     // chooser treats an absent group differently from an empty-named one, so it must not become ''.
     scanlator: c.scanlator?.trim() || undefined,
@@ -189,7 +188,7 @@ export function makeSuwayomiAdapter(remote: RemoteSource, run: Gql = defaultGql)
   const adapterId = swAdapterId(remote.id);
 
   const fetchList = async (type: 'SEARCH' | 'LATEST' | 'POPULAR', query: string | null, page: number): Promise<SourceSeries[]> => {
-    const d = await run<{ fetchSourceManga: { mangas: RemoteManga[] } }>(FETCH_SOURCE_MANGA, {
+    const d = await run<{ fetchSourceManga: { mangas: RemoteManga[] } }>(OPS.fetchSourceManga.doc, {
       source: remote.id,
       type,
       query,
@@ -210,7 +209,7 @@ export function makeSuwayomiAdapter(remote: RemoteSource, run: Gql = defaultGql)
     // Declared by the extension author and the only adult signal any source gives us. Carried onto the
     // adapter so the routes can decide with the object they already hold, without a per-request DB read.
     isNsfw: !!remote.isNsfw,
-    // The extension ships its own logo and `SOURCES_Q` has always selected it; it was simply dropped here.
+    // The extension ships its own logo and the sources query has always selected it; it was simply dropped here.
     // Served to browsers through /img/sources/icon/:id, never linked directly: the extension server is not
     // reachable from a browser.
     iconUrl: remote.iconUrl?.trim() || undefined,
@@ -232,27 +231,14 @@ export function makeSuwayomiAdapter(remote: RemoteSource, run: Gql = defaultGql)
     },
 
     async getSeries(id) {
-      const d = await run<{ fetchManga: { manga: RemoteManga | null } }>(FETCH_MANGA, { id: Number(id) });
-      const m = d?.fetchManga?.manga;
+      const d = await run<{ fetchMangaAndChapters: { manga: RemoteManga | null } }>(OPS.fetchManga.doc, { id: Number(id) });
+      const m = d?.fetchMangaAndChapters?.manga;
       return m ? toSeries(m, adapterId) : null;
     },
 
     async listChapters(seriesId) {
-      type Answer = { fetchChapters: { chapters: RemoteChapter[] } };
-      const vars = { mangaId: Number(seriesId) };
-      let d: Answer;
-      if (legacyChapterEngines.has(run)) d = await run<Answer>(FETCH_CHAPTERS_V048, vars);
-      else {
-        try {
-          d = await run<Answer>(FETCH_CHAPTERS, vars);
-        } catch (e) {
-          // An engine older than the pinned one may not have the fields; ask it once the old way and remember.
-          if (!refusedChapterFields(e)) throw e;
-          legacyChapterEngines.add(run);
-          d = await run<Answer>(FETCH_CHAPTERS_V048, vars);
-        }
-      }
-      const list = d?.fetchChapters?.chapters;
+      const d = await run<{ fetchMangaAndChapters: { chapters: RemoteChapter[] } }>(OPS.fetchChapters.doc, { id: Number(seriesId) });
+      const list = d?.fetchMangaAndChapters?.chapters;
       if (!Array.isArray(list)) return [];
       // Every copy of a number is reported, not just the first the engine listed. The choice between
       // groups belongs to lib/releases.ts, which knows the series' preference; this adapter's job is to
@@ -271,7 +257,7 @@ export function makeSuwayomiAdapter(remote: RemoteSource, run: Gql = defaultGql)
     },
 
     async getPageUrls(chapterId) {
-      const d = await run<{ fetchChapterPages: { pages: string[] } }>(FETCH_PAGES, { chapterId: Number(chapterId) });
+      const d = await run<{ fetchChapterPages: { pages: string[] } }>(OPS.fetchChapterPages.doc, { chapterId: Number(chapterId) });
       const pages = d?.fetchChapterPages?.pages;
       if (!Array.isArray(pages)) return [];
       // Suwayomi hands back its own proxy paths; the downloader fetches them straight from Suwayomi.
