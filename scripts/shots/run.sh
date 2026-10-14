@@ -6,6 +6,9 @@
 #   bash scripts/shots/run.sh --yes --site                # also refresh the marketing site's copies
 #   SHOT_NET=<net> SHOT_BASE=http://<app>:3000 bash scripts/shots/run.sh --yes --login user:pass --only admin-extensions
 #                                                         # a throwaway instance's own account; no database is touched
+#   bash scripts/shots/run.sh --yes --out web/shots-preview --compare http://yomi-web-preview --only home,series
+#                                                         # before/after: the same shots from SHOT_BASE into
+#                                                         # <out>/before and from the preview into <out>/after
 #
 # Screenshots are GENERATED, never hand-taken. See docs/SCREENSHOTS.md.
 #
@@ -27,8 +30,9 @@ BASE=${SHOT_BASE:-http://uchiyomi:3000}
 BFF_IMAGE=${BFF_IMAGE:-ghcr.io/angelosha/uchiyomi:latest}
 SHOT_USER=shotbot
 OUT_PNG=$(mktemp -d)
+OUT_PNG2=""                 # --compare: the second pass's pictures
 OUT_WEBP="$REPO/docs/shots"
-ONLY=""; YES=0; SITE=""; RECORD=0; LOGIN=""
+ONLY=""; YES=0; SITE=""; RECORD=0; LOGIN=""; COMPARE=""
 # A reading life for the capture account (fixtures.mjs seedReading): only for the throwaway one this script creates.
 SEED=0
 SITE_DIR=${SITE_DIR:-}     # only for --site: where to ALSO publish shots (a marketing site checkout)
@@ -46,17 +50,33 @@ while [ $# -gt 0 ]; do
     # with KEEP=1). Then nothing is written to any database. The fixture shots (extensions, providers) need no
     # real library, so they are taken this way; never create accounts on someone's live server for them.
     --login) LOGIN="$2"; shift 2 ;;
+    # Where the WebP files go instead of docs/shots: a preview set, which must never overwrite the committed one.
+    --out) OUT_WEBP="$(mkdir -p "$2" && cd "$2" && pwd)"; shift 2 ;;
+    # A second address to photograph the same shots from, with the same account: a preview build of the web app in
+    # front of the same server (docs/SCREENSHOTS.md, "Before and after"). <out>/before is SHOT_BASE, <out>/after this.
+    --compare) COMPARE="$2"; shift 2 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
+if [ -n "$COMPARE" ]; then
+  [ "$RECORD" = "0" ] && [ -z "$SITE" ] || { echo "--compare takes stills only: not with --record or --site" >&2; exit 2; }
+  [ "$OUT_WEBP" != "$REPO/docs/shots" ] || { echo "--compare needs --out <dir>: a before/after set never goes into docs/shots" >&2; exit 2; }
+  OUT_PNG2=$(mktemp -d)
+fi
 
 psql() { docker exec -i "$DB" psql -h 127.0.0.1 -U "${PGUSER:-yomi}" -d "${PGDATABASE:-yomi}" -tAc "$1"; }
+# The capture container writes as its own user, so hand a folder's files back before removing it.
+wipe() {
+  [ -n "$1" ] && [ -d "$1" ] || return 0
+  docker run --rm -u 0 -v "$1":/t alpine sh -c 'rm -rf /t/* /t/.[!.]* 2>/dev/null' >/dev/null 2>&1 || true
+  rm -rf "$1"
+}
 
 if [ -n "$LOGIN" ]; then
   SHOT_USER="${LOGIN%%:*}"; PW="${LOGIN#*:}"
   echo "· signing in as '$SHOT_USER' on $BASE (--login: no account is created, no database is touched)"
   SERIES_ID=${SHOT_SERIES_ID:-}; BOOK_ID=${SHOT_BOOK_ID:-}
-  cleanup() { docker run --rm -u 0 -v "$OUT_PNG":/t alpine sh -c 'rm -rf /t/* /t/.[!.]* 2>/dev/null' >/dev/null 2>&1 || true; rm -rf "$OUT_PNG"; }
+  cleanup() { wipe "$OUT_PNG"; wipe "$OUT_PNG2"; }
   trap cleanup EXIT INT TERM
 else
 cat <<EOF
@@ -82,9 +102,7 @@ fi
 cleanup() {
   local rc=$?
   psql "DELETE FROM users WHERE username='$SHOT_USER'" >/dev/null 2>&1 || true
-  # the capture container writes as its own user, so hand the files back before removing them
-  docker run --rm -u 0 -v "$OUT_PNG":/t alpine sh -c 'rm -rf /t/* /t/.[!.]* 2>/dev/null' >/dev/null 2>&1 || true
-  rm -rf "$OUT_PNG"
+  wipe "$OUT_PNG"; wipe "$OUT_PNG2"
   [ $rc -eq 0 ] || echo "(cleaned up after a failure)" >&2
 }
 trap cleanup EXIT INT TERM
@@ -128,6 +146,7 @@ echo "· series $SERIES_ID · book $BOOK_ID"
 fi
 
 chmod 777 "$OUT_PNG"
+[ -z "$OUT_PNG2" ] || chmod 777 "$OUT_PNG2"
 
 if [ "$RECORD" = "1" ]; then
   # Record the tour instead of taking stills. Encoding happens on the host, which has ffmpeg with x264,
@@ -157,12 +176,22 @@ if [ "$RECORD" = "1" ]; then
   exit 0
 fi
 
-docker run --rm --network "$NET" \
-  -w /home/pptruser \
-  -e SHOT_BASE="$BASE" -e SHOT_OUT=/out -e SHOT_USER="$SHOT_USER" -e SHOT_PASS="$PW" \
-  -e SHOT_ONLY="$ONLY" -e SHOT_SERIES_ID="$SERIES_ID" -e SHOT_BOOK_ID="$BOOK_ID" -e SHOT_SEED="$SEED" -e SHOT_RELATED_ID="${RELATED_ID:-}" \
-  -v "$OUT_PNG":/out -v "$REPO/scripts/shots":/home/pptruser/shots:ro \
-  ghcr.io/puppeteer/puppeteer:latest node /home/pptruser/shots/capture.mjs
+# capture <base> <png folder> <seed>
+capture() {
+  docker run --rm --network "$NET" \
+    -w /home/pptruser \
+    -e SHOT_BASE="$1" -e SHOT_OUT=/out -e SHOT_USER="$SHOT_USER" -e SHOT_PASS="$PW" \
+    -e SHOT_ONLY="$ONLY" -e SHOT_SERIES_ID="$SERIES_ID" -e SHOT_BOOK_ID="$BOOK_ID" -e SHOT_SEED="$3" -e SHOT_RELATED_ID="${RELATED_ID:-}" \
+    -v "$2":/out -v "$REPO/scripts/shots":/home/pptruser/shots:ro \
+    ghcr.io/puppeteer/puppeteer:latest node /home/pptruser/shots/capture.mjs
+}
+
+capture "$BASE" "$OUT_PNG" "$SEED"
+if [ -n "$COMPARE" ]; then
+  # The same account and the same shots from the preview. Its reading life is already seeded: never twice.
+  echo "· and again from $COMPARE"
+  capture "$COMPARE" "$OUT_PNG2" 0
+fi
 
 mkdir -p "$OUT_WEBP"
 # Encode with the bff image's sharp — no new dependency, and it is already in every dev's cache.
@@ -176,8 +205,11 @@ if [ -n "$SITE" ] && [ -d "$SITE/assets/shots" ]; then
   SITE="$SITE/assets/shots"
 fi
 
-docker run --rm -u 0 --entrypoint node -w /app -e NODE_PATH=/app/node_modules \
-  -v "$OUT_PNG":/png -v "$OUT_WEBP":/webp ${SITE:+-v "$SITE":/site} "$BFF_IMAGE" -e '
+# encode <png folder> <webp folder>
+encode() {
+  mkdir -p "$2"
+  docker run --rm -u 0 --entrypoint node -w /app -e NODE_PATH=/app/node_modules \
+    -v "$1":/png -v "$2":/webp ${SITE:+-v "$SITE":/site} "$BFF_IMAGE" -e '
 const sharp=require("sharp"), fs=require("fs");
 (async()=>{
   const site = fs.existsSync("/site");
@@ -189,4 +221,13 @@ const sharp=require("sharp"), fs=require("fs");
     console.log("  ·", n);
   }
 })();'
-echo "✓ docs/shots/ updated${SITE:+ (and the marketing site)}"
+}
+
+if [ -n "$COMPARE" ]; then
+  encode "$OUT_PNG" "$OUT_WEBP/before"
+  encode "$OUT_PNG2" "$OUT_WEBP/after"
+  echo "✓ $OUT_WEBP/before ($BASE) and $OUT_WEBP/after ($COMPARE)"
+else
+  encode "$OUT_PNG" "$OUT_WEBP"
+  echo "✓ ${OUT_WEBP#"$REPO"/} updated${SITE:+ (and the marketing site)}"
+fi

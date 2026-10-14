@@ -59,7 +59,9 @@ async function settle(page, extra = 0) {
  */
 async function heroAtRest(page) {
   const corner = await page.evaluate(() => {
-    const hero = document.querySelector('button[aria-label="Slide 1"]')?.parentElement?.parentElement;
+    // `data-home-hero` (UI refresh) first; the Slide 1 dot's grandparent is how a server older than that is found.
+    const hero = document.querySelector('[data-home-hero]')
+      ?? document.querySelector('button[aria-label="Slide 1"]')?.parentElement?.parentElement;
     const r = hero?.getBoundingClientRect();
     return r && r.height > 0 ? { x: r.right - 24, y: r.top + 24 } : null;
   });

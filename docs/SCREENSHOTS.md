@@ -167,6 +167,23 @@ Two things the 2026-09-22 run turned up were worth writing down, because both ha
 field, which moved to its own tab in v0.39.0. Everything after that point was guarded by `if (f)`, so the
 recording simply lost its last twelve seconds without saying anything.
 
+## Before and after
+
+A redesign is judged on pictures of the same screens, taken the same way, before and after. `--compare <url>`
+photographs every chosen shot twice with the same capture account: first from `SHOT_BASE`, then from `<url>`.
+It writes `<out>/before` and `<out>/after`. `--out` is required with it, so a preview set can never overwrite
+`docs/shots`.
+
+```bash
+bash scripts/shots/run.sh --yes --out web/shots-preview --compare http://yomi-web-preview --only home,library,series
+```
+
+The `<url>` is a preview build of the web app (`cd web && npm run build`) served by a throwaway nginx on
+`SHOT_NET`. Its configuration is a copy of `web/nginx.conf` whose API, auth and image paths go to the same app
+`SHOT_BASE` names, so both passes read the same server and the same account. Never start a second server on
+the live database for this: its schedulers would run twice. `web/shots*/` is gitignored, and the second pass
+does not seed reading again.
+
 ## Adding a shot
 
 Add a `want('<name>')` block in `scripts/shots/capture.mjs` and re-run with `--only <name>`. Prefer a whole

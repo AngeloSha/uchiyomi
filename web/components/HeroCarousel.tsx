@@ -62,6 +62,7 @@ export function HeroCarousel({ slides }: { slides: Series[] }) {
 
   return (
     <div
+      data-home-hero
       className="relative h-[58vh] min-h-[420px] w-full overflow-hidden lg:-mx-8 lg:h-[64vh] lg:w-[calc(100%+4rem)]"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
