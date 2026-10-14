@@ -169,10 +169,10 @@ test('every dialog in the app is on the stack, and so are the nav and both selec
     assert.match(src, /import \{[^}]*\buseLayer\b[^}]*\} from '@\/lib\/layers';/, `${rel} does not import useLayer`);
   }
   // A dialog also hides behind a hand-rolled overlay: a `fixed inset-0` root with no aria-modal (Edit series,
-  // Add to collection, Edit chapter, the art picker, New collection, the reader's settings all were). Each
+  // Add to list and Edit chapter until the UI refresh, the art picker, New collection, the reader's settings all were). Each
   // such root is one more dialog the file must register. Only the roots below are not dialogs. Reintroduce by
-  // deleting `useLayer('dialog');` from ChapterEditModal: "app/series/page.tsx has 3 full-screen overlays
-  // but registers 2 dialogs" fails.
+  // deleting `useLayer('dialog');` from ArtPicker: "app/admin/page.tsx has N full-screen overlays but registers
+  // N-1 dialogs" fails.
   const NOT_DIALOGS: Record<string, string> = {
     'components/ContextMenu.tsx': 'the invisible click-catcher behind a context menu, which closes on any click',
     'app/reader/page.tsx': 'the reader itself, a page that fills the screen, and its loading fallback',
@@ -192,7 +192,8 @@ test('every dialog in the app is on the stack, and so are the nav and both selec
     assert.ok(registered >= n, `${rel} has ${n} full-screen overlays but registers ${registered} dialogs, so notices land on their buttons`);
     assert.match(src, /import \{[^}]*\buseLayer\b[^}]*\} from '@\/lib\/layers';/, `${rel} does not import useLayer`);
   }
-  assert.ok(roots >= 12, `only ${roots} full-screen overlays found -- the scan is broken`);
+  // 10, not 12, since the UI refresh moved the series page's Add to list and Edit chapter onto the shared Modal.
+  assert.ok(roots >= 10, `only ${roots} full-screen overlays found -- the scan is broken`);
   for (const rel of Object.keys(NOT_DIALOGS)) assert.ok(overlays(code(read(rel))) > 0, `${rel} no longer has an overlay; drop it from NOT_DIALOGS`);
 
   // The dialogs that keep the phone's nav band free say so; the one that does not, doesn't.

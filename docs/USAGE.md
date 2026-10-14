@@ -134,7 +134,7 @@ The top bar has **Home** (a daily-pick hero + "For you" rails), **Library**, **L
 plus search, the updates bell, a refresh button, and your profile.
 
 **Lists** are your own shelves — *Plan to read*, *Reading now*, anything. Make one under **Lists** with **New**, and
-add series to it from a series page with the **List** key under the reading button (*Add to collection*). A list shows its series with the Library's covers
+add series to it from a series page with the **List** key under the reading button (*Add to list*). A list shows its series with the Library's covers
 (since v0.55.7, [#164](https://github.com/AngeloSha/uchiyomi/discussions/164)): the unread count, the **NEW** ribbon and
 the favourite heart, counted from your own reading. **Sort by** orders it: **Your order** (the list as you arranged it,
 the default), **A–Z**, **Z–A**, **Last read** (what you read most recently first), **Most unread** and **Latest chapter**
@@ -288,7 +288,7 @@ genres, description, and the **chapter list**.
   (below), which takes the names from another source.
 - Four keys sit under the cover (since v0.60.0): **Favourite** (heart; adds it to your favourites and smart offline
   sync), **Offline** (*Save all offline*: copies every chapter to this device for reading with no connection), **List**
-  (*Add to collection*) and **More**. **More** holds the rest, grouped: *Reading* (notes and saved pages, mark all read
+  (*Add to list*) and **More**. **More** holds the rest, grouped: *Reading* (notes and saved pages, mark all read
   or unread), *Chapters* (Find missing chapters, Archive slowly, and for an admin Check for new chapters), *Share* (copy
   the link, open in a new tab), and for an admin *Edit details*, *New banner*, *Rename folder* and *Remove from
   library*. On a computer it opens as a menu, on a phone as a sheet.

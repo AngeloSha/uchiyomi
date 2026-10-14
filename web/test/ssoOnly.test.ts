@@ -43,7 +43,7 @@ test('Members offers no New account and no password in SSO-only mode, and marks 
   assert.match(members, /const ssoOnly = data\?\.auth\?\.mode === 'oidc-only';/);
   // Reintroduce the form for SSO-only mode: the server refuses every account it makes (403 sso_only).
   assert.match(members, /\{ssoOnly \? \(\s*<div className="card grad-border p-4" data-sso-accounts>/);
-  assert.match(members, /\{!ssoOnly && <button onClick=\{\(\) => setResetting\(u\)\} className="chip text-xs">\{tr\('Reset'\)\}<\/button>\}/);
+  assert.match(members, /\{!ssoOnly && <button onClick=\{\(\) => setResetting\(u\)\} className="btn-key">\{tr\('Reset'\)\}<\/button>\}/);
   assert.match(members, /u\.sso && provider \? provider : null/);
 });
 

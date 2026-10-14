@@ -11,7 +11,7 @@ import { Page, Series } from '@/lib/types';
 import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from './Toast';
 import { Img } from './ui';
-import { IcSearch, IcSparkle, IcRefresh, IcBell, IcDownload, IcCloudDownload, IcGrid, IcMoments, IcSettings, IcUser, IcImport } from './icons';
+import { IcSearch, IcSparkle, IcRefresh, IcBell, IcDownload, IcCloudDownload, IcGrid, IcMoments, IcSettings, IcUser, IcImport, IcBookmark } from './icons';
 import { t as tr } from '@/lib/i18n';
 import { hiddenOnDesktop, isDesktop, DESKTOP_HIDDEN } from '@/lib/desktop';
 import { effectsReduced } from '@/lib/effects';
@@ -115,6 +115,8 @@ export function CommandPalette({ open, seed = '', onClose }: { open: boolean; se
     },
     { key: 'updates', label: tr('Updates'), hint: tr('new chapters'), icon: <IcBell width={16} height={16} />, run: () => go('/updates') },
     { key: 'moments', label: tr('Moments'), hint: tr('pages you saved'), icon: <IcMoments width={16} height={16} />, run: () => go('/moments') },
+    // The sidebar's Lists (UI refresh), here too: a phone has no sidebar, and Profile's "See all" was the only way in.
+    { key: 'lists', label: tr('Lists'), icon: <IcBookmark width={16} height={16} />, run: () => go('/collections') },
     // What the SERVER is fetching (v0.49.0), beside this device's copies: two different promises, two entries.
     // Kept on desktop, where it is the only "downloads" there is.
     ...(mayDownload ? [{ key: 'server-downloads', label: tr('Server downloads'), hint: tr('what the server is fetching'), icon: <IcCloudDownload width={16} height={16} />, run: () => go(downloadsHref()) }] : []),

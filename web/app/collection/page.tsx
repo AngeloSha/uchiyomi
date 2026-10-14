@@ -147,7 +147,7 @@ function CollectionInner() {
         </div>
       ) : items.length === 0 ? (
         <p className="px-4 pt-10 text-center text-sm text-fog-500 lg:px-0">
-          {smart ? tr('Nothing in your library matches this list right now.') : tr('Empty so far — open any series and use “Add to collection”.')}
+          {smart ? tr('Nothing in your library matches this list right now.') : tr('Empty so far — open any series and use “Add to list”.')}
         </p>
       ) : (
         // The Library's own tile (#164): the same unread count, NEW mark, favourite and offline marks, from the same

@@ -39,6 +39,30 @@ const SAVED_MS = 1500;
 export const SETTINGS_GRID = 'grid items-start gap-3 lg:gap-4 xl:grid-cols-2 3xl:grid-cols-3';
 
 /**
+ * The page's sections as a row of keys above the grid (UI refresh): Admin → Settings is nine cards, and one low in the
+ * grid was a long scroll away. A key scrolls its card to the top, instantly under reduced motion or Reduce effects, as
+ * a `?section=` arrival does (lib/useSectionArrival.ts). One row that scrolls sideways on a phone; it wraps at lg.
+ */
+export function SectionIndex({ label, sections, className = '' }: {
+  label: string;
+  sections: ReadonlyArray<readonly [id: string, title: string]>;
+  className?: string;
+}) {
+  // `title` arrives translated: the caller's own literals are what the locale scan reads.
+  const reduced = useReducedMotion();
+  const fewer = useReduceEffects();
+  const go = (id: string) => document.getElementById(id)?.scrollIntoView({ block: 'start', behavior: reduced || fewer ? 'auto' : 'smooth' });
+  return (
+    <div role="navigation" aria-label={label} data-settings-index data-lenis-prevent
+      className={`-mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0 [&::-webkit-scrollbar]:hidden ${className}`}>
+      {sections.map(([id, title]) => (
+        <button key={id} type="button" onClick={() => go(id)} className="btn-key">{title}</button>
+      ))}
+    </div>
+  );
+}
+
+/**
  * The one feedback idiom for a setting.
  *
  * ALWAYS in the DOM, even while idle: a live region announces changes to content that was already there

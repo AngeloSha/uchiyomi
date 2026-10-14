@@ -19,7 +19,7 @@ const glyph = (size: number, className: string | undefined, d: ReactNode) => (
   <svg aria-hidden width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}
     strokeLinecap="round" strokeLinejoin="round" className={className}>{d}</svg>
 );
-/** A list with a plus: put this series in one of your lists (the glyph Add to collection always had). */
+/** A list with a plus: put this series in one of your lists (the glyph Add to list always had). */
 export const IcListAdd = ({ size = 20, className }: Glyph) => glyph(size, className, <><path d="M4 6h16M4 12h16M4 18h10" /><path d="M19 15v6M16 18h6" /></>);
 /** Out of the app: the AniList tile's corner, and Open in a new tab. */
 export const IcExternal = ({ size = 16, className }: Glyph) => glyph(size, className, <><path d="M14 4h6v6" /><path d="M20 4 11 13" /><path d="M19 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4" /></>);
@@ -66,7 +66,7 @@ export interface SeriesKeyProps {
    * word, so a voice command naming what is on screen still finds the key.
    */
   name?: string;
-  /** A tooltip: what the key does, when its word is a noun (List: Add to collection). */
+  /** A tooltip: what the key does, when its word is a noun (List: Add to list). */
   title?: string;
   onClick: (e: MouseEvent<HTMLButtonElement>) => void;
   disabled?: boolean;

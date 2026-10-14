@@ -18,13 +18,20 @@ export function Modal({
   onClose,
   children,
   wide,
+  fieldFocus = true,
 }: {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
   wide?: boolean;
+  /**
+   * False where typing is not the likely first move -- Add to list, where picking a list is -- so focus starts on the
+   * close key and a phone's keyboard does not open over the list the moment the dialog does.
+   */
+  fieldFocus?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const fieldFirst = useRef(fieldFocus);
   // On the notices' layer stack (lib/layers.ts), as a dialog that keeps the phone's nav band free -- see the
   // padding below -- so a notice can dock there instead of over this title.
   useLayer('dialog', true, { navBandFree: true });
@@ -50,7 +57,7 @@ export function Modal({
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeRef.current(); };
     document.addEventListener('keydown', onKey);
     // A field if there is one; the close button only when there is nothing to type into.
-    const first = ref.current?.querySelector<HTMLElement>('input, textarea, select')
+    const first = (fieldFirst.current ? ref.current?.querySelector<HTMLElement>('input, textarea, select') : null)
       ?? ref.current?.querySelector<HTMLElement>('button');
     first?.focus();
     return () => { document.removeEventListener('keydown', onKey); opener?.focus(); };

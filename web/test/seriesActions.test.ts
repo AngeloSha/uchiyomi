@@ -145,7 +145,7 @@ test('the page: four keys under the button, More by width, the sheet closed befo
   assert.ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])), `the keys are not Favourite, Offline, List, More: ${order}`);
   assert.match(keys, /\{offlineKeyShown\(\{ nothingYet, desktop: isDesktop\(\) \}\) && \(/, 'the Offline key is not offlineKeyShown\'s');
   assert.match(keys, /name=\{downloadingAll \? tr\('Saving…'\) : tr\('Save all offline'\)\} onClick=\{downloadAll\}/, 'the Offline key is not Save all offline');
-  assert.match(keys, /label=\{tr\('List'\)\} title=\{tr\('Add to collection'\)\} onClick=\{\(\) => setCollecting\(true\)\}/, 'List does not open Add to collection');
+  assert.match(keys, /label=\{tr\('List'\)\} title=\{tr\('Add to list'\)\} onClick=\{\(\) => setCollecting\(true\)\}/, 'List does not open Add to list');
   // The old stack is gone from under the cover.
   for (const old of ["tr('Find missing chapters')", "tr('Edit details')", "tr('Remove from library')", "tr('Rename folder')", "tr('New banner')", 'data-archive-slowly'])
     assert.ok(!keys.includes(old), `${old} is back under the cover`);

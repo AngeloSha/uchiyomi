@@ -190,6 +190,12 @@ const SLICES: [string, string, string, string][] = [
   ['components/ProfileYou.tsx', 'Studio: by hour and devices', '<div data-studio-hours>', ''],
   ['app/wrapped/page.tsx', 'Wrapped: the time line', '{timeLine && <p data-wrapped-time', '</div>'],
   ['app/wrapped/page.tsx', 'Wrapped: by hour', '<div data-wrapped-hours', '(data?.topSeries?.length'],
+  // UI refresh, phase 2: Members' cards act through keys -- Reset, Make admin, Disable, downloads, and the openers of the
+  // library and age panels, whose choices inside stay chips -- and what a new member starts with, which reuses them.
+  ['app/admin/page.tsx', 'Members: the cards', 'function Members()', 'function NewMemberDefaults('],
+  ['app/admin/page.tsx', 'Members: what a new member starts with', 'function NewMemberDefaults(', 'function ArtReview('],
+  ['app/admin/page.tsx', 'Members: the age limit\'s opener', 'function AgeCap(', '{open && ('],
+  ['app/admin/page.tsx', 'Members: the libraries\' opener', 'function LibraryAccess(', '{open && ('],
 ];
 
 const slice = (src: string, from: string, to: string, name: string): string => {

@@ -564,23 +564,24 @@ function Members() {
               </div>
               {!self && (
                 <button onClick={() => setDeleting(u)} aria-label={tr('Remove')}
-                  className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-ink-700 text-red-300"><IcTrash width={16} height={16} /></button>
+                  className="btn-key btn-key-danger h-9 w-9 px-0"><IcTrash width={16} height={16} /></button>
               )}
             </div>
             <p className="mt-2 text-[11px] text-fog-500">
               {/* The provider's name on an account linked to it (v0.63.0), as 2FA marks the accounts that have it. */}
               {[roleText(u.role), self ? tr('you') : null, u.disabled ? tr('disabled') : null, u.totp_enabled ? '2FA' : null, u.sso && provider ? provider : null].filter(Boolean).join(' · ')}
             </p>
+            {/* Keys (UI refresh): each acts on the account. The choices inside the library and age panels stay chips. */}
             <div className="mt-2.5 flex flex-wrap gap-1.5">
-              {!ssoOnly && <button onClick={() => setResetting(u)} className="chip text-xs">{tr('Reset')}</button>}
+              {!ssoOnly && <button onClick={() => setResetting(u)} className="btn-key">{tr('Reset')}</button>}
               {!self && (
                 <>
-                  <button onClick={() => patch(u, { role: u.role === 'admin' ? 'user' : 'admin' }, tr('Role updated'))} className="chip text-xs">{u.role === 'admin' ? tr('Make member') : tr('Make admin')}</button>
-                  <button onClick={() => patch(u, { disabled: !u.disabled }, u.disabled ? tr('Account enabled') : tr('Account disabled'))} className="chip text-xs">{u.disabled ? tr('Enable') : tr('Disable')}</button>
+                  <button onClick={() => patch(u, { role: u.role === 'admin' ? 'user' : 'admin' }, tr('Role updated'))} className="btn-key">{u.role === 'admin' ? tr('Make member') : tr('Make admin')}</button>
+                  <button onClick={() => patch(u, { disabled: !u.disabled }, u.disabled ? tr('Account enabled') : tr('Account disabled'))} className="btn-key">{u.disabled ? tr('Enable') : tr('Disable')}</button>
                   {/* A member's, like the two below: an admin downloads whatever the flag says (routes/sources.ts), so on an
                       admin's card it toggled nothing -- and one the provider made carries the new-member default for
                       the day it is made a member, which read here as a refusal it is not. */}
-                  {u.role !== 'admin' && <button onClick={() => patch(u, { perms: { ...u.perms, canDownload: !canDl } }, tr('Permission updated'))} className="chip text-xs">{canDl ? tr('Deny downloads') : tr('Allow downloads')}</button>}
+                  {u.role !== 'admin' && <button onClick={() => patch(u, { perms: { ...u.perms, canDownload: !canDl } }, tr('Permission updated'))} className="btn-key">{canDl ? tr('Deny downloads') : tr('Allow downloads')}</button>}
                   {/* Library access. "All libraries" is the ABSENCE of grant rows, not a full set of them, so a
                       library added next month is visible to unrestricted accounts without editing anyone. */}
                   {u.role !== 'admin' && <LibraryAccess granted={u.libraries ?? null} onSaved={inval}
@@ -652,10 +653,10 @@ function NewMemberDefaults({ sso, provider, signup }: { sso?: boolean; provider:
     catch (e) { toast(msgOf(e, tr('Could not update')), 'error'); }
     setBusy(false);
   };
-  // The chips say what a new member gets, lit where that is less than everything, as LibraryAccess and AgeCap are.
+  // The keys say what a new member gets, lit where that is less than everything, as LibraryAccess and AgeCap are.
   const chips = (
     <div className="mt-2.5 flex flex-wrap gap-1.5" data-member-defaults>
-      <button onClick={flipDownloads} disabled={busy} className={`chip text-xs disabled:opacity-50 ${canDl ? '' : 'chip-active'}`}>{canDl ? tr('Can download') : tr('No downloads')}</button>
+      <button onClick={flipDownloads} disabled={busy} className={`btn-key ${canDl ? '' : 'btn-key-accent'}`}>{canDl ? tr('Can download') : tr('No downloads')}</button>
       <LibraryAccess granted={d.libraries} save={(libraries) => save({ libraries })} onSaved={saved} nothing={tr('New members would see nothing.')} />
       <AgeCap cap={d.maxAgeRating} save={(maxAgeRating) => save({ maxAgeRating })} onSaved={saved} />
     </div>
@@ -1152,7 +1153,7 @@ function AgeCap({ cap, save: store, onSaved }: { cap: number | null; save: (next
 
   return (
     <>
-      <button onClick={() => setOpen((v) => !v)} className={`chip text-xs ${cap !== null ? 'chip-active' : ''}`}>
+      <button onClick={() => setOpen((v) => !v)} aria-expanded={open} className={`btn-key ${cap !== null ? 'btn-key-accent' : ''}`}>
         {cap === null ? tr('Any age rating') : tr('{age}+ and below', { age: cap })}
       </button>
       {open && (
@@ -1221,7 +1222,7 @@ function LibraryAccess({ granted, save: store, onSaved, nothing }: {
   // Only worth showing once there is more than one library to choose between.
   return (
     <>
-      <button onClick={() => setOpen((v) => !v)} className={`chip text-xs ${granted ? 'chip-active' : ''}`}>
+      <button onClick={() => setOpen((v) => !v)} aria-expanded={open} className={`btn-key ${granted ? 'btn-key-accent' : ''}`}>
         {!granted ? tr('All libraries') : granted.length === 1 ? tr('1 library') : tr('{n} libraries', { n: granted.length })}
       </button>
       {open && (

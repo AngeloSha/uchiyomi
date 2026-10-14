@@ -17,7 +17,7 @@ test('one switch per series type, the server\'s six in its order, each with a la
 
 test('Admin → Settings: the section comes after the pinned ones and saves the list whole', () => {
   const src = read('components/AdminSettings.tsx');
-  const grid = src.slice(src.indexOf('<div className={SETTINGS_GRID}>\n      <ServerSection'));
+  const grid = src.slice(src.indexOf('<ServerSection '));  // the grid from its first card (the section index is above it since the UI refresh)
   assert.match(grid, /<SourceOrderSection [^\n]*\/>\s*<NoticeChaptersSection /, 'Notice chapters is not last, after the source order');
   const section = src.slice(src.indexOf('function NoticeChaptersSection('));
   assert.match(section, /save\(\{ hideNoticeTypes: next \}\)/, 'the section does not PATCH hideNoticeTypes');

@@ -664,3 +664,20 @@ test('Admin → Settings → Downloads comes after the pinned sections, and save
   assert.ok(trKeys(['components/ArchiveSettings.tsx']).size >= 15, 'the scan found too few strings in the section');
   for (const f of localeFiles()) assert.deepEqual(missingIn(f, trKeys(['components/ArchiveSettings.tsx'])), [], `${f} lacks a Downloads string`);
 });
+
+test('Admin → Settings has a key for every card above them, each to its own card', () => {
+  // UI refresh: nine cards in a grid, and the one at the bottom was a long scroll away. The index names each card by its
+  // `<Section id>` and its own title. Reintroduce by adding a card without its key: "a card has no key" fails; by
+  // pointing a key at an id that no card has: "a key goes nowhere" fails.
+  const files = ['components/AdminSettings.tsx', 'components/AdminNotifications.tsx', 'components/ArchiveSettings.tsx'];
+  const cards = files.flatMap((f) => [...code(read(f)).matchAll(/<Section id="([^"]+)" title=\{tr\('([^']+)'\)\}/g)].map((m) => `${m[1]} ${m[2]}`));
+  assert.equal(cards.length, 9, 'the cards are not where this test looks');
+  const admin = code(read('components/AdminSettings.tsx'));
+  const index = admin.slice(admin.indexOf('<SectionIndex '), admin.indexOf(']} />', admin.indexOf('<SectionIndex ')));
+  const keys = [...index.matchAll(/\['([^']+)', tr\('([^']+)'\)\]/g)].map((m) => `${m[1]} ${m[2]}`);
+  for (const c of cards) assert.ok(keys.includes(c), `a card has no key: ${c}`);
+  for (const k of keys) assert.ok(cards.includes(k), `a key goes nowhere: ${k}`);
+  // Instantly under reduced motion or Reduce effects, as a `?section=` arrival is.
+  const shared = code(read('components/settings.tsx'));
+  assert.match(shared, /scrollIntoView\(\{ block: 'start', behavior: reduced \|\| fewer \? 'auto' : 'smooth' \}\)/);
+});

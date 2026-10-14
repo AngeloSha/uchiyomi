@@ -74,9 +74,11 @@ const fld = 'w-full rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2 tex
 
 interface CollectionRow { id: string; name: string; accent: string | null; item_count: number }
 
-/** "Add to collection" sheet: pick an existing list or create one inline. */
+/**
+ * "Add to list": pick an existing list or create one inline. The shared Modal since the UI refresh (it was a hand-rolled
+ * overlay): Escape closes it, focus starts in it and goes back to the List key, and it clears a phone's nav bar.
+ */
 function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () => void }) {
-  useLayer('dialog');
   const toast = useToast();
   const qc = useQueryClient();
   const [name, setName] = useState('');
@@ -99,34 +101,28 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
     } catch { toast(tr('Could not create the list'), 'error'); }
   };
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={onClose}>
-      <div role="dialog" aria-modal="true" aria-label={tr('Add to collection')} className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-3 flex items-start justify-between gap-3">
-          <h3 className="font-display text-lg font-semibold">{tr('Add to collection')}</h3>
-          <button onClick={onClose} aria-label={tr('Close')} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
+    <Modal title={tr('Add to list')} onClose={onClose} fieldFocus={false}>
+      {isLoading ? (
+        <div className="skeleton h-24 rounded-xl" />
+      ) : (
+        <div data-lenis-prevent className="max-h-64 space-y-1.5 overflow-y-auto">
+          {(data?.content ?? []).map((c) => (
+            <button key={c.id} onClick={() => add(c)}
+              className="flex w-full items-center gap-2.5 rounded-xl border border-ink-700 px-3 py-2.5 text-start transition hover:border-accent/50">
+              <span aria-hidden className="h-4 w-1.5 shrink-0 rounded-full" style={{ background: c.accent || 'rgb(var(--accent))' }} />
+              <span className="min-w-0 truncate text-sm text-fog-100">{c.name}</span>
+              <span className="ms-auto shrink-0 text-[11px] text-fog-500">{c.item_count}</span>
+            </button>
+          ))}
+          {!(data?.content ?? []).length && <p className="py-2 text-center text-xs text-fog-500">{tr('No lists yet — create one below.')}</p>}
         </div>
-        {isLoading ? (
-          <div className="skeleton h-24 rounded-xl" />
-        ) : (
-          <div data-lenis-prevent className="max-h-64 space-y-1.5 overflow-y-auto">
-            {(data?.content ?? []).map((c) => (
-              <button key={c.id} onClick={() => add(c)}
-                className="flex w-full items-center gap-2.5 rounded-xl border border-ink-700 px-3 py-2.5 text-start transition hover:border-accent/50">
-                <span aria-hidden className="h-4 w-1.5 shrink-0 rounded-full" style={{ background: c.accent || 'rgb(var(--accent))' }} />
-                <span className="min-w-0 truncate text-sm text-fog-100">{c.name}</span>
-                <span className="ms-auto shrink-0 text-[11px] text-fog-500">{c.item_count}</span>
-              </button>
-            ))}
-            {!(data?.content ?? []).length && <p className="py-2 text-center text-xs text-fog-500">{tr('No collections yet — create one below.')}</p>}
-          </div>
-        )}
-        <div className="mt-3 flex gap-2 border-t border-ink-800 pt-3">
-          <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && createAndAdd()}
-            placeholder={tr('New collection…')} className={`${fld} flex-1`} />
-          <button onClick={createAndAdd} disabled={!name.trim()} className="btn-accent px-3 text-xs disabled:opacity-50">{tr('Create')}</button>
-        </div>
+      )}
+      <div className="mt-3 flex gap-2 border-t border-ink-800 pt-3">
+        <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && createAndAdd()}
+          placeholder={tr('New list…')} className={`${fld} flex-1`} />
+        <button onClick={createAndAdd} disabled={!name.trim()} className="btn-accent px-3 text-xs disabled:opacity-50">{tr('Create')}</button>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -215,7 +211,6 @@ function RenameFolderModal({ id, folder, title, onClose, onSaved }: {
 }
 
 function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () => void; onSaved: () => void }) {
-  useLayer('dialog');
   const toast = useToast();
   const [number, setNumber] = useState(String(book.number ?? ''));
   const [title, setTitle] = useState(book.metadata?.title || book.name || '');
@@ -240,27 +235,22 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
   };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={onClose}>
-      <div role="dialog" aria-modal="true" aria-label={tr('Edit chapter')} className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-3 flex items-start justify-between gap-3">
-          <h3 className="font-display text-lg font-semibold leading-tight">{tr('Edit chapter')}</h3>
-          <button onClick={onClose} aria-label={tr('Close')} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
-        </div>
-        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Chapter number')}</label>
-        <input value={number} onChange={(e) => setNumber(e.target.value)} inputMode="decimal" className={fld} />
-        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Title')}</label>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} className={fld} />
-        {completed && (
-          <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] leading-relaxed text-amber-200">
-            {tr('You have finished this chapter. Changing its number changes what gets reported to a connected tracker. Progress never moves backwards on its own: if the new number is lower, the tracker keeps the higher one until an admin imports your list again under Admin → Import (From your tracker).')}
-          </p>
-        )}
-        <div className="mt-4 flex gap-2">
-          <button onClick={() => save(true)} disabled={busy} className="btn-ghost flex-1 py-2 text-sm disabled:opacity-50">{tr('Reset to file')}</button>
-          <button onClick={() => save()} disabled={busy} className="btn-accent flex-1 py-2 text-sm disabled:opacity-50">{tr('Save')}</button>
-        </div>
+    // The shared Modal (UI refresh), as Add to list: Escape, focus in and back, and clear of a phone's nav bar.
+    <Modal title={tr('Edit chapter')} onClose={onClose}>
+      <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Chapter number')}</label>
+      <input value={number} onChange={(e) => setNumber(e.target.value)} inputMode="decimal" className={fld} />
+      <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Title')}</label>
+      <input value={title} onChange={(e) => setTitle(e.target.value)} className={fld} />
+      {completed && (
+        <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] leading-relaxed text-amber-200">
+          {tr('You have finished this chapter. Changing its number changes what gets reported to a connected tracker. Progress never moves backwards on its own: if the new number is lower, the tracker keeps the higher one until an admin imports your list again under Admin → Import (From your tracker).')}
+        </p>
+      )}
+      <div className="mt-4 flex gap-2">
+        <button onClick={() => save(true)} disabled={busy} className="btn-ghost flex-1 py-2 text-sm disabled:opacity-50">{tr('Reset to file')}</button>
+        <button onClick={() => save()} disabled={busy} className="btn-accent flex-1 py-2 text-sm disabled:opacity-50">{tr('Save')}</button>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -1647,7 +1637,7 @@ function SeriesInner() {
           <SeriesKey icon={downloadingAll ? <ProgressRing progress="spin" size={20} /> : <IcDownload width={20} height={20} aria-hidden />}
             label={tr('Offline')} name={downloadingAll ? tr('Saving…') : tr('Save all offline')} onClick={downloadAll} disabled={downloadingAll} />
         )}
-        <SeriesKey icon={<IcListAdd />} label={tr('List')} title={tr('Add to collection')} onClick={() => setCollecting(true)}
+        <SeriesKey icon={<IcListAdd />} label={tr('List')} title={tr('Add to list')} onClick={() => setCollecting(true)}
           attrs={{ 'aria-haspopup': 'dialog' }} />
         <MoreKey onOpen={openMore} open={moreOpen} menu={wide} />
       </div>

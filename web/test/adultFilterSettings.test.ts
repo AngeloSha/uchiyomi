@@ -26,7 +26,7 @@ test('the section comes after Notifications, so the pinned order of the others i
   // Reintroduce by rendering it anywhere above <NotificationsSection />: the four-section order that
   // settingsConsole.test.ts and run.mjs rely on would shift.
   const src = code(read('components/AdminSettings.tsx'));
-  const grid = src.slice(src.indexOf('<div className={SETTINGS_GRID}>\n      <ServerSection'));
+  const grid = src.slice(src.indexOf('<ServerSection '));  // the grid from its first card (the section index is above it since the UI refresh)
   assert.ok(grid.indexOf('<NotificationsSection />') > 0, 'PREMISE: no Notifications section');
   assert.ok(grid.indexOf('<AdultFilterSection data={data} save={save} />') > grid.indexOf('<NotificationsSection />'),
     'the 18+ filter is not after Notifications');

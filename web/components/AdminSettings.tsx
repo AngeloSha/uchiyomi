@@ -26,7 +26,7 @@ import { useToast } from '@/components/Toast';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Switch } from '@/components/Switch';
 import { IcFilter, IcRefresh, IcSettings, IcSliders, IcTrash } from '@/components/icons';
-import { Disclosure, NumberRow, Row, SETTINGS_GRID, SaveState, Section, Segmented, SwitchRow, TextRow, useAutosave } from '@/components/settings';
+import { Disclosure, NumberRow, Row, SETTINGS_GRID, SaveState, Section, SectionIndex, Segmented, SwitchRow, TextRow, useAutosave } from '@/components/settings';
 import { nightlyModeOf, type NightlyMode } from '@/lib/autofix';
 import { t as tr } from '@/lib/i18n';
 import type { KnownGroup, SeriesType, StoredPrefs } from '@/lib/types';
@@ -67,6 +67,13 @@ export function AdminSettings() {
   }
   return (
     <div className={SETTINGS_GRID}>
+      {/* The cards below in the order they are drawn, each by its own `<Section id>`, on a row of the grid's own (UI
+          refresh); settingsConsole.test.ts fails when a card is added without its key here. */}
+      <SectionIndex label={tr('Settings')} className="col-span-full" sections={[
+        ['server', tr('Server')], ['schedules', tr('Updates & schedules')], ['housekeeping', tr('Library housekeeping')],
+        ['scanlators', tr('Scanlators')], ['notifications', tr('Notifications')], ['downloads', tr('Downloads')],
+        ['adult-filter', tr('18+ filter')], ['source-order', tr('Source order')], ['notice-chapters', tr('Notice chapters')],
+      ]} />
       <ServerSection data={data} save={save} />
       <SchedulesSection data={data} save={save} />
       <HousekeepingSection data={data} save={save} />
