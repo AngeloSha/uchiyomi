@@ -111,7 +111,7 @@ export default function CollectionsPage() {
     return (
       <div key={c.id} className="card group relative overflow-hidden" data-list-card={c.id}>
         <Link href={`/collection/?id=${c.id}`} className="block">
-          <div aria-hidden className="relative h-36 overflow-hidden border-t-[3px]" style={{ borderTopColor: tint }}>
+          <div aria-hidden data-list-band className="relative h-36 overflow-hidden border-t-[3px]" style={{ borderTopColor: tint }}>
             {covers.length > 0 ? (
               <div className="grid h-full gap-px" style={{ gridTemplateColumns: `repeat(${Math.max(covers.length, 3)}, minmax(0, 1fr))` }}>
                 {covers.map((id) => (

@@ -293,15 +293,22 @@ export async function homeListsWalk(ctx) {
     [say('Move earlier'), say('Move later')]);
     check(`homelists @${t}: earlier and later controls have accessible names`, arrowLabels);
     if (language === 'ar') {
-      const rtlStart = await page.evaluate((name) => {
+      // UI refresh (v0.65.0): the list's colour is the top edge of its cover band, the same in either direction; what
+      // follows the reading direction is the row of keys -- Home at the start edge (the right), Delete at the end.
+      const rtl = await page.evaluate((name, homeLabel) => {
         const card = [...document.querySelectorAll('div.card')].find((node) =>
           [...node.querySelectorAll('p')].some((p) => p.textContent?.trim() === name));
-        const bar = card?.querySelector('span.absolute.inset-y-0');
-        if (!card || !bar || document.documentElement.dir !== 'rtl') return false;
-        const c = card.getBoundingClientRect(); const b = bar.getBoundingClientRect();
-        return Math.abs(c.right - b.right) <= 2 && b.left > c.left + c.width / 2;
-      }, beta.name);
-      check('homelists @390ar: the card accent is on the RTL start edge', rtlStart);
+        const band = card?.querySelector('[data-list-band]');
+        const home = card && [...card.querySelectorAll('button')].find((b) => b.textContent?.trim() === homeLabel);
+        const del = card?.querySelector('button.btn-key-danger');
+        if (!card || !band || !home || !del || document.documentElement.dir !== 'rtl') return false;
+        const c = card.getBoundingClientRect(); const bd = band.getBoundingClientRect();
+        const h = home.getBoundingClientRect(); const d = del.getBoundingClientRect();
+        const accentOnTop = Math.abs(bd.top - c.top) <= 2 && bd.width >= c.width - 4
+          && parseFloat(getComputedStyle(band).borderTopWidth) >= 2;
+        return accentOnTop && h.left > c.left + c.width / 2 && d.right < c.left + c.width / 2;
+      }, beta.name, say('Home {n}', { n: 1 }));
+      check('homelists @390ar: the accent runs along the card\'s top; Home sits at the RTL start, Delete at the end', rtl);
     }
     await ctx.shot(`v558-homelists-${t}-3-controls`);
     await visit('/', 3500);
