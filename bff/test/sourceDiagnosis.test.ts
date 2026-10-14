@@ -56,8 +56,9 @@ test('THE MIS-DIAGNOSIS: "challenge" in a solver error must not read as the site
 // --- trawl's own failures (v0.55.3) ----------------------------------------------------------------------------
 // ⚠️ Not from a production last_error: the side-by-side benchmark on the owner's pages (2026-10-04) had trawl answer all
 // fourteen, so these are trawl 1.7.0's own messages, read from its source (apps/api/src/routes/v1.ts, packages/tiers
-// orchestrator.ts and tiers/3.ts), in the shape the client stores them: `flaresolverr: <message>`. Without a residential
-// proxy, a wall its browser cannot pass ends as "Tier 3 failed (<reason>). Set RESIDENTIAL_PROXY_URL …".
+// orchestrator.ts and tiers/3.ts; 1.8.0's are the same, re-read 2026-10-14), in the shape the client stores them:
+// `flaresolverr: <message>`. Without a residential proxy, a wall its browser cannot pass ends as "Tier 3 failed
+// (<reason>). Set RESIDENTIAL_PROXY_URL …".
 const TRAWL_TIER4 = 'Set RESIDENTIAL_PROXY_URL (or pass a proxy per-request) to enable Tier 4 proxy escalation.';
 const trawl = (reason: string) => `flaresolverr: Tier 3 failed (${reason}). ${TRAWL_TIER4}`;
 

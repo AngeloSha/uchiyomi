@@ -179,7 +179,7 @@ test('no backup, or a backup at the main\'s own address: the main is asked once,
 
 // ---- a solver that is busy (its own HTTP 429) --------------------------------------------------------------------
 
-/** trawl's answer when no browser of its pool frees up in time (apps/api/src/routes/v1.ts, 1.7.0). */
+/** trawl's answer when no browser of its pool frees up in time (apps/api/src/routes/v1.ts; 1.7.0 and 1.8.0 alike). */
 const busy = (): Reply => ({ status: 429, json: { status: 'error', message: 'Browser pool exhausted: all browsers are busy', solution: { url: '', status: 0, headers: {}, response: '', cookies: [], userAgent: '' } } });
 
 test("a solver's own 429 is busy: it is asked again, twice, a moment apart, then the backup", async () => {

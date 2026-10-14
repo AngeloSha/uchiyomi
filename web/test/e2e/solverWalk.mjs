@@ -5,12 +5,12 @@
 //   KEEP=1 E2E_SOLVERS=1 E2E_MIN_FREE_GB=0 E2E_NO_WALK=1 E2E_NET=uchi-e2e-sv E2E_PORT=18163 E2E_SUBNET=10.222.63.0/24 \
 //     bash web/test/e2e/up.sh
 //   cd web && BASE=http://127.0.0.1:18163 PHASES=solver npm run test:e2e:v049
-// The main solver greets as trawl 1.7.0, the backup as FlareSolverr 3.5.2 (fakeSolver.mjs); their control ports are
+// The main solver greets as trawl 1.8.0, the backup as FlareSolverr 3.5.2 (fakeSolver.mjs); their control ports are
 // 26000 + 2 x the app port's last three digits, and one more, as up.sh derives them. fake-b's stub answers only a request
 // carrying a solver's cf_clearance, and says whose each one carried (fakeSource.mjs --cloudflare).
 //
 //   1. Both answer: Health's Cloudflare solver card lists the main and the backup, each by its kind and version -- the
-//      main "trawl v1.7.0", never held against FlareSolverr's 3.x releases -- and is green.
+//      main "trawl v1.8.0", never held against FlareSolverr's 3.x releases -- and is green.
 //   2. The main stops answering: the card is amber, "The main solver is not answering; the backup is solving", its
 //      mark Worth a look -- never the red Needs attention, never the solver-down card -- and the Cloudflare site still
 //      lists and downloads: Walk Gap added from fake-b, every request the site answered carrying the backup's
@@ -86,16 +86,16 @@ export async function solverWalk(ctx) {
     const [main, backup] = both?.items ?? [];
     check('solver: ...the main first, then the backup', main?.titleSaid?.code === 'solver.main' && backup?.titleSaid?.code === 'solver.backup', brief(both));
     const m = rowSaid(main)?.params ?? {}, b = rowSaid(backup)?.params ?? {};
-    check('solver: the main greets "TRAWL is ready!" and is named trawl v1.7.0', rowSaid(main)?.code === 'solver.ready' && m.kind === 'trawl' && m.version === '1.7.0', JSON.stringify(rowSaid(main)));
+    check('solver: the main greets "TRAWL is ready!" and is named trawl v1.8.0', rowSaid(main)?.code === 'solver.ready' && m.kind === 'trawl' && m.version === '1.8.0', JSON.stringify(rowSaid(main)));
     // trawl held against FlareSolverr's 3.x releases read as years behind (v0.55.2 and before): its own, or none.
     check('solver: ...never held against FlareSolverr\'s releases: no "v3.x is out" beside trawl, no version row for it',
-      (m.latest == null || !/^3\./.test(String(m.latest))) && !(both?.items ?? []).some((i) => /^v1\.7\.0 → v3/.test(i.title ?? '')), JSON.stringify({ m, titles: both?.items?.map((i) => i.title) }));
+      (m.latest == null || !/^3\./.test(String(m.latest))) && !(both?.items ?? []).some((i) => /^v1\.8\.0 → v3/.test(i.title ?? '')), JSON.stringify({ m, titles: both?.items?.map((i) => i.title) }));
     console.log(`         trawl's newest release as the server read it: ${m.latest ?? 'none newer (or GitHub not asked)'}`);
     check('solver: the backup greets as FlareSolverr 3.5.2', b.kind === 'flaresolverr' && b.version === '3.5.2', JSON.stringify(rowSaid(backup)));
     await page.setViewport({ width: 1280, height: 900 });
     const shownBoth = await openCard('solver');
     check('solver @1280: Health shows both rows, the main named trawl', !!shownBoth?.open && shownBoth.text.includes(say('Main solver'))
-      && shownBoth.text.includes(say('Backup solver')) && /trawl v1\.7\.0/.test(shownBoth.text), shownBoth?.text);
+      && shownBoth.text.includes(say('Backup solver')) && /trawl v1\.8\.0/.test(shownBoth.text), shownBoth?.text);
     await shot('solver-1280-0-both-ready');
 
     // ---- 2. the main stops answering --------------------------------------------------------------------------------
