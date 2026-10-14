@@ -1,20 +1,14 @@
-// A MangaDex title with no English chapters could not be added at all.
+// MangaDex in one language is that language, and nothing else.
 //
-// listChapters asked for `translatedLanguage[]=en` and nothing else, so a title whose scanlations are all
-// Spanish or Portuguese answered with zero chapters. Downstream that is indistinguishable from a dead
-// series: nothing to add, nothing to download, no error to explain it.
+// A title with no English chapters used to be empty to English MangaDex, and the fix then was a fallback:
+// English asked Spanish, Portuguese, French, Russian and Indonesian in turn and kept the first that answered. That
+// was how a server set to English only downloaded a Spanish series with nothing on screen to say why (reported in
+// v0.61.2). v0.52.0 (#123) made every other language an adapter of its own, so the fallback had nothing left to do
+// but that: since v0.62.0 English asks for English alone, in its chapter lists and in its search, and a Spanish-only
+// title is added from MangaDex (ES-419).
 //
-// The obvious fix -- drop the language filter -- is wrong here, and this file pins why. Chapter numbers
-// repeat across languages, and the chooser that picks one copy per number (lib/releases.ts) ranks by group,
-// hosting and date; it has no notion of a preferred language. So an unfiltered feed yields a list whose
-// language is chosen arbitrarily, per chapter. One language at a time, stopping at the first that answers,
-// keeps the result coherent.
-//
-// The second half pins what the feed carries per row now that the adapter no longer collapses a number to
-// one copy: the scanlation groups, expanded by `includes[]=scanlation_group`, and every release of a number.
-//
-// v0.52.0 (#123): the fallback is English's alone. MangaDex in another language is an adapter of its own that asks
-// for its language and nothing else, and a row's language is the app's code ("es-419", never MangaDex's "es-la").
+// The rest pins what the feed carries per row: the scanlation groups, expanded by `includes[]=scanlation_group`, and
+// every release of a number, and a row's language in the app's code ("es-419", never MangaDex's "es-la").
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mangadex, makeMangadex, _setMangadexPacing, _resetMangadexLimiter } from '../src/lib/sources/mangadex';
@@ -51,12 +45,12 @@ function stubFeed(byLang: Record<string, Row[]>, urls: string[] = []) {
   return asked;
 }
 
-// The shared limiter's spacing is not what these pin: no gap, so a fallback through seven languages costs no time.
+// The shared limiter's spacing is not what these pin: no gap between requests.
 before(() => _setMangadexPacing({ apiGapMs: 0, atHomeGapMs: 0 }));
 after(() => _setMangadexPacing(null));
 test.afterEach(() => { globalThis.fetch = realFetch; _resetMangadexLimiter(); });
 
-test('English is preferred, and nothing else is even asked for when it answers', async () => {
+test('English asks for English, and one request is all a title with English chapters costs', async () => {
   const asked = stubFeed({ en: [{ n: 1 }, { n: 2 }], 'es-la': [{ n: 1 }] });
   const out = await mangadex.listChapters!('series-1');
   assert.deepEqual(out.map((c) => c.number), [1, 2]);
@@ -64,50 +58,32 @@ test('English is preferred, and nothing else is even asked for when it answers',
   assert.deepEqual(asked, ['en'], 'a title with English chapters must cost exactly one language request');
 });
 
-test('THE BUG: a title with no English chapters is no longer empty', async () => {
-  // Reintroduce by pinning listChapters back to `translatedLanguage[]=en`: this returns [] and the title
-  // cannot be added at all.
-  const asked = stubFeed({ 'es-la': [{ n: 1 }, { n: 2 }, { n: 3 }] });
+test('THE BUG: English never answers in another language, so English only stays English', async () => {
+  // Reintroduce the fallback chain (en, es-la, es, pt-br, fr, ru, id until one answers): this returns the Spanish
+  // chapters, and a server set to English only downloads them.
+  const asked = stubFeed({ 'es-la': [{ n: 1 }, { n: 2 }, { n: 3 }], 'pt-br': [{ n: 7 }] });
   const out = await mangadex.listChapters!('series-2');
-  assert.deepEqual(out.map((c) => c.number), [1, 2, 3]);
-  // The app's code for MangaDex's "es-la", as on the source's name, MangaDex (ES-419).
-  assert.ok(out.every((c) => c.lang === 'es-419'), 'the Spanish chapters should be the ones returned');
-  assert.equal(asked[0], 'en', 'English must still be tried first');
-  assert.ok(asked.includes('es-la'));
+  assert.deepEqual(out, [], 'a title with no English chapters has none in English');
+  assert.deepEqual(asked, ['en'], 'asks en and nothing else');
 });
 
-test('the result is single-language, never a mixture', async () => {
-  // Reintroduce by fetching every language at once (what the obvious fix does): chapter 2 comes back in
-  // both languages and the chooser keeps whichever has pages, so the list silently mixes languages.
-  const asked = stubFeed({
-    'es-la': [{ n: 1 }, { n: 2, pages: 0 }],
-    fr: [{ n: 2, pages: 30 }, { n: 3 }],
-  });
-  const out = await mangadex.listChapters!('series-3');
-  const langs = new Set(out.map((c) => c.lang));
-  assert.equal(langs.size, 1, `expected one language, got ${[...langs].join(', ')}`);
-  assert.equal([...langs][0], 'es-419', 'the first language that answered wins outright');
-  assert.ok(!asked.includes('fr'), 'once a language answers, later ones must not be requested');
-});
-
-test('the fallback order is fixed, and stops at the first language that answers', async () => {
-  const asked = stubFeed({ 'pt-br': [{ n: 7 }] });
-  const out = await mangadex.listChapters!('series-4');
-  assert.equal(out.length, 1);
-  assert.deepEqual(asked, ['en', 'es-la', 'es', 'pt-br'], 'tried in order, and stopped');
-});
-
-test('a title with nothing anywhere answers empty rather than looping', async () => {
-  const asked = stubFeed({});
-  const out = await mangadex.listChapters!('series-5');
-  assert.deepEqual(out, []);
-  // Bounded: a genuinely empty title must not become an unbounded fan-out on every updater sweep.
-  assert.ok(asked.length <= 8, `tried ${asked.length} languages; the list should stay short`);
+test("English search finds only titles with English chapters", async () => {
+  // A hit English cannot serve is a series added with no chapters. Reintroduce the unfiltered English search
+  // (`english ? '' : ...`): the URL carries no availableTranslatedLanguage and this fails.
+  const urls: string[] = [];
+  globalThis.fetch = (async (url: any) => {
+    urls.push(String(url));
+    return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  await mangadex.search('solo leveling');
+  const asked = urls.filter((u) => new URL(u).pathname.endsWith('/manga'));
+  assert.equal(asked.length, 1);
+  assert.deepEqual(new URL(asked[0]).searchParams.getAll('availableTranslatedLanguage[]'), ['en']);
 });
 
 test('MangaDex in another language asks for that language alone, and never falls back to English', async () => {
-  // Reintroduce by giving every adapter the English fallback chain (listChapters without the `!english` return):
-  // MangaDex (ES-419) answers with the English chapters, and "asks es-la and nothing else" fails.
+  // Reintroduce by giving every adapter a fallback chain that starts at English: MangaDex (ES-419) answers with the
+  // English chapters, and "asks es-la and nothing else" fails.
   const asked = stubFeed({ en: [{ n: 1 }, { n: 2 }], 'es-la': [] });
   const es = makeMangadex('es-419');
   assert.deepEqual(await es.listChapters('series-es'), [], 'a title with no Spanish chapters has none in Spanish');

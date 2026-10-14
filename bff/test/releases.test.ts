@@ -6,7 +6,7 @@
 // that name no group at all, and the tie-breaks that decide when nothing else does.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseReleases, groupsOf, mergePrefs, normGroup, ReleasePrefs, StoredPrefs } from '../src/lib/releases';
+import { chooseReleases, copiesOf, groupsOf, mergePrefs, normGroup, ReleasePrefs, StoredPrefs } from '../src/lib/releases';
 import type { SourceChapter } from '../src/lib/sources/types';
 
 const DAY = 86_400_000;
@@ -181,3 +181,37 @@ test('normGroup: NFKC, case and punctuation insensitive', () => {
   assert.equal(normGroup('Luminous_Scans!'), 'luminousscans');
   assert.notEqual(normGroup('Alpha'), normGroup('Alpha2'));
 });
+
+test('a Spanish copy never wins an English series, whichever source ranks first', () => {
+  // v0.62.0 (lib/copyLanguage.ts): the language rule drops a copy known to be in another language before ranking, like
+  // a blocked group's. Here the Spanish copy comes from the source ranked first, which won every such tie before.
+  // Reintroduce by dropping the inLanguage line from chooseReleases: chapter 1 reads Esp.
+  const inLanguage = (c: { lang?: string }) => c.lang !== 'es';
+  const sourceRank = (s?: string) => (s === 'main' ? 0 : 1);
+  const copies = [copy(1, 'Esp', { lang: 'es', source: 'main' }), copy(1, 'Eng', { lang: 'en', source: 'follower' })];
+  const r = chooseReleases(copies, prefs(), { inLanguage, sourceRank });
+  assert.equal(chosen(r, 1), 'Eng');
+  // A number with nothing in the language is left out, never filled with the other one.
+  const only = chooseReleases([copy(2, 'Esp', { lang: 'es', source: 'main' })], prefs(), { inLanguage, sourceRank });
+  assert.equal(only.releases.length, 0, 'a chapter that exists only in Spanish was chosen for an English series');
+  // The fallback chain's supply drops it the same way. Reintroduce by dropping the line from copiesOf: two copies.
+  assert.deepEqual(copiesOf(copies, 1, prefs(), { inLanguage, sourceRank }).map((c) => c.scanlator), ['Eng']);
+});
+
+test('continuity decides after the source rank, before the date, and only when the rules call copies equal', () => {
+  // v0.62.0: a source in every language lists one copy per translation; the group of the latest chapters on disk keeps
+  // the series in one language, where the earliest release was whichever translation came out first.
+  const continuity = (c: { scanlator?: string }) => (c.scanlator === 'Eng' ? 0 : 1);
+  const esp = copy(1, 'Esp', { publishedAt: iso(T0) });
+  const eng = copy(1, 'Eng', { publishedAt: iso(T0 + 3 * DAY) });
+  // Reintroduce by dropping `x.kept - y.kept` from releaseOrder: Esp, the earlier release, wins.
+  assert.equal(chosen(chooseReleases([esp, eng], prefs(), { continuity }), 1), 'Eng');
+  // A ranked group still beats it. Reintroduce by moving `kept` ahead of the rank: Eng wins against the ranked Esp.
+  assert.equal(chosen(chooseReleases([esp, eng], prefs({ priority: ['Esp'] }), { continuity }), 1), 'Esp');
+  // And so does the source rank. Reintroduce by moving `kept` ahead of the source rank: Eng from the follower wins.
+  const ranked = chooseReleases(
+    [copy(2, 'Esp', { source: 'main', publishedAt: iso(T0) }), copy(2, 'Eng', { source: 'follower', publishedAt: iso(T0) })],
+    prefs(), { continuity, sourceRank: (s) => (s === 'main' ? 0 : 1) });
+  assert.equal(chosen(ranked, 2), 'Esp');
+});
+

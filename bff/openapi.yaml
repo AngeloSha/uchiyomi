@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.61.2
+  version: 0.62.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -869,7 +869,7 @@ components:
     Copy:
       type: object
       description: One version of a listed chapter number, as the sources list it.
-      required: [key, source, sourceName, groups, scanlator, lang, pages, publishedAt, chosen, blocked, onDisk]
+      required: [key, source, sourceName, groups, scanlator, lang, otherLanguage, pages, publishedAt, chosen, blocked, onDisk]
       properties:
         key: { type: string, description: "`<source>:<sourceId>`, unique within the number." }
         source: { type: string, description: The adapter id; with `sourceId` this is what a Pick names. }
@@ -877,6 +877,7 @@ components:
         groups: { type: array, items: { type: string } }
         scanlator: { type: [string, "null"], description: The group string as the source shows it (a joint release reads "A & B"). }
         lang: { type: [string, "null"] }
+        otherLanguage: { type: [string, "null"], description: "Since v0.62.0: the copy's language when it is known to be another than the series' (its own, else its source's), a copy the release rules never take; null otherwise." }
         pages: { type: [integer, "null"], description: 0 is an external link (not downloadable); null when the source does not say. }
         publishedAt: { type: [string, "null"], format: date-time }
         chosen: { type: boolean, description: The copy the release rules chose at the last check. }
@@ -2382,7 +2383,9 @@ paths:
         `blocked` and `onDisk`. A `source` and
         `sourceId` from here make a Pick for POST /api/sources/fetch or the admin refetch. A number listed
         before v0.33.0 has an empty `copies` until its next check. Any account that can open the series may
-        read it.
+        read it. Since v0.62.0 `otherLanguage` lists the chapters on the server known to be in another language
+        than the series' that a listed copy in its language can replace -- `{series, langs, bookIds}`, the ids for
+        the admin refetch -- and is null when there are none.
       parameters:
         - name: id
           in: path
@@ -2398,11 +2401,18 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [checkedAt, content]
+                required: [checkedAt, otherLanguage, content]
                 properties:
                   checkedAt:
                     type: [string, "null"]
                     format: date-time
+                  otherLanguage:
+                    type: [object, "null"]
+                    required: [series, langs, bookIds]
+                    properties:
+                      series: { type: string, description: The series' language. }
+                      langs: { type: array, items: { type: string }, description: "The languages they are in, most chapters first." }
+                      bookIds: { type: array, items: { type: string } }
                   content:
                     type: array
                     items:
@@ -7692,7 +7702,11 @@ paths:
         - admin
       summary: Add a whole site by URL (engine auto-detected).
       operationId: postApiAdminSourcesCustom
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since v0.62.0 the
+        homepage's language (`<html lang>`, else `og:locale`) is stored as the site's language and answered as `lang`,
+        except English, which WordPress writes for any site left at its default: null, and the site is in the unstated
+        language. A picked engine reads the page for the language for up to 15 s.
       requestBody:
         required: false
         content:
@@ -7721,9 +7735,12 @@ paths:
     patch:
       tags:
         - admin
-      summary: Change a custom site's base address, and nothing else, so its series follow it.
+      summary: Change a custom site's base address or its language, and nothing else, so its series follow it.
       operationId: patchApiAdminSourcesCustomId
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Give `base`, `lang`
+        or both. A new `base` clears the site's block and is tested again (`smoke`). A new `lang` (since v0.62.0)
+        re-picks the chapters of every series that uses the site; `smoke` is null when only the language changed.
       parameters:
         - name: id
           in: path
@@ -7739,13 +7756,16 @@ paths:
               properties:
                 base:
                   type: string
+                lang:
+                  type: string
+                  description: "The site's language, one code (since v0.62.0): `es`, `es-419`, `pt-BR`, `zh-Hant`."
       security:
         - bearer: []
       responses:
         "200":
           description: OK
         "400":
-          description: Malformed body or parameter
+          description: "Malformed body or parameter; `unknown_language` for a `lang` that is not one language"
         "401":
           description: Not authenticated
         "403":

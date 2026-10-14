@@ -204,3 +204,44 @@ export function UnstatedLanguageRow() {
     </Row>
   );
 }
+
+/**
+ * A site added by address: the language it is in (v0.62.0), in its sheet under its address. Read from its homepage
+ * when it was added (bff lib/sources/detect.ts siteLanguage), else the language of sites that do not say theirs,
+ * which a pick here replaces. Saved as it is picked, like the row above; the server re-picks the chapters of every
+ * series that uses the site, and `onSaved` reads the sources again so the sheet shows what was stored.
+ */
+export function SiteLanguage({ siteId, lang, onSaved }: { siteId: string; lang: string | null; onSaved: () => Promise<unknown> | void }) {
+  const { data } = useLanguageSettings();
+  const { status, run } = useAutosave();
+  const id = useId();
+  const [picked, setPicked] = useState<string | null>(null);
+  const pending = useRef(0);
+  const [queue] = useState(serial);
+  if (!data) return null;
+  const value = picked ?? lang ?? data.unstated_lang;
+  const codes = data.mangadex_available.includes(value) ? data.mangadex_available : [value, ...data.mangadex_available];
+  const pick = (next: string) => {
+    setPicked(next);
+    pending.current++;
+    const send = queue(() => api(`/api/admin/sources/custom/${encodeURIComponent(siteId)}`, { method: 'PATCH', json: { lang: next } }));
+    void run(async () => { await send; await onSaved(); }).finally(() => { if (!--pending.current) setPicked(null); });
+  };
+  return (
+    <section aria-label={tr('Language')} className="border-t border-ink-800/70 pt-3" data-source-language>
+      <div className="flex items-center justify-between gap-2">
+        <label htmlFor={id} className="text-[11px] font-semibold uppercase tracking-wider text-fog-500 rtl:tracking-normal">{tr('Language')}</label>
+        <SaveState status={status} />
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <select id={id} value={value} onChange={(e) => pick(e.target.value)} className="field w-auto" data-source-language-pick>
+          {codes.map((c) => <option key={c} value={c}>{languageName(c)}</option>)}
+        </select>
+        {!lang && picked === null && <span className="text-[12px] text-fog-500" data-source-language-default>{tr('The site doesn’t say, so this is your default')}</span>}
+      </div>
+      <p className="mt-1.5 max-w-prose text-[11px] leading-relaxed text-fog-500">
+        {tr('Series in another language never follow this site automatically, and never take its chapters.')}
+      </p>
+    </section>
+  );
+}

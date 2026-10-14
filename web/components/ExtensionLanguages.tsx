@@ -77,6 +77,8 @@ export function LanguagesSheet({ onClose }: { onClose: () => void }) {
                       <p className="truncate text-sm text-fog-100" title={code ?? undefined}>{name}</p>
                       <p className="mt-0.5 text-[11px] text-fog-500">{facts}</p>
                       {l.hidden && <p className="mt-0.5 text-[11px] text-amber-300/90">{tr('Hidden: new extensions leave it off')}</p>}
+                      {/* v0.62.0: what this row is, where a reader keeping to one language decides on it. */}
+                      {code === 'all' && <p className="mt-0.5 text-[11px] leading-relaxed text-fog-500" data-lang-mixed>{tr('Each lists the chapters of every language together. Turn it off to keep to the languages you read.')}</p>}
                     </div>
                     {/* A source that declares no language cannot be chosen by one -- the server reaches it by id only. */}
                     {code === null ? (

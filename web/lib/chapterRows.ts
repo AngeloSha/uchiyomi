@@ -254,13 +254,13 @@ export const FETCH_CHUNK = 300;
 export const MARK_CHUNK = 500;
 
 /**
- * A run's numbers cut into requests of at most `size`, in order, none empty. ⚠️ The requests are for ONE
- * series and the route answers 409 `busy` while that series' job is running, so the page posts them one
- * after the other, waiting for each job to end (`fetchMany` in the series page); this only decides the
- * cuts, where a test can count them.
+ * A run's numbers -- or chapter ids, for Fetch again (v0.62.0) -- cut into requests of at most `size`, in order, none
+ * empty. ⚠️ The requests are for ONE series and the route answers 409 `busy` while that series' job is running, so the
+ * page posts them one after the other, waiting for each job to end (`postInChunks` in the series page); this only
+ * decides the cuts, where a test can count them.
  */
-export function chunkNumbers(numbers: number[], size = FETCH_CHUNK): number[][] {
-  const out: number[][] = [];
+export function chunkNumbers<T>(numbers: T[], size = FETCH_CHUNK): T[][] {
+  const out: T[][] = [];
   for (let i = 0; i < numbers.length; i += size) out.push(numbers.slice(i, i + size));
   return out;
 }

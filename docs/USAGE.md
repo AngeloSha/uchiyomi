@@ -556,6 +556,19 @@ group has also released stays, and its copy becomes that group's. **Unblock** br
 just as fast, as chapters you can fetch. The same goes for a group blocked for every series under **Admin →
 Settings → Scanlators**. A chapter already downloaded from a group you block stays on the shelf.
 
+**In the series' language** (since v0.62.0). A copy known to be in another language than the series' is never
+taken, exactly like a blocked group's: a Spanish copy never fills a chapter of an English series, whichever source
+ranks first. A copy's language is known when its source names it — MangaDex for each chapter, an extension or a site
+for all of its chapters — and a copy whose language is not known (a site that does not say, an extension source in
+every language) is still taken. A chapter that exists only in another language is left out as a blocked one is, and
+**Fetch** on it says *That chapter is only in another language than the series. Pick a copy under Versions to fetch it
+anyway.*; the chapter's **Versions** mark such a copy with its language, in amber. The rule needs a source that serves
+the series' language: a series whose every source is in another language — its language set by hand to the
+original, Korean for a manhwa you read in English, say — updates as it always did. Changing a series' language in
+*Edit details* re-picks its chapters at once. And from an extension source in every language, which lists one copy
+per translation of each number, Uchiyomi keeps to the group of the latest chapters you have, and so to their
+language, where it used to take whichever translation came out first.
+
 In v0.55.8 the preference and every affected stored chapter choice change together. If the rebuild cannot finish,
 nothing is saved and the page reports the failure; a concurrent check cannot put an older blocklist back over the new
 one. Unblocking restores whether a chapter was naturally available, held or covered by another split, rather than
@@ -650,8 +663,9 @@ sources it already follows are kept but not asked, and a new follow is refused w
 
 **In the series' language only** (since v0.52.0). A series follows sources in its own language: the add dialog's
 check, the hunt for a missing chapter and Find other sources never follow a source in another, and Find missing
-chapters never offers one, because its chapters would be mixed in, one language per number by chance. A source in
-every language counts as any, and a series' own source always passes. To read a title in two languages, add the
+chapters never offers one, because its chapters would be mixed in, one language per number by chance. A series' own
+source always passes. A source in every language passes only an admin's own follow, *Make main* or a merge: since
+v0.62.0 nothing follows one automatically, because nothing says which of its copies is in which language. To read a title in two languages, add the
 other as an edition (*Reading a series in two languages*, below); a follow refused for its language offers
 **Add it as an edition**.
 
@@ -1218,12 +1232,15 @@ The bar is up from the moment you tap Select. The selection is cleared when you 
 order.
 
 An admin's chapter menu (⋯) also has **Copy file path**: the chapter's file, in full, on the server. The series'
-folder is in *Edit details* (**Folder on the server**), with a Copy beside each path.
+folder is in *Edit details* (**Folder on the server**), with a Copy beside each path. Since v0.62.0 it has **Fetch
+again** and **Delete from server** too, for that one chapter, on a chapter Uchiyomi downloaded: each asks first, as
+the bar's do (next section).
 
 ### Deleting a chapter from the server and fetching it again
 
-An admin can free the space a chapter takes without losing the record of it. **Remove** in the select bar,
-confirmed with **Delete from server**, removes the file and keeps everything else: the chapter row, marked
+An admin can free the space a chapter takes without losing the record of it. **Remove** in the select bar, or
+**Delete from server** in one chapter's ⋯, confirmed with **Delete from server**, removes the file and keeps
+everything else: the chapter row, marked
 *Deleted from the server*, everyone's reading progress on it, and every count — the series' unread number does
 not move, and nothing is pushed to AniList. (Where the chapter list is a grid, on a wide screen, the mark says just
 *Deleted* — or *No file* for *File no longer on disk* — and the whole sentence shows when you point at the row;
@@ -1245,6 +1262,16 @@ back and the chapter is exactly as it was. Like a manual fetch, this ignores pat
 never the blocklist.
 
 Both ask you to confirm, and both are written to the activity log.
+
+### Chapters in another language
+
+Since v0.62.0 an admin sees, above the chapter list, the chapters on the server that are in another language than
+the series' — a few Spanish chapters in an English series, which a source in another language, or MangaDex's English
+source before v0.62.0 (section 7), could bring: *3 chapters here are in Spanish* · *The series is in English, and each
+of them has come out in English too.*, with **Fetch them again in English**. That is *Fetch again* for those chapters:
+each file is replaced on its own row by the copy in the series' language, so everyone's place is kept, and the notice
+goes once they have landed. It counts only a chapter a source has in the series' language, and only a file Uchiyomi
+downloaded.
 
 ---
 
@@ -1579,9 +1606,16 @@ old addresses, `?tab=Providers` and `?tab=Extensions`, lead there.
 3. Paste the site's **homepage URL**, the root only, e.g. `https://some-manga-site.com`. Not a deep link to a
    specific series or chapter.
 4. Type a **Name** (any label you like; it's just what shows in your source list).
-5. Click **Add**. Uchiyomi fetches the homepage, figures out the engine, and the source goes live **instantly, no
-   restart**: it is tested on the spot, with the checks it passed and failed listed under the form. It then appears
-   under **Your sources** and is searchable from **Discover**.
+5. Click **Add**. Uchiyomi fetches the homepage, figures out the engine and the language the page says it is in,
+   and the source goes live **instantly, no restart**: it is tested on the spot, with the checks it passed and failed
+   listed under the form. It then appears under **Your sources** and is searchable from **Discover**.
+
+**The site's language** (since v0.62.0). A site's sheet shows the language it is in under its address, and changes
+it. It is read from the homepage when the site is added (`<html lang>`, else `og:locale`), with a picked engine too;
+a page that says English is not taken at its word, since WordPress says *en-US* for any site left at its default, so
+such a site, like one whose page says nothing, is in the language under *Sites that do not say their language*
+(*The site doesn't say, so this is your default*). Series in another language never follow a site automatically and
+never take its chapters, and changing its language re-picks the chapters of every series that uses it at once.
 
 ### Will a site work?
 
@@ -1635,7 +1669,14 @@ cooldown (if a site rate-limited you after heavy downloading); **Turn off** or *
 series use it (they get no new chapters from it until you turn it back on; nothing is deleted); and **Remove** for a
 site you added, refused while it is still some series' main source (replace it first). **Used by 195 series ›**
 opens the Library filtered to them. Then what its kind has: an extension's languages, settings, **Update** and
-**Remove extension**; MangaDex's languages; a site's address, with **Update address**.
+**Remove extension**; MangaDex's languages; a site's address, with **Update address**, and its **Language**.
+
+An extension's source in every language reads *All languages, mixed* (it read *Multiple languages*, and in
+**Languages** *All languages*, which looked like a switch for all of them): it lists the chapters of every language
+together, so a server that reads in some languages only switches it off — in **Languages**, or the source's own
+switch. Since v0.62.0 Uchiyomi never follows one for a series by itself, keeps to the group of the chapters you
+already have when a series does use one, and in Discover's search a card offers it last, so a title another source
+carries in one language is added from that source.
 
 **Test all**, beside the views, tests every source, one at a time, in the background: the line under it says how far
 it has got (*Testing 7 of 40 · …*), and a check that was already running when you opened the tab is picked up. When
@@ -1699,8 +1740,17 @@ a language that series came from asks first: they keep their chapters, get no ne
 lists them under its frozen series with the switch named. All the languages share one rate limit: when MangaDex asks
 Uchiyomi to slow down, every language waits.
 
+Since v0.62.0 English MangaDex is English only: its search finds the titles that have English chapters, and a title
+lists its English chapters. Before, a title with none fell back to another language's, so a series could fill with
+Spanish chapters while it read as English. The upgrade moves each series that fallback filled to MangaDex in its own
+language, and switches that language on, when the series is stated in that language and its chapters were; any other
+series keeps English MangaDex. Each chapter the fallback fetched keeps its language on the server, so an English
+series with Spanish chapters offers to fetch them again in English where they are out (*Chapters in another
+language*, section 4).
+
 In **Add sources**, **Sites that do not say their language** is the language Uchiyomi takes a source to be in
-when it declares none, which most sites added by address do: English unless you choose another. It matters for
+when it declares none — a site added by address whose page does not say (or says English) — English unless you
+choose another. It matters for
 the rule in *Following a second source* (section 4): a source is followed automatically only for a series in its
 language.
 

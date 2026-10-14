@@ -34,7 +34,9 @@ import { groupsOf, normGroup } from '../lib/releases';
 import { getSource } from '../lib/sources';
 import { cleanSourceOrder } from '../lib/sourcePrefs';
 import { editionInfo } from '../lib/editions';
-import { effectiveLang } from '../lib/seriesLang';
+import { effectiveLang, seriesLanguage } from '../lib/seriesLang';
+import { copyLang, languageRulesFor, type LanguageRules } from '../lib/copyLanguage';
+import { chapterFileRel } from '../lib/downloader';
 import { DL_ROOT, LIBRARY_ROOT, lastScanFailure, lastScanReport, scanProgress, scanRunning } from '../lib/library';
 import { noticeBook, noticeListed, noticesShortOnly } from '../lib/noticeChapters';
 import { noticeTypes, hiddenCount } from '../lib/noticeSettings';
@@ -835,6 +837,13 @@ export default async function catalogRoutes(app: FastifyInstance) {
    *
    * `chosen` is what the rules would take, so a `blocked` number -- every copy dropped, the first kept in
    * `chosen` only for display (lib/seriesListing.ts) -- has no chosen copy at all: the rules took nothing.
+   *
+   * v0.62.0, chapters in the series' language (lib/copyLanguage.ts): a copy's `otherLanguage` is its language when it
+   * is known to be another than the series' -- a copy the rules never take, labelled so the sheet can say why -- and
+   * the answer's `otherLanguage` lists the chapters HERE in another language that a copy in the series' language can
+   * replace: the notice above the chapter list, whose Fetch them again (POST /api/admin/series/:id/chapters/refetch)
+   * replaces each file in place. Only a file that route can replace (the downloader's own path in the download root),
+   * only a number with such a copy, and nothing at all for a series whose language no source serves (languageRules).
    */
   app.get('/api/series/:id/versions', async (req) => {
     const { id } = req.params as { id: string };
@@ -843,8 +852,10 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const rows = await q<{ number: number; title: string | null; source_id: string; status: string; chosen: { sourceId?: string } | null; copies: ListingCopy[] }>(
       `SELECT l.number, l.title, l.source_id, l.status, l.chosen, l.copies FROM series_listing l
         WHERE l.series_id = $1 AND NOT ${noticeListed('l')} ORDER BY l.number`, [id]);
-    const books = await q<{ number: number; source_id: string | null; scanlator: string | null; source_chapter_id: string | null; chapter_name: string | null }>(
-      'SELECT number, source_id, scanlator, source_chapter_id, chapter_name FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL', [id]);
+    const books = await q<{ id: string; number: number; source_id: string | null; scanlator: string | null; source_chapter_id: string | null;
+                             chapter_name: string | null; lang: string | null; root: string | null; file: string; number_end: number | null }>(
+      `SELECT id, number, source_id, scanlator, source_chapter_id, chapter_name, lang, root, file, number_end
+         FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL`, [id]);
     const booksOf = new Map<number, typeof books>();
     for (const b of books) {
       const n = Number(b.number);
@@ -860,8 +871,39 @@ export default async function catalogRoutes(app: FastifyInstance) {
       if (n === undefined) { n = getSource(sid)?.name ?? sid; names.set(sid, n); }
       return n;
     };
+    const series = await one<{ folder: string; source_id: string | null }>('SELECT folder, source_id FROM lib_series WHERE id = $1', [id]);
+    const followed = [
+      ...(series?.source_id ? [series.source_id] : []),
+      ...(await q<{ source_id: string }>('SELECT source_id FROM series_sources WHERE series_id = $1', [id])).map((f) => f.source_id),
+    ];
+    const { inLanguage } = await languageRulesFor(id, followed).catch((): LanguageRules => ({}));
+    /** A copy's language when it is known to be another than the series'; null when it is the series' or unknown. */
+    const otherLanguageOf = (c: { lang?: string | null; source?: string | null }) =>
+      inLanguage && !inLanguage(c) ? copyLang(c) : null;
+    let otherLanguage: { series: string; langs: string[]; bookIds: string[] } | null = null;
+    if (inLanguage && series) {
+      const replaceable = new Set(rows.filter((r) => r.copies?.some((c) => inLanguage(c))).map((r) => Number(r.number)));
+      const tally = new Map<string, number>();
+      const bookIds: string[] = [];
+      for (const b of books) {
+        const number = Number(b.number);
+        if (b.number_end != null || b.root !== DL_ROOT || b.file !== chapterFileRel(series.folder, number) || !replaceable.has(number)) continue;
+        const lang = otherLanguageOf({ lang: b.lang, source: b.source_id });
+        if (!lang) continue;
+        bookIds.push(b.id);
+        tally.set(lang, (tally.get(lang) ?? 0) + 1);
+      }
+      if (bookIds.length) {
+        otherLanguage = {
+          series: (await seriesLanguage(id)).lang,
+          langs: [...tally].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([l]) => l),
+          bookIds,
+        };
+      }
+    }
     return {
       checkedAt: await checkedAtOf(id),
+      otherLanguage,
       content: rows.map((r) => {
         const number = Number(r.number);
         const here = booksOf.get(number) ?? [];
@@ -895,6 +937,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
               groups: c.groups ?? [],
               scanlator: c.scanlator ?? null,
               lang: c.lang ?? null,
+              otherLanguage: otherLanguageOf(c),
               pages: c.pages ?? null,
               publishedAt: c.publishedAt ?? null,
               chosen,

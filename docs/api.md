@@ -259,9 +259,13 @@ extension (`done: switched_off`; the extension stays installed), and only turns 
 turned_off`). It answers `{ok, done, followsDropped}`, audited `source.retire`. `DELETE /api/admin/sources/custom/:id`
 answers the same **409** `in_use` while the site is some series' main source.
 
-`PATCH /api/admin/sources/custom/:id` (admin) changes a custom site's `base` address and nothing else. The
-source id is derived from its name and the library is keyed on that id, so editing in place is the only way
-to follow a site to a new domain without orphaning every series that came from it.
+`PATCH /api/admin/sources/custom/:id` (admin) changes a custom site's `base` address, its `lang`, or both, and
+nothing else. The source id is derived from its name and the library is keyed on that id, so editing in place is
+the only way to follow a site to a new domain without orphaning every series that came from it. A new `lang`
+(v0.62.0; one code, else **400** `unknown_language`) re-picks the chapters of every series that uses the site:
+a series in another language never follows the site automatically and never takes its chapters. Adding a site
+stores the language its homepage says (`<html lang>`, else `og:locale`), except English, which WordPress writes
+for a site left at its default; the add answers it as `lang`, null for the unstated language.
 
 `POST /api/sources/add` answers as soon as the outcome is decided and downloads afterwards. It used to hold
 the request until the first chapter had been fetched, measured at 15 to 59 seconds on a real install.
@@ -1219,14 +1223,17 @@ and this is read from those copies plus the file stamps — never from the sourc
 `checkedAt` is how old the answer is. Any account that can open the series may read it; ranking and blocking
 is the admin route below.
 
-**Chapter versions.** `GET /api/series/:id/versions` answers `{checkedAt, content: [{number, copies: [Copy]}]}`
-for every listed number, `Copy = {key, source, sourceName, groups, scanlator, lang, pages, publishedAt,
+**Chapter versions.** `GET /api/series/:id/versions` answers `{checkedAt, otherLanguage, content: [{number, copies: [Copy]}]}`
+for every listed number, `Copy = {key, source, sourceName, groups, scanlator, lang, otherLanguage, pages, publishedAt,
 chosen, blocked, onDisk}` — `key` is `<source>:<sourceId>`; `chosen` marks the copy the release rules picked
 at the last check; `blocked` means every group on the copy is blocked by the effective preferences (a copy
 with no groups is never blocked); `onDisk` is best effort — a live chapter for the number came from the same
 source with the same group stamp, or, for a file with no stamp, this is the chosen copy. A `source` and
 `sourceId` from here make a *pick* (below). A number listed before v0.33.0 has `copies: []` until its next
-check.
+check. Since v0.62.0 a copy's `otherLanguage` is its language when it is known to be another than the series'
+(a copy the release rules never take), and the answer's `otherLanguage` is `{series, langs, bookIds}`: the
+chapters on the server in another language that a listed copy in the series' language can replace, for the
+admin refetch below, or null.
 
 ### Sources
 ```

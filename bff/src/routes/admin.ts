@@ -40,7 +40,7 @@ import { testSource } from '../lib/sourceCheck';
 import { currentFailures, stageLines } from '../lib/sourceEvidence';
 import { runExtensionMonitor, runExtensionCheck, extState, liveStore as extensionStore } from '../lib/extensionMonitor';
 import { readSites, writeSites } from '../lib/sources/customSites';
-import { reloadAll, listSources, getSource, detectEngine, listRemoteSources, suwayomiConfigured, suwayomiAbout, swAdapterId, isSwAdapterId, withTimeout } from '../lib/sources';
+import { reloadAll, listSources, getSource, sniffSite, listRemoteSources, suwayomiConfigured, suwayomiAbout, swAdapterId, isSwAdapterId, withTimeout } from '../lib/sources';
 import {
   listExtensions, refreshExtensions, setExtensionState, sourcesOfExtension, getRepos, setRepos, altRepoUrl,
   parseRepoInput, repoKey, contributedBy, engineReason, REPO_MESSAGES, type ExtensionInfo,
@@ -76,7 +76,8 @@ import { say, saidOf } from '../lib/said';
 import { prefsSchema, readGlobalPrefs, readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
 import { groupsOf, normGroup } from '../lib/releases';
 import { groupStats, emptyGroupStat, type StatCopy } from '../lib/groupStats';
-import { copyToChapter, reapplyBlocklistInTransaction, type ListingCopy } from '../lib/seriesListing';
+import { copyToChapter, reapplyBlocklist, reapplyBlocklistInTransaction, type ListingCopy } from '../lib/seriesListing';
+import { languageRulesFor, type LanguageRules } from '../lib/copyLanguage';
 import { claimWriterFolders } from '../lib/bulkNewest';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { switchMainSource } from '../lib/mainSource';
@@ -92,7 +93,7 @@ import { autofixRun, autofixSeriesIds, autofixState, scrubAutofixRecord, scrubAu
 import { IGNORABLE_CHECKS, ignoreFinding, unignoreFinding } from '../lib/healthIgnore';
 import { readHealthSummary, scheduleHealthSummaryRefresh, storeHealthSummary } from '../lib/healthSummary';
 import { titlesFromMangadexList, entriesFromMangadexList } from '../lib/mangadexList';
-import { MANGADEX_LANGS, canonLang, mdLang, setUnstatedLang } from '../lib/lang';
+import { MANGADEX_LANGS, canonLang, editionLang, mdLang, setUnstatedLang } from '../lib/lang';
 import { cleanMangadexLangs, mangadexLangs, setMangadexLangs, syncMangadexSources } from '../lib/sources/mangadexLangs';
 import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner, type AniListArt } from '../lib/anilist';
 import { namesMatch } from '../lib/onlineMatch';
@@ -1362,25 +1363,44 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { error: 'in_use', main, message: said.text, messageSaid: saidOf(said) };
   };
 
+  /** How long a picked engine's add waits for the homepage, for the site's language alone (below). */
+  const LANGUAGE_SNIFF_MS = 15_000;
+  /**
+   * The series a site's language decides for: those it is the main source of and those that follow it. Their stored
+   * listings are re-picked when it changes (PATCH, below), as a series' own language change re-picks its own.
+   */
+  const seriesOfSite = async (id: string) => (await q<{ id: string }>(
+    `SELECT id FROM lib_series WHERE source_id = $1 AND deleted_at IS NULL
+     UNION SELECT series_id FROM series_sources WHERE source_id = $1`, [id])).map((r) => r.id);
+
   app.get('/api/admin/sources/custom', async () => ({ content: await readSites() }));
   app.post('/api/admin/sources/custom', async (req, reply) => {
     const b = z.object({ engine: z.enum(['auto', 'madara', 'manganato', 'mangathemesia']), name: z.string().min(1).max(60), base: z.string().url() }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Pick an engine, a name, and a valid https URL.' });
-    // auto-detect the engine from the site's homepage so the user can just paste a URL
-    let engine = b.data.engine as string;
-    if (engine === 'auto') {
-      const detected = await detectEngine(b.data.base);
-      if (!detected) return reply.code(422).send({ error: 'undetected', message: "Couldn't detect the site's engine — pick Madara, MangaThemesia, or Manganato manually." });
-      engine = detected;
-    }
+    // Named first: a name that is taken is said at once, not after the homepage has been fetched through the solver.
     const id = slug(b.data.name) || slug(new URL(b.data.base).hostname.replace(/^www\./, ''));
     if (!id) return reply.code(400).send({ error: 'bad_name' });
+    if (getSource(id) || (await readSites()).some((s) => s.id === id)) return reply.code(409).send({ error: 'exists', message: `A source named "${b.data.name}" already exists — pick another name.` });
+    // auto-detect the engine from the site's homepage so the user can just paste a URL. The same page says the site's
+    // language (v0.62.0, lib/sources/detect.ts siteLanguage), read for a picked engine too -- but bounded, since a
+    // picked engine is most often one the page could not be read for, and the add must not wait out the solver for it.
+    let engine = b.data.engine as string;
+    let lang: string | null;
+    if (engine === 'auto') {
+      const sniffed = await sniffSite(b.data.base);
+      if (!sniffed.engine) return reply.code(422).send({ error: 'undetected', message: "Couldn't detect the site's engine — pick Madara, MangaThemesia, or Manganato manually." });
+      engine = sniffed.engine;
+      lang = sniffed.lang;
+    } else {
+      lang = (await withTimeout(sniffSite(b.data.base), LANGUAGE_SNIFF_MS).catch(() => null))?.lang ?? null;
+    }
+    // Read again: the list may have changed while the homepage was fetched.
     const list = await readSites();
     if (getSource(id) || list.some((s) => s.id === id)) return reply.code(409).send({ error: 'exists', message: `A source named "${b.data.name}" already exists — pick another name.` });
-    list.push({ engine, id, name: b.data.name, base: b.data.base.replace(/\/+$/, ''), order: 100 });
+    list.push({ engine, id, name: b.data.name, base: b.data.base.replace(/\/+$/, ''), order: 100, ...(lang ? { lang } : {}) });
     await writeSites(list);
     await reloadAll();
-    await logAudit('source.custom_add', { userId: userIdOf(req), detail: { id, engine, base: b.data.base }, req });
+    await logAudit('source.custom_add', { userId: userIdOf(req), detail: { id, engine, base: b.data.base, lang }, req });
     // Verify the freshly-added site actually works, bounded so a slow/Cloudflare-heavy site can't hang the request.
     const added = getSource(id);
     // No Promise.race any more: `smokeTest` carries its own wall-clock deadline. The race returned after 30s
@@ -1389,35 +1409,57 @@ export default async function adminRoutes(app: FastifyInstance) {
     const smoke = added
       ? await smokeTest(added)
       : { ok: false, checks: [{ name: 'Verify', ok: false, detail: 'source failed to load' }] };
-    return reply.send({ ok: true, id, engine, available: listSources().length, smoke });
+    return reply.send({ ok: true, id, engine, lang, available: listSources().length, smoke });
   });
   /**
-   * Change a custom site's address, and nothing else.
+   * Change a custom site's address or its language, and nothing else.
    *
    * There was no way to do this: only add and delete existed, so "the site moved to a new domain" -- far and
    * away the most common real failure -- meant deleting and re-adding. That is a trap, because the id is
    * `slug(name)` and `lib_series.source_id` is keyed on it, so re-adding under any other name orphans every
    * series that came from it. Editing the base in place keeps the id, and therefore keeps the library.
    *
-   * `base` only. Name and engine stay put, precisely because the id derives from the name.
+   * `base` and `lang` only. Name and engine stay put, precisely because the id derives from the name.
+   *
+   * `lang` (v0.62.0): the language the site is in. It decides which series may follow the site automatically
+   * (lib/seriesLang.ts) and whose chapters it may serve (lib/copyLanguage.ts), so the stored listings of the series
+   * that use it are re-picked at once, as a series' own language change re-picks its own (PATCH /api/admin/series/:id).
    */
   app.patch('/api/admin/sources/custom/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const b = z.object({ base: z.string().url() }).safeParse(req.body);
-    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Give a valid https URL.' });
+    const b = z.object({ base: z.string().url().optional(), lang: z.string().min(1).max(35).optional() })
+      .refine((v) => v.base !== undefined || v.lang !== undefined).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Give a valid https URL, or a language.' });
+    // As a source's code (lib/lang.ts editionLang): "es-MX" is the Latin American edition, "en-GB" is English.
+    const lang = b.data.lang === undefined ? undefined : editionLang(b.data.lang);
+    if (lang === null) return reply.code(400).send({ error: 'unknown_language', message: `"${b.data.lang}" is not one language.` });
     const list = await readSites();
     const site = list.find((s) => s.id === id);
     if (!site) return reply.code(404).send({ error: 'not_found' });
     const from = site.base;
-    site.base = b.data.base.replace(/\/+$/, '');
+    const langFrom = editionLang(site.lang);
+    if (b.data.base !== undefined) site.base = b.data.base.replace(/\/+$/, '');
+    if (lang !== undefined) site.lang = lang;
     await writeSites(list);
     await reloadAll();
     // A moved site's recorded failures describe an address that no longer exists, and leaving the cooldown
     // in place would suppress the very first request that could prove the new one works.
-    await clearBlock(id).catch(() => {});
-    await logAudit('source.custom_edit', { userId: userIdOf(req), detail: { id, from, to: site.base }, req });
+    if (b.data.base !== undefined) await clearBlock(id).catch(() => {});
+    if (lang !== undefined && lang !== langFrom) {
+      // After the reload, so the rules read the site's new language. The language is saved either way: a listing left
+      // as it was is re-picked by the series' next check.
+      await reapplyBlocklist(await seriesOfSite(id)).catch((e) => {
+        console.warn(`[sources] re-picking the chapters of ${id}'s series failed: ${(e as Error)?.message || e}`);
+      });
+    }
+    await logAudit('source.custom_edit', {
+      userId: userIdOf(req),
+      detail: { id, ...(b.data.base !== undefined ? { from, to: site.base } : {}), ...(lang !== undefined ? { langFrom, lang } : {}) },
+      req,
+    });
     const src = getSource(id);
-    return reply.send({ ok: true, id, base: site.base, smoke: src ? await smokeTest(src) : null });
+    // Tested again only when the address changed: a language says nothing about whether the site answers.
+    return reply.send({ ok: true, id, base: site.base, lang: editionLang(site.lang), smoke: src && b.data.base !== undefined ? await smokeTest(src) : null });
   });
   // Refused while the site is some series' main source (v0.54.0): it was removed at once, with no check, and every series
   // from it froze -- "no longer installed". Replace moves them first. Reintroduce by dropping the guard: "the custom
@@ -1506,6 +1548,14 @@ export default async function adminRoutes(app: FastifyInstance) {
       });
       if (!ok) return reply.code(409).send({ error: 'edition_exists', message: 'Another edition of this work is already in that language.' });
       detail.lang = lang;
+      // v0.62.0: the language decides which copies the release rules may take (lib/copyLanguage.ts), so the stored
+      // listing is re-resolved now, as a preference change is: the server's pick and Fetch again follow the new
+      // language at once, not after the next check. Best effort: the language is saved either way, and the next
+      // check re-resolves it too. Reintroduce by dropping this: "a language change re-picks at once" in
+      // copyLanguage.int.test.ts still finds the Spanish copy chosen.
+      await tx((qq) => reapplyBlocklistInTransaction(qq, [id])).catch((e) => {
+        console.warn(`[series] language saved, listing not re-resolved: ${(e as Error)?.message || e}`);
+      });
     }
     if (caughtUp) {
       await q('UPDATE lib_series SET chapter_floor = $2 WHERE id = $1', [id, caughtUp.floor]);
@@ -2566,6 +2616,9 @@ export default async function adminRoutes(app: FastifyInstance) {
       ...(s.source_id ? [s.source_id as string] : []),
       ...(await q<{ source_id: string }>('SELECT source_id FROM series_sources WHERE series_id = $1', [id]).catch(() => [])).map((r) => r.source_id),
     ]);
+    // The series' language rules (v0.62.0), read once and only when a blocked number needs explaining.
+    let languageRules: Promise<LanguageRules> | null = null;
+    const languageOf = () => (languageRules ??= languageRulesFor(id, [...followed]).catch((): LanguageRules => ({})));
     const sourceState = new Map<string, 'ok' | 'source_unavailable' | 'cooldown'>();
     const stateOf = async (sid: string) => {
       let st = sourceState.get(sid);
@@ -2594,7 +2647,13 @@ export default async function adminRoutes(app: FastifyInstance) {
         continue;
       }
       if (!l) { skipped.push({ id: e.id, reason: 'not_listed' }); continue; }
-      if (l.status === 'blocked') { skipped.push({ id: e.id, reason: 'blocked_group' }); continue; }
+      if (l.status === 'blocked') {
+        // v0.62.0: every copy in another language than the series' (lib/copyLanguage.ts) reads as its own reason.
+        const language = (await languageOf()).inLanguage;
+        const otherLanguage = !!language && l.copies.length > 0 && l.copies.every((c) => !language(c));
+        skipped.push({ id: e.id, reason: otherLanguage ? 'other_language' : 'blocked_group' });
+        continue;
+      }
       const st = await stateOf(l.source_id);
       if (st !== 'ok') { skipped.push({ id: e.id, reason: st }); continue; }
       todo.push({ row: e, chapter: { ...l.chosen, source: l.source_id } });

@@ -304,10 +304,9 @@ const SHIPPED_UNPAIRED = [
   'failed {n} times',
   '{n} titles matched', '{n} chapters listed', '{n} chapters listed · none fetched yet',
   '{n} chapters saved', '{n} chapters qualify right now.', '{n} chapters qualify today and would go on the first run.',
-  'Fetch {n} chapters again?',
 ];
 /** What SHIPPED_UNPAIRED may hold at most: lower it with every entry fixed, never raise it. */
-const SHIPPED_UNPAIRED_MAX = 30;
+const SHIPPED_UNPAIRED_MAX = 29;
 
 test('counted strings come in pairs: every "1 chapter" has its "{n} chapters", and back', () => {
   // Reintroduce by deleting the singular of a pair from the app -- `tr('Refreshed — 1 extension available')`

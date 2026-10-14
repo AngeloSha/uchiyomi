@@ -21,6 +21,7 @@ import { downloadWithFallback, type FallbackOutcome } from './chapterFallback';
 import { huntSource, seriesIsAdult, sweepAllowedFor, HUNT_MAX_PER_SWEEP } from './sourceHunt';
 import { completePartial, PARTIAL_COMPLETE_MAX } from './partial';
 import { effectiveSourcePriority, rankSources } from './sourcePrefs';
+import { languageRulesFor } from './copyLanguage';
 import { beginRun, endRun, stopRequested, type RunCard } from './downloadJobs';
 import { say } from './said';
 import { withOrigin } from './downloadActivity';
@@ -422,7 +423,14 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   // Reintroduce by going back to the follow order alone: "a new chapter comes from the higher-ranked source"
   // in sourceOrder.int.test.ts takes it from the primary.
   const priority = await effectiveSourcePriority(s.source_prefs).catch(() => null);
-  const chooseOpts = { sourceRank: rankSources(priority, followed.map((f) => f.source)) };
+  // v0.62.0: the series' language (lib/copyLanguage.ts). A copy known to be in another language is left out, and a
+  // copy of unknown language keeps to the group of the series' latest chapters. The rules are the stored listing's
+  // too (lib/seriesListing.ts decisionAfterSeries), so what the sweep downloads and what the listing calls the
+  // server's pick agree. A read that fails is no rule: the sweep goes on as it did before v0.62.0.
+  // Reintroduce by dropping the spread: "an English series never downloads the Spanish copy" in
+  // copyLanguage.int.test.ts downloads it.
+  const language = await languageRulesFor(seriesId, followed.map((f) => f.source)).catch(() => ({}));
+  const chooseOpts = { sourceRank: rankSources(priority, followed.map((f) => f.source)), ...language };
   // Chapter parts that sources number or split differently (lib/partAlias.ts): another site's N.1 / N.6 for the N /
   // N.5 on disk is renumbered onto them (R1), and another site's split of a chapter already here (R2), or of a new one
   // whose first-ranked source splits it another way (R3), is `covered` --

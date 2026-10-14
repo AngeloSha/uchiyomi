@@ -7,11 +7,16 @@ import { dirname, join } from 'path';
 import { forDesktop } from '../desktop';
 import type { SourceAdapter } from './types';
 import { registerAdapter } from './loader';
+import { editionLang } from '../lang';
 import { makeMadara } from './engines/madara';
 import { makeManganato } from './engines/manganato';
 import { makeMangaThemesia } from './engines/mangathemesia';
 
-export interface Site { engine?: string; id?: string; name?: string; base?: string; order?: number }
+/**
+ * One site added by address, as sites.json keeps it. `lang` (v0.62.0): the language the site is in, from its pages when
+ * it was added (detect.ts siteLanguage) or from its sheet; absent, the site is in the unstated language (lib/lang.ts).
+ */
+export interface Site { engine?: string; id?: string; name?: string; base?: string; order?: number; lang?: string }
 /**
  * Where the operator's template sites live. Written by Admin, read by the pack on every reload.
  *
@@ -44,7 +49,9 @@ export async function writeSites(list: Site[]): Promise<void> {
 
 function build(s: Site): SourceAdapter | null {
   if (!s.id || !s.base) return null;
-  const cfg = { id: s.id, name: s.name || s.id, base: s.base, order: s.order };
+  // As a source's code (lib/lang.ts editionLang): the file is the operator's, and a hand-written "ES" is Spanish and
+  // "es-MX" the Latin American edition; "all" or nonsense declares nothing.
+  const cfg = { id: s.id, name: s.name || s.id, base: s.base, order: s.order, lang: editionLang(s.lang) ?? undefined };
   if (s.engine === 'madara') return makeMadara(cfg);
   if (s.engine === 'manganato') return makeManganato(cfg);
   if (s.engine === 'mangathemesia') return makeMangaThemesia(cfg);

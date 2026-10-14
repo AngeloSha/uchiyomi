@@ -636,7 +636,9 @@ async function findFor(
   // `fits`: "a Find other sources run never searches a source in another language" in languageGuard.int.test.ts
   // finds it searched.
   const lang = await seriesLanguage(s.id);
-  const fits = await followGuard(s.id);
+  // v0.62.0: nor a source in every language (`mixed: false`), which an automatic search never takes on. Reintroduce by
+  // dropping it: "a Find other sources run never searches a source in every language" in languageGuard.int.test.ts.
+  const fits = await followGuard(s.id, { mixed: false });
   const all = listSources();
   // A Replace asks only a source that could take the series over (v0.55.1): one that can update it (usable or cooling,
   // lib/sourceStanding.ts) and that Fix everything is not replacing too. What it follows is what it promotes, and a

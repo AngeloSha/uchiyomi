@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3723
+    "strings": 3735
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3726,5 +3726,17 @@
   "Nightly backup": "每晚备份",
   "Save the database and the config folder every night. Turn it off if you back up another way; Run now under Tasks still makes one.": "每晚保存数据库和配置文件夹。如果你用其他方式备份，可以关闭；「任务」中的「立即运行」仍可创建备份。",
   "Backups to keep": "保留的备份数",
-  "After each backup, the oldest beyond this number are deleted.": "每次备份后，超出此数量的最旧备份会被删除。"
+  "After each backup, the oldest beyond this number are deleted.": "每次备份后，超出此数量的最旧备份会被删除。",
+  "Fetch 1 chapter again?": "要重新获取 1 章吗？",
+  "Another language than the series’: the server never takes it": "与系列语言不同：服务器从不选用",
+  "Each lists the chapters of every language together. Turn it off to keep to the languages you read.": "每个来源都会把所有语言的章节列在一起。关闭它即可只保留你阅读的语言。",
+  "The site doesn’t say, so this is your default": "站点未注明语言，因此使用你的默认语言",
+  "Series in another language never follow this site automatically, and never take its chapters.": "其他语言的系列不会自动追踪此站点，也不会采用它的章节。",
+  "It lists the chapters of every language together. Uchiyomi never follows it for a series by itself, and keeps to the group of the chapters you already have.": "它把所有语言的章节列在一起。Uchiyomi 不会自行为系列追踪它，并会沿用你已有章节的汉化组。",
+  "All languages, mixed": "所有语言（混合）",
+  "1 chapter here is in {language}": "这里有 1 章是{language}",
+  "{n} chapters here are in {language}": "这里有 {n} 章是{language}",
+  "The series is in {language}, and each of them has come out in {language} too.": "这个系列是{language}，而这些章节也都有{language}版本。",
+  "Fetch it again in {language}": "以{language}重新获取",
+  "Fetch them again in {language}": "以{language}重新获取"
 }

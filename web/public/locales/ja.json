@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3723
+    "strings": 3735
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -3726,5 +3726,17 @@
   "Nightly backup": "毎晩のバックアップ",
   "Save the database and the config folder every night. Turn it off if you back up another way; Run now under Tasks still makes one.": "データベースと設定フォルダーを毎晩保存します。ほかの方法でバックアップしている場合はオフにしてください。「タスク」の「今すぐ実行」ではこれまでどおり作成できます。",
   "Backups to keep": "保持するバックアップ数",
-  "After each backup, the oldest beyond this number are deleted.": "バックアップのたびに、この数を超えた古いものから削除されます。"
+  "After each backup, the oldest beyond this number are deleted.": "バックアップのたびに、この数を超えた古いものから削除されます。",
+  "Fetch 1 chapter again?": "1 話を再取得しますか？",
+  "Another language than the series’: the server never takes it": "シリーズとは別の言語です。サーバーはこれを選びません",
+  "Each lists the chapters of every language together. Turn it off to keep to the languages you read.": "それぞれ、すべての言語の話をまとめて一覧にします。読む言語だけにするにはオフにしてください。",
+  "The site doesn’t say, so this is your default": "サイトが言語を示していないため、既定の言語です",
+  "Series in another language never follow this site automatically, and never take its chapters.": "別の言語のシリーズは、このサイトを自動で追跡せず、その話も取り込みません。",
+  "It lists the chapters of every language together. Uchiyomi never follows it for a series by itself, and keeps to the group of the chapters you already have.": "すべての言語の話をまとめて一覧にします。Uchiyomi がこのソースをシリーズのために自動で追跡することはなく、すでにある話のグループに合わせます。",
+  "All languages, mixed": "すべての言語（混在）",
+  "1 chapter here is in {language}": "ここにある 1 話は{language}です",
+  "{n} chapters here are in {language}": "ここにある {n} 話は{language}です",
+  "The series is in {language}, and each of them has come out in {language} too.": "このシリーズは{language}で、どの話も{language}版が出ています。",
+  "Fetch it again in {language}": "{language}で再取得",
+  "Fetch them again in {language}": "{language}で再取得"
 }

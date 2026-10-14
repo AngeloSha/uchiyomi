@@ -449,6 +449,131 @@ test("migrate: v0.52.0's data migration states a MangaDex series' language from 
   }
 });
 
+test("migrate: v0.62.0 moves a series the English MangaDex fallback filled to MangaDex in its own language", { skip }, async () => {
+  // English MangaDex no longer falls back to Spanish, Portuguese and the rest (lib/sources/mangadex.ts). A series that
+  // fallback filled would stop updating, so it moves to MangaDex in its language, which is switched on. Each series:
+  // main source, stated language, the language of its MangaDex listing's chosen copies, and whether it is deleted.
+  const SEED: Record<string, [string, string | null, string, boolean]> = {
+    't-mdm-es': ['mangadex', 'es-419', 'es-419', false],
+    't-mdm-es-md': ['mangadex', 'es-419', 'es-la', false],
+    't-mdm-pt': ['mangadex', 'pt-BR', 'pt-br', false],
+    't-mdm-label': ['mangadex', 'ja', 'en', false],
+    't-mdm-en': ['mangadex', 'en', 'en', false],
+    't-mdm-unstated': ['mangadex', null, 'es-la', false],
+    't-mdm-gone': ['mangadex', 'es-419', 'es-419', true],
+  };
+  const ids = Object.keys(SEED);
+  const [{ langs: before }] = await q<{ langs: unknown }>(`SELECT mangadex_langs AS langs FROM server_settings WHERE id = 1`);
+  try {
+    await q(`UPDATE server_settings SET mangadex_langs = '["fr"]'::jsonb WHERE id = 1`);
+    for (const [id, [source, lang, chosen, gone]] of Object.entries(SEED)) {
+      await q(`INSERT INTO lib_series (id, source, title, folder, source_id, source_series_id, lang, deleted_at)
+               VALUES ($1, 'test', 'T', $1, $2, 'md-uuid', $3, $4)`, [id, source, lang, gone ? new Date() : null]);
+      await q(`INSERT INTO series_listing (series_id, number, source_id, chosen) VALUES ($1, 1, 'mangadex', $2::jsonb)`,
+        [id, JSON.stringify({ sourceId: `${id}-c1`, number: 1, lang: chosen })]);
+      await q(`INSERT INTO chapter_failures (series_id, number, source_id, status) VALUES ($1, 1, 'mangadex', 'error')`, [id]);
+    }
+    // Already following the language it moves to: that row must not stay, a main is never also a follower.
+    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ('t-mdm-pt', 'mangadex-pt-br', 'md-uuid')`);
+    await q(`DELETE FROM schema_migrations WHERE id = 'v0.62.0-mangadex-series-to-their-language'`);
+    await migrate();
+    const rows = await q<{ id: string; source_id: string }>(`SELECT id, source_id FROM lib_series WHERE id = ANY($1)`, [ids]);
+    assert.deepEqual(Object.fromEntries(rows.map((r) => [r.id, r.source_id])), {
+      't-mdm-es': 'mangadex-es-419',
+      // A listing written before v0.52.0 stamped MangaDex's own code. Reintroduce by matching the app code alone.
+      't-mdm-es-md': 'mangadex-es-419',
+      't-mdm-pt': 'mangadex-pt-br',
+      // Reintroduce by dropping the EXISTS (the label alone): a series stated Japanese while its listing chose English
+      // moves to MangaDex (Japanese), and Japanese is switched on.
+      't-mdm-label': 'mangadex',
+      't-mdm-en': 'mangadex',
+      // Only a stated language moves a series. Reintroduce by moving on the listing alone.
+      't-mdm-unstated': 'mangadex',
+      // Reintroduce by dropping "deleted_at IS NULL": a removed series moves and switches a language on.
+      't-mdm-gone': 'mangadex',
+    }, 'the data migration moved the wrong series');
+    const follows = await q(`SELECT 1 FROM series_sources WHERE series_id = 't-mdm-pt'`);
+    assert.equal(follows.length, 0, 'the new main source is still listed as one of its followers');
+    const oldRows = await q<{ series_id: string }>(
+      `SELECT series_id FROM series_listing WHERE series_id = ANY($1) AND source_id = 'mangadex' ORDER BY 1`, [ids]);
+    assert.deepEqual(oldRows.map((r) => r.series_id), ['t-mdm-en', 't-mdm-gone', 't-mdm-label', 't-mdm-unstated'],
+      "a moved series kept English MangaDex's listing rows, or one that stayed lost them");
+    const failures = await q<{ series_id: string; source_id: string; status: string }>(
+      `SELECT series_id, source_id, status FROM chapter_failures WHERE series_id IN ('t-mdm-es', 't-mdm-label') ORDER BY 1`);
+    assert.deepEqual(failures.map((f) => [f.series_id, f.source_id, f.status]),
+      [['t-mdm-es', 'mangadex-es-419', 'moved'], ['t-mdm-label', 'mangadex', 'error']],
+      "the moved series' failures were not re-filed under its new main source");
+    const [{ langs }] = await q<{ langs: string[] }>(`SELECT mangadex_langs AS langs FROM server_settings WHERE id = 1`);
+    assert.deepEqual([...langs].sort(), ['es-419', 'fr', 'pt-BR'],
+      'the languages the moved series need were not switched on, or a language was switched on for nothing');
+    assert.equal((await q(`SELECT 1 FROM schema_migrations WHERE id = 'v0.62.0-mangadex-series-to-their-language'`)).length, 1,
+      'the data migration did not run, or did not stamp itself');
+  } finally {
+    await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [ids]);
+    await q(`UPDATE server_settings SET mangadex_langs = $1::jsonb WHERE id = 1`, [JSON.stringify(before ?? [])]);
+  }
+});
+
+test("migrate: v0.62.0 keeps the language of each chapter English MangaDex took in another", { skip }, async () => {
+  // Once English MangaDex lists English alone, nothing on the server says which copy a file the fallback fetched was,
+  // and the wrong-language notice could never find it. So each one keeps its language on its row, from the listing copy
+  // its chapter id names -- before the next step moves a series and drops its English MangaDex listing.
+  const series: Record<string, [string | null, string]> = { 't-mdk': ['en', 'en'], 't-mdk-moved': ['es-419', 'es-419'] };
+  const copies = [
+    { source: 'mangadex', sourceId: 'c-es', lang: 'es-419' },
+    { source: 'mangadex', sourceId: 'c-en', lang: 'en' },
+    { source: 'mdk-ext', sourceId: 'c-ext', lang: 'fr' },
+    { source: 'mangadex', sourceId: 'm-es', lang: 'es-419' },
+  ];
+  // Each chapter: its series, source, chapter id stamp, and whether its file was deleted.
+  const BOOKS: Record<string, [string, string, string | null, boolean]> = {
+    't-mdk-b-es': ['t-mdk', 'mangadex', 'c-es', false],
+    't-mdk-b-en': ['t-mdk', 'mangadex', 'c-en', false],
+    't-mdk-b-nostamp': ['t-mdk', 'mangadex', null, false],
+    't-mdk-b-gone': ['t-mdk', 'mangadex', 'c-es', true],
+    't-mdk-b-ext': ['t-mdk', 'mdk-ext', 'c-ext', false],
+    't-mdk-b-moved': ['t-mdk-moved', 'mangadex', 'm-es', false],
+  };
+  const ids = Object.keys(series);
+  const [{ langs: before }] = await q<{ langs: unknown }>(`SELECT mangadex_langs AS langs FROM server_settings WHERE id = 1`);
+  try {
+    for (const [id, [lang, chosen]] of Object.entries(series)) {
+      await q(`INSERT INTO lib_series (id, source, title, folder, source_id, source_series_id, lang) VALUES ($1, 'test', 'T', $1, 'mangadex', 'md-uuid', $2)`,
+        [id, lang]);
+      await q(`INSERT INTO series_listing (series_id, number, source_id, chosen, copies) VALUES ($1, 1, 'mangadex', $2::jsonb, $3::jsonb)`,
+        [id, JSON.stringify({ sourceId: `${id}-c1`, number: 1, lang: chosen }), JSON.stringify(copies)]);
+    }
+    for (const [id, [sid, source, stamp, gone]] of Object.entries(BOOKS)) {
+      await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, source_id, source_chapter_id, pruned_at)
+               VALUES ($1, $2, 'test', $1, 1, 'Chapter 1', $3, $4, $5)`, [id, sid, source, stamp, gone ? new Date() : null]);
+    }
+    await q(`DELETE FROM schema_migrations WHERE id = ANY($1)`,
+      [['v0.62.0-chapters-keep-their-language', 'v0.62.0-mangadex-series-to-their-language']]);
+    await migrate();
+    const rows = await q<{ id: string; lang: string | null }>(`SELECT id, lang FROM lib_books WHERE id = ANY($1)`, [Object.keys(BOOKS)]);
+    assert.deepEqual(Object.fromEntries(rows.map((r) => [r.id, r.lang])), {
+      't-mdk-b-es': 'es-419',
+      // An English copy from English MangaDex is in its source's language: nothing to keep. Reintroduce by dropping the
+      // English exclusion: 'en'.
+      't-mdk-b-en': null,
+      // No stamp, no copy to read it from: the file reads as its source's.
+      't-mdk-b-nostamp': null,
+      // A tombstone is no file. Reintroduce by dropping "pruned_at IS NULL": 'es-419'.
+      't-mdk-b-gone': null,
+      // Only the source that fell back, the file's and the copy's. Reintroduce by dropping both source checks: 'fr'.
+      't-mdk-b-ext': null,
+      // Read before the move drops the series' English MangaDex listing. Reintroduce by running this step after it: null.
+      't-mdk-b-moved': 'es-419',
+    }, 'the data migration kept the wrong languages');
+    assert.equal((await q(`SELECT source_id FROM lib_series WHERE id = 't-mdk-moved'`))[0].source_id, 'mangadex-es-419');
+    assert.equal((await q(`SELECT 1 FROM schema_migrations WHERE id = 'v0.62.0-chapters-keep-their-language'`)).length, 1,
+      'the data migration did not run, or did not stamp itself');
+  } finally {
+    await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [ids]);
+    await q(`UPDATE server_settings SET mangadex_langs = $1::jsonb WHERE id = 1`, [JSON.stringify(before ?? [])]);
+  }
+});
+
 test("migrate: v0.55.2's data migration types a series from its genres, and only one nothing has typed", { skip }, async () => {
   // Notice chapters are switched per series type (lib/noticeChapters.ts), so every series whose genres say what it is
   // has a type at the first boot. Each: its genres, the admin's genres (null for none), the type it already had and

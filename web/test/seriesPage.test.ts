@@ -71,14 +71,17 @@ const fn = (page: string, name: string): string => {
 test('Fetch all posts its chunks one after the other, each after the previous job has ended', () => {
   // ⚠️ The route answers 409 `busy` while the series' job runs and `startJob` returns when a job has
   // STARTED, so chunks posted back to back are chunks refused: a 500-chapter run fetched 300 and toasted an
-  // error for the rest. Reintroduce by deleting the `await awaitJob(` line from fetchMany (post the next
+  // error for the rest. Reintroduce by deleting the `await awaitJob(` line from postInChunks (post the next
   // chunk at once): "waits for the job between chunks" fails. Or by chunking inline with `slice(i, i + 300)`
   // instead of chunkNumbers: "cuts with the tested helper" fails.
   const page = code(read('app/series/page.tsx'));
-  const body = fn(page, 'fetchMany');
+  const body = fn(page, 'postInChunks');
   assert.match(body, /\bchunkNumbers\(/, 'cuts with the tested helper');
   assert.match(body, /await awaitJob\(/, 'waits for the job between chunks');
   assert.doesNotMatch(body, /await startJob\(/, 'one toast for the run, not one per chunk');
+  // Fetch all and the wrong-language notice's Fetch them again (v0.62.0) both post through it. Reintroduce by posting
+  // the notice's chapters in one request: the route refuses past 300, and "refetchMany posts in chunks" fails.
+  for (const name of ['fetchMany', 'refetchMany']) assert.match(fn(page, name), /\bpostInChunks\(/, `${name} posts in chunks`);
   const wait = fn(page, 'awaitJob');
   assert.match(wait, /status !== 'downloading'/, 'the wait ends when the job is no longer downloading');
   assert.match(wait, /\['source-jobs'\]/, 'through the shared jobs key, so the Library ring and the band read the same answer');
@@ -396,4 +399,20 @@ test('a file holding a range of chapters holds every number in it on the series 
     'the sheet\'s solid chips ignore range files');
   assert.match(page, /\.filter\(\(x\) => lastOf\(x\) < b\.number && !x\.readProgress\?\.completed\)/,
     'Mark previous as read marks a range file that runs past this chapter');
+});
+
+test('an admin fetches one chapter again, or deletes it from the server, from its ⋯ (v0.62.0)', () => {
+  // The report: "It would be nice if I could delete individual files rather than the whole manga." Both were in the
+  // select bar only. Reintroduce by dropping either entry: its line here fails.
+  const page = code(read('app/series/page.tsx'));
+  assert.match(page, /\.\.\.\(onRefetch \? \[\{ label: tr\('Fetch again'\), divider: true, onSelect: onRefetch \}\] : \[\]\)/, 'no Fetch again in the menu');
+  assert.match(page, /\.\.\.\(onDelete \? \[\{ label: tr\('Delete from server'\), divider: !onRefetch, danger: true, onSelect: onDelete \}\] : \[\]\)/, 'no Delete from server in the menu');
+  // An admin's, on a file Uchiyomi downloaded -- the routes refuse anything else -- and Delete not on a file already
+  // deleted. Reintroduce by dropping `b.owned`: a chapter in a library the admin built offers both, and both fail.
+  assert.match(page, /onRefetch=\{isAdmin && b\.owned \? \(\) => setConfirming\(\{ what: 'refetch', books: \[b\] \}\) : undefined\}/);
+  assert.match(page, /onDelete=\{isAdmin && b\.owned && !b\.pruned \? \(\) => setConfirming\(\{ what: 'delete', books: \[b\] \}\) : undefined\}/);
+  // Each asks first, in the select bar's own dialog, which acts on what it was opened with. Reintroduce by confirming
+  // with the selection (`deletable`): the row's Delete deletes nothing, or what is ticked.
+  assert.match(page, /onConfirm=\{\(\) => deleteBooks\(confirming\.books\)\}/);
+  assert.match(page, /onConfirm=\{\(\) => refetchBooks\(confirming\.books\)\}/);
 });

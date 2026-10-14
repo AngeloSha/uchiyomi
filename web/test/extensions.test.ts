@@ -102,7 +102,9 @@ test('the language filter names languages, the multi-language extensions first, 
   assert.deepEqual(opts.map((o) => o.value), ['', 'all', 'en', 'ja', 'es-419'], 'by name: English, Japanese, Latin American Spanish');
   assert.deepEqual(opts.map((o) => o.label), ['All languages', 'Multiple languages', 'English', 'Japanese', 'Latin American Spanish'],
     'a bare code reaches the filter');
-  assert.equal(extLanguageName('all'), 'Multiple languages', '"all" reads as "All languages" on an extension');
+  // A SOURCE in every language (v0.62.0): its chapters are every language's, together. Reintroduce "Multiple
+  // languages" (or "All languages"): the Languages sheet's row reads like a switch for every language.
+  assert.equal(extLanguageName('all'), 'All languages, mixed', '"all" on a source says its chapters are mixed');
   assert.equal(extLanguageName(null), 'No language');
 });
 

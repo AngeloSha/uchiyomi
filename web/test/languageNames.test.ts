@@ -21,7 +21,7 @@ test('a language code reads as the language, in the reader\'s own language', () 
   assert.equal(languageName('es'), 'espagnol');
   setActiveLocale('en');
   // The engine's code for a source in every language, and a code Intl does not know.
-  assert.equal(languageName('all'), 'All languages');
+  assert.equal(languageName('all'), 'All languages, mixed');
   assert.equal(languageName('not a code!'), 'not a code!', 'an unknown code must stay as it is');
 });
 

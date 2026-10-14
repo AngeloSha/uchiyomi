@@ -446,9 +446,16 @@ export function groupByTitle(
     }
   }
   const all = [...groups.values()];
+  // v0.62.0: a source in every language (Suwayomi's "all") goes after the sources that are one language, in every card.
+  // Its chapter list mixes every translation of each number, and the first provider is the add dialog's default pick,
+  // so a title an English extension carries is added from it rather than from the same extension's every-language
+  // variant. A stable sort: the order is otherwise the caller's. Reintroduce by dropping it: "a source in every
+  // language comes last in its card" in searchCards.test.ts finds it first.
+  const mixed = new Set(order.filter((src) => !!src.lang?.trim() && canonLang(src.lang) === null).map((src) => src.id));
   for (const g of all) {
     const rating = cardRating(judged.get(g) ?? []);
     if (rating) g.rating = rating;
+    if (mixed.size) g.providers.sort((x, y) => Number(mixed.has(x.source)) - Number(mixed.has(y.source)));
   }
   return (rated ? all.filter((g) => shows(rated.want, g.rating)) : all).sort((a, b) => b.providers.length - a.providers.length).slice(0, max);
 }

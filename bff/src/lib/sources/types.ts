@@ -181,7 +181,8 @@ export interface SourceAdapter {
   /**
    * BCP-47-ish language this source publishes in, when it only publishes in one. Suwayomi reports it per
    * source; a built-in declares it only when its own requests pin a language (each MangaDex adapter asks for
-   * its one language and nothing else). Absent means "no single language", which the language grouping reads
+   * its one language and nothing else); a site added by address when its pages or its sheet say one (v0.62.0,
+   * customSites.ts Site.lang). Absent means "no single language", which the language grouping reads
    * as "belongs to every group" -- so declaring it wrongly is worse than leaving it off.
    */
   lang?: string;

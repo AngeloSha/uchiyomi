@@ -360,6 +360,29 @@ test('the sheet\'s keys by state and kind: Replace only for a dead main source, 
   assert.doesNotMatch(fine, /data-source-key="remove"|data-source-address/, 'a built-in offers what only a site has');
 });
 
+test('a site\'s sheet says its language, and a source in every language says what it is (v0.62.0)', () => {
+  const settings = { mangadex_langs: [], mangadex_available: ['en', 'es', 'pt-BR'], unstated_lang: 'en' };
+  const render = (s: OverviewSource) => withQueries(createElement(SourceSheet, {
+    target: { id: s.id }, overview: { ...OVERVIEW, sources: [s] }, evidence: new Map(), testMs: 53_000, status: undefined, actions: ACTIONS,
+    installed: [], hiddenLangs: [], onClose: noop, onReplace: noop, onLanguages: noop, onChanged: noop,
+  }), [[['admin-settings'], settings]]);
+  // A site in Spanish, which the add read from its pages: the sheet says so and changes it. Reintroduce by dropping
+  // SiteLanguage from the sheet: nothing says which language a site is in, and a wrong one stays wrong.
+  const es = render(src('es-site', { kind: 'site', lang: 'es', address: 'https://es.example' }));
+  assert.match(slice(es, 'data-source-language', '</section>'), /<option value="es" selected="">Spanish<\/option>/);
+  assert.doesNotMatch(es, /data-source-language-default/, 'a language the site states reads as the default');
+  // A site that says nothing is in this server's default, and the sheet says that is what it is.
+  const quiet = render(src('quiet', { kind: 'site', lang: null, address: 'https://q.example' }));
+  assert.match(slice(quiet, 'data-source-language', '</section>'), /<option value="en" selected="">English<\/option>/);
+  assert.match(quiet, /data-source-language-default="true">The site doesn’t say, so this is your default</);
+  assert.doesNotMatch(render(src('b')), /data-source-language/, 'a built-in offers a language to pick');
+  // A source in every language: what it lists, and what Uchiyomi does about it. Reintroduce by dropping the line.
+  const mixed = render(src('sw:77', { kind: 'extension', lang: 'all', pkgName: 'pkg.mixed' }));
+  assert.match(mixed, /data-source-mixed="true">It lists the chapters of every language together\./);
+  assert.match(mixed, /All languages, mixed/, 'the facts do not say its chapters are mixed');
+  assert.doesNotMatch(es, /data-source-mixed/);
+});
+
 test('a source the engine\'s limit left out is not broken: no Replace on its sheet, one line on making room (v0.55.1)', () => {
   // Health's Free a slot lands on this sheet, and its filled key was Replace: the wrong fix, since the source works and
   // is only not loaded. Reintroduce Replace for it (drop `!s.overLimit` in sheetKeys): "a source over the limit offers

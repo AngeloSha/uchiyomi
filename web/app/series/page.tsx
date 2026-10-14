@@ -46,6 +46,7 @@ import { SeriesServerDownloads } from '@/components/SeriesServerDownloads';
 import { useArchiveEnqueue } from '@/components/ArchiveQueue';
 import { listingArchiveLine } from '@/lib/archive';
 import { NumberingNotice } from '@/components/NumberingNotice';
+import { LanguageNotice } from '@/components/LanguageNotice';
 import { NumberingSheet } from '@/components/NumberingSheet';
 import type { PlanMode } from '@/lib/numbering';
 import { AddSeriesDialog } from '@/components/AddSeriesDialog';
@@ -393,10 +394,16 @@ function ButtonsWrap({ compact, menuOpen, children }: { compact: boolean; menuOp
   return <div className={buttonsClass(menuOpen)}>{children}</div>;
 }
 
-function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, onReader, onToggleDownload, onMark, onEdit, onVersions, onCopyPath, selectable, selected, onToggle, compact, lit }: {
+function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, onReader, onToggleDownload, onMark, onEdit, onVersions, onCopyPath, onRefetch, onDelete, selectable, selected, onToggle, compact, lit }: {
   book: Book;
   /** Admins only (#136): copy the chapter file's full path. Absent for everyone else and for a row with no path. */
   onCopyPath?: () => void;
+  /**
+   * Admins only, on a file Uchiyomi downloaded (v0.62.0): the select bar's Fetch again and Delete from server, for this
+   * one chapter -- each asks first, as the bar's do. Absent for everyone else, and Delete for a file already deleted.
+   */
+  onRefetch?: () => void;
+  onDelete?: () => void;
   /** Lit for a moment: the chapter a `?ch=` link (Health's Open) came to see. */
   lit?: boolean;
   /** The opt-in compact chapter list (lib/compactChapters.ts). Off: the row is exactly as it always was. */
@@ -429,6 +436,8 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
     ...(onVersions ? [{ label: tr('Versions'), divider: true, onSelect: onVersions }] : []),
     ...(onEdit ? [{ label: tr('Edit number & title'), divider: true, onSelect: onEdit }] : []),
     ...(onCopyPath ? [{ label: tr('Copy file path'), divider: !onEdit, onSelect: onCopyPath }] : []),
+    ...(onRefetch ? [{ label: tr('Fetch again'), divider: true, onSelect: onRefetch }] : []),
+    ...(onDelete ? [{ label: tr('Delete from server'), divider: !onRefetch, danger: true, onSelect: onDelete }] : []),
   ], { label: tr('Chapter actions') });
   // Only a name is shown; an id that resolves to nothing (a source since removed) shows no caption at all.
   const altSource = book.sourceId && book.sourceId !== primarySource ? (sourceNames?.[book.sourceId] ?? null) : null;
@@ -722,7 +731,8 @@ function SeriesInner() {
   const [pickedBooks, setPickedBooks] = useState<Set<string>>(new Set());
   const [pickedGhosts, setPickedGhosts] = useState<Set<string>>(new Set());
   const [acting, setActing] = useState(false);
-  const [confirming, setConfirming] = useState<null | 'delete' | 'refetch'>(null);
+  // What a confirm acts on: the select bar's subset, or the one chapter a row's ⋯ names (v0.62.0).
+  const [confirming, setConfirming] = useState<null | { what: 'delete' | 'refetch'; books: Book[] }>(null);
   const [started, setStarted] = useState<StartedJob | null>(null);
   const clearPicks = () => { setPickedBooks(new Set()); setPickedGhosts(new Set()); };
   const leaveSelect = () => { setSelecting(false); clearPicks(); };
@@ -1318,24 +1328,23 @@ function SeriesInner() {
       if (job ? job.status !== 'downloading' : Date.now() - at > 5000) return job ?? null;
     }
   };
-  // "Fetch all {n}" on an older-chapters run: the same request for the run's numbers, in chunks of at most
-  // FETCH_CHUNK (the route's FILL_MAX_CHAPTERS), each posted only after the previous chunk's job has ENDED.
-  // ⚠️ `startJob` returns when a job has started, not when it is done, and the route answers 409 `busy`
-  // while the series' job runs: the first cut posted the chunks back to back, so on a run past 300 the
-  // reader saw "Fetching 300 chapters…" and then one error toast per further chunk, and the rest was never
-  // fetched. One toast for the whole run; the run stops at the first chunk that fails to start or whose job
-  // ends in error, with that message. `acting` holds for the whole run, so the chip cannot be tapped into
-  // a 409 of its own meanwhile.
-  const fetchMany = async (numbers: number[]) => {
-    const chunks = chunkNumbers(numbers);
+  // One run of requests for this series, in chunks of at most FETCH_CHUNK (the routes' FILL_MAX_CHAPTERS), each
+  // posted only after the previous chunk's job has ENDED. ⚠️ `startJob` returns when a job has started, not when it
+  // is done, and the routes answer 409 `busy` while the series' job runs: the first cut posted the chunks back to
+  // back, so on a run past 300 the reader saw "Fetching 300 chapters…" and then one error toast per further chunk,
+  // and the rest was never fetched. One toast for the whole run; the run stops at the first chunk that fails to start
+  // or whose job ends in error, with that message. `acting` holds for the whole run, so the chip cannot be tapped
+  // into a 409 of its own meanwhile.
+  const postInChunks = async <T,>(items: T[], post: (chunk: T[]) => Promise<{ folder: string; total: number }>) => {
+    const chunks = chunkNumbers(items);
     setActing(true);
     try {
       for (const [i, chunk] of chunks.entries()) {
-        const res = await api<{ folder: string; total: number }>('/api/sources/fetch', { method: 'POST', json: { seriesId: id, numbers: chunk } });
+        const res = await post(chunk);
         setStarted({ folder: res.folder, at: Date.now() });
         void kickDownloads(qc);
         if (i === 0) {
-          toast(fetchingToast(numbers.length), 'info', { busy: true });
+          toast(fetchingToast(items.length), 'info', { busy: true });
           invalidateChapters();
           leaveSelect();
         }
@@ -1348,7 +1357,14 @@ function SeriesInner() {
     }
     setActing(false);
   };
-  const bulkRefetch = () => startJob(`/api/admin/series/${id}/chapters/refetch`, { bookIds: refetchable.map((b) => b.id) });
+  // "Fetch all {n}" on an older-chapters run: the same request for the run's numbers.
+  const fetchMany = (numbers: number[]) => postInChunks(numbers, (chunk) =>
+    api<{ folder: string; total: number }>('/api/sources/fetch', { method: 'POST', json: { seriesId: id, numbers: chunk } }));
+  // The wrong-language notice's Fetch them again (v0.62.0, components/LanguageNotice.tsx): Fetch again for its chapters,
+  // each file replaced in place by the copy in the series' language.
+  const refetchMany = (bookIds: string[]) => postInChunks(bookIds, (chunk) =>
+    api<{ folder: string; total: number }>(`/api/admin/series/${id}/chapters/refetch`, { method: 'POST', json: { bookIds: chunk } }));
+  const refetchBooks = (picked: Book[]) => startJob(`/api/admin/series/${id}/chapters/refetch`, { bookIds: picked.map((b) => b.id) });
   // "Fetch" on one copy in the chapter sheet. A pick names the copy by source and the source's own id (`copySourceId`, never
   // a split on ':'), and the server takes it as an explicit choice: the group rules, blocklist included, do
   // not apply to it. On a ghost row the copy lands as the chapter; on an on-disk row the file is replaced,
@@ -1361,11 +1377,11 @@ function SeriesInner() {
     await startJob(`/api/admin/series/${id}/chapters/refetch`, { picks: [{ bookId: replacing.book.id, source: replacing.copy.source, sourceId: copySourceId(replacing.copy) }] });
     setReplacing(null);
   };
-  const bulkDelete = async () => {
+  const deleteBooks = async (picked: Book[]) => {
     setActing(true);
     try {
       const res = await api<{ applied: number; skipped: { id: string; reason: string }[] }>(`/api/admin/series/${id}/chapters/delete`, {
-        method: 'POST', json: { bookIds: deletable.map((b) => b.id) },
+        method: 'POST', json: { bookIds: picked.map((b) => b.id) },
       });
       // Say what was skipped rather than silently deleting fewer than were selected, one line per reason
       // present: `not_owned` (the file is in a library the admin built, not one Uchiyomi fetched) and
@@ -1673,6 +1689,8 @@ function SeriesInner() {
     <div ref={chaptersTop} className="scroll-mt-20">
       {/* How the chapters are numbered, when that needs saying (#116): above the band, which it can hold. */}
       <NumberingNotice seriesId={id} numbering={listing?.numbering} isAdmin={isAdmin} onReview={setNumberingSheet} />
+      {/* Chapters here in another language than the series' (v0.62.0): the admin's, who can fetch them again. */}
+      {isAdmin && <LanguageNotice notice={versionsData?.otherLanguage} busy={acting || !!started} onFetch={(ids) => void refetchMany(ids)} />}
       {/* What the server is fetching for this series, whoever started it (v0.49.0): above the list it fills. */}
       <SeriesServerDownloads seriesId={id} folder={series?.folder} />
       {/* The heading on its own line and ONE row of four short, text-only chips under it. Measured at
@@ -1717,6 +1735,8 @@ function SeriesInner() {
                 onMark={(mode) => markChapter(b, mode)}
                 onEdit={isAdmin ? () => setEditChapter(b) : undefined}
                 onCopyPath={isAdmin && b.path ? () => void copyPath(b.path!, toast) : undefined}
+                onRefetch={isAdmin && b.owned ? () => setConfirming({ what: 'refetch', books: [b] }) : undefined}
+                onDelete={isAdmin && b.owned && !b.pruned ? () => setConfirming({ what: 'delete', books: [b] }) : undefined}
                 selectable={selecting} selected={pickedBooks.has(b.id)} onToggle={() => togglePickBook(b.id)}
                 versions={versionsOf.get(b.number)?.length}
                 onVersions={versionsOf.has(b.number) ? () => setChapterSheet({ number: b.number, book: b }) : undefined} />
@@ -1815,9 +1835,9 @@ function SeriesInner() {
         {/* The two icons say which side each acts on: ⬇ this device, ☁ the server. */}
         {!isDesktop() && <button disabled={acting || !saveable.length} onClick={bulkSave} className="chip text-xs disabled:opacity-50"><IcDownload width={14} height={14} />{tr('Save offline')}</button>}
         {canDownload(user) && <button disabled={acting || !fetchable.length} onClick={bulkFetch} className="chip text-xs disabled:opacity-50"><IcCloudDownload width={14} height={14} />{tr('Fetch')}</button>}
-        {isAdmin && <button disabled={acting || !refetchable.length} onClick={() => setConfirming('refetch')} className="chip text-xs disabled:opacity-50"><IcCloudDownload width={14} height={14} />{tr('Fetch again')}</button>}
+        {isAdmin && <button disabled={acting || !refetchable.length} onClick={() => setConfirming({ what: 'refetch', books: refetchable })} className="chip text-xs disabled:opacity-50"><IcCloudDownload width={14} height={14} />{tr('Fetch again')}</button>}
         {isAdmin && (
-          <button disabled={acting || !deletable.length} onClick={() => setConfirming('delete')} data-remove-chapters className="chip text-xs text-rose-300 disabled:opacity-50">
+          <button disabled={acting || !deletable.length} onClick={() => setConfirming({ what: 'delete', books: deletable })} data-remove-chapters className="chip text-xs text-rose-300 disabled:opacity-50">
             {deletable.length === 1 ? tr('Remove 1 chapter') : deletable.length ? tr('Remove {n} chapters', { n: deletable.length }) : tr('Remove chapters')}
           </button>
         )}
@@ -2034,9 +2054,9 @@ function SeriesInner() {
         <SeriesMoreSheet title={title} groups={moreGroups} notesHref={notesHref}
           onPick={(a) => { setMoreSheet(false); runAction(a); }} onClose={() => setMoreSheet(false)} />
       )}
-      {confirming === 'delete' && (
+      {confirming?.what === 'delete' && (
         <ConfirmDialog
-          title={deletable.length === 1 ? tr('Delete 1 chapter from the server?') : tr('Delete {n} chapters from the server?', { n: deletable.length })}
+          title={confirming.books.length === 1 ? tr('Delete 1 chapter from the server?') : tr('Delete {n} chapters from the server?', { n: confirming.books.length })}
           danger
           busy={acting}
           confirmLabel={tr('Delete from server')}
@@ -2049,18 +2069,18 @@ function SeriesInner() {
               <p className="mt-2">{tr('Fetch again brings a chapter back.')}</p>
             </>
           }
-          onConfirm={bulkDelete}
+          onConfirm={() => deleteBooks(confirming.books)}
           onClose={() => setConfirming(null)}
         />
       )}
-      {confirming === 'refetch' && (
+      {confirming?.what === 'refetch' && (
         <ConfirmDialog
-          title={tr('Fetch {n} chapters again?', { n: refetchable.length })}
+          title={confirming.books.length === 1 ? tr('Fetch 1 chapter again?') : tr('Fetch {n} chapters again?', { n: confirming.books.length })}
           danger
           busy={acting}
           confirmLabel={tr('Fetch again')}
           body={<p>{tr('Each file is replaced with the copy the translation rules choose now. A different group’s copy may have a different page count, so reading positions inside the chapter may shift.')}</p>}
-          onConfirm={bulkRefetch}
+          onConfirm={() => refetchBooks(confirming.books)}
           onClose={() => setConfirming(null)}
         />
       )}

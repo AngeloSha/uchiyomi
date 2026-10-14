@@ -1280,17 +1280,21 @@ export async function setBookMeta(folder: string, landed: Array<{ number: number
     values.push(`($${params.length - 5}::real, $${params.length - 4}::text, $${params.length - 3}::text, $${params.length - 2}::int[], $${params.length - 1}::text, $${params.length}::text)`);
   }
   await q(
-    // An own name replaces a borrowed one (lib/borrowNames.ts), and takes its donor mark with it.
+    // An own name replaces a borrowed one (lib/borrowNames.ts), and takes its donor mark with it. A file that landed
+    // is in its source's language (v0.62.0: every MangaDex adapter lists its own alone), so a language the row kept
+    // for the file it replaces goes (migrate.ts, lib_books.lang).
     `UPDATE lib_books b SET scanlator = v.grp, source_id = v.src, missing_pages = v.miss,
             chapter_name = COALESCE(v.name, b.chapter_name),
             chapter_name_source = CASE WHEN v.name IS NOT NULL THEN NULL ELSE b.chapter_name_source END,
-            source_chapter_id = COALESCE(v.cid, b.source_chapter_id)
+            source_chapter_id = COALESCE(v.cid, b.source_chapter_id),
+            lang = NULL
      FROM (VALUES ${values.join(',')}) AS v(n, grp, src, miss, name, cid), lib_series s
      WHERE s.folder = $1 AND b.series_id = s.id AND ${BOOK_NUMBER} = v.n AND NOT ${isRange('b')}
        AND (b.scanlator IS DISTINCT FROM v.grp OR b.source_id IS DISTINCT FROM v.src
             OR b.missing_pages IS DISTINCT FROM v.miss
             OR (v.name IS NOT NULL AND b.chapter_name IS DISTINCT FROM v.name)
-            OR (v.cid IS NOT NULL AND b.source_chapter_id IS DISTINCT FROM v.cid))`,
+            OR (v.cid IS NOT NULL AND b.source_chapter_id IS DISTINCT FROM v.cid)
+            OR b.lang IS NOT NULL)`,
     params,
   );
 }

@@ -28,6 +28,7 @@ import { sameLanguage } from './lang';
 import { sourceLanguage } from './seriesLang';
 import { cleanSourceOrder, rankSources, type SourcePriority } from './sourcePrefs';
 import { refreshRadar } from './releaseRadar';
+import { languageRulesFor } from './copyLanguage';
 
 /**
  * `covered` (v0.50.0, lib/partAlias.ts R2): another site's split of a chapter on disk -- its 78.1 ... 78.9 where 78
@@ -209,6 +210,9 @@ async function decisionAfterSeries(qq: ListingQuery, seriesId: string, series: D
   const ownSources = cleanSourceOrder((series.source_prefs as { priority?: unknown } | null)?.priority);
   const globalSources = cleanSourceOrder((global?.source_prefs as { priority?: unknown } | null)?.priority);
   const followOrder = [...(series.source_id ? [series.source_id] : []), ...follows];
+  // v0.62.0: the series' language (lib/copyLanguage.ts), the same rules the sweep chooses by, so the stored listing,
+  // the fallback chain, repair and the slow archive never take a copy the sweep would have left out.
+  const language = await languageRulesFor(seriesId, followOrder, qq);
   return {
     prefs: mergePrefs(
       storedPrefs(global?.scanlator_prefs, { priority: [], blocked: [], patienceDays: 2 }),
@@ -216,7 +220,7 @@ async function decisionAfterSeries(qq: ListingQuery, seriesId: string, series: D
         ? null
         : storedPrefs(series.scanlator_prefs, { priority: [], blocked: [], patienceDays: null }),
     ),
-    opts: { sourceRank: rankSources(priorityFrom(ownSources.length ? ownSources : globalSources), followOrder) },
+    opts: { sourceRank: rankSources(priorityFrom(ownSources.length ? ownSources : globalSources), followOrder), ...language },
   };
 }
 
@@ -508,12 +512,12 @@ export const copyBlocked = (c: { groups?: string[]; scanlator?: string | null },
   return keys.length > 0 && keys.every((k) => blocked.has(k));
 };
 
-/** The copies an automatic action may use, under the blocklist as it stands at the call. */
+/** The copies an automatic action may use, under the blocklist and the series' language as they stand at the call. */
 export function automaticCopies(copies: readonly ListingCopy[], prefs: ReleasePrefs, opts: ChooseOpts = {}): ListingCopy[] {
   const blocked = new Set(prefs.blocked.map(normGroup).filter(Boolean));
   const rules = releaseOrder(prefs, opts);
   return copies.map((copy, index) => ({ copy, index, chapter: copyToChapter(copy, { number: 0, title: null }) }))
-    .filter(({ copy }) => !copyBlocked(copy, blocked))
+    .filter(({ copy, chapter }) => !copyBlocked(copy, blocked) && (!opts.inLanguage || opts.inLanguage(chapter)))
     .sort((a, b) => rules(a.chapter, b.chapter) || a.index - b.index)
     .map(({ copy }) => copy);
 }
@@ -524,13 +528,18 @@ export async function automaticCopiesFor(seriesId: string, copies: readonly List
   return decision ? automaticCopies(copies, decision.prefs, decision.opts) : [];
 }
 
-/** Whether one automatically selected chapter still survives the series' current blocklist. */
+/**
+ * Whether one automatically selected chapter still survives the series' current blocklist, and its language (v0.62.0:
+ * a chapter known to be in another language is refused here too, so a download queued before the series' language
+ * changed does not land).
+ */
 export async function automaticChapterAllowedFor(
   seriesId: string,
-  chapter: Pick<SourceChapter, 'groups' | 'scanlator'>,
+  chapter: Pick<SourceChapter, 'groups' | 'scanlator' | 'lang' | 'source'>,
 ): Promise<boolean> {
   const decision = await currentDecision(q, seriesId);
-  return !!decision && !copyBlocked(chapter, new Set(decision.prefs.blocked.map(normGroup).filter(Boolean)));
+  if (!decision || copyBlocked(chapter, new Set(decision.prefs.blocked.map(normGroup).filter(Boolean)))) return false;
+  return !decision.opts.inLanguage || decision.opts.inLanguage(chapter);
 }
 
 /**

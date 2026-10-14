@@ -12,7 +12,7 @@
 //   Remove; a source the engine's limit left out (v0.55.1) has no Replace, and one line on how to make room instead;
 // - "Used by 195 series ›", the Library filtered to them;
 // - what its kind has: an extension's languages, settings, Update and Remove extension (components/ExtensionSheet.tsx);
-//   MangaDex's languages (components/MangadexCard.tsx); a site's address, with Update address.
+//   MangaDex's languages (components/MangadexCard.tsx); a site's address, with Update address, and its language.
 //
 // Every question is asked INSIDE the sheet: a ConfirmDialog is z-50 under a Sheet's z-60. Replace and the Languages
 // sheet are sheets of their own, so this one closes before either opens (one sheet at a time).
@@ -40,7 +40,7 @@ import { SourceTile } from '@/components/SourceTile';
 import { Disclosure } from '@/components/settings';
 import { Busy, ExtIcon, ExtTags, Facts, busyKey } from '@/components/ExtensionBits';
 import { ExtensionRemove, ExtensionSection, ExtensionUpdateKey } from '@/components/ExtensionSheet';
-import { MangadexLanguages } from '@/components/MangadexCard';
+import { MangadexLanguages, SiteLanguage } from '@/components/MangadexCard';
 import { IcChevronRight } from '@/components/icons';
 import type { ExtActions } from '@/components/ExtensionsPanel';
 
@@ -221,6 +221,12 @@ export function SourceSheet({ target, overview, evidence, testMs, status, action
               {says.reason && <span className="text-fog-400">— {says.reason}</span>}
             </p>
             {limit && <p className="mt-1.5 text-[12px] leading-relaxed text-fog-400" data-source-limit>{limit}</p>}
+            {/* A source in every language (v0.62.0): what Uchiyomi does about it, said where the admin looks at it. */}
+            {s.lang === 'all' && (
+              <p className="mt-1.5 text-[12px] leading-relaxed text-fog-400" data-source-mixed>
+                {tr('It lists the chapters of every language together. Uchiyomi never follows it for a series by itself, and keeps to the group of the chapters you already have.')}
+              </p>
+            )}
             <div className="mt-3 flex flex-wrap items-center gap-2" data-source-keys>
               {keys.includes('replace') && key('replace', tr('Replace'), () => onReplace(s), 'btn-key btn-key-primary')}
               {keys.includes('test') && key('test', busy === 'test' ? testClock(now - testFrom, testMs) : tr('Test'), test, 'btn-key', { 'data-source-test': s.id })}
@@ -282,6 +288,8 @@ export function SourceSheet({ target, overview, evidence, testMs, status, action
             {refusal?.key === 'address' && <p role="alert" dir="auto" className="mt-2 text-[12px] leading-relaxed text-amber-300" data-source-refusal>{refusal.text}</p>}
           </section>
         )}
+
+        {s?.kind === 'site' && <SiteLanguage siteId={s.id} lang={s.lang} onSaved={onChanged} />}
 
         {s?.kind === 'mangadex' && (
           <div className="border-t border-ink-800/70 pt-3">

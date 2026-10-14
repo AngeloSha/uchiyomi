@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3723
+    "strings": 3735
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -3726,5 +3726,17 @@
   "Nightly backup": "Copia de seguridad nocturna",
   "Save the database and the config folder every night. Turn it off if you back up another way; Run now under Tasks still makes one.": "Guarda la base de datos y la carpeta de configuración cada noche. Desactívala si haces copias de otra forma; «Ejecutar ahora» en Tareas sigue creando una.",
   "Backups to keep": "Copias de seguridad que conservar",
-  "After each backup, the oldest beyond this number are deleted.": "Tras cada copia, se eliminan las más antiguas que superen este número."
+  "After each backup, the oldest beyond this number are deleted.": "Tras cada copia, se eliminan las más antiguas que superen este número.",
+  "Fetch 1 chapter again?": "¿Obtener 1 capítulo de nuevo?",
+  "Another language than the series’: the server never takes it": "Un idioma distinto al de la serie: el servidor nunca la toma",
+  "Each lists the chapters of every language together. Turn it off to keep to the languages you read.": "Cada una lista juntos los capítulos de todos los idiomas. Desactívala para quedarte con los idiomas que lees.",
+  "The site doesn’t say, so this is your default": "El sitio no lo indica, así que es tu idioma predeterminado",
+  "Series in another language never follow this site automatically, and never take its chapters.": "Las series en otro idioma nunca siguen este sitio automáticamente ni toman sus capítulos.",
+  "It lists the chapters of every language together. Uchiyomi never follows it for a series by itself, and keeps to the group of the chapters you already have.": "Lista juntos los capítulos de todos los idiomas. Uchiyomi nunca la sigue por sí solo para una serie, y se queda con el grupo de los capítulos que ya tienes.",
+  "All languages, mixed": "Todos los idiomas, mezclados",
+  "1 chapter here is in {language}": "1 capítulo de aquí está en {language}",
+  "{n} chapters here are in {language}": "{n} capítulos de aquí están en {language}",
+  "The series is in {language}, and each of them has come out in {language} too.": "La serie está en {language}, y cada uno también ha salido en {language}.",
+  "Fetch it again in {language}": "Obtenerlo de nuevo en {language}",
+  "Fetch them again in {language}": "Obtenerlos de nuevo en {language}"
 }

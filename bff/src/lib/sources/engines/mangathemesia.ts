@@ -13,7 +13,7 @@ const strip = plainText;
 const norm = (u: string) => u.replace(/^\/\//, 'https://').replace(/&amp;/g, '&').trim();
 const numOf = (s: string) => { const m = s.match(/(\d+(?:\.\d+)?)/); return m ? parseFloat(m[1]) : NaN; };
 
-export function makeMangaThemesia(cfg: { id: string; name: string; base: string; order?: number }): SourceAdapter {
+export function makeMangaThemesia(cfg: { id: string; name: string; base: string; order?: number; lang?: string }): SourceAdapter {
   const base = cfg.base.replace(/\/$/, '');
   // Search results and the /manga/?order=update listing share the same `.bsx` cards, so parse both here.
   const parseBsx = (h: string): SourceSeries[] => {
@@ -33,6 +33,8 @@ export function makeMangaThemesia(cfg: { id: string; name: string; base: string;
   return {
     id: cfg.id,
     name: cfg.name,
+    // The site's own language (v0.62.0, customSites.ts Site.lang); absent, the unstated one.
+    ...(cfg.lang ? { lang: cfg.lang } : {}),
     base,
     imageReferer: `${base}/`, // covers/images often live on a separate hotlink-protected CDN that wants the SITE origin as Referer
     requiresCloudflare: true,

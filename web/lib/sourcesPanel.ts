@@ -184,7 +184,7 @@ export function usedText(s: Pick<OverviewSource, 'main' | 'followed'>): string {
 /** A source's language in the reader's words; nothing for one that does not say. */
 export function langText(lang: string | null | undefined): string {
   if (!lang) return '';
-  return lang === 'all' ? tr('Multiple languages') : languageName(lang);
+  return languageName(lang);
 }
 
 /**

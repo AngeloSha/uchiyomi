@@ -271,7 +271,9 @@ export async function huntCandidates(
   // takes none of the HUNT_MAX_SOURCES. Reintroduce by dropping `fits` here: "the hunt never searches a source in
   // another language" in languageGuard.int.test.ts finds it searched.
   const lang = await seriesLanguage(seriesId);
-  const fits = await followGuard(seriesId);
+  // v0.62.0: nor a source in every language (`mixed: false`). Reintroduce by dropping it: "the hunt never searches a
+  // source in every language" in languageGuard.int.test.ts finds it searched.
+  const fits = await followGuard(seriesId, { mixed: false });
   const candidates = scanOrder(listSources().filter((src) => opts.allowed(src.id)), { id: s.source_id ?? '', lang: lang.lang })
     .filter(fits)
     .filter((id) => {

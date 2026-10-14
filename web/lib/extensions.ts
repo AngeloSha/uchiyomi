@@ -103,10 +103,12 @@ export interface InstalledExt extends CatalogExt {
   used: number;
 }
 
-/** A language's name for an extension or a source: "Multiple languages" for `all`, "No language" for none. */
+/**
+ * A source's language's name: "All languages, mixed" for `all` (lib/format.ts languageName says why), "No language" for
+ * none. An EXTENSION's `all` is another thing -- sources in several languages -- and extLanguagesText says that itself.
+ */
 export function extLanguageName(code: string | null): string {
   if (!code) return tr('No language');
-  if (code === 'all') return tr('Multiple languages');
   return languageName(code);
 }
 
@@ -155,7 +157,7 @@ export function extLanguagesText(e: Pick<InstalledExt, 'lang' | 'sources'>): str
   const langs = [...new Set(e.sources.map((s) => s.lang))];
   if (langs.length === 1) return extLanguageName(langs[0]);
   if (langs.length > 1) return tr('{n} languages', { n: numberText(langs.length) });
-  return extLanguageName(e.lang);
+  return e.lang === 'all' ? tr('Multiple languages') : extLanguageName(e.lang);
 }
 
 /** An engine's version as the strip prints it: "v2.3.2243", whether or not the engine sent its "v". */

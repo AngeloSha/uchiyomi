@@ -15,7 +15,7 @@ import { Sheet } from '@/components/ui';
 import { GroupAvatar } from '@/components/GroupAvatar';
 import { SourceIcon } from '@/components/SourcePicker';
 import { IcCloudDownload } from '@/components/icons';
-import { chapterLabel, relativeTime } from '@/lib/format';
+import { chapterLabel, languageName, relativeTime } from '@/lib/format';
 import { t as tr } from '@/lib/i18n';
 import { copyTitlesDiffer, postsShareNumber } from '@/lib/versions';
 
@@ -94,7 +94,10 @@ export function ChapterVersionsSheet({ number, ghost, book, copies, sourceNames,
                 {titled && <span dir="auto" className="block truncate text-sm text-fog-100" data-copy-title>{c.title?.trim() || '—'}</span>}
                 <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
                   <span className={titled ? 'truncate text-[12px] text-fog-400' : 'truncate text-sm text-fog-100'}>{who || (titled ? '' : '—')}</span>
-                  {c.lang && <span className="rounded border border-ink-700 px-1 text-[10px] uppercase leading-4 text-fog-500">{c.lang}</span>}
+                  {/* In another language than the series' (v0.62.0): never the server's pick, and the tag says why. */}
+                  {c.otherLanguage
+                    ? <span title={tr('Another language than the series’: the server never takes it')} className="rounded-[4px] border border-amber-500/40 px-1.5 text-[10px] leading-4 text-amber-300" data-copy-other-language>{languageName(c.otherLanguage)}</span>
+                    : c.lang && <span className="rounded border border-ink-700 px-1 text-[10px] uppercase leading-4 text-fog-500">{c.lang}</span>}
                   {c.onDisk && <span className="rounded-[4px] border border-ink-700 px-1.5 text-[10px] leading-4 text-fog-300">{tr('on server')}</span>}
                   {c.chosen && <span className="rounded-[4px] border border-accent/40 px-1.5 text-[10px] leading-4 text-accent">{tr("server's pick")}</span>}
                   {c.blocked && <span className="rounded-[4px] border border-rose-500/40 px-1.5 text-[10px] leading-4 text-rose-300">{tr('blocked group')}</span>}

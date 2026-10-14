@@ -141,7 +141,9 @@ export async function replaceFacts(
     `SELECT series_id, source_id, source_series_id, title, coverage, checked_at, chapters
        FROM series_sources WHERE series_id = ANY($1::text[]) ORDER BY series_id, created_at, source_id`, [ids]);
   const standing = await standingRows(fols.map((f) => f.source_id));
-  const guards = await followGuards(ids);
+  // v0.62.0, `mixed: false`: Replace never promotes a follower in every language, nor takes one on by searching.
+  // Reintroduce by dropping it: "Replace never promotes a follower in every language" in languageGuard.int.test.ts.
+  const guards = await followGuards(ids, { mixed: false });
   // Every number each source lists for the series: the copies of each listing row, or the row's own source for a row
   // older than the copies.
   const listed = new Map<string, number[]>();

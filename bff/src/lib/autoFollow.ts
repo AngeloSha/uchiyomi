@@ -266,7 +266,10 @@ export async function judgeCandidate(
   // every automatic path shares -- the add's auto-follow, the hunt, Find other sources and its review, borrowed
   // names. Reintroduce by dropping it: "auto-follow refuses a source in another language" in
   // languageGuard.int.test.ts asks the Spanish source for its chapters and follows it.
-  if (!languageFits(candidate.source, { lang: primary.lang, sameBaseSibling: primary.exactLang })) return { ...base, why: 'language_differs' };
+  // A source in every language is refused here too (v0.62.0, `mixed: false`): nothing says which of its copies is in
+  // the series' language. Reintroduce by dropping it: "auto-follow refuses a source in every language" in
+  // languageGuard.int.test.ts follows it.
+  if (!languageFits(candidate.source, { lang: primary.lang, sameBaseSibling: primary.exactLang }, { mixed: false })) return { ...base, why: 'language_differs' };
   const h = opts.health
     ? opts.health.get(candidate.source) ?? null
     : await one<Pick<SourceHealth, 'disabled' | 'blocked_until'>>(

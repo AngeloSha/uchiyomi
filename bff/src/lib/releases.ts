@@ -102,7 +102,20 @@ export interface ChooseOpts {
   now?: number;
   /** Lower = preferred, for the updater's multi-source union (primary 0, followers after). Default 0. */
   sourceRank?: (source?: string) => number;
+  /**
+   * v0.62.0, lib/copyLanguage.ts: false for a copy KNOWN to be in another language than the series'. Such a copy
+   * is dropped before ranking, beside a blocked group's: never chosen, never an alternate. Absent: none is.
+   */
+  inLanguage?: (c: CopyFacts) => boolean;
+  /**
+   * v0.62.0, lib/copyLanguage.ts: 0 for a copy of unknown language whose group translated the series' latest
+   * chapters, else 1, consulted after the source rank and before the date. Absent: no effect.
+   */
+  continuity?: (c: CopyFacts) => number;
 }
+
+/** What the language options read of a copy: its own language, its source and its groups. */
+type CopyFacts = Pick<SourceChapter, 'lang' | 'source' | 'groups' | 'scanlator'>;
 
 /** The priority list as comparison keys, minus the blocked groups, and the blocked set itself. */
 function priorityKeys(prefs: ReleasePrefs): { blocked: Set<string>; priority: string[] } {
@@ -116,8 +129,12 @@ function priorityKeys(prefs: ReleasePrefs): { blocked: Set<string>; priority: st
 /**
  * The order the release rules rank two copies of the SAME number in: hosted before external (pages === 0
  * is MangaDex's external link; an unknown page count is not), then priority rank, then the caller's
- * source rank, then earliest release. Zero when nothing separates them, so a caller may add its own
+ * source rank, then the caller's continuity (v0.62.0: the group of the series' latest chapters, for copies
+ * of unknown language), then earliest release. Zero when nothing separates them, so a caller may add its own
  * tie-break (chooseReleases keeps the order the source listed them in).
+ *
+ * The language rule is a filter, not a key here (ChooseOpts.inLanguage): as a key ahead of hosted-before-external
+ * it would let a same-language external link win a number and then fail on every sweep.
  *
  * Exported because the persisted listing stores every copy of a number in this same order, chosen copy
  * first, and a second copy of the comparator would drift from this one the first time either changed.
@@ -127,6 +144,7 @@ function priorityKeys(prefs: ReleasePrefs): { blocked: Set<string>; priority: st
  */
 export function releaseOrder(prefs: ReleasePrefs, opts: ChooseOpts = {}): (a: SourceChapter, b: SourceChapter) => number {
   const sourceRank = opts.sourceRank ?? (() => 0);
+  const continuity = opts.continuity ?? (() => 0);
   const { priority } = priorityKeys(prefs);
   const rankOf = (c: SourceChapter): number => {
     let best = Infinity;
@@ -143,15 +161,16 @@ export function releaseOrder(prefs: ReleasePrefs, opts: ChooseOpts = {}): (a: So
   const external = (c: SourceChapter) => (c.pages === 0 ? 1 : 0);
   // Memoised per object: a sort calls the comparator n log n times and groupsOf normalises every name
   // on every call, which for a thousand-copy MangaDex listing is measurable.
-  const keys = new WeakMap<SourceChapter, { rank: number; date: number; ext: number }>();
+  const keys = new WeakMap<SourceChapter, { rank: number; date: number; ext: number; kept: number }>();
   const keyOf = (c: SourceChapter) => {
     let k = keys.get(c);
-    if (!k) { k = { rank: rankOf(c), date: dateOf(c), ext: external(c) }; keys.set(c, k); }
+    if (!k) { k = { rank: rankOf(c), date: dateOf(c), ext: external(c), kept: continuity(c) }; keys.set(c, k); }
     return k;
   };
   return (a, b) => {
     const x = keyOf(a), y = keyOf(b);
-    return x.ext - y.ext || x.rank - y.rank || sourceRank(a.source) - sourceRank(b.source) || x.date - y.date || 0;
+    return x.ext - y.ext || x.rank - y.rank || sourceRank(a.source) - sourceRank(b.source) || x.kept - y.kept
+      || x.date - y.date || 0;
   };
 }
 
@@ -178,6 +197,8 @@ export function copiesOf<T extends SourceChapter>(
     .map((c, idx) => ({ c, idx }))
     .filter(({ c }) => {
       if (c.number !== number) return false;
+      // The language rule of chooseReleases, verbatim (v0.62.0).
+      if (opts.inLanguage && !opts.inLanguage(c)) return false;
       const keys = groupsOf(c).map(normGroup);
       // The blocklist rule of chooseReleases, verbatim: dropped only when every known group is blocked.
       return !(keys.length && keys.every((k) => blocked.has(k)));
@@ -220,6 +241,10 @@ export function chooseReleases<T extends SourceChapter>(
   const byNumber = new Map<number, Copy[]>();
   chapters.forEach((c, idx) => {
     if (!Number.isFinite(c.number)) return;
+    // A copy known to be in another language than the series' (v0.62.0, lib/copyLanguage.ts) is dropped like a
+    // blocked group's: a number with nothing else is left out, never filled in the wrong language. Reintroduce by
+    // dropping this line: "a Spanish copy never wins an English series" in releases.test.ts picks the Spanish one.
+    if (opts.inLanguage && !opts.inLanguage(c)) return;
     const keys = groupsOf(c).map(normGroup);
     if (keys.length && keys.every((k) => blocked.has(k))) return;
     const copy: Copy = { c, idx, keys, rank: rankOf(keys), date: dateOf(c) };

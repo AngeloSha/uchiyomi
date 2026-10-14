@@ -98,11 +98,13 @@ let languageNames: Intl.DisplayNames | null = null;
 /**
  * A source's language code as the reader's own name for it: "en" reads "English", "Englisch", "英语". The engine
  * hands out bare codes, and in Spanish or French a bare "en" or "es" reads as a word of the sentence around it
- * ("Ocultar en", "Masquer en ?"). "all" is the engine's code for a source in every language. A code Intl does not
- * know, or a runtime without Intl.DisplayNames, keeps the code.
+ * ("Ocultar en", "Masquer en ?"). "all" is the engine's code for a source in every language: "All languages, mixed"
+ * since v0.62.0 -- "All languages" read as a switch for every language, and an admin keeping to English left the one
+ * source that lists them all together on. A code Intl does not know, or a runtime without Intl.DisplayNames, keeps
+ * the code.
  */
 export function languageName(code: string): string {
-  if (code === 'all') return tr('All languages');
+  if (code === 'all') return tr('All languages, mixed');
   try {
     languageNames ??= new Intl.DisplayNames([intlTag()], { type: 'language' });
     return languageNames.of(code) || code;

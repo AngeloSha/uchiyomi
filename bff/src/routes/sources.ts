@@ -89,6 +89,7 @@ import { registerArchiveRoutes } from './archive';
 import { chooseReleases, groupsOf, releaseOrder } from '../lib/releases';
 import { effectivePrefsFor, readSeriesPrefs } from '../lib/scanlatorPrefs';
 import { automaticChapterAllowedFor, automaticCopiesFor, copyToChapter, declaredLang, listingRows, replaceListing, sameRelease, seriesFollowsSource, type ListingCopy } from '../lib/seriesListing';
+import { languageRulesFor, type LanguageRules } from '../lib/copyLanguage';
 import { cleanSourceOrder } from '../lib/sourcePrefs';
 import { paceLevel, rateKeyOf, restLeft } from '../lib/pace';
 import { haveNumbers } from '../lib/libraryNumbers';
@@ -3051,6 +3052,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const chapters: Array<SourceChapter & { pinned?: boolean }> = [];
     // Health is per source, asked once per source rather than once per number.
     const sourceState = new Map<string, 'ok' | 'source_unavailable' | 'cooldown' | 'denied'>();
+    // The series' language rules (v0.62.0), read once and only when a blocked number needs explaining.
+    let languageRules: Promise<LanguageRules> | null = null;
+    const languageOf = () => (languageRules ??= languageRulesFor(seriesId, [...followed]).catch((): LanguageRules => ({})));
     const stateOf = async (sid: string) => {
       let st = sourceState.get(sid);
       if (st) return st;
@@ -3083,7 +3087,14 @@ export default async function sourceRoutes(app: FastifyInstance) {
         continue;
       }
       if (!row) { skipped.push({ number: n, reason: 'not_listed' }); continue; }
-      if (row.status === 'blocked') { skipped.push({ number: n, reason: 'blocked_group' }); continue; }
+      if (row.status === 'blocked') {
+        // v0.62.0: a number whose every copy is in another language than the series' is left out by the language
+        // rule (lib/copyLanguage.ts), and unblocking a group would not bring it back: say which it is.
+        const language = (await languageOf()).inLanguage;
+        const otherLanguage = !!language && row.copies.length > 0 && row.copies.every((c) => !language(c));
+        skipped.push({ number: n, reason: otherLanguage ? 'other_language' : 'blocked_group' });
+        continue;
+      }
       if (here.has(n)) { skipped.push({ number: n, reason: 'already_here' }); continue; }
       const st = await stateOf(row.source_id);
       // The same by-id rejection the rest of this file gives, and it does not say what is being withheld.
@@ -3098,6 +3109,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
       const first = skipped.find((x) => x.reason !== 'duplicate')?.reason ?? skipped[0]?.reason;
       const message = first === 'not_listed' ? 'Not in the last listing -- run Check for new chapters first.'
         : first === 'blocked_group' ? 'Only blocked groups released that chapter. Unblock the group and check again.'
+        : first === 'other_language' ? 'That chapter is only in another language than the series. Pick a copy under Versions to fetch it anyway.'
         : first === 'already_here' ? 'That chapter is already here.'
         : first === 'cooldown' ? 'That source is in a cooldown. Try again later.'
         : 'That source is not available right now.';

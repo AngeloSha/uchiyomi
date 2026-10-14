@@ -111,7 +111,7 @@ export function isListingPage(h: string): boolean {
   return /(^|\s)(search|post-type-archive-wp-manga)(\s|$)/.test(cls);
 }
 
-export function makeMadara(cfg: { id: string; name: string; base: string; order?: number }): SourceAdapter {
+export function makeMadara(cfg: { id: string; name: string; base: string; order?: number; lang?: string }): SourceAdapter {
   const base = cfg.base.replace(/\/$/, '');
   const mangaUrl = (id: string) => (id.startsWith('http') ? rebase(id, base) : `${base}/manga/${id}/`);
   // Parsing lives at module scope so it can be tested against real markup; see madaraListing.test.ts.
@@ -132,6 +132,8 @@ export function makeMadara(cfg: { id: string; name: string; base: string; order?
   return {
     id: cfg.id,
     name: cfg.name,
+    // The site's own language (v0.62.0, customSites.ts Site.lang); absent, the unstated one.
+    ...(cfg.lang ? { lang: cfg.lang } : {}),
     base,
     imageReferer: `${base}/`, // covers/images often live on a separate hotlink-protected CDN that wants the SITE origin as Referer
     // Madara sites serve pages + images from behind Cloudflare. Also read by the diagnosis layer: it is

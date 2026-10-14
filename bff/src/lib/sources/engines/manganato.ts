@@ -103,7 +103,7 @@ export function parseListing(h: string, sourceId: string): SourceSeries[] {
   return [];
 }
 
-export function makeManganato(cfg: { id: string; name: string; base: string; order?: number }): SourceAdapter {
+export function makeManganato(cfg: { id: string; name: string; base: string; order?: number; lang?: string }): SourceAdapter {
   const base = cfg.base.replace(/\/$/, '');
   const mangaUrl = (id: string) => (id.startsWith('http') ? rebase(id, base) : `${base}/manga/${id}`);
 
@@ -155,6 +155,8 @@ export function makeManganato(cfg: { id: string; name: string; base: string; ord
   return {
     id: cfg.id,
     name: cfg.name,
+    // The site's own language (v0.62.0, customSites.ts Site.lang); absent, the unstated one.
+    ...(cfg.lang ? { lang: cfg.lang } : {}),
     base,
     imageReferer: `${base}/`, // covers/images often live on a separate hotlink-protected CDN that wants the SITE origin as Referer
     requiresCloudflare: true, // Manganato-engine sites sit behind Cloudflare

@@ -13,7 +13,9 @@
 //   - Find missing chapters never asks it, and the manual follow refuses a stale plan's Spanish source with both
 //     languages and the edition to add instead;
 //   - borrowed names come in the series' OWN language, stated, not its main source's;
-//   - a Spanish series follows the Spanish source, and the unstated language decides for sites that declare none.
+//   - a Spanish series follows the Spanish source, and the unstated language decides for sites that declare none;
+//   - v0.62.0: no automatic path takes on a source in every language either (auto-follow, the hunt, Find other sources,
+//     Replace), while an admin's own follow still may.
 //
 // Skipped automatically unless TEST_DATABASE_URL is set.
 import test, { before, after, beforeEach } from 'node:test';
@@ -39,6 +41,7 @@ const EN = 'lg-en';       // the series' own source, English, 1..12
 const ES = 'lg-es';       // MangaDex (ES-419)'s shape: Spanish, the same work, 1..13 -- the one that lists 13
 const EN2 = 'lg-en2';     // another English source, 1..12
 const SITE = 'lg-site';   // an add-a-site engine: declares no language, 1..12
+const ALL = 'lg-all';     // an extension in every language (Suwayomi's "all"), the same work, 1..13
 const ADMIN = 'lg-admin';
 const S = (k: string) => `s_lg_${k}`;
 const R = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
@@ -94,6 +97,7 @@ before(async () => {
   registerAdapter(fake(ES, 'es-419', R(1, 13), (n) => `Chapter ${n}: Nombre ${n}`) as any);
   registerAdapter(fake(EN2, 'en', R(1, 12), (n) => `Chapter ${n}: Name ${n}`) as any);
   registerAdapter(fake(SITE, undefined, R(1, 12)) as any);
+  registerAdapter(fake(ALL, 'all', R(1, 13)) as any);
   ({ autoFollow } = (await import('../src/lib/autoFollow')) as any);
   ({ huntSource } = (await import('../src/lib/sourceHunt')) as any);
   ({ borrowNamesFor } = (await import('../src/lib/borrowNames')) as any);
@@ -313,3 +317,65 @@ test('Replace never promotes a follower in another language: it is passed over, 
   assert.equal((await q('SELECT source_id FROM lib_series WHERE id = $1', [S('rep')]))[0].source_id, EN2);
   assert.equal(searches[ES] ?? 0, 0, 'the Spanish source was never searched');
 });
+
+test('auto-follow refuses a source in every language, without asking it anything', { skip }, async () => {
+  await series('add-all');
+  const results = await autoFollow(S('add-all'), [candidate(ALL), candidate(EN2)]);
+  const why = Object.fromEntries(results.map((r: any) => [r.source, r.why]));
+  // Reintroduce by dropping `mixed: false` in judgeCandidate (lib/autoFollow.ts): it is asked and followed.
+  assert.equal(why[ALL], 'language_differs');
+  assert.equal(asks[ALL] ?? 0, 0, 'the every-language source was asked for its chapters');
+  assert.deepEqual(await followed('add-all'), [EN2]);
+});
+
+test('the hunt never searches a source in every language', { skip }, async () => {
+  await series('hunt-all');
+  await huntSource(S('hunt-all'), 13, { allowed: () => true, budget: { left: 5 } });
+  // Reintroduce by dropping `mixed: false` in huntCandidates (lib/sourceHunt.ts): it is searched for chapter 13.
+  assert.equal(searches[ALL] ?? 0, 0, 'the every-language source was searched');
+  assert.ok((searches[EN2] ?? 0) > 0, 'the English sources were searched: the hunt ran');
+  assert.ok(!(await followed('hunt-all')).includes(ALL));
+});
+
+test('a Find other sources run never searches a source in every language', { skip }, async () => {
+  await series('find-all');
+  await q(`INSERT INTO source_health (source_id, disabled) VALUES ($1, true), ($2, true)`, [EN2, SITE]);
+  const r = await app.inject({ method: 'POST', url: '/api/admin/sources/find', headers: auth, payload: { seriesIds: [S('find-all')] } });
+  assert.equal(r.statusCode, 202, r.body);
+  await findLib.findSettled();
+  const st = (await app.inject({ method: 'GET', url: '/api/admin/sources/find', headers: auth })).json();
+  // Reintroduce by dropping `mixed: false` in findFor (lib/findSources.ts): it is searched, and followed.
+  assert.equal(searches[ALL] ?? 0, 0, 'the every-language source was searched');
+  assert.deepEqual(st.run.results.map((x: any) => [x.seriesId, x.why]), [[S('find-all'), 'no_source']]);
+});
+
+test('Replace never promotes a follower in every language: it is passed over, and the series is searched for', { skip }, async () => {
+  await series('rep-all');
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, $2, $3)`, [S('rep-all'), ALL, `${ALL}|s`]);
+  await q(`INSERT INTO source_health (source_id, disabled) VALUES ($1, true), ($2, true)`, [EN, SITE]);
+  const r = await app.inject({ method: 'POST', url: '/api/admin/sources/find', headers: auth, payload: { sourceId: EN, mode: 'replace' } });
+  assert.equal(r.statusCode, 202, r.body);
+  await findLib.findSettled();
+  const res = (await app.inject({ method: 'GET', url: '/api/admin/sources/find', headers: auth })).json().run.results[0];
+  // Reintroduce by dropping `mixed: false` in replaceFacts (lib/replaceSource.ts): the every-language follower becomes
+  // the series' main source.
+  assert.deepEqual(res.skipped, [{ sourceId: ALL, name: `Name ${ALL}`, why: 'language' }], 'the every-language follower is passed over');
+  assert.deepEqual([res.promoted?.to, res.promoted?.via], [EN2, 'search']);
+  assert.equal((await q('SELECT source_id FROM lib_series WHERE id = $1', [S('rep-all')]))[0].source_id, EN2);
+});
+
+test("an admin's own follow of a source in every language still goes through", { skip }, async () => {
+  // Explicit actions keep `mixed` (the default): Find missing chapters offers it, and the follow is the admin's call.
+  await series('own-all');
+  const scan = (await app.inject({ method: 'POST', url: '/api/sources/fill/scan', headers: auth, payload: { seriesId: S('own-all') } })).json();
+  const all = scan.candidates.find((c: any) => c.source === ALL);
+  assert.ok(all, `the scan offers the every-language source: ${JSON.stringify(scan.candidates.map((c: any) => c.source))}`);
+  const r = await app.inject({
+    method: 'POST', url: `/api/admin/series/${S('own-all')}/sources`, headers: auth,
+    payload: { planId: scan.planId, source: ALL, sourceSeriesId: all.sourceSeriesId },
+  });
+  // Reintroduce by making `mixed: false` the default in lib/seriesLang.ts: 409, and the admin cannot follow it at all.
+  assert.equal(r.statusCode, 200, r.body);
+  assert.ok((await followed('own-all')).includes(ALL));
+});
+

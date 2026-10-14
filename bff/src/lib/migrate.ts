@@ -1736,6 +1736,12 @@ CREATE INDEX IF NOT EXISTS collections_shared_idx ON collections (shared) WHERE 
 -- Additive: v0.61.0 boots on this schema and ignores both.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS backup_enabled boolean NOT NULL DEFAULT true;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS backup_keep int;
+
+-- v0.62.0: the language a chapter's file is in when that is not its source's (lib/copyLanguage.ts bookLang): set once,
+-- below, for the chapters MangaDex's English source took in another language before it stopped falling back, and
+-- cleared when the file is replaced (lib/library.ts setBookMeta, lib/partial.ts restampBook). NULL: its source's. The
+-- wrong-language notice reads it (routes/catalog.ts, GET /api/series/:id/versions). Additive: v0.61.x ignores it.
+ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS lang text;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:
@@ -1966,6 +1972,75 @@ const DATA_MIGRATIONS: { id: string; run: (c: PoolClient) => Promise<void> }[] =
     },
   },
 
+
+  // v0.62.0: before MangaDex's English adapter stops falling back to another language (the next step, and
+  // lib/sources/mangadex.ts), each chapter it took in another language keeps that language on its row: once the next
+  // check lists English only, nothing else on the server says which copy the file was. The listing still holds the
+  // copy (MangaDex names a language per chapter), found by the chapter id the file was stamped with (v0.49.0). It is
+  // what tells the wrong-language notice that an English series' chapter 5 is in Spanish. Files from before the stamp
+  // cannot be matched, and keep reading as their source's: English.
+  {
+    id: 'v0.62.0-chapters-keep-their-language',
+    run: async (c) => {
+      await c.query(
+        `UPDATE lib_books b SET lang = x.lang
+           FROM (SELECT DISTINCT ON (bk.id) bk.id, cp->>'lang' AS lang
+                   FROM lib_books bk
+                   JOIN series_listing l ON l.series_id = bk.series_id
+                   CROSS JOIN LATERAL jsonb_array_elements(COALESCE(l.copies, '[]'::jsonb)) cp
+                  WHERE bk.source_id = 'mangadex' AND bk.pruned_at IS NULL AND bk.source_chapter_id IS NOT NULL
+                    AND cp->>'source' = 'mangadex' AND cp->>'sourceId' = bk.source_chapter_id
+                    AND lower(btrim(COALESCE(cp->>'lang', ''))) NOT IN ('', 'en')
+                  ORDER BY bk.id) x
+          WHERE b.id = x.id`,
+      );
+    },
+  },
+
+  // v0.62.0: MangaDex's English adapter no longer falls back to another language (lib/sources/mangadex.ts). A series
+  // that fallback filled reads as English from the adapter but is stated in its real language (the add's
+  // majorityLang, or v0.52.0's migration above), and without a move it would stop updating. So each one moves to
+  // MangaDex in its own language, the adapter that language has had since v0.52.0, and that language is switched
+  // on so the adapter registers at this same boot (server.ts loads the MangaDex languages after migrate()).
+  //
+  // Evidence, not the label alone: a series moves only when its listing CHOSE MangaDex copies in that language,
+  // which is what the fallback did. A series somebody stated as Japanese while reading English chapters stays
+  // put, and nothing switches Japanese on. The data changes are Make main's (lib/mainSource.ts switchMainSource):
+  // the new main stops being a follower, the old main's listing rows go (the next check lists the new one), and
+  // the series' failure rows are re-filed under the new main (REFILE_FAILURES_SQL). The MangaDex id is the same in
+  // every language, so source_series_id stays.
+  {
+    id: 'v0.62.0-mangadex-series-to-their-language',
+    run: async (c) => {
+      const langs = MANGADEX_LANGS.filter((l) => l.code !== 'en');
+      const moved = (await c.query<{ id: string; lang: string }>(
+        `WITH m AS (SELECT * FROM unnest($1::text[], $2::text[]) AS m(code, md))
+         UPDATE lib_series s SET source_id = 'mangadex-' || lower(s.lang)
+           FROM m
+          WHERE s.source_id = 'mangadex' AND s.lang = m.code AND s.deleted_at IS NULL AND s.merged_into IS NULL
+            AND EXISTS (SELECT 1 FROM series_listing l
+                         WHERE l.series_id = s.id AND l.source_id = 'mangadex'
+                           AND lower(l.chosen->>'lang') IN (lower(m.code), lower(m.md)))
+         RETURNING s.id, s.lang`,
+        [langs.map((l) => l.code), langs.map((l) => l.md)],
+      )).rows;
+      if (!moved.length) return;
+      const ids = moved.map((r) => r.id);
+      await c.query(
+        `DELETE FROM series_sources ss USING lib_series s
+          WHERE ss.series_id = s.id AND s.id = ANY($1::text[]) AND ss.source_id = s.source_id`, [ids]);
+      await c.query(`DELETE FROM series_listing WHERE series_id = ANY($1::text[]) AND source_id = 'mangadex'`, [ids]);
+      await c.query(REFILE_FAILURES_SQL, [ids]);
+      await c.query(
+        `UPDATE server_settings
+            SET mangadex_langs = (SELECT COALESCE(jsonb_agg(DISTINCT v), '[]'::jsonb)
+                                    FROM (SELECT jsonb_array_elements_text(mangadex_langs) AS v
+                                          UNION SELECT unnest($1::text[])) x)
+          WHERE id = 1`,
+        [[...new Set(moved.map((r) => r.lang))]],
+      );
+    },
+  },
 ];
 
 export async function migrate(): Promise<void> {

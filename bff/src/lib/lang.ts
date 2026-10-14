@@ -94,6 +94,22 @@ export function mdLang(app: string | null | undefined): string | null {
 }
 
 /**
+ * A code as the language of a SOURCE (v0.62.0, a site added by address): the base language, except where scanlations
+ * come in editions the app tells apart -- Spanish (es, es-419), Portuguese (pt, pt-BR) and Chinese (zh-Hans, zh-Hant).
+ * A page says "en-US", "es-MX" or "zh-TW"; kept as written, "en-US" would never equal a series' "en" where codes
+ * compare exactly (a work with two editions in one base language). Null as canonLang is.
+ */
+export function editionLang(code: string | null | undefined): string | null {
+  const c = canonLang(code);
+  if (!c) return null;
+  const loc = new Intl.Locale(c);
+  if (loc.language === 'es') return loc.region && loc.region !== 'ES' ? 'es-419' : 'es';
+  if (loc.language === 'pt') return loc.region === 'BR' ? 'pt-BR' : 'pt';
+  if (loc.language === 'zh') return loc.maximize().script === 'Hant' ? 'zh-Hant' : 'zh-Hans';
+  return loc.language;
+}
+
+/**
  * A language as a short label: "ES-419", "PT-BR", "ZH-HANT". For text that is never translated -- folder names,
  * "MangaDex (ES-419)", Komga titles -- so it is the code itself, upper-cased, and reads the same in every app
  * language. Empty for no single language.

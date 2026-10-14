@@ -3,7 +3,9 @@
 // Since v0.49.0 every copy carries its own title. Three groups' "Chapter 5" are versions of one chapter; Webtoons'
 // "E7 - 315-317" and "Ee7 - 318-320", both numbered 7 by the extension, are two different posts. The titles are
 // what tell the two apart, so the sheet shows them -- and says so -- only when they differ.
-import type { VersionCopy } from './types';
+import type { OtherLanguage, VersionCopy } from './types';
+import { t as tr } from './i18n';
+import { activeLocale, languageName } from './format';
 
 /** A title as compared: without the extension's " (ch. N)" and the ♫ some sources append, case and spacing folded. */
 export function normCopyTitle(t: string | null | undefined): string {
@@ -37,4 +39,24 @@ export function postsShareNumber(copies: ReadonlyArray<Pick<VersionCopy, 'title'
     if (had === undefined) seen.set(who, t);
   }
   return false;
+}
+
+/** Names as the reader's language joins them: "Spanish and Portuguese". */
+function joined(names: string[]): string {
+  try { return new Intl.ListFormat(activeLocale(), { type: 'conjunction' }).format(names); } catch { return names.join(', '); }
+}
+
+/**
+ * The wrong-language notice's words (v0.62.0, components/LanguageNotice.tsx): how many chapters here are in which other
+ * language, and the series' language, which Fetch again takes them in.
+ */
+export function otherLanguageWords(o: OtherLanguage): { heading: string; body: string; key: string } {
+  const n = o.bookIds.length;
+  const langs = joined(o.langs.map(languageName));
+  const series = languageName(o.series);
+  return {
+    heading: n === 1 ? tr('1 chapter here is in {language}', { language: langs }) : tr('{n} chapters here are in {language}', { n, language: langs }),
+    body: tr('The series is in {language}, and each of them has come out in {language} too.', { language: series }),
+    key: n === 1 ? tr('Fetch it again in {language}', { language: series }) : tr('Fetch them again in {language}', { language: series }),
+  };
 }

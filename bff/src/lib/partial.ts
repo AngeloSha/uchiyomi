@@ -152,7 +152,8 @@ export async function restampBook(bookId: string, abs: string, missing0: number[
   const params: any[] = [bookId, missing0.length ? missing0.map((i) => i + 1) : null, pages, size];
   if (via) {
     params.push(via.source, via.scanlator ?? null);
-    set.push(`source_id = $${params.length - 1}`, `scanlator = $${params.length}`);
+    // In its source's language, as any file that lands (lib/library.ts setBookMeta): the row's kept language goes.
+    set.push(`source_id = $${params.length - 1}`, `scanlator = $${params.length}`, 'lang = NULL');
     // The post the new file was written from (#116): a group upgrade or a completion from another copy is a
     // landing too, and left alone the stamp named the REPLACED copy -- which the versions view trusts first
     // (routes/catalog.ts onDisk) and every later remap takes as proof of which post the file is. Reintroduce by

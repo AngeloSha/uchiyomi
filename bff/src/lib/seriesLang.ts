@@ -86,31 +86,41 @@ export function sourceLanguage(id: string): string | 'any' {
 }
 
 /**
- * The same-language rule (#123) on a series' facts already read: a source in the series' language passes (exactly,
- * when the work holds a same-base edition), and so does one that serves any. For a caller that holds the facts
- * rather than the id -- autoFollow's judgeCandidate; everything else filters with followGuard.
+ * Whether a source in every language ('any': Suwayomi's "all", "other", several codes) may be followed (v0.62.0). An
+ * explicit action may -- the manual follow, Make main, a merge, an admin who looked at it -- and that stays the
+ * default. Every automatic path passes `mixed: false`: such a source lists one copy per translation of each number,
+ * and nothing says which copy is in which language (lib/copyLanguage.ts can only keep to the group on disk), so a
+ * series following one automatically took whichever translation a number had, the report v0.62.0 answers.
  */
-export function languageFits(sourceId: string, series: Pick<SeriesLang, 'lang' | 'sameBaseSibling'>): boolean {
+export interface GuardOpts { mixed?: boolean }
+
+/**
+ * The same-language rule (#123) on a series' facts already read: a source in the series' language passes (exactly,
+ * when the work holds a same-base edition), and so does one that serves any unless `mixed: false`. For a caller that
+ * holds the facts rather than the id -- autoFollow's judgeCandidate; everything else filters with followGuard.
+ */
+export function languageFits(sourceId: string, series: Pick<SeriesLang, 'lang' | 'sameBaseSibling'>, o: GuardOpts = {}): boolean {
   const lang = sourceLanguage(sourceId);
-  return lang === 'any' || sameLanguage(series.lang, lang, { exact: series.sameBaseSibling });
+  if (lang === 'any') return o.mixed !== false;
+  return sameLanguage(series.lang, lang, { exact: series.sameBaseSibling });
 }
 
 /**
- * Whether a source may be followed for this series without a person deciding: the same-language guard, built once
- * per series and applied as a filter over candidates. The series' own main source always passes: it is what the
- * series is, whatever either declares -- a MangaDex title that came in through the English adapter's Spanish
- * fallback is stated Spanish and still follows that adapter.
+ * Whether a source may be followed for this series: the same-language guard, built once per series and applied as a
+ * filter over candidates. The series' own main source always passes: it is what the series is, whatever either
+ * declares -- a series added from a source in every language follows that source. `mixed`: GuardOpts.
  */
-export async function followGuard(seriesId: string): Promise<(sourceId: string) => boolean> {
-  return guardOf(await readSeries(seriesId, q));
+export async function followGuard(seriesId: string, o: GuardOpts = {}): Promise<(sourceId: string) => boolean> {
+  return guardOf(await readSeries(seriesId, q), o);
 }
 
-const guardOf = (s: SeriesLang & { sourceId: string | null }) => (sourceId: string) => sourceId === s.sourceId || languageFits(sourceId, s);
+const guardOf = (s: SeriesLang & { sourceId: string | null }, o: GuardOpts = {}) =>
+  (sourceId: string) => sourceId === s.sourceId || languageFits(sourceId, s, o);
 
 /** followGuard for many series at once, in one read: each series' guard by its id (absent: not a series). */
-export async function followGuards(seriesIds: readonly string[]): Promise<Map<string, (sourceId: string) => boolean>> {
+export async function followGuards(seriesIds: readonly string[], o: GuardOpts = {}): Promise<Map<string, (sourceId: string) => boolean>> {
   if (!seriesIds.length) return new Map();
-  return new Map((await readLangRows(seriesIds, q)).map((r) => [r.id, guardOf(factsOf(r))]));
+  return new Map((await readLangRows(seriesIds, q)).map((r) => [r.id, guardOf(factsOf(r), o)]));
 }
 
 /**

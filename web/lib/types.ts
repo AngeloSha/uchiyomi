@@ -468,10 +468,30 @@ export interface VersionCopy {
   onDisk: boolean;
   /** The copy's own title (v0.49.0): posts that share a number are told apart by it (lib/versions.ts). */
   title?: string | null;
+  /**
+   * v0.62.0: the copy's language when it is known to be another than the series' -- a copy the server never takes.
+   * Absent from an older server.
+   */
+  otherLanguage?: string | null;
+}
+
+/**
+ * v0.62.0: the chapters on the server known to be in another language than the series', each of which a copy in the
+ * series' language can replace -- the notice above the chapter list (components/LanguageNotice.tsx).
+ */
+export interface OtherLanguage {
+  /** The series' language: the one they are fetched again in. */
+  series: string;
+  /** The languages they are in, most chapters first. */
+  langs: string[];
+  /** The chapters, for Fetch again (POST /api/admin/series/:id/chapters/refetch). */
+  bookIds: string[];
 }
 
 export interface Versions {
   checkedAt: string | null;
+  /** v0.62.0; absent from an older server. */
+  otherLanguage?: OtherLanguage | null;
   content: { number: number; copies: VersionCopy[] }[];
 }
 
