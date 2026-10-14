@@ -1,6 +1,21 @@
 # Changelog
 
-## Unreleased
+## v0.67.0 — 2026-10-14
+
+**On a phone, a series opens on its cover.** The cover fills the top of the page edge to edge — a phone held upright is
+the cover's own shape — with the title on its lower edge and the reading button right under it. A computer's series page
+is unchanged.
+
+### A series opens on its cover
+
+- **The cover is the hero**: sharp, the screen's width, drifting slowly closer (still under **Reduce effects**). The wide
+  banner showed only a slice of its middle on a phone, in a strip a third of this height.
+- **The title sits on the art**: the status, the title and its details are on the cover's foot, where they had been
+  squeezed beside a small cover in up to four lines.
+- **A clean bar when you scroll**: clear over the art, then glass with the title once you scroll past it. Before, the
+  reading button showed through the bar as it scrolled under it.
+- **Continue comes first**: under the art, the reading button and the four keys, then the ratings and the sources. The
+  genres are one row you swipe.
 
 ### The Cloudflare solver
 
@@ -8,8 +23,36 @@
   searches with a form post, and trawl 1.7.0 refused every one (*body requires a Content-Type header to be set*), so a
   site like ManhuaUS failed its Popular and Search through it. 1.8.0 takes them, and the trawl service in
   [the Cloudflare solver](docs/CONFIGURATION.md#the-cloudflare-solver) now pins it.
-- **Upgrading:** if you run trawl, move its image to `ghcr.io/germondai/trawl:1.8.0` and recreate its container. No
-  setting changed, and neither FlareSolverr nor Byparr is affected.
+
+### Upgrading
+
+- Nothing to do in Uchiyomi itself.
+- **If you run trawl**, move its image to `ghcr.io/germondai/trawl:1.8.0` and recreate its container. No setting
+  changed, and neither FlareSolverr nor Byparr is affected.
+
+## v0.66.0 — 2026-10-14
+
+**Make Uchiyomi look the way you like.** Home's rails can go in the order you read them, and the background can be
+softer than true black. True black stays the default and looks exactly as before.
+
+### Home in your order, and two softer backgrounds
+
+- **Customize**, at the end of Home's greeting line, lists Home's rails with arrows to move each one and a switch to
+  hide it. Home changes as you go, and the arrangement is saved to your account, so your other devices open the same
+  Home. **Reset** brings back the original order.
+- **Your lists move as one rail.** Which lists Home shows is still chosen on **Lists**; the sheet's **Choose lists**
+  takes you there.
+- **A hidden rail isn't loaded at all.**
+- **Background**, in **Profile → Settings → Appearance**, offers **OLED black** (the default), **Graphite**, a soft
+  charcoal, and **Midnight**, a deep blue, for screens where true black feels harsh. The whole app follows: the page,
+  cards, sheets, the sidebar, and a phone browser's own bar.
+- **It is saved to your account** like the accent colour, and applied before the first frame, so a reload never
+  flashes black first. The sign-in screen stays black.
+
+### Upgrading
+
+- Nothing to do. For scripts: `/api/settings` carries two more keys the app writes, `homeRails` and `tone`
+  ([docs/api.md](docs/api.md)).
 
 ## v0.65.1 — 2026-10-14
 

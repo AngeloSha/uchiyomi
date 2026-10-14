@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { incognitoOf } from '../lib/incognito';
+import { HOME_RAILS } from '../lib/homeRails';
 
 process.env.NEXT_PUBLIC_API_BASE = '';
 
@@ -80,15 +81,15 @@ test('the shell keeps the switch for the reader, and says it is on above every p
 test("Home draws Pick back up and Hidden gems only when they hold something, in the owner's order", () => {
   const home = code(read('app/page.tsx'));
   // Reintroduce an unconditional section: an older server sends neither, and Home shows an empty rail.
-  assert.match(home, /\{\(data\?\.pickUp\?\.length \?\? 0\) > 0 && \(\s*<section className="pt-8" data-home-pickup>/);
-  assert.match(home, /\{\(data\?\.gems\?\.length \?\? 0\) > 0 && \(\s*<section className="pt-8" data-home-gems>/);
-  const at = (s: string) => { const i = home.indexOf(s); assert.ok(i > 0, `not found: ${s}`); return i; };
-  const order = [
-    at("tr('Keep reading')"), at("tr('For you')"), at("tr('New episodes')"), at("tr('Your favorites')"), at('<CollectionRails />'),
-    at("tr('Pick back up')"), at("tr('Recently added')"), at("tr('Most popular in your library')"), at("tr('Hidden gems')"),
-    at("tr('Top 10 in your library')"),
-  ];
-  assert.deepEqual([...order].sort((a, b) => a - b), order, 'the rails are out of the owner\'s order');
+  assert.match(home, /case 'pickUp':[^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*return \(data\?\.pickUp\?\.length \?\? 0\) > 0 && \(\s*<section className="pt-8" data-home-pickup>/);
+  assert.match(home, /case 'gems':[^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*return \(data\?\.gems\?\.length \?\? 0\) > 0 && \(\s*<section className="pt-8" data-home-gems>/);
+  // The owner's order (UI refresh, phase 3): Home draws its rails in the reader's own order now, and the default -- the
+  // order everybody gets who never opens Customize -- is lib/homeRails.ts HOME_RAILS, where this pin moved. Reorder the
+  // registry and this fails; homeRails.test.ts pins the whole of it.
+  const order = HOME_RAILS.map((r) => r.key);
+  const at = (k: string) => { const i = order.indexOf(k as never); assert.ok(i >= 0, `not a rail: ${k}`); return i; };
+  const owner = ['continue', 'forYou', 'newEpisodes', 'favorites', 'lists', 'pickUp', 'recentlyAdded', 'popular', 'gems', 'top10'].map(at);
+  assert.deepEqual([...owner].sort((a, b) => a - b), owner, 'the rails are out of the owner\'s order');
   // Pick back up says when the reading stopped; a gem says AniList's score; See all is the Library's own answer.
   assert.match(home, /<ContinueCard key=\{b\.id\} book=\{b\} note=\{b\.stoppedAt \? tr\('Read \{when\}', \{ when: relativeTime\(b\.stoppedAt\) \}\) : undefined\} \/>/);
   assert.match(home, /<SeriesCard key=\{s\.id\} series=\{s\} note=\{sortValue\(s, 'score'\)\} \/>/);

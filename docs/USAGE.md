@@ -136,6 +136,17 @@ pointer on it, or Tab into it, and it opens with their names. The top bar holds 
 profile; **Check for new chapters** is a key on **Updates**. On a phone the bar along the bottom has **Home**,
 **Library**, **Search**, **Discover**, **Offline** and **You**.
 
+**Customize Home** (since v0.66.0): the key at the end of the greeting's line lists Home's rails — *Keep reading*,
+*For you*, *New episodes*, your lists and the rest — each with arrows to move it up or down and a switch to hide it.
+Home follows at once, and the arrangement is saved to your account, so your other devices open the same Home; **Reset**
+puts the original order back. Your lists move together as one rail, and which lists those are is still chosen on
+**Lists** (the sheet's **Choose lists** goes there). A hidden rail isn't fetched at all.
+
+**Background** (since v0.66.0, **Profile → Settings → Appearance**): **OLED black**, the default and true black, or
+**Graphite**, a soft charcoal, or **Midnight**, a deep blue, for screens where true black is harsh. The whole app follows,
+the page, cards, sheets, the sidebar and a phone browser's own bar included, and nothing else about the look changes.
+It is saved to your account like the accent colour; the sign-in screen stays black.
+
 **Lists** are your own shelves — *Plan to read*, *Reading now*, anything. Make one under **Lists** with **New**, and
 add series to it from a series page with the **List** key under the reading button (*Add to list*). A list shows its series with the Library's covers
 (since v0.55.7, [#164](https://github.com/AngeloSha/uchiyomi/discussions/164)): the unread count, the **NEW** ribbon and

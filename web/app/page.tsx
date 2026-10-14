@@ -1,7 +1,7 @@
 'use client';
 import { ScrollRail, CARD_RAIL } from '@/components/ScrollRail';
 import Link from 'next/link';
-import { useEffect } from 'react';
+import { Fragment, ReactNode, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
 import { HomePayload, Series } from '@/lib/types';
@@ -25,6 +25,8 @@ import { sortValue } from '@/lib/sortValue';
 import { relativeTime } from '@/lib/format';
 import { homeIdsOf, type ListRow } from '@/lib/lists';
 import { useListsAll } from '@/components/SaveListDialog';
+import { HOME_RAIL_KEYS, shownRails, type HomeRailKey } from '@/lib/homeRails';
+import { HomeCustomize } from '@/components/HomeCustomize';
 
 type CollectionRow = ListRow;
 
@@ -91,9 +93,13 @@ export default function HomePage() {
   const qc = useQueryClient();
   // A second reason for the 18+ reveal to render: a genre or source on the admin's 18+ filter.
   const adultFilter = useAdultFilterConfigured();
+  // The reader's rails, in their order (lib/homeRails.ts; Customize below the hero). A hidden rail is not drawn, and the
+  // three that have a request of their own do not ask it.
+  const shown = shownRails(user?.settings?.homeRails, HOME_RAIL_KEYS);
+  const on = (k: HomeRailKey) => shown.includes(k);
   const { data, isLoading } = useQuery({ queryKey: ['home'], queryFn: () => api<HomePayload>('/api/home') });
-  const { data: foryou } = useQuery({ queryKey: ['foryou'], queryFn: () => api<{ genres: string[]; content: Series[] }>('/api/foryou'), staleTime: 600000 });
-  const { data: trending } = useQuery({ queryKey: ['trending'], queryFn: () => api<{ content: Series[] }>('/api/trending'), staleTime: 300000 });
+  const { data: foryou } = useQuery({ queryKey: ['foryou'], queryFn: () => api<{ genres: string[]; content: Series[] }>('/api/foryou'), staleTime: 600000, enabled: on('forYou') });
+  const { data: trending } = useQuery({ queryKey: ['trending'], queryFn: () => api<{ content: Series[] }>('/api/trending'), staleTime: 300000, enabled: on('top10') });
   const { data: featured, isPending: featuredPending } = useQuery({ queryKey: ['featured'], queryFn: () => api<{ content: Series[] }>('/api/featured'), staleTime: 600000 });
 
   // "Because you read X" — seed a named recommendation rail from what you're currently reading (else a top favorite)
@@ -105,7 +111,7 @@ export default function HomePage() {
   const { data: because } = useQuery({
     queryKey: ['because', seed?.id ?? 'none'],
     queryFn: () => api<{ content: Series[] }>(`/api/series/${seed!.id}/similar`),
-    enabled: !!seed?.id,
+    enabled: !!seed?.id && on('because'),
     staleTime: 600000,
   });
 
@@ -124,6 +130,134 @@ export default function HomePage() {
   useEffect(() => () => clearCover(), []);
   // Home's art starts at the top of the window: the desktop top bar is see-through over it (lib/overArt.ts).
   useArtUnderChrome();
+
+  // Home's rails by key (lib/homeRails.ts), each drawn only when it has something to show. The reader's arrangement puts
+  // them in order below; HOME_RAILS holds the owner's order, which is the default.
+  const rail = (key: HomeRailKey): ReactNode => {
+    switch (key) {
+      case 'continue':
+        // Keep reading. Every rail says pt-8; the list below gives the first one shown pt-4, whichever it is.
+        return (data?.onDeck?.length ?? 0) > 0 && (
+          <section className="pt-8">
+            <SectionTitle>{tr('Keep reading')}</SectionTitle>
+            <ScrollRail label={tr('Keep reading')} className={CARD_RAIL}>
+              {data!.onDeck.map((b, i) => <ContinueCard key={b.id} book={b} eager={i < 4} />)}
+            </ScrollRail>
+          </section>
+        );
+      case 'forYou':
+        // For you
+        return (foryou?.content?.length ?? 0) > 0 && (
+          <section className="pt-8">
+            <SectionTitle action={<Link href="/library" className="text-xs text-accent">{tr('Library')}</Link>}>{tr('For you')}</SectionTitle>
+            <ScrollRail label={tr('For you')} className={CARD_RAIL}>
+              {foryou!.content.map((s) => <SeriesCard key={s.id} series={s} />)}
+            </ScrollRail>
+          </section>
+        );
+      case 'because':
+        // Because you read X (the series being read, else a favourite)
+        return seed && (because?.content?.length ?? 0) > 0 && (
+          <section className="pt-8">
+            <SectionTitle>{tr('Because you read {title}', { title: `⁨${seed.name}⁩` })}</SectionTitle>
+            <ScrollRail label={tr('Because you read {title}', { title: `⁨${seed.name}⁩` })} className={CARD_RAIL}>
+              {because!.content.map((s) => <SeriesCard key={s.id} series={s} />)}
+            </ScrollRail>
+          </section>
+        );
+      case 'newEpisodes':
+        // New episodes
+        return (
+          <section className="pt-8">
+            <SectionTitle action={<Link href="/library?sort=updated" className="text-xs text-accent">{tr('See all')}</Link>}>{tr('New episodes')}</SectionTitle>
+            {isLoading ? <RailSkeleton /> : (
+              <ScrollRail label={tr('New episodes')} className={CARD_RAIL}>
+                {(data?.updated ?? []).map((s, i) => <SeriesCard key={s.id} series={s} eager={i < 8} />)}
+              </ScrollRail>
+            )}
+          </section>
+        );
+      case 'favorites':
+        // Favorites
+        return (data?.favorites?.length ?? 0) > 0 && (
+          <section className="pt-8">
+            <SectionTitle action={<Link href="/profile" className="text-xs text-accent">{tr('Manage')}</Link>}>{tr('Your favorites')}</SectionTitle>
+            <ScrollRail label={tr('Your favorites')} className={CARD_RAIL}>
+              {data!.favorites.map((s) => <SeriesCard key={s.id} series={s} />)}
+            </ScrollRail>
+          </section>
+        );
+      case 'lists':
+        // Your lists: one rail per list the Lists page puts on Home, in its order there.
+        return <CollectionRails />;
+      case 'pickUp':
+        // Pick back up (v0.61.0): series put down three months to two years ago, each at its next chapter and saying
+        // when. Only with something in it, like every rail an older server does not send.
+        return (data?.pickUp?.length ?? 0) > 0 && (
+          <section className="pt-8" data-home-pickup>
+            <SectionTitle>{tr('Pick back up')}</SectionTitle>
+            <ScrollRail label={tr('Pick back up')} className={CARD_RAIL}>
+              {data!.pickUp!.map((b) => (
+                <ContinueCard key={b.id} book={b} note={b.stoppedAt ? tr('Read {when}', { when: relativeTime(b.stoppedAt) }) : undefined} />
+              ))}
+            </ScrollRail>
+          </section>
+        );
+      case 'recentlyAdded':
+        // Recently added
+        return (
+          <section className="pt-8">
+            <SectionTitle action={<Link href="/library?sort=new" className="text-xs text-accent">{tr('See all')}</Link>}>{tr('Recently added')}</SectionTitle>
+            {isLoading ? <RailSkeleton /> : (
+              <ScrollRail label={tr('Recently added')} className={CARD_RAIL}>
+                {(data?.new ?? []).map((s) => <SeriesCard key={s.id} series={s} />)}
+              </ScrollRail>
+            )}
+          </section>
+        );
+      case 'popular':
+        // Most popular in your library (v0.58.0): the viewer's series by AniList popularity, each saying AniList's
+        // score. Only with something in it -- a server older than v0.58.0 sends no `popular`, and a library with no
+        // AniList numbers yet has nothing to rank -- so it never shows an empty rail or a skeleton that turns into
+        // nothing.
+        return (data?.popular?.length ?? 0) > 0 && (
+          <section className="pt-8">
+            <SectionTitle action={<Link href="/library?sort=popular" className="text-xs text-accent">{tr('See all')}</Link>}>{tr('Most popular in your library')}</SectionTitle>
+            <ScrollRail label={tr('Most popular in your library')} className={CARD_RAIL}>
+              {data!.popular!.map((s) => <SeriesCard key={s.id} series={s} note={sortValue(s, 'score')} />)}
+            </ScrollRail>
+          </section>
+        );
+      case 'gems':
+        // Hidden gems (v0.61.0): well-rated series nobody here has opened, each saying AniList's score. Only with
+        // something in it. See all is the Library's own answer to the same question, best first and not started.
+        return (data?.gems?.length ?? 0) > 0 && (
+          <section className="pt-8" data-home-gems>
+            <SectionTitle action={<Link href="/library?sort=score&read=UNREAD" className="text-xs text-accent">{tr('See all')}</Link>}>{tr('Hidden gems')}</SectionTitle>
+            <ScrollRail label={tr('Hidden gems')} className={CARD_RAIL}>
+              {data!.gems!.map((s) => <SeriesCard key={s.id} series={s} note={sortValue(s, 'score')} />)}
+            </ScrollRail>
+          </section>
+        );
+      case 'top10':
+        // Trending across accounts — Netflix-style Top 10 with big rank numerals
+        return (trending?.content?.length ?? 0) > 0 && (
+          <section className="pt-8">
+            <SectionTitle>{tr('Top 10 in your library')}</SectionTitle>
+            <ScrollRail label={tr('Top 10 in your library')} className={CARD_RAIL}>
+              {trending!.content.slice(0, 10).map((s, i) => (
+                <div key={s.id} className="flex shrink-0 items-end [scroll-snap-align:start]">
+                  <span aria-hidden className="rank-numeral -me-5 mb-6 select-none font-display text-[88px] font-black leading-[0.78]">
+                    {i + 1}
+                  </span>
+                  <SeriesCard series={s} />
+                </div>
+              ))}
+            </ScrollRail>
+          </section>
+        );
+    }
+  };
 
   return (
     <PullToRefresh onRefresh={onRefresh}>
@@ -172,128 +306,21 @@ export default function HomePage() {
           so it is where the way back has to be. */}
       {/* px-4 at every width (UI refresh): the section titles and their rails sit 1rem in, and the greeting sat 4 px
           to the right of them on a phone and 16 px to the left on a desktop. */}
+      {/* Look settings (UI refresh): Customize, the reader's own order and choice of rails, at the end of the same line. */}
       <div className="flex items-center justify-between gap-3 px-4 pt-6">
         <p className="min-w-0 text-sm text-fog-400 lg:text-base">
           {greeting(user?.displayName && user.displayName !== 'me' ? user.displayName : undefined)}
         </p>
-        <AdultToggle className="shrink-0" alsoWhen={adultFilter} />
+        <div className="flex shrink-0 items-center gap-2">
+          <AdultToggle className="shrink-0" alsoWhen={adultFilter} />
+          <HomeCustomize />
+        </div>
       </div>
 
-      {/* Keep reading */}
-      {(data?.onDeck?.length ?? 0) > 0 && (
-        <section className="pt-4">
-          <SectionTitle>{tr('Keep reading')}</SectionTitle>
-          <ScrollRail label={tr('Keep reading')} className={CARD_RAIL}>
-            {data!.onDeck.map((b, i) => <ContinueCard key={b.id} book={b} eager={i < 4} />)}
-          </ScrollRail>
-        </section>
-      )}
-
-      {/* For you */}
-      {(foryou?.content?.length ?? 0) > 0 && (
-        <section className="pt-8">
-          <SectionTitle action={<Link href="/library" className="text-xs text-accent">{tr('Library')}</Link>}>{tr('For you')}</SectionTitle>
-          <ScrollRail label={tr('For you')} className={CARD_RAIL}>
-            {foryou!.content.map((s) => <SeriesCard key={s.id} series={s} />)}
-          </ScrollRail>
-        </section>
-      )}
-
-      {/* Because you read X */}
-      {seed && (because?.content?.length ?? 0) > 0 && (
-        <section className="pt-8">
-          <SectionTitle>{tr('Because you read {title}', { title: `⁨${seed.name}⁩` })}</SectionTitle>
-          <ScrollRail label={tr('Because you read {title}', { title: `⁨${seed.name}⁩` })} className={CARD_RAIL}>
-            {because!.content.map((s) => <SeriesCard key={s.id} series={s} />)}
-          </ScrollRail>
-        </section>
-      )}
-
-      {/* New episodes */}
-      <section className="pt-8">
-        <SectionTitle action={<Link href="/library?sort=updated" className="text-xs text-accent">{tr('See all')}</Link>}>{tr('New episodes')}</SectionTitle>
-        {isLoading ? <RailSkeleton /> : (
-          <ScrollRail label={tr('New episodes')} className={CARD_RAIL}>
-            {(data?.updated ?? []).map((s, i) => <SeriesCard key={s.id} series={s} eager={i < 8} />)}
-          </ScrollRail>
-        )}
-      </section>
-
-      {/* Favorites */}
-      {(data?.favorites?.length ?? 0) > 0 && (
-        <section className="pt-8">
-          <SectionTitle action={<Link href="/profile" className="text-xs text-accent">{tr('Manage')}</Link>}>{tr('Your favorites')}</SectionTitle>
-          <ScrollRail label={tr('Your favorites')} className={CARD_RAIL}>
-            {data!.favorites.map((s) => <SeriesCard key={s.id} series={s} />)}
-          </ScrollRail>
-        </section>
-      )}
-
-      {/* Your collections */}
-      <CollectionRails />
-
-      {/* Pick back up (v0.61.0): series put down three months to two years ago, each at its next chapter and saying when.
-          Only with something in it, like every rail an older server does not send. */}
-      {(data?.pickUp?.length ?? 0) > 0 && (
-        <section className="pt-8" data-home-pickup>
-          <SectionTitle>{tr('Pick back up')}</SectionTitle>
-          <ScrollRail label={tr('Pick back up')} className={CARD_RAIL}>
-            {data!.pickUp!.map((b) => (
-              <ContinueCard key={b.id} book={b} note={b.stoppedAt ? tr('Read {when}', { when: relativeTime(b.stoppedAt) }) : undefined} />
-            ))}
-          </ScrollRail>
-        </section>
-      )}
-
-      {/* Recently added */}
-      <section className="pt-8">
-        <SectionTitle action={<Link href="/library?sort=new" className="text-xs text-accent">{tr('See all')}</Link>}>{tr('Recently added')}</SectionTitle>
-        {isLoading ? <RailSkeleton /> : (
-          <ScrollRail label={tr('Recently added')} className={CARD_RAIL}>
-            {(data?.new ?? []).map((s) => <SeriesCard key={s.id} series={s} />)}
-          </ScrollRail>
-        )}
-      </section>
-
-      {/* Most popular in your library (v0.58.0): the viewer's series by AniList popularity, each saying AniList's score.
-          Only with something in it -- a server older than v0.58.0 sends no `popular`, and a library with no AniList
-          numbers yet has nothing to rank -- so it never shows an empty rail or a skeleton that turns into nothing. */}
-      {(data?.popular?.length ?? 0) > 0 && (
-        <section className="pt-8">
-          <SectionTitle action={<Link href="/library?sort=popular" className="text-xs text-accent">{tr('See all')}</Link>}>{tr('Most popular in your library')}</SectionTitle>
-          <ScrollRail label={tr('Most popular in your library')} className={CARD_RAIL}>
-            {data!.popular!.map((s) => <SeriesCard key={s.id} series={s} note={sortValue(s, 'score')} />)}
-          </ScrollRail>
-        </section>
-      )}
-
-      {/* Hidden gems (v0.61.0): well-rated series nobody here has opened, each saying AniList's score. Only with something
-          in it. See all is the Library's own answer to the same question, best first and not started. */}
-      {(data?.gems?.length ?? 0) > 0 && (
-        <section className="pt-8" data-home-gems>
-          <SectionTitle action={<Link href="/library?sort=score&read=UNREAD" className="text-xs text-accent">{tr('See all')}</Link>}>{tr('Hidden gems')}</SectionTitle>
-          <ScrollRail label={tr('Hidden gems')} className={CARD_RAIL}>
-            {data!.gems!.map((s) => <SeriesCard key={s.id} series={s} note={sortValue(s, 'score')} />)}
-          </ScrollRail>
-        </section>
-      )}
-
-      {/* Trending across accounts — Netflix-style Top 10 with big rank numerals */}
-      {(trending?.content?.length ?? 0) > 0 && (
-        <section className="pt-8">
-          <SectionTitle>{tr('Top 10 in your library')}</SectionTitle>
-          <ScrollRail label={tr('Top 10 in your library')} className={CARD_RAIL}>
-            {trending!.content.slice(0, 10).map((s, i) => (
-              <div key={s.id} className="flex shrink-0 items-end [scroll-snap-align:start]">
-                <span aria-hidden className="rank-numeral -me-5 mb-6 select-none font-display text-[88px] font-black leading-[0.78]">
-                  {i + 1}
-                </span>
-                <SeriesCard series={s} />
-              </div>
-            ))}
-          </ScrollRail>
-        </section>
-      )}
+      {/* The rails, in the reader's order (Customize, above). Whichever comes first sits closer to the greeting. */}
+      <div className="[&>section:first-child]:pt-4">
+        {shown.map((k) => <Fragment key={k}>{rail(k)}</Fragment>)}
+      </div>
     </div>
     </PullToRefresh>
   );

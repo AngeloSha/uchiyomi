@@ -1472,7 +1472,11 @@ sorts by `popularity`, `score`, `rating`, `chapters` and `lastRead` (see the Ope
   also takes `incognito: true` for a chapter read while it was on and sent after it went off (the offline outbox).
   When a series is next pushed with it off, the tracker is told the series' real highest chapter and catches up.
 
-The earlier `reader` object (including `coverEdges`) and `listSorts` map remain additive keys on the same object.
+The earlier `reader` object (including `coverEdges`) and `listSorts` map remain additive keys on the same object, and so
+do two of v0.66.0's, kept as written and read by the web app alone: `homeRails: {order: string[], hidden: string[]} | null`,
+Home's rails as the reader arranged them (keys such as `continue`, `newEpisodes`, `lists`, `top10`; missing or null is
+the default order, and the app puts a rail it does not find in `order` where the default puts it), and `tone: 'oled' |
+'graphite' | 'midnight'`, the background (anything else is OLED black, the default).
 
 **Reading time** (since v0.61.0). `GET /api/stats/time?days=90&tz=Asia/Kolkata` answers the signed-in reader's own
 reading time, worked out from their page turns (`reading_events`; nothing new is recorded): `{tz, days, week: {ms,

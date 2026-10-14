@@ -127,6 +127,11 @@ const SURFACES = [
   'components/ReaderKeys.tsx',
   'lib/readerKeys.ts',
   'lib/readerPad.ts',
+  // UI refresh, phase 3 (Look settings): Home's Customize key and sheet (squared move keys, Reset, Done) and the words
+  // of the rails and the background tones.
+  'components/HomeCustomize.tsx',
+  'lib/homeRails.ts',
+  'lib/tone.ts',
 ];
 
 /**

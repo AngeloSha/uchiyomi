@@ -90,11 +90,13 @@ sites' terms and your local law.
   per device.
 - **Skips the pages that are not the story** — the scanlator credit page that opens every chapter is found
   by repetition and collapsed into a band you can tap open (or hide entirely, or show everything).
-- **True-black OLED interface**, built for a phone and installable as a PWA.
+- **True-black OLED interface**, or a softer *Graphite* or *Midnight* if you prefer, built for a phone and installable
+  as a PWA.
 - **Offline downloads** — save chapters to the device and read them with no connection at all; with *Keep favorites
   offline* on, your favourites' next unread chapters download to the phone by themselves.
 - **A Home that knows what to read next** — *Keep reading*, *Pick back up* for the series you stopped part-way months
-  ago, *Hidden gems* (well rated on AniList, read by nobody in the house) and *Because you read*.
+  ago, *Hidden gems* (well rated on AniList, read by nobody in the house) and *Because you read*, in the order you
+  choose: **Customize** moves its rails and hides the ones you don't use.
 - **Moments** — star a page and it lands on its own screen as the panel itself, with notes.
 - **Reading Studio & Wrapped** — a year heat-map, chapters by month and weekday, your top series and genres, and
   how long you read: hours, minutes a chapter, by hour of the day and by device.

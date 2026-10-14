@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3796
+    "strings": 3806
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -3799,5 +3799,15 @@
   "New list…": "Nueva lista…",
   "Empty so far — open any series and use “Add to list”.": "Vacía por ahora — abre cualquier serie y usa «Añadir a una lista».",
   "The series stay in your library.": "Las series se quedan en tu biblioteca.",
-  "Columns": "Columnas"
+  "Columns": "Columnas",
+  "Customize": "Personalizar",
+  "Customize Home": "Personalizar Inicio",
+  "Choose which rows Home shows, and in what order.": "Elige qué filas muestra Inicio y en qué orden.",
+  "Because you read…": "Porque leíste…",
+  "Choose lists": "Elegir listas",
+  "No lists chosen": "Ninguna lista elegida",
+  "OLED black": "Negro OLED",
+  "Graphite": "Grafito",
+  "Midnight": "Medianoche",
+  "True black suits OLED screens. Graphite and Midnight are softer on other displays.": "El negro puro va bien en pantallas OLED. Grafito y Medianoche son más suaves en otras pantallas."
 }
