@@ -284,7 +284,7 @@ export default function HomePage() {
       {(featured?.content?.length ?? 0) > 0 ? (
         <HeroCarousel slides={featured!.content} />
       ) : isLoading || featuredPending ? (
-        <div className="skeleton bleed-lg under-topbar under-phone-header h-[62vh] min-h-[440px]" />
+        <div className="skeleton bleed-lg under-topbar under-phone-header h-[min(150vw,82svh)] lg:h-[62vh] lg:min-h-[440px]" />
       ) : (
         <div className="bleed-lg under-topbar under-phone-header relative h-[58vh] min-h-[420px] overflow-hidden lg:h-[70vh]">
           {/* eslint-disable-next-line @next/next/no-img-element */}

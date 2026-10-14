@@ -90,3 +90,31 @@ test('every element anywhere in the app that scrolls opts out of Lenis', () => {
   assert.ok(seen >= 15, `only ${seen} scrolling elements found -- is the tag parser still reading the files?`);
   assert.deepEqual(missing, [], `these scroll without data-lenis-prevent, so the wheel scrolls the page instead:\n${missing.join('\n')}`);
 });
+
+/** Sideways scrollers that rightly take every wheel from Lenis, each with its reason. */
+const OWNS_EVERY_WHEEL: Record<string, string> = {
+  'app/reader/page.tsx': 'the reader is the page: its pages are the scroller in every direction, and Lenis must never move what is behind it',
+};
+
+test('a sideways scroller hands Lenis back the vertical wheel', () => {
+  // v0.67.1: every card rail (ScrollRail) carried the plain data-lenis-prevent, which makes Lenis ignore EVERY wheel over
+  // it. A vertical wheel there went to the browser while Lenis was still easing the page from the wheel before, and the
+  // page stopped dead wherever a card was under the pointer: on Home, a mouse could only scroll with the scrollbar.
+  // `data-lenis-prevent-horizontal` steps Lenis aside for a sideways gesture only. Reintroduce the plain attribute on any
+  // element that scrolls sideways but not up and down: this names it.
+  const files = [...tsxUnder(join(ROOT, 'app')), ...tsxUnder(join(ROOT, 'components'))];
+  let seen = 0;
+  const plain: string[] = [];
+  for (const file of files) {
+    for (const tag of openingTags(readFileSync(file, 'utf8'))) {
+      if (!/\boverflow-x-auto\b/.test(tag) || scrolls(tag)) continue;
+      seen++;
+      if (/data-lenis-prevent(?![-\w])/.test(tag) && !OWNS_EVERY_WHEEL[relative(ROOT, file)]) plain.push(`${relative(ROOT, file)}: ${tag.slice(0, 160)}`);
+    }
+  }
+  assert.ok(seen >= 5, `only ${seen} sideways scrollers found -- is the tag parser still reading the files?`);
+  assert.deepEqual(plain, [], `these take every wheel from Lenis, so the page stops under them:\n${plain.join('\n')}`);
+  // The rails themselves, by name.
+  assert.match(readFileSync(join(ROOT, 'components/ScrollRail.tsx'), 'utf8'), /className=\{`overflow-x-auto \$\{className\}`\} data-lenis-prevent-horizontal>/);
+});
+

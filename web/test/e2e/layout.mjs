@@ -224,6 +224,36 @@ try {
   else if (clearScrolled !== false) bad('top bar @1280 /: still see-through after the page scrolled');
   else ok('top bar @1280 /: see-through over the hero, glass once scrolled');
 
+  // v0.67.1 (the owner: "scrolling with the mouse wheel stops when the pointer is on top of a series"): with the pointer
+  // held where Home's cards pass under it, a steady wheel must carry the page past the rails to its end. The rails had
+  // the plain data-lenis-prevent, which handed Lenis's vertical wheel to the browser mid-ease, and the page stopped dead
+  // at the first rail. Long rails as a real library has them: each rail's cards repeated in the DOM.
+  await page.setViewport({ width: 1366, height: 560 });
+  await page.goto(BASE + '/', { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+  await sleep(1800);
+  const wheelSetup = await page.evaluate(() => {
+    const rails = [...document.querySelectorAll('div')].filter((e) => getComputedStyle(e).overflowX === 'auto' && e.querySelector('a[href*="/series/"]'));
+    for (const rail of rails) { const kids = [...rail.children]; for (let i = 0; i < 10; i++) for (const k of kids) rail.appendChild(k.cloneNode(true)); }
+    window.scrollTo(0, 0);
+    return { rails: rails.length, max: document.documentElement.scrollHeight - innerHeight };
+  });
+  await sleep(900);
+  await page.mouse.move(200, 300);
+  let overRail = 0;
+  for (let i = 0; i < 30; i++) {
+    await page.mouse.wheel({ deltaY: 100 });
+    await sleep(60);
+    // Over a rail = under an element that scrolls sideways, whatever it tells Lenis (the old build said it the wrong way).
+    if (await page.evaluate(() => { for (let e = document.elementFromPoint(200, 300); e; e = e.parentElement) if (getComputedStyle(e).overflowX === 'auto') return true; return false; })) overRail++;
+  }
+  await sleep(1500);
+  const wheeled = await page.evaluate(() => Math.round(scrollY));
+  if (!wheelSetup.rails) bad('wheel @1366 /: no card rail on Home to scroll over');
+  else if (!overRail) bad('wheel @1366 /: the pointer never crossed a rail -- the check proves nothing');
+  else if (wheeled < Math.min(wheelSetup.max, 2000) - 40) bad(`wheel @1366 /: the page stopped at ${wheeled} px of ${wheelSetup.max} with the pointer over a rail`);
+  else ok(`wheel @1366 /: a steady wheel carries the page past ${wheelSetup.rails} rail(s) to ${wheeled} px of ${wheelSetup.max}`);
+  await page.evaluate(() => window.scrollTo(0, 0));
+
   for (const w of [2560, 1920, 1280, 1024, 390]) {
     const mobile = w < 700;
     console.log(`\n  ${w}px`);

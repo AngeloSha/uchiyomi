@@ -73,7 +73,10 @@ export function ScrollRail({ children, className = '', size = 'md', label }: {
 
   return (
     <div className="relative" role={label ? 'group' : undefined} aria-label={label}>
-      <div ref={ref} onScroll={measure} className={`overflow-x-auto ${className}`} data-lenis-prevent>
+      {/* Lenis steps aside for a SIDEWAYS gesture only (a trackpad swipe, Shift+wheel): the plain data-lenis-prevent also
+          handed it a vertical wheel, and with Lenis still easing the page from the wheel before, the page stopped dead
+          wherever a card was under the pointer -- scrolling Home with a mouse took the scrollbar. */}
+      <div ref={ref} onScroll={measure} className={`overflow-x-auto ${className}`} data-lenis-prevent-horizontal>
         {children}
       </div>
       <button type="button" onClick={() => go(-1)} disabled={ends.start} aria-label={tr('Previous')}

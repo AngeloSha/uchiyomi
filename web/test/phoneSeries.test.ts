@@ -7,7 +7,8 @@ import { join } from 'node:path';
 
 const page = readFileSync(join(__dirname, '..', 'app/series/page.tsx'), 'utf8');
 const hero = page.slice(page.indexOf('<div data-series-hero'), page.indexOf('{/* content */}'));
-const cover = page.slice(page.indexOf('function PhoneHeroCover('), page.indexOf('function ChapterEditModal('));
+// The component's code, its comments left out: they say "nothing blurred".
+const cover = readFileSync(join(__dirname, '..', 'components/PhoneHeroCover.tsx'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 
 test('a phone\'s hero is the cover, filling it: the sharp 1600-px copy, cropped to fit, nothing blurred', () => {
   assert.ok(hero && cover, 'the hero or PhoneHeroCover is not where this test looks');
@@ -44,5 +45,22 @@ test('a phone reads the reading button first under the art, and swipes one row o
   // The poster is a desktop's, and a phone does not even fetch it.
   assert.match(left, /className="hidden overflow-hidden rounded-2xl [^"]*lg:block lg:w-full">\s*\{series && wide && <Img/);
   const genres = page.slice(page.indexOf('const Genres = '), page.indexOf('const Summary = '));
-  assert.match(genres, /<div data-lenis-prevent className="-mx-4 flex gap-2 overflow-x-auto [^"]*lg:flex-wrap[^"]*">/);
+  assert.match(genres, /<div data-lenis-prevent-horizontal className="-mx-4 flex gap-2 overflow-x-auto [^"]*lg:flex-wrap[^"]*">/);
 });
+
+test('Home\'s hero on a phone is its slide\'s cover too, filling it; a computer keeps the banner and the strips', () => {
+  // v0.67.1, the owner: the phone hero "still shows the mashup of panels". Reintroduce the strips on a phone (drop the
+  // `wide ?`): this fails.
+  const hero = readFileSync(join(__dirname, '..', 'components/HeroCarousel.tsx'), 'utf8');
+  assert.match(hero, /\{wide \? <HeroArt series=\{cur\} hero className="absolute inset-0" \/> : <PhoneHeroCover id=\{cur\.id\} version=\{cur\.artVersion\} still=\{reduced\} \/>\}/);
+  assert.match(hero, /data-home-hero\s+className="[^"]*\bh-\[min\(150vw,82svh\)\][^"]*lg:h-\[64vh\]/, 'the phone hero is not the cover\'s shape');
+  // A phone fades only the foot, where the title and keys are; the desktop's wash across the art is a computer's.
+  assert.match(hero, /<div className="absolute inset-0 hidden bg-linear-to-r [^"]*lg:block" \/>/);
+  assert.match(hero, /<div className="absolute inset-x-0 bottom-0 h-\[65%\] bg-linear-to-t [^"]*lg:hidden" \/>/);
+  // The next slide's art is warmed before it shows -- on a phone, its cover.
+  assert.match(hero, /im\.src = wide \? backdropSources\([^)]*\)\[0\] : img\.seriesThumb\(nxt\.id, nxt\.artVersion, 1600\);/);
+  // Home's skeleton holds the same height, so the page does not jump when the hero arrives.
+  const home = readFileSync(join(__dirname, '..', 'app/page.tsx'), 'utf8');
+  assert.match(home, /skeleton bleed-lg under-topbar under-phone-header h-\[min\(150vw,82svh\)\] lg:h-\[62vh\]/);
+});
+

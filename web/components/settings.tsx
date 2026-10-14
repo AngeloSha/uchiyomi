@@ -53,7 +53,7 @@ export function SectionIndex({ label, sections, className = '' }: {
   const fewer = useReduceEffects();
   const go = (id: string) => document.getElementById(id)?.scrollIntoView({ block: 'start', behavior: reduced || fewer ? 'auto' : 'smooth' });
   return (
-    <div role="navigation" aria-label={label} data-settings-index data-lenis-prevent
+    <div role="navigation" aria-label={label} data-settings-index data-lenis-prevent-horizontal
       className={`-mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0 [&::-webkit-scrollbar]:hidden ${className}`}>
       {sections.map(([id, title]) => (
         <button key={id} type="button" onClick={() => go(id)} className="btn-key">{title}</button>

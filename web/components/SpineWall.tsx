@@ -38,7 +38,7 @@ export function SpineWall({ ids, label, titles, className = '', contained = fals
     <div className={className}>
       {/* Empty label = the shelf sits under a heading that already says this, e.g. inside HouseBoard. */}
       {label && <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fog-500">{label}</p>}
-      <div className={`-me-4 hide-scrollbar overflow-x-auto pe-4 ${contained ? '' : 'lg:me-0 lg:overflow-visible lg:pe-0'}`} data-lenis-prevent>
+      <div className={`-me-4 hide-scrollbar overflow-x-auto pe-4 ${contained ? '' : 'lg:me-0 lg:overflow-visible lg:pe-0'}`} data-lenis-prevent-horizontal>
         <div className="flex">
           {ids.map((id, i) => (
             <motion.div

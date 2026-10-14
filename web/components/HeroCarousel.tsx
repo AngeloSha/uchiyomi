@@ -7,6 +7,7 @@ import { api, img } from '@/lib/api';
 import { Series } from '@/lib/types';
 import { useWideViewport } from './ui';
 import { HeroArt } from './MosaicArt';
+import { PhoneHeroCover } from './PhoneHeroCover';
 import { backdropSources } from '@/lib/art';
 import { applyCover } from '@/lib/theme';
 import { IcPlay, IcHeart, IcChevronLeft, IcChevronRight } from './icons';
@@ -70,7 +71,8 @@ export function HeroCarousel({ slides }: { slides: Series[] }) {
   useEffect(() => {
     if (n < 2) return;
     const nxt = slides[(i + 1) % n];
-    if (nxt) { const im = new Image(); im.src = backdropSources(nxt.id, nxt.autoHero, { hero: true, wide }, '')[0]; }
+    // A phone's hero is the cover (components/PhoneHeroCover.tsx), so a phone warms the next cover instead.
+    if (nxt) { const im = new Image(); im.src = wide ? backdropSources(nxt.id, nxt.autoHero, { hero: true, wide }, '')[0] : img.seriesThumb(nxt.id, nxt.artVersion, 1600); }
   }, [i, n, slides, wide]);
 
   if (!n || !cur) return null;
@@ -80,7 +82,7 @@ export function HeroCarousel({ slides }: { slides: Series[] }) {
   return (
     <div
       data-home-hero
-      className="bleed-lg under-topbar under-phone-header relative h-[58vh] min-h-[420px] overflow-hidden lg:h-[64vh]"
+      className="bleed-lg under-topbar under-phone-header relative h-[min(150vw,82svh)] overflow-hidden lg:h-[64vh] lg:min-h-[420px]"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       onTouchStart={(e) => { startX.current = e.touches[0].clientX; }}
@@ -91,9 +93,13 @@ export function HeroCarousel({ slides }: { slides: Series[] }) {
           {/* real art pulled from the internet (AniList) — sharp banner in the hero; for a series AniList has no banner
               for, the one the server made from its own pages (v0.51.0), as whole strips (UI refresh, components/MosaicArt.tsx);
               genre-banner fallback. Scrims stay light so the actual art shows: legibility gradient only bottom-start. */}
-          <HeroArt series={cur} hero className="absolute inset-0" />
-          <div className="absolute inset-0 bg-linear-to-t from-ink-950 via-ink-950/30 to-transparent" />
-          <div className="absolute inset-0 bg-linear-to-r from-ink-950/65 via-ink-950/20 to-transparent rtl:bg-linear-to-l" />
+          {/* On a phone the slide is its series' cover, filling the hero (v0.67.1, the owner: the strips "still show the
+              mashup of panels on phone"), as the series page's since v0.67.0. A computer keeps the banner and the strips. */}
+          {wide ? <HeroArt series={cur} hero className="absolute inset-0" /> : <PhoneHeroCover id={cur.id} version={cur.artVersion} still={reduced} />}
+          <div className="absolute inset-0 hidden bg-linear-to-t from-ink-950 via-ink-950/30 to-transparent lg:block" />
+          <div className="absolute inset-0 hidden bg-linear-to-r from-ink-950/65 via-ink-950/20 to-transparent rtl:bg-linear-to-l lg:block" />
+          {/* A phone's cover is shown: a fade at the foot for the title and keys, not the desktop's wash across it. */}
+          <div className="absolute inset-x-0 bottom-0 h-[65%] bg-linear-to-t from-ink-950 via-ink-950/60 to-transparent lg:hidden" />
           <div className="absolute inset-0" style={{ background: 'radial-gradient(60% 70% at 22% 55%, rgb(var(--cover, 124 92 255) / 0.12), transparent 70%)' }} />
         </motion.div>
       </AnimatePresence>

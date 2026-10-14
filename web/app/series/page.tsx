@@ -33,6 +33,7 @@ import { clampPage, pageCount, pageLabel, pageOf, pageSizeFor, pageSlice } from 
 import { openRuns, showAllChaptersOn } from '@/lib/showAllChapters';
 import { buttonsClass, compactChaptersOn, dotHide, rowClass, thumbHide } from '@/lib/compactChapters';
 import { chapterRowsClass, chapterViewOn, setChapterView, type ChapterView } from '@/lib/chapterView';
+import { PhoneHeroCover } from '@/components/PhoneHeroCover';
 import { Segmented } from '@/components/settings';
 import { fetchAllBooks } from '@/lib/seriesBooks';
 import { fetchingToast } from '@/lib/jobs';
@@ -209,21 +210,6 @@ function RenameFolderModal({ id, folder, title, onClose, onSaved }: {
         </div>
       </div>
     </Modal>
-  );
-}
-
-/**
- * A phone's hero (UI refresh, phone): the series' cover, the hero's whole width and height -- real art, nothing blurred,
- * the 1600-px copy so a 3x screen gets every pixel. Drifting slowly closer and back, unless Reduce effects or the system's
- * reduced motion is on, where it is simply there (`still`).
- */
-function PhoneHeroCover({ id, version, still }: { id: string; version?: number; still: boolean }) {
-  return (
-    <motion.div className="absolute inset-0" initial={false}
-      animate={still ? { scale: 1 } : { scale: [1, 1.07] }}
-      transition={still ? { duration: 0 } : { duration: 24, ease: 'easeInOut', repeat: Infinity, repeatType: 'reverse' }}>
-      <Img src={img.seriesThumb(id, version, 1600)} alt="" eager className="h-full w-full" imgClassName="object-cover object-top" />
-    </motion.div>
   );
 }
 
@@ -1695,7 +1681,7 @@ function SeriesInner() {
 
   const Genres = !!meta?.genres?.length && (
     // One row a phone swipes (UI refresh, phone): wrapped, eight genres took three lines before the summary.
-    <div data-lenis-prevent className="-mx-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0 [&::-webkit-scrollbar]:hidden">
+    <div data-lenis-prevent-horizontal className="-mx-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0 [&::-webkit-scrollbar]:hidden">
       {/* Each genre opens the Library filtered by it (UI refresh): a filter, so it keeps the filter chip's shape. */}
       {meta.genres.slice(0, 8).map((g) => (
         <Link key={g} href={`/library/?genres=${encodeURIComponent(g)}`} data-series-genre className="chip shrink-0 text-xs transition hover:border-accent/50 hover:text-fog-100">{g}</Link>

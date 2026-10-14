@@ -386,7 +386,7 @@ function Overview({ onTab }: { onTab: (t: Tab) => void }) {
         <div className="full">
           <h2 className="mb-2 font-display text-base font-semibold">{tr('Top 10 in your library')}</h2>
           <div className="hide-scrollbar -mx-4 flex gap-3 overflow-x-auto px-4 pb-1 [scroll-snap-type:x_mandatory] lg:mx-0 lg:px-0"
-            data-lenis-prevent>
+            data-lenis-prevent-horizontal>
             {/* The heading says ten. */}
             {rail.slice(0, 10).map((sx) => <SeriesCard key={sx.id} series={sx} />)}
           </div>

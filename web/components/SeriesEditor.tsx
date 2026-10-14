@@ -253,7 +253,7 @@ export function SeriesEditor({ id, series, tab: opening = 'details', onClose, on
           {/* Text tabs with an accent underline, the Library's Series | Downloads. A row too long for a phone scrolls
               inside itself, never the page; the underline sits on the row's own inset line, which a scroller would
               clip if it hung over a border below it. */}
-          <div role="tablist" aria-label={tr('Edit details')} data-lenis-prevent
+          <div role="tablist" aria-label={tr('Edit details')} data-lenis-prevent-horizontal
             className="hide-scrollbar mt-3 flex shrink-0 items-end gap-5 overflow-x-auto px-4 shadow-[inset_0_-1px_0_var(--color-ink-800)] md:gap-6 md:px-6">
             {TABS.map((t, i) => {
               const on = t === tab;
