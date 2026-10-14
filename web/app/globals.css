@@ -406,6 +406,53 @@
   *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
 
+/* ============ Background tones (Look settings) ============
+   OLED black is the app's look and the default: the @theme block's --color-ink-* scale, with no attribute and no rule
+   here. Graphite and Midnight are lib/tone.ts's other two, put on <html data-tone> by the code that applies the accent,
+   and each is the whole ink scale again. Every bg-, border- and from-/via-/to-ink utility reads these variables -- with
+   an opacity too, through color-mix() -- so the page, its cards, its borders and the fades of art into the page all move
+   together, and no component needs to know a tone exists.
+   ⚠️ lib/tone.ts restates three shades of each for the theme-color meta and the swatches; test/tokens.test.ts holds the
+   two together, wants every shade of the scale in every tone, and checks each tone's text contrast and the order of its
+   surfaces.
+   ⚠️ BEFORE the Reduce effects block below: its solid glass must still beat a tone's tinted one, at the same
+   specificity, so it has to come later. */
+html[data-tone='graphite'] {
+  --color-ink-950: #131316;
+  --color-ink-900: #18181c;
+  --color-ink-850: #1d1d22;
+  --color-ink-800: #232329;
+  --color-ink-700: #2d2d35;
+  --color-ink-600: #3a3a44;
+  --color-ink-500: #4e4e5a;
+}
+html[data-tone='midnight'] {
+  --color-ink-950: #090d18;
+  --color-ink-900: #0d1220;
+  --color-ink-850: #111727;
+  --color-ink-800: #161d30;
+  --color-ink-700: #1e2740;
+  --color-ink-600: #2a3452;
+  --color-ink-500: #3e4a6e;
+}
+/* What paints the page colour by hand rather than through a token follows a tone too: the canvas behind the body (an
+   overscroll, the notch), the scrollbars, the glass, and the collapsed sidebar's scrim -- black on true black is
+   invisible except over art, and on a tone it would be a dark band down the start of every page. These restate OLED's
+   own rules in the tone's ink; the rules themselves are untouched, so OLED renders exactly what it did. */
+html[data-tone] { background: var(--color-ink-950); }
+html[data-tone] * { scrollbar-color: var(--color-ink-600) transparent; }
+html[data-tone] *::-webkit-scrollbar-thumb { background: var(--color-ink-600); }
+html[data-tone] .glass { background: color-mix(in srgb, var(--color-ink-850) 55%, transparent); }
+html[data-tone] .glass-strong { background: color-mix(in srgb, var(--color-ink-900) 78%, transparent); }
+html[data-tone] .rail-scrim {
+  background-image: linear-gradient(to right, color-mix(in srgb, var(--color-ink-950) 82%, transparent),
+    color-mix(in srgb, var(--color-ink-950) 55%, transparent) 55%, transparent);
+}
+html[data-tone][dir='rtl'] .rail-scrim {
+  background-image: linear-gradient(to left, color-mix(in srgb, var(--color-ink-950) 82%, transparent),
+    color-mix(in srgb, var(--color-ink-950) 55%, transparent) 55%, transparent);
+}
+
 /* ============ Reduce effects (#71) ============
    The performance mode: a switch per account under Profile -> Settings -> Appearance, applied as this class
    by lib/effects.ts before the app shell renders. Measured on a 200-series library at 1440 (web/test/perf):

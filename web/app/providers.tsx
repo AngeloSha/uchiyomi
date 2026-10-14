@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useLayoutEffect, useState, ReactNode } from 'react';
 import Lenis from 'lenis';
 import { effectsReduced, restoreReduceEffects, useReduceEffects } from '@/lib/effects';
+import { restoreTone } from '@/lib/tone';
 import { AuthProvider } from '@/lib/auth';
 import { ToastProvider } from '@/components/Toast';
 import { I18nProvider } from '@/lib/I18nProvider';
@@ -56,6 +57,9 @@ export function Providers({ children }: { children: ReactNode }) {
   // The device's copy of Reduce effects, before the first paint of the splash or the sign-in screen. The
   // account's own value replaces it the moment /auth/refresh answers (lib/auth.tsx).
   useLayoutEffect(restoreReduceEffects, []);
+  // The background tone's too (lib/tone.ts). The <head> script has usually put it on <html> already; this also sets the
+  // browser bar's colour, which that script runs too early to find.
+  useLayoutEffect(restoreTone, []);
   const reduceEffects = useReduceEffects();
 
   // Momentum scroll on desktop wheel (native touch on mobile; reader opts out via data-lenis-prevent).

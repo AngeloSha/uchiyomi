@@ -5973,7 +5973,9 @@ paths:
         reader's edges) and, since v0.55.7, `listSorts` (list id to `az`, `za`, `read`, `unread` or `latest`: the order
         each list is shown in; a list's own order is not stored). Since v0.55.8 the validated keys are `librarySort`,
         `homeCollections` and `showAllChapters` (since v0.60.0 also `librarySortDir`, since v0.61.0 `incognito`, a
-        boolean). Unknown keys remain accepted and retained for compatibility.
+        boolean). Unknown keys remain accepted and retained for compatibility -- since v0.66.0 the web app's `homeRails`
+        (`{order, hidden}`, Home's rails as the reader arranged them; null is the default order) and `tone` (`oled`,
+        `graphite` or `midnight`, the background) among them.
       operationId: putApiSettings
       requestBody:
         required: false

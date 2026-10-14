@@ -1058,6 +1058,97 @@ try {
     }
   }
 
+  // ---------------------------------------------------------------- look settings (UI refresh, phase 3)
+  //
+  // Customize Home: a rail hidden and another moved to the top show at once and again after a reload, because the
+  // account holds them; Reset puts the owner's order back. The background tone: Midnight puts <html data-tone>, the page
+  // colour and the browser bar's colour in place, and keeps them through a reload and a click to another page; OLED takes
+  // all three back to black. Everything is put back at the end, for the checks after this one.
+  console.log('\n  look settings');
+  {
+    const titles = () => page.evaluate(() => [...document.querySelectorAll('section h2')].map((h) => (h.textContent || '').trim()));
+    const settings = async () => {
+      const tok = await login(USER, PASS);
+      return tok ? (await fetch(`${BASE}/api/settings`, { headers: { authorization: `Bearer ${tok}` } })).json() : {};
+    };
+    await page.goto(`${BASE}/`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+    await sleep(2500);
+    if (await ensureSignedIn(page, 'look settings')) {
+      // Compared by what was asked rather than to a whole earlier list: a rail with a request of its own (For you) may
+      // arrive between two readings.
+      const arranged = (t) => t[0] === 'Recently added' && !t.includes('New episodes');
+      if (!(await page.$('[data-home-customize]'))) bad('Home has no Customize key');
+      else {
+        await page.click('[data-home-customize]');
+        await page.waitForSelector('[data-home-rails]', { timeout: 5000 }).catch(() => {});
+        const rows = await page.$$eval('[data-home-rail]', (els) => els.map((e) => e.getAttribute('data-home-rail')));
+        rows.length === 11 ? ok('Customize lists the eleven rails') : bad(`Customize lists ${rows.length} rail(s): ${rows.join(', ')}`);
+        await page.click('[data-home-rail="newEpisodes"] [role="switch"]');
+        for (let i = 0; i < 12 && (await page.$('[data-home-rail="recentlyAdded"] [data-home-rail-up]:not([disabled])')); i++) {
+          await page.click('[data-home-rail="recentlyAdded"] [data-home-rail-up]');
+          await sleep(120);
+        }
+        await sleep(1800);
+        await shot('home-customize');
+        const live = await titles();
+        const saved = (await settings()).homeRails;
+        if (!arranged(live)) bad(`Home did not follow the sheet: ${live.join(' | ')}`);
+        else ok('a hidden rail goes and a moved rail leads, at once');
+        if (!saved || saved.order?.[0] !== 'recentlyAdded' || !saved.hidden?.includes('newEpisodes')) bad(`the account holds ${JSON.stringify(saved)}`);
+        else ok('the account holds the arrangement');
+        await page.keyboard.press('Escape');
+        await page.reload({ waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+        await sleep(2500);
+        const again = await titles();
+        arranged(again) ? ok('the arrangement survives a reload') : bad(`after a reload Home reads ${again.join(' | ')}`);
+        await page.click('[data-home-customize]');
+        await page.waitForSelector('[data-home-rails-reset]', { timeout: 5000 }).catch(() => {});
+        await page.click('[data-home-rails-reset]');
+        await sleep(1500);
+        await page.keyboard.press('Escape');
+        await sleep(800);
+        const reset = await titles();
+        const cleared = (await settings()).homeRails;
+        reset.includes('New episodes') && reset.indexOf('New episodes') < reset.indexOf('Recently added') && cleared == null
+          ? ok('Reset puts the owner\'s order back and stores nothing')
+          : bad(`after Reset: ${reset.join(' | ')} (stored ${JSON.stringify(cleared)})`);
+      }
+
+      const look = () => page.evaluate(() => ({
+        tone: document.documentElement.getAttribute('data-tone'),
+        body: getComputedStyle(document.body).backgroundColor,
+        html: getComputedStyle(document.documentElement).backgroundColor,
+        bar: [...document.querySelectorAll('meta[name="theme-color"]')].map((m) => m.getAttribute('content')).join(),
+      }));
+      const want = (w, tone, rgb, bar) => w.tone === tone && w.body === rgb && w.html === rgb && w.bar === bar;
+      await page.goto(`${BASE}/profile/?tab=Settings`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+      await sleep(2500);
+      if (!(await page.$('[data-tone-choice="midnight"]'))) bad('Appearance has no Midnight tone');
+      else {
+        await page.click('[data-tone-choice="midnight"]');
+        await sleep(1500);
+        await shot('tone-midnight');
+        const m = await look();
+        want(m, 'midnight', 'rgb(9, 13, 24)', '#090d18') ? ok('Midnight colours the page and the browser bar') : bad(`Midnight: ${JSON.stringify(m)}`);
+        (await settings()).tone === 'midnight' ? ok('the account holds the tone') : bad('the tone was not saved');
+        await page.reload({ waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+        await sleep(2500);
+        const r = await look();
+        want(r, 'midnight', 'rgb(9, 13, 24)', '#090d18') ? ok('it survives a reload') : bad(`after a reload: ${JSON.stringify(r)}`);
+        await page.evaluate(() => document.querySelector('a[href="/"]')?.click());
+        await sleep(2500);
+        const n = await look();
+        want(n, 'midnight', 'rgb(9, 13, 24)', '#090d18') ? ok('and a click to Home') : bad(`after a click to Home: ${JSON.stringify(n)}`);
+        await page.goto(`${BASE}/profile/?tab=Settings`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+        await sleep(2500);
+        await page.click('[data-tone-choice="oled"]');
+        await sleep(1500);
+        const o = await look();
+        want(o, null, 'rgb(0, 0, 0)', '#000000') ? ok('OLED black takes it all back') : bad(`back to OLED: ${JSON.stringify(o)}`);
+      }
+    }
+  }
+
   // ---------------------------------------------------------------- clicking, not typing URLs
   //
   // Every check above navigates with page.goto, which is a fresh load with an empty react-query cache. A

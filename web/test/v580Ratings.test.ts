@@ -16,6 +16,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SORTS, SORT_GROUPS } from '../lib/librarySort';
+import { HOME_RAILS } from '../lib/homeRails';
 import { SeriesCard, SeriesTile } from '../components/cards';
 import { AuthProvider } from '../lib/auth';
 import { anilistLine, anilistNumbers, sortValue } from '../lib/sortValue';
@@ -228,7 +229,7 @@ test('Home: "Most popular in your library" after Recently added, saying AniList\
   // Reintroduce the rail unconditionally (or with a RailSkeleton): a server older than v0.58.0 sends no `popular`, and
   // Home would hold a title over nothing, or a skeleton that never fills -- "the rail shows without a list" fails.
   const home = code(read('app/page.tsx'));
-  const rail = slice(home, '{(data?.popular?.length ?? 0) > 0 && (', '</section>');
+  const rail = slice(home, "case 'popular':", '</section>');
   assert.match(rail, /<SectionTitle action=\{<Link href="\/library\?sort=popular" className="text-xs text-accent">\{tr\('See all'\)\}<\/Link>\}>\{tr\('Most popular in your library'\)\}<\/SectionTitle>/,
     'See all does not open the Library sorted by popularity, as New episodes and Recently added open theirs');
   assert.match(rail, /\{data!\.popular!\.map\(\(s\) => <SeriesCard key=\{s\.id\} series=\{s\} note=\{sortValue\(s, 'score'\)\} \/>\)\}/,
@@ -236,8 +237,10 @@ test('Home: "Most popular in your library" after Recently added, saying AniList\
   assert.doesNotMatch(rail, /RailSkeleton|isLoading/, 'the rail shows without a list');
   // One rail: its heading once. (The rail itself is named by the same words since the UI refresh -- ScrollRail's label.)
   assert.equal((home.match(/\{tr\('Most popular in your library'\)\}<\/SectionTitle>/g) ?? []).length, 1);
-  const at = (s: string) => home.indexOf(s);
-  assert.ok(at("tr('Recently added')") > 0 && at("tr('Recently added')") < at('data?.popular') && at('data?.popular') < at("tr('Top 10 in your library')"),
+  // Its place is the owner's order, which is lib/homeRails.ts HOME_RAILS since the reader can rearrange Home (UI refresh,
+  // phase 3); homeRails.test.ts pins the whole order.
+  const at = (k: string) => HOME_RAILS.findIndex((r) => r.key === k);
+  assert.ok(at('recentlyAdded') >= 0 && at('recentlyAdded') < at('popular') && at('popular') < at('top10'),
     'the rail is not between Recently added and Top 10 in your library');
   assert.ok(SORTS.some((s) => s.key === 'popular'), 'See all names an order the Library does not have');
   assert.match(read('lib/types.ts'), /popular\?: Series\[\];/, 'HomePayload has no optional `popular`');

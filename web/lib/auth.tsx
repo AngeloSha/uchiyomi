@@ -5,6 +5,7 @@ import { readOfflineIdentity, writeOfflineIdentity, clearOfflineIdentity, Offlin
 import { deviceId, deviceName } from './device';
 import { clearShownOnce } from './shownOnce';
 import { applyReduceEffects, restoreReduceEffects } from './effects';
+import { applyTone, restoreTone } from './tone';
 import { isDesktop, serverReachableHint, untilReachable } from './desktop';
 import { t as tr } from './i18n';
 
@@ -138,6 +139,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // arrived one commit later would let the mesh, grain and vignette paint a frame on every reload with
     // Reduce effects on (#71). Both directions, so the next account on a shared device gets its own setting.
     applyReduceEffects(u.settings?.reduceEffects === true);
+    // The background tone (lib/tone.ts), for the same reason: the shell's first frame is already in it.
+    applyTone(u.settings?.tone);
     setStatus('authed');
   };
 
@@ -157,6 +160,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // No server to ask, so the device's copy, which the last online sign-in of this same account wrote (the
     // mirror is cleared with the saved identity on sign-out). Before setStatus for the same reason as above.
     restoreReduceEffects();
+    restoreTone();
     setStatus('offline');
   };
 
@@ -180,6 +184,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // sign-in screen reduced for whoever's session happened to lapse. The account still holds the setting and
     // the next sign-in applies it, both ways.
     applyReduceEffects(false);
+    // The tone likewise: the sign-in screen is OLED, and the next person's offline launch does not inherit this one's.
+    applyTone(null);
     setUser(null);
     setStatus('anon');
     // Secrets the server only ever sends once are held outside React so a remount cannot destroy them.
@@ -343,6 +349,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     applyAccent({ ...(user?.settings || {}), ...partial });
     // The Appearance switch applies the moment it is flipped, and again (reverted) if the save is refused.
     if ('reduceEffects' in partial) applyReduceEffects(partial.reduceEffects === true);
+    if ('tone' in partial) applyTone(partial.tone);
   };
 
   const setAvatar = (avatar: Avatar) => setUser((u) => (u ? { ...u, avatar } : u));

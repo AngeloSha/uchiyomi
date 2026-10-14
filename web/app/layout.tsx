@@ -7,6 +7,7 @@ import localFont from 'next/font/local';
 import './globals.css';
 import { Providers } from './providers';
 import { AppShell } from '@/components/AppShell';
+import { TONE_BOOT } from '@/lib/tone';
 
 // Self-hosted rather than next/font/google: that fetches from fonts.gstatic.com at BUILD time, so a blip
 // there fails the image build outright -- which is how v0.5.1 shipped half-published, with the API image
@@ -46,8 +47,11 @@ export const metadata: Metadata = {
   twitter: { card: 'summary_large_image', title: 'Uchiyomi', images: ['/art/og.jpg'] },
 };
 
+// ⚠️ No `themeColor` here: TONE_BOOT (below) makes the theme-color meta. Next re-renders the viewport's metadata on every
+// client-side navigation, which put a phone's browser bar back to black under Graphite and Midnight at the first click,
+// and a meta React renders itself is matched at hydration by its content: once the boot script had coloured it, React
+// added a second one (both caught by e2e/run.mjs "look settings"). One that React never rendered, it leaves alone.
 export const viewport: Viewport = {
-  themeColor: '#000000',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
@@ -57,7 +61,13 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${display.variable} ${sans.variable} ${brand.variable}`}>
+    // suppressHydrationWarning: TONE_BOOT may have put `data-tone` on <html> before React hydrates it, on purpose.
+    <html lang="en" className={`${display.variable} ${sans.variable} ${brand.variable}`} suppressHydrationWarning>
+      <head>
+        {/* The reader's background tone from the device's copy, and the browser bar's colour, while the page is still
+            being parsed: without it a Graphite or Midnight reader saw true black until the app booted (lib/tone.ts). */}
+        <script dangerouslySetInnerHTML={{ __html: TONE_BOOT }} />
+      </head>
       <body>
         <Providers>
           <AppShell>{children}</AppShell>

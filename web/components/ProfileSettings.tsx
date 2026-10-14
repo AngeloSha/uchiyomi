@@ -22,6 +22,7 @@ import { SETTINGS_GRID, Section, Row, SwitchRow, Segmented, NumberRow, RangeRow,
 import { inDesktopWindow, isDesktop } from '@/lib/desktop';
 import { useIncognito } from '@/components/IncognitoBanner';
 import { INCOGNITO_TEXT } from '@/lib/incognito';
+import { TONES, toneOf, type Tone } from '@/lib/tone';
 
 /**
  * The profile's Settings tab: Appearance · Reading · Downloads · This device.
@@ -113,6 +114,19 @@ function AppearanceSection() {
       .then((ok) => { if (!ok) { setAccent(prev); setSettings({ accent: prev }); } });
   };
 
+  // The background tone (lib/tone.ts): on the account like the accent, applied the moment it is picked -- `setSettings`
+  // puts it on <html> and the browser bar -- and put back if the server refuses, so the pressed swatch is always the tone
+  // the account holds.
+  const toneSave = useAutosave();
+  const tone = toneOf(user?.settings?.tone);
+  const pickTone = (next: Tone) => {
+    if (next === tone) return;
+    const prev = user?.settings?.tone ?? null;
+    setSettings({ tone: next });
+    void toneSave.run(() => api('/api/settings', { method: 'PUT', json: { tone: next } }))
+      .then((ok) => { if (!ok) setSettings({ tone: prev }); });
+  };
+
   // Reduce effects (#71): the performance mode. Stored on the account like the accent, so it follows the
   // person to another device, and applied the moment it is flipped -- `setSettings` sets html.reduce-effects
   // and its mirror (lib/effects.ts) -- then put back if the server refuses, so the switch never shows a
@@ -184,6 +198,32 @@ function AppearanceSection() {
               )}
             </button>
           ))}
+        </div>
+      </Row>
+
+      {/* Three curated tones, each drawn in its own colours whatever tone is on: the page, a card on it, and the accent.
+          OLED black is first and the default. */}
+      <Row stacked label={tr('Background')} help={tr('True black suits OLED screens. Graphite and Midnight are softer on other displays.')}
+        status={toneSave.status}>
+        <div className="grid max-w-md grid-cols-3 gap-2.5">
+          {TONES.map((t) => {
+            const on = tone === t.key;
+            return (
+              <button key={t.key} type="button" onClick={() => pickTone(t.key)} aria-pressed={on} data-tone-choice={t.key}
+                className={`rounded-xl border p-1.5 text-start transition ${on ? 'border-accent bg-accent-soft' : 'border-ink-700 hover:border-ink-500'}`}>
+                <span aria-hidden className="relative block h-14 overflow-hidden rounded-lg" style={{ background: t.page, boxShadow: `inset 0 0 0 1px ${t.line}` }}>
+                  <span className="absolute inset-x-2 bottom-2 top-5 rounded-md" style={{ background: t.surface, boxShadow: `inset 0 0 0 1px ${t.line}` }} />
+                  <span className="absolute start-2 top-2 h-1.5 w-7 rounded-[2px] bg-accent" />
+                  <span className="absolute start-4 top-7 h-1 w-10 rounded-[2px] bg-fog-300/70" />
+                  <span className="absolute start-4 top-9 h-1 w-6 rounded-[2px] bg-fog-500/70" />
+                </span>
+                <span className="mt-1.5 flex items-center gap-1 px-0.5 text-xs font-medium text-fog-100">
+                  {on && <IcCheck width={12} height={12} className="shrink-0 text-accent" aria-hidden />}
+                  <span className="truncate">{tr(t.label)}</span>
+                </span>
+              </button>
+            );
+          })}
         </div>
       </Row>
 

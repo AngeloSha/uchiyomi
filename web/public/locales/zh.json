@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3796
+    "strings": 3806
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3799,5 +3799,15 @@
   "New list…": "新建列表…",
   "Empty so far — open any series and use “Add to list”.": "目前为空 — 打开任意系列并选择“加入列表”。",
   "The series stay in your library.": "系列仍保留在你的库中。",
-  "Columns": "分栏"
+  "Columns": "分栏",
+  "Customize": "自定义",
+  "Customize Home": "自定义首页",
+  "Choose which rows Home shows, and in what order.": "选择首页显示哪些栏目，以及它们的顺序。",
+  "Because you read…": "因为你读过……",
+  "Choose lists": "选择列表",
+  "No lists chosen": "未选择列表",
+  "OLED black": "OLED 纯黑",
+  "Graphite": "石墨",
+  "Midnight": "午夜",
+  "True black suits OLED screens. Graphite and Midnight are softer on other displays.": "纯黑适合 OLED 屏幕。石墨和午夜在其他显示屏上更柔和。"
 }
