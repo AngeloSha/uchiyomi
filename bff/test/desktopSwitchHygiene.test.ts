@@ -64,6 +64,8 @@ const IS_DESKTOP_ALLOWED = new Set([
   // v0.49.1: the Health solver row's codes (lib/said.ts). The helper's address carries its token on desktop, so it
   // is never a parameter there, and the row's title is the helper's name rather than the address.
   'lib/health.ts',
+  // v0.63.0 (#208): Uchiyomi Desktop signs its one person in through the app, so AUTH_MODE=oidc-only is ignored there.
+  'lib/authMode.ts',
 ]);
 
 test('UCHIYOMI_DESKTOP is read in lib/desktop.ts and nowhere else', () => {
