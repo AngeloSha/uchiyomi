@@ -156,10 +156,12 @@ async function extensionsWalk({ page, api, go, shot, check, waitFor, sleep, ENGI
   await control('/__reset');
   await control('/__mode', { mode: 'up' });
   await control('/__catalogue', { extensions: 1300, set: { [MANGABALL]: { hasUpdate: true } } });
-  // ...listed by one repository, as a real catalogue is: Browse's count line names how many.
+  // ...listed by one repository, as a real catalogue is: Browse's count line names how many. Added as an extension store,
+  // the way Uchiyomi adds one since v0.64.0 (operations.ts addExtensionStore): the fake, like the engine, keeps the
+  // deprecated settings' extensionRepos apart from its stores, and Browse counts the stores.
   await control('/api/graphql', {
-    query: 'mutation($r:[String!]){ setSettings(input:{settings:{extensionRepos:$r}}){ settings { extensionRepos } } }',
-    variables: { r: ['https://repo.example/index.min.json'] },
+    query: 'mutation($indexUrl:String!){ addExtensionStore(input:{indexUrl:$indexUrl}){ extensionStore { indexUrl name } } }',
+    variables: { indexUrl: 'https://repo.example/index.min.json' },
   });
   // As installed in the engine's own page: Uchiyomi has their sources, every one switched off (an earlier phase may
   // have switched Webtoons.com on over the API).

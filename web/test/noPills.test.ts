@@ -116,6 +116,11 @@ const SURFACES = [
   'components/HeroCarousel.tsx',
   'components/MosaicArt.tsx',
   'components/CheckForNew.tsx',
+  // UI refresh, phase 2: Offline downloads (its keys, the covers, the storage bar), Lists' cards and History's rows.
+  'app/downloads/page.tsx',
+  'components/OfflineCover.tsx',
+  'app/collections/page.tsx',
+  'app/history/page.tsx',
   'lib/libraryQuery.ts',
   'lib/incognito.ts',
   // v0.61.0, Reader → Keys and controller: every binding a squared key cap, Add a key / Add a button, Reset to defaults.
