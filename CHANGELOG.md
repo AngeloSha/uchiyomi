@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.63.0 — 2026-10-14
+
+**Single sign-on can now be the only way in.** This came from **@DrummyFloyd**'s request
+([#208](https://github.com/AngeloSha/uchiyomi/issues/208)), after a security review of their own server. Thank you.
+
+### SSO-only mode
+
+- **`AUTH_MODE=oidc-only`** makes your OpenID Connect provider (Authentik, Authelia, Keycloak…) the only way to sign
+  in. First-run setup, password sign-in, sign-up, password change and two-factor are not served at all, so a server on
+  the internet has nothing there to guess at or rate-limit. The sign-in screen shows the provider's button alone.
+- **The first admin comes from the provider.** On a new server, the first sign-in from the person
+  `OIDC_BOOTSTRAP_ADMIN_SUB` names, or else from someone in `OIDC_ADMIN_GROUP`, makes that person the admin. Nobody can
+  take a fresh server by being its first visitor. A refused first sign-in is logged with its subject, ready to copy.
+- **Accounts come from the provider.** With `OIDC_ALLOW_SIGNUP`, anyone the provider lets in gets an account at their
+  first sign-in. **Admin → Members** makes no account and resets no password in this mode.
+- **Linking the accounts you already have.** **Profile → Account** now has *Link to …*, which links the identity you
+  sign in with at the provider to your account here. Link accounts before you turn the mode on. At every start, the
+  log lists any account that can no longer sign in.
+- **A way back in.** If the provider is ever down, `AUTH_RESCUE_ADMIN` reopens password sign-in for one admin account
+  until you remove it. It's logged at every start and at every sign-in it allows.
+- **The server refuses to start in a configuration that can't work** and says why: a typo in `AUTH_MODE`, no provider,
+  `OIDC_LINK_BY_USERNAME`, or a new server with no way to make its admin.
+- **Setup:** the install guide's new *Single sign-on* section has an Authentik example. Every setting is in
+  [docs/api.md](docs/api.md#sso-only-mode).
+
+### Also
+
+- **The last admin keeps their role.** With `OIDC_ADMIN_GROUP` set, roles still follow the provider at every sign-in,
+  but the server's last admin is never demoted that way.
+
+### Upgrading
+
+- **Database:** no changes.
+- **Nothing changes unless you set `AUTH_MODE=oidc-only`.** The bundled compose files pass the three new settings
+  through from `.env`.
+
 ## v0.62.0 — 2026-10-14
 
 **Chapters stay in the series' language, whatever the source. An admin can also fetch again, or delete, one chapter
