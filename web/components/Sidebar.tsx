@@ -147,7 +147,7 @@ export function Sidebar() {
         onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false); }}
         onKeyDown={(e) => { if (e.key === 'Escape') { setPinned(false); setHovered(false); (document.activeElement as HTMLElement | null)?.blur(); } }}
         className={`absolute inset-y-0 start-0 flex flex-col overflow-hidden px-3 pb-4 pt-3 ${
-          open ? 'w-64 border-e border-white/[0.06] glass shadow-lift' : 'w-full rail-scrim'}${
+          open ? 'w-64 border-e border-white/[0.06] glass-strong shadow-lift' : 'w-full rail-scrim'}${
           reduced ? '' : ' transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]'}`}>
         {/* Named by the wordmark's own text, faded rather than removed while the rail is closed. */}
         <Link href="/" className="mb-4 flex h-10 shrink-0 items-center gap-3">

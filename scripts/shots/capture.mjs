@@ -59,14 +59,23 @@ async function settle(page, extra = 0) {
  */
 async function heroAtRest(page) {
   const corner = await page.evaluate(() => {
-    // `data-home-hero` (UI refresh) first; the Slide 1 dot's grandparent is how a server older than that is found.
+    // The first slide's button: its name ends in a lone 1 in every language ("Slide 1", "الشريحة 1"), never "Slide 11".
+    const lone1 = (b) => /(^|\D)1$/.test(b.getAttribute('aria-label') || '');
+    // `data-home-hero` (UI refresh) first; the first dot's grandparent is how a server older than that is found.
     const hero = document.querySelector('[data-home-hero]')
-      ?? document.querySelector('button[aria-label="Slide 1"]')?.parentElement?.parentElement;
+      ?? [...document.querySelectorAll('main button[aria-label]')].find(lone1)?.parentElement?.parentElement;
     const r = hero?.getBoundingClientRect();
-    return r && r.height > 0 ? { x: r.right - 24, y: r.top + 24 } : null;
+    if (!r || r.height <= 0) return null;
+    // The first slide, so two builds photographed one after the other show the same series (--compare).
+    [...hero.querySelectorAll('button[aria-label]')].find(lone1)?.click();
+    // The top END corner: the right in English, the left in Arabic, where the start edge holds the desktop sidebar.
+    const rtl = getComputedStyle(document.documentElement).direction === 'rtl';
+    return { x: rtl ? r.left + 24 : r.right - 24, y: r.top + 24 };
   });
   if (!corner) return;
   await page.mouse.move(corner.x, corner.y);
+  // The first slide's art landing, then a fade already under way finishing.
+  await page.waitForNetworkIdle({ idleTime: 500, timeout: 10000 }).catch(() => {});
   await sleep(1300);
 }
 
@@ -865,14 +874,16 @@ async function main() {
     await page.mouse.move(700, 500);
   }
   if (named('home-ar') || named('phone-home-ar')) {
-    for (const pg of [page, ph]) await pg.evaluate(() => localStorage.setItem('uchiyomi.lang', 'ar'));
+    // One context and one origin: the language set from the desktop tab is the phone tab's too. Never from the phone
+    // tab itself, which phone-home leaves on about:blank, where localStorage is refused.
+    await page.evaluate(() => localStorage.setItem('uchiyomi.lang', 'ar'));
     if (named('home-ar')) { await view(page, PROFILES.desk, '/'); await heroAtRest(page); await shot(page, 'home-ar'); }
     if (named('phone-home-ar')) {
       await ph.bringToFront();
       await ph.goto(`${BASE}/`, { waitUntil: 'networkidle2', timeout: 60000 });
       await settle(ph, 900); await heroAtRest(ph); await shot(ph, 'phone-home-ar');
     }
-    for (const pg of [page, ph]) await pg.evaluate(() => localStorage.removeItem('uchiyomi.lang'));
+    await page.evaluate(() => localStorage.removeItem('uchiyomi.lang'));
   }
   if (named('phone-series') && SERIES_ID) {
     await ph.bringToFront();
