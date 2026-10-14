@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.66.0 — 2026-10-14
+
+**Make Uchiyomi look the way you like.** Home's rails can go in the order you read them, and the background can be
+softer than true black. True black stays the default and looks exactly as before.
+
+### Home in your order, and two softer backgrounds
+
+- **Customize**, at the end of Home's greeting line, lists Home's rails with arrows to move each one and a switch to
+  hide it. Home changes as you go, and the arrangement is saved to your account, so your other devices open the same
+  Home. **Reset** brings back the original order.
+- **Your lists move as one rail.** Which lists Home shows is still chosen on **Lists**; the sheet's **Choose lists**
+  takes you there.
+- **A hidden rail isn't loaded at all.**
+- **Background**, in **Profile → Settings → Appearance**, offers **OLED black** (the default), **Graphite**, a soft
+  charcoal, and **Midnight**, a deep blue, for screens where true black feels harsh. The whole app follows: the page,
+  cards, sheets, the sidebar, and a phone browser's own bar.
+- **It is saved to your account** like the accent colour, and applied before the first frame, so a reload never
+  flashes black first. The sign-in screen stays black.
+
+### Upgrading
+
+- Nothing to do. For scripts: `/api/settings` carries two more keys the app writes, `homeRails` and `tone`
+  ([docs/api.md](docs/api.md)).
+
 ## v0.65.1 — 2026-10-14
 
 **Two requests from @klave7, the first of them promised for the new look: chapters as one list, and Mark unread on a
