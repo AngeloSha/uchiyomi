@@ -89,6 +89,8 @@ export default function DownloadsPage() {
     return acc;
   }, {});
   const totalBytes = items.reduce((a, c) => a + (c.totalBytes || 0), 0);
+  // The server's covers only while it answers this account; else the saved pages (components/OfflineCover.tsx).
+  const coverOnline = online && status === 'authed';
 
   return (
     <div className="min-h-screen-d">
@@ -142,7 +144,7 @@ export default function DownloadsPage() {
             return (
               <section key={seriesId} className="card overflow-hidden" data-offline-series={seriesId}>
                 <div className="flex items-center gap-3 p-3">
-                  <OfflineCover seriesId={seriesId} bookId={chapters[0].bookId} online={online && status === 'authed'} title={title} />
+                  <OfflineCover key={String(coverOnline)} seriesId={seriesId} bookId={chapters[0].bookId} online={coverOnline} />
                   <div className="min-w-0 flex-1">
                     <h2 className="line-clamp-2 font-display text-base font-semibold leading-tight text-fog-100">{title}</h2>
                     <p className="mt-1 text-2xs text-fog-500">

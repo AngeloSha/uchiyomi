@@ -220,7 +220,7 @@ export default function CollectionsPage() {
       {deleting && (
         <ConfirmDialog
           title={tr('Delete “{name}”', { name: iso(deleting.name) })}
-          body={tr('Delete “{name}”? The series stay in your library.', { name: iso(deleting.name) })}
+          body={tr('The series stay in your library.')}
           confirmLabel={tr('Delete')}
           danger
           onConfirm={() => { const c = deleting; setDeleting(null); void remove(c); }}

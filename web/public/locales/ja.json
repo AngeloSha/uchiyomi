@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3794
+    "strings": 3795
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -3797,5 +3797,6 @@
   "Add to list": "リストに追加",
   "No lists yet — create one below.": "まだリストはありません — 下から作成してください。",
   "New list…": "新しいリスト…",
-  "Empty so far — open any series and use “Add to list”.": "まだ空です — シリーズを開いて「リストに追加」を選んでください。"
+  "Empty so far — open any series and use “Add to list”.": "まだ空です — シリーズを開いて「リストに追加」を選んでください。",
+  "The series stay in your library.": "シリーズはライブラリに残ります。"
 }
