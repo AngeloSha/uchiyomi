@@ -43,6 +43,13 @@ export interface EngineReport {
   lastTry?: string | null;
   lastTryOk?: boolean | null;
   engine?: string;
+  /** The engine upgrade (absent from an older server): "Stable" or "Preview", and how its version stands. */
+  buildType?: string | null;
+  tested?: string;
+  oldest?: string;
+  standing?: 'same' | 'older' | 'tooOld' | 'newer' | 'unknown';
+  /** What it refused, by operation, in its own words: non-empty, it answers and does not match this Uchiyomi. */
+  refused?: Array<{ op: string; message: string; at: string }>;
   solver?: {
     supported: boolean;
     enabled: boolean;

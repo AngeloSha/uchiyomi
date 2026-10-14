@@ -574,6 +574,74 @@ test("migrate: v0.62.0 keeps the language of each chapter English MangaDex took 
   }
 });
 
+test('migrate: chapter dates the engine gave in SECONDS are put right everywhere a chapter keeps its date', { skip }, async () => {
+  // v2.3.2243 stamps a new chapter its extension listed without a date with the current time in epoch SECONDS, and the
+  // adapter read every date as milliseconds, so it was stored as 1970-01-21 (sources.ts uploadedAt). The repair turns a
+  // stored date between the epoch and 1973-03-04 into that many seconds after the epoch, when that lands between
+  // 2000-01-01 and two days from now, and no date otherwise -- in lib_books, series_listing (its column, `chosen` and
+  // each of `copies`) and series_post_numbers. Reintroduce by repairing lib_books alone: the listing's dates still read
+  // 1970. Drop the 2000..now+2d window: a date that was never one becomes year 2026 + 3000.
+  const { CHAPTER_DATES_MIGRATION } = await import('../src/lib/migrate');
+  const SECONDS = '1970-01-21T17:40:17.209Z'; // 1791617209 s read as ms: 2026-10-10T07:26:49Z
+  const FIXED = '2026-10-10T07:26:49.000Z';
+  const FUTURE = '1972-12-31T00:00:00.000Z'; // as seconds: past year 5000
+  const ANCIENT = '1970-01-02T00:00:00.000Z'; // as seconds: 1972, before 2000
+  const REAL = '2024-07-29T14:44:42.000Z';
+  const BEFORE_EPOCH = '1969-12-31T00:00:00.000Z';
+  const SID = 't-cds';
+  const books: Record<string, string | null> = {
+    't-cds-b-seconds': SECONDS, 't-cds-b-future': FUTURE, 't-cds-b-ancient': ANCIENT, 't-cds-b-real': REAL,
+    't-cds-b-epoch': '1970-01-01T00:00:00.000Z', 't-cds-b-before': BEFORE_EPOCH, 't-cds-b-none': null,
+  };
+  try {
+    await q(`INSERT INTO lib_series (id, source, title, folder, source_id, source_series_id) VALUES ($1, 'test', 'T', $1, 'sw:1', '1')`, [SID]);
+    for (const [id, at] of Object.entries(books)) {
+      await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, published_at) VALUES ($1, $2, 'test', $1, 1, 'C', $3)`, [id, SID, at]);
+    }
+    const copy = (sourceId: string, publishedAt?: string) => ({ source: 'sw:1', sourceId, ...(publishedAt === undefined ? {} : { publishedAt }) });
+    await q(`INSERT INTO series_listing (series_id, number, source_id, chosen, copies, published_at) VALUES ($1, 1, 'sw:1', $2::jsonb, $3::jsonb, $4)`, [SID,
+      JSON.stringify(copy('c1', SECONDS)),
+      JSON.stringify([copy('c1', SECONDS), copy('c2', REAL), copy('c3', '1970-01-21T17:40:17.209+00:00'), copy('c4', 'last Tuesday'), copy('c5'), copy('c6', FUTURE)]),
+      SECONDS]);
+    // The chosen copy is fine and another one is not (192 such rows live): the copies are put right all the same.
+    await q(`INSERT INTO series_listing (series_id, number, source_id, chosen, copies, published_at) VALUES ($1, 2, 'sw:1', $2::jsonb, $3::jsonb, $4)`, [SID,
+      JSON.stringify(copy('d1', REAL)), JSON.stringify([copy('d1', REAL), copy('d2', SECONDS)]), REAL]);
+    await q(`INSERT INTO series_listing (series_id, number, source_id, chosen, copies, published_at) VALUES ($1, 3, 'sw:1', $2::jsonb, '[]'::jsonb, $3)`, [SID,
+      JSON.stringify(copy('e1', FUTURE)), FUTURE]);
+    await q(`INSERT INTO series_post_numbers (series_id, source_id, post_id, number, published_at) VALUES ($1, 'sw:1', 'p1', 1, $2), ($1, 'sw:1', 'p2', 2, $3)`,
+      [SID, SECONDS, REAL]);
+
+    await q(`DELETE FROM schema_migrations WHERE id = $1`, [CHAPTER_DATES_MIGRATION]);
+    await migrate();
+
+    const iso = (v: Date | null) => (v ? v.toISOString() : null);
+    const b = await q<{ id: string; published_at: Date | null }>(`SELECT id, published_at FROM lib_books WHERE series_id = $1`, [SID]);
+    assert.deepEqual(Object.fromEntries(b.map((r) => [r.id, iso(r.published_at)])), {
+      't-cds-b-seconds': FIXED,
+      't-cds-b-future': null,
+      't-cds-b-ancient': null,
+      't-cds-b-real': REAL,
+      't-cds-b-epoch': '1970-01-01T00:00:00.000Z',
+      't-cds-b-before': BEFORE_EPOCH,
+      't-cds-b-none': null,
+    }, 'lib_books');
+    const l = await q<{ number: number; published_at: Date | null; chosen: any; copies: any[] }>(
+      `SELECT number, published_at, chosen, copies FROM series_listing WHERE series_id = $1 ORDER BY number`, [SID]);
+    assert.equal(iso(l[0].published_at), FIXED, 'the listing\'s column');
+    assert.deepEqual(l[0].chosen, copy('c1', FIXED), 'the chosen copy, written back as the adapter writes a date');
+    assert.deepEqual(l[0].copies, [copy('c1', FIXED), copy('c2', REAL), copy('c3', FIXED), copy('c4', 'last Tuesday'), copy('c5'), copy('c6')],
+      'each copy: put right, left alone, or its non-date dropped -- in order');
+    assert.deepEqual(l[1].copies, [copy('d1', REAL), copy('d2', FIXED)], 'a row whose chosen copy was fine');
+    assert.equal(l[2].published_at, null);
+    assert.deepEqual(l[2].chosen, copy('e1'), 'a chosen copy whose date was never one has none');
+    const p = await q<{ post_id: string; published_at: Date | null }>(`SELECT post_id, published_at FROM series_post_numbers WHERE series_id = $1 ORDER BY post_id`, [SID]);
+    assert.deepEqual(p.map((r) => iso(r.published_at)), [FIXED, REAL], 'series_post_numbers');
+    assert.equal((await q(`SELECT 1 FROM schema_migrations WHERE id = $1`, [CHAPTER_DATES_MIGRATION])).length, 1, 'stamped');
+  } finally {
+    await q(`DELETE FROM lib_series WHERE id = $1`, [SID]);
+  }
+});
+
 test("migrate: v0.55.2's data migration types a series from its genres, and only one nothing has typed", { skip }, async () => {
   // Notice chapters are switched per series type (lib/noticeChapters.ts), so every series whose genres say what it is
   // has a type at the first boot. Each: its genres, the admin's genres (null for none), the type it already had and

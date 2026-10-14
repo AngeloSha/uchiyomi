@@ -2,7 +2,9 @@
 //
 // The responses below are real shapes captured from Suwayomi-Server v2.2.2100 by introspecting and calling
 // it, then written here as code rather than committed as blobs, so a schema change surfaces as a failing
-// expectation instead of a mystery. The GraphQL client is injected, so nothing here touches the network.
+// expectation instead of a mystery. The GraphQL client is injected, so nothing here touches the network. Since the
+// engine upgrade the series and its chapters come through fetchMangaAndChapters (operations.ts), and the payloads
+// below are keyed the way it answers.
 //
 // What these pin: the id namespacing that keeps lib_series.source_id routable, the capability reporting the
 // loader duck-types, and -- most importantly -- that a malformed or empty response yields NOTHING rather
@@ -22,9 +24,9 @@ const LOCAL = { id: '0', name: 'Local source', displayName: 'Local source', lang
 const fakeGql = (answers: Record<string, unknown>, seen: string[] = []) =>
   (async (query: string, variables: Record<string, unknown> = {}) => {
     const op = /fetchSourceManga/.test(query) ? 'fetchSourceManga'
-      : /fetchChapters/.test(query) ? 'fetchChapters'
+      : /fetchChapters:true/.test(query) ? 'fetchChapters'
       : /fetchChapterPages/.test(query) ? 'fetchChapterPages'
-      : /fetchManga/.test(query) ? 'fetchManga'
+      : /fetchManga:true/.test(query) ? 'fetchManga'
       : 'sources';
     seen.push(`${op}:${JSON.stringify(variables)}`);
     if (!(op in answers)) throw new Error(`unexpected operation ${op}`);
@@ -85,7 +87,7 @@ test('latest is claimed only when the extension supports it', async () => {
 test('chapters come back ascending, every copy of a number, with dates and groups', async () => {
   const { makeSuwayomiAdapter } = await load();
   const a = makeSuwayomiAdapter(LOCAL, fakeGql({
-    fetchChapters: { fetchChapters: { chapters: [
+    fetchChapters: { fetchMangaAndChapters: { chapters: [
       { id: 33, chapterNumber: 3, name: 'Chapter 3', pageCount: -1, uploadDate: '1787177865027', scanlator: '   ' },
       { id: 1, chapterNumber: 1, name: 'Chapter 1', pageCount: 3, uploadDate: '1787177840210' },
       { id: 2, chapterNumber: 2, name: 'Chapter 2', pageCount: 3, uploadDate: '1787177840269', scanlator: 'Main Team' },
@@ -139,7 +141,7 @@ test('junk in a response produces nothing, never invented entries', async () => 
     fetchSourceManga: { fetchSourceManga: { mangas: [
       { id: 1, title: '   ' }, { id: 2 }, { title: 'no id' }, null,
     ] } },
-    fetchChapters: { fetchChapters: { chapters: [
+    fetchChapters: { fetchMangaAndChapters: { chapters: [
       { id: 1, chapterNumber: null }, { id: 2, chapterNumber: NaN }, { chapterNumber: 4 },
       { id: 3, chapterNumber: -1 }, null,
     ] } },
@@ -153,8 +155,8 @@ test('junk in a response produces nothing, never invented entries', async () => 
 test('a response missing its payload entirely is survivable', async () => {
   const { makeSuwayomiAdapter } = await load();
   const a = makeSuwayomiAdapter(LOCAL, fakeGql({
-    fetchSourceManga: {}, fetchChapters: { fetchChapters: {} }, fetchChapterPages: { fetchChapterPages: { pages: null } },
-    fetchManga: { fetchManga: { manga: null } },
+    fetchSourceManga: {}, fetchChapters: { fetchMangaAndChapters: {} }, fetchChapterPages: { fetchChapterPages: { pages: null } },
+    fetchManga: { fetchMangaAndChapters: { manga: null } },
   }));
   assert.deepEqual(await a.search('x'), []);
   assert.deepEqual(await a.listChapters('1'), []);
@@ -207,7 +209,7 @@ test('popular asks for POPULAR, and asks for the page it was given', async () =>
 
 test('the extension icon is carried onto the adapter', async () => {
   const { makeSuwayomiAdapter } = await load();
-  // `SOURCES_Q` has always selected iconUrl and the adapter used to drop it, so every extension source
+  // The sources query has always selected iconUrl and the adapter used to drop it, so every extension source
   // showed a blank square. Reintroduce by removing the assignment.
   const a = makeSuwayomiAdapter({ ...LOCAL, iconUrl: '/api/v1/source/0/icon' }, fakeGql({}));
   assert.equal(a.iconUrl, '/api/v1/source/0/icon');
@@ -216,14 +218,14 @@ test('the extension icon is carried onto the adapter', async () => {
 
 // ---- #116: posting order and url -----------------------------------------------------------------------------
 
-/** Answer fetchChapters with only the fields the query selected, as the engine does. */
+/** Answer the chapter list with only the fields the query selected, as the engine does. */
 const selecting = (rows: Array<Record<string, unknown>>, seen: string[] = [], refuse?: (q: string) => Error | null) =>
   (async (query: string) => {
     seen.push(query);
     const err = refuse?.(query);
     if (err) throw err;
     const fields = /chapters\s*\{([^}]*)\}/.exec(query)![1].trim().split(/\s+/);
-    return { fetchChapters: { chapters: rows.map((r) => Object.fromEntries(fields.filter((f) => f in r).map((f) => [f, r[f]]))) } };
+    return { fetchMangaAndChapters: { chapters: rows.map((r) => Object.fromEntries(fields.filter((f) => f in r).map((f) => [f, r[f]]))) } };
   }) as never;
 
 // Webtoons-shaped, as the engine answers: sourceOrder ascending (1 = the oldest post), every post numbered 1.
@@ -235,7 +237,7 @@ const PARTS = [
 ];
 
 test('chapters carry the engine\'s posting order and url, and the number stays raw', async () => {
-  // Reintroduce by dropping `sourceOrder url` from FETCH_CHAPTERS: the engine then sends neither, `url` is
+  // Reintroduce by dropping `sourceOrder url` from operations.ts CHAPTER_FIELDS: the engine then sends neither, `url` is
   // undefined and the first deepEqual fails (and `order` falls back to the answer's positions).
   const { makeSuwayomiAdapter } = await load();
   const seen: string[] = [];
@@ -256,46 +258,21 @@ test('chapters carry the engine\'s posting order and url, and the number stays r
   assert.deepEqual(odd.map((c) => [c.order, c.url]), [[1, undefined], [2, '/episode?titleNo=344018&episodeNo=2']]);
 });
 
-/** The engine's own words for a field it does not have, as client.ts rethrows them. */
+/** The engine's own words for a field it does not have, as client.ts rethrows them (an EngineRefusedError). */
 const fieldUndefined = (q: string) => /\bsourceOrder\b/.test(q)
-  ? new Error("suwayomi: Validation error (FieldUndefined@[fetchChapters/chapters/sourceOrder]) : Field 'sourceOrder' in type 'ChapterType' is undefined")
+  ? new Error("suwayomi: Validation error (FieldUndefined@[fetchMangaAndChapters/chapters/sourceOrder]) : Field 'sourceOrder' in type 'ChapterType' is undefined")
   : null;
 
-test('an older engine that refuses sourceOrder is asked the v0.48 way, once', async () => {
-  // Reintroduce by removing the fallback in listChapters: the first call rejects with the validation error.
+test('an engine that refuses a field is not asked another way: the refusal is the answer', async () => {
+  // Until the engine upgrade an engine refusing `sourceOrder url` was asked again with the v0.48 query, and the
+  // refusal was hidden. Such an engine predates OLDEST_ENGINE and lacks fetchMangaAndChapters too, so the fallback is
+  // retired (sources.ts): the refusal reaches the caller, and Health says "Not compatible". Reintroduce a fallback
+  // (retry without the fields on a refusal): two queries are sent and the call resolves.
   const { makeSuwayomiAdapter } = await load();
   const seen: string[] = [];
-  const run = selecting(PARTS, seen, fieldUndefined);
-  const a = makeSuwayomiAdapter(LOCAL, run);
-  const cs = await a.listChapters('7');
-  assert.equal(seen.length, 2, 'refused once, then asked without the fields');
-  assert.doesNotMatch(seen[1], /sourceOrder|\burl\b/);
-  // The engine still answers in sourceOrder, so each row's place in the answer is its order.
-  assert.deepEqual(cs.map((c) => [c.sourceId, c.order]), [['71', 1], ['72', 2], ['73', 4], ['90', 3]]);
-  assert.equal(cs[0].url, undefined);
-  // Remembered for that engine: no second refusal per listing.
-  await a.listChapters('7');
-  await makeSuwayomiAdapter({ ...LOCAL, id: '9' }, run).listChapters('8');
-  assert.equal(seen.length, 4);
-  assert.ok(seen.slice(2).every((q) => !/sourceOrder/.test(q)));
-  // ...and only for that engine: another transport still asks for the fields.
-  const other: string[] = [];
-  await makeSuwayomiAdapter(LOCAL, selecting(PARTS, other)).listChapters('7');
-  assert.match(other[0], /\bsourceOrder\b/);
-});
-
-test('a failure that is not the engine refusing those fields is not retried', async () => {
-  // Reintroduce by retrying on any error: two calls, and the older query's answer would hide this one.
-  const { makeSuwayomiAdapter, refusedChapterFields } = await load();
-  const seen: string[] = [];
-  const boom = new Error('suwayomi: Exception while fetching data (/fetchChapters) : java.io.IOException: bad url\r\n\r\nat ...');
-  const a = makeSuwayomiAdapter(LOCAL, selecting(PARTS, seen, () => boom));
-  await assert.rejects(a.listChapters('7'), (e) => e === boom);
-  assert.equal(seen.length, 1);
-  assert.equal(refusedChapterFields(new Error('suwayomi timeout after 30000 ms')), false);
-  assert.equal(refusedChapterFields(fieldUndefined('sourceOrder')), true);
-  // Matched on the engine's words wherever they sit, so a wrapper that keeps them still falls back.
-  assert.equal(refusedChapterFields(new Error("extension failed: suwayomi: Validation error (FieldUndefined@[fetchChapters/chapters/url]) : Field 'url' in type 'ChapterType' is undefined")), true);
+  const a = makeSuwayomiAdapter(LOCAL, selecting(PARTS, seen, fieldUndefined));
+  await assert.rejects(a.listChapters('7'), /Validation error \(FieldUndefined@\[fetchMangaAndChapters\/chapters\/sourceOrder\]\)/);
+  assert.equal(seen.length, 1, 'asked once, and never another way');
 });
 
 test('against the pinned engine: Istrevelia arrives with its posting order, its urls and its raw numbers', async () => {
@@ -331,7 +308,7 @@ test('chapters with no usable number are counted on the answer, not silently los
   const { makeSuwayomiAdapter } = await load();
   const { UNNUMBERED, unnumberedOf } = await import('../src/lib/sources/types');
   const a = makeSuwayomiAdapter(LOCAL, fakeGql({
-    fetchChapters: { fetchChapters: { chapters: [
+    fetchChapters: { fetchMangaAndChapters: { chapters: [
       { id: 1, chapterNumber: -1, name: 'Prologue' }, { id: 2, chapterNumber: -1, name: 'Notice' }, { id: 3, chapterNumber: null, name: 'Extra' },
     ] } },
   }));
@@ -342,6 +319,71 @@ test('chapters with no usable number are counted on the answer, not silently los
   assert.deepEqual(Object.keys(list), [], 'non-enumerable: spreads and JSON never see it');
   assert.equal(JSON.stringify(list), '[]');
   // A normal list carries nothing.
-  const b = makeSuwayomiAdapter(LOCAL, fakeGql({ fetchChapters: { fetchChapters: { chapters: [{ id: 1, chapterNumber: 1, name: 'One' }] } } }));
+  const b = makeSuwayomiAdapter(LOCAL, fakeGql({ fetchChapters: { fetchMangaAndChapters: { chapters: [{ id: 1, chapterNumber: 1, name: 'One' }] } } }));
   assert.equal(unnumberedOf(await b.listChapters('7')), 0);
+});
+
+// ---- the engine upgrade: contentWarning and dates --------------------------------------------------------------
+
+test('a MIXED source is adult, and so is one whose warning is missing or unknown: a capped account cannot open it', async () => {
+  // `contentWarning` replaced `isNsfw`, and the engine's own isNsfw is contentWarning >= MIXED -- a legacy store's 18+
+  // extension is MIXED (measured on v2.3.2243 and v2.4.2366). Reintroduce `adultOf = (w) => w === 'NSFW'`: the MIXED
+  // source is allowed to a 13+ account. Reintroduce `w !== undefined && w !== 'SAFE'`: the one with no warning is.
+  const { listRemoteSources, makeSuwayomiAdapter, adultOf } = await load();
+  const { sourceAllowedFor } = await import('../src/lib/visibility');
+  const nodes = [
+    { ...LOCAL, id: '1', contentWarning: 'SAFE' }, { ...LOCAL, id: '2', contentWarning: 'MIXED' },
+    { ...LOCAL, id: '3', contentWarning: 'NSFW' }, { ...LOCAL, id: '4' }, { ...LOCAL, id: '5', contentWarning: 'SOMETHING_NEW' },
+  ];
+  const remote = await listRemoteSources((async () => ({ sources: { nodes } })) as never);
+  assert.deepEqual(remote.map((s) => [s.id, s.isNsfw]), [['1', false], ['2', true], ['3', true], ['4', true], ['5', true]]);
+  const capped = (id: string) => sourceAllowedFor(makeSuwayomiAdapter(remote.find((s) => s.id === id)!, fakeGql({})), 13);
+  assert.equal(capped('1'), true, 'a SAFE source is open to a capped account');
+  assert.equal(capped('2'), false, 'a MIXED source is adult');
+  assert.equal(capped('4'), false, 'no warning fails closed');
+  assert.equal(adultOf('SAFE'), false);
+});
+
+test('a date in seconds is read as one; milliseconds are unchanged; junk is no date', async () => {
+  // v2.3.2243 stamps a new chapter its extension gave no date with the current time in SECONDS (measured:
+  // "1791984615"), which read as milliseconds is 1970-01-21. Reintroduce by dropping `if (ms < 1e11) ms *= 1000`: the
+  // first assertion finds no date (the 2000 floor drops the misread one; without it, 1970-01-21).
+  const { uploadedAt, makeSuwayomiAdapter } = await load();
+  assert.equal(uploadedAt('1791984615'), '2026-10-14T13:30:15.000Z', 'seconds');
+  assert.equal(uploadedAt('1704067200000'), '2024-01-01T00:00:00.000Z', 'milliseconds, unchanged');
+  assert.equal(uploadedAt(1704067200000), '2024-01-01T00:00:00.000Z', 'a number too');
+  // No date at all, or one before 2000 in either unit: never a date the radar would show.
+  for (const junk of ['0', '', '-5', 'abc', null, undefined, '946684799', '946684799999', 'Infinity', 'NaN']) {
+    assert.equal(uploadedAt(junk), undefined, String(junk));
+  }
+  // And through the adapter: the dateless chapter dated, the dated one as it was.
+  const a = makeSuwayomiAdapter(LOCAL, fakeGql({ fetchChapters: { fetchMangaAndChapters: { chapters: [
+    { id: 1, chapterNumber: 1, name: 'One', uploadDate: '1791984615' },
+    { id: 2, chapterNumber: 2, name: 'Two', uploadDate: '1704067200000' },
+  ] } } }));
+  assert.deepEqual((await a.listChapters('7')).map((c) => c.publishedAt), ['2026-10-14T13:30:15.000Z', '2024-01-01T00:00:00.000Z']);
+});
+
+test('against the pinned engine: a chapter the extension gave no date arrives dated now, not 1970', async () => {
+  // The fake stamps it the way v2.3.2243 does, in seconds. Reintroduce by dropping uploadedAt's `* 1000`: the chapter
+  // has no date (the 2000 floor drops the misread one; without it, 1970-01-21).
+  const { startFakeSuwayomi, SOURCE_IDS } = await import('./fixtures/fakeSuwayomi');
+  const { makeSuwayomiAdapter } = await load();
+  const fake = await startFakeSuwayomi();
+  try {
+    const run = (async (query: string, variables: Record<string, unknown> = {}) => {
+      const r = await fake.query(query, variables);
+      if (r.errors?.length) throw new Error(`suwayomi: ${r.errors[0].message}`);
+      return r.data;
+    }) as never;
+    const ball = fake.manga('Ball Runner');
+    const a = makeSuwayomiAdapter({ id: SOURCE_IDS.mangaBall, name: 'Manga Ball', lang: 'en' }, run);
+    await a.listChapters(String(ball.id));
+    ball.chapters.unshift({ name: 'Chapter 5', url: '/title/ball-runner/5', chapterNumber: 5, scanlator: 'Ball Team', uploadDate: 0 });
+    const t0 = Date.now() - 1000;
+    const five = (await a.listChapters(String(ball.id))).find((c) => c.number === 5)!;
+    assert.ok(Date.parse(five.publishedAt!) >= t0 && Date.parse(five.publishedAt!) <= Date.now() + 1000, `dated now: ${five.publishedAt}`);
+  } finally {
+    await fake.close();
+  }
 });

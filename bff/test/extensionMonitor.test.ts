@@ -38,6 +38,8 @@ interface FakeExt {
  */
 function engine(exts: FakeExt[], opts: {
   repos?: string[];
+  /** Store addresses the engine cannot read now: their add fails, as an address that 404s does. */
+  unreadable?: string[];
   refreshThrows?: Error;
   onUpdate?: (pkg: string) => boolean | Error;
   onInstall?: (pkg: string) => boolean;
@@ -59,8 +61,8 @@ function engine(exts: FakeExt[], opts: {
     hasUpdate: refreshed && e.installedVersion !== null && e.upstreamVersion !== null
       && e.upstreamVersion !== e.installedVersion,
     isObsolete: refreshed && e.installedVersion !== null && e.upstreamVersion === null,
-    isNsfw: !!e.nsfw,
-    repo: repos[0] ?? null,
+    contentWarning: e.nsfw ? 'NSFW' : 'SAFE',
+    storeIndexUrl: repos[0] ?? null,
   });
 
   const gql = (async (query: string, variables: Record<string, any> = {}) => {
@@ -73,13 +75,13 @@ function engine(exts: FakeExt[], opts: {
     if (/updateExtension\(/.test(query)) {
       const pkg = variables.id as string;
       const e = state.find((x) => x.pkgName === pkg)!;
-      if (/install:true/.test(query)) {
+      if (variables.patch?.install) {
         ops.push(`install:${pkg}`); calls.push({ op: 'install', vars: variables });
         const ok = opts.onInstall ? opts.onInstall(pkg) : true;
         if (ok) e.installedVersion = e.upstreamVersion;
         return { updateExtension: { extension: ok ? { pkgName: pkg, isInstalled: true } : null } };
       }
-      if (/uninstall:true/.test(query)) {
+      if (variables.patch?.uninstall) {
         ops.push(`uninstall:${pkg}`); calls.push({ op: 'uninstall', vars: variables });
         e.installedVersion = null;
         return { updateExtension: { extension: { pkgName: pkg, isInstalled: false } } };
@@ -90,14 +92,19 @@ function engine(exts: FakeExt[], opts: {
       if (r) e.installedVersion = e.upstreamVersion;
       return { updateExtension: { extension: r ? { pkgName: pkg, isInstalled: true } : null } };
     }
-    if (/setSettings/.test(query)) {
-      ops.push('setRepos'); calls.push({ op: 'setRepos', vars: variables });
-      repos = [...(variables.r as string[])];
-      return { setSettings: { settings: { extensionRepos: repos } } };
+    // Extension stores, as measured: an add reads the address there and then and stores the engine's own spelling of
+    // it (the repo.json beside an index.min.json); one it cannot read fails the add.
+    if (/addExtensionStore/.test(query)) {
+      const u = variables.indexUrl as string;
+      ops.push('addRepo'); calls.push({ op: 'addRepo', vars: variables });
+      if (opts.unreadable?.includes(u)) throw new Error('suwayomi: Exception while fetching data (/addExtensionStore) : HTTP error 404');
+      const stored = u.replace(/\/index\.min\.json$/, '/repo.json');
+      if (!repos.includes(stored)) repos = [...repos, stored];
+      return { addExtensionStore: { extensionStore: { indexUrl: stored, name: 'R' } } };
     }
-    if (/extensionRepos/.test(query)) {
+    if (/extensionStores/.test(query)) {
       ops.push('getRepos');
-      return { settings: { extensionRepos: repos } };
+      return { extensionStores: { nodes: repos.map((indexUrl) => ({ indexUrl, name: 'R' })) } };
     }
     ops.push('list'); calls.push({ op: 'list', vars: variables });
     return { extensions: { nodes: state.map(node) } };
@@ -373,12 +380,12 @@ test('repository urls are adopted from the engine, and put back when it loses th
   const { runExtensionCheck } = await load();
 
   // First run after upgrade: we hold none, the engine holds one. Adopt it, do not write to the engine.
-  // Reintroduce by writing repos to the engine unconditionally: setRepos appears in ops.
+  // Reintroduce by writing repos to the engine unconditionally: addRepo appears in ops.
   const adopt = engine([upToDate('org.x.a', 'Alpha')], { repos: ['https://r/i.json'] });
   const stA = store({ repos: [] });
   await runExtensionCheck({}, deps(adopt, stA).deps as any);
   assert.deepEqual(stA.s.repos, ['https://r/i.json'], 'the engine\'s repositories were not adopted');
-  assert.ok(!adopt.ops.includes('setRepos'), 'adopting should not write back to the engine');
+  assert.ok(!adopt.ops.includes('addRepo'), 'adopting should not write back to the engine');
 
   // Its volume was wiped: the engine has none, we still know them. Put them back.
   // Reintroduce by removing the restore branch: the feature stays silently unconfigured.
@@ -392,18 +399,18 @@ test('repository urls are adopted from the engine, and put back when it loses th
 });
 
 test('a repository the engine respelled after a restart is not "lost", and is never written back twice', async () => {
-  // Suwayomi v2.3.2243 reports a pasted index.min.json as typed until it restarts, then as the repo.json beside
-  // it; since v0.45.0 the add route saves the typed spelling as our copy. Measured on the real engine: every
-  // restart made the next check write [repo.json, index.min.json] and push "Extension repositories restored".
-  // Reintroduce by comparing live.includes(u) again: reposRestored is ['https://r/a/index.min.json'] and the
-  // engine gets a setRepos with both spellings.
+  // Suwayomi v2.3.2243 reported a pasted index.min.json as typed until it restarted, then as the repo.json beside
+  // it (the extension stores list that spelling from the start); since v0.45.0 the add route saved the typed spelling
+  // as our copy. Measured on the real engine: every restart made the next check write [repo.json, index.min.json]
+  // and push "Extension repositories restored". Reintroduce by comparing live.includes(u) again: reposRestored is
+  // ['https://r/a/index.min.json'] and the engine gets an addRepo for it.
   const { runExtensionCheck } = await load();
   const restarted = engine([upToDate('org.x.a', 'Alpha')], { repos: ['https://r/a/repo.json'] });
   const st = store({ repos: ['https://r/a/index.min.json'] });
   const d = deps(restarted, st);
   const r = await runExtensionCheck({}, d.deps as any);
   assert.deepEqual(r.reposRestored, [], 'a respelled repository was reported as lost');
-  assert.ok(!restarted.ops.includes('setRepos'), 'the check wrote the repository back as a duplicate');
+  assert.ok(!restarted.ops.includes('addRepo'), 'the check wrote the repository back as a duplicate');
   assert.deepEqual(restarted.repos, ['https://r/a/repo.json']);
   assert.ok(!d.pushes.some((p) => /restored/i.test(p.title)), 'admins were told a repository had been lost');
 
@@ -412,7 +419,23 @@ test('a repository the engine respelled after a restart is not "lost", and is ne
   const stW = store({ repos: ['https://r/a/index.min.json', 'https://r/a/repo.json', 'https://r/b/index.min.json'] });
   const rW = await runExtensionCheck({}, deps(wiped, stW).deps as any);
   assert.deepEqual(rW.reposRestored, ['https://r/a/index.min.json', 'https://r/b/index.min.json']);
-  assert.deepEqual(wiped.repos, ['https://r/a/index.min.json', 'https://r/b/index.min.json']);
+  assert.deepEqual(wiped.repos, ['https://r/a/repo.json', 'https://r/b/repo.json'], 'each put back once, as the engine spells it');
+});
+
+test('an address the engine cannot read now is not reported as put back, and is kept for the next check', async () => {
+  // Since the engine upgrade a store is added one at a time and read as it is added (extensions.ts addRepo), so a
+  // repository that is down when a wiped engine is healed cannot go back yet. Reintroduce by reporting every missing
+  // one (`result.reposRestored = missing`): the down one is in reposRestored and the audit, though the engine lacks it.
+  const { runExtensionCheck } = await load();
+  const wiped = engine([upToDate('org.x.a', 'Alpha')], { repos: [], unreadable: ['https://r/down/index.min.json'] });
+  const st = store({ repos: ['https://r/a/index.min.json', 'https://r/down/index.min.json'] });
+  const d = deps(wiped, st);
+  const r = await runExtensionCheck({}, d.deps as any);
+  assert.deepEqual(wiped.ops.filter((o) => o === 'addRepo').length, 2, 'PREMISE: both were tried');
+  assert.deepEqual(r.reposRestored, ['https://r/a/index.min.json']);
+  assert.deepEqual(wiped.repos, ['https://r/a/repo.json']);
+  assert.deepEqual(d.audits.find((a) => a.event === 'extension.repo_restored')?.detail, { urls: ['https://r/a/index.min.json'] });
+  assert.deepEqual(st.s.repos, ['https://r/a/index.min.json', 'https://r/down/index.min.json'], 'our copy still holds the one to try next time');
 });
 
 test('a wiped engine gets its extensions back; an admin uninstalling one does not', async () => {

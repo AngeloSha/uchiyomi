@@ -1,7 +1,7 @@
 // The extension catalogue: browsing, installing, and the repositories it comes from.
 //
 // The GraphQL client is injected, so nothing here touches the network. Shapes are the ones a live
-// Suwayomi-Server v2.3.2243 actually returns.
+// Suwayomi-Server v2.3.2243 actually returns (and v2.4.2366: the repositories are its extension stores).
 //
 // The assertions that matter are the mapping ones. An extension row that comes back half-formed must not
 // become a clickable "Add" button for something that cannot be installed, and an empty answer must stay
@@ -24,8 +24,8 @@ const EXT = {
   pkgName: 'eu.kanade.tachiyomi.extension.all.mangaup',
   name: 'Manga UP!', lang: 'en', versionName: '1.4.8',
   iconUrl: '/api/v1/extension/icon/eu.kanade.tachiyomi.extension.all.mangaup',
-  isInstalled: true, hasUpdate: false, isObsolete: false, isNsfw: false,
-  repo: 'https://example.org/repo/',
+  isInstalled: true, hasUpdate: false, isObsolete: false, contentWarning: 'SAFE',
+  storeIndexUrl: 'https://example.org/repo/',
 };
 
 test('an extension row maps to what the catalogue shows', async () => {
@@ -38,6 +38,19 @@ test('an extension row maps to what the catalogue shows', async () => {
   assert.equal(e.installed, true);
   assert.equal(e.hasUpdate, false);
   assert.equal(e.nsfw, false);
+  assert.equal(e.repo, 'https://example.org/repo/', 'storeIndexUrl, which replaced repo, read into repo');
+});
+
+test('an extension is 18+ unless the engine says SAFE: MIXED, NSFW, nothing or something new', async () => {
+  // A legacy store's 18+ extension is MIXED, not NSFW (measured on v2.3.2243 and v2.4.2366). Reintroduce
+  // `nsfw: e.contentWarning === 'NSFW'`: the MIXED row reads safe, and Admin → Sources offers it without the 18+ mark.
+  const { listExtensions, sourcesOfExtension } = await load();
+  const rows = ['SAFE', 'MIXED', 'NSFW', undefined, 'NEW'].map((w, i) => ({ ...EXT, pkgName: `p${i}`, contentWarning: w }));
+  assert.deepEqual((await listExtensions(answer({ extensions: { nodes: rows } }))).map((e) => e.nsfw), [false, true, true, true, true]);
+  const src = await sourcesOfExtension('mine', answer({ extensions: { nodes: [{ pkgName: 'mine', source: { nodes: [
+    { id: '1', name: 'A', lang: 'en', contentWarning: 'SAFE' }, { id: '2', name: 'B', lang: 'en', contentWarning: 'MIXED' },
+  ] } }] } }));
+  assert.deepEqual(src.map((s) => s.nsfw), [false, true]);
 });
 
 test('a nameless extension falls back to its package name rather than rendering blank', async () => {
@@ -64,14 +77,14 @@ test('an empty or shapeless answer produces an empty catalogue', async () => {
 test('install, update and uninstall each send the right patch', async () => {
   const { setExtensionState } = await load();
   for (const action of ['install', 'uninstall', 'update'] as const) {
-    let sent = '';
-    const run = (async (query: string, variables: Record<string, unknown>) => {
-      sent = query;
+    let sent: Record<string, unknown> = {};
+    const run = (async (_query: string, variables: Record<string, unknown>) => {
+      sent = variables;
       assert.equal(variables.id, 'pkg.name');
       return { updateExtension: { extension: { pkgName: 'pkg.name' } } };
     }) as never;
     assert.equal(await setExtensionState('pkg.name', action, run), true);
-    assert.match(sent, new RegExp(`${action}:true`), `${action} did not send its own patch`);
+    assert.deepEqual(sent.patch, { [action]: true }, `${action} did not send its own patch`);
   }
 });
 
@@ -97,14 +110,23 @@ test('an extension that provides no sources yields none, not a crash', async () 
   assert.deepEqual(await sourcesOfExtension('mine', answer({})), []);
 });
 
-test('reading and writing repositories round-trips', async () => {
-  const { getRepos, setRepos } = await load();
-  assert.deepEqual(await getRepos(answer({ settings: { extensionRepos: ['https://example.org/a.json'] } })), ['https://example.org/a.json']);
-  assert.deepEqual(await getRepos(answer({ settings: { extensionRepos: null } })), []);
+test('repositories are the engine\'s extension stores: listed, added one at a time, removed by its spelling', async () => {
+  // Reintroduce reading the deprecated `settings { extensionRepos }`: a store added through the stores (the engine's
+  // own page, or this) is not there until the engine restarts (measured), and getRepos reads [].
+  const { getRepos, addRepo, removeRepo } = await load();
+  assert.deepEqual(await getRepos(answer({ extensionStores: { nodes: [{ indexUrl: 'https://example.org/a/repo.json' }, { indexUrl: '' }, null] } })),
+    ['https://example.org/a/repo.json']);
+  assert.deepEqual(await getRepos(answer({ extensionStores: { nodes: null } })), []);
   assert.deepEqual(await getRepos(answer({})), []);
   const seen: string[] = [];
-  await setRepos(['https://example.org/b.json'], answer({ setSettings: { settings: { extensionRepos: ['https://example.org/b.json'] } } }, seen));
-  assert.ok(seen[0].includes('example.org/b.json'), seen[0]);
+  assert.deepEqual(await addRepo('https://example.org/b/index.min.json',
+    answer({ addExtensionStore: { extensionStore: { indexUrl: 'https://example.org/b/repo.json', name: 'B' } } }, seen)),
+  { indexUrl: 'https://example.org/b/repo.json', name: 'B' }, 'the engine\'s own spelling comes back');
+  assert.ok(seen[0].startsWith('mutation:') && seen[0].includes('example.org/b/index.min.json'), seen[0]);
+  // No store and no error is not taken as an add.
+  await assert.rejects(addRepo('https://example.org/c', answer({ addExtensionStore: { extensionStore: null } })), /did not say which store/);
+  assert.equal(await removeRepo('https://example.org/b/repo.json', answer({ removeExtensionStore: { extensionStore: { indexUrl: 'https://example.org/b/repo.json' } } })), true);
+  assert.equal(await removeRepo('https://example.org/zzz', answer({ removeExtensionStore: { extensionStore: null } })), false, 'an address it did not hold');
 });
 
 test('refreshing the repositories passes its timeout through to the transport', async () => {
@@ -297,10 +319,14 @@ test('a repository removed and added back is credited with the installed extensi
   assert.equal(contributedBy([row(true)], [row(true)], []), 0, 'an orphan was credited to a broken repository');
 });
 
-test('the engine\'s reason loses our transport prefix and nothing else', async () => {
+test('the engine\'s reason loses our transport prefix, graphql-java\'s head and the stack trace, and nothing else', async () => {
+  // Reintroduce the prefix strip alone: the add refusal reads "Exception while fetching data (/addExtensionStore) :
+  // HTTP error 404" followed by a Java stack trace.
   const { engineReason } = await load();
   assert.equal(engineReason(new Error('suwayomi: Validation errors: bad url')), 'Validation errors: bad url');
   assert.equal(engineReason(new Error('suwayomi 500')), '500');
   assert.equal(engineReason(new Error('')), 'no reason given');
   assert.equal(engineReason('x'.repeat(400)).length, 300);
+  assert.equal(engineReason(new Error('suwayomi: Exception while fetching data (/addExtensionStore) : HTTP error 404\r\n\r\neu.kanade.tachiyomi.network.HttpException: HTTP error 404\n\tat suwayomi.tachidesk.X(X.kt:50)')),
+    'HTTP error 404');
 });

@@ -1784,6 +1784,12 @@ export async function runOnce(
 }
 
 /**
+ * The chapter-date repair's id, apart because migrate.int.test.ts runs it again by name. Version-free on purpose: ids
+ * are permanent, and this one was written before its release had a number.
+ */
+export const CHAPTER_DATES_MIGRATION = 'suwayomi-chapter-dates-in-seconds';
+
+/**
  * Run-once data migrations, oldest first. Ids are permanent: renaming one re-runs it everywhere.
  */
 const DATA_MIGRATIONS: { id: string; run: (c: PoolClient) => Promise<void> }[] = [
@@ -2039,6 +2045,49 @@ const DATA_MIGRATIONS: { id: string; run: (c: PoolClient) => Promise<void> }[] =
                                           UNION SELECT unnest($1::text[])) x)
           WHERE id = 1`,
         [[...new Set(moved.map((r) => r.lang))]],
+      );
+    },
+  },
+
+  // The engine upgrade: chapter dates the extension engine gave in SECONDS. v2.3.2243 stamps a new chapter its
+  // extension listed without a date with the current time in epoch seconds (`Instant.now().epochSecond`; measured on
+  // a throwaway engine), and the adapter read every date as milliseconds -- so they were stored as 1970-01-21. The
+  // adapter now reads both (sources/suwayomi/sources.ts uploadedAt); this puts right what it already stored, in every
+  // place a chapter's date lives: lib_books (setBookDates), series_listing's column and its `chosen` and `copies`
+  // JSON, and series_post_numbers.
+  //
+  // A stored date after the epoch and before 1973-03-04 (1e11 ms) can only be such a value: it becomes that many
+  // SECONDS after the epoch when that lands between 2000-01-01 and two days from now, and no date otherwise -- never a
+  // guess. A date at or before the epoch is left alone, as is everything after March 1973. On the owner's server
+  // (2026-10-14, read-only): 175 chapters, 174 listing rows and 366 listing copies, all from extension sources, all
+  // between 2026-10-04 and 2026-10-14; no posting-order rows.
+  {
+    id: CHAPTER_DATES_MIGRATION,
+    run: async (c) => {
+      // The real moment a seconds-valued timestamp stood for, or NULL. `ts` is SQL text, used twice.
+      const fixed = (ts: string) => `(CASE WHEN to_timestamp(extract(epoch FROM ${ts}) * 1000)
+          BETWEEN timestamptz '2000-01-01' AND now() + interval '2 days'
+          THEN to_timestamp(extract(epoch FROM ${ts}) * 1000) END)`;
+      const misread = (ts: string) => `${ts} > 'epoch' AND ${ts} < '1973-03-04'`;
+      for (const table of ['lib_books', 'series_listing', 'series_post_numbers']) {
+        await c.query(`UPDATE ${table} SET published_at = ${fixed('published_at')} WHERE ${misread('published_at')}`);
+      }
+      // The JSON keeps a date as an ISO string ("2026-10-10T07:26:49.000Z" as the adapter wrote it, "+00:00" from some
+      // APIs). Only a string that IS one is read as a timestamp: the CASE comes first, so nothing else is ever cast. A
+      // date put right is written back the adapter's way; one that was no date is dropped from its copy, as the adapter
+      // now drops it.
+      const iso = (v: string) =>
+        `(CASE WHEN ${v} ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:?\\d{2})$' THEN (${v})::timestamptz END)`;
+      const repaired = (j: string) => `(CASE WHEN ${fixed(iso(`${j}->>'publishedAt'`))} IS NULL THEN ${j} - 'publishedAt'
+          ELSE jsonb_set(${j}, '{publishedAt}', to_jsonb(to_char(${fixed(iso(`${j}->>'publishedAt'`))} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))) END)`;
+      const bad = (j: string) => misread(iso(`${j}->>'publishedAt'`));
+      await c.query(`UPDATE series_listing SET chosen = ${repaired('chosen')} WHERE ${bad('chosen')}`);
+      await c.query(
+        `UPDATE series_listing l
+            SET copies = (SELECT jsonb_agg(CASE WHEN ${bad('cp')} THEN ${repaired('cp')} ELSE cp END ORDER BY i)
+                            FROM jsonb_array_elements(l.copies) WITH ORDINALITY AS e(cp, i))
+          WHERE jsonb_typeof(l.copies) = 'array'
+            AND EXISTS (SELECT 1 FROM jsonb_array_elements(l.copies) cp WHERE ${bad('cp')})`,
       );
     },
   },

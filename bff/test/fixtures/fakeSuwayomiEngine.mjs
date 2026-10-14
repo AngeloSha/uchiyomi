@@ -31,6 +31,19 @@
 //     /api/v1/extension/icon/<pkgName>;
 //   * fetchManga / fetchChapters / fetchChapterPages on an unknown id: "Collection is empty."
 //     (java.util.NoSuchElementException); fetchSourceManga on an unknown source: a NullPointerException;
+//   * fetchMangaAndChapters (which replaced fetchManga and fetchChapters; v2.3.2243 and v2.4.2366, 2026-10-14): an
+//     unknown id fails the field the same way; a failed UPDATE is caught and answered with the STORED manga and every
+//     stored chapter, plus an error that is the exception's bare message -- `{"message":"No chapters found"}`, no
+//     path, no locations, no stack trace. `chapters` is every stored row in sourceOrder, whichever flag was set;
+//   * a new chapter the extension gave no date (0) is stamped with the latest date seen before it in the oldest-first
+//     list, or with NOW when there is none -- in epoch SECONDS on v2.3.2243 ("1791984615" beside a real
+//     "1704067200000"), milliseconds from v2.4. A known chapter with no date keeps its stored one;
+//   * extension stores (addExtensionStore / removeExtensionStore / extensionStores; v2.3.2243 and v2.4.2366): an add
+//     reads the index there and then and answers the engine's own spelling of the address (the repo.json beside an
+//     index.min.json) or fails like any fetcher ("HTTP error 404", "Provided legacy store url is not valid", OkHttp's
+//     "Expected URL scheme 'http' or 'https' but no scheme was found for not a ..."); adding a store it holds changes
+//     nothing; a remove matches exactly, and an unknown address answers null with no error;
+//   * contentWarning is SAFE, MIXED or NSFW, and isNsfw = contentWarning != SAFE; a legacy store's 18+ extension is MIXED;
 //   * updateSourcePreference (Source.setSourcePreference, v2.3.2243): the position indexes the preference
 //     screen built by the LAST read of that source's preferences -- there is none before the first read, which
 //     is a NullPointerException; an out-of-range position is an IndexOutOfBoundsException; a DISABLED
@@ -44,20 +57,34 @@
 // What is modelled rather than measured is marked where it happens (the extension's own stack frames, the
 // Webtoons numbering rule, the image failure status).
 //
-// ⚠️ NOT FOR REPOSITORY FLOWS. setSettings stores extensionRepos, and fetchExtensions / extensions answer the
-// seeded catalogue whatever the repositories say. The real engine applies an added repository asynchronously,
-// lists its own spelling after a restart, and marks an installed extension no repository offers as obsolete --
-// three behaviours extensionRepos.int.test.ts measured and models, each of which hid a shipped bug behind a
-// fake that ignored it. A test of adding, removing or refreshing repositories uses that file's fake, not this.
+// ⚠️ NOT FOR REPOSITORY FLOWS. Stores are kept (the three operations above answer as measured, and an address
+// answers as a store when it ends in /index.min.json or /repo.json -- there is no network here), but fetchExtensions
+// and extensions answer the seeded catalogue whatever the stores say. The real engine marks an installed extension no
+// store offers as obsolete, and lists a store's extensions only once it is added -- behaviours
+// extensionRepos.int.test.ts measured and models, each of which hid a shipped bug behind a fake that ignored it. A
+// test of adding, removing or refreshing repositories uses that file's fake, not this.
+//
+// THE SCHEMA can be another engine's: SUWAYOMI_FAKE_SCHEMA names a capture (captureSuwayomiSchema.mjs), and the
+// weekly canary (.github/workflows/engine-canary.yml) runs the fake-based tests against a NEW engine's that way. The
+// fake then answers aboutServer with that engine's version and, from v2.4 on, stamps dateless chapters in
+// milliseconds, as that engine does. Everything else it models stays v2.3.2243's.
 //
 // Not modelled either: graphql-java's overlap and uniqueness rules (FieldsConflict, duplicate arguments,
 // fields, fragments, variables or directives, a directive in the wrong place). A query that breaks one is
 // refused by the engine and answered here, so do not lean on the fake to catch those.
 import http from 'node:http';
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { deflateSync } from 'node:zlib';
 
 export const SCHEMA_FILE = new URL('./suwayomi-v2.3.2243-schema.json', import.meta.url);
+
+/** The schema the fake validates against by default: SCHEMA_FILE, or the capture SUWAYOMI_FAKE_SCHEMA names. */
+export function defaultSchemaFile() {
+  const over = typeof process !== 'undefined' ? process.env.SUWAYOMI_FAKE_SCHEMA : '';
+  return over ? pathToFileURL(resolve(over)) : SCHEMA_FILE;
+}
 
 // ================================================================================================
 // Schema
@@ -119,12 +146,27 @@ export class Schema {
   possible(name) { return this.kind(name) === 'OBJECT' ? [name] : this.types[name]?.possibleTypes ?? []; }
 }
 
-let defaultSchema = null;
-export function loadSchema(file = SCHEMA_FILE) {
-  if (file === SCHEMA_FILE && defaultSchema) return defaultSchema;
-  const s = new Schema(JSON.parse(readFileSync(file, 'utf8')));
-  if (file === SCHEMA_FILE) defaultSchema = s;
-  return s;
+/**
+ * A copy of `schema` without the members named `Type.member` (fields or input fields): an engine that lacks them, as an
+ * older or newer one would. What a test of the engine REFUSING Uchiyomi's queries starts from (setSchema below).
+ */
+export function schemaWithout(schema, members) {
+  const json = structuredClone({ engine: schema.engine, roots: schema.roots, types: schema.types });
+  for (const m of members) {
+    const [type, name] = m.split('.');
+    const t = json.types[type];
+    if (!t || !(t.fields?.[name] ?? t.inputFields?.[name])) throw new Error(`schemaWithout: ${m} is not in the schema`);
+    if (t.fields) delete t.fields[name];
+    if (t.inputFields) delete t.inputFields[name];
+  }
+  return new Schema(json);
+}
+
+const schemas = new Map();
+export function loadSchema(file = defaultSchemaFile()) {
+  const key = String(file);
+  if (!schemas.has(key)) schemas.set(key, new Schema(JSON.parse(readFileSync(file, 'utf8'))));
+  return schemas.get(key);
 }
 
 // ================================================================================================
@@ -483,6 +525,9 @@ export function validate(schema, doc, deprecated = []) {
         add('WrongType', path, `${head} - Expected an AST type of 'EnumValue' but it was a '${JAVA_AST[value.kind]}'`, loc);
       } else if (!schema.enumValues(name).includes(value.value)) {
         add('WrongType', path, `${head} - Literal value not in allowable values for enum '${name}' - '${printAst(value)}'`, loc);
+      } else if (Object.hasOwn(schema.types[name]?.deprecatedValues ?? {}, value.value)) {
+        // A deprecated enum value is accepted as silently as a deprecated field, and as worth knowing about.
+        deprecated.push(`${name}.${value.value}`);
       }
       return;
     }
@@ -695,6 +740,13 @@ export class EngineException extends Error {
 }
 /** A field or argument the REAL engine serves and this fake does not. Loud on purpose; see the header. */
 export class NotImplemented extends Error {}
+/**
+ * graphql-java's DataFetcherResult: data AND errors from one fetcher. What fetchMangaAndChapters answers a failed
+ * update with -- the stored rows, and the exception as a bare `{message}` (toGraphQLError: no path, no locations).
+ */
+export class WithErrors {
+  constructor(data, errors) { this.data = data; this.errors = errors; }
+}
 class FakeBug extends Error {}
 const BUBBLE = Symbol('null bubbles to the parent');
 
@@ -923,6 +975,10 @@ async function execute(schema, doc, { operationName, variables, root }) {
       if (typeof r === 'function') value = await r(args);
       else if (Object.keys(args).length) throw new NotImplemented(`${where}(${Object.keys(args).join(', ')})`);
       else value = r;
+      if (value instanceof WithErrors) {
+        errors.push(...value.errors);
+        value = value.data;
+      }
     } catch (e) {
       if (!(e instanceof EngineException)) throw e;
       errors.push({ message: fetchErrorMessage(path, e), locations: [node.loc], path });
@@ -1273,6 +1329,9 @@ export function catalogueSeed(n) {
   return { ...seed, sources: [...seed.sources, ...more.sources], extensions: [...seed.extensions, ...more.extensions] };
 }
 
+/** A store's name, as an index's meta would give it: its host, offline. */
+const storeName = (u) => { try { return new URL(u).host; } catch { return u; } };
+
 /** The settings a fresh v2.3.2243 reports, read off the disposable engine. Others are refused as not implemented. */
 const DEFAULT_SETTINGS = {
   extensionRepos: [],
@@ -1293,11 +1352,22 @@ const ABOUT = {
   github: 'https://github.com/Suwayomi/Suwayomi-Server', discord: 'https://discord.gg/DDZdqZWaHA',
 };
 
-function buildState(seed) {
+/** "v2.4.2366" → [2, 4, 2366]; null for anything else. */
+const versionParts = (v) => { const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(v ?? '')); return m ? m.slice(1).map(Number) : null; };
+/** Does the engine this schema came from stamp a dateless chapter in milliseconds (v2.4 on) rather than seconds? */
+const stampsMillis = (schema) => { const p = versionParts(schema?.engine?.version); return !!p && (p[0] > 2 || (p[0] === 2 && p[1] >= 4)); };
+
+/** The engine's own word for a seed's adult flag: `contentWarning` as seeded, else NSFW or SAFE from `isNsfw`. */
+const warningOf = (x) => x?.contentWarning ?? (x?.isNsfw ? 'NSFW' : 'SAFE');
+
+function buildState(seed, schema) {
   const clone = structuredClone(seed);
   const st = {
-    about: { ...ABOUT },
+    about: { ...ABOUT, version: schema?.engine?.version ?? ABOUT.version, revision: `r${versionParts(schema?.engine?.version)?.[2] ?? 2243}` },
+    millis: stampsMillis(schema),
     settings: { ...DEFAULT_SETTINGS, ...(clone.settings ?? {}) },
+    /** Extension stores by the engine's own spelling of their address, in the order they were added. */
+    stores: new Map((clone.stores ?? []).map((u) => [u, { indexUrl: u, name: storeName(u) }])),
     sources: new Map(),
     extensions: new Map(),
     mangas: new Map(),
@@ -1381,8 +1451,10 @@ function png(seed) {
  * One engine: its state, its mode and its request log, behind one HTTP handler. `startFakeEngine` puts it on
  * a port; tests usually want that, through fakeSuwayomi.ts.
  */
-export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), auth = null } = {}) {
-  let st = buildState(seed);
+export function createFakeEngine({ seed = defaultSeed(), schema: initialSchema = loadSchema(), auth = null } = {}) {
+  /** The schema it validates against: another one with setSchema (an engine swapped for an older or newer one). */
+  let schema = initialSchema;
+  let st = buildState(seed, schema);
   let mode = { mode: 'up' };
   const log = [];
   let seq = 0;
@@ -1460,8 +1532,8 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
   function extensionView(e) {
     return {
       pkgName: e.pkgName, name: e.name, lang: e.lang, versionName: e.versionName, iconUrl: `/api/v1/extension/icon/${e.pkgName}`,
-      isInstalled: !!e.installed, hasUpdate: !!e.hasUpdate, isObsolete: !!e.obsolete, isNsfw: !!e.isNsfw,
-      contentWarning: e.isNsfw ? 'NSFW' : 'SAFE', repo: e.repo ?? null, storeIndexUrl: e.repo ?? null,
+      isInstalled: !!e.installed, hasUpdate: !!e.hasUpdate, isObsolete: !!e.obsolete, isNsfw: warningOf(e) !== 'SAFE',
+      contentWarning: warningOf(e), repo: e.repo ?? null, storeIndexUrl: e.repo ?? null,
       versionCode: e.versionCode, versionCodeLong: String(e.versionCode), apkName: `tachiyomi-${e.pkgName.split('.').slice(-2).join('.')}-v${e.versionName}.apk`,
       // Modelled, not measured (no network inside the measured container): the addresses a repository's index gives
       // its files -- Keiyoushi's put them on GitHub Releases -- as seeded, else none.
@@ -1473,8 +1545,8 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
     const ext = st.extensions.get(src.pkgName);
     return {
       id: src.id, name: src.name, displayName: displayName(src), lang: src.lang, iconUrl: `/api/v1/extension/icon/${src.pkgName}`,
-      supportsLatest: !!src.supportsLatest, isConfigurable: src.preferences.length > 0, isNsfw: !!src.isNsfw,
-      contentWarning: src.isNsfw ? 'NSFW' : 'SAFE', baseUrl: src.baseUrl ?? null, homeUrl: src.baseUrl ?? null,
+      supportsLatest: !!src.supportsLatest, isConfigurable: src.preferences.length > 0, isNsfw: warningOf(src) !== 'SAFE',
+      contentWarning: warningOf(src), baseUrl: src.baseUrl ?? null, homeUrl: src.baseUrl ?? null,
       extension: () => (ext ? extensionView(ext) : { pkgName: src.pkgName, name: 'Local Source fake extension', lang: 'localsourcelang', isInstalled: true, isNsfw: false, contentWarning: 'SAFE' }),
       preferences: () => readPreferences(src),
     };
@@ -1509,6 +1581,10 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
     const oldestFirst = [...m.chapters].reverse();
     const numbered = src.numbering === 'webtoons' ? webtoonsNumbers(oldestFirst, src.prefValues[SEQUENTIAL_KEY] === true) : null;
     const now = Math.floor(Date.now() / 1000);
+    // Chapter.updateChapterListDatabase: a NEW chapter without a date takes the latest date seen before it, oldest
+    // first, or now -- in SECONDS on v2.3.2243 (`now.epochSecond`), in milliseconds from v2.4. A known one keeps its own.
+    const stamp = st.millis ? Date.now() : now;
+    let maxSeen = 0;
     const keep = new Set();
     const rows = oldestFirst.map((c, i) => {
       const key = `${m.id}\n${c.url}`;
@@ -1516,11 +1592,16 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
       if (id === undefined) { id = st.nextChapter++; st.chapterIds.set(key, id); }
       keep.add(id);
       const prev = st.chapters.get(id);
+      let uploadDate = c.uploadDate ?? 0;
+      // Only a NEW chapter's date counts as seen, as on the engine.
+      if (prev) { if (uploadDate === 0) uploadDate = prev.uploadDate; }
+      else if (uploadDate === 0) uploadDate = maxSeen || stamp;
+      else maxSeen = Math.max(maxSeen, uploadDate);
       const row = {
         id, mangaId: m.id, url: c.url, realUrl: c.realUrl ?? null,
         name: numbered ? numbered[i].name : c.name,
         chapterNumber: numbered ? numbered[i].chapterNumber : f32(c.chapterNumber ?? -1),
-        scanlator: c.scanlator ?? null, uploadDate: c.uploadDate ?? 0, sourceOrder: i + 1,
+        scanlator: c.scanlator ?? null, uploadDate, sourceOrder: i + 1,
         pages: c.pages ?? 3, pageCount: prev?.pageCount ?? -1, fetchedAt: now,
       };
       st.chapters.set(id, row);
@@ -1551,6 +1632,8 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
       extension: ({ pkgName }) => { const e = st.extensions.get(pkgName); return e ? extensionView(e) : null; },
       manga: ({ id }) => { const m = st.mangas.get(id); return m && sourceOf(m.sourceId) ? mangaView(m) : null; },
       chapter: ({ id }) => { const c = st.chapters.get(id); return c ? chapterView(c) : null; },
+      extensionStores: (args) => { only(args, [], 'Query.extensionStores'); return connection([...st.stores.values()].map(storeView)); },
+      extensionStore: ({ indexUrl }) => { const x = st.stores.get(indexUrl); return x ? storeView(x) : null; },
     },
     Mutation: {
       fetchSourceManga: ({ input }) => {
@@ -1577,6 +1660,34 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
         if (!m || !sourceOf(m.sourceId)) throw noSuchElement('suwayomi.tachidesk.manga.impl.Manga.updateMangaAndChapters(Manga.kt:162)');
         failIf(st.sources.get(m.sourceId), 'chapters');
         return { chapters: syncChapters(m).map(chapterView), clientMutationId: input.clientMutationId ?? null };
+      },
+      // MangaMutation.fetchMangaAndChapters: the update's exception is caught and attached, and the payload is read
+      // back from the database whatever happened -- the stored manga and every stored chapter, in sourceOrder. An
+      // unknown id fails the field outright (its read of the manga row), as fetchManga's did.
+      fetchMangaAndChapters: ({ input }) => {
+        const m = st.mangas.get(input.id);
+        if (!m || !sourceOf(m.sourceId)) {
+          throw new EngineException('java.util.NoSuchElementException', 'Collection is empty.', [
+            'kotlin.collections.CollectionsKt___CollectionsKt.first(_Collections.kt:209)',
+            'suwayomi.tachidesk.graphql.mutations.MangaMutation$fetchMangaAndChapters$1.invokeSuspend(MangaMutation.kt:207)',
+          ]);
+        }
+        const src = st.sources.get(m.sourceId);
+        let error = null;
+        try {
+          if (input.fetchManga) failIf(src, 'manga');
+          if (input.fetchChapters) { failIf(src, 'chapters'); syncChapters(m); }
+        } catch (e) {
+          if (!(e instanceof EngineException)) throw e;
+          error = e;
+        }
+        const payload = {
+          manga: mangaView(m),
+          chapters: [...st.chapters.values()].filter((c) => c.mangaId === m.id).sort((a, b) => a.sourceOrder - b.sourceOrder).map(chapterView),
+          clientMutationId: input.clientMutationId ?? null,
+        };
+        // toGraphQLError: the exception's own message, and nothing else (a null message is modelled as "null").
+        return error ? new WithErrors(payload, [{ message: error.javaMessage ?? 'null' }]) : payload;
       },
       fetchChapterPages: ({ input }) => {
         const row = st.chapters.get(input.chapterId);
@@ -1638,6 +1749,33 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
         }
         return { preferences: readPreferences(src), source: sourceView(src), clientMutationId: input.clientMutationId ?? null };
       },
+      // ExtensionStoreMutation: the add reads the index there and then (offline here: an address answers as a store when
+      // it ends in /index.min.json or /repo.json, and is "HTTP error 404" otherwise; `failStores` names others), stores
+      // the engine's own spelling of it -- the repo.json beside an index.min.json -- and answers that. Upserted by that
+      // spelling, exactly; the remove matches exactly too, and an address it does not hold answers null.
+      addExtensionStore: ({ input }) => {
+        const url = input.indexUrl;
+        const at = 'suwayomi.tachidesk.manga.impl.extension.ExtensionStoreService.fetch(ExtensionStoreService.kt:50)';
+        if (!/^https?:\/\//i.test(url)) {
+          // OkHttp's HttpUrl.Builder.parse, which quotes the first six characters.
+          const shown = url.length > 6 ? `${url.slice(0, 6)}...` : url;
+          throw new EngineException('java.lang.IllegalArgumentException', `Expected URL scheme 'http' or 'https' but no scheme was found for ${shown}`,
+            ['okhttp3.HttpUrl$Builder.parse$okhttp(HttpUrl.kt:1261)', at]);
+        }
+        const forced = st.failStores?.[url];
+        if (forced) throw new EngineException('java.lang.Exception', forced, [at]);
+        let indexUrl;
+        if (/\/index\.min\.json$/.test(url)) indexUrl = url.replace(/\/index\.min\.json$/, '/repo.json');
+        else if (/\/repo\.json$/.test(url)) indexUrl = url;
+        else throw new EngineException('eu.kanade.tachiyomi.network.HttpException', 'HTTP error 404', [at]);
+        if (!st.stores.has(indexUrl)) st.stores.set(indexUrl, { indexUrl, name: storeName(indexUrl) });
+        return { extensionStore: storeView(st.stores.get(indexUrl)), clientMutationId: input.clientMutationId ?? null };
+      },
+      removeExtensionStore: ({ input }) => {
+        const x = st.stores.get(input.indexUrl);
+        if (x) st.stores.delete(input.indexUrl);
+        return { extensionStore: x ? storeView(x) : null, clientMutationId: input.clientMutationId ?? null };
+      },
       fetchExtensions: ({ input }) => {
         if (st.failFetch) throw repositoryFailure('suwayomi.tachidesk.manga.impl.extension.ExtensionsList.fetchExtensions(ExtensionsList.kt:1)');
         return { extensions: [...st.extensions.values()].map(extensionView), extensionStores: [], clientMutationId: input.clientMutationId ?? null };
@@ -1655,6 +1793,9 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
   };
   function settingsView() {
     return { ...st.settings };
+  }
+  function storeView(x) {
+    return { indexUrl: x.indexUrl, name: x.name, badgeLabel: x.name, isLegacy: true, signingKey: '', contactWebsite: x.indexUrl, contactDiscord: null, extensionListUrl: null };
   }
 
   // ---- HTTP -------------------------------------------------------------------------------------------------
@@ -1690,9 +1831,10 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
    * an unreachable repository does, and `failList` the catalogue's own listing (`extensions`); false puts either back.
    * Never part of the engine; a bad body throws, and is a 400.
    */
-  function catalogue({ extensions, set, empty, failFetch, failList } = {}) {
+  function catalogue({ extensions, set, empty, failFetch, failList, failStores } = {}) {
     if (failFetch !== undefined) st.failFetch = failFetch === true;
     if (failList !== undefined) st.failList = failList === true;
+    if (failStores !== undefined) st.failStores = failStores && typeof failStores === 'object' ? { ...failStores } : {};
     if (empty === true) {
       for (const [id, s] of st.sources) if (s.pkgName !== PKG.local) st.sources.delete(id);
       st.extensions.clear();
@@ -1715,7 +1857,8 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
     return { extensions: st.extensions.size, sources: st.sources.size };
   }
   function reset(nextSeed = seed) {
-    st = buildState(nextSeed);
+    schema = initialSchema;
+    st = buildState(nextSeed, schema);
     root.Query.aboutServer = { ...st.about };
     mode = { mode: 'up' };
     log.length = 0;
@@ -1749,7 +1892,7 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
       return out;
     } catch (e) {
       if (!(e instanceof NotImplemented)) throw e;
-      const message = `FAKE ENGINE: ${e.message} is valid on Suwayomi-Server v2.3.2243 but this fake does not implement it; add it to bff/test/fixtures/fakeSuwayomiEngine.mjs`;
+      const message = `FAKE ENGINE: ${e.message} is valid on Suwayomi-Server ${schema.engine?.version ?? 'v2.3.2243'} but this fake does not implement it; add it to bff/test/fixtures/fakeSuwayomiEngine.mjs`;
       if (row) Object.assign(row, { status: 'unimplemented', error: message });
       return { errors: [{ message }] };
     }
@@ -1815,6 +1958,7 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
           return json(res, 200, {
             mode, settings: st.settings, prefWrites: st.prefWrites, extensions: [...st.extensions.values()],
             pageCache: st.pageCache.size, thumbnailCache: st.thumbnailCache.size, cacheClears: st.cacheClears,
+            stores: [...st.stores.keys()],
           });
         }
         return json(res, 404, { error: 'not_found' });
@@ -1880,7 +2024,9 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
   }
 
   return {
-    schema,
+    get schema() { return schema; },
+    /** Validate against another schema from now on (schemaWithout); the state is kept. */
+    setSchema(next) { schema = next ?? initialSchema; },
     handle,
     graphql,
     setMode,

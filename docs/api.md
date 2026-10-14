@@ -2575,6 +2575,18 @@ asked, never by itself -- answering `{ ok, enabled, wiring }`, or **400** `not_c
 has no `FLARESOLVERR_URL` to share) / `unsupported`, or **502** `unreachable`; it is audited as
 `extension.solver` with the solver's host only.
 
+**The engine's version, and an engine that does not match (the engine upgrade).** The status also carries `buildType`
+(`Stable` or `Preview`), `tested` and `oldest` -- the engine version this Uchiyomi was tested with and the oldest it
+works with -- `standing`, how the running engine's version stands against them (`same`, `older`, `tooOld`, `newer` or
+`unknown`), and `refused`: the operations the engine refused, `[{ op, message, at }]`, by their name in Uchiyomi's
+registry of GraphQL documents and in the engine's own words. An engine that refuses Uchiyomi's queries (an older or
+newer one) has answered, so it is `reachable`; Health's *Extension engine* row says *Not compatible* and quotes it,
+with the step that changes the engine's version on each platform, and a source failing that way is diagnosed
+`engine_incompatible`. A refusal is forgotten once that operation succeeds again, or the engine reports another
+version. Since the same release, a repository is the engine's own *extension store*: `GET /api/admin/extensions/repos`
+lists the stores by the engine's spelling of each address (the `repo.json` beside a pasted `index.min.json`), and the
+add and remove answer as before.
+
 ```
 GET    /api/admin/extensions/status      GET    /api/admin/extensions/catalog
 POST   /api/admin/extensions/catalog/:pkgName

@@ -13,6 +13,7 @@
 // ⚠️ NEVER set without an admin asking. This is someone else's server's configuration; Uchiyomi offers the
 // change (Health's "Connect the Cloudflare helper", Admin → Extensions' Connect) and makes it when pressed.
 import { gql as defaultGql, type Gql } from './client';
+import { OPS } from './operations';
 
 /** What the engine reports. `supported: false`: its settings type has no such fields (an older or odd engine). */
 export type EngineSolver =
@@ -29,19 +30,28 @@ export type EngineSolver =
  */
 export type SolverWiring = 'ok' | 'off' | 'localhost' | 'other' | 'unsupported';
 
-const READ_Q = '{ settings { flareSolverrEnabled flareSolverrUrl } }';
-const SET_M = 'mutation($u:String!){ setSettings(input:{settings:{flareSolverrEnabled:true, flareSolverrUrl:$u}}){ settings { flareSolverrEnabled flareSolverrUrl } } }';
+/**
+ * The engine saying its settings have no such field. graphql-java -- the engine's -- words it "Validation error
+ * (FieldUndefined@[settings/flareSolverrEnabled]) : Field 'flareSolverrEnabled' in type 'SettingsType' is undefined";
+ * "Cannot query field" is graphql-js's wording, kept for an engine behind something that speaks it. ⚠️ The first
+ * version matched graphql-js's words alone, so an engine without the setting was never `supported: false`: its
+ * refusal was thrown as an error and the helper's row said the setting "could not be read just now", for good.
+ * Reintroduce the one alternative: "an engine without the setting is unsupported, in the engine's own words" in
+ * engineSolver.test.ts throws.
+ */
+const NO_SUCH_SETTING = /FieldUndefined@\[settings\/flareSolverr(?:Enabled|Url)\]|Cannot query field/i;
 
 /**
- * Read the engine's setting. A "Cannot query field" refusal means an engine without these settings, which is an
- * answer (`supported: false`); anything else -- unreachable, a timeout -- is thrown for the caller to report.
+ * Read the engine's setting. A refusal naming these fields means an engine without them, which is an answer
+ * (`supported: false`, and not recorded as an incompatible engine: operations.ts marks this read optional); anything
+ * else -- unreachable, a timeout -- is thrown for the caller to report.
  */
 export async function getEngineSolver(run: Gql = defaultGql, timeoutMs = 15000): Promise<EngineSolver> {
   try {
-    const d = await run<{ settings: { flareSolverrEnabled: boolean | null; flareSolverrUrl: string | null } }>(READ_Q, {}, timeoutMs);
+    const d = await run<{ settings: { flareSolverrEnabled: boolean | null; flareSolverrUrl: string | null } }>(OPS.solverSettings.doc, {}, timeoutMs);
     return { supported: true, enabled: !!d?.settings?.flareSolverrEnabled, url: String(d?.settings?.flareSolverrUrl ?? '') };
   } catch (e) {
-    if (/Cannot query field/i.test((e as Error)?.message ?? '')) return { supported: false };
+    if (NO_SUCH_SETTING.test((e as Error)?.message ?? '')) return { supported: false };
     throw e;
   }
 }
@@ -56,7 +66,7 @@ export async function getEngineSolver(run: Gql = defaultGql, timeoutMs = 15000):
 export async function setEngineSolver(url: string, run: Gql = defaultGql): Promise<{ before: EngineSolver; after: EngineSolver }> {
   const before = await getEngineSolver(run);
   if (!before.supported) return { before, after: before };
-  const d = await run<{ setSettings: { settings: { flareSolverrEnabled: boolean | null; flareSolverrUrl: string | null } } }>(SET_M, { u: url }, 20000);
+  const d = await run<{ setSettings: { settings: { flareSolverrEnabled: boolean | null; flareSolverrUrl: string | null } } }>(OPS.setSolverSettings.doc, { u: url }, 20000);
   const s = d?.setSettings?.settings;
   return { before, after: { supported: true, enabled: !!s?.flareSolverrEnabled, url: String(s?.flareSolverrUrl ?? '') } };
 }

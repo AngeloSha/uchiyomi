@@ -12,7 +12,7 @@ import { env } from '../../../env';
 import { visibleToAll } from '../../visibility';
 import { registerAdapter } from '../loader';
 import { listRemoteSources, makeSuwayomiAdapter, SW_PREFIX, type RemoteSource } from './sources';
-import { suwayomiConfigured } from './client';
+import { EngineRefusedError, suwayomiConfigured } from './client';
 
 export interface EnabledRow {
   source_id: string;
@@ -140,6 +140,13 @@ export interface LoadResult {
   registered: number;
   skipped: number;
   error?: string;
+  /**
+   * The engine answered, and refused the sources query itself (client.ts EngineRefusedError): an engine this Uchiyomi
+   * does not match, not one that is down. Nothing registers, as for an engine that is down, and the retry goes on --
+   * an engine updated or put back registers at its next try -- but what Health and the frozen series say is "not
+   * compatible", never "not answering", whose fix (a restart) does nothing for it.
+   */
+  refused?: boolean;
 }
 
 // The most recent load, kept so the cap overflow is readable after the fact. Until this existed the only
@@ -195,6 +202,9 @@ export async function loadSuwayomiSources(
  * Squeaks72's fork). Reintroduce by clearing before the engine is asked: "the sources stay registered while a reload
  * waits for the engine" in reloadWindow.int.test.ts finds the source gone mid-reload.
  */
+/** The refusal last logged, so an engine that refuses every five minutes for a week puts one line in the log. */
+let refusalLogged: string | null = null;
+
 async function load(list: () => Promise<RemoteSource[]>, quiet: boolean, beforeRegister?: () => void): Promise<LoadResult> {
   if (!suwayomiConfigured()) {
     beforeRegister?.();
@@ -208,11 +218,24 @@ async function load(list: () => Promise<RemoteSource[]>, quiet: boolean, beforeR
     remote = await list();
   } catch (e) {
     const msg = (e as Error)?.message || 'unreachable';
-    if (!quiet) console.warn(`[sources] suwayomi: could not list sources (${msg})`);
+    // ⚠️ It used to be "could not list sources" and reachable: false for every error, so an engine that answered with
+    // a refusal of the query read as one that was down (Health: "Not answering"; the fix it named, a restart, changes
+    // nothing). Reintroduce by dropping `refused`: "a refusal is reported as not compatible" in
+    // extensionsEngine.int.test.ts reads "Not answering".
+    const refused = e instanceof EngineRefusedError;
+    if (refused) {
+      if (refusalLogged !== msg) {
+        console.warn(`[sources] suwayomi: the extension engine refused Uchiyomi's sources query, so it does not match this version of Uchiyomi (${msg}). Health → Extension engine says what to do; Uchiyomi asks again every few minutes.`);
+        refusalLogged = msg;
+      }
+    } else if (!quiet) {
+      console.warn(`[sources] suwayomi: could not list sources (${msg})`);
+    }
     beforeRegister?.();
     leftOut = new Set();
-    return { configured: true, reachable: false, available: 0, registered: 0, skipped: 0, error: msg };
+    return { configured: true, reachable: false, available: 0, registered: 0, skipped: 0, error: msg, ...(refused ? { refused: true } : {}) };
   }
+  refusalLogged = null;
 
   await remember(remote);
   offered = new Set(remote.map((s) => String(s.id)));

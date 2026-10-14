@@ -71,6 +71,8 @@ export function solverVersionLabel(version?: string | null, kind?: string | null
 }
 /** The engine's version as its Health row says it: " (v2.3.2243)". */
 const engineVersion = (v?: string | null) => (v ? ` (v${v.replace(/^v/i, '')})` : '');
+/** An engine version inside a sentence: "v2.3.2243", whether or not it came with its "v". */
+const ver = (v: string) => `v${v.replace(/^v/i, '')}`;
 /**
  * A language code as English names it ("es-419" is "Latin American Spanish"), the name the web's languageName gives in
  * English; the code itself where Intl cannot. The web says it in the reader's language.
@@ -199,6 +201,8 @@ const EN = {
     `${n} chapters; its source ${source} can’t be reached because the extension engine isn’t answering`,
   'frozen.engineOff': ({ n, source }: { n: number; source: string }) =>
     `${n} chapters; its source ${source} can’t be reached because the extension engine is off`,
+  'frozen.engineIncompatible': ({ n, source }: { n: number; source: string }) =>
+    `${n} chapters; its source ${source} can’t be reached because the extension engine does not match this Uchiyomi`,
   'frozen.switchedOff': ({ n, source }: { n: number; source: string }) => `${n} chapters; its source ${source} is switched off`,
   // Enabled yet unregistered: dropped by SUWAYOMI_MAX_SOURCES, which the cap check names but a series page cannot see.
   'frozen.overLimit': ({ n, source }: { n: number; source: string }) =>
@@ -484,6 +488,37 @@ const EN = {
   'engine.readySolverQuiet': ({ version }: { version: string | null }) => `Ready${engineVersion(version)}; its Cloudflare helper is not answering`,
   'engine.solverQuietDetail': () =>
     'It is connected to Uchiyomi’s own Cloudflare helper, which is not answering (the Cloudflare solver row says what to do). Extension sources on Cloudflare-protected sites fail until it answers again.',
+  // The engine's version against the one this Uchiyomi was tested with, and an engine that refuses what Uchiyomi asks
+  // (the engine upgrade, lib/sources/suwayomi/enginePin.ts). The image, the command, the service and the path are
+  // parameters, never words: what someone copies must survive any translation.
+  'engine.incompatible': ({ version }: { version: string | null }) => `Not compatible${engineVersion(version)}`,
+  'engine.incompatibleTitle': () => 'Not compatible with this Uchiyomi',
+  'engine.incompatibleNote': () => 'It answers, but its extensions are unavailable until the engine and Uchiyomi match. Restarting it does not help.',
+  'engine.refused': ({ error }: { error: string }) => `It refused what Uchiyomi asked: ${error}`,
+  'engine.updateEngine': ({ tested }: { tested: string }) => `Update the engine to ${ver(tested)}, the version this Uchiyomi was tested with.`,
+  'engine.updateUchiyomi': ({ tested }: { tested: string }) =>
+    `The engine is newer than this Uchiyomi. Update Uchiyomi; until a release supports this engine, ${ver(tested)} is the version that works.`,
+  'engine.matchEngine': ({ tested }: { tested: string }) => `Run the version this Uchiyomi was tested with, ${ver(tested)}.`,
+  'engine.backupFirst': () =>
+    'Back up the engine’s data first: the engine upgrades its database when it starts, and an older engine cannot read it again.',
+  'engine.stepCompose': ({ image, file, command }: { image: string; file: string; command: string }) =>
+    `In ${file}, set the engine’s image to ${image}, then run ${command}.`,
+  'engine.stepUnraid': ({ image, service, path }: { image: string; service: string; path: string }) =>
+    `On the Docker tab, edit ${service}, set its Repository to ${image} and apply. Its data stays in ${path}.`,
+  'engine.stepCasaos': ({ image, service, path }: { image: string; service: string; path: string }) =>
+    `In CasaOS, edit the ${service} app, set its image to ${image} and save. Its data stays in ${path}.`,
+  'engine.stepDesktop': () =>
+    'Quit and reopen Uchiyomi. If Admin → Sources then offers to download the extension engine, download it: that is the version this Uchiyomi was tested with.',
+  'engine.stepOther': ({ image }: { image: string }) => `Run ${image} in place of the engine you have, on the same data.`,
+  'engine.versionTitle': () => 'Engine version',
+  'engine.versionNewer': ({ version, tested }: { version: string; tested: string }) =>
+    `${ver(version)} is newer than the version this Uchiyomi was tested with (${ver(tested)}).`,
+  'engine.versionOlder': ({ version, tested }: { version: string; tested: string }) =>
+    `${ver(version)} is older than the version this Uchiyomi was tested with (${ver(tested)}). It works; updating it is recommended.`,
+  'engine.versionTooOld': ({ version, oldest }: { version: string; oldest: string }) =>
+    `${ver(version)} is older than the oldest version this Uchiyomi works with (${ver(oldest)}).`,
+  'engine.goBackWithBackup': ({ tested }: { tested: string }) =>
+    `To go back to ${ver(tested)}, restore a backup of the engine’s data from before the update: an older engine cannot read what a newer one wrote.`,
 
   // ---- A download job's reason (Library → Downloads, the series band, Discover). `source` is a source's name.
   'job.noSpace': ({ error }: { error: string }) => `Not enough free space: ${error}`,

@@ -6,7 +6,8 @@
 // first fake passed every test while the candidate had three real bugs. So the first thing pinned here is the
 // refusal: an unknown field, argument, input field, enum value or type is answered the way the engine answers
 // it, in its words, and never executed. Then that it is not TOO strict: every query the shipping adapter sends
-// is accepted, deprecated members included. Then the engine behaviours later steps build on.
+// is accepted -- and, since the engine upgrade, none of them uses a deprecated member. Then the engine behaviours
+// later steps build on.
 //
 // Everything goes through the product's own transport (`gql`, the adapters), over real HTTP on loopback.
 // Every expected message below was read off a disposable v2.3.2243 (conformFakeSuwayomi.mjs holds the fake
@@ -16,7 +17,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  startFakeSuwayomi, suwayomiQueryErrors, defaultSeed, SOURCE_IDS, PKG, SEQUENTIAL_KEY, type FakeSuwayomi,
+  startFakeSuwayomi, suwayomiQueryErrors, defaultSeed, fakeEngineVersion, SOURCE_IDS, PKG, SEQUENTIAL_KEY, type FakeSuwayomi,
 } from './fixtures/fakeSuwayomi';
 
 process.env.JWT_SECRET ||= 'test-secret-at-least-16-chars';
@@ -66,7 +67,7 @@ const UPDATE_PREF_M = `mutation($source:LongString!,$position:Int!,$switchState:
     source { id }
   }
 }`;
-const CHAPTERS_M = `mutation($mangaId:Int!){ fetchChapters(input:{mangaId:$mangaId}){ chapters { id name chapterNumber scanlator uploadDate url sourceOrder pageCount fetchedAt } } }`;
+const CHAPTERS_M = `mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchManga:false,fetchChapters:true}){ chapters { id name chapterNumber scanlator uploadDate url sourceOrder pageCount fetchedAt } } }`;
 const PAGES_M = `mutation($chapterId:Int!){ fetchChapterPages(input:{chapterId:$chapterId}){ pages chapter { id pageCount } } }`;
 const SEARCH_M = `mutation($source:LongString!,$query:String){ fetchSourceManga(input:{source:$source,type:SEARCH,query:$query,page:1}){ mangas { id title } hasNextPage } }`;
 
@@ -88,9 +89,9 @@ test('the schema fixture is a full capture of the pinned engine, shapes only', (
   assert.equal(t.SettingsType.fields.flareSolverrEnabled, 'Boolean!');
   assert.equal(t.SettingsType.fields.flareSolverrUrl, 'String!');
   assert.equal(t.PartialSettingsTypeInput.inputFields.flareSolverrUrl, 'String');
-  // ⚠️ Deprecated members are IN, because introspection hides them by default and the adapter uses them today.
-  // A capture without them refuses the shipping adapter's own queries ('every query the shipping adapter
-  // sends is accepted' below fails on SourceType.isNsfw).
+  // ⚠️ Deprecated members are IN, because introspection hides them by default. The adapter used several until the
+  // engine upgrade, and a capture without them refused its queries; now the registry's "no deprecated member" check
+  // (suwayomiOperations.test.ts) can only see a deprecation the capture kept.
   assert.equal(t.SourceType.fields.isNsfw.deprecated, ', replace with contentWarning');
   assert.match(t.Mutation.fields.fetchChapters.deprecated, /fetchMangaAndChapters/);
   assert.match(t.PartialSettingsTypeInput.inputFields.extensionRepos.deprecated, /addExtensionStore/);
@@ -124,9 +125,10 @@ test('AN UNKNOWN FIELD IS REFUSED, in the engine\'s words, and never executed', 
   }]);
 
   // Through the product transport it is a thrown error carrying the engine's message.
+  // Since the engine upgrade it is an EngineRefusedError: the engine answered, and refused the query itself.
   const { gql } = await client();
   await assert.rejects(gql('{ aboutServer { name version codename } }'),
-    /^Error: suwayomi: Validation error \(FieldUndefined@\[aboutServer\/codename\]\) : Field 'codename' in type 'AboutServerPayload' is undefined$/);
+    /^EngineRefusedError: suwayomi: Validation error \(FieldUndefined@\[aboutServer\/codename\]\) : Field 'codename' in type 'AboutServerPayload' is undefined$/);
 
   // Refused means not run: a mutation with one bad field in its answer changes nothing.
   await assert.rejects(gql(`mutation { setSettings(input:{settings:{flareSolverrEnabled:true}}) { settings { flareSolverrEnabled flareSolverUrl } } }`),
@@ -204,10 +206,9 @@ test('variables are coerced the way the engine coerces them', async () => {
   assert.equal(ok.data.fetchSourceManga.mangas.length, 1);
 });
 
-test('every query the shipping adapter sends is accepted, deprecated members and all', async () => {
-  // Reintroduce by capturing the schema WITHOUT deprecated members (drop `"isNsfw"` from SourceType in the
-  // fixture): listRemoteSources is refused with FieldUndefined@[sources/nodes/isNsfw], though the real engine
-  // answers it.
+test('every query the shipping adapter sends is accepted, and none uses a deprecated member', async () => {
+  // Reintroduce by selecting `isNsfw` beside `contentWarning` in operations.ts's sources document: the deprecated set
+  // below is not empty. (Until the engine upgrade it listed seven members, each with a replacement already there.)
   fake.reset();
   const { gql, aboutServer } = await client();
   const { listRemoteSources, makeSuwayomiAdapter } = await adapters();
@@ -217,8 +218,10 @@ test('every query the shipping adapter sends is accepted, deprecated members and
   assert.deepEqual(remote.map((s) => s.id), [SOURCE_IDS.local, SOURCE_IDS.webtoons, SOURCE_IDS.mangaBall, SOURCE_IDS.nightShelf]);
   assert.equal(remote.find((s) => s.id === SOURCE_IDS.mangaBall)?.displayName, 'Manga Ball (EN)');
   assert.equal(remote.find((s) => s.id === SOURCE_IDS.nightShelf)?.isNsfw, true);
+  assert.equal(remote.find((s) => s.id === SOURCE_IDS.nightShelf)?.contentWarning, 'NSFW');
+  assert.equal(remote.find((s) => s.id === SOURCE_IDS.mangaBall)?.isNsfw, false);
   assert.equal(remote.find((s) => s.id === SOURCE_IDS.webtoons)?.extension?.pkgName, PKG.webtoons);
-  assert.equal((await aboutServer(gql)).version, 'v2.3.2243');
+  assert.equal((await aboutServer(gql)).version, fakeEngineVersion());
 
   const ball = makeSuwayomiAdapter(remote.find((s) => s.id === SOURCE_IDS.mangaBall)!, gql);
   const [hit] = await ball.search('ball');
@@ -243,23 +246,26 @@ test('every query the shipping adapter sends is accepted, deprecated members and
   assert.equal(await ext.refreshExtensions(gql), 4);
   assert.equal(await ext.setExtensionState(PKG.shelfTwo, 'install', gql), true);
   assert.deepEqual((await ext.sourcesOfExtension(PKG.webtoons, gql)).map((s) => s.id), [SOURCE_IDS.webtoons]);
-  assert.deepEqual(await ext.setRepos(['https://repo.example/index.min.json'], gql), ['https://repo.example/index.min.json']);
-  assert.deepEqual(await ext.getRepos(gql), ['https://repo.example/index.min.json']);
+  // Extension stores: the engine's own spelling comes back, and is what a remove matches.
+  assert.deepEqual(await ext.addRepo('https://repo.example/index.min.json', gql), { indexUrl: 'https://repo.example/repo.json', name: 'repo.example' });
+  assert.deepEqual(await ext.getRepos(gql), ['https://repo.example/repo.json']);
+  assert.equal(await ext.removeRepo('https://repo.example/index.min.json', gql), false, 'a remove matches the stored spelling exactly');
+  assert.equal(await ext.removeRepo('https://repo.example/repo.json', gql), true);
+  assert.deepEqual(await ext.getRepos(gql), []);
 
   const refused = fake.calls.filter((c) => c.status === 'rejected' || c.status === 'unimplemented');
   assert.deepEqual(refused, [], 'the fake refused a query the real engine answers');
-  // Recorded, so an engine upgrade that finally removes them is a known list, not a surprise.
-  const deprecated = new Set(fake.calls.flatMap((c) => c.deprecated ?? []));
-  for (const d of ['SourceType.isNsfw', 'SourceType.baseUrl', 'Mutation.fetchManga', 'Mutation.fetchChapters', 'ExtensionType.repo', 'SettingsType.extensionRepos', 'AboutServerPayload.revision']) {
-    assert.ok(deprecated.has(d), d);
-  }
+  // Recorded on every call. Until the engine upgrade this listed SourceType.isNsfw and baseUrl, Mutation.fetchManga and
+  // fetchChapters, ExtensionType.repo, SettingsType.extensionRepos and AboutServerPayload.revision.
+  assert.ok(fake.calls.filter((c) => c.kind === 'graphql').length >= 15, 'PREMISE: the adapter was driven through the fake');
+  assert.deepEqual([...new Set(fake.calls.flatMap((c) => c.deprecated ?? []))], [], 'the adapter uses a deprecated member');
 });
 
 test('chapters carry sourceOrder, url, uploadDate, scanlator, name and chapterNumber as the engine sends them', async () => {
   fake.reset();
   const ball = fake.manga('Ball Runner');
-  const { data } = await raw(CHAPTERS_M, { mangaId: ball.id }).then((r) => r.body);
-  const rows = data.fetchChapters.chapters;
+  const { data } = await raw(CHAPTERS_M, { id: ball.id }).then((r) => r.body);
+  const rows = data.fetchMangaAndChapters.chapters;
   // Ordered by sourceOrder ascending, and 1 is the OLDEST post: the extension lists newest first and the
   // engine numbers that list reversed. Reintroduce by numbering the extension's list as given (syncChapters,
   // `sourceOrder: oldestFirst.length - i`): this first assertion fails, [6, 5, 4, 3, 2, 1].
@@ -280,7 +286,7 @@ test('chapters carry sourceOrder, url, uploadDate, scanlator, name and chapterNu
   // A post the site drops is gone, with its id; a new post takes a new id and shifts every sourceOrder above it.
   ball.chapters = ball.chapters.filter((c) => c.name !== 'Chapter 2');
   ball.chapters.unshift({ name: 'Chapter 5', url: '/title/ball-runner/5', chapterNumber: 5, scanlator: 'Ball Team', uploadDate: Date.UTC(2024, 3, 1) });
-  const again = (await raw(CHAPTERS_M, { mangaId: ball.id })).body.data.fetchChapters.chapters;
+  const again = (await raw(CHAPTERS_M, { id: ball.id })).body.data.fetchMangaAndChapters.chapters;
   assert.deepEqual(again.map((c: any) => c.name), ['Chapter 1', 'Chapter 3', 'Chapter 3', 'Chapter 4', 'Oneshot', 'Chapter 5']);
   assert.equal(again[0].id, rows[0].id, 'a post keeps its id while it is listed');
   assert.ok(!again.some((c: any) => c.id === rows[1].id), "the dropped post's id is gone");
@@ -294,7 +300,7 @@ test('chapters carry sourceOrder, url, uploadDate, scanlator, name and chapterNu
 test('Istrevelia numbers the way the Webtoons extension does: 226 posts on 13 numbers, 1-226 when switched', async () => {
   fake.reset();
   const ist = fake.manga('Istrevelia');
-  const rows = (await raw(CHAPTERS_M, { mangaId: ist.id })).body.data.fetchChapters.chapters;
+  const rows = (await raw(CHAPTERS_M, { id: ist.id })).body.data.fetchMangaAndChapters.chapters;
   assert.equal(rows.length, 226);
   const numbers = rows.map((c: any) => c.chapterNumber);
   assert.equal(new Set(numbers).size, 13);
@@ -309,7 +315,7 @@ test('Istrevelia numbers the way the Webtoons extension does: 226 posts on 13 nu
   const position = prefs.findIndex((p: any) => p.key === SEQUENTIAL_KEY);
   const w = await raw(UPDATE_PREF_M, { source: SOURCE_IDS.webtoons, position, switchState: true });
   assert.equal(w.body.errors, undefined);
-  const after = (await raw(CHAPTERS_M, { mangaId: ist.id })).body.data.fetchChapters.chapters;
+  const after = (await raw(CHAPTERS_M, { id: ist.id })).body.data.fetchMangaAndChapters.chapters;
   assert.deepEqual(after.map((c: any) => c.chapterNumber), Array.from({ length: 226 }, (_, i) => i + 1));
   assert.deepEqual(after.map((c: any) => c.id), rows.map((c: any) => c.id), 'same posts, same ids: only the numbers moved');
 });
@@ -330,15 +336,15 @@ test("extension_error: the engine answers with the extension's own exception, an
 
   // Only that source, only that stage: the engine itself is fine.
   assert.equal((await gql<any>(SEARCH_M, { source: SOURCE_IDS.webtoons, query: 'walk' })).fetchSourceManga.mangas.length, 1);
-  assert.equal((await gql<any>(CHAPTERS_M, { mangaId: fake.manga('Ball Runner').id })).fetchChapters.chapters.length, 6);
+  assert.equal((await gql<any>(CHAPTERS_M, { id: fake.manga('Ball Runner').id })).fetchMangaAndChapters.chapters.length, 6);
   assert.equal((await gql<any>('{ aboutServer { name } }')).aboutServer.name, 'Suwayomi-Server');
 
   // Every stage when none is named, with the message asked for; images fail at the REST path.
+  // fetchMangaAndChapters attaches the exception to the stored rows: the bare message, and gql still throws on it.
   fake.setMode({ mode: 'extension_error', source: SOURCE_IDS.mangaBall, message: 'HTTP error 500' });
-  await assert.rejects(gql(CHAPTERS_M, { mangaId: fake.manga('Ball Runner').id }),
-    /^Error: suwayomi: Exception while fetching data \(\/fetchChapters\) : HTTP error 500\r\n/);
+  await assert.rejects(gql(CHAPTERS_M, { id: fake.manga('Ball Runner').id }), /^Error: suwayomi: HTTP error 500$/);
   fake.setMode('up');
-  const ch = (await gql<any>(CHAPTERS_M, { mangaId: fake.manga('Ball Runner').id })).fetchChapters.chapters[0];
+  const ch = (await gql<any>(CHAPTERS_M, { id: fake.manga('Ball Runner').id })).fetchMangaAndChapters.chapters[0];
   const page = (await gql<any>(PAGES_M, { chapterId: ch.id })).fetchChapterPages.pages[0];
   fake.setMode({ mode: 'extension_error', stage: 'images' });
   assert.equal((await fetch(fake.url + page)).status, 500);
@@ -427,7 +433,7 @@ test('settings: the fresh engine\'s values, and setSettings changes only what it
   assert.ok(!('data' in bad.body));
   assert.match(bad.body.errors[0].message, /^Exception while fetching data \(\/setSettings\) : Validation errors: maxSourcesInParallel: Value \(-5\) must be at least 1\r\n/);
   // A setting this fake does not model is refused loudly, never invented.
-  await assert.rejects(gql('{ settings { downloadsPath } }'), /FAKE ENGINE: SettingsType\.downloadsPath is valid on Suwayomi-Server v2\.3\.2243 but this fake does not implement it/);
+  await assert.rejects(gql('{ settings { downloadsPath } }'), new RegExp(`FAKE ENGINE: SettingsType\\.downloadsPath is valid on Suwayomi-Server ${fakeEngineVersion().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} but this fake does not implement it`));
 });
 
 test('down drops the connection, slow holds the answer, stop refuses it, and each comes back', async () => {
@@ -494,7 +500,7 @@ test('REST: thumbnails and extension icons are served, anything else is a 404, a
 
 test('a valid field the fake does not serve is refused as the FAKE\'s gap, never answered with a guess', async () => {
   const r = await raw('{ sources { pageInfo { hasNextPage } } }');
-  assert.deepEqual(r.body, { errors: [{ message: 'FAKE ENGINE: SourceNodeList.pageInfo is valid on Suwayomi-Server v2.3.2243 but this fake does not implement it; add it to bff/test/fixtures/fakeSuwayomiEngine.mjs' }] });
+  assert.deepEqual(r.body, { errors: [{ message: `FAKE ENGINE: SourceNodeList.pageInfo is valid on Suwayomi-Server ${fakeEngineVersion()} but this fake does not implement it; add it to bff/test/fixtures/fakeSuwayomiEngine.mjs` }] });
   assert.equal(fake.calls.at(-1)?.status, 'unimplemented');
   const args = await raw('{ sources(first: 2) { nodes { id } } }');
   assert.match(args.body.errors[0].message, /^FAKE ENGINE: Query\.sources\(first\) is valid/);
@@ -537,8 +543,8 @@ test('clearCachedImages empties what it is asked to, and only that', async () =>
   fake.reset();
   const ball = fake.manga('Ball Runner');
   const { gql } = await client();
-  const ch = await gql<any>('mutation($m:Int!){ fetchChapters(input:{mangaId:$m}){ chapters { id } } }', { m: ball.id });
-  const pages = await gql<any>('mutation($c:Int!){ fetchChapterPages(input:{chapterId:$c}){ pages } }', { c: ch.fetchChapters.chapters[0].id });
+  const ch = await gql<any>('mutation($m:Int!){ fetchMangaAndChapters(input:{id:$m,fetchManga:false,fetchChapters:true}){ chapters { id } } }', { m: ball.id });
+  const pages = await gql<any>('mutation($c:Int!){ fetchChapterPages(input:{chapterId:$c}){ pages } }', { c: ch.fetchMangaAndChapters.chapters[0].id });
   await fetch(fake.url + pages.fetchChapterPages.pages[0]);
   await fetch(`${fake.url}/api/v1/manga/${ball.id}/thumbnail`);
   assert.equal(fake.pageCache.size, 1);
@@ -558,4 +564,96 @@ test('clearCachedImages empties what it is asked to, and only that', async () =>
 
   const refused = await raw('mutation { clearCachedImages(input:{cachedPage:true}) { cachedPages } }');
   assert.match(refused.body.errors[0].message, /^Validation error \(WrongType@\[clearCachedImages\]\) : argument 'input' with value .* contains a field not in 'ClearCachedImagesInput': 'cachedPage'$/);
+});
+
+// ---- the engine upgrade (v2.3.2243 and v2.4.2366, measured 2026-10-14 on throwaway engines) -------------------
+
+test('fetchMangaAndChapters answers a failed update with the stored rows AND the bare error, as the engine does', async () => {
+  // Reintroduce by failing the field instead (throw from the resolver): the body has `fetchMangaAndChapters: null`
+  // and the "Exception while fetching data" wording, which is fetchChapters' shape, not this mutation's.
+  fake.reset();
+  const ball = fake.manga('Ball Runner');
+  const first = await raw(CHAPTERS_M, { id: ball.id });
+  assert.equal(first.body.data.fetchMangaAndChapters.chapters.length, 6);
+  fake.setMode({ mode: 'extension_error', source: SOURCE_IDS.mangaBall, stage: 'chapters', message: 'No chapters found' });
+  const failed = await raw(CHAPTERS_M, { id: ball.id });
+  assert.equal(failed.status, 200);
+  assert.deepEqual(failed.body.errors, [{ message: 'No chapters found' }], 'the error is the bare message: no path, no locations, no trace');
+  assert.deepEqual(failed.body.data.fetchMangaAndChapters.chapters.map((c: any) => c.id), first.body.data.fetchMangaAndChapters.chapters.map((c: any) => c.id),
+    'the stored rows come back beside the error');
+  fake.setMode('up');
+  // An unknown id fails the field, the old way.
+  const unknown = await raw(CHAPTERS_M, { id: 999 });
+  assert.deepEqual(unknown.body.data, { fetchMangaAndChapters: null });
+  assert.match(unknown.body.errors[0].message, /^Exception while fetching data \(\/fetchMangaAndChapters\) : Collection is empty\.\r\n\r\n/);
+  // `chapters` is every stored row whichever flag was set: before any chapter fetch there are none.
+  fake.reset();
+  const m = await raw(`mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchManga:true,fetchChapters:false}){ manga { id title } chapters { id } } }`, { id: fake.manga('Ball Runner').id });
+  assert.deepEqual(m.body.data.fetchMangaAndChapters, { manga: { id: fake.manga('Ball Runner').id, title: 'Ball Runner' }, chapters: [] });
+});
+
+test('a new chapter with no date is stamped NOW, in seconds as v2.3.2243 does, and keeps it', async () => {
+  // Measured: "1791984615" (seconds) beside a dated chapter's "1704067200000". Reintroduce by stamping 0 as before: the
+  // seconds assertion reads "0" -- the fake would hide the 1970 bug the adapter now guards (sources.ts uploadedAt).
+  fake.reset();
+  const ball = fake.manga('Ball Runner');
+  // In one fetch, a dateless chapter after dated ones takes the latest date seen before it (oldest first)...
+  ball.chapters.splice(4, 0, { name: 'Chapter 2.5', url: '/title/ball-runner/2.5', chapterNumber: 2.5, scanlator: 'Ball Team', uploadDate: 0 });
+  const rows = (await raw(CHAPTERS_M, { id: ball.id })).body.data.fetchMangaAndChapters.chapters;
+  assert.equal(rows.find((c: any) => c.name === 'Chapter 2.5').uploadDate, String(Date.UTC(2024, 0, 11)), "chapter 2's date");
+  // ...and one that arrives on a later check, after nothing new with a date, is stamped now.
+  ball.chapters.unshift({ name: 'Chapter 5', url: '/title/ball-runner/5', chapterNumber: 5, scanlator: 'Ball Team', uploadDate: 0 });
+  const before = Math.floor(Date.now() / 1000);
+  const next = (await raw(CHAPTERS_M, { id: ball.id })).body.data.fetchMangaAndChapters.chapters;
+  const five = next.find((c: any) => c.name === 'Chapter 5');
+  if (/^v2\.3\./.test(fakeEngineVersion())) {
+    assert.ok(Number(five.uploadDate) >= before && Number(five.uploadDate) < 1e11, `stamped in seconds: ${five.uploadDate}`);
+  } else {
+    assert.ok(Number(five.uploadDate) >= before * 1000, `stamped in milliseconds: ${five.uploadDate}`);
+  }
+  // A known chapter with no date keeps its stamp.
+  const again = (await raw(CHAPTERS_M, { id: ball.id })).body.data.fetchMangaAndChapters.chapters;
+  assert.equal(again.find((c: any) => c.name === 'Chapter 5').uploadDate, five.uploadDate);
+});
+
+test('extension stores: the engine spells the address its own way, an add of one it holds changes nothing, a remove matches exactly', async () => {
+  // Reintroduce by storing the address as given: the first deepEqual reads index.min.json, and a remove by the
+  // answered spelling (what the route and the monitor do) finds nothing.
+  fake.reset();
+  const ADD = 'mutation($u:String!){ addExtensionStore(input:{indexUrl:$u}){ extensionStore { indexUrl name } } }';
+  const REMOVE = 'mutation($u:String!){ removeExtensionStore(input:{indexUrl:$u}){ extensionStore { indexUrl } } }';
+  const a = await raw(ADD, { u: 'https://store.example/a/index.min.json' });
+  assert.deepEqual(a.body, { data: { addExtensionStore: { extensionStore: { indexUrl: 'https://store.example/a/repo.json', name: 'store.example' } } } });
+  assert.equal((await raw(ADD, { u: 'https://store.example/a/repo.json' })).body.data.addExtensionStore.extensionStore.indexUrl, 'https://store.example/a/repo.json');
+  assert.deepEqual(fake.stores, ['https://store.example/a/repo.json'], 'the same store twice is one store');
+  // What the engine cannot read is the add's own error.
+  const html = await raw(ADD, { u: 'https://store.example/a/' });
+  assert.deepEqual(html.body.data, { addExtensionStore: null });
+  assert.match(html.body.errors[0].message, /^Exception while fetching data \(\/addExtensionStore\) : HTTP error 404\r\n\r\n/);
+  const word = await raw(ADD, { u: 'not a url' });
+  assert.match(word.body.errors[0].message, /^Exception while fetching data \(\/addExtensionStore\) : Expected URL scheme 'http' or 'https' but no scheme was found for not a \.\.\.\r\n/);
+  // A remove by another spelling, or of nothing, is null and no error.
+  assert.deepEqual((await raw(REMOVE, { u: 'https://store.example/a/index.min.json' })).body, { data: { removeExtensionStore: { extensionStore: null } } });
+  assert.deepEqual((await raw(REMOVE, { u: 'https://store.example/a/repo.json' })).body, { data: { removeExtensionStore: { extensionStore: { indexUrl: 'https://store.example/a/repo.json' } } } });
+  assert.deepEqual((await raw('{ extensionStores { nodes { indexUrl } } }')).body, { data: { extensionStores: { nodes: [] } } });
+});
+
+test('contentWarning: SAFE, MIXED or NSFW, and the deprecated isNsfw is anything but SAFE', async () => {
+  // Reintroduce `isNsfw: contentWarning === 'NSFW'` in sourceView: the MIXED source reads isNsfw false, which is not
+  // what the engine says (its isNsfw is contentWarning >= MIXED).
+  fake.reset();
+  fake.source(SOURCE_IDS.mangaBall).contentWarning = 'MIXED';
+  const r = await raw('{ sources { nodes { id isNsfw contentWarning } } }');
+  const byId = new Map(r.body.data.sources.nodes.map((n: any) => [n.id, n]));
+  assert.deepEqual(byId.get(SOURCE_IDS.mangaBall), { id: SOURCE_IDS.mangaBall, isNsfw: true, contentWarning: 'MIXED' });
+  assert.deepEqual(byId.get(SOURCE_IDS.nightShelf), { id: SOURCE_IDS.nightShelf, isNsfw: true, contentWarning: 'NSFW' });
+  assert.deepEqual(byId.get(SOURCE_IDS.webtoons), { id: SOURCE_IDS.webtoons, isNsfw: false, contentWarning: 'SAFE' });
+});
+
+test('a deprecated enum value is recorded like a deprecated field', async () => {
+  // ExtensionOrderBy.APK_NAME is deprecated on v2.3.2243. Reintroduce by dropping the deprecatedValues check in
+  // validate(): the call records nothing, and a query relying on a value the next engine drops goes unnoticed.
+  fake.reset();
+  await raw('{ extensions(order: [{by: APK_NAME}]) { nodes { pkgName } } }');
+  assert.deepEqual(fake.calls.at(-1)?.deprecated, ['ExtensionOrderBy.APK_NAME']);
 });

@@ -114,6 +114,12 @@ test('the strip says the engine\'s state and the Cloudflare helper\'s, and offer
   assert.equal(engineLine({ configured: true, reachable: false }).state, 'unreachable');
   assert.equal(engineLine({ configured: false, reachable: false, off: 'switch' }).tone, 'off');
   assert.equal(engineLine({ configured: false, reachable: false, off: 'unset' }).label, 'No extension engine is set up');
+  // The engine upgrade: an engine that refuses what Uchiyomi asks answers, and is not ready (bff client.ts
+  // engineRefusals). Reintroduce by dropping the `refused` line in engineLine: this reads "Ready" in green.
+  const refused = [{ op: 'sources', message: "Validation error (FieldUndefined@[sources/nodes/contentWarning]) : x", at: '2026-10-14T00:00:00.000Z' }];
+  assert.deepEqual(engineLine({ configured: true, reachable: true, version: 'v2.9.0', refused }),
+    { state: 'ready', tone: 'problem', label: 'Not compatible with this Uchiyomi' }, 'an engine that refuses');
+  assert.equal(engineLine({ configured: true, reachable: true, version: 'v2.3.2243', refused: [] }).label, 'Ready', 'nothing refused is ready');
   const base = { supported: true, enabled: false, connectable: true };
   // Reintroduce `action: null` for `off`: the helper says it is off with no way to connect it.
   assert.deepEqual(helperLine({ ...base, wiring: 'off' })?.action, 'connect', 'a helper that is off offers no Connect');

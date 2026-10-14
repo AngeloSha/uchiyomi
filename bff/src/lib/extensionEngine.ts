@@ -12,7 +12,10 @@ import { visibleToAll } from './visibility';
 import { env } from '../env';
 import { isDesktop } from './desktop';
 import { installPlatform } from './platform';
-import { aboutServer, gql, suwayomiConfigured, type Gql } from './sources/suwayomi/client';
+import {
+  aboutServer, engineRefusals, EngineRefusedError, gql, suwayomiConfigured, type EngineRefusal, type Gql,
+} from './sources/suwayomi/client';
+import { engineStanding, OLDEST_ENGINE, TESTED_ENGINE } from './sources/suwayomi/enginePin';
 import { engineHost, engineOffReason } from './sources/suwayomi/engineState';
 import {
   getEngineSolver, ourSolverUrl, setEngineSolver, solverHost, solverWiring, type EngineSolver, type SolverWiring,
@@ -67,7 +70,10 @@ const iso = (ms: number | null): string | null => (ms ? new Date(ms).toISOString
  *
  * Not configured: why (`off`: the switch, or no address), the platform the setup steps open on, and how many
  * series wait for an engine. Configured: the engine's answer, what registration reached, the retry's progress,
- * the platform, the linked series and, when it answers, its Cloudflare helper.
+ * the platform, the linked series and, when it answers, its Cloudflare helper. Since the engine upgrade, also how
+ * its version stands against the one this Uchiyomi was tested with (`tested`, `oldest`, `standing`, enginePin.ts)
+ * and what it refused (`refused`, by operation, in its words): an engine that refuses Uchiyomi's queries answers,
+ * so it is `reachable`, and does not match.
  *
  * ⚠️ It HEALS a missed registration: when the engine answers now but the last registration found nobody there,
  * it registers before replying (single-flight with the retry loop). That is what makes "Check again" -- a plain
@@ -81,14 +87,19 @@ export async function engineStatusReport() {
     return { configured: false, reachable: false, off: engineOffReason() ?? 'unset', platform, linkedSeries };
   }
   let version: string | null = null;
+  let buildType: string | null = null;
   let reachable = false;
   let error: string | undefined;
   const askedAt = Date.now();
   try {
-    version = (await aboutServer()).version;
+    const about = await aboutServer();
+    version = about.version;
+    buildType = about.buildType ?? null;
     reachable = true;
   } catch (e) {
     error = (e as Error)?.message || 'unreachable';
+    // A refusal is an answer: the engine is there, and it does not match this Uchiyomi.
+    if (e instanceof EngineRefusedError) reachable = true;
   }
   // This look is a try of its own: Check again is this call, and so is every poll of the setup card.
   noteSuwayomiTry(reachable, askedAt);
@@ -107,11 +118,13 @@ export async function engineStatusReport() {
   // The last attempt to reach the engine and how it went (register.ts noteSuwayomiTry), never the last load alone.
   const tried = lastSuwayomiTry();
   return {
-    configured: true, reachable, version, error, enabled: counts?.enabled ?? 0, known: counts?.known ?? 0,
+    configured: true, reachable, version, buildType, error, enabled: counts?.enabled ?? 0, known: counts?.known ?? 0,
     registered: load?.registered ?? 0, skipped: load?.skipped ?? 0, cap: env.SUWAYOMI_MAX_SOURCES,
     hiddenLangs: await getHiddenLangs().catch(() => [] as string[]),
     engine: engineHost(), platform, retry: suwayomiRetryState(), lastTry: iso(tried?.at ?? null), lastTryOk: tried?.ok ?? null,
     linkedSeries,
+    tested: TESTED_ENGINE, oldest: OLDEST_ENGINE, standing: engineStanding(version),
+    refused: reachable ? engineRefusals() : [],
     ...(solver ? { solver } : {}),
   };
 }
@@ -157,11 +170,14 @@ export const PROBE_TTL_MS = 30_000;
 export const PROBE_TIMEOUT_MS = 3_000;
 
 export interface EngineProbe {
+  /** It answered: with its version, or by refusing what it was asked (then `refused` says what). */
   reachable: boolean;
   version: string | null;
   error: string | null;
   /** Null when the engine did not answer, or its settings could not be read. */
   solver: EngineSolver | null;
+  /** What it refused, by operation (client.ts engineRefusals); empty while it takes everything Uchiyomi asks. */
+  refused: EngineRefusal[];
 }
 
 let memo: { at: number; p: Promise<EngineProbe> } | null = null;
@@ -180,12 +196,15 @@ export function engineProbe(now: number = Date.now()): Promise<EngineProbe> {
   const run = (<T,>(query: string, variables: Record<string, unknown> = {}) => gql<T>(query, variables, PROBE_TIMEOUT_MS)) as Gql;
   const askedAt = Date.now();
   const p = Promise.allSettled([aboutServer(run), getEngineSolver(run, PROBE_TIMEOUT_MS)]).then(([about, solver]) => {
-    noteSuwayomiTry(about.status === 'fulfilled', askedAt);
+    // An engine that refuses aboutServer itself answered: reachable, and every bit as incompatible.
+    const reachable = about.status === 'fulfilled' || about.reason instanceof EngineRefusedError;
+    noteSuwayomiTry(reachable, askedAt);
     return {
-      reachable: about.status === 'fulfilled',
+      reachable,
       version: about.status === 'fulfilled' ? about.value.version : null,
       error: about.status === 'rejected' ? String((about.reason as Error)?.message || about.reason || 'unreachable') : null,
       solver: about.status === 'fulfilled' && solver.status === 'fulfilled' ? solver.value : null,
+      refused: reachable ? engineRefusals() : [],
     };
   });
   memo = { at: now, p };

@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased
+
+**Ready for the next extension engine.** Extensions run in Suwayomi-Server, which has releases of its own. Nothing
+changed for anyone's engine here: every install mode still pins v2.3.2243. What changed is that Uchiyomi now works with
+v2.4.2366 as well, says plainly when an engine doesn't match, and tests every new engine release before anyone runs it.
+
+### The extension engine
+
+- **An engine that doesn't match says so.** When the engine refuses what Uchiyomi asks (an engine much older or newer
+  than this Uchiyomi knows), **Health → Extension engine** now reads *Not compatible*, quotes the engine, and gives the
+  one step for your setup: Docker Compose, Unraid, CasaOS, the desktop app or anything else. It used to say *Not
+  answering*, and restarting the container changed nothing. Its series say why they wait, and **Admin → Sources** says
+  it too.
+- **Health shows the engine's version** when it isn't the one this Uchiyomi was tested with: newer (with how to go
+  back safely), older, or too old to work.
+- **No more chapters dated 1970.** The engine dated some new chapters in seconds instead of milliseconds, so they showed
+  as January 1970 in Releases, a group's history, the catalogue and the Komga API. Uchiyomi reads both now, and puts
+  right the dates it already stored when you upgrade.
+- **Nothing the engine has marked for removal is used any more**, so its next releases can't break Uchiyomi that way:
+  the 18+ flag (an extension marked *mixed* counts as 18+), the chapter list, the engine's version, and repositories.
+- **Repositories are the engine's extension stores.** An address is checked when you add it, and if the engine can't
+  read it, the message says why in the engine's words. Adding, removing and the nightly restore work as before.
+
+### For contributors
+
+- **A weekly canary** (`.github/workflows/engine-canary.yml`) runs every new stable Suwayomi-Server, and the newest
+  preview, through what Uchiyomi asks of an engine: its schema, every GraphQL document Uchiyomi sends (one registry,
+  `bff/src/lib/sources/suwayomi/operations.ts`), a source end to end, an extension store, and the fake-engine tests.
+  `scripts/engine/bump.mjs <tag>` moves every pin at once. It posts nothing until the repository variable
+  `ENGINE_CANARY_POST` is `on`.
+
+### Upgrading
+
+- **Database:** no schema change. At the first start, chapter dates stored as 1970 are put right once (chapters, the
+  chapter lists, posting order).
+- **The extension engine stays at v2.3.2243.** Moving to v2.4.2366 is a later release.
+
 ## v0.63.0 — 2026-10-14
 
 **Single sign-on can now be the only way in.** This came from **@DrummyFloyd**'s request

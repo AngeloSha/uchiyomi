@@ -168,6 +168,8 @@ const loopedTo = (p: P): string =>
     : tr('the same folder as the root, reached again through a mount');
 
 const engineVersion = (p: P): string => str(p, 'version').replace(/^v/i, '');
+/** An engine version inside a sentence, as the server writes it: "v2.3.2243", whether or not it came with its "v". */
+const verText = (p: P, k: string): string => `v${str(p, k).replace(/^v/i, '')}`;
 
 /** The solvers Health names by their kind (v0.55.3, bff lib/said.ts solverName): names, never translated. */
 const solverName = (kind: string): string => (kind === 'flaresolverr' ? 'FlareSolverr' : kind === 'trawl' ? 'trawl' : '');
@@ -199,6 +201,7 @@ const REASON_WORDS: Record<string, () => string> = {
   rate_limited: () => tr('This source asked us to slow down.'),
   // "the extension engine", the component's name everywhere else in the app (the server's says "server").
   upstream_down: () => tr('The extension engine did not answer.'),
+  engine_incompatible: () => tr('The extension engine does not match this version of Uchiyomi.'),
   extension_error: () => tr('This source\'s extension reported an error.'),
   unnumbered: () => tr('This source lists chapters without numbers Uchiyomi can use.'),
   site_offline: () => tr('The site says it is offline (its own page)'),
@@ -344,6 +347,9 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'frozen.engineOff': (p) => (num(p, 'n') === 1
     ? tr('1 chapter; its source {source} can’t be reached because the extension engine is off', { source: str(p, 'source') })
     : tr('{n} chapters; its source {source} can’t be reached because the extension engine is off', { n: num(p, 'n'), source: str(p, 'source') })),
+  'frozen.engineIncompatible': (p) => (num(p, 'n') === 1
+    ? tr('1 chapter; its source {source} can’t be reached because the extension engine does not match this Uchiyomi', { source: str(p, 'source') })
+    : tr('{n} chapters; its source {source} can’t be reached because the extension engine does not match this Uchiyomi', { n: num(p, 'n'), source: str(p, 'source') })),
   'frozen.switchedOff': (p) => (num(p, 'n') === 1
     ? tr('1 chapter; its source {source} is switched off', { source: str(p, 'source') })
     : tr('{n} chapters; its source {source} is switched off', { n: num(p, 'n'), source: str(p, 'source') })),
@@ -665,6 +671,26 @@ const WORDS: Record<string, (p: P) => string | null> = {
     ? tr('Ready (v{version}); its Cloudflare helper is not answering', { version: engineVersion(p) })
     : tr('Ready; its Cloudflare helper is not answering')),
   'engine.solverQuietDetail': () => tr('It is connected to Uchiyomi’s own Cloudflare helper, which is not answering (the Cloudflare solver row says what to do). Extension sources on Cloudflare-protected sites fail until it answers again.'),
+  // The engine upgrade: the engine's version against the tested one, and an engine that refuses. The image, file,
+  // command, service and path are parameters, never words: what someone copies survives any translation.
+  'engine.incompatible': (p) => (p.version ? tr('Not compatible (v{version})', { version: engineVersion(p) }) : tr('Not compatible')),
+  'engine.incompatibleTitle': () => tr('Not compatible with this Uchiyomi'),
+  'engine.incompatibleNote': () => tr('It answers, but its extensions are unavailable until the engine and Uchiyomi match. Restarting it does not help.'),
+  'engine.refused': (p) => tr('It refused what Uchiyomi asked: {error}', { error: str(p, 'error') }),
+  'engine.updateEngine': (p) => tr('Update the engine to {tested}, the version this Uchiyomi was tested with.', { tested: verText(p, 'tested') }),
+  'engine.updateUchiyomi': (p) => tr('The engine is newer than this Uchiyomi. Update Uchiyomi; until a release supports this engine, {tested} is the version that works.', { tested: verText(p, 'tested') }),
+  'engine.matchEngine': (p) => tr('Run the version this Uchiyomi was tested with, {tested}.', { tested: verText(p, 'tested') }),
+  'engine.backupFirst': () => tr('Back up the engine’s data first: the engine upgrades its database when it starts, and an older engine cannot read it again.'),
+  'engine.stepCompose': (p) => tr('In {file}, set the engine’s image to {image}, then run {command}.', { file: str(p, 'file'), image: str(p, 'image'), command: str(p, 'command') }),
+  'engine.stepUnraid': (p) => tr('On the Docker tab, edit {service}, set its Repository to {image} and apply. Its data stays in {path}.', { service: str(p, 'service'), image: str(p, 'image'), path: str(p, 'path') }),
+  'engine.stepCasaos': (p) => tr('In CasaOS, edit the {service} app, set its image to {image} and save. Its data stays in {path}.', { service: str(p, 'service'), image: str(p, 'image'), path: str(p, 'path') }),
+  'engine.stepDesktop': () => tr('Quit and reopen Uchiyomi. If Admin → Sources then offers to download the extension engine, download it: that is the version this Uchiyomi was tested with.'),
+  'engine.stepOther': (p) => tr('Run {image} in place of the engine you have, on the same data.', { image: str(p, 'image') }),
+  'engine.versionTitle': () => tr('Engine version'),
+  'engine.versionNewer': (p) => tr('{version} is newer than the version this Uchiyomi was tested with ({tested}).', { version: verText(p, 'version'), tested: verText(p, 'tested') }),
+  'engine.versionOlder': (p) => tr('{version} is older than the version this Uchiyomi was tested with ({tested}). It works; updating it is recommended.', { version: verText(p, 'version'), tested: verText(p, 'tested') }),
+  'engine.versionTooOld': (p) => tr('{version} is older than the oldest version this Uchiyomi works with ({oldest}).', { version: verText(p, 'version'), oldest: verText(p, 'oldest') }),
+  'engine.goBackWithBackup': (p) => tr('To go back to {tested}, restore a backup of the engine’s data from before the update: an older engine cannot read what a newer one wrote.', { tested: verText(p, 'tested') }),
 
   // ---- A download job's reason. `source`, `from` and `to` are sources' names.
   'job.noSpace': (p) => tr('Not enough free space: {error}', { error: str(p, 'error') }),
@@ -949,6 +975,9 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'fix.engineDown': () => (isDesktop()
     ? tr('This is Uchiyomi\'s extension engine, not the site. Quit and reopen Uchiyomi to restart it.')
     : tr('This is the Suwayomi extension server, not the site. Check that container.')),
+  'fix.engineIncompatible': () => (isDesktop()
+    ? tr('Uchiyomi\'s extension engine refused Uchiyomi\'s request. Quit and reopen Uchiyomi, and download the extension engine again if Admin → Sources offers it.')
+    : tr('The extension engine refused Uchiyomi\'s request: it is older or newer than the version this Uchiyomi works with. Health → Extension engine says which, and how to change it.')),
   'fix.engineTimeout': (p) => joinPart(byStage(p, {
     none: () => tr('The extension engine did not answer in time.'),
     search: () => tr('The extension engine did not answer in time while searching.'),

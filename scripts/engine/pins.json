@@ -1,0 +1,27 @@
+{
+  "_comment": "Every place that names the extension engine's version (Suwayomi-Server). bff/test/enginePins.test.ts holds them all equal to the desktop pin, and scripts/engine/bump.mjs moves them together. A file added here is checked and bumped from then on.",
+  "pin": "desktop/src/engine-pin.json",
+  "images": [
+    "deploy/docker-compose.yml",
+    "deploy/docker-compose.external-db.yml",
+    "deploy/docker-compose.split.yml",
+    "docker-compose.yml",
+    "deploy/casaos/uchiyomi-suwayomi.yml",
+    "templates/uchiyomi-suwayomi.xml",
+    "web/lib/engineSetup.ts"
+  ],
+  "pack": "desktop/engine/pack.mjs",
+  "workflow": ".github/workflows/desktop.yml",
+  "tested": "bff/src/lib/sources/suwayomi/enginePin.ts",
+  "fake": "bff/test/fixtures/fakeSuwayomiEngine.mjs",
+  "schemas": "bff/test/fixtures",
+  "solverDtos": { "dir": "desktop/test/fixtures", "test": "desktop/test/solver.contract.test.ts" },
+  "deployEnv": [
+    "deploy/docker-compose.yml",
+    "deploy/docker-compose.external-db.yml",
+    "deploy/docker-compose.split.yml",
+    "docker-compose.yml",
+    "deploy/casaos/uchiyomi-suwayomi.yml",
+    "templates/uchiyomi-suwayomi.xml"
+  ]
+}
