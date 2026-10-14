@@ -118,6 +118,10 @@ export default function CollectionsPage() {
                   // eslint-disable-next-line @next/next/no-img-element
                   <img key={id} src={img.seriesThumb(id)} alt="" loading="lazy" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
                 ))}
+                {/* Fewer covers than columns: the rest in the list's colour, rather than an empty band. */}
+                {Array.from({ length: Math.max(0, 3 - covers.length) }, (_, i) => (
+                  <div key={`fill-${i}`} className="opacity-25" style={{ background: `linear-gradient(135deg, ${tint}, transparent 80%)` }} />
+                ))}
               </div>
             ) : (
               <div className="h-full w-full opacity-40" style={{ background: `linear-gradient(135deg, ${tint}, transparent 75%)` }} />
