@@ -5,6 +5,7 @@ import { MANGADEX_LANGS } from './lang';
 import { typeFromGenres, SERIES_TYPE_FROM } from './seriesTypeSignals';
 import { cleanGenres } from './genres';
 import { REFILE_FAILURES_SQL } from './chapterFailures';
+import { ssoOnly } from './authMode';
 
 // NOTE: gen_random_uuid() is in Postgres core (v13+); no pgcrypto extension needed.
 // (The supabase/postgres image's event triggers reject CREATE EXTENSION under a custom role.)
@@ -2067,9 +2068,11 @@ export async function migrate(): Promise<void> {
   }
 
   // Seed the admin from the OPTIONAL env-provided argon2 hash (plaintext never stored). If no hash is set, the
-  // users table is left empty and the first-run web setup (POST /api/setup) creates the admin instead.
+  // users table is left empty and the first-run web setup (POST /api/setup) creates the admin instead. Never in SSO-only
+  // mode (v0.63.0, #208): its first admin comes from the provider, and a password admin is exactly what it does away
+  // with (lib/authMode.ts; boot says the setting is ignored).
   const existing = await one<{ id: string }>('SELECT id FROM users LIMIT 1');
-  if (!existing && env.initialUserPasswordHash) {
+  if (!existing && env.initialUserPasswordHash && !ssoOnly()) {
     const row = await one<{ id: string }>(
       `INSERT INTO users (display_name, username, role, password_hash, auth_kind)
        VALUES ('admin', 'admin', 'admin', $1, 'password') RETURNING id`,

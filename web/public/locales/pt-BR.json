@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3736
+    "strings": 3749
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -3739,5 +3739,18 @@
   "The series is in {language}, and each of them has come out in {language} too.": "A série está em {language}, e cada um deles também saiu em {language}.",
   "Fetch it again in {language}": "Buscar de novo em {language}",
   "Fetch them again in {language}": "Buscar de novo em {language}",
-  "The file is deleted from the server. The chapter stays listed and everyone keeps their reading history, but anyone partway through it loses their place.": "O arquivo é excluído do servidor. O capítulo continua listado e todos mantêm seu histórico de leitura, mas quem estiver no meio dele perde o ponto onde estava."
+  "The file is deleted from the server. The chapter stays listed and everyone keeps their reading history, but anyone partway through it loses their place.": "O arquivo é excluído do servidor. O capítulo continua listado e todos mantêm seu histórico de leitura, mas quem estiver no meio dele perde o ponto onde estava.",
+  "New accounts": "Novas contas",
+  "This server signs in through {name} only. Anyone {name} lets in gets an account the first time they sign in, so choose who in {name}.": "Este servidor só entra pelo {name}. Quem o {name} deixar entrar ganha uma conta no primeiro login, então escolha no {name} quem pode.",
+  "This server signs in through {name} only, and makes no new accounts: only accounts already linked to {name} can sign in. OIDC_ALLOW_SIGNUP lets new people in.": "Este servidor só entra pelo {name} e não cria contas novas: só contas já vinculadas ao {name} podem entrar. OIDC_ALLOW_SIGNUP deixa entrar pessoas novas.",
+  "You signed in, but there’s no account here for you yet. Ask the server’s admin to let you in.": "Você entrou, mas ainda não há uma conta para você aqui. Peça ao administrador do servidor para deixar você entrar.",
+  "This server isn’t set up yet: its admin signs in first.": "Este servidor ainda não está configurado: o administrador dele entra primeiro.",
+  "This server signs in through {name} only.": "Este servidor só entra pelo {name}.",
+  "Password sign-in is open for one admin while the server’s rescue setting is on.": "O login com senha está aberto para um administrador enquanto a configuração de resgate do servidor estiver ativa.",
+  "You can sign in with {name}.": "Você pode entrar com o {name}.",
+  "Link this account to {name} to sign in with it.": "Vincule esta conta ao {name} para entrar com ele.",
+  "Link to {name}": "Vincular ao {name}",
+  "Linked to {name}. You can sign in with it now.": "Vinculada ao {name}. Agora você pode entrar com ele.",
+  "That {name} account is already linked to another account here.": "Essa conta do {name} já está vinculada a outra conta aqui.",
+  "Could not link your account to {name}.": "Não foi possível vincular sua conta ao {name}."
 }

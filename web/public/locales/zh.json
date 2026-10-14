@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3736
+    "strings": 3749
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3739,5 +3739,18 @@
   "The series is in {language}, and each of them has come out in {language} too.": "这个系列是{language}，而这些章节也都有{language}版本。",
   "Fetch it again in {language}": "以{language}重新获取",
   "Fetch them again in {language}": "以{language}重新获取",
-  "The file is deleted from the server. The chapter stays listed and everyone keeps their reading history, but anyone partway through it loses their place.": "文件会从服务器删除。章节仍会列出，所有人的阅读历史都会保留，但正在读到一半的人会丢失进度位置。"
+  "The file is deleted from the server. The chapter stays listed and everyone keeps their reading history, but anyone partway through it loses their place.": "文件会从服务器删除。章节仍会列出，所有人的阅读历史都会保留，但正在读到一半的人会丢失进度位置。",
+  "New accounts": "新账号",
+  "This server signs in through {name} only. Anyone {name} lets in gets an account the first time they sign in, so choose who in {name}.": "此服务器只通过 {name} 登录。{name} 允许进入的人会在首次登录时获得账号，所以请在 {name} 中决定谁可以进入。",
+  "This server signs in through {name} only, and makes no new accounts: only accounts already linked to {name} can sign in. OIDC_ALLOW_SIGNUP lets new people in.": "此服务器只通过 {name} 登录，且不会创建新账号：只有已与 {name} 关联的账号才能登录。设置 OIDC_ALLOW_SIGNUP 可让新用户进入。",
+  "You signed in, but there’s no account here for you yet. Ask the server’s admin to let you in.": "你已登录，但这里还没有你的账号。请让服务器管理员允许你进入。",
+  "This server isn’t set up yet: its admin signs in first.": "此服务器尚未设置：管理员需要先登录。",
+  "This server signs in through {name} only.": "此服务器只通过 {name} 登录。",
+  "Password sign-in is open for one admin while the server’s rescue setting is on.": "服务器的救援设置开启期间，一位管理员可以用密码登录。",
+  "You can sign in with {name}.": "你可以使用 {name} 登录。",
+  "Link this account to {name} to sign in with it.": "将此账号关联到 {name}，即可用它登录。",
+  "Link to {name}": "关联到 {name}",
+  "Linked to {name}. You can sign in with it now.": "已关联到 {name}。现在可以用它登录了。",
+  "That {name} account is already linked to another account here.": "该 {name} 账号已与这里的另一个账号关联。",
+  "Could not link your account to {name}.": "无法将你的账号关联到 {name}。"
 }

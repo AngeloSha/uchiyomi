@@ -1,5 +1,5 @@
 'use client';
-import { FormEvent, useId, useState } from 'react';
+import { FormEvent, useEffect, useId, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -12,6 +12,7 @@ import { msgOf } from '@/components/ConfirmDialog';
 import { IcCheck, IcGrid, IcLogOut, IcUser } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
 import { SETTINGS_GRID, Section, Row, useAutosave } from '@/components/settings';
+import { linkResultText, ssoOnly, useAuthConfig, type AuthConfig } from '@/lib/authConfig';
 
 /**
  * The profile's Account tab: Signed in as · Two-factor authentication · Active sessions · Sign out.
@@ -22,10 +23,14 @@ import { SETTINGS_GRID, Section, Row, useAutosave } from '@/components/settings'
  * the one thing that must not save as you type, and everything else here is an action with a toast.
  */
 export function ProfileAccount() {
+  // SSO-only mode (v0.63.0, #208): no password and no second step to manage here -- the provider has both, and the
+  // routes behind them are not there. Reintroduce either and "the profile manages no password and no 2FA in SSO-only
+  // mode" in web/test/ssoOnly.test.ts fails.
+  const { data: config, isFetched } = useAuthConfig();
   return (
     <div className={SETTINGS_GRID}>
-      <IdentitySection />
-      <TwoFactorSection />
+      <IdentitySection config={config} ready={isFetched} />
+      {!ssoOnly(config) && <TwoFactorSection />}
       <SessionsSection />
       <SignOutSection />
     </div>
@@ -44,8 +49,9 @@ function explain(e: unknown, fallback: string): never {
 
 /* ============================== Signed in as ============================== */
 
-function IdentitySection() {
+function IdentitySection({ config, ready }: { config: AuthConfig | undefined; ready: boolean }) {
   const { user, isAdmin } = useAuth();
+  const provider = config?.oidc?.enabled ? config.oidc.name : '';
   const qc = useQueryClient();
   const toast = useToast();
   const { status, run } = useAutosave();
@@ -54,6 +60,21 @@ function IdentitySection() {
   const curId = useId();
   const nextId = useId();
   const valid = !!cur && next.length >= 8;
+  // Back from Link to … (bff routes/auth.ts /auth/oidc/link): how it went, said once the provider's name is known, and
+  // gone from the address.
+  const linkSaid = useRef(false);
+  useEffect(() => {
+    if (!ready || linkSaid.current) return;
+    linkSaid.current = true;
+    const u = new URL(window.location.href);
+    const result = u.searchParams.get('sso_link');
+    if (!result) return;
+    const said = linkResultText(result, provider || 'SSO');
+    toast(said.text, said.ok ? 'success' : 'error');
+    u.searchParams.delete('sso_link');
+    window.history.replaceState(window.history.state, '', u.toString());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
 
   const changePw = async (e: FormEvent) => {
     e.preventDefault();
@@ -82,8 +103,17 @@ function IdentitySection() {
         )}
       </div>
 
+      {/* v0.63.0 (#208): linked to the provider, or a way to link -- how an account that already exists moves to SSO before
+          the server turns SSO-only mode on. A link, not a request: the server reads this browser's session. */}
+      {provider && (
+        <Row label={tr('Single sign-on')}
+          help={user?.sso ? tr('You can sign in with {name}.', { name: `\u2068${provider}\u2069` }) : tr('Link this account to {name} to sign in with it.', { name: `\u2068${provider}\u2069` })}>
+          {!user?.sso && <a href="/auth/oidc/link" className="btn-key" data-sso-link>{tr('Link to {name}', { name: `\u2068${provider}\u2069` })}</a>}
+        </Row>
+      )}
+
       {/* The one explicit Save on this tab that is not an action: a password must never save as you type. */}
-      <Row stacked label={tr('Change password')} status={status}>
+      {!ssoOnly(config) && <Row stacked label={tr('Change password')} status={status}>
         <form onSubmit={changePw} className="space-y-2">
           <label htmlFor={curId} className="sr-only">{tr('Current password')}</label>
           <input id={curId} type="password" autoComplete="current-password" value={cur} onChange={(e) => setCur(e.target.value)}
@@ -95,7 +125,7 @@ function IdentitySection() {
             {tr('Update password')}
           </button>
         </form>
-      </Row>
+      </Row>}
     </Section>
   );
 }

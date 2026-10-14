@@ -119,6 +119,14 @@ const schema = z.object({
   OIDC_LINK_BY_USERNAME: envFlag(false),
   // Users in this IdP group become admins here (leave empty to keep roles managed locally).
   OIDC_ADMIN_GROUP: z.string().default(''),
+  // v0.63.0 (#208), lib/authMode.ts, which reads these three when asked. `oidc-only` makes the provider the only way to
+  // sign in: no setup form, no passwords. A plain string, so a typo reaches the boot check, which refuses to start and
+  // says why: a mode that quietly fell back to `local` would leave the password routes open.
+  AUTH_MODE: z.string().default('local'),
+  // SSO-only mode: the provider's subject (`sub`) of the person whose first sign-in makes a new server's first admin.
+  OIDC_BOOTSTRAP_ADMIN_SUB: z.string().default(''),
+  // SSO-only mode's way back in: password sign-in reopened for this one admin account while it is set.
+  AUTH_RESCUE_ADMIN: z.string().default(''),
   // Optional Suwayomi server used purely as an extension engine: it runs Mihon/Tachiyomi's Kotlin extensions
   // on the JVM and exposes them over GraphQL. Empty issuer = feature off, exactly like OIDC. Uchiyomi keeps
   // owning the library, reader, downloads and updates; Suwayomi only answers search/chapters/pages.

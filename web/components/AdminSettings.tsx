@@ -36,6 +36,7 @@ import { suggestGroups } from '@/lib/groupSuggest';
 import { NotificationsSection } from '@/components/AdminNotifications';
 import { DownloadsSection } from '@/components/ArchiveSettings';
 import { isDesktop } from '@/lib/desktop';
+import { ssoOnly, useAuthConfig } from '@/lib/authConfig';
 import { adultShown } from '@/lib/adult';
 import { addable, moveIn, orderRows } from '@/lib/sourceOrder';
 
@@ -368,6 +369,8 @@ function ServerSection({ data, save }: { data: any; save: Save }) {
   // Uchiyomi Desktop has one person and no install count (lib/desktop.ts): no registration switch, and the
   // count's row is gone with its preview, which the server answers 404 for there and never sends.
   const desktop = isDesktop();
+  // SSO-only mode (v0.63.0, #208) has no sign-up route at all, so Open registration would be a switch that does nothing.
+  const { data: authConfig } = useAuthConfig();
   // Fetched whether or not it is on: seeing exactly what WOULD be sent is the point of the preview, and
   // asking someone to consent first in order to find out would be backwards.
   const { data: preview } = useQuery({
@@ -383,7 +386,7 @@ function ServerSection({ data, save }: { data: any; save: Save }) {
           back to the saved name on blur instead of a "Could not save" over nothing. */}
       <TextRow label={tr('Server name')} value={data.server_name ?? ''} maxLength={64} autoComplete="off" required
         onSave={(v) => save({ serverName: v })} />
-      {!desktop && (
+      {!desktop && !ssoOnly(authConfig) && (
         <SwitchRow label={tr('Open registration')} help={tr('Let anyone create their own account')}
           on={!!data.allow_registration} onChange={(next) => save({ allowRegistration: next })} />
       )}

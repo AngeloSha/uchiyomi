@@ -15,6 +15,8 @@ interface User {
   displayName: string;
   role: string;
   totpEnabled?: boolean;
+  /** Linked to an identity at the OIDC provider (v0.63.0): Profile → Account offers Link to … until it is. */
+  sso?: boolean;
   perms?: Record<string, boolean>;
   avatar?: Avatar;
   settings: Record<string, any>;

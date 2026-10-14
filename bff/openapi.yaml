@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.62.0
+  version: 0.63.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -1155,6 +1155,9 @@ paths:
         - auth
       summary: Create the first admin account (only while no account exists).
       operationId: postApiSetup
+      description: >-
+        Not registered in SSO-only mode (AUTH_MODE=oidc-only, since v0.63.0): a new server's first admin is made by
+        their first sign-in through the provider instead (OIDC_BOOTSTRAP_ADMIN_SUB, else OIDC_ADMIN_GROUP).
       requestBody:
         required: false
         content:
@@ -1182,6 +1185,10 @@ paths:
         - auth
       summary: Login options the client should offer (registration open, OIDC configured).
       operationId: getAuthConfig
+      description: >-
+        Since v0.63.0 `mode` is `local` or `oidc-only` (AUTH_MODE): in SSO-only mode the provider is the only way in,
+        and `rescue: true` says password sign-in is open for one admin while AUTH_RESCUE_ADMIN names one.
+        `allowRegistration` is always false in SSO-only mode.
       security: []
       responses:
         "200":
@@ -1193,6 +1200,10 @@ paths:
       summary: Log in with username and password (and a TOTP code when enabled); returns a short-lived JWT and sets
         the refresh cookie.
       operationId: postAuthLogin
+      description: >-
+        Not registered in SSO-only mode (AUTH_MODE=oidc-only, since v0.63.0), nor are /auth/register, /auth/password
+        and /auth/totp/*. While AUTH_RESCUE_ADMIN names an admin it is registered again for that one account: any other
+        name is refused as a wrong password is, and a rescue sign-in is logged and written down as `login.rescue`.
       requestBody:
         required: false
         content:
@@ -1478,12 +1489,33 @@ paths:
       responses:
         "302":
           description: Redirect
+  /auth/oidc/link:
+    get:
+      tags:
+        - auth
+      summary: "Link the account signed in on this browser to an identity at the provider (since v0.63.0)."
+      operationId: getAuthOidcLink
+      description: >-
+        A top-level navigation from Profile → Account: the account is the one whose session cookie comes with the
+        request, never one the request names. Redirects to the provider; its answer lands on the callback, which links
+        the identity and redirects to `/profile/?tab=Account&sso_link=ok|taken|failed` without signing anyone in
+        (`taken`: the identity is already another account's). With no session, redirects to the sign-in screen.
+      security: []
+      responses:
+        "302":
+          description: Redirect
+        "404":
+          description: Single sign-on is not configured
   /auth/oidc/callback:
     get:
       tags:
         - auth
       summary: "Single sign-on return leg: finishes login and redirects into the app."
       operationId: getAuthOidcCallback
+      description: >-
+        Since v0.63.0, in SSO-only mode, a new server's first sign-in makes its admin: the subject OIDC_BOOTSTRAP_ADMIN_SUB
+        names, else anyone in OIDC_ADMIN_GROUP. Anyone else first is sent back with `sso_error=not_set_up`. Group mapping
+        never takes away the last admin's role.
       security: []
       responses:
         "302":
@@ -6752,7 +6784,10 @@ paths:
         - admin
       summary: All accounts with their permissions.
       operationId: getApiAdminUsers
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since v0.63.0 the
+        answer carries `auth: {mode, sso, signup}` -- the sign-in mode, the provider's name (null without one) and
+        whether OIDC_ALLOW_SIGNUP makes accounts -- and each account `sso`, whether it is linked to the provider.
       security:
         - bearer: []
       responses:
@@ -6767,7 +6802,9 @@ paths:
         - admin
       summary: Create an account.
       operationId: postApiAdminUsers
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Refused with 403
+        `sso_only` in SSO-only mode (since v0.63.0): accounts come from the sign-on provider.
       requestBody:
         required: false
         content:
@@ -12016,7 +12053,9 @@ paths:
         - admin
       summary: "Change an account: role, permissions, library access, age limit, downloads."
       operationId: patchApiAdminUsersId
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. A body with a
+        `password` is refused whole with 403 `sso_only` in SSO-only mode (since v0.63.0).
       parameters:
         - name: id
           in: path

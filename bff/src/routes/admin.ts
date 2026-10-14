@@ -49,6 +49,8 @@ import { getHiddenLangs, setSourcesEnabled, adoptExtensionSources, langOverview,
 import { lastSuwayomiLoad, limitLeftSomethingOut, rememberMissing } from '../lib/sources/suwayomi/register';
 import { engineStatusReport, connectEngineSolver } from '../lib/extensionEngine';
 import { env } from '../env';
+import { oidcEnabled, oidcName } from '../lib/oidc';
+import { authMode, ssoOnly } from '../lib/authMode';
 import { readFile, writeFile, mkdir, rm, rename, stat } from 'fs/promises';
 import { dirname, resolve, sep } from 'path';
 import sharp from 'sharp';
@@ -600,8 +602,11 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/admin/users', async () => ({
+    // v0.63.0 (#208): the sign-in mode and the provider, for Members -- in SSO-only mode it offers no New account and no
+    // password, and says where accounts come from -- and per account whether it is linked to the provider (`sso`).
+    auth: { mode: authMode(), sso: oidcEnabled() ? oidcName() : null, signup: env.OIDC_ALLOW_SIGNUP },
     content: await q(`SELECT u.id, u.username, u.display_name, u.role, u.avatar, u.created_at, u.disabled, u.perms, u.totp_enabled,
-        u.max_age_rating,
+        u.max_age_rating, u.oidc_sub IS NOT NULL AS sso,
         (SELECT max(created_at) FROM reading_events e WHERE e.user_id = u.id) AS last_active,
         -- NULL, not an empty array, when unrestricted: the UI must tell "every library, including ones
         -- added later" apart from "exactly these", and an empty array is a real setting meaning nothing.
@@ -4597,7 +4602,13 @@ export default async function adminRoutes(app: FastifyInstance) {
   // that is toggleable and checked nowhere is worse than no flag, so there is deliberately only one.
   const permsShape = z.object({ canDownload: z.boolean().optional() });
 
+  /** SSO-only mode's answer to an account made or a password set here (v0.63.0, #208): accounts come from the provider. */
+  const ssoOnlyRefusal = (reply: any) =>
+    reply.code(403).send({ error: 'sso_only', message: 'This server signs in through single sign-on only: accounts come from the sign-on provider, with no password here.' });
+
   app.post('/api/admin/users', async (req, reply) => {
+    // Reintroduce by dropping it: "Members makes no account and sets no password" in ssoOnly.int.test.ts gets a 200.
+    if (ssoOnly()) return ssoOnlyRefusal(reply);
     const b = z
       .object({
         username: z.string().min(2).max(64).regex(/^[a-zA-Z0-9._-]+$/, 'letters, numbers, . _ - only'),
@@ -4643,6 +4654,8 @@ export default async function adminRoutes(app: FastifyInstance) {
         maxAgeRating: z.number().int().min(0).max(18).nullable().optional(),
       })
       .parse(req.body);
+    // Before anything is written, so a body that also sets a password changes nothing at all.
+    if (b.password && ssoOnly()) return ssoOnlyRefusal(reply);
     // safety: never lock yourself out, never remove the last active admin
     if (id === userIdOf(req) && (b.disabled || b.role === 'user')) return reply.code(400).send({ error: 'cannot_demote_self' });
     if (b.disabled || b.role === 'user') {

@@ -64,9 +64,19 @@ import { isDesktop } from './lib/desktop';
 import { installDesktopGuards } from './lib/desktopGuard';
 import { ensureDesktopUser } from './lib/desktopUser';
 import { initialiseBulkChapterDeleteRuns } from './lib/bulkChapterDelete';
+import { authFacts, authModeProblems, authModeWarnings } from './lib/authMode';
 
 async function main() {
   await migrate();
+  // v0.63.0 (#208, lib/authMode.ts): a sign-in mode that cannot work stops the server here and says why, before any
+  // route exists -- a typo in AUTH_MODE must never leave the password routes open behind an operator who thinks them
+  // closed -- and SSO-only mode says what it changes at every start.
+  const authProblems = authModeProblems(authFacts(!!(await one('SELECT 1 FROM users LIMIT 1'))));
+  if (authProblems.length) {
+    for (const p of authProblems) console.error(`[auth] ${p}`);
+    process.exit(1);
+  }
+  for (const w of await authModeWarnings()) console.warn(`[auth] ${w}`);
   // The language of sources and series that do not say (lib/lang.ts), before anything compares languages. A
   // database that cannot be read here leaves English, the default, and never stops the boot.
   await loadUnstatedLang().catch((e) => console.warn(`[lang] could not read the unstated language: ${(e as Error)?.message || e}`));

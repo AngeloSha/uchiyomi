@@ -475,7 +475,15 @@ function Members() {
   const { user } = useAuth();
   const toast = useToast();
   const qc = useQueryClient();
-  const { data } = useQuery({ queryKey: ['admin-users'], queryFn: () => api<{ content: any[] }>('/api/admin/users') });
+  const { data } = useQuery({
+    queryKey: ['admin-users'],
+    queryFn: () => api<{ content: any[]; auth?: { mode: 'local' | 'oidc-only'; sso: string | null; signup: boolean } }>('/api/admin/users'),
+  });
+  // SSO-only mode (v0.63.0, #208): accounts come from the provider. No New account, no password to reset -- the server
+  // refuses both -- and a card that says where accounts come from instead. Reintroduce the form and "Members offers no
+  // New account and no password in SSO-only mode" in web/test/ssoOnly.test.ts fails.
+  const ssoOnly = data?.auth?.mode === 'oidc-only';
+  const provider = data?.auth?.sso ?? '';
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -510,6 +518,16 @@ function Members() {
 
   return (
     <div className="board">
+      {ssoOnly ? (
+        <div className="card grad-border p-4" data-sso-accounts>
+          <h2 className="mb-2 font-display text-base font-semibold">{tr('New accounts')}</h2>
+          <p className="text-sm leading-relaxed text-fog-300">
+            {data?.auth?.signup
+              ? tr('This server signs in through {name} only. Anyone {name} lets in gets an account the first time they sign in, so choose who in {name}.', { name: iso(provider) })
+              : tr('This server signs in through {name} only, and makes no new accounts: only accounts already linked to {name} can sign in. OIDC_ALLOW_SIGNUP lets new people in.', { name: iso(provider) })}
+          </p>
+        </div>
+      ) : (
       <form onSubmit={create} className="card grad-border p-4">
         <h2 className="mb-3 font-display text-base font-semibold">{tr('New account')}</h2>
         <div className="space-y-2">
@@ -520,6 +538,7 @@ function Members() {
         </div>
         <button type="submit" disabled={busy || !username.trim() || password.length < 8} className="btn-accent mt-3 w-full disabled:opacity-50"><IcPlus width={18} height={18} /> {busy ? tr('Creating…') : tr('Create account')}</button>
       </form>
+      )}
 
       {(data?.content ?? []).map((u: any) => {
         const self = u.id === user?.id;
@@ -538,10 +557,11 @@ function Members() {
               )}
             </div>
             <p className="mt-2 text-[11px] text-fog-500">
-              {[roleText(u.role), self ? tr('you') : null, u.disabled ? tr('disabled') : null, u.totp_enabled ? '2FA' : null].filter(Boolean).join(' · ')}
+              {/* The provider's name on an account linked to it (v0.63.0), as 2FA marks the accounts that have it. */}
+              {[roleText(u.role), self ? tr('you') : null, u.disabled ? tr('disabled') : null, u.totp_enabled ? '2FA' : null, u.sso && provider ? provider : null].filter(Boolean).join(' · ')}
             </p>
             <div className="mt-2.5 flex flex-wrap gap-1.5">
-              <button onClick={() => setResetting(u)} className="chip text-xs">{tr('Reset')}</button>
+              {!ssoOnly && <button onClick={() => setResetting(u)} className="chip text-xs">{tr('Reset')}</button>}
               {!self && (
                 <>
                   <button onClick={() => patch(u, { role: u.role === 'admin' ? 'user' : 'admin' }, tr('Role updated'))} className="chip text-xs">{u.role === 'admin' ? tr('Make member') : tr('Make admin')}</button>

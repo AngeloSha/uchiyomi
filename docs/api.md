@@ -979,7 +979,15 @@ GET    /auth/sessions             DELETE /auth/sessions/:id
 POST   /auth/totp/setup           POST   /auth/totp/enable
 POST   /auth/totp/disable
 GET    /auth/oidc/start             GET    /auth/oidc/callback
+GET    /auth/oidc/link
 ```
+
+**SSO-only mode** (since v0.63.0, `AUTH_MODE=oidc-only`): `/api/setup`, `/auth/login`, `/auth/register`,
+`/auth/password` and `/auth/totp/*` are not registered at all (**404**), `GET /api/setup/status` answers
+`{needsSetup: false}`, and `GET /auth/config` says `mode: 'oidc-only'`. `POST /api/admin/users`, and a
+`PATCH /api/admin/users/:id` that sets a password, are **403** `sso_only`. `GET /auth/oidc/link` links the account
+signed in on that browser to an identity at the provider. The whole mode is under
+[Single sign-on (OIDC)](#single-sign-on-oidc), below.
 
 **Signing up** (the form since v0.61.0). `POST /auth/register` `{username, password, displayName?, deviceId?,
 deviceName?}` works only while **Admin → Settings → Open registration** is on — `GET /auth/config` says so as
@@ -2962,8 +2970,9 @@ the web app, OPDS and the offline manifest list what is on disk exactly as befor
 Uchiyomi can sign people in through an identity provider you already run: Authentik, Authelia, Keycloak,
 Pocket ID, Zitadel, or any other OpenID Connect provider.
 
-SSO is **additional**, never a replacement. Local accounts, 2FA, lockout and session revocation all keep
-working exactly as before, so you are not locked out if the identity provider is down.
+SSO is **additional** unless you choose otherwise. Local accounts, 2FA, lockout and session revocation all keep
+working exactly as before, so you are not locked out if the identity provider is down. A server on the internet that
+signs everyone in through its provider can make it the **only** way in: see [SSO-only mode](#sso-only-mode) below.
 
 ## Setting it up
 
@@ -3012,6 +3021,51 @@ Optionally map admin rights from a group:
 
 When set, roles follow the identity provider on every sign-in: in the group means admin here, out of it means
 an ordinary user. Leave it unset to keep managing roles in the admin panel.
+
+## Linking an account that already exists
+
+*Link to …* in **Profile → Account**, under *Single sign-on* (since v0.63.0), sends the person to the provider and links the
+identity they sign in with to the account signed in on that browser: same account, same reading history, now
+reachable through the provider too. One identity is never linked to two accounts (*already linked to another account
+here*). This is how an install moves its existing accounts to SSO before turning on SSO-only mode, without
+`OIDC_LINK_BY_USERNAME`'s trust in usernames.
+
+## SSO-only mode
+
+For a server reachable from the internet, the provider can be the only way in (since v0.63.0):
+
+```yaml
+  AUTH_MODE: oidc-only
+  OIDC_BOOTSTRAP_ADMIN_SUB: 0e6f2a52-…   # a new server's first admin: their subject (`sub`) at the provider
+```
+
+- **No passwords at all.** First-run setup, password sign-in, sign-up, password change and two-factor are not served —
+  not refused, absent — so there is nothing to guess at, rate-limit or watch. The sign-in screen shows the provider's
+  button alone. Two-factor, lockout and password rules are the provider's job.
+- **The first admin comes from the provider.** On a server with no account, the first sign-in of the subject
+  `OIDC_BOOTSTRAP_ADMIN_SUB` names becomes its admin; without it, the first sign-in from someone in
+  `OIDC_ADMIN_GROUP` does. Anyone else first is told the server is not set up yet. There is no "first visitor
+  becomes admin" window.
+- **Accounts come from the provider.** With `OIDC_ALLOW_SIGNUP: "true"`, anyone the provider lets in gets an account
+  the first time they sign in, so decide who in the provider (restrict the application to a group). Without it, only
+  accounts already linked can sign in. **Admin → Members** makes no account and resets no password in this mode.
+- **An account is its provider identity alone.** `OIDC_LINK_BY_USERNAME` is refused at startup.
+- **Existing installs.** At every start the log lists the accounts that have no link and so can no longer sign in.
+  Link them first, in the default mode (above), or let each person sign in through the provider for a new account.
+- **Roles.** With `OIDC_ADMIN_GROUP` set, roles follow the provider at every sign-in, but never take the server's
+  last admin away from being one.
+- **Locked out?** If the provider is down or misconfigured, set `AUTH_RESCUE_ADMIN` to the username of an admin
+  account with a password and restart: password sign-in reopens for that one account, and the sign-in screen says so.
+  It is logged at every start and at every rescue sign-in. Remove it once SSO works again. Its 2FA, if it has one,
+  is still asked for.
+
+The server refuses to start in a configuration that cannot work — a typo in `AUTH_MODE`, no provider, linking by
+username, or a new server with no way to make its first admin — and says which in its log. Sessions already
+signed in keep working; Uchiyomi Desktop ignores the mode.
+
+Not sure of your subject? Start the server with `OIDC_ADMIN_GROUP` alone, or sign in once: a new server that refuses a
+first sign-in logs the subject it came with, ready to copy into `OIDC_BOOTSTRAP_ADMIN_SUB`. (In Authentik, the
+provider's *Subject mode* decides what that subject is.)
 
 ## Notes
 

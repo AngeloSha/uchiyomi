@@ -91,6 +91,10 @@ services:
       OIDC_ALLOW_SIGNUP: ${OIDC_ALLOW_SIGNUP:-false}
       OIDC_LINK_BY_USERNAME: ${OIDC_LINK_BY_USERNAME:-false}
       OIDC_ADMIN_GROUP: ${OIDC_ADMIN_GROUP:-}
+      # SSO-only sign-in (v0.63.0): AUTH_MODE=oidc-only makes the provider the only way in. See docs/api.md, SSO-only mode.
+      AUTH_MODE: ${AUTH_MODE:-local}
+      OIDC_BOOTSTRAP_ADMIN_SUB: ${OIDC_BOOTSTRAP_ADMIN_SUB:-}
+      AUTH_RESCUE_ADMIN: ${AUTH_RESCUE_ADMIN:-}
       # Extension engine (Mihon/Tachiyomi extensions), wired up by default. EXTENSION_ENGINE=0 in .env turns it
       # off and drops its container; SUWAYOMI_URL points at a Suwayomi you run yourself instead. The single dash
       # is deliberate: `:-` treats an empty value as unset, so the documented `SUWAYOMI_URL=` never turned

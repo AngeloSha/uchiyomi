@@ -27,7 +27,7 @@ const login = code(read('components/LoginScreen.tsx'));
 test('the sign-in form offers Create an account only while registration is open', () => {
   // Reintroduce the form-less screen by dropping the link, or show it whatever /auth/config says (drop `canRegister &&`):
   // this fails. `!needTotp`: a person half-way through their second step is signing in, not up.
-  assert.match(login, /useState<'checking' \| 'login' \| 'setup' \| 'desktop' \| 'register'>\('checking'\)/, 'there is no register mode');
+  assert.match(login, /useState<'checking' \| 'login' \| 'setup' \| 'desktop' \| 'register' \| 'sso'>\('checking'\)/, 'there is no register mode');
   assert.match(login, /^\s*setCanRegister\(c\.allowRegistration === true\);$/m, '/auth/config\'s allowRegistration is not read on a line of its own');
   // The desktop arm is untouched (web/test/desktopSurfaces.test.ts holds its exact line): a browser tab on the desktop
   // port gets the "open the app" sentence and no form at all, so no link either.

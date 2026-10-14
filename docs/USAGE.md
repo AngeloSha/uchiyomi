@@ -70,6 +70,12 @@ appears under the password form and you can sign in with Authentik, Authelia, Ke
 speaks OpenID Connect. Local accounts keep working alongside it, so a provider outage can never lock you out.
 Setup is in [docs/api.md](api.md#single-sign-on-oidc).
 
+**A server that signs in through its provider only** (since v0.63.0, `AUTH_MODE=oidc-only`) shows that button and
+nothing else: there are no passwords on it at all, and it says *This server signs in through … only*. Your first
+sign-in there may make your account, if the server lets new people in. If it says *This server isn't set up yet*, its
+admin has not signed in for the first time yet. An account you already had keeps working once you have linked it
+(**Profile → Account**, below).
+
 ![Continue with SSO](shots/login-sso.webp)
 
 Log in with the username/password you set in `setup.sh` (the first account is `admin`). If you've turned on
@@ -2523,7 +2529,10 @@ returns its series to whichever library still covers their folder.
 Once you have more than one, the Library page grows a row of tabs to switch between them.
 
 **Members:** create accounts (user or admin), reset passwords, and per-user controls: make admin/member,
-disable, or allow/deny downloads. Each row shows whether the member has 2FA on.
+disable, or allow/deny downloads. Each row shows whether the member has 2FA on, and the provider's name on an account
+linked to single sign-on. On a server that signs in through its provider only (since v0.63.0), Members makes no
+account and resets no password: a card says where accounts come from instead, the provider's sign-in, and whether
+it makes new ones (`OIDC_ALLOW_SIGNUP`). Everything else here works as before.
 
 Each member also has an **age limit**, next to their library access. Set one and anything rated above it
 disappears from that account entirely: the library page, search, the reader, the offline downloads and any
@@ -2857,6 +2866,10 @@ In **Profile → Account** (`/profile/?tab=Account`; every user has this):
 
 - **Signed in as:** who you are, and **Change password** — it requires your current password, and changing it
   signs out your other devices (**Update password** is the button; a wrong current password is said inline).
+- **Single sign-on** (since v0.63.0, when the server has a provider): *Link to …* takes you to the provider and links
+  the identity you sign in with there to this account, so you can sign in with either. One identity links one account.
+  On a server that signs in through its provider only, there is no password and no two-factor here: the provider has
+  both.
 - **Two-factor authentication:** tap **Set up 2FA**, scan the QR with any authenticator app (Google
   Authenticator, Authy, 1Password…), enter a code to enable, and **save your recovery codes** (shown once).
   After that, logins ask for the 6-digit code. Disable it anytime by confirming your password.

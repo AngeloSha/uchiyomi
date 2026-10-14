@@ -187,3 +187,29 @@ proxy's own password prompt (HTTP Basic Auth) does not, yet.
 
 > Using the development stack from a clone instead? Its services are named `yomi-*`, with networks
 > `yomi_app` and `yomi_internal`.
+
+## Single sign-on
+
+Uchiyomi signs people in through any OpenID Connect provider (Authentik, Authelia, Keycloak, Pocket ID…), beside its
+own accounts or, for a server on the internet, instead of them. With Authentik:
+
+1. **Applications → Providers → Create → OAuth2/OpenID Provider**: client type *Confidential*, redirect URI
+   `https://manga.example.com/auth/oidc/callback` (your `PUBLIC_ORIGIN` followed by `/auth/oidc/callback`), and the
+   default scopes `openid`, `profile` and `email` (`profile` carries the `groups` claim).
+2. **Applications → Create**, with that provider, slug `uchiyomi`. Under its **Policy / Group / User Bindings**, bind
+   the group whose members may read here: Authentik then turns everyone else away before Uchiyomi sees them.
+3. In `.env`:
+
+```dotenv
+OIDC_ISSUER=https://auth.example.com/application/o/uchiyomi/
+OIDC_CLIENT_ID=…
+OIDC_CLIENT_SECRET=…
+OIDC_NAME=Authentik
+OIDC_ADMIN_GROUP=uchiyomi-admins   # members of this group are admins here
+OIDC_ALLOW_SIGNUP=true              # a person the provider lets in gets an account at their first sign-in
+```
+
+**SSO-only.** Add `AUTH_MODE=oidc-only` and the server stops offering passwords at all: no setup form, no password
+sign-in, no sign-up. A new server's first admin is the first person in `OIDC_ADMIN_GROUP` to sign in, or the subject
+`OIDC_BOOTSTRAP_ADMIN_SUB` names. Accounts that already exist need linking first (*Link to Authentik* in **Profile → Account**), and `AUTH_RESCUE_ADMIN` is the way back in if the provider is ever down. The whole reference, with every
+setting: [Single sign-on (OIDC)](api.md#single-sign-on-oidc).

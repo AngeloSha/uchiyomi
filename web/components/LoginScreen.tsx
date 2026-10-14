@@ -4,6 +4,7 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { useAuth } from '@/lib/auth';
 import { api, ApiError } from '@/lib/api';
 import { noteServerDesktop } from '@/lib/desktop';
+import { providerOnly, type AuthConfig } from '@/lib/authConfig';
 import { ART } from '@/lib/art';
 import { Mark, Wordmark } from './Brand';
 import { t as tr } from '@/lib/i18n';
@@ -15,7 +16,10 @@ import { t as tr } from '@/lib/i18n';
  */
 const ssoError = (reason: string): string => {
   switch (reason) {
-    case 'no_account': return tr('You signed in successfully, but there’s no account here for you yet. Ask the admin to create one.');
+    // Said for both sign-in modes (v0.63.0): in SSO-only mode an admin cannot make the account, only let new people in.
+    case 'no_account': return tr('You signed in, but there’s no account here for you yet. Ask the server’s admin to let you in.');
+    // SSO-only mode on a new server: its first admin signs in first (bff routes/auth.ts firstAdmin).
+    case 'not_set_up': return tr('This server isn’t set up yet: its admin signs in first.');
     case 'username_taken': return tr('An account with that username already exists here and is not linked to SSO.');
     case 'disabled': return tr('That account is disabled.');
     case 'expired': return tr('That sign-in took too long. Please try again.');
@@ -30,8 +34,9 @@ const ssoError = (reason: string): string => {
 export function LoginScreen() {
   const { login, firstRunSetup, register } = useAuth();
   // `desktop`: this port is Uchiyomi Desktop's, reached from a browser tab -- see the effect below. `register` (v0.61.0):
-  // signing up, reached only from `login` by "Create an account" while Open registration is on.
-  const [mode, setMode] = useState<'checking' | 'login' | 'setup' | 'desktop' | 'register'>('checking');
+  // signing up, reached only from `login` by "Create an account" while Open registration is on. `sso` (v0.63.0): the
+  // server signs in through its provider only (lib/authConfig.ts providerOnly), so the screen is that button alone.
+  const [mode, setMode] = useState<'checking' | 'login' | 'setup' | 'desktop' | 'register' | 'sso'>('checking');
   const [username, setUsername] = useState('');
   const [pw, setPw] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -44,6 +49,8 @@ export function LoginScreen() {
   // answered behind it, but this screen had no form, so turning it on did nothing anyone could see. Always false on
   // Uchiyomi Desktop, whose server says so whatever its settings hold.
   const [canRegister, setCanRegister] = useState(false);
+  // /auth/config's answer (v0.63.0): read for `rescue`, the password form reopened for one admin in SSO-only mode.
+  const [config, setConfig] = useState<AuthConfig | null>(null);
   const err = !!errMsg;
   // globals.css kills CSS animation under prefers-reduced-motion, but it cannot reach framer-motion, so
   // this screen's backdrop ignored the setting until now.
@@ -56,22 +63,27 @@ export function LoginScreen() {
       // /auth/config has said so, rather than flash a sign-in form nobody can use. Any other failure still
       // falls back to the form at once, as it always has.
       let desktopMaybe = false;
+      // What first-run setup says, kept until /auth/config has answered as well (v0.63.0): in SSO-only mode the screen
+      // is the provider's button alone, and a password form shown in between would be a sign-in nobody can use.
+      let first: 'setup' | 'login' | null = null;
       try {
         const s = await api<{ needsSetup: boolean }>('/api/setup/status');
-        setMode(s.needsSetup ? 'setup' : 'login');
+        first = s.needsSetup ? 'setup' : 'login';
       } catch (e) {
         if (e instanceof ApiError && e.status === 404) desktopMaybe = true;
         else setMode('login');
       }
       try {
-        const c = await api<{ oidc?: { enabled: boolean; name: string }; desktop?: boolean; allowRegistration?: boolean }>('/auth/config');
+        const c = await api<AuthConfig>('/auth/config');
         if (c.oidc?.enabled) setSso(c.oidc);
         setCanRegister(c.allowRegistration === true);
+        setConfig(c);
         // A browser tab pointed at the desktop app's port: that library signs in only inside the app, and
         // this form could never succeed there (the server has no password sign-in to answer it).
         if (c.desktop === true) { noteServerDesktop(true); setMode('desktop'); }
         else if (desktopMaybe) setMode('login');
-      } catch { /* SSO is optional; a failure here just means no button */ if (desktopMaybe) setMode('login'); }
+        else if (first) setMode(first === 'login' && providerOnly(c) ? 'sso' : first);
+      } catch { /* SSO is optional; a failure here just means no button */ if (desktopMaybe) setMode('login'); else if (first) setMode(first); }
     })();
     // the OIDC callback sends people back here with a reason when it couldn't sign them in
     const reason = new URLSearchParams(window.location.search).get('sso_error');
@@ -214,9 +226,27 @@ export function LoginScreen() {
             {...{ username, setUsername, pw, setPw, confirm, setConfirm, busy, errMsg, inputCls, labelCls }} />
         )}
 
+        {/* SSO-only (v0.63.0): the provider's button and nothing else -- this server takes no password. Reintroduce the
+            form here and "an SSO-only server's screen is its provider's button alone" in web/test/ssoOnly.test.ts fails. */}
+        {mode === 'sso' && (
+          <div className="glass grad-border rounded-3xl p-5 shadow-lift" data-sso-only>
+            <a href="/auth/oidc/start" className="btn-accent block w-full text-center">
+              {tr('Continue with {name}', { name: `\u2068${sso.name}\u2069` })}
+            </a>
+            {errMsg && <p className="mt-3 text-sm text-red-400">{errMsg}</p>}
+            <p className="mt-3 text-center text-xs text-fog-500">{tr('This server signs in through {name} only.', { name: `\u2068${sso.name}\u2069` })}</p>
+          </div>
+        )}
+
         {/* Normal sign-in */}
         {mode === 'login' && (
           <form onSubmit={submit} className="glass grad-border rounded-3xl p-5 shadow-lift">
+            {/* SSO-only mode with its rescue on (AUTH_RESCUE_ADMIN): the form is back for one admin, and says why. */}
+            {config?.rescue && !needTotp && (
+              <p className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-200" data-sso-rescue>
+                {tr('Password sign-in is open for one admin while the server’s rescue setting is on.')}
+              </p>
+            )}
             {!needTotp ? (
               <>
                 <label className={labelCls}>{tr('Username')}</label>

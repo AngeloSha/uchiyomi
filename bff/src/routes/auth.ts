@@ -34,6 +34,7 @@ import { randomBytes } from 'crypto';
 import { SESSION_COOKIE as KOMGA_SESSION_COOKIE } from '../lib/komgaSession';
 import { desktopFailAudit, desktopSecretMatches, isDesktop, isLoopback } from '../lib/desktop';
 import { desktopUserId, ensureDesktopUser } from '../lib/desktopUser';
+import { authMode, bootstrapSub, mayBootstrap, rescueAdmin, ssoOnly } from '../lib/authMode';
 
 const loginBody = z.object({
   username: z.string().max(64).optional(),
@@ -72,8 +73,8 @@ function setImgCookie(app: FastifyInstance, reply: any, userId: string) {
 }
 
 async function userPayload(userId: string) {
-  const user = await one<{ id: string; username: string | null; display_name: string; role: string; avatar: unknown; totp_enabled: boolean; perms: unknown }>(
-    'SELECT id, username, display_name, role, avatar, totp_enabled, perms FROM users WHERE id = $1',
+  const user = await one<{ id: string; username: string | null; display_name: string; role: string; avatar: unknown; totp_enabled: boolean; perms: unknown; sso: boolean }>(
+    'SELECT id, username, display_name, role, avatar, totp_enabled, perms, oidc_sub IS NOT NULL AS sso FROM users WHERE id = $1',
     [userId],
   );
   const settings = await one<{ data: unknown }>('SELECT data FROM app_settings WHERE user_id = $1', [userId]);
@@ -84,19 +85,45 @@ async function userPayload(userId: string) {
     role: user?.role ?? 'user',
     avatar: user?.avatar ?? {},
     totpEnabled: !!user?.totp_enabled,
+    // Linked to an identity at the OIDC provider (v0.63.0): Profile → Account offers Link to … until it is.
+    sso: !!user?.sso,
     perms: user?.perms ?? {},
     settings: settings?.data ?? {},
   };
 }
 
+/**
+ * Test seam: how long a new SSO-only server's first sign-in waits between counting the accounts and making its admin
+ * (firstAdmin). Zero in the server. A race test holds the window open with it, so two first sign-ins meet inside it
+ * every time rather than once in a while: with the lock they are made one after the other, without it two admins.
+ */
+let firstAdminPauseMs = 0;
+export function _setFirstAdminPause(ms: number): void { firstAdminPauseMs = ms; }
+
+/** The username an identity at the provider asks for, cleaned to what a username here may hold; '' when it names none. */
+const usernameFor = (claims: OidcClaims): string =>
+  (claims.username || claims.email?.split('@')[0] || '').replace(/[^a-zA-Z0-9._-]/g, '');
+
 export default async function authRoutes(app: FastifyInstance) {
+  /**
+   * v0.63.0 (#208, lib/authMode.ts): in SSO-only mode the routes that take a password are not registered at all --
+   * first-run setup, sign-up, password change, two-factor -- and sign-in only while AUTH_RESCUE_ADMIN names an admin.
+   * Not refused: absent, a 404 like any path that never existed, so there is nothing to guess at, rate-limit or watch.
+   * Read once, here, as the routes are: the mode is the environment's, and the environment does not change under a
+   * running server. Reintroduce any one of them: its line in ssoOnly.int.test.ts finds it answering.
+   */
+  const local = !ssoOnly();
+
   // ---- first-run setup: create the very first admin from the browser, no env secret needed ----
   app.get('/api/setup/status', async () => {
+    // SSO-only mode has no setup form: the first admin is whoever the provider says, at their first sign-in
+    // (resolveOidcUser), so a new server shows the sign-in screen's one button.
+    if (!local) return { needsSetup: false };
     const c = await one<{ c: number }>('SELECT count(*)::int AS c FROM users');
     return { needsSetup: (c?.c ?? 0) === 0 };
   });
 
-  app.post('/api/setup', { config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } }, async (req, reply) => {
+  if (local) app.post('/api/setup', { config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } }, async (req, reply) => {
     const b = z.object({ username: z.string().min(2).max(64).regex(/^[a-zA-Z0-9._-]+$/), password: z.string() }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Username: letters, numbers, . _ - (2–64 chars).' });
     // once any user exists, setup is closed forever
@@ -116,7 +143,7 @@ export default async function authRoutes(app: FastifyInstance) {
     return reply.send({ ...signAccess(app, row.id, 'admin'), user: await userPayload(row.id), refreshExpiresAt: refreshExpiresAt() });
   });
 
-  app.post('/auth/login', { config: { rateLimit: { max: 10, timeWindow: '5 minutes' } } }, async (req, reply) => {
+  if (local || rescueAdmin()) app.post('/auth/login', { config: { rateLimit: { max: 10, timeWindow: '5 minutes' } } }, async (req, reply) => {
     const parsed = loginBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'bad_request' });
     const { password, code, deviceId, deviceName } = parsed.data;
@@ -124,7 +151,16 @@ export default async function authRoutes(app: FastifyInstance) {
     const ip = clientIp(req);
     const ua = (req.headers['user-agent'] as string) || null;
 
+    // SSO-only mode's way back in (lib/authMode.ts rescueAdmin): this route answers only while AUTH_RESCUE_ADMIN names
+    // an admin, and then for that account alone. Any other name, or a rescue name that is no admin, is refused exactly
+    // as a wrong password is, so the answer says nothing about who exists. Reintroduce by dropping the check: "the
+    // rescue opens one admin's password sign-in and nobody else's" in ssoRescue.int.test.ts signs a member in.
+    const rescue = local ? null : rescueAdmin();
     const user = await one<FullUser>(`SELECT ${USER_AUTH_COLS} FROM users WHERE username = $1`, [username]);
+    if (!local && (username !== rescue || user?.role !== 'admin')) {
+      await logAudit('login.fail', { userId: user?.id, username, detail: { reason: 'sso_only' }, req });
+      return reply.code(401).send({ error: 'invalid_credentials' });
+    }
     if (!user) {
       await logAudit('login.fail', { username, detail: { reason: 'no_user' }, req });
       return reply.code(401).send({ error: 'invalid_credentials' });
@@ -167,7 +203,9 @@ export default async function authRoutes(app: FastifyInstance) {
     const refresh = await issueRefreshToken(user.id, { deviceId, deviceName, ip, userAgent: ua });
     reply.setCookie(REFRESH_COOKIE, refresh, cookieOptions());
     setImgCookie(app, reply, user.id);
-    await logAudit('login.ok', { userId: user.id, username, req });
+    // A rescue sign-in is said in the log as well as written down: it is the door SSO-only mode exists to keep shut.
+    if (rescue) app.log.warn(`[auth] rescue sign-in by the admin "${username}" (AUTH_RESCUE_ADMIN)`);
+    await logAudit(rescue ? 'login.rescue' : 'login.ok', { userId: user.id, username, req });
     return reply.send({ ...signAccess(app, user.id, user.role), user: await userPayload(user.id), refreshExpiresAt: refreshExpiresAt() });
   });
 
@@ -176,9 +214,14 @@ export default async function authRoutes(app: FastifyInstance) {
     const s = await one<{ server_name: string; allow_registration: boolean }>('SELECT server_name, allow_registration FROM server_settings WHERE id = 1');
     return {
       serverName: s?.server_name || 'Uchiyomi',
-      // Desktop has one person and no sign-up form, whatever a restored server database says.
-      allowRegistration: !isDesktop() && !!s?.allow_registration,
+      // Desktop has one person and no sign-up form, whatever a restored server database says; SSO-only mode (v0.63.0)
+      // has no sign-up route at all.
+      allowRegistration: !isDesktop() && local && !!s?.allow_registration,
       oidc: oidcEnabled() ? { enabled: true, name: oidcName() } : { enabled: false, name: '' },
+      // v0.63.0 (#208): `oidc-only` is a sign-in screen with the provider's button alone, and `rescue` the password form
+      // beside it while AUTH_RESCUE_ADMIN reopens it for one admin (components/LoginScreen.tsx).
+      mode: authMode(),
+      ...(rescueAdmin() ? { rescue: true as const } : {}),
       // What a browser tab pointed at the desktop app's port sees instead of a sign-in form (LoginScreen.tsx).
       ...(isDesktop() ? { desktop: true as const } : {}),
     };
@@ -244,8 +287,8 @@ export default async function authRoutes(app: FastifyInstance) {
   // untouched, and the callback finishes by minting exactly the session a password login would.
   const OIDC_COOKIE = 'yomi_oidc';
 
-  app.get('/auth/oidc/start', async (req, reply) => {
-    if (!oidcEnabled()) return reply.code(404).send({ error: 'not_configured' });
+  /** Off to the provider: `link` names the account signed in here that the identity it answers with is linked to. */
+  const toProvider = async (reply: any, link?: string) => {
     let start;
     try {
       start = await beginLogin();
@@ -256,13 +299,34 @@ export default async function authRoutes(app: FastifyInstance) {
     // The PKCE verifier and nonce must survive the round trip but must not be readable by scripts, and
     // must not outlive the login attempt.
     const ticket = app.jwt.sign(
-      { typ: 'oidc', state: start.state, nonce: start.nonce, verifier: start.verifier },
+      { typ: 'oidc', state: start.state, nonce: start.nonce, verifier: start.verifier, ...(link ? { link } : {}) },
       { expiresIn: 600 },
     );
     reply.setCookie(OIDC_COOKIE, ticket, {
       httpOnly: true, secure: 'auto', sameSite: 'lax', path: '/auth/oidc', maxAge: 600,
     });
     return reply.redirect(start.url);
+  };
+
+  app.get('/auth/oidc/start', async (_req, reply) => {
+    if (!oidcEnabled()) return reply.code(404).send({ error: 'not_configured' });
+    return toProvider(reply);
+  });
+
+  /**
+   * Link the account signed in on this browser to an identity at the provider (v0.63.0, #208): Profile → Account's
+   * Link to …. How an install moves accounts that already exist to SSO before it turns SSO-only mode on, and how the
+   * rescue admin links theirs. A top-level navigation, so the account is the one whose session cookie comes with it,
+   * never one a request names; the provider's answer lands on the callback below, which links rather than signs in.
+   * A browser with no session goes to the sign-in screen. Reintroduce by taking the account from the query: "a link
+   * names the account signed in on this browser, never another" in ssoLink.int.test.ts links the wrong one.
+   */
+  app.get('/auth/oidc/link', async (req, reply) => {
+    if (!oidcEnabled()) return reply.code(404).send({ error: 'not_configured' });
+    const token = req.cookies?.[REFRESH_COOKIE];
+    const cur = token ? await validateRefreshToken(token) : null;
+    if (!cur) return reply.redirect(`${env.PUBLIC_ORIGIN.replace(/\/$/, '')}/login`);
+    return toProvider(reply, cur.userId);
   });
 
   app.get('/auth/oidc/callback', async (req, reply) => {
@@ -280,7 +344,7 @@ export default async function authRoutes(app: FastifyInstance) {
 
     const raw = (req.cookies as Record<string, string | undefined>)[OIDC_COOKIE];
     if (!raw) return fail('expired');
-    let ticket: { typ?: string; state?: string; nonce?: string; verifier?: string };
+    let ticket: { typ?: string; state?: string; nonce?: string; verifier?: string; link?: string };
     try {
       ticket = app.jwt.verify(raw);
     } catch {
@@ -297,11 +361,32 @@ export default async function authRoutes(app: FastifyInstance) {
     }
     reply.clearCookie(OIDC_COOKIE, { path: '/auth/oidc' });
 
+    // A link from Profile → Account (above): the identity joins the account that asked, and nobody is signed in --
+    // that browser already is. Back to the profile, saying how it went.
+    if (ticket.link) {
+      const back = (result: string) => reply.redirect(`${env.PUBLIC_ORIGIN.replace(/\/$/, '')}/profile/?tab=Account&sso_link=${result}`);
+      const taken = await one<{ id: string }>('SELECT id FROM users WHERE oidc_issuer = $1 AND oidc_sub = $2', [claims.issuer, claims.sub]);
+      // Never two accounts for one identity: it would sign in as whichever the lookup found first.
+      if (taken && taken.id !== ticket.link) {
+        await logAudit('login.oidc_fail', { userId: ticket.link, detail: { reason: 'link_taken' }, req });
+        return back('taken');
+      }
+      const u = await one<{ username: string | null; disabled: boolean }>('SELECT username, disabled FROM users WHERE id = $1', [ticket.link]);
+      if (!u || u.disabled) return back('failed');
+      await q('UPDATE users SET oidc_issuer = $2, oidc_sub = $3 WHERE id = $1', [ticket.link, claims.issuer, claims.sub]);
+      await logAudit('user.oidc_linked', { userId: ticket.link, username: u.username ?? undefined, detail: { issuer: claims.issuer, via: 'profile' }, req });
+      return back('ok');
+    }
+
     let userId: string;
     try {
       userId = await resolveOidcUser(claims);
     } catch (e) {
-      return fail((e as Error).message);
+      const reason = (e as Error).message;
+      // A new SSO-only server refusing a first sign-in says whose (v0.63.0): the subject to copy into
+      // OIDC_BOOTSTRAP_ADMIN_SUB is in the log, where only the operator reads it.
+      if (reason === 'not_set_up') app.log.warn(`[auth] a first sign-in, by the subject "${claims.sub}", is not this server's first admin (OIDC_BOOTSTRAP_ADMIN_SUB, OIDC_ADMIN_GROUP)`);
+      return fail(reason);
     }
 
     const row = await one<{ role: string; disabled: boolean; username: string | null }>(
@@ -321,18 +406,38 @@ export default async function authRoutes(app: FastifyInstance) {
 
   /** Map an OIDC identity to a local account, creating or adopting one only where configured to. */
   async function resolveOidcUser(claims: OidcClaims): Promise<string> {
-    const existing = await one<{ id: string }>(
-      'SELECT id FROM users WHERE oidc_issuer = $1 AND oidc_sub = $2', [claims.issuer, claims.sub],
+    const existing = await one<{ id: string; role: string }>(
+      'SELECT id, role FROM users WHERE oidc_issuer = $1 AND oidc_sub = $2', [claims.issuer, claims.sub],
     );
     if (existing) {
       // keep the role in step with the IdP when group mapping is configured
       if (env.OIDC_ADMIN_GROUP) {
-        await q('UPDATE users SET role = $2 WHERE id = $1', [existing.id, isAdminByGroup(claims) ? 'admin' : 'user']);
+        let role = isAdminByGroup(claims) ? 'admin' : 'user';
+        // ...but never the server's last admin out of being one (v0.63.0): an SSO-only server's first admin may come
+        // from OIDC_BOOTSTRAP_ADMIN_SUB and be in no group, and with no password to fall back on, demoting them would
+        // leave nobody able to run the server. Admin → Members refuses the same (last_admin). Reintroduce by dropping
+        // it: "the first admin stays one while nobody else is" in ssoOnly.int.test.ts reads user.
+        if (role === 'user' && existing.role === 'admin') {
+          const others = await one<{ c: number }>(
+            `SELECT count(*)::int AS c FROM users WHERE role = 'admin' AND NOT disabled AND id <> $1`, [existing.id]);
+          if ((others?.c ?? 0) === 0) {
+            role = 'admin';
+            app.log.warn(`[auth] the provider puts the last admin outside ${env.OIDC_ADMIN_GROUP}: kept as admin`);
+          }
+        }
+        await q('UPDATE users SET role = $2 WHERE id = $1', [existing.id, role]);
       }
       return existing.id;
     }
 
-    const wanted = (claims.username || claims.email?.split('@')[0] || '').replace(/[^a-zA-Z0-9._-]/g, '');
+    // SSO-only mode (v0.63.0, #208): a new server's first account is its first admin, made here rather than by a setup
+    // form (firstAdmin, below). Past it, an unknown identity is a sign-up like any other.
+    if (!local) {
+      const first = await firstAdmin(claims);
+      if (first) return first;
+    }
+
+    const wanted = usernameFor(claims);
     if (!wanted) throw new Error('no_username');
 
     if (env.OIDC_LINK_BY_USERNAME) {
@@ -364,6 +469,35 @@ export default async function authRoutes(app: FastifyInstance) {
     return rows[0].id;
   }
 
+  /**
+   * A new SSO-only server's first admin, from this sign-in -- or null when the server has an account already. The
+   * subject OIDC_BOOTSTRAP_ADMIN_SUB names, else anyone in OIDC_ADMIN_GROUP (lib/authMode.ts mayBootstrap), whatever
+   * OIDC_ALLOW_SIGNUP says: this is the server's admin, not a sign-up. Anyone else before them is told the server is
+   * not set up yet (`not_set_up`), and gets no account. One lock and one count, so two first sign-ins at once make one
+   * admin. Reintroduce by checking outside the lock: "two first sign-ins at once make one admin" in
+   * ssoOnly.int.test.ts finds two.
+   */
+  async function firstAdmin(claims: OidcClaims): Promise<string | null> {
+    // An unusable password, hashed before the lock: the account is reached through the provider alone.
+    const placeholder = await hash(randomBytes(32).toString('base64url'));
+    const username = usernameFor(claims) || 'admin';
+    const id = await tx(async (qq) => {
+      await qq('SELECT pg_advisory_xact_lock(6301)');
+      if ((await qq('SELECT 1 FROM users LIMIT 1')).length) return null;
+      if (!mayBootstrap(claims, { bootstrapSub: bootstrapSub(), adminGroup: env.OIDC_ADMIN_GROUP })) throw new Error('not_set_up');
+      if (firstAdminPauseMs) await new Promise((go) => setTimeout(go, firstAdminPauseMs));
+      const [row] = await qq<{ id: string }>(
+        `INSERT INTO users (display_name, username, role, password_hash, auth_kind, oidc_issuer, oidc_sub)
+         VALUES ($1, $2, 'admin', $3, 'oidc', $4, $5) RETURNING id`,
+        [claims.displayName || username, username, placeholder, claims.issuer, claims.sub],
+      );
+      await qq(`INSERT INTO app_settings (user_id, data) VALUES ($1, '{}'::jsonb) ON CONFLICT (user_id) DO NOTHING`, [row.id]);
+      return row.id;
+    });
+    if (id) await logAudit('setup.complete', { userId: id, username, detail: { via: 'oidc', issuer: claims.issuer } });
+    return id;
+  }
+
   // self-registration (only when the admin enabled it) → creates a plain user + logs in
   //
   // v0.61.0: the sign-in screen has a form for this at last (web/components/LoginScreen.tsx -- Open registration in
@@ -377,7 +511,7 @@ export default async function authRoutes(app: FastifyInstance) {
   //    that instant) is a 409 too, never a 500. Reintroduce by dropping the lock: "sign-ups racing for one name in
   //    different cases end in one account" in register.int.test.ts sees several; drop the 23505 mapping: "a unique
   //    violation from another writer is a 409, not a 500" sees a 500.
-  app.post('/auth/register', { config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } }, async (req, reply) => {
+  if (local) app.post('/auth/register', { config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } }, async (req, reply) => {
     const s = await one<{ allow_registration: boolean }>('SELECT allow_registration FROM server_settings WHERE id = 1');
     if (!s?.allow_registration) return reply.code(403).send({ error: 'registration_disabled', message: 'Registration is disabled.' });
     const b = z.object({
@@ -484,7 +618,7 @@ export default async function authRoutes(app: FastifyInstance) {
   });
 
   // ---- change own password ----
-  app.post('/auth/password', { preHandler: [authenticate] }, async (req, reply) => {
+  if (local) app.post('/auth/password', { preHandler: [authenticate] }, async (req, reply) => {
     const body = z.object({ current: z.string(), next: z.string() }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'bad_request' });
     const uid = userIdOf(req);
@@ -501,7 +635,7 @@ export default async function authRoutes(app: FastifyInstance) {
   });
 
   // ---- TOTP 2FA ----
-  app.post('/auth/totp/setup', { preHandler: [authenticate] }, async (req, reply) => {
+  if (local) app.post('/auth/totp/setup', { preHandler: [authenticate] }, async (req, reply) => {
     const uid = userIdOf(req);
     const u = await one<{ username: string | null; totp_enabled: boolean }>('SELECT username, totp_enabled FROM users WHERE id = $1', [uid]);
     // ⚠️ Setup is for an account WITHOUT a second step. With 2FA on, the secret in the row is the one the
@@ -522,7 +656,7 @@ export default async function authRoutes(app: FastifyInstance) {
     return { secret, otpauth: uri, qr };
   });
 
-  app.post('/auth/totp/enable', { preHandler: [authenticate] }, async (req, reply) => {
+  if (local) app.post('/auth/totp/enable', { preHandler: [authenticate] }, async (req, reply) => {
     const body = z.object({ code: z.string() }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'bad_request' });
     const uid = userIdOf(req);
@@ -534,7 +668,7 @@ export default async function authRoutes(app: FastifyInstance) {
     return reply.send({ ok: true, recoveryCodes: codes });
   });
 
-  app.post('/auth/totp/disable', { preHandler: [authenticate] }, async (req, reply) => {
+  if (local) app.post('/auth/totp/disable', { preHandler: [authenticate] }, async (req, reply) => {
     const body = z.object({ password: z.string() }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'bad_request' });
     const uid = userIdOf(req);
