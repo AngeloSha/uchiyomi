@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.67.1 — 2026-10-14
+
+**Scrolling with a mouse wheel works over a series again, and on a phone Home opens on a cover too.**
+
+### Scrolling with a mouse wheel
+
+- **The page scrolls when the pointer is over a series.** On a computer, the page stopped dead wherever a series in a
+  row of covers was under the pointer (Home's rows, a series' Related, Discover, Admin's Top 10), so only the scrollbar
+  moved it. A sideways swipe or Shift+wheel still scrolls the row itself. The Settings index and a series' genres had
+  the same problem and are fixed too.
+
+### Home on a phone
+
+- **Home's hero is the daily pick's cover**, filling it edge to edge as a series page's has since v0.67.0, where it
+  showed the automatic banner's panels. A computer keeps the banner.
+
+### Upgrading
+
+- Nothing to do.
+
 ## v0.67.0 — 2026-10-14
 
 **On a phone, a series opens on its cover.** The cover fills the top of the page edge to edge — a phone held upright is
