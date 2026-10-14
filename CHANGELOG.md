@@ -1,5 +1,51 @@
 # Changelog
 
+## v0.62.0 — 2026-10-14
+
+**Chapters stay in the series' language, whatever the source. An admin can also fetch again, or delete, one chapter
+from its ⋯ menu.** Both came from a new user's report: a server set to English only downloaded a few series in
+Spanish; fetching them again gave every chapter two versions, and the Spanish one still won. Thank you.
+
+### Chapters in the series' language
+
+- **A chapter is never taken in another language than its series'.** Uchiyomi chose each chapter's copy by group,
+  source and date, and never looked at its language. Now a copy known to be in another language is never downloaded,
+  whichever source ranks first. A chapter out only in another language waits until it is out in the series' language.
+  *Fetch* on such a chapter says why, and the chapter's **Versions** mark that copy with its language.
+- **English MangaDex is English only.** For a title with no English chapters, it used to fall back to another
+  language, which is how an English series filled up with Spanish chapters. Its search now finds only titles that have
+  English chapters. Series that relied on the fallback move to MangaDex in their own language when you upgrade (see
+  *Upgrading*).
+- **Chapters already here in another language are listed above the chapter list**, for admins, with **Fetch them
+  again in English** (or whatever the series' language is). Each file is replaced on its own row, so everyone keeps
+  their place.
+- **A site added by address knows its language.** It is read from the site's homepage when you add it. The site's
+  sheet shows it and lets you change it. Before, every such site counted as English (or as your *Sites that do not say
+  their language*), so a Spanish site could be followed by an English series.
+- **A source in every language is never followed automatically.** An extension source that lists every language's
+  chapters together now reads *All languages, mixed*. Its sheet and **Languages** say what it is; before, *All
+  languages* there looked like a switch for every language. When a series does use one, Uchiyomi keeps to the group
+  of the chapters you have, instead of taking whichever translation came out first. In Discover's search, such a
+  source is offered last on a card.
+- **Changing a series' language re-picks its chapters at once**, not at the next check.
+- A series whose language was set by hand to one none of its sources has (Korean for a manhwa read in English, say)
+  updates as before.
+
+### One chapter at a time
+
+- **Fetch again** and **Delete from server** are in each chapter's ⋯ menu, for admins, on chapters Uchiyomi
+  downloaded. Before, they were only in the select bar. Each asks first.
+
+### Upgrading
+
+- **Database:** one new column, `lib_books.lang`, added automatically. It keeps the language of each chapter English
+  MangaDex fetched in another language, so those chapters can be listed and fetched again. v0.61.2 still runs on the
+  new schema if you need to go back.
+- **MangaDex:** a series stated in another language, whose chapters came from English MangaDex's fallback, moves to
+  MangaDex in that language. That language is switched on under **Admin → Sources → Add sources → MangaDex
+  languages**. Its chapters stay, and new ones come from the new source. Other series keep English MangaDex.
+- Nothing else to do.
+
 ## v0.61.2 — 2026-10-13
 
 **AniList, MyAnimeList and Kitsu no longer mark a series Completed while it is still coming out. The Library's unread
