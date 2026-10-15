@@ -10,7 +10,7 @@
 // or not the fix were real.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildFlow, startIndex, renderWindow, type FlowChapter } from '../lib/readerFlow';
+import { buildFlow, startIndex, renderWindow, pageWidthBucket, type FlowChapter } from '../lib/readerFlow';
 
 const page = (n: number, junk = false) => ({ number: n, width: 800, height: 1200, junk: junk || undefined });
 
@@ -142,4 +142,15 @@ test('asking for the end of a chapter whose last pages were removed lands on its
   const hide = buildFlow(chapters, 'hide');
   assert.equal(hide[startIndex(hide, 0, 4)].number, 3);
   assert.equal(hide[startIndex(hide, 0, 99)].ci, 0, 'and it stays in the chapter that was asked for');
+});
+
+test('pages are asked for at the screen\'s width in device pixels, rounded up to a step', () => {
+  assert.equal(pageWidthBucket(0, 3), 0);
+  assert.equal(pageWidthBucket(360, 1), 720);
+  assert.equal(pageWidthBucket(390, 3), 1440);
+  assert.equal(pageWidthBucket(360, 2), 720);
+  assert.equal(pageWidthBucket(400, 3), 1440);
+  assert.equal(pageWidthBucket(860, 2), 2000);
+  assert.equal(pageWidthBucket(1900, 1), 2000);
+  assert.equal(pageWidthBucket(300, 0), 720);
 });

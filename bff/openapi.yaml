@@ -6456,7 +6456,7 @@ paths:
     get:
       tags:
         - images
-      summary: Owned-library page bytes (1-based); ?w resizes.
+      summary: Owned-library page bytes (1-based); ?w (64-2000) fits the page to that width and never returns a larger or worse copy.
       operationId: getImgLibBooksIdPageN
       parameters:
         - name: id

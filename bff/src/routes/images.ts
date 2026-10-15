@@ -27,6 +27,7 @@ import { q, one } from '../lib/db';
 import { viewCtxFor, visibleBookFile, seriesVisible, sourceAllowedFor, SYSTEM_CTX, type ViewCtx } from '../lib/visibility';
 import { artFile, FIRST_PAGE } from '../lib/seriesArt';
 import { namesOf } from '../lib/altTitles';
+import { fitPageWidth } from '../lib/pageFit';
 import { HERO_FRAMES, backdropLook, heroFit, type HeroAr } from '../lib/heroFrame';
 import { heroServable, heroFrame, heroVariant, queueHero, type AutoHeroAr } from '../lib/autoHero';
 
@@ -766,7 +767,7 @@ export const serveLibBookPage = async (req: FastifyRequest, reply: FastifyReply,
     return serveImage(req, reply, `lib-page:${id}:${pageNo}:w${w}`, async () => {
       const page = await pageOrGone(abs, pageNo - 1);
       if (!page) throw Object.assign(new Error('no page'), { statusCode: 404 });
-      return pageAtWidth(page.bytes, w, 74);
+      return fitPageWidth(page.bytes, w, libCt(page.name), (b, ww) => pageAtWidth(b, ww, 74));
     });
   }
   return serveImage(req, reply, `lib-page:${id}:${pageNo}`, async () => {
@@ -891,8 +892,8 @@ export default async function imageRoutes(app: FastifyInstance) {
 
     if (w && Number.isInteger(w) && w >= 64 && w <= 2000) {
       return serveImage(req, reply, `page:${id}:${pageNo}:w${w}`, async () => {
-        const input = await fetchUpstream(komga.bookPagePath(id, pageNo));
-        return pageAtWidth(input, w, 74);
+        const up = await fetchUpstreamWithType(komga.bookPagePath(id, pageNo));
+        return fitPageWidth(up.buffer, w, up.contentType, (b, ww) => pageAtWidth(b, ww, 74));
       });
     }
 

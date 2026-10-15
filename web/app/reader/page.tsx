@@ -10,7 +10,7 @@ import { api, img } from '@/lib/api';
 import { fetchAllBooks } from '@/lib/seriesBooks';
 import { chapterOutcome } from '@/lib/readerState';
 import { openableChapters } from '@/lib/chapterRows';
-import { buildFlow, startIndex, renderWindow } from '@/lib/readerFlow';
+import { buildFlow, startIndex, renderWindow, pageWidthBucket } from '@/lib/readerFlow';
 import { AHEAD_SCREENS, APPEND_SCREENS, BEHIND_SCREENS, KEEP_SCREENS, MAX_WINDOW_PAGES, anchorAt, nearEnd, prefetchList, screenRange, scrollTopFor, windowSet, type IndexRange } from '@/lib/readerWindow';
 import { readTap, undoLeft, undoWindow, type TapZone } from '@/lib/readerGesture';
 import { PAGE_ACTIONS, READER_ACTIONS, actionForKey, keyMapFor, type ReaderAction } from '@/lib/readerKeys';
@@ -226,6 +226,8 @@ function ReaderInner() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [colW, setColW] = useState(0);
+  /** The width page images are asked for: the screen's, in device pixels, in a few steps so the server's cache is shared. 0 until measured. */
+  const [pageW, setPageW] = useState(0);
   const didInitScroll = useRef(false);
   /** The last `chapterId:page` a progress ping was sent for. Declared here rather than beside sendProgress
    *  because the initial-scroll effect seeds it, and that effect is defined above sendProgress. */
@@ -630,6 +632,7 @@ function ReaderInner() {
       // #233: this device's column width, a share of what Fit gives (lib/readerDevice.ts); 100 is the column as it was.
       const base = (prefs.fitWidth ? Math.min(w, 860) : w) * (device.columnWidth / 100);
       setColW(base * zoom);
+      setPageW(pageWidthBucket(base, window.devicePixelRatio || 1));
     };
     measure();
     window.addEventListener('resize', measure);
@@ -786,7 +789,7 @@ function ReaderInner() {
       const ch = chapters[it.ci];
       if (!ch || ch.offline || prefetched.current.has(it.key)) continue;
       prefetched.current.add(it.key);
-      void fetch(img.page(ch.id, it.number), { credentials: 'same-origin', priority: 'low' } as RequestInit)
+      void fetch(img.page(ch.id, it.number, pageW || undefined), { credentials: 'same-origin', priority: 'low' } as RequestInit)
         .then((r) => (r.ok ? r.arrayBuffer() : null))
         .catch(() => { prefetched.current.delete(it.key); });
     }
@@ -798,7 +801,7 @@ function ReaderInner() {
     const ch = chapters[it.ci];
     if (!ch) return null;
     if (ch.offline) return blobUrls.current.get(it.key) || null;
-    return img.page(ch.id, it.number);
+    return img.page(ch.id, it.number, pageW || undefined);
   };
 
   /**

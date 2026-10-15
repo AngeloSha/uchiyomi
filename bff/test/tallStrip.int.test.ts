@@ -66,8 +66,9 @@ before(async () => {
   await q('DELETE FROM lib_series WHERE id = $1', [S]).catch(() => {});
   await q('DELETE FROM users WHERE username = $1', [USER]).catch(() => {});
 
-  // A strip 400 x 20,000: taller than WebP holds at its own width, inside it at half that.
-  await cbz(join(DL, FOLDER, 'Chapter 1.cbz'), 400, 20000);
+  // A strip 800 x 40,000: at 400 wide it is 20,000 tall (more than WebP holds), at 200 wide 10,000 (inside it). The strip is
+  // wider than every width asked for: a page already that narrow is sent as it is.
+  await cbz(join(DL, FOLDER, 'Chapter 1.cbz'), 800, 40000);
   await cbz(join(DL, FOLDER, 'Chapter 2.cbz'), 300, 400);
   await q(`INSERT INTO lib_series (id, source, title, folder, books_count) VALUES ($1,'T!tall','Tall Test',$2,2)`, [S, FOLDER]);
   for (const [id, n] of [[STRIP, 1], [PAGE, 2]] as const) {
