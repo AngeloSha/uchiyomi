@@ -84,6 +84,7 @@ import { copyToChapter, reapplyBlocklist, reapplyBlocklistInTransaction, type Li
 import { languageRulesFor, type LanguageRules } from '../lib/copyLanguage';
 import { claimWriterFolders } from '../lib/bulkNewest';
 import { seriesSourcesFor } from '../lib/seriesSources';
+import { fetchCoverImage } from './images';
 import { switchMainSource } from '../lib/mainSource';
 import { refileFailures } from '../lib/chapterFailures';
 import { mainUses, retireSource } from '../lib/retireSource';
@@ -3142,9 +3143,10 @@ export default async function adminRoutes(app: FastifyInstance) {
     const requestedId = (req.params as { id: string }).id;
     const b = z.object({
       kind: z.enum(['cover', 'banner']),
-      mode: z.enum(['url', 'upload', 'reset', 'first_page']),
+      mode: z.enum(['url', 'upload', 'reset', 'first_page', 'source']),
       url: z.string().url().optional(),
       dataUrl: z.string().optional(),
+      source: z.string().max(200).optional(),
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     // Use the exact canonical id read from the database, not a route segment, in persistent file paths. Besides
@@ -3178,6 +3180,22 @@ export default async function adminRoutes(app: FastifyInstance) {
       await mkdir(ART_DIR, { recursive: true }).catch(() => {});
       await writeFile(artPath, buf);
       value = 'upload';
+    } else if (mode === 'source') {
+      // A cover taken from a source this series follows. Only the source's id is taken from the caller: the
+      // picture's address is read from the source's own record of this series, never from the request.
+      const follow = (await seriesSourcesFor(id)).find((x) => x.sourceId === b.data.source);
+      const src = follow ? getSource(follow.sourceId) : null;
+      if (kind !== 'cover' || !follow || !src) return reply.code(400).send({ error: 'bad_source', message: 'That source does not follow this series.' });
+      let buf: Buffer;
+      try {
+        const sr = await withTimeout(src.getSeries(follow.sourceSeriesId), 20_000);
+        if (!sr?.coverUrl) return reply.code(404).send({ error: 'no_cover', message: 'That source has no cover for this series.' });
+        const raw = await fetchCoverImage(sr.coverUrl, src.id);
+        buf = await sharp(raw).rotate().resize({ width: 1000, withoutEnlargement: true }).webp({ quality: 86 }).toBuffer();
+      } catch { return reply.code(502).send({ error: 'unavailable', message: 'The source would not hand over its cover.' }); }
+      await mkdir(ART_DIR, { recursive: true }).catch(() => {});
+      await writeFile(artFile(id, kind), buf);
+      value = 'upload';
     } else {
       await rm(artPath, { force: true }).catch(() => {});
       value = null;
@@ -3190,6 +3208,25 @@ export default async function adminRoutes(app: FastifyInstance) {
     );
     await logAudit('series.art_override', { userId: userIdOf(req), detail: { id, kind, mode }, req });
     return { ok: true };
+  });
+
+  // The covers the sources this series follows have for it, for the series page's "Change cover" picker. Each
+  // is answered by the source's own record of the series (the same lookup the updater makes); a source that is
+  // down or has no picture is left out. The picture is shown through /img/sources/cover and applied with
+  // PUT .../art { mode: 'source', source }.
+  app.get('/api/admin/series/:id/cover-candidates', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!(await getSeriesRow(id))) return reply.code(404).send({ error: 'not_found' });
+    const follows = await seriesSourcesFor(id);
+    const found = await Promise.all(follows.map(async (f) => {
+      const src = getSource(f.sourceId);
+      if (!src || !f.sourceSeriesId) return null;
+      try {
+        const sr = await withTimeout(src.getSeries(f.sourceSeriesId), 15_000);
+        return sr?.coverUrl ? { sourceId: f.sourceId, name: f.name, primary: f.primary, coverUrl: sr.coverUrl } : null;
+      } catch { return null; }
+    }));
+    return { content: found.filter(Boolean) };
   });
 
   // ---- art review: per-series art status + candidates + bulk backfill ----

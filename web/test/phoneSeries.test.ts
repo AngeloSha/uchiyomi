@@ -43,7 +43,7 @@ test('a phone reads the reading button first under the art, and swipes one row o
   const left = page.slice(page.indexOf('{/* The poster, a desktop\'s'), page.indexOf('{/* info + chapters */}'));
   assert.ok(left.indexOf('{Actions}') >= 0 && left.indexOf('{Actions}') < left.indexOf('<RatingsPanel'), 'the reading button is not first');
   // The poster is a desktop's, and a phone does not even fetch it.
-  assert.match(left, /className="hidden overflow-hidden rounded-2xl [^"]*lg:block lg:w-full">\s*\{series && wide && <Img/);
+  assert.match(left, /className="hidden overflow-hidden rounded-2xl [^"]*lg:block lg:w-full">\s*\{series && wide && (?:<Img|\(isAdmin)/);
   const genres = page.slice(page.indexOf('const Genres = '), page.indexOf('const Summary = '));
   assert.match(genres, /<div data-lenis-prevent-horizontal className="-mx-4 flex gap-2 overflow-x-auto [^"]*lg:flex-wrap[^"]*">/);
 });

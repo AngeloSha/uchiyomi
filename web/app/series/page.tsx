@@ -43,6 +43,7 @@ import { SourcesExplainer } from '@/components/SourcesExplainer';
 import { SupplyLine } from '@/components/SupplyLine';
 import { ChapterFilterSheet } from '@/components/ChapterFilterSheet';
 import { ChapterVersionsSheet } from '@/components/ChapterVersionsSheet';
+import { CoverPickerSheet } from '@/components/CoverPickerSheet';
 import { GroupAvatar } from '@/components/GroupAvatar';
 import { supplyLine } from '@/lib/supplyLine';
 import { isDesktop } from '@/lib/desktop';
@@ -1374,6 +1375,7 @@ function SeriesInner() {
   // which is asked about first below.
   const pickGhost = (number: number, copy: VersionCopy) =>
     startJob('/api/sources/fetch', { seriesId: id, picks: [{ number, source: copy.source, sourceId: copySourceId(copy) }] });
+  const [coverPicker, setCoverPicker] = useState(false);
   const [replacing, setReplacing] = useState<{ book: Book; copy: VersionCopy } | null>(null);
   const replaceWith = async () => {
     if (!replacing) return;
@@ -1954,10 +1956,21 @@ function SeriesInner() {
           {/* The poster, a desktop's: a phone's hero is the cover itself (UI refresh, phone). */}
           <motion.div initial={{ opacity: 0, y: 18, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.5, ease: [0.22, 0.61, 0.36, 1] }}
             className="hidden overflow-hidden rounded-2xl border border-ink-600 shadow-lift lg:block lg:w-full">
-            {series && wide && <Img src={img.seriesThumb(id, series.artVersion, 800)} alt={series.name} className="aspect-[2/3] h-full w-full" />}
+            {series && wide && (isAdmin ? (
+              <button type="button" onClick={() => setCoverPicker(true)} aria-label={tr('Change cover')} title={tr('Change cover')} data-cover-button
+                className="group relative block h-full w-full focus-visible:outline-2 focus-visible:outline-accent">
+                <Img src={img.seriesThumb(id, series.artVersion, 800)} alt="" className="aspect-[2/3] h-full w-full" />
+                <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 pb-2 pt-6 text-center text-xs font-medium text-white opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">{tr('Change cover')}</span>
+              </button>
+            ) : <Img src={img.seriesThumb(id, series.artVersion, 800)} alt={series.name} className="aspect-[2/3] h-full w-full" />)}
           </motion.div>
           {/* On a phone the reading button and the four keys come first, right under the art (UI refresh, phone); the
               ratings, the languages and the supply line follow. A desktop's left column is the poster and these. */}
+          {/* Change cover (admin): the picker also opens from the desktop poster, but a phone's hero is the cover itself with nothing to
+              tap, and the poster's hover caption is invisible to touch -- so a plain key sits right under the art in both. */}
+          {series && isAdmin && (
+            <button type="button" onClick={() => setCoverPicker(true)} data-cover-key className="btn-key mt-3 w-full justify-center">{tr('Change cover')}</button>
+          )}
           {Actions}
           {/* The ratings, phone form. The desktop form is the first row of the right column. */}
           {series && <div className="mt-4 lg:hidden"><RatingsPanel anilist={series.yomi?.anilist} rating={rating} onRate={rate} /></div>}
@@ -2135,6 +2148,7 @@ function SeriesInner() {
           onClose={() => setConfirming(null)}
         />
       )}
+      {coverPicker && <CoverPickerSheet seriesId={id} artVersion={series?.artVersion} onClose={() => setCoverPicker(false)} />}
       {replacing && (
         <ConfirmDialog
           title={tr('Replace with this version?')}

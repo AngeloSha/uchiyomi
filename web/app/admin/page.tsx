@@ -34,6 +34,7 @@ import { SeriesCard } from '@/components/cards';
 import { ConsoleNav } from '@/components/ConsoleNav';
 import { motion, useReducedMotion } from 'framer-motion';
 import { t as tr, keys } from '@/lib/i18n';
+import { bustCover } from '@/lib/coverBust';
 import type { HealthCheck, Series } from '@/lib/types';
 import { bridge, hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN, type UpdateStatus } from '@/lib/desktop';
 import { SourcesPanel } from '@/components/SourcesPanel';
@@ -782,7 +783,7 @@ function ArtReview() {
       {/* The row as the gallery has it now, not as it was when the picker opened: after Use the first page or a reset the
           picker's keys follow what the series has. */}
       {open && <ArtPicker row={(data?.content ?? []).find((r) => r.id === open.id) ?? open} onClose={() => setOpen(null)}
-        onApplied={() => { setBust((b) => ({ ...b, [open.id]: Date.now() })); qc.invalidateQueries({ queryKey: ['admin-art'] }); }} />}
+        onApplied={() => { bustCover(open.id); setBust((b) => ({ ...b, [open.id]: Date.now() })); qc.invalidateQueries({ queryKey: ['admin-art'] }); }} />}
     </div>
   );
 }
