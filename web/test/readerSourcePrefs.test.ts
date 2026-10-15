@@ -240,3 +240,22 @@ test("the series' type is remembered for opening it offline, and junk reads back
   assert.ok(![...mem.keys()].some((k) => k.startsWith('yomi_rs_') || k.startsWith('yomi_rp_')), 'the type was stored where the account sync collects');
   mem.clear();
 });
+
+test('a library\'s reading defaults sit under the source\'s and the series\' own', async () => {
+  const { titleLook, DEFAULT_PREFS } = await import('../lib/readerPrefs');
+  const lib = { mode: 'paged' as const, theme: 'sepia' as const, spread: true };
+  // The reader hands titleLook the library look with the source's laid over it.
+  const l = titleLook({ ...DEFAULT_PREFS }, { ...lib }, {});
+  assert.deepEqual([l.prefs.mode, l.prefs.theme, l.prefs.spread], ['paged', 'sepia', true]);
+  const s = titleLook({ ...DEFAULT_PREFS }, { ...lib, ...{ mode: 'vertical' as const } }, {});
+  assert.equal(s.prefs.mode, 'vertical', "the source's mode beats the library's");
+  assert.equal(s.prefs.theme, 'sepia', 'and the rest still comes from the library');
+  const own = titleLook({ ...DEFAULT_PREFS }, { ...lib }, { mode: 'vertical' });
+  assert.equal(own.prefs.mode, 'vertical', "the series' own mode beats the library's");
+  // The reader does that merge (and asks an admin's sheet for the library's name) -- reintroduce by dropping the library look.
+  const { readFileSync } = await import('fs');
+  const { join } = await import('path');
+  const src = readFileSync(join(__dirname, '..', 'app/reader/page.tsx'), 'utf8');
+  assert.match(src, /\{ \.\.\.\(libLook \?\? \{\}\), \.\.\.\(src \? loadSourcePrefs\(src\.id\) : \{\}\) \}/);
+  assert.match(src, /libraryName=\{seriesLibrary\?\.name\}/);
+});

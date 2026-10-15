@@ -1098,6 +1098,8 @@ interface LibraryRow {
   age_rating: number | null;
   /** Automatic, implicit title/id lookups may contact AniList for series currently filed here. */
   anilist_lookup: boolean;
+  /** Reading defaults for its series (bff lib/libraryReader.ts); null when it has none. */
+  reader_prefs?: { mode?: string; theme?: string; spread?: boolean; pagedDirection?: string } | null;
   /** How many of its series were placed here by hand rather than by the folder rule. */
   pinned: number;
   /** Who can open it. Includes members with no restriction at all, who see every library. */
@@ -1335,6 +1337,18 @@ function LibraryDialog({ editing, start, libs, onClose, onSaved }: {
   const [typed, setTyped] = useState('');
   const [age, setAge] = useState<string>(editing?.age_rating == null ? '' : String(editing.age_rating));
   const [anilistLookup, setAniListLookup] = useState(editing?.anilist_lookup ?? true);
+  const [look, setLook] = useState<Record<string, string>>(() => {
+    const r = editing?.reader_prefs;
+    return { mode: r?.mode ?? '', theme: r?.theme ?? '', spread: r?.spread === undefined ? '' : String(r.spread), pagedDirection: r?.pagedDirection ?? '' };
+  });
+  const readerPrefs = () => {
+    const o: Record<string, unknown> = {};
+    if (look.mode) o.mode = look.mode;
+    if (look.theme) o.theme = look.theme;
+    if (look.spread) o.spread = look.spread === 'true';
+    if (look.pagedDirection) o.pagedDirection = look.pagedDirection;
+    return Object.keys(o).length ? o : null;
+  };
   const [preview, setPreview] = useState<{ series: number; sample: string[] } | null>(null);
   const [busy, setBusy] = useState(false);
   const isLib = editing?.id === 'lib';
@@ -1379,7 +1393,7 @@ function LibraryDialog({ editing, start, libs, onClose, onSaved }: {
     try {
       const ageRating = age === '' ? null : Number(age);
       if (editing) {
-        const body: Record<string, unknown> = { name: name.trim(), ageRating, anilistLookup };
+        const body: Record<string, unknown> = { name: name.trim(), ageRating, anilistLookup, readerPrefs: readerPrefs() };
         if (!isLib && !unchanged) body.paths = folders;
         await api(`/api/admin/libraries/${editing.id}`, { method: 'PATCH', json: body });
         toast(tr('Saved'), 'success');
@@ -1387,7 +1401,7 @@ function LibraryDialog({ editing, start, libs, onClose, onSaved }: {
         // One request. This used to POST the library and then PATCH the rating separately, and skip the
         // PATCH entirely when the rating was null -- so a failed second call created an unrated library
         // under a "Created" toast, which is the one outcome nobody would check for.
-        await api('/api/admin/libraries', { method: 'POST', json: { name: name.trim(), paths: folders, ageRating, anilistLookup } });
+        await api('/api/admin/libraries', { method: 'POST', json: { name: name.trim(), paths: folders, ageRating, anilistLookup, readerPrefs: readerPrefs() } });
         toast(tr('Created'), 'success');
       }
       onSaved();
@@ -1461,6 +1475,29 @@ function LibraryDialog({ editing, start, libs, onClose, onSaved }: {
           <input type="checkbox" checked={anilistLookup} onChange={(e) => setAniListLookup(e.target.checked)}
             className="mt-0.5 size-4 shrink-0 accent-accent" data-library-anilist-lookup />
         </label>
+
+        <div className="mt-3 max-w-md rounded-lg border border-ink-700 bg-ink-900/40 p-3" data-library-reader>
+          <span className="block text-xs font-medium text-fog-200">{tr('Reading defaults')}</span>
+          <span className="mt-1 block text-[11px] leading-relaxed text-fog-500">
+            {tr("Used for every series in this library, unless the series or its source has its own.")}
+          </span>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            {([
+              ['mode', tr('Reading mode'), [['vertical', tr('Webtoon (scroll)')], ['paged', tr('Paged (swipe)')]]],
+              ['spread', tr('Pages per view'), [['false', tr('Single')], ['true', tr('Double spread')]]],
+              ['pagedDirection', tr('Reading direction'), [['series', tr('Follow the series')], ['ltr', tr('Left to right')], ['rtl', tr('Right to left')]]],
+            ] as const).map(([k, label, opts]) => (
+              <label key={k} className="block text-[11px] text-fog-400">
+                {label}
+                <select value={look[k]} onChange={(e) => setLook({ ...look, [k]: e.target.value })}
+                  className="mt-1 w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1.5 text-xs text-fog-200" data-library-look={k}>
+                  <option value="">{tr('Use user default')}</option>
+                  {opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </label>
+            ))}
+          </div>
+        </div>
 
         {preview && (
           <p className="mt-3 text-[11px] leading-relaxed text-fog-500" data-library-preview={preview.series}>

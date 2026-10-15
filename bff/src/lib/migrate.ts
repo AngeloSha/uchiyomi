@@ -814,6 +814,9 @@ ALTER TABLE libraries ADD COLUMN IF NOT EXISTS age_rating int;
 -- the historical behaviour; switching it off never clears art, tracker links, direction or type already learned.
 ALTER TABLE libraries ADD COLUMN IF NOT EXISTS anilist_lookup boolean NOT NULL DEFAULT true;
 
+-- Reading defaults for the whole library (mode, theme, spread, direction); null = none, the reader's own apply.
+ALTER TABLE libraries ADD COLUMN IF NOT EXISTS reader_prefs jsonb;
+
 -- Why a series is in the library it is in. The scanner already keeps an existing series where it is, so a
 -- hand-move survives a rescan by accident; this records that it was DELIBERATE, so creating or re-pathing a
 -- library never steals it back and the UI can say "pinned here" rather than "here because of the folder".

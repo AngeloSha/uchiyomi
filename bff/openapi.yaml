@@ -1974,6 +1974,16 @@ paths:
                                 current: { type: boolean }
                                 lastRead: { type: [number, "null"] }
                       - type: "null"
+                  library:
+                    description: Admins only. The library the series is in, for the reader's key that saves the current look as that library's reading defaults.
+                    type: object
+                    properties:
+                      id: { type: string }
+                      name: { type: string }
+                  libraryReader:
+                    description: The reading defaults of the library the series is in (`mode`, `theme`, `spread`, `pagedDirection`), or null when it has none.
+                    type: [object, "null"]
+                    additionalProperties: true
                   langStated:
                     description: Admins only (since v0.52.0). Whether `lang` is the series' own (stated) rather than inferred.
                     type: boolean
@@ -9705,6 +9715,14 @@ paths:
                   type: boolean
                   default: true
                   description: Permit automatic AniList enrichment for series currently in this library.
+                readerPrefs:
+                  description: Reading defaults for the library's series (mode, theme, spread, pagedDirection); null clears them. Layered under a source's and a series' own.
+                  type: [object, "null"]
+                  properties:
+                    mode: { type: string, enum: [vertical, paged] }
+                    theme: { type: string, enum: [amoled, sepia, gray] }
+                    spread: { type: boolean }
+                    pagedDirection: { type: string, enum: [ltr, rtl, series] }
       security:
         - bearer: []
       responses:
@@ -9847,6 +9865,14 @@ paths:
                 anilistLookup:
                   type: boolean
                   description: Permit automatic AniList enrichment for series currently in this library.
+                readerPrefs:
+                  description: Reading defaults for the library's series (mode, theme, spread, pagedDirection); null clears them. Layered under a source's and a series' own.
+                  type: [object, "null"]
+                  properties:
+                    mode: { type: string, enum: [vertical, paged] }
+                    theme: { type: string, enum: [amoled, sepia, gray] }
+                    spread: { type: boolean }
+                    pagedDirection: { type: string, enum: [ltr, rtl, series] }
                 members:
                   type: array
                   items: { type: string }

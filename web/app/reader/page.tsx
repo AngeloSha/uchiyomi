@@ -215,6 +215,9 @@ function ReaderInner() {
   const [seriesSourceNames, setSeriesSourceNames] = useState<Record<string, string>>({});
   // The series' PRIMARY source, which keys the per-source reader default (lib/readerPrefs.ts seriesSourceOf).
   const [seriesSource, setSeriesSource] = useState<{ id: string; name: string } | null>(null);
+  // The library the series is in (admins only) and the reading defaults it carries (everyone): they sit under the source's own.
+  const [seriesLibrary, setSeriesLibrary] = useState<{ id: string; name: string } | null>(null);
+  const [libraryLook, setLibraryLook] = useState<NonNullable<Series['libraryReader']> | null>(null);
   // The work's language editions (v0.52.0, #72), for the chapter sheet's chips, and each chapter's number, which a
   // switch to another edition opens there. Both from requests the page makes anyway.
   const [editions, setEditions] = useState<EditionRow[] | null>(null);
@@ -260,7 +263,7 @@ function ReaderInner() {
     if (p.autoMode !== undefined) {
       savePrefs({ ...loadPrefs(), autoMode: p.autoMode });
       if (seriesId0) {
-        const look = titleLook(loadPrefs(), seriesSource ? loadSourcePrefs(seriesSource.id) : {}, loadSeriesPrefs(seriesId0), autoGuess.current);
+        const look = titleLook(loadPrefs(), { ...(libraryLook ?? {}), ...(seriesSource ? loadSourcePrefs(seriesSource.id) : {}) }, loadSeriesPrefs(seriesId0), autoGuess.current);
         setAutoApplied(look.autoApplied);
         setPrefs((cur) => ({ ...cur, autoMode: p.autoMode!, mode: look.prefs.mode }));
       } else {
@@ -382,10 +385,14 @@ function ReaderInner() {
       // this device last saw and the downloaded record's direction. The pages' shape is the chapter's own, either way.
       let seriesType = first.offline ? seriesTypeOf(first.seriesId) : null;
       let readsRtl = first.readingDirection === 'RIGHT_TO_LEFT';
+      let libLook: NonNullable<Series['libraryReader']> | null = null;
       try {
         const s = await api<Series>(`/api/series/${first.seriesId}`);
         if (alive) {
           setRtl(s?.metadata?.readingDirection === 'RIGHT_TO_LEFT');
+          libLook = s?.libraryReader ?? null;
+          setLibraryLook(libLook);
+          setSeriesLibrary(s?.library ?? null);
           readsRtl = s?.metadata?.readingDirection === 'RIGHT_TO_LEFT';
           seriesType = s?.seriesType ?? null;
           rememberSeriesType(first.seriesId, seriesType);
@@ -419,7 +426,8 @@ function ReaderInner() {
       // neither its memory nor its source holds one (titleLook).
       const memory = loadSeriesPrefs(first.seriesId);
       autoGuess.current = guessMode({ pages: first.pages, type: seriesType, rtl: readsRtl });
-      const look = titleLook(loadPrefs(), src ? loadSourcePrefs(src.id) : {}, memory, autoGuess.current);
+      // The library's own reading defaults sit between the global default and the source's.
+      const look = titleLook(loadPrefs(), { ...(libLook ?? {}), ...(src ? loadSourcePrefs(src.id) : {}) }, memory, autoGuess.current);
       setPrefs(look.prefs);
       setAutoApplied(look.autoApplied);
       setZoom(memory.zoom && memory.zoom >= 1 ? memory.zoom : 1);
@@ -1834,6 +1842,15 @@ function ReaderInner() {
             // never shown (an extension's is nineteen digits).
             sourceName={seriesSource?.name || undefined}
             sourceDefault={!!(seriesSource && Object.keys(loadSourcePrefs(seriesSource.id)).length)}
+            libraryName={seriesLibrary?.name}
+            onLibraryDefault={() => {
+              if (!seriesLibrary) return;
+              const look = { mode: prefs.mode, theme: prefs.theme, spread: prefs.spread, pagedDirection: prefs.pagedDirection };
+              api(`/api/admin/libraries/${seriesLibrary.id}`, { method: 'PATCH', json: { readerPrefs: look } })
+                .then(() => { setLibraryLook(look); toast(tr('Saved as the default for {library}.', { library: seriesLibrary.name })); })
+                .catch(() => toast(tr('Could not save'), 'error'));
+              setShowSettings(false);
+            }}
             onSourceDefault={(save) => {
               if (!seriesSource) return;
               if (save) saveSourcePrefs(seriesSource.id, { mode: prefs.mode, theme: prefs.theme, spread: prefs.spread, pagedDirection: prefs.pagedDirection });
