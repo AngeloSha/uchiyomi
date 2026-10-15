@@ -21,8 +21,11 @@ export type ListStatus = (typeof LIST_STATUSES)[number];
 
 /** An entry's bucket as a push reads it (v0.61.2, #201): the five above, or `rereading` for a re-read in progress. */
 export type EntryStatus = ListStatus | 'rereading';
-/** What a push may set, as trackers.ts pushStatus decides it: reading, completed, or a re-read kept as one. */
-export type PushStatus = 'reading' | 'completed' | 'rereading';
+/**
+ * What a push may set, as trackers.ts pushStatus decides it: reading, completed, or a re-read kept as one -- and
+ * `planning`, which only an add sets (v0.68.0, #223, trackers.ts planSeriesOnAdd), on a series not on the list yet.
+ */
+export type PushStatus = 'reading' | 'completed' | 'rereading' | 'planning';
 
 /**
  * What the service says before a push (v0.61.2, #201): whether the series has ENDED there -- finished, or cancelled or
@@ -277,7 +280,7 @@ const ANILIST_SAVE = `mutation($mediaId:Int,$progress:Int,$status:MediaListStatu
 const ANILIST_STATE = `query($id:Int){Media(id:$id,type:MANGA){status chapters mediaListEntry{status progress}}}`;
 /** FINISHED and CANCELLED have ended; RELEASING, HIATUS and NOT_YET_RELEASED have more chapters to come. */
 const ANILIST_ENDED = new Set(['FINISHED', 'CANCELLED']);
-const ANILIST_PUSH: Record<PushStatus, string> = { reading: 'CURRENT', completed: 'COMPLETED', rereading: 'REPEATING' };
+const ANILIST_PUSH: Record<PushStatus, string> = { reading: 'CURRENT', completed: 'COMPLETED', rereading: 'REPEATING', planning: 'PLANNING' };
 
 export const anilistAdapter: TrackerAdapter = {
   id: 'anilist',
@@ -455,7 +458,7 @@ export const malAdapter: TrackerAdapter = {
     // status as the person has it: MAL keeps a re-read under whichever status it was started from.
     const body = new URLSearchParams({ num_chapters_read: String(chapters) });
     if (status === 'rereading') body.set('is_rereading', 'true');
-    else body.set('status', status);
+    else body.set('status', status === 'planning' ? 'plan_to_read' : status);
     await malCall(token, `/manga/${encodeURIComponent(externalId)}/my_list_status`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -617,7 +620,7 @@ export const kitsuAdapter: TrackerAdapter = {
     // A re-read is the entry's `reconsuming` flag under the status it already has, so it moves only the progress.
     const attributes = status === 'rereading'
       ? { progress: chapters, reconsuming: true }
-      : { progress: chapters, status: status === 'completed' ? 'completed' : 'current' };
+      : { progress: chapters, status: status === 'completed' ? 'completed' : status === 'planning' ? 'planned' : 'current' };
     if (entryId != null) {
       await kitsuCall(token, `/library-entries/${encodeURIComponent(String(entryId))}`, {
         method: 'PATCH',

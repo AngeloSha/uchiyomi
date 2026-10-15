@@ -255,6 +255,13 @@ components:
             written (Keep reading and resuming work), but no reading event is recorded (history, streaks, Wrapped, the
             leaderboard, the household's Top 10, member activity) and nothing is pushed to a tracker automatically --
             whatever client wrote the progress. The next push once it is off sends the series' real highest chapter.
+        trackerPlanOnAdd:
+          type: boolean
+          description: >-
+            Since v0.68.0 (#223), off unless exactly true: a series this account adds to the library goes on each
+            connected tracker it is linked to as Plan to Read (AniList PLANNING, MyAnimeList plan_to_read, Kitsu
+            planned), only where the account's list has no entry for it yet -- an existing entry is never changed --
+            and never under Incognito reading.
         reader:
           type: object
           additionalProperties: true
@@ -5973,7 +5980,7 @@ paths:
         reader's edges) and, since v0.55.7, `listSorts` (list id to `az`, `za`, `read`, `unread` or `latest`: the order
         each list is shown in; a list's own order is not stored). Since v0.55.8 the validated keys are `librarySort`,
         `homeCollections` and `showAllChapters` (since v0.60.0 also `librarySortDir`, since v0.61.0 `incognito`, a
-        boolean). Unknown keys remain accepted and retained for compatibility -- since v0.66.0 the web app's `homeRails`
+        boolean, and since v0.68.0 `trackerPlanOnAdd`, a boolean). Unknown keys remain accepted and retained for compatibility -- since v0.66.0 the web app's `homeRails`
         (`{order, hidden}`, Home's rails as the reader arranged them; null is the default order) and `tone` (`oled`,
         `graphite` or `midnight`, the background) among them.
       operationId: putApiSettings

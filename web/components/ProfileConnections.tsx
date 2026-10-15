@@ -13,6 +13,7 @@ import { IcCloudDownload, IcPlus, IcRefresh } from '@/components/icons';
 import { Row, Section, SETTINGS_GRID, SwitchRow } from '@/components/settings';
 import { isDesktop } from '@/lib/desktop';
 import { connectProblem, testProblem, testSaid, tokenFromPaste, tokenSource, type TestResult } from '@/lib/trackerHelp';
+import { PLAN_ON_ADD_TEXT, planOnAddOf } from '@/lib/trackerPlan';
 
 /**
  * Profile → Connections: everything that lets something OTHER than this app read or write on the account --
@@ -115,8 +116,25 @@ function TrackerSection({ focus }: { focus: boolean }) {
       icon={<IcRefresh width={18} height={18} />}
       description={tr('Connect a service and every chapter you finish is pushed to it.')}>
       {all.map((t) => <TrackerRow key={t.provider} t={t} refetch={refetch} />)}
+      <PlanOnAddRow />
     </Section>
   );
+}
+
+/**
+ * "Plan to read when I add a series" (v0.68.0, #223): the account's own switch, saved to its settings and acted on by the
+ * server at every add (bff lib/trackers.ts planSeriesOnAdd). Off by default. SwitchRow flips at once and reverts if the
+ * save fails.
+ */
+function PlanOnAddRow() {
+  const { user, setSettings } = useAuth();
+  const on = planOnAddOf(user?.settings);
+  const set = async (next: boolean) => {
+    setSettings({ trackerPlanOnAdd: next });
+    try { await api('/api/settings', { method: 'PUT', json: { trackerPlanOnAdd: next } }); }
+    catch (e) { setSettings({ trackerPlanOnAdd: !next }); throw e; }
+  };
+  return <SwitchRow label={tr(PLAN_ON_ADD_TEXT[0])} help={tr(PLAN_ON_ADD_TEXT[1])} on={on} onChange={set} />;
 }
 
 /**

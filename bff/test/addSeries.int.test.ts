@@ -464,6 +464,39 @@ test('POST /api/sources/add refuses a chapterFrom it does not know', { skip }, a
       assert.equal(r.statusCode, 200, `answered ${r.statusCode}: ${r.body}`);
       assert.equal(r.json().chapters, 0, 'already in library, so nothing was downloaded twice');
     });
+    await t.test('#223: someone who asked for it gets a series they add on their tracker as Plan to Read', async () => {
+      // The route's half of lib/trackers.ts planSeriesOnAdd (the rules are planOnAdd.int.test.ts's): POST /api/sources/add
+      // hands the person's id to the add, and the add plans once the series is linked -- here a series already in the
+      // library, whose AniList link is already there. Reintroduce by dropping the planSeriesOnAddAsync call from the
+      // "already in library" branch (or not passing userId from the route): AniList is never written to.
+      const trackers = await import('../src/lib/trackers');
+      const sid = (await q(`SELECT id FROM lib_series WHERE source_id = $1`, [LATEST]))[0].id;
+      await trackers.linkSeries(sid, '987', 'Caught Up', null, 'anilist');
+      await trackers.saveConnection(uid, 'anilist', 'tok-anilist', 'me', new Date(Date.now() + 86_400_000));
+      await q(`INSERT INTO app_settings (user_id, data) VALUES ($1, '{"trackerPlanOnAdd": true}'::jsonb)
+        ON CONFLICT (user_id) DO UPDATE SET data = app_settings.data || EXCLUDED.data`, [uid]);
+      const sent: any[] = [];
+      globalThis.fetch = (async (u: any, init?: any) => {
+        const url = new URL(String(u));
+        if (url.hostname !== 'graphql.anilist.co') return realFetch(u, init);
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        if (/SaveMediaListEntry/.test(body.query)) { sent.push(body.variables); return new Response(JSON.stringify({ data: { SaveMediaListEntry: { id: 1 } } }), { status: 200, headers: { 'content-type': 'application/json' } }); }
+        return new Response(JSON.stringify({ data: { Media: { status: 'RELEASING', chapters: null, mediaListEntry: null } } }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }) as typeof fetch;
+      try {
+        const r = await app.inject({ method: 'POST', url: '/api/sources/add', headers,
+          payload: { source: LATEST, sourceId: `${LATEST}-1`, chapterCount: 2, chapterFrom: 'newest' } });
+        assert.equal(r.statusCode, 200, r.body);
+        assert.equal(r.json().seriesId, sid);
+        for (let i = 0; i < 50 && !sent.length; i++) await new Promise((res) => setTimeout(res, 100));
+        assert.deepEqual(sent, [{ mediaId: 987, progress: 0, status: 'PLANNING' }]);
+      } finally {
+        globalThis.fetch = realFetch;
+        await q(`DELETE FROM user_trackers WHERE user_id = $1`, [uid]);
+        await q(`DELETE FROM app_settings WHERE user_id = $1`, [uid]);
+        await q(`DELETE FROM series_trackers WHERE series_id = $1`, [sid]);
+      }
+    });
     await t.test('a missing source or sourceId is still the same 400', async () => {
       const r = await app.inject({ method: 'POST', url: '/api/sources/add', headers, payload: { source: LATEST } });
       assert.equal(r.statusCode, 400);

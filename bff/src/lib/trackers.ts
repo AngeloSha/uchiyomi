@@ -421,16 +421,21 @@ async function pushOne(
         [userId, seriesId, conn.provider, chapters],
       );
     } catch (e) {
-      const err = e as Error & { authFailed?: boolean };
-      // a bad token will fail on every future chapter too -- disable it rather than retry forever
-      if (err.authFailed) {
-        await q('UPDATE user_trackers SET enabled=false, last_error=$3 WHERE user_id=$1 AND provider=$2',
-          [userId, conn.provider, 'the tracker rejected the saved token -- reconnect to resume syncing']);
-      } else {
-        await markError(userId, conn.provider, err.message?.slice(0, 200) || 'sync failed');
-      }
+      await syncFailed(userId, conn.provider, e);
     }
   }, { concurrency: 1, minGapMs: 2400 });
+}
+
+/** A write the service refused: a bad token fails every future write too, so it disables the connection; else it says why. */
+async function syncFailed(userId: string, provider: Provider, e: unknown): Promise<void> {
+  const err = e as Error & { authFailed?: boolean };
+  // a bad token will fail on every future chapter too -- disable it rather than retry forever
+  if (err.authFailed) {
+    await q('UPDATE user_trackers SET enabled=false, last_error=$3 WHERE user_id=$1 AND provider=$2',
+      [userId, provider, 'the tracker rejected the saved token -- reconnect to resume syncing']);
+  } else {
+    await markError(userId, provider, err.message?.slice(0, 200) || 'sync failed');
+  }
 }
 
 async function markError(userId: string, provider: Provider, msg: string): Promise<void> {
@@ -452,6 +457,85 @@ export function pushSeriesProgressAsync(userId: string, seriesId: string): void 
     if (await incognitoOn(userId)) return;
     await pushSeriesProgress(userId, seriesId);
   })().catch(() => {});
+}
+
+/**
+ * Whether this account asked for the series it adds to go on its trackers as Plan to Read (v0.68.0, #223): app_settings
+ * `trackerPlanOnAdd`, set on Profile → Connections → Progress tracking. Off unless it is exactly `true`, and off when
+ * the setting cannot be read: an unasked-for entry on someone's list is worse than a missing one.
+ */
+export async function planOnAddWanted(userId: string): Promise<boolean> {
+  try {
+    const row = await one<{ on: boolean | null }>(
+      `SELECT (data -> 'trackerPlanOnAdd') = 'true'::jsonb AS on FROM app_settings WHERE user_id = $1`, [userId]);
+    return row?.on === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A series someone added to the library goes on their trackers as Plan to Read (v0.68.0, #223, "adding a series is a
+ * deliberate act ... the list entry should be created at the moment of commitment"), when they asked for that.
+ *
+ * - Only where their list has nothing for it yet. An entry they already have -- planned, reading, finished, on hold,
+ *   dropped -- is theirs, read first through the same seriesState a push reads, and never touched.
+ * - Only on a service the series is linked to: an add links it to AniList through its own art lookup (sources.ts
+ *   artByTitle, which calls this once that has run, whether or not it linked anything this time), and an import links
+ *   MyAnimeList and Kitsu. Every connected service with a link gets it, through the adapters every push goes through.
+ * - Never under Incognito (lib/incognito.ts): nothing about this account reaches a tracker while it is on.
+ * - Each service through its own lane, as a push is, so a burst of adds trickles out politely.
+ *
+ * Reintroduce writing over an existing entry by dropping the `state.entry` check: "an entry already on the list is left
+ * alone" in planOnAdd.int.test.ts sees the planned status sent.
+ */
+export async function planSeriesOnAdd(userId: string, seriesId: string): Promise<void> {
+  if (!(await planOnAddWanted(userId))) return;
+  if (await incognitoOn(userId)) return;
+  const conns = await q<{ provider: Provider; access_token: string; expires_at: string | null }>(
+    `SELECT provider, access_token, expires_at FROM user_trackers WHERE user_id = $1 AND enabled = true`,
+    [userId],
+  );
+  await Promise.all(conns.map((conn) => planOne(userId, seriesId, conn)));
+}
+
+async function planOne(
+  userId: string,
+  seriesId: string,
+  conn: { provider: Provider; access_token: string; expires_at: string | null },
+): Promise<void> {
+  const adapter = ADAPTERS[conn.provider];
+  if (!adapter) return;
+  const link = await one<{ external_id: string }>(
+    `SELECT external_id FROM series_trackers WHERE series_id = $1 AND provider = $2`,
+    [seriesId, conn.provider],
+  );
+  if (!link) return; // not matched on this service: nothing to add it as
+  if (conn.expires_at && new Date(conn.expires_at).getTime() < Date.now()) {
+    await markError(userId, conn.provider, 'the access token has expired -- reconnect to resume syncing');
+    return;
+  }
+  const token = unseal(conn.access_token);
+  if (!token) {
+    await markError(userId, conn.provider, 'stored token could not be read -- reconnect to resume syncing');
+    return;
+  }
+  await withGate(`tracker:${userId}:${conn.provider}`, async () => {
+    try {
+      const state = await adapter.seriesState(token, link.external_id);
+      if (state.entry) return; // on their list already, in whatever state they put it
+      await adapter.setProgress(token, link.external_id, 0, 'planning', state);
+      await q('UPDATE user_trackers SET last_sync_at = now(), last_error = NULL WHERE user_id=$1 AND provider=$2',
+        [userId, conn.provider]);
+    } catch (e) {
+      await syncFailed(userId, conn.provider, e);
+    }
+  }, { concurrency: 1, minGapMs: 2400 });
+}
+
+/** Fire-and-forget, from an add: an add never waits for a tracker, nor fails over one. */
+export function planSeriesOnAddAsync(userId: string, seriesId: string): void {
+  void planSeriesOnAdd(userId, seriesId).catch(() => {});
 }
 
 /**

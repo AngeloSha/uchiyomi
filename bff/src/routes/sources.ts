@@ -105,7 +105,7 @@ import { adultOk, becauseYouRead } from '../lib/anilistRelated';
 import { automaticAniListAllowed, withAniListMutation } from '../lib/anilistPolicy';
 import { learnDirection, learnDirectionWith, directionFromAniListMatch } from '../lib/readingDirection';
 import { learnTypeFromSource, learnTypeFromAniListWith } from '../lib/seriesType';
-import { linkSeriesWith } from '../lib/trackers';
+import { linkSeriesWith, planSeriesOnAddAsync } from '../lib/trackers';
 import { noticeListed } from '../lib/noticeChapters';
 import { q, one } from '../lib/db';
 import { healthAll, isDisabled, blockedNow, reportLatest, reportFail, reportSlow, classify, noteStage, slowStreakNow } from '../lib/sourceHealth';
@@ -1330,8 +1330,13 @@ async function archiveRest(seriesId: string, a: { by: string | null; ctx: ViewCt
  * neither waits for AniList nor fails over it. By folder where the add has not learned the id yet.
  * Reintroduce by keeping AniList's answer unchecked: "an add keeps AniList's art only from an entry named as the
  * series" in onlineMatch.int.test.ts finds the other work's banner stored.
+ *
+ * `addedBy` (v0.68.0, #223): the person whose add this is. Once the lookup has run -- linked or not, answered or not, the
+ * series may be linked already, as an edition copies its links -- their trackers get the series as Plan to Read if they
+ * asked for that (lib/trackers.ts planSeriesOnAdd). After it, because a fresh add has its AniList link from here.
  */
-async function artByTitle(where: { id: string } | { folder: string }, title: string): Promise<void> {
+async function artByTitle(where: { id: string } | { folder: string }, title: string, addedBy: string | null = null): Promise<void> {
+  let seriesId: string | null = 'id' in where ? where.id : null;
   try {
     // This add-time enrichment is implicit. Resolve the policy from the series' current library immediately before
     // sending its title; by-folder covers a fresh download after persistScan, and fails closed if that row vanished.
@@ -1349,7 +1354,7 @@ async function artByTitle(where: { id: string } | { folder: string }, title: str
     // A source cover can have created the row while automatic lookups were disabled. Completing the lookup later
     // fills only what is missing. The series/library locks make the final privacy decision and all derived DML one
     // atomic act: a move or opt-out cannot slip between the last check and art/link/type/direction writes.
-    await withAniListMutation(where, 'automatic', async (qq, seriesId) => {
+    const done = await withAniListMutation(where, 'automatic', async (qq, seriesId) => {
       await qq(`INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1, $2, $3, now())
         ON CONFLICT (series_id) DO UPDATE SET
           banner = COALESCE(series_art.banner, EXCLUDED.banner),
@@ -1359,7 +1364,14 @@ async function artByTitle(where: { id: string } | { folder: string }, title: str
       await learnDirectionWith(qq, { id: seriesId }, directionFromAniListMatch(names, a), 'anilist');
       await learnTypeFromAniListWith(qq, { id: seriesId }, names, a);
     });
+    seriesId = done.seriesId ?? seriesId;
   } catch { /* AniList is best effort on an add */ }
+  if (!addedBy) return;
+  if (!seriesId && 'folder' in where) {
+    seriesId = (await one<{ id: string }>(`SELECT id FROM lib_series WHERE folder = $1 AND ${visibleToAll('lib_series')}`, [where.folder])
+      .catch(() => null))?.id ?? null;
+  }
+  if (seriesId) planSeriesOnAddAsync(addedBy, seriesId);
 }
 
 /** Add one series from a source to the library (downloads chapter 1 synchronously, the rest in background).
@@ -1500,6 +1512,8 @@ export async function addSeriesFromSource(opts: {
   if (existing && !existing.deleted_at) {
     // The edition's own folder, already here: added again, or left on its own by an unlink. It is that edition.
     const linked = await linkHere(existing.id);
+    // Added again by someone (#223): their intent is the same as a first add's, and its links are already here.
+    if (opts.userId) planSeriesOnAddAsync(opts.userId, existing.id);
     return { ok: true, status: 200, title, folder, chapters: 0, seriesId: existing.id, message: 'already in library', ...(linked ? { edition: linked } : {}) };
   }
   // Numbered here, before the chooser (#116): the selection, the floor, the have-set, the listing and the files
@@ -1672,7 +1686,7 @@ export async function addSeriesFromSource(opts: {
     }
     await learnDirection({ id }, series?.readingDirection, 'source').catch(() => {});
     await learnTypeFromSource({ id }, series);
-    void artByTitle({ id }, title);
+    void artByTitle({ id }, title, opts.userId ?? null);
     return { ok: true, status: 200, title, folder, chapters: 0, started: false, nothing: true, seriesId: id, ...(archive ? { archive } : {}), ...(linked ? { edition: linked } : {}) };
   }
 
@@ -1778,7 +1792,7 @@ export async function addSeriesFromSource(opts: {
       await q(`INSERT INTO series_art (series_id, cover, checked_at) SELECT id, $1, NULL FROM lib_series WHERE folder = $2
         ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [series.coverUrl, folder]).catch(() => {});
     }
-    void artByTitle({ folder }, title);
+    void artByTitle({ folder }, title, opts.userId ?? null);
     return {
       ok: true, status: 200, title, folder, chapters: 0, started: false, alreadyHere: selected.length, seriesId: heldId,
       ...(opts.archive ? { archive: heldArchive ?? 'nothing' } : {}), ...(heldEdition ? { edition: heldEdition } : {}),
@@ -1914,7 +1928,7 @@ export async function addSeriesFromSource(opts: {
       await q(`INSERT INTO series_art (series_id, cover, checked_at) SELECT id, $1, NULL FROM lib_series WHERE folder = $2
         ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [series.coverUrl, folder]).catch(() => {});
     }
-    void artByTitle({ folder }, title);
+    void artByTitle({ folder }, title, opts.userId ?? null);
     void (async () => {
       let failures = 0;
       // As in startDownloadJob: a failed add says what is still to fetch, when the loop stops and at the end.

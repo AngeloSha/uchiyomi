@@ -3005,6 +3005,17 @@ Uchiyomi finds each series' AniList entry by itself, from the same lookup its ar
 an entry that carries the series' name (section 4, *Cover and banner*); a series it cannot match has no link, and
 importing your list (below) links every title on it to its own entry.
 
+**Plan to read when you add a series** (since v0.68.0, [#223](https://github.com/AngeloSha/uchiyomi/issues/223)).
+Off unless you turn it on, at the foot of **Profile → Connections → Progress tracking**. Then a series you add to the
+library goes on your trackers as **Plan to read** (AniList's *Planning*, MyAnimeList's *Plan to Read*, Kitsu's
+*Want to Read*), as soon as Uchiyomi has matched it to its AniList entry:
+
+- Only where your list has nothing for it yet. An entry you already have, in any state, is left exactly as it is.
+- Only on a tracker the series is linked to. An add links it to AniList by itself; MyAnimeList and Kitsu links come
+  from importing your list from them (below), so a series new to you usually reaches AniList.
+- Only for you, the person who added it, and never while **Incognito reading** is on. Adding a series that is already
+  in the library counts too; a series that arrives any other way (a library scan, an admin's import) is nobody's add.
+
 **Bringing your list over.** The same connection reads in the other direction, once: on the import page
 (section 8, *Sources → Import a list*) the *From your tracker* box loads the account's manga list — the
 lists you tick — into the reviewed import, and every title that comes in, or that you already had, is linked

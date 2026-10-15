@@ -1069,6 +1069,12 @@ export default async function personalRoutes(app: FastifyInstance) {
     if ('incognito' in data && typeof data.incognito !== 'boolean') {
       return reply.code(400).send({ error: 'bad_settings', message: 'Incognito reading must be on or off.' });
     }
+    // v0.68.0, #223: whether a series this account adds goes on its trackers as Plan to Read (lib/trackers.ts
+    // planSeriesOnAdd), read by the server at every add, so only a real boolean. Reintroduce by accepting anything:
+    // "Plan to read on add must be on or off" in planOnAdd.int.test.ts saves "yes".
+    if ('trackerPlanOnAdd' in data && typeof data.trackerPlanOnAdd !== 'boolean') {
+      return reply.code(400).send({ error: 'bad_settings', message: 'Plan to read on add must be on or off.' });
+    }
     if ('homeCollections' in data) {
       const parsed = z.array(z.string().min(1).max(64)).max(30).safeParse(data.homeCollections);
       if (!parsed.success) return reply.code(400).send({ error: 'bad_settings', message: 'Choose up to three lists for Home.' });
