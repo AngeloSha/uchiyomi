@@ -1,0 +1,124 @@
+'use client';
+import Link from 'next/link';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '@/lib/auth';
+import { t as tr } from '@/lib/i18n';
+import { INCOGNITO_TEXT } from '@/lib/incognito';
+import { adultShown, setAdultShown } from '@/lib/adult';
+import { isDesktop } from '@/lib/desktop';
+import { useReduceEffects } from '@/lib/useReduceEffects';
+import { Avatar } from './Avatar';
+import { useIncognito } from './IncognitoBanner';
+import { useLibraries, useAdultShown, useAdultFilterConfigured } from './AdultToggle';
+import { Row, SwitchRow } from './settings';
+import { Switch } from './Switch';
+import { OnBody, Sheet, useRtl } from './ui';
+
+/**
+ * The quick settings behind the profile photo: the switches reached for most, each one the SAME state as its row in
+ * Profile -> Settings (the same hooks and the same endpoint), so flipping one here moves the other there.
+ * Show 18+ is the session's reveal (lib/adult.ts) and, as AdultToggle does, renders nothing for an account
+ * with no 18+ library or filter to reveal.
+ */
+export function QuickSettings({ onClose }: { onClose: () => void }) {
+  const { user, logout } = useAuth();
+  const qc = useQueryClient();
+  const incognito = useIncognito();
+  const [reduceEffects, saveReduceEffects] = useReduceEffects();
+  const { data: libs } = useLibraries();
+  const filterConfigured = useAdultFilterConfigured();
+  const adultOn = useAdultShown();
+  const showAdult = filterConfigured || (libs ?? []).some((l) => l.adult);
+  const link = 'rounded-lg px-2 py-1.5 text-sm text-fog-200 hover:bg-ink-800/70 hover:text-fog-50';
+  return (
+    <div>
+      <div className="flex items-center gap-3 pb-3">
+        <Avatar avatar={user?.avatar} size={44} />
+        <p className="min-w-0 flex-1 truncate font-medium text-fog-50">{user?.displayName}</p>
+        <Link href="/profile" onClick={onClose} data-profile-link className={`${link} shrink-0 border border-ink-700`}>{tr('Profile')}</Link>
+      </div>
+      <div className="divide-y divide-ink-800/70 border-t border-ink-800/70 [&>*]:py-2.5 [&_[role=status]]:hidden">
+        <SwitchRow label={tr(INCOGNITO_TEXT[0])} on={incognito.on} onChange={incognito.set} />
+        {showAdult && (
+          <Row label={tr('Show 18+')}>
+            <Switch on={adultOn} label={tr('Show 18+')} onChange={() => { setAdultShown(!adultShown()); qc.invalidateQueries(); }} />
+          </Row>
+        )}
+        <SwitchRow label={tr('Reduce effects')} on={reduceEffects} onChange={saveReduceEffects} />
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-2 border-t border-ink-800/70 pt-3">
+        <Link href="/profile?tab=Settings" onClick={onClose} className={link}>{tr('Profile settings')}</Link>
+        {/* Not on desktop: the app signs itself back in at once, so "Sign out" there would do nothing visible (as on the profile rail). */}
+        {!isDesktop() && <button type="button" onClick={() => { onClose(); void logout(); }} className="rounded-lg px-2 py-1.5 text-sm text-red-300 hover:bg-red-500/10">{tr('Sign out')}</button>}
+      </div>
+    </div>
+  );
+}
+
+/** The avatar button and its popover (desktop header). Escape, an outside press and tabbing out close it; Escape gives focus back. */
+export function ProfileMenu({ active }: { active: boolean }) {
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const btn = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const rtl = useRtl();
+  const id = useId();
+  const [pos, setPos] = useState<{ top: number; edge: number }>({ top: 0, edge: 0 });
+  const close = useCallback((refocus = true) => { setOpen(false); if (refocus) btn.current?.focus({ preventScroll: true }); }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const r = btn.current?.getBoundingClientRect();
+      if (r) setPos({ top: r.bottom + 8, edge: rtl ? r.left : window.innerWidth - r.right });
+    };
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [open, rtl]);
+
+  useEffect(() => {
+    if (!open) return;
+    panel.current?.focus({ preventScroll: true });
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    const onDown = (e: PointerEvent) => {
+      const el = e.target as Node;
+      if (!panel.current?.contains(el) && !btn.current?.contains(el)) close(false);
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onDown);
+    return () => { document.removeEventListener('keydown', onKey); document.removeEventListener('pointerdown', onDown); };
+  }, [open, close]);
+
+  return (
+    <>
+      <button ref={btn} type="button" aria-label={tr('You')} title={user?.displayName} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}
+        onClick={() => setOpen((o) => !o)}
+        className={`shrink-0 rounded-full transition hover:opacity-80 ${active ? 'ring-2 ring-accent ring-offset-2 ring-offset-ink-950' : ''}`}>
+        <Avatar avatar={user?.avatar} size={40} />
+      </button>
+      {open && (
+        <OnBody>
+          <div id={id} ref={panel} role="dialog" aria-label={tr('Quick settings')} tabIndex={-1}
+            onBlur={(e) => { const to = e.relatedTarget as Node | null; if (to && !panel.current?.contains(to) && !btn.current?.contains(to)) close(false); }}
+            style={{ top: pos.top, ...(rtl ? { left: pos.edge } : { right: pos.edge }) }}
+            className="glass fixed z-50 w-80 max-w-[calc(100vw-1rem)] rounded-2xl border border-ink-700 p-4 shadow-2xl outline-none">
+            <div data-lenis-prevent className="max-h-[calc(100vh-6rem)] overflow-y-auto">
+              <QuickSettings onClose={() => close(false)} />
+            </div>
+          </div>
+        </OnBody>
+      )}
+    </>
+  );
+}
+
+/** The phone's version: the same body in a bottom sheet, opened from Home's avatar. */
+export function QuickSettingsSheet({ onClose }: { onClose: () => void }) {
+  return (
+    <Sheet title={tr('Quick settings')} onClose={onClose} overBottomNav>
+      <div data-lenis-prevent className="min-h-0 overflow-y-auto px-4"><QuickSettings onClose={onClose} /></div>
+    </Sheet>
+  );
+}

@@ -152,7 +152,7 @@ const SLICES: [string, string, string, string][] = [
   // Step 5: the Library's Series | Downloads switch (its count is a squared tag), and the header's two counts
   // side by side on a desktop -- the downloads ring's and the Updates bell's, a capsule at "9+" until v0.49.0.
   ['app/library/page.tsx', 'Library: the Series | Downloads switch', 'function ViewSwitch(', 'function MoveToLibrary('],
-  ['components/TopNav.tsx', 'TopNav: the Updates count and the avatar', '<Link href="/updates"', '<Link href="/profile"'],
+  ['components/TopNav.tsx', 'TopNav: the Updates count and the avatar', '<Link href="/updates"', '<ProfileMenu'],
   // UI refresh: the series page's chapter toolbar (keys: they act on the list), its pager, and the chapter rows' keys;
   // Home's phone header; Updates' header.
   ['app/series/page.tsx', 'Series: the chapter toolbar', '<div data-chapter-toolbar', '{group !== ALL_GROUPS && ('],
@@ -347,7 +347,7 @@ test('the downloads counts are squared tags: the switch\'s, the ring\'s and the 
   // The Updates count beside the new desktop ring was a round tag that became a capsule at "9+": three count
   // shapes side by side. Reintroduce `rounded-full` on it: the capsule scan above fails ("TopNav … capsule")
   // and so does this.
-  const top = slice(code(read('components/TopNav.tsx')), '<Link href="/updates"', '<Link href="/profile"', 'TopNav');
+  const top = slice(code(read('components/TopNav.tsx')), '<Link href="/updates"', '<ProfileMenu', 'TopNav');
   const count = /<span data-updates-count className="([^"]*)"/.exec(top);
   assert.ok(count, 'the Updates count is not where this test looks');
   assert.match(count![1], /rounded-\[4px\]/, 'the Updates count is not squared');

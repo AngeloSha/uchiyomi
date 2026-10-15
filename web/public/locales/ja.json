@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3820
+    "strings": 3822
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -3823,5 +3823,7 @@
   "Keyboard shortcuts": "キーボードショートカット",
   "Show this list": "この一覧を表示",
   "With the mouse: double-click zooms in and out. Change the keys in Reader settings.": "マウス：ダブルクリックで拡大・縮小します。キーはリーダー設定で変更できます。",
-  "18+ titles are showing.": "18禁の作品を表示しています。"
+  "18+ titles are showing.": "18禁の作品を表示しています。",
+  "Profile settings": "Profile settings",
+  "Quick settings": "Quick settings"
 }

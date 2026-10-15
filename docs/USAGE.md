@@ -228,6 +228,12 @@ Kitsu. It covers your whole account, on every device and in Mihon too, because t
 top of every page says it is on, with **Turn off**, and the reader shows *Incognito*. Turning it off does not send
 what you read meanwhile; a tracker catches up at the next chapter you finish.
 
+**Quick settings.** Your profile photo, in the top bar on a computer and at the top of Home on a phone,
+opens a small panel instead of going to Profile: **Incognito reading**, **Show 18+** (only if the server has something
+for it to reveal) and **Reduce effects**, the same switches as **Profile → Settings** and the same state, so flipping
+one there moves the other here. **Profile** and **Profile settings** in the panel go to the page; **Sign out** is there
+too, except in the desktop app. **Esc**, a tap outside or tabbing away closes it.
+
 ### What counts as a chapter
 
 Point `LIBRARY_PATH` at what you already have. A chapter can be any of:

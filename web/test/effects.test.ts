@@ -351,10 +351,13 @@ test('the Appearance section has the Reduce effects switch, and it saves to the 
   const slice = src.slice(start, end);
   assert.match(slice, /<SwitchRow label=\{tr\('Reduce effects'\)\}\s*help=\{tr\('Turns off the animated background, blur, smooth scrolling and transitions\. Try it if scrolling feels slow\.'\)\}\s*on=\{reduceEffects\} onChange=\{saveReduceEffects\} \/>/,
     'the Reduce effects row is not in Appearance');
-  assert.match(slice, /const reduceEffects = user\?\.settings\?\.reduceEffects === true;/, 'the row does not read the account setting');
-  assert.match(slice, /setSettings\(\{ reduceEffects: next \}\);/, 'the switch is not applied the moment it is flipped');
-  assert.match(slice, /json: \{ reduceEffects: next \}/, 'the switch does not save reduceEffects to the account');
-  assert.match(slice, /catch \(e\) \{ setSettings\(\{ reduceEffects: prev \}\); throw e; \}/, 'a refused save leaves the switch applied');
+  assert.match(slice, /const \[reduceEffects, saveReduceEffects\] = useReduceEffects\(\);/, 'the row does not read the account setting');
+  // The hook is shared with the profile's quick settings (components/ProfileMenu.tsx), so it is read where it lives.
+  const hook = code(read('lib/useReduceEffects.ts'));
+  assert.match(hook, /user\?\.settings\?\.reduceEffects === true;/, 'the row does not read the account setting');
+  assert.match(hook, /setSettings\(\{ reduceEffects: next \}\);/, 'the switch is not applied the moment it is flipped');
+  assert.match(hook, /json: \{ reduceEffects: next \}/, 'the switch does not save reduceEffects to the account');
+  assert.match(hook, /catch \(e\) \{ setSettings\(\{ reduceEffects: prev \}\); throw e; \}/, 'a refused save leaves the switch applied');
 });
 
 test('the class is applied before the app shell renders, and follows the account both ways', () => {
