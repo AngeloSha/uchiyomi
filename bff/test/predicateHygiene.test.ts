@@ -100,6 +100,7 @@ const GATED: Record<string, string> = {
   '/img/lib/series/:id/thumb': 'seriesVisible check at the top of serveLibSeriesThumb',
   '/img/lib/books/:id/thumb': 'bookFileAbs -> visibleBookFile',
   '/img/lib/books/:id/page/:n': 'bookFileAbs -> visibleBookFile',
+  '/img/series/:id/copy-page': 'admin-only (role read at the top of the route); the copy must be in the series\' own listing (copyPageList)',
   '/img/extensions/icon/:pkgName': 'n/a: extension icon from the engine, not library content',
   '/img/sources/cover': 'n/a: remote source cover, not library content',
   '/img/sources/preview': 'no library content; mayDownload + previewPageList (no age limit, disabled/cooldown refused, chapter by number from the server\'s own listing, page by index) and the guarded fetcher (preview.int.test.ts)',

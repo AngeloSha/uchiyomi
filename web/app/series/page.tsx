@@ -43,6 +43,7 @@ import { SourcesExplainer } from '@/components/SourcesExplainer';
 import { SupplyLine } from '@/components/SupplyLine';
 import { ChapterFilterSheet } from '@/components/ChapterFilterSheet';
 import { ChapterVersionsSheet } from '@/components/ChapterVersionsSheet';
+import { CompareCopiesDialog } from '@/components/CompareCopiesDialog';
 import { GroupAvatar } from '@/components/GroupAvatar';
 import { supplyLine } from '@/lib/supplyLine';
 import { isDesktop } from '@/lib/desktop';
@@ -391,7 +392,7 @@ function ButtonsWrap({ compact, menuOpen, children }: { compact: boolean; menuOp
   return <div className={buttonsClass(menuOpen)}>{children}</div>;
 }
 
-function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, onReader, onToggleDownload, onMark, onEdit, onVersions, onCopyPath, onRefetch, onDelete, selectable, selected, onToggle, compact, lit }: {
+function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, onReader, onToggleDownload, onMark, onEdit, onVersions, onReplaceFrom, onCopyPath, onRefetch, onDelete, selectable, selected, onToggle, compact, lit }: {
   book: Book;
   /** Admins only (#136): copy the chapter file's full path. Absent for everyone else and for a row with no path. */
   onCopyPath?: () => void;
@@ -421,6 +422,8 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
   onEdit?: () => void;
   /** Opens the chapter sheet with every copy of this number; absent when the sources know none. */
   onVersions?: () => void;
+  /** Admins only: compare this file with another source's copy of the same number and swap it. Absent when no other source has one. */
+  onReplaceFrom?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const rp = book.readProgress;
@@ -435,6 +438,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
     ...(state !== 'unread' ? [{ label: tr('Mark unread'), onSelect: () => onMark('unread') }] : []),
     { label: tr('Mark previous as read'), onSelect: () => onMark('previous') },
     ...(onVersions ? [{ label: tr('Versions'), divider: true, onSelect: onVersions }] : []),
+    ...(onReplaceFrom ? [{ label: tr('Replace from another source…'), onSelect: onReplaceFrom }] : []),
     ...(onEdit ? [{ label: tr('Edit number & title'), divider: true, onSelect: onEdit }] : []),
     ...(onCopyPath ? [{ label: tr('Copy file path'), divider: !onEdit, onSelect: onCopyPath }] : []),
     ...(onRefetch ? [{ label: tr('Fetch again'), divider: true, onSelect: onRefetch }] : []),
@@ -1375,6 +1379,7 @@ function SeriesInner() {
   const pickGhost = (number: number, copy: VersionCopy) =>
     startJob('/api/sources/fetch', { seriesId: id, picks: [{ number, source: copy.source, sourceId: copySourceId(copy) }] });
   const [replacing, setReplacing] = useState<{ book: Book; copy: VersionCopy } | null>(null);
+  const [comparing, setComparing] = useState<Book | null>(null);
   const replaceWith = async () => {
     if (!replacing) return;
     await startJob(`/api/admin/series/${id}/chapters/refetch`, { picks: [{ bookId: replacing.book.id, source: replacing.copy.source, sourceId: copySourceId(replacing.copy) }] });
@@ -1760,7 +1765,8 @@ function SeriesInner() {
                 onDelete={isAdmin && b.owned && !b.pruned ? () => setConfirming({ what: 'delete', books: [b] }) : undefined}
                 selectable={selecting} selected={pickedBooks.has(b.id)} onToggle={() => togglePickBook(b.id)}
                 versions={versionsOf.get(b.number)?.length}
-                onVersions={versionsOf.has(b.number) ? () => setChapterSheet({ number: b.number, book: b }) : undefined} />
+                onVersions={versionsOf.has(b.number) ? () => setChapterSheet({ number: b.number, book: b }) : undefined}
+                onReplaceFrom={isAdmin && b.owned !== false && versionsOf.get(b.number)?.some((c) => !c.onDisk) ? () => setComparing(b) : undefined} />
             );
           }
           if (r.kind === 'ghost') {
@@ -2134,6 +2140,12 @@ function SeriesInner() {
           onConfirm={() => refetchBooks(confirming.books)}
           onClose={() => setConfirming(null)}
         />
+      )}
+      {comparing && (
+        <CompareCopiesDialog seriesId={id} book={comparing} copies={versionsOf.get(comparing.number) ?? []} sourceNames={sourceNames}
+          // The compare closes FIRST, then the confirm opens: the same Modal-over-Modal rule as the versions sheet.
+          onReplace={(copy) => { const b = comparing; setComparing(null); setReplacing({ book: b, copy }); }}
+          onClose={() => setComparing(null)} />
       )}
       {replacing && (
         <ConfirmDialog

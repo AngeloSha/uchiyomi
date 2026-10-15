@@ -6463,6 +6463,37 @@ paths:
           description: OK
         "401":
           description: Not authenticated
+  /img/series/{id}/copy-page:
+    get:
+      tags:
+        - images
+      summary: One page of one named copy of a chapter of a library series, for the compare view.
+      operationId: getImgSeriesIdCopyPage
+      description: >-
+        Admin only. The copy is named by its source and the source's own chapter id, and must be one this series'
+        listing holds (the `copies` of GET /api/series/{id}/versions) -- never a free-form id. Fetched through the
+        same guard as /img/sources/preview and served as the original bytes with `cache-control: private, no-store`.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: source, in: query, required: true, schema: { type: string } }
+        - { name: chapter, in: query, required: true, description: The source's chapter id for the copy., schema: { type: string } }
+        - { name: i, in: query, required: true, description: The page index, from 0., schema: { type: integer, minimum: 0 } }
+      security:
+        - imgCookie: []
+        - bearer: []
+      responses:
+        "200":
+          description: The page's bytes.
+        "401":
+          description: Not authenticated
+        "403":
+          description: Not an admin, or the source is disabled
+        "404":
+          description: The copy is not in the series' listing, or no such page
+        "429":
+          description: The source is in a cooldown
+        "502":
+          description: The page could not be fetched, or was not an image
   /img/sources/preview:
     get:
       tags:
@@ -9422,6 +9453,45 @@ paths:
           description: Not found, or not visible to this account
         "409":
           description: "`refused`: the download directory is not writable; `message` and `fix` say what to do"
+  /api/admin/series/{id}/copy-pages:
+    get:
+      tags:
+        - admin
+      summary: How many pages one copy of a chapter has on its source.
+      operationId: getApiAdminSeriesIdCopyPages
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The copy is named
+        by `source` and `chapter` (the source's chapter id) and must be one the series' listing holds. The pages
+        are GET /img/series/{id}/copy-page.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - { name: source, in: query, required: true, schema: { type: string } }
+        - { name: chapter, in: query, required: true, schema: { type: string } }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission, or a disabled source"
+        "404":
+          description: The copy is not in the series' listing
+        "429":
+          description: The source is in a cooldown
+        "502":
+          description: The source would not list the pages
   /api/admin/series/{id}/chapters/refetch:
     post:
       tags:

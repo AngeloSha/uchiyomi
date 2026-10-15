@@ -1108,6 +1108,37 @@ export async function previewPageList(ctx: ViewCtx, source: string | undefined, 
   previewPages.set(key, { at: Date.now(), urls });
   return { src: r.src, chapter, urls };
 }
+/**
+ * The page list of ONE named copy of a chapter of a library series, for the compare view: unlike a preview, which
+ * takes the copy the rules would pick for a number, this is the copy the admin is looking at. The copy must be one
+ * the series' own listing holds (source and the source's chapter id), so the id is never a free-form request to
+ * the source. Callers check that the viewer is an admin.
+ */
+export async function copyPageList(seriesId: string, source: string | undefined, chapterId: string | undefined):
+  Promise<{ src: SourceAdapter; chapter: SourceChapter; urls: string[] } | PreviewRefusal> {
+  const src = source ? getSource(source) : null;
+  if (!src || !chapterId || chapterId.length > 2048) return refused(400, 'bad_request', 'Name a source and one of its chapters.');
+  const known = await one<{ n: number }>(
+    'SELECT 1 AS n FROM series_listing WHERE series_id = $1 AND copies @> $2::jsonb LIMIT 1',
+    [seriesId, JSON.stringify([{ source: src.id, sourceId: chapterId }])],
+  );
+  if (!known) return refused(404, 'not_listed', 'That copy is not in this series\u2019 listing.');
+  if (await isDisabled(src.id).catch(() => false)) return refused(403, 'disabled', `${src.name} is switched off.`);
+  if (await blockedNow(src.id).catch(() => null)) return refused(429, 'cooldown', `${src.name} asked us to slow down. Try again later.`);
+  const chapter = { sourceId: chapterId, number: 0 } as SourceChapter;
+  const key = `${src.id}\u0000${chapterId}`;
+  const hit = previewPages.get(key);
+  if (hit && Date.now() - hit.at < PREVIEW_PAGES_TTL) return { src, chapter, urls: hit.urls };
+  const urls = await withTimeout(src.getPageUrls(chapterId), budgetFor(src, 20_000)).catch((e) => {
+    if (!e?.selfTimeout) void noteStage(src.id, 'pages', 'fail', { error: String(e?.message || 'getPageUrls failed') });
+    return null;
+  });
+  if (urls?.length) void noteStage(src.id, 'pages', 'ok');
+  if (!urls?.length) return refused(502, 'unreadable', 'That chapter would not load from the source.');
+  if (previewPages.size >= PREVIEW_PAGES_MAX) previewPages.delete(previewPages.keys().next().value!);
+  previewPages.set(key, { at: Date.now(), urls });
+  return { src, chapter, urls };
+}
 const latestCache = new Map<string, { at: number; items: SourceSeries[] }>();
 const latestInflight = new Map<string, Promise<SourceSeries[]>>();
 
