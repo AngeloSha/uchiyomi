@@ -3,8 +3,9 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { IcSearch, IcBell } from './icons';
 import { api } from '@/lib/api';
+import { usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
-import { Avatar } from './Avatar';
+import { ProfileMenu } from './ProfileMenu';
 import { useChromeOverArt, useScrolledPast } from '@/lib/overArt';
 import { t as tr } from '@/lib/i18n';
 
@@ -12,7 +13,8 @@ import { t as tr } from '@/lib/i18n';
 // (components/Sidebar.tsx) -- the links, Moments, the downloads ring and the Health mark moved there -- and the
 // Refresh button became "Check for new chapters" on Updates (components/CheckForNew.tsx).
 export function TopNav({ onSearchFocus }: { onSearchFocus?: () => void }) {
-  const { user, status } = useAuth();
+  const { status } = useAuth();
+  const path = usePathname();
   const offline = status === 'offline';
   // `enabled`, not a conditional call: hooks must run in the same order every render. Offline this would be
   // a request at a dead network, and the browser harness counts every console error.
@@ -44,9 +46,7 @@ export function TopNav({ onSearchFocus }: { onSearchFocus?: () => void }) {
             {/* A squared tag: a round one grows into a capsule at "9+". */}
             {updCount > 0 && <span data-updates-count className="absolute -end-1.5 -top-1 grid h-4 min-w-4 place-items-center rounded-[4px] bg-accent px-[3px] text-[10px] font-bold leading-none tabular-nums text-black">{updCount > 9 ? '9+' : updCount}</span>}
           </Link>
-          <Link href="/profile" className="shrink-0 transition hover:opacity-80" aria-label={tr('You')}>
-            <Avatar avatar={user?.avatar} size={40} />
-          </Link>
+          <ProfileMenu active={path.startsWith('/profile')} />
         </div>
       </div>
     </header>

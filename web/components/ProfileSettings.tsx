@@ -23,6 +23,7 @@ import { inDesktopWindow, isDesktop } from '@/lib/desktop';
 import { useIncognito } from '@/components/IncognitoBanner';
 import { INCOGNITO_TEXT } from '@/lib/incognito';
 import { TONES, toneOf, type Tone } from '@/lib/tone';
+import { useReduceEffects } from '@/lib/useReduceEffects';
 
 /**
  * The profile's Settings tab: Appearance · Reading · Downloads · This device.
@@ -131,7 +132,7 @@ function AppearanceSection() {
   // person to another device, and applied the moment it is flipped -- `setSettings` sets html.reduce-effects
   // and its mirror (lib/effects.ts) -- then put back if the server refuses, so the switch never shows a
   // state the account does not hold.
-  const reduceEffects = user?.settings?.reduceEffects === true;
+  const [reduceEffects, saveReduceEffects] = useReduceEffects();
   // Read after mount: localStorage is not there during the static export's render.
   const [typeSearch, setTypeSearch] = useState(true);
   useEffect(() => { setTypeSearch(typeToSearchOn()); }, []);
@@ -139,12 +140,6 @@ function AppearanceSection() {
   useEffect(() => { setCompactList(compactChaptersOn()); }, []);
   const [contextMenus, setContextMenus] = useState(true);
   useEffect(() => { setContextMenus(contextMenusOn()); }, []);
-  const saveReduceEffects = async (next: boolean) => {
-    const prev = reduceEffects;
-    setSettings({ reduceEffects: next });
-    try { await api('/api/settings', { method: 'PUT', json: { reduceEffects: next } }); }
-    catch (e) { setSettings({ reduceEffects: prev }); throw e; }
-  };
   // Show all chapters at once (lib/showAllChapters.ts): on the account like Reduce effects, so every device the
   // reader signs in on opens the whole list; optimistic, and put back when the server refuses.
   const showAllChapters = showAllChaptersOn(user?.settings);

@@ -1,7 +1,7 @@
 'use client';
 import { ScrollRail, CARD_RAIL } from '@/components/ScrollRail';
 import Link from 'next/link';
-import { Fragment, ReactNode, useEffect } from 'react';
+import { Fragment, ReactNode, useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
 import { HomePayload, Series } from '@/lib/types';
@@ -18,6 +18,7 @@ import { AdultToggle, useAdultFilterConfigured } from '@/components/AdultToggle'
 import { IcPlay, IcSparkle, IcRefresh, IcBell } from '@/components/icons';
 import { PullToRefresh } from '@/components/PullToRefresh';
 import { Avatar } from '@/components/Avatar';
+import { QuickSettingsSheet } from '@/components/ProfileMenu';
 import { Lockup } from '@/components/Brand';
 import { LibraryStart } from '@/components/LibraryStart';
 import { t as tr } from '@/lib/i18n';
@@ -90,6 +91,7 @@ function greeting(name?: string) {
 
 export default function HomePage() {
   const { user } = useAuth();
+  const [quickOpen, setQuickOpen] = useState(false);
   const qc = useQueryClient();
   // A second reason for the 18+ reveal to render: a genre or source on the admin's 18+ filter.
   const adultFilter = useAdultFilterConfigured();
@@ -271,11 +273,12 @@ export default function HomePage() {
             {/* Squared, as the desktop bar's: a round tag grows into a capsule at "9+". */}
             {(data?.updatesCount ?? 0) > 0 && <span className="absolute -end-1.5 -top-1 grid h-4 min-w-4 place-items-center rounded-[4px] bg-accent px-[3px] text-[10px] font-bold leading-none tabular-nums text-black">{(data!.updatesCount ?? 0) > 9 ? '9+' : data!.updatesCount}</span>}
           </Link>
-          <Link href="/profile" className="transition active:opacity-80">
+          <button type="button" aria-label={tr('You')} aria-haspopup="dialog" onClick={() => setQuickOpen(true)} className="grid h-10 w-10 place-items-center rounded-full transition active:opacity-80">
             <Avatar avatar={user?.avatar} size={40} />
-          </Link>
+          </button>
         </div>
       </header>
+      {quickOpen && <QuickSettingsSheet onClose={() => setQuickOpen(false)} />}
 
       {/* HERO — daily recommendation carousel */}
       {/* The welcome is for a library with nothing in it for this viewer -- `/api/featured` is the latest series they
