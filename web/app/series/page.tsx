@@ -35,7 +35,7 @@ import { buttonsClass, compactChaptersOn, dotHide, rowClass, thumbHide } from '@
 import { chapterRowsClass, chapterViewOn, setChapterView, type ChapterView } from '@/lib/chapterView';
 import { PhoneHeroCover } from '@/components/PhoneHeroCover';
 import { Segmented } from '@/components/settings';
-import { fetchAllBooks } from '@/lib/seriesBooks';
+import { seriesBooksQuery, seriesQuery } from '@/lib/seriesPrefetch';
 import { fetchingToast } from '@/lib/jobs';
 import { ALL_GROUPS, copySourceId, groupsOfRow, matchesGroup } from '@/lib/groupFilter';
 import { SourcesSheet, useCheckNow, useSeriesGroups } from '@/components/SourcesSheet';
@@ -782,12 +782,10 @@ function SeriesInner() {
   };
   useEffect(() => { setSelecting(false); setPickedBooks(new Set()); setPickedGhosts(new Set()); setShowAll(false); setExpandedRuns(new Set()); setFoldedRuns(new Set()); setChapterSheet(null); }, [id, asc]);
 
-  const { data: series } = useQuery({ queryKey: ['series', id], queryFn: () => api<Series>(`/api/series/${id}`), enabled: !!id });
-  const { data: books } = useQuery({
-    queryKey: ['series-books', id],
-    queryFn: () => fetchAllBooks(id),
-    enabled: !!id,
-  });
+  // The same two queries lib/seriesPrefetch.ts asks for at the click that opens this page, so the page usually mounts on
+  // them rather than on its placeholders.
+  const { data: series } = useQuery({ ...seriesQuery(id), enabled: !!id });
+  const { data: books } = useQuery({ ...seriesBooksQuery(id), enabled: !!id });
   // What the sources list that the library lacks, as of the updater's last visit. A courtesy, never a
   // blocker: no retry, and an error renders no ghost rows rather than a message, because the chapters on
   // disk are the page and this is the margin note.

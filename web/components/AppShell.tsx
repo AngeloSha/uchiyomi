@@ -19,6 +19,7 @@ import { t as tr } from '@/lib/i18n';
 import { desktopShell, isDesktop } from '@/lib/desktop';
 import { useServerDownloads } from '@/lib/useServerDownloads';
 import { IncognitoBanner, useIncognito } from './IncognitoBanner';
+import { usePrefetchSeriesOnClick } from '@/lib/seriesPrefetch';
 
 function Splash() {
   return (
@@ -92,6 +93,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Incognito reading (v0.61.0): kept here, above every early return, so the reader's progress payload knows it on the
   // reader's own route too, where this shell renders nothing of its own (components/IncognitoBanner.tsx).
   useIncognito();
+  // A series and its chapters are asked for at the click that opens it, not a fade later (lib/seriesPrefetch.ts). Above
+  // every early return, with the rest.
+  usePrefetchSeriesOnClick(status === 'authed');
 
   // smart offline: keep favorites' latest unread chapters downloaded. Never on desktop, where "Save offline"
   // is hidden: it would copy chapters already on this disk into the window's storage (lib/desktop.ts).
