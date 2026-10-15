@@ -28,6 +28,7 @@ import { runVerify, verifyState } from '../lib/verifyFiles';
 import { matchCheckState, runMatchCheck } from '../lib/matchCheck';
 import { startRescan, rescanState } from '../lib/rescan';
 import { runRepair, repairState, repairLiveSnapshot, REPAIR_HOURS, REPAIR_LIMITS, REPAIR_STEPS, REPAIR_SHORT_MAX, REPAIR_GAPS_MAX, type RepairSkip, type RepairStep } from '../lib/repair';
+import { fillMissingMeta } from '../lib/metaFill';
 import { listRunRecords, runDigest, type RunTarget } from '../lib/repairRuns';
 import { worstCase } from '../lib/repairEstimate';
 import { authenticate, requireAdmin, userIdOf, roleOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
@@ -1845,6 +1846,9 @@ export default async function adminRoutes(app: FastifyInstance) {
     // is when the owner expected them and saw nothing (v0.48.3). Not waited for: a Cloudflare source can take
     // a minute to list, and the Find missing dialog's "Follow and download" asks the fetch route, which
     // refreshes the listing itself before it picks a copy.
+    // A description, genres, author or cover the series lacks and this source has (lib/metaFill.ts). Not waited for, and it
+    // only ever fills what is empty.
+    void fillMissingMeta(id);
     void updateSeries(id, 0).catch(() => {});
     return { ok: true, sources: list };
   });

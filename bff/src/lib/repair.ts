@@ -61,6 +61,7 @@ import { blockedNow, clearBlock, isDisabled } from './sourceHealth';
 import { automaticChapterAllowedFor, automaticCopiesFor, copyToChapter, seriesFollowsSource, type ListingCopy } from './seriesListing';
 import { groupsOf, normGroup, type ReleasePrefs } from './releases';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
+import { fillMissingMeta, seriesMissingMeta } from './metaFill';
 import { borrowNamesFor, NAMES_RETRY_MS } from './borrowNames';
 import { busyFolders } from './bulkNewest';
 import { beginRun, dismissRun, endRun, stopRequested, type RunCard } from './downloadJobs';
@@ -127,6 +128,9 @@ const GROUP_RETRY_DAYS = 7;
  * and two lookups per candidate judged, all for something cosmetic, so it is kept to a handful a night.
  */
 export const REPAIR_NAMES_MAX = envInt('REPAIR_NAMES_MAX', 5, 1, 100);
+/** Series one run may fill missing metadata for (stepMeta). */
+const REPAIR_META_MAX = 15;
+
 /**
  * Series one run may ask about their reading direction, per signal (stepDirections). MangaDex answers 100 per
  * request and AniList 50, so the default is at most five and ten requests a night.
@@ -1529,6 +1533,19 @@ async function stepNames(r: RepairResult, log?: Log): Promise<RepairResult['stop
 }
 
 /**
+ * Fill what a few series lack (description, genres, author, cover) from their other attached sources (lib/metaFill.ts): a
+ * handful a night, so a library catches up over a few runs without one run asking a hundred sources. Only ever fills empty
+ * fields; stops between series for a Cancel or a shutdown.
+ */
+async function stepMeta(log?: Log): Promise<void> {
+  for (const id of await seriesMissingMeta(REPAIR_META_MAX).catch(() => [] as string[])) {
+    if (runtime.stopping || cancelled()) break;
+    const res = await fillMissingMeta(id);
+    if (res.filled.length) log?.info(`repair: ${id}: filled ${res.filled.join(', ')} from ${res.from.join(', ')}`);
+  }
+}
+
+/**
  * (h) Reading directions (#102): which way series read, for the ones nothing has said about yet.
  *
  * The scanner learns it from ComicInfo and an add from its source and its AniList match, but a series added
@@ -1919,7 +1936,7 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
     } else if (step === 'gaps') stopped = await stepGaps(r, opts, budget, pending, notes, log);
     else if (step === 'groups') stopped = await stepGroups(r, opts, notes, log);
     else if (step === 'names') stopped = await stepNames(r, log);
-    else if (step === 'directions') await stepDirections(r, log);
+    else if (step === 'directions') { await stepDirections(r, log); await stepMeta(log); }
     r.stepMs[step] = Date.now() - t;
     if (live) live.stepMs[step] = r.stepMs[step];
     if (activeCard) {

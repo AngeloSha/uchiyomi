@@ -2031,7 +2031,7 @@ what it left out. An add or a *Fetch* whose chapters land on disk but not in the
 on its card that says so.
 
 **What fixes itself.** Once a day — **Admin → Settings → Library housekeeping → Repair the library nightly**,
-on by default, and **Admin → Tasks → Repair library** with a *Run now* — Uchiyomi does the six things that
+on by default, and **Admin → Tasks → Repair library** with a *Run now* — Uchiyomi does the seven things that
 are reversible or provable on their own, and two more only when you switch them on, in this order. Since v0.55.0,
 **Every night**, just under that switch, chooses what runs: this **Safe repair** (the default), or a whole **Fix
 everything**, which does what its key on Health does and can merge, delete and install extensions without asking.
@@ -2056,7 +2056,13 @@ everything**, which does what its key on Health does and can merge, delete and i
 * **learns which way series read** (since v0.48.0) for the ones nothing has said about yet: it asks MangaDex
   for the original language of every series that follows it, then AniList for the country of origin of every
   series linked there — a few batch requests a night, at most 500 series each. It only ever writes the reading
-  direction, never over one you set by hand.
+  direction, never over one you set by hand;
+* **fills what a series is missing from its other sources**: a description, genres, an author, or (for a series
+  with no chapters yet) a cover that the series lacks and another source it is attached to has. It asks the series'
+  own source first, then the ones it follows, for up to 15 series a night, and the same happens in the background when
+  you follow a source from *Find missing chapters*. Only an empty field is ever filled: nothing a scan, a source or you
+  already set is replaced. The text lands where an edit from *Edit details* does, so a later scan leaves it alone, and
+  you can still change it there.
 
 A whole run starts at most five searches, however many findings there are, shared between the steps that
 need one — and the short chapters may take at most two of them, so a library full of short chapters cannot
