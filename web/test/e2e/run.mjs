@@ -1212,6 +1212,45 @@ try {
     }
   }
 
+  // ---------------------------------------------------------------- Back puts a page back where it was left
+  //
+  // (2026-10-15) With the fade fixed, the page Back returns to arrives only after the fade, and the browser had put the
+  // scroll back onto the page still fading out: a Library left 2000 px down came back 145 px down. lib/scrollMemory.ts puts
+  // it back once the page is there. Reintroduce by dropping its putBack() from PageTransition: Home comes back near its top.
+  {
+    await page.goto(BASE, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+    await sleep(3000);
+    const max = await page.evaluate(() => document.documentElement.scrollHeight - innerHeight);
+    if (max < 300) console.log(`    [ -- ] Home is only ${max} px taller than the window here: nothing to come back to`);
+    else {
+      await page.evaluate((y) => window.scrollTo(0, y), Math.min(700, max - 100));
+      await sleep(900);
+      const left = await page.evaluate(() => Math.round(scrollY));
+      const clicked = await page.evaluate(() => {
+        const a = [...document.querySelectorAll('main a[href*="/series/"]')].find((x) => {
+          const r = x.getBoundingClientRect();
+          return r.top > 80 && r.bottom < innerHeight - 80;
+        });
+        if (!a) return false;
+        a.click();
+        return true;
+      });
+      if (!clicked) bad(`Back: no series on screen to open from Home ${left} px down`);
+      else {
+        await sleep(1500);
+        const opened = await page.evaluate(() => ({ path: location.pathname, y: Math.round(scrollY) }));
+        await page.goBack().catch(() => {});
+        await sleep(2000);
+        const back = await page.evaluate(() => ({ path: location.pathname, y: Math.round(scrollY) }));
+        if (!opened.path.startsWith('/series')) bad(`Back: the click did not open a series (${JSON.stringify(opened)})`);
+        else if (opened.y > 4) bad(`Back: a series opened from a scrolled Home opened ${opened.y} px down, not at its top`);
+        else if (back.path !== '/') bad(`Back: did not return to Home (${JSON.stringify(back)})`);
+        else if (Math.abs(back.y - left) > 4) bad(`Back: Home was left ${left} px down and came back ${back.y} px down`);
+        else ok(`Back: Home was left ${left} px down and came back there; the series opened at its top`);
+      }
+    }
+  }
+
   // ---------------------------------------------------------------- 18+ libraries stay off the shelf
   //
   // The whole chain, end to end: a session cookie set by the button, a query parameter added to every API

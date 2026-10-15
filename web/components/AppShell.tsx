@@ -20,6 +20,7 @@ import { desktopShell, isDesktop } from '@/lib/desktop';
 import { useServerDownloads } from '@/lib/useServerDownloads';
 import { IncognitoBanner, useIncognito } from './IncognitoBanner';
 import { usePrefetchSeriesOnClick } from '@/lib/seriesPrefetch';
+import { scrollMemory } from '@/lib/scrollMemory';
 
 function Splash() {
   return (
@@ -96,6 +97,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // A series and its chapters are asked for at the click that opens it, not a fade later (lib/seriesPrefetch.ts). Above
   // every early return, with the rest.
   usePrefetchSeriesOnClick(status === 'authed');
+  // Where each page was left, for Back and Forward to put back (lib/scrollMemory.ts) -- from the first page on, the reader
+  // included, which is not inside the page fade that otherwise installs it.
+  useEffect(() => { scrollMemory(); }, []);
 
   // smart offline: keep favorites' latest unread chapters downloaded. Never on desktop, where "Save offline"
   // is hidden: it would copy chapters already on this disk into the window's storage (lib/desktop.ts).

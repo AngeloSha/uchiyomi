@@ -20,7 +20,7 @@ test('the outgoing page keeps every context it read its route from', () => {
     assert.match(SRC, new RegExp(`<${ctx}\\.Provider value=\\{h\\.`), `${ctx} is no longer held for the outgoing page`);
   }
   // Held from the last render on which this was the current page, and only then.
-  assert.match(SRC, /const held = useRef\(live\);\n\s*if \(live\.pathname === path\) held\.current = live;/,
+  assert.match(SRC, /const held = useRef\(live\);\n\s*const current = live\.pathname === path;\n\s*if \(current\) held\.current = live;/,
     'a page that is still the current one must follow the live route (one series to another is a search-params change)');
   // Around the page, inside the keyed wrapper the fade animates.
   assert.match(SRC, /<motion\.div\s+key=\{path\}[\s\S]*?<FrozenRoute path=\{path\}>\{children\}<\/FrozenRoute>\s*<\/motion\.div>/,

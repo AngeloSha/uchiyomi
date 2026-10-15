@@ -1,5 +1,5 @@
 'use client';
-import { useContext, useRef } from 'react';
+import { useContext, useLayoutEffect, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import { LayoutRouterContext } from 'next/dist/shared/lib/app-router-context.shared-runtime';
 import {
@@ -7,6 +7,7 @@ import {
 } from 'next/dist/shared/lib/hooks-client-context.shared-runtime';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useReduceEffects } from '@/lib/effects';
+import { scrollMemory } from '@/lib/scrollMemory';
 
 /**
  * The page a fade is taking away, held as it was (2026-10-15).
@@ -18,7 +19,8 @@ import { useReduceEffects } from '@/lib/effects';
  * was the current page, so the old page is what fades out, unchanged -- a series fading away is still that series, not
  * the same page asked for a series with no id -- and the new one is built once, as it fades in. While its path is still
  * the current one a page follows the live contexts, so a change of search params alone (one series to another,
- * `/series/?id=…`) updates it in place as before.
+ * `/series/?id=…`) updates it in place as before. Because the page being returned to arrives only after the fade, Back
+ * and Forward put the scroll back themselves (lib/scrollMemory.ts).
  *
  * ⚠️ These contexts are Next's internals (next/dist/shared/lib): web/test/pageTransition.test.ts checks they still exist
  * and that `usePathname` and `useSearchParams` still read them, so a Next upgrade that moves them fails a test, not the fade.
@@ -32,8 +34,13 @@ function FrozenRoute({ path, children }: { path: string; children: React.ReactNo
     promises: useContext(NavigationPromisesContext),
   };
   const held = useRef(live);
-  if (live.pathname === path) held.current = live;
+  const current = live.pathname === path;
+  if (current) held.current = live;
   const h = held.current;
+  // Back and Forward put the page where it was left, once it is here to put back (lib/scrollMemory.ts): the browser would
+  // have scrolled the page still fading out instead. On every arrival -- a mount, or new search params on the same page.
+  const url = `${live.pathname}?${live.search?.toString() ?? ''}`;
+  useLayoutEffect(() => { if (current) scrollMemory().putBack(); }, [current, url]);
   return (
     <LayoutRouterContext.Provider value={h.layout}>
       <PathnameContext.Provider value={h.pathname}>
