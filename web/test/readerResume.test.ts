@@ -1,0 +1,24 @@
+// Two ways the reader lost its place, pinned as source guards (the behaviour is the browser's; see the comments in
+// app/reader/page.tsx):
+//   1. A paged track whose WIDTH changed (the window dragged to a screen of another size) kept its scrollLeft in pixels,
+//      so the same offset read as another slide and progress was saved for a different page or chapter.
+//   2. Continuous reading appends chapters to one track while the address kept naming the first, so a refresh reopened
+//      the chapter the reader was opened on, not the one being read.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
+const src = readFileSync(join(__dirname, '..', 'app/reader/page.tsx'), 'utf8');
+
+test('a change of track width puts the track back on its slide instead of reading a new page from it', () => {
+  assert.match(src, /pagedWidth\.current && pagedWidth\.current !== w/);
+  assert.match(src, /new ResizeObserver/);
+  assert.match(src, /trackSign \* pagedSlide\.current \* w/);
+});
+
+test('the address follows the chapter on screen, without reloading the reader for it', () => {
+  assert.match(src, /urlSynced\.current = readingChapterId/);
+  assert.match(src, /if \(urlSynced\.current === bookId\) \{ urlSynced\.current = null; return; \}/);
+  assert.match(src, /chapters\[0\]\?\.id !== bookId/, 'not while a jump to another chapter is loading');
+});
