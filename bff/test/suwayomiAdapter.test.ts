@@ -397,3 +397,22 @@ for (const [engine, schemaFile] of [
     await fake.close();
   }
 });
+
+test("a manga of another source is not this source's: no series, no chapters", async () => {
+  // The engine's manga ids are global across extensions, and the age cap and the source switches are judged on the
+  // source a request names. Without the check an adult extension's manga resolved through a safe one. Reintroduce by
+  // dropping ownManga in getSeries/listChapters: the foreign manga comes back with its chapters.
+  const { makeSuwayomiAdapter } = await load();
+  const foreign = makeSuwayomiAdapter(LOCAL, fakeGql({
+    fetchManga: { fetchMangaAndChapters: { manga: { id: 7, title: 'Another Source Manga', sourceId: '987654321' } } },
+    fetchChapters: { fetchMangaAndChapters: { manga: { sourceId: '987654321' }, chapters: [
+      { id: 70, chapterNumber: 1, name: 'Ch 1', scanlator: null, uploadDate: '0', pageCount: 3, sourceOrder: 1, url: '/c/1' },
+    ] } },
+  }));
+  assert.equal(await foreign.getSeries('7'), null);
+  assert.deepEqual(await foreign.listChapters('7'), []);
+  const own = makeSuwayomiAdapter(LOCAL, fakeGql({
+    fetchManga: { fetchMangaAndChapters: { manga: { id: 8, title: 'Own Manga', sourceId: String(LOCAL.id) } } },
+  }));
+  assert.equal((await own.getSeries('8'))?.title, 'Own Manga');
+});

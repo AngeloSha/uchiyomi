@@ -26,7 +26,8 @@ export interface EngineOp {
 const op = (name: string, doc: string, optional = false): EngineOp =>
   Object.freeze(optional ? { name, doc, optional } : { name, doc });
 
-const MANGA_FIELDS = 'id title thumbnailUrl realUrl url description author artist genre status';
+// `sourceId`: which extension source the manga belongs to. Engine manga ids are global, so an adapter checks it (v0.69.1).
+const MANGA_FIELDS = 'id title thumbnailUrl realUrl url description author artist genre status sourceId';
 /**
  * `sourceOrder url` (#116): non-null on ChapterType. sourceOrder is index + 1 over the extension's list reversed, so 1
  * is the OLDEST post, and the engine answers in sourceOrder ascending. `uploadDate` is epoch milliseconds as a string --
@@ -76,7 +77,7 @@ export const OPS = {
    */
   fetchManga: op('fetchManga', `mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchManga:true,fetchChapters:false}){ manga { ${MANGA_FIELDS} } } }`),
   /** The chapter list, the same way (it replaced `fetchChapters`). Rows in sourceOrder ascending. */
-  fetchChapters: op('fetchChapters', `mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchManga:false,fetchChapters:true}){ chapters { ${CHAPTER_FIELDS} } } }`),
+  fetchChapters: op('fetchChapters', `mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchManga:false,fetchChapters:true}){ manga { sourceId } chapters { ${CHAPTER_FIELDS} } } }`),
   fetchChapterPages: op('fetchChapterPages', 'mutation($chapterId:Int!){ fetchChapterPages(input:{chapterId:$chapterId}){ pages } }'),
 
   // ---- extensions (extensions.ts)

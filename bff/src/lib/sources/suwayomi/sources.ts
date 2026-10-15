@@ -69,6 +69,8 @@ export async function listRemoteSources(run: Gql = defaultGql): Promise<RemoteSo
 
 interface RemoteManga {
   id: number;
+  /** The extension source the manga belongs to (a LongString, so a string). */
+  sourceId?: string | number | null;
   title?: string | null;
   thumbnailUrl?: string | null;
   realUrl?: string | null;
@@ -202,6 +204,9 @@ export function makeSuwayomiAdapter(remote: RemoteSource, run: Gql = defaultGql)
       .filter((s): s is SourceSeries => !!s && (seen.has(s.sourceId) ? false : (seen.add(s.sourceId), true)));
   };
 
+  /** Whether a manga the engine answered with is this source's own. Absent means the engine did not say (a test fake). */
+  const ownManga = (sourceId: string | number | null | undefined): boolean => sourceId == null || String(sourceId) === String(remote.id);
+
   const adapter: SourceAdapter = {
     id: adapterId,
     name: remote.displayName?.trim() || remote.name,
@@ -237,11 +242,17 @@ export function makeSuwayomiAdapter(remote: RemoteSource, run: Gql = defaultGql)
     async getSeries(id) {
       const d = await run<{ fetchMangaAndChapters: { manga: RemoteManga | null } }>(OPS.fetchManga.doc, { id: Number(id) });
       const m = d?.fetchMangaAndChapters?.manga;
-      return m ? toSeries(m, adapterId) : null;
+      // The engine's manga ids are global, across every extension: an id from ANOTHER source resolved here, under this
+      // source's name -- and the age cap and the source switches are judged on the name (sourceAllowedFor), so an
+      // adult extension's manga opened through a safe one. Reintroduce by dropping the check: "a manga of another
+      // source is not this source's" in suwayomiAdapter.test.ts resolves it.
+      if (!m || !ownManga(m.sourceId)) return null;
+      return toSeries(m, adapterId);
     },
 
     async listChapters(seriesId) {
-      const d = await run<{ fetchMangaAndChapters: { chapters: RemoteChapter[] } }>(OPS.fetchChapters.doc, { id: Number(seriesId) });
+      const d = await run<{ fetchMangaAndChapters: { manga?: { sourceId?: string | number | null } | null; chapters: RemoteChapter[] } }>(OPS.fetchChapters.doc, { id: Number(seriesId) });
+      if (!ownManga(d?.fetchMangaAndChapters?.manga?.sourceId)) return []; // another source's manga, as getSeries above
       const list = d?.fetchMangaAndChapters?.chapters;
       if (!Array.isArray(list)) return [];
       // Every copy of a number is reported, not just the first the engine listed. The choice between
