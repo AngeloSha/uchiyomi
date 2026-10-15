@@ -1911,6 +1911,26 @@ numbers that can't be real, series waiting for a renumbering review, any source 
 extension engine. Each check says what it found and what it cannot see. Hit **Re-check** to run them again. Since
 v0.49.1 the page says the server's findings in your language, with dates and times in your own time zone.
 
+Five more cards read the library's own records rather than its chapters:
+
+- **Series covers** lists a series with nothing to show as a cover: none set by hand, none fetched, and no chapter whose
+  first page could stand in. A cover that exists but is blank cannot be told from here.
+- **Series details** lists a series with no description or no genres. A missing description only counts where the
+  series' source gives descriptions to other series (a source that gives none has none to give), and a series
+  missing only its author is listed for reference.
+- **Disk space and folders** checks the library, downloads and config folders: under 5 % free on a disk of under
+  200 GB, or under 2 % or 5 GB free on any disk, is a finding, and a folder that cannot be read, or looks empty while
+  chapters are recorded under it, is usually a share that is not mounted.
+- **Tracker sync** lists a tracker sign-in that was refused (it stays off until its owner reconnects it under
+  Settings → Trackers), a sync that failed, and a sign-in that expired or expires within 14 days (30 days is listed
+  for reference).
+- **Reading data** only counts the reading history, tracker records, offline downloads, favourites and progress that
+  belong to removed series or chapters. That data is kept on purpose, so nothing is deleted and the card never turns
+  amber; it is there so the growth is visible.
+
+The first four can be ignored per finding, like the other cards'. **Fix everything** does nothing about them (a cover
+or a description is yours to set, and a disk is yours to free), and lists each one that is still amber under *Needs you*.
+
 Since v0.55.10 a chapter stitched into one or two long strips (its images together at least ten times as tall as they
 are wide) is a whole chapter, not a short one: Health measures such a chapter's pages once, as the reader does, and
 leaves it off the short-chapter card. A placeholder, an ad or a credits banner is still listed.

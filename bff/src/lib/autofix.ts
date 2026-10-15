@@ -1547,6 +1547,14 @@ function summarise(a: Run, report: HealthReport): AutofixSummary {
     const n = Number(by.get('downloads-missing')!.summarySaid?.[0]?.params?.n ?? missing.length) || missing.length;
     need('downloads-missing', say('autofix.needs.downloadsMissing', { n }));
   }
+  // Cards no phase of the run works on (a cover, a description, a disk, a tracker sign-in): each amber one is the owner's,
+  // counted from the card's own summary so the end never reads "All green" over it.
+  for (const id of ['covers', 'details', 'disk', 'trackers'] as const) {
+    const fs = findings(by.get(id));
+    if (!fs.length) continue;
+    const n = Number(by.get(id)!.summarySaid?.[0]?.params?.n ?? fs.length) || fs.length;
+    need(id, say(`${id}.bad` as const, { n }));
+  }
 
   // Series that can no longer update: the limit is a slot to free, the engine is its own row's; the rest no source carries
   // -- once Replace and the extensions phase have both had their go at them.

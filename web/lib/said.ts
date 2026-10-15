@@ -954,6 +954,48 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'autofix.clears.mainSolverDown': () => tr('The main Cloudflare solver is not answering, and the backup is solving meanwhile'),
   'autofix.clears.backupSolverDown': () => tr('The backup Cloudflare solver is not answering, and the main one is solving'),
 
+  // ---- Series covers and details, disk, reading data and trackers (bff lib/healthMore.ts)
+  'covers.detail': () => tr('no cover set, none fetched, and no chapter to take one from'),
+  'covers.bad': (p) => tr('Series with nothing to show as a cover: {n}', { n: num(p, 'n') }),
+  'covers.ok': () => tr('every series has a cover, or a chapter to take one from'),
+  'covers.note': () => tr('A cover is one set by hand, one fetched from a source or the web, or the first page of a chapter. A cover that exists but is blank cannot be detected here.'),
+  'details.missing': (p) => tr('Missing: {list}', {
+    list: [p.summary && tr('description'), p.genres && tr('genres'), p.author && tr('author')].filter(Boolean).join(listSep()),
+  }),
+  'details.bad': (p) => tr('Series missing a description or genres: {n}', { n: num(p, 'n') }),
+  'details.ok': () => tr('every series has a description and genres'),
+  'details.note': () => tr('Descriptions and genres come from a source or a metadata lookup. Open a series to edit them or fetch them again. A series missing only its author is listed for reference.'),
+  'disk.where': (p) => (str(p, 'kind') === 'library' ? tr('Library folder') : str(p, 'kind') === 'downloads' ? tr('Downloads folder') : tr('Config folder')),
+  'disk.free': (p) => tr('{free} GB free of {total} GB', { free: numText(num(p, 'free')), total: numText(num(p, 'total')) }),
+  'disk.low': (p) => tr('only {free} GB free of {total} GB', { free: numText(num(p, 'free')), total: numText(num(p, 'total')) }),
+  'disk.cannotRead': (p) => tr('could not be read ({error})', { error: str(p, 'error') }),
+  'disk.looksEmpty': (p) => tr('looks empty, but the library records chapters under it (count: {n}). Is the share mounted?', { n: num(p, 'n') }),
+  'disk.bad': (p) => tr('Folders or disks needing attention: {n}', { n: num(p, 'n') }),
+  'disk.ok': () => tr('enough free space, and every folder can be read'),
+  'disk.note': () => tr('Free space is flagged under 5 % on a disk of under 200 GB, and always under 2 % or 5 GB. A library or download folder that cannot be read, or looks empty while chapters are recorded under it, is usually a share that is not mounted: nothing is marked missing until it is back.'),
+  'orphans.kind': (p) => {
+    switch (str(p, 'kind')) {
+      case 'eventsSeries': return tr('Reading history of removed series');
+      case 'eventsChapter': return tr('Reading history of removed chapters');
+      case 'trackerSeries': return tr('Tracker records of removed series');
+      case 'downloads': return tr('Offline downloads of removed chapters');
+      case 'removed': return tr('Favorites and progress held by removed or merged series');
+      default: return str(p, 'kind');
+    }
+  },
+  'orphans.rows': (p) => tr('Records: {n}', { n: num(p, 'n') }),
+  'orphans.some': (p) => tr('Leftover records: {n}', { n: num(p, 'n') }),
+  'orphans.none': () => tr('no leftover reading data'),
+  'orphans.note': () => tr('Reading history is kept on purpose when a series or chapter goes away, so it comes back if the series is added again, and tracker progress is a floor that stops a tracker being rewound. Nothing here is deleted; it is listed so the growth is visible.'),
+  'trackers.rejected': () => tr('the tracker refused the saved sign-in; it has to be reconnected'),
+  'trackers.error': (p) => tr('last sync failed: {error}', { error: str(p, 'error') }),
+  'trackers.expired': (p) => tr('sign-in expired {date}', { date: dayText(p.at) }),
+  'trackers.expiring': (p) => tr('sign-in expires {date}', { date: dayText(p.at) }),
+  'trackers.bad': (p) => tr('Tracker sign-ins needing attention: {n}', { n: num(p, 'n') }),
+  'trackers.ok': (p) => tr('all tracker sign-ins look fine (count: {n})', { n: num(p, 'n') }),
+  'trackers.none': () => tr('no one has connected a tracker'),
+  'trackers.note': () => tr('Each person reconnects their own tracker under Settings → Trackers; one whose sign-in was refused stays switched off until they do. Sign-ins ending within 14 days are findings, and within 30 days listed for reference.'),
+
   // ---- A diagnosis's fix (bff lib/sourceDiagnosis.ts FixCode). ADMIN ONLY, like the server's.
   'fix.solverCrash': () => (isDesktop()
     ? tr('The browser inside Uchiyomi\'s built-in Cloudflare helper crashed. Quit and reopen Uchiyomi to restart it.')
