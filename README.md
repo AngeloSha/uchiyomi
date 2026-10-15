@@ -193,8 +193,8 @@ sites' terms and your local law.
   or Suwayomi with one API token: [uchiyomi-extension](https://github.com/AngeloSha/uchiyomi-extension).
 - **A Komga-compatible API** — point Mihon's own Komga extension at Uchiyomi instead and its built-in Komga
   tracker syncs reading progress back in both directions, forward-only: [how to set it up](docs/extensions.md#komga-compatible-api).
-- **Progress sync** to AniList, MyAnimeList and Kitsu: the highest chapter you finished, never backwards, and
-  *Completed* only once the series has ended.
+- **Progress sync** to AniList, MyAnimeList, Kitsu and MangaUpdates: the highest chapter you finished, never
+  backwards, and *Completed* only once the series has ended.
 - **A Homepage dashboard tile** — [Homepage](https://gethomepage.dev)'s own Komga widget shows your libraries,
   series and chapters with a read token ([how](docs/USAGE.md#on-a-dashboard-homepage)).
 - **Nine languages**, with right-to-left layout for Arabic.

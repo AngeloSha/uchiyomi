@@ -435,6 +435,7 @@ test('a tracker batch is named after its tracker in Open imports', () => {
   assert.equal(batchOriginLabel('tracker', 'anilist'), 'AniList list', 'AniList');
   assert.equal(batchOriginLabel('tracker', 'myanimelist'), 'MyAnimeList list', 'MyAnimeList');
   assert.equal(batchOriginLabel('tracker', 'kitsu'), 'Kitsu list', 'Kitsu');
+  assert.equal(batchOriginLabel('tracker', 'mangaupdates'), 'MangaUpdates list', 'MangaUpdates');
   assert.equal(batchOriginLabel('tracker', null), 'Tracker list', 'a tracker the web does not know keeps a generic label');
   assert.equal(batchOriginLabel('paste'), 'Pasted titles', 'the other origins are unchanged');
   assert.equal(batchOriginLabel('backup', 'anilist'), 'Backup file', 'a tracker on a non-tracker origin is ignored');

@@ -8,7 +8,7 @@ import { normTitle } from './normTitle';
 /** `tracker` (v0.36.0) is the reading list of an AniList / MyAnimeList / Kitsu account connected under Profile. */
 export type ImportOrigin = 'backup' | 'mangadex' | 'paste' | 'tracker';
 /** The tracker a `tracker` batch was read from; the same ids `GET /api/trackers` uses. */
-export type TrackerId = 'anilist' | 'myanimelist' | 'kitsu';
+export type TrackerId = 'anilist' | 'myanimelist' | 'kitsu' | 'mangaupdates';
 export type ImportBatchState = 'resolving' | 'review' | 'importing' | 'done' | 'cancelled';
 export type ImportDecision = 'unresolved' | 'auto' | 'manual' | 'skip';
 export type MatchConfidence = 'same_source' | 'exact' | 'contains' | 'fuzzy';
@@ -246,6 +246,7 @@ export function batchOriginLabel(origin: ImportOrigin, tracker?: string | null):
         case 'anilist': return tr('AniList list');
         case 'myanimelist': return tr('MyAnimeList list');
         case 'kitsu': return tr('Kitsu list');
+        case 'mangaupdates': return tr('MangaUpdates list');
         default: return tr('Tracker list');
       }
     default: return tr('Pasted titles');

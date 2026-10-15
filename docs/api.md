@@ -1432,6 +1432,7 @@ GET    /api/opds/token            DELETE /api/opds/token
 PATCH  /api/opds/token
 GET    /api/trackers              POST   /api/trackers/anilist
 POST   /api/trackers/:provider/connect
+POST   /api/trackers/mangaupdates/login
 POST   /api/trackers/:provider/test
 POST   /api/trackers/anilist/backfill
 POST   /api/trackers/:provider/resync/:seriesId
@@ -1570,7 +1571,11 @@ drops it. Since v0.61.0 ([#190](https://github.com/AngeloSha/uchiyomi/issues/190
 `authorizeUrl` — `https://anilist.co/api/v2/oauth/authorize?client_id=53603&response_type=token`, the project's
 public AniList client: open it, approve, and AniList's own pin page shows the token to paste (an implicit grant;
 nothing comes back to this server and no secret is involved). MyAnimeList and Kitsu have no such page;
-[USAGE.md](USAGE.md#getting-a-myanimelist-token) has the commands that get theirs. Connect checks the token with
+[USAGE.md](USAGE.md#getting-a-myanimelist-token) has the commands that get theirs. MangaUpdates has no token
+page either: `POST /api/trackers/mangaupdates/login {username, password}` trades its credentials for a session token
+(the password is used for that call only and is not stored), checks it as a pasted one is checked, and stores the
+token; the answer is **400** `rejected` when MangaUpdates turns the sign-in down and **502** `unreachable` when it
+cannot be asked. Connect checks the token with
 the service first, and only the service's verdict on it is a **400** `rejected`: no answer at all (a timeout, DNS, a
 refused connection) is a **502** `tracker_unreachable`, and an answer that turned the request down for another
 reason (Cloudflare's 403 in front of AniList, a 429, a 5xx) is a **502** `tracker_refused` `{status}` — neither
@@ -1582,8 +1587,8 @@ the floor `tracker_progress` holds for them (see the reviewable import under Adm
 ([#201](https://github.com/AngeloSha/uchiyomi/issues/201)) a push first reads the series and the caller's entry from
 the service and sends nothing when the entry is already at or past that chapter. The status it sends comes from what it
 read: *completed* only when the service says the series has ended (AniList `FINISHED`/`CANCELLED`, MyAnimeList
-`finished`/`discontinued`, Kitsu `finished`) and gives a chapter count the push reaches; a re-read stays one (AniList
-`REPEATING`, MyAnimeList `is_rereading`, Kitsu `reconsuming`); an entry completed on a series that has ended stays
+`finished`/`discontinued`, Kitsu `finished`, MangaUpdates `completed`) and gives a chapter count the push reaches; a re-read stays one (AniList
+`REPEATING`, MyAnimeList `is_rereading`, Kitsu `reconsuming`; MangaUpdates has no such flag); an entry completed on a series that has ended stays
 completed; anything else is *reading*. Before, every chapter on this server read meant *completed*, a series still
 coming out included. Pushes in one account's lane to one service are 2.4 s apart (a read and a write each). Only a **401**
 from the service — or AniList's "Invalid token" **400** — is a verdict on the token, and disables the

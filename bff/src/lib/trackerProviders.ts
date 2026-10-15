@@ -6,14 +6,15 @@
 // push progress and, since v0.36.0, read the account's list -- so those live here and the sync path and the
 // import intake pick an adapter instead of hardcoding AniList.
 //
-// All three connect by PASTING A TOKEN, which is the same honest, dependency-free path AniList already used:
+// AniList, MyAnimeList and Kitsu connect by PASTING A TOKEN, which is the same honest, dependency-free path AniList already used:
 // no client registration, no redirect URLs to configure, nothing to keep secret server-side. A full OAuth
 // dance would need every self-hoster to register an application with each service and put the secret in
 // their compose file, which is a worse trade for a household app than copying a token once. Since v0.61.0
 // the AniList token comes from the project's own public client, whose page shows it (ANILIST_CLIENT_ID below):
-// still a paste, and still nothing secret anywhere.
+// still a paste, and still nothing secret anywhere. MangaUpdates has no token page either, so it takes a username
+// and password once (mangaupdatesLogin below) and keeps only the session token it hands back.
 
-export type Provider = 'anilist' | 'myanimelist' | 'kitsu';
+export type Provider = 'anilist' | 'myanimelist' | 'kitsu' | 'mangaupdates';
 
 /** The reading-list buckets every tracker has, in the app's own words; each adapter maps its service's names. */
 export const LIST_STATUSES = ['reading', 'plan_to_read', 'completed', 'on_hold', 'dropped'] as const;
@@ -647,12 +648,163 @@ export const kitsuAdapter: TrackerAdapter = {
   },
 };
 
+// ---------------------------------------------------------------------------- MangaUpdates
+
+const MU_API = apiUrl('MANGAUPDATES_API_URL', 'https://api.mangaupdates.com/v1');
+const MU_PAGE = 100;
+/** MangaUpdates' five standard lists, by the `type` /lists names them with; a custom list has none of these. */
+const MU_LIST_TYPE: Record<ListStatus, string> = {
+  reading: 'read', plan_to_read: 'wish', completed: 'complete', on_hold: 'hold', dropped: 'unfinished',
+};
+/** The standard lists' fixed ids, used when /lists does not answer for one (a brand-new account lists them all). */
+const MU_LIST_ID: Record<ListStatus, number> = { reading: 0, plan_to_read: 1, completed: 2, dropped: 3, on_hold: 4 };
+const muFormat = (t: unknown): LibraryEntry['format'] => {
+  const s = String(t ?? '');
+  if (s === 'Novel') return 'novel';
+  return ['Manga', 'Manhwa', 'Manhua', 'OEL', 'Doujinshi', 'Filipino', 'Indonesian', 'Thai', 'Vietnamese', 'Malaysian', 'Nordic', 'French', 'Spanish', 'German'].includes(s) ? 'manga' : 'other';
+};
+
+async function muCall(token: string, path: string, init?: RequestInit): Promise<any> {
+  const r = await fetch(`${MU_API}${path}`, {
+    ...init,
+    headers: { authorization: `Bearer ${token}`, accept: 'application/json', ...(init?.headers as any) },
+    signal: AbortSignal.timeout(15000),
+  });
+  // A 401 is a session that is gone or never was ("This action requires a user account"). Writes are refused with a
+  // 412 when two come within five seconds of each other; that is the service asking us to wait, not a verdict on the
+  // token, so it travels as a plain error (`throttled`) for the caller to wait out.
+  if (r.status === 401) throw authFail('MangaUpdates rejected the token', 401);
+  if (r.status === 412) throw Object.assign(httpFail('mangaupdates 412', 412), { throttled: true });
+  if (r.status === 404) throw Object.assign(httpFail('mangaupdates 404', 404), { notFound: true });
+  if (!r.ok) throw httpFail(`mangaupdates ${r.status}`, r.status);
+  return r.json().catch(() => null);
+}
+
+/** The id each standard list has on this account, by bucket; falls back to the fixed ids. */
+async function muListIds(token: string): Promise<Record<ListStatus, number>> {
+  const out = { ...MU_LIST_ID };
+  const lists = await muCall(token, '/lists').catch((e) => { if ((e as any).authFailed) throw e; return null; });
+  for (const l of Array.isArray(lists) ? lists : []) {
+    if (l?.custom || l?.list_id == null) continue;
+    for (const st of LIST_STATUSES) if (MU_LIST_TYPE[st] === l.type) out[st] = Number(l.list_id);
+  }
+  return out;
+}
+
+/** Log in with a username and password; the session token is all that is kept. */
+export async function mangaupdatesLogin(username: string, password: string): Promise<{ token: string }> {
+  const r = await fetch(`${MU_API}/account/login`, {
+    method: 'PUT', headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ username, password }), signal: AbortSignal.timeout(15000),
+  });
+  const j: any = await r.json().catch(() => null);
+  const token = j?.context?.session_token;
+  if (!r.ok || typeof token !== 'string' || !token) {
+    const why = typeof j?.reason === 'string' ? j.reason : '';
+    throw Object.assign(new Error(why ? `MangaUpdates: ${why}` : `MangaUpdates did not give a token (${r.status})`), { rejected: r.status === 400 || r.status === 401 });
+  }
+  return { token };
+}
+
+export const mangaupdatesAdapter: TrackerAdapter = {
+  id: 'mangaupdates',
+  label: 'MangaUpdates',
+  tokenHelp: 'Sign in with your MangaUpdates username and password, or paste a session token you already have.',
+  tokenDays: null,
+  async whoAmI(token) {
+    const d = await muCall(token, '/account/profile');
+    return d?.user_id != null ? { id: String(d.user_id), name: String(d.username ?? d.user_id) } : null;
+  },
+  async listLibrary(token, { statuses, max }) {
+    if (!statuses.length || !(max > 0)) return [];
+    const ids = await muListIds(token);
+    const out: LibraryEntry[] = [];
+    const seen = new Set<string>();
+    // One paged read per bucket asked for: a list is its own endpoint, and the page is our own number.
+    for (const status of statuses) {
+      for (let page = 1; ; page++) {
+        const d = await muCall(token, `/lists/${ids[status]}/search`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ page, perpage: MU_PAGE }),
+        });
+        const rows: any[] = Array.isArray(d?.results) ? d.results : [];
+        for (const row of rows) {
+          const sid = row?.record?.series?.id ?? row?.metadata?.series?.series_id;
+          if (sid == null || seen.has(String(sid))) continue;
+          const t = titlesOf([row?.record?.series?.title, row?.metadata?.series?.title]);
+          if (!t) continue;
+          seen.add(String(sid));
+          out.push({
+            externalId: String(sid), ...t, status,
+            progress: Math.max(0, Math.floor(Number(row?.record?.status?.chapter) || 0)),
+            format: muFormat(row?.metadata?.series?.type),
+          });
+          if (out.length >= max) return out;
+        }
+        const total = Number(d?.total_hits) || 0;
+        if (!rows.length || page * MU_PAGE >= total) break;
+      }
+    }
+    return out;
+  },
+  async seriesState(token, externalId) {
+    const sid = Number(externalId);
+    if (!Number.isInteger(sid)) throw new Error('mangaupdates: not a series id');
+    // The series is public; the entry is this account's own, and is simply absent (404) until it is on a list.
+    const series = await muCall(token, `/series/${sid}`).catch((e) => { if ((e as any).notFound) return null; throw e; });
+    const ids = await muListIds(token);
+    let current: any = null;
+    try { current = await muCall(token, `/lists/series/${sid}`); }
+    catch (e) { if (!(e as any).notFound) throw e; }
+    // `completed` is the one thing MangaUpdates states outright, and it covers both ways a series stops --
+    // finished or cancelled. Its `status` is free prose ("17 Volumes (Ongoing)"), so only the flag is read.
+    const ended = series?.completed === true;
+    // `latest_chapter` is the newest chapter seen, not a total; it is only the total once nothing more is coming.
+    const total = ended ? positiveInt(series?.latest_chapter) : null;
+    // The bucket is the list the entry sits on. A custom list is none of the five and counts as reading, which is
+    // where setProgress below leaves it; MangaUpdates has no re-read flag, so a re-read cannot be told apart here.
+    const onList = current?.list_id != null ? Number(current.list_id) : null;
+    const status = onList == null ? null : (LIST_STATUSES.find((st) => ids[st] === onList) ?? 'reading');
+    return {
+      ended,
+      total,
+      entry: status ? { status, progress: progressOf(current?.status?.chapter) } : null,
+    };
+  },
+  async setProgress(token, externalId, chapters, status) {
+    const sid = Number(externalId);
+    if (!Number.isInteger(sid)) throw new Error('mangaupdates: not a series id');
+    const ids = await muListIds(token);
+    let current: any = null;
+    try { current = await muCall(token, `/lists/series/${sid}`); }
+    catch (e) { if (!(e as any).notFound) throw e; }
+    // A completed push moves it to the complete list. Otherwise it stays where it is, except that a wish, hold or
+    // unfinished entry being read goes to reading; an entry on a custom list is left on it.
+    const onList: number | null = current?.list_id != null ? Number(current.list_id) : null;
+    const standard = Object.values(ids);
+    const target = status === 'completed' ? ids.completed
+      : onList != null && !standard.includes(onList) ? onList
+      : ids.reading;
+    const item = { series: { id: sid }, list_id: target, status: { chapter: chapters } };
+    const write = () => muCall(token, current ? '/lists/series/update' : '/lists/series', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify([item]),
+    });
+    try { await write(); }
+    catch (e) {
+      if (!(e as any).throttled) throw e;
+      await new Promise((r) => setTimeout(r, 5500));
+      await write();
+    }
+  },
+};
+
 // ----------------------------------------------------------------------------
 
 export const ADAPTERS: Record<Provider, TrackerAdapter> = {
   anilist: anilistAdapter,
   myanimelist: malAdapter,
   kitsu: kitsuAdapter,
+  mangaupdates: mangaupdatesAdapter,
 };
 
 export const PROVIDERS = Object.keys(ADAPTERS) as Provider[];

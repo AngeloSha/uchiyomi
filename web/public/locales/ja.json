@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3867
+    "strings": 3872
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -3870,5 +3870,10 @@
   "None of the sources following this series has a cover to offer right now.": "このシリーズのソースには、今のところ提案できる表紙がありません。",
   "Reconnect": "再連携",
   "Your tracker token no longer works. Reconnect it under Profile.": "トラッカーのトークンが使えなくなりました。マイページから再連携してください。",
-  "Your token for {names} no longer works. Reconnect to keep your progress in sync.": "{names} のトークンが使えなくなりました。進捗の同期を続けるには再連携してください。"
+  "Your token for {names} no longer works. Reconnect to keep your progress in sync.": "{names} のトークンが使えなくなりました。進捗の同期を続けるには再連携してください。",
+  "{name} did not accept that sign-in": "{name} did not accept that sign-in",
+  "Your password is used once to get a token and is not stored.": "Your password is used once to get a token and is not stored.",
+  "Sign in": "Sign in",
+  "Paste a token instead": "Paste a token instead",
+  "MangaUpdates list": "MangaUpdates list"
 }
