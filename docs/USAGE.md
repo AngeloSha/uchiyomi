@@ -202,6 +202,15 @@ interface the palette opens empty instead, so the input method composes the whol
 Appearance → Type anywhere to search** switches the typing, and the **/** shortcut with it, off on that device;
 **Ctrl+K** keeps working.
 
+**Keyboard shortcuts.** With a keyboard, **g** then a letter goes to a page: **g h** Home, **g l** Library, **g s**
+Search, **g u** Updates, **g c** Lists, **g f** Favorites, **g m** Moments, **g y** Reading history, **g w** Wrapped,
+**g p** Profile, and, for an account that may add series, **g d** Discover, **g v** Library → Downloads and **g o**
+Offline downloads (not on the desktop app, where the chapters are already on the disk), and **g a** Admin for an admin.
+**?** lists them, with **Ctrl+K**, **/** and **Esc**. They stand down in the same places as typing to search (in a
+field, under a dialog or menu, with Ctrl, Alt or ⌘ held, and in the reader) and **Type anywhere to search** switches
+them off along with it. A title can start with *g*, so a **g** that no letter follows within about a second opens the
+search with the *g* already in it, and a **g** followed by a letter that is not a chord does the same with both.
+
 **Search finds pages and settings too** (since v0.55.4). Type two letters or more and, under the series, **Pages and
 settings** lists what the words name: every admin tab, each section of **Admin → Settings**, the profile's tabs and
 cards, the import, and settings by name — *Notice chapters*, *18+ filter*, *Source order*, *Slow archive*, *Backup

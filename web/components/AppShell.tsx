@@ -1,7 +1,7 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { useAuth } from '@/lib/auth';
+import { canDownload, useAuth } from '@/lib/auth';
 import { runSmartOffline } from '@/lib/offlineSync';
 import { BottomNav } from './BottomNav';
 import { TopNav } from './TopNav';
@@ -12,6 +12,7 @@ import { DesktopReconnect } from './DesktopReconnect';
 import { CinematicFX } from './CinematicFX';
 import { PageTransition } from './PageTransition';
 import { CommandPalette, usePaletteHotkeys } from './CommandPalette';
+import { ShortcutsDialog, useGoShortcuts } from './Shortcuts';
 import { useWideViewport } from './ui';
 import { Mark } from './Brand';
 import { IcWifiOff } from './icons';
@@ -64,11 +65,12 @@ function OfflineBanner({ name }: { name: string }) {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const { status, user } = useAuth();
+  const { status, user, isAdmin } = useAuth();
   const path = usePathname();
   const router = useRouter();
   const [palette, setPalette] = useState(false);
   const [paletteSeed, setPaletteSeed] = useState('');
+  const [help, setHelp] = useState(false);
   // The desktop's sidebar is mounted from lg up only: on a phone none of it is in the document (components/Sidebar.tsx).
   const wide = useWideViewport();
 
@@ -91,6 +93,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useServerDownloads({ poll: true, enabled: !path.startsWith('/reader') });
   // Ctrl/Cmd+K, "/", or just typing, anywhere in the app (reader keeps its own keys; palette skipped there)
   usePaletteHotkeys(setPalette, status === 'authed' && !path.startsWith('/reader'), setPaletteSeed);
+  // "g" then h / l / s ... goes there; "?" lists them. Same gate as the palette's hotkeys: signed in, not in the reader.
+  const shortcutCtx = useMemo(() => ({ admin: isAdmin, mayDownload: status === 'authed' && canDownload(user), desktop: isDesktop() }), [isAdmin, status, user]);
+  useGoShortcuts({
+    enabled: status === 'authed' && !path.startsWith('/reader'),
+    ctx: shortcutCtx,
+    onHelp: () => setHelp(true),
+    onSearch: (seed) => { setPaletteSeed(seed); setPalette(true); },
+  });
   // Incognito reading (v0.61.0): kept here, above every early return, so the reader's progress payload knows it on the
   // reader's own route too, where this shell renders nothing of its own (components/IncognitoBanner.tsx).
   useIncognito();
@@ -145,6 +155,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </main>
       <BottomNav />
       {status === 'authed' && <CommandPalette open={palette} seed={paletteSeed} onClose={() => setPalette(false)} />}
+      {status === 'authed' && help && <ShortcutsDialog ctx={shortcutCtx} onClose={() => setHelp(false)} />}
     </>
   );
 }
