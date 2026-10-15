@@ -6,6 +6,7 @@ import { runSmartOffline } from '@/lib/offlineSync';
 import { BottomNav } from './BottomNav';
 import { TopNav } from './TopNav';
 import { Sidebar } from './Sidebar';
+import { AdultBar } from './AdultToggle';
 import { HealthBanner } from './HealthAlert';
 import { LoginScreen } from './LoginScreen';
 import { DesktopReconnect } from './DesktopReconnect';
@@ -140,6 +141,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {status === 'authed' && <HealthBanner />}
       <TopNav onSearchFocus={() => { setPaletteSeed(''); setPalette(true); }} />
       {wide && <Sidebar />}
+      {status === 'authed' && <AdultBar />}
       <main className="shell relative z-[1] pb-28 lg:pb-12">
         <PageTransition>{children}</PageTransition>
       </main>

@@ -2491,7 +2491,9 @@ everybody, until somebody asks for it. It stays out of the home rails, the libra
 your collections, updates, history, bookmarks and the OPDS feeds, and its tab does not appear on the Library
 page. (An OPDS reader has no button to press, so for it the choice sits on its own credential:
 **Profile → Connections → External readers → Include 18+ content in this reader**, off by default.) A **Show 18+** button sits beside the sorts on the Library page and brings it all back; the reveal
-lasts until you close the browser and then it hides itself again. The button only appears for accounts that
+lasts until you close the browser and then it hides itself again. While it is on, the button gives way to a small pill
+pinned to the bottom of every page (the reader excepted) that says *18+ titles are showing* and has a one-tap **Hide 18+**,
+so the reveal is never left on without a sign of it. The button only appears for accounts that
 actually have such a library, and never for one whose age limit is below 18.
 
 **Since v0.42.0 the same reveal also covers adult providers on Discover.** A source whose extension

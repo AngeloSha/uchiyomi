@@ -60,6 +60,9 @@ export function useAdultShown(): boolean {
  * already drops libraries above the viewer's age cap — so an account that may not open the 18+ shelf never
  * sees the button that would reveal it.
  *
+ * It is the way IN only: once the reveal is on it renders nothing, and `AdultBar` (pinned on every page by
+ * the AppShell) says 18+ is showing and is the way out.
+ *
  * `alsoWhen` is a second reason to render, for a screen that knows of something else the reveal is hiding.
  * Discover passes `hiddenAdult > 0` from `/api/sources`: since v0.42.0 the reveal also hides adult
  * PROVIDERS, and an install with adult sources and no 18+ library would otherwise lose them with no button
@@ -75,19 +78,38 @@ export function AdultToggle({ className = '', alsoWhen = false }: { className?: 
   const { data: libs } = useLibraries();
   const on = useAdultShown();
 
-  if (!alsoWhen && !(libs ?? []).some((l) => l.adult)) return null;
+  if (on || (!alsoWhen && !(libs ?? []).some((l) => l.adult))) return null;
 
   return (
     <button
       type="button"
-      aria-pressed={on}
       onClick={() => {
-        setAdultShown(!on);
+        setAdultShown(true);
         qc.invalidateQueries();
       }}
-      className={`chip whitespace-nowrap ${on ? 'chip-active' : ''} ${className}`}
+      className={`chip whitespace-nowrap ${className}`}
     >
       {tr('Show 18+')}
     </button>
+  );
+}
+
+/**
+ * While 18+ is revealed: a small pill pinned to the screen on every page that says so and hides it again in one tap,
+ * so the reveal is never left on unnoticed on a page that has no button of its own for it. Nothing renders while it
+ * is off. Mounted once, by the AppShell.
+ */
+export function AdultBar() {
+  const qc = useQueryClient();
+  const on = useAdultShown();
+  if (!on) return null;
+  return (
+    <div data-adult-bar className="pointer-events-none fixed inset-x-0 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-40 flex justify-center px-3 lg:bottom-5">
+      <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-amber-300/30 bg-ink-950/90 py-1.5 ps-4 pe-1.5 shadow-lg backdrop-blur">
+        <span role="status" data-adult-notice className="min-w-0 text-xs text-amber-200">{tr('18+ titles are showing.')}</span>
+        <button type="button" onClick={() => { setAdultShown(false); qc.invalidateQueries(); }}
+          className="chip chip-active shrink-0 whitespace-nowrap text-xs">{tr('Hide 18+')}</button>
+      </div>
+    </div>
   );
 }

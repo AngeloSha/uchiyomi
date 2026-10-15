@@ -60,7 +60,7 @@ test('AdultToggle renders for a second reason, and still for its first', () => {
   // Reintroduce by restoring `if (!(libs ?? []).some((l) => l.adult)) return null;`: an install with adult
   // sources and no 18+ library gets a filter with no off switch anywhere.
   const c = code(read('components/AdultToggle.tsx'));
-  assert.match(c, /if \(!alsoWhen && !\(libs \?\? \[\]\)\.some\(\(l\) => l\.adult\)\) return null;/,
+  assert.match(c, /if \(on \|\| \(!alsoWhen && !\(libs \?\? \[\]\)\.some\(\(l\) => l\.adult\)\)\) return null;/,
     'the toggle ignores alsoWhen, so Discover cannot offer the reveal without an 18+ library');
   assert.match(c, /alsoWhen = false/, 'alsoWhen no longer defaults to false, so every other render site changed meaning');
 });
