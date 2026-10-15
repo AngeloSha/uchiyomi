@@ -21,6 +21,7 @@ export interface FlowPage {
   width: number | null;
   height: number | null;
   junk?: boolean;
+  join?: 'rtl' | 'ltr';
   /**
    * A placeholder the server saved in place of a page the source never served (v0.40.0). Carried, never
    * acted on: a missing page is drawn at full height with a caption over it, in every mode. It is not
@@ -49,6 +50,8 @@ export interface FlowItem {
   missing?: boolean;
   /** Drawn as a thin band of itself rather than at full height. Derived, never stored. */
   collapsed?: boolean;
+  /** From the page list: this page and the next are one spread the source cut in two (bff lib/spreadJoin.ts). */
+  join?: 'rtl' | 'ltr';
 }
 
 /**
@@ -93,6 +96,7 @@ export function buildFlow(
         key,
         firstOfChapter: false,
         junk: p.junk,
+        join: p.join,
         // ⚠️ Passed through untouched and never a reason to collapse or drop the page. The flow's job is
         // to keep "flat index" and "page number" the same thing, and a missing page is still a page --
         // the archive holds a real placeholder at that index, the server counts it, progress lands on it.

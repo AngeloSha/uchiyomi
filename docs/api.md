@@ -1022,6 +1022,8 @@ GET    /api/series/:id/related
 POST   /api/series/search         GET    /api/leaderboard
 GET    /api/books/:id             POST   /api/books/:id/refetch
 GET    /api/books/:id/pages
+GET    /api/books/:id/spread-marks
+PUT    /api/books/:id/spread-marks/:page
 GET    /api/books/:id/next        PUT    /api/books/:id/progress
 PUT    /api/books/:id/pages/:n/junk
 GET    /api/offline/plan             GET    /api/series/:id/listing
@@ -2771,7 +2773,8 @@ GET    /img/series/:id/hero
 GET    /img/extensions/icon/:pkgName
 GET    /img/books/:id/thumb       GET    /img/books/:id/page/:n
 GET    /img/lib/series/:id/thumb  GET    /img/lib/books/:id/thumb
-GET    /img/lib/books/:id/page/:n GET    /img/sources/cover
+GET    /img/lib/books/:id/page/:n GET    /img/lib/books/:id/spread/:n
+GET    /img/sources/cover
 GET    /opds                      GET    /opds/series
 GET    /opds/series/:id           GET    /opds/search
 GET    /opds/opensearch.xml       GET    /opds/book/:id/file
@@ -2779,6 +2782,14 @@ GET    /opds/book/:id/page/:n
 GET    /opds/continue             GET    /opds/favorites
 GET    /opds/lists/:id
 ```
+
+`GET /img/lib/books/:id/spread/:n` serves page `n` and the one after it as a single wide image, for a client that
+can only show an image it is handed -- the KOReader plugin -- where the web reader pairs the two pages itself. It
+joins nothing on demand: the chapter's own page measurements (`lib_books.page_dims`, written when its pages were
+measured) say whether page `n` starts a spread the source cut in two and which way round it reads, and only then are
+the two stitched. A page that starts no spread is **404** `no_spread`, so this cannot be asked to glue arbitrary
+pages together; a chapter this account may not see is **404** `no_book`, and `n` below 1 or not a whole number is
+**400** `bad_page`. Gated exactly as its `page/:n` sibling is, and cached under its own key.
 
 ### Komga-compatible API (Mihon's Komga extension and tracker)
 ```

@@ -65,6 +65,8 @@ export default async function downloadRoutes(app: FastifyInstance) {
         // reason as `junk`: the offline reader never asks the server, so the caption has to travel with the
         // download. The placeholder's bytes download like any page.
         missing: p.missing || undefined,
+        // A spread the source cut in two (lib/spreadJoin.ts): carried so the offline reader pairs the two saved pages.
+        join: p.join || undefined,
       };
     });
 

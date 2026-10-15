@@ -39,15 +39,16 @@ import { NextInStory } from '@/components/RelatedRail';
 import { IcChevronLeft, IcChevronRight, IcSliders, IcGrid } from '@/components/icons';
 import { ReaderImg, MissingCaption, ReaderPageRow, SlidePending, SlideRegion, SlideTurned, DIVIDER_H, measurePage } from '@/components/ReaderPage';
 import { CHAPTER_SAMPLE, LEFT_HALF, RIGHT_HALF, WHOLE, chapterSideCrop, halfCrop, pairCrop, type Region } from '@/lib/readerCrop';
+import { applyMarks, loadMarks, markFor, saveMark, spreadOptions, type Marks, type SpreadOption } from '@/lib/spreadMarks';
 import { t as tr } from '@/lib/i18n';
 import { serverReachableHint } from '@/lib/desktop';
 import { IncognitoTag, incognitoRef } from '@/components/IncognitoBanner';
 
-interface PageDim { number: number; width: number | null; height: number | null; junk?: boolean; missing?: boolean }
+interface PageDim { number: number; width: number | null; height: number | null; junk?: boolean; join?: 'rtl' | 'ltr'; missing?: boolean }
 /** `sourceId`: the adapter the copy came from, for naming it on a missing page's caption. Unknown for a downloaded copy. */
-interface Chapter { id: string; seriesId: string; seriesTitle: string; title: string; pages: PageDim[]; offline: boolean; readingDirection?: string | null; pruned?: boolean; sourceId?: string | null }
+interface Chapter { id: string; seriesId: string; seriesTitle: string; title: string; pages: PageDim[]; offline: boolean; readingDirection?: string | null; pruned?: boolean; sourceId?: string | null; marks?: Marks }
 interface ChapterRef { id: string; label: string }
-interface FlatItem { ci: number; number: number; width: number | null; height: number | null; key: string; firstOfChapter: boolean; junk?: boolean; missing?: boolean; collapsed?: boolean }
+interface FlatItem { ci: number; number: number; width: number | null; height: number | null; key: string; firstOfChapter: boolean; junk?: boolean; join?: 'rtl' | 'ltr'; forced?: boolean; missing?: boolean; collapsed?: boolean }
 
 /** Paged mode's render window, in pages: a slide is one screen, so pages and screens are the same thing there. */
 const WINDOW_BEHIND = 2;
@@ -110,18 +111,19 @@ async function loadChapter(bookId: string): Promise<Chapter | null> {
   }
   try {
     const b = await api<Book>(`/api/books/${bookId}`);
-    const pInfo = await api<PageInfo[]>(`/api/books/${bookId}/pages`);
+    const [pInfo, marks] = await Promise.all([api<PageInfo[]>(`/api/books/${bookId}/pages`), loadMarks(bookId)]);
     return {
       id: bookId,
       seriesId: b.seriesId,
       seriesTitle: b.seriesTitle,
       title: b.metadata?.title || b.name,
-      pages: pInfo.map((p) => ({ number: p.number, width: p.width ?? null, height: p.height ?? null, junk: p.junk, missing: p.missing })),
+      pages: pInfo.map((p) => ({ number: p.number, width: p.width ?? null, height: p.height ?? null, junk: p.junk, missing: p.missing, join: p.join })),
       offline: false,
       // The server deleted this chapter's file after everyone finished it. Carried so the empty page list
       // below can be explained rather than blamed on the reader's library mount.
       pruned: b.pruned === true,
       sourceId: b.sourceId ?? null,
+      marks,
     };
   } catch {
     return null;
@@ -209,6 +211,11 @@ function ReaderInner() {
   const [seriesSourceNames, setSeriesSourceNames] = useState<Record<string, string>>({});
   // The series' PRIMARY source, which keys the per-source reader default (lib/readerPrefs.ts seriesSourceOf).
   const [seriesSource, setSeriesSource] = useState<{ id: string; name: string } | null>(null);
+  // A webtoon is one long strip cut into images, never a spread cut in two: joining is for paged series only.
+  // Joins are off only for a series TYPED webtoon, not one whose direction is merely unknown (the API says WEBTOON for NULL,
+  // which is half the library, One Piece among it). The server already joins nothing in a chapter of strips (lib/spreadJoin.ts
+  // joinsFor), so a manga of unknown direction keeps its joined spreads.
+  const [typedWebtoon, setTypedWebtoon] = useState(false);
   // The work's language editions (v0.52.0, #72), for the chapter sheet's chips, and each chapter's number, which a
   // switch to another edition opens there. Both from requests the page makes anyway.
   const [editions, setEditions] = useState<EditionRow[] | null>(null);
@@ -374,6 +381,7 @@ function ReaderInner() {
       // this device last saw and the downloaded record's direction. The pages' shape is the chapter's own, either way.
       let seriesType = first.offline ? seriesTypeOf(first.seriesId) : null;
       let readsRtl = first.readingDirection === 'RIGHT_TO_LEFT';
+      setTypedWebtoon(seriesType === 'webtoon');
       try {
         const s = await api<Series>(`/api/series/${first.seriesId}`);
         if (alive) {
@@ -381,6 +389,7 @@ function ReaderInner() {
           readsRtl = s?.metadata?.readingDirection === 'RIGHT_TO_LEFT';
           seriesType = s?.seriesType ?? null;
           rememberSeriesType(first.seriesId, seriesType);
+          setTypedWebtoon(seriesType === 'webtoon');
           setEditions((s?.edition?.editions?.length ?? 0) > 1 ? s.edition!.editions! : null);
           // The followed sources' display names, for the caption on a page the source never served. Free:
           // this request is made anyway, and `sources` is sent to every viewer, unlike /api/sources.
@@ -460,9 +469,15 @@ function ReaderInner() {
   // removed: removing would give the two modes different flows, and switching mode mid-chapter would then land
   // on a different page, because nothing re-anchors `current` when the flow is rebuilt.
   const flowJunk = prefs.mode === 'paged' && prefs.junkPages === 'collapse' ? 'show' : prefs.junkPages;
-  const flat: FlatItem[] = useMemo(
+  // `detected` is the flow with the server's joins as found; `flat` has this reader's own marks applied (lib/spreadMarks.ts), so
+  // what pairs is decided in one place. Same length and order, so an index means the same in both.
+  const detected: FlatItem[] = useMemo(
     () => buildFlow(chapters, flowJunk, expanded) as FlatItem[],
     [chapters, flowJunk, expanded],
+  );
+  const flat: FlatItem[] = useMemo(
+    () => applyMarks(detected, chapters.map((c) => c.marks), rtl || pagedRtl ? 'rtl' : 'ltr'),
+    [detected, chapters, rtl, pagedRtl],
   );
   /** Vertical + `collapse`: a repeated page is drawn as a band of itself instead of being removed. */
   const collapsing = prefs.junkPages === 'collapse';
@@ -516,8 +531,8 @@ function ReaderInner() {
   const rightFirst = rtl || pagedRtl;
   const splitTrack = prefs.mode === 'paged' && wideMode === 'split';
   const { slides, slideOf, half } = useMemo(
-    () => pairSlides(flat, prefs.mode === 'paged' && !!prefs.spread, { split: splitTrack, rightFirst }),
-    [flat, prefs.mode, prefs.spread, splitTrack, rightFirst],
+    () => pairSlides(flat, prefs.mode === 'paged' && !!prefs.spread, { split: splitTrack, rightFirst, joinSplit: prefs.joinSplit && !typedWebtoon }),
+    [flat, prefs.mode, prefs.spread, splitTrack, rightFirst, prefs.joinSplit, typedWebtoon],
   );
   /** The paged track's slide, measured: what a split half or a page turned on its side is fitted into. */
   const [area, setArea] = useState({ w: 0, h: 0 });
@@ -1006,6 +1021,34 @@ function ReaderInner() {
     staleTime: 5 * 60 * 1000,
   });
   const activeChapter = chapters[flat[current]?.ci ?? 0];
+
+  // What a reader may say about the page being read (lib/spreadMarks.ts): merge it with a neighbour, take a spread apart, or
+  // let the detector's answer stand. Online chapters, paged mode only: the answer is kept on the server, and the column has no pairs.
+  const optionsAt = (at: number): SpreadOption[] => {
+    const ch = chapters[flat[at]?.ci ?? -1];
+    return prefs.mode === 'paged' && ch && !ch.offline ? spreadOptions(flat, at, ch.marks, pagedRtl) : [];
+  };
+  const optionLabel = (o: SpreadOption): string =>
+    o.kind === 'split' ? tr('These two pages are not one spread')
+    : o.kind === 'unmerge' ? tr('Unmerge these pages')
+    : o.kind === 'restore' ? tr('Join these two pages again')
+    : o.side === 'left' ? tr('Merge with the page on the left') : tr('Merge with the page on the right');
+  const applyOption = (at: number, o: SpreadOption) => {
+    const ch = chapters[flat[at]?.ci ?? -1];
+    if (!ch) return;
+    const mark = markFor(o);
+    const before = ch.marks;
+    const next: Marks = { ...(before ?? {}) };
+    if (mark === null) delete next[o.first];
+    else {
+      next[o.first] = mark;
+      if (mark === 'join') for (const n of [o.first - 1, o.first + 1]) if (next[n] === 'join') delete next[n];
+    }
+    const put = (marks?: Marks) => setChapters((cs) => cs.map((c) => (c.id === ch.id ? { ...c, marks } : c)));
+    put(next);
+    setShowSettings(false);
+    saveMark(ch.id, o.first, mark).then(put).catch(() => { put(before); toast(tr('Could not save'), 'error'); });
+  };
 
   // One place that knows how to move to a page, shared by the scrubber and the page grid. The initial-scroll
   // effect above deliberately does not use it: that one must also seed `lastSent` and run exactly once.
@@ -1760,6 +1803,7 @@ function ReaderInner() {
             autoApplied={autoApplied}
             padConnected={padConnected}
             rtlTrack={pagedRtl}
+            spreadOptions={optionsAt(current).map((o) => ({ label: optionLabel(o), onSelect: () => applyOption(current, o) }))}
             onClose={() => setShowSettings(false)}
             // The series' own source, by name. With no name there is no row at all: a raw source id is
             // never shown (an extension's is nineteen digits).

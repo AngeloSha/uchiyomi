@@ -255,6 +255,33 @@ test('the Library shows one card per work: the edition read last, else the origi
   }
 });
 
+test('a reader merges or splits a spread for their own account only', { skip }, async () => {
+  const book = 'b_sp_marks';
+  await q(`INSERT INTO lib_books (id, series_id, source, file, title, number, pages) VALUES ($1, $2, 'Fake EN', 'Fake EN/x/sp.cbz', 'Chapter 9', 9, 5)
+           ON CONFLICT (id) DO NOTHING`, [book, A]);
+  const put = (who: string, page: number | string, mark: unknown) => call('PUT', `/api/books/${book}/spread-marks/${page}`, who, { mark });
+  const get = async (who: string) => (await call('GET', `/api/books/${book}/spread-marks`, who)).json().marks;
+  try {
+    assert.deepEqual(await get(ADMIN), {}, 'PREMISE: nothing marked');
+    // Reintroduce by keying the rows on the book alone: the member sees the admin's correction.
+    assert.deepEqual((await put(ADMIN, 2, 'split')).json().marks, { 2: 'split' });
+    assert.deepEqual((await put(ADMIN, 4, 'join')).json().marks, { 2: 'split', 4: 'join' });
+    assert.deepEqual(await get(MEMBER), {}, 'another account is not changed');
+    // A page is in one spread only: joining 3-4 takes the join on 4-5 away, and 2-3 (a split) stays as it is.
+    assert.deepEqual((await put(ADMIN, 3, 'join')).json().marks, { 2: 'split', 3: 'join' });
+    assert.deepEqual((await put(ADMIN, 2, null)).json().marks, { 3: 'join' }, 'given back to the detector');
+    assert.equal((await put(ADMIN, 5, 'join')).statusCode, 400, 'the last page starts no pair');
+    assert.equal((await put(ADMIN, 0, 'join')).statusCode, 400);
+    assert.equal((await put(ADMIN, 2, 'yes')).statusCode, 400);
+    assert.equal((await call('GET', '/api/books/b_not_there/spread-marks', ADMIN)).statusCode, 404);
+    for (let n = 1; n <= 4; n++) await put(MEMBER, n, 'split');
+    assert.deepEqual(Object.keys(await get(MEMBER)), ['1', '2', '3', '4']);
+  } finally {
+    await q('DELETE FROM lib_books WHERE id = $1', [book]);
+  }
+  assert.deepEqual((await q('SELECT 1 FROM spread_marks WHERE book_id = $1', [book])), [], 'a deleted chapter takes its marks with it');
+});
+
 test('a viewer is shown only the editions they may open', { skip }, async () => {
   const detail = async (who: string, id: string) => (await call('GET', `/api/series/${id}`, who)).json();
   const a = await detail(ADMIN, A);

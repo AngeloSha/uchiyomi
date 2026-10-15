@@ -1352,6 +1352,13 @@ fix the title's direction: it keeps following the profile. (Before v0.48.0 it di
 kept reading left to right whatever the profile said; those accidental *Series default* pins are ignored now.
 A *Left to right* or *Right to left* chosen for one title in those versions is kept.)
 
+**Merging and splitting double pages** — the detector that joins the two halves of a spread a source cut in two is good, not perfect.
+In **Reader settings → Double pages** (paged mode, on the page you are reading) you can **merge** a page with the one on its left or
+right when it missed a spread, **take a joined pair apart** when it was wrong, and give a pair back to the detector. Left and
+right are the sides of the screen, so on a right-to-left read the page on the left is the next one. A page is in one spread only,
+a merge works even with *Join split double pages* off, and none of it applies to webtoons, wide pages, or chapters saved for
+offline reading. It is saved for your account only and changes nothing for anyone else; a re-scan never erases it.
+
 **Reader defaults** — mode (webtoon scroll or paged), theme, the cover colour at the edges, repeated pages, fit,
 page gap, auto-scroll and brightness — live under **Profile → Settings → Reading**, where each one saves as you
 change it and says *Saved* beside the row. The reader's own sheet still changes them for the session you are in,
@@ -1388,6 +1395,13 @@ not to you: an e-ink tablet wants E-ink, the phone beside it does not.
   fill the screen. Only on a screen held upright -- a spread fits a phone held sideways, or a computer's screen, as
   it is -- and never in two-page spread mode. The two halves are one page: the counter, your progress, OPDS and
   your trackers never see a half.
+- **Join split double pages** (account, on by default): some sources serve a double-page spread as two ordinary
+  pages. In *Double spread* the reader shows such a pair as the spread. The server finds them by comparing the inner
+  edge of each page with the edge of the next: only a pair whose picture runs across the seam, at the same sizes, is
+  joined (a page can be in one pair only, and webtoon strips are never joined), and the answer is kept with the
+  chapter's page sizes. A chapter measured before this existed is looked at once, the next time it is opened. The
+  pages themselves are never changed, so the counter, progress and OPDS still see two. The KOReader plugin gets the
+  joined image from `/img/lib/books/{id}/spread/{n}`.
 - **Crop page borders** (account): trims the blank white or black margins around scanned pages, measured from each
   page's own pixels in your browser (nothing is cut on the server, and downloaded chapters crop too). Page by page
   all four sides are trimmed, never more than 15 % a side, and a two-page spread keeps its gutter. In webtoon

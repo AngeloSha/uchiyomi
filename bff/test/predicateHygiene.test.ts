@@ -100,6 +100,9 @@ const GATED: Record<string, string> = {
   '/img/lib/series/:id/thumb': 'seriesVisible check at the top of serveLibSeriesThumb',
   '/img/lib/books/:id/thumb': 'bookFileAbs -> visibleBookFile',
   '/img/lib/books/:id/page/:n': 'bookFileAbs -> visibleBookFile',
+  // The joined spread (lib/spreadJoin.ts): the same gate as the page it starts, before the cache and before
+  // page_dims is read -- the stitched image is two pages of the same chapter, so nothing new is exposed.
+  '/img/lib/books/:id/spread/:n': 'bookFileAbs -> visibleBookFile, as its page sibling',
   '/img/extensions/icon/:pkgName': 'n/a: extension icon from the engine, not library content',
   '/img/sources/cover': 'n/a: remote source cover, not library content',
   '/img/sources/preview': 'no library content; mayDownload + previewPageList (no age limit, disabled/cooldown refused, chapter by number from the server\'s own listing, page by index) and the guarded fetcher (preview.int.test.ts)',

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3808
+    "strings": 3817
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -3811,5 +3811,14 @@
   "Midnight": "Minuit",
   "True black suits OLED screens. Graphite and Midnight are softer on other displays.": "Le noir pur convient aux écrans OLED. Graphite et Minuit sont plus doux sur les autres écrans.",
   "Plan to read when I add a series": "« À lire » quand j’ajoute une série",
-  "A series you add to the library goes on your trackers as Plan to read, where it is not on your list yet. Nothing already on your list changes, and nothing is sent while Incognito reading is on.": "Une série que vous ajoutez à la bibliothèque arrive sur vos services de suivi en « À lire », là où elle n’est pas encore dans votre liste. Rien de ce qui est déjà dans votre liste ne change, et rien n’est envoyé tant que la Lecture incognito est activée."
+  "A series you add to the library goes on your trackers as Plan to read, where it is not on your list yet. Nothing already on your list changes, and nothing is sent while Incognito reading is on.": "Une série que vous ajoutez à la bibliothèque arrive sur vos services de suivi en « À lire », là où elle n’est pas encore dans votre liste. Rien de ce qui est déjà dans votre liste ne change, et rien n’est envoyé tant que la Lecture incognito est activée.",
+  "Join split double pages": "Join split double pages",
+  "Shows two pages that a source cut from one spread as the one spread, in single-page and Double spread reading alike. Only a pair whose picture runs across the seam is joined.": "Shows two pages that a source cut from one spread as the one spread, in single-page and Double spread reading alike. Only a pair whose picture runs across the seam is joined.",
+  "These two pages are not one spread": "Ces deux pages ne forment pas une double page",
+  "Join these two pages again": "Rejoindre ces deux pages",
+  "Unmerge these pages": "Séparer ces pages",
+  "Merge with the page on the left": "Fusionner avec la page de gauche",
+  "Merge with the page on the right": "Fusionner avec la page de droite",
+  "Double pages": "Doubles pages",
+  "Merge two pages into one spread, or take a spread apart. Saved for your account only; it changes nothing for anyone else.": "Fusionnez deux pages en une double page, ou séparez-la. Enregistré pour votre compte uniquement ; rien ne change pour les autres."
 }

@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { q, one } from '../lib/db';
 import { junkPagesFor, setPageOverride } from '../lib/junkPages';
+import { marksFor, setMark } from '../lib/spreadMarks';
 import { komgaImage } from '../lib/komga';
 import { content as komga, NATIVE_PROGRESS, OWNED } from '../lib/backend';
 import { UnsupportedFilter, owned } from '../lib/ownedCatalog';
@@ -967,6 +968,25 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const b = await komga.book(vc(req), id);
     return (await booksForUser(req, [b]))[0];
+  });
+
+  // The caller's own say on where this chapter's double-page spreads are (lib/spreadMarks.ts): {marks: {"<first page>": "join" | "split"}}.
+  app.get('/api/books/:id/spread-marks', async (req) => {
+    const { id } = req.params as { id: string };
+    await komga.book(vc(req), id); // 404 for a chapter this account may not see
+    return { marks: await marksFor(userIdOf(req), id) };
+  });
+
+  app.put('/api/books/:id/spread-marks/:page', async (req, reply) => {
+    const { id, page } = req.params as { id: string; page: string };
+    const body = z.object({ mark: z.enum(['join', 'split']).nullable() }).safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: 'bad_mark' });
+    await komga.book(vc(req), id);
+    const pages = (await one<{ pages: number | null }>('SELECT pages FROM lib_books WHERE id = $1', [id]))?.pages ?? 0;
+    const r = await setMark(userIdOf(req), id, Number(page), body.data.mark, pages);
+    if (r === 'bad_page') return reply.code(400).send({ error: 'bad_page' });
+    if (r === 'too_many') return reply.code(409).send({ error: 'too_many_marks' });
+    return { marks: await marksFor(userIdOf(req), id) };
   });
 
   app.get('/api/books/:id/pages', async (req) => {
