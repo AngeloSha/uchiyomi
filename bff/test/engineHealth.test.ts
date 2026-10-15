@@ -377,5 +377,8 @@ test('with the shipped pins, the pinned engine has no version row and the previo
   assert.equal(previous.status, 'ok', 'an engine on the previous pin turns Health amber');
   const row = previous.items.find((i) => i.title === 'Engine version')!;
   assert.equal(row.info, true);
-  assert.match(row.detail, new RegExp(`^v2\\.3\\.2243 is older than the version this Uchiyomi was tested with \\(${TESTED_ENGINE.replace(/\./g, '\\.')}\\)\\. It works; updating it is recommended\\. Back up the engine’s data first: [^.]+\\. In docker-compose\\.yml`));
+  // Plain strings around the pin: a regex built from it would have to escape it (CodeQL #55).
+  const head = `v2.3.2243 is older than the version this Uchiyomi was tested with (${TESTED_ENGINE}). It works; updating it is recommended. `;
+  assert.ok(row.detail.startsWith(head), row.detail);
+  assert.match(row.detail.slice(head.length), /^Back up the engine’s data first: [^.]+\. In docker-compose\.yml/);
 });
