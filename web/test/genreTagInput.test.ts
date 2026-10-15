@@ -22,6 +22,13 @@ test('a genre already there is not added again, whatever its case', () => {
   assert.deepEqual(withGenre(have, 'Drama'), ['Action', 'Romance', 'Drama']);
 });
 
+test('a genre the library has, typed in another case, takes the library\'s spelling', () => {
+  // Reintroduce `withGenre(genres, raw)` without the known list: 'slice of life' is added as typed, a new spelling.
+  assert.deepEqual(withGenre(['Action'], 'slice of life', ['Slice of Life', 'Drama']), ['Action', 'Slice of Life']);
+  assert.deepEqual(withGenre(['Action'], 'Isekai', ['Slice of Life']), ['Action', 'Isekai'], 'a new genre keeps its own spelling');
+  assert.match(read('components/GenreTagInput.tsx'), /withGenre\(genres, raw, known\.data \?\? \[\]\)/, 'the box hands it the library\'s genres');
+});
+
 test('suggestions: prefix matches first, then the rest that contain it, none already chosen, capped', () => {
   const known = ['Slice of Life', 'Action', 'Sci-Fi', 'Supernatural', 'Historical', 'Psychological', 'Thriller', 'Sports'];
   assert.deepEqual(suggestGenres('', known, []), [], 'nothing typed, nothing offered');

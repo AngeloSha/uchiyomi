@@ -24,7 +24,7 @@ export function GenreTagInput({ genres, onChange, id }: { genres: string[]; onCh
 
   const add = (raw: string) => {
     setDraft(''); setActive(-1); setOpen(false);
-    const next = withGenre(genres, raw);
+    const next = withGenre(genres, raw, known.data ?? []);
     if (next !== genres) onChange(next);
   };
 

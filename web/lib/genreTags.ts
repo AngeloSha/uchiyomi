@@ -8,11 +8,16 @@ export function cleanGenre(raw: string): string {
   return raw.trim().replace(/,$/, '').trim();
 }
 
-/** `genres` with `raw` added at the end, or the same array when it is empty or already there (case ignored). */
-export function withGenre(genres: string[], raw: string): string[] {
+/**
+ * `genres` with `raw` added at the end, or the same array when it is empty or already there (case ignored). A genre the
+ * library already has (`known`), typed in another case, takes the library's spelling: the box is there so that
+ * "Slice of Life" is not spelled three ways, and Enter on "slice of life" was the third.
+ */
+export function withGenre(genres: string[], raw: string, known: readonly unknown[] = []): string[] {
   const t = cleanGenre(raw);
   if (!t || genres.some((g) => g.toLowerCase() === t.toLowerCase())) return genres;
-  return [...genres, t];
+  const spelt = known.find((g): g is string => typeof g === 'string' && g.trim().toLowerCase() === t.toLowerCase());
+  return [...genres, spelt ? spelt.trim() : t];
 }
 
 /** The known genres to offer for what is typed: those that start with it first, then those that contain it; never one already chosen. */
