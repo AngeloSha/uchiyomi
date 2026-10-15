@@ -1242,6 +1242,9 @@ function ReaderInner() {
 
   // ---- tap / double-tap / pinch (no overlay -> native scroll works) ----
   const onPointerDown = (e: React.PointerEvent) => {
+    // Only the primary button is a tap. A right or middle click is the browser's own (the context menu, auto-scroll), and
+    // it used to count as a tap here too: a right click on the edge of a page turned it, and one in the middle toggled the controls.
+    if (e.pointerType === 'mouse' && e.button !== 0) { tap.current = null; return; }
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.current.size === 2) {
       const p = [...pointers.current.values()];
