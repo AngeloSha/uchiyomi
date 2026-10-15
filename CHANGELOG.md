@@ -1,5 +1,75 @@
 # Changelog
 
+## v0.69.1 — 2026-10-15
+
+### Security fixes
+
+**Update soon, especially if people outside your household can reach your server.** A full security review of the
+server, web app, desktop app and deploy files found the problems below. None needs anything from you to be fixed
+except updating; the few settings to know about are under Upgrading.
+
+### Accounts and sign-in
+
+- **An API token can only create an admin token if it is one.** A read+write token belonging to an admin (the kind you
+  make for Mihon or Komga sync) could create an admin-scoped token for itself. Now only an admin session, or a token
+  that already has the admin scope, can.
+- **Restarting the server no longer makes the oldest account an admin again.** It did on every start, which undid a
+  demotion and, after the oldest account was deleted, promoted the next one. A server with no admin at all still makes
+  its one account the admin, as an upgrade from a single-user install needs.
+- **A disabled or deleted account's browser stops loading pages and covers.** The image cookie kept working for up to a
+  week; for a deleted account it could even open libraries it was never given.
+- **Single sign-on routes are rate limited and do a bounded amount of work.** Failed sign-ins are logged once a minute
+  per kind, a sign-in ticket works once, and old failed sign-in entries are tidied away nightly.
+- **OIDC_LINK_BY_USERNAME links an existing account only when the provider reports exactly that username.** It also
+  matched the part of an email before the @, and a username with characters removed. An adopted account's role now
+  follows OIDC_ADMIN_GROUP from its first sign-in.
+- **Only your own reverse proxy can tell the server a visitor's address.** Anyone reaching the app's port directly could
+  choose the address the sign-in limits counted. See TRUST_PROXY under Upgrading.
+
+### What members can see
+
+- **Titles a source rates erotica or pornographic (MangaDex) are added as 18+,** and an age-limited account no longer
+  sees them in that source's listings or can open or add them.
+- **An extension source answers only for its own series,** so a series from an 18+ extension cannot be opened through
+  another one.
+- **For you and Featured drop a series as soon as a member loses access to it,** instead of up to ten minutes later.
+- **Discover, push notifications, Hidden gems, series colours and source icons respect each member's libraries and age
+  limit.** Discover still says when the server already has a title, but only names it to members who may open it; a
+  new-chapter notification goes only to members who may open the series; Hidden gems no longer counts what another
+  member read with Incognito on; an 18+ source's icon is a lettered tile for an age-limited account.
+- **Avatar colours and list colours are colours.** Anything else is refused, and shown as the default.
+
+### Files and outside requests
+
+- **One damaged or hostile file can no longer take the server down.** Archive pages are read with a size limit (a
+  small file that unpacks to gigabytes is refused), PDF pages are drawn at no more than 32 megapixels, and a chapter
+  folder's pages must be real files inside it, not links to elsewhere.
+- **The server only fetches from the public internet on a site's say-so.** Chapter pages, source icons, covers, the
+  Cloudflare solver and web-push addresses all refuse addresses on your own network, and stop reading at a size limit.
+  The extension engine's login is sent only to the engine.
+- **A search can no longer be made big enough to tie up the database.** A filter of more than 128 conditions is refused.
+- **In the split layout the extension engine no longer shares the database's network.**
+
+### Also
+
+- **Health reads trawl 1.8.0's solve timeout as a timeout.** trawl 1.8.0 says "Scrape deadline exceeded" where 1.7.0
+  said "…-challenge-timeout", so a site whose solve ran out of time got no cooldown and an "unknown" diagnosis. It now
+  gets the usual cooldown and "The site presented a Cloudflare challenge the solver could not finish in time".
+
+### Upgrading
+
+- **TRUST_PROXY (new):** by default the server believes a forwarded visitor address only from a proxy on the same
+  machine, in Docker or on your local network (nginx, Nginx Proxy Manager, Caddy, Traefik, Umbrel, CasaOS, a Cloudflare
+  tunnel). If your reverse proxy is on a public address or reaches the server over Tailscale, add its address (or a
+  CIDR range) to the default list rather than replacing it, since the app's own web server is one of those proxies:
+  `TRUST_PROXY=loopback, linklocal, uniquelocal, 203.0.113.9`. Behind Cloudflare's proxy (the orange cloud), have
+  your reverse proxy restore the visitor's address from `CF-Connecting-IP`, or add Cloudflare's ranges the same way,
+  or the activity log shows Cloudflare's addresses. Otherwise nothing to do. See docs/CONFIGURATION.md.
+- **Split layout (docker-compose.split.yml):** `docker compose up -d` moves the extension engine to its new network.
+  Nothing else changes.
+- **OIDC_LINK_BY_USERNAME:** accounts already linked are unaffected. A first sign-in links an existing account only if
+  your provider sends a `preferred_username` (or `nickname`) equal to the account's username.
+
 ## v0.69.0 — 2026-10-15
 
 **The extension engine moves to v2.4.2366.** Every install mode now pins Suwayomi-Server v2.4.2366: the compose files,

@@ -18,10 +18,12 @@ The ones worth knowing:
 - `TRUST_PROXY`: which peers may tell the app the visitor's address in `X-Forwarded-For` (sign-in rate limits and
   the activity log use it). The default, `loopback, linklocal, uniquelocal`, trusts a proxy on this machine, in
   Docker or on your LAN: nginx, Nginx Proxy Manager, Caddy, Traefik, an Umbrel or CasaOS app proxy, a Cloudflare
-  tunnel container. A proxy on a public address needs naming here (`203.0.113.9` or a CIDR list); `true` trusts
-  every peer, which lets anyone who can reach the port directly choose their own address. Behind Cloudflare's proxy
-  (the orange cloud) the visitor reaches you through Cloudflare's own addresses: have your reverse proxy restore the
-  real address from `CF-Connecting-IP`, or add Cloudflare's published ranges here, or the log shows Cloudflare's.
+  tunnel container. A proxy on a public address, or one that reaches the server over Tailscale (`100.x`), needs
+  adding: keep the default names, because the app's own web server is one of those proxies too
+  (`TRUST_PROXY=loopback, linklocal, uniquelocal, 203.0.113.9`, addresses or CIDR ranges). `true` trusts every
+  peer, which lets anyone who can reach the port directly choose their own address. Behind Cloudflare's proxy (the
+  orange cloud) the visitor reaches you through Cloudflare's own addresses: have your reverse proxy restore the real
+  address from `CF-Connecting-IP`, or add Cloudflare's published ranges the same way, or the log shows Cloudflare's.
 - **Database** — `DATABASE_URL`, on the app container. **Unset** (the shipped one-container file leaves it
   unset on purpose): the container runs its own Postgres 16 in `/data/pg` (the `uchiyomi_data` volume), on a
   unix socket only — no network listener, no password — and the nightly task dumps it into `/backups` like
