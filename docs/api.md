@@ -1022,6 +1022,8 @@ GET    /api/series/:id/related
 POST   /api/series/search         GET    /api/leaderboard
 GET    /api/books/:id             POST   /api/books/:id/refetch
 GET    /api/books/:id/pages
+GET    /api/books/:id/spread-marks
+PUT    /api/books/:id/spread-marks/:page
 GET    /api/books/:id/next        PUT    /api/books/:id/progress
 PUT    /api/books/:id/pages/:n/junk
 GET    /api/offline/plan             GET    /api/series/:id/listing

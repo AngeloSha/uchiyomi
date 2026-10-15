@@ -59,6 +59,7 @@ export function ReaderSettings({
   sourceName,
   sourceDefault,
   onSourceDefault,
+  spreadOptions,
 }: {
   prefs: ReaderPrefs;
   set: (p: Partial<ReaderPrefs>) => void;
@@ -78,6 +79,8 @@ export function ReaderSettings({
   sourceDefault?: boolean;
   /** Save the current mode/theme/spread as that source's default, or clear it when `false` is passed. */
   onSourceDefault?: (save: boolean) => void;
+  /** What may be done to the double page at the page being read (merge, split, restore); empty when nothing may. */
+  spreadOptions?: Array<{ label: string; onSelect: () => void }>;
 }) {
   // A sheet on the notices' layer stack (lib/layers.ts). It runs to the bottom edge, so it does not leave the
   // nav band free -- the reader has no nav there anyway -- and its panel is measured, so a notice rises above
@@ -218,6 +221,21 @@ export function ReaderSettings({
             {tr('On a screen held upright, a double-page spread can be split into its two pages, or turned on its side to fill the screen.')}
           </p>
         </Row>
+
+        {/* The detector joins pairs that are not spreads and misses ones that are: the reader's word against it, kept on the
+            account (bff lib/spreadMarks.ts), so it follows them to the phone and changes nothing for anyone else. */}
+        {spreadOptions && spreadOptions.length > 0 && (
+          <Row label={tr('Double pages')}>
+            <div className="grid grid-cols-1 gap-2">
+              {spreadOptions.map((o) => (
+                <button key={o.label} type="button" onClick={o.onSelect} className="rounded-2xl border border-ink-700 py-3 text-sm text-fog-300">{o.label}</button>
+              ))}
+            </div>
+            <p className="mt-2 text-[11px] leading-snug text-fog-500">
+              {tr('Merge two pages into one spread, or take a spread apart. Saved for your account only; it changes nothing for anyone else.')}
+            </p>
+          </Row>
+        )}
 
         <div className="py-3">
           <div className="flex items-center justify-between gap-3">

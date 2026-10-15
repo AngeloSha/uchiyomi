@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3810
+    "strings": 3817
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -3813,5 +3813,12 @@
   "Plan to read when I add a series": "“Para ler” quando eu adicionar uma série",
   "A series you add to the library goes on your trackers as Plan to read, where it is not on your list yet. Nothing already on your list changes, and nothing is sent while Incognito reading is on.": "Uma série que você adiciona à biblioteca entra nos seus rastreadores como Para ler, onde ainda não estiver na sua lista. Nada que já está na sua lista muda, e nada é enviado enquanto a Leitura anônima estiver ligada.",
   "Join split double pages": "Join split double pages",
-  "Shows two pages that a source cut from one spread as the one spread, in single-page and Double spread reading alike. Only a pair whose picture runs across the seam is joined.": "Shows two pages that a source cut from one spread as the one spread, in single-page and Double spread reading alike. Only a pair whose picture runs across the seam is joined."
+  "Shows two pages that a source cut from one spread as the one spread, in single-page and Double spread reading alike. Only a pair whose picture runs across the seam is joined.": "Shows two pages that a source cut from one spread as the one spread, in single-page and Double spread reading alike. Only a pair whose picture runs across the seam is joined.",
+  "These two pages are not one spread": "Estas duas páginas não são uma página dupla",
+  "Join these two pages again": "Juntar estas duas páginas novamente",
+  "Unmerge these pages": "Separar estas páginas",
+  "Merge with the page on the left": "Mesclar com a página da esquerda",
+  "Merge with the page on the right": "Mesclar com a página da direita",
+  "Double pages": "Páginas duplas",
+  "Merge two pages into one spread, or take a spread apart. Saved for your account only; it changes nothing for anyone else.": "Una duas páginas em uma página dupla ou separe uma página dupla. Salvo apenas na sua conta; não muda nada para os outros."
 }

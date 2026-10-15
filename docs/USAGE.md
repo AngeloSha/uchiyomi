@@ -1352,6 +1352,13 @@ fix the title's direction: it keeps following the profile. (Before v0.48.0 it di
 kept reading left to right whatever the profile said; those accidental *Series default* pins are ignored now.
 A *Left to right* or *Right to left* chosen for one title in those versions is kept.)
 
+**Merging and splitting double pages** — the detector that joins the two halves of a spread a source cut in two is good, not perfect.
+In **Reader settings → Double pages** (paged mode, on the page you are reading) you can **merge** a page with the one on its left or
+right when it missed a spread, **take a joined pair apart** when it was wrong, and give a pair back to the detector. Left and
+right are the sides of the screen, so on a right-to-left read the page on the left is the next one. A page is in one spread only,
+a merge works even with *Join split double pages* off, and none of it applies to webtoons, wide pages, or chapters saved for
+offline reading. It is saved for your account only and changes nothing for anyone else; a re-scan never erases it.
+
 **Reader defaults** — mode (webtoon scroll or paged), theme, the cover colour at the edges, repeated pages, fit,
 page gap, auto-scroll and brightness — live under **Profile → Settings → Reading**, where each one saves as you
 change it and says *Saved* beside the row. The reader's own sheet still changes them for the session you are in,

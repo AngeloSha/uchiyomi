@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3810
+    "strings": 3817
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -3813,5 +3813,12 @@
   "Plan to read when I add a series": "Beim Hinzufügen einer Serie als „Geplant“ eintragen",
   "A series you add to the library goes on your trackers as Plan to read, where it is not on your list yet. Nothing already on your list changes, and nothing is sent while Incognito reading is on.": "Eine Serie, die du der Bibliothek hinzufügst, kommt bei deinen Trackern als „Geplant“ auf die Liste, wo sie dort noch nicht steht. Was schon auf deiner Liste steht, bleibt unverändert, und solange Inkognito lesen an ist, wird nichts gesendet.",
   "Join split double pages": "Join split double pages",
-  "Shows two pages that a source cut from one spread as the one spread, in single-page and Double spread reading alike. Only a pair whose picture runs across the seam is joined.": "Shows two pages that a source cut from one spread as the one spread, in single-page and Double spread reading alike. Only a pair whose picture runs across the seam is joined."
+  "Shows two pages that a source cut from one spread as the one spread, in single-page and Double spread reading alike. Only a pair whose picture runs across the seam is joined.": "Shows two pages that a source cut from one spread as the one spread, in single-page and Double spread reading alike. Only a pair whose picture runs across the seam is joined.",
+  "These two pages are not one spread": "Diese zwei Seiten sind keine Doppelseite",
+  "Join these two pages again": "Diese zwei Seiten wieder verbinden",
+  "Unmerge these pages": "Diese Seiten wieder trennen",
+  "Merge with the page on the left": "Mit der linken Seite verbinden",
+  "Merge with the page on the right": "Mit der rechten Seite verbinden",
+  "Double pages": "Doppelseiten",
+  "Merge two pages into one spread, or take a spread apart. Saved for your account only; it changes nothing for anyone else.": "Zwei Seiten zu einer Doppelseite verbinden oder eine Doppelseite trennen. Nur für dein Konto gespeichert; für andere ändert sich nichts."
 }

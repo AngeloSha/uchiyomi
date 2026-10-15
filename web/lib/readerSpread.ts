@@ -33,6 +33,8 @@ export interface SpreadItem {
   height?: number | null;
   /** The server's finding that this page and the next are one spread cut in two, and which side the next is on. */
   join?: 'rtl' | 'ltr' | null;
+  /** The join is a reader's own (lib/spreadMarks.ts): it holds even with `joinSplit` off, because they asked for this one. */
+  forced?: boolean;
 }
 
 /** A page wider than it is tall. Unknown or nonsensical dimensions are portrait -- see rule 5. */
@@ -65,7 +67,7 @@ export function pairSlides(
   // A real pair of portrait pages starting at `i`, in one chapter, that the server says are one spread.
   const joinAt = (i: number): boolean => {
     const a = items[i], b = items[i + 1];
-    return !!opts.joinSplit && !!a?.join && !!b && b.ci === a.ci && (a.number === undefined || b.number === undefined || b.number === a.number + 1) && !isWide(a) && !isWide(b);
+    return (!!opts.joinSplit || !!a?.forced) && !!a?.join && !!b && b.ci === a.ci && (a.number === undefined || b.number === undefined || b.number === a.number + 1) && !isWide(a) && !isWide(b);
   };
 
   if (!spread) {

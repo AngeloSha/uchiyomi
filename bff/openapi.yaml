@@ -2638,6 +2638,74 @@ paths:
             `not_refetchable`: the row is not a deliberate canonical owned tombstone, its exact stored copy is
             unsafe or unavailable, a renumber is pending, or the download root is not writable; `busy`: another
             writer owns this series folder.
+  /api/books/{id}/spread-marks:
+    get:
+      tags:
+        - personal
+      summary: The caller's own say on where a chapter's double-page spreads are.
+      description: >-
+        Fork change. `marks` maps the first page of a pair to `join` (the caller's reader shows the pair as one spread where
+        the detector found none) or `split` (it shows a pair the detector joined as two pages). Per account: no other
+        account is affected.
+      operationId: getApiBooksIdSpreadMarks
+      security:
+        - bearer: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  marks: { type: object, additionalProperties: { type: string, enum: [join, split] } }
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/books/{id}/spread-marks/{page}:
+    put:
+      tags:
+        - personal
+      summary: Merge or split a pair of pages for the caller, or give it back to the detector.
+      description: >-
+        Fork change. `page` is the first page of the pair (1 to the page count minus 1). `mark` is `join`, `split`, or null
+        to remove the caller's mark. A join removes a join on either neighbouring pair (a page is in one spread only). At
+        most 60 per chapter (409 `too_many_marks`).
+      operationId: putApiBooksIdSpreadMarksPage
+      security:
+        - bearer: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: page, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mark]
+              properties:
+                mark: { type: string, nullable: true, enum: [join, split, null] }
+      responses:
+        "200":
+          description: The caller's marks on the chapter after the change.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  marks: { type: object, additionalProperties: { type: string, enum: [join, split] } }
+        "400":
+          description: Not a mark, or a page that starts no pair
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+        "409":
+          description: Too many marks on this chapter
   /api/books/{id}/pages:
     get:
       tags:
