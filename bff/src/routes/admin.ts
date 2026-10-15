@@ -2834,6 +2834,14 @@ export default async function adminRoutes(app: FastifyInstance) {
   // real install: that level holds source names written by the downloader, so inferring would rename one
   // library into several named after scrapers. Library zero covers the whole root and always exists.
 
+  // A library's reading defaults (#235): the content's look only -- mode, pages per view, direction. Not a theme, which is
+  // each reader's own (lib/libraryReader.ts); an unknown key, a theme among them, is dropped rather than refused.
+  const LIBRARY_READER = z.object({
+    mode: z.enum(['vertical', 'paged']).optional(),
+    spread: z.boolean().optional(),
+    pagedDirection: z.enum(['ltr', 'rtl', 'series']).optional(),
+  });
+
   app.get('/api/admin/libraries', async () => {
     const rows = await q<{ id: string; name: string; path: string; paths: string[]; age_rating: number | null; anilist_lookup: boolean; reader_prefs: unknown; n: number; pinned: number; members: string[] }>(
       // `paths`: every folder it holds (v0.55.1, #148), the first -- `path`, all a v0.55.0 reads -- first, then by name.
@@ -2980,13 +2988,8 @@ export default async function adminRoutes(app: FastifyInstance) {
       ageRating: z.number().int().min(0).max(18).nullable().optional(),
       // Automatic title/id enrichment only. Manual Admin Art, relink and tracker actions remain available.
       anilistLookup: z.boolean().optional(),
-      // Reading defaults for its series (mode, theme, spread, direction). null clears them.
-      readerPrefs: z.object({
-        mode: z.enum(['vertical', 'paged']).optional(),
-        theme: z.enum(['amoled', 'sepia', 'gray']).optional(),
-        spread: z.boolean().optional(),
-        pagedDirection: z.enum(['ltr', 'rtl', 'series']).optional(),
-      }).nullable().optional(),
+      // Reading defaults for its series (lib/libraryReader.ts). null clears them.
+      readerPrefs: LIBRARY_READER.nullable().optional(),
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const raw = b.data.paths ?? (b.data.path !== undefined ? [b.data.path] : null);
@@ -3031,13 +3034,8 @@ export default async function adminRoutes(app: FastifyInstance) {
       ageRating: z.number().int().min(0).max(18).nullable().optional(),
       // false stops future implicit AniList calls for series currently in this library; it does not erase metadata.
       anilistLookup: z.boolean().optional(),
-      // Reading defaults for its series (mode, theme, spread, direction). null clears them.
-      readerPrefs: z.object({
-        mode: z.enum(['vertical', 'paged']).optional(),
-        theme: z.enum(['amoled', 'sepia', 'gray']).optional(),
-        spread: z.boolean().optional(),
-        pagedDirection: z.enum(['ltr', 'rtl', 'series']).optional(),
-      }).nullable().optional(),
+      // Reading defaults for its series (lib/libraryReader.ts). null clears them.
+      readerPrefs: LIBRARY_READER.nullable().optional(),
       // Who may see it. See the note below: this is not simply "insert a row".
       members: z.array(z.string()).optional(),
     }).safeParse(req.body);

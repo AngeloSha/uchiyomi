@@ -1389,12 +1389,14 @@ the default for *Source*** removes it again. Like the per-series memory it is sa
 follows you to your other devices. A downloaded chapter opened offline carries no source, so the button does
 not appear there.
 
-**A default per library.** An admin can give a whole library reading defaults, from **Admin -> Libraries**, when
+**A default per library.** An admin can give a whole library reading defaults, from **Admin → Libraries**, when
 creating or editing it (**Reading defaults**: reading mode, pages per view and reading direction; each can be left
 at *Use user default*), or from the reader itself: **Use these settings for every series in *Library*** (admins,
-under **This library** in the sheet) saves the current mode, theme, pages per view and direction as the library's.
-They apply to every account. The order becomes *your defaults < the library's < the source's < this series*, so a
-source's default or a title adjusted by hand still wins, and a library without defaults changes nothing.
+under **This library** in the sheet) saves the current mode, pages per view and direction as the library's, once you
+confirm. They apply to every account, so the theme is not among them: sepia or true black stays each reader's own.
+The order becomes *your defaults < the library's < the source's < this series*, so a source's default or a title
+adjusted by hand still wins, and a library without defaults changes nothing. A chapter downloaded for offline reading
+opens with the library's defaults this device last saw.
 
 ### Reading comfort
 

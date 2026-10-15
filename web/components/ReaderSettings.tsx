@@ -1,6 +1,6 @@
 'use client';
 import { motion } from 'framer-motion';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { ReaderPrefs } from '@/lib/readerPrefs';
 import type { ColorFilter, DevicePrefs } from '@/lib/readerDevice';
 import type { AutoGuess } from '@/lib/readerAuto';
@@ -74,9 +74,11 @@ export function ReaderSettings({
   /** Whether the paged track runs right to left now: its left edge then turns ON (the tap sketches say so). */
   rtlTrack?: boolean;
   onClose: () => void;
-  /** The source this chapter came from, named for the button. Absent for a copy with no source on record. */
+  /** The library the series is in, named for the admin's key (#235). Absent for a member: only an admin is told it. */
   libraryName?: string;
+  /** Save the current mode, pages per view and direction as that library's reading defaults, for every account. */
   onLibraryDefault?: () => void;
+  /** The source this chapter came from, named for the button. Absent for a copy with no source on record. */
   sourceName?: string;
   /** Whether that source already has a default saved, which decides what the button offers. */
   sourceDefault?: boolean;
@@ -88,6 +90,8 @@ export function ReaderSettings({
   // it rather than covering its last rows.
   const panelRef = useRef<HTMLDivElement>(null);
   useLayer('dialog', true, { ref: panelRef });
+  // The library key's question is open (#235): the key saves for every account, so it asks first.
+  const [askLibrary, setAskLibrary] = useState(false);
   // v0.61.0: Incognito reading, the account's switch (lib/incognito.ts) -- here because the reader is where it is wanted.
   const incognito = useIncognito();
   const toast = useToast();
@@ -306,11 +310,31 @@ export function ReaderSettings({
           from it at once, instead of the global default being wrong for half the library or each series
           having to be corrected by hand. A series you have already adjusted still wins over this.
         */}
+        {/*
+          A library's reading defaults (#235) reach EVERY account that opens a series filed there, so the key asks first --
+          inside the sheet, like every question here: a ConfirmDialog is z-50, under this sheet. What it saves is the
+          content's look (mode, pages per view, direction); the theme stays each reader's own.
+          Reintroduce the one-tap save: readerSourcePrefs.test.ts "the library key asks first" fails.
+        */}
         {libraryName && onLibraryDefault && (
           <Row label={tr('This library')}>
-            <button onClick={onLibraryDefault} className="w-full rounded-2xl border border-ink-700 py-3 text-sm text-fog-300" data-library-default>
-              {tr('Use these settings for every series in {library}', { library: libraryName })}
-            </button>
+            {!askLibrary ? (
+              <button onClick={() => setAskLibrary(true)} className="w-full rounded-2xl border border-ink-700 py-3 text-sm text-fog-300" data-library-default>
+                {tr('Use these settings for every series in {library}', { library: libraryName })}
+              </button>
+            ) : (
+              <div data-library-default-ask>
+                <p className="text-xs leading-snug text-fog-400">
+                  {tr('Every account that opens a series in {library} gets this mode, pages per view and direction, unless the series or its source has its own.', { library: libraryName })}
+                </p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <button onClick={() => { setAskLibrary(false); onLibraryDefault(); }} data-library-default-save
+                    className="rounded-2xl border border-accent bg-accent-soft py-3 text-sm text-accent">{tr('Save for everyone')}</button>
+                  <button onClick={() => setAskLibrary(false)}
+                    className="rounded-2xl border border-ink-700 py-3 text-sm text-fog-300">{tr('Cancel')}</button>
+                </div>
+              </div>
+            )}
           </Row>
         )}
         {sourceName && onSourceDefault && (

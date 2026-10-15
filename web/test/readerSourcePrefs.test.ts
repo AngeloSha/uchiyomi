@@ -241,21 +241,61 @@ test("the series' type is remembered for opening it offline, and junk reads back
   mem.clear();
 });
 
-test('a library\'s reading defaults sit under the source\'s and the series\' own', async () => {
-  const { titleLook, DEFAULT_PREFS } = await import('../lib/readerPrefs');
-  const lib = { mode: 'paged' as const, theme: 'sepia' as const, spread: true };
+test('a library\'s reading defaults sit under the source\'s and the series\' own (#235)', async () => {
+  const { titleLook, DEFAULT_PREFS } = prefs;
+  const lib = { mode: 'paged' as const, spread: true, pagedDirection: 'rtl' as const };
   // The reader hands titleLook the library look with the source's laid over it.
-  const l = titleLook({ ...DEFAULT_PREFS }, { ...lib }, {});
-  assert.deepEqual([l.prefs.mode, l.prefs.theme, l.prefs.spread], ['paged', 'sepia', true]);
+  const l = titleLook({ ...DEFAULT_PREFS, theme: 'sepia' }, { ...lib }, {});
+  assert.deepEqual([l.prefs.mode, l.prefs.spread, l.prefs.pagedDirection], ['paged', true, 'rtl']);
+  assert.equal(l.prefs.theme, 'sepia', "the reader's own theme stands: a library holds none");
   const s = titleLook({ ...DEFAULT_PREFS }, { ...lib, ...{ mode: 'vertical' as const } }, {});
   assert.equal(s.prefs.mode, 'vertical', "the source's mode beats the library's");
-  assert.equal(s.prefs.theme, 'sepia', 'and the rest still comes from the library');
+  assert.equal(s.prefs.spread, true, 'and the rest still comes from the library');
   const own = titleLook({ ...DEFAULT_PREFS }, { ...lib }, { mode: 'vertical' });
   assert.equal(own.prefs.mode, 'vertical', "the series' own mode beats the library's");
+  // A theme in a stored or served look is dropped, like any key a library may not hold.
+  assert.deepEqual(prefs.cleanLibraryLook({ mode: 'paged', theme: 'sepia', zoom: 2 }), { mode: 'paged' });
+  assert.equal(prefs.cleanLibraryLook({ theme: 'gray' }), null);
   // The reader does that merge (and asks an admin's sheet for the library's name) -- reintroduce by dropping the library look.
   const { readFileSync } = await import('fs');
   const { join } = await import('path');
   const src = readFileSync(join(__dirname, '..', 'app/reader/page.tsx'), 'utf8');
   assert.match(src, /\{ \.\.\.\(libLook \?\? \{\}\), \.\.\.\(src \? loadSourcePrefs\(src\.id\) : \{\}\) \}/);
   assert.match(src, /libraryName=\{seriesLibrary\?\.name\}/);
+  // What the admin's key saves: the content's look, never the theme.
+  assert.match(src, /const look: LibraryLook = \{ mode: prefs\.mode, spread: prefs\.spread, pagedDirection: prefs\.pagedDirection \};/,
+    'the library key saves something other than mode, pages per view and direction');
+});
+
+test("offline, the library's defaults the device last saw (#235)", async () => {
+  // Online, the reader remembers what the series answered; offline (the series request fails) it reads that back.
+  prefs.rememberLibraryLook('series-lib', { mode: 'paged', spread: true, theme: 'sepia' });
+  assert.deepEqual(prefs.libraryLookOf('series-lib'), { mode: 'paged', spread: true });
+  // A library whose defaults were cleared clears the memory, so the old look does not linger offline.
+  prefs.rememberLibraryLook('series-lib', null);
+  assert.equal(prefs.libraryLookOf('series-lib'), null);
+  localStorage.setItem('yomi_liblook_series-junk', '{"mode":"sideways"');
+  assert.equal(prefs.libraryLookOf('series-junk'), null, 'junk in storage reads as a look');
+  prefs.rememberLibraryLook('series-lib', { pagedDirection: 'rtl' });
+  assert.ok(![...mem.keys()].some((k) => k.startsWith('yomi_rs_') || k.startsWith('yomi_rp_')), 'the look was stored where the account sync collects');
+  mem.clear();
+  // Wired: remembered from the series' answer, read back in the offline branch.
+  // Reintroduce by dropping either line: the matching assertion fails.
+  const { readFileSync } = await import('fs');
+  const { join } = await import('path');
+  const src = readFileSync(join(__dirname, '..', 'app/reader/page.tsx'), 'utf8');
+  assert.match(src, /libLook = s\?\.libraryReader \?\? null;\s*rememberLibraryLook\(first\.seriesId, libLook\);/, 'the answer is not remembered');
+  assert.match(src, /libLook = libraryLookOf\(first\.seriesId\);/, 'offline does not read the remembered look');
+});
+
+test('the library key asks first: it changes the look for every account (#235)', async () => {
+  const { readFileSync } = await import('fs');
+  const { join } = await import('path');
+  const sheet = readFileSync(join(__dirname, '..', 'components/ReaderSettings.tsx'), 'utf8');
+  const row = sheet.slice(sheet.indexOf("<Row label={tr('This library')}>"), sheet.indexOf("<Row label={tr('This source')}>"));
+  assert.ok(row.length > 0, 'the library row is gone');
+  // Reintroduce the one-tap save (`onClick={onLibraryDefault}` on the first key): the first assertion fails.
+  assert.match(row, /<button onClick=\{\(\) => setAskLibrary\(true\)\}[^>]*data-library-default>/, 'the first tap saves instead of asking');
+  assert.equal((row.match(/onLibraryDefault\(\)/g) ?? []).length, 1, 'something other than the confirming key saves');
+  assert.match(row, /setAskLibrary\(false\); onLibraryDefault\(\);[^>]*data-library-default-save/, 'the confirming key does not save');
 });

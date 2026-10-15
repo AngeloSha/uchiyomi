@@ -1981,7 +1981,7 @@ paths:
                       id: { type: string }
                       name: { type: string }
                   libraryReader:
-                    description: The reading defaults of the library the series is in (`mode`, `theme`, `spread`, `pagedDirection`), or null when it has none.
+                    description: The reading defaults of the library the series is in (`mode`, `spread`, `pagedDirection`), or null when it has none.
                     type: [object, "null"]
                     additionalProperties: true
                   langStated:
@@ -9716,11 +9716,10 @@ paths:
                   default: true
                   description: Permit automatic AniList enrichment for series currently in this library.
                 readerPrefs:
-                  description: Reading defaults for the library's series (mode, theme, spread, pagedDirection); null clears them. Layered under a source's and a series' own.
+                  description: Reading defaults for the library's series (mode, spread, pagedDirection); null clears them. Layered under a source's and a series' own. No theme, which stays each reader's own; an unknown key is dropped.
                   type: [object, "null"]
                   properties:
                     mode: { type: string, enum: [vertical, paged] }
-                    theme: { type: string, enum: [amoled, sepia, gray] }
                     spread: { type: boolean }
                     pagedDirection: { type: string, enum: [ltr, rtl, series] }
       security:
@@ -9866,11 +9865,10 @@ paths:
                   type: boolean
                   description: Permit automatic AniList enrichment for series currently in this library.
                 readerPrefs:
-                  description: Reading defaults for the library's series (mode, theme, spread, pagedDirection); null clears them. Layered under a source's and a series' own.
+                  description: Reading defaults for the library's series (mode, spread, pagedDirection); null clears them. Layered under a source's and a series' own. No theme, which stays each reader's own; an unknown key is dropped.
                   type: [object, "null"]
                   properties:
                     mode: { type: string, enum: [vertical, paged] }
-                    theme: { type: string, enum: [amoled, sepia, gray] }
                     spread: { type: boolean }
                     pagedDirection: { type: string, enum: [ltr, rtl, series] }
                 members:

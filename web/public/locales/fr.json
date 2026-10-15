@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3832
+    "strings": 3833
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -3828,12 +3828,13 @@
   "Quick settings": "Paramètres rapides",
   "Last nightly Fix everything {when}: {what}": "Dernier « Tout réparer » de nuit {when} : {what}",
   "Last Fix everything {when}: {what}": "Dernier « Tout réparer » {when} : {what}",
-  "Reading defaults": "Reading defaults",
-  "Used for every series in this library, unless the series or its source has its own.": "Used for every series in this library, unless the series or its source has its own.",
-  "Reading mode": "Reading mode",
-  "Follow the series": "Follow the series",
-  "Use user default": "Use user default",
-  "Saved as the default for {library}.": "Saved as the default for {library}.",
-  "This library": "This library",
-  "Use these settings for every series in {library}": "Use these settings for every series in {library}"
+  "Reading defaults": "Réglages de lecture par défaut",
+  "Used for every series in this library, unless the series or its source has its own.": "Utilisés pour chaque série de cette bibliothèque, sauf si la série ou sa source a les siens.",
+  "Reading mode": "Mode de lecture",
+  "Use user default": "Le réglage de chaque personne",
+  "Saved as the default for {library}.": "Enregistré comme réglage par défaut de {library}.",
+  "This library": "Cette bibliothèque",
+  "Use these settings for every series in {library}": "Utiliser ces réglages pour chaque série de {library}",
+  "Every account that opens a series in {library} gets this mode, pages per view and direction, unless the series or its source has its own.": "Chaque compte qui ouvre une série de {library} aura ce mode, ce nombre de pages par vue et ce sens de lecture, sauf si la série ou sa source a les siens.",
+  "Save for everyone": "Enregistrer pour tous"
 }

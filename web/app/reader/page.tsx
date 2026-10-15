@@ -28,7 +28,7 @@ import { ReaderEndLabel, ReaderEndRadar } from '@/components/ReaderEndRadar';
 import { getOfflineChapter, getPageBlob, queueProgress, noteOfflineProgress, listSeriesDownloads, setOfflinePageJunk } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
 import { COLOR_FILTER, glide, loadDevicePrefs, saveDevicePrefs, type DevicePrefs } from '@/lib/readerDevice';
-import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER, loadSourcePrefs, saveSourcePrefs, clearSourcePrefs, globalPrefsChange, seriesPinChange, titleLook, mergePulled, rememberSeriesSource, seriesSourceOf, rememberSeriesType, seriesTypeOf } from '@/lib/readerPrefs';
+import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER, loadSourcePrefs, saveSourcePrefs, clearSourcePrefs, globalPrefsChange, seriesPinChange, titleLook, mergePulled, rememberSeriesSource, seriesSourceOf, rememberSeriesType, seriesTypeOf, rememberLibraryLook, libraryLookOf, type LibraryLook } from '@/lib/readerPrefs';
 import { guessMode, type AutoGuess } from '@/lib/readerAuto';
 import { ReaderSettings } from '@/components/ReaderSettings';
 import { SectionTitle, useImgRetry, useRtl } from '@/components/ui';
@@ -217,7 +217,7 @@ function ReaderInner() {
   const [seriesSource, setSeriesSource] = useState<{ id: string; name: string } | null>(null);
   // The library the series is in (admins only) and the reading defaults it carries (everyone): they sit under the source's own.
   const [seriesLibrary, setSeriesLibrary] = useState<{ id: string; name: string } | null>(null);
-  const [libraryLook, setLibraryLook] = useState<NonNullable<Series['libraryReader']> | null>(null);
+  const [libraryLook, setLibraryLook] = useState<LibraryLook | null>(null);
   // The work's language editions (v0.52.0, #72), for the chapter sheet's chips, and each chapter's number, which a
   // switch to another edition opens there. Both from requests the page makes anyway.
   const [editions, setEditions] = useState<EditionRow[] | null>(null);
@@ -385,12 +385,13 @@ function ReaderInner() {
       // this device last saw and the downloaded record's direction. The pages' shape is the chapter's own, either way.
       let seriesType = first.offline ? seriesTypeOf(first.seriesId) : null;
       let readsRtl = first.readingDirection === 'RIGHT_TO_LEFT';
-      let libLook: NonNullable<Series['libraryReader']> | null = null;
+      let libLook: LibraryLook | null = null;
       try {
         const s = await api<Series>(`/api/series/${first.seriesId}`);
         if (alive) {
           setRtl(s?.metadata?.readingDirection === 'RIGHT_TO_LEFT');
           libLook = s?.libraryReader ?? null;
+          rememberLibraryLook(first.seriesId, libLook);
           setLibraryLook(libLook);
           setSeriesLibrary(s?.library ?? null);
           readsRtl = s?.metadata?.readingDirection === 'RIGHT_TO_LEFT';
@@ -414,7 +415,9 @@ function ReaderInner() {
         // this device saw the last time it opened the series online.
         src = seriesSourceOf(first.seriesId);
         seriesType = seriesTypeOf(first.seriesId);
-        if (alive) setSeriesSource(src);
+        // And the library's reading defaults this device last saw (#235), so a downloaded chapter opens as it does online.
+        libLook = libraryLookOf(first.seriesId);
+        if (alive) { setSeriesSource(src); setLibraryLook(libLook); setSeriesLibrary(null); }
       }
       if (!alive) return;
       // F1 (v0.61.0): the title's look -- the stored default < its source's < its own (lib/readerPrefs.ts titleLook) --
@@ -1845,9 +1848,15 @@ function ReaderInner() {
             libraryName={seriesLibrary?.name}
             onLibraryDefault={() => {
               if (!seriesLibrary) return;
-              const look = { mode: prefs.mode, theme: prefs.theme, spread: prefs.spread, pagedDirection: prefs.pagedDirection };
+              // The content's look only (#235): the theme stays each reader's own, and the server would drop it anyway.
+              const look: LibraryLook = { mode: prefs.mode, spread: prefs.spread, pagedDirection: prefs.pagedDirection };
+              const sid = seriesId0;
               api(`/api/admin/libraries/${seriesLibrary.id}`, { method: 'PATCH', json: { readerPrefs: look } })
-                .then(() => { setLibraryLook(look); toast(tr('Saved as the default for {library}.', { library: seriesLibrary.name })); })
+                .then(() => {
+                  setLibraryLook(look);
+                  rememberLibraryLook(sid, look);
+                  toast(tr('Saved as the default for {library}.', { library: seriesLibrary.name }));
+                })
                 .catch(() => toast(tr('Could not save'), 'error'));
               setShowSettings(false);
             }}

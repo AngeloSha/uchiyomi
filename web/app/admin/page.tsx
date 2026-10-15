@@ -1098,8 +1098,8 @@ interface LibraryRow {
   age_rating: number | null;
   /** Automatic, implicit title/id lookups may contact AniList for series currently filed here. */
   anilist_lookup: boolean;
-  /** Reading defaults for its series (bff lib/libraryReader.ts); null when it has none. */
-  reader_prefs?: { mode?: string; theme?: string; spread?: boolean; pagedDirection?: string } | null;
+  /** Reading defaults for its series (bff lib/libraryReader.ts): mode, pages per view, direction; null when it has none. */
+  reader_prefs?: { mode?: string; spread?: boolean; pagedDirection?: string } | null;
   /** How many of its series were placed here by hand rather than by the folder rule. */
   pinned: number;
   /** Who can open it. Includes members with no restriction at all, who see every library. */
@@ -1339,12 +1339,11 @@ function LibraryDialog({ editing, start, libs, onClose, onSaved }: {
   const [anilistLookup, setAniListLookup] = useState(editing?.anilist_lookup ?? true);
   const [look, setLook] = useState<Record<string, string>>(() => {
     const r = editing?.reader_prefs;
-    return { mode: r?.mode ?? '', theme: r?.theme ?? '', spread: r?.spread === undefined ? '' : String(r.spread), pagedDirection: r?.pagedDirection ?? '' };
+    return { mode: r?.mode ?? '', spread: r?.spread === undefined ? '' : String(r.spread), pagedDirection: r?.pagedDirection ?? '' };
   });
   const readerPrefs = () => {
     const o: Record<string, unknown> = {};
     if (look.mode) o.mode = look.mode;
-    if (look.theme) o.theme = look.theme;
     if (look.spread) o.spread = look.spread === 'true';
     if (look.pagedDirection) o.pagedDirection = look.pagedDirection;
     return Object.keys(o).length ? o : null;
@@ -1485,12 +1484,12 @@ function LibraryDialog({ editing, start, libs, onClose, onSaved }: {
             {([
               ['mode', tr('Reading mode'), [['vertical', tr('Webtoon (scroll)')], ['paged', tr('Paged (swipe)')]]],
               ['spread', tr('Pages per view'), [['false', tr('Single')], ['true', tr('Double spread')]]],
-              ['pagedDirection', tr('Reading direction'), [['series', tr('Follow the series')], ['ltr', tr('Left to right')], ['rtl', tr('Right to left')]]],
+              ['pagedDirection', tr('Reading direction'), [['series', tr('Series default')], ['ltr', tr('Left to right')], ['rtl', tr('Right to left')]]],
             ] as const).map(([k, label, opts]) => (
               <label key={k} className="block text-[11px] text-fog-400">
                 {label}
                 <select value={look[k]} onChange={(e) => setLook({ ...look, [k]: e.target.value })}
-                  className="mt-1 w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1.5 text-xs text-fog-200" data-library-look={k}>
+                  className="field mt-1" data-library-look={k}>
                   <option value="">{tr('Use user default')}</option>
                   {opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>

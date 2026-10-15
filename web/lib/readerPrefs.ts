@@ -480,6 +480,44 @@ export function seriesTypeOf(seriesId: string): SeriesType | null {
   } catch { return null; }
 }
 
+/**
+ * The reading defaults of the library a series is in (#235): the content's look -- mode, pages per view, direction,
+ * never a theme -- an admin set for the whole library. They sit under the source's default (titleLook's `source`
+ * layer, the source's laid over them).
+ */
+export type LibraryLook = Pick<SeriesPrefs, 'mode' | 'spread' | 'pagedDirection'>;
+const LOOK_MODES: readonly string[] = ['vertical', 'paged'];
+const LOOK_DIRECTIONS: readonly string[] = ['ltr', 'rtl', 'series'];
+/** Only the keys and values a library may hold; null when nothing is left. */
+export function cleanLibraryLook(raw: unknown): LibraryLook | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  const out: LibraryLook = {};
+  if (typeof o.mode === 'string' && LOOK_MODES.includes(o.mode)) out.mode = o.mode as LibraryLook['mode'];
+  if (typeof o.spread === 'boolean') out.spread = o.spread;
+  if (typeof o.pagedDirection === 'string' && LOOK_DIRECTIONS.includes(o.pagedDirection)) out.pagedDirection = o.pagedDirection as LibraryLook['pagedDirection'];
+  return Object.keys(out).length ? out : null;
+}
+/**
+ * Remembered on this device, like the series' type and source, so a chapter downloaded for offline reading opens with
+ * the look it has online. Its own prefix: not `yomi_rs_`/`yomi_rp_`, which the account sync collects. A library with no
+ * defaults (null) clears the memory, so a cleared default does not linger offline.
+ * Reintroduce by remembering nothing: readerSourcePrefs.test.ts "offline, the library's defaults the device last saw" fails.
+ */
+const LIBRARY_LOOK_KEY = 'yomi_liblook_';
+export function rememberLibraryLook(seriesId: string, look: unknown) {
+  if (!seriesId) return;
+  try {
+    const clean = cleanLibraryLook(look);
+    if (clean) localStorage.setItem(`${LIBRARY_LOOK_KEY}${seriesId}`, JSON.stringify(clean));
+    else localStorage.removeItem(`${LIBRARY_LOOK_KEY}${seriesId}`);
+  } catch {}
+}
+export function libraryLookOf(seriesId: string): LibraryLook | null {
+  if (typeof window === 'undefined' || !seriesId) return null;
+  try { return cleanLibraryLook(JSON.parse(localStorage.getItem(`${LIBRARY_LOOK_KEY}${seriesId}`) || 'null')); } catch { return null; }
+}
+
 /** Every per-source default held locally, capped like the per-series map for the same reason. */
 function allSourcePrefs(): Record<string, SourcePrefs> {
   const out: Record<string, SourcePrefs> = {};

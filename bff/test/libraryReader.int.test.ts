@@ -39,9 +39,9 @@ test('a library carries reading defaults the reader can layer under the source a
   const as = (id: string, role: string) => ({ authorization: `Bearer ${app.jwt.sign({ sub: id, role })}` });
   let libId = '';
   try {
-    // Created with defaults; a key it does not know is dropped.
+    // Created with defaults; a key it does not know is dropped, and so is a theme: that is each reader's own.
     const made = await app.inject({ method: 'POST', url: '/api/admin/libraries', headers: as(admin, 'admin'),
-      payload: { name: 'Shelf', path: 'LrdShelf', readerPrefs: { mode: 'paged', spread: true, zoom: 3 } } });
+      payload: { name: 'Shelf', path: 'LrdShelf', readerPrefs: { mode: 'paged', theme: 'sepia', spread: true, zoom: 3 } } });
     assert.equal(made.statusCode, 200, made.body);
     libId = made.json().id;
     const row = async () => (await app.inject({ method: 'GET', url: '/api/admin/libraries', headers: as(admin, 'admin') }))
