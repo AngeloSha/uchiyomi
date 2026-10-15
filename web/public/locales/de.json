@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3808
+    "strings": 3813
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -3811,5 +3811,10 @@
   "Midnight": "Mitternacht",
   "True black suits OLED screens. Graphite and Midnight are softer on other displays.": "Echtes Schwarz passt zu OLED-Bildschirmen. Graphit und Mitternacht sind auf anderen Displays sanfter.",
   "Plan to read when I add a series": "Beim Hinzufügen einer Serie als „Geplant“ eintragen",
-  "A series you add to the library goes on your trackers as Plan to read, where it is not on your list yet. Nothing already on your list changes, and nothing is sent while Incognito reading is on.": "Eine Serie, die du der Bibliothek hinzufügst, kommt bei deinen Trackern als „Geplant“ auf die Liste, wo sie dort noch nicht steht. Was schon auf deiner Liste steht, bleibt unverändert, und solange Inkognito lesen an ist, wird nichts gesendet."
+  "A series you add to the library goes on your trackers as Plan to read, where it is not on your list yet. Nothing already on your list changes, and nothing is sent while Incognito reading is on.": "Eine Serie, die du der Bibliothek hinzufügst, kommt bei deinen Trackern als „Geplant“ auf die Liste, wo sie dort noch nicht steht. Was schon auf deiner Liste steht, bleibt unverändert, und solange Inkognito lesen an ist, wird nichts gesendet.",
+  "{name} did not accept that sign-in": "{name} did not accept that sign-in",
+  "Your password is used once to get a token and is not stored.": "Your password is used once to get a token and is not stored.",
+  "Sign in": "Sign in",
+  "Paste a token instead": "Paste a token instead",
+  "MangaUpdates list": "MangaUpdates list"
 }

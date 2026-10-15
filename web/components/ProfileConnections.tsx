@@ -146,6 +146,10 @@ function PlanOnAddRow() {
 function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
   const toast = useToast();
   const [token, setToken] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  // MangaUpdates shows no token anywhere, so it opens on a username and password form; a token can still be pasted.
+  const [byToken, setByToken] = useState(false);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
   // Why the last Connect failed, said under the field (role="status"); cleared as the paste changes.
@@ -156,6 +160,35 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
   // A service's own name is a proper noun: it is passed as a placeholder rather than translated.
   const label = t.label || t.provider;
 
+  const withPassword = t.provider === 'mangaupdates' && !byToken;
+
+  const connected = async (account: string) => {
+    toast(tr('Connected to {name} as {account}', { name: label, account }), 'success');
+    setToken(''); setPassword('');
+    setOpen(false);
+    refetch();
+    // Only AniList has a backfill endpoint today; the others start syncing from the next chapter read.
+    if (t.provider === 'anilist') {
+      const b = await api<{ series: number }>('/api/trackers/anilist/backfill', { json: {} });
+      if (b.series) toast(tr('Syncing {n} series you have already finished…', { n: b.series }), 'info', { busy: true });
+    }
+  };
+
+  const signIn = async () => {
+    if (!username.trim() || !password) return;
+    setBusy(true);
+    setProblem('');
+    try {
+      const r = await api<{ account: string }>(`/api/trackers/${t.provider}/login`, { json: { username: username.trim(), password } });
+      await connected(r.account);
+    } catch (e) {
+      let said = '';
+      try { said = JSON.parse((e as { body?: string })?.body || '{}')?.message || ''; } catch { /* not JSON */ }
+      setProblem(said || tr('{name} did not accept that sign-in', { name: label }));
+    }
+    setBusy(false);
+  };
+
   const connect = async () => {
     // The address of AniList's pin page, or a token endpoint's whole JSON answer, carries the token: it is taken out.
     // Anything else is sent as pasted -- a shape only ever chooses the message below, never refuses the paste.
@@ -165,15 +198,7 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
     setProblem('');
     try {
       const r = await api<{ account: string }>(`/api/trackers/${t.provider}/connect`, { json: { token: sent } });
-      toast(tr('Connected to {name} as {account}', { name: label, account: r.account }), 'success');
-      setToken('');
-      setOpen(false);
-      refetch();
-      // Only AniList has a backfill endpoint today; the others start syncing from the next chapter read.
-      if (t.provider === 'anilist') {
-        const b = await api<{ series: number }>('/api/trackers/anilist/backfill', { json: {} });
-        if (b.series) toast(tr('Syncing {n} series you have already finished…', { n: b.series }), 'info', { busy: true });
-      }
+      await connected(r.account);
     } catch (e) { setProblem(connectProblem(e, t.provider, label, sent)); }
     setBusy(false);
   };
@@ -248,22 +273,44 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
       </Row>
       {open && (
         <div id={formId} className="pb-3 last:pb-0">
-          <TokenHelp provider={t.provider} name={label} fallback={t.tokenHelp} />
-          {/* fog-500, not fog-600: this is the one security fact on the form, and fog-600 measures 2.6:1 on
-              the card -- below AA for any size of text. fog-500 (4.1:1) is the floor for helper text. */}
-          <p className="mt-2 max-w-prose text-[11px] text-fog-500">
-            {tr('The token carries access to your {name} account and cannot be scoped. It is stored encrypted here, and you can disconnect at any time.', { name: label })}
-          </p>
-          <div className="mt-3 flex gap-2">
-            <input value={token} onChange={(e) => { setToken(e.target.value); setProblem(''); }} type="password"
-              onKeyDown={(e) => { if (e.key === 'Enter' && !busy) connect(); }}
-              placeholder={tr('{name} access token', { name: label })} aria-label={tr('{name} access token', { name: label })}
-              autoCapitalize="none" autoCorrect="off" autoComplete="off" className="field min-w-0 flex-1" />
-            <button type="button" onClick={connect} disabled={busy || !token.trim()} className="btn-key btn-key-primary shrink-0">
-              {busy ? tr('Working…') : tr('Connect')}
-            </button>
-          </div>
-          <p role="status" aria-live="polite" data-tracker-problem className="mt-2 max-w-prose text-xs leading-snug text-red-300 empty:hidden">{problem}</p>
+          {withPassword ? (
+            <>
+              <p className="max-w-prose text-[11px] text-fog-500">{tr('Your password is used once to get a token and is not stored.')}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <input value={username} onChange={(e) => { setUsername(e.target.value); setProblem(''); }} placeholder={tr('Username')} aria-label={tr('Username')}
+                  autoCapitalize="none" autoCorrect="off" autoComplete="username" spellCheck={false} className="field min-w-0 flex-1" />
+                <input value={password} onChange={(e) => { setPassword(e.target.value); setProblem(''); }} type="password" placeholder={tr('Password')} aria-label={tr('Password')}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !busy) signIn(); }}
+                  autoComplete="current-password" className="field min-w-0 flex-1" />
+                <button type="button" onClick={signIn} disabled={busy || !username.trim() || !password} className="btn-key btn-key-primary shrink-0">
+                  {busy ? tr('Working…') : tr('Sign in')}
+                </button>
+              </div>
+              <p role="status" aria-live="polite" data-tracker-problem className="mt-2 max-w-prose text-xs leading-snug text-red-300 empty:hidden">{problem}</p>
+              <p className="mt-2 text-xs text-fog-500">
+                <button type="button" onClick={() => { setByToken(true); setProblem(''); }} className="underline underline-offset-2 hover:text-fog-300">{tr('Paste a token instead')}</button>
+              </p>
+            </>
+          ) : (
+            <>
+              <TokenHelp provider={t.provider} name={label} fallback={t.tokenHelp} />
+              {/* fog-500, not fog-600: this is the one security fact on the form, and fog-600 measures 2.6:1 on
+                  the card -- below AA for any size of text. fog-500 (4.1:1) is the floor for helper text. */}
+              <p className="mt-2 max-w-prose text-[11px] text-fog-500">
+                {tr('The token carries access to your {name} account and cannot be scoped. It is stored encrypted here, and you can disconnect at any time.', { name: label })}
+              </p>
+              <div className="mt-3 flex gap-2">
+                <input value={token} onChange={(e) => { setToken(e.target.value); setProblem(''); }} type="password"
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !busy) connect(); }}
+                  placeholder={tr('{name} access token', { name: label })} aria-label={tr('{name} access token', { name: label })}
+                  autoCapitalize="none" autoCorrect="off" autoComplete="off" className="field min-w-0 flex-1" />
+                <button type="button" onClick={connect} disabled={busy || !token.trim()} className="btn-key btn-key-primary shrink-0">
+                  {busy ? tr('Working…') : tr('Connect')}
+                </button>
+              </div>
+              <p role="status" aria-live="polite" data-tracker-problem className="mt-2 max-w-prose text-xs leading-snug text-red-300 empty:hidden">{problem}</p>
+            </>
+          )}
         </div>
       )}
     </>

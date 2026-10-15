@@ -130,7 +130,7 @@ export const DESTINATIONS: readonly Destination[] = [
 
   // ---- The import (app/admin/import/page.tsx) ----
   { key: 'import', label: 'Import a list', where: ADMIN, href: '/admin/import/', admin: true,
-    keywords: ['import', 'mihon', 'tachiyomi', 'tachibk', 'backup', 'mangadex', 'anilist', 'myanimelist', 'mal', 'kitsu',
+    keywords: ['import', 'mihon', 'tachiyomi', 'tachibk', 'backup', 'mangadex', 'anilist', 'myanimelist', 'mal', 'kitsu', 'mangaupdates',
       'migrate', 'move my library', 'paste titles'] },
 
   // ---- The profile's tabs (app/profile/page.tsx), cards and settings ----
@@ -158,7 +158,7 @@ export const DESTINATIONS: readonly Destination[] = [
     desktopHidden: true, keywords: ['push', 'notifications'] },
   { key: 'profile-connections', label: 'Connections', where: PROFILE, href: '/profile/?tab=Connections', keywords: ['integrations'] },
   { key: 'progress-tracking', label: 'Progress tracking', where: PROFILE_CONNECTIONS, href: '/profile/?tab=Connections&section=progress-tracking',
-    keywords: ['anilist', 'myanimelist', 'mal', 'kitsu', 'tracker', 'sync'] },
+    keywords: ['anilist', 'myanimelist', 'mal', 'kitsu', 'mangaupdates', 'tracker', 'sync'] },
   { key: 'opds', label: 'External readers (OPDS)', where: PROFILE_CONNECTIONS, href: '/profile/?tab=Connections&section=opds',
     desktopHidden: true, keywords: ['opds', 'koreader', 'panels', 'chunky', 'e-reader'] },
   { key: 'api-tokens', label: 'API tokens', where: PROFILE_CONNECTIONS, href: '/profile/?tab=Connections&section=api-tokens',

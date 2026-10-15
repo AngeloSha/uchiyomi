@@ -5745,7 +5745,7 @@ paths:
                       type: object
                       required: [provider, label, tokenHelp, connected, accountName, expiresAt, expiringSoon, lastSyncAt, lastError]
                       properties:
-                        provider: { type: string, enum: [anilist, myanimelist, kitsu] }
+                        provider: { type: string, enum: [anilist, myanimelist, kitsu, mangaupdates] }
                         label: { type: string }
                         tokenHelp: { type: string, description: "Where a token comes from, in English." }
                         authorizeUrl:
@@ -5797,7 +5797,7 @@ paths:
     post:
       tags:
         - personal
-      summary: Connect a tracker (AniList, MyAnimeList, Kitsu) with a pasted access token.
+      summary: Connect a tracker (AniList, MyAnimeList, Kitsu, MangaUpdates) with a pasted access token.
       operationId: postApiTrackersProviderConnect
       description: >-
         The token is checked against the service (who it belongs to) before it is stored, encrypted. Since v0.61.0
@@ -5811,7 +5811,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [anilist, myanimelist, kitsu]
+            enum: [anilist, myanimelist, kitsu, mangaupdates]
       requestBody:
         required: true
         content:
@@ -5842,6 +5842,40 @@ paths:
           description: >-
             `tracker_unreachable` `{error, message}`, or `tracker_refused` `{error, status?, message}`: the service
             could not be asked, or refused the request for a reason that is not the token.
+  /api/trackers/mangaupdates/login:
+    post:
+      tags:
+        - personal
+      summary: Connect MangaUpdates with a username and password.
+      operationId: postApiTrackersMangaUpdatesLogin
+      description: >-
+        MangaUpdates shows no token on any page, so this trades the credentials for its session token in one call and
+        stores the token, checked the way POST /api/trackers/{provider}/connect checks a pasted one. The password is
+        used for that call only: it is not stored or logged. 400 `rejected` when MangaUpdates refuses the sign-in (its
+        own reason is in `message`), 502 `unreachable` when it cannot be asked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body, or `rejected`
+        "401":
+          description: Not authenticated
+        "502":
+          description: The tracker could not be reached
   /api/trackers/{provider}/test:
     post:
       tags:
@@ -5861,7 +5895,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [anilist, myanimelist, kitsu]
+            enum: [anilist, myanimelist, kitsu, mangaupdates]
       security:
         - bearer: []
       responses:
@@ -5928,7 +5962,7 @@ paths:
       description: >-
         The one deliberate way down. Progress is otherwise monotonic per series (a tracker takes a lower
         number and rewrites the entry with no undo): this deletes the caller's `tracker_progress` floor for
-        the series on THAT provider only -- `anilist`, `myanimelist` or `kitsu`; any other name is 404
+        the series on THAT provider only -- `anilist`, `myanimelist`, `kitsu` or `mangaupdates`; any other name is 404
         `unknown_provider` -- and pushes the current local count at once, lower or not, even below what the
         service's own entry holds (since v0.61.2 every other push reads the entry first and leaves one at or past
         the chapter alone). The other providers' floors are untouched. No web control calls it; a floor the
@@ -11037,7 +11071,7 @@ paths:
         batches in every state, newest first, as `{content: [{id, origin, tracker, state, total, resolved,
         added, already, failed, skippedNovels, truncated, created_at, updated_at, stale}]}` — `origin` is
         `backup`, `mangadex`, `paste` or `tracker`, and `tracker` names the service (`anilist`, `myanimelist`,
-        `kitsu`) for a tracker batch, null otherwise; `skippedNovels` (integer: the novels a tracker read
+        `kitsu`, `mangaupdates`) for a tracker batch, null otherwise; `skippedNovels` (integer: the novels a tracker read
         dropped, 0 for the other origins) and `truncated` (boolean: the intake kept the first 500 titles not
         already in the library and more remained -- since v0.51.0 the titles already owned ride along as
         skipped rows and do not count -- or the tracker read hit its cap) are the intake's own answer kept on
@@ -11133,7 +11167,7 @@ paths:
                   description: Names the tracker intake; `tracker` says which service.
                 tracker:
                   type: string
-                  enum: [anilist, myanimelist, kitsu]
+                  enum: [anilist, myanimelist, kitsu, mangaupdates]
                   description: Which connected tracker to read the requesting admin's own list from.
                 statuses:
                   type: array

@@ -70,7 +70,7 @@ const entry = (mediaId: number, status: string, progress: number, m: ReturnType<
 
 test('every provider has a complete adapter', async () => {
   const { ADAPTERS, PROVIDERS, isProvider } = await import('../src/lib/trackerProviders');
-  assert.deepEqual(PROVIDERS.sort(), ['anilist', 'kitsu', 'myanimelist']);
+  assert.deepEqual(PROVIDERS.sort(), ['anilist', 'kitsu', 'mangaupdates', 'myanimelist']);
   for (const p of PROVIDERS) {
     const a = ADAPTERS[p];
     assert.equal(a.id, p, `${p}: the adapter must know its own id, since it is looked up by it`);
@@ -561,12 +561,12 @@ test('multi-provider tracking', { skip }, async (t) => {
 
     await t.test('status lists every provider, connected or not', async () => {
       const st = await trackers.statusFor(userId);
-      assert.equal(st.length, 3, 'the UI offers what it is told about, so all three must be listed');
+      assert.equal(st.length, 4, 'the UI offers what it is told about, so all four must be listed');
       for (const s of st) {
         assert.ok(s.label, 'each needs a display name');
         assert.ok(s.tokenHelp, 'each needs to say where a token comes from');
       }
-      assert.deepEqual(st.map((s) => s.connected), [false, false, false]);
+      assert.deepEqual(st.map((s) => s.connected), [false, false, false, false]);
     });
 
     await t.test('connections are independent: one does not disturb another', async () => {

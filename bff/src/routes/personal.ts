@@ -16,7 +16,7 @@ import { enrichSeries, seenCounts } from '../lib/enrich';
 import { env } from '../env';
 import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription } from '../lib/push';
 import { statusFor, saveConnection, disconnect, whoAmI, pushSeriesProgress, pushSeriesProgressAsync, clearTrackerFloor, testConnection } from '../lib/trackers';
-import { ADAPTERS, isProvider, verdictOf, type Provider } from '../lib/trackerProviders';
+import { ADAPTERS, isProvider, mangaupdatesLogin, verdictOf, type Provider } from '../lib/trackerProviders';
 import { logAudit } from '../lib/audit';
 import { noticeBook } from '../lib/noticeChapters';
 import { devicesOf, hourIn, lastDays, loadTimeline, summarize, validTz, yearRange } from '../lib/readingTime';
@@ -928,13 +928,11 @@ export default async function personalRoutes(app: FastifyInstance) {
   // for another reason is a 502 `tracker_refused` with the service's `status` (lib/trackerProviders.ts verdictOf).
   // Reintroduce by answering 400 `rejected` in the catch again: "connect: a network throw is 502 tracker_unreachable"
   // in trackerVerdicts.int.test.ts fails.
-  const connectTracker = async (provider: Provider, req: any, reply: any) => {
-    const b = z.object({ token: z.string().min(10).max(4000) }).safeParse(req.body);
+  const finishConnect = async (provider: Provider, req: any, reply: any, token: string) => {
     const adapter = ADAPTERS[provider];
-    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: `Paste your ${adapter.label} token.` });
     let who;
     try {
-      who = await whoAmI(b.data.token.trim(), provider);
+      who = await whoAmI(token, provider);
     } catch (e) {
       const v = verdictOf(e);
       if (v.verdict !== 'rejected') req.log.warn({ provider, verdict: v.verdict, status: v.status, err: (e as Error)?.message }, 'tracker connect: the token could not be checked');
@@ -952,10 +950,30 @@ export default async function personalRoutes(app: FastifyInstance) {
     if (!who) return reply.code(400).send({ error: 'rejected', message: `${adapter.label} did not accept that token.` });
     // Record the expiry so the UI can warn before it lapses; none of these services can refresh silently.
     const expires = adapter.tokenDays ? new Date(Date.now() + adapter.tokenDays * 86400000) : null;
-    await saveConnection(userIdOf(req), provider, b.data.token.trim(), who.name, expires);
+    await saveConnection(userIdOf(req), provider, token, who.name, expires);
     await logAudit('tracker.connect', { userId: userIdOf(req), detail: { provider, account: who.name }, req });
     return { ok: true, account: who.name };
   };
+
+  const connectTracker = async (provider: Provider, req: any, reply: any) => {
+    const b = z.object({ token: z.string().min(10).max(4000) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: `Paste your ${ADAPTERS[provider].label} token.` });
+    return finishConnect(provider, req, reply, b.data.token.trim());
+  };
+
+  // MangaUpdates has no token page: it trades a username and password for a session token. The password is used
+  // for that one call and is neither stored nor logged; what is kept is the token, checked like a pasted one.
+  app.post('/api/trackers/mangaupdates/login', async (req, reply) => {
+    const b = z.object({ username: z.string().min(1).max(320), password: z.string().min(1).max(500) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Enter your MangaUpdates username and password.' });
+    let grant: { token: string };
+    try { grant = await mangaupdatesLogin(b.data.username.trim(), b.data.password); }
+    catch (e) {
+      if ((e as { rejected?: boolean })?.rejected) return reply.code(400).send({ error: 'rejected', message: (e as Error).message || 'MangaUpdates did not accept that sign-in.' });
+      return reply.code(502).send({ error: 'unreachable', message: 'Could not reach MangaUpdates. Try again in a moment.' });
+    }
+    return finishConnect('mangaupdates', req, reply, grant.token);
+  });
 
   // Kept as its own path for the clients and docs that already reference it.
   app.post('/api/trackers/anilist', async (req, reply) => connectTracker('anilist', req, reply));

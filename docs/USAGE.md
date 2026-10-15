@@ -14,7 +14,7 @@ environment variables see [CONFIGURATION.md](CONFIGURATION.md).
 - [7. Sources: extensions, add-a-site and MangaDex](#7-sources-extensions-add-a-site-and-mangadex)
 - [8. The admin panel](#8-the-admin-panel)
 - [9. Security: 2FA, sessions, password](#9-security-2fa-sessions-password)
-- [10. Tracking: AniList, MyAnimeList and Kitsu](#10-tracking-anilist-myanimelist-and-kitsu)
+- [10. Tracking: AniList, MyAnimeList, Kitsu and MangaUpdates](#10-tracking-anilist-myanimelist-kitsu-and-mangaupdates)
 - [11. Install as an app & offline](#11-install-as-an-app--offline)
 - [12. Backups & restore](#12-backups--restore)
 - [13. Troubleshooting & FAQ](#13-troubleshooting--faq)
@@ -2961,7 +2961,7 @@ chapter) as plain numbers, which Homepage's **Custom API** widget can show:
 
 Uchiyomi does not record volumes, so there is no volume count.
 
-## 10. Tracking: AniList, MyAnimeList and Kitsu
+## 10. Tracking: AniList, MyAnimeList, Kitsu and MangaUpdates
 
 Connect your AniList account once under **Profile → Connections → Progress tracking** (tap **Connect** on the
 AniList row and the token field opens under it) and finishing a chapter here updates your AniList list on its own.
@@ -2985,8 +2985,9 @@ your reading. If the service rejects your token, Uchiyomi disables the connectio
 rather than failing silently; a token that has lapsed is noted on the row too, but the connection is left
 in place until you paste a new one. A service that is blocking or rate-limiting the server is a sync
 error to retry on the next chapter, never a verdict on the token, so it does not disconnect anything.
-Disconnect at any time. MyAnimeList and Kitsu connect the same way, each on its own row, and more than one can
-be connected at once; each syncs on its own.
+Disconnect at any time. MyAnimeList, Kitsu and MangaUpdates connect the same way, each on its own row (MangaUpdates
+takes your username and password, used once to get a token and not kept; a token you already have can be pasted
+instead), and more than one can be connected at once; each syncs on its own.
 
 **Reading or Completed** (since v0.61.2, [#201](https://github.com/AngeloSha/uchiyomi/issues/201)). Before each
 update Uchiyomi asks the tracker about the series and about your entry:
@@ -3004,6 +3005,7 @@ you finish puts it back to Reading, or you can fix it on the tracker straight aw
 Uchiyomi finds each series' AniList entry by itself, from the same lookup its art comes from, and since v0.55.7 only
 an entry that carries the series' name (section 4, *Cover and banner*); a series it cannot match has no link, and
 importing your list (below) links every title on it to its own entry.
+MangaUpdates is linked only that way, by importing its list. It has no re-read mark, so a re-read cannot be told from a first read there, and its *ended* answer covers a series that was cancelled as well as one that finished.
 
 **Plan to read when you add a series** (since v0.68.0, [#223](https://github.com/AngeloSha/uchiyomi/issues/223)).
 Off unless you turn it on, at the foot of **Profile → Connections → Progress tracking**. Then a series you add to the
