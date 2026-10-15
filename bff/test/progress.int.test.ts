@@ -95,8 +95,10 @@ test('completion rules', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' },
 });
 
 test('reachedEnd only trusts a real page count', () => {
-  assert.equal(reachedEnd(19, 20), true, 'last page');
-  assert.equal(reachedEnd(20, 20), true, 'past the end');
+  // Pages are numbered from 1: 19 of 20 is the page before the last, and it counts (lib/progressRules.ts says why).
+  assert.equal(reachedEnd(19, 20), true, 'the page before the last');
+  assert.equal(reachedEnd(20, 20), true, 'the last page');
+  assert.equal(reachedEnd(18, 20), false, 'two pages from the end');
   assert.equal(reachedEnd(5, 20), false, 'mid-book');
   assert.equal(reachedEnd(0, 0), false, 'unknown page count must never auto-complete');
   assert.equal(reachedEnd(0, 1), false, 'a 1-page count is not trustworthy');

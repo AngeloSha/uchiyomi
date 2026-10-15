@@ -2,7 +2,14 @@
 
 /** True when a page ping has reached the end of a book, i.e. it counts as finished even if the client never
  *  sent an explicit completion (fast scrolling blows past the last page). `pagesCount` is 0/unknown for some
- *  books, so only a real count is trusted — otherwise every first page would mark a book read. */
+ *  books, so only a real count is trusted — otherwise every first page would mark a book read.
+ *
+ *  Pages are numbered from 1, so `pagesCount - 1` is the page BEFORE the last. It reads like "the last index", but it
+ *  is kept (#264, 2026-10-16): it is when a chapter has counted as read since the first release -- the last page is
+ *  often a credits page nobody waits on -- and read-chapter cleanup (chapterCleanup.ts) holds a file by the same rule.
+ *  Its cost is that one read-through writes two completed events: this page's ping, upgraded here, and the last page's
+ *  own. So nothing counts completed EVENTS: every count of finished chapters is count(DISTINCT book_id)
+ *  (finishedOnce.int.test.ts). */
 export function reachedEnd(page: number, pagesCount: number): boolean {
   return pagesCount > 1 && page >= pagesCount - 1;
 }

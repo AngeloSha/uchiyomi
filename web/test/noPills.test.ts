@@ -196,7 +196,7 @@ const SLICES: [string, string, string, string][] = [
   ['app/updates/page.tsx', 'Updates: Expected this week', 'function ExpectedThisWeek(', 'export default function UpdatesPage('],
   ['app/series/page.tsx', 'Series: the outlook line', '{outlook && <p data-series-outlook', '<div data-series-keys'],
   // v0.61.0, reading time: the Reading Studio's tiles, hours and devices, and Wrapped's line and hours.
-  ['components/ProfileYou.tsx', 'Studio: reading time', '<div data-studio-time>', '{bookCountText(total)}'],
+  ['components/ProfileYou.tsx', 'Studio: reading time', '<div data-studio-time>', '{bookCountText(data?.windowChapters ?? total)}'],
   ['components/ProfileYou.tsx', 'Studio: by hour and devices', '<div data-studio-hours>', ''],
   ['app/wrapped/page.tsx', 'Wrapped: the time line', '{timeLine && <p data-wrapped-time', '</div>'],
   ['app/wrapped/page.tsx', 'Wrapped: by hour', '<div data-wrapped-hours', '(data?.topSeries?.length'],

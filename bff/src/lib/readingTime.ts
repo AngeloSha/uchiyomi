@@ -66,7 +66,7 @@ export interface Piece {
 export interface Timeline {
   /** Counted gaps and sitting openings (ms 0 until summarize prices them), in time order. */
   pieces: Piece[];
-  /** The finished chapters: every completed event, by time. */
+  /** Every completed event, by time -- a chapter can have several (summarize counts each chapter once). */
   finished: Array<{ at: number; bookId: string; seriesId: string }>;
 }
 
@@ -115,7 +115,7 @@ const median = (xs: number[]): number => {
 
 export interface WindowTime {
   ms: number;
-  /** Chapters finished in the window: completed events, as /api/stats and /api/wrapped count them. */
+  /** Chapters finished in the window, each once however many completed events it has (#264), as /api/wrapped counts the year. */
   chapters: number;
   /** The median time of a chapter finished in the window, null under PACE_MIN_CHAPTERS. */
   perChapterMs: number | null;
@@ -164,7 +164,10 @@ export function summarize(tl: Timeline, from: number, to: number, hourOf: (t: nu
   const times = [...perBook.values()];
   return {
     ms: Math.round(ms),
-    chapters: finished.length,
+    // A chapter, not an event (#264): one read-through writes two completed events -- the page before the last already
+    // counts as the end (progressRules.ts reachedEnd) and the last page sends its own. Reintroduce `finished.length`:
+    // "a read-through counts once" in readingTime.test.ts reads two.
+    chapters: new Set(finished.map((f) => f.bookId)).size,
     perChapterMs: times.length >= PACE_MIN_CHAPTERS ? Math.round(median(times)) : null,
     byHour: byHour.map((x) => Math.round(x)),
     byDevice, bySeries, perBook,

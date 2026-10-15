@@ -4584,9 +4584,12 @@ export default async function adminRoutes(app: FastifyInstance) {
         //
         // The lateral join runs once per member and is index-served by idx_events_recent
         // (user_id, created_at DESC); the alternative, a window function over every event row, is not.
+        //
+        // Chapters, not completed events, as /api/leaderboard counts them (#264): one read-through writes two.
+        // Reintroduce count(e.*): "a read-through counts once" in finishedOnce.int.test.ts finds two.
         `SELECT u.id, u.display_name, u.username, u.avatar,
-                count(e.*) FILTER (WHERE e.completed)::int AS total,
-                count(e.*) FILTER (WHERE e.completed AND e.created_at > now() - interval '7 days')::int AS week,
+                count(DISTINCT e.book_id) FILTER (WHERE e.completed)::int AS total,
+                count(DISTINCT e.book_id) FILTER (WHERE e.completed AND e.created_at > now() - interval '7 days')::int AS week,
                 max(e.created_at) AS last_active,
                 l.series_id AS last_series_id,
                 l.title     AS last_series_title

@@ -604,8 +604,11 @@ export default async function personalRoutes(app: FastifyInstance) {
                 (now() AT TIME ZONE 'UTC')::date,
                 interval '1 day') AS d
          LEFT JOIN (
+           -- A chapter finished twice in a day is one chapter that day (#264): one read-through writes two completed
+           -- events (the page before the last already counts as the end, lib/progressRules.ts reachedEnd, and the last
+           -- page sends its own). A chapter read again on ANOTHER day lights that day too, as it does the streak below.
            SELECT date_trunc('day', created_at AT TIME ZONE 'UTC')::date AS day,
-                  count(*) FILTER (WHERE completed) AS chapters
+                  count(DISTINCT book_id) FILTER (WHERE completed) AS chapters
              FROM reading_events
             WHERE user_id = $1 AND created_at > now() - make_interval(days => $2)
             GROUP BY 1
@@ -620,12 +623,23 @@ export default async function personalRoutes(app: FastifyInstance) {
       )
     ).map((r) => r.d);
     const streaks = computeStreaks(days);
-    const weekChapters = (await one<{ c: number }>(`SELECT count(*)::int AS c FROM reading_events WHERE user_id = $1 AND completed = true AND created_at > now() - interval '7 days'`, [uid]))?.c ?? 0;
+    // The week's chapters (the weekly goal) and the window's (the Studio's count over its heatmap): each finished chapter
+    // once, as the household board counts its week (#264). The window's is not the sum of byDay, where a chapter read
+    // again on another day counts on both days. Reintroduce count(*): "a read-through counts once" in
+    // finishedOnce.int.test.ts finds two.
+    const counts = await one<{ week: number; in_window: number }>(
+      `SELECT count(DISTINCT book_id) FILTER (WHERE created_at > now() - interval '7 days')::int AS week,
+              count(DISTINCT book_id)::int AS in_window
+         FROM reading_events
+        WHERE user_id = $1 AND completed = true AND created_at > now() - make_interval(days => $2)`,
+      [uid, windowDays],
+    );
+    const weekChapters = counts?.week ?? 0;
     const settings = ((await one<{ data: any }>('SELECT data FROM app_settings WHERE user_id = $1', [uid]))?.data) ?? {};
     // When reading started, so a year picker can offer the years that exist rather than guessing a range.
     // Null for an account that has never read anything, which is different from "started this year".
     const firstRead = (await one<{ at: string | null }>('SELECT min(created_at) AS at FROM reading_events WHERE user_id = $1', [uid]))?.at ?? null;
-    return { ...summary, days: windowDays, byDay, first_read_at: firstRead, currentStreak: streaks.current, longestStreak: streaks.longest, weekChapters, weeklyGoal: settings.weeklyGoal ?? 0 };
+    return { ...summary, days: windowDays, byDay, windowChapters: counts?.in_window ?? 0, first_read_at: firstRead, currentStreak: streaks.current, longestStreak: streaks.longest, weekChapters, weeklyGoal: settings.weeklyGoal ?? 0 };
   });
 
   /**
@@ -699,12 +713,19 @@ export default async function personalRoutes(app: FastifyInstance) {
     //
     // A half-open range rather than a function on the column, so the index on (user_id, created_at) is
     // usable; `extract(...)` was not sargable and scanned every event the account ever had.
+    //
+    // Each chapter once, on the day it was first finished that year (#264): one read-through writes two completed
+    // events (the page before the last already counts as the end, lib/progressRules.ts reachedEnd), and a re-read or
+    // an outbox replay writes more, so "69 chapters" was 40. The months, weekdays, days and top series below are
+    // built from these rows, so they add up to `chapters`. Reintroduce the plain SELECT: "a read-through counts once"
+    // in finishedOnce.int.test.ts finds two.
     const rows = await q<{ series_id: string; created_at: string }>(
-      `SELECT series_id, created_at
+      `SELECT DISTINCT ON (book_id) series_id, created_at
          FROM reading_events
         WHERE user_id = $1 AND completed = true
           AND created_at >= make_timestamptz($2, 1, 1, 0, 0, 0, 'UTC')
-          AND created_at <  make_timestamptz($3, 1, 1, 0, 0, 0, 'UTC')`,
+          AND created_at <  make_timestamptz($3, 1, 1, 0, 0, 0, 'UTC')
+        ORDER BY book_id, created_at, id`,
       [uid, year, year + 1],
     );
     const seriesCounts: Record<string, number> = {};

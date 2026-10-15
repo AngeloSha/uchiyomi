@@ -32,6 +32,8 @@ export interface Stats {
   series_touched: number;
   last_read_at: string | null;
   byDay: { day: string; chapters: number }[];
+  /** The window's finished chapters, each once (#264): not the sum of byDay, where a chapter read again on another day counts twice. */
+  windowChapters?: number;
   currentStreak: number;
   longestStreak: number;
   weekChapters: number;
@@ -208,7 +210,7 @@ export function StudioCard({ span = '' }: { span?: string }) {
           )}
           <div>
             <p className="mb-1.5 text-[11px] uppercase tracking-widest text-fog-500">
-              {bookCountText(total)}
+              {bookCountText(data?.windowChapters ?? total)}
             </p>
             {series.length > 0 && <Heatmap values={counts} start={series[0].day} />}
           </div>

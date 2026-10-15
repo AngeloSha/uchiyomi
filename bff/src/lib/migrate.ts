@@ -85,12 +85,15 @@ CREATE TABLE IF NOT EXISTS reading_events (
 CREATE INDEX IF NOT EXISTS idx_events_recent ON reading_events(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_events_series ON reading_events(user_id, series_id);
 
+-- A finished chapter counts ONCE (#264): count(*) counted completed EVENTS, and one read-through writes two -- the
+-- page before the last is already the end (reachedEnd, lib/progressRules.ts) and the last page sends its own -- so the
+-- profile's chapters and the badges built on them ran ahead of the household board, which always counted distinct.
 CREATE OR REPLACE VIEW reading_stats AS
 SELECT user_id,
-       count(*) FILTER (WHERE completed)              AS chapters_completed,
-       count(DISTINCT series_id)                      AS series_touched,
-       count(*)                                       AS total_events,
-       max(created_at)                                AS last_read_at
+       count(DISTINCT book_id) FILTER (WHERE completed) AS chapters_completed,
+       count(DISTINCT series_id)                        AS series_touched,
+       count(*)                                         AS total_events,
+       max(created_at)                                  AS last_read_at
 FROM reading_events GROUP BY user_id;
 
 CREATE TABLE IF NOT EXISTS app_settings (

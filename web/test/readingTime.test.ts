@@ -68,7 +68,7 @@ test('the Reading Studio: three squared tiles, the pace and its note, then By ho
   const src = code(read('components/ProfileYou.tsx'));
   // Its own key and endpoint, the window's and the reader's timezone in it (queryKeys.test.ts holds keys to endpoints).
   assert.match(src, /queryKey: \['stats-time', days, tz\],\s*queryFn: \(\) => api<ReadingTime>\(`\/api\/stats\/time\?days=\$\{days\}&tz=\$\{encodeURIComponent\(tz\)\}`\)/);
-  const block = src.slice(src.indexOf('<div data-studio-time>'), src.indexOf("{bookCountText(total)}"));
+  const block = src.slice(src.indexOf('<div data-studio-time>'), src.indexOf("{bookCountText(data?.windowChapters ?? total)}"));
   assert.match(block, /\{ label: tr\('Last 7 days'\), \.\.\.time\.week \},\s*\{ label: tr\('Last 30 days'\), \.\.\.time\.month \},\s*\{ label: String\(time\.year\.year\), \.\.\.time\.year \},/);
   assert.match(block, /className="grid grid-cols-3 gap-2"/);
   assert.match(block, /rounded-xl border/, 'the tiles are squared');
@@ -79,6 +79,14 @@ test('the Reading Studio: three squared tiles, the pace and its note, then By ho
   assert.ok(weekday > 0 && src.indexOf("tr('By hour')") > weekday && src.indexOf("tr('Devices')") > src.indexOf("tr('By hour')"), 'By hour and Devices follow By weekday');
   assert.match(src, /<Columns values=\{time\.window\.byHour\} \/>/);
   assert.match(src, /<Bars items=\{devices\} wideHint \/>/);
+});
+
+test('the Reading Studio counts each finished chapter once over its heatmap, as the server counts it (#264)', () => {
+  // The heatmap's days add a chapter read again on another day twice; the count above it is the server's own, once.
+  // Reintroduce by printing the sum: this finds `bookCountText(total)` again.
+  const src = code(read('components/ProfileYou.tsx'));
+  assert.match(src, /\{bookCountText\(data\?\.windowChapters \?\? total\)\}/);
+  assert.doesNotMatch(src, /\{bookCountText\(total\)\}/);
 });
 
 test('the series page puts "Catch up in" first on its outlook line, asking for a pace only when it can say one', () => {

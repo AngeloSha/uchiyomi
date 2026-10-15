@@ -105,6 +105,18 @@ test('per chapter: the median of the chapters finished with time, and nothing un
   assert.equal(T.summarize(three, T0 - HOUR, T0 + 24 * HOUR, utc, 's_c1').perChapterMs, null);
 });
 
+test('a read-through counts once (#264)', () => {
+  // One read-through writes two completed events: the page before the last already counts as the end
+  // (progressRules.ts reachedEnd) and the last page sends its own, seconds later. A re-read the same week is the same
+  // chapter again. Reintroduce `chapters: finished.length`: this reads three.
+  const read = [turn(0, 'c1'), turn(20, 'c1', { completed: true }), turn(40, 'c1', { completed: true })];
+  const again = turn(3 * 3600, 'c1', { completed: true });
+  const other = turn(3 * 3600 + 20, 'c2', { completed: true });
+  const tl = T.readingTimeline([...read, again, other], flat);
+  assert.equal(tl.finished.length, 4, 'the premise: four completed events');
+  assert.equal(all(tl).chapters, 2, 'two chapters, each once');
+});
+
 test('a window counts what began inside it', () => {
   // A gap that starts before the window is the earlier turn's, outside it.
   const tl = T.readingTimeline([turn(0), turn(60), turn(120)], flat);
