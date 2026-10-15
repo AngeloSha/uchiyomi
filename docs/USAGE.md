@@ -1950,6 +1950,16 @@ without you pressing anything. Since v0.48.3:
     copies for short chapters, gaps and the solver, the steps some finding offers — and leaves the rest to the
     cards. One run takes up to 20 short chapters and 5 series with gaps (the `REPAIR_SHORT_MAX` / `REPAIR_GAPS_MAX`
     defaults); what it did stays under the keys until the next press.
+  Under the header a line says how the last finished Fix everything went and how long ago (*Last nightly Fix
+  everything 3 hours ago: 2 need you*), so a nightly run nobody watched still reports. In the list of what needs you,
+  what a person decides comes first, and the cards no run or button can change (a cover, a description, a disk, a
+  tracker sign-in) come last, each keeping its order.
+- **By series / By check**, beside Fix everything, turns the page around: one card per series with everything that is
+  wrong with it, the series with the most problems first, each problem with the same keys its card has. Under each
+  series: *Open*, *Find missing chapters* where it has gaps, *Add details by hand* where it lacks a description or
+  genres, and *Remove from library* (hidden, no files deleted, everyone's progress kept). Tick several series and
+  *Remove N from library* removes them together. Findings about no single series (a source, a folder, the version) and
+  the duplicates card stay in the By check view.
 - **Open** goes to the chapter the finding is about: a short chapter opens in the reader; a gap or an impossible
   number opens the series with its list turned to that chapter and the row lit up (for a gap, the chapter just
   before it).

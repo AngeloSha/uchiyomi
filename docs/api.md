@@ -625,7 +625,7 @@ the next is installed), `files` (the later copy of a chapter saved twice deleted
 impossible chapter numbers deleted, with the delete route's guards) and `recheck`. It never presses Ignore.
 `GET /api/admin/health/autofix` answers `{run, last}` -- the live run and the newest finished one -- and
 `GET /api/admin/health/autofix/:runId` one run; `POST /api/admin/health/autofix/stop` stops it at its next safe point
-(`{ok, stopping}`), never inside a merge, a delete or a renumber. A run is `{id, status, startedAt, finishedAt?, by,
+(`{ok, stopping}`), never inside a merge, a delete or a renumber. A run is `{id, status, startedAt, finishedAt?, by, origin,
 phase, phaseIndex, stopping?, current?, summary?, log?}` (`stopping` from Stop until its safe point, for every
 viewer), every sentence a `Said` (`autofix.*` codes): `summary` is `{green, again, done, clears, needsYou}` -- `green`
 when nothing but Needs you is left, `again` when something a run could still change is left (what this one did not

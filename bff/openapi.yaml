@@ -136,13 +136,14 @@ components:
         their 18+ switch hides one of the series it names (`params.seriesIds`, since v0.55.1, judged on the series as it
         stands, a merged-away one included), and `current.title` the same way by `current.seriesIds`; a line written
         before v0.55.1, with no ids, is left out whatever it names.
-      required: [id, status, startedAt, by, phase, phaseIndex]
+      required: [id, status, startedAt, by, origin, phase, phaseIndex]
       properties:
         id: { type: string }
         status: { type: string, enum: [running, done, stopped, failed, interrupted] }
         startedAt: { type: string, format: date-time }
         finishedAt: { type: string, format: date-time }
         by: { type: string, nullable: true }
+        origin: { type: string, enum: [nightly, manual], description: 'How the run began: nightly for the scheduled one.' }
         phase:
           type: string
           nullable: true

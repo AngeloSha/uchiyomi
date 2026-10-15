@@ -17,7 +17,8 @@ import { IcChevronLeft, IcChevronRight, IcTrash, IcPlus, IcRefresh, IcX } from '
 import { LibraryFolders } from '@/components/LibraryFolders';
 import { addFolder, foldersOf, heldByOthers, heldByText, previewQuery, previewText, sameFolders, toggleFolder, typedFolder } from '@/lib/libraryFolders';
 import { CardProgress, HealthCardActions, HealthRow, hasCardActions, scanState, scanWorking } from '@/components/HealthActions';
-import { FixEverythingDialog, FixEverythingKey, SafeRepairLine } from '@/components/FixEverythingDialog';
+import { FixEverythingDialog, FixEverythingKey, LastFixLine, SafeRepairLine } from '@/components/FixEverythingDialog';
+import { HealthBySeries } from '@/components/HealthBySeries';
 import { AutofixRunProvider } from '@/lib/useAutofixRun';
 import { RepairHistory, RepairLiveStrip, RepairTaskLines } from '@/components/RepairLive';
 import { RESCAN_KEY, RescanPanel } from '@/components/RescanTask';
@@ -1851,6 +1852,7 @@ function LibraryPanel() {
 
 function Health() {
   const [open, setOpen] = useState<string | null>(null);
+  const [bySeries, setBySeries] = useState(false);
   // v0.55.0: Fix everything's dialog -- the question, the run, or how the run ended.
   const [fixing, setFixing] = useState(false);
   const { data, isFetching, refetch } = useQuery({
@@ -1866,6 +1868,7 @@ function Health() {
   // A Needs-you item's card key, in Fix everything's end: the dialog closes, and that card opens where it is.
   const showCheck = (id: string) => {
     setFixing(false);
+    setBySeries(false); // the card is in the by-check view
     setOpen(id);
     requestAnimationFrame(() => document.querySelector(`[data-health-check="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'start' }));
   };
@@ -1895,13 +1898,17 @@ function Health() {
             {/* v0.55.0: whenever any card has a finding -- where Fix all issues' row was, which only the repair's four
                 steps could summon. */}
             <FixEverythingKey checks={checks} onOpen={() => setFixing(true)} />
+            <button type="button" onClick={() => setBySeries((v) => !v)} aria-pressed={bySeries} className="btn-key" data-health-view>
+              {bySeries ? tr('By check') : tr('By series')}
+            </button>
           </div>
         </div>
 
+        <LastFixLine />
         <SafeRepairLine checks={checks} />
         <RepairLiveStrip />
 
-        {checks.map((c) => {
+        {bySeries ? <HealthBySeries checks={checks} /> : checks.map((c) => {
           const isOpen = open === c.id;
           // Notes explain important states that are deliberately not findings. A readable partial chapter, for
           // example, is absent from the active failure ledger but this note is the only place Health says where

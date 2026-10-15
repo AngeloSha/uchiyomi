@@ -358,6 +358,8 @@ test('Fix everything: one run over a library with something wrong on every card'
     const row = (await q(`SELECT kind, origin, status, by_user, step_ms, result FROM repair_runs WHERE id = $1`, [run.id]))[0];
     assert.equal(row.kind, 'autofix');
     assert.equal(row.origin, 'manual');
+    assert.equal(run.origin, 'manual', 'the run says how it began: Health\'s last-run line reads it');
+    assert.equal((await autofix.autofixState()).last?.origin, 'manual', 'and so does the state the page polls');
     assert.equal(row.by_user, adminId);
     assert.ok(row.step_ms.recheck >= 0, 'each phase timed');
     assert.equal(run.by, 'af-admin');

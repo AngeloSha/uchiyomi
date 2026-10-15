@@ -19,7 +19,7 @@
  * hidden: it falls back to its card's name.
  */
 import { keys, t as tr } from './i18n';
-import { untilText } from './format';
+import { relativeTime, untilText } from './format';
 import { saidWords, type Said } from './said';
 import { checkTitle } from './healthCopy';
 import type { RepairStatus } from './repairRun';
@@ -73,6 +73,8 @@ export interface AutofixRun {
   finishedAt?: string;
   /** Who pressed it; null for the nightly. */
   by: string | null;
+  /** `nightly` for the scheduled run; absent from a server older than this field. */
+  origin?: 'nightly' | 'manual';
   /** The phase it is in while it runs. */
   phase: AutofixPhase | null;
   /** 0-based, of AUTOFIX_PHASES.length. */
@@ -243,6 +245,21 @@ export function autofixHeadline(run: Pick<AutofixRun, 'status' | 'summary'>): { 
   return { kind: 'calm', tone: 'accent', text: tr('Nothing needs you') };
 }
 
+/**
+ * The line under Health's header about the last finished Fix everything, so a nightly run nobody watched still reports:
+ * "Last nightly Fix everything 3 hours ago: 2 need you". Nothing while a run goes, or before any has ended.
+ */
+export function lastFixLine(status: AutofixStatus | undefined): string | null {
+  if (!status || status.run?.status === 'running') return null;
+  const last = status.last;
+  if (!last || last.status === 'running' || !last.finishedAt) return null;
+  const when = relativeTime(last.finishedAt);
+  const what = autofixHeadline(last).text;
+  return last.origin === 'nightly'
+    ? tr('Last nightly Fix everything {when}: {what}', { when, what })
+    : tr('Last Fix everything {when}: {what}', { when, what });
+}
+
 /** How many of what it did the end shows; the rest are under Details. */
 export const DONE_SHOWN = 6;
 
@@ -296,12 +313,18 @@ export interface NeedsYouLine { check: string; text: string; key: NeedsYouKey | 
  * you" -- so a sentence this build cannot word falls back to its card's name.
  */
 export function needsYouLines(s: Pick<AutofixSummary, 'needsYou'> | null | undefined): NeedsYouLine[] {
-  return (s?.needsYou ?? []).map((n) => ({
+  const lines = (s?.needsYou ?? []).map((n) => ({
     check: n.check,
     text: saidWords(n.said) ?? checkTitle({ id: n.check, title: n.check }),
     key: needsYouKey(n.action),
   }));
+  // What a person decides first, then the cards no run or button changes (a cover, a description, a disk, a tracker).
+  const last = (l: NeedsYouLine) => (LOOK_ONLY.has(l.check) ? 1 : 0);
+  return lines.map((l, i) => ({ l, i })).sort((a, b) => last(a.l) - last(b.l) || a.i - b.i).map((x) => x.l);
 }
+
+/** Health cards whose findings Fix everything cannot change and a button cannot either: noticed, then looked at. */
+const LOOK_ONLY = new Set(['covers', 'details', 'disk', 'trackers']);
 
 /** What clears by itself, with when ("in 3 hours") where the server says. */
 export function clearsLines(s: Pick<AutofixSummary, 'clears'> | null | undefined, now = Date.now()): Array<{ text: string; when: string }> {

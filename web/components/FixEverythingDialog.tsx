@@ -21,7 +21,7 @@ import { useReduceEffects } from '@/lib/effects';
 import { TONE_TEXT } from '@/lib/status';
 import {
   autofixBlocked, autofixCount, autofixHeadline, autofixPhaseLabel, autofixProgress, autofixRefusal, autofixStepLine, autofixStepOf, autofixWait,
-  canRunAgain, cardsToLook, clearsLines, doneLines, fixView, logLines, needsYouLines, showFixEverything,
+  canRunAgain, cardsToLook, clearsLines, doneLines, fixView, lastFixLine, logLines, needsYouLines, showFixEverything,
   type AutofixRun, type DoneLine, type NeedsYouKey,
 } from '@/lib/autofix';
 import { useAutofix, type AutofixApi } from '@/lib/useAutofixRun';
@@ -76,6 +76,14 @@ export function FixEverythingKey({ checks, onOpen }: { checks: HealthCheck[]; on
       {tr('Fix everything')}
     </button>
   );
+}
+
+/** Under Health's header: how the last finished run went, so the nightly's result is there to read. */
+export function LastFixLine() {
+  const af = useAutofix();
+  const line = lastFixLine(af?.status);
+  if (!line) return null;
+  return <p className="full -mt-1 text-[11px] text-fog-500" data-fix-last>{line}</p>;
 }
 
 /**

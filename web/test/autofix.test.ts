@@ -19,7 +19,7 @@ import { setActiveLocale } from '../lib/format';
 import {
   AUTOFIX_PHASES, AUTOFIX_POLL_MS, DONE_SHOWN, autofixEndedIds, autofixHeadline, autofixOfRecord, autofixPhaseLabel, autofixPollMs,
   autofixProgress, autofixStepLine, canRunAgain, cardsToLook, clearsLines, doneLines, fixView, needsYouKey, needsYouLines,
-  nightlyModeOf, showFixEverything,
+  lastFixLine, nightlyModeOf, showFixEverything,
   type AutofixRun, type AutofixStatus, type AutofixSummary,
 } from '../lib/autofix';
 import { pageBody, pagePlan } from '../lib/repairRun';
@@ -326,7 +326,7 @@ test('each Needs-you item has its one key: its page, its card, or Admin → Sett
   assert.doesNotMatch(dialog(ended(run({ summary: summary({ done: EIGHT }) }))), /<span dir="auto" class="min-w-0 break-words">/, 'a line of what it did takes its direction from its first letter');
   // The card key closes the dialog, opens the card and scrolls to it, clear of the top bar.
   const health = slice(code('app/admin/page.tsx'), 'function Health()', 'function DesktopUpdateNote()');
-  assert.match(health, /setFixing\(false\);\s*setOpen\(id\);\s*requestAnimationFrame\(\(\) => document\.querySelector\(`\[data-health-check="\$\{CSS\.escape\(id\)\}"\]`\)\?\.scrollIntoView/);
+  assert.match(health, /setFixing\(false\);\s*(?:setBySeries\(false\);[^\n]*\n\s*)?setOpen\(id\);\s*requestAnimationFrame\(\(\) => document\.querySelector\(`\[data-health-check="\$\{CSS\.escape\(id\)\}"\]`\)\?\.scrollIntoView/);
   assert.match(health, /data-health-check=\{c\.id\} className=\{`[^`]*\bscroll-mt-4\b[^`]*\blg:scroll-mt-20\b/, 'the card scrolls under the top bar');
   // What clears by itself: one muted line each, with when.
   const at = new Date(Date.now() + 3 * 3_600_000 + 60_000).toISOString();
@@ -449,4 +449,26 @@ test('Recent repairs lists a Fix everything run with its headline and its first 
   assert.doesNotMatch(lines, /useQuery|AUTOFIX_URL|api</, 'Recent repairs asks for nothing per row');
   assert.match(lines, /if \(!run\) return r\.status === 'running' \? null : <p className="[^"]*">\{runStatusWord\(r\.status\)\}<\/p>;/,
     'a run that ended before its summary says nothing');
+});
+
+test('Needs you: what a person decides comes first, the cards no run can change last, each keeping its order', () => {
+  const lines = needsYouLines(summary({
+    needsYou: [
+      { check: 'covers', said: said('3 covers need a look') },
+      { check: 'duplicates', said: said('1 duplicate needs your decision') },
+      { check: 'disk', said: said('Low on space') },
+      { check: 'short-chapters', said: said('2 short chapters need your decision') },
+    ],
+  }));
+  assert.deepEqual(lines.map((l) => l.check), ['duplicates', 'short-chapters', 'covers', 'disk']);
+});
+
+test('the last-run line: the nightly says so, a live run or no run says nothing', () => {
+  const done = run({ origin: 'nightly', summary: summary({ needsYou: [{ check: 'covers', said: said('x') }] }) });
+  const nightly = lastFixLine({ run: null, last: done } as AutofixStatus);
+  assert.match(nightly ?? '', /^Last nightly Fix everything .+: 1 needs you$/);
+  assert.match(lastFixLine({ run: null, last: run({ origin: 'manual', summary: summary({ green: true }) }) } as AutofixStatus) ?? '', /^Last Fix everything .+: All green$/);
+  assert.equal(lastFixLine({ run: run({ status: 'running' }), last: done } as AutofixStatus), null);
+  assert.equal(lastFixLine({ run: null, last: null } as AutofixStatus), null);
+  assert.equal(lastFixLine(undefined), null);
 });
