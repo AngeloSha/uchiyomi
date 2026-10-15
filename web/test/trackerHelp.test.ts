@@ -59,6 +59,18 @@ test('MyAnimeList and Kitsu link to the guide\'s recipes, which exist', () => {
   assert.equal(tokenSource('goodreads'), null, 'a provider the web does not know keeps the server\'s help');
 });
 
+test('MangaUpdates links to the guide\'s recipe too: the password goes to MangaUpdates, never through this server (#244)', () => {
+  const mu = tokenSource('mangaupdates');
+  assert.equal(mu?.shows, false, 'no MangaUpdates page shows a token');
+  assert.match(mu!.url, /docs\/USAGE\.md#getting-a-mangaupdates-token$/);
+  const usage = readFileSync(join(ROOT, '..', 'docs', 'USAGE.md'), 'utf8');
+  assert.match(usage, /^### Getting a MangaUpdates token$/m);
+  assert.match(usage, /https:\/\/api\.mangaupdates\.com\/v1\/account\/login/, 'the MangaUpdates recipe lost its login endpoint');
+  // #244 as opened signed in through this server, with no rate limit: the row must stay a paste.
+  const rows = readFileSync(join(ROOT, 'components', 'ProfileConnections.tsx'), 'utf8');
+  assert.doesNotMatch(rows, /type="password" placeholder=\{tr\('Password'\)\}|\/login`/, 'a tracker row asks for a password again');
+});
+
 test('tokenFromPaste takes the token out of a link, a fragment or a JSON answer, and leaves anything else alone', () => {
   // Reintroduce sending the paste as it is: AniList's pin-page address goes to AniList whole and is refused.
   assert.equal(tokenFromPaste(`https://anilist.co/api/v2/oauth/pin#access_token=${JWT}&token_type=Bearer&expires_in=31536000`), JWT);
@@ -71,6 +83,9 @@ test('tokenFromPaste takes the token out of a link, a fragment or a JSON answer,
   assert.equal(tokenFromPaste('https://anilist.co/api/v2/oauth/authorize?client_id=53603&response_type=token'),
     'https://anilist.co/api/v2/oauth/authorize?client_id=53603&response_type=token', 'a link with no token in it is sent as pasted');
   assert.equal(tokenFromPaste('my_access_token=nope'), 'my_access_token=nope', 'a longer name is not access_token');
+  // What MangaUpdates' login answers (#244): the session token sits in `context`.
+  assert.equal(tokenFromPaste('{"status":"success","reason":"Successfully logged in","context":{"session_token":"mu-sess-7f3a","uid":4242}}'), 'mu-sess-7f3a');
+  assert.equal(tokenFromPaste('{\n    "context": {\n        "session_token": "mu-sess-pretty",\n        "uid": 1\n    }\n}'), 'mu-sess-pretty');
   assert.equal(tokenFromPaste('   '), '');
 });
 

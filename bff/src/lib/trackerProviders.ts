@@ -6,13 +6,16 @@
 // push progress and, since v0.36.0, read the account's list -- so those live here and the sync path and the
 // import intake pick an adapter instead of hardcoding AniList.
 //
-// AniList, MyAnimeList and Kitsu connect by PASTING A TOKEN, which is the same honest, dependency-free path AniList already used:
+// Every tracker connects by PASTING A TOKEN, which is the same honest, dependency-free path AniList already used:
 // no client registration, no redirect URLs to configure, nothing to keep secret server-side. A full OAuth
 // dance would need every self-hoster to register an application with each service and put the secret in
 // their compose file, which is a worse trade for a household app than copying a token once. Since v0.61.0
 // the AniList token comes from the project's own public client, whose page shows it (ANILIST_CLIENT_ID below):
-// still a paste, and still nothing secret anywhere. MangaUpdates has no token page either, so it takes a username
-// and password once (mangaupdatesLogin below) and keeps only the session token it hands back.
+// still a paste, and still nothing secret anywhere. MangaUpdates (#244) shows no token either: its login API answers
+// one, which the person asks for themself and pastes, as for MyAnimeList and Kitsu.
+
+import { createHash } from 'crypto';
+import { muTurn } from './mangaupdates';
 
 export type Provider = 'anilist' | 'myanimelist' | 'kitsu' | 'mangaupdates';
 
@@ -649,6 +652,17 @@ export const kitsuAdapter: TrackerAdapter = {
 };
 
 // ---------------------------------------------------------------------------- MangaUpdates
+//
+// #244 (@Squeaks72). MangaUpdates shows no token on any page, so it connects like MyAnimeList and Kitsu: a token the
+// person gets themself -- here the session token its login API answers for their username and password (docs/USAGE.md
+// "Getting a MangaUpdates token") -- pasted into the row. Their password goes to MangaUpdates only, never to this
+// server: a sign-in form here made the server a password relay with no rate limit, and taught browsers to save a
+// MangaUpdates password over the Uchiyomi one.
+//
+// Polite by construction. Every call waits its turn at lib/mangaupdates.ts's one-a-second gate, which Discover's name
+// lookups use too: a list import or a burst of pushes cannot get this server's address throttled for everyone. The
+// account's list ids are kept for ten minutes, and a push writes from what seriesState just read (`ref`), so it is
+// three calls -- the series, the entry, the write -- and the first of a session four.
 
 const MU_API = apiUrl('MANGAUPDATES_API_URL', 'https://api.mangaupdates.com/v1');
 const MU_PAGE = 100;
@@ -665,9 +679,10 @@ const muFormat = (t: unknown): LibraryEntry['format'] => {
 };
 
 async function muCall(token: string, path: string, init?: RequestInit): Promise<any> {
+  await muTurn();
   const r = await fetch(`${MU_API}${path}`, {
     ...init,
-    headers: { authorization: `Bearer ${token}`, accept: 'application/json', ...(init?.headers as any) },
+    headers: { authorization: `Bearer ${token}`, accept: 'application/json', 'user-agent': 'Uchiyomi/1.0 (self-hosted personal reader)', ...(init?.headers as any) },
     signal: AbortSignal.timeout(15000),
   });
   // A 401 is a session that is gone or never was ("This action requires a user account"). Writes are refused with a
@@ -680,36 +695,45 @@ async function muCall(token: string, path: string, init?: RequestInit): Promise<
   return r.json().catch(() => null);
 }
 
+/** The account's list ids, kept a while per token (by its hash: no token is kept as a key). */
+const MU_LISTS_MS = 10 * 60_000;
+const muLists = new Map<string, { at: number; ids: Record<ListStatus, number> }>();
+const tokenKey = (token: string) => createHash('sha256').update(token).digest('hex');
+
 /** The id each standard list has on this account, by bucket; falls back to the fixed ids. */
 async function muListIds(token: string): Promise<Record<ListStatus, number>> {
+  const key = tokenKey(token);
+  const kept = muLists.get(key);
+  if (kept && Date.now() - kept.at < MU_LISTS_MS) return kept.ids;
   const out = { ...MU_LIST_ID };
-  const lists = await muCall(token, '/lists').catch((e) => { if ((e as any).authFailed) throw e; return null; });
+  let answered = false;
+  const lists = await muCall(token, '/lists').then((l) => { answered = true; return l; })
+    .catch((e) => { if ((e as any).authFailed) throw e; return null; });
   for (const l of Array.isArray(lists) ? lists : []) {
     if (l?.custom || l?.list_id == null) continue;
     for (const st of LIST_STATUSES) if (MU_LIST_TYPE[st] === l.type) out[st] = Number(l.list_id);
   }
+  // Only an answer is kept: a failed read falls back to the fixed ids this once, and asks again next time.
+  if (answered) {
+    if (muLists.size > 200) muLists.clear();
+    muLists.set(key, { at: Date.now(), ids: out });
+  }
   return out;
 }
 
-/** Log in with a username and password; the session token is all that is kept. */
-export async function mangaupdatesLogin(username: string, password: string): Promise<{ token: string }> {
-  const r = await fetch(`${MU_API}/account/login`, {
-    method: 'PUT', headers: { 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify({ username, password }), signal: AbortSignal.timeout(15000),
-  });
-  const j: any = await r.json().catch(() => null);
-  const token = j?.context?.session_token;
-  if (!r.ok || typeof token !== 'string' || !token) {
-    const why = typeof j?.reason === 'string' ? j.reason : '';
-    throw Object.assign(new Error(why ? `MangaUpdates: ${why}` : `MangaUpdates did not give a token (${r.status})`), { rejected: r.status === 400 || r.status === 401 });
-  }
-  return { token };
+/** What seriesState read, for setProgress to write from (`ref`): the account's list ids and the list the entry is on. */
+interface MuRef { ids: Record<ListStatus, number>; onList: number | null }
+
+/** This account's entry for a series: its list and chapter, or null when it is on no list (MangaUpdates answers 404). */
+async function muEntry(token: string, sid: number): Promise<{ list_id?: number; status?: { chapter?: number } } | null> {
+  try { return await muCall(token, `/lists/series/${sid}`); }
+  catch (e) { if ((e as any).notFound) return null; throw e; }
 }
 
 export const mangaupdatesAdapter: TrackerAdapter = {
   id: 'mangaupdates',
   label: 'MangaUpdates',
-  tokenHelp: 'Sign in with your MangaUpdates username and password, or paste a session token you already have.',
+  tokenHelp: 'MangaUpdates shows no token on any page: its login API answers a session token for your username and password (see "Getting a MangaUpdates token" in the guide). Paste the session_token, or the whole answer.',
   tokenDays: null,
   async whoAmI(token) {
     const d = await muCall(token, '/account/profile');
@@ -736,7 +760,7 @@ export const mangaupdatesAdapter: TrackerAdapter = {
           seen.add(String(sid));
           out.push({
             externalId: String(sid), ...t, status,
-            progress: Math.max(0, Math.floor(Number(row?.record?.status?.chapter) || 0)),
+            progress: progressOf(row?.record?.status?.chapter),
             format: muFormat(row?.metadata?.series?.type),
           });
           if (out.length >= max) return out;
@@ -753,9 +777,7 @@ export const mangaupdatesAdapter: TrackerAdapter = {
     // The series is public; the entry is this account's own, and is simply absent (404) until it is on a list.
     const series = await muCall(token, `/series/${sid}`).catch((e) => { if ((e as any).notFound) return null; throw e; });
     const ids = await muListIds(token);
-    let current: any = null;
-    try { current = await muCall(token, `/lists/series/${sid}`); }
-    catch (e) { if (!(e as any).notFound) throw e; }
+    const current = await muEntry(token, sid);
     // `completed` is the one thing MangaUpdates states outright, and it covers both ways a series stops --
     // finished or cancelled. Its `status` is free prose ("17 Volumes (Ongoing)"), so only the flag is read.
     const ended = series?.completed === true;
@@ -765,28 +787,31 @@ export const mangaupdatesAdapter: TrackerAdapter = {
     // where setProgress below leaves it; MangaUpdates has no re-read flag, so a re-read cannot be told apart here.
     const onList = current?.list_id != null ? Number(current.list_id) : null;
     const status = onList == null ? null : (LIST_STATUSES.find((st) => ids[st] === onList) ?? 'reading');
+    const ref: MuRef = { ids, onList };
     return {
       ended,
       total,
       entry: status ? { status, progress: progressOf(current?.status?.chapter) } : null,
+      ref,
     };
   },
-  async setProgress(token, externalId, chapters, status) {
+  async setProgress(token, externalId, chapters, status, state) {
     const sid = Number(externalId);
     if (!Number.isInteger(sid)) throw new Error('mangaupdates: not a series id');
-    const ids = await muListIds(token);
-    let current: any = null;
-    try { current = await muCall(token, `/lists/series/${sid}`); }
-    catch (e) { if (!(e as any).notFound) throw e; }
-    // A completed push moves it to the complete list. Otherwise it stays where it is, except that a wish, hold or
-    // unfinished entry being read goes to reading; an entry on a custom list is left on it.
-    const onList: number | null = current?.list_id != null ? Number(current.list_id) : null;
+    // What seriesState just read, when this push read it (the usual case); else asked now.
+    const known = state?.ref as MuRef | undefined;
+    const ids = known?.ids ?? await muListIds(token);
+    const onList = known ? known.onList : ((e) => (e?.list_id != null ? Number(e.list_id) : null))(await muEntry(token, sid));
+    // A completed push moves it to the complete list; a plan (an add, #223, on a series on no list) puts it on the wish
+    // list. Otherwise it stays where it is, except that a wish, hold or unfinished entry being read goes to reading; an
+    // entry on a custom list is left on it. MangaUpdates has no re-read mark, so a re-read is reading.
     const standard = Object.values(ids);
     const target = status === 'completed' ? ids.completed
+      : status === 'planning' ? (onList ?? ids.plan_to_read)
       : onList != null && !standard.includes(onList) ? onList
       : ids.reading;
     const item = { series: { id: sid }, list_id: target, status: { chapter: chapters } };
-    const write = () => muCall(token, current ? '/lists/series/update' : '/lists/series', {
+    const write = () => muCall(token, onList != null ? '/lists/series/update' : '/lists/series', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify([item]),
     });
     try { await write(); }

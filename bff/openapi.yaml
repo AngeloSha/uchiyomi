@@ -5872,40 +5872,6 @@ paths:
           description: >-
             `tracker_unreachable` `{error, message}`, or `tracker_refused` `{error, status?, message}`: the service
             could not be asked, or refused the request for a reason that is not the token.
-  /api/trackers/mangaupdates/login:
-    post:
-      tags:
-        - personal
-      summary: Connect MangaUpdates with a username and password.
-      operationId: postApiTrackersMangaUpdatesLogin
-      description: >-
-        MangaUpdates shows no token on any page, so this trades the credentials for its session token in one call and
-        stores the token, checked the way POST /api/trackers/{provider}/connect checks a pasted one. The password is
-        used for that call only: it is not stored or logged. 400 `rejected` when MangaUpdates refuses the sign-in (its
-        own reason is in `message`), 502 `unreachable` when it cannot be asked.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [username, password]
-              properties:
-                username:
-                  type: string
-                password:
-                  type: string
-      security:
-        - bearer: []
-      responses:
-        "200":
-          description: OK
-        "400":
-          description: Malformed body, or `rejected`
-        "401":
-          description: Not authenticated
-        "502":
-          description: The tracker could not be reached
   /api/trackers/{provider}/test:
     post:
       tags:

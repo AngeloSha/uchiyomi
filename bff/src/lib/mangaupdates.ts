@@ -8,20 +8,27 @@
  * Read once at module load; unset, it is MangaUpdates' own API (docs/CONFIGURATION.md).
  */
 const MU = (process.env.MANGAUPDATES_API_URL || 'https://api.mangaupdates.com/v1').replace(/\/+$/, '');
-const GAP_MS = 1000;
+let gapMs = 1000;
 let nextAt = 0;
 
-/** Wait for this request's turn: one a second, whoever asks. */
-async function turn(): Promise<void> {
+/**
+ * Wait for this request's turn: one a second, whoever asks -- Discover's name lookups here and, since #244, the
+ * MangaUpdates tracker (lib/trackerProviders.ts), which goes through this same gate so one person's list import or a
+ * burst of pushes cannot get the server's address throttled for everyone else's lookups.
+ */
+export async function muTurn(): Promise<void> {
   const now = Date.now();
   const start = Math.max(now, nextAt);
-  nextAt = start + GAP_MS;
+  nextAt = start + gapMs;
   if (start > now) await new Promise((r) => setTimeout(r, start - now));
 }
 
+/** Tests only: a shorter gap, so a suite of calls does not take a second each. */
+export function setMangaUpdatesGap(ms: number): void { gapMs = ms; nextAt = 0; }
+
 /** One MangaUpdates call as JSON. Throws on anything but an answer: a network error, a 429 or a 5xx is not a miss. */
 async function muFetch(path: string, init?: RequestInit): Promise<any> {
-  await turn();
+  await muTurn();
   const r = await fetch(`${MU}${path}`, {
     ...init,
     headers: { 'content-type': 'application/json', accept: 'application/json', 'user-agent': 'Uchiyomi/1.0 (self-hosted personal reader)' },

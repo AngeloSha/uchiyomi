@@ -6,8 +6,9 @@
 // did not accept that token". The owner registered a public AniList client for the project, id 53603, whose redirect is
 // AniList's own pin page: its authorize link asks the person to approve Uchiyomi and then SHOWS the token (AniList's
 // implicit grant). Nothing secret is involved -- a client id is public by design, and no client secret exists anywhere
-// in this app -- and it is still paste-a-token, not a sign-in: nothing comes back to this server. MyAnimeList and Kitsu
-// show no token on any page, so their help says so and links to the guide's recipes (docs/USAGE.md, section 10).
+// in this app -- and it is still paste-a-token, not a sign-in: nothing comes back to this server. MyAnimeList, Kitsu and
+// MangaUpdates (#244) show no token on any page, so their help says so and links to the guide's recipes (docs/USAGE.md,
+// section 10): a person's password goes to the service, never through this server.
 //
 // The server sends the same AniList link as `authorizeUrl` in GET /api/trackers, for API clients
 // (bff/src/lib/trackerProviders.ts); web/test/trackerHelp.test.ts holds the two to one address.
@@ -35,6 +36,7 @@ export function tokenSource(provider: string): { url: string; shows: boolean } |
     case 'anilist': return { url: anilistTokenUrl(), shows: true };
     case 'myanimelist': return { url: `${GUIDE}#getting-a-myanimelist-token`, shows: false };
     case 'kitsu': return { url: `${GUIDE}#getting-a-kitsu-token`, shows: false };
+    case 'mangaupdates': return { url: `${GUIDE}#getting-a-mangaupdates-token`, shows: false };
     default: return null;
   }
 }
@@ -42,9 +44,10 @@ export function tokenSource(provider: string): { url: string; shows: boolean } |
 /**
  * `access_token` as a link or a fragment carries it (`#access_token=…&token_type=…`, the address of AniList's pin page),
  * or as a token endpoint's JSON answer does (`"access_token":"…"`, what the guide's curl prints for MyAnimeList and
- * Kitsu). What follows is the token, up to the next `&`, quote, `#` or space.
+ * Kitsu) -- or `session_token`, as MangaUpdates' login answers it (`"context":{"session_token":"…"}`, #244). What
+ * follows is the token, up to the next `&`, quote, `#` or space.
  */
-const ACCESS_TOKEN = /(?:^|[#?&\s"'{,])access_token(?:=|"\s*:\s*")([^&\s"'#]+)/;
+const ACCESS_TOKEN = /(?:^|[#?&\s"'{,])(?:access_token|session_token)(?:=|"\s*:\s*")([^&\s"'#]+)/;
 
 /**
  * The token in a paste: out of a link, a fragment or a JSON answer when the paste carries `access_token`, otherwise the

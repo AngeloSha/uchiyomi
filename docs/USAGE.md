@@ -3050,9 +3050,9 @@ your reading. If the service rejects your token, Uchiyomi disables the connectio
 rather than failing silently; a token that has lapsed is noted on the row too, but the connection is left
 in place until you paste a new one. A service that is blocking or rate-limiting the server is a sync
 error to retry on the next chapter, never a verdict on the token, so it does not disconnect anything.
-Disconnect at any time. MyAnimeList, Kitsu and MangaUpdates connect the same way, each on its own row (MangaUpdates
-takes your username and password, used once to get a token and not kept; a token you already have can be pasted
-instead), and more than one can be connected at once; each syncs on its own.
+Disconnect at any time. MyAnimeList, Kitsu and MangaUpdates connect the same way, each on its own row with a token you
+get yourself (the recipes are below; your password goes to the service only, never to Uchiyomi), and more than one can
+be connected at once; each syncs on its own.
 
 **Reading or Completed** (since v0.61.2, [#201](https://github.com/AngeloSha/uchiyomi/issues/201)). Before each
 update Uchiyomi asks the tracker about the series and about your entry:
@@ -3149,6 +3149,23 @@ curl -s https://kitsu.io/api/oauth/token \
 
 Paste the answer's `access_token` into the Kitsu row (or the whole answer). It lasts 30 days (`expires_in`, in
 seconds); run the command again for a new one. Your password goes to Kitsu only, never to Uchiyomi.
+
+### Getting a MangaUpdates token
+
+MangaUpdates gives a session token to its login API for your username and password. In a terminal (the password is
+read without being shown, and `jq` writes the request, so a password with quotes or backslashes in it still arrives
+whole):
+
+```bash
+printf 'MangaUpdates password: '; read -rs MU_PASSWORD; echo
+jq -n --arg username 'your-name' --arg password "$MU_PASSWORD" '{$username, $password}' |
+  curl -s -X PUT https://api.mangaupdates.com/v1/account/login \
+    -H 'Content-Type: application/json' --data @-
+```
+
+Paste the answer's `session_token` (inside `context`) into the MangaUpdates row, or the whole answer. MangaUpdates does
+not say when a session ends; when the row says the token no longer works, run the command again. Your password goes to
+MangaUpdates only, never to Uchiyomi. Uchiyomi asks MangaUpdates at most once a second, whoever is asking.
 
 ## 11. Install as an app & offline
 
