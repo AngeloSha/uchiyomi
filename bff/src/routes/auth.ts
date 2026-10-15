@@ -470,14 +470,22 @@ export default async function authRoutes(app: FastifyInstance) {
     if (!wanted) throw new Error('no_username');
 
     if (env.OIDC_LINK_BY_USERNAME) {
-      const local = await one<{ id: string; oidc_sub: string | null }>(
-        'SELECT id, oidc_sub FROM users WHERE username = $1', [wanted],
-      );
+      // Adopt only by the username the provider itself reports, exactly -- what the setting promises (env.ts). `wanted`
+      // is a name for a NEW account: it falls back to the email's local part (email_verified unread, the domain
+      // dropped) and strips characters, so adopting by it handed an existing account, an admin's included, to any
+      // identity whose email or cleaned name happened to match (v0.69.1). Reintroduce by looking up `wanted`:
+      // oidcLinkByUsername.int.test.ts adopts 'admin' for an identity that reports no username at all.
+      const reported = claims.username;
+      const local = reported
+        ? await one<{ id: string; oidc_sub: string | null }>('SELECT id, oidc_sub FROM users WHERE username = $1', [reported])
+        : null;
       // Never steal an account already bound to a different SSO identity.
       if (local && !local.oidc_sub) {
         await q('UPDATE users SET oidc_issuer = $2, oidc_sub = $3 WHERE id = $1', [local.id, claims.issuer, claims.sub]);
-        await logAudit('user.oidc_linked', { userId: local.id, username: wanted, detail: { issuer: claims.issuer } });
-        return local.id;
+        await logAudit('user.oidc_linked', { userId: local.id, username: reported, detail: { issuer: claims.issuer } });
+        // Linked now, so the linked account's path runs: OIDC_ADMIN_GROUP sets the role from this first sign-in on,
+        // where adoption used to keep whatever role the account had (an admin outside the group stayed one).
+        return resolveOidcUser(claims);
       }
       if (local) throw new Error('username_taken');
     }
