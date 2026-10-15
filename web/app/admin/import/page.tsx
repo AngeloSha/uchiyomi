@@ -29,7 +29,7 @@ import { useLayer } from '@/lib/layers';
 import { t as tr, keys } from '@/lib/i18n';
 import { selectedText } from '@/lib/counted';
 import type { Src } from '@/lib/sourceGroups';
-import type { TrackerStatus } from '@/lib/types';
+import { useTrackers, usableTrackers, brokenTrackers } from '@/lib/trackerHealth';
 import {
   needsAttention, confidenceLabel, confidenceColor, matchTitleDiffers, matchedViaAlt, openBatches, batchStateLabel, batchOriginLabel,
   runStatusLabel, runStatusColor, linkedCount, linkedLine, truncatedWords, sameSourcePair, alreadyImported,
@@ -88,12 +88,10 @@ function TrackerIntake({ starting, onStart }: {
   starting: boolean;
   onStart: (tracker: string, statuses: ListStatus[]) => void;
 }) {
-  const { data, isPending } = useQuery({
-    queryKey: ['trackers'],
-    queryFn: () => api<{ content: TrackerStatus[] }>('/api/trackers'),
-    staleTime: 30_000,
-  });
-  const connected = (data?.content ?? []).filter((t) => t.connected);
+  const { data, isPending } = useTrackers({ staleTime: 30_000 });
+  // Only a connection that works can be read from; one that needs reconnecting is said so below instead of offered.
+  const connected = usableTrackers(data);
+  const broken = brokenTrackers(data);
   const [tracker, setTracker] = useState<string | null>(null);
   const [statuses, setStatuses] = useState<Set<ListStatus>>(() => new Set(LIST_STATUSES.filter((s) => s.on).map((s) => s.id)));
   // The first connected provider is the pick until a chip is tapped; a provider disconnected meanwhile
@@ -112,7 +110,7 @@ function TrackerIntake({ starting, onStart }: {
       <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-fog-500">{tr('From your tracker')}</p>
       {!connected.length ? (
         <Link href="/profile/?tab=Connections&card=tracking" className="block text-[11px] text-fog-500 underline decoration-ink-600 underline-offset-2 hover:text-fog-300">
-          {NOT_CONNECTED()}
+          {broken.length ? tr('Your tracker rejected the saved login. Reconnect it under Profile.') : NOT_CONNECTED()}
         </Link>
       ) : (
         <>

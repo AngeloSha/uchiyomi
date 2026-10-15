@@ -7,6 +7,7 @@ import { BottomNav } from './BottomNav';
 import { TopNav } from './TopNav';
 import { Sidebar } from './Sidebar';
 import { HealthBanner } from './HealthAlert';
+import { TrackerAlert } from './TrackerAlert';
 import { LoginScreen } from './LoginScreen';
 import { DesktopReconnect } from './DesktopReconnect';
 import { CinematicFX } from './CinematicFX';
@@ -138,6 +139,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {status === 'authed' && <IncognitoBanner />}
       {/* Above the top bar (UI refresh): nothing sits between the bar and a page's art, which starts under it. */}
       {status === 'authed' && <HealthBanner />}
+      {status === 'authed' && <TrackerAlert />}
       <TopNav onSearchFocus={() => { setPaletteSeed(''); setPalette(true); }} />
       {wide && <Sidebar />}
       <main className="shell relative z-[1] pb-28 lg:pb-12">
