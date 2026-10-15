@@ -1,60 +1,81 @@
-// Attaching and detaching a source by hand, with a person's eyes as the judge.
+// Attaching and detaching a source by hand, with a person's eyes as the judge of the numbers (#243, @Squeaks72).
 //
 // Every other way to follow a source asks a machine first: the fill scan and Find other sources lay a candidate's chapter
 // numbers over the series' own and need MIN_HAVE (3) of them to line up (lib/fill.ts, lib/findSources.ts `too_few`), and the
 // add-time auto-follow wants a title match plus a numbering verdict. A series with one chapter -- or none -- can never pass
 // that, which is exactly the series that most needs a new source. Here the person has searched, looked at the cover and the
-// chapter count, and chosen: that is the judgement, so none of the numeric gates apply. The gates that guard what is NOT a
-// matter of opinion all stay -- the source must be loaded, enabled and within the account's age reach, the language guard,
-// posting-order numbering, a run inside the series, a pending renumber -- and so does the follower cap on a plain follow.
+// chapter count, and chosen: that is the judgement of the NUMBERS, so none of the numeric gates apply.
 //
-//   as 'follower'  the source joins series_sources (added_by = the person, so the sheet says "also checked", not "followed for you").
-//   as 'main'      the source becomes the main source (lib/mainSource.ts does the swap). The row is written first, past the cap
-//                  -- the swap removes it again -- so a series already at the cap can still be moved. `old` is what becomes of
-//                  the old main, as for Make main; a move defaults to dropping it.
-//   no main yet    a series with no source at all (scanned from disk, or detached) takes the pick as its main whichever was asked.
+// The pair itself is still never taken on trust (lib/mainSource.ts says why: the next sweep fetches whatever it lists into
+// the series' folder). The server asks the source for the pick (`getSeries`, under the source's own budget) and its own
+// title must be ours or one of our other names (lib/autoFollow.ts titleMatch, judgeCandidate's step) -- else
+// `title_differs`, unless the person, shown that, answers with `force`. What is stored is what the source calls it, never
+// what the request says. A source that cannot say what the title is (no answer, no title) is `unreachable`, force or not:
+// there is nothing to attach. A title the source rates adults-only follows the add's rule: refused to an account capped
+// below 18, and it makes the series 18+ (never lowering a rating).
 //
-// Detaching the main source: promote a follower when there is one (the old main is dropped), otherwise leave the series with
-// no source. Files, progress and the folder never move either way -- the same promise as every other source change.
+// The gates that guard what is NOT a matter of opinion all stay -- the source must be loaded, switched on, not cooling and
+// within the account's age reach, the language guard, posting-order numbering, a run inside the series, a pending renumber
+// -- and so does the follower cap on a plain follow.
+//
+//   as 'follower'  the source joins series_sources (added_by = the person, so the sheet says "also checked", not "followed
+//                  for you"), through followJudged and its cap.
+//   as 'main'      lib/mainSource.ts switchMainSource moves the series to the checked pair inside its one transaction (its
+//                  `pick`), so nothing is written before the switch: a refused move leaves a follower row of that source
+//                  exactly as it was. `old` is what becomes of the old main, as for Make main; a move defaults to dropping it.
+//   no main yet    a series with no source at all (scanned from disk, or detached) takes the pick as its main whichever was
+//                  asked.
+//
+// Detaching the main source: posting order refuses (the series takes its chapters from its numbering source alone, and
+// detaching would strand it: nothing could attach a new main to it), then a follower is promoted when there is one (the
+// old main is dropped), otherwise the series is left with no source. Files, progress and the folder never move either way.
 import type { FastifyRequest } from 'fastify';
 import { one, q, tx } from './db';
 import { getSource } from './sources';
 import { logAudit } from './audit';
-import { seriesVisible, sourceAllowedFor, type ViewCtx } from './visibility';
-import { MAX_FOLLOWERS, followJudged } from './autoFollow';
+import { seriesVisible, sourceAllowedFor, ADULT_RATING, type ViewCtx } from './visibility';
+import { MAX_FOLLOWERS, bounded, followJudged, titleMatch } from './autoFollow';
+import { altTitlesFor } from './altTitles';
 import { runsInside } from './updater';
 import { renumberRunning } from './numbering';
 import { effectiveLang, followGuard, sourceLanguage } from './seriesLang';
+import { canonLang } from './lang';
 import { editionFollowing } from './editions';
 import { scheduleHealthSummaryRefresh } from './healthSummary';
-import { standingRows } from './sourceStanding';
+import { standingOf, standingRows } from './sourceStanding';
 import { refileFailures } from './chapterFailures';
-import { switchMainSource, type OldMain } from './mainSource';
+import { switchMainSource, type OldMain, type MainRefused } from './mainSource';
+import { adultContentRating } from './ageRating';
+import { budgetFor } from './sources/budget';
+import { say, type Part } from './said';
 
 export type AttachRefusal =
-  | 'not_found' | 'is_main' | 'posting_order' | 'renumber_pending' | 'busy' | 'source_unavailable'
-  | 'language_differs' | 'cap' | 'moved' | 'no_main';
+  | 'not_found' | 'is_main' | 'posting_order' | 'renumber_pending' | 'busy' | 'source_unavailable' | 'cooling'
+  | 'language_differs' | 'cap' | 'moved' | 'no_main' | 'title_differs' | 'unreachable';
 
 export interface AttachRefused {
   refused: AttachRefusal;
-  message: string;
+  /** What the refusal says, as a said code (lib/said.ts); absent for `not_found`. */
+  said?: Part;
+  /** `language_differs`: the follow route's edition to add instead, or the one the work holds. */
   edition?: { of: string; lang: string; existing?: { id: string; lang: string } };
+  /** `title_differs`: what the source calls the pick, for the question that may answer with `force`. */
+  theirTitle?: string;
 }
-export interface Attached { ok: true; as: 'follower' | 'main'; from?: string | null; old?: 'kept' | 'dropped' }
+export interface Attached {
+  ok: true;
+  as: 'follower' | 'main';
+  from?: string | null;
+  old?: 'kept' | 'dropped';
+  /** What the source calls the pick: what was stored. */
+  theirTitle: string;
+}
 
-const no = (refused: AttachRefusal, message: string, extra: Partial<AttachRefused> = {}): AttachRefused => ({ refused, message, ...extra });
+const no = (refused: AttachRefusal, said?: Part, extra: Partial<AttachRefused> = {}): AttachRefused =>
+  ({ refused, ...(said ? { said } : {}), ...extra });
 
-const REFUSALS: Record<Exclude<AttachRefusal, 'language_differs'>, string> = {
-  not_found: 'That series is not there.',
-  is_main: 'That is already the series’ own main source.',
-  posting_order: 'This series is numbered by posting order, so it takes its chapters from its numbering source alone.',
-  renumber_pending: 'A renumber is waiting on this series. Finish or cancel it first.',
-  busy: 'This series is being checked right now. Try again in a minute.',
-  source_unavailable: 'That source is not available right now.',
-  cap: `This series already follows ${MAX_FOLLOWERS} other sources. Detach one first, or make the new one the main source.`,
-  moved: 'The main source changed while that was happening. Reopen the sheet and try again.',
-  no_main: 'This series has no main source to detach.',
-};
+/** How long the source may take to say what the pick is: the add dialog's lookup, widened for a solver (budgetFor). */
+const ATTACH_LOOKUP_MS = 20_000;
 
 type Pre = {
   title: string; source_id: string | null; source_series_id: string | null; numbering: string | null;
@@ -63,120 +84,136 @@ type Pre = {
 const PRE = 'title, source_id, source_series_id, numbering, numbering_pending, renumber_plan, deleted_at, merged_into, lang';
 
 export interface AttachOpts { ctx: ViewCtx; userId: string | null; old?: OldMain; req?: FastifyRequest }
-export interface AttachPick { source: string; sourceSeriesId: string; title?: string | null }
+export interface AttachPick {
+  source: string;
+  sourceSeriesId: string;
+  /** The person has seen the source call it something else, and attaches it anyway (`title_differs` answered). */
+  force?: boolean;
+}
+
+/** The series' own checks, shared by attach and detach: the answer when one refuses, else the row. */
+async function preflight(seriesId: string, ctx: ViewCtx): Promise<Pre | AttachRefused> {
+  if (!(await seriesVisible(seriesId, ctx))) return no('not_found');
+  const pre = await one<Pre>(`SELECT ${PRE} FROM lib_series WHERE id = $1`, [seriesId]);
+  if (!pre || pre.deleted_at || pre.merged_into) return no('not_found');
+  if (pre.numbering === 'posting_order') return no('posting_order', say('numbering.postingRefusal'));
+  if (pre.numbering_pending || pre.renumber_plan || renumberRunning(seriesId)) return no('renumber_pending', say('main.renumberPending'));
+  if (runsInside(seriesId) > 0) return no('busy', say('renumber.checking'));
+  return pre;
+}
+
+/** A switch's refusal in this module's terms (`not_followed` cannot happen with a pick: read as the main having moved). */
+const fromSwitch = (out: MainRefused): AttachRefused =>
+  out.refused === 'not_found' || !out.said ? no('not_found')
+    : out.refused === 'not_followed' ? no('moved', say('main.moved'))
+    : no(out.refused, out.said, out.edition ? { edition: out.edition } : {});
 
 export async function attachManual(seriesId: string, pick: AttachPick, as: 'follower' | 'main', opts: AttachOpts): Promise<Attached | AttachRefused> {
-  if (!(await seriesVisible(seriesId, opts.ctx))) return no('not_found', REFUSALS.not_found);
-  const pre = await one<Pre>(`SELECT ${PRE} FROM lib_series WHERE id = $1`, [seriesId]);
-  if (!pre || pre.deleted_at || pre.merged_into) return no('not_found', REFUSALS.not_found);
-  if (pick.source === pre.source_id) return no('is_main', REFUSALS.is_main);
-  if (pre.numbering === 'posting_order') return no('posting_order', REFUSALS.posting_order);
-  if (pre.numbering_pending || pre.renumber_plan || renumberRunning(seriesId)) return no('renumber_pending', REFUSALS.renumber_pending);
-  if (runsInside(seriesId) > 0) return no('busy', REFUSALS.busy);
+  const pre = await preflight(seriesId, opts.ctx);
+  if ('refused' in pre) return pre;
+  if (pick.source === pre.source_id) return no('is_main', say('main.isMain'));
   const src = getSource(pick.source);
-  const standing = await standingRows([pick.source]);
-  if (!src || standing.get(pick.source)?.disabled || !sourceAllowedFor(src, opts.ctx.maxAgeRating)) {
-    return no('source_unavailable', REFUSALS.source_unavailable);
-  }
+  const standing = (await standingRows([pick.source])).get(pick.source);
+  if (!src || standing?.disabled || !sourceAllowedFor(src, opts.ctx.maxAgeRating)) return no('source_unavailable', say('main.unavailable'));
+  // A source in a cooldown is not asked anything, by hand or not: the cooldown is the site asking for room.
+  if (standing?.blocked_until && new Date(standing.blocked_until).getTime() > Date.now()) return no('cooling', say('attach.cooling', { name: src.name }));
   if (!(await followGuard(seriesId))(pick.source)) {
     const theirs = sourceLanguage(pick.source);
     const ours = effectiveLang(pre.lang, pre.source_id);
     const existing = await editionFollowing(seriesId, pick.source, opts.ctx);
     return no('language_differs',
-      existing
-        ? `That source is in ${theirs}, this series is in ${ours}. The ${existing.lang} edition already follows it — open that one.`
-        : `That source is in ${theirs}, this series is in ${ours}. Add it as its own ${theirs} edition instead.`,
+      existing ? say('follow.languageDiffersEdition', { theirs, ours, edition: existing.lang }) : say('follow.languageDiffers', { theirs, ours }),
       { edition: { of: seriesId, lang: theirs, ...(existing ? { existing } : {}) } });
   }
-  const theirTitle = pick.title?.trim() || null;
-  const audit = (detail: Record<string, unknown>) => logAudit('series.attach_source', {
-    userId: opts.userId, detail: { id: seriesId, title: pre.title, source: pick.source, sourceSeriesId: pick.sourceSeriesId, theirTitle, ...detail }, req: opts.req,
-  });
 
-  // ---- no main source yet: the pick becomes it ----
-  if (!pre.source_id) {
-    const done = await tx<boolean>(async (qq) => {
-      const [row] = await qq<{ source_id: string | null; deleted_at: string | null; merged_into: string | null }>(
-        'SELECT source_id, deleted_at, merged_into FROM lib_series WHERE id = $1 FOR UPDATE', [seriesId]);
-      if (!row || row.deleted_at || row.merged_into || row.source_id) return false;
-      await qq('UPDATE lib_series SET source_id = $2, source_series_id = $3 WHERE id = $1', [seriesId, pick.source, pick.sourceSeriesId]);
-      await qq('DELETE FROM series_sources WHERE series_id = $1 AND source_id = $2', [seriesId, pick.source]);
-      return true;
-    });
-    if (!done) return no('moved', REFUSALS.moved);
-    await audit({ as: 'main', from: null });
-    scheduleHealthSummaryRefresh();
-    return { ok: true, as: 'main', from: null };
-  }
+  // ---- the pair, from the source itself ----
+  // Reintroduce by storing the request's title and skipping the lookup: "a pick whose own title is another work is refused
+  // until the person insists" in manualAttach.int.test.ts attaches it.
+  let found: { title?: string; contentRating?: string } | null = null;
+  try {
+    found = await bounded(src.getSeries(pick.sourceSeriesId), budgetFor(src, ATTACH_LOOKUP_MS));
+  } catch { found = null; }
+  const theirTitle = found?.title?.trim() || '';
+  if (!theirTitle) return no('unreachable', say('attach.unreachable', { name: src.name }));
+  const adult = adultContentRating(found?.contentRating);
+  // The add's per-title age rule: MangaDex as a whole is not an adult source, its erotica is.
+  if (adult && opts.ctx.maxAgeRating !== null && opts.ctx.maxAgeRating < ADULT_RATING) return no('source_unavailable', say('main.unavailable'));
+  const match = titleMatch(theirTitle, { title: pre.title, altTitles: await altTitlesFor(seriesId) });
+  if (!match && !pick.force) return no('title_differs', say('attach.titleDiffers', { name: src.name, title: theirTitle }), { theirTitle });
+
+  const audit = (detail: Record<string, unknown>) => logAudit('series.attach_source', {
+    userId: opts.userId,
+    detail: { id: seriesId, title: pre.title, source: pick.source, sourceSeriesId: pick.sourceSeriesId, theirTitle, ...(match ? {} : { forced: true }), ...detail },
+    req: opts.req,
+  });
+  // 18+ when its source says so, as the add stores it: GREATEST never lowers a rating, and an admin's override still wins.
+  const rate = async () => { if (adult) await q('UPDATE lib_series SET age_rating = GREATEST(age_rating, $2::int) WHERE id = $1', [seriesId, ADULT_RATING]); };
 
   // ---- a plain follower ----
-  if (as === 'follower') {
+  if (as === 'follower' && pre.source_id) {
     const r = await followJudged(seriesId, { source: pick.source, name: src.name, sourceSeriesId: pick.sourceSeriesId, theirTitle, coverage: null }, { addedBy: opts.userId });
-    if (r === 'gone') return no('not_found', REFUSALS.not_found);
-    if (r === 'cap') return no('cap', REFUSALS.cap);
+    if (r === 'gone') return no('not_found');
+    if (r === 'cap') return no('cap', say('attach.cap', { n: MAX_FOLLOWERS }));
+    await rate();
     await audit({ as: 'follower' });
-    return { ok: true, as: 'follower' };
+    return { ok: true, as: 'follower', theirTitle };
   }
 
-  // ---- the new main: write the row past the cap, then let the swap move it ----
-  const had = await one<{ source_series_id: string }>('SELECT source_series_id FROM series_sources WHERE series_id = $1 AND source_id = $2', [seriesId, pick.source]);
-  const wrote = await tx<boolean>(async (qq) => {
-    const [row] = await qq<{ deleted_at: string | null; merged_into: string | null }>('SELECT deleted_at, merged_into FROM lib_series WHERE id = $1 FOR UPDATE', [seriesId]);
-    if (!row || row.deleted_at || row.merged_into) return false;
-    await qq(
-      `INSERT INTO series_sources (series_id, source_id, source_series_id, title, coverage, added_by)
-       VALUES ($1, $2, $3, $4, NULL, $5)
-       ON CONFLICT (series_id, source_id) DO UPDATE SET source_series_id = EXCLUDED.source_series_id, title = EXCLUDED.title,
-         added_by = COALESCE(EXCLUDED.added_by, series_sources.added_by)`,
-      [seriesId, pick.source, pick.sourceSeriesId, theirTitle, opts.userId]);
-    return true;
+  // ---- the new main (or the first one): the switch writes the checked pair in its own transaction ----
+  const out = await switchMainSource(seriesId, pick.source, {
+    old: opts.old ?? 'drop', ctx: opts.ctx, userId: opts.userId, via: 'manual', req: opts.req,
+    expect: pre.source_id, pick: { ref: pick.sourceSeriesId },
   });
-  if (!wrote) return no('not_found', REFUSALS.not_found);
-  const out = await switchMainSource(seriesId, pick.source, { old: opts.old ?? 'drop', ctx: opts.ctx, userId: opts.userId, via: 'manual', req: opts.req });
-  if ('refused' in out) {
-    if (!had) await q('DELETE FROM series_sources WHERE series_id = $1 AND source_id = $2', [seriesId, pick.source]).catch(() => {});
-    return no(out.refused === 'not_followed' ? 'moved' : out.refused as AttachRefusal, out.said?.text ?? REFUSALS.moved, out.edition ? { edition: out.edition } : {});
-  }
+  if ('refused' in out) return fromSwitch(out);
+  await rate();
   await audit({ as: 'main', from: out.from, old: out.old });
-  return { ok: true, as: 'main', from: out.from, old: out.old };
+  return { ok: true, as: 'main', from: out.from, ...(out.from ? { old: out.old } : {}), theirTitle };
 }
 
 export interface Detached { ok: true; promoted: string | null }
 
 /** Detach the main source: a follower takes over when the series has one; otherwise the series is left with no source. */
 export async function detachMain(seriesId: string, opts: AttachOpts): Promise<Detached | AttachRefused> {
-  if (!(await seriesVisible(seriesId, opts.ctx))) return no('not_found', REFUSALS.not_found);
-  const pre = await one<Pre>(`SELECT ${PRE} FROM lib_series WHERE id = $1`, [seriesId]);
-  if (!pre || pre.deleted_at || pre.merged_into) return no('not_found', REFUSALS.not_found);
-  if (!pre.source_id) return no('no_main', REFUSALS.no_main);
-  if (pre.numbering_pending || pre.renumber_plan || renumberRunning(seriesId)) return no('renumber_pending', REFUSALS.renumber_pending);
-  if (runsInside(seriesId) > 0) return no('busy', REFUSALS.busy);
+  const pre = await preflight(seriesId, opts.ctx);
+  if ('refused' in pre) return pre;
+  if (!pre.source_id) return no('no_main', say('detach.noMain'));
+  const from = pre.source_id;
   const followers = await q<{ source_id: string }>('SELECT source_id FROM series_sources WHERE series_id = $1 ORDER BY created_at, source_id', [seriesId]);
   if (followers.length) {
+    // A follower that still carries the series first (usable or cooling), in follow order; the rest after.
     const standing = await standingRows(followers.map((f) => f.source_id));
-    const ranked = [...followers].sort((a, b) => Number(!!standing.get(a.source_id)?.disabled) - Number(!!standing.get(b.source_id)?.disabled));
+    const off = (id: string) => Number(!['usable', 'cooling'].includes(standingOf(id, standing.get(id))));
+    const ranked = [...followers].sort((a, b) => off(a.source_id) - off(b.source_id));
     let last: AttachRefused | null = null;
     for (const f of ranked) {
-      const out = await switchMainSource(seriesId, f.source_id, { old: 'drop', ctx: opts.ctx, userId: opts.userId, via: 'manual', req: opts.req });
+      const out = await switchMainSource(seriesId, f.source_id, { old: 'drop', ctx: opts.ctx, userId: opts.userId, via: 'manual', req: opts.req, expect: from });
       if (!('refused' in out)) {
-        await logAudit('series.detach_main', { userId: opts.userId, detail: { id: seriesId, title: pre.title, source: pre.source_id, promoted: f.source_id }, req: opts.req });
+        await logAudit('series.detach_main', { userId: opts.userId, detail: { id: seriesId, title: pre.title, source: from, promoted: f.source_id }, req: opts.req });
         return { ok: true, promoted: f.source_id };
       }
-      last = no(out.refused as AttachRefusal, out.said?.text ?? REFUSALS.moved);
+      last = fromSwitch(out);
       if (out.refused !== 'source_unavailable' && out.refused !== 'language_differs') break;
     }
     return last!;
   }
-  const from = pre.source_id;
-  const done = await tx<boolean>(async (qq) => {
-    const [row] = await qq<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1 FOR UPDATE', [seriesId]);
-    if (!row || row.source_id !== from) return false;
+  const done = await tx<AttachRefused | true>(async (qq) => {
+    const [row] = await qq<Pre>(`SELECT ${PRE} FROM lib_series WHERE id = $1 FOR UPDATE`, [seriesId]);
+    if (!row || row.deleted_at || row.merged_into) return no('not_found');
+    if (row.source_id !== from) return no('moved', say('main.moved'));
+    if (row.numbering === 'posting_order') return no('posting_order', say('numbering.postingRefusal'));
+    if (row.numbering_pending || row.renumber_plan) return no('renumber_pending', say('main.renumberPending'));
+    // The language stays what it reads as now, as a main-source switch keeps it (lib/mainSource.ts): one inferred from the
+    // main source is pinned before the source goes, or the series would change language by the way.
+    if (canonLang(row.lang) === null && effectiveLang(null, from) !== effectiveLang(null, null)) {
+      await qq('UPDATE lib_series SET lang = $2 WHERE id = $1', [seriesId, effectiveLang(null, from)]);
+    }
     await qq('UPDATE lib_series SET source_id = NULL, source_series_id = NULL WHERE id = $1', [seriesId]);
+    // The unfollow's rule: the listing rows it carried go with it, or a member could still fetch through it.
     await qq('DELETE FROM series_listing WHERE series_id = $1 AND source_id = $2', [seriesId, from]);
     await refileFailures(qq, [seriesId]);
     return true;
   });
-  if (!done) return no('moved', REFUSALS.moved);
+  if (done !== true) return done;
   await logAudit('series.detach_main', { userId: opts.userId, detail: { id: seriesId, title: pre.title, source: from, promoted: null }, req: opts.req });
   scheduleHealthSummaryRefresh();
   return { ok: true, promoted: null };

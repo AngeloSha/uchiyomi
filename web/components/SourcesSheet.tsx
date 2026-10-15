@@ -635,11 +635,10 @@ export function SourcesSheet({ id, title: seriesTitle, series, groups, admin, er
     setPromoting(null);
   };
 
-  // Extra sources are added from Find missing chapters, where a person has seen the source's title and its
-  // overlap with what is on disk. Here they can only be removed; the main one is not removable at all,
-  // since it is the row the series was created from.
-  // Add more sources / move (MigrateSourceSheet): a hand-picked attach with no chapter-overlap gate, and the main
-  // source's detach, asked first in one line under the list.
+  // Extra sources are added from Find missing chapters, where a person has seen the source's title and its overlap with
+  // what is on disk, or by hand from Add more sources (#243, MigrateSourceSheet): a pick a person compared, with no
+  // chapter-overlap gate, whose title the server still checks with the source. The × removes a follower; on the main
+  // source it detaches it, asked first in one line under the list: a follower takes over, or the series is left with none.
   const [migrating, setMigrating] = useState(false);
   const [detachAsk, setDetachAsk] = useState(false);
   const [unfollowing, setUnfollowing] = useState<string | null>(null);
@@ -781,11 +780,11 @@ export function SourcesSheet({ id, title: seriesTitle, series, groups, admin, er
           <div role="alertdialog" aria-labelledby={`detach-q-${id}`} className="mt-2 border-s-2 border-rose-400/70 bg-ink-850/80 py-2 pe-2 ps-2.5" data-detach-confirm>
             <p id={`detach-q-${id}`} className="text-[12px] leading-relaxed text-fog-100">
               {sources.length > 1
-                ? tr('Detach {name}? The next source takes over as main. Downloaded chapters and your progress stay.', { name: main.name })
-                : tr('Detach {name}? The series keeps its chapters and progress but will have no source to update from.', { name: main.name })}
+                ? tr('Detach {name}? The next source takes over as main. Downloaded chapters and your progress stay.', { name: `\u2068${main.name}\u2069` })
+                : tr('Detach {name}? The series keeps its chapters and progress but will have no source to update from.', { name: `\u2068${main.name}\u2069` })}
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
-              <button type="button" disabled={unfollowing !== null} className="btn-key" data-detach-yes
+              <button type="button" disabled={unfollowing !== null} className="btn-key btn-key-danger" data-detach-yes
                 onClick={async () => { await unfollow(main); setDetachAsk(false); }}>{tr('Detach')}</button>
               <button type="button" autoFocus onClick={() => setDetachAsk(false)} className="btn-key">{tr('Cancel')}</button>
             </div>
@@ -819,12 +818,12 @@ export function SourcesSheet({ id, title: seriesTitle, series, groups, admin, er
         {isAdmin && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {sources.length > 0 && (
-              <button type="button" onClick={checkNow} disabled={checking} className="chip text-xs disabled:opacity-50">
+              <button type="button" onClick={checkNow} disabled={checking} className="btn-key">
                 {checking ? tr('Checking…') : tr('Check now')}
               </button>
             )}
-            <button type="button" onClick={onFindMissing} className="chip text-xs">{tr('Add one from Find missing chapters')}</button>
-            <button type="button" onClick={() => setMigrating(true)} className="chip text-xs" data-add-more-sources>{tr('Add more sources…')}</button>
+            <button type="button" onClick={onFindMissing} className="btn-key">{tr('Add one from Find missing chapters')}</button>
+            <button type="button" onClick={() => setMigrating(true)} className="btn-key" data-add-more-sources>{tr('Add more sources…')}</button>
           </div>
         )}
         {isAdmin && series?.borrowNamesEffective !== undefined && (

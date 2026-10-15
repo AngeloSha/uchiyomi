@@ -592,6 +592,16 @@ const EN = {
   'main.renumberPending': () => 'This series’ chapters are waiting to be renumbered. Review that on the series page first.',
   'main.unavailable': () => 'That source cannot be used right now: it is not installed, it is switched off, or it is not available on this account.',
   'main.moved': () => 'This series’ main source changed meanwhile. Look again.',
+  // ---- Attaching a source by hand refused (#243, lib/manualAttach.ts): the rest say what Make main says. `title` is what
+  // the source calls the pick, which the web isolates in right-to-left text.
+  'attach.titleDiffers': ({ name, title }: { name: string; title: string }) =>
+    `${name} calls it “${title}”, which is not this series’ title or one of its other names. If the cover and the chapters show it is the same work, attach it anyway.`,
+  'attach.unreachable': ({ name }: { name: string }) => `${name} did not say what that title is. Try again in a minute.`,
+  'attach.cooling': ({ name }: { name: string }) => `${name} is cooling down after errors, so it is not asked anything right now. Try again later.`,
+  'attach.cap': ({ n }: { n: number }) => (n === 1
+    ? 'This series already follows 1 other source, as many as it may. Remove one first, or move the series to this source.'
+    : `This series already follows ${n} other sources, as many as it may. Remove one first, or move the series to this source.`),
+  'detach.noMain': () => 'This series has no main source to detach.',
   // A source retired, or a site removed, while some series still has it as its main source (v0.54.0, lib/retireSource.ts).
   'retire.inUse': ({ n }: { n: number }) => `It is the main source of ${n} series. Replace it first.`,
 

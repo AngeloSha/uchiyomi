@@ -42,3 +42,16 @@ test('the Sources sheet offers Add more sources, and the main source detaches af
   assert.match(mig, /\/attach-source/);
   assert.match(mig, /search-all\?groupBy=source/);
 });
+
+test('the server is asked to check the pick: no title of ours is sent, and Attach anyway answers title_differs', async () => {
+  const { readFileSync } = await import('node:fs');
+  const mig = readFileSync(new URL('../components/MigrateSourceSheet.tsx', import.meta.url), 'utf8');
+  // The source's own title is what the server stores (bff lib/manualAttach.ts); the route refuses a body that names one.
+  // Reintroduce `title: pick.title` in the body: the first assertion fails (and the server answers 400).
+  assert.match(mig, /json: \{ source: pick\.source, sourceSeriesId: pick\.sourceId, as,/, 'the body is not the checked shape');
+  assert.doesNotMatch(mig, /title: pick\.title/, 'the sheet sends its own title for the pick');
+  // Only a title_differs refusal offers Attach anyway, and it repeats the refused action with force.
+  assert.match(mig, /errorCode\(e\) === 'title_differs'\) setDiffers\(as\)/);
+  assert.match(mig, /onClick=\{\(\) => act\(differs, true\)\}[^>]*data-migrate-anyway/);
+  assert.match(mig, /\.\.\.\(force \? \{ force: true \} : \{\}\)/);
+});

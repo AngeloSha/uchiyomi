@@ -8567,11 +8567,15 @@ paths:
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. For a series too short
         to be judged by chapter numbers (fewer than 3, or none): the person has searched and chosen, so the fill scan's
-        and Find's overlap gates do not apply. `as: follower` adds the source as a follower (refused `cap` at the follower
-        cap); `as: main` makes it the main source, past the cap, with `old` deciding the old main (default `drop`). A series
-        with no main source takes the pick as its main whichever is asked. Still refused: the source not loaded, switched off
-        or beyond the age reach, another language (`language_differs` + `edition`), posting-order numbering, a pending
-        renumber, a run inside the series. Audited as `series.attach_source`. Starts a listing refresh.
+        and Find's overlap gates do not apply. The pair is still checked with the source: it is asked for the title, and
+        its own title must be the series' title or one of its other names, else `title_differs` (with `theirTitle`) until
+        the request says `force: true`; what the source calls it is what is stored. `as: follower` adds the source as a
+        follower (refused `cap` at the follower cap); `as: main` makes it the main source, past the cap, with `old`
+        deciding the old main (default `drop`). A series with no main source takes the pick as its main whichever is
+        asked. Still refused: the source not loaded, switched off, in a cooldown (`cooling`) or beyond the age reach, a
+        source that does not say what the title is (`unreachable`), another language (`language_differs` + `edition`),
+        posting-order numbering, a pending renumber, a run inside the series. Audited as `series.attach_source`. Starts a
+        listing refresh.
       parameters:
         - name: id
           in: path
@@ -8589,9 +8593,11 @@ paths:
               properties:
                 source: { type: string }
                 sourceSeriesId: { type: string }
-                title: { type: [string, "null"] }
                 as: { type: string, enum: [follower, main] }
                 old: { type: string, enum: [auto, keep, drop] }
+                force:
+                  type: boolean
+                  description: Attach it although the source calls it something else (the answer to `title_differs`).
       security:
         - bearer: []
       responses:
@@ -8601,12 +8607,15 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [ok, as, sources]
+                required: [ok, as, theirTitle, sources]
                 properties:
                   ok: { type: boolean }
                   as: { type: string, enum: [follower, main] }
                   from: { type: [string, "null"] }
                   old: { type: string, enum: [kept, dropped] }
+                  theirTitle:
+                    type: string
+                    description: What the source calls the pick, as stored.
                   sources:
                     type: array
                     items:
@@ -8621,8 +8630,9 @@ paths:
           description: not_found -- not a series this admin may see.
         "409":
           description: >-
-            Refused, with `error` and `message`: is_main, posting_order, renumber_pending, busy, source_unavailable, cap,
-            moved, language_differs (with `edition`).
+            Refused, with `error`, `message` and `messageSaid` (lib/said.ts): is_main, posting_order, renumber_pending,
+            busy, source_unavailable, cooling, unreachable, cap, moved, title_differs (with `theirTitle`),
+            language_differs (with `edition`).
   /api/admin/series/{id}/sources/{sourceId}:
     delete:
       tags:
@@ -8633,8 +8643,9 @@ paths:
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Chapters
         already downloaded from it stay; the listing rows it carried are dropped at once, so nothing can be
         fetched through it before the next check. The main source can be detached the same way: a follower takes
-        over (the old main dropped), or the series is left with no source when it has none (409 with `error` and
-        `message` when refused, as the attach route).
+        over (the old main dropped), or the series is left with no source when it has none. A series numbered by
+        posting order refuses (nothing could attach a new main to it afterwards); a refusal is 409 with `error`,
+        `message` and `messageSaid`, as the attach route answers.
       parameters:
         - name: id
           in: path

@@ -2376,19 +2376,25 @@ failure), stamps nothing and leaves its listing standing. The sweep's queues fol
 asked through -- the first it follows that is loaded and not switched off -- so a dead main source's cooldown no
 longer parks series that update from their followers.
 
-**Attaching a source by hand.** `POST /api/admin/series/:id/attach-source {source, sourceSeriesId, title?, as, old?}`
+**Attaching a source by hand.** `POST /api/admin/series/:id/attach-source {source, sourceSeriesId, as, old?, force?}`
 attaches a source a person picked (`as`: `follower` or `main`) without the chapter-overlap gates, so a series with one
 chapter or none (which the fill scan and Find other sources cannot judge: they need 3 chapters to line up) can take a
-source. The person has searched and compared, and that is the judgement; what is not a matter of opinion stays: the
-source must be loaded, switched on and within the admin's age reach, the language guard (`language_differs` + `edition`),
-posting-order numbering, a pending renumber and a run inside the series refuse, and a follower is still capped
-(`cap`). `as: main` writes the row past the cap and lets the main-source switch move it (`old` as for `main-source`,
-default `drop`); a series with no main source takes the pick as its main whichever is asked. It answers `{ok, as, from?,
-old?, sources}` and starts a listing refresh, or **409** `{error, message}` (`is_main`, `posting_order`,
-`renumber_pending`, `busy`, `source_unavailable`, `cap`, `moved`, `language_differs`), **404** for a series the admin
-cannot see; audited as `series.attach_source`. `DELETE /api/admin/series/:id/sources/:sourceId` on the **main** source
-detaches it: a follower takes over (the old main is dropped; `{ok, promoted, sources}`), or, with none, the series is left
-with no source (audited as `series.detach_main`). Files, progress and the folder never move either way.
+source. The person has searched and compared the numbers, and that is the judgement of them. The pair itself is still
+checked: the server asks the source for the title (under its usual time budget), and its own title must be the series'
+title or one of its other names, else **409** `title_differs` with `theirTitle` until the request says `force: true`;
+what the source calls it is what is stored, and a title the source rates adults-only is refused to an age-limited
+account and makes the series 18+. What is not a matter of opinion stays: the source must be loaded, switched on, out of
+any cooldown (`cooling`) and within the admin's age reach, and must say what the title is (`unreachable`); the language
+guard (`language_differs` + `edition`), posting-order numbering, a pending renumber and a run inside the series refuse,
+and a follower is still capped (`cap`). `as: main` hands the checked pair to the main-source switch, which writes it in
+its own transaction (`old` as for `main-source`, default `drop`), so a refused move changes nothing; a series with no
+main source takes the pick as its main whichever is asked. It answers `{ok, as, from?, old?, theirTitle, sources}` and
+starts a listing refresh, or **409** `{error, message, messageSaid}` (`is_main`, `posting_order`, `renumber_pending`,
+`busy`, `source_unavailable`, `cooling`, `unreachable`, `cap`, `moved`, `title_differs`, `language_differs`), **404** for
+a series the admin cannot see; audited as `series.attach_source`. `DELETE /api/admin/series/:id/sources/:sourceId` on the
+**main** source detaches it: a follower takes over (the old main is dropped; `{ok, promoted, sources}`), or, with none,
+the series is left with no source (audited as `series.detach_main`); a series numbered by posting order refuses, since
+nothing could attach a new main to it afterwards. Files, progress and the folder never move either way.
 
 **Making a follower the main source** (since v0.54.0). `POST /api/admin/series/:id/main-source {sourceId, old?}`
 makes a source the series already follows its main source -- only a followed one: its follow is the "same series?"

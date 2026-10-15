@@ -1787,10 +1787,13 @@ up, so a series with fewer can never be matched that way, which is the series th
 other names one tap away, and *Choose* narrows which sources are searched), one row of results per source. Pick one and
 the footer shows its cover, title and chapter count beside what the series lists now; then **Add as extra source** (it is
 checked too) or **Move here** (it becomes the main source; *Keep the current main source as a backup* keeps the old one).
-You are the judge, so no chapter overlap is asked for; the other rules stay (the series' language, posting-order
-numbering, a check running right now, a waiting renumber, the follower limit for an extra source). A series with no
+You are the judge of the chapters, so no chapter overlap is asked for. The title is still checked with the source: when
+the source calls it something that is not the series' title or one of its other names, the sheet says what it calls it
+and offers **Attach anyway**. The other rules stay (the series' language, posting-order numbering, a check running right
+now, a waiting renumber, a source cooling down after errors, the follower limit for an extra source). A series with no
 source takes the pick as its main. The **×** on the main source detaches it, after asking: the next source takes over, or
-the series is left with none; downloaded chapters and your progress stay either way.
+the series is left with none; downloaded chapters and your progress stay either way. A series numbered by posting order
+keeps its main source.
 
 ### MangaDex in other languages
 

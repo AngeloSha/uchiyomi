@@ -783,6 +783,16 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'main.renumberPending': () => tr('This series’ chapters are waiting to be renumbered. Review that on the series page first.'),
   'main.unavailable': () => tr('That source cannot be used right now: it is not installed, it is switched off, or it is not available on this account.'),
   'main.moved': () => tr('This series’ main source changed meanwhile. Look again.'),
+  // ---- Attaching a source by hand refused (#243, bff lib/manualAttach.ts). `title` is what the source calls the pick.
+  'attach.titleDiffers': (p) => tr('{name} calls it “{title}”, which is not this series’ title or one of its other names. If the cover and the chapters show it is the same work, attach it anyway.', {
+    name: str(p, 'name'), title: titled(p, 'title'),
+  }),
+  'attach.unreachable': (p) => tr('{name} did not say what that title is. Try again in a minute.', { name: str(p, 'name') }),
+  'attach.cooling': (p) => tr('{name} is cooling down after errors, so it is not asked anything right now. Try again later.', { name: str(p, 'name') }),
+  'attach.cap': (p) => (num(p, 'n') === 1
+    ? tr('This series already follows 1 other source, as many as it may. Remove one first, or move the series to this source.')
+    : tr('This series already follows {n} other sources, as many as it may. Remove one first, or move the series to this source.', { n: num(p, 'n') })),
+  'detach.noMain': () => tr('This series has no main source to detach.'),
   // A source retired, or a site removed, while some series still has it as its main source (bff lib/retireSource.ts).
   'retire.inUse': (p) => (num(p, 'n') === 1
     ? tr('It is the main source of 1 series. Replace it first.')

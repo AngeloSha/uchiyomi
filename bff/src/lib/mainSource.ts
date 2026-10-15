@@ -8,7 +8,9 @@
 // Only a source the series already FOLLOWS can be promoted (`not_followed` otherwise): its row is the "same series?"
 // judgement already made -- by a fill-scan plan, the add's auto-follow or a Find run -- and the sweep already merges
 // its chapters. Promoting it changes the tie-breaks and the label, not which chapters arrive. A bare (source, id) pair
-// is never taken on trust, here as on the follow route.
+// is never taken on trust, here as on the follow route. The one exception is `pick` (#243, lib/manualAttach.ts): a pair
+// that module has just asked the source about and title-checked, which the switch writes inside its own transaction --
+// so a refused switch has written nothing, and a follower row of that source is never overwritten before it succeeds.
 //
 // What moves and what stays:
 //   - the pair (`source_id`, `source_series_id`) moves, inside one transaction holding the series row's lock -- the
@@ -87,7 +89,12 @@ export interface SwitchOpts {
   via: 'manual' | 'replace' | 'review';
   runId?: string;
   /** The main source the caller saw. A Replace run passes the source it replaces: a series moved off it since is `moved`. */
-  expect?: string;
+  expect?: string | null;
+  /**
+   * A pair checked by lib/manualAttach.ts (the source asked, its title matched or a person insisted): the series moves to
+   * `to` at this id, whether or not it follows `to`. Only that module passes it.
+   */
+  pick?: { ref: string };
   req?: FastifyRequest;
 }
 
@@ -124,7 +131,7 @@ export async function switchMainSource(seriesId: string, to: string, opts: Switc
   if (to === pre.source_id) return refusal('is_main');
   const target = await one<{ source_series_id: string }>(
     'SELECT source_series_id FROM series_sources WHERE series_id = $1 AND source_id = $2', [seriesId, to]);
-  if (!target?.source_series_id) return refusal('not_followed');
+  if (!target?.source_series_id && !opts.pick) return refusal('not_followed');
   if (pre.numbering === 'posting_order') return refusal('posting_order');
   if (pre.numbering_pending || pre.renumber_plan || renumberRunning(seriesId)) return refusal('renumber_pending');
   // Reintroduce by dropping it: "a check inside the series" in mainSource.int.test.ts is answered 200.
@@ -159,7 +166,8 @@ export async function switchMainSource(seriesId: string, to: string, opts: Switc
       'SELECT source_id, source_series_id, coverage, added_by FROM series_sources WHERE series_id = $1 ORDER BY created_at, source_id FOR UPDATE',
       [seriesId]);
     const promoted = follows.find((f) => f.source_id === to);
-    if (!promoted?.source_series_id) return refusal('not_followed');
+    const toRef = opts.pick?.ref ?? promoted?.source_series_id;
+    if (!toRef) return refusal('not_followed');
 
     // The language, pinned only when the switch would change what it reads as. Reintroduce by dropping it: "the
     // series keeps its language" in mainSource.int.test.ts reads the server's unstated language after the switch.
@@ -171,7 +179,7 @@ export async function switchMainSource(seriesId: string, to: string, opts: Switc
         langPinned = was;
       }
     }
-    await qq('UPDATE lib_series SET source_id = $2, source_series_id = $3 WHERE id = $1', [seriesId, to, promoted.source_series_id]);
+    await qq('UPDATE lib_series SET source_id = $2, source_series_id = $3 WHERE id = $1', [seriesId, to, toRef]);
     // The promoted row, and a row older than the follow route's rule that names the old main itself.
     // Reintroduce by dropping it: "a follower becomes the main source" in mainSource.int.test.ts finds the new main still
     // followed -- its row fills the cap, so the old main is dropped rather than kept.
@@ -205,10 +213,10 @@ export async function switchMainSource(seriesId: string, to: string, opts: Switc
     const failuresMoved = await refileFailures(qq, [seriesId]);
     return {
       r: {
-        ok: true as const, from, fromRef: pre.source_series_id, to, toRef: promoted.source_series_id,
+        ok: true as const, from, fromRef: pre.source_series_id, to, toRef,
         old: kept ? 'kept' as const : 'dropped' as const, ...(langPinned ? { langPinned } : {}), listingDropped,
       },
-      promoted: { coverage: promoted.coverage, added_by: promoted.added_by },
+      promoted: { coverage: promoted?.coverage ?? null, added_by: promoted?.added_by ?? null },
       failuresMoved,
     };
   });

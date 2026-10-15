@@ -1,5 +1,6 @@
-// Attaching a source by hand (lib/manualAttach.ts), through the real routes: a series with one chapter -- or none -- has
-// nothing for the overlap gates to judge, so a person's pick is taken, and the gates that are not opinion still hold.
+// Attaching a source by hand (lib/manualAttach.ts, #243), through the real routes: a series with one chapter -- or none --
+// has nothing for the overlap gates to judge, so a person's pick is taken; the pair is still checked with the source
+// (its own title must be ours, else the person must insist), and the gates that are not opinion still hold.
 //
 // Skipped automatically unless TEST_DATABASE_URL is set.
 import test, { before, after, beforeEach } from 'node:test';
@@ -32,12 +33,24 @@ const SOURCES = ['at-a', 'at-b', 'at-c', 'at-d', 'at-es', 'at-all', 'at-gone'];
 let hold: Promise<void> | null = null;
 let release: () => void = () => {};
 const realFetch = globalThis.fetch;
+/** What a fake source says a pick is: its title is the id unless named here; `null` answers with no title. */
+const said = new Map<string, { title?: string | null; contentRating?: string } | 'throw'>();
+/** Every getSeries a fake source was asked, as `source:id`. */
+const asked: string[] = [];
+/** Run while a getSeries is answered: what happens between the server's checks and the write. */
+let duringLookup: (() => Promise<void>) | null = null;
 
 function fake(id: string, lang?: string) {
   return {
     id, name: `Name ${id}`, ...(lang ? { lang } : {}),
     async search() { return []; },
-    async getSeries(sid: string) { return { sourceId: sid, source: id, title: sid }; },
+    async getSeries(sid: string) {
+      asked.push(`${id}:${sid}`);
+      if (duringLookup) await duringLookup();
+      const s = said.get(sid);
+      if (s === 'throw') throw new Error('unreachable');
+      return { sourceId: sid, source: id, title: s?.title === undefined ? sid : s.title, ...(s?.contentRating ? { contentRating: s.contentRating } : {}) };
+    },
     async listChapters() {
       if (hold) await hold;
       return [1, 2, 3, 4, 5, 6, 7].map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `${id}:${n}` }));
@@ -110,6 +123,9 @@ before(async () => {
 beforeEach(async () => {
   if (!DSN) return;
   hold = null;
+  said.clear();
+  asked.length = 0;
+  duringLookup = null;
   await q('DELETE FROM lib_series WHERE library_id = $1', [LIB]);
   await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [SOURCES]);
   await q(`DELETE FROM audit_log WHERE event = 'series.attach_source'`);
@@ -136,7 +152,7 @@ test('a pick is followed with no chapter overlap, and it is a person\'s follow',
   await series('one', 'at-a');
   holdListings();
   try {
-    const r = await post(S('one'), { source: 'at-b', sourceSeriesId: 'b-1', title: 'One', as: 'follower' });
+    const r = await post(S('one'), { source: 'at-b', sourceSeriesId: S('one'), as: 'follower' });
     assert.equal(r.statusCode, 200, r.body);
     assert.deepEqual(await followers(S('one')), ['at-b']);
     assert.notEqual((await q('SELECT added_by FROM series_sources WHERE series_id = $1', [S('one')]))[0].added_by, null);
@@ -148,13 +164,14 @@ test('the follower cap holds for a follow, and the main can still be moved past 
   await series('cap', 'at-a', ['at-b', 'at-c']);
   holdListings();
   try {
-    const full = await post(S('cap'), { source: 'at-d', sourceSeriesId: 'd-1', as: 'follower' });
+    const full = await post(S('cap'), { source: 'at-d', sourceSeriesId: S('cap'), as: 'follower' });
     assert.equal(full.statusCode, 409);
     assert.equal(full.json().error, 'cap');
-    const moved = await post(S('cap'), { source: 'at-d', sourceSeriesId: 'd-1', as: 'main' });
+    assert.equal(full.json().messageSaid.code, 'attach.cap', 'the refusal is not said in the reader\'s language');
+    const moved = await post(S('cap'), { source: 'at-d', sourceSeriesId: S('cap'), as: 'main' });
     assert.equal(moved.statusCode, 200, moved.body);
     assert.equal(await mainOf(S('cap')), 'at-d');
-    assert.equal((await q('SELECT source_series_id FROM lib_series WHERE id = $1', [S('cap')]))[0].source_series_id, 'd-1');
+    assert.equal((await q('SELECT source_series_id FROM lib_series WHERE id = $1', [S('cap')]))[0].source_series_id, S('cap'));
     assert.ok(!(await followers(S('cap'))).includes('at-a'), 'the old main is dropped by default');
   } finally { await settle(S('cap')); }
 });
@@ -164,7 +181,7 @@ test('a series with no source takes the pick as its main, whichever is asked', {
   await q('UPDATE lib_series SET source_id = NULL, source_series_id = NULL WHERE id = $1', [S('none')]);
   holdListings();
   try {
-    const r = await post(S('none'), { source: 'at-b', sourceSeriesId: 'b-1', as: 'follower' });
+    const r = await post(S('none'), { source: 'at-b', sourceSeriesId: S('none'), as: 'follower' });
     assert.equal(r.statusCode, 200, r.body);
     assert.equal(await mainOf(S('none')), 'at-b');
   } finally { await settle(S('none')); }
@@ -193,4 +210,99 @@ test('detaching the main promotes a follower; with none, the series is left with
     assert.equal(r2.statusCode, 200, r2.body);
     assert.equal(await mainOf(S('det')), null);
   } finally { await settle(S('det')); }
+});
+
+test('a pick whose own title is another work is refused until the person insists, and the source\'s title is stored', { skip }, async () => {
+  // The pair is never taken on trust: the server asks the source, and "Other Work" is not this series or another name.
+  // Reintroduce by storing the request's title and skipping the lookup: the first assertion reads 200.
+  await series('tit', 'at-a');
+  said.set('tit-1', { title: 'Other Work' });
+  const r = await post(S('tit'), { source: 'at-b', sourceSeriesId: 'tit-1', as: 'follower' });
+  assert.equal(r.statusCode, 409, r.body);
+  assert.equal(r.json().error, 'title_differs');
+  assert.equal(r.json().theirTitle, 'Other Work');
+  assert.equal(r.json().messageSaid.code, 'attach.titleDiffers');
+  assert.deepEqual(await followers(S('tit')), [], 'a refused pick was followed');
+  assert.ok(asked.includes('at-b:tit-1'), 'the source was never asked what the pick is');
+  // The request no longer carries a title of its own: the strict body refuses one.
+  assert.equal((await post(S('tit'), { source: 'at-b', sourceSeriesId: 'tit-1', as: 'follower', title: S('tit') })).statusCode, 400);
+  holdListings();
+  try {
+    const forced = await post(S('tit'), { source: 'at-b', sourceSeriesId: 'tit-1', as: 'follower', force: true });
+    assert.equal(forced.statusCode, 200, forced.body);
+    assert.equal(forced.json().theirTitle, 'Other Work');
+    assert.equal((await q('SELECT title FROM series_sources WHERE series_id = $1 AND source_id = $2', [S('tit'), 'at-b']))[0].title, 'Other Work');
+    const audit = (await q(`SELECT detail FROM audit_log WHERE event = 'series.attach_source' ORDER BY at DESC LIMIT 1`))[0]?.detail;
+    assert.equal(audit?.forced, true, 'an insisted attach is not marked as one');
+  } finally { await settle(S('tit')); }
+});
+
+test('an other name the series goes by is its title too', { skip }, async () => {
+  await series('alt', 'at-a');
+  const { recordAltTitles, altTitlesFor } = await import('../src/lib/altTitles');
+  await recordAltTitles(S('alt'), ['Walk Tale Original'], 'admin');
+  assert.deepEqual(await altTitlesFor(S('alt')), ['Walk Tale Original'], 'the premise: the series goes by that name');
+  said.set('alt-1', { title: 'Walk Tale Original' });
+  holdListings();
+  try {
+    const r = await post(S('alt'), { source: 'at-b', sourceSeriesId: 'alt-1', as: 'follower' });
+    assert.equal(r.statusCode, 200, r.body);
+  } finally { await settle(S('alt')); }
+});
+
+test('a source that cannot say what the pick is, or is cooling down, is not attached', { skip }, async () => {
+  await series('unr', 'at-a');
+  said.set('unr-1', 'throw');
+  const r = await post(S('unr'), { source: 'at-b', sourceSeriesId: 'unr-1', as: 'main', force: true });
+  assert.equal(r.statusCode, 409, r.body);
+  assert.equal(r.json().error, 'unreachable', 'force attaches a pair nobody could confirm exists');
+  said.set('unr-2', { title: null });
+  assert.equal((await post(S('unr'), { source: 'at-b', sourceSeriesId: 'unr-2', as: 'follower' })).json().error, 'unreachable');
+  // A cooldown is the site asking for room: it is not asked anything, by hand or not.
+  await q(`INSERT INTO source_health (source_id, blocked_until) VALUES ('at-c', now() + interval '1 hour')
+           ON CONFLICT (source_id) DO UPDATE SET blocked_until = EXCLUDED.blocked_until`);
+  asked.length = 0;
+  const cool = await post(S('unr'), { source: 'at-c', sourceSeriesId: S('unr'), as: 'follower' });
+  assert.equal(cool.json().error, 'cooling', cool.body);
+  assert.deepEqual(asked, [], 'a cooling source was asked');
+  assert.equal(await mainOf(S('unr')), 'at-a');
+});
+
+test('a refused move writes nothing: the follower row it would have replaced stays as it was', { skip }, async () => {
+  // The series follows at-b at an old id. A move to at-b at a NEW id is checked, and while the source is being asked a
+  // renumber arrives, so the switch refuses. The follower row must still name the old id and title.
+  // Reintroduce by upserting the follower row before the switch (#243 as opened): the row reads the new id.
+  await series('row', 'at-a', ['at-b']);
+  await q(`UPDATE series_sources SET source_series_id = 'b-old', title = 'Old Title' WHERE series_id = $1 AND source_id = 'at-b'`, [S('row')]);
+  said.set('b-new', { title: S('row') });
+  duringLookup = async () => { await q(`UPDATE lib_series SET numbering_pending = 'posting_order' WHERE id = $1`, [S('row')]); };
+  const r = await post(S('row'), { source: 'at-b', sourceSeriesId: 'b-new', as: 'main' });
+  duringLookup = null;
+  assert.equal(r.statusCode, 409, r.body);
+  assert.equal(r.json().error, 'renumber_pending');
+  const row = (await q('SELECT source_series_id, title FROM series_sources WHERE series_id = $1 AND source_id = $2', [S('row'), 'at-b']))[0];
+  assert.deepEqual([row?.source_series_id, row?.title], ['b-old', 'Old Title'], 'the refused move overwrote the follower row');
+  assert.equal(await mainOf(S('row')), 'at-a');
+});
+
+test('a title its source rates adults-only makes the series 18+', { skip }, async () => {
+  await series('adl', 'at-a');
+  said.set('adl-1', { title: S('adl'), contentRating: 'erotica' });
+  holdListings();
+  try {
+    const r = await post(S('adl'), { source: 'at-b', sourceSeriesId: 'adl-1', as: 'main' });
+    assert.equal(r.statusCode, 200, r.body);
+    assert.equal((await q('SELECT age_rating FROM lib_series WHERE id = $1', [S('adl')]))[0].age_rating, 18);
+  } finally { await settle(S('adl')); }
+});
+
+test('a series numbered by posting order keeps its main source: detaching it is refused', { skip }, async () => {
+  // Detached to no source, nothing could attach a new main to it again: every attach refuses posting order.
+  // Reintroduce by dropping the posting-order check from detachMain: the DELETE answers 200 and the main is gone.
+  await series('pdt', 'at-a');
+  await q(`UPDATE lib_series SET numbering = 'posting_order' WHERE id = $1`, [S('pdt')]);
+  const r = await detach(S('pdt'), 'at-a');
+  assert.equal(r.statusCode, 409, r.body);
+  assert.equal(r.json().error, 'posting_order');
+  assert.equal(await mainOf(S('pdt')), 'at-a');
 });

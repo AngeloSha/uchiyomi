@@ -1,13 +1,15 @@
 'use client';
-// Attach or move a series to another source by hand, for the series the
-// automatic Find cannot judge: one with fewer than 3 chapters has nothing to line up, so a person picks the match.
+// Attach or move a series to another source by hand (#243, @Squeaks72), for the series the automatic Find cannot judge:
+// one with fewer than 3 chapters has nothing to line up, so a person picks the match.
 //
 // The search term is editable (it starts as the series' title; its other names are one tap away), the answer is one rail
 // per source as in the import review's manual search, and a pick is compared -- cover, title, chapter count against what
-// the series lists now -- before anything is written. POST /api/admin/series/:id/attach-source has no overlap gate.
+// the series lists now -- before anything is written. POST /api/admin/series/:id/attach-source has no overlap gate, but it
+// asks the source what the pick is called: when that is not the series' title or one of its other names it says so
+// (`title_differs`), and only then does the footer offer Attach anyway, which sends `force`.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { withAdult } from '@/lib/adult';
 import { Sheet, Img } from '@/components/ui';
 import { ScrollRail } from '@/components/ScrollRail';
@@ -26,6 +28,9 @@ interface SourceResult { sourceId: string; title: string; coverUrl?: string }
 interface SourceGroup { source: string; name: string; lang: string | null; results: SourceResult[] }
 interface Pick { source: string; sourceId: string; title: string; coverUrl?: string; name: string }
 interface Detail { title: string; coverUrl: string | null; count: number }
+
+/** A refusal's code, from a failed call's body. */
+const errorCode = (e: ApiError): string => { try { return String(JSON.parse(e.body || '{}').error ?? ''); } catch { return ''; } };
 
 function useDebounced<T>(value: T, ms: number) {
   const [v, setV] = useState(value);
@@ -52,6 +57,8 @@ export function MigrateSourceSheet({ id, title, attached, mainId, listed, onDone
   const [keepOld, setKeepOld] = useState(false);
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
+  /** The source called the pick something else (`title_differs`): the action that was refused, for Attach anyway. */
+  const [differs, setDiffers] = useState<'follower' | 'main' | null>(null);
   const [choosing, setChoosing] = useState(false);
   /** The ids to search; null means every source. */
   const [selected, setSelected] = useState<string[] | null>(null);
@@ -100,17 +107,21 @@ export function MigrateSourceSheet({ id, title, attached, mainId, listed, onDone
     staleTime: 60_000,
   });
 
-  const act = async (as: 'follower' | 'main') => {
+  const act = async (as: 'follower' | 'main', force = false) => {
     if (!pick) return;
     setBusy(true);
     setRefusal(null);
+    setDiffers(null);
     try {
       await api(`/api/admin/series/${encodeURIComponent(id)}/attach-source`, {
-        json: { source: pick.source, sourceSeriesId: pick.sourceId, title: pick.title, as, ...(as === 'main' ? { old: keepOld ? 'keep' : 'drop' } : {}) },
+        json: { source: pick.source, sourceSeriesId: pick.sourceId, as, ...(as === 'main' ? { old: keepOld ? 'keep' : 'drop' } : {}), ...(force ? { force: true } : {}) },
       });
-      toast(as === 'main' ? tr('{name} is now the main source', { name: `⁨${pick.name}⁩` }) : tr('Now also checking {name}', { name: `⁨${pick.name}⁩` }), 'success');
+      toast(as === 'main' ? tr('{name} is now the main source', { name: `\u2068${pick.name}\u2069` }) : tr('Now also checking {name}', { name: `\u2068${pick.name}\u2069` }), 'success');
       onDone();
-    } catch (e) { setRefusal(msgOf(e, tr('Could not attach that source'))); }
+    } catch (e) {
+      setRefusal(msgOf(e, tr('Could not attach that source')));
+      if (e instanceof ApiError && e.status === 409 && errorCode(e) === 'title_differs') setDiffers(as);
+    }
     setBusy(false);
   };
 
@@ -123,7 +134,7 @@ export function MigrateSourceSheet({ id, title, attached, mainId, listed, onDone
       <div className="flex items-center gap-2.5 rounded-xl border border-ink-700 bg-ink-900/50 p-2">
         <Img src={pick.coverUrl ? sourceCover(pick.source, pick.coverUrl) : ''} alt="" fallbackSrc={pick.coverUrl || undefined} className="h-16 w-11 shrink-0 rounded" />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm text-fog-100">{pick.title}</p>
+          <p className="truncate text-sm text-fog-100" dir="auto">{pick.title}</p>
           <p className="truncate text-[11px] text-fog-400">
             {pick.name}{detail.isFetching ? ` · ${tr('checking…')}` : detail.data ? ` · ${bookCountText(detail.data.count)}` : ''}
           </p>
@@ -135,6 +146,11 @@ export function MigrateSourceSheet({ id, title, attached, mainId, listed, onDone
         </div>
       </div>
       {refusal && <p role="alert" className="text-[11px] leading-relaxed text-amber-300" data-migrate-refusal>{refusal}</p>}
+      {differs && (
+        <button type="button" onClick={() => act(differs, true)} disabled={busy} className="btn-key w-full" data-migrate-anyway>
+          {tr('Attach anyway')}
+        </button>
+      )}
       {buttons.main && mainId && (
         <label className="flex items-center gap-2 text-[11px] text-fog-400">
           <input type="checkbox" checked={keepOld} onChange={(e) => setKeepOld(e.target.checked)} className="accent-[rgb(var(--accent))]" />
@@ -142,13 +158,13 @@ export function MigrateSourceSheet({ id, title, attached, mainId, listed, onDone
         </label>
       )}
       <div className="flex gap-2">
-        <button type="button" onClick={() => setPick(null)} disabled={busy} className="chip flex-1 py-1.5 text-xs disabled:opacity-50">{tr('Cancel')}</button>
+        <button type="button" onClick={() => { setPick(null); setRefusal(null); setDiffers(null); }} disabled={busy} className="btn-key flex-1">{tr('Cancel')}</button>
         {buttons.follower && (
-          <button type="button" onClick={() => act('follower')} disabled={busy} className="chip flex-1 py-1.5 text-xs disabled:opacity-50" data-migrate-follow>
+          <button type="button" onClick={() => act('follower')} disabled={busy} className="btn-key flex-1" data-migrate-follow>
             {tr('Add as extra source')}
           </button>
         )}
-        <button type="button" onClick={() => act('main')} disabled={busy} className="btn-accent flex-1 py-1.5 text-xs disabled:opacity-50" data-migrate-main>
+        <button type="button" onClick={() => act('main')} disabled={busy} className="btn-key btn-key-primary flex-1" data-migrate-main>
           {busy ? tr('Working…') : buttons.follower ? tr('Move here') : tr('Use this source')}
         </button>
       </div>
@@ -193,7 +209,7 @@ export function MigrateSourceSheet({ id, title, attached, mainId, listed, onDone
                     <input type="checkbox" checked={pickedIds.includes(s.id)} onChange={() => toggleSource(s.id)} className="accent-[rgb(var(--accent))]" />
                     <SourceIcon id={s.id} name={s.name} size={16} />
                     <span className="truncate">{s.name}{s.lang ? ` (${s.lang.toUpperCase()})` : ''}</span>
-                    {attached.includes(s.id) && <span className="chip px-1.5 py-0 text-[11px]">{s.id === mainId ? tr('main') : tr('attached')}</span>}
+                    {attached.includes(s.id) && <Marker main={s.id === mainId} />}
                   </label>
                 ))}
               </div>
@@ -227,21 +243,21 @@ export function MigrateSourceSheet({ id, title, attached, mainId, listed, onDone
               <p className="mb-1.5 flex items-center gap-1.5 px-0.5 text-xs font-semibold text-fog-300">
                 <SourceIcon id={g.source} name={g.name} size={16} />
                 <span className="truncate">{g.name}{g.lang ? ` (${g.lang.toUpperCase()})` : ''}</span>
-                {attached.includes(g.source) && <span className="chip px-1.5 py-0 text-[11px]">{g.source === mainId ? tr('main') : tr('attached')}</span>}
+                {attached.includes(g.source) && <Marker main={g.source === mainId} />}
               </p>
               <ScrollRail className="flex gap-2.5 pb-3">
                 {g.results.map((r) => {
                   const selected = pick?.source === g.source && pick?.sourceId === r.sourceId;
                   return (
                     <button key={r.sourceId} type="button" disabled={busy} aria-pressed={selected}
-                      onClick={() => { setRefusal(null); setPick({ source: g.source, sourceId: r.sourceId, title: r.title, coverUrl: r.coverUrl, name: g.name }); }}
+                      onClick={() => { setRefusal(null); setDiffers(null); setPick({ source: g.source, sourceId: r.sourceId, title: r.title, coverUrl: r.coverUrl, name: g.name }); }}
                       className="w-24 shrink-0 text-start disabled:opacity-50">
                       <span className="relative block">
                         <Img src={sourceCover(g.source, r.coverUrl)} alt="" fallbackSrc={r.coverUrl}
                           className={`aspect-[2/3] w-24 rounded-lg border ${selected ? 'border-accent ring-2 ring-accent' : 'border-ink-700'}`} />
                         {selected && <span className="absolute end-1 top-1 grid size-5 place-items-center rounded-full bg-accent text-black"><IcCheck aria-hidden width={12} height={12} /></span>}
                       </span>
-                      <p className="mt-1 line-clamp-2 text-[11px] leading-tight text-fog-300">{r.title}</p>
+                      <p className="mt-1 line-clamp-2 text-[11px] leading-tight text-fog-300" dir="auto">{r.title}</p>
                     </button>
                   );
                 })}
@@ -252,4 +268,11 @@ export function MigrateSourceSheet({ id, title, attached, mainId, listed, onDone
       )}
     </Sheet>
   );
+}
+
+/** A source the series already uses, marked as a squared tag (no capsules for statuses: noPills.test.ts). */
+function Marker({ main }: { main: boolean }) {
+  return main
+    ? <span className="shrink-0 rounded-[4px] border border-accent/40 px-1.5 text-[10px] leading-4 text-accent">{tr('main')}</span>
+    : <span className="shrink-0 rounded-[4px] border border-ink-700 px-1.5 text-[10px] leading-4 text-fog-300">{tr('attached')}</span>;
 }
