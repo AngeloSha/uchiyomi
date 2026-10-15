@@ -177,6 +177,9 @@ function ReaderInner() {
   const imgFilter = COLOR_FILTER[device.colorFilter];
   const behavior = glide(device.colorFilter);
   const [zoom, setZoom] = useState(1);
+  // A pair of pages on one slide with ONE of them brought into frame: tap a page to fill the screen with it, tap it again for the pair.
+  // Only ever a view of a slide that holds two pages, so nothing the pages count (progress, the slider, bookmarks) sees it.
+  const [focused, setFocused] = useState<{ slide: number; page: number } | null>(null);
   const [rtl, setRtl] = useState(false); // series reads right-to-left → double-spread pair order flips
   // Paged mode's track direction: the reader setting (lib/readerPrefs.ts `pagedDirection`), or the series'
   // own direction above when it says `series`. `trackSign` turns a slide index into a scrollLeft: an RTL
@@ -234,7 +237,7 @@ function ReaderInner() {
    * that far: the OS decides how long a double-click may take (Windows defaults to 500 ms), so the single
    * click of a slow double-click has already acted by the time the browser says the two were one gesture.
    */
-  const acted = useRef<{ kind: 'turn'; slide: number; at: number } | { kind: 'scroll'; top: number; at: number } | { kind: 'chrome'; at: number } | null>(null);
+  const acted = useRef<{ kind: 'turn'; slide: number; at: number } | { kind: 'scroll'; top: number; at: number } | { kind: 'chrome'; at: number } | { kind: 'focus'; prev: { slide: number; page: number } | null; at: number } | null>(null);
   /** When the pointer path handled a double-tap itself. A touch double-tap also raises `dblclick`, and
    *  zooming for both halves of the same gesture would put the zoom straight back where it started. */
   const handledDouble = useRef(0);
@@ -519,6 +522,8 @@ function ReaderInner() {
     () => pairSlides(flat, prefs.mode === 'paged' && !!prefs.spread, { split: splitTrack, rightFirst }),
     [flat, prefs.mode, prefs.spread, splitTrack, rightFirst],
   );
+  // The slides were laid out again (another chapter, a setting): a page brought into frame belongs to the old layout.
+  useEffect(() => { setFocused(null); }, [slides]);
   /** The paged track's slide, measured: what a split half or a page turned on its side is fitted into. */
   const [area, setArea] = useState({ w: 0, h: 0 });
   useEffect(() => {
@@ -866,6 +871,7 @@ function ReaderInner() {
       // engine follows), so page n sits at -n × width.
       const s = Math.round(Math.abs(el.scrollLeft) / Math.max(1, el.clientWidth));
       const idxs = slides[Math.max(0, Math.min(slides.length - 1, s))];
+      setFocused((f) => (f && f.slide !== s ? null : f));
       const i = idxs ? idxs[idxs.length - 1] : 0; // last page of a spread → completion fires on the final spread
       setCurrent((c) => (c === i ? c : i));
       return;
@@ -1302,7 +1308,49 @@ function ReaderInner() {
     cancelPendingTap();
     lastTapAt.current = now;
     const zone = act.zone;
+    // A tap ON a page of a pair brings that page into frame (and on the focused page, back to the pair), instead of turning or
+    // showing the interface; a tap on the black around the pages is still the tap layout's.
+    const target = pairTap(e.clientX, e.clientY);
+    if (target !== undefined) {
+      tapTimer.current = setTimeout(() => { tapTimer.current = null; acted.current = { kind: 'focus', prev: focused, at: Date.now() }; setFocused(target); }, act.after);
+      return;
+    }
     tapTimer.current = setTimeout(() => { tapTimer.current = null; runTap(zone); }, act.after);
+  };
+
+  /**
+   * The pages of a slide in the order the layout puts them. RTL manga: right page reads first. On an RTL track `dir` already
+   * lays a spread out right to left, so flipping here as well would put it back the wrong way round. A right-to-left series
+   * forced to read left to right still swaps: the pages turn the other way, but a double-page spread is ONE drawing, and it
+   * only reassembles with its first page on the right.
+   */
+  const shownOf = (idxs: number[]): number[] => {
+    return rtl && !pagedRtl && idxs.length === 2 ? [idxs[1], idxs[0]] : idxs;
+  };
+
+  /**
+   * What a tap at (x, y) does to the pair on screen: `{slide, page}` to bring that page into frame, `null` to go back to the pair,
+   * `undefined` when it is none of that (not a pair, or the tap missed the pages and landed on the black round them).
+   * The page is the one on that side of the screen: the pair is laid out symmetrically, one page a half.
+   */
+  const pairTap = (x: number, y: number): { slide: number; page: number } | null | undefined => {
+    const el = scrollRef.current;
+    if (prefs.mode !== 'paged' || !el) return undefined;
+    const slide = slideNow();
+    const idxs = slides[slide];
+    if (!idxs) return undefined;
+    const isFocused = focused?.slide === slide;
+    if (idxs.length !== 2) return undefined;
+    const box = el.children[slide] as HTMLElement | undefined;
+    const onPage = Array.from(box?.querySelectorAll('img') ?? []).some((im) => {
+      const r = im.getBoundingClientRect();
+      return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    });
+    if (!onPage) return undefined;
+    if (isFocused) return null;
+    const visual = pagedRtl ? [shownOf(idxs)[1], shownOf(idxs)[0]] : shownOf(idxs); // left, right on screen
+    const rect = el.getBoundingClientRect();
+    return { slide, page: visual[x < rect.left + rect.width / 2 ? 0 : 1] };
   };
 
   const cancelPendingTap = () => {
@@ -1353,6 +1401,7 @@ function ReaderInner() {
       if (a.kind === 'turn' && el) el.scrollTo({ left: trackSign * a.slide * (el.clientWidth || window.innerWidth) });
       else if (a.kind === 'scroll' && el) el.scrollTo({ top: a.top });
       else if (a.kind === 'chrome') setChrome((c) => !c);
+      else if (a.kind === 'focus') setFocused(a.prev);
     }
     applyZoom(zoom > 1 ? 1 : 2);
   };
@@ -1522,16 +1571,14 @@ function ReaderInner() {
         <div ref={scrollRef} data-lenis-prevent onScroll={onScroll} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd} onDoubleClick={onTrackDoubleClick}
           dir={pagedRtl ? 'rtl' : 'ltr'}
           className="hide-scrollbar flex h-screen-d snap-x snap-mandatory overflow-x-auto overflow-y-hidden" style={{ filter: THEME_FILTER[prefs.theme] }}>
-          {slides.map((idxs, s) => {
-            // RTL manga: right page reads first. On an RTL track `dir` already lays a spread out right to
-            // left, so flipping here as well would put it back the wrong way round. A right-to-left series
-            // forced to read left to right still swaps: the pages turn the other way, but a double-page spread
-            // is ONE drawing, and it only reassembles with its first page on the right.
-            const shown = rtl && !pagedRtl && idxs.length === 2 ? [idxs[1], idxs[0]] : idxs;
+          {slides.map((slideIdxs, s) => {
+            // One page of the pair brought into frame (see `focused`): the slide holds just it, so everything below lays it out as a single page.
+            const idxs = focused && focused.slide === s ? [focused.page] : slideIdxs;
+            const shown = shownOf(idxs);
             // v0.61.0: one half of a wide page (Wide pages → Split) is a slide of its own, keyed apart from its twin.
             const halfOf = half[s];
             return (
-              <div key={halfOf ? `${flat[idxs[0]].key}:${halfOf}` : flat[idxs[0]].key} className="relative flex h-full w-full shrink-0 snap-center snap-always items-center justify-center gap-1">
+              <div key={halfOf ? `${flat[idxs[0]].key}:${halfOf}` : flat[idxs[0]].key} className="relative flex h-full w-full shrink-0 snap-center snap-always items-center justify-center">
                 {shown.map((i) => {
                   const p = flat[i];
                   if (!(activeSet.has(i) && srcFor(i))) return <span key={p.key} className="text-ink-600">{p.number}</span>;
@@ -1581,7 +1628,7 @@ function ReaderInner() {
                       region = pairCrop(pair[0]?.all ?? WHOLE, pair[1]?.all ?? WHOLE)[shown.indexOf(i)];
                     }
                     return <SlideRegion key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={w} height={h}
-                      region={region} area={shown.length === 2 ? { w: area.w / 2 - 2, h: area.h } : area} zoom={zoom}
+                      region={region} area={shown.length === 2 ? { w: area.w / 2, h: area.h } : area} zoom={zoom}
                       pending={pending} onLoaded={loaded} filter={imgFilter} trimmed={region.l} />;
                   }
                   return (

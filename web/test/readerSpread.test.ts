@@ -186,3 +186,16 @@ test('the paged track counts a key press from the slide on screen, and re-anchor
   // And a split is drawn only upright and never in spread mode.
   assert.match(src, /const wideMode: WidePages = portrait && !\(prefs\.mode === 'paged' && prefs\.spread\) \? prefs\.widePages : 'whole';/);
 });
+
+test('the two pages of a pair touch, and a tap on one brings it into frame', () => {
+  const src = code(readFileSync(join(ROOT, 'app/reader/page.tsx'), 'utf8'));
+  // No gap between the pages of a slide: the picture runs across the seam. Reintroduce `gap-1` on the slide (or the `- 2` in the
+  // crop area) and this fails.
+  assert.doesNotMatch(src, /snap-always items-center justify-center gap-/, 'the slide puts a gap between the pages of a pair');
+  assert.doesNotMatch(src, /area\.w \/ 2 - 2/, 'a cropped pair leaves room for a gap');
+  // A tap on a page of a pair focuses it (and on the focused page, undoes it) instead of turning a page; a mouse's double-click undoes it too.
+  assert.match(src, /const target = pairTap\(e\.clientX, e\.clientY\);\s*if \(target !== undefined\)/);
+  assert.match(src, /else if \(a\.kind === 'focus'\) setFocused\(a\.prev\)/);
+  // Leaving the slide puts the pair back.
+  assert.match(src, /setFocused\(\(f\) => \(f && f\.slide !== s \? null : f\)\)/);
+});
