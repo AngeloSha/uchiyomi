@@ -64,6 +64,12 @@ export interface LibraryEntry {
   status: ListStatus;
   progress: number;
   format: 'manga' | 'novel' | 'other';
+  /** The person's own rating on a 0-10 scale; absent when they have not rated it (both services use 0 for that). */
+  score?: number;
+  /** Chapters in the library for this series, when Uchiyomi holds it: lets a few chapters of a long series count for little. */
+  total?: number;
+  /** When the person last read a chapter of it in Uchiyomi (epoch ms); absent when never read here. */
+  lastRead?: number;
 }
 /** How many entries one intake reads at most: the review batch keeps 500, one more says "truncated". */
 export const TRACKER_LIST_MAX = 501;
@@ -257,7 +263,7 @@ async function anilistCall(token: string, query: string, variables: Record<strin
 const ANILIST_LIST = `query($userId:Int,$statuses:[MediaListStatus],$chunk:Int,$perChunk:Int){
   MediaListCollection(userId:$userId,type:MANGA,status_in:$statuses,chunk:$chunk,perChunk:$perChunk,forceSingleCompletedList:true){
     hasNextChunk
-    lists{ isCustomList entries{ mediaId status progress media{ id format title{ romaji english } synonyms } } }
+    lists{ isCustomList entries{ mediaId status progress score(format:POINT_10_DECIMAL) media{ id format title{ romaji english } synonyms } } }
   }
 }`;
 const ANILIST_PER_CHUNK = 500;
@@ -330,6 +336,7 @@ export const anilistAdapter: TrackerAdapter = {
             externalId: String(mediaId), ...t, status,
             progress: Math.max(0, Math.floor(Number(e.progress) || 0)),
             format: anilistFormat(e.media?.format),
+            ...(Number(e.score) > 0 ? { score: Number(e.score) } : {}),
           });
           if (out.length >= max) return out;
         }
@@ -403,15 +410,20 @@ export const malAdapter: TrackerAdapter = {
     if (!statuses.length || !(max > 0)) return [];
     const out: LibraryEntry[] = [];
     const seen = new Set<string>();
-    // `status` takes ONE value ("to return all manga, don't specify"), so it is one paged loop per bucket.
+    // `status` takes ONE value ("to return all manga, don't specify"), so a subset is one paged loop per bucket.
     // `nsfw=true` is not optional: without it the gray and black entries are silently left out of the
     // answer, and a list that "imported fine" is missing titles nobody can account for.
-    for (const st of statuses) {
+    // Every bucket asked for is ONE paged read with no `status` (the row says which bucket it is in), not
+    // five: a full-list read for recommendations costs a call per thousand entries instead of a call per bucket.
+    const everything = LIST_STATUSES.every((s) => statuses.includes(s));
+    const wanted = new Set<string>(statuses);
+    for (const pass of everything ? [null] : statuses) {
       for (let offset = 0, more = true; more; ) {
         const qs = new URLSearchParams({
-          status: MAL_STATUS[st], fields: 'list_status,alternative_titles,media_type',
+          fields: 'list_status,alternative_titles,media_type',
           limit: String(MAL_PAGE), offset: String(offset), nsfw: 'true',
         });
+        if (pass) qs.set('status', MAL_STATUS[pass]);
         const d = await malCall(token, `/users/@me/mangalist?${qs}`);
         const rows: any[] = Array.isArray(d?.data) ? d.data : [];
         // `paging.next` is only a signal that there is more. It is a URL the service composed, and this
@@ -423,6 +435,8 @@ export const malAdapter: TrackerAdapter = {
         for (const row of rows) {
           const node = row?.node;
           if (node?.id == null || seen.has(String(node.id))) continue;
+          const st = (pass ?? row?.list_status?.status) as ListStatus | undefined;
+          if (!st || !wanted.has(st) || !(LIST_STATUSES as readonly string[]).includes(st)) continue;
           // `title` is the romaji; the English title lives under alternative_titles.en and is "" when there
           // is none, so the trim rule in titlesOf is what makes the romaji the search title in that case.
           const alt = node.alternative_titles ?? {};
@@ -433,6 +447,7 @@ export const malAdapter: TrackerAdapter = {
             externalId: String(node.id), ...t, status: st,
             progress: Math.max(0, Math.floor(Number(row?.list_status?.num_chapters_read) || 0)),
             format: malFormat(node.media_type),
+            ...(Number(row?.list_status?.score) > 0 ? { score: Number(row.list_status.score) } : {}),
           });
           if (out.length >= max) return out;
         }
@@ -822,6 +837,140 @@ export const mangaupdatesAdapter: TrackerAdapter = {
     }
   },
 };
+
+// ---------------------------------------------------------------------------- Recommendations
+
+/**
+ * One title another reader suggested, in the shape lib/trackerRecs.ts caches. `votes` is how strongly the
+ * community stands behind the pairing (AniList's net rating, MyAnimeList's `num_recommendations`).
+ * `adult` is null when the service did not say, which only MyAnimeList's own answer ever leaves.
+ */
+export interface RecItem {
+  id: string;
+  title: string;
+  altTitles: string[];
+  cover: string | null;
+  url: string | null;
+  /** 0-100, the community's score; null when there is none. */
+  score: number | null;
+  adult: boolean | null;
+  format: LibraryEntry['format'];
+  votes: number;
+  /** AniList genre names; absent on answers cached before genres were asked for. */
+  genres?: string[];
+}
+
+const ANILIST_MEDIA = 'id idMal type format isAdult averageScore siteUrl genres title{ romaji english } synonyms coverImage{ large medium }';
+
+function anilistItem(m: any, votes: number): RecItem | null {
+  if (!m || m.id == null || (m.type && m.type !== 'MANGA')) return null;
+  const t = titlesOf([m.title?.english, m.title?.romaji, ...(Array.isArray(m.synonyms) ? m.synonyms : [])]);
+  if (!t) return null;
+  return {
+    id: String(m.id), ...t,
+    cover: nonEmpty(m.coverImage?.large) ?? nonEmpty(m.coverImage?.medium),
+    url: nonEmpty(m.siteUrl),
+    score: Number(m.averageScore) > 0 ? Math.round(Number(m.averageScore)) : null,
+    adult: typeof m.isAdult === 'boolean' ? m.isAdult : null,
+    format: anilistFormat(m.format),
+    votes,
+    genres: Array.isArray(m.genres) ? m.genres.filter((g: unknown) => typeof g === 'string') : [],
+  };
+}
+
+/**
+ * What AniList readers recommend after each of these series, as ONE request: the ids are aliases of a single
+ * query rather than a call each. The query is public, so no token is sent -- a recommendation is the same
+ * for everyone and need not carry anyone's credentials. Only pairings the community voted up (net rating
+ * above zero) are kept, best first. An id AniList does not know simply has no entry in the answer.
+ */
+export async function anilistRecommendations(ids: string[], perSeed = 12): Promise<Map<string, RecItem[]>> {
+  const out = new Map<string, RecItem[]>();
+  const wanted = ids.filter((i) => /^\d+$/.test(i));
+  if (!wanted.length) return out;
+  const body = wanted.map((id, n) =>
+    `m${n}: Media(id:${Number(id)}, type:MANGA){ id recommendations(sort:RATING_DESC, perPage:${perSeed}){ nodes{ rating mediaRecommendation{ ${ANILIST_MEDIA} } } } }`,
+  ).join('\n');
+  const r = await fetch(ANILIST_API, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ query: `query{ ${body} }` }),
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!r.ok && r.status !== 404) throw new Error(`anilist ${r.status}`);
+  const j: any = await r.json().catch(() => null);
+  // A seed that no longer exists answers a per-alias "Not Found" error next to the aliases that worked; only
+  // an answer with no data at all is a failure.
+  if (!j?.data) throw new Error(`anilist ${j?.errors?.[0]?.message || 'no data'}`);
+  wanted.forEach((id, n) => {
+    const nodes: any[] = j.data[`m${n}`]?.recommendations?.nodes ?? [];
+    const items: RecItem[] = [];
+    for (const node of nodes) {
+      const votes = Number(node?.rating) || 0;
+      if (votes <= 0) continue;
+      const item = anilistItem(node?.mediaRecommendation, votes);
+      if (item) items.push(item);
+    }
+    out.set(id, items);
+  });
+  return out;
+}
+
+/**
+ * What MyAnimeList readers recommend after one series. One call, the person's own token (the endpoint needs
+ * a client id or a bearer and the token is the one already held). MyAnimeList says nothing about age rating
+ * here, so `adult` is null until lib/trackerRecs.ts asks AniList about the whole batch at once.
+ */
+export async function malRecommendations(token: string, malId: string): Promise<RecItem[]> {
+  if (!/^\d+$/.test(malId)) return [];
+  let d: any;
+  try {
+    d = await malCall(token, `/manga/${malId}?fields=recommendations`);
+  } catch (e) {
+    if (/ 404$/.test((e as Error).message)) return []; // gone from MyAnimeList: nothing to recommend, and no use asking again
+    throw e;
+  }
+  const out: RecItem[] = [];
+  for (const rec of Array.isArray(d?.recommendations) ? d.recommendations : []) {
+    const node = rec?.node;
+    const title = nonEmpty(node?.title);
+    if (node?.id == null || !title) continue;
+    out.push({
+      id: String(node.id), title, altTitles: [],
+      cover: nonEmpty(node.main_picture?.large) ?? nonEmpty(node.main_picture?.medium),
+      url: `https://myanimelist.net/manga/${node.id}`,
+      score: null, adult: null, format: 'other',
+      votes: Math.max(1, Math.floor(Number(rec?.num_recommendations) || 1)),
+    });
+  }
+  return out;
+}
+
+/**
+ * AniList's record for a batch of MyAnimeList ids, in one request (`idMal_in`): the age rating, format,
+ * English title and score MyAnimeList's recommendations lack. Up to 50 ids, which is one page. Public, no token.
+ */
+export async function anilistByMalIds(malIds: string[]): Promise<Map<string, RecItem>> {
+  const out = new Map<string, RecItem>();
+  const ids = malIds.filter((i) => /^\d+$/.test(i)).slice(0, 50).map(Number);
+  if (!ids.length) return out;
+  const r = await fetch(ANILIST_API, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({
+      query: `query($ids:[Int]){ Page(perPage:50){ media(idMal_in:$ids, type:MANGA){ ${ANILIST_MEDIA} } } }`,
+      variables: { ids },
+    }),
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!r.ok) throw new Error(`anilist ${r.status}`);
+  const j: any = await r.json().catch(() => null);
+  for (const m of j?.data?.Page?.media ?? []) {
+    const item = anilistItem(m, 0);
+    if (item && m.idMal != null) out.set(String(m.idMal), item);
+  }
+  return out;
+}
 
 // ----------------------------------------------------------------------------
 

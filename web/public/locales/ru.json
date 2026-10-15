@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3868
+    "strings": 3869
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -3871,5 +3871,6 @@
   "Reconnect": "Подключить заново",
   "Your tracker token no longer works. Reconnect it under Profile.": "Токен трекера больше не работает. Подключите его заново в разделе Профиль.",
   "Your token for {names} no longer works. Reconnect to keep your progress in sync.": "Ваш токен для {names} больше не работает. Подключитесь заново, чтобы прогресс продолжал синхронизироваться.",
-  "MangaUpdates list": "Список MangaUpdates"
+  "MangaUpdates list": "Список MangaUpdates",
+  "Recommended for you": "Recommended for you"
 }
