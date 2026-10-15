@@ -1,12 +1,13 @@
 'use client';
-import Link from 'next/link';
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { t as tr } from '@/lib/i18n';
 import { INCOGNITO_TEXT } from '@/lib/incognito';
 import { adultShown, setAdultShown } from '@/lib/adult';
 import { isDesktop } from '@/lib/desktop';
+import { arrival } from '@/lib/destinations';
 import { useReduceEffects } from '@/lib/useReduceEffects';
 import { Avatar } from './Avatar';
 import { useIncognito } from './IncognitoBanner';
@@ -31,14 +32,30 @@ export function QuickSettings({ onClose }: { onClose: () => void }) {
   const adultOn = useAdultShown();
   const showAdult = filterConfigured || (libs ?? []).some((l) => l.adult);
   const link = 'rounded-lg px-2 py-1.5 text-sm text-fog-200 hover:bg-ink-800/70 hover:text-fog-50';
+  const router = useRouter();
+  /**
+   * Profile and Profile settings arrive as the search palette's destinations do (lib/destinations.ts arrival): a push
+   * from another page, a whole load from the profile's other tab, nothing where it already is. ⚠️ The profile reads
+   * `?tab=` once (lib/useTabParam.ts), so a client push from /profile to ?tab=Settings changed the address and nothing on
+   * the screen. Still real links, so a middle click or Ctrl+click opens a tab.
+   */
+  const go = (href: string) => (e: MouseEvent<HTMLAnchorElement>) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    onClose();
+    const how = arrival(href, window.location, () => false);
+    if (how === 'push') router.push(href);
+    else if (how === 'load') window.location.assign(href);
+  };
   return (
     <div>
       <div className="flex items-center gap-3 pb-3">
         <Avatar avatar={user?.avatar} size={44} />
         <p className="min-w-0 flex-1 truncate font-medium text-fog-50">{user?.displayName}</p>
-        <Link href="/profile" onClick={onClose} data-profile-link className={`${link} shrink-0 border border-ink-700`}>{tr('Profile')}</Link>
+        <a href="/profile/" onClick={go('/profile/')} data-profile-link className={`${link} shrink-0 border border-ink-700`}>{tr('Profile')}</a>
       </div>
-      <div className="divide-y divide-ink-800/70 border-t border-ink-800/70 [&>*]:py-2.5 [&_[role=status]]:hidden">
+      {/* Each switch says Saving…, Saved or why it could not, as its row in Settings does: a refused save is never silent. */}
+      <div className="divide-y divide-ink-800/70 border-t border-ink-800/70 [&>*]:py-2.5">
         <SwitchRow label={tr(INCOGNITO_TEXT[0])} on={incognito.on} onChange={incognito.set} />
         {showAdult && (
           <Row label={tr('Show 18+')}>
@@ -48,7 +65,7 @@ export function QuickSettings({ onClose }: { onClose: () => void }) {
         <SwitchRow label={tr('Reduce effects')} on={reduceEffects} onChange={saveReduceEffects} />
       </div>
       <div className="mt-2 flex items-center justify-between gap-2 border-t border-ink-800/70 pt-3">
-        <Link href="/profile?tab=Settings" onClick={onClose} className={link}>{tr('Profile settings')}</Link>
+        <a href="/profile/?tab=Settings" onClick={go('/profile/?tab=Settings')} data-profile-settings-link className={link}>{tr('Profile settings')}</a>
         {/* Not on desktop: the app signs itself back in at once, so "Sign out" there would do nothing visible (as on the profile rail). */}
         {!isDesktop() && <button type="button" onClick={() => { onClose(); void logout(); }} className="rounded-lg px-2 py-1.5 text-sm text-red-300 hover:bg-red-500/10">{tr('Sign out')}</button>}
       </div>
@@ -95,7 +112,7 @@ export function ProfileMenu({ active }: { active: boolean }) {
     <>
       <button ref={btn} type="button" aria-label={tr('You')} title={user?.displayName} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}
         onClick={() => setOpen((o) => !o)}
-        className={`shrink-0 rounded-full transition hover:opacity-80 ${active ? 'ring-2 ring-accent ring-offset-2 ring-offset-ink-950' : ''}`}>
+        className={`shrink-0 grid h-10 w-10 place-items-center rounded-full transition hover:opacity-80 ${active ? 'ring-2 ring-accent ring-offset-2 ring-offset-ink-950' : ''}`}>
         <Avatar avatar={user?.avatar} size={40} />
       </button>
       {open && (

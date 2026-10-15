@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { arrival } from '../lib/destinations';
 
 const read = (f: string) => readFileSync(join(__dirname, '..', f), 'utf8');
 const code = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
@@ -36,7 +37,7 @@ test('it offers only switches Settings already has, from the same hooks', () => 
   // 18+ renders nothing for an account with no 18+ library or filter, as AdultToggle does.
   assert.match(menu, /showAdult && \(/);
   assert.match(menu, /\.some\(\(l\) => l\.adult\)/);
-  assert.match(menu, /href="\/profile"/, 'the Profile route stays reachable');
+  assert.match(menu, /href="\/profile\/"/, 'the Profile route stays reachable');
   assert.match(menu, /\{tr\('Sign out'\)\}/);
   assert.match(menu, /!isDesktop\(\) && <button/, 'no Sign out on the desktop app');
 });
@@ -47,3 +48,28 @@ test('the phone opens the same body in a sheet from Home\'s avatar', () => {
   assert.match(home, /onClick=\{\(\) => setQuickOpen\(true\)\}/);
   assert.doesNotMatch(home, /<Link href="\/profile"[^>]*>\s*<Avatar/);
 });
+
+test('Profile and Profile settings arrive as the palette\'s destinations do', () => {
+  // ⚠️ The profile reads ?tab= once (lib/useTabParam.ts): a client push from /profile to ?tab=Settings changed the address
+  // and nothing on the screen, and from the Settings tab back to /profile the same. Reintroduce `<Link href=…>` for either:
+  // the links lose `go(…)` and this fails.
+  const menu = code(read('components/ProfileMenu.tsx'));
+  assert.match(menu, /<a href="\/profile\/" onClick=\{go\('\/profile\/'\)\}/);
+  assert.match(menu, /<a href="\/profile\/\?tab=Settings" onClick=\{go\('\/profile\/\?tab=Settings'\)\}/);
+  assert.match(menu, /const how = arrival\(href, window\.location, \(\) => false\);\s*if \(how === 'push'\) router\.push\(href\);\s*else if \(how === 'load'\) window\.location\.assign\(href\);/);
+  assert.match(menu, /if \(e\.button !== 0 \|\| e\.metaKey \|\| e\.ctrlKey \|\| e\.shiftKey \|\| e\.altKey\) return;/, 'a new-tab click stays the browser\'s');
+  // What arrival says for the four places the panel is opened from.
+  const at = (pathname: string, search = '') => ({ pathname, search });
+  assert.equal(arrival('/profile/?tab=Settings', at('/library/'), () => false), 'push');
+  assert.equal(arrival('/profile/?tab=Settings', at('/profile/'), () => false), 'load', 'from You to Settings');
+  assert.equal(arrival('/profile/', at('/profile/', '?tab=Settings'), () => false), 'load', 'from Settings to You');
+  assert.equal(arrival('/profile/', at('/profile'), () => false), 'none', 'already there');
+});
+
+test('a refused save says so in the panel, as in Settings', () => {
+  // The PR hid every row's save state (`[&_[role=status]]:hidden`), so a switch the server refused flipped back with no
+  // word. Reintroduce the class: this fails.
+  const menu = code(read('components/ProfileMenu.tsx'));
+  assert.doesNotMatch(menu, /role=status\]\]:hidden/);
+});
+

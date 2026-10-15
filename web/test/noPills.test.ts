@@ -129,6 +129,9 @@ const SURFACES = [
   'lib/readerPad.ts',
   // v0.70.0 (#260, @Squeaks72): the reader's key list on ?, its key caps squared as Reader → Keys has them.
   'components/ReaderShortcuts.tsx',
+  // v0.70.0 (#251, @Squeaks72): the profile photo's quick settings, its round avatar key and the hook it shares.
+  'components/ProfileMenu.tsx',
+  'lib/useReduceEffects.ts',
   // UI refresh, phase 3 (Look settings): Home's Customize key and sheet (squared move keys, Reset, Done) and the words
   // of the rails and the background tones.
   'components/HomeCustomize.tsx',

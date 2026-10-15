@@ -209,7 +209,7 @@ test('the desktop header fits at 1024 px: round buttons keep their 40 px, and th
   }
   assert.ok([...header.matchAll(/\bh-10 w-10\b/g)].length >= 1, 'the round buttons moved -- redo this scan');
   // The avatar is the quick-settings button now (components/ProfileMenu.tsx), not a link in the header.
-  assert.match(code(read('components/ProfileMenu.tsx')), /className=\{`shrink-0 rounded-full /, 'the avatar can be squeezed');
+  assert.match(code(read('components/ProfileMenu.tsx')), /className=\{`shrink-0 grid h-10 w-10 place-items-center rounded-full /, 'the avatar can be squeezed');
   // The search takes what is left: flexible, never a fixed width, its words truncating down to the icon.
   assert.match(header, /className="flex min-w-0 max-w-xl flex-1 /, 'the search is a fixed width again');
   assert.doesNotMatch(header, /(?<![\w-])w-(72|96|xl)\b/, 'the search is a fixed width again');
