@@ -285,6 +285,23 @@ export async function browsableIds(ids: readonly string[], ctx: ViewCtx): Promis
  * judged, and is not named. Reintroduce `browsableIds` in its place: "a merge of a series that is not 18+ is still said"
  * in repairRoutes.int.test.ts finds the line gone.
  */
+/**
+ * Which of these series this viewer may OPEN: visible(), the permission, without the 18+ surfacing switch that
+ * browsableIds also applies -- for an answer that links to a series rather than lists it (Discover's Open, v0.69.1).
+ * A failed lookup is an empty answer: nothing named.
+ */
+export async function visibleIds(ids: readonly string[], ctx: ViewCtx): Promise<Set<string>> {
+  const list = [...new Set(ids.filter(Boolean))];
+  if (!list.length) return new Set();
+  const p = new Params();
+  const arr = p.add(list);
+  const rows = await q<{ id: string }>(
+    `SELECT s.id FROM lib_series s WHERE s.id = ANY(${arr}) AND ${visible('s', ctx, p)}`,
+    p.values as any[],
+  ).catch(() => [] as Array<{ id: string }>);
+  return new Set(rows.map((r) => r.id));
+}
+
 export async function nameableIds(ids: readonly string[], ctx: ViewCtx): Promise<Set<string>> {
   const list = [...new Set(ids.filter(Boolean))];
   if (!list.length) return new Set();

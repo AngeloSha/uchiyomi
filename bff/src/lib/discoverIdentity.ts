@@ -15,7 +15,7 @@
 // never containment, so "Tokyo Ghoul:re" stays its own card beside "Tokyo Ghoul".
 
 import { q, one } from './db';
-import { visibleToAll } from './visibility';
+import { visibleToAll, visibleIds, type ViewCtx } from './visibility';
 import { nameKey, namesMatch } from './onlineMatch';
 import { namesOfMany } from './altTitles';
 import { effectiveLang } from './seriesLang';
@@ -209,6 +209,23 @@ export function workOf(idx: LibraryIndex, it: ItemRef, held: Held[] = heldFor(id
   return workForKey(k) ?? `n:${k}`;
 }
 
+/**
+ * Which held series this viewer may be told about BY NAME (v0.69.1): the id, the languages and the `lib:` work key a
+ * card carries. The index is server-wide on purpose -- whether adding a title would be a second copy is the server's
+ * fact, so `inLibrary` and `owned` stay as they are -- but Discover also handed every member the internal id, held
+ * languages and work key of series outside their library grants or above their age cap. One query per response over the
+ * index's series; an unrestricted viewer skips it. Reintroduce by answering `() => true`: "Discover names only what
+ * the member may open" in discoverIdentity.int.test.ts finds the ungranted series' id.
+ */
+export async function nameableFor(idx: LibraryIndex, ctx: ViewCtx): Promise<(id: string) => boolean> {
+  if (ctx.libraryIds === null && ctx.maxAgeRating === null) return () => true;
+  const ids = new Set<string>();
+  for (const m of [idx.byPair, idx.byName, idx.byWork]) for (const hs of m.values()) for (const h of hs) ids.add(h.id);
+  if (!ids.size) return () => false;
+  const ok = await visibleIds([...ids], ctx);
+  return (id) => ok.has(id);
+}
+
 /** An index of nothing: what a response falls back to when the library cannot be read -- nothing reads as held. */
 export function noIndex(): LibraryIndex {
   return { byPair: new Map(), byName: new Map(), byWork: new Map() };
@@ -219,18 +236,20 @@ export function noIndex(): LibraryIndex {
  * `n:` key the library turned out to hold, or whose name has since been placed with a work; a service's key the library
  * holds. `lib:` and `s:` keys are what they were. `owned`: the library holds the work, in any language.
  */
-export function currentWork(idx: LibraryIndex, key: string): { work: string; owned: boolean } {
+export function currentWork(idx: LibraryIndex, key: string, may: (id: string) => boolean = () => true): { work: string; owned: boolean } {
   if (key.startsWith('lib:')) return { work: key, owned: true };
   let w: string | null = key;
+  // `owned` from the server-wide index; the `lib:` work key only from a series this viewer may open (nameableFor).
+  const named = (held: Held[]) => held.find((h) => may(h.id))?.work;
   if (key.startsWith('n:')) {
     const k = key.slice(2);
     const byName = idx.byName.get(k);
-    if (byName?.length) return { work: byName[0].work, owned: true };
+    if (byName?.length) return { work: named(byName) ?? workForKey(k) ?? key, owned: true };
     w = workForKey(k);
     if (!w) return { work: key, owned: false };
   }
   const held = idx.byWork.get(w);
-  return held?.length ? { work: held[0].work, owned: true } : { work: w, owned: false };
+  return held?.length ? { work: named(held) ?? w, owned: true } : { work: w, owned: false };
 }
 
 // ---- asking the online services ------------------------------------------------------------------------------------

@@ -127,7 +127,7 @@ export const REFRESH_BUDGET_MS = 10_000;
 import { logAudit } from '../lib/audit';
 import { autoFollow, refusals, MAX_AUTO_CANDIDATES, type FollowCandidate, type FollowResult } from '../lib/autoFollow';
 import { altTitlesFor, exactHit, learnAltTitles, learnFromMainSource, namesOf, parseAltTitles, SEARCH_NAMES } from '../lib/altTitles';
-import { currentWork, heldFor, learnPageNames, libraryChanged, libraryIndex, noIndex, noteTitles, pendingOf, workOf, type Held, type LibraryIndex } from '../lib/discoverIdentity';
+import { currentWork, heldFor, learnPageNames, libraryChanged, libraryIndex, nameableFor, noIndex, noteTitles, pendingOf, workOf, type Held, type LibraryIndex } from '../lib/discoverIdentity';
 import { env } from '../env';
 import { runtime } from '../lib/runtime';
 import { dismissRun, listRuns, requestStop } from '../lib/downloadJobs';
@@ -878,12 +878,14 @@ const uniqueHeld = (all: Held[]): Held[] => all.filter((h, i) => all.findIndex((
  * language (`owned`: browsing leaves those out, search marks them). Names nobody has looked up yet are queued for the
  * online lookups, which never hold this answer up. A library that cannot be read is an empty one, as it always was here.
  */
-async function decorate<T extends { title: string; sourceId: string }>(items: T[], source: string) {
+async function decorate<T extends { title: string; sourceId: string }>(items: T[], source: string, ctx: ViewCtx) {
   const idx = await libraryIndex().catch(() => noIndex());
+  const may = await nameableFor(idx, ctx);
   noteTitles(items.map((r) => r.title));
   return items.map((r) => {
     const held = heldOf(idx, r, source);
-    return { ...r, ...owned(held, source), work: workOf(idx, { source, sourceId: r.sourceId, title: r.title }, held), owned: held.length > 0 };
+    const seen = held.filter((h) => may(h.id));
+    return { ...r, ...owned(held, source, seen), work: workOf(idx, { source, sourceId: r.sourceId, title: r.title }, seen), owned: held.length > 0 };
   });
 }
 
@@ -895,12 +897,16 @@ async function decorate<T extends { title: string; sourceId: string }>(items: T[
  * Reintroduce by answering `inLibrary: !!held.length`: "a Spanish provider of a title held in English is not owned"
  * in editions.int.test.ts reads true.
  */
-function owned(held: Held[] | undefined, source: string): { inLibrary: boolean; librarySeriesId?: string; libraryLangs?: string[]; lang: string | null } {
+function owned(held: Held[] | undefined, source: string, seen: Held[] = held ?? []): { inLibrary: boolean; librarySeriesId?: string; libraryLangs?: string[]; lang: string | null } {
   const lang = canonLang(getSource(source)?.lang);
   if (!held?.length) return { inLibrary: false, lang };
   const serves = sourceLanguage(source);
   const mine = serves === 'any' ? held[0] : held.find((h) => sameLanguage(h.lang, serves));
-  return { inLibrary: !!mine, librarySeriesId: (mine ?? held[0]).id, libraryLangs: [...new Set(held.map((h) => h.lang))], lang };
+  // `inLibrary` is the server's fact (would adding this be a second copy); the id and the languages only from `seen`, the
+  // series this viewer may open (nameableFor, v0.69.1).
+  if (!seen.length) return { inLibrary: !!mine, lang };
+  const shown = serves === 'any' ? seen[0] : seen.find((h) => sameLanguage(h.lang, serves));
+  return { inLibrary: !!mine, librarySeriesId: (shown ?? seen[0]).id, libraryLangs: [...new Set(seen.map((h) => h.lang))], lang };
 }
 
 /**
@@ -908,7 +914,7 @@ function owned(held: Held[] | undefined, source: string): { inLibrary: boolean; 
  * English and a Spanish provider stays addable while only the English edition is here. Each provider says for
  * itself (`inLibrary`, `lang`): the add dialog marks the held ones "in your library".
  */
-function ownedGroup<G extends { providers: Array<{ source: string }> }>(g: G, held: Held[] | undefined) {
+function ownedGroup<G extends { providers: Array<{ source: string }> }>(g: G, held: Held[] | undefined, seen: Held[] = held ?? []) {
   const providers = g.providers.map((p) => {
     const o = owned(held, p.source);
     return { ...p, inLibrary: o.inLibrary, lang: o.lang };
@@ -917,9 +923,10 @@ function ownedGroup<G extends { providers: Array<{ source: string }> }>(g: G, he
   return {
     ...g, providers,
     inLibrary: providers.length > 0 && providers.every((p) => p.inLibrary),
-    ...(held?.length ? {
-      librarySeriesId: (mine ? owned(held, mine.source).librarySeriesId : undefined) ?? held[0].id,
-      libraryLangs: [...new Set(held.map((h) => h.lang))],
+    // Named only from the series this viewer may open, as owned() above.
+    ...(seen.length ? {
+      librarySeriesId: (mine ? owned(held, mine.source, seen).librarySeriesId : undefined) ?? seen[0].id,
+      libraryLangs: [...new Set(seen.map((h) => h.lang))],
     } : {}),
   };
 }
@@ -2421,7 +2428,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const seen = new Set<string>();
     const results = ratedForViewer(req, raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true))).slice(0, 24);
     // flag titles already in the library so the UI can mark them instead of offering a duplicate add
-    return { content: await decorate(results, src.id) };
+    return { content: await decorate(results, src.id, vc(req)) };
   });
 
   // Search a title across ALL enabled providers at once, grouped so one card carries every source that
@@ -3243,20 +3250,24 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // wants but hides which specific source a manual pick would come from.
     if (groupBy === 'source') {
       const rails = bySource(ans.per, order, rated);
-      return { content: await Promise.all(rails.map(async (g) => ({ ...g, results: await decorate(g.results, g.source) }))), ...rest };
+      return { content: await Promise.all(rails.map(async (g) => ({ ...g, results: await decorate(g.results, g.source, vc(req)) }))), ...rest };
     }
 
     // One card per WORK (v0.56.0, lib/discoverIdentity.ts): the work the library holds, else the one the name is known to
     // be, else the name by nameKey -- so two sites naming one series differently are one card, carrying both. `owned`:
     // the library holds the work in any language; the providers still say for their own language (ownedGroup).
     const idx = await libraryIndex().catch(() => noIndex());
+    const may = await nameableFor(idx, vc(req));
     noteTitles([...ans.per.values()].flatMap((c) => c.items.map((r) => r.title)));
-    const keyOf = (r: DiscoverItem) => workOf(idx, { source: r.source, sourceId: r.sourceId, title: r.title });
+    const keyOf = (r: DiscoverItem) => {
+      const it = { source: r.source, sourceId: r.sourceId, title: r.title };
+      return workOf(idx, it, heldFor(idx, it).filter((h) => may(h.id)));
+    };
     const groups = groupByTitle(ans.per, order, 30, rated, keyOf);
     return {
       content: groups.map((g) => {
         const held = uniqueHeld(g.providers.flatMap((p) => heldFor(idx, { source: p.source, sourceId: p.sourceId, title: p.title })));
-        return { ...ownedGroup(g, held.length ? held : undefined), owned: held.length > 0 };
+        return { ...ownedGroup(g, held.length ? held : undefined, held.filter((h) => may(h.id))), owned: held.length > 0 };
       }),
       ...rest,
     };
@@ -3285,10 +3296,10 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const resting = await blockedNow(source!).catch(() => null);
     if (resting) {
       const stale = cachedLatest(src.id, p);
-      if (stale.length || !restingForSlowness(resting)) return { content: await decorate(ratedForViewer(req, stale), src.id) };
+      if (stale.length || !restingForSlowness(resting)) return { content: await decorate(ratedForViewer(req, stale), src.id, vc(req)) };
     }
     const results = await latestPage(src, p);
-    return { content: await decorate(ratedForViewer(req, results), src.id) };
+    return { content: await decorate(ratedForViewer(req, results), src.id, vc(req)) };
   });
 
   /**
@@ -3311,10 +3322,10 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const resting = await blockedNow(source!).catch(() => null);
     if (resting) {
       const stale = cachedLatest(src.id, p, 'popular');
-      if (stale.length || !restingForSlowness(resting)) return { content: await decorate(ratedForViewer(req, stale), src.id) };
+      if (stale.length || !restingForSlowness(resting)) return { content: await decorate(ratedForViewer(req, stale), src.id, vc(req)) };
     }
     const results = await latestPage(src, p, 'popular');
-    return { content: await decorate(ratedForViewer(req, results), src.id) };
+    return { content: await decorate(ratedForViewer(req, results), src.id, vc(req)) };
   });
 
   /**
@@ -3548,8 +3559,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const raw = String((req.query as { keys?: string }).keys ?? '');
     const keys = [...new Set(raw.split(',').map((k) => k.trim()).filter(Boolean))].slice(0, 200);
     const idx = await libraryIndex().catch(() => noIndex());
+    const may = await nameableFor(idx, vc(req));
     const works: Record<string, { work: string; owned: boolean }> = {};
-    for (const key of keys) works[key] = currentWork(idx, key);
+    for (const key of keys) works[key] = currentWork(idx, key, may);
     return { works, pending: pendingOf(keys) };
   });
 
@@ -3590,7 +3602,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // does: the add dialog marks the held ones and offers the others as a new edition.
     const hits = found.filter((f): f is NonNullable<typeof f> => !!f);
     const idx = await libraryIndex().catch(() => noIndex());
-    return { content: hits.map((f) => ({ ...f, ...owned(heldOf(idx, f, f.source), f.source) })) };
+    const may = await nameableFor(idx, vc(req));
+    return { content: hits.map((f) => { const held = heldOf(idx, f, f.source); return { ...f, ...owned(held, f.source, held.filter((h) => may(h.id))) }; }) };
   });
 
   /**

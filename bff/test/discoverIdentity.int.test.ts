@@ -356,3 +356,30 @@ test('a series you hold under another name is a duplicate', { skip }, async () =
   assert.equal(r.json().error, 'duplicate');
   assert.equal(r.json().existing?.title, 'Held Tale');
 });
+
+test('Discover names only what the member may open', { skip }, async () => {
+  // A member granted another library still learns THAT the server holds the title -- whether adding it would be a
+  // second copy is the server's fact -- but not the series' id, its languages or its lib: work key. Reintroduce by
+  // answering `() => true` in nameableFor: the ungranted series' id comes back to the member.
+  await q(`INSERT INTO libraries (id, name, path) VALUES ('di-other','Other','/di-other') ON CONFLICT (id) DO NOTHING`);
+  const m = (await q(`INSERT INTO users (username, display_name, password_hash, role, auth_kind, perms)
+                      VALUES ('di-member','di-member','x','user','password','{}') RETURNING id`))[0].id;
+  await q(`INSERT INTO user_libraries (user_id, library_id) VALUES ($1,'di-other')`, [m]);
+  try {
+    const member = { authorization: `Bearer ${app.jwt.sign({ sub: m, role: 'user' })}` };
+    const r = await app.inject({ method: 'GET', url: `/api/sources/latest?source=${A}`, headers: member });
+    assert.equal(r.statusCode, 200, r.body);
+    const held = (r.json().content as any[]).find((x) => x.sourceId === 'a-held');
+    assert.equal(held.owned, true, 'the server still says it holds the title');
+    assert.equal(held.librarySeriesId, undefined, 'the ungranted series is named to the member');
+    assert.equal(held.libraryLangs, undefined);
+    assert.ok(!String(held.work).startsWith('lib:'), `the work key names the held series: ${held.work}`);
+    const works = await app.inject({ method: 'GET', url: `/api/discover/works?keys=n:heldtale`, headers: member });
+    assert.ok(!String(works.json().works['n:heldtale']?.work).startsWith('lib:'), JSON.stringify(works.json()));
+    // the admin control: named as before
+    assert.equal((await latest(A)).get('a-held').librarySeriesId, HELD);
+  } finally {
+    await q(`DELETE FROM users WHERE username = 'di-member'`);
+    await q(`DELETE FROM libraries WHERE id = 'di-other'`).catch(() => {});
+  }
+});
