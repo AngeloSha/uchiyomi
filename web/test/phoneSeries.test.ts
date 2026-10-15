@@ -42,6 +42,11 @@ test('the phone bar is clear over the cover and glass with the title once the co
 test('a phone reads the reading button first under the art, and swipes one row of genres', () => {
   const left = page.slice(page.indexOf('{/* The poster, a desktop\'s'), page.indexOf('{/* info + chapters */}'));
   assert.ok(left.indexOf('{Actions}') >= 0 && left.indexOf('{Actions}') < left.indexOf('<RatingsPanel'), 'the reading button is not first');
+  // Nothing renders between the art and the reading button: #242 put an admin's full-width Change cover key there, and
+  // Continue dropped a row on a phone. Reintroduce any element before {Actions}: this fails. (Comments may sit there.)
+  const beforeActions = left.slice(left.indexOf('</motion.div>') + '</motion.div>'.length, left.indexOf('{Actions}'))
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
+  assert.equal(beforeActions.trim(), '', `something sits between the art and the reading button: ${beforeActions.trim().slice(0, 80)}`);
   // The poster is a desktop's, and a phone does not even fetch it.
   assert.match(left, /className="hidden overflow-hidden rounded-2xl [^"]*lg:block lg:w-full">\s*\{series && wide && (?:<Img|\(isAdmin)/);
   const genres = page.slice(page.indexOf('const Genres = '), page.indexOf('const Summary = '));

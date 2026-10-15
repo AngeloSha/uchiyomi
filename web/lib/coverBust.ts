@@ -5,8 +5,7 @@
 // cover picked a moment ago kept showing its old picture on every card until the browser let go of it. The id is
 // remembered here with the time of the change and `Img` adds that to the address of its thumbnail, which makes it a new
 // address: the card fetches the new picture, and keeps doing so after a reload (the record lives in localStorage).
-import { useSyncExternalStore } from 'react';
-
+// Read as a card renders, not subscribed to (components/ui.tsx says why). Other devices still wait out their own copy.
 const KEY = 'yomi.coverBust';
 /** Longer than the browser's stale-while-revalidate window for a thumbnail (a day plus a week). */
 const KEEP_MS = 9 * 24 * 3600_000;
@@ -15,8 +14,6 @@ const MAX = 300;
 const THUMB = /^\/img\/series\/([^/?]+)\/thumb(\?.*)?$/;
 
 let marks: Record<string, number> = {};
-let version = 0;
-const listeners = new Set<() => void>();
 
 function load(): void {
   if (typeof window === 'undefined') return;
@@ -24,7 +21,6 @@ function load(): void {
     const raw = JSON.parse(window.localStorage.getItem(KEY) || '{}') as Record<string, unknown>;
     const now = Date.now();
     for (const [id, at] of Object.entries(raw)) if (typeof at === 'number' && now - at < KEEP_MS) marks[id] = at;
-    if (Object.keys(marks).length) version = 1;
   } catch { /* unreadable: nothing remembered */ }
 }
 load();
@@ -35,24 +31,15 @@ export function bustCover(seriesId: string): void {
   marks[seriesId] = Date.now();
   const entries = Object.entries(marks).sort((a, b) => b[1] - a[1]).slice(0, MAX);
   marks = Object.fromEntries(entries);
-  version++;
   try { window.localStorage.setItem(KEY, JSON.stringify(marks)); } catch { /* private mode: this tab still shows it */ }
-  for (const l of listeners) l();
 }
 
 /** The address of a series thumbnail with the change time of its cover added; any other address is returned as it came. */
 export function withCoverBust(src: string): string {
   const m = THUMB.exec(src);
   if (!m) return src;
-  const at = marks[decodeURIComponent(m[1])];
+  let id = m[1];
+  try { id = decodeURIComponent(id); } catch { /* a malformed escape: the id as written */ }
+  const at = marks[id];
   return at ? `${src}${m[2] ? '&' : '?'}cb=${at}` : src;
-}
-
-/** Re-renders the caller when a cover changes; the value is only a render key. */
-export function useCoverBust(): number {
-  return useSyncExternalStore(
-    (cb) => { listeners.add(cb); return () => { listeners.delete(cb); }; },
-    () => version,
-    () => 0,
-  );
 }

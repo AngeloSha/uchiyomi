@@ -7,10 +7,7 @@ import { msgOf } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/Toast';
 import { t as tr } from '@/lib/i18n';
 import { bustCover } from '@/lib/coverBust';
-
-/** The most the server takes for an uploaded cover (Edit details has the same limit). */
-const ART_MAX_MB = 11;
-const ART_MAX_BYTES = ART_MAX_MB * 1024 * 1024;
+import { ART_MAX_BYTES, ART_MAX_MB, dataUrlOf } from '@/lib/artUpload';
 
 interface Candidate { sourceId: string; name: string; primary: boolean; coverUrl: string }
 
@@ -37,12 +34,7 @@ export function CoverPickerSheet({ seriesId, artVersion, onClose }: { seriesId: 
     if (f.size > ART_MAX_BYTES) { toast(tr('That image is over {n} MB. Pick a smaller one.', { n: ART_MAX_MB }), 'error'); return; }
     setSaving(true);
     try {
-      const dataUrl = await new Promise<string>((res, rej) => {
-        const r = new FileReader();
-        r.onload = () => res(String(r.result));
-        r.onerror = () => rej(new Error('read'));
-        r.readAsDataURL(f);
-      });
+      const dataUrl = await dataUrlOf(f);
       await api(`/api/admin/series/${encodeURIComponent(seriesId)}/art`, { method: 'PUT', json: { kind: 'cover', mode: 'upload', dataUrl } });
       done();
     } catch (e) { toast(msgOf(e, tr('Could not change the cover')), 'error'); setSaving(false); }

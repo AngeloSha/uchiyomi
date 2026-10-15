@@ -2806,11 +2806,14 @@ nothing found online is shown or looked up for it -- its banner is made from its
 **400**. `GET /api/admin/art/overview` marks such a series `first_page: true`.
 
 **Choosing a cover from a source** (series page, admin). `GET /api/admin/series/:id/cover-candidates` answers
-`{content: [{sourceId, name, primary, coverUrl}]}`: one entry for every source the series follows that answered, from the
-source's own record of the series (a source that is down or has no picture is left out). `PUT /api/admin/series/:id/art
+`{content: [{sourceId, name, primary, coverUrl}]}`: one entry for every source the series uses that answered, from the
+source's own record of the series. Only a usable source is asked -- one switched off, not loaded, cooling down or
+failing is left out without a request -- each under its own time budget (a solver-fronted source gets the solver's), all
+at once; a source with no picture, or that did not answer in time, is left out too. `PUT /api/admin/series/:id/art
 {kind: 'cover', mode: 'source', source}` takes that source's cover: only the source's id comes from the caller (**400**
-`bad_source` when the series does not follow it, **404** `no_cover`, **502** `unavailable`), the server fetches the picture
-itself and keeps its own copy as an upload, so the cover survives the source changing or going away.
+`bad_source` when the series does not use it, **409** `source_unavailable` when it is not usable now, **404**
+`no_cover`, **502** `unavailable`), the server fetches the picture itself through the guarded cover fetch and keeps its
+own copy as an upload, so the cover survives the source changing or going away.
 ```
 GET    /img/series/:id/thumb      GET    /img/series/:id/backdrop
 GET    /img/series/:id/hero

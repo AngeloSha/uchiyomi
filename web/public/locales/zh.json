@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3865
+    "strings": 3864
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3862,11 +3862,10 @@
   "This series already follows 1 other source, as many as it may. Remove one first, or move the series to this source.": "此系列已追踪 1 个其他来源，已达上限。请先移除一个，或把系列移到此来源。",
   "This series already follows {n} other sources, as many as it may. Remove one first, or move the series to this source.": "此系列已追踪 {n} 个其他来源，已达上限。请先移除一个，或把系列移到此来源。",
   "This series has no main source to detach.": "此系列没有可移除的主来源。",
-  "Change cover": "Change cover",
-  "Use this cover": "Use this cover",
-  "Looking for covers…": "Looking for covers…",
-  "Current cover": "Current cover",
-  "Upload your own…": "Upload your own…",
-  "None of the sources following this series has a cover to offer right now.": "None of the sources following this series has a cover to offer right now.",
-  "Change cover…": "Change cover…"
+  "Change cover": "更换封面",
+  "Use this cover": "使用此封面",
+  "Looking for covers…": "正在查找封面…",
+  "Current cover": "当前封面",
+  "Upload your own…": "上传自己的…",
+  "None of the sources following this series has a cover to offer right now.": "此系列的来源目前都没有可提供的封面。"
 }

@@ -25,7 +25,9 @@ test('the picker is wired on the series page for an admin, and a changed cover i
   const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
   const page = read('app/series/page.tsx');
   assert.match(page, /data-cover-button/);
-  assert.match(page, /\{series && isAdmin && \(\s*<button type="button" onClick=\{\(\) => setCoverPicker\(true\)\} data-cover-key/, 'a visible Change cover key sits under the art, for a phone');
+  // Opened from More's admin group (a phone) and the desktop poster: never a key under the art (phoneSeries.test.ts).
+  assert.doesNotMatch(page, /data-cover-key/, 'the always-visible Change cover key is back under the art');
+  assert.match(page, /case 'cover': setCoverPicker\(true\); break;/);
   assert.match(page, /<CoverPickerSheet seriesId=\{id\}/);
   const picker = read('components/CoverPickerSheet.tsx');
   assert.match(picker, /mode: 'source'/);
@@ -33,5 +35,10 @@ test('the picker is wired on the series page for an admin, and a changed cover i
   assert.match(picker, /data-cover-use/);
   assert.match(picker, /bustCover\(seriesId\)/);
   assert.match(read('components/ui.tsx'), /withCoverBust\(fellBack/);
+  // Read as a card renders, never a store every Img of a Library grid subscribes to (the v0.67.2 perf work).
+  assert.doesNotMatch(read('components/ui.tsx'), /useCoverBust|useSyncExternalStore/, 'every Img subscribes to the cover store again');
+  // One upload limit and reader, the editor's and the picker's.
+  assert.match(read('components/CoverPickerSheet.tsx'), /from '@\/lib\/artUpload'/);
+  assert.doesNotMatch(read('components/CoverPickerSheet.tsx'), /const ART_MAX_MB|readAsDataURL/, 'the picker has its own copy of the upload code');
   assert.match(read('components/SeriesEditor.tsx'), /if \(kind === 'cover'\) bustCover\(id\)/);
 });

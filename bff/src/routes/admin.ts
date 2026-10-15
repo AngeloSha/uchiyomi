@@ -86,6 +86,8 @@ import { claimWriterFolders } from '../lib/bulkNewest';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { attachManual, detachMain, type AttachRefused } from '../lib/manualAttach';
 import { fetchCoverImage } from './images';
+import { bounded } from '../lib/autoFollow';
+import { budgetFor } from '../lib/sources/budget';
 import { switchMainSource } from '../lib/mainSource';
 import { refileFailures } from '../lib/chapterFailures';
 import { mainUses, retireSource } from '../lib/retireSource';
@@ -542,6 +544,9 @@ const ESTIMATED_KINDS = ['full', 'fix_short', 'fill', 'retry', 'steps:solver', '
 
 /** The most extensions GET /api/admin/extensions/catalog answers at once, and how many it answers when not asked. */
 export const CATALOG_PAGE_MAX = 400;
+
+/** How long a source may take to say what its cover is for the picker (#242): the add dialog's lookup, widened for a solver. */
+const COVER_LOOKUP_MS = 15_000;
 
 export default async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
@@ -3243,14 +3248,17 @@ export default async function adminRoutes(app: FastifyInstance) {
       await writeFile(artPath, buf);
       value = 'upload';
     } else if (mode === 'source') {
-      // A cover taken from a source this series follows. Only the source's id is taken from the caller: the
-      // picture's address is read from the source's own record of this series, never from the request.
+      // A cover taken from a source this series uses (#242, @Squeaks72). Only the source's id is taken from the caller:
+      // the picture's address is read from the source's own record of this series, never from the request, and fetched
+      // through the guarded, size-capped cover fetch. Turned off means off: a source that is not usable right now
+      // (switched off, not loaded, cooling down, failing) is not asked, as the candidates below never offer it.
       const follow = (await seriesSourcesFor(id)).find((x) => x.sourceId === b.data.source);
       const src = follow ? getSource(follow.sourceId) : null;
       if (kind !== 'cover' || !follow || !src) return reply.code(400).send({ error: 'bad_source', message: 'That source does not follow this series.' });
+      if (follow.standing !== 'usable') return reply.code(409).send({ error: 'source_unavailable', message: 'That source cannot be asked right now.' });
       let buf: Buffer;
       try {
-        const sr = await withTimeout(src.getSeries(follow.sourceSeriesId), 20_000);
+        const sr = await bounded(src.getSeries(follow.sourceSeriesId), budgetFor(src, COVER_LOOKUP_MS));
         if (!sr?.coverUrl) return reply.code(404).send({ error: 'no_cover', message: 'That source has no cover for this series.' });
         const raw = await fetchCoverImage(sr.coverUrl, src.id);
         buf = await sharp(raw).rotate().resize({ width: 1000, withoutEnlargement: true }).webp({ quality: 86 }).toBuffer();
@@ -3272,19 +3280,24 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  // The covers the sources this series follows have for it, for the series page's "Change cover" picker. Each
-  // is answered by the source's own record of the series (the same lookup the updater makes); a source that is
-  // down or has no picture is left out. The picture is shown through /img/sources/cover and applied with
-  // PUT .../art { mode: 'source', source }.
+  // The covers the sources this series uses have for it (#242), for the series page's Change cover. Each is answered by
+  // the source's own record of the series (the same lookup the updater makes), in parallel, each under its source's own
+  // budget (budgetFor: a solver-fronted source gets the solver's). Only a USABLE source is asked: one switched off, not
+  // loaded, cooling down or failing is left out without a request -- a dead main source (aqua) would otherwise hold the
+  // picker for its whole timeout every time it opens, and a cooldown is the site asking for room. A source with no
+  // picture, or that did not answer in time, is left out too. The picture is shown through /img/sources/cover and
+  // applied with PUT .../art { mode: 'source', source }.
+  // Reintroduce by asking every follow: "the picker asks only usable sources" in coverPicker.int.test.ts finds the
+  // switched-off and cooling sources asked.
   app.get('/api/admin/series/:id/cover-candidates', async (req, reply) => {
     const { id } = req.params as { id: string };
     if (!(await getSeriesRow(id))) return reply.code(404).send({ error: 'not_found' });
-    const follows = await seriesSourcesFor(id);
+    const follows = (await seriesSourcesFor(id)).filter((f) => f.standing === 'usable' && !!f.sourceSeriesId);
     const found = await Promise.all(follows.map(async (f) => {
       const src = getSource(f.sourceId);
-      if (!src || !f.sourceSeriesId) return null;
+      if (!src) return null;
       try {
-        const sr = await withTimeout(src.getSeries(f.sourceSeriesId), 15_000);
+        const sr = await bounded(src.getSeries(f.sourceSeriesId), budgetFor(src, COVER_LOOKUP_MS));
         return sr?.coverUrl ? { sourceId: f.sourceId, name: f.name, primary: f.primary, coverUrl: sr.coverUrl } : null;
       } catch { return null; }
     }));

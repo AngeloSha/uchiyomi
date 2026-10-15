@@ -26,6 +26,7 @@ import { useLayer } from '@/lib/layers';
 import { useReduceEffects } from '@/lib/effects';
 import { keys, t as tr } from '@/lib/i18n';
 import { bustCover } from '@/lib/coverBust';
+import { ART_MAX_BYTES, ART_MAX_MB, dataUrlOf } from '@/lib/artUpload';
 import { metaSaver, seedMeta, type SeriesMeta } from '@/lib/seriesMeta';
 import { SERIES_TYPES, seriesTypeKey } from '@/lib/seriesTypes';
 import { useToast } from './Toast';
@@ -108,13 +109,6 @@ const ages = (current: string): number[] => {
   return current !== '' && Number.isInteger(n) && !AGES.includes(n) ? [...AGES, n].sort((a, b) => a - b) : AGES;
 };
 
-/**
- * The largest picture an upload takes. ⚠️ The route's body limit is sized from it (bff routes/admin.ts ART_BODY_LIMIT):
- * the picture travels base64 in JSON, a third larger, and the 12 MB limit it had refused everything between 9 and
- * 11 MB that this dialog had just said it would take.
- */
-const ART_MAX_MB = 11;
-const ART_MAX_BYTES = ART_MAX_MB * 1024 * 1024;
 type ArtKind = 'cover' | 'banner';
 
 /** Tab through the dialog and round again, never out of it: the page under a modal is not there to the keyboard. */
@@ -667,12 +661,6 @@ function LibraryRow({ id, series, onSaved }: { id: string; series: Series; onSav
 
 /** Whether a dropped thing carries files (a dragged link or text does not, and is left to the browser). */
 const carriesFiles = (e: DragEvent) => [...(e.dataTransfer?.types ?? [])].includes('Files');
-const dataUrlOf = (f: File) => new Promise<string>((res, rej) => {
-  const r = new FileReader();
-  r.onload = () => res(String(r.result));
-  r.onerror = () => rej(new Error('read'));
-  r.readAsDataURL(f);
-});
 const webLink = (s: string): boolean => {
   try { const u = new URL(s); return u.protocol === 'http:' || u.protocol === 'https:'; } catch { return false; }
 };

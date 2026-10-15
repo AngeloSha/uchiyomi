@@ -9531,8 +9531,10 @@ paths:
       operationId: getApiAdminSeriesIdCoverCandidates
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. One entry per
-        followed source that answered with a picture (`sourceId`, `name`, `primary`, `coverUrl`); show it through
-        /img/sources/cover and apply it with PUT /api/admin/series/{id}/art `{ kind: cover, mode: source, source }`.
+        source the series uses that answered with a picture (`sourceId`, `name`, `primary`, `coverUrl`); show it through
+        /img/sources/cover and apply it with PUT /api/admin/series/{id}/art `{ kind: cover, mode: source, source }`. Only
+        a usable source is asked (not one switched off, not loaded, cooling down or failing), each under its own time
+        budget, all at once.
       parameters:
         - name: id
           in: path
