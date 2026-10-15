@@ -57,6 +57,8 @@ const SAMPLE: Record<string, (c: number) => unknown> = {
   // The engine upgrade: the versions an engine is held to (bff enginePin.ts), and what a step names to copy.
   tested: () => 'v2.3.2243', oldest: () => 'v2.3.2243', image: () => 'suwayomi/suwayomi-server:v2.3.2243',
   command: () => 'docker compose up -d uchiyomi-suwayomi', service: () => 'uchiyomi-suwayomi', path: () => '/mnt/user/appdata/uchiyomi-suwayomi',
+  // The chapter files check (bff lib/healthFiles.ts).
+  looked: (c) => c, roots: () => ['/library-dl'], missing: (c) => c, empty: () => 1, broken: () => 2,
 };
 
 /**

@@ -170,7 +170,7 @@ components:
                   kind:
                     type: string
                     enum: [replaced, retired, tested, unblocked, linked, merged, renumbered, fetched, refetched, shortFixed, shortConfirmed,
-                           failuresCleared, installed, uninstalled, deletedTwice, deletedOdd, scanned, resumedRenumber, solverReset, engineConnected]
+                           failuresCleared, installed, uninstalled, deletedTwice, deletedOdd, scanned, resumedRenumber, solverReset, engineConnected, badFiles]
                   n: { type: integer }
                   said: { $ref: '#/components/schemas/AutofixSaid' }
                   items: { type: array, items: { $ref: '#/components/schemas/AutofixSaid' } }
@@ -10747,7 +10747,7 @@ paths:
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
         Body {check, key, ignored}: `check` is one of chapter-gaps, chapter-failures, sources, frozen-series,
-        duplicates, outliers, downloads-missing, and `key` is the finding's `key` as GET /api/admin/health reports
+        duplicates, outliers, downloads-missing, files, and `key` is the finding's `key` as GET /api/admin/health reports
         it. The server looks the finding up again and records everything it is about (every missing number of a
         gap, not only the hundred the report carries); it then reports it greyed with `ignored` and an `unignore`
         action, and stays quiet while what it is about is part of that. A finding gone for a week forgets its
@@ -10764,7 +10764,7 @@ paths:
               properties:
                 check:
                   type: string
-                  enum: [chapter-gaps, chapter-failures, sources, frozen-series, duplicates, outliers, downloads-missing]
+                  enum: [chapter-gaps, chapter-failures, sources, frozen-series, duplicates, outliers, downloads-missing, files]
                 key:
                   type: string
                 ignored:

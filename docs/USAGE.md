@@ -1911,6 +1911,14 @@ numbers that can't be real, series waiting for a renumbering review, any source 
 extension engine. Each check says what it found and what it cannot see. Hit **Re-check** to run them again. Since
 v0.49.1 the page says the server's findings in your language, with dates and times in your own time zone.
 
+**Chapter files** lists the series that have chapters whose file is gone, empty, or a zip that ends too early (what a
+download cut short leaves behind), found by the check itself rather than by *Verify chapter files* or *Rescan
+everything*. Each run of the page looks at a slice of the files (the ones never looked at, or last found wrong, first;
+one found fine is looked at again after a week), so the whole library is covered over several runs. A folder where none
+of the files is found is a share that is not mounted, not a library whose chapters were all deleted: the card says so
+instead of counting them. **Fix everything** takes a broken file in the downloads folder off the disk and marks its
+chapter missing, so the sweep fetches it again at the same place; a chapter whose whole folder is gone is left alone.
+
 Since v0.55.10 a chapter stitched into one or two long strips (its images together at least ten times as tall as they
 are wide) is a whole chapter, not a short one: Health measures such a chapter's pages once, as the reader does, and
 leaves it off the short-chapter card. A placeholder, an ad or a credits banner is still listed.

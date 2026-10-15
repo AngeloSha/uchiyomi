@@ -613,6 +613,7 @@ const EN = {
   'autofix.now.searching': ({ name }: { name: string }) => `Searching ${name}`,
   'autofix.now.removing': ({ name }: { name: string }) => `Removing ${name}`,
   'autofix.now.files': () => 'Deleting chapters saved twice or numbered impossibly',
+  'autofix.now.badFiles': () => 'Fetching again the chapter files that are empty or cut short',
   'autofix.now.rechecking': () => 'Checking Health again',
   'autofix.now.waitSweep': () => 'Waiting for the chapter sweep to finish',
 
@@ -644,6 +645,7 @@ const EN = {
   'autofix.done.triedNone': ({ n }: { n: number }) => `Tried ${n} extension${s(n, '', 's')}: none of the series were there`,
   'autofix.done.deletedTwice': ({ n }: { n: number }) => `Deleted ${n} chapter${s(n, '', 's')} saved twice`,
   'autofix.done.deletedOdd': ({ n }: { n: number }) => `Deleted ${n} chapter${s(n, '', 's')} numbered impossibly`,
+  'autofix.done.badFiles': ({ n }: { n: number }) => `Took ${n} broken chapter file${s(n, '', 's')} off the disk to fetch again`,
 
   // One thing it did or met, for Details (the done lines' `items`, and the run's log).
   'autofix.item.tested': ({ name, ok }: { name: string; ok: boolean }) => (ok ? `${name} passed its test` : `${name} failed its test again`),
@@ -665,6 +667,8 @@ const EN = {
   'autofix.item.noRoom': ({ name }: { name: string }) => `Did not keep ${name}: the source limit is full`,
   'autofix.item.installFailed': ({ name }: { name: string }) => `${name} could not be installed`,
   'autofix.item.deleted': ({ title, n }: { title: string; n: number; seriesIds?: string[] }) => `Deleted ${n} chapter${s(n, '', 's')} of “${title}”`,
+  'autofix.item.refetching': ({ title, n }: { title: string; n: number; seriesIds?: string[] }) =>
+    `Took ${n} broken chapter file${s(n, '', 's')} of “${title}” off the disk to fetch again`,
   // Why a part of the run was passed over: solver_down | engine_down | no_engine | time | stopped | installs.
   'autofix.item.skipped': ({ why }: { why: string }) => AUTOFIX_SKIPPED[why] ?? why,
 
@@ -714,6 +718,18 @@ const EN = {
   // helper and never a backup, so neither is ever said there.
   'autofix.clears.mainSolverDown': () => 'The main Cloudflare solver is not answering, and the backup is solving meanwhile',
   'autofix.clears.backupSolverDown': () => 'The backup Cloudflare solver is not answering, and the main one is solving',
+
+  // ---- Chapter files (lib/healthFiles.ts)
+  'files.detail': ({ missing, empty, broken }: { missing: number; empty: number; broken: number }) =>
+    [missing && `Missing: ${missing}`, empty && `Empty: ${empty}`, broken && `Incomplete: ${broken}`].filter(Boolean).join(' · '),
+  'files.bad': ({ n, m }: { n: number; m: number }) => `Chapters with a missing or damaged file: ${n}; series affected: ${m}`,
+  'files.ok': ({ looked, total }: { looked: number; total: number }) => `no missing or damaged chapter files found (checked: ${looked} of ${total})`,
+  'files.note': ({ looked, total }: { looked: number; total: number }) =>
+    'A slice of the library is looked at on every run, chapters never looked at or last found wrong first, so all of it is covered over several runs ' +
+    `(looked at so far: ${looked} of ${total}). A chapter is damaged when its file is empty, or a zip that ends too early. ` +
+    'Rescan everything and Verify chapter files (Admin → Tasks) put right what is missing.',
+  'files.skipped': ({ roots }: { roots: string[] }) =>
+    `Not counted: ${roots.join(', ')} holds none of its files, so the share is probably not mounted (see Disk space and folders).`,
 };
 
 /** Why Fix everything passed a part of its run over (`autofix.item.skipped`). */

@@ -76,6 +76,7 @@ import {
 } from './health';
 import { gapsOf, splitAtFloor } from './fill';
 import { loadIgnores, noIgnores } from './healthIgnore';
+import { badChapterFiles, dropBadFiles, type BadFile } from './healthFiles';
 import { storeHealthSummary, scheduleHealthSummaryRefresh } from './healthSummary';
 import { mergeRefusal, mergeSeries, MergeConflictError, deleteChapterFiles, getSeriesRow, keepOrder, type KeepFacts } from './libraryAdmin';
 import { claimWriterFolders } from './bulkNewest';
@@ -110,7 +111,7 @@ export const AFTER_NIGHTLY_AUTOFIX: readonly RepairStep[] = REPAIR_STEPS.filter(
 
 export type DoneKind = 'replaced' | 'retired' | 'tested' | 'unblocked' | 'linked' | 'merged' | 'renumbered' | 'fetched' | 'refetched'
   | 'shortFixed' | 'shortConfirmed' | 'failuresCleared' | 'installed' | 'uninstalled' | 'deletedTwice' | 'deletedOdd' | 'scanned'
-  | 'resumedRenumber' | 'solverReset' | 'engineConnected';
+  | 'resumedRenumber' | 'solverReset' | 'engineConnected' | 'badFiles';
 export type NeedsYouAction = { kind: 'open'; href: string } | { kind: 'health'; check: string } | { kind: 'settings'; key: string };
 export type AutofixStatus = 'running' | 'done' | 'stopped' | 'failed' | 'interrupted';
 
@@ -512,7 +513,7 @@ async function liveView(a: Run): Promise<AutofixRun> {
  * them all, adult or not. A line from before v0.55.1 carries no ids to hold its title to, and keeps that rule: left out.
  */
 const TITLED = new Set(['autofix.item.linked', 'autofix.item.merged', 'autofix.item.notMerged', 'autofix.item.renumbered',
-  'autofix.item.notRenumbered', 'autofix.item.deleted']);
+  'autofix.item.notRenumbered', 'autofix.item.deleted', 'autofix.item.refetching']);
 /** The series a line or a "Now:" names: its `seriesIds`, else null -- written before v0.55.1, or naming none. */
 const namedBy = (ids: unknown): string[] | null =>
   (Array.isArray(ids) && ids.length > 0 && ids.every((x) => typeof x === 'string' && x !== '') ? (ids as string[]) : null);
@@ -1004,6 +1005,20 @@ async function chapters(a: Run): Promise<void> {
   // fetched or hunted through it (repair.ts AutofixDrive.resting). Reintroduce by driving without it: "a 429 failure is
   // not retried by the run" in autofix.int.test.ts finds its row reset and the site asked.
   const rest = await restingSources();
+  // Chapter files that are empty, cut short or gone are taken off the disk first and marked missing, so the gap step below
+  // (and the sweep) fetch them again at the same row. Only the download folder, and only what a full look finds wrong.
+  await held(async () => {
+    now(a, say('autofix.now.badFiles'));
+    const bad = await badChapterFiles().catch(() => [] as BadFile[]);
+    const bySeries = new Map<string, BadFile[]>();
+    for (const b of bad) bySeries.set(b.seriesId, [...(bySeries.get(b.seriesId) ?? []), b]);
+    for (const [seriesId, list] of bySeries) {
+      if (halted(a) || outOfTime(a)) return;
+      const n = await dropBadFiles(seriesId, list.map((b) => b.id), { userId: a.by, runId: a.id }).catch(() => 0);
+      if (n) did(a, 'badFiles', n, say('autofix.item.refetching', { title: list[0].title, n, seriesIds: [seriesId] }));
+    }
+  });
+  if (outOfTime(a)) { a.timeUp = true; cutShort(a, 'chapters'); return; }
   const r: RepairResult = await held(() => repairForAutofix(a.log, { only: ['failures', 'short', 'gaps'], userId: a.by },
     { ...drive(a), resting: (id) => rest.has(id) }));
   a.repairCur = null;
@@ -1444,7 +1459,7 @@ async function recheckReport(a: Run): Promise<HealthReport> {
 const DONE_ORDER: DoneKind[] = [
   'replaced', 'installed', 'merged', 'fetched', 'refetched', 'shortFixed', 'renumbered', 'deletedTwice', 'deletedOdd', 'linked',
   'retired', 'unblocked', 'failuresCleared', 'shortConfirmed', 'resumedRenumber', 'engineConnected', 'solverReset', 'uninstalled',
-  'tested', 'scanned',
+  'badFiles', 'tested', 'scanned',
 ];
 
 /** A list of names as the done lines carry it: the first three, and how many more. */
@@ -1546,6 +1561,12 @@ function summarise(a: Run, report: HealthReport): AutofixSummary {
   if (missing.length) {
     const n = Number(by.get('downloads-missing')!.summarySaid?.[0]?.params?.n ?? missing.length) || missing.length;
     need('downloads-missing', say('autofix.needs.downloadsMissing', { n }));
+  }
+  // Chapter files still empty, cut short or gone after the run (a share not mounted, or a source that cannot serve them again).
+  const badFiles = findings(by.get('files'));
+  if (badFiles.length) {
+    const first = by.get('files')!.summarySaid?.[0];
+    need('files', say('files.bad', { n: Number(first?.params?.n ?? badFiles.length) || badFiles.length, m: Number(first?.params?.m ?? badFiles.length) || badFiles.length }));
   }
 
   // Series that can no longer update: the limit is a slot to free, the engine is its own row's; the rest no source carries

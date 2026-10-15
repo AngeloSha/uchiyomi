@@ -131,3 +131,8 @@ test('a folder scanned twice links to the install guide\'s Volumes section, whic
   assert.match(readFileSync(join(__dirname, '..', 'app', 'admin', 'page.tsx'), 'utf8'),
     /\{\.\.\.\(\/\^https\?:\\\/\\\/\/\.test\(l\.href\) \? \{ target: '_blank', rel: 'noopener noreferrer' \} : \{\}\)\}/, 'the install guide opens in place of the app');
 });
+
+test('a chapter-files finding opens its series and the Tasks that put files right', () => {
+  assert.deepEqual(healthLinks('files', { title: 't', detail: 'd', seriesId: 's1' }),
+    [{ href: '/series/?id=s1' }, { href: '/admin/?tab=Tasks', label: 'Tasks' }]);
+});

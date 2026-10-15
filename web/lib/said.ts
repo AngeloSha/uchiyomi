@@ -805,6 +805,7 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'autofix.now.searching': (p) => tr('Searching {name}', { name: str(p, 'name') }),
   'autofix.now.removing': (p) => tr('Removing {name}', { name: str(p, 'name') }),
   'autofix.now.files': () => tr('Deleting chapters saved twice or numbered impossibly'),
+  'autofix.now.badFiles': () => tr('Fetching again the chapter files that are empty or cut short'),
   'autofix.now.rechecking': () => tr('Checking Health again'),
   'autofix.now.waitSweep': () => tr('Waiting for the chapter sweep to finish'),
 
@@ -850,6 +851,9 @@ const WORDS: Record<string, (p: P) => string | null> = {
     : tr('Tried {n} extensions: none of the series were there', { n: num(p, 'n') })),
   'autofix.done.deletedTwice': (p) => (num(p, 'n') === 1 ? tr('Deleted 1 chapter saved twice') : tr('Deleted {n} chapters saved twice', { n: num(p, 'n') })),
   'autofix.done.deletedOdd': (p) => (num(p, 'n') === 1 ? tr('Deleted 1 chapter numbered impossibly') : tr('Deleted {n} chapters numbered impossibly', { n: num(p, 'n') })),
+  'autofix.done.badFiles': (p) => (num(p, 'n') === 1
+    ? tr('Took 1 broken chapter file off the disk to fetch again')
+    : tr('Took {n} broken chapter files off the disk to fetch again', { n: num(p, 'n') })),
 
   'autofix.item.tested': (p) => (p.ok ? tr('{name} passed its test', { name: str(p, 'name') }) : tr('{name} failed its test again', { name: str(p, 'name') })),
   'autofix.item.unblocked': (p) => tr('Cleared the block on {name}', { name: str(p, 'name') }),
@@ -872,6 +876,9 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'autofix.item.uninstalled': (p) => tr('Tried and removed {name}: none of the series were there', { name: str(p, 'name') }),
   'autofix.item.noRoom': (p) => tr('Did not keep {name}: the source limit is full', { name: str(p, 'name') }),
   'autofix.item.installFailed': (p) => tr('{name} could not be installed', { name: str(p, 'name') }),
+  'autofix.item.refetching': (p) => (num(p, 'n') === 1
+    ? tr('Took 1 broken chapter file of “{title}” off the disk to fetch again', { title: titled(p, 'title') })
+    : tr('Took {n} broken chapter files of “{title}” off the disk to fetch again', { n: num(p, 'n'), title: titled(p, 'title') })),
   'autofix.item.deleted': (p) => (num(p, 'n') === 1
     ? tr('Deleted 1 chapter of “{title}”', { title: titled(p, 'title') })
     : tr('Deleted {n} chapters of “{title}”', { n: num(p, 'n'), title: titled(p, 'title') })),
@@ -953,6 +960,17 @@ const WORDS: Record<string, (p: P) => string | null> = {
   // v0.55.3: one of two solvers is not answering while the other solves (never on the desktop app: one helper, no backup).
   'autofix.clears.mainSolverDown': () => tr('The main Cloudflare solver is not answering, and the backup is solving meanwhile'),
   'autofix.clears.backupSolverDown': () => tr('The backup Cloudflare solver is not answering, and the main one is solving'),
+
+  // ---- Chapter files (bff lib/healthFiles.ts)
+  'files.detail': (p) => [
+    num(p, 'missing') ? tr('Missing: {n}', { n: num(p, 'missing') }) : '',
+    num(p, 'empty') ? tr('Empty: {n}', { n: num(p, 'empty') }) : '',
+    num(p, 'broken') ? tr('Incomplete: {n}', { n: num(p, 'broken') }) : '',
+  ].filter(Boolean).join(' · '),
+  'files.bad': (p) => tr('Chapters with a missing or damaged file: {n}; series affected: {m}', { n: num(p, 'n'), m: num(p, 'm') }),
+  'files.ok': (p) => tr('no missing or damaged chapter files found (checked: {looked} of {total})', { looked: num(p, 'looked'), total: num(p, 'total') }),
+  'files.note': (p) => tr('A slice of the library is looked at on every run, chapters never looked at or last found wrong first, so all of it is covered over several runs (looked at so far: {looked} of {total}). A chapter is damaged when its file is empty, or a zip that ends too early. Rescan everything and Verify chapter files (Admin → Tasks) put right what is missing.', { looked: num(p, 'looked'), total: num(p, 'total') }),
+  'files.skipped': (p) => tr('Not counted: {roots} holds none of its files, so the share is probably not mounted (see Disk space and folders).', { roots: strs(p, 'roots').join(listSep()) }),
 
   // ---- A diagnosis's fix (bff lib/sourceDiagnosis.ts FixCode). ADMIN ONLY, like the server's.
   'fix.solverCrash': () => (isDesktop()

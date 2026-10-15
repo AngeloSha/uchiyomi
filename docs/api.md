@@ -577,7 +577,7 @@ curl -H "Authorization: Bearer $TOK" https://your-server/api/admin/health
 Returns the same checks as the admin Health tab: chapter gaps (since v0.55.0 counted between plausible numbers only:
 a chapter numbered far beyond the rest is the impossible-number check's, never a gap of thousands -- the repair's gap
 step counts the same way), truncated downloads, duplicate series, impossible chapter numbers, failing sources, the last library scan (`library-scan`: folders it could not index,
-and since v0.48.2 folders it could not look into at all), and since v0.48.2 `downloads-missing`: every chapter
+and since v0.48.2 folders it could not look into at all), `files`: one item per series with chapters whose file is missing, empty or a zip cut short (`key` `series:ID`, ignorable; a library root where none of the files is found is a share that is not mounted and is not counted), and since v0.48.2 `downloads-missing`: every chapter
 file in the downloads folder that is not in the library, per folder, with the reason when the scan knows it, and
 since v0.50.0 `saved-twice`: series where two sources' splits of one chapter are both on disk, each item with
 `bookIds` and `numbers` for the files that arrived later and the `delete` action (nothing is deleted by the check

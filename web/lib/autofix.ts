@@ -42,7 +42,7 @@ export type AutofixStatusWord = 'running' | 'done' | 'stopped' | 'failed' | 'int
 export type DoneKind =
   | 'replaced' | 'retired' | 'tested' | 'unblocked' | 'linked' | 'merged' | 'renumbered' | 'fetched' | 'refetched'
   | 'shortFixed' | 'shortConfirmed' | 'failuresCleared' | 'installed' | 'uninstalled' | 'deletedTwice' | 'deletedOdd' | 'scanned'
-  | 'resumedRenumber' | 'solverReset' | 'engineConnected';
+  | 'resumedRenumber' | 'solverReset' | 'engineConnected' | 'badFiles';
 
 /** The one thing a person can do about a Needs-you item: open a page, see a Health card, or Admin → Settings. */
 export type NeedsYouAction = { kind: 'open'; href: string } | { kind: 'health'; check: string } | { kind: 'settings'; key: string };
