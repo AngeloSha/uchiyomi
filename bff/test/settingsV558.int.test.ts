@@ -70,11 +70,18 @@ test('v0.55.8 personal settings contracts', { skip }, async () => {
       { homeCollections: owned },
       { homeCollections: [foreign] },
       ['not', 'an', 'object'],
+      // v0.69.1: an avatar colour must be a hex colour -- it is painted into other members' inline backgrounds, where a
+      // url() made their browsers fetch it. Reintroduce by accepting any avatar object: these save with 200.
+      { avatar: { emoji: '🦊', color: 'url(https://attacker.example/beacon.png)' } },
+      { avatar: { color: '#fff; background-image: url(x)' } },
+      { accent: 'url(https://attacker.example/x)' },
     ]) {
       const bad = await put(payload);
       assert.equal(bad.statusCode, 400, `${JSON.stringify(payload)}: ${bad.body}`);
       assert.equal(bad.json().error, 'bad_settings');
     }
+    const avatar = await put({ avatar: { emoji: '🦊', color: '#7c5cff' } });
+    assert.equal(avatar.statusCode, 200, avatar.body);
   } finally {
     await app.close();
     await q("DELETE FROM users WHERE username IN ('v558-settings-a','v558-settings-b')").catch(() => {});

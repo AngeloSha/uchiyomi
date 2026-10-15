@@ -15,6 +15,7 @@ import { t as tr } from '@/lib/i18n';
 import { ACCENTS, homeIdsOf, isMine, type ListRow } from '@/lib/lists';
 import { ListOwnerLine, ListTags } from '@/components/ListBits';
 import { invalidateLists, useListsAll } from '@/components/SaveListDialog';
+import { safeColor } from '@/lib/safeColor';
 
 export type CollectionRow = ListRow;
 
@@ -107,7 +108,7 @@ export default function CollectionsPage() {
   const card = (c: CollectionRow) => {
     const on = homeIds.includes(c.id);
     const covers = (c.preview ?? []).slice(0, 4);
-    const tint = c.accent || 'rgb(var(--accent))';
+    const tint = safeColor(c.accent, 'rgb(var(--accent))');
     return (
       <div key={c.id} className="card group relative overflow-hidden" data-list-card={c.id}>
         <Link href={`/collection/?id=${c.id}`} className="block">

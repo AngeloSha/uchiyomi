@@ -27,6 +27,7 @@ import { homeIdsOf, type ListRow } from '@/lib/lists';
 import { useListsAll } from '@/components/SaveListDialog';
 import { HOME_RAIL_KEYS, shownRails, type HomeRailKey } from '@/lib/homeRails';
 import { HomeCustomize } from '@/components/HomeCustomize';
+import { safeColor } from '@/lib/safeColor';
 
 type CollectionRow = ListRow;
 
@@ -65,7 +66,7 @@ function CollectionRail({ col }: { col: CollectionRow }) {
     <section className="pt-8">
       <SectionTitle action={<Link href={`/collection/?id=${col.id}`} className="text-xs text-accent">{tr('See all')}</Link>}>
         <span className="inline-flex items-center gap-2">
-          <span aria-hidden className="h-4 w-1.5 rounded-full" style={{ background: col.accent || 'rgb(var(--accent))' }} />
+          <span aria-hidden className="h-4 w-1.5 rounded-full" style={{ background: safeColor(col.accent, 'rgb(var(--accent))') }} />
           {col.name}
         </span>
       </SectionTitle>

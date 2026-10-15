@@ -14,6 +14,7 @@ import { t as tr } from '@/lib/i18n';
 import { isMine, type ListRow } from '@/lib/lists';
 import { ListKeys, ListOwnerLine, ListTags } from '@/components/ListBits';
 import { invalidateLists } from '@/components/SaveListDialog';
+import { safeColor } from '@/lib/safeColor';
 
 /** v0.61.0: with its kind, sharing and owner, and `total` -- how many it shows this reader, a smart list being capped. */
 type CollectionDetail = Pick<ListRow, 'id' | 'name' | 'accent' | 'kind' | 'shared' | 'mine' | 'owner' | 'query'> & { items: Series[]; total?: number };
@@ -107,7 +108,7 @@ function CollectionInner() {
             <IcChevronLeft width={22} height={22} />
           </button>
           <div className="flex min-w-0 items-center gap-2.5">
-            <span aria-hidden className="h-6 w-1.5 shrink-0 rounded-full" style={{ background: data?.accent || 'rgb(var(--accent))' }} />
+            <span aria-hidden className="h-6 w-1.5 shrink-0 rounded-full" style={{ background: safeColor(data?.accent, 'rgb(var(--accent))') }} />
             <h1 className="truncate font-display text-2xl font-bold lg:text-3xl">{data?.name || '…'}</h1>
             {data && <ListTags list={data} />}
           </div>

@@ -24,6 +24,9 @@ import { devicesOf, hourIn, lastDays, loadTimeline, summarize, validTz, yearRang
 import { listFor, ownListFor, listsFor, listItems, kindOf, ownerOf, type ListRow } from '../lib/lists';
 import { smartQuery, parseQuery } from '../lib/smartLists';
 
+/** A colour a member stores that other members' browsers paint (avatar, list accent): hex only (v0.69.1). */
+const HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+
 function computeStreaks(days: string[]): { current: number; longest: number } {
   if (!days.length) return { current: 0, longest: 0 };
   const set = new Set(days);
@@ -257,7 +260,7 @@ export default async function personalRoutes(app: FastifyInstance) {
     const uid = userIdOf(req);
     const b = z.object({
       name: listName,
-      accent: z.string().max(32).optional(),
+      accent: z.string().regex(HEX_COLOR).optional(),
       // v0.61.0: a smart list's saved Library search, and whether the household may read the list.
       query: smartQuery.optional(),
       shared: z.boolean().optional(),
@@ -275,7 +278,7 @@ export default async function personalRoutes(app: FastifyInstance) {
     const uid = userIdOf(req);
     const b = z.object({
       name: listName.optional(),
-      accent: z.string().max(32).nullable().optional(),
+      accent: z.string().regex(HEX_COLOR).nullable().optional(),
       sortOrder: z.number().int().optional(),
       query: smartQuery.optional(),
       shared: z.boolean().optional(),
@@ -1068,6 +1071,18 @@ export default async function personalRoutes(app: FastifyInstance) {
       const dir = z.enum(['asc', 'desc']).safeParse(data.librarySortDir);
       if (!dir.success) return reply.code(400).send({ error: 'bad_settings', message: 'Choose High to low or Low to high.' });
       data.librarySortDir = dir.data;
+    }
+    // v0.69.1: the avatar is painted for other members (web/components/Avatar.tsx), its colour into an inline background,
+    // where a stored `url(https://…)` made every viewer's browser fetch a URL the member chose. A hex colour and a short
+    // emoji, or nothing. Reintroduce by accepting any object: "an avatar colour must be a hex colour" in
+    // settingsV558.int.test.ts saves a url().
+    if ('avatar' in data && data.avatar !== null) {
+      const av = z.object({ emoji: z.string().max(16).optional(), color: z.string().regex(HEX_COLOR).optional() }).safeParse(data.avatar); // unknown keys are dropped
+      if (!av.success) return reply.code(400).send({ error: 'bad_settings', message: 'An avatar is an emoji and a colour.' });
+      data.avatar = av.data;
+    }
+    if ('accent' in data && data.accent !== null && !(typeof data.accent === 'string' && HEX_COLOR.test(data.accent))) {
+      return reply.code(400).send({ error: 'bad_settings', message: 'Choose a colour.' });
     }
     if ('showAllChapters' in data && typeof data.showAllChapters !== 'boolean') {
       return reply.code(400).send({ error: 'bad_settings', message: 'Show all chapters must be on or off.' });

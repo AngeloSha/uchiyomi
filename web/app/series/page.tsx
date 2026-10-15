@@ -68,6 +68,7 @@ import { FavouriteKey, IcListAdd, MoreKey, SeriesKey, SeriesMoreSheet, moreMenuI
 import { ProgressRing } from '@/components/ProgressRing';
 import { SeriesEditor, copyPath, type EditTab } from '@/components/SeriesEditor';
 import { RelatedRail } from '@/components/RelatedRail';
+import { safeColor } from '@/lib/safeColor';
 
 /** "Marking 3 chapters read…", counted: the busy half of Mark read's one card. */
 const markingText = (n: number) => (n === 1 ? tr('Marking 1 chapter read…') : tr('Marking {n} chapters read…', { n }));
@@ -112,7 +113,7 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
           {(data?.content ?? []).map((c) => (
             <button key={c.id} onClick={() => add(c)}
               className="flex w-full items-center gap-2.5 rounded-xl border border-ink-700 px-3 py-2.5 text-start transition hover:border-accent/50">
-              <span aria-hidden className="h-4 w-1.5 shrink-0 rounded-full" style={{ background: c.accent || 'rgb(var(--accent))' }} />
+              <span aria-hidden className="h-4 w-1.5 shrink-0 rounded-full" style={{ background: safeColor(c.accent, 'rgb(var(--accent))') }} />
               <span className="min-w-0 truncate text-sm text-fog-100">{c.name}</span>
               <span className="ms-auto shrink-0 text-[11px] text-fog-500">{c.item_count}</span>
             </button>
