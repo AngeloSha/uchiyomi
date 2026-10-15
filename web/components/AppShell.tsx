@@ -19,6 +19,7 @@ import { t as tr } from '@/lib/i18n';
 import { desktopShell, isDesktop } from '@/lib/desktop';
 import { useServerDownloads } from '@/lib/useServerDownloads';
 import { IncognitoBanner, useIncognito } from './IncognitoBanner';
+import { AdultBanner } from './AdultToggle';
 import { usePrefetchSeriesOnClick } from '@/lib/seriesPrefetch';
 import { scrollMemory } from '@/lib/scrollMemory';
 
@@ -136,6 +137,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <CinematicFX />
       {status === 'offline' && <OfflineBanner name={user?.displayName || ''} />}
       {status === 'authed' && <IncognitoBanner />}
+      {status === 'authed' && <AdultBanner />}
       {/* Above the top bar (UI refresh): nothing sits between the bar and a page's art, which starts under it. */}
       {status === 'authed' && <HealthBanner />}
       <TopNav onSearchFocus={() => { setPaletteSeed(''); setPalette(true); }} />

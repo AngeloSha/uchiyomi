@@ -91,3 +91,31 @@ export function AdultToggle({ className = '', alsoWhen = false }: { className?: 
     </button>
   );
 }
+
+/**
+ * Above every page while 18+ is revealed (#255, @Squeaks72): what is on, and Hide 18+ -- the way off from a page with
+ * no Show 18+ chip of its own (a series, search, history), where the reveal used to stay on with no sign of it until
+ * the browser closed. Incognito reading's slot and look (components/IncognitoBanner.tsx), a squared key, and only while
+ * the reveal reveals something to this account: an 18+ library it holds, or the admin's 18+ filter naming a genre or
+ * source it meets. A reveal left on after the 18+ library went, or on an account capped below 18, shows nothing,
+ * because nothing is showing. The Show 18+ chips stay two-way.
+ */
+export function AdultBanner() {
+  // The reveal first, so a page with it off asks for nothing.
+  return useAdultShown() ? <AdultBannerShown /> : null;
+}
+
+/** The banner once the reveal is on (exported for its test, adultBanner.test.ts). */
+export function AdultBannerShown() {
+  const qc = useQueryClient();
+  const { data: libs } = useLibraries();
+  const filter = useAdultFilterConfigured();
+  if (!(libs ?? []).some((l) => l.adult) && !filter) return null;
+  return (
+    <div data-adult-banner className="flex items-center justify-center gap-2 bg-ink-800 px-4 py-1.5 text-[11px] text-fog-300 lg:ps-[calc(var(--rail-w)+1rem)]">
+      <span className="min-w-0">{tr('18+ titles are showing.')}</span>
+      <button type="button" onClick={() => { setAdultShown(false); qc.invalidateQueries(); }}
+        className="btn-key h-6 shrink-0 px-2 text-[11px]" data-adult-off>{tr('Hide 18+')}</button>
+    </div>
+  );
+}

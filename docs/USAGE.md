@@ -2508,7 +2508,9 @@ your collections, updates, history, bookmarks and the OPDS feeds, and its tab do
 page. (An OPDS reader has no button to press, so for it the choice sits on its own credential:
 **Profile → Connections → External readers → Include 18+ content in this reader**, off by default.) A **Show 18+** button sits beside the sorts on the Library page and brings it all back; the reveal
 lasts until you close the browser and then it hides itself again. The button only appears for accounts that
-actually have such a library, and never for one whose age limit is below 18.
+actually have such a library, and never for one whose age limit is below 18. While the reveal is on, a line above
+every page says *18+ titles are showing* with a **Hide 18+** key, as Incognito reading's does, so a series page or
+search you reached from the Library still says so and still has the way back (since v0.70.0, @Squeaks72's idea).
 
 **Since v0.42.0 the same reveal also covers adult providers on Discover.** A source whose extension
 declares itself adult used to keep listing itself, and painting its newest and popular covers, on the one

@@ -211,6 +211,8 @@ const SLICES: [string, string, string, string][] = [
   ['app/admin/page.tsx', 'Members: what a new member starts with', 'function NewMemberDefaults(', 'function ArtReview('],
   ['app/admin/page.tsx', 'Members: the age limit\'s opener', 'function AgeCap(', '{open && ('],
   ['app/admin/page.tsx', 'Members: the libraries\' opener', 'function LibraryAccess(', '{open && ('],
+  // v0.70.0 (#255): the 18+ line above every page and its Hide 18+ key, beside the Show 18+ chip, a filter that stays.
+  ['components/AdultToggle.tsx', '18+: the banner', 'export function AdultBanner(', ''],
 ];
 
 const slice = (src: string, from: string, to: string, name: string): string => {
