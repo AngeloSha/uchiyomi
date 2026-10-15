@@ -339,7 +339,7 @@ export type Judged = Rating | 'flagged';
 /** What a search shows: everything, everything not known to be 18+ (`safe`), or only what is (`adult`). */
 export type RatingFilter = 'all' | 'safe' | 'adult';
 /** The admin's 18+ filter lists (lib/visibility.ts adultFilter): genres as typed, source ids lowercased. */
-export interface AdultLists { genres: readonly string[]; sources: readonly string[] }
+export interface AdultLists { genres: readonly string[]; sources: readonly string[]; /** Sources the admin set to "Mixed": their extension's flag does not count. */ cleared?: readonly string[] }
 
 /**
  * Whether a search result is 18+, by every signal it carries.
@@ -362,7 +362,7 @@ export function ratingOf(
   const adult = new Set(lists.genres.map(fold).filter(Boolean));
   const genres = (Array.isArray(item.genres) ? item.genres : []).filter((g): g is string => typeof g === 'string').map(fold).filter(Boolean);
   if (genres.some((g) => adult.has(g))) return 'adult';
-  if (src?.isNsfw) return 'flagged';
+  if (src?.isNsfw && !(src.id && lists.cleared?.includes(String(src.id).toLowerCase()))) return 'flagged';
   if (item.contentRating === 'safe' || item.contentRating === 'suggestive') return 'safe';
   if (genres.length && adult.size) return 'safe';
   return undefined;

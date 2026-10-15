@@ -57,6 +57,10 @@ export interface OverviewSource {
   icon?: boolean;
   /** A site added by address: where it lives. */
   address?: string | null;
+  /** The admin's own age rating for the whole source (0 = Mixed, 18 = Adult only), null when none is set. */
+  ageRating?: number | null;
+  /** What it is held to without one: 18 for an extension that declares itself adult, else null. */
+  defaultAgeRating?: number | null;
   /**
    * v0.55.1: not loaded because the engine's source limit is full, with the limit it is over -- not broken, and Replace is
    * not its fix (the sheet says so instead: limitLine). Absent from every other source, and from an older server.

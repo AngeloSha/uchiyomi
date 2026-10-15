@@ -40,6 +40,7 @@ import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { MIN_HAVE } from './fill';
 import { logAudit } from './audit';
 import { ADULT_RATING, adultFilter } from './visibility';
+import { isAdultSource } from './sourceRatings';
 import { altTitlesFor, exactHit, SEARCH_NAMES } from './altTitles';
 import { followGuard, seriesLanguage } from './seriesLang';
 import { aliasParts, partRulesApply, type HeldPart } from './partAlias';
@@ -152,7 +153,7 @@ export async function seriesIsAdult(seriesId: string): Promise<boolean> {
 export async function sweepAllowedFor(adult: boolean): Promise<(sourceId: string) => boolean> {
   if (adult) return () => true;
   const named = new Set((await adultFilter().catch(() => ({ sources: [] as string[] }))).sources);
-  return (id) => !getSource(id)?.isNsfw && !named.has(String(id).toLowerCase());
+  return (id) => !isAdultSource(getSource(id)) && !named.has(String(id).toLowerCase());
 }
 
 async function huntOn(): Promise<boolean> {

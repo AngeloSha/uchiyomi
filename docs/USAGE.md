@@ -1498,7 +1498,7 @@ again.
   - Admin → Settings → *Match Discover titles online* switches the lookups off; cards then fold by their names alone.
 - **Hide 18+ and 18+ only** (since v0.55.4, [#158](https://github.com/AngeloSha/uchiyomi/discussions/158)): with
   **Show 18+** on, three chips under *Results across your sources* — **All**, **Hide 18+**, **18+ only** — filter the
-  results by what is known of each. A result is 18+ when its provider is ticked in **Admin → Settings → 18+ filter**,
+  results by what is known of each. A result is 18+ when its provider is rated *Adult only* (**Admin → Sources** → the source → **Age rating**),
   when MangaDex rates the title erotica, or when it carries one of the 18+ filter's genres, and such a card wears a small
   **18+** mark; a MangaDex title rated safe or suggestive is not, nor one whose genres the filter's list does not name.
   A site whose extension calls itself 18+ makes a title 18+ only when no other site carries it (since v0.55.5): the
@@ -2517,14 +2517,23 @@ limit below 18 is the other thing entirely: those sources are refused by name wh
 switch knew about, so keeping, say, *Ecchi* off the shelf meant moving those series into an 18+ library — a
 filing decision made to get a display outcome, and one the scanner argues with on the next rescan.
 **Admin → Settings → 18+ filter** says it directly instead: tick the genres (the list is the genres your
-library actually has) and, separately, any source that should count as adult although its extension does not
-say so. With **Show 18+** off, a series carrying one of those genres leaves the same places an 18+ library
-does, and a ticked source leaves Discover the way a self-declared adult one does. Nothing is refiled and
+library actually has). With **Show 18+** off, a series carrying one of those genres leaves the same places an 18+
+library does. Sources are rated one by one instead (next paragraph). Nothing is refiled and
 nothing is refused: it is the same surfacing filter, with the same exceptions as above. One title that is
 tagged wrongly, or that you simply want to keep, can be let through on its own: **Edit details → Always show**
 on the series page. The **Show 18+** button appears on Library and Home whenever either list has something
-in it, even with no 18+ library (never for an account whose age limit is below 18). Both lists are empty
-until you tick something, so an existing server behaves as before.
+in it or a source is rated Adult only, even with no 18+ library (never for an account whose age limit is below 18). The
+list is empty until you tick something, so an existing server behaves as before.
+
+**A whole source can be rated.** Suwayomi flags a whole extension as adult (`isNsfw`), which only says it *can* carry adult
+titles, and the flag was one-way: nothing could say that a flagged site is fine. **Admin → Sources**, open a source,
+**Age rating** now has three choices. **Default** leaves it to the extension: adult if the extension says so, else
+unrated. **Mixed** says its titles are judged one by one: the extension's adult flag stops counting, so accounts limited
+below 18 can use the source and it stays in Discover with **Show 18+** off (a title carrying one of the 18+ filter's genres
+is still 18+). **Adult only** makes the whole source adult, flagged or not: accounts limited below 18 cannot use it, and
+with **Show 18+** off it leaves Discover, search and the latest and popular lists. Series already in your library keep
+their own ratings. The old *Sources to treat as adult* chips of the 18+ filter were the same thing as Adult only, so on
+upgrade each source that was ticked there becomes rated Adult only (a source you had already rated keeps your rating).
 
 **Access.** **Access** on a library row lists who can open it. One thing worth knowing: a member with no
 limits set can open every library, including ones you add later. Unticking them here is what turns that into

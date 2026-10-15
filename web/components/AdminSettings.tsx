@@ -10,7 +10,7 @@
 // says "Saved" in one place. The only Save button left is the scanlators' one, because those are lists
 // that are edited in several steps and must land as one write. Since v0.43.0 a fifth, Notifications
 // (components/AdminNotifications.tsx), follows them; its dialog saves a whole target at once. After it, the
-// 18+ filter: which genres and sources the "Show 18+" switch hides besides 18+ libraries. Last, the source order:
+// 18+ filter: which genres (and, set per source, which sources) the "Show 18+" switch hides besides 18+ libraries. Last, the source order:
 // which followed source a new chapter is taken from. After that, notice chapters: per series type, whether short
 // chapters numbered with a fraction (12.5, with 3 pages or fewer) are hidden -- or, with "Only hide short ones" off
 // (v0.55.3, #147), every chapter numbered with one.
@@ -137,7 +137,7 @@ function NoticeChaptersSection({ data, save }: { data: any; save: Save }) {
 }
 
 /**
- * What the "Show 18+" switch hides, beyond libraries rated 18+.
+ * What the "Show 18+" switch hides, beyond libraries rated 18+ and sources rated Adult only (Sources ▸ a source ▸ Age rating).
  *
  * Before this the only way to keep a genre off the shelf was to move its series into an 18+ library --
  * a filing decision made to get a display outcome, which the scanner then argued with on every rescan.
@@ -154,11 +154,9 @@ function AdultFilterSection({ data, save }: { data: any; save: Save }) {
   // from `data`, two quick clicks both toggled against the list as it was before either save landed, and
   // the second PATCH quietly undid the first.
   const [genres, setGenres] = useState<string[]>(() => (Array.isArray(data.adult_genres) ? data.adult_genres : []));
-  const [sources, setSources] = useState<string[]>(() => (Array.isArray(data.adult_sources) ? data.adult_sources : []));
   useEffect(() => { setGenres(Array.isArray(data.adult_genres) ? data.adult_genres : []); }, [data.adult_genres]);
-  useEffect(() => { setSources(Array.isArray(data.adult_sources) ? data.adult_sources : []); }, [data.adult_sources]);
-  // Both pickers ask with the reveal ON, whatever this browser has it set to. Otherwise the very thing
-  // being configured hides the controls for it: with "Show 18+" off, a genre or a source ticked here leaves
+  // The picker asks with the reveal ON, whatever this browser has it set to. Otherwise the very thing
+  // being configured hides the controls for it: with "Show 18+" off, a genre ticked here leaves
   // the list it was ticked in, and can then never be unticked. Same URL rule and the same reason as the
   // admin console's `allSourcesUrl` (app/admin/page.tsx): `?adult=1` only when the reveal is OFF, because
   // lib/api.ts adds its own when it is on and two copies arrive as an array, which the server reads as
@@ -173,12 +171,6 @@ function AdultFilterSection({ data, save }: { data: any; save: Save }) {
     queryFn: () => api<{ content: Array<{ key: string; label: string }> }>(revealed('/api/genres/overview?covers=1')),
     staleTime: 5 * 60_000,
   });
-  // The admin console's key and URL, so the two share one answer.
-  const { data: srcList } = useQuery({
-    queryKey: ['sources', 'all'],
-    queryFn: () => api<{ content: Array<{ id: string; name: string }> }>(revealed('/api/sources')),
-    staleTime: 5 * 60_000,
-  });
   const allGenres = (overview?.content ?? []).filter((g) => g?.key);
   const has = (list: string[], v: string) => list.includes(v.toLowerCase());
   const toggle = (list: string[], v: string) => {
@@ -186,7 +178,7 @@ function AdultFilterSection({ data, save }: { data: any; save: Save }) {
     return list.includes(k) ? list.filter((x) => x !== k) : [...list, k];
   };
   // A failed save puts the chip back and says so, rather than leaving it lit over a list that was not stored.
-  const flip = (field: 'adultGenres' | 'adultSources', list: string[], set: (v: string[]) => void, v: string) => {
+  const flip = (field: 'adultGenres', list: string[], set: (v: string[]) => void, v: string) => {
     const next = toggle(list, v);
     set(next);
     save({ [field]: next })
@@ -213,21 +205,9 @@ function AdultFilterSection({ data, save }: { data: any; save: Save }) {
           ))}
         </div>
       </div>
-      <div className="py-3">
-        <p className="mb-2 max-w-prose text-[11px] leading-relaxed text-fog-500">
-          {tr('Sources to treat as adult, on top of the ones their extension already declares.')}
-        </p>
-        <div className="flex flex-wrap gap-1.5">
-          {(srcList?.content ?? []).map((src) => (
-            <button key={src.id} type="button"
-              onClick={() => flip('adultSources', sources, setSources, src.id)}
-              aria-pressed={has(sources, src.id)}
-              className={`chip whitespace-nowrap ${has(sources, src.id) ? 'chip-active' : ''}`}>
-              {src.name}
-            </button>
-          ))}
-        </div>
-      </div>
+      <p className="py-3 text-[11px] leading-relaxed text-fog-500" data-source-ratings-note>
+        {tr('Which sources count as adult is set on each source: Sources ▸ a source ▸ Age rating.')}
+      </p>
       <p className="py-3 text-[11px] leading-relaxed text-fog-500">
         {tr('One series can be let through on its own page — Edit details ▸ “Always show”.')}
       </p>

@@ -11,6 +11,7 @@
 // one more clause on `visible()`, and every caller inherits it because they all go through here.
 import { q, one } from './db';
 import { noticeBook } from './noticeChapters';
+import { applySourceRatings, clearedIds, effectiveAgeRating, isAdultSource, ratedAdultIds } from './sourceRatings';
 
 export interface ViewCtx {
   /** null only for background work that legitimately sees everything: the scanner, the hero pre-warmer. */
@@ -170,17 +171,22 @@ export function sanitiseSourceIds(values: unknown): string[] {
  * the failure mode of showing something that would have been tidied away is the right one -- the
  * permission (`maxAgeRating`) is a different field and is never sourced from here.
  */
-let adultCache: { at: number; genres: string[]; sources: string[] } | null = null;
+let adultCache: { at: number; genres: string[]; sources: string[]; cleared: string[] } | null = null;
 const ADULT_CACHE_MS = 15_000;
 export function invalidateAdultFilter(): void { adultCache = null; }
-export async function adultFilter(): Promise<{ genres: string[]; sources: string[] }> {
+export async function adultFilter(): Promise<{ genres: string[]; sources: string[]; cleared: string[] }> {
   if (adultCache && Date.now() - adultCache.at < ADULT_CACHE_MS) return adultCache;
-  const row = await one<{ adult_genres: unknown; adult_sources: unknown }>(
-    'SELECT adult_genres, adult_sources FROM server_settings WHERE id = 1').catch(() => null);
+  const row = await one<{ adult_genres: unknown; adult_sources: unknown; source_ratings: unknown }>(
+    'SELECT adult_genres, adult_sources, source_ratings FROM server_settings WHERE id = 1').catch(() => null);
+  // The same row carries the admin's per-source ratings: re-reading them here keeps the in-memory copy that
+  // `sourceAllowedFor` uses from drifting. A source rated 18 is adult exactly as one named on the list is, and one
+  // rated mixed (0) is `cleared`: its extension's own flag no longer condemns it (searchAll.ratingOf).
+  if (row) applySourceRatings(row.source_ratings);
   adultCache = {
     at: Date.now(),
     genres: sanitiseAdultList(row?.adult_genres),
-    sources: sanitiseSourceIds(row?.adult_sources),
+    sources: [...new Set([...sanitiseSourceIds(row?.adult_sources), ...ratedAdultIds()])],
+    cleared: clearedIds(),
   };
   return adultCache;
 }
@@ -330,9 +336,10 @@ export const ADULT_RATING = 18;
  * us anything, and treating every built-in and custom site as adult would empty Discover for a capped
  * account rather than filter it.
  */
-export function sourceAllowedFor(src: { isNsfw?: boolean } | null | undefined, maxAgeRating: number | null): boolean {
-  if (!src?.isNsfw) return true;
-  return maxAgeRating === null || maxAgeRating >= ADULT_RATING;
+export function sourceAllowedFor(src: { id?: string; isNsfw?: boolean } | null | undefined, maxAgeRating: number | null): boolean {
+  const need = effectiveAgeRating(src);
+  if (need === null) return true;
+  return maxAgeRating === null || maxAgeRating >= need;
 }
 
 /**
@@ -368,10 +375,11 @@ export function adultFilterConfigured(ctx: ViewCtx): boolean {
 export function sourceBrowsableFor(src: { id?: string; isNsfw?: boolean } | null | undefined, ctx: ViewCtx): boolean {
   if (!sourceAllowedFor(src, ctx.maxAgeRating)) return false;
   if (!ctx.hideAdultLibraries) return true;
-  if (src?.isNsfw) return false;
-  // Named by the admin as adult even though its extension does not say so. The list is lowercased on the
-  // way in, so the comparison is too.
-  return !(src?.id && (ctx.adultSources ?? []).includes(String(src.id).toLowerCase()));
+  // Adult through and through: the admin's "Adult only" (or the adult_sources list, lowercased on the way in), else the
+  // extension's own flag when the admin has not said "Mixed". A mixed source stays, and each of its titles is judged
+  // (lib/searchAll.ts ratingOf, routes/sources.ts).
+  if (src?.id && (ctx.adultSources ?? []).includes(String(src.id).toLowerCase())) return false;
+  return !isAdultSource(src);
 }
 
 /**

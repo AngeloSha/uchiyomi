@@ -23,6 +23,7 @@ import { MANGADEX_GROUP } from './sources/mangadex';
 import { readSites } from './sources/customSites';
 import { extensionsGeneration, listExtensions } from './sources/suwayomi/extensions';
 import { visibleToAll } from './visibility';
+import { ADULT_AGE, sourceRatingOverride } from './sourceRatings';
 import { mainSourceCounts } from './findScope';
 import { sourceTrouble, sourceLabel, type HealthItem } from './health';
 import { loadIgnores } from './healthIgnore';
@@ -55,6 +56,12 @@ export interface OverviewSource {
   icon: boolean;
   /** A site added by address: its address. */
   address?: string;
+  /**
+   * The admin's own age rating for the whole source (lib/sourceRatings.ts): 0 is Mixed (judge each title), 18 Adult only, null when none is
+   * set. `defaultAgeRating` is what it is held to without one: 18 for an extension that declares itself adult, else null.
+   */
+  ageRating: number | null;
+  defaultAgeRating: number | null;
   /**
    * v0.55.1: not loaded because the engine's source limit is full -- switched on, offered, and left out by the last load
    * (register.ts leftOutByLimit), with the limit it is over. Not broken, and Replace is not its fix: room under the limit
@@ -107,8 +114,8 @@ export async function sourcesOverview(): Promise<SourcesOverview> {
   const now = Date.now();
   const health = await sourceTrouble(await loadIgnores());
   const rows = new Map<string, HealthItem>(health.items.filter((i) => i.sourceId).map((i) => [i.sourceId!, i]));
-  const sw = new Map((await q<{ source_id: string; name: string | null; lang: string | null; pkg_name: string | null }>(
-    'SELECT source_id, name, lang, pkg_name FROM suwayomi_sources').catch(() => [])).map((r) => [`${SW_PREFIX}${r.source_id}`, r]));
+  const sw = new Map((await q<{ source_id: string; name: string | null; lang: string | null; pkg_name: string | null; nsfw: boolean | null }>(
+    'SELECT source_id, name, lang, pkg_name, nsfw FROM suwayomi_sources').catch(() => [])).map((r) => [`${SW_PREFIX}${r.source_id}`, r]));
   const sites = new Map((await readSites()).filter((s) => s.id).map((s) => [s.id!, s]));
   const used = await q<{ source_id: string }>(
     `SELECT DISTINCT x.source_id FROM (
@@ -174,6 +181,8 @@ export async function sourcesOverview(): Promise<SourcesOverview> {
       lastTestedAt: o?.live_at ? new Date(o.live_at).toISOString() : null,
       icon: !!src?.iconUrl,
       ...(site?.base ? { address: site.base } : {}),
+      ageRating: sourceRatingOverride(id) ?? null,
+      defaultAgeRating: (src?.isNsfw ?? !!ext?.nsfw) ? ADULT_AGE : null,
       // Health's frozen row for its series offers Free a slot by the same record (lib/health.ts frozenSeries), and lands
       // here: the sheet says why it is not loaded instead of offering Replace. Reintroduce by leaving it out: "a source
       // the limit left out says so" in sourcesOverview.int.test.ts finds nothing.

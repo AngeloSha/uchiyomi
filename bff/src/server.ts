@@ -61,6 +61,7 @@ import opdsRoutes from './routes/opds';
 import komgaCompatRoutes from './routes/komgaCompat';
 import notifyRoutes from './routes/notify';
 import { isDesktop } from './lib/desktop';
+import { loadSourceRatings } from './lib/sourceRatings';
 import { installDesktopGuards } from './lib/desktopGuard';
 import { ensureDesktopUser } from './lib/desktopUser';
 import { initialiseBulkChapterDeleteRuns } from './lib/bulkChapterDelete';
@@ -83,6 +84,8 @@ async function main() {
   // Whether any notice-chapter switch is on (lib/noticeChapters.ts), before the first query is built: while none is,
   // every query is the one the previous release ran. Unreadable leaves them off, as they were before the feature.
   await refreshNoticesActive().catch((e) => console.warn(`[notices] could not read the switches: ${(e as Error)?.message || e}`));
+  // The admin's per-source age ratings (lib/sourceRatings.ts), before anything asks which sources an account may reach.
+  await loadSourceRatings().catch((e) => console.warn(`[ratings] could not read the source ratings: ${(e as Error)?.message || e}`));
   // A Find other sources run still `running` belonged to the process that just went away (v0.49.1): say so.
   await closeInterruptedFindRuns().catch((e) => console.warn(`[find] could not close interrupted runs: ${(e as Error)?.message || e}`));
   // v0.55.0: a Fix everything run the last process was in the middle of (lib/autofix.ts) reads `interrupted`, not running.

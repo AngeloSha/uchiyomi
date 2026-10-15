@@ -6,6 +6,7 @@ import { typeFromGenres, SERIES_TYPE_FROM } from './seriesTypeSignals';
 import { cleanGenres } from './genres';
 import { REFILE_FAILURES_SQL } from './chapterFailures';
 import { ssoOnly } from './authMode';
+import { foldAdultSources } from './sourceRatings';
 
 // NOTE: gen_random_uuid() is in Postgres core (v13+); no pgcrypto extension needed.
 // (The supabase/postgres image's event triggers reject CREATE EXTENSION under a custom role.)
@@ -1163,6 +1164,9 @@ END $$;
 -- series is filed or who may open it. Empty by default, so an existing install behaves exactly as before.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS adult_genres  jsonb NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS adult_sources jsonb NOT NULL DEFAULT '[]'::jsonb;
+
+-- The admin's own age rating for a whole source (lib/sourceRatings.ts): {"sw:123": 18}: 0 = Mixed (judge each title), 18 = Adult only. Absent = the default.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS source_ratings jsonb NOT NULL DEFAULT '{}'::jsonb;
 -- "Hide everything tagged Mature, except this one." Without it the genre list is all-or-nothing, and one
 -- wrongly-tagged classic is enough to make somebody turn the whole filter off.
 ALTER TABLE series_overrides ADD COLUMN IF NOT EXISTS adult_exempt boolean;
@@ -2101,6 +2105,23 @@ const DATA_MIGRATIONS: { id: string; run: (c: PoolClient) => Promise<void> }[] =
       );
     },
   },
+  // The adult-sources list retired into the per-source age ratings (lib/sourceRatings.ts): a source on that list means
+  // exactly a rating of 18, so every id on it becomes a rating of 18 (foldAdultSources: an id the admin already rated
+  // keeps its rating), and the list is emptied. The column and the settings field stay for API compatibility, and the
+  // 18+ filter reads both, so a list set later is still honoured. One read and one UPDATE.
+  {
+    id: 'adult-sources-into-ratings',
+    run: async (c) => {
+      const row = (await c.query<{ adult_sources: unknown; source_ratings: unknown }>(
+        'SELECT adult_sources, source_ratings FROM server_settings WHERE id = 1')).rows[0];
+      if (!row || !Array.isArray(row.adult_sources) || row.adult_sources.length === 0) return;
+      await c.query(
+        `UPDATE server_settings SET source_ratings = $1::jsonb, adult_sources = '[]'::jsonb, updated_at = now() WHERE id = 1`,
+        [JSON.stringify(foldAdultSources(row.adult_sources, row.source_ratings))],
+      );
+    },
+  },
+
 ];
 
 export async function migrate(): Promise<void> {

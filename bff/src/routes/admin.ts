@@ -40,6 +40,7 @@ import { testSource } from '../lib/sourceCheck';
 import { currentFailures, stageLines } from '../lib/sourceEvidence';
 import { runExtensionMonitor, runExtensionCheck, extState, liveStore as extensionStore } from '../lib/extensionMonitor';
 import { readSites, writeSites } from '../lib/sources/customSites';
+import { setSourceRating, ADULT_AGE } from '../lib/sourceRatings';
 import { reloadAll, listSources, getSource, sniffSite, listRemoteSources, suwayomiConfigured, suwayomiAbout, swAdapterId, isSwAdapterId, withTimeout } from '../lib/sources';
 import {
   listExtensions, refreshExtensions, setExtensionState, sourcesOfExtension, getRepos, addRepo, removeRepo, altRepoUrl,
@@ -743,6 +744,8 @@ export default async function adminRoutes(app: FastifyInstance) {
        * page (`adultExempt` on the series meta route).
        */
       adultGenres: z.array(z.string().min(1).max(60)).max(60).optional(),
+      // Retired for the per-source age ratings (PUT /api/admin/sources/:id/age-rating): the boot migration folds this list into
+      // them. Still accepted, and still honoured by the 18+ filter if set later.
       adultSources: z.array(z.string().min(1).max(120)).max(200).optional(),
       /**
        * Source ids, most preferred first (lib/sourcePrefs.ts): which copy of a chapter the server does not
@@ -4526,6 +4529,24 @@ export default async function adminRoutes(app: FastifyInstance) {
     const r = await retireSource(id, { how: b.data.how ?? 'off', userId: userIdOf(req), req });
     if ('inUse' in r) return reply.code(409).send(inUse(r.inUse));
     return r;
+  });
+
+  /**
+   * Set what a whole source is, or clear it with `null` (lib/sourceRatings.ts). 0 is "Mixed" (judge each title; it cancels
+   * an extension's adult flag), 18 is "Adult only". Its own route, ranked above
+   * `/:id/:action`. The id need not be loaded now: an extension's source is only registered while the engine is up.
+   */
+  app.put('/api/admin/sources/:id/age-rating', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ ageRating: z.union([z.literal(0), z.literal(ADULT_AGE), z.null()]) }).strict().safeParse(req.body ?? {});
+    if (!b.success || !/^[\p{L}\p{N}_.:\-]{1,120}$/u.test(id)) {
+      return reply.code(400).send({ error: 'bad_request', message: 'Send {ageRating: 0 | 18 | null}.' });
+    }
+    const rating = b.data.ageRating;
+    await setSourceRating(id, rating);
+    invalidateAdultFilter();
+    await logAudit('source.age_rating', { userId: userIdOf(req), detail: { source: id, ageRating: rating }, req });
+    return reply.send({ ok: true, ageRating: rating });
   });
 
   app.post('/api/admin/sources/:id/:action', async (req, reply) => {

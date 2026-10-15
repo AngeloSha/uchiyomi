@@ -50,6 +50,7 @@ import { getOrFetch, type FetchedImage } from './imageCache';
 import { firstRunFloor } from './desktop';
 import { ADULT_RATING, visibleToAll } from './visibility';
 import { FIRST_PAGE } from './seriesArt';
+import { isAdultSource } from './sourceRatings';
 
 // ── the frames ───────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -569,11 +570,14 @@ export function heroEligible(alias: string): string {
          AND lower(btrim(hg)) IN (SELECT lower(btrim(g)) FROM unnest(${s}.genres || COALESCE(
                (SELECT ho2.genres FROM series_overrides ho2 WHERE ho2.series_id = ${s}.id), '{}'::text[])) AS g))
     AND NOT EXISTS (SELECT 1 FROM server_settings hs3 WHERE hs3.id = 1 AND jsonb_typeof(hs3.adult_sources) = 'array'
-                     AND hs3.adult_sources ? lower(COALESCE(${s}.source_id, '')))`;
+                     AND hs3.adult_sources ? lower(COALESCE(${s}.source_id, '')))
+    AND NOT EXISTS (SELECT 1 FROM server_settings hs4 WHERE hs4.id = 1 AND jsonb_typeof(hs4.source_ratings) = 'object'
+                     AND jsonb_typeof(hs4.source_ratings -> lower(COALESCE(${s}.source_id, ''))) = 'number'
+                     AND (hs4.source_ratings ->> lower(COALESCE(${s}.source_id, '')))::numeric >= ${ADULT_RATING})`;
 }
 
-/** An extension that declares itself adult: its series never get a banner made from their pages. */
-const adultSource = (id: string | null) => !!id && !!getSource(id)?.isNsfw;
+/** An extension that declares itself adult, unless the admin rated the source below 18: its series never get a banner made from their pages. */
+const adultSource = (id: string | null) => !!id && isAdultSource(getSource(id));
 
 /** How long a series whose pages made no banner is left alone before it is tried again. */
 export const FAIL_RETRY_MS = 7 * 24 * 3600_000;

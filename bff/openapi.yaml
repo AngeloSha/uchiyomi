@@ -7174,7 +7174,9 @@ paths:
                     maxLength: 60
                 adultSources:
                   description: >-
-                    Source ids to treat as adult on top of the ones whose extension declares itself NSFW,
+                    Deprecated: a source on this list is exactly a source rated 18 (PUT /api/admin/sources/{id}/age-rating),
+                    and the boot migration folds the stored list into those ratings and empties it. Still accepted and still
+                    honoured. Source ids to treat as adult on top of the ones whose extension declares itself NSFW,
                     replaced whole. While a request does not carry adult=1 they drop out of the routes that
                     list sources or fan out over them (GET /api/sources, search-all, latest, popular). By-id
                     routes are unaffected. Same normalisation as adultGenres. Empty by default.
@@ -11865,6 +11867,8 @@ paths:
                         followed: { type: integer, minimum: 0 }
                         withBackup: { type: integer, minimum: 0 }
                         lastTestedAt: { type: [string, "null"], format: date-time, description: The last deliberate live check (Test or the daily check). }
+                        ageRating: { type: [integer, "null"], enum: [0, 18, null], description: "What the admin says the whole source is: 0 = Mixed (judge each title), 18 = Adult only, null when none is set (PUT /api/admin/sources/{id}/age-rating)." }
+                        defaultAgeRating: { type: [integer, "null"], description: "What the source is held to without a rating of its own: 18 for an extension that declares itself adult, else null." }
                         icon: { type: boolean, description: "GET /img/sources/icon/{id} serves an extension's logo." }
                         address: { type: string, description: A site added by address only. }
                         overLimit:
@@ -11984,6 +11988,52 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+  /api/admin/sources/{id}/age-rating:
+    put:
+      tags:
+        - admin
+      summary: Set the age rating of a whole source, or clear it.
+      operationId: putApiAdminSourcesIdAgeRating
+      description: >-
+        Requires an admin account and a token carrying the admin scope. `ageRating` 0 is "Mixed": each title is judged and
+        the extension's own adult flag no longer counts. 18 is "Adult only": accounts limited below 18 are refused it, and
+        with "Show 18+" off it leaves Discover, search and the latest and popular lists, as a source on the 18+ source list
+        does. `null` removes the rating, so the source is held to its extension's flag again. Library series from the
+        source keep their own ratings. The id need not be loaded now. Audited as `source.age_rating` {source, ageRating}.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [ageRating]
+              properties:
+                ageRating: { type: [integer, "null"], enum: [0, 18, null], description: "0 = Mixed, 18 = Adult only, null = no rating of its own." }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Saved.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, ageRating]
+                properties:
+                  ok: { type: boolean }
+                  ageRating: { type: [integer, "null"] }
+        "400":
+          description: "`bad_request`: not 0, 18 or null, or an id that is not a source id"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
   /api/admin/sources/{id}/{action}:
     post:
       tags:
