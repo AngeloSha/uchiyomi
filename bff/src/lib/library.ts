@@ -24,6 +24,7 @@ const StreamZip = require('node-stream-zip');
 // node-unrar-js: pure-wasm RAR reader (no native build) for .cbr comic archives.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { createExtractorFromData } = require('node-unrar-js');
+import { MAX_META_BYTES, EntryTooLarge, zipEntryCapped, regularFiles, readRegularFile, rarEntryAllowed } from './archiveCaps';
 // PDF and image-EPUB chapters. Both live in their own modules: EPUB is a zip and reuses this file's zip
 // reader, needing only its own page ORDER, while PDF is genuinely different and reads nothing from here.
 import { pdfPages, pdfPageBytes, pdfPageCount, pdfPageDims, pdfPageIndex, pdfPageName } from './readers/pdf';
@@ -231,7 +232,10 @@ async function rarExtractor(path: string): Promise<any> {
 async function rarHeaders(ex: any): Promise<any[]> {
   return [...ex.getFileList().fileHeaders].filter((h: any) => !h.flags?.directory);
 }
-async function rarExtract(ex: any, name: string): Promise<Buffer> {
+async function rarExtract(ex: any, name: string, cap?: number): Promise<Buffer> {
+  // Judged on the header before anything is extracted: node-unrar-js has no streaming read, it hands back the whole
+  // entry, so the declared unpacked size is the only place a bomb can be refused (lib/archiveCaps.ts).
+  if (!rarEntryAllowed((await rarHeaders(ex)).find((h: any) => h.name === name), cap)) throw new EntryTooLarge(name);
   const files = [...ex.extract({ files: [name] }).files];
   const f = files.find((x: any) => x.fileHeader?.name === name) || files[0];
   if (!f?.extraction) throw new Error('rar entry not found');
@@ -266,9 +270,9 @@ async function readArchive(path: string): Promise<{ xml: string; pages: number }
   if (k === 'pdf') return { xml: '', pages: await pdfPageCount(path) };
   if (k === 'epub') return { xml: '', pages: (await epubPages(path)).length };
   if (k === 'dir') {
-    const names = await readdir(path).catch(() => []);
+    const names = await regularFiles(path, () => true);
     const xmlName = names.find((n) => /comicinfo\.xml$/i.test(n));
-    const xml = xmlName ? await readFile(join(path, xmlName), 'utf8').catch(() => '') : '';
+    const xml = xmlName ? await readRegularFile(path, xmlName, MAX_META_BYTES).then((b) => b.toString('utf8')).catch(() => '') : '';
     return { xml, pages: names.filter((n) => IMG.test(n)).length };
   }
   if (k === 'rar') {
@@ -276,7 +280,7 @@ async function readArchive(path: string): Promise<{ xml: string; pages: number }
     const headers = await rarHeaders(ex);
     const xmlH = headers.find((h) => /comicinfo\.xml$/i.test(h.name));
     let xml = '';
-    if (xmlH) { try { xml = (await rarExtract(ex, xmlH.name)).toString('utf8'); } catch {} }
+    if (xmlH) { try { xml = (await rarExtract(ex, xmlH.name, MAX_META_BYTES)).toString('utf8'); } catch {} }
     return { xml, pages: headers.filter((h) => IMG.test(h.name)).length };
   }
   const zip = new StreamZip.async({ file: path });
@@ -286,7 +290,8 @@ async function readArchive(path: string): Promise<{ xml: string; pages: number }
     for (const name of Object.keys(entries)) {
       if (entries[name].isDirectory) continue;
       if (IMG.test(name)) pages++;
-      else if (/comicinfo\.xml$/i.test(name)) xml = (await zip.entryData(name)).toString('utf8');
+      // Capped, and a refused one reads as no ComicInfo: the scan goes on with the folder's other facts.
+      else if (/comicinfo\.xml$/i.test(name)) xml = await zipEntryCapped(zip, name, MAX_META_BYTES).then((b) => b.toString('utf8')).catch(() => '');
     }
     return { xml, pages };
   } finally {
@@ -299,7 +304,7 @@ export async function cbzPages(path: string): Promise<string[]> {
   const k = chapterKind(path);
   if (k === 'pdf') return pdfPages(path);
   if (k === 'epub') return epubPages(path);   // already in spine order; do NOT re-sort
-  if (k === 'dir') return (await readdir(path).catch(() => [])).filter((n) => IMG.test(n)).sort(naturalCmp);
+  if (k === 'dir') return regularFiles(path, (n) => IMG.test(n), naturalCmp);
   if (k === 'rar') return (await rarHeaders(await rarExtractor(path))).map((h) => h.name).filter((n) => IMG.test(n)).sort(naturalCmp);
   const zip = new StreamZip.async({ file: path });
   try {
@@ -314,11 +319,11 @@ export async function cbzPages(path: string): Promise<string[]> {
 export async function cbzEntry(path: string, name: string): Promise<Buffer> {
   const k = chapterKind(path);
   if (k === 'pdf') return pdfPageBytes(path, pdfPageIndex(name));
-  if (k === 'dir') return readFile(join(path, name));
+  if (k === 'dir') return readRegularFile(path, name);
   if (k === 'rar') return rarExtract(await rarExtractor(path), name);
   const zip = new StreamZip.async({ file: path });
   try {
-    return await zip.entryData(name);
+    return await zipEntryCapped(zip, name);
   } finally {
     await zip.close();
   }
@@ -349,13 +354,13 @@ export async function cbzPageAt(
     const name = names[index];
     if (!name) return null;
     const zip = new StreamZip.async({ file: path });
-    try { return { name, bytes: await zip.entryData(name), total: names.length }; }
+    try { return { name, bytes: await zipEntryCapped(zip, name), total: names.length }; }
     finally { await zip.close(); }
   }
   if (k === 'dir') {
-    const names = (await readdir(path).catch(() => [])).filter((n) => IMG.test(n)).sort(naturalCmp);
+    const names = await regularFiles(path, (n) => IMG.test(n), naturalCmp);
     const name = names[index];
-    return name ? { name, bytes: await readFile(join(path, name)), total: names.length } : null;
+    return name ? { name, bytes: await readRegularFile(path, name), total: names.length } : null;
   }
   if (k === 'rar') {
     const ex = await rarExtractor(path); // one extractor for both the listing and the read
@@ -368,7 +373,7 @@ export async function cbzPageAt(
     const entries = await zip.entries();
     const names = Object.keys(entries).filter((n) => !entries[n].isDirectory && IMG.test(n)).sort(naturalCmp);
     const name = names[index];
-    return name ? { name, bytes: await zip.entryData(name), total: names.length } : null;
+    return name ? { name, bytes: await zipEntryCapped(zip, name), total: names.length } : null;
   } finally {
     await zip.close();
   }
@@ -391,11 +396,18 @@ export async function cbzPageDims(path: string): Promise<Array<{ name: string; w
     const zip = new StreamZip.async({ file: path });
     try {
       const entries = await zip.entries();
-      for (const name of Object.keys(entries).filter((n) => !entries[n].isDirectory && IMG.test(n)).sort(naturalCmp)) await dim(name, await zip.entryData(name));
+      for (const name of Object.keys(entries).filter((n) => !entries[n].isDirectory && IMG.test(n)).sort(naturalCmp)) {
+        // A page over the cap is measured as unknown rather than failing the whole chapter's dimensions.
+        const bytes = await zipEntryCapped(zip, name).catch(() => null);
+        if (bytes) await dim(name, bytes); else out.push({ name, width: null, height: null });
+      }
     } finally { await zip.close(); }
     return out;
   }
-  for (const name of await cbzPages(path)) await dim(name, await cbzEntry(path, name));
+  for (const name of await cbzPages(path)) {
+    const bytes = await cbzEntry(path, name).catch(() => null);
+    if (bytes) await dim(name, bytes); else out.push({ name, width: null, height: null });
+  }
   return out;
 }
 

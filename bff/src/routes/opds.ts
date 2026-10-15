@@ -8,13 +8,14 @@
 //   * Facets (OPDS 1.2 §7): sort, library, genre and status as links the reader renders as filters.
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createReadStream } from 'node:fs';
-import { stat, readdir } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { q, one } from '../lib/db';
 import { resolveOpdsBasic } from '../lib/auth';
 import { viewCtxFor, visibleBookFile, Params, visible, browsable, type ViewCtx } from '../lib/visibility';
 import { LIBRARY_ROOT, cbzPageAt } from '../lib/library';
+import { regularFiles, readRegularFile } from '../lib/archiveCaps';
 import { serveImage } from '../lib/imageCache';
 import { editionLabels } from '../lib/editions';
 import { noticeShown, visibleBookCount } from '../lib/noticeChapters';
@@ -489,7 +490,9 @@ export default async function opdsRoutes(app: FastifyInstance) {
     reply.header('Content-Type', CBZ);
     if (st.isDirectory()) {
       const zip = new AdmZip();
-      for (const name of (await readdir(abs)).filter((n) => IMG.test(n)).sort()) zip.addLocalFile(join(abs, name));
+      // Regular files only, read without following a symlink and within the page cap (lib/archiveCaps.ts): addLocalFile
+      // followed an entry named like an image out of the library -- the audit downloaded a jwt.secret this way.
+      for (const name of await regularFiles(abs, (n) => IMG.test(n))) zip.addFile(name, await readRegularFile(abs, name));
       reply.header('Content-Disposition', `attachment; filename="${esc(base)}.cbz"`);
       return reply.send(zip.toBuffer());
     }

@@ -34,6 +34,7 @@ const AdmZip = require('adm-zip');
 // invariant pinned by zipExtractionGuard.test.ts) and use the streaming reader for manifests/entries.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const StreamZip = require('node-stream-zip');
+import { MAX_META_BYTES, zipEntryCapped } from './archiveCaps';
 
 /** The manifest's entry name at the archive root. Not an image extension, so the scanner never counts it. */
 export const PARTIAL_MANIFEST = 'uchiyomi-partial.json';
@@ -102,7 +103,7 @@ export async function readPartialManifest(abs: string): Promise<PartialManifest 
     const entries = await zip.entries();
     if (!entries[PARTIAL_MANIFEST] || entries[PARTIAL_MANIFEST].isDirectory) return null;
     let m: any;
-    try { m = JSON.parse((await zip.entryData(PARTIAL_MANIFEST)).toString('utf8')); }
+    try { m = JSON.parse((await zipEntryCapped(zip, PARTIAL_MANIFEST, MAX_META_BYTES)).toString('utf8')); }
     catch { throw new Error(`invalid ${PARTIAL_MANIFEST}: malformed JSON`); }
     if (m?.version !== 1 || typeof m.source !== 'string' || typeof m.chapterSourceId !== 'string' ||
         !Number.isInteger(m.expected) || m.expected < 1 || !Array.isArray(m.missing) ||
@@ -314,7 +315,7 @@ export async function completePartial(
           const entries = await old.entries();
           for (const name of Object.keys(entries)) {
             if (entries[name].isDirectory || name === PARTIAL_MANIFEST || replaced.has(name)) continue;
-            keep.push([name, await old.entryData(name)]);
+            keep.push([name, await zipEntryCapped(old, name)]);
           }
         } finally {
           await old.close();

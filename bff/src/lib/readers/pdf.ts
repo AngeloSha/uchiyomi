@@ -29,6 +29,22 @@ const loadMupdf = () => (mupdfPromise ??= esmImport('mupdf'));
 const RENDER_WIDTH = 1600;
 const MAX_SCALE = 4;      // never upscale a small page into a huge one
 const MIN_SCALE = 0.5;
+/**
+ * The most pixels one rendered page may have, whatever its box says. The scale above is relative to the page's width
+ * only, so a page with a huge box (or a tall one) became a pixmap of any size: mupdf refuses the absurd ones itself,
+ * but admitted a 15000x15000 render that took a 1 GiB process down. Past this the page is rendered smaller, never
+ * refused. 32 megapixels is a 1600 x 20000 strip, about 96 MB of RGB while it is drawn.
+ */
+export const MAX_PDF_PIXELS = 32_000_000;
+
+/** The render scale for a page of `w` x `h` points: RENDER_WIDTH wide within the scale limits, then under MAX_PDF_PIXELS. */
+export function renderScale(w: number, h: number): number {
+  const width = w || RENDER_WIDTH;
+  const height = h || width;
+  const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, RENDER_WIDTH / width));
+  const pixels = width * scale * height * scale;
+  return pixels > MAX_PDF_PIXELS ? Math.sqrt(MAX_PDF_PIXELS / (width * height)) : scale;
+}
 
 /** Zero-padded so the natural sort the rest of the app uses keeps them in order past page 9. */
 export const pdfPageName = (i: number) => `page-${String(i + 1).padStart(4, '0')}.png`;
@@ -65,8 +81,7 @@ export async function pdfPageBytes(path: string, index: number): Promise<Buffer>
   if (index < 0 || index >= doc.countPages()) throw new Error('pdf page out of range');
   const page = doc.loadPage(index);
   const box = page.getBounds();                    // [x0, y0, x1, y1] in points
-  const w = Math.abs(box[2] - box[0]) || RENDER_WIDTH;
-  const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, RENDER_WIDTH / w));
+  const scale = renderScale(Math.abs(box[2] - box[0]), Math.abs(box[3] - box[1]));
   const pix = page.toPixmap(mupdf.Matrix.scale(scale, scale), mupdf.ColorSpace.DeviceRGB, false, true);
   return Buffer.from(pix.asPNG());
 }
@@ -89,7 +104,7 @@ export async function pdfPageDims(path: string): Promise<Array<{ name: string; w
       const box = doc.loadPage(i).getBounds();
       const w = Math.abs(box[2] - box[0]);
       const h = Math.abs(box[3] - box[1]);
-      const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, RENDER_WIDTH / (w || RENDER_WIDTH)));
+      const scale = renderScale(w, h);
       out.push({ name: pdfPageName(i), width: Math.round(w * scale) || null, height: Math.round(h * scale) || null });
     } catch {
       out.push({ name: pdfPageName(i), width: null, height: null });

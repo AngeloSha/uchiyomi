@@ -12,6 +12,7 @@
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const StreamZip = require('node-stream-zip');
+import { MAX_META_BYTES, zipEntryCapped } from '../archiveCaps';
 
 const IMG = /\.(jpe?g|png|webp|gif|avif)$/i;
 
@@ -51,13 +52,13 @@ export async function epubPages(path: string): Promise<string[]> {
     // container.xml names the OPF; without it there is no stated order to honour.
     let opfPath: string | null = null;
     if (has('META-INF/container.xml')) {
-      const c = (await zip.entryData('META-INF/container.xml')).toString('utf8');
+      const c = (await zipEntryCapped(zip, 'META-INF/container.xml', MAX_META_BYTES)).toString('utf8');
       const m = /<rootfile\b[^>]*>/i.exec(c);
       if (m) opfPath = attr(m[0], 'full-path');
     }
     if (!opfPath || !has(opfPath)) return allImages();
 
-    const opf = (await zip.entryData(opfPath)).toString('utf8');
+    const opf = (await zipEntryCapped(zip, opfPath, MAX_META_BYTES)).toString('utf8');
 
     // manifest: id -> { href, type }
     const manifest = new Map<string, { href: string; type: string }>();
@@ -81,7 +82,7 @@ export async function epubPages(path: string): Promise<string[]> {
 
       // The usual shape: a one-page XHTML wrapper around a single <img> or SVG <image>.
       if (!has(target)) continue;
-      const html = (await zip.entryData(target)).toString('utf8');
+      const html = (await zipEntryCapped(zip, target, MAX_META_BYTES)).toString('utf8');
       for (const tag of html.matchAll(/<(?:img|image)\b[^>]*>/gi)) {
         const src = attr(tag[0], 'src') || attr(tag[0], 'xlink:href') || attr(tag[0], 'href');
         if (src) push(resolveHref(target, src));
