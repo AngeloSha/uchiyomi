@@ -1174,6 +1174,44 @@ try {
       : ok(`${href} survives being clicked into`);
   }
 
+  // ---------------------------------------------------------------- the page that leaves is the one that fades out
+  //
+  // (2026-10-15) Since the fade was written, a click showed the NEXT page at once inside the outgoing fade, faded it away
+  // and faded it in again, and built it twice (components/PageTransition.tsx says why). Sampled every frame from a click
+  // on a cover: while the page is fading out it must still be the Library, and the series must arrive fading in. Reintroduce
+  // by rendering `{children}` without FrozenRoute: the series hero shows inside the outgoing fade within a frame or two.
+  {
+    await page.goto(`${BASE}/library`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+    await sleep(3000);
+    const frames = await page.evaluate(() => new Promise((resolve) => {
+      if (document.documentElement.classList.contains('reduce-effects')) { resolve('reduced'); return; }
+      const a = document.querySelector('main [data-library-grid] a[href*="/series/"]');
+      if (!a) { resolve(null); return; }
+      const t0 = performance.now(); const seen = [];
+      a.click();
+      const tick = () => {
+        const w = document.querySelector('main > div');
+        seen.push({ t: Math.round(performance.now() - t0), op: w ? +getComputedStyle(w).opacity : 1,
+          library: !!w?.querySelector('[data-library-grid]'), series: !!w?.querySelector('[data-series-hero]') });
+        if (performance.now() - t0 > 1200) resolve(seen); else requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    })).catch(() => null);
+    if (frames === 'reduced') console.log('    [ -- ] Reduce effects is on for this account: no fade to check');
+    else if (!Array.isArray(frames)) bad('the page fade: no cover to click in the Library');
+    else {
+      // The fade-out is every frame up to the darkest one; the fade-in, every frame after it.
+      const low = frames.reduce((m, f, i) => (f.op < frames[m].op ? i : m), 0);
+      const out = frames.slice(0, low).filter((f) => f.op < 1);
+      const wrong = out.find((f) => f.series || !f.library);
+      const landed = frames.slice(low).some((f) => f.series && f.op === 1);
+      if (!out.length) bad(`the page fade: no fade-out was seen at all (${JSON.stringify(frames.slice(0, 6))})`);
+      else if (wrong) bad(`the page fade: ${wrong.t} ms after the click, the page fading out is ${wrong.series ? 'the series it is going to' : 'not the Library'} (opacity ${wrong.op.toFixed(2)})`);
+      else if (!landed) bad('the page fade: the series never finished fading in');
+      else ok(`the page fade: the Library fades out as itself (${out.length} frames), then the series fades in`);
+    }
+  }
+
   // ---------------------------------------------------------------- 18+ libraries stay off the shelf
   //
   // The whole chain, end to end: a session cookie set by the button, a query parameter added to every API
