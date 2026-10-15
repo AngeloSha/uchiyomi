@@ -67,7 +67,7 @@ import { sanitiseNoticeTypes, visibleBookCount } from '../lib/noticeChapters';
 import { seriesHidesNotices, hiddenCount, refreshNoticesActive } from '../lib/noticeSettings';
 import { SERIES_TYPES, isKnownSeriesType, learnTypeFromAniList } from '../lib/seriesType';
 import {
-  addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, claimDownloadJob, releaseDownloadJobClaim,
+  copyPageList, isRefusal, addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, claimDownloadJob, releaseDownloadJobClaim,
   startDownloadJob, clearLatestCache, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS,
 } from './sources';
 import { confirmsTitle } from '../lib/confirmTitle';
@@ -2574,6 +2574,16 @@ export default async function adminRoutes(app: FastifyInstance) {
       if ('refused' in r) return reply.code(409).send({ error: 'refused', message: r.refused.reason, fix: r.refused.fix });
       return { ok: true, applied: r.applied, bytes: r.bytes, skipped: r.skipped };
     } finally { claim.release(); }
+  });
+
+  // How many pages one copy of a chapter has on its source, for the side-by-side compare. The pages themselves
+  // are GET /img/series/:id/copy-page, by index. The copy must be one this series' listing knows.
+  app.get('/api/admin/series/:id/copy-pages', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const { source, chapter } = req.query as { source?: string; chapter?: string };
+    const r = await copyPageList(id, source, chapter);
+    if (isRefusal(r)) return reply.code(r.code).send({ error: r.error, message: r.message });
+    return { count: r.urls.length };
   });
 
   /**

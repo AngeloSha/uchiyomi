@@ -1160,6 +1160,12 @@ closes, *Replace with this version?* asks, and **Replace** is the *Fetch again* 
 the file is set aside, the version you chose is downloaded onto the same row, and everyone's place in it is
 kept (on a chapter deleted from the server there is no file to set aside; the copy simply lands on the row).
 
+To judge before you swap, an admin can **compare** first: a chapter row's **⋯** menu has **Replace from another
+source…** whenever another source lists a copy of that number. It opens *Compare copies*: the file on this server on the
+left, the copy of the source you pick (a chip per copy) on the right, page by page and moving together (arrow keys, or
+‹ ›), with each side's page count and a note when they differ. Nothing changes until **Replace with this copy**, which
+goes on to the same *Replace with this version?* confirmation.
+
 A pick is an explicit choice of one copy and is treated as one. It ignores patience and resets the retry
 cap, as every manual fetch does — and, unlike *Fetch* on the row, it also ignores the blocklist: a copy
 marked *blocked group* is fetched when you press *Fetch* beside it, because you pointed at it with the label

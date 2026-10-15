@@ -16,7 +16,7 @@ import { solverMayVisit } from '../lib/sources/imageHosts';
 import { getSource, isSwAdapterId } from '../lib/sources';
 import type { SourceAdapter, SourceChapter } from '../lib/sources/types';
 import { fetchPages } from '../lib/downloader';
-import { previewPageList, isRefusal } from './sources';
+import { previewPageList, copyPageList, isRefusal } from './sources';
 import { assertPublicHost, isBlockedHost, BlockedAddress } from '../lib/ssrfGuard';
 import { suwayomiUrl, suwayomiBase, suwayomiImageHeaders, onEngineOrigin } from '../lib/sources/suwayomi/client';
 import { fetchPublic, readCapped, MAX_COVER_BYTES, MAX_ICON_BYTES, MAX_HTML_BYTES } from '../lib/safeFetch';
@@ -999,6 +999,27 @@ export default async function imageRoutes(app: FastifyInstance) {
     const ctx = vc(req);
     if (!(await mayDownload(ctx.userId))) return reply.code(403).send({ error: 'forbidden' });
     const r = await previewPageList(ctx, source, sourceId, number);
+    if (isRefusal(r)) return reply.code(r.code).send({ error: r.error });
+    const idx = Number(i);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= r.urls.length) return reply.code(404).send({ error: 'not_found' });
+    const buf = await previewGate(r.src.id, () => previewPageBytes(r.src, r.chapter, r.urls, idx)).catch(() => null);
+    const type = buf && buf.length <= PREVIEW_MAX_BYTES ? sniffImage(buf) : null;
+    if (!buf || !type) return reply.code(502).send({ error: 'unavailable' });
+    reply.header('cache-control', 'private, no-store');
+    reply.header('x-content-type-options', 'nosniff');
+    reply.type(type);
+    return reply.send(buf);
+  });
+
+  // One page of one named copy of a chapter of this series, for the compare view. Admin only, like the replace it
+  // leads to; the copy must be one the series' listing holds (copyPageList).
+  app.get('/img/series/:id/copy-page', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const { source, chapter, i } = req.query as { source?: string; chapter?: string; i?: string };
+    const ctx = vc(req);
+    const me = ctx.userId ? await one<{ role: string }>('SELECT role FROM users WHERE id = $1', [ctx.userId]).catch(() => null) : null;
+    if (me?.role !== 'admin') return reply.code(403).send({ error: 'forbidden' });
+    const r = await copyPageList(id, source, chapter);
     if (isRefusal(r)) return reply.code(r.code).send({ error: r.error });
     const idx = Number(i);
     if (!Number.isInteger(idx) || idx < 0 || idx >= r.urls.length) return reply.code(404).send({ error: 'not_found' });
