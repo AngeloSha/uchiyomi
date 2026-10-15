@@ -283,8 +283,12 @@ function ReaderInner() {
     if (seriesId0) saveSeriesPrefs(seriesId0, { zoom: clamped });
   };
 
+  /** The chapter the address was last moved to by reading, so the load below does not run for it. */
+  const urlSynced = useRef<string | null>(null);
   // ---- (re)load on bookId change ----
   useEffect(() => {
+    // The address followed the reader into the next chapter (see urlFollowsReading): the chapters are all loaded already.
+    if (urlSynced.current === bookId) { urlSynced.current = null; return; }
     let alive = true;
     setReady(false);
     setEnded(false);
@@ -1116,7 +1120,17 @@ function ReaderInner() {
   const seriesHref = activeSeriesId ? `/series/?id=${activeSeriesId}` : null;
 
   const back = () => (typeof window !== 'undefined' && window.history.length > 1 ? router.back() : router.push(seriesId ? `/series/?id=${seriesId}` : '/'));
-  const goChapter = (cid?: string, atEnd = false) => { if (cid) router.replace(`/reader/?book=${cid}${atEnd ? '&page=last' : ''}`); };
+  // ⚠️ Refresh went back to where the reader was OPENED. Continuous reading appends the next chapters to one track, but the
+  // address kept naming the first, so a reload reopened that chapter (and its saved page) however far on the reader had got.
+  // The address now follows the chapter on screen; progress for it is saved by the same path, so a reload resumes there.
+  const readingChapterId = ready && didInitScroll.current ? chapters[flat[current]?.ci ?? -1]?.id : undefined;
+  useEffect(() => {
+    if (!readingChapterId || readingChapterId === bookId || chapters[0]?.id !== bookId) return; // not while a jump is loading
+    urlSynced.current = readingChapterId;
+    router.replace(`/reader/?book=${readingChapterId}`, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readingChapterId]);
+  const goChapter = (cid?: string, atEnd = false) => { urlSynced.current = null; if (cid) router.replace(`/reader/?book=${cid}${atEnd ? '&page=last' : ''}`); };
   /**
    * Read this chapter in another language edition (v0.52.0): the same number there when the server holds it, else
    * that edition's page at the number, where its ghost row has Fetch -- said first, so the jump is not a surprise.
