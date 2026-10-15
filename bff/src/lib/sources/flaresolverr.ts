@@ -11,6 +11,8 @@
 // Both addresses are read when asked rather than once at load: production sets them before the server starts, and a
 // test can point them at fakes of its own.
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { assertNotPrivateHost } from '../safeFetch';
+import { BlockedAddress, isBlockedHost } from '../ssrfGuard';
 
 const mainUrl = (): string => (process.env.FLARESOLVERR_URL || 'http://yomi-flaresolverr:8191').replace(/\/$/, '');
 
@@ -126,9 +128,33 @@ function release(): void {
 /** Tests only: how many solves are running and waiting. */
 export const _solverQueue = () => ({ inFlight, waiting: waiting.length });
 
+/** The e2e stub's own origins (FAKE_SOURCE_URLS, sources/fake.ts): on loopback by design, and set only by a test run. */
+const fakeOrigins = (): string[] => (process.env.FAKE_SOURCE_URLS || '').split(',').flatMap((e) => {
+  try { return [new URL(e.slice(e.indexOf('=') + 1).trim()).origin]; } catch { return []; }
+});
+
+/**
+ * A URL reaches the solver only on a public http(s) host (lib/safeFetch.ts assertNotPrivateHost). The solver is a
+ * browser on the Docker network beside the engine and the database, which follows redirects and runs a page's scripts,
+ * and the URLs it was handed came from a site's own HTML -- a chapter link, a page image -- with no check at all
+ * (v0.69.1). The cover route already checked before its solve; this is the one door every solve goes through.
+ */
+function solvableHost(url: string): string | null {
+  let u: URL;
+  try { u = new URL(url); } catch { throw new BlockedAddress(url); }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new BlockedAddress(url);
+  if (fakeOrigins().includes(u.origin)) return null;
+  if (isBlockedHost(u.hostname)) throw new BlockedAddress(u.hostname);
+  return u.hostname;
+}
+
 async function solve(cmd: 'request.get' | 'request.post', url: string, postData?: string): Promise<Solution> {
+  // A private literal or a local name is refused before it takes a slot; the DNS half runs inside the slot, so the
+  // queue keeps the order callers arrived in. Reintroduce by removing both: solverGuard.test.ts sees the solver asked.
+  const host = solvableHost(url);
   await acquire();
   try {
+    if (host) await assertNotPrivateHost(host);
     return await solveNow(cmd, url, postData);
   } finally {
     release();
