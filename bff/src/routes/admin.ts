@@ -104,6 +104,7 @@ import { namesMatch } from '../lib/onlineMatch';
 import { READING_DIRECTIONS } from '../lib/komgaDto';
 import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
 import { fetchKitsuBanner } from '../lib/kitsu';
+import { fetchTrackerMeta } from '../lib/trackerMeta';
 import { randomBytes } from 'crypto';
 import { appVersion } from '../lib/appVersion';
 import { PING_URL, buildPayload, installFacts, monthlyId, newSecret, sendForget } from '../lib/installPing';
@@ -452,6 +453,27 @@ export async function huntArt(t: { id: string; title: string }): Promise<'banner
       const res = mdSrc ? await mdSrc.search(t.title) : [];
       art.cover = (res ?? []).find((r) => r.coverUrl && namesMatch(names, [r.title]))?.coverUrl || null;
     } catch { /* mangadex miss is fine */ }
+  }
+  // Kitsu and MangaUpdates (lib/trackerMeta.ts): a cover when nothing else had one, and a description and genres for a
+  // series that has none -- written to series_overrides, the layer a scan never overwrites, and only where both are empty.
+  const meta = await fetchTrackerMeta(t.title, names);
+  if (meta) {
+    art.cover = art.cover ?? meta.cover;
+    art.banner = art.banner ?? meta.banner;
+    if (meta.summary) {
+      await q(
+        `INSERT INTO series_overrides (series_id, summary) SELECT s.id, $2 FROM lib_series s WHERE s.id = $1 AND COALESCE(s.summary,'') = ''
+         ON CONFLICT (series_id) DO UPDATE SET summary = EXCLUDED.summary, updated_at = now() WHERE COALESCE(series_overrides.summary,'') = ''`,
+        [t.id, meta.summary],
+      ).catch(() => {});
+    }
+    if (meta.genres.length) {
+      await q(
+        `INSERT INTO series_overrides (series_id, genres) SELECT s.id, $2::text[] FROM lib_series s WHERE s.id = $1 AND cardinality(s.genres) = 0
+         ON CONFLICT (series_id) DO UPDATE SET genres = EXCLUDED.genres, updated_at = now() WHERE COALESCE(cardinality(series_overrides.genres),0) = 0`,
+        [t.id, meta.genres],
+      ).catch(() => {});
+    }
   }
   if (!art.banner && !art.cover) return null;
   // checked_at (lib/matchCheck.ts): a row this writes whole is checked; one it only fills keeps the mark of what it

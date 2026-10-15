@@ -88,7 +88,10 @@ them. By default, every series added gets its title sent to AniList (`graphql.an
 art; a series with no art on record is looked up the same way the first time its art is requested, and that
 match also records the AniList id progress sync writes against. The admin panel's **Cover & banner health**
 card — its *Backfill*, and picking art for one series by hand — asks AniList again and, for wide cover art,
-Kitsu (`kitsu.io`), and `POST /api/admin/trackers/relink` asks AniList for every unlinked series. Discover's
+Kitsu (`kitsu.io`), and `POST /api/admin/trackers/relink` asks AniList for every unlinked series. When AniList has no
+cover or banner for a series, Kitsu (`kitsu.io`) and then MangaUpdates (`api.mangaupdates.com`) are asked by title for
+one, and the backfill also asks them for a description and genres; an entry is used only when it is named as the series
+is, and the same per-library switch below turns the automatic lookup off. Discover's
 *Trending* rail is AniList's own trending list, fetched at most once every six hours. These lookups carry
 your server's IP address and the title asked for, and nothing else. Of the knobs below, only `ANILIST_API_URL`
 moves them (AniList's, since v0.55.7); the other two point only the token-bearing tracker calls elsewhere.

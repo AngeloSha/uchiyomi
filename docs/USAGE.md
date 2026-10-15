@@ -465,9 +465,13 @@ limits apply as everywhere else.
 When nobody chose a picture, a series is shown with:
 
 - **its cover**: the cover of the source it was added from; else AniList's, when AniList's entry carries the series'
-  name; else its own first page.
-- **its banner**: AniList's (or its anime adaptation's) on the same condition; else one made from the series' own
-  pages (*New banner* in *Edit details* picks another).
+  name; else Kitsu's or MangaUpdates', on the same condition; else its own first page.
+- **its banner**: AniList's (or its anime adaptation's) on the same condition, or Kitsu's wide cover; else one made
+  from the series' own pages (*New banner* in *Edit details* picks another).
+
+The art backfill under **Admin → Content → Art** also fills a **description** and **genres** from Kitsu or MangaUpdates
+for a series that has none of its own. They are saved as your own edits to the series, so a scan never replaces them,
+and only where both the source's and yours are empty; change them in *Edit details* like any other.
 
 Since v0.55.7 ([#168](https://github.com/AngeloSha/uchiyomi/discussions/168)) an online match counts only when one of the
 entry's names — its romaji, English or native title, or a synonym — is exactly one of the series' names: its title, the
