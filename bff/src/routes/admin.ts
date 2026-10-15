@@ -14,6 +14,7 @@ import { runtime } from '../lib/runtime';
 import { persistScan, libraryIdFor, libraryRows, LIBRARY_ROOT, DL_ROOT, setBookDates, setBookMeta } from '../lib/library';
 import { applyMoves, heldElsewhere, lockLibrarySaves, previewMoves, setFolders, storedFolders, underSql, LIBRARY_MAX_FOLDERS } from '../lib/libraryFolders';
 import { containedPath, allWritable, realContainedPath } from '../lib/fsGuard';
+import { removeChapters, restoreRemoved, removedNumbers } from '../lib/chapterRemovals';
 import { deleteSeries, restoreSeries, mergeSeries, mergeRefusal, MergeConflictError, getSeriesRow, deleteSeriesFiles, renameSeriesFolder, forgetSeries, diskSpelling, deleteChapterFiles } from '../lib/libraryAdmin';
 import { editionFollowing, linkEdition, linkPair, unlinkEdition, workRows } from '../lib/editions';
 import { toStoredRel, trimTrailingSlashes } from '../lib/relPath';
@@ -2521,6 +2522,39 @@ export default async function adminRoutes(app: FastifyInstance) {
       if ('refused' in r) return reply.code(409).send({ error: 'refused', message: r.refused.reason, fix: r.refused.fix });
       return { ok: true, applied: r.applied, bytes: r.bytes, skipped: r.skipped };
     } finally { claim.release(); }
+  });
+
+  /**
+   * Take chapter NUMBERS out of the series for good: the files go (download folder only), the number is recorded in
+   * series_chapter_removals so it stays out of the series page, the reader and the Komga API, and the sweep stops
+   * listing and fetching it. For a chapter a source listed that is not part of the work. Restore: /chapters/restore.
+   */
+  app.post('/api/admin/series/:id/chapters/remove', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ numbers: z.array(z.number().finite().min(-1000).max(100000)).min(1).max(500) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!(await getSeriesRow(id))) return reply.code(404).send({ error: 'not_found' });
+    const r = await removeChapters(id, b.data.numbers, { userId: userIdOf(req), req });
+    if ('refused' in r) return reply.code(409).send({ error: 'refused', message: r.refused.reason, fix: r.refused.fix });
+    return { ok: true, ...r };
+  });
+
+  app.get('/api/admin/series/:id/chapters/removed', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!(await getSeriesRow(id))) return reply.code(404).send({ error: 'not_found' });
+    return { numbers: await removedNumbers(id) };
+  });
+
+  app.post('/api/admin/series/:id/chapters/restore', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({
+      numbers: z.array(z.number().finite()).min(1).max(500).optional(),
+      all: z.literal(true).optional(),
+    }).refine((v) => !!v.numbers !== !!v.all, { message: 'numbers or all' }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!(await getSeriesRow(id))) return reply.code(404).send({ error: 'not_found' });
+    const restored = await restoreRemoved(id, b.data.all ? 'all' : b.data.numbers!, { userId: userIdOf(req), req });
+    return { ok: true, restored };
   });
 
   /**

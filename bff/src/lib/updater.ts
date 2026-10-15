@@ -452,6 +452,9 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
       }));
     }
   }
+  // Numbers an admin removed from this series (lib/chapterRemovals.ts) are not listed, fetched or counted again.
+  const removedSet = new Set((await q<{ number: number }>('SELECT number FROM series_chapter_removals WHERE series_id = $1', [seriesId]).catch(() => [])).map((r) => Number(r.number)));
+  if (removedSet.size) tagged = tagged.filter((c) => !removedSet.has(c.number));
   const { releases, waiting: held } = chooseReleases(tagged, prefs, chooseOpts);
 
   // A series added as "latest N" carries a floor, and what the source lists below it is not this job's

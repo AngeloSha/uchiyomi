@@ -93,6 +93,8 @@ const booksSrc = (ctx: ViewCtx, p: Params, alias = 'bv') => `(
     -- A notice chapter the admin hides (lib/noticeChapters.ts) is not a chapter to anyone: not listed, not opened
     -- by id, not next or previous, not in the offline plan or the Komga-compatible API. By the effective number.
    WHERE ${noticeShown('s', 'b', 'ov')}
+     -- A chapter an admin removed by hand (lib/chapterRemovals.ts): its row is a tombstone kept for reading history.
+     AND NOT EXISTS (SELECT 1 FROM series_chapter_removals rm WHERE rm.series_id = b.series_id AND rm.number = COALESCE(ov.number, b.number))
 ) ${alias}`;
 
 /** The overridden title for one series, for the book DTOs that carry seriesTitle. */

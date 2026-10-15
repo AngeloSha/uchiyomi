@@ -813,6 +813,7 @@ export async function listingFor(seriesId: string, opts: { floor: number | null;
         -- cannot be fetched while the block stands, and a group blocked is a group the reader does not want to see.
         -- Kept in the listing, so unblocking the group shows it again at once.
         AND l.status <> 'blocked'
+        AND NOT EXISTS (SELECT 1 FROM series_chapter_removals rm WHERE rm.series_id = l.series_id AND rm.number = l.number)
         AND NOT EXISTS (
           SELECT 1 FROM lib_books b
             LEFT JOIN book_overrides ov ON ov.book_id = b.id

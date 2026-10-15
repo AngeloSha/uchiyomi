@@ -43,6 +43,7 @@ import { SourcesExplainer } from '@/components/SourcesExplainer';
 import { SupplyLine } from '@/components/SupplyLine';
 import { ChapterFilterSheet } from '@/components/ChapterFilterSheet';
 import { ChapterVersionsSheet } from '@/components/ChapterVersionsSheet';
+import { RemovedChaptersDialog } from '@/components/RemovedChapters';
 import { GroupAvatar } from '@/components/GroupAvatar';
 import { supplyLine } from '@/lib/supplyLine';
 import { isDesktop } from '@/lib/desktop';
@@ -391,10 +392,12 @@ function ButtonsWrap({ compact, menuOpen, children }: { compact: boolean; menuOp
   return <div className={buttonsClass(menuOpen)}>{children}</div>;
 }
 
-function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, onReader, onToggleDownload, onMark, onEdit, onVersions, onCopyPath, onRefetch, onDelete, selectable, selected, onToggle, compact, lit }: {
+function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, onReader, onToggleDownload, onMark, onEdit, onVersions, onCopyPath, onRemove, onRefetch, onDelete, selectable, selected, onToggle, compact, lit }: {
   book: Book;
   /** Admins only (#136): copy the chapter file's full path. Absent for everyone else and for a row with no path. */
   onCopyPath?: () => void;
+  /** Admins only: take this chapter number out of the library (files and listing), for a chapter that is not part of the work. */
+  onRemove?: () => void;
   /**
    * Admins only, on a file Uchiyomi downloaded (v0.62.0): the select bar's Fetch again and Delete from server, for this
    * one chapter -- each asks first, as the bar's do. Absent for everyone else, and Delete for a file already deleted.
@@ -439,6 +442,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
     ...(onCopyPath ? [{ label: tr('Copy file path'), divider: !onEdit, onSelect: onCopyPath }] : []),
     ...(onRefetch ? [{ label: tr('Fetch again'), divider: true, onSelect: onRefetch }] : []),
     ...(onDelete ? [{ label: tr('Delete from server'), divider: !onRefetch, danger: true, onSelect: onDelete }] : []),
+    ...(onRemove ? [{ label: tr('Remove from library'), divider: true, danger: true, onSelect: onRemove }] : []),
   ], { label: tr('Chapter actions') });
   // Only a name is shown; an id that resolves to nothing (a source since removed) shows no caption at all.
   const altSource = book.sourceId && book.sourceId !== primarySource ? (sourceNames?.[book.sourceId] ?? null) : null;
@@ -546,7 +550,7 @@ function SelectBubble({ selected }: { selected: boolean }) {
  * dimmed, because "this server does not have it" is still true. The mark lives in its own table and becomes
  * ordinary progress when the chapter lands (bff lib/listingProgress).
  */
-function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onToggle, onFetch, onOpen, onMark, compact, wholeHere }: {
+function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onToggle, onFetch, onOpen, onMark, onRemove, compact, wholeHere }: {
   ghost: Ghost;
   /** The series holds a chapter at this ghost's whole number: what a covered row's caption says (lib/chapterRows.ts whyLabel). */
   wholeHere?: boolean;
@@ -568,12 +572,15 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
    * can see the page, download permission or not: a mark costs no bytes. Select mode hides it like the ☁.
    */
   onMark?: (completed: boolean) => void;
+  /** Admins only: take this number out of the library, so it is no longer listed. */
+  onRemove?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const read = ghost.read === true;
   // The one action that applies to a chapter that is not here, on the same menu as a chapter row's (#100).
   const menu = useContextMenu(() => (onMark ? [
     { label: read ? tr('Mark unread') : tr('Mark read'), onSelect: () => onMark(!read) },
+    ...(onRemove ? [{ label: tr('Remove from library'), divider: true, danger: true, onSelect: onRemove }] : []),
   ] : []), { label: tr('Chapter actions') });
   const menuBind = onMark && !selectable ? menu.bind : {};
   const label = whyLabel(ghost, { wholeHere });
@@ -734,7 +741,16 @@ function SeriesInner() {
   const [pickedGhosts, setPickedGhosts] = useState<Set<string>>(new Set());
   const [acting, setActing] = useState(false);
   // What a confirm acts on: the select bar's subset, or the one chapter a row's ⋯ names (v0.62.0).
-  const [confirming, setConfirming] = useState<null | { what: 'delete' | 'refetch'; books: Book[] }>(null);
+  const [confirming, setConfirming] = useState<null | { what: 'delete' | 'refetch' | 'purge'; books: Book[] }>(null);
+  // 'purge' is Remove from series: it acts on the picked numbers, so its `books` is always empty.
+  const [removing, setRemoving] = useState<number | null>(null);
+  // What Remove from series blocked: counted here so the way back is on the page the removal was done on.
+  const [showRemoved, setShowRemoved] = useState(false);
+  const removedCount = useQuery({
+    queryKey: ['series-removed', id], enabled: isAdmin && !!id,
+    queryFn: () => api<{ numbers: number[] }>(`/api/admin/series/${id}/chapters/removed`),
+  }).data?.numbers.length ?? 0;
+  useEffect(() => { if (!removedCount) setShowRemoved(false); }, [removedCount]);
   const [started, setStarted] = useState<StartedJob | null>(null);
   const clearPicks = () => { setPickedBooks(new Set()); setPickedGhosts(new Set()); };
   const leaveSelect = () => { setSelecting(false); clearPicks(); };
@@ -1241,6 +1257,57 @@ function SeriesInner() {
   const invalidateChapters = () => {
     for (const k of [['series-books', id], ['series-listing', id], ['series-versions', id], ['series-groups', id], ['series-scanlators', id], ['series', id], ['home'], ['source-jobs']]) qc.invalidateQueries({ queryKey: k });
   };
+  const removeChapter = async () => {
+    if (removing == null) return;
+    setActing(true);
+    try {
+      const res = await api<{ removed: number[]; skipped: { number: number; reason: string }[] }>(`/api/admin/series/${id}/chapters/remove`, {
+        method: 'POST', json: { numbers: [removing] },
+      });
+      if (res.removed.length) toast(tr('Removed from the library'), 'success');
+      for (const x of res.skipped) {
+        toast(x.reason === 'not_owned' ? skippedNotOursText(1) : x.reason === 'bookmarked' ? skippedBookmarkedText(1) : tr('1 chapter could not be deleted'), res.removed.length ? 'info' : 'error');
+      }
+      invalidateChapters();
+    } catch (e) {
+      toast(msgOf(e, tr('Could not remove that chapter')), 'error');
+    }
+    setActing(false);
+    setRemoving(null);
+  };
+  // Remove from series: the files go AND the numbers stop being listed or fetched (POST chapters/remove), for the
+  // picked chapters and picked grey rows alike. In chunks of the route's 500.
+  const removeNumbers = async (numbers: number[]) => {
+    let removed = 0; let notOurs = 0; let bookmarked = 0; let other = 0;
+    for (let i = 0; i < numbers.length; i += 500) {
+      const res = await api<{ removed: number[]; skipped: { number: number; reason: string }[] }>(`/api/admin/series/${id}/chapters/remove`, {
+        method: 'POST', json: { numbers: numbers.slice(i, i + 500) },
+      });
+      removed += res.removed.length;
+      for (const x of res.skipped) { if (x.reason === 'not_owned') notOurs++; else if (x.reason === 'bookmarked') bookmarked++; else other++; }
+    }
+    return { removed, notOurs, bookmarked, other };
+  };
+  const reportRemoval = (r: { removed: number; notOurs: number; bookmarked: number; other: number }) => {
+    const kind = r.removed ? 'info' : 'error';
+    if (r.removed) toast(r.removed === 1 ? tr('Removed 1 chapter from the library') : tr('Removed {n} chapters from the library', { n: r.removed }), 'success');
+    if (r.notOurs) toast(skippedNotOursText(r.notOurs), kind);
+    if (r.bookmarked) toast(skippedBookmarkedText(r.bookmarked), kind);
+    if (r.other) toast(r.other === 1 ? tr('1 chapter could not be deleted') : tr('{n} chapters could not be deleted', { n: r.other }), kind);
+  };
+  const bulkPurge = async () => {
+    setActing(true);
+    try {
+      const numbers = [...new Set([...pickedBookList.map((b) => b.number), ...pickedGhostList.map((g) => g.number)])];
+      reportRemoval(await removeNumbers(numbers));
+      invalidateChapters();
+      leaveSelect();
+    } catch (e) {
+      toast(msgOf(e, tr('Could not remove those chapters')), 'error');
+    }
+    setActing(false);
+    setConfirming(null);
+  };
   // The picked chapters AND the picked grey rows (#69): select mode is how a reader who reads elsewhere ticks
   // a stretch of chapters this server never fetched. Two requests, one per kind, and one toast that counts
   // what was asked. A ghost failure has already said so (markGhosts), so only a clean run toasts success.
@@ -1587,7 +1654,7 @@ function SeriesInner() {
   };
   const moreGroups = seriesActionGroups({
     isAdmin, mayDownload: canDownload(user), booksCount: series?.booksCount ?? 0, mayArchive,
-    autoHero: !!series?.autoHero, hasFolder: !!series?.folder, offline: authStatus === 'offline', notes: notesCounts,
+    autoHero: !!series?.autoHero, hasFolder: !!series?.folder, removedCount, offline: authStatus === 'offline', notes: notesCounts,
     busy: { checkNew: checking, archive: acting, newBanner: busyAdmin },
   });
   const runAction = (a: SeriesActionId) => {
@@ -1596,6 +1663,7 @@ function SeriesInner() {
       case 'markAllRead': void markAllRead(); break;
       case 'markAllUnread': void markAllUnread(); break;
       case 'findMissing': setFindingMissing(true); break;
+      case 'removed': setShowRemoved(true); break;
       case 'archive': void archiveSlowly(); break;
       case 'checkNew': void checkNow(); break;
       case 'copyLink': void copyLink(); break;
@@ -1755,6 +1823,7 @@ function SeriesInner() {
                 onReader={() => router.push(`/reader/?book=${b.id}`)} onToggleDownload={() => toggleDownload(b.id)}
                 onMark={(mode) => markChapter(b, mode)}
                 onEdit={isAdmin ? () => setEditChapter(b) : undefined}
+                onRemove={isAdmin ? () => setRemoving(b.number) : undefined}
                 onCopyPath={isAdmin && b.path ? () => void copyPath(b.path!, toast) : undefined}
                 onRefetch={isAdmin && b.owned ? () => setConfirming({ what: 'refetch', books: [b] }) : undefined}
                 onDelete={isAdmin && b.owned && !b.pruned ? () => setConfirming({ what: 'delete', books: [b] }) : undefined}
@@ -1774,6 +1843,7 @@ function SeriesInner() {
                 onFetch={canDownload(user) && r.ghost.why !== 'blocked'
                   ? () => r.ghost.bookId ? fetchDeleted(r.ghost.bookId) : fetchOne(r.ghost.number)
                   : undefined}
+                onRemove={isAdmin ? () => setRemoving(r.ghost.number) : undefined}
                 onMark={(completed) => markGhost(r.ghost, completed)} />
             );
           }
@@ -1861,6 +1931,11 @@ function SeriesInner() {
         {isAdmin && (
           <button disabled={acting || !deletable.length} onClick={() => setConfirming({ what: 'delete', books: deletable })} data-remove-chapters className="btn-key btn-key-danger text-rose-300">
             {deletable.length === 1 ? tr('Remove 1 chapter') : deletable.length ? tr('Remove {n} chapters', { n: deletable.length }) : tr('Remove chapters')}
+          </button>
+        )}
+        {isAdmin && (
+          <button disabled={acting || !pickedCount} onClick={() => setConfirming({ what: 'purge', books: [] })} data-remove-from-series className="btn-key btn-key-danger text-rose-300">
+            {tr('Remove from series')}
           </button>
         )}
         <button disabled={acting} onClick={leaveSelect} className="btn-key text-fog-400">{tr('Cancel')}</button>
@@ -2087,11 +2162,28 @@ function SeriesInner() {
           onClose={() => setUnlinking(null)}
         />
       )}
+      {showRemoved && <RemovedChaptersDialog id={id} onClose={() => setShowRemoved(false)} />}
       {findingMissing && (
         <FindMissingDialog seriesId={id} onClose={() => setFindingMissing(false)}
           onAddEdition={addEdition ? (o) => { setFindingMissing(false); addEdition(o); } : undefined} />
       )}
       {Toolbar}
+      {removing != null && (
+        <ConfirmDialog
+          title={tr('Remove this chapter from the library?')}
+          danger
+          busy={acting}
+          confirmLabel={tr('Remove')}
+          body={
+            <>
+              <p>{tr('The chapter’s files are deleted from the server and the number is no longer listed or fetched for this series. Use it for a chapter a source added that is not part of the series.')}</p>
+              <p className="mt-2">{tr('A chapter somebody has bookmarked, and a chapter in a library you assembled yourself, is skipped. The More menu can bring a removed chapter back.')}</p>
+            </>
+          }
+          onConfirm={removeChapter}
+          onClose={() => setRemoving(null)}
+        />
+      )}
       {/* After the select bar, which takes the same place and hides this one. */}
       <ContinueBar shown={barShown}>
         <ContinueButton compact label={ctaText.label} disabled={!resumeBook} onOpen={openReader} />
@@ -2121,6 +2213,22 @@ function SeriesInner() {
             </>
           }
           onConfirm={() => deleteBooks(confirming.books)}
+          onClose={() => setConfirming(null)}
+        />
+      )}
+      {confirming?.what === 'purge' && (
+        <ConfirmDialog
+          title={pickedCount === 1 ? tr('Remove 1 chapter from the series?') : tr('Remove {n} chapters from the series?', { n: pickedCount })}
+          danger
+          busy={acting}
+          confirmLabel={tr('Remove')}
+          body={
+            <>
+              <p>{tr('The chapters’ files are deleted from the server and the numbers are no longer listed or fetched for this series. Use it for chapters a source added that are not part of the series.')}</p>
+              <p className="mt-2">{tr('A chapter somebody has bookmarked, and a chapter in a library you assembled yourself, is skipped. The More menu can bring a removed chapter back.')}</p>
+            </>
+          }
+          onConfirm={bulkPurge}
           onClose={() => setConfirming(null)}
         />
       )}

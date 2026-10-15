@@ -1658,6 +1658,8 @@ POST   /api/admin/series/:id/delete-files
 POST   /api/admin/series/:id/forget
 POST   /api/admin/series/:id/rename-folder
 POST   /api/admin/series/:id/chapters/delete POST   /api/admin/series/:id/chapters/refetch
+POST   /api/admin/series/:id/chapters/remove GET    /api/admin/series/:id/chapters/removed
+POST   /api/admin/series/:id/chapters/restore
 PUT    /api/admin/books/:id/meta POST   /api/admin/books/:id/confirm-short
 POST   /api/admin/series/:id/restore
 POST   /api/admin/series/:id/merge
@@ -1972,6 +1974,14 @@ it: a bookmark names a page inside the file. A chapter whose file *and* folder a
 chapter. It answers `{ok, applied, bytes, skipped: [{id, reason}]}` with `reason` one of `not_found`,
 `not_owned`, `already_pruned`, `bookmarked`, `outside_root`, `unlink_failed`, or **409** `refused` (with
 `message` and `fix`) when the download directory is not writable.
+`POST /api/admin/series/:id/chapters/remove {numbers: [..]}` (1-500 numbers; effective numbers, after any override) takes
+a chapter out of one series for good: owned files go through the same safe delete as `chapters/delete` (a bookmarked
+chapter is skipped), a ghost row is dropped, and the number is remembered in `series_chapter_removals` so no sweep,
+update check or slow archive fetches it again and no surface (web, Komga API, reader, OPDS) lists it. A live chapter
+this server does not own is refused as `not_owned`. The answer is `{ok, removed, skipped: [{number, reason}], applied, bytes}`,
+or **409** `refused` when the volume is not writable. Audit line `series.chapters_remove`.
+`GET .../chapters/removed` lists the remembered numbers as `{numbers}`; `POST .../chapters/restore {numbers: [..]}` or
+`{all: true}` forgets them again (audit `series.chapters_restore`), after which the chapter can be fetched as before.
 `POST /api/admin/series/:id/chapters/refetch {bookIds?[], picks?[]}` (at least one, at most 300 combined)
 downloads the chapters again as the copy the release rules choose *now* — after a change of priority, or a follow, that may be another group's —
 onto the **same rows**, so progress stays attached. Only a row under the download folder (`not_owned`

@@ -9422,6 +9422,170 @@ paths:
           description: Not found, or not visible to this account
         "409":
           description: "`refused`: the download directory is not writable; `message` and `fix` say what to do"
+  /api/admin/series/{id}/chapters/remove:
+    post:
+      tags:
+        - admin
+      summary: Take chapters out of one series for good, by number, and keep them out.
+      operationId: postApiAdminSeriesIdChaptersRemove
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. For a chapter a
+        source lists that is not part of the work. Owned files go through the same safe delete as chapters/delete
+        (a bookmarked chapter is skipped), a ghost row is dropped, and the number is recorded in
+        series_chapter_removals so no sweep, update check or slow archive fetches it again and no surface lists it.
+        A live chapter this server does not own is skipped as `not_owned`. Audit line `series.chapters_remove`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [numbers]
+              properties:
+                numbers:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: number
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, removed, skipped, applied, bytes]
+                properties:
+                  ok:
+                    type: boolean
+                  removed:
+                    type: array
+                    items:
+                      type: number
+                  skipped:
+                    type: array
+                    items:
+                      type: object
+                      required: [number, reason]
+                      properties:
+                        number:
+                          type: number
+                        reason:
+                          type: string
+                          enum: [not_owned, already_pruned, bookmarked, outside_root, unlink_failed, not_found]
+                  applied:
+                    type: integer
+                  bytes:
+                    type: integer
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "409":
+          description: "`refused`: the download directory is not writable; `message` and `fix` say what to do"
+  /api/admin/series/{id}/chapters/removed:
+    get:
+      tags:
+        - admin
+      summary: The chapter numbers removed from this series.
+      operationId: getApiAdminSeriesIdChaptersRemoved
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [numbers]
+                properties:
+                  numbers:
+                    type: array
+                    items:
+                      type: number
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/series/{id}/chapters/restore:
+    post:
+      tags:
+        - admin
+      summary: Let removed chapters back in.
+      operationId: postApiAdminSeriesIdChaptersRestore
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Forgets the
+        removal of the named numbers, or of all with `all: true` (exactly one of the two); the chapters can then be
+        fetched and listed as before. Audit line `series.chapters_restore`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                numbers:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: number
+                all:
+                  type: boolean
+                  enum: [true]
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, restored]
+                properties:
+                  ok:
+                    type: boolean
+                  restored:
+                    description: The numbers let back in.
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
   /api/admin/series/{id}/chapters/refetch:
     post:
       tags:

@@ -15,7 +15,9 @@ export type SeriesActionId =
   | 'notes' | 'markAllRead' | 'markAllUnread'
   | 'findMissing' | 'archive' | 'checkNew'
   | 'copyLink' | 'openTab'
-  | 'edit' | 'newBanner' | 'rename' | 'remove';
+  | 'edit' | 'newBanner' | 'rename' | 'remove'
+  // Admin: the chapters taken out of this series (Remove from series) and the way back.
+  | 'removed';
 
 export type SeriesActionGroupId = 'reading' | 'chapters' | 'share' | 'admin';
 
@@ -52,6 +54,8 @@ export interface SeriesActionsInput {
   /** `series.folder`, sent to admins only: Rename folder. */
   hasFolder: boolean;
   offline?: boolean;
+  /** Chapter numbers an admin removed from this series: Removed chapters, to restore them. */
+  removedCount?: number;
   /**
    * Items whose work this page already has running -- a Check for new chapters, an archive being queued, a banner being
    * made: greyed until it ends, as their keys were under the cover.
@@ -90,6 +94,7 @@ export function seriesActionGroups(x: SeriesActionsInput): SeriesActionGroup[] {
     ...(x.mayDownload && x.booksCount >= 3 ? [{ id: 'findMissing' as const, label: tr('Find missing chapters'), disabled: offline }] : []),
     ...(x.mayArchive ? [{ id: 'archive' as const, label: tr('Archive slowly'), hook: 'archive-slowly', disabled: offline }] : []),
     ...(x.isAdmin ? [{ id: 'checkNew' as const, label: tr('Check for new chapters'), disabled: offline }] : []),
+    ...(x.isAdmin && (x.removedCount ?? 0) > 0 ? [{ id: 'removed' as const, label: tr('Removed chapters ({n})…', { n: x.removedCount ?? 0 }), hook: 'removed-open', disabled: offline }] : []),
   ];
   const share: SeriesAction[] = [
     { id: 'copyLink', label: tr('Copy link') },

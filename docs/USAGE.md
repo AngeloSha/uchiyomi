@@ -303,7 +303,7 @@ genres, description, and the **chapter list**.
 - Four keys sit under the cover (since v0.60.0): **Favourite** (heart; adds it to your favourites and smart offline
   sync), **Offline** (*Save all offline*: copies every chapter to this device for reading with no connection), **List**
   (*Add to list*) and **More**. **More** holds the rest, grouped: *Reading* (notes and saved pages, mark all read
-  or unread), *Chapters* (Find missing chapters, Archive slowly, and for an admin Check for new chapters), *Share* (copy
+  or unread), *Chapters* (Find missing chapters, Archive slowly, and for an admin Check for new chapters and, once any is removed, Removed chapters), *Share* (copy
   the link, open in a new tab), and for an admin *Edit details*, *New banner*, *Rename folder* and *Remove from
   library*. On a computer it opens as a menu, on a phone as a sheet.
 
@@ -1085,6 +1085,18 @@ numbers:
 
 None of these rules applies to a series numbered by posting order, or while a numbering change is waiting for you.
 Chapters downloaded twice before v0.50.0 are listed by Health's *The same chapter saved twice* check.
+
+### Removing a chapter number from a series
+
+A source sometimes lists a chapter that is not part of the work at all (a *0.5* from an unrelated title). An admin can
+take that number out for good: on the series page, a row's **⋯** menu has **Remove from library** (on a chapter you have
+and on a grey row), and in **Select** mode the bar's **Remove from series** does it for every ticked chapter and grey row.
+The chapter's file is deleted from the download folder, and the number is remembered, so it is no longer listed, shown in
+the reader or the Komga API, or fetched by the sweep, a check for new chapters or *Archive slowly*. A chapter somebody
+has bookmarked, and a chapter in a library you assembled yourself, is skipped. Reading history is kept.
+
+**More → Chapters → Removed chapters (n)…** (shown while something is removed) lists the numbers, with **Restore** for
+each and **Restore all**; a restored number is listed again at the next check.
 
 ### Marking chapters you don't have as read
 
