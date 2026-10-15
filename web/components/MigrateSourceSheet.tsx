@@ -29,6 +29,9 @@ interface SourceGroup { source: string; name: string; lang: string | null; resul
 interface Pick { source: string; sourceId: string; title: string; coverUrl?: string; name: string }
 interface Detail { title: string; coverUrl: string | null; count: number }
 
+/** A footer key that shares its row: equal widths, and room for a long word to wrap (btn-key is one line tall). */
+const GROW = 'h-auto min-h-8 flex-1 py-1.5 text-center leading-tight';
+
 /** A refusal's code, from a failed call's body. */
 const errorCode = (e: ApiError): string => { try { return String(JSON.parse(e.body || '{}').error ?? ''); } catch { return ''; } };
 
@@ -157,14 +160,16 @@ export function MigrateSourceSheet({ id, title, attached, mainId, listed, onDone
           {tr('Keep the current main source as a backup')}
         </label>
       )}
+      {/* Three keys share a phone's row: each may grow to two lines (a German or Russian label is three times
+          "Cancel"), never spill out of a fixed-height key. */}
       <div className="flex gap-2">
-        <button type="button" onClick={() => { setPick(null); setRefusal(null); setDiffers(null); }} disabled={busy} className="btn-key flex-1">{tr('Cancel')}</button>
+        <button type="button" onClick={() => { setPick(null); setRefusal(null); setDiffers(null); }} disabled={busy} className={`btn-key ${GROW}`}>{tr('Cancel')}</button>
         {buttons.follower && (
-          <button type="button" onClick={() => act('follower')} disabled={busy} className="btn-key flex-1" data-migrate-follow>
+          <button type="button" onClick={() => act('follower')} disabled={busy} className={`btn-key ${GROW}`} data-migrate-follow>
             {tr('Add as extra source')}
           </button>
         )}
-        <button type="button" onClick={() => act('main')} disabled={busy} className="btn-key btn-key-primary flex-1" data-migrate-main>
+        <button type="button" onClick={() => act('main')} disabled={busy} className={`btn-key btn-key-primary ${GROW}`} data-migrate-main>
           {busy ? tr('Working…') : buttons.follower ? tr('Move here') : tr('Use this source')}
         </button>
       </div>
