@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3816
+    "strings": 3819
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -3819,5 +3819,8 @@
   "Open the series": "Abrir a série",
   "Hide controls": "Ocultar controles",
   "Show controls": "Mostrar controles",
-  "Reader settings": "Configurações do leitor"
+  "Reader settings": "Configurações do leitor",
+  "Keyboard shortcuts": "Atalhos de teclado",
+  "Show this list": "Mostrar esta lista",
+  "With the mouse: double-click zooms in and out. Change the keys in Reader settings.": "Com o mouse: clique duplo aumenta e diminui o zoom. Altere as teclas nas configurações do leitor."
 }
