@@ -61,7 +61,7 @@ const WIDE = '(min-width: 768px)';
 
 /** Komga's four directions, as the dialog offers them: what the server stores, and the label for each. */
 const DIRECTION_LABELS = keys('Right to left', 'Left to right', 'Webtoon', 'Vertical');
-const DIRECTIONS = (['RIGHT_TO_LEFT', 'LEFT_TO_RIGHT', 'WEBTOON', 'VERTICAL'] as const).map((v, i) => [v, DIRECTION_LABELS[i]] as const);
+export const DIRECTIONS = (['RIGHT_TO_LEFT', 'LEFT_TO_RIGHT', 'WEBTOON', 'VERTICAL'] as const).map((v, i) => [v, DIRECTION_LABELS[i]] as const);
 
 /**
  * What automatic currently means and what said so -- so an admin can see whether the files, the source or AniList
@@ -89,7 +89,7 @@ function autoTypeLabel(d: Series['detectedType']): string {
 }
 
 /** The Automatic choice itself, short enough for a segment: what it reads as now, a webtoon when nothing has said. */
-function autoDirectionChoice(d: Series['detectedDirection']): string {
+export function autoDirectionChoice(d: Series['detectedDirection']): string {
   const label = DIRECTIONS.find(([v]) => v === d?.direction)?.[1] ?? DIRECTION_LABELS[2];
   return tr('Automatic · {direction}', { direction: tr(label) });
 }
@@ -101,7 +101,7 @@ const STATUS_LABELS = keys('Ongoing', 'Completed', 'Hiatus', 'Cancelled');
 const OTHER_STATUS = '__other';
 const AGES = [6, 10, 13, 15, 17, 18];
 /** The ages offered, with a rating a file gave that is none of them (a ComicInfo 12+) in its place, so it shows. */
-const ages = (current: string): number[] => {
+export const ages = (current: string): number[] => {
   const n = Number(current);
   return current !== '' && Number.isInteger(n) && !AGES.includes(n) ? [...AGES, n].sort((a, b) => a - b) : AGES;
 };
@@ -497,7 +497,7 @@ function ReadingPane({ id, series, meta, save, onSaved }: {
  * A few named values, saved as one is picked: the kit's Segmented, squared (no capsules on this surface). `narrow`:
  * below sm the group would wrap into rows of segments, so a phone gets the same choice as a select.
  */
-function ChoiceRow({ label, help, value, options, narrow, onPick }: {
+export function ChoiceRow({ label, help, value, options, narrow, onPick }: {
   label: string; help?: ReactNode; value: string; options: ReadonlyArray<{ value: string; label: string }>; narrow?: boolean;
   onPick: (v: string) => Promise<unknown>;
 }) {
@@ -661,7 +661,7 @@ function FilesPane({ id, series, onSaved }: { id: string; series: Series; onSave
  * every series should stay on -- picking one explicitly is a decision that then survives rescans, new libraries, and
  * re-pathing an existing one, which is the whole point and also the reason not to do it by accident.
  */
-function LibraryRow({ id, series, onSaved }: { id: string; series: Series; onSaved: () => void }) {
+export function LibraryRow({ id, series, onSaved }: { id: string; series: Series; onSaved: () => void }) {
   const { run } = useAutosave();
   const sid = useId();
   const [lib, setLib] = useState<string>(series.libraryPinned ? series.libraryId : '');

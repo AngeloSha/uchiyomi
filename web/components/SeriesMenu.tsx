@@ -1,4 +1,5 @@
 'use client';
+import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { canDownload, useAuth } from '@/lib/auth';
@@ -7,6 +8,7 @@ import type { Series } from '@/lib/types';
 import { useToast } from './Toast';
 import { useContextMenu, type MenuItem } from './ContextMenu';
 import { useArchiveEnqueue } from './ArchiveQueue';
+import { SeriesPropertiesSheet } from './SeriesPropertiesSheet';
 
 /**
  * A series card's menu (#100): the few things worth doing without opening the series, from wherever it is on
@@ -16,7 +18,8 @@ import { useArchiveEnqueue } from './ArchiveQueue';
  * stand in for what the browser's menu offered; then what the Library's Select mode already does for many
  * series, here for one; and for an admin, a check for new chapters; for anyone who may download, the slow
  * archive of the rest (#117). Offered by role, never offered and then refused, and greyed rather than hidden
- * while offline. Anything larger is the series page, one click away.
+ * while offline. An admin also gets Properties, the settings reached for most (SeriesPropertiesSheet). Anything
+ * larger is the series page, one click away.
  */
 export function useSeriesMenu(series: Series) {
   const qc = useQueryClient();
@@ -26,6 +29,7 @@ export function useSeriesMenu(series: Series) {
   const offline = status === 'offline';
   const href = `/series/?id=${encodeURIComponent(series.id)}`;
   const favourite = !!series.yomi?.favorite;
+  const [properties, setProperties] = useState(false);
 
   // ['collection']: a list's tiles carry the same badges since v0.55.7 (#164), and Mark all read from one of them must
   // move its count there too, not only on the Library.
@@ -70,7 +74,11 @@ export function useSeriesMenu(series: Series) {
       label: tr('Archive slowly'), divider: !isAdmin, disabled: offline,
       onSelect: () => { void archive([series.id], series.metadata?.title || series.name); },
     }] : []),
+    ...(isAdmin ? [{ label: tr('Properties…'), divider: true, onSelect: () => setProperties(true) }] : []),
   ];
 
-  return useContextMenu(items, { label: series.metadata?.title || series.name });
+  const menu = useContextMenu(items, { label: series.metadata?.title || series.name });
+  // The sheet rides on the menu's `element`, so every card that renders the menu renders it too.
+  const element = <>{menu.element}{properties && <SeriesPropertiesSheet series={series} onClose={() => setProperties(false)} />}</>;
+  return { ...menu, element };
 }

@@ -178,7 +178,11 @@ that nobody on this server has read yet, one card per work.
 
 **Right-click a series** anywhere it appears — the library grid, Home's rails, Up next in the reader — or press
 and hold it on a touchscreen, for a short menu (since v0.48.0): **Open in a new tab**, **Copy link**,
-**Favourite**, **Mark all read** / **unread**, and for an admin **Check for new chapters**. Shift+right-click still
+**Favourite**, **Mark all read** / **unread**, and for an admin **Check for new chapters** and **Properties…**: a
+sheet with the settings reached for most, without opening the series first — *Age rating*, *Library*, *Reading
+direction*, *Series type*, the sources the series follows (with *Detach* on each follower; adding or moving one is
+*Sources & translations* on the series page), and **Check for new chapters**. Changes save as you pick them, and
+**Open series** at the bottom goes on to the full page. Shift+right-click still
 opens the browser's own menu, and so does a right-click on selected text or in a text field. **Profile →
 Settings → Appearance → Right-click menus** turns them off on that device; the ⋯ buttons keep working either way.
 
