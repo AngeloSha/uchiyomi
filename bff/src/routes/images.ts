@@ -24,7 +24,7 @@ import { env } from '../env';
 import { join } from 'path';
 import { readFile } from 'fs/promises';
 import { q, one } from '../lib/db';
-import { viewCtxFor, visibleBookFile, seriesVisible, SYSTEM_CTX, type ViewCtx } from '../lib/visibility';
+import { viewCtxFor, visibleBookFile, seriesVisible, sourceAllowedFor, SYSTEM_CTX, type ViewCtx } from '../lib/visibility';
 import { artFile, FIRST_PAGE } from '../lib/seriesArt';
 import { namesOf } from '../lib/altTitles';
 import { HERO_FRAMES, backdropLook, heroFit, type HeroAr } from '../lib/heroFrame';
@@ -962,6 +962,13 @@ export default async function imageRoutes(app: FastifyInstance) {
     if (!/^[A-Za-z0-9:._-]{1,120}$/.test(id)) return reply.code(400).send({ error: 'bad' });
     const src = getSource(id);
     if (!src) return reply.code(404).send({ error: 'not_found' });
+    // The age cap every by-id source route applies (sourceAllowedFor): an adult source's own icon is not served to an
+    // account capped below it. Its lettered tile is -- the series pages that name the source still paint a tile, and
+    // nothing is fetched -- under its own cache key, never the real icon's. Reintroduce by removing this:
+    // "a capped account gets the tile, not an adult source's icon" in visibilityGaps.int.test.ts sees the icon's pixels.
+    if (!sourceAllowedFor(src, vc(req).maxAgeRating)) {
+      return serveImage(req, reply, `srcicon-tile:${id}`, async () => ({ buffer: await letterTile(src.name || src.id), contentType: 'image/webp' }));
+    }
 
     return serveImage(req, reply, `srcicon:${id}`, async () => {
       const raw = await sourceIconBytes(src).catch(() => null);

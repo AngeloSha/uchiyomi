@@ -6,7 +6,7 @@ import { komgaImage } from '../lib/komga';
 import { content as komga, NATIVE_PROGRESS, OWNED } from '../lib/backend';
 import { UnsupportedFilter, owned } from '../lib/ownedCatalog';
 import { cleanDescription } from '../lib/htmlText';
-import { viewCtxFor, SYSTEM_CTX, type ViewCtx, hideAdult, browsableIds, browsable, Params, adultFilterConfigured } from '../lib/visibility';
+import { viewCtxFor, SYSTEM_CTX, type ViewCtx, hideAdult, browsableIds, browsable, Params, adultFilterConfigured, seriesVisible } from '../lib/visibility';
 
 /** The viewer attached by the preHandler above. */
 const vc = (req: FastifyRequest): ViewCtx => (req as any).viewCtx as ViewCtx;
@@ -118,7 +118,14 @@ async function tasteRecs(req: FastifyRequest): Promise<any[]> {
   // while 18+ was revealed would otherwise be handed straight back after it was hidden again.
   const key = `${uid}:${vc(req).hideAdultLibraries ? 'safe' : 'all'}`;
   const cached = forYouCache.get(key);
-  if (cached && Date.now() - cached.ts < 10 * 60 * 1000) return cached.pool;
+  if (cached && Date.now() - cached.ts < 10 * 60 * 1000) {
+    // Re-judged for THIS request: the pool was built under the grants and age cap the member had then, and an admin
+    // may have narrowed them since (or moved or re-rated a series). Without this For you and Featured kept listing a
+    // series the member had just lost, name and summary included, for up to ten minutes. Reintroduce by returning
+    // cached.pool: "For you drops a series the member just lost" in visibilityGaps.int.test.ts still lists it.
+    const ok = new Set(await browsableIds(cached.pool.map((s: any) => s.id), vc(req)));
+    return cached.pool.filter((s: any) => ok.has(s.id));
+  }
   const favIds = (await q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1', [uid])).map((r) => r.series_id);
   const doneIds = (await q<{ series_id: string }>('SELECT DISTINCT series_id FROM read_progress WHERE user_id = $1 AND completed = true', [uid])).map((r) => r.series_id);
   const sourceIds = Array.from(new Set([...favIds, ...doneIds])).slice(0, 30);
@@ -623,6 +630,11 @@ export default async function catalogRoutes(app: FastifyInstance) {
   // Ambient cover color (computed + cached on demand).
   app.get('/api/series/:id/color', async (req) => {
     const { id } = req.params as { id: string };
+    // Only for a series this viewer may open, answered as for an unknown id so the route says nothing either way. Every
+    // sibling by-id route was gated; this one answered the colour of hidden, deleted, merged and over-cap series. Komga
+    // mode has no per-viewer model, so the gate is the owned backend's. Reintroduce by removing it:
+    // visibilityGaps.int.test.ts reads the colour of a series in an ungranted library.
+    if (OWNED && !(await seriesVisible(id, vc(req)))) return { color: null };
     const row = await one<{ color: string }>('SELECT color FROM series_colors WHERE series_id = $1', [id]);
     if (row?.color) return { color: row.color };
     if (NATIVE_PROGRESS) try {

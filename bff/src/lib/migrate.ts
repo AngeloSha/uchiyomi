@@ -370,6 +370,9 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar jsonb NOT NULL DEFAULT '{}';
 
 -- account security: disable/suspend, brute-force lockout, TOTP 2FA, granular permissions
 ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled            boolean     NOT NULL DEFAULT false;
+-- v0.69.1: a place kept while Incognito reading was on (lib/progress.ts). Other members' private places are not
+-- "read by the household" (Hidden gems, lib/ownedCatalog.ts). Cleared once the chapter is read in the open.
+ALTER TABLE read_progress ADD COLUMN IF NOT EXISTS incognito     boolean     NOT NULL DEFAULT false;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_logins       int         NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until        timestamptz;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret         text;                       -- base32; pending until totp_enabled

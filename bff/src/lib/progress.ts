@@ -44,25 +44,28 @@ export async function writeProgress(w: ProgressWrite): Promise<void> {
   // The rule is "the newest event wins", not "the furthest page wins".
   // Clamped (progressRules.ts eventTime): never in the future, and a dead clock's 1970 is not believed.
   const at = eventTime(w.at);
+  // Incognito reading (v0.61.0, lib/incognito.ts): the request's flag OR the account's switch now. Decided before the
+  // place is written, because the place itself carries it since v0.69.1 (read_progress.incognito): other members'
+  // rails that read places -- Hidden gems -- must not count a private one. A place read in the open stays open.
+  const incognito = w.incognito === true || (await incognitoOn(w.userId));
   // A first row takes the event's time too (v0.61.0): a chapter first opened offline was inserted at SYNC time, every
   // later replayed page was then older than that and moved nothing, and the reader resumed at the first page read
   // offline rather than the last. Reintroduce by letting the INSERT take updated_at's default: "a chapter first read
   // offline resumes where the reader stopped" in offlineDates.int.test.ts finds page 3, not 25.
   await q(
-    `INSERT INTO read_progress (user_id, book_id, series_id, page, completed, updated_at)
-     VALUES ($1, $2, $3, $4, $5, COALESCE($7::timestamptz, now()))
+    `INSERT INTO read_progress (user_id, book_id, series_id, page, completed, updated_at, incognito)
+     VALUES ($1, $2, $3, $4, $5, COALESCE($7::timestamptz, now()), $8)
      ON CONFLICT (user_id, book_id)
      DO UPDATE SET page = CASE WHEN $7::timestamptz IS NULL OR $7 >= read_progress.updated_at
                                THEN EXCLUDED.page ELSE read_progress.page END,
        completed = CASE WHEN $6 THEN EXCLUDED.completed ELSE (read_progress.completed OR EXCLUDED.completed) END,
-       updated_at = GREATEST(read_progress.updated_at, COALESCE($7::timestamptz, now()))`,
-    [w.userId, w.bookId, w.seriesId, w.page, w.completed, !!w.silent, at],
+       updated_at = GREATEST(read_progress.updated_at, COALESCE($7::timestamptz, now())),
+       incognito = read_progress.incognito AND EXCLUDED.incognito`,
+    [w.userId, w.bookId, w.seriesId, w.page, w.completed, !!w.silent, at, incognito],
   );
-  // Incognito reading (v0.61.0, lib/incognito.ts): the place above is kept, and nothing else -- no event, so history,
-  // streaks, Wrapped, the boards and Top 10 never see it, and no tracker push. The request's flag OR the account's
-  // switch now. Reintroduce by writing the event regardless: "an incognito chapter keeps its place and leaves no trace"
-  // in incognito.int.test.ts finds the event.
-  const incognito = w.incognito === true || (await incognitoOn(w.userId));
+  // Incognito reading: the place above is kept, and nothing else -- no event, so history, streaks, Wrapped, the boards
+  // and Top 10 never see it, and no tracker push. Reintroduce by writing the event regardless: "an incognito chapter
+  // keeps its place and leaves no trace" in incognito.int.test.ts finds the event.
   if (!w.silent && !incognito) {
     await q(
       `INSERT INTO reading_events (user_id, series_id, book_id, page, completed, device_id, created_at)

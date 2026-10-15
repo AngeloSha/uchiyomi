@@ -692,13 +692,18 @@ export const owned = {
     const src = browseSrc(ctx, p);
     const score = anilistScoreOf('sv', 'score');
     const pop = anilistScoreOf('sv', 'popularity');
+    // A place another member kept under Incognito is not "read by the household": counting it showed this viewer
+    // which unread, well-rated series that member had opened privately (v0.69.1). The viewer's own private places
+    // still count -- they know what they opened. Reintroduce by dropping the incognito clause: "an Incognito read
+    // leaves another member's Hidden gems alone" in gemsIncognito.int.test.ts sees the gem disappear.
+    const counts = `(NOT rp.incognito OR rp.user_id = ${p.add(ctx.userId ?? null)})`;
     const rows = await q(
       `SELECT ${SERIES_COLS} FROM (
          SELECT DISTINCT ON (COALESCE(sv.work_id::text, sv.id)) sv.*, ${score} AS gem_score, ${pop} AS gem_pop
            FROM ${src}
           WHERE ${score} >= ${GEM_MIN_SCORE}
-            AND NOT EXISTS (SELECT 1 FROM read_progress rp WHERE rp.series_id = sv.id)
-            AND NOT EXISTS (SELECT 1 FROM read_progress rp JOIN lib_series ed ON ed.id = rp.series_id WHERE ed.work_id = sv.work_id)
+            AND NOT EXISTS (SELECT 1 FROM read_progress rp WHERE rp.series_id = sv.id AND ${counts})
+            AND NOT EXISTS (SELECT 1 FROM read_progress rp JOIN lib_series ed ON ed.id = rp.series_id WHERE ed.work_id = sv.work_id AND ${counts})
           ORDER BY COALESCE(sv.work_id::text, sv.id), gem_score DESC, gem_pop DESC NULLS LAST, sv.title ASC
        ) g
        ORDER BY gem_score DESC, gem_pop DESC NULLS LAST, title ASC LIMIT ${p.add(size)} OFFSET ${p.add(pg * size)}`,

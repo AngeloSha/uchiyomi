@@ -11,6 +11,7 @@ import { startBulkNewest, bulkNewestState } from '../lib/bulkNewest';
 // The download strip's "is a job running for this folder" lives with the strip, in routes/sources.ts, and
 // routes/admin.ts imports it from there too.
 import { jobBusy } from './sources';
+import { BlockedAddress } from '../lib/ssrfGuard';
 import { authenticate, userIdOf, roleOf, actsAsAdmin, issueOpdsToken, issueApiToken, listApiTokens, revokeApiToken, API_SCOPES, revokeOpdsToken, opdsTokenStatus, setOpdsShowAdult, OPDS_TOKEN_DAYS } from '../lib/auth';
 import { enrichSeries, seenCounts } from '../lib/enrich';
 import { env } from '../env';
@@ -165,7 +166,13 @@ export default async function personalRoutes(app: FastifyInstance) {
   app.post('/api/push/subscribe', async (req, reply) => {
     const b = z.object({ endpoint: z.string().url(), keys: z.object({ p256dh: z.string(), auth: z.string() }), deviceId: z.string().optional() }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
-    await saveSubscription(userIdOf(req), { endpoint: b.data.endpoint, keys: b.data.keys }, b.data.deviceId);
+    try {
+      await saveSubscription(userIdOf(req), { endpoint: b.data.endpoint, keys: b.data.keys }, b.data.deviceId);
+    } catch (e) {
+      // not https, or not a public host (lib/push.ts assertPushEndpoint): a refusal, answered as a 400 rather than a 500
+      if (e instanceof BlockedAddress) return reply.code(400).send({ error: 'bad_request', message: 'A push endpoint must be a public https URL.' });
+      throw e;
+    }
     return { ok: true };
   });
   app.post('/api/push/unsubscribe', async (req, reply) => {
