@@ -80,7 +80,7 @@ test('the reader names the source from what it already has, and asks /api/source
   assert.match(q, /enabled: unnamedMissingSource && canDownload\(user\)/, 'the full source list is asked for by a viewer the route refuses, or with no missing page to name');
   assert.match(src, /const unnamedMissingSource = chapters\.some\(\(c\) => !!c\.sourceId && !seriesSourceNames\[c\.sourceId\] && c\.pages\.some\(\(p\) => p\.missing\)\)/, 'the gate no longer keys on an unnamed source with a missing page');
   // The flag and the source id both have to survive loadChapter, or the caption never renders online.
-  assert.match(src, /junk: p\.junk, missing: p\.missing \}\)\)/, 'loadChapter drops the missing flag from the page list');
+  assert.match(src, /junk: p\.junk, missing: p\.missing, join: p\.join }\)\)/, 'loadChapter drops the missing flag from the page list');
   assert.match(src, /sourceId: b\.sourceId \?\? null,/, 'loadChapter drops the book\'s sourceId');
 });
 
@@ -110,10 +110,10 @@ test('the offline record keeps the missing flag beside junk', () => {
   // lives in the manifest is one the reader never sees: online the caption, offline a blank grey page.
   // Reintroduce by dropping `missing: p.missing` from the pages map in saveChapter.
   const src = code(read('lib/downloads.ts'));
-  assert.match(src, /pages: manifest\.pages\.map\(\(p\) => \(\{ number: p\.number, width: p\.width, height: p\.height, junk: p\.junk, missing: p\.missing \}\)\)/, 'the offline record does not copy `missing` beside `junk`');
-  assert.match(src, /junk\?: boolean; missing\?: true \}\[\];/, 'the OfflineChapter page type lost `missing`');
+  assert.match(src, /pages: manifest\.pages\.map\(\(p\) => \(\{ number: p\.number, width: p\.width, height: p\.height, junk: p\.junk, missing: p\.missing, join: p\.join }\)\)/, 'the offline record does not copy `missing` beside `junk`');
+  assert.match(src, /junk\?: boolean; missing\?: true; join\?: 'rtl' | 'ltr' \}\[\];/, 'the OfflineChapter page type lost `missing`');
   // The manifest type it reads from carries the flag too, or the copy above is a type error at best.
-  assert.match(code(read('lib/types.ts')), /bytes: number \| null; junk\?: boolean; missing\?: true \}\[\];/, 'DownloadManifest pages lost `missing`');
+  assert.match(code(read('lib/types.ts')), /bytes: number \| null; junk\?: boolean; missing\?: true; join\?: 'rtl' | 'ltr' \}\[\];/, 'DownloadManifest pages lost `missing`');
   assert.match(code(read('lib/types.ts')), /missingPages\?: number\[\] \| null;/, 'Book lost `missingPages`');
 });
 

@@ -1388,6 +1388,13 @@ not to you: an e-ink tablet wants E-ink, the phone beside it does not.
   fill the screen. Only on a screen held upright -- a spread fits a phone held sideways, or a computer's screen, as
   it is -- and never in two-page spread mode. The two halves are one page: the counter, your progress, OPDS and
   your trackers never see a half.
+- **Join split double pages** (account, on by default): some sources serve a double-page spread as two ordinary
+  pages. In *Double spread* the reader shows such a pair as the spread. The server finds them by comparing the inner
+  edge of each page with the edge of the next: only a pair whose picture runs across the seam, at the same sizes, is
+  joined (a page can be in one pair only, and webtoon strips are never joined), and the answer is kept with the
+  chapter's page sizes. A chapter measured before this existed is looked at once, the next time it is opened. The
+  pages themselves are never changed, so the counter, progress and OPDS still see two. The KOReader plugin gets the
+  joined image from `/img/lib/books/{id}/spread/{n}`.
 - **Crop page borders** (account): trims the blank white or black margins around scanned pages, measured from each
   page's own pixels in your browser (nothing is cut on the server, and downloaded chapters crop too). Page by page
   all four sides are trimmed, never more than 15 % a side, and a two-page spread keeps its gutter. In webtoon

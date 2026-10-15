@@ -17,6 +17,7 @@ import { getSource, isSwAdapterId } from '../lib/sources';
 import type { SourceAdapter, SourceChapter } from '../lib/sources/types';
 import { fetchPages } from '../lib/downloader';
 import { previewPageList, isRefusal } from './sources';
+import { stitchSpread } from '../lib/spreadJoin';
 import { assertPublicHost, isBlockedHost, BlockedAddress } from '../lib/ssrfGuard';
 import { suwayomiUrl, suwayomiBase, suwayomiImageHeaders } from '../lib/sources/suwayomi/client';
 import { env } from '../env';
@@ -743,6 +744,25 @@ export const serveLibBookPage = async (req: FastifyRequest, reply: FastifyReply,
   });
 };
 
+/**
+ * Page `pageNo` and the one after it as a single wide image, when the chapter's cache says they are a spread the
+ * source cut in two (lib/spreadJoin.ts). For a client that can only show images it is handed -- the KOReader plugin --
+ * where the web reader pairs the two pages itself. 404 for a page that starts no spread, so this cannot be asked
+ * to glue arbitrary pages together.
+ */
+export const serveLibBookSpread = async (req: FastifyRequest, reply: FastifyReply, id: string, pageNo: number) => {
+  const abs = await bookFileAbs(id, vc(req));
+  if (!abs) return reply.code(404).send({ error: 'no_book' });
+  const row = await one<{ page_dims: Array<{ join?: 'rtl' | 'ltr' | null }> | null }>('SELECT page_dims FROM lib_books WHERE id = $1', [id]);
+  const dir = Array.isArray(row?.page_dims) ? row!.page_dims[pageNo - 1]?.join : null;
+  if (dir !== 'rtl' && dir !== 'ltr') return reply.code(404).send({ error: 'no_spread' });
+  return serveImage(req, reply, `lib-spread:${id}:${pageNo}:${dir}`, async () => {
+    const [a, b] = await Promise.all([pageOrGone(abs, pageNo - 1), pageOrGone(abs, pageNo)]);
+    if (!a || !b) throw Object.assign(new Error('no page'), { statusCode: 404 });
+    return { buffer: await stitchSpread(a.bytes, b.bytes, dir), contentType: 'image/jpeg' };
+  });
+};
+
 /** A preview page bigger than this is not served (#91): a page is a few hundred kilobytes, a video is not. */
 const PREVIEW_MAX_BYTES = 15 * 1024 * 1024;
 /** The pause between two preview pages from one source, as the downloader paces its own. */
@@ -910,6 +930,13 @@ export default async function imageRoutes(app: FastifyInstance) {
     const pageNo = Number(n);
     if (!Number.isInteger(pageNo) || pageNo < 1) return reply.code(400).send({ error: 'bad_page' });
     return serveLibBookPage(req, reply, id, pageNo, Number((req.query as Record<string, string>).w));
+  });
+
+  app.get('/img/lib/books/:id/spread/:n', (req, reply) => {
+    const { id, n } = req.params as { id: string; n: string };
+    const pageNo = Number(n);
+    if (!Number.isInteger(pageNo) || pageNo < 1) return reply.code(400).send({ error: 'bad_page' });
+    return serveLibBookSpread(req, reply, id, pageNo);
   });
 
   // Proxy a remote source cover (for search results); handles Cloudflare sites via FlareSolverr cookies.

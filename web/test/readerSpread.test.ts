@@ -186,3 +186,36 @@ test('the paged track counts a key press from the slide on screen, and re-anchor
   // And a split is drawn only upright and never in spread mode.
   assert.match(src, /const wideMode: WidePages = portrait && !\(prefs\.mode === 'paged' && prefs\.spread\) \? prefs\.widePages : 'whole';/);
 });
+
+test('a pair the server found to be one cut spread is one slide, and the page before it is solo', () => {
+  // The first page of a chapter is a cover unless it is half of a spread. Reintroduce by dropping `joinAt` from the
+  // loop: page 1 stands alone again and 1145's opening spread is two screens.
+  const mk = (join: Array<'rtl' | 'ltr' | undefined>) => join.map((j, k) => ({ ci: 0, firstOfChapter: k === 0, number: k + 1, width: 800, height: 1200, join: j }));
+  const items = mk([undefined, undefined, 'rtl', undefined, undefined, undefined]);
+  assert.deepEqual(pairSlides(items, true, { joinSplit: true }).slides, [[0], [1], [2, 3], [4, 5]]);
+  assert.deepEqual(pairSlides(mk(['rtl', undefined, undefined, undefined]), true, { joinSplit: true }).slides, [[0, 1], [2, 3]]);
+  // Switched off, nothing changes from the rules before joins.
+  assert.deepEqual(pairSlides(items, true, { joinSplit: false }).slides, pairSlides(items, true).slides);
+  // A page hidden between the two breaks the join; a chapter boundary does too.
+  const gap = mk([undefined, 'rtl', undefined, undefined]); gap[2].number = 5;
+  assert.deepEqual(pairSlides(gap, true, { joinSplit: true }).slides, pairSlides(gap, true).slides);
+  const cross = mk([undefined, 'rtl', undefined, undefined]); cross[2].ci = 1; cross[3].ci = 1; cross[2].firstOfChapter = true;
+  assert.ok(!pairSlides(cross, true, { joinSplit: true }).slides.some((s) => s.length === 2 && s[0] === 1));
+});
+
+test('Join split double pages is on unless switched off, and is not a title\'s look', () => {
+  assert.equal(DEFAULT_PREFS.joinSplit, true);
+  assert.equal(migratePrefs({}).joinSplit, true);
+  assert.equal(migratePrefs({ joinSplit: 'no' }).joinSplit, true);
+  assert.equal(migratePrefs({ joinSplit: false }).joinSplit, false);
+  assert.ok(!(LOOK_KEYS as readonly string[]).includes('joinSplit'));
+});
+
+test('a joined pair is one slide in single-page reading too (One Piece 1154 on a phone held upright)', () => {
+  const mk = (join: Array<'rtl' | 'ltr' | undefined>) => join.map((j, k) => ({ ci: 0, firstOfChapter: k === 0, number: k + 1, width: 800, height: 1150, join: j }));
+  const items = mk([undefined, undefined, 'rtl', undefined, undefined]);
+  assert.deepEqual(pairSlides(items, false, { joinSplit: true }).slides, [[0], [1], [2, 3], [4]]);
+  assert.deepEqual(pairSlides(items, false, { joinSplit: false }).slides, [[0], [1], [2], [3], [4]], 'off: one page per slide');
+  const { slideOf } = pairSlides(items, false, { joinSplit: true });
+  assert.deepEqual(slideOf, [0, 1, 2, 2, 3], 'both pages of the pair open on its slide');
+});

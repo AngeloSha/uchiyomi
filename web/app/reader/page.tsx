@@ -43,11 +43,11 @@ import { t as tr } from '@/lib/i18n';
 import { serverReachableHint } from '@/lib/desktop';
 import { IncognitoTag, incognitoRef } from '@/components/IncognitoBanner';
 
-interface PageDim { number: number; width: number | null; height: number | null; junk?: boolean; missing?: boolean }
+interface PageDim { number: number; width: number | null; height: number | null; junk?: boolean; join?: 'rtl' | 'ltr'; missing?: boolean }
 /** `sourceId`: the adapter the copy came from, for naming it on a missing page's caption. Unknown for a downloaded copy. */
 interface Chapter { id: string; seriesId: string; seriesTitle: string; title: string; pages: PageDim[]; offline: boolean; readingDirection?: string | null; pruned?: boolean; sourceId?: string | null }
 interface ChapterRef { id: string; label: string }
-interface FlatItem { ci: number; number: number; width: number | null; height: number | null; key: string; firstOfChapter: boolean; junk?: boolean; missing?: boolean; collapsed?: boolean }
+interface FlatItem { ci: number; number: number; width: number | null; height: number | null; key: string; firstOfChapter: boolean; junk?: boolean; join?: 'rtl' | 'ltr'; missing?: boolean; collapsed?: boolean }
 
 /** Paged mode's render window, in pages: a slide is one screen, so pages and screens are the same thing there. */
 const WINDOW_BEHIND = 2;
@@ -116,7 +116,7 @@ async function loadChapter(bookId: string): Promise<Chapter | null> {
       seriesId: b.seriesId,
       seriesTitle: b.seriesTitle,
       title: b.metadata?.title || b.name,
-      pages: pInfo.map((p) => ({ number: p.number, width: p.width ?? null, height: p.height ?? null, junk: p.junk, missing: p.missing })),
+      pages: pInfo.map((p) => ({ number: p.number, width: p.width ?? null, height: p.height ?? null, junk: p.junk, missing: p.missing, join: p.join })),
       offline: false,
       // The server deleted this chapter's file after everyone finished it. Carried so the empty page list
       // below can be explained rather than blamed on the reader's library mount.
@@ -209,6 +209,11 @@ function ReaderInner() {
   const [seriesSourceNames, setSeriesSourceNames] = useState<Record<string, string>>({});
   // The series' PRIMARY source, which keys the per-source reader default (lib/readerPrefs.ts seriesSourceOf).
   const [seriesSource, setSeriesSource] = useState<{ id: string; name: string } | null>(null);
+  // A webtoon is one long strip cut into images, never a spread cut in two: joining is for paged series only.
+  // Joins are off only for a series TYPED webtoon, not one whose direction is merely unknown (the API says WEBTOON for NULL,
+  // which is half the library, One Piece among it). The server already joins nothing in a chapter of strips (lib/spreadJoin.ts
+  // joinsFor), so a manga of unknown direction keeps its joined spreads.
+  const [typedWebtoon, setTypedWebtoon] = useState(false);
   // The work's language editions (v0.52.0, #72), for the chapter sheet's chips, and each chapter's number, which a
   // switch to another edition opens there. Both from requests the page makes anyway.
   const [editions, setEditions] = useState<EditionRow[] | null>(null);
@@ -374,6 +379,7 @@ function ReaderInner() {
       // this device last saw and the downloaded record's direction. The pages' shape is the chapter's own, either way.
       let seriesType = first.offline ? seriesTypeOf(first.seriesId) : null;
       let readsRtl = first.readingDirection === 'RIGHT_TO_LEFT';
+      setTypedWebtoon(seriesType === 'webtoon');
       try {
         const s = await api<Series>(`/api/series/${first.seriesId}`);
         if (alive) {
@@ -381,6 +387,7 @@ function ReaderInner() {
           readsRtl = s?.metadata?.readingDirection === 'RIGHT_TO_LEFT';
           seriesType = s?.seriesType ?? null;
           rememberSeriesType(first.seriesId, seriesType);
+          setTypedWebtoon(seriesType === 'webtoon');
           setEditions((s?.edition?.editions?.length ?? 0) > 1 ? s.edition!.editions! : null);
           // The followed sources' display names, for the caption on a page the source never served. Free:
           // this request is made anyway, and `sources` is sent to every viewer, unlike /api/sources.
@@ -516,8 +523,8 @@ function ReaderInner() {
   const rightFirst = rtl || pagedRtl;
   const splitTrack = prefs.mode === 'paged' && wideMode === 'split';
   const { slides, slideOf, half } = useMemo(
-    () => pairSlides(flat, prefs.mode === 'paged' && !!prefs.spread, { split: splitTrack, rightFirst }),
-    [flat, prefs.mode, prefs.spread, splitTrack, rightFirst],
+    () => pairSlides(flat, prefs.mode === 'paged' && !!prefs.spread, { split: splitTrack, rightFirst, joinSplit: prefs.joinSplit && !typedWebtoon }),
+    [flat, prefs.mode, prefs.spread, splitTrack, rightFirst, prefs.joinSplit, typedWebtoon],
   );
   /** The paged track's slide, measured: what a split half or a page turned on its side is fitted into. */
   const [area, setArea] = useState({ w: 0, h: 0 });

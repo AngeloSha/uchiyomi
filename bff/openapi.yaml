@@ -6378,6 +6378,43 @@ paths:
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+  /img/lib/books/{id}/spread/{n}:
+    get:
+      tags:
+        - images
+      summary: "Page n and the one after it as a single wide image, when they are a spread the source cut in two."
+      operationId: getImgLibBooksIdSpreadN
+      description: >-
+        For a client that can only show an image it is handed -- the KOReader plugin -- where the web reader pairs
+        the two pages itself. The join is not computed on demand: the chapter's own page measurements
+        (`lib_books.page_dims`, written when its pages were measured) say whether page n starts a spread and which
+        way round it reads, and only then are the two pages stitched. A page that starts no spread is a 404, so this
+        cannot be asked to glue arbitrary pages together. Gated as its page sibling is, and cached under its own key.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: n
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - imgCookie: []
+        - bearer: []
+        - opdsBasic: []
+      responses:
+        "200":
+          description: The two pages stitched into one JPEG, in the reading direction the measurements recorded.
+        "400":
+          description: "bad_page -- n below 1 or not an integer."
+        "401":
+          description: Not authenticated
+        "404":
+          description: >-
+            no_book when the chapter is not visible to this account, or no_spread when page n starts no spread.
   /img/extensions/icon/{pkgName}:
     get:
       tags:

@@ -67,6 +67,11 @@ export interface ReaderPrefs {
    */
   cropBorders: boolean;
   /**
+   * Show two pages a source cut from one double-page spread as the spread (lib/readerSpread.ts), in single-page reading and in the double-page layout alike.
+   * On by default; the server only flags a pair whose picture runs across the seam (bff lib/spreadJoin.ts).
+   */
+  joinSplit: boolean;
+  /**
    * Pick Webtoon or Paged for each series from the shape of its pages and its type (v0.61.0, lib/readerAuto.ts), for a
    * title whose own memory and source default hold no mode. Off by default; synced, not a look.
    */
@@ -89,6 +94,7 @@ export const DEFAULT_PREFS: ReaderPrefs = {
   coverEdges: true,
   widePages: 'whole',
   cropBorders: false,
+  joinSplit: true,
   autoMode: false,
 };
 
@@ -137,6 +143,8 @@ export function migratePrefs(raw: unknown): ReaderPrefs {
   if (!WIDE_PAGES.includes(p.widePages)) p.widePages = DEFAULT_PREFS.widePages;
   // Only a real `true` crops: an older row, or junk, reads as the default -- off.
   if (p.cropBorders !== true) p.cropBorders = false;
+  // Only an explicit false turns joining off: an older row has no key, and the feature is on.
+  if (p.joinSplit !== false) p.joinSplit = true;
   if (p.autoMode !== true) p.autoMode = false;
   p.skipJunk = p.junkPages !== 'show';
   return p;
