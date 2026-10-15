@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.68.0 — 2026-10-15
+
+**A series you add can go on your trackers as Plan to read.**
+
+### Plan to read when you add a series
+
+- **A new switch at the foot of Profile → Connections → Progress tracking** ([#223](https://github.com/AngeloSha/uchiyomi/issues/223)).
+  With it on, a series you add to the library goes on your trackers as Plan to read: AniList's Planning,
+  MyAnimeList's Plan to Read, Kitsu's Want to Read. It is off until you turn it on.
+- **Only where your list has nothing for it yet.** An entry you already have, in any state, is left exactly as it is.
+- **On every tracker the series is linked to.** An add links it to AniList by itself; MyAnimeList and Kitsu links come
+  from importing your list from them.
+- **Only for you, and never while Incognito reading is on.** Adding a series that is already in the library counts too;
+  a series that arrives any other way (a library scan, an admin's import) is nobody's add.
+
+### Upgrading
+
+- Nothing to do.
+
 ## v0.67.3 — 2026-10-15
 
 **Fast scrolling on a computer is smooth: the film grain steps aside while the page moves.**

@@ -1,6 +1,6 @@
 {
   "name": "yomi-web",
-  "version": "0.67.3",
+  "version": "0.68.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
