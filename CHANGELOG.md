@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.69.0 — 2026-10-15
+
+**The extension engine moves to v2.4.2366.** Every install mode now pins Suwayomi-Server v2.4.2366: the compose files,
+the Unraid template, the CasaOS add-on and the desktop app. It ran on a real server for a day before this release. A
+server that keeps v2.3.2243 keeps working, and **Admin → Health** recommends the update, with the backup to take first.
+The desktop app updates its engine by itself, and keeps a copy of the engine's database before the new version first
+opens it.
+
+### The extension engine moves to v2.4.2366
+
+- **What the new engine brings**, from Suwayomi's own notes: an extension whose update fails is no longer lost;
+  a Cloudflare-protected source's search reaches the site through the solver with its whole request, not only when it
+  is a form, and the source's own errors come through instead of reading as a failed Cloudflare check; a new chapter
+  with no date is no longer dated 1970 by the engine (Uchiyomi reads both since v0.64.0); and fixes for some
+  extensions' series links, browse filters with nested groups, and pages in non-Latin scripts.
+- **On a server, you choose when, and it is one way.** `docker compose pull` fetches the same engine again. This
+  release's compose files, Unraid template and CasaOS add-on name v2.4.2366; an install you already have changes one
+  line. The engine upgrades its database when v2.4.2366 first starts, and v2.3.2243 cannot read it again, so back it
+  up first: [Updating the engine](docs/extensions.md#updating-the-engine) has the steps for Docker Compose, Unraid,
+  CasaOS and an engine you run yourself, each with the way back.
+- **Health says so, quietly.** On an engine still at v2.3.2243, **Admin → Health → Extension engine** adds a greyed
+  line: older than the version this Uchiyomi was tested with, it works, updating is recommended, then the backup and
+  the step for your setup. Nothing turns amber: this release works with v2.3.2243 too. The step to update an engine
+  that is too old to work starts with the backup now as well.
+- **Uchiyomi Desktop updates its engine by itself.** On a computer that had the engine, the first start after this
+  update downloads v2.4.2366 (about 200 MB) without a click; until now an engine update would have left extensions
+  stopped until someone found the download button again. Before the new engine first opens its data, the app keeps
+  a copy of the engine's database in `engine-snapshots` in its data folder (the two newest copies stay), and if it
+  cannot make one, on a full disk, it does not start the new engine and says why. The old engine's files are deleted
+  once the new one runs.
+
+### For contributors
+
+- `bff/test/enginePins.test.ts` holds the FlareSolverr DTO fixture to the pin too: the desktop solver's contract must
+  decode with the pinned engine's DTOs, verbatim, and with no other engine's.
+- The solver contract has v2.4's two rules: a POST body of any kind reaches the browser byte for byte (the Electron
+  check compares the bytes a site receives, where it compared lengths), and a solve counts for v2.4 only with a
+  `cf_clearance` cookie, which the solver hands back from its jar untouched.
+- No test hard-codes the tested engine any more: Health's wording tests fix their own versions and the web tests read
+  the pin, so the next `scripts/engine/bump.mjs` moves the pin without touching them. `startFakeSuwayomi({ schemaFile })`
+  runs one fake as another engine, and the 1970-date guard is checked end to end against v2.3.2243 as well as the pin.
+
+### Upgrading
+
+- **Uchiyomi's own database:** no change; v0.68.0 runs on it.
+- **The extension engine on a server:** nothing changes until you change its tag. Do it with a backup:
+  [Updating the engine](docs/extensions.md#updating-the-engine).
+- **Uchiyomi Desktop:** the first start after the update downloads about 200 MB, once, and keeps a copy of the
+  engine's database first.
+
 ## v0.68.0 — 2026-10-15
 
 **A series you add can go on your trackers as Plan to read.**
