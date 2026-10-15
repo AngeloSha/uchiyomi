@@ -1,16 +1,30 @@
 import type { FastifyInstance } from 'fastify';
 import { junkPagesFor } from '../lib/junkPages';
 import { z } from 'zod';
-import { q } from '../lib/db';
+import { one, q } from '../lib/db';
 import { content } from '../lib/backend';
 import { viewCtxFor, type ViewCtx, hideAdult } from '../lib/visibility';
 import { authenticate, userIdOf, roleOf } from '../lib/auth';
+import { createReadStream } from 'node:fs';
+import { dropExport, jobById, jobsOf, startExport, viewOf, type Target } from '../lib/zipExport';
+import { timingSafeEqual } from 'node:crypto';
+
+/** Admin → Settings → Download as zip (server_settings.zip_exports). Off by default; a column the schema does not have yet reads as off. */
+const zipExportsOn = async (): Promise<boolean> =>
+  !!(await one<{ on: boolean | null }>('SELECT zip_exports AS "on" FROM server_settings WHERE id = 1').catch(() => null))?.on;
+
+/** The finished zip is fetched by a plain browser navigation, which cannot send a Bearer header: its job token authorises it instead. */
+const EXPORT_FILE = '/api/exports/:id/file';
 
 export default async function downloadRoutes(app: FastifyInstance) {
-  app.addHook('preHandler', authenticate);
+  app.addHook('preHandler', async (req, reply) => {
+    if (req.routeOptions?.url === EXPORT_FILE) return;
+    return authenticate(req, reply);
+  });
   // Same shape as catalog.ts: resolve the viewer once, and let the handlers read it. Without this the
   // manifest reached the raw Komga client, which is not the backend anyone runs -- see below.
   app.addHook('preHandler', async (req) => {
+    if (req.routeOptions?.url === EXPORT_FILE) return;
     (req as any).viewCtx = await viewCtxFor(userIdOf(req), roleOf(req), { hideAdult: hideAdult(req) });
   });
 
@@ -127,5 +141,63 @@ export default async function downloadRoutes(app: FastifyInstance) {
       await q('DELETE FROM offline_downloads WHERE user_id = $1 AND book_id = $2', [uid, bookId]);
     }
     return { ok: true };
+  });
+
+  // Download a series, or chosen chapters of it, as one zip: a job the client watches (like Google Drive's "Preparing
+  // your download"), then a file the browser fetches. Jobs are the caller's own; nobody else sees or fetches them.
+  // `enabled` is how the web app knows whether to offer Download as zip at all.
+  app.get('/api/exports', async (req) => ({ content: jobsOf(userIdOf(req)).map(viewOf), enabled: await zipExportsOn() }));
+
+  app.post('/api/exports', async (req, reply) => {
+    if (!(await zipExportsOn())) return reply.code(403).send({ error: 'exports_off', message: 'Downloading as a zip is turned off on this server.' });
+    const b = z.object({
+      seriesId: z.string().min(1).max(200).optional(),
+      seriesIds: z.array(z.string().min(1).max(200)).max(500).optional(),
+      bookIds: z.array(z.string().min(1).max(200)).max(5000).optional(),
+      collectionId: z.string().min(1).max(100).optional(),
+    }).safeParse(req.body ?? {});
+    if (!b.success || (!b.data.seriesId && !b.data.seriesIds?.length && !b.data.collectionId)) return reply.code(400).send({ error: 'bad_request' });
+    const uid = userIdOf(req);
+    let ids = [...(b.data.seriesIds ?? []), ...(b.data.seriesId ? [b.data.seriesId] : [])];
+    let label = 'Uchiyomi export';
+    if (b.data.collectionId === 'favorites') {
+      label = 'Favorites';
+      ids = (await q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1 ORDER BY created_at', [uid])).map((r) => r.series_id);
+    } else if (b.data.collectionId) {
+      const c = await q<{ name: string }>('SELECT name FROM collections WHERE id::text = $1 AND user_id = $2', [b.data.collectionId, uid]);
+      if (!c.length) return reply.code(404).send({ error: 'not_found' });
+      label = c[0].name;
+      ids = (await q<{ series_id: string }>('SELECT series_id FROM collection_items WHERE collection_id::text = $1 ORDER BY position', [b.data.collectionId])).map((r) => r.series_id);
+    }
+    const targets: Target[] = [];
+    for (const id of [...new Set(ids)]) {
+      const series = await content.series(vc(req), id).catch(() => null);
+      if (series) targets.push({ seriesId: id, title: series.metadata?.title ?? series.name ?? 'series', bookIds: ids.length === 1 ? b.data.bookIds ?? [] : [] });
+    }
+    if (!targets.length) return reply.code(404).send({ error: 'not_found' });
+    const job = await startExport(uid, targets, label);
+    if (!job) return reply.code(404).send({ error: 'nothing_to_export', message: 'None of those chapters have files on the server.' });
+    return { ...viewOf(job), token: job.token };
+  });
+
+  app.delete('/api/exports/:id', async (req, reply) => {
+    const job = jobById((req.params as { id: string }).id);
+    if (!job || job.userId !== userIdOf(req)) return reply.code(404).send({ error: 'not_found' });
+    await dropExport(job);
+    return { ok: true };
+  });
+
+  app.get(EXPORT_FILE, async (req, reply) => {
+    const job = jobById((req.params as { id: string }).id);
+    const t = Buffer.from(String((req.query as { t?: string }).t ?? ''));
+    const want = Buffer.from(job?.token ?? '');
+    if (!job || t.length !== want.length || !timingSafeEqual(t, want)) return reply.code(404).send({ error: 'not_found' });
+    if (job.status !== 'ready') return reply.code(409).send({ error: 'not_ready' });
+    return reply
+      .header('Content-Type', /\.cbz$/i.test(job.name) ? 'application/vnd.comicbook+zip' : /\.zip$/i.test(job.name) ? 'application/zip' : 'application/octet-stream')
+      .header('Content-Length', job.fileBytes)
+      .header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(job.name)}`)
+      .header('Cache-Control', 'private, no-store')
+      .send(createReadStream(job.file));
   });
 }

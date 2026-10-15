@@ -1753,6 +1753,11 @@ ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS lang text;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS new_member_libraries      text[];
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS new_member_max_age_rating int;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS new_member_perms          jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+-- Download as zip (Admin -> Settings): whether members may pack a series, chapters, a list or their favourites into one zip
+-- on the server and download it (lib/zipExport.ts). Off by default: it spends disk and CPU on the server and hands a whole
+-- series to whoever can see it. Additive.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS zip_exports boolean NOT NULL DEFAULT false;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

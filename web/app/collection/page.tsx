@@ -11,6 +11,7 @@ import { Sheet, useRtl } from '@/components/ui';
 import { useToast } from '@/components/Toast';
 import { IcChevronLeft, IcChevronRight, IcTrash } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
+import { startExport, useZipExports } from '@/lib/exports';
 import { isMine, type ListRow } from '@/lib/lists';
 import { ListKeys, ListOwnerLine, ListTags } from '@/components/ListBits';
 import { invalidateLists } from '@/components/SaveListDialog';
@@ -34,6 +35,7 @@ function SortChips({ value, onPick }: { value: ListSort; onPick: (s: ListSort) =
 }
 
 function CollectionInner() {
+  const zipOn = useZipExports();
   const id = useSearchParams().get('id') || '';
   const router = useRouter();
   const qc = useQueryClient();
@@ -133,6 +135,10 @@ function CollectionInner() {
               <ListKeys list={data} editing={editing} hasItems={items.length > 0} onEdit={() => setEditing((v) => !v)}
                 onShare={toggleShare} busy={sharing} />
             )}
+            {!editing && data && zipOn && <button type="button" data-list-zip className="chip text-xs"
+              onClick={() => startExport({ collectionId: id })
+                .then(() => toast(tr('Zipping started. Follow it at the bottom of the screen.'), 'success'))
+                .catch(() => toast(tr('Nothing on the server to zip yet. Fetch some chapters first.'), 'error'))}>{tr('Download as zip')}</button>}
           </div>
         )}
         {/* A smart list is capped at 200 (bff lib/lists.ts): say so rather than let the rest read as missing. */}

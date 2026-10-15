@@ -6058,6 +6058,105 @@ paths:
           description: Not found, or not visible to this account
         "410":
           description: The chapter is a pruned tombstone and has no pages to download.
+  /api/exports:
+    get:
+      tags:
+        - downloads
+      summary: The caller's zip export jobs, with progress, and whether an admin has turned Download as zip on.
+      operationId: getApiExports
+      description: Answers `{ content, enabled }`; `enabled` is Admin → Settings → Download as zip (off by default).
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+    post:
+      tags:
+        - downloads
+      summary: Start packing a series, chosen chapters, several series or a list into one zip (one chapter is delivered as its .cbz).
+      operationId: postApiExports
+      description: Returns the job and a one-time `token` that authorises fetching the finished file.
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                seriesId:
+                  type: string
+                seriesIds:
+                  type: array
+                  items:
+                    type: string
+                collectionId:
+                  type: string
+                  description: A list's id, or `favorites`; the zip holds every series on it.
+                bookIds:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad request
+        "403":
+          description: Download as zip is turned off (`exports_off`).
+        "404":
+          description: No such series, or none of those chapters have files.
+        "401":
+          description: Not authenticated
+  /api/exports/{id}:
+    delete:
+      tags:
+        - downloads
+      summary: Cancel an export job, or discard a finished one.
+      operationId: deleteApiExportsById
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not found
+        "401":
+          description: Not authenticated
+  /api/exports/{id}/file:
+    get:
+      tags:
+        - downloads
+      summary: The finished zip, authorised by the job's token (`t`) rather than a Bearer header.
+      operationId: getApiExportsByIdFile
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: t
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The zip archive.
+        "404":
+          description: Unknown job or wrong token.
+        "409":
+          description: Not finished yet.
   /api/downloads:
     get:
       tags:

@@ -13,6 +13,7 @@ import { IcSearch, IcPlus, IcImport } from '@/components/icons';
 import { PullToRefresh } from '@/components/PullToRefresh';
 import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from '@/components/Toast';
+import { startExport, useZipExports } from '@/lib/exports';
 import { Modal, ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { LibraryFolders } from '@/components/LibraryFolders';
 import { foldersOf } from '@/lib/libraryFolders';
@@ -53,6 +54,7 @@ import {
 } from '@/lib/bulkChapterDelete';
 
 function LibraryInner() {
+  const zipOn = useZipExports();
   const params = useSearchParams();
   const router = useRouter();
   const { isAdmin, user, status: authStatus, setSettings } = useAuth();
@@ -485,6 +487,11 @@ function LibraryInner() {
    * ("12 series queued for the slow archive · 3 series had nothing older to fetch"). Library -> Downloads shows them.
    */
   const archiveEnqueue = useArchiveEnqueue();
+  const zipPicked = () => {
+    startExport({ seriesIds: [...picked] })
+      .then(() => toast(tr('Zipping started. Follow it at the bottom of the screen.'), 'success'))
+      .catch(() => toast(tr('Nothing on the server to zip yet. Fetch some chapters first.'), 'error'));
+  };
   const archiveSelected = async () => {
     setActing(true);
     const r = await archiveEnqueue([...picked]);
@@ -815,6 +822,12 @@ function LibraryInner() {
               <button onClick={() => { setMore(false); void archiveSelected(); }}
                 className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60 lg:hidden">
                 {tr('Archive slowly')}
+              </button>
+            )}
+            {zipOn && (
+              <button onClick={() => { setMore(false); zipPicked(); }} data-zip-picked
+                className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60">
+                {tr('Download as zip')}
               </button>
             )}
             {isAdmin && (

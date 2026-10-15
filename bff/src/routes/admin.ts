@@ -610,7 +610,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- server settings ----
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, backup_enabled, auto_follow_on_failure, '
-    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, discover_lookups, '
+    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, discover_lookups, zip_exports, '
     + 'mangadex_langs, unstated_lang, hide_notice_types, deleted_as_ghosts, update_smart, '
     + ARCHIVE_SETTINGS_COLS;
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
@@ -766,6 +766,8 @@ export default async function adminRoutes(app: FastifyInstance) {
        * fold by their names alone.
        */
       discoverLookups: z.boolean().optional(),
+      /** Download as zip (lib/zipExport.ts): members may pack a series, chapters, a list or favourites into one zip. Off by default. */
+      zipExports: z.boolean().optional(),
       /**
        * v0.61.0, Smart update checks (lib/releaseRadar.ts isDue): the scheduled sweep asks a quiet series less often --
        * never less than every three days -- and every series at the usual interval while its next chapter is due. Off by
@@ -888,6 +890,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       await q('UPDATE server_settings SET discover_lookups = $1, updated_at = now() WHERE id = 1', [b.discoverLookups]);
       lookupsChanged();
     }
+    if (b.zipExports !== undefined) await q('UPDATE server_settings SET zip_exports = $1, updated_at = now() WHERE id = 1', [b.zipExports]);
     if (b.borrowNames !== undefined) {
       await q('UPDATE server_settings SET borrow_names = $1, updated_at = now() WHERE id = 1', [b.borrowNames]);
       // "Stop doing that" means the names it wrote go too; a series switched on for itself keeps its own.

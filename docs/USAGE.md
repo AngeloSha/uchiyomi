@@ -1241,6 +1241,9 @@ row too), and the bar at the bottom shows what can be done with the selection. *
   are still live. Marking a backlog read this way does not count towards streaks, as on the Library page.
 - **Save offline** — saves the ticked chapters to this device, skipping any already saved and any the
   server has deleted.
+- **Download as zip** — packs the ticked chapters into one zip on the server and downloads it (one chapter comes as its
+  `.cbz`). Only when an admin has turned **Admin → Settings → Download as zip** on; it is off by default, and nothing
+  offers it until then. The same switch covers *Download as zip* on a list and on the Library's selection (under *More*, which is there for admins and for anyone who may download).
 - **Fetch** — for grey rows, downloads them to the server now. Anyone who may download (the same permission
   as *Find missing chapters*) can. A manual fetch takes the best copy the sources offer today rather than
   waiting out the patience window, and it retries a chapter that had failed three times; it never takes a

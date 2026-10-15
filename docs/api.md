@@ -488,6 +488,10 @@ that work. `pending` is how many of the keys are still being looked up.
 Admin settings carry `discover_lookups` (`PATCH` takes `discoverLookups`). It is Admin → Settings *Match Discover
 titles online*.
 
+Admin settings also carry `zip_exports` (`PATCH` takes `zipExports`; off by default), Admin → Settings *Download as zip*.
+While it is off `POST /api/exports` answers **403** `exports_off`, and `GET /api/exports` carries `enabled: false` so a
+client knows not to offer it.
+
 **Trending and Because you read** (since v0.61.0). `GET /api/discover/trending?country=KR|JP|CN` (KR, manhwa, when
 absent; anything else is **400**) answers AniList's trending titles of that country of origin -- never 18+ on AniList,
 never a light novel, never one the server holds -- each country cached six hours; with Show 18+ off, a title carrying a
@@ -1593,6 +1597,8 @@ Admin → Import (From your tracker) to take the tracker's current number, or as
 ```
 GET    /api/downloads             POST   /api/downloads
 DELETE /api/downloads/:bookId     GET    /api/books/:id/download-manifest
+GET    /api/exports               POST   /api/exports
+DELETE /api/exports/:id           GET    /api/exports/:id/file
 ```
 
 ### Admin
