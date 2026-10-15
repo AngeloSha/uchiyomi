@@ -34,6 +34,7 @@ import { ProgressRing } from './ProgressRing';
 import { useContextMenu } from './ContextMenu';
 import { useCheckNow } from './SourcesSheet';
 import { IcX } from './icons';
+import { GenreTagInput } from './GenreTagInput';
 import { LinkRow, Row, SaveScope, SaveState, Segmented, SwitchRow, TextRow, useAutosave, useSaveScope } from './settings';
 
 /**
@@ -422,37 +423,10 @@ function StatusRow({ value, onSave }: { value: string; onSave: (v: string) => Pr
 function GenresRow({ genres, onSave }: { genres: string[]; onSave: (g: string[]) => Promise<void> }) {
   const { run } = useAutosave();
   const fid = useId();
-  const [draft, setDraft] = useState('');
-  const save = (next: string[]) => { void run(() => onSave(next)); };
-  const add = (raw: string) => {
-    const t = raw.trim().replace(/,$/, '').trim();
-    setDraft('');
-    if (!t || genres.some((g) => g.toLowerCase() === t.toLowerCase())) return;
-    save([...genres, t]);
-  };
   return (
     <Row label={tr('Genres')} htmlFor={fid} stacked
       help={tr('Genres drive the Library’s genre filters and the recommendation rails. Clearing them all means this series genuinely has none.')}>
-      <div className="flex w-full flex-wrap gap-1.5 rounded-xl border border-ink-700 bg-ink-850 p-1.5 transition-colors focus-within:border-accent">
-        {genres.map((g) => (
-          <span key={g} className="inline-flex min-w-0 items-center gap-0.5 rounded-md bg-ink-700/80 py-0.5 pe-0.5 ps-2 text-xs text-fog-100">
-            <bdi dir="auto" className="truncate">{g}</bdi>
-            <button type="button" onClick={() => save(genres.filter((x) => x !== g))} aria-label={tr('Remove {name}', { name: g })}
-              className="grid h-6 w-6 shrink-0 place-items-center rounded text-fog-500 transition-colors hover:text-rose-300">
-              <IcX width={12} height={12} />
-            </button>
-          </span>
-        ))}
-        <input id={fid} value={draft} dir="auto" maxLength={60} placeholder={tr('Add a genre…')}
-          className="min-w-[8rem] flex-1 bg-transparent px-1.5 py-1 text-sm text-fog-50 outline-hidden placeholder:text-fog-500"
-          onChange={(e) => (e.target.value.endsWith(',') ? add(e.target.value) : setDraft(e.target.value))}
-          onBlur={() => add(draft)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') { e.preventDefault(); add(draft); }
-            else if (e.key === 'Backspace' && !draft && genres.length) save(genres.slice(0, -1));
-            else if (e.key === 'Escape' && draft) { e.preventDefault(); setDraft(''); }
-          }} />
-      </div>
+      <GenreTagInput id={fid} genres={genres} onChange={(next) => { void run(() => onSave(next)); }} />
     </Row>
   );
 }

@@ -413,6 +413,9 @@ says how many are in hand. The chips:
   and none of it touches
   your files. Anything you set here survives the next scan; anything you leave blank keeps following what
   the files say.
+  The **Genres** field is a tag box: type a genre and press Enter, a comma, or leave the field to add it,
+  Backspace on an empty field removes the last one. While you type, the genres your library already uses are
+  offered (arrow keys and Enter, or tap), so "Slice of Life" is not spelled three ways.
 - **Edit a chapter** from its row menu, if its number came out wrong. Numbers are read from the filename (see *How
   a chapter's number is read* in section 3), and a chapter scanned before v0.55.2 by the first number in it, so
   its `Vol 2 Ch 5.cbz` is chapter 2. Correcting it fixes the reading order and what gets reported to a connected
