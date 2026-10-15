@@ -426,8 +426,12 @@ export async function viewCtxFor(
   // nobody sees.
   const [rows, cap] = await Promise.all([
     q<{ library_id: string }>('SELECT library_id FROM user_libraries WHERE user_id = $1', [userId]),
-    one<{ max_age_rating: number | null }>('SELECT max_age_rating FROM users WHERE id = $1', [userId]),
+    one<{ max_age_rating: number | null; disabled: boolean }>('SELECT max_age_rating, disabled FROM users WHERE id = $1', [userId]),
   ]);
+  // No account behind the id (deleted while a cookie or token signed for it still lives), or a disabled one: it
+  // sees nothing. Without this a vanished row read as null for BOTH restrictions -- the same "fallback to
+  // unrestricted" as above, with the deleted grants widening the viewer to every library and no age cap.
+  if (!cap || cap.disabled) return { userId, libraryIds: [], maxAgeRating: 0, hideAdultLibraries, adultGenres, adultSources };
   return {
     userId,
     libraryIds: rows.length ? rows.map((r) => r.library_id) : null,

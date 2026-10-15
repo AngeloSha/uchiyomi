@@ -148,3 +148,33 @@ test('a bearer that is not an API token falls through to the other schemes, and 
   const none = await app.inject({ method: 'GET', url: `/img/books/${bookId}/page/1` });
   assert.equal(none.statusCode, 401);
 });
+
+test('the image cookie stops working when its owner is disabled, and a deleted owner is refused, never widened', { skip }, async () => {
+  // The yomi_img cookie is a signed { sub, typ: 'img' } that lives a week and is checked by signature alone, so
+  // the account behind it must be checked on use. Reintroduce by dropping accountActive() in
+  // authorizeImageRequest: the disabled member's page is 200, and the fenced member's page goes from 404 to 200
+  // once they are deleted -- their grants went with them, which read as "every library, no age cap".
+  const mk = async (name: string) => (await q<{ id: string }>(
+    `INSERT INTO users (username, display_name, password_hash, role, auth_kind) VALUES ($1,$1,'x','user','password') RETURNING id`, [name]))[0].id;
+  const live = await mk('ib-cookie-live');
+  const fenced = await mk('ib-cookie-fenced');
+  await q(`INSERT INTO user_libraries (user_id, library_id) VALUES ($1,'ib-private') ON CONFLICT DO NOTHING`, [fenced]);
+  const cookie = (sub: string) => ({ cookie: `yomi_img=${app.jwt.sign({ sub, typ: 'img' })}` });
+  const page = (sub: string) => app.inject({ method: 'GET', url: `/img/books/${bookId}/page/1`, headers: cookie(sub) });
+
+  assert.equal((await page(live)).statusCode, 200, 'premise: a live member with no grants reads the page');
+  assert.equal((await page(fenced)).statusCode, 404, 'premise: grants apply to the cookie');
+
+  await q(`UPDATE users SET disabled = true WHERE id = $1`, [live]);
+  assert.equal((await page(live)).statusCode, 401, "a disabled member's cookie must not keep serving pages");
+
+  await q(`DELETE FROM users WHERE id = $1`, [fenced]);
+  assert.equal((await page(fenced)).statusCode, 401, "a deleted member's cookie must not open anything, least of all more than before");
+
+  // and the viewer itself fails closed for an id with no account behind it (any credential that outlives a delete)
+  const { viewCtxFor } = await import('../src/lib/visibility');
+  const ghost = await viewCtxFor(fenced);
+  assert.deepEqual(ghost.libraryIds, [], 'a vanished account sees no library');
+  const off = await viewCtxFor(live);
+  assert.deepEqual(off.libraryIds, [], 'neither does a disabled one');
+});

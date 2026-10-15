@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import sharp from 'sharp';
-import { IMG_COOKIE, API_TOKEN_PREFIX, resolveApiToken, resolveOpdsBasic } from '../lib/auth';
+import { IMG_COOKIE, API_TOKEN_PREFIX, resolveApiToken, resolveOpdsBasic, accountActive } from '../lib/auth';
 import { komga, komgaImage } from '../lib/komga';
 import { serveImage, getOrFetch } from '../lib/imageCache';
 import { dominantHex } from '../lib/color';
@@ -550,6 +550,10 @@ export async function authorizeImageRequest(
       // (routes/auth.ts) and nothing else is. Reintroduce by dropping the typ condition: "an access token in
       // the yomi_img cookie does not open images" in komgaCompat.int.test.ts sees 200.
       if (claims.typ === 'img') {
+        // The cookie lives for a week and nothing revokes it, so the account behind it is checked on every use: a
+        // disabled or deleted owner gets the 401 every other credential gets. Reintroduce by dropping this line:
+        // "the image cookie stops working..." in imageBearer.int.test.ts sees a disabled member's page (200).
+        if (!(await accountActive(claims.sub))) return reply.code(401).send({ error: 'unauthorized' });
         (req as any).viewCtx = await viewCtxFor(claims.sub ?? null);
         return;
       }
