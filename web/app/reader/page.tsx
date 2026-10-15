@@ -42,6 +42,7 @@ import { CHAPTER_SAMPLE, LEFT_HALF, RIGHT_HALF, WHOLE, chapterSideCrop, halfCrop
 import { t as tr } from '@/lib/i18n';
 import { serverReachableHint } from '@/lib/desktop';
 import { IncognitoTag, incognitoRef } from '@/components/IncognitoBanner';
+import { useContextMenu, type MenuItem } from '@/components/ContextMenu';
 
 interface PageDim { number: number; width: number | null; height: number | null; junk?: boolean; missing?: boolean }
 /** `sourceId`: the adapter the copy came from, for naming it on a missing page's caption. Unknown for a downloaded copy. */
@@ -203,6 +204,8 @@ function ReaderInner() {
   const [showSettings, setShowSettings] = useState(false);
   const [showPages, setShowPages] = useState(false);
   const [showChapters, setShowChapters] = useState(false);
+  /** Whether the right-click menu is open (it is made further down): the keys are its while it is, Escape included. */
+  const menuOpen = useRef(false);
   const [current, setCurrent] = useState(0);
   const { user } = useAuth();
   /** Source id -> display name from the series' own followed sources (set with the reading direction). */
@@ -1209,6 +1212,8 @@ function ReaderInner() {
       // Alt+← is the browser's Back and Ctrl/Cmd+F its Find: a key with a modifier is never the reader's.
       // (Shift is not a modifier here -- Shift+Space means "back a page", as in any scrolling view.)
       if (e.altKey || e.ctrlKey || e.metaKey) return;
+      // The right-click menu has the keys while it is open (arrows, Enter, and Escape closes it, not the reader).
+      if (menuOpen.current) return;
       // An open sheet (settings, page grid, chapter list) is what the keys are for: turning pages underneath
       // it, or leaving the reader on Escape, acted on the thing the reader was not looking at. None of the
       // three listens for Escape itself, so it is handled here, and it closes the sheet.
@@ -1393,6 +1398,36 @@ function ReaderInner() {
   };
   const chapterPageCount = activeChapter?.pages.length ?? 0;
 
+  // ---- the right-click menu (the menu the Library and the series page use, components/ContextMenu.tsx) ----
+  // What one wants under a hand while reading: the page (zoom, bookmark, jump), the chapter (next, previous, the list), how it is
+  // laid out, and the way out. Shift+right-click is still the browser's own menu (lib/contextMenus.ts wantsOwnMenu), which is where
+  // "Save image as" lives. Only the mouse's right button opens it: a touch screen keeps its taps and holds, so the reader's
+  // gestures are untouched.
+  const readerMenu = useContextMenu((): MenuItem[] => {
+    const items: MenuItem[] = [
+      { label: zoom > 1 ? tr('Reset zoom') : tr('Zoom in'), onSelect: () => applyZoom(zoom > 1 ? 1 : 2) },
+      { label: bookmarked ? tr('Remove bookmark') : tr('Bookmark this page'), onSelect: () => { void toggleBookmark(); }, disabled: !activeChapter || !pageInChapter },
+      { label: tr('Jump to a page'), onSelect: () => setShowPages(true) },
+      { label: tr('Next chapter'), onSelect: () => goChapter(nextId), disabled: !nextId, divider: true },
+      { label: tr('Previous chapter'), onSelect: () => goChapter(prevId, true), disabled: !prevId },
+    ];
+    if (chapterRefs.length > 0) items.push({ label: tr('Chapters'), onSelect: () => setShowChapters(true) });
+    if (prefs.mode === 'paged') {
+      items.push({ label: prefs.spread ? tr('Read in single pages') : tr('Read in double spreads'), onSelect: () => setPref({ spread: !prefs.spread }), divider: true });
+    }
+    items.push(
+      { label: tr('Full screen'), onSelect: () => toggleFullscreen(), divider: prefs.mode !== 'paged' },
+      { label: chrome ? tr('Hide controls') : tr('Show controls'), onSelect: () => setChrome((c) => !c) },
+      { label: tr('Reader settings'), onSelect: () => setShowSettings(true) },
+    );
+    if (seriesHref) items.push({ label: tr('Open the series'), onSelect: () => router.push(seriesHref), divider: true });
+    items.push({ label: tr('Leave the reader'), onSelect: () => back(), divider: !seriesHref });
+    return items;
+  }, { label: tr('Reader') });
+  menuOpen.current = readerMenu.open;
+  /** Only the mouse's right button: the hook's touch long-press is left out, so the reader's own gestures stay as they were. */
+  const menuBind = { onContextMenu: readerMenu.bind.onContextMenu };
+
   // the header's two-line "what you are reading" block, wrapped in a link to the series when we know its id
   const titleBlock = (
     <>
@@ -1485,6 +1520,7 @@ function ReaderInner() {
     // `data-page` / `data-chapter`: what is being read, for the browser walks (test/e2e/v610Walk-reader.mjs) -- the counter
     // that says it lives in the auto-hiding footer. Nothing reads them in the app.
     <div className="fixed inset-0 z-40 bg-ink-950" data-page={pageInChapter || undefined} data-chapter={activeChapter?.id}>
+      {readerMenu.element}
       <div className="pointer-events-none absolute inset-0 z-30 bg-black" style={{ opacity: 1 - prefs.brightness }} />
       {/* Ambient cover wash framing the reader: the look, by default. Its switch (Cover colour at the edges, #170)
           removes the two bands outright rather than their colour, because with no colour they are still a 16 %
@@ -1501,7 +1537,7 @@ function ReaderInner() {
           DOM -- is the only model of the layout there is. A browser that quietly adjusts scrollTop to keep
           content in view desynchronises it from `current` with no symptom and no way to detect it. */}
       {prefs.mode === 'vertical' ? (
-        <div ref={scrollRef} data-lenis-prevent style={{ overflowAnchor: 'none' }} onScroll={onScroll} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd} onDoubleClick={onTrackDoubleClick}
+        <div ref={scrollRef} data-lenis-prevent style={{ overflowAnchor: 'none' }} onScroll={onScroll} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd} onDoubleClick={onTrackDoubleClick} {...menuBind}
           className={`h-screen-d touch-pan-y overflow-y-auto overscroll-contain ${zoom > 1 ? 'overflow-x-auto' : 'overflow-x-hidden'}`}>
           <div className="mx-auto" style={{ width: colW || '100%', filter: THEME_FILTER[prefs.theme] }}>
             <div className="h-2" />
@@ -1522,7 +1558,7 @@ function ReaderInner() {
           </div>
         </div>
       ) : (
-        <div ref={scrollRef} data-lenis-prevent onScroll={onScroll} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd} onDoubleClick={onTrackDoubleClick}
+        <div ref={scrollRef} data-lenis-prevent onScroll={onScroll} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd} onDoubleClick={onTrackDoubleClick} {...menuBind}
           dir={pagedRtl ? 'rtl' : 'ltr'}
           className="hide-scrollbar flex h-screen-d snap-x snap-mandatory overflow-x-auto overflow-y-hidden" style={{ filter: THEME_FILTER[prefs.theme] }}>
           {slides.map((idxs, s) => {
