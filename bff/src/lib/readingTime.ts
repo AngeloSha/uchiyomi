@@ -166,7 +166,7 @@ export function summarize(tl: Timeline, from: number, to: number, hourOf: (t: nu
     ms: Math.round(ms),
     // A chapter, not an event (#264): one read-through writes two completed events -- the page before the last already
     // counts as the end (progressRules.ts reachedEnd) and the last page sends its own. Reintroduce `finished.length`:
-    // "a read-through counts once" in readingTime.test.ts reads two.
+    // "a read-through counts once" in readingTime.test.ts reads four.
     chapters: new Set(finished.map((f) => f.bookId)).size,
     perChapterMs: times.length >= PACE_MIN_CHAPTERS ? Math.round(median(times)) : null,
     byHour: byHour.map((x) => Math.round(x)),

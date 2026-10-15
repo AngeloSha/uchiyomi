@@ -626,7 +626,7 @@ export default async function personalRoutes(app: FastifyInstance) {
     // The week's chapters (the weekly goal) and the window's (the Studio's count over its heatmap): each finished chapter
     // once, as the household board counts its week (#264). The window's is not the sum of byDay, where a chapter read
     // again on another day counts on both days. Reintroduce count(*): "a read-through counts once" in
-    // finishedOnce.int.test.ts finds two.
+    // finishedOnce.int.test.ts finds five.
     const counts = await one<{ week: number; in_window: number }>(
       `SELECT count(DISTINCT book_id) FILTER (WHERE created_at > now() - interval '7 days')::int AS week,
               count(DISTINCT book_id)::int AS in_window
@@ -718,7 +718,7 @@ export default async function personalRoutes(app: FastifyInstance) {
     // events (the page before the last already counts as the end, lib/progressRules.ts reachedEnd), and a re-read or
     // an outbox replay writes more, so "69 chapters" was 40. The months, weekdays, days and top series below are
     // built from these rows, so they add up to `chapters`. Reintroduce the plain SELECT: "a read-through counts once"
-    // in finishedOnce.int.test.ts finds two.
+    // in finishedOnce.int.test.ts finds five.
     const rows = await q<{ series_id: string; created_at: string }>(
       `SELECT DISTINCT ON (book_id) series_id, created_at
          FROM reading_events

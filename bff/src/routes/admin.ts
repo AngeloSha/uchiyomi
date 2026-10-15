@@ -4586,7 +4586,7 @@ export default async function adminRoutes(app: FastifyInstance) {
         // (user_id, created_at DESC); the alternative, a window function over every event row, is not.
         //
         // Chapters, not completed events, as /api/leaderboard counts them (#264): one read-through writes two.
-        // Reintroduce count(e.*): "a read-through counts once" in finishedOnce.int.test.ts finds two.
+        // Reintroduce count(e.*): "a read-through counts once" in finishedOnce.int.test.ts finds five.
         `SELECT u.id, u.display_name, u.username, u.avatar,
                 count(DISTINCT e.book_id) FILTER (WHERE e.completed)::int AS total,
                 count(DISTINCT e.book_id) FILTER (WHERE e.completed AND e.created_at > now() - interval '7 days')::int AS week,
