@@ -25,7 +25,7 @@ export const MAX_HTML_BYTES = 512 * 1024;
 /**
  * The body of `r`, refused as soon as it passes `max` decoded bytes. An uncompressed Content-Length over the cap is
  * refused before reading anything. Reintroduce by going back to `Buffer.from(await r.arrayBuffer())`:
- * safeFetch.test.ts reads the 48 MiB gzip body whole.
+ * outboundGuard.test.ts reads the 48 MiB gzip body whole.
  */
 export async function readCapped(r: Response, max: number): Promise<Buffer> {
   const declared = Number(r.headers.get('content-length') || 0);
@@ -124,7 +124,7 @@ const CREDENTIAL_HEADERS = new Set(['authorization', 'cookie', 'proxy-authorizat
  * Resolves the final response (the caller reads its status and body, the body with readCapped); throws BlockedAddress
  * for a hop that is not public. `exemptFirst` lets the FIRST hop skip the host rule -- the extension engine's own page
  * proxy URLs, which are private by design and which only an engine-backed source hands over. Credentials go to the
- * first origin only. Reintroduce by calling fetch(u) with redirects followed: downloaderGuard.test.ts sees the
+ * first origin only. Reintroduce by calling fetch(u) with redirects followed: outboundGuard.test.ts sees the
  * loopback page fetched and stored.
  */
 export async function fetchFollowingPublic(
