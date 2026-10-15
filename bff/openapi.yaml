@@ -5767,7 +5767,7 @@ paths:
                     type: array
                     items:
                       type: object
-                      required: [provider, label, tokenHelp, connected, accountName, expiresAt, expiringSoon, lastSyncAt, lastError]
+                      required: [provider, label, tokenHelp, connected, accountName, expiresAt, expiringSoon, lastSyncAt, lastError, needsReconnect]
                       properties:
                         provider: { type: string, enum: [anilist, myanimelist, kitsu] }
                         label: { type: string }
@@ -5783,6 +5783,12 @@ paths:
                         expiringSoon: { type: boolean }
                         lastSyncAt: { type: [string, "null"], format: date-time }
                         lastError: { type: [string, "null"] }
+                        needsReconnect:
+                          type: boolean
+                          description: >-
+                            Since v0.71.0 (#246): only a new token mends this connection -- its token was rejected (the
+                            connection is off), has lapsed, or can no longer be read. A rate limit, an outage or a refused
+                            lower number also leave `lastError`, but never set this.
         "401":
           description: Not authenticated
   /api/trackers/anilist:

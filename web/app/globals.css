@@ -269,6 +269,11 @@
   /* Status-bar / notch safe clearance for top bars. Lives in the components layer so a plain
      `pt-*` utility no longer silently overrides it; pair with `lg:pt-*` to override on desktop. */
   .safe-top { padding-top: max(0.9rem, calc(env(safe-area-inset-top) + 0.55rem)); }
+  /* The lines above the top bar stack as one column (AppShell's banner stack: offline, Incognito reading, 18+, Health,
+     a tracker to reconnect), and only the FIRST meets an installed app's status bar. A `safe-top` line under another
+     one keeps an ordinary line's padding: Health's under Incognito's, or the tracker's under Health's (#246), left a
+     phone a notch's worth of empty band between two lines. */
+  .banner-stack > .safe-top:not(:first-child) { padding-top: 0.5rem; }
   .safe-bottom { padding-bottom: max(0.8rem, calc(env(safe-area-inset-bottom) + 0.4rem)); }
 
   /* UI refresh: squared like every other action key (noPills.test.ts). The names stay, so no page changes. */

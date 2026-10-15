@@ -3868,7 +3868,7 @@
   "Current cover": "Portada actual",
   "Upload your own…": "Subir una propia…",
   "None of the sources following this series has a cover to offer right now.": "Ninguna de las fuentes de esta serie tiene ahora una portada que ofrecer.",
-  "Your tracker rejected the saved login. Reconnect it under Profile.": "Your tracker rejected the saved login. Reconnect it under Profile.",
-  "Your tracker connection needs attention: {names}": "Your tracker connection needs attention: {names}",
-  "Reconnect": "Reconnect"
+  "Reconnect": "Reconectar",
+  "Your tracker token no longer works. Reconnect it under Profile.": "Tu token del tracker ya no funciona. Vuelve a conectarlo en Tú.",
+  "Your token for {names} no longer works. Reconnect to keep your progress in sync.": "Tu token de {names} ya no funciona. Vuelve a conectar para mantener tu progreso sincronizado."
 }

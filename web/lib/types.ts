@@ -105,6 +105,8 @@ export interface TrackerStatus {
   expiringSoon: boolean;
   lastSyncAt: string | null;
   lastError: string | null;
+  /** Only a new token mends it (#246, bff lib/trackers.ts needsReconnect); a rate limit or an outage never sets it. */
+  needsReconnect?: boolean;
 }
 
 /**

@@ -110,7 +110,7 @@ function TrackerIntake({ starting, onStart }: {
       <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-fog-500">{tr('From your tracker')}</p>
       {!connected.length ? (
         <Link href="/profile/?tab=Connections&card=tracking" className="block text-[11px] text-fog-500 underline decoration-ink-600 underline-offset-2 hover:text-fog-300">
-          {broken.length ? tr('Your tracker rejected the saved login. Reconnect it under Profile.') : NOT_CONNECTED()}
+          {broken.length ? tr('Your tracker token no longer works. Reconnect it under Profile.') : NOT_CONNECTED()}
         </Link>
       ) : (
         <>

@@ -3036,11 +3036,13 @@ the service refused the request for another reason (a block, a rate limit, an ou
 your token, so try again later rather than getting a new one. **Test connection** on a connected row asks the
 service whether the saved token still works and says what it answered; it changes nothing.
 
-When one of **your** connections needs attention (the service rejected its token, a sync keeps failing, or the token has
-lapsed) a line above every page says so, to you and not to anyone else, with a **Reconnect** link to the row; it goes
-when the connection is sound again, and is not shown on Profile itself. Anything that reads your own list is offered only
-on a working connection: the import's *From your tracker* box lists only those, and says to reconnect when the one you
-had is broken. Public AniList information (ratings, related titles, art) needs no connection and is not affected.
+When one of **your** connections needs a new token (the service rejected the saved one, it has lapsed, or it can no
+longer be read) a line above every page says so, to you and not to anyone else, with a **Reconnect** link to the row and
+**Not now**, which keeps it away until a connection breaks in another way; it goes when the connection is sound again,
+and is not shown on Profile itself. A rate limit or the service being down is not such a case: the row says what
+happened, and the next sync tries again. Anything that reads your own list is offered only on a working connection: the
+import's *From your tracker* box lists only those, and says to reconnect when the one you had needs a new token. Public
+AniList information (ratings, related titles, art) needs no connection and is not affected.
 
 Progress is the highest chapter you have **finished**,
 so re-reading an old chapter never rewinds your list, and AniList being slow or down can never delay or block

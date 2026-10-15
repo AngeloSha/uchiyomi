@@ -93,7 +93,7 @@ import { refileFailures } from '../lib/chapterFailures';
 import { mainUses, retireSource } from '../lib/retireSource';
 import { sourcesOverview } from '../lib/sourcesOverview';
 import { titlesFromBackup, entriesFromBackup, type BackupEntry } from '../lib/tachibk';
-import { linkSeries, seedTrackerFloor } from '../lib/trackers';
+import { linkSeries, seedTrackerFloor, TOKEN_EXPIRED, TOKEN_REJECTED, TOKEN_UNREADABLE } from '../lib/trackers';
 import { ADAPTERS, PROVIDERS, LIST_STATUSES, TRACKER_LIST_MAX, type Provider, type LibraryEntry } from '../lib/trackerProviders';
 import { open as unseal } from '../lib/secretbox';
 import { findingOf, runHealthChecks } from '../lib/health';
@@ -229,10 +229,10 @@ type TrackerRead =
   | { entries: IntakeEntry[]; skippedNovels: number; capped: boolean }
   | { status: 404 | 422 | 502; error: 'not_connected' | 'tracker_rejected' | 'token_expired' | 'tracker_unavailable'; message: string };
 
-/** The sentence a rejected token leaves on the connection -- pushOne's (lib/trackers.ts), word for word. */
-const TOKEN_REJECTED_ERROR = 'the tracker rejected the saved token -- reconnect to resume syncing';
-/** The sentence a lapsed token leaves on the connection -- pushOne's again, word for word. */
-const TOKEN_EXPIRED_ERROR = 'the access token has expired -- reconnect to resume syncing';
+/** The sentences a rejected or lapsed token leaves on the connection: pushOne's own (lib/trackers.ts), which its
+ *  `needsReconnect` recognises (#246), so they are imported rather than copied. */
+const TOKEN_REJECTED_ERROR = TOKEN_REJECTED;
+const TOKEN_EXPIRED_ERROR = TOKEN_EXPIRED;
 const CONNECT_HINT = 'Profile → Connections → Progress tracking';
 
 /**
@@ -278,7 +278,7 @@ async function readTrackerList(userId: string, provider: Provider, statuses: (ty
   if (!token) {
     // Not a refusal by the service, so the connection stays enabled; the same note pushOne leaves.
     await q('UPDATE user_trackers SET last_error = $3 WHERE user_id = $1 AND provider = $2',
-      [userId, provider, 'stored token could not be read -- reconnect to resume syncing']).catch(() => {});
+      [userId, provider, TOKEN_UNREADABLE]).catch(() => {});
     return { status: 422, error: 'tracker_rejected', message: `The saved ${label} token could not be read — reconnect it under ${CONNECT_HINT}.` };
   }
   let list: LibraryEntry[];

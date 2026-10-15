@@ -136,12 +136,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <>
       <CinematicFX />
-      {status === 'offline' && <OfflineBanner name={user?.displayName || ''} />}
-      {status === 'authed' && <IncognitoBanner />}
-      {status === 'authed' && <AdultBanner />}
-      {/* Above the top bar (UI refresh): nothing sits between the bar and a page's art, which starts under it. */}
-      {status === 'authed' && <HealthBanner />}
-      {status === 'authed' && <TrackerAlert />}
+      {/* Above the top bar (UI refresh): nothing sits between the bar and a page's art, which starts under it. One stack, so
+          only its first line meets an installed app's status bar (app/globals.css .banner-stack): two `safe-top` lines,
+          Health's and a tracker's to reconnect (#246), left a notch's worth of gap between them on a phone. */}
+      <div className="banner-stack" data-banner-stack>
+        {status === 'offline' && <OfflineBanner name={user?.displayName || ''} />}
+        {status === 'authed' && <IncognitoBanner />}
+        {status === 'authed' && <AdultBanner />}
+        {status === 'authed' && <HealthBanner />}
+        {status === 'authed' && <TrackerAlert />}
+      </div>
       <TopNav onSearchFocus={() => { setPaletteSeed(''); setPalette(true); }} />
       {wide && <Sidebar />}
       <main className="shell relative z-[1] pb-28 lg:pb-12">

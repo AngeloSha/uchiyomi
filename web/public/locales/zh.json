@@ -3868,7 +3868,7 @@
   "Current cover": "当前封面",
   "Upload your own…": "上传自己的…",
   "None of the sources following this series has a cover to offer right now.": "此系列的来源目前都没有可提供的封面。",
-  "Your tracker rejected the saved login. Reconnect it under Profile.": "Your tracker rejected the saved login. Reconnect it under Profile.",
-  "Your tracker connection needs attention: {names}": "Your tracker connection needs attention: {names}",
-  "Reconnect": "Reconnect"
+  "Reconnect": "重新连接",
+  "Your tracker token no longer works. Reconnect it under Profile.": "你的追踪器令牌已失效。请在“我的”中重新连接。",
+  "Your token for {names} no longer works. Reconnect to keep your progress in sync.": "你在 {names} 的令牌已失效。请重新连接，以便继续同步进度。"
 }

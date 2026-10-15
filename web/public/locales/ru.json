@@ -3868,7 +3868,7 @@
   "Current cover": "Текущая обложка",
   "Upload your own…": "Загрузить свою…",
   "None of the sources following this series has a cover to offer right now.": "Сейчас ни один источник этой серии не может предложить обложку.",
-  "Your tracker rejected the saved login. Reconnect it under Profile.": "Your tracker rejected the saved login. Reconnect it under Profile.",
-  "Your tracker connection needs attention: {names}": "Your tracker connection needs attention: {names}",
-  "Reconnect": "Reconnect"
+  "Reconnect": "Подключить заново",
+  "Your tracker token no longer works. Reconnect it under Profile.": "Токен трекера больше не работает. Подключите его заново в разделе Профиль.",
+  "Your token for {names} no longer works. Reconnect to keep your progress in sync.": "Ваш токен для {names} больше не работает. Подключитесь заново, чтобы прогресс продолжал синхронизироваться."
 }

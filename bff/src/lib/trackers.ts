@@ -37,9 +37,34 @@ export interface TrackerStatus {
   expiringSoon: boolean;
   lastSyncAt: string | null;
   lastError: string | null;
+  /**
+   * Only a new token mends it (#246): the service rejected the saved one (the row is switched off), it lapsed, or it can
+   * no longer be read. Not set by a rate limit, an outage or the floor refusal, which also write `lastError` but which a
+   * reconnect does nothing for: the web's line above every page and the import's tracker box read this, never
+   * `lastError` alone.
+   */
+  needsReconnect: boolean;
 }
 
 const EXPIRY_WARN_DAYS = 30;
+
+/** The `last_error` lines only a new token mends: what the push writes for a lapsed, unreadable or rejected token. */
+export const TOKEN_EXPIRED = 'the access token has expired -- reconnect to resume syncing';
+export const TOKEN_UNREADABLE = 'stored token could not be read -- reconnect to resume syncing';
+export const TOKEN_REJECTED = 'the tracker rejected the saved token -- reconnect to resume syncing';
+const RECONNECT_ERRORS: ReadonlySet<string> = new Set([TOKEN_EXPIRED, TOKEN_UNREADABLE, TOKEN_REJECTED]);
+
+/**
+ * Whether a stored connection needs a new token (#246). A row that exists but is switched off is one whose token was
+ * rejected (a disconnect deletes the row); a token past its `expires_at` is lapsed whatever the last push said.
+ * Reintroduce "any lastError": "a rate limit or the floor refusal never asks for a reconnect" in trackerReconnect.test.ts
+ * fails.
+ */
+export function needsReconnect(r: { enabled: boolean; expires_at: string | Date | null; last_error: string | null }, now = Date.now()): boolean {
+  if (!r.enabled) return true;
+  if (r.expires_at && new Date(r.expires_at).getTime() <= now) return true;
+  return !!r.last_error && RECONNECT_ERRORS.has(r.last_error);
+}
 
 // ---- connection management -------------------------------------------------
 
@@ -84,7 +109,7 @@ export async function statusFor(userId: string): Promise<TrackerStatus[]> {
     if (!r) {
       return {
         provider: p, connected: false, accountName: null, expiresAt: null,
-        expiringSoon: false, lastSyncAt: null, lastError: null,
+        expiringSoon: false, lastSyncAt: null, lastError: null, needsReconnect: false,
         label: ADAPTERS[p].label, tokenHelp: ADAPTERS[p].tokenHelp, ...authorizeUrl,
       };
     }
@@ -99,6 +124,7 @@ export async function statusFor(userId: string): Promise<TrackerStatus[]> {
     expiringSoon: !!r.expires_at && new Date(r.expires_at).getTime() - Date.now() < EXPIRY_WARN_DAYS * 86_400_000,
     lastSyncAt: r.last_sync_at ? new Date(r.last_sync_at).toISOString() : null,
     lastError: r.last_error,
+    needsReconnect: needsReconnect(r),
     };
   });
 }
@@ -344,12 +370,12 @@ async function pushOne(
   if (!link) return; // this series was never matched on this service
 
   if (conn.expires_at && new Date(conn.expires_at).getTime() < Date.now()) {
-    await markError(userId, conn.provider, 'the access token has expired -- reconnect to resume syncing');
+    await markError(userId, conn.provider, TOKEN_EXPIRED);
     return;
   }
   const token = unseal(conn.access_token);
   if (!token) {
-    await markError(userId, conn.provider, 'stored token could not be read -- reconnect to resume syncing');
+    await markError(userId, conn.provider, TOKEN_UNREADABLE);
     return;
   }
 
@@ -432,7 +458,7 @@ async function syncFailed(userId: string, provider: Provider, e: unknown): Promi
   // a bad token will fail on every future chapter too -- disable it rather than retry forever
   if (err.authFailed) {
     await q('UPDATE user_trackers SET enabled=false, last_error=$3 WHERE user_id=$1 AND provider=$2',
-      [userId, provider, 'the tracker rejected the saved token -- reconnect to resume syncing']);
+      [userId, provider, TOKEN_REJECTED]);
   } else {
     await markError(userId, provider, err.message?.slice(0, 200) || 'sync failed');
   }
@@ -512,12 +538,12 @@ async function planOne(
   );
   if (!link) return; // not matched on this service: nothing to add it as
   if (conn.expires_at && new Date(conn.expires_at).getTime() < Date.now()) {
-    await markError(userId, conn.provider, 'the access token has expired -- reconnect to resume syncing');
+    await markError(userId, conn.provider, TOKEN_EXPIRED);
     return;
   }
   const token = unseal(conn.access_token);
   if (!token) {
-    await markError(userId, conn.provider, 'stored token could not be read -- reconnect to resume syncing');
+    await markError(userId, conn.provider, TOKEN_UNREADABLE);
     return;
   }
   await withGate(`tracker:${userId}:${conn.provider}`, async () => {

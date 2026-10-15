@@ -3868,7 +3868,7 @@
   "Current cover": "الغلاف الحالي",
   "Upload your own…": "ارفع صورتك…",
   "None of the sources following this series has a cover to offer right now.": "لا يقدّم أيٌّ من مصادر هذه السلسلة غلافًا الآن.",
-  "Your tracker rejected the saved login. Reconnect it under Profile.": "Your tracker rejected the saved login. Reconnect it under Profile.",
-  "Your tracker connection needs attention: {names}": "Your tracker connection needs attention: {names}",
-  "Reconnect": "Reconnect"
+  "Reconnect": "أعد الربط",
+  "Your tracker token no longer works. Reconnect it under Profile.": "لم يعد رمز المتتبّع يعمل. أعد ربطه من حسابي.",
+  "Your token for {names} no longer works. Reconnect to keep your progress in sync.": "لم يعد رمزك لـ {names} يعمل. أعد الربط ليبقى تقدّمك متزامنًا."
 }
