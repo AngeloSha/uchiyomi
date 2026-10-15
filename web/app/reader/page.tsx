@@ -13,7 +13,7 @@ import { openableChapters } from '@/lib/chapterRows';
 import { buildFlow, startIndex, renderWindow } from '@/lib/readerFlow';
 import { AHEAD_SCREENS, APPEND_SCREENS, BEHIND_SCREENS, KEEP_SCREENS, MAX_WINDOW_PAGES, anchorAt, nearEnd, prefetchList, screenRange, scrollTopFor, windowSet, type IndexRange } from '@/lib/readerWindow';
 import { readTap, undoLeft, undoWindow, type TapZone } from '@/lib/readerGesture';
-import { PAGE_ACTIONS, actionForKey, keyMapFor, type ReaderAction } from '@/lib/readerKeys';
+import { PAGE_ACTIONS, READER_ACTIONS, actionForKey, keyMapFor, type ReaderAction } from '@/lib/readerKeys';
 import { padMapFor } from '@/lib/readerPad';
 import { useGamepad } from '@/lib/useGamepad';
 import { ARM_MS, pagesAfter, skipNeedsConfirm, stillArmed } from '@/lib/readerNav';
@@ -1175,6 +1175,8 @@ function ReaderInner() {
     const el = scrollRef.current;
     if (PAGE_ACTIONS.has(action)) {
       if (!el) return;
+      // One page of a spread in frame: the arrow toward the other page goes there (stepFocus), before any page turns.
+      if (!o.tap && (action === 'pageLeft' || action === 'pageRight') && stepFocus(action === 'pageLeft' ? -1 : 1)) return;
       // Next and back are reading order, whichever way the pages run. The page to the left or the right is PHYSICAL,
       // like the arrow keys and the thirds: on a right-to-left read the next page is to the left.
       const d = action === 'next' ? 1 : action === 'prev' ? -1 : (action === 'pageRight' ? 1 : -1) * trackSign;
@@ -1220,6 +1222,13 @@ function ReaderInner() {
       // three listens for Escape itself, so it is handled here, and it closes the sheet.
       if (showSettings || showPages || showChapters) {
         if (e.key === 'Escape') { setShowSettings(false); setShowPages(false); setShowChapters(false); }
+        return;
+      }
+      // Z brings one page of a double spread into frame, and back (the arrows then step between its two pages: perform). Not
+      // rebindable, and not taken from a key the reader has bound to something else.
+      if (e.key.toLowerCase() === 'z' && !e.shiftKey && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target as HTMLElement | null)?.tagName ?? '')
+        && !READER_ACTIONS.some((a) => keyMap[a].some((k) => k.toLowerCase() === 'z'))) {
+        if (focusKeys.current.toggleFocus()) e.preventDefault();
         return;
       }
       // Escape is reserved, never bound: it leaves the reader. ⚠️ Once a press -- Escape repeating called
@@ -1352,6 +1361,42 @@ function ReaderInner() {
     const rect = el.getBoundingClientRect();
     return { slide, page: visual[x < rect.left + rect.width / 2 ? 0 : 1] };
   };
+
+  /** The two pages of the slide on screen as they sit on it, left then right; null when the slide is not a pair. */
+  const pairOnScreen = (slide: number): number[] | null => {
+    const idxs = slides[slide];
+    if (prefs.mode !== 'paged' || !idxs || idxs.length !== 2) return null;
+    return pagedRtl ? [shownOf(idxs)[1], shownOf(idxs)[0]] : shownOf(idxs);
+  };
+  /**
+   * Z: bring one page of the pair into frame, or give the pair back. The same as tapping a page, for a keyboard: it starts on
+   * the pair's first page in reading order. Answers whether it did anything (a slide that is not a pair has nothing to focus).
+   */
+  const toggleFocus = (): boolean => {
+    const slide = slideNow();
+    if (focused?.slide === slide) { acted.current = { kind: 'focus', prev: focused, at: Date.now() }; setFocused(null); return true; }
+    if (!pairOnScreen(slide)) return false;
+    acted.current = { kind: 'focus', prev: focused, at: Date.now() };
+    setFocused({ slide, page: slides[slide][0] });
+    return true;
+  };
+  /**
+   * An arrow key while one page is in frame: to the pair's other page when the arrow points at it, so the two pages of a spread
+   * are read one after the other without leaving focus. `side` is physical (-1 the left of the screen). False at the pair's
+   * edge, where the key turns the page as it always does.
+   */
+  const stepFocus = (side: -1 | 1): boolean => {
+    if (!focused) return false;
+    const on = pairOnScreen(focused.slide);
+    if (!on) return false;
+    const to = on.indexOf(focused.page) + side;
+    if (to < 0 || to > 1) return false;
+    acted.current = { kind: 'focus', prev: focused, at: Date.now() };
+    setFocused({ slide: focused.slide, page: on[to] });
+    return true;
+  };
+  const focusKeys = useRef({ toggleFocus, stepFocus });
+  focusKeys.current = { toggleFocus, stepFocus };
 
   const cancelPendingTap = () => {
     if (tapTimer.current) { clearTimeout(tapTimer.current); tapTimer.current = null; }
@@ -1532,6 +1577,14 @@ function ReaderInner() {
     // that says it lives in the auto-hiding footer. Nothing reads them in the app.
     <div className="fixed inset-0 z-40 bg-ink-950" data-page={pageInChapter || undefined} data-chapter={activeChapter?.id}>
       <div className="pointer-events-none absolute inset-0 z-30 bg-black" style={{ opacity: 1 - prefs.brightness }} />
+      {/* One page of a spread in frame: say so, and how to get back. Shown on the page's own number, whichever half it is. */}
+      {focused && flat[focused.page] && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-3 z-40 flex justify-center" aria-hidden="true">
+          <span className="rounded-full bg-black/70 px-3 py-1 text-xs text-white">
+            {tr('Page {n} · tap, or press Z, to see both', { n: flat[focused.page].number })}
+          </span>
+        </div>
+      )}
       {/* Ambient cover wash framing the reader: the look, by default. Its switch (Cover colour at the edges, #170)
           removes the two bands outright rather than their colour, because with no colour they are still a 16 %
           black band over the page. */}

@@ -1390,7 +1390,9 @@ not to you: an e-ink tablet wants E-ink, the phone beside it does not.
   your trackers never see a half.
 - **Tapping a page of a pair**: on a slide that holds two pages (two-page spread), one tap on a page brings that page
   into frame; tapping it again goes back to the pair, and so does turning away. Taps on the black around the pages
-  keep the tap layout's behaviour. A mouse's double-click zooms without leaving the page focused. The two pages of a
+  keep the tap layout's behaviour. A mouse's double-click zooms without leaving the page focused.
+  **Z** does the same from the keyboard (it starts on the pair's first page in reading order, and a second **Z** gives the pair back),
+  and with one page in frame the **←** and **→** keys move to the pair's other page before they turn the page. A small label names the page in frame. The two pages of a
   pair touch, with no gap between them. Focusing is only a view: the counter and your progress still see both pages.
 - **Crop page borders** (account): trims the blank white or black margins around scanned pages, measured from each
   page's own pixels in your browser (nothing is cut on the server, and downloaded chapters crop too). Page by page
