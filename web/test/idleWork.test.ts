@@ -67,3 +67,33 @@ test('smooth scrolling runs its frame loop only where a wheel can turn', () => {
   assert.match(src, /window\.removeEventListener\('wheel', start\);/);
   assert.match(src, /fine\.removeEventListener\('change', start\);/);
 });
+
+test('no scroll of the window reads the scroll position', () => {
+  // Reading scrollY (or any layout value) in a scroll handler makes the browser finish its style and layout on the spot, and
+  // a wheel scrolls every frame. v0.67.2 had two such reads -- the scroll memory and the top bar's "scrolled past" -- and
+  // together they were the costliest script of a fast scroll on the Library (v0.67.3). Every listener on the window's
+  // scroll is named here with why it is cheap; a new one has to earn its place.
+  const allowed: Record<string, string> = {
+    'components/ContextMenu.tsx': 'listens only while a menu is open, and only closes it',
+    'lib/scrollMemory.ts': 'files a position once the scrolling pauses, never on the event',
+  };
+  const found = new Set<string>();
+  for (const file of [...sources('app'), ...sources('components'), ...sources('lib').concat(
+    readdirSync(join(ROOT, 'lib')).filter((n) => n.endsWith('.ts')).map((n) => `lib/${n}`))]) {
+    if (/\b(window|win)\.addEventListener\('scroll'/.test(read(file))) found.add(file);
+  }
+  for (const file of found) assert.ok(allowed[file], `${file} listens to every scroll of the window: read nothing from layout there`);
+  assert.equal(found.size, Object.keys(allowed).length, 'a listener named above is gone: update the list');
+
+  const memory = read('lib/scrollMemory.ts');
+  const onScroll = memory.match(/const onScroll = \(\) => \{[\s\S]*?\n  \};/)?.[0] ?? '';
+  assert.ok(onScroll, 'the scroll memory\'s handler moved');
+  assert.doesNotMatch(onScroll, /scrollY/, 'the scroll memory reads the position on every scroll again');
+  assert.match(onScroll, /win\.setTimeout\(file, RECORD_MS\)/);
+
+  const art = read('lib/overArt.ts');
+  assert.doesNotMatch(art, /addEventListener\('scroll'/, 'the top bar measures the scroll on every event again');
+  assert.match(art, /new IntersectionObserver\(/);
+  assert.match(art, /position:absolute;top:\$\{px\}px;left:0;width:1px;height:1px;pointer-events:none;visibility:hidden/,
+    'the mark must stay out of the layout and out of reach');
+});
