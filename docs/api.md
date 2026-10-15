@@ -626,7 +626,7 @@ impossible chapter numbers deleted, with the delete route's guards) and `recheck
 `GET /api/admin/health/autofix` answers `{run, last}` -- the live run and the newest finished one -- and
 `GET /api/admin/health/autofix/:runId` one run; `POST /api/admin/health/autofix/stop` stops it at its next safe point
 (`{ok, stopping}`), never inside a merge, a delete or a renumber. A run is `{id, status, startedAt, finishedAt?, by,
-phase, phaseIndex, stopping?, current?, summary?, log?}` (`stopping` from Stop until its safe point, for every
+origin, phase, phaseIndex, stopping?, current?, summary?, log?}` (`origin`, since v0.70.0: `nightly` or `manual`) (`stopping` from Stop until its safe point, for every
 viewer), every sentence a `Said` (`autofix.*` codes): `summary` is `{green, again, done, clears, needsYou}` -- `green`
 when nothing but Needs you is left, `again` when something a run could still change is left (what this one did not
 get to: stopped, or out of time, searches, Tests or installs -- `clears` says "the next Fix everything continues"),

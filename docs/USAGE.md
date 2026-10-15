@@ -2108,6 +2108,9 @@ chapters, everyone keeps their reading history, and updates do not fetch them ba
 two series and never renumbers anything; with **Every night** set to *Fix everything* the nightly is Fix
 everything, which can. It also never runs beside a chapter sweep: whichever starts second
 waits ten minutes. Switching it off stops the schedule only — *Run now* and the buttons below keep working.
+Since v0.70.0 a line under Health's header says how the last finished Fix everything went, and when — *Last nightly
+Fix everything 3h ago: 1 needs you* — so a run nobody watched reports at the top of the page, not only in *Recent
+repairs* (@Squeaks72's idea).
 
 **The keys, one set per finding.** *Fix* asks the repair to look at that one chapter now (since v0.49.0 not
 offered for a chapter saved with placeholder pages, which the chapter sweep re-fetches; *It's fine* is its only

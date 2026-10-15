@@ -135,6 +135,11 @@ export interface AutofixRun {
   finishedAt?: string;
   /** The admin who started it, by name; null for the nightly (and for an account since deleted). */
   by: string | null;
+  /**
+   * How it began: `nightly` for the scheduled run, `manual` for one an admin pressed -- which `by: null` alone cannot
+   * say once the admin's account is gone (v0.70.0, for Health's "Last nightly Fix everything" line; #254, @Squeaks72).
+   */
+  origin: RunOrigin;
   phase: AutofixPhase | null;
   phaseIndex: number;
   /** Asked to stop and winding down to its next safe point: every viewer's "Stopping…", not only the one who pressed. */
@@ -474,12 +479,12 @@ export async function closeInterruptedAutofix(except: string | null = active?.id
 }
 
 type RunRow = {
-  id: string; started_at: Date; finished_at: Date | null; status: AutofixStatus; username: string | null; result: Stored | null;
+  id: string; started_at: Date; finished_at: Date | null; status: AutofixStatus; origin: RunOrigin; username: string | null; result: Stored | null;
 };
 const fromRow = (r: RunRow): AutofixRun => ({
   id: r.id, status: r.status, startedAt: new Date(r.started_at).toISOString(),
   ...(r.finished_at ? { finishedAt: new Date(r.finished_at).toISOString() } : {}),
-  by: r.username, phase: null, phaseIndex: r.result?.phaseIndex ?? 0,
+  by: r.username, origin: r.origin, phase: null, phaseIndex: r.result?.phaseIndex ?? 0,
   ...(r.result?.summary ? { summary: r.result.summary } : {}),
   log: r.result?.log ?? [],
 });
@@ -498,7 +503,7 @@ async function liveView(a: Run): Promise<AutofixRun> {
     }
     : undefined;
   return {
-    id: a.id, status: 'running', startedAt: new Date(a.startedAt).toISOString(), by, phase: a.phase, phaseIndex: a.phaseIndex,
+    id: a.id, status: 'running', startedAt: new Date(a.startedAt).toISOString(), by, origin: a.origin, phase: a.phase, phaseIndex: a.phaseIndex,
     // Stop asked, by the route or the run card's generic cancel: said to every viewer until the run reaches its safe point.
     ...(a.stop || stopRequested(a.card) ? { stopping: true } : {}),
     ...(current ? { current } : {}), log: [...a.lines],
@@ -567,7 +572,7 @@ export async function autofixState(): Promise<{ run: AutofixRun | null; last: Au
   await closeInterruptedAutofix().catch(() => {});
   const a = active;
   const rows = await q<RunRow>(
-    `SELECT r.id, r.started_at, r.finished_at, r.status, u.username, r.result FROM repair_runs r LEFT JOIN users u ON u.id = r.by_user
+    `SELECT r.id, r.started_at, r.finished_at, r.status, r.origin, u.username, r.result FROM repair_runs r LEFT JOIN users u ON u.id = r.by_user
       WHERE r.kind = 'autofix' AND r.status <> 'running' ORDER BY r.started_at DESC LIMIT 1`).catch(() => [] as RunRow[]);
   return { run: a ? await liveView(a) : null, last: rows[0] ? fromRow(rows[0]) : null };
 }
@@ -578,7 +583,7 @@ export async function autofixRun(id: string): Promise<AutofixRun | null> {
   if (a?.id === id) return liveView(a);
   await closeInterruptedAutofix().catch(() => {});
   const row = await one<RunRow>(
-    `SELECT r.id, r.started_at, r.finished_at, r.status, u.username, r.result FROM repair_runs r LEFT JOIN users u ON u.id = r.by_user
+    `SELECT r.id, r.started_at, r.finished_at, r.status, r.origin, u.username, r.result FROM repair_runs r LEFT JOIN users u ON u.id = r.by_user
       WHERE r.kind = 'autofix' AND r.id::text = $1`, [id]).catch(() => null);
   return row ? fromRow(row) : null;
 }

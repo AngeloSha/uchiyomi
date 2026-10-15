@@ -21,7 +21,7 @@ import { useReduceEffects } from '@/lib/effects';
 import { TONE_TEXT } from '@/lib/status';
 import {
   autofixBlocked, autofixCount, autofixHeadline, autofixPhaseLabel, autofixProgress, autofixRefusal, autofixStepLine, autofixStepOf, autofixWait,
-  canRunAgain, cardsToLook, clearsLines, doneLines, fixView, logLines, needsYouLines, showFixEverything,
+  canRunAgain, cardsToLook, clearsLines, doneLines, fixView, lastFixLine, logLines, needsYouLines, showFixEverything,
   type AutofixRun, type DoneLine, type NeedsYouKey,
 } from '@/lib/autofix';
 import { useAutofix, type AutofixApi } from '@/lib/useAutofixRun';
@@ -379,6 +379,13 @@ function EndView({ af, run, onClose, onShowCheck }: {
       </div>
     </Sheet>
   );
+}
+
+/** Under Health's header: how the last finished Fix everything went and when (lib/autofix.ts lastFixLine). */
+export function LastFixLine() {
+  const line = lastFixLine(useAutofix()?.status);
+  if (!line) return null;
+  return <p className="full px-1 text-[11px] text-fog-500" data-fix-last>{line}</p>;
 }
 
 /**

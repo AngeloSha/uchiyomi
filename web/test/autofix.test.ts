@@ -19,7 +19,7 @@ import { setActiveLocale } from '../lib/format';
 import {
   AUTOFIX_PHASES, AUTOFIX_POLL_MS, DONE_SHOWN, autofixEndedIds, autofixHeadline, autofixOfRecord, autofixPhaseLabel, autofixPollMs,
   autofixProgress, autofixStepLine, canRunAgain, cardsToLook, clearsLines, doneLines, fixView, needsYouKey, needsYouLines,
-  nightlyModeOf, showFixEverything,
+  lastFixLine, nightlyModeOf, showFixEverything,
   type AutofixRun, type AutofixStatus, type AutofixSummary,
 } from '../lib/autofix';
 import { pageBody, pagePlan } from '../lib/repairRun';
@@ -450,3 +450,21 @@ test('Recent repairs lists a Fix everything run with its headline and its first 
   assert.match(lines, /if \(!run\) return r\.status === 'running' \? null : <p className="[^"]*">\{runStatusWord\(r\.status\)\}<\/p>;/,
     'a run that ended before its summary says nothing');
 });
+
+test('the last-run line under the header: the nightly says so, a live run or none says nothing (v0.70.0, #254)', () => {
+  // A nightly run nobody watched reported only in Recent repairs at the foot of Health. Reintroduce by dropping
+  // `<LastFixLine />` from the Health tab: the last assertion fails; drop the origin from the server: the first reads
+  // "Last Fix everything".
+  const ended = new Date(Date.now() - 3 * 3_600_000).toISOString();
+  const nightly = run({ status: 'done', origin: 'nightly', finishedAt: ended, summary: summary({ needsYou: [{ check: 'duplicates', said: said('x') }] }) });
+  assert.equal(lastFixLine({ run: null, last: nightly }), 'Last nightly Fix everything 3h ago: 1 needs you');
+  const pressed = run({ status: 'done', origin: 'manual', finishedAt: ended, summary: summary({ green: true }) });
+  assert.equal(lastFixLine({ run: null, last: pressed }), 'Last Fix everything 3h ago: All green');
+  assert.equal(lastFixLine({ run: null, last: { ...pressed, origin: undefined } }), 'Last Fix everything 3h ago: All green', 'an older server says no origin');
+  assert.equal(lastFixLine({ run: run({ status: 'running' }), last: nightly }), null, 'the live strip says a run that goes');
+  assert.equal(lastFixLine({ run: null, last: null }), null, 'no run has ended yet');
+  assert.equal(lastFixLine(undefined), null);
+  const health = slice(code('app/admin/page.tsx'), 'function Health()', 'function DesktopUpdateNote()');
+  assert.match(health, /<LastFixLine \/>\s*<SafeRepairLine checks=\{checks\} \/>/);
+});
+

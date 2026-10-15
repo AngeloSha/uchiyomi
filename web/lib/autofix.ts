@@ -19,7 +19,7 @@
  * hidden: it falls back to its card's name.
  */
 import { keys, t as tr } from './i18n';
-import { untilText } from './format';
+import { relativeTime, untilText } from './format';
 import { saidWords, type Said } from './said';
 import { checkTitle } from './healthCopy';
 import type { RepairStatus } from './repairRun';
@@ -73,6 +73,8 @@ export interface AutofixRun {
   finishedAt?: string;
   /** Who pressed it; null for the nightly. */
   by: string | null;
+  /** How it began (since v0.70.0): `nightly` for the scheduled run. Absent from an older server. */
+  origin?: 'nightly' | 'manual';
   /** The phase it is in while it runs. */
   phase: AutofixPhase | null;
   /** 0-based, of AUTOFIX_PHASES.length. */
@@ -241,6 +243,21 @@ export function autofixHeadline(run: Pick<AutofixRun, 'status' | 'summary'>): { 
   if (s?.green) return { kind: 'green', tone: 'ok', text: tr('All green') };
   if (run.status === 'stopped') return { kind: 'stopped', tone: 'info', text: tr('Stopped before it finished') };
   return { kind: 'calm', tone: 'accent', text: tr('Nothing needs you') };
+}
+
+/**
+ * Under Health's header (v0.70.0, #254, @Squeaks72's idea): how the last finished Fix everything went, and when --
+ * "Last nightly Fix everything 3h ago: 1 needs you" -- so a nightly run nobody watched says so at the top, not only in
+ * Recent repairs at the foot of the page. Nothing while a run goes (the live strip says that) or before one has ended.
+ */
+export function lastFixLine(status: AutofixStatus | null | undefined): string | null {
+  const last = status?.last;
+  if (!last || status?.run?.status === 'running' || last.status === 'running' || !last.finishedAt) return null;
+  const when = relativeTime(last.finishedAt);
+  const what = autofixHeadline(last).text;
+  return last.origin === 'nightly'
+    ? tr('Last nightly Fix everything {when}: {what}', { when, what })
+    : tr('Last Fix everything {when}: {what}', { when, what });
 }
 
 /** How many of what it did the end shows; the rest are under Details. */

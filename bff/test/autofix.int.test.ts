@@ -358,6 +358,10 @@ test('Fix everything: one run over a library with something wrong on every card'
     const row = (await q(`SELECT kind, origin, status, by_user, step_ms, result FROM repair_runs WHERE id = $1`, [run.id]))[0];
     assert.equal(row.kind, 'autofix');
     assert.equal(row.origin, 'manual');
+    // v0.70.0: the run says how it began, for Health's "Last nightly Fix everything" line, which `by` cannot (a deleted
+    // admin's run reads `by: null` too). Reintroduce by dropping r.origin from autofixState's SELECT: undefined here.
+    assert.equal(run.origin, 'manual', 'the run says how it began');
+    assert.equal((await autofix.autofixState()).last?.origin, 'manual', 'and so does the state Health polls');
     assert.equal(row.by_user, adminId);
     assert.ok(row.step_ms.recheck >= 0, 'each phase timed');
     assert.equal(run.by, 'af-admin');

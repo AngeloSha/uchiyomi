@@ -17,7 +17,7 @@ import { IcChevronLeft, IcChevronRight, IcTrash, IcPlus, IcRefresh, IcX } from '
 import { LibraryFolders } from '@/components/LibraryFolders';
 import { addFolder, foldersOf, heldByOthers, heldByText, previewQuery, previewText, sameFolders, toggleFolder, typedFolder } from '@/lib/libraryFolders';
 import { CardProgress, HealthCardActions, HealthRow, hasCardActions, scanState, scanWorking } from '@/components/HealthActions';
-import { FixEverythingDialog, FixEverythingKey, SafeRepairLine } from '@/components/FixEverythingDialog';
+import { FixEverythingDialog, FixEverythingKey, LastFixLine, SafeRepairLine } from '@/components/FixEverythingDialog';
 import { AutofixRunProvider } from '@/lib/useAutofixRun';
 import { RepairHistory, RepairLiveStrip, RepairTaskLines } from '@/components/RepairLive';
 import { RESCAN_KEY, RescanPanel } from '@/components/RescanTask';
@@ -1898,6 +1898,7 @@ function Health() {
           </div>
         </div>
 
+        <LastFixLine />
         <SafeRepairLine checks={checks} />
         <RepairLiveStrip />
 
