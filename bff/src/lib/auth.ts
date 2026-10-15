@@ -462,6 +462,28 @@ export function roleOf(request: FastifyRequest): string {
   return (request.user as { role?: string }).role || 'user';
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * True for an existing, enabled account. For the credentials that are verified by signature alone and outlive a
+ * disable or delete (the week-long yomi_img cookie); API and OPDS tokens already join users in SQL.
+ */
+export async function accountActive(userId: string | null | undefined): Promise<boolean> {
+  if (!userId || !UUID.test(userId)) return false;
+  const r = await one<{ ok: boolean }>('SELECT NOT disabled AS ok FROM users WHERE id = $1', [userId]);
+  return r?.ok === true;
+}
+
+/**
+ * Whether this request carries admin authority: an admin account, and for an API token the admin scope too
+ * (requireAdmin's rule). roleOf alone is the account's role, which an admin's read+write automation token has.
+ */
+export function actsAsAdmin(request: FastifyRequest): boolean {
+  if (roleOf(request) !== 'admin') return false;
+  const scopes = (request.user as { tokenScopes?: string[] }).tokenScopes;
+  return !scopes || scopes.includes('admin');
+}
+
 /** Route guard: 403 unless the verified user is an admin. Run after `authenticate`. */
 export async function requireAdmin(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   if (roleOf(request) !== 'admin') return reply.code(403).send({ error: 'forbidden' });

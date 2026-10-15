@@ -11,7 +11,7 @@ import { startBulkNewest, bulkNewestState } from '../lib/bulkNewest';
 // The download strip's "is a job running for this folder" lives with the strip, in routes/sources.ts, and
 // routes/admin.ts imports it from there too.
 import { jobBusy } from './sources';
-import { authenticate, userIdOf, roleOf, issueOpdsToken, issueApiToken, listApiTokens, revokeApiToken, API_SCOPES, revokeOpdsToken, opdsTokenStatus, setOpdsShowAdult, OPDS_TOKEN_DAYS } from '../lib/auth';
+import { authenticate, userIdOf, roleOf, actsAsAdmin, issueOpdsToken, issueApiToken, listApiTokens, revokeApiToken, API_SCOPES, revokeOpdsToken, opdsTokenStatus, setOpdsShowAdult, OPDS_TOKEN_DAYS } from '../lib/auth';
 import { enrichSeries, seenCounts } from '../lib/enrich';
 import { env } from '../env';
 import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription } from '../lib/push';
@@ -136,9 +136,11 @@ export default async function personalRoutes(app: FastifyInstance) {
       .safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Give the token a name and at least one scope.' });
 
-    // Only an admin may mint an admin-scoped token; otherwise any user could self-promote their automation.
+    // Only admin authority may mint an admin-scoped token: an admin session, or a token that already carries the
+    // admin scope. Otherwise any user could self-promote their automation, and an admin's read+write sync token
+    // (which requireAdmin refuses) could mint its way onto the admin API in one request.
     const scopes = b.data.scopes;
-    if (scopes.includes('admin') && roleOf(req) !== 'admin') {
+    if (scopes.includes('admin') && !actsAsAdmin(req)) {
       return reply.code(403).send({ error: 'forbidden', message: 'Only an admin can create an admin token.' });
     }
     // 'write' and 'admin' both imply being able to read

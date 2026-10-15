@@ -196,3 +196,48 @@ test('personal API tokens', { skip: DSN ? false : 'set TEST_DATABASE_URL to run'
   await app.close();
   await q(`DELETE FROM users WHERE username IN ($1,$2)`, ['tok-admin', 'tok-user']);
 });
+
+test('minting an admin-scoped token needs admin authority, not just an admin owner', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  // POST /api/tokens through the real personal routes. Reintroduce by checking only roleOf(req) there: an admin's
+  // read+write sync token -- which requireAdmin refuses -- mints an [admin, write] token with 200, and that token
+  // walks onto the admin API (in the audit it created a new admin account).
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const auth = await import('../src/lib/auth');
+  const Fastify = (await import('fastify')).default;
+  const jwt = (await import('@fastify/jwt')).default;
+  const personalRoutes = (await import('../src/routes/personal')).default;
+
+  await migrate();
+  await q(`DELETE FROM users WHERE username IN ($1,$2)`, ['mint-admin', 'mint-user']);
+  const mk = async (username: string, role: string) =>
+    (await q<{ id: string }>(`INSERT INTO users (username, display_name, password_hash, role) VALUES ($1,$1,'x',$2) RETURNING id`, [username, role]))[0].id;
+  const adminId = await mk('mint-admin', 'admin');
+  const userId = await mk('mint-user', 'user');
+  const app = Fastify();
+  await app.register(jwt, { secret: process.env.JWT_SECRET! });
+  await app.register(personalRoutes);
+  await app.ready();
+  const mint = (token: string, scopes: string[]) =>
+    app.inject({ method: 'POST', url: '/api/tokens', headers: bearer(token), payload: { name: 'minted', scopes } });
+
+  try {
+    const { token: adminSync } = await auth.issueApiToken(adminId, 'sync', ['read', 'write'], null);
+    for (const scopes of [['admin'], ['admin', 'write']]) {
+      const r = await mint(adminSync, scopes);
+      assert.equal(r.statusCode, 403, `an admin's read+write token minted ${scopes.join('+')}`);
+    }
+    // still allowed: admin authority itself -- a session, or a token that already carries admin (and write, to POST)
+    assert.equal((await mint(app.jwt.sign({ sub: adminId, role: 'admin' }, { expiresIn: 60 }), ['admin'])).statusCode, 200);
+    const { token: adminOps } = await auth.issueApiToken(adminId, 'ops', ['read', 'write', 'admin'], null);
+    assert.equal((await mint(adminOps, ['admin', 'write'])).statusCode, 200);
+    // unchanged: a write token minting a non-admin token; a member never minting an admin one
+    assert.equal((await mint(adminSync, ['write'])).statusCode, 200);
+    const { token: memberSync } = await auth.issueApiToken(userId, 'member-sync', ['read', 'write'], null);
+    assert.equal((await mint(memberSync, ['admin'])).statusCode, 403);
+    assert.equal((await mint(app.jwt.sign({ sub: userId, role: 'user' }, { expiresIn: 60 }), ['admin'])).statusCode, 403);
+  } finally {
+    await app.close();
+    await q(`DELETE FROM users WHERE username IN ($1,$2)`, ['mint-admin', 'mint-user']);
+  }
+});
