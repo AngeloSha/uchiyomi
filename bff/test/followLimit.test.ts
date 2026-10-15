@@ -10,10 +10,13 @@ test('two unless the operator says otherwise', () => {
   assert.equal(followLimit('0'), 2, '0 is not a limit, it is nothing set');
 });
 
-test('a number is taken whole, between 1 and 20', () => {
+test('a number is taken whole, between 1 and 6', () => {
+  // Every follower is one more chapter list per sweep for every series. Reintroduce a ceiling of 20: '500' reads 20.
   assert.equal(followLimit('5'), 5);
   assert.equal(followLimit('3.9'), 3);
   assert.equal(followLimit('1'), 1);
   assert.equal(followLimit('-4'), 1);
-  assert.equal(followLimit('500'), 20);
+  assert.equal(followLimit('6'), 6);
+  assert.equal(followLimit('7'), 6);
+  assert.equal(followLimit('500'), 6);
 });

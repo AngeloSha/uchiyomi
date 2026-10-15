@@ -935,7 +935,7 @@
   "Not followed": "Не отслеживается",
   "Followed {n} of {m}": "Отслеживается {n} из {m}",
   "Also check the other sources that carry this title": "Проверить и другие источники с этим названием",
-  "Following one means new chapters are taken from whichever source has them first. Each is checked against this title's chapter list — only a source listing at least 90 % of the same numbers is followed, up to two per series.": "Отслеживание означает, что новые главы берутся из того источника, где они появятся раньше. Каждый источник сверяется со списком глав этого тайтла — отслеживается только тот, где есть не меньше 90 % тех же номеров, не более двух на серию.",
+  "Following one means new chapters are taken from whichever source has them first. Each is checked against this title's chapter list — only a source listing at least 90 % of the same numbers is followed.": "Отслеживание означает, что новые главы берутся из того источника, где они появятся раньше. Каждый источник сверяется со списком глав этого тайтла — отслеживается только тот, где есть не меньше 90 % тех же номеров.",
   "followed for you": "отслеживается за вас",
   "Checking other sources…": "Проверяем другие источники…",
   "Checked other sources": "Другие источники проверены",

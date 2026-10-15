@@ -935,7 +935,7 @@
   "Not followed": "追跡なし",
   "Followed {n} of {m}": "{m} 件中 {n} 件を追跡",
   "Also check the other sources that carry this title": "このタイトルを扱う他のソースも確認する",
-  "Following one means new chapters are taken from whichever source has them first. Each is checked against this title's chapter list — only a source listing at least 90 % of the same numbers is followed, up to two per series.": "追跡すると、新しい話はいちばん早く掲載したソースから取得されます。各ソースはこのタイトルの話リストと照合され、同じ話数の90%以上を掲載しているソースだけを、1シリーズにつき最大2つまで追跡します。",
+  "Following one means new chapters are taken from whichever source has them first. Each is checked against this title's chapter list — only a source listing at least 90 % of the same numbers is followed.": "追跡すると、新しい話はいちばん早く掲載したソースから取得されます。各ソースはこのタイトルの話リストと照合され、同じ話数の90%以上を掲載しているソースだけを追跡します。",
   "followed for you": "自動で追跡",
   "Checking other sources…": "他のソースを確認中…",
   "Checked other sources": "他のソースを確認済み",

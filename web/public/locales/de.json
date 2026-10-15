@@ -935,7 +935,7 @@
   "Not followed": "Nicht verfolgt",
   "Followed {n} of {m}": "{n} von {m} werden verfolgt",
   "Also check the other sources that carry this title": "Auch die anderen Quellen prüfen, die diesen Titel führen",
-  "Following one means new chapters are taken from whichever source has them first. Each is checked against this title's chapter list — only a source listing at least 90 % of the same numbers is followed, up to two per series.": "Wird eine verfolgt, kommen neue Kapitel von der Quelle, die sie zuerst hat. Jede wird mit der Kapitelliste dieses Titels abgeglichen — nur eine Quelle, die mindestens 90 % derselben Nummern führt, wird verfolgt, höchstens zwei pro Serie.",
+  "Following one means new chapters are taken from whichever source has them first. Each is checked against this title's chapter list — only a source listing at least 90 % of the same numbers is followed.": "Wird eine verfolgt, kommen neue Kapitel von der Quelle, die sie zuerst hat. Jede wird mit der Kapitelliste dieses Titels abgeglichen — nur eine Quelle, die mindestens 90 % derselben Nummern führt, wird verfolgt.",
   "followed for you": "für dich verfolgt",
   "Checking other sources…": "Andere Quellen werden geprüft…",
   "Checked other sources": "Andere Quellen geprüft",

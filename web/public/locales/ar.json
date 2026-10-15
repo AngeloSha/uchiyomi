@@ -935,7 +935,7 @@
   "Not followed": "لم تتم المتابعة",
   "Followed {n} of {m}": "تمت متابعة {n} من {m}",
   "Also check the other sources that carry this title": "التحقّق أيضًا من المصادر الأخرى التي تعرض هذا العنوان",
-  "Following one means new chapters are taken from whichever source has them first. Each is checked against this title's chapter list — only a source listing at least 90 % of the same numbers is followed, up to two per series.": "متابعة مصدر آخر تعني أخذ الفصول الجديدة من أي مصدر يعرضها أولًا. يُقارَن كل مصدر بقائمة فصول هذا العنوان — لا يُتابَع إلا مصدر يعرض 90٪ على الأقل من الأرقام نفسها، وبحدّ أقصى مصدرين لكل سلسلة.",
+  "Following one means new chapters are taken from whichever source has them first. Each is checked against this title's chapter list — only a source listing at least 90 % of the same numbers is followed.": "متابعة مصدر آخر تعني أخذ الفصول الجديدة من أي مصدر يعرضها أولًا. يُقارَن كل مصدر بقائمة فصول هذا العنوان — لا يُتابَع إلا مصدر يعرض 90٪ على الأقل من الأرقام نفسها.",
   "followed for you": "تمت متابعته لك",
   "Checking other sources…": "جارٍ التحقّق من المصادر الأخرى…",
   "Checked other sources": "تم التحقّق من المصادر الأخرى",

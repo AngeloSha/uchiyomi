@@ -935,7 +935,7 @@
   "Not followed": "Non suivie",
   "Followed {n} of {m}": "{n} sur {m} suivies",
   "Also check the other sources that carry this title": "Vérifier aussi les autres sources qui proposent ce titre",
-  "Following one means new chapters are taken from whichever source has them first. Each is checked against this title's chapter list — only a source listing at least 90 % of the same numbers is followed, up to two per series.": "En suivre une, c'est prendre les nouveaux chapitres à la source qui les a en premier. Chacune est comparée à la liste des chapitres de ce titre — seule une source proposant au moins 90 % des mêmes numéros est suivie, deux par série au maximum.",
+  "Following one means new chapters are taken from whichever source has them first. Each is checked against this title's chapter list — only a source listing at least 90 % of the same numbers is followed.": "En suivre une, c'est prendre les nouveaux chapitres à la source qui les a en premier. Chacune est comparée à la liste des chapitres de ce titre — seule une source proposant au moins 90 % des mêmes numéros est suivie.",
   "followed for you": "suivie pour vous",
   "Checking other sources…": "Vérification des autres sources…",
   "Checked other sources": "Autres sources vérifiées",

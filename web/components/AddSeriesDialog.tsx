@@ -865,7 +865,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
 
           {/* Only for an admin, and only when the dialog holds other sources for this title (a trending
               search, a wall fold). The helper leads with why anyone would: the benefit is the reason #49
-              was filed. "Up to two per series" is the total, not two of these. */}
+              was filed. It names no limit: how many a series may follow is the server's (MAX_FOLLOWED_SOURCES, two by default). */}
           {mayFollow && others.length > 0 && view?.posting && (
             <p className="mt-3 text-[11px] text-fog-500" data-also-follow="posting_order">
               {tr('Other sources are not followed for a series numbered by posting order: their chapter numbers do not line up.')}
@@ -878,7 +878,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
                 <Switch on={alsoFollow} onChange={setAlsoFollow} label={tr('Also check the other sources that carry this title')} />
               </div>
               <p className="mt-1 text-[11px] text-fog-500">
-                {tr('Following one means new chapters are taken from whichever source has them first. Each is checked against this title\'s chapter list — only a source listing at least 90 % of the same numbers is followed, up to two per series.')}
+                {tr('Following one means new chapters are taken from whichever source has them first. Each is checked against this title\'s chapter list — only a source listing at least 90 % of the same numbers is followed.')}
               </p>
             </div>
           )}

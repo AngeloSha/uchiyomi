@@ -746,8 +746,8 @@ once, calmly. The idea is @TIGamingTV's ([#119](https://github.com/AngeloSha/uch
   extensions do), as Discover and **Follow** on a series page do. A series with no other names stored is first given
   the ones its source's description lists. A candidate must pass the same check as any second source
   (*Following a second source*): its title, then its chapter numbers. A series follows at most two other sources
-  (`MAX_FOLLOWED_SOURCES`), the run stops looking once the series is full, and it gives each series at most 90 seconds. A series
-  numbered by posting order is skipped: it follows no other source.
+  (more if the server sets `MAX_FOLLOWED_SOURCES`), the run stops looking once the series is full, and it gives each
+  series at most 90 seconds. A series numbered by posting order is skipped: it follows no other source.
 - **Afterwards**, each series that gained a source has its chapter list read again, 1.5 seconds apart, so the next
   scheduled check fetches its new chapters without a burst, and Health checks itself again.
 - **Watching it.** **Library → Downloads** lists the run under *Server tasks* as *Other-source search*: how many
@@ -816,8 +816,8 @@ after ten chapters in a row came down whole at it — a site that kept refusing 
 ten minutes later. Two sources whose pages come from the same image server share one pace (Natomanga and
 Mangakakalot do), and **Admin → Health** says *Downloading slowly: the site asked for fewer requests* on the
 source's row under *Source health* while it lasts. If a normal failure still wins, Uchiyomi
-tries the same chapter on at most two sources the series already follows (`MAX_FOLLOWED_SOURCES`); the download card says which
-source it switched from and to. It does not switch a version you explicitly picked, and a 403 or 429 is a
+tries the same chapter on at most two sources the series already follows (up to four with `MAX_FOLLOWED_SOURCES`);
+the download card says which source it switched from and to. It does not switch a version you explicitly picked, and a 403 or 429 is a
 refusal: the source cools down, no partial is saved and no new source is hunted. If the series already
 follows another source with the chapter, that copy may keep the queue moving.
 
