@@ -193,9 +193,10 @@ services:
       FLARESOLVERR_URL: http://uchiyomi-flaresolverr:8191
     volumes:
       - uchiyomi_suwayomi:/home/suwayomi/.local/share/Tachidesk
-    # uchiyomi_internal is how the bff reaches it; uchiyomi_app is where the solver lives. Without the second
-    # network FLARESOLVERR_URL above names a host the engine cannot resolve and the setting is theatre.
-    networks: [uchiyomi_internal, uchiyomi_app]
+    # uchiyomi_app only: the bff reaches it there, and the solver its FLARESOLVERR_URL names lives there. Never
+    # uchiyomi_internal (v0.69.1): the engine runs third-party extension code, and that network is the database's,
+    # whose password is a default unless DB_PASSWORD is set -- an extension could have opened the whole database.
+    networks: [uchiyomi_app]
     expose:
       - "4567"
     healthcheck:
