@@ -84,6 +84,7 @@ import { copyToChapter, reapplyBlocklist, reapplyBlocklistInTransaction, type Li
 import { languageRulesFor, type LanguageRules } from '../lib/copyLanguage';
 import { claimWriterFolders } from '../lib/bulkNewest';
 import { seriesSourcesFor } from '../lib/seriesSources';
+import { attachManual, detachMain } from '../lib/manualAttach';
 import { switchMainSource } from '../lib/mainSource';
 import { refileFailures } from '../lib/chapterFailures';
 import { mainUses, retireSource } from '../lib/retireSource';
@@ -1877,8 +1878,45 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { ok: true, from: out.from, to: out.to, old: out.old, ...(out.langPinned ? { langPinned: out.langPinned } : {}), sources: list };
   });
 
+  /**
+   * Attach a source a person picked by hand (lib/manualAttach.ts): none of the chapter-overlap gates apply, so a series with
+   * one chapter or none can take a source. Body `{source, sourceSeriesId, title?, as: 'follower'|'main', old?}`. 200
+   * `{ok, as, from?, old?, sources}`; 409 with the refusal's code and English (`is_main`, `cap`, `posting_order`, `busy`,
+   * `source_unavailable`, `language_differs` + `edition`, ...).
+   */
+  app.post('/api/admin/series/:id/attach-source', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({
+      source: z.string().min(1).max(128), sourceSeriesId: z.string().min(1).max(512), title: z.string().max(500).nullish(),
+      as: z.enum(['follower', 'main']), old: z.enum(['auto', 'keep', 'drop']).optional(),
+    }).strict().safeParse(req.body ?? {});
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const out = await attachManual(id, { source: b.data.source, sourceSeriesId: b.data.sourceSeriesId, title: b.data.title }, b.data.as, {
+      ctx: await viewCtxFor(userIdOf(req), roleOf(req)), userId: userIdOf(req), old: b.data.old, req,
+    });
+    if ('refused' in out) {
+      if (out.refused === 'not_found') return reply.code(404).send({ error: 'not_found' });
+      return reply.code(409).send({ error: out.refused, message: out.message, ...(out.edition ? { edition: out.edition } : {}) });
+    }
+    const list = await seriesSourcesFor(id);
+    void updateSeries(id, 0).catch(() => {});
+    return { ...out, sources: list };
+  });
+
   app.delete('/api/admin/series/:id/sources/:sourceId', async (req, reply) => {
     const { id, sourceId } = req.params as { id: string; sourceId: string };
+    // The main source: a follower takes over, or the series is left with none (lib/manualAttach.ts detachMain).
+    const mainRow = await one<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1', [id]);
+    if (mainRow?.source_id && mainRow.source_id === sourceId) {
+      const out = await detachMain(id, { ctx: await viewCtxFor(userIdOf(req), roleOf(req)), userId: userIdOf(req), req });
+      if ('refused' in out) {
+        if (out.refused === 'not_found') return reply.code(404).send({ error: 'not_found' });
+        return reply.code(409).send({ error: out.refused, message: out.message });
+      }
+      const list = await seriesSourcesFor(id);
+      void updateSeries(id, 0).catch(() => {});
+      return { ok: true, promoted: out.promoted, sources: list };
+    }
     const gone = await q<{ source_id: string }>(
       'DELETE FROM series_sources WHERE series_id = $1 AND source_id = $2 RETURNING source_id', [id, sourceId]);
     if (!gone.length) return reply.code(404).send({ error: 'not_found' });

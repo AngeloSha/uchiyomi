@@ -1750,6 +1750,17 @@ works. It asks first, in one line — *Make Sample Comics this series' main sour
 (or *…is dropped*, when the old one no longer works) — and a refusal says why: the series is numbered by posting
 order, its chapters wait for a renumbering review, it is being checked right now, and so on.
 
+**Adding or moving a source by hand** (admin). The automatic *Find other sources* needs at least three chapters to line
+up, so a series with fewer can never be matched that way, which is the series that most needs a new source. Its
+**Sources & translations** sheet has **Add more sources…**: a search over the sources (the series' title to start, its
+other names one tap away, and *Choose* narrows which sources are searched), one row of results per source. Pick one and
+the footer shows its cover, title and chapter count beside what the series lists now; then **Add as extra source** (it is
+checked too) or **Move here** (it becomes the main source; *Keep the current main source as a backup* keeps the old one).
+You are the judge, so no chapter overlap is asked for; the other rules stay (the series' language, posting-order
+numbering, a check running right now, a waiting renumber, the follower limit for an extra source). A series with no
+source takes the pick as its main. The **×** on the main source detaches it, after asking: the next source takes over, or
+the series is left with none; downloaded chapters and your progress stay either way.
+
 ### MangaDex in other languages
 
 Since v0.52.0 ([#123](https://github.com/AngeloSha/uchiyomi/issues/123)) MangaDex serves other languages than

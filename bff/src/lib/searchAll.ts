@@ -338,6 +338,16 @@ export type Rating = 'adult' | 'safe';
 export type Judged = Rating | 'flagged';
 /** What a search shows: everything, everything not known to be 18+ (`safe`), or only what is (`adult`). */
 export type RatingFilter = 'all' | 'safe' | 'adult';
+/**
+ * The ids of a `sources` query value (comma-separated), or null when it names none -- the search then asks every source.
+ * At most 200 ids, so a hostile value costs nothing; the caller still intersects it with the sources the viewer may reach.
+ */
+export function narrowTo(raw: unknown): Set<string> | null {
+  if (typeof raw !== 'string') return null;
+  const ids = raw.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 200);
+  return ids.length ? new Set(ids) : null;
+}
+
 /** The admin's 18+ filter lists (lib/visibility.ts adultFilter): genres as typed, source ids lowercased. */
 export interface AdultLists { genres: readonly string[]; sources: readonly string[] }
 

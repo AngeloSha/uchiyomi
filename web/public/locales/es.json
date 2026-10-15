@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3808
+    "strings": 3826
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -3811,5 +3811,23 @@
   "Midnight": "Medianoche",
   "True black suits OLED screens. Graphite and Midnight are softer on other displays.": "El negro puro va bien en pantallas OLED. Grafito y Medianoche son más suaves en otras pantallas.",
   "Plan to read when I add a series": "Pendientes de leer al añadir una serie",
-  "A series you add to the library goes on your trackers as Plan to read, where it is not on your list yet. Nothing already on your list changes, and nothing is sent while Incognito reading is on.": "Una serie que añadas a la biblioteca entra en tus servicios de seguimiento como Pendientes de leer, donde aún no esté en tu lista. Nada de lo que ya está en tu lista cambia, y no se envía nada mientras la Lectura de incógnito esté activada."
+  "A series you add to the library goes on your trackers as Plan to read, where it is not on your list yet. Nothing already on your list changes, and nothing is sent while Incognito reading is on.": "Una serie que añadas a la biblioteca entra en tus servicios de seguimiento como Pendientes de leer, donde aún no esté en tu lista. Nada de lo que ya está en tu lista cambia, y no se envía nada mientras la Lectura de incógnito esté activada.",
+  "Now also checking {name}": "Now also checking {name}",
+  "Could not attach that source": "Could not attach that source",
+  "This series lists {n} now": "This series lists {n} now",
+  "Keep the current main source as a backup": "Keep the current main source as a backup",
+  "Add as extra source": "Add as extra source",
+  "Move here": "Move here",
+  "Use this source": "Use this source",
+  "Add or move source": "Add or move source",
+  "Searching {n} of {total} sources": "Searching {n} of {total} sources",
+  "Searching all {total} sources": "Searching all {total} sources",
+  "Choose": "Choose",
+  "attached": "attached",
+  "Pick at least one source to search them; searching all for now.": "Pick at least one source to search them; searching all for now.",
+  "Nobody has that title. Try another name above.": "Nobody has that title. Try another name above.",
+  "Detach {name}? The next source takes over as main. Downloaded chapters and your progress stay.": "Detach {name}? The next source takes over as main. Downloaded chapters and your progress stay.",
+  "Detach {name}? The series keeps its chapters and progress but will have no source to update from.": "Detach {name}? The series keeps its chapters and progress but will have no source to update from.",
+  "Detach": "Detach",
+  "Add more sources…": "Add more sources…"
 }
