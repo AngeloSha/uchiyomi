@@ -1367,6 +1367,11 @@ the default for *Source*** removes it again. Like the per-series memory it is sa
 follows you to your other devices. A downloaded chapter opened offline carries no source, so the button does
 not appear there.
 
+**Missing chapters.** When the chapter the reader moves on to skips whole numbers that are not in the library (you are
+on 43 and the next one you have is 100), a short notice names them -- *Chapters 44-99 are missing here. This continues
+at chapter 100.* -- as the next chapter joins the page or when you use **Next chapter**. Nothing is shown when the
+numbers run on, for a half chapter such as 10.5, or when either number is unknown.
+
 ### Reading comfort
 
 Since v0.61.0 the reader has a few more settings. **Every one of them is off, or exactly the old reader, until you

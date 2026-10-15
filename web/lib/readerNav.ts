@@ -27,3 +27,15 @@ export function pagesAfter(flow: ReadonlyArray<{ ci: number }>, current: number)
   for (let i = current + 1; i < flow.length && flow[i].ci === ci; i++) n++;
   return n;
 }
+
+/**
+ * The whole chapter numbers that lie strictly between two neighbours in the reading order -- the ones the
+ * reader is about to skip over. null when there are none, or when either number is unknown or the order does
+ * not run forward (an edition's copy of the same number, a special placed out of order).
+ */
+export function chapterGap(from: number | undefined | null, to: number | undefined | null): { first: number; last: number } | null {
+  if (from == null || to == null || !Number.isFinite(from) || !Number.isFinite(to) || to <= from) return null;
+  const first = Math.floor(from) + 1;
+  const last = Math.ceil(to) - 1;
+  return first <= last ? { first, last } : null;
+}

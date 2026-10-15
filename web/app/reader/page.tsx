@@ -16,7 +16,7 @@ import { readTap, undoLeft, undoWindow, type TapZone } from '@/lib/readerGesture
 import { PAGE_ACTIONS, actionForKey, keyMapFor, type ReaderAction } from '@/lib/readerKeys';
 import { padMapFor } from '@/lib/readerPad';
 import { useGamepad } from '@/lib/useGamepad';
-import { ARM_MS, pagesAfter, skipNeedsConfirm, stillArmed } from '@/lib/readerNav';
+import { ARM_MS, chapterGap, pagesAfter, skipNeedsConfirm, stillArmed } from '@/lib/readerNav';
 import { Book, EditionRow, Page, PageInfo, Series } from '@/lib/types';
 import { useAuth, canDownload } from '@/lib/auth';
 import { chapterLabel, languageName } from '@/lib/format';
@@ -877,6 +877,15 @@ function ReaderInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tops, heights, flat, prefs.mode, slides]); // the sign-free Math.abs above needs no trackSign dep
 
+  /** Said as the next chapter joins the column (or is jumped to): the numbers between the two are not in the library. */
+  const warnGap = (fromId?: string, toId?: string) => {
+    const to = toId ? numberOf.get(toId) : undefined;
+    const gap = chapterGap(fromId ? numberOf.get(fromId) : undefined, to);
+    if (!gap || to == null) return;
+    toast(gap.first === gap.last
+      ? tr('Chapter {a} is missing here. This continues at chapter {next}.', { a: numLabel(gap.first), next: numLabel(to) })
+      : tr('Chapters {a}–{b} are missing here. This continues at chapter {next}.', { a: numLabel(gap.first), b: numLabel(gap.last), next: numLabel(to) }), 'info');
+  };
   // ---- continuous reading: append next chapter near the end ----
   useEffect(() => {
     if (!ready || !flat.length || appending.current || noMore.current) return;
@@ -901,6 +910,7 @@ function ReaderInner() {
       const outcome = chapterOutcome(ch);
       await untilStill(lastMoved, rtlTrack);
       hold();
+      if (outcome === 'ok') warnGap(last?.id, next.id);
       if (outcome === 'ok') setChapters((cs) => (cs.some((c) => c.id === ch!.id) ? cs : [...cs, ch!]));
       // There IS a next chapter -- chapterRefs says so -- and it would not load. Claiming the series is
       // finished here is how a corrupt file or a dropped connection came to read as an ending.
@@ -1114,7 +1124,7 @@ function ReaderInner() {
   const goNext = () => {
     if (!nextId) return;
     const remaining = pagesAfter(flat, current);
-    if (!skipNeedsConfirm(remaining) || stillArmed(armedNext, Date.now())) { setArmedNext(null); goChapter(nextId); return; }
+    if (!skipNeedsConfirm(remaining) || stillArmed(armedNext, Date.now())) { setArmedNext(null); warnGap(activeChapter?.id, nextId); goChapter(nextId); return; }
     setArmedNext(Date.now());
   };
   useEffect(() => {
