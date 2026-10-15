@@ -497,6 +497,16 @@ series with a finished chapter (that they may list, in a library with AniList lo
 the server holds and what is 18+ for them -- the first of their last five such series that leaves at least four. Both
 sit behind the `canDownload` gate below; neither asks AniList for anything about the library.
 
+**Recommended for you.** `GET /api/discover/recommendations` answers `{content, sources, pending}` from the trackers the
+caller has connected (AniList and MyAnimeList seed it; any other connected list only adds to what is left out).
+`content` is ranked, at most 40, and each entry carries `title`, `altTitles`, `cover`, `score` and `sources` -- the
+services that suggested it and, for each, the series of the caller's own it came from (`because`). `sources` says, per
+connected service, how many titles are on the list and how many of them seeded. Left out: everything on any connected
+list under any status, what the library holds (by name, as Discover's index knows it), light novels, and, while the
+caller is hiding 18+ or is capped below it, anything not known to be all-ages. It is answered from two caches
+(`tracker_list_cache`: the list, read at most every 12 hours; `tracker_rec_cache`: what readers recommend after a title,
+once per server per 14 days) and waits up to 8 seconds for a first refresh; `pending: true` says one is still running.
+An account with nothing connected gets an empty `content`, and nothing is asked of any service. `Cache-Control: no-store`.
 Responses worth handling: **200** with `message: "already in library"` if you have that exact series already,
 and **409** `duplicate` if a series with the same title came from a *different* source — retry with
 `"force": true` to add the second copy anyway.
@@ -1251,6 +1261,7 @@ GET    /api/sources/search-all    GET    /api/sources/latest
 GET    /api/sources/jobs          POST   /api/sources/add
 GET    /api/discover/trending     POST   /api/sources/fill/scan
 GET    /api/discover/works        GET    /api/discover/because
+GET    /api/discover/recommendations
 GET    /api/sources/fill/scan/:id POST   /api/sources/fill
 POST   /api/sources/fetch
 GET    /api/sources/archive       POST   /api/sources/archive

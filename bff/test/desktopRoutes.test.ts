@@ -35,7 +35,7 @@ const REPO = join(__dirname, '..', '..');
 const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 const key = (m: string, p: string) => `${m.toUpperCase()} ${p}`;
 const toOpenApi = (p: string) => p.replace(/:([A-Za-z]+)/g, '{$1}');
-const ROUTES = ['auth', 'admin', 'notify', 'catalog', 'images', 'personal', 'downloads', 'sources', 'opds', 'komgaCompat'];
+const ROUTES = ['auth', 'admin', 'notify', 'catalog', 'images', 'personal', 'recommendations', 'downloads', 'sources', 'opds', 'komgaCompat'];
 
 /**
  * The OFF table: openapi.yaml's operations plus the two inline routes. openapiCoverage.test.ts proves this IS

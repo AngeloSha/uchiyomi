@@ -15,6 +15,7 @@ import { ProgressBar, Reveal } from '@/components/ui';
 import { SourceCard, SourceItem, StillLoadingCard } from '@/components/cards';
 import { ScrollRail } from '@/components/ScrollRail';
 import { DiscoverHero, TrendingCard, Trending } from '@/components/DiscoverHero';
+import { RecommendationRail } from '@/components/RecommendationRail';
 import { SourcePicker, SourceLatest, Src, SrcState } from '@/components/SourcePicker';
 import { aloneEmpty, answeredPage, budgetForMode, WALL_IN_FLIGHT, type ListMode, type SrcExtension, type StackSource } from '@/lib/sourceGroups';
 import { normTitle } from '@/lib/normTitle';
@@ -649,6 +650,8 @@ function DiscoverInner() {
           </form>
         </div>
       </header>
+
+      {mode === 'newest' && <RecommendationRail enabled={mayAdd} onPick={(title) => setSeed({ kind: 'trending', title })} />}
 
       {/* v0.61.0: "Because you read {title}", above the wall while browsing, only with something on it -- under the
           header, so the source picker stays beside the wall it narrows. The title is isolated: a Latin title inside an

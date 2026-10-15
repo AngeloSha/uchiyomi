@@ -680,6 +680,24 @@ CREATE TABLE IF NOT EXISTS series_trackers (
   PRIMARY KEY (series_id, provider)
 );
 
+-- Recommendations from the connected trackers (lib/trackerRecs.ts). Both tables exist to spare the services:
+-- the person's list is read at most twice a day and what readers recommend after a title is asked once per
+-- title for the whole server, for two weeks, however many people hold it.
+CREATE TABLE IF NOT EXISTS tracker_list_cache (
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  provider   text NOT NULL,
+  entries    jsonb NOT NULL,
+  fetched_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, provider)
+);
+CREATE TABLE IF NOT EXISTS tracker_rec_cache (
+  provider   text NOT NULL,
+  seed_id    text NOT NULL,
+  recs       jsonb NOT NULL,
+  fetched_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (provider, seed_id)
+);
+
 -- admin-editable per-series metadata + art overrides
 -- cover/banner: 'upload' = a file under <CONFIG_DIR>/series-art; an http(s) URL = pasted; null = use automatic art
 CREATE TABLE IF NOT EXISTS libraries (
