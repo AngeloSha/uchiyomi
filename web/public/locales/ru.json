@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3808
+    "strings": 3816
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -3811,5 +3811,13 @@
   "Midnight": "Полночь",
   "True black suits OLED screens. Graphite and Midnight are softer on other displays.": "Чистый чёрный подходит для OLED-экранов. Графит и Полночь мягче на других дисплеях.",
   "Plan to read when I add a series": "Добавлять серию «В планы», когда я добавляю её",
-  "A series you add to the library goes on your trackers as Plan to read, where it is not on your list yet. Nothing already on your list changes, and nothing is sent while Incognito reading is on.": "Серия, которую вы добавляете в библиотеку, попадает в ваши трекеры со статусом «В планах», если её ещё нет в вашем списке. То, что уже есть в списке, не меняется, а пока включён Режим инкогнито, ничего не отправляется."
+  "A series you add to the library goes on your trackers as Plan to read, where it is not on your list yet. Nothing already on your list changes, and nothing is sent while Incognito reading is on.": "Серия, которую вы добавляете в библиотеку, попадает в ваши трекеры со статусом «В планах», если её ещё нет в вашем списке. То, что уже есть в списке, не меняется, а пока включён Режим инкогнито, ничего не отправляется.",
+  "Reading defaults": "Reading defaults",
+  "Used for every series in this library, unless the series or its source has its own.": "Used for every series in this library, unless the series or its source has its own.",
+  "Reading mode": "Reading mode",
+  "Follow the series": "Follow the series",
+  "Use user default": "Use user default",
+  "Saved as the default for {library}.": "Saved as the default for {library}.",
+  "This library": "This library",
+  "Use these settings for every series in {library}": "Use these settings for every series in {library}"
 }

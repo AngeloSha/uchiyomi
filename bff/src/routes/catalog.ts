@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { q, one } from '../lib/db';
+import { cleanLibraryReader } from '../lib/libraryReader';
 import { junkPagesFor, setPageOverride } from '../lib/junkPages';
 import { komgaImage } from '../lib/komga';
 import { content as komga, NATIVE_PROGRESS, OWNED } from '../lib/backend';
@@ -484,6 +485,14 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // Where the chapters come from: the primary source first, then any followed ones. Every viewer gets
     // this -- it is what the "Sources" line under the title shows, and nothing in it names the host.
     out.sources = await seriesSourcesFor(id).catch(() => []);
+    // The reading defaults of the library it sits in (lib/libraryReader.ts); null when it has none. Every viewer gets
+    // them: they are layered under the source's and the series' own in the reader.
+    const lr = await one<{ p: unknown; lid: string | null; lname: string | null }>(
+      `SELECT l.id AS lid, l.name AS lname, l.reader_prefs AS p
+         FROM lib_series s LEFT JOIN libraries l ON l.id = s.library_id WHERE s.id = $1`, [id]);
+    out.libraryReader = cleanLibraryReader(lr?.p);
+    // Admins only: which library it is in, for the reader's "use these settings for the library" key.
+    if (roleOf(req) === 'admin' && lr?.lid) out.library = { id: lr.lid, name: lr.lname };
     // v0.61.0: what kind of comic it is -- the admin's override, else what the evidence learned, else unknown -- for EVERY
     // viewer: the reader's "Pick the mode for each series" opens a manhwa as a webtoon and a manga page by page. The
     // evidence behind it (`detectedType`) stays an admin's, below. Additive: the admin block sets the same value.

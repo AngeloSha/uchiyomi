@@ -56,6 +56,8 @@ export function ReaderSettings({
   padConnected = false,
   rtlTrack = false,
   onClose,
+  libraryName,
+  onLibraryDefault,
   sourceName,
   sourceDefault,
   onSourceDefault,
@@ -73,6 +75,8 @@ export function ReaderSettings({
   rtlTrack?: boolean;
   onClose: () => void;
   /** The source this chapter came from, named for the button. Absent for a copy with no source on record. */
+  libraryName?: string;
+  onLibraryDefault?: () => void;
   sourceName?: string;
   /** Whether that source already has a default saved, which decides what the button offers. */
   sourceDefault?: boolean;
@@ -302,6 +306,13 @@ export function ReaderSettings({
           from it at once, instead of the global default being wrong for half the library or each series
           having to be corrected by hand. A series you have already adjusted still wins over this.
         */}
+        {libraryName && onLibraryDefault && (
+          <Row label={tr('This library')}>
+            <button onClick={onLibraryDefault} className="w-full rounded-2xl border border-ink-700 py-3 text-sm text-fog-300" data-library-default>
+              {tr('Use these settings for every series in {library}', { library: libraryName })}
+            </button>
+          </Row>
+        )}
         {sourceName && onSourceDefault && (
           <Row label={tr('This source')}>
             <div className="grid gap-2">

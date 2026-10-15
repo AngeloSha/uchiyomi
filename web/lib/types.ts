@@ -175,6 +175,10 @@ export interface SeriesEdition {
 }
 
 export interface Series {
+  /** Admins only: the library it is in. */
+  library?: { id: string; name: string };
+  /** The reading defaults of the library the series is in; null when it has none. */
+  libraryReader?: { mode?: 'vertical' | 'paged'; theme?: 'amoled' | 'sepia' | 'gray'; spread?: boolean; pagedDirection?: 'ltr' | 'rtl' | 'series' } | null;
   /** Whether the scheduled updater fetches new chapters for this series. */
   autoUpdate?: boolean;
   /** The folder on disk, relative to the library root. Only sent to admins, for the rename control. */

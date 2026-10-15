@@ -1705,6 +1705,11 @@ series, sample}` (the series an admin can see, and up to 20 of their titles), an
 holds; with `&id=` it is an edit of that library, counting what would leave it as well as what would come in. A folder
 is matched by its name: `_` and `%` in it are not wildcards.
 
+A library can carry reading defaults: `readerPrefs {mode?, theme?, spread?, pagedDirection?}` on `POST` and `PATCH
+/api/admin/libraries` (null clears them), returned as `reader_prefs` on each row of `GET /api/admin/libraries`, and
+as `libraryReader` on `GET /api/series/{id}` (for an admin also `library {id, name}`, the library the series is in).
+The reader layers them under the source's and the series' own choices.
+
 Since v0.55.8 ([#168](https://github.com/AngeloSha/uchiyomi/discussions/168)), `anilistLookup` defaults true and
 `GET /api/admin/libraries` returns it as `anilist_lookup` on every row, including the default library. False prevents
 automatic art lookup, title/id matching, reading-direction/type repair, the startup match check and scheduled

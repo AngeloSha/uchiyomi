@@ -125,11 +125,11 @@ test('the dialog keeps a list of folders, sends `paths`, and the browser\'s rows
   const dialog = slice(admin, 'function LibraryDialog(', 'function LibrariesSection(');
   assert.match(dialog, /const folders = addFolder\(paths, typed\);/, 'Save forgets a folder typed and not added');
   // Reintroduce `path: path.trim()` in either request: "the create does not send paths" / "the edit does not".
-  assert.match(dialog, /json: \{ name: name\.trim\(\), paths: folders, ageRating, anilistLookup \}/, 'the create does not send paths or the AniList preference');
+  assert.match(dialog, /json: \{ name: name\.trim\(\), paths: folders, ageRating, anilistLookup, readerPrefs: readerPrefs\(\) \}/, 'the create does not send paths or the AniList preference');
   assert.match(dialog, /if \(!isLib && !unchanged\) body\.paths = folders;/, 'the edit does not send paths');
   assert.match(dialog, /const \[anilistLookup, setAniListLookup\] = useState\(editing\?\.anilist_lookup \?\? true\);/,
     'a new or older library does not keep the compatible AniList-on default');
-  assert.match(dialog, /const body: Record<string, unknown> = \{ name: name\.trim\(\), ageRating, anilistLookup \};/,
+  assert.match(dialog, /const body: Record<string, unknown> = \{ name: name\.trim\(\), ageRating, anilistLookup, readerPrefs: readerPrefs\(\) \};/,
     'an edited library does not save the AniList preference');
   assert.match(dialog, /data-library-anilist-lookup/, 'the dialog has no AniList privacy control');
   assert.match(dialog, /automatic lookups do not send this library's titles to AniList[\s\S]*manual AniList actions can still connect/,

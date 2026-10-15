@@ -108,6 +108,7 @@ import { randomBytes } from 'crypto';
 import { appVersion } from '../lib/appVersion';
 import { PING_URL, buildPayload, installFacts, monthlyId, newSecret, sendForget } from '../lib/installPing';
 import { withOrigin } from '../lib/downloadActivity';
+import { cleanLibraryReader } from '../lib/libraryReader';
 import {
   readBulkChapterDeleteRun, requestBulkChapterDeleteCancel, startBulkChapterDelete,
 } from '../lib/bulkChapterDelete';
@@ -2834,9 +2835,9 @@ export default async function adminRoutes(app: FastifyInstance) {
   // library into several named after scrapers. Library zero covers the whole root and always exists.
 
   app.get('/api/admin/libraries', async () => {
-    const rows = await q<{ id: string; name: string; path: string; paths: string[]; age_rating: number | null; anilist_lookup: boolean; n: number; pinned: number; members: string[] }>(
+    const rows = await q<{ id: string; name: string; path: string; paths: string[]; age_rating: number | null; anilist_lookup: boolean; reader_prefs: unknown; n: number; pinned: number; members: string[] }>(
       // `paths`: every folder it holds (v0.55.1, #148), the first -- `path`, all a v0.55.0 reads -- first, then by name.
-      `SELECT l.id, l.name, l.path, l.age_rating, l.anilist_lookup,
+      `SELECT l.id, l.name, l.path, l.age_rating, l.anilist_lookup, l.reader_prefs,
               (SELECT coalesce(array_agg(lp.path ORDER BY lp.path <> l.path, lp.path), '{}') FROM library_paths lp
                 WHERE lp.library_id = l.id) AS paths,
               (SELECT count(*)::int FROM lib_series s WHERE s.library_id = l.id AND ${visibleToAll('s')}) AS n,
@@ -2979,6 +2980,13 @@ export default async function adminRoutes(app: FastifyInstance) {
       ageRating: z.number().int().min(0).max(18).nullable().optional(),
       // Automatic title/id enrichment only. Manual Admin Art, relink and tracker actions remain available.
       anilistLookup: z.boolean().optional(),
+      // Reading defaults for its series (mode, theme, spread, direction). null clears them.
+      readerPrefs: z.object({
+        mode: z.enum(['vertical', 'paged']).optional(),
+        theme: z.enum(['amoled', 'sepia', 'gray']).optional(),
+        spread: z.boolean().optional(),
+        pagedDirection: z.enum(['ltr', 'rtl', 'series']).optional(),
+      }).nullable().optional(),
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const raw = b.data.paths ?? (b.data.path !== undefined ? [b.data.path] : null);
@@ -2994,8 +3002,8 @@ export default async function adminRoutes(app: FastifyInstance) {
       // Checked under the lock, so two saves cannot both take one folder.
       const held = await heldElsewhere(qq, id, paths);
       if (held) return { held };
-      await qq(`INSERT INTO libraries (id, name, path, age_rating, anilist_lookup) VALUES ($1,$2,$3,$4,$5)`,
-        [id, b.data.name.trim(), paths[0], b.data.ageRating ?? null, b.data.anilistLookup ?? true]);
+      await qq(`INSERT INTO libraries (id, name, path, age_rating, anilist_lookup, reader_prefs) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [id, b.data.name.trim(), paths[0], b.data.ageRating ?? null, b.data.anilistLookup ?? true, cleanLibraryReader(b.data.readerPrefs)]);
       // Reassignment is deliberate and happens here, not in a scan: the scanner keeps an existing folder in
       // the library it is already in, precisely so it can never re-mint an id by recomputing. The longest folder
       // wins, so a new `Manga/Seinen` takes from `Manga` and never the other way, and a pinned series stays put:
@@ -3023,6 +3031,13 @@ export default async function adminRoutes(app: FastifyInstance) {
       ageRating: z.number().int().min(0).max(18).nullable().optional(),
       // false stops future implicit AniList calls for series currently in this library; it does not erase metadata.
       anilistLookup: z.boolean().optional(),
+      // Reading defaults for its series (mode, theme, spread, direction). null clears them.
+      readerPrefs: z.object({
+        mode: z.enum(['vertical', 'paged']).optional(),
+        theme: z.enum(['amoled', 'sepia', 'gray']).optional(),
+        spread: z.boolean().optional(),
+        pagedDirection: z.enum(['ltr', 'rtl', 'series']).optional(),
+      }).nullable().optional(),
       // Who may see it. See the note below: this is not simply "insert a row".
       members: z.array(z.string()).optional(),
     }).safeParse(req.body);
@@ -3059,6 +3074,9 @@ export default async function adminRoutes(app: FastifyInstance) {
     }
     if (b.data.anilistLookup !== undefined) {
       await q('UPDATE libraries SET anilist_lookup = $2 WHERE id = $1', [id, b.data.anilistLookup]);
+    }
+    if (b.data.readerPrefs !== undefined) {
+      await q('UPDATE libraries SET reader_prefs = $2 WHERE id = $1', [id, cleanLibraryReader(b.data.readerPrefs)]);
     }
 
     /**
