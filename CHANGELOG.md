@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.67.3 — 2026-10-15
+
+**Fast scrolling on a computer is smooth: the film grain steps aside while the page moves.**
+
+### Fast scrolling
+
+- **The film grain pauses while the page moves, and fades back in when it stops.** Its blend over the whole screen
+  made the graphics card redraw everything beneath it on every frame of a scroll, and that alone made a fast scroll
+  stutter. A fast flick through the Library now runs at about 56 frames a second instead of 39, and Home at 53–58
+  instead of 49–55. At rest nothing looks different.
+- **Scrolling does less work on every frame.** The scroll position is no longer measured on every frame of a scroll.
+
+### Upgrading
+
+- Nothing to do.
+
 ## v0.67.2 — 2026-10-15
 
 **The app does about half the work while you are not touching it, a page change is the fade it was designed to be
