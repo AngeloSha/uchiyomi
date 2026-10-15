@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3808
+    "strings": 3810
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -3811,5 +3811,7 @@
   "Midnight": "ミッドナイト",
   "True black suits OLED screens. Graphite and Midnight are softer on other displays.": "純粋な黒はOLED画面に向いています。グラファイトとミッドナイトは、ほかのディスプレイで目にやさしい色です。",
   "Plan to read when I add a series": "シリーズを追加したら「読む予定」に入れる",
-  "A series you add to the library goes on your trackers as Plan to read, where it is not on your list yet. Nothing already on your list changes, and nothing is sent while Incognito reading is on.": "ライブラリに追加したシリーズは、まだリストにないトラッカーに「読む予定」として入ります。すでにリストにあるものは変わりません。シークレット読書がオンの間は何も送信しません。"
+  "A series you add to the library goes on your trackers as Plan to read, where it is not on your list yet. Nothing already on your list changes, and nothing is sent while Incognito reading is on.": "ライブラリに追加したシリーズは、まだリストにないトラッカーに「読む予定」として入ります。すでにリストにあるものは変わりません。シークレット読書がオンの間は何も送信しません。",
+  "Column width on this device": "Column width on this device",
+  "Narrows the webtoon column. Saved on this device only, so your other screens are unaffected.": "Narrows the webtoon column. Saved on this device only, so your other screens are unaffected."
 }
