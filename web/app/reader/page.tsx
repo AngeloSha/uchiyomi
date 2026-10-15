@@ -837,6 +837,7 @@ function ReaderInner() {
     const el = scrollRef.current;
     if (!el || !didInitScroll.current || laidOutMode.current === prefs.mode) return;
     laidOutMode.current = prefs.mode;
+    pagedWidth.current = 0; // a new scroller: its width is its own
     if (prefs.mode === 'paged') {
       laidOutSign.current = trackSign;
       laidOutSplit.current = splitTrack;
@@ -876,6 +877,23 @@ function ReaderInner() {
   }, [splitTrack]);
 
   // ---- track current page on scroll ----
+  /** The paged track's width and slide as the last scroll event read them: what a resize is put back to. */
+  const pagedWidth = useRef(0);
+  const pagedSlide = useRef(0);
+  // A resize that raises no scroll event (the offset still fits) leaves the track between two pages: snap it back too.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || prefs.mode !== 'paged' || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      const w = el.clientWidth;
+      if (!w || !pagedWidth.current || pagedWidth.current === w) return;
+      pagedWidth.current = w;
+      el.scrollTo({ left: trackSign * pagedSlide.current * w, behavior: 'instant' as ScrollBehavior });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefs.mode, ready, trackSign]);
   const onScroll = useCallback(() => {
     lastMoved.current = Date.now();
     const el = scrollRef.current;
@@ -883,7 +901,19 @@ function ReaderInner() {
     if (prefs.mode === 'paged') {
       // Math.abs: an RTL track scrolls from 0 into NEGATIVE scrollLeft (the spec'd behaviour every current
       // engine follows), so page n sits at -n × width.
-      const s = Math.round(Math.abs(el.scrollLeft) / Math.max(1, el.clientWidth));
+      // ⚠️ A track whose width just changed (the window dragged to a screen of another size, a sidebar, a rotation) keeps its
+      // scrollLeft in PIXELS, so the same offset now divides into another slide: the reader was moved to a different page, and
+      // a few chapters on once the append and progress paths believed it. The width, not the offset, is what changed, so this
+      // scroll event is no reading: put the track back on the slide it was on and read nothing from it.
+      const w = el.clientWidth;
+      if (pagedWidth.current && pagedWidth.current !== w) {
+        pagedWidth.current = w;
+        el.scrollTo({ left: trackSign * pagedSlide.current * w, behavior: 'instant' as ScrollBehavior });
+        return;
+      }
+      pagedWidth.current = w;
+      const s = Math.round(Math.abs(el.scrollLeft) / Math.max(1, w));
+      pagedSlide.current = s;
       const idxs = slides[Math.max(0, Math.min(slides.length - 1, s))];
       const i = idxs ? idxs[idxs.length - 1] : 0; // last page of a spread → completion fires on the final spread
       setCurrent((c) => (c === i ? c : i));
