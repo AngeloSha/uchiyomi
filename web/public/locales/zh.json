@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3943
+    "strings": 3945
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3946,5 +3946,7 @@
   "missing details filled in for {n} series": "已为 {n} 部作品补全缺失的信息",
   "Off by default. Once a night, a series with no description, genres or author of its own gets them from AniList, when it is linked there and in English, or else from its own source or one it follows; a series with no chapters yet gets a cover too. A series’ own details always win, and so does anything you set in Edit details. Switching this off takes back everything it filled in.": "默认关闭。每晚一次，对没有自己的简介、类型或作者的作品，从 AniList 补上（需已在那里关联且为英文），否则从它自己的来源或它关注的来源补上；还没有章节的作品也会补上封面。作品自己的信息始终优先，你在“编辑详情”中设置的内容也一样。关闭后，补上的内容会全部撤回。",
   "It asks for a password when you install it. On the uchiyomi container, set {user} to its user name ({default} unless you changed it) and {password} to that password.": "安装时它会要求设置密码。在 uchiyomi 容器中，把 {user} 设为它的用户名（若未修改则为 {default}），把 {password} 设为这个密码。",
-  "Syncing slowly: {name} asks us to wait.": "同步变慢：{name} 要求我们稍等。"
+  "Syncing slowly: {name} asks us to wait.": "同步变慢：{name} 要求我们稍等。",
+  "Chapter {a} is missing here. This continues at chapter {next}.": "Chapter {a} is missing here. This continues at chapter {next}.",
+  "Chapters {a}–{b} are missing here. This continues at chapter {next}.": "Chapters {a}–{b} are missing here. This continues at chapter {next}."
 }

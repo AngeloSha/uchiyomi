@@ -1411,6 +1411,11 @@ The order becomes *your defaults < the library's < the source's < this series*, 
 adjusted by hand still wins, and a library without defaults changes nothing. A chapter downloaded for offline reading
 opens with the library's defaults this device last saw.
 
+**Missing chapters.** When the chapter the reader moves on to skips whole numbers that are not in the library (you are
+on 43 and the next one you have is 100), a short notice names them -- *Chapters 44-99 are missing here. This continues
+at chapter 100.* -- as the next chapter joins the page or when you use **Next chapter**. Nothing is shown when the
+numbers run on, for a half chapter such as 10.5, or when either number is unknown.
+
 ### Reading comfort
 
 Since v0.61.0 the reader has a few more settings. **Every one of them is off, or exactly the old reader, until you
