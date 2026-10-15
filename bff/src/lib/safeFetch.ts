@@ -111,9 +111,36 @@ export async function assertNotPrivateHost(hostname: string): Promise<void> {
   if (isBlockedHost(hostname)) throw new BlockedAddress(hostname);
   const h = hostname.toLowerCase().replace(/^\[|\]$/g, '');
   if (isIP(h)) return;
-  let addrs: Array<{ address: string }>;
-  try { addrs = await lookup(h, { all: true }); } catch { return; }
-  if (addrs.some((a) => isPrivateAddress(a.address))) throw new BlockedAddress(hostname);
+  if (await resolvesPrivate(h)) throw new BlockedAddress(hostname);
+}
+
+/**
+ * Whether a name resolves to anything private, remembered for a minute and asked once at a time. A chapter's hundred
+ * pages on one image host cost one lookup, not a hundred -- and a check answered from memory adds no wait in front of
+ * the fetch, which matters: the downloader stops issuing pages the moment a site answers 429, and a page held back by
+ * a lookup was fetched right after the refusal (pageConcurrency.test.ts "after a 429 the resume runs one page at a
+ * time"). A name that does not resolve is let through, as above.
+ */
+const judged = new Map<string, { at: number; private: boolean }>();
+const asking = new Map<string, Promise<boolean>>();
+const JUDGED_MS = 60_000;
+
+async function resolvesPrivate(h: string): Promise<boolean> {
+  const hit = judged.get(h);
+  if (hit && Date.now() - hit.at < JUDGED_MS) return hit.private;
+  let running = asking.get(h);
+  if (!running) {
+    running = lookup(h, { all: true }).then(
+      (addrs) => addrs.some((a) => isPrivateAddress(a.address)),
+      () => false,
+    ).then((priv) => {
+      if (judged.size > 2000) judged.clear();
+      judged.set(h, { at: Date.now(), private: priv });
+      return priv;
+    }).finally(() => asking.delete(h));
+    asking.set(h, running);
+  }
+  return running;
 }
 
 /** Header names a redirect to another origin must not carry: they are credentials for the first one. */
