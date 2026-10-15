@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import type { FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyReply, FastifyRequest, FastifyServerOptions } from 'fastify';
 import { q, one } from './db';
 import { env } from '../env';
 import { isDesktop } from './desktop';
@@ -415,14 +415,22 @@ export const revokeAllSessions = (userId: string, exceptId?: string) =>
     exceptId ? [userId, exceptId] : [userId]);
 
 /**
- * Client IP from the proxy chain.
+ * Client IP, as Fastify resolved it under `trustProxy` (server.ts, env.TRUST_PROXY).
  *
- * ⚠️ This reads X-Forwarded-For whatever `trustProxy` is set to. On the desktop app nothing sits in front of the
- * server, so a forwarded-for header there is only ever one a local process invented, and it is ignored.
+ * This used to read the first X-Forwarded-For entry whatever `trustProxy` said, and the first entry is the one a
+ * client writes itself -- a proxy appends to the header, it does not replace it. `req.ip` walks the chain from the
+ * socket back through the trusted proxies only, so it is the address the nearest untrusted hop connected from.
  */
 export function clientIp(req: FastifyRequest): string | null {
-  const xff = isDesktop() ? '' : (req.headers['x-forwarded-for'] as string) || '';
-  return (xff.split(',')[0].trim() || req.ip || '').slice(0, 64) || null;
+  return (req.ip || '').slice(0, 64) || null;
+}
+
+/** env.TRUST_PROXY as Fastify's `trustProxy` option: true, false, or the address list as written. */
+export function trustProxySetting(raw: string): FastifyServerOptions['trustProxy'] {
+  const v = raw.trim().toLowerCase();
+  if (v === 'true') return true;
+  if (v === 'false' || v === '') return false;
+  return raw.trim();
 }
 
 /**

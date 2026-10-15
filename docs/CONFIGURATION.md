@@ -15,6 +15,11 @@ The ones worth knowing:
 - `WEB_PORT`: host port the app is published on — `8080` everywhere. (`SPLIT_WEB_PORT`, default `8081`, is
   the split's own port under `--profile split`, so both can run side by side.)
 - `PUBLIC_ORIGIN`: the URL the app is served from (match your domain behind a reverse proxy).
+- `TRUST_PROXY`: which peers may tell the app the visitor's address in `X-Forwarded-For` (sign-in rate limits and
+  the activity log use it). The default, `loopback, linklocal, uniquelocal`, trusts a proxy on this machine, in
+  Docker or on your LAN: nginx, Nginx Proxy Manager, Caddy, Traefik, an Umbrel or CasaOS app proxy, a Cloudflare
+  tunnel container. A proxy on a public address needs naming here (`203.0.113.9` or a CIDR list); `true` trusts
+  every peer, which lets anyone who can reach the port directly choose their own address.
 - **Database** — `DATABASE_URL`, on the app container. **Unset** (the shipped one-container file leaves it
   unset on purpose): the container runs its own Postgres 16 in `/data/pg` (the `uchiyomi_data` volume), on a
   unix socket only — no network listener, no password — and the nightly task dumps it into `/backups` like

@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { env } from '../env';
 import { one, q, tx } from '../lib/db';
-import { logAudit } from '../lib/audit';
+import { logAudit, auditEvery } from '../lib/audit';
 import {
   IMG_COOKIE,
   IMG_COOKIE_TTL,
@@ -288,6 +288,28 @@ export default async function authRoutes(app: FastifyInstance) {
   // untouched, and the callback finishes by minting exactly the session a password login would.
   const OIDC_COOKIE = 'yomi_oidc';
 
+  /**
+   * The unauthenticated OIDC routes (v0.69.1). They declared no rate limit and did unconditional work per request: every
+   * refusal at the callback wrote an audit row holding the caller's own ?error= text (17 KB of table each), and the
+   * login ticket was good for any number of callbacks, each one a token-endpoint POST with this server's client
+   * credentials. The limit is a speed bump only -- its key is req.ip -- so the rows are throttled (auditEvery) and the
+   * ticket is spent once. Reintroduce any one: oidcCallbackBounds.int.test.ts counts the rows or the token POSTs.
+   */
+  const oidcLimit = { config: { rateLimit: { max: 30, timeWindow: '5 minutes' } } };
+  /** Refusals that come before any identity is proven: from anyone on the network, so throttled per kind. */
+  const PRE_IDENTITY = new Set(['missing_code', 'expired', 'state_mismatch', 'exchange_failed']);
+  /** Ticket ids already used, until their ten minutes are up. One process, so memory is enough. */
+  const spent = new Map<string, number>();
+  const spend = (jti: string | undefined): boolean => {
+    const now = Date.now();
+    // Added in expiry order, so the expired ones are at the front: stop at the first live one rather than visiting
+    // every spent id on every callback.
+    for (const [k, exp] of spent) { if (exp >= now) break; spent.delete(k); }
+    if (!jti || spent.has(jti)) return false;
+    spent.set(jti, now + 600_000);
+    return true;
+  };
+
   /** Off to the provider: `link` names the account signed in here that the identity it answers with is linked to. */
   const toProvider = async (reply: any, link?: string) => {
     let start;
@@ -300,7 +322,7 @@ export default async function authRoutes(app: FastifyInstance) {
     // The PKCE verifier and nonce must survive the round trip but must not be readable by scripts, and
     // must not outlive the login attempt.
     const ticket = app.jwt.sign(
-      { typ: 'oidc', state: start.state, nonce: start.nonce, verifier: start.verifier, ...(link ? { link } : {}) },
+      { typ: 'oidc', jti: randomBytes(12).toString('base64url'), state: start.state, nonce: start.nonce, verifier: start.verifier, ...(link ? { link } : {}) },
       { expiresIn: 600 },
     );
     reply.setCookie(OIDC_COOKIE, ticket, {
@@ -309,7 +331,7 @@ export default async function authRoutes(app: FastifyInstance) {
     return reply.redirect(start.url);
   };
 
-  app.get('/auth/oidc/start', async (_req, reply) => {
+  app.get('/auth/oidc/start', oidcLimit, async (_req, reply) => {
     if (!oidcEnabled()) return reply.code(404).send({ error: 'not_configured' });
     return toProvider(reply);
   });
@@ -322,7 +344,7 @@ export default async function authRoutes(app: FastifyInstance) {
    * A browser with no session goes to the sign-in screen. Reintroduce by taking the account from the query: "a link
    * names the account signed in on this browser, never another" in ssoLink.int.test.ts links the wrong one.
    */
-  app.get('/auth/oidc/link', async (req, reply) => {
+  app.get('/auth/oidc/link', oidcLimit, async (req, reply) => {
     if (!oidcEnabled()) return reply.code(404).send({ error: 'not_configured' });
     const token = req.cookies?.[REFRESH_COOKIE];
     const cur = token ? await validateRefreshToken(token) : null;
@@ -330,13 +352,17 @@ export default async function authRoutes(app: FastifyInstance) {
     return toProvider(reply, cur.userId);
   });
 
-  app.get('/auth/oidc/callback', async (req, reply) => {
+  app.get('/auth/oidc/callback', oidcLimit, async (req, reply) => {
     if (!oidcEnabled()) return reply.code(404).send({ error: 'not_configured' });
-    const fail = async (reason: string, detail?: string) => {
-      await logAudit('login.oidc_fail', { detail: { reason, detail }, req });
+    const fail = async (reason: string, detail?: string, identityProven = false) => {
+      // Before an identity is proven the caller is anyone on the network: one row a minute per kind, counting the
+      // attempts it stands for, and never more of the caller's own text than a short token.
+      const shown = String(reason).slice(0, 64);
+      const attempts = identityProven ? 1 : auditEvery(`login.oidc_fail:${PRE_IDENTITY.has(reason) ? reason : 'provider_error'}`);
+      if (attempts !== null) await logAudit('login.oidc_fail', { detail: { reason: shown, detail: detail?.slice(0, 200), attempts }, req });
       reply.clearCookie(OIDC_COOKIE, { path: '/auth/oidc' });
       const origin = env.PUBLIC_ORIGIN.replace(/\/$/, '');
-      return reply.redirect(`${origin}/login?sso_error=${encodeURIComponent(reason)}`);
+      return reply.redirect(`${origin}/login?sso_error=${encodeURIComponent(shown)}`);
     };
 
     const { code, state, error } = req.query as { code?: string; state?: string; error?: string };
@@ -345,13 +371,15 @@ export default async function authRoutes(app: FastifyInstance) {
 
     const raw = (req.cookies as Record<string, string | undefined>)[OIDC_COOKIE];
     if (!raw) return fail('expired');
-    let ticket: { typ?: string; state?: string; nonce?: string; verifier?: string; link?: string };
+    let ticket: { typ?: string; jti?: string; state?: string; nonce?: string; verifier?: string; link?: string };
     try {
       ticket = app.jwt.verify(raw);
     } catch {
       return fail('expired');
     }
     if (ticket.typ !== 'oidc' || !ticket.state || ticket.state !== state) return fail('state_mismatch');
+    // One callback per ticket: a replay never reaches the provider's token endpoint.
+    if (!spend(ticket.jti)) return fail('expired');
 
     let claims: OidcClaims;
     try {
@@ -387,13 +415,13 @@ export default async function authRoutes(app: FastifyInstance) {
       // A new SSO-only server refusing a first sign-in says whose (v0.63.0): the subject to copy into
       // OIDC_BOOTSTRAP_ADMIN_SUB is in the log, where only the operator reads it.
       if (reason === 'not_set_up') app.log.warn(`[auth] a first sign-in, by the subject "${claims.sub}", is not this server's first admin (OIDC_BOOTSTRAP_ADMIN_SUB, OIDC_ADMIN_GROUP)`);
-      return fail(reason);
+      return fail(reason, undefined, true);
     }
 
     const row = await one<{ role: string; disabled: boolean; username: string | null }>(
       'SELECT role, disabled, username FROM users WHERE id = $1', [userId],
     );
-    if (!row || row.disabled) return fail('disabled');
+    if (!row || row.disabled) return fail('disabled', undefined, true);
 
     const refresh = await issueRefreshToken(userId, {
       deviceName: 'SSO', ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null,

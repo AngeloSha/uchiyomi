@@ -48,17 +48,29 @@ interface Discovery {
 let discoveryCache: { at: number; doc: Discovery } | null = null;
 const DISCOVERY_TTL = 60 * 60 * 1000;
 
+/** A failed discovery is not asked again for this long: /auth/oidc/start is unauthenticated (v0.69.1). */
+const DISCOVERY_RETRY_MS = 30_000;
+let discoveryFailedAt = Number.NEGATIVE_INFINITY;
+
 export async function discover(): Promise<Discovery> {
   if (discoveryCache && Date.now() - discoveryCache.at < DISCOVERY_TTL) return discoveryCache.doc;
+  // Only a success was cached, so while the provider was down every unauthenticated /auth/oidc/start fetched the
+  // discovery document again: one outbound request per inbound one.
+  if (Date.now() - discoveryFailedAt < DISCOVERY_RETRY_MS) throw new Error('OIDC discovery failed a moment ago; not retrying yet');
   const base = env.OIDC_ISSUER.replace(/\/$/, '');
-  const r = await fetch(`${base}/.well-known/openid-configuration`, { signal: AbortSignal.timeout(10000) });
-  if (!r.ok) throw new Error(`OIDC discovery failed (${r.status}) at ${base}`);
-  const doc = (await r.json()) as Discovery;
-  for (const k of ['authorization_endpoint', 'token_endpoint', 'jwks_uri'] as const) {
-    if (!doc[k]) throw new Error(`OIDC discovery document is missing ${k}`);
+  try {
+    const r = await fetch(`${base}/.well-known/openid-configuration`, { signal: AbortSignal.timeout(10000) });
+    if (!r.ok) throw new Error(`OIDC discovery failed (${r.status}) at ${base}`);
+    const doc = (await r.json()) as Discovery;
+    for (const k of ['authorization_endpoint', 'token_endpoint', 'jwks_uri'] as const) {
+      if (!doc[k]) throw new Error(`OIDC discovery document is missing ${k}`);
+    }
+    discoveryCache = { at: Date.now(), doc };
+    return doc;
+  } catch (e) {
+    discoveryFailedAt = Date.now();
+    throw e;
   }
-  discoveryCache = { at: Date.now(), doc };
-  return doc;
 }
 
 interface Jwk { kid?: string; kty: string; alg?: string; use?: string; [k: string]: unknown }

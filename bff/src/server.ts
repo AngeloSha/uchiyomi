@@ -41,6 +41,7 @@ import { runChapterCleanup, unpruneRestored } from './lib/chapterCleanup';
 import { runExtensionMonitor } from './lib/extensionMonitor';
 import { startEngineCacheKeeper } from './lib/sources/suwayomi/cache';
 import { startSweeper } from './lib/imageCache';
+import { pruneAudit } from './lib/audit';
 import { startActivityLog, flushActivityLog } from './lib/activityLog';
 import { runBackup, backupDelay, backupSettings, stampDelay } from './lib/backup';
 import { firstRunFloor, DESKTOP_FLOORS } from './lib/desktop';
@@ -51,6 +52,7 @@ import { registerApiDocs } from './lib/apiDocs';
 import { appVersion } from './lib/appVersion';
 import { buildPayload, installFacts, sendPing } from './lib/installPing';
 import authRoutes from './routes/auth';
+import { trustProxySetting } from './lib/auth';
 import adminRoutes, { sweepImportBatches } from './routes/admin';
 import catalogRoutes from './routes/catalog';
 import imageRoutes, { authorizeImageRequest } from './routes/images';
@@ -117,8 +119,10 @@ async function main() {
   const app = Fastify({
     logger: { level: env.NODE_ENV === 'production' ? 'info' : 'debug' },
     // Desktop: nothing sits in front of the app, so a forwarded-for header is only ever something a local
-    // process made up.
-    trustProxy: !isDesktop(),
+    // process made up. Elsewhere only the peers TRUST_PROXY names may set it (env.ts): trusting every peer let a client
+    // on the app port choose its own address for the rate limits. Reintroduce `true`: trustProxy.test.ts sees 14
+    // sign-ins with rotating X-Forwarded-For all answered 401, none 429.
+    trustProxy: isDesktop() ? false : trustProxySetting(env.TRUST_PROXY),
     bodyLimit: 2 * 1024 * 1024,
   });
 
@@ -232,6 +236,11 @@ async function main() {
   await registerWebRoot(app);
 
   startSweeper();
+  // v0.69.1: the refusal rows an outside caller can write stay bounded (lib/audit.ts pruneAudit, refusals only -- the
+  // rest of audit_log is evidence other code reads back). Shortly after boot, then once a day.
+  const pruneRefusals = () => { pruneAudit().catch((e) => app.log.warn({ err: e }, 'audit prune failed')); };
+  setTimeout(pruneRefusals, 10 * 60_000).unref();
+  setInterval(pruneRefusals, 24 * 60 * 60_000).unref();
 
   // Periodic new-chapter check (owned mode), self-rescheduling so the admin can change the interval live.
   // ⚠️ `OWNED`, never `LIBRARY_BACKEND === 'owned'`: the all-in-one image and the Unraid template do not set

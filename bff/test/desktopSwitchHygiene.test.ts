@@ -103,8 +103,9 @@ test('server.ts keeps the server arm of every networking difference', () => {
   const s = code(read('server.ts'));
   // Reintroduce by writing `host: '127.0.0.1'` without the ternary: the Docker image stops answering on its port.
   assert.match(s, /host: isDesktop\(\) \? '127\.0\.0\.1' : '0\.0\.0\.0'/, 'the listen host lost its server arm');
-  // Reintroduce by writing `trustProxy: false`: every server behind a reverse proxy logs the proxy's address.
-  assert.match(s, /trustProxy: !isDesktop\(\),/, 'trustProxy lost its server arm');
+  // Reintroduce by writing `trustProxy: false`: every server behind a reverse proxy logs the proxy's address. The
+  // server arm trusts the proxies TRUST_PROXY names (v0.69.1, trustProxy.test.ts), the desktop arm nothing.
+  assert.match(s, /trustProxy: isDesktop\(\) \? false : trustProxySetting\(env\.TRUST_PROXY\),/, 'trustProxy lost its server arm');
   // The guard hook only on desktop, and only once.
   // Reintroduce by calling installDesktopGuards(app) unconditionally: every server request with a Host other
   // than 127.0.0.1 would answer 421.
