@@ -230,6 +230,9 @@ test('a solver still busy fails in our own words: no cooldown and no rate limit 
 
   // The SITE's 429 is the site's: trawl says it in its own answer, and classify() reads a rate limit there, as ever.
   assert.equal(classify(new Error('flaresolverr: Tier 3 failed (http-429). Set RESIDENTIAL_PROXY_URL (or pass a proxy per-request) to enable Tier 4 proxy escalation.')), 'rate_limited');
+  // trawl 1.8.0's words for a solve that used up its 60 s budget (1.7.0 said "…-challenge-timeout"): a cooldown, as
+  // any timeout. Reintroduce by dropping "deadline exceeded" from classify(): null, and no cooldown.
+  assert.equal(classify(new Error('flaresolverr: Scrape deadline exceeded')), 'down');
 });
 
 // ---- per site: the solver that answered last, and its own cookies -------------------------------------------------

@@ -221,7 +221,8 @@ const RULES: Array<[RegExp, (c: RuleCtx) => Diagnosis]> = [
       'admin')],
 
   // trawl's own (v0.55.3): "Tier 3 failed (cloudflare-challenge-timeout)", its browser's wait on the wall running out.
-  [/timeout after [\d.]+ seconds|error solving the challenge|-challenge-timeout\b/i, () =>
+  // trawl 1.8.0 says it as "Scrape deadline exceeded" when a solve uses up its 60 s budget (v0.69.1).
+  [/timeout after [\d.]+ seconds|error solving the challenge|-challenge-timeout\b|scrape deadline exceeded/i, () =>
     D('solver_timeout', NEEDS_ADMIN,
       fixed('fix.solverTimeout', 'The site presented a Cloudflare challenge the solver could not finish in time. Often transient, so re-test first. If it persists, the site has raised its protection.'),
       'admin')],

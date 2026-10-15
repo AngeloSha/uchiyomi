@@ -44,7 +44,8 @@ export function classify(err: unknown, httpStatus?: number): SourceStatus | null
   const m = (err instanceof Error ? err.message : String(err ?? '')).toLowerCase();
   if (httpStatus === 429 || RATE_LIMIT_WORDS.test(m)) return 'rate_limited';
   if (httpStatus === 403 || /\b403\b|just a moment|cloudflare|challenge|cf-chl|forbidden|access denied|blocked/.test(m)) return 'blocked';
-  if (httpStatus === 503 || httpStatus === 502 || httpStatus === 504 || /timeout|timed out|econn|enotfound|fetch failed|network|\b50[234]\b/.test(m)) return 'down';
+  // "deadline exceeded": trawl 1.8.0's words for a solve that used up its budget (v0.69.1); 1.7.0 said "…-challenge-timeout".
+  if (httpStatus === 503 || httpStatus === 502 || httpStatus === 504 || /timeout|timed out|deadline exceeded|econn|enotfound|fetch failed|network|\b50[234]\b/.test(m)) return 'down';
   return null;
 }
 

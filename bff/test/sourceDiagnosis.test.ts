@@ -68,6 +68,9 @@ test("trawl's own failures are named for what broke", () => {
   // as unknown.
   const code = (err: string) => diagnose(facts({ lastError: err })).code;
   assert.equal(code(trawl('cloudflare-challenge-timeout')), 'solver_timeout', 'its browser ran out of time on the wall');
+  // trawl 1.8.0's words for the same thing. Reintroduce by matching 1.7.0's alone: this reads unknown (and classify(),
+  // pinned in sourceEvidence.test.ts, gave the source no cooldown either).
+  assert.equal(code('Scrape deadline exceeded'), 'solver_timeout', "trawl 1.8.0's timeout");
   const blocked = diagnose(facts({ lastError: trawl('datacenter-ip-blocked (cf_clearance obtained but redirect never completed — needs residential proxy)') }));
   assert.equal(blocked.code, 'edge_403', 'past the challenge, and the site still refuses this address');
   assert.equal(blocked.fixSaid?.code, 'fix.ipBlocked');
