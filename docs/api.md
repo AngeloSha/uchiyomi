@@ -2779,6 +2779,10 @@ GET    /opds/book/:id/page/:n
 GET    /opds/continue             GET    /opds/favorites
 GET    /opds/lists/:id
 ```
+`GET /img/books/:id/page/:n?w=<64..2000>` and `/img/lib/books/:id/page/:n?w=` answer a page at most `w` pixels wide, as WebP
+(or JPEG for a strip too tall for WebP). A page that is already that narrow, is animated, cannot be read, or would not come out
+smaller is sent as it is, in its original type, so asking for a width never returns a worse copy of a page that already fits.
+The web reader asks for the width its column is shown at (in device pixels, rounded up to 720, 1080, 1440 or 2000).
 
 ### Komga-compatible API (Mihon's Komga extension and tracker)
 ```

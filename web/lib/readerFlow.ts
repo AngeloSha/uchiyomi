@@ -159,3 +159,17 @@ export function renderWindow(flow: FlowItem[], current: number, behind: number, 
   }
   return s;
 }
+
+/** The page widths the reader asks the server for; the server caches a copy of each page per width. */
+export const PAGE_WIDTHS = [720, 1080, 1440, 2000] as const;
+
+/**
+ * The width to request a page at: the column's CSS width in device pixels (at most 3x), rounded UP to a
+ * step so the picture is never softer than the screen. 0 when the column is not measured yet. A page that is
+ * already narrower than this comes back as it is.
+ */
+export function pageWidthBucket(cssWidth: number, dpr: number): number {
+  if (!(cssWidth > 0)) return 0;
+  const want = cssWidth * Math.min(3, Math.max(1, dpr || 1));
+  return PAGE_WIDTHS.find((w) => w >= want) ?? PAGE_WIDTHS[PAGE_WIDTHS.length - 1];
+}
