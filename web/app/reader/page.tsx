@@ -246,6 +246,8 @@ function ReaderInner() {
   /** When "next chapter" was last pressed without being confirmed (null = not armed). See readerNav.ts. */
   const [armedNext, setArmedNext] = useState<number | null>(null);
   const pointers = useRef<Map<number, { x: number; y: number }>>(new Map());
+  /** What the last press on the page was made with, for the right-click menu below: a touch long-press is not a right click. */
+  const lastPointer = useRef('mouse');
   const pinch = useRef<{ dist: number; zoom: number } | null>(null);
 
   const seriesId0 = chapters[0]?.seriesId || '';
@@ -1247,6 +1249,7 @@ function ReaderInner() {
 
   // ---- tap / double-tap / pinch (no overlay -> native scroll works) ----
   const onPointerDown = (e: React.PointerEvent) => {
+    lastPointer.current = e.pointerType;
     // Only the primary button is a tap. A right or middle click is the browser's own (the context menu, auto-scroll), and
     // it used to count as a tap here too: a right click on the edge of a page turned it, and one in the middle toggled the controls.
     if (e.pointerType === 'mouse' && e.button !== 0) { tap.current = null; return; }
@@ -1425,8 +1428,18 @@ function ReaderInner() {
     return items;
   }, { label: tr('Reader') });
   menuOpen.current = readerMenu.open;
-  /** Only the mouse's right button: the hook's touch long-press is left out, so the reader's own gestures stay as they were. */
-  const menuBind = { onContextMenu: readerMenu.bind.onContextMenu };
+  /**
+   * Only the mouse's right button: the hook's touch long-press is left out, so the reader's own gestures stay as they were.
+   * And a long-press is not a right click: Android Chrome and Windows touch send `contextmenu` for one, and there the
+   * browser's own menu (save or share the image) is what holding a page is for. Chromium and Firefox name the pointer on
+   * the event; Safari's is a plain MouseEvent, so the page's last press names it there.
+   */
+  const menuBind = {
+    onContextMenu: (e: React.MouseEvent<HTMLElement>) => {
+      if (((e.nativeEvent as Partial<PointerEvent>).pointerType || lastPointer.current) === 'touch') return;
+      readerMenu.bind.onContextMenu(e);
+    },
+  };
 
   // the header's two-line "what you are reading" block, wrapped in a link to the series when we know its id
   const titleBlock = (
