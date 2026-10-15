@@ -30,6 +30,7 @@ import { addNoticeHeading, addNumberingView, numLabel, type DetailNumbering } fr
 import { extensionSettingsHref } from '@/lib/sourcePrefs';
 import { baseOf, codeLabel, editionLangPreset, languageChoices, openingLanguage } from '@/lib/editions';
 import { MANGADEX_LANGUAGES_HREF } from '@/lib/mangadexLangs';
+import { useAccountPref } from '@/lib/useAccountPref';
 
 export interface Provider {
   source: string; name: string; sourceId: string; title: string; coverUrl?: string;
@@ -108,12 +109,9 @@ export type AddSeed =
   | { kind: 'group'; title: string; providers: Provider[]; library?: HeldTitle }
   | { kind: 'edition'; of: string; title: string; lang?: string; source?: string };
 
-/**
- * Per-device memory of the "Also check the other sources" switch. A device setting, not an account one: it
- * is about how this person adds, and the server has nothing to store for a choice the dialog makes at add
- * time. Off until switched on.
- */
-const ALSO_FOLLOW_KEY = 'uchiyomi.alsoFollow';
+// The "Also check the other sources" switch is remembered on the ACCOUNT (`alsoFollow`, lib/accountPrefs.ts; it was
+// per device): it is about how this person adds, and it should not have to be found again on another browser.
+// Off until switched on.
 /** At most this many candidates ride with an add: the server judges each with two outbound calls, under one wall budget. */
 const ALSO_FOLLOW_MAX = 6;
 
@@ -333,13 +331,9 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
     }
     return out.slice(0, ALSO_FOLLOW_MAX);
   }, [offered, picked]);
-  const [alsoFollow, setAlsoFollowState] = useState<boolean>(() => {
-    try { return typeof localStorage !== 'undefined' && localStorage.getItem(ALSO_FOLLOW_KEY) === '1'; } catch { return false; }
-  });
-  const setAlsoFollow = (v: boolean) => {
-    setAlsoFollowState(v);
-    try { localStorage.setItem(ALSO_FOLLOW_KEY, v ? '1' : '0'); } catch { /* private mode: the switch still works for this dialog */ }
-  };
+  const [alsoFollow, setAlsoFollowPref] = useAccountPref('alsoFollow');
+  // Applied at once; a refused save puts it back, which is all a switch in a dialog needs to say.
+  const setAlsoFollow = (v: boolean) => { void setAlsoFollowPref(v).catch(() => {}); };
   // How many candidates rode with the add, so the done step knows whether to look for results on the job
   // card and what "Checking {n} sources" counts. Zero when the switch was off or there was nobody to check.
   const [sentFollow, setSentFollow] = useState(0);

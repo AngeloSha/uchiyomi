@@ -137,6 +137,9 @@ test('the account keeps homeRails: the settings PUT stores any key a newer clien
   // No bff change for this: PUT /api/settings validates the keys that steer a query or name a row and merges the rest
   // (`app_settings.data || EXCLUDED.data`). If that ever narrows to a list of known keys, homeRails stops saving.
   const route = read('../bff/src/routes/personal.ts');
-  assert.match(route, /const body = z\.record\(z\.string\(\), z\.any\(\)\)\.safeParse\(req\.body \?\? \{\}\);/);
+  assert.match(route, /const body = settingsBody\.safeParse\(req\.body \?\? \{\}\);/);
+  // The schema lives in lib/accountSettings.ts. Still a free-form record -- only its two boolean account switches
+  // are refined -- so a key a newer client writes (homeRails, tone) is still kept.
+  assert.match(read('../bff/src/lib/accountSettings.ts'), /z\.record\(z\.string\(\), z\.any\(\)\)\.superRefine\(/);
   assert.match(route, /ON CONFLICT \(user_id\) DO UPDATE SET data = app_settings\.data \|\| EXCLUDED\.data/);
 });

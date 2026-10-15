@@ -1053,8 +1053,8 @@ time of that check are there from the start.) A followed source that was in a co
 not in that listing either, so
 chapters only it carries drop off the page until the next sweep.
 
-The **Filter** chip's switch, **Show chapters not on the server yet**, hides or shows the grey rows on this
-device. Members see them too — a grey row is how anyone can tell the difference between "the source has not
+The **Filter** chip's switch, **Show chapters not on the server yet**, hides or shows the grey rows. It is
+remembered on your account, so it follows you to your other browsers. Members see them too — a grey row is how anyone can tell the difference between "the source has not
 released it" and "it is held for a group" — but only people who may download can fetch. For them every grey
 row (except one only a blocked group has) ends in a cloud icon: tap it and that one chapter is fetched, the
 same request the selection bar's *Fetch* makes for many. It is the cloud, not the ⬇ on the rows above — that
@@ -1563,7 +1563,7 @@ again.
   up with the main source's — at least 90% of the main source's numbers listed there and, unless the title
   is exact and the main source lists at least ten, at least 90% of its numbers listed here too — up to two
   per series (the rule in full is in section 4, *Following a second source*). The switch is remembered on
-  this device. The done step shows the check as it runs — *Checking {n} sources — this can take a minute.
+  your account. The done step shows the check as it runs — *Checking {n} sources — this can take a minute.
   You can close this; anything followed shows under Sources & translations.* — then one line per source,
   *Followed {name} — listed there as “{title}” · {pct} %* or *Not followed: {name} — numbering differs* (or
   *different title*, *could not be reached*, *lists too few chapters*, *not checked — it took too long*,

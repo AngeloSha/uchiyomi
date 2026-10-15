@@ -19,6 +19,7 @@ import { statusFor, saveConnection, disconnect, whoAmI, pushSeriesProgress, push
 import { ADAPTERS, isProvider, verdictOf, type Provider } from '../lib/trackerProviders';
 import { logAudit } from '../lib/audit';
 import { noticeBook } from '../lib/noticeChapters';
+import { settingsBody } from '../lib/accountSettings';
 import { devicesOf, hourIn, lastDays, loadTimeline, summarize, validTz, yearRange } from '../lib/readingTime';
 import { listFor, ownListFor, listsFor, listItems, kindOf, ownerOf, type ListRow } from '../lib/lists';
 import { smartQuery, parseQuery } from '../lib/smartLists';
@@ -1037,9 +1038,12 @@ export default async function personalRoutes(app: FastifyInstance) {
 
   app.put('/api/settings', async (req, reply) => {
     const uid = userIdOf(req);
-    // zod 4 requires a key schema as well as a value schema; z.record(valueOnly) was a v3 signature.
-    const body = z.record(z.string(), z.any()).safeParse(req.body ?? {});
-    if (!body.success) return reply.code(400).send({ error: 'bad_settings', message: 'Settings must be an object.' });
+    // The switches the web app mirrors to localStorage must be booleans (lib/accountSettings.ts); the rest is free-form.
+    const body = settingsBody.safeParse(req.body ?? {});
+    if (!body.success) {
+      const key = body.error.issues.map((i) => i.path.join('.')).find(Boolean);
+      return reply.code(400).send({ error: 'bad_settings', message: key ? `${key} must be on or off.` : 'Settings must be an object.' });
+    }
     const data = body.data;
     // Most of this object intentionally remains forwards-compatible: old servers must retain settings written
     // by a newer web client.  The settings that alter navigation or name database rows are stricter, though.

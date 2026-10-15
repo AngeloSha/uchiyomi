@@ -45,7 +45,7 @@ test('v0.55.8 personal settings contracts', { skip }, async () => {
   try {
     const put = (payload: unknown) => app.inject({ method: 'PUT', url: '/api/settings', headers: auth, payload });
 
-    const ok = await put({ librarySort: 'unread', librarySortDir: 'asc', showAllChapters: true, homeCollections: [owned[1], owned[0], owned[1]], futureSetting: { kept: true } });
+    const ok = await put({ librarySort: 'unread', librarySortDir: 'asc', showAllChapters: true, showGhosts: false, alsoFollow: true, homeCollections: [owned[1], owned[0], owned[1]], futureSetting: { kept: true } });
     assert.equal(ok.statusCode, 200, ok.body);
     const saved = (await app.inject({ method: 'GET', url: '/api/settings', headers: auth })).json();
     assert.equal(saved.librarySort, 'unread');
@@ -59,6 +59,8 @@ test('v0.55.8 personal settings contracts', { skip }, async () => {
     assert.equal(soon.json().librarySort, 'soon');
     assert.equal((await put({ librarySort: 'unread' })).statusCode, 200);
     assert.equal(saved.showAllChapters, true);
+    assert.equal(saved.showGhosts, false, 'the per-account Show-chapters-not-on-the-server switch');
+    assert.equal(saved.alsoFollow, true, 'the per-account Also-check-the-other-sources switch');
     assert.deepEqual(saved.homeCollections, [owned[1], owned[0]], 'deduplicated without changing order');
     assert.deepEqual(saved.futureSetting, { kept: true }, 'unknown settings remain forwards-compatible');
 
@@ -67,6 +69,9 @@ test('v0.55.8 personal settings contracts', { skip }, async () => {
       // v0.60.0: a sort order other than asc or desc. Reintroduce by accepting anything: saved, 200.
       { librarySortDir: 'sideways' },
       { showAllChapters: 'yes' },
+      // The two switches the web app mirrors to localStorage: a string "false" would read as truthy there.
+      { showGhosts: 'false' },
+      { alsoFollow: 1 },
       { homeCollections: owned },
       { homeCollections: [foreign] },
       ['not', 'an', 'object'],

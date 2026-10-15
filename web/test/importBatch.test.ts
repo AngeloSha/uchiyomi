@@ -635,10 +635,10 @@ test('the add dialog offers the other sources only when it already holds a list,
   // addSeriesDialog.test.ts.)
   // (v0.52.0's language edition rides after those, pinned in addSeriesDialog.test.ts.)
   assert.match(src, /json: \{\s*source: picked\.source, sourceId: picked\.sourceId, chapterCount, chapterFrom, autoUpdate, force, alsoFollow: alsoFollowBody, numbering,?(?:\s*\.\.\.\(archiving \? \{ archive: true \} : \{\}\),?)?(?:\s*\.\.\.\(editionBody \? \{ edition: editionBody \} : \{\}\),?)?\s*\}/, 'the add body does not carry alsoFollow');
-  // The switch is on the options step only with candidates, remembered per device under one key.
+  // The switch is on the options step only with candidates, remembered on the account (lib/accountPrefs.ts), mirrored to the same localStorage key it always used.
   assert.match(src, /\{mayFollow && others\.length > 0 && !view\?\.posting && \(\s*<div className="mt-3" data-also-follow>/, 'the switch shows without candidates');
-  assert.match(src, /const ALSO_FOLLOW_KEY = 'uchiyomi\.alsoFollow';/, 'the per-device key changed');
-  assert.match(src, /localStorage\.setItem\(ALSO_FOLLOW_KEY, v \? '1' : '0'\)/, 'the switch is not remembered');
+  assert.match(src, /const \[alsoFollow, setAlsoFollowPref\] = useAccountPref\('alsoFollow'\);/, 'the switch is not remembered');
+  assert.match(readFileSync(join(__dirname, '..', 'lib/accountPrefs.ts'), 'utf8'), /alsoFollow: \{ mirror: 'uchiyomi\.alsoFollow', on: '1', off: '0', fallback: false \}/, 'the stored key or values changed');
   // The done step: results from the job card the dialog already polls; a result seed points at Find missing.
   assert.match(src, /if \(seed\.kind === 'result'\) return <p[^>]*>\{tr\('Other sources: Find missing chapters on the series page\.'\)\}<\/p>;/, 'a result seed is not pointed at Find missing chapters');
   assert.match(src, /if \(others\.length === 0\) return <p[^>]*>\{tr\('None of the other sources checked lists this title\.'\)\}<\/p>;/, 'zero others does not say "checked"');

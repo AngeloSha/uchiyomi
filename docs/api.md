@@ -1441,7 +1441,8 @@ POST   /api/push/unsubscribe
 
 **Account settings.** `GET /api/settings` answers the caller's whole forwards-compatible object; `PUT /api/settings`
 takes top-level keys directly and merges them into that object (an object value is replaced whole). Unknown keys stay
-accepted and retained for compatibility. v0.55.8 validates three public keys, and v0.60.0 a fourth:
+accepted and retained for compatibility. v0.55.8 validates three public keys, and v0.60.0 a fourth (then the two
+switches below):
 
 - `librarySort: 'updated' | 'new' | 'az' | 'unread'` (since v0.58.0 also `'popular' | 'score' | 'rating' | 'chapters'
   | 'read'`, since v0.61.0 `'soon'`, Releasing soon), the Library's saved default. A valid URL sort wins for that
@@ -1458,6 +1459,13 @@ many AniList users list the entry, read through the series' checked AniList link
 older than three days, fifty per request; never for a library whose AniList lookups are off. `POST /api/series/search`
 sorts by `popularity`, `score`, `rating`, `chapters` and `lastRead` (see the OpenAPI), and `GET /api/home` carries
 `popular`, Home's "Most popular in your library".
+- `showGhosts: boolean` and `alsoFollow: boolean`, the two switches that used to live only in the browser's
+  localStorage: show chapters the sources list that this server lacks on the series page (default `true`), and the Add
+  dialog's "also check the other sources" switch (default `false`). Anything but a boolean answers
+  `400 {error:"bad_settings"}` naming the key. The web app still mirrors both to localStorage, under the keys it always
+  used, so the first paint and an offline launch do not wait for the server; the account's value overwrites the local
+  one once the session (`user.settings`) has loaded, and a value the device holds that the account lacks is uploaded
+  once.
 - `homeCollections: string[]`, ordered, de-duplicated, at most three collection ids owned by the caller -- or, since
   v0.61.0, shared with the household by another member. Missing means the legacy first three nonempty Lists; `[]`
   explicitly means no Home List rails. A selected empty List keeps its slot. Home ignores an already-stored stale or

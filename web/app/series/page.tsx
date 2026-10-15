@@ -61,6 +61,7 @@ import { editionChipLabels } from '@/lib/editions';
 import { continueChoice, continueText, readCountText } from '@/lib/continueLabel';
 import { radarText } from '@/lib/radar';
 import { catchUpText } from '@/lib/readingTime';
+import { useAccountPref } from '@/lib/useAccountPref';
 import { offlineKeyShown, seriesActionGroups, type SeriesActionId } from '@/lib/seriesActions';
 import { RatingsPanel, useSeriesRating } from '@/components/RatingsPanel';
 import { ContinueBar, ContinueButton, ReadProgress, useOutOfView } from '@/components/ContinueBar';
@@ -651,11 +652,7 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
 interface StartedJob { folder: string; at: number }
 interface SourceJob { folder: string; status: string; reason?: string; reasonSaid?: Said[] }
 
-/** The localStorage key for the per-device "Show chapters not on the server yet" switch in the Filter sheet. */
-const SHOW_GHOSTS_KEY = 'uchiyomi.showGhosts';
-function readShowGhosts(): boolean {
-  try { return localStorage.getItem(SHOW_GHOSTS_KEY) !== 'off'; } catch { return true; }
-}
+
 
 /**
  * Prev / a range picker / Next for the chapter list. The picker names each page by the first and last chapter
@@ -717,14 +714,14 @@ function SeriesInner() {
   const [downloaded, setDownloaded] = useState<Set<string>>(new Set());
   const [showSummary, setShowSummary] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
-  // Ghost rows: the chapters the sources list that this server lacks. Per device, default on, because
-  // "there are 12 more of these" is the news this page exists to carry; off is for a phone that only ever
-  // reads what is already here.
-  const [showGhosts, setShowGhosts] = useState(true);
+  // Ghost rows: the chapters the sources list that this server lacks. On your ACCOUNT (lib/accountPrefs.ts; it was
+  // per device), default on, because "there are 12 more of these" is the news this page exists to carry; off is
+  // for someone who only ever reads what is already here.
+  const [showGhosts, setShowGhostsPref] = useAccountPref('showGhosts');
   // Whether this device's choice has been read yet: a `?ch=` jump waits for it, or the switch arriving one render
   // later resets the chapter page under a jump that already happened (a series still cached from a minute ago).
   const [ghostsRead, setGhostsRead] = useState(false);
-  useEffect(() => { setShowGhosts(readShowGhosts()); setGhostsRead(true); }, []);
+  useEffect(() => { setGhostsRead(true); }, []);
   const [showAll, setShowAll] = useState(false);
   // Select mode, the library's pattern. Two sets because a chapter is picked by id and a ghost has none --
   // it is picked by number, which is what the fetch route takes. Cleared whenever the list under it
@@ -1208,8 +1205,8 @@ function SeriesInner() {
     setPickedGhosts((p) => { const n = new Set(p); const k = ghostKey(ghost); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const toggleGhosts = () => {
     const next = !showGhosts;
-    setShowGhosts(next);
-    try { localStorage.setItem(SHOW_GHOSTS_KEY, next ? 'on' : 'off'); } catch { /* private mode: the session still has it */ }
+    // Applied at once and saved to the account; a refused save puts it back, and the device has it either way.
+    void setShowGhostsPref(next).catch(() => {});
     // Rows that are no longer on screen cannot stay picked, or Fetch would act on what nobody can see.
     if (!next) setPickedGhosts(new Set());
   };

@@ -6,6 +6,7 @@ import { deviceId, deviceName } from './device';
 import { clearShownOnce } from './shownOnce';
 import { applyReduceEffects, restoreReduceEffects } from './effects';
 import { applyTone, restoreTone } from './tone';
+import { adoptAccountPrefs, clearAccountPrefs, localOnlyPrefs } from './accountPrefs';
 import { isDesktop, serverReachableHint, untilReachable } from './desktop';
 import { t as tr } from './i18n';
 
@@ -141,6 +142,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     applyReduceEffects(u.settings?.reduceEffects === true);
     // The background tone (lib/tone.ts), for the same reason: the shell's first frame is already in it.
     applyTone(u.settings?.tone);
+    // The device switches that follow the account (lib/accountPrefs.ts): the account's value over the device's.
+    // A switch the account holds no value for yet keeps this device's and is carried up once, so a choice made
+    // before these were account settings is not lost on the first sign-in after the upgrade.
+    adoptAccountPrefs(u.settings);
+    const carry = localOnlyPrefs(u.settings);
+    if (Object.keys(carry).length) {
+      void api('/api/settings', { method: 'PUT', json: carry }).catch(() => { /* the device keeps it; the next sign-in tries again */ });
+    }
     setStatus('authed');
   };
 
@@ -186,6 +195,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     applyReduceEffects(false);
     // The tone likewise: the sign-in screen is OLED, and the next person's offline launch does not inherit this one's.
     applyTone(null);
+    clearAccountPrefs();
     setUser(null);
     setStatus('anon');
     // Secrets the server only ever sends once are held outside React so a remount cannot destroy them.

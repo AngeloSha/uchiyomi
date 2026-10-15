@@ -114,9 +114,11 @@ test('the <head> script applies only a tone that is not OLED, makes the one brow
 test('the account\'s tone is applied where the accent and Reduce effects are', () => {
   const auth = code(read('lib/auth.tsx'));
   // Before `authed`, like Reduce effects: the shell's first frame is in the reader's tone.
-  assert.match(auth, /applyReduceEffects\(u\.settings\?\.reduceEffects === true\);\s*applyTone\(u\.settings\?\.tone\);\s*setStatus\('authed'\);/);
+  // The account switches (lib/accountPrefs.ts) are adopted between the two and setStatus; what this pins is
+  // that the tone is applied with Reduce effects, and both before `authed` mounts anything.
+  assert.match(auth, /applyReduceEffects\(u\.settings\?\.reduceEffects === true\);\s*(?:\/\/[^\n]*\n\s*)*applyTone\(u\.settings\?\.tone\);[\s\S]*?setStatus\('authed'\);/);
   assert.match(auth, /restoreReduceEffects\(\);\s*restoreTone\(\);\s*setStatus\('offline'\);/);
-  assert.match(auth, /applyReduceEffects\(false\);\s*applyTone\(null\);\s*setUser\(null\);/, 'sign-out keeps the tone for the sign-in screen');
+  assert.match(auth, /applyReduceEffects\(false\);\s*(?:\/\/[^\n]*\n\s*)*applyTone\(null\);[\s\S]*?setUser\(null\);/, 'sign-out keeps the tone for the sign-in screen');
   assert.match(auth, /if \('tone' in partial\) applyTone\(partial\.tone\);/, 'picking a tone waits for a reload');
   assert.match(code(read('app/providers.tsx')), /useLayoutEffect\(restoreReduceEffects, \[\]\);\s*useLayoutEffect\(restoreTone, \[\]\);/);
 });

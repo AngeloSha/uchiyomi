@@ -262,6 +262,12 @@ components:
             connected tracker it is linked to as Plan to Read (AniList PLANNING, MyAnimeList plan_to_read, Kitsu
             planned), only where the account's list has no entry for it yet -- an existing entry is never changed --
             and never under Incognito reading.
+        showGhosts:
+          type: boolean
+          description: Show chapters the sources list that this server lacks, on the series page (default true). Per account; the web app mirrors it to localStorage.
+        alsoFollow:
+          type: boolean
+          description: The Add dialog's "also check the other sources" switch (default false). Per account; the web app mirrors it to localStorage.
         reader:
           type: object
           additionalProperties: true
@@ -5980,7 +5986,7 @@ paths:
         reader's edges) and, since v0.55.7, `listSorts` (list id to `az`, `za`, `read`, `unread` or `latest`: the order
         each list is shown in; a list's own order is not stored). Since v0.55.8 the validated keys are `librarySort`,
         `homeCollections` and `showAllChapters` (since v0.60.0 also `librarySortDir`, since v0.61.0 `incognito`, a
-        boolean, and since v0.68.0 `trackerPlanOnAdd`, a boolean). Unknown keys remain accepted and retained for compatibility -- since v0.66.0 the web app's `homeRails`
+        boolean, and since v0.68.0 `trackerPlanOnAdd`, a boolean; `showGhosts` and `alsoFollow`, booleans too, else 400). Unknown keys remain accepted and retained for compatibility -- since v0.66.0 the web app's `homeRails`
         (`{order, hidden}`, Home's rails as the reader arranged them; null is the default order) and `tone` (`oled`,
         `graphite` or `midnight`, the background) among them.
       operationId: putApiSettings
