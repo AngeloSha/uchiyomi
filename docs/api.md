@@ -1494,6 +1494,16 @@ reader's 90-day median; 404 for a series they may not open. `GET /api/wrapped` t
 same figure as the Studio's year), `perChapterMs` and `byHour`. The leaderboard and the admin's member stats stay
 counts of chapters.
 
+**Finished chapters count once** (since v0.70.0, [#264](https://github.com/AngeloSha/uchiyomi/issues/264)). One
+read-through writes two completed reading events (the page before the last already counts as the end, and the last page
+sends its own), so every count of finished chapters is a count of distinct chapters, as `/api/leaderboard` always was:
+`/api/stats`' `chapters_completed` (and the badges on it), `weekChapters`, each `byDay` entry (a chapter finished twice in
+a day is one; read again on another day it counts on that day too, as the streak does) and `windowChapters`, new, the
+`days` window's chapters each once; `/api/wrapped`, whose months, weekdays, days and top series count each chapter on
+the day it was first finished that year; `/api/stats/time`'s `chapters`; and `/api/admin/stats`' member `total` and `week`.
+They are counted from reading events, never from a chapter's read mark, so marking a chapter read from a list does not
+count and reading it afterwards does.
+
 **Release radar** (since v0.61.0). Every enriched series also carries `yomi.radar: {nextAt, dueUntil, quietAfter,
 lastAt, every, kind, steady, ended, basis} | null` — the server's estimate of when its next chapter comes (`series_radar`,
 one row per series, ISO times). The evidence is the dates its sources list for the chosen copies of what it may take

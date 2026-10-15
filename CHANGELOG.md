@@ -1,5 +1,61 @@
 # Changelog
 
+## v0.70.0 — 2026-10-16
+
+**Each chapter you finish counts once. The reader gains a right-click menu and a list of its keys, and the 18+ reveal
+says it is on wherever you are.** Most of this release began as pull requests from **@Squeaks72**, taken as they were
+or rebuilt on the app's own parts ([#231](https://github.com/AngeloSha/uchiyomi/pull/231), [#239](https://github.com/AngeloSha/uchiyomi/pull/239), [#251](https://github.com/AngeloSha/uchiyomi/pull/251),
+[#254](https://github.com/AngeloSha/uchiyomi/pull/254), [#255](https://github.com/AngeloSha/uchiyomi/pull/255), [#258](https://github.com/AngeloSha/uchiyomi/pull/258), [#259](https://github.com/AngeloSha/uchiyomi/pull/259), [#260](https://github.com/AngeloSha/uchiyomi/pull/260)). The
+counting fix is **CheetahDoesStuff**'s report ([#264](https://github.com/AngeloSha/uchiyomi/issues/264)). Thank you both.
+
+### Each finished chapter counts once
+
+- **Reading a chapter through counted it twice** ([#264](https://github.com/AngeloSha/uchiyomi/issues/264), reported by CheetahDoesStuff). The page
+  before the last already counts as the end, and the last page then counted the chapter again. Re-reading a chapter
+  added more. So Wrapped, your profile's chapters, the Reading studio, the weekly goal, reading time and the admin's
+  member stats all said more than you had read. On one real server, 1,812 finished chapters were really 1,336.
+  - Each chapter now counts once, as the household board always counted it.
+  - This applies to the reading already recorded, too.
+- **Your numbers may go down.** The chapters on your profile, the badges they earn and the weekly goal count fewer than
+  before. A badge you had only because of the double count waits until you earn it.
+- **A chapter you mark as read from a list, and then really read, still counts.** One you only mark still does not.
+- **The Reading studio counts chapters over its heatmap.** A chapter read again on another day lights that day on the
+  heatmap, but it still counts once in the total.
+
+### Reading
+
+- **Right-click a page for a menu** ([#259](https://github.com/AngeloSha/uchiyomi/pull/259)). It has zoom, bookmark the page, jump to a page, the next
+  and previous chapter, the chapter list, single pages or double spreads, full screen, show or hide the controls, the
+  reader's settings, the series and leaving the reader.
+  - Esc closes the menu, not the reader.
+  - Shift + right-click still opens the browser's own menu, and so does holding a page on a touch screen.
+- **Press ? for the reader's keys** ([#260](https://github.com/AngeloSha/uchiyomi/pull/260)), as this device has them bound. On a computer there is also
+  a keyboard button in the top bar.
+- **A right or middle click no longer turns the page or toggles the controls** ([#258](https://github.com/AngeloSha/uchiyomi/pull/258)).
+
+### Everywhere else
+
+- **"18+ titles are showing"** ([#255](https://github.com/AngeloSha/uchiyomi/pull/255)). While the Show 18+ reveal is on, a line above every page says
+  so, with a **Hide 18+** key, as Incognito reading's line does. Before, a series page or a search reached from the
+  Library showed 18+ titles with no sign of it until the browser closed.
+  - The line appears only when the reveal has something to show you.
+  - The Show 18+ chips still turn it on and off.
+- **Your profile photo opens quick settings** ([#251](https://github.com/AngeloSha/uchiyomi/pull/251)): Incognito reading, Show 18+ (where there is
+  something to show), Reduce effects, Profile, Profile settings and Sign out. On a phone, it is the photo on Home.
+- **Genres while you type** ([#239](https://github.com/AngeloSha/uchiyomi/pull/239)). Edit details offers the genres your library already uses. A genre
+  typed in another case takes the library's spelling.
+- **Health says how the last Fix everything went** ([#254](https://github.com/AngeloSha/uchiyomi/pull/254)), under its header: "Last nightly Fix
+  everything 3h ago: 1 needs you".
+- **`MAX_FOLLOWED_SOURCES`** ([#231](https://github.com/AngeloSha/uchiyomi/pull/231)) sets how many other sources a series may follow: 2 by default, up
+  to 6. The Add dialog no longer states a number.
+
+### Upgrading
+
+- **Database:** no new tables or columns. The `reading_stats` view is redefined when the server starts.
+- **Badges and the weekly goal may count fewer chapters than before** (see above).
+- **Optional:** set `MAX_FOLLOWED_SOURCES` (1 to 6) to let a series follow more than two other sources. Each one more
+  is another chapter list read on every update check, for every series.
+
 ## v0.69.1 — 2026-10-15
 
 ### Security fixes
