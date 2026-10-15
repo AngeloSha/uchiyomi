@@ -38,11 +38,12 @@ import { assess, verdict, followable, MIN_HAVE, MIN_COVERAGE } from './fill';
 import { logAudit } from './audit';
 import type { SourceChapter } from './sources/types';
 import { normTitle } from './titleMatch';
+import { followLimit } from './followLimit';
 import { altTitlesFor, MIN_ALT_KEY } from './altTitles';
 import { languageFits, seriesLanguage } from './seriesLang';
 
-/** How many sources a series may FOLLOW, on top of its primary. */
-export const MAX_FOLLOWERS = 2;
+/** How many sources a series may FOLLOW, on top of its primary (env MAX_FOLLOWED_SOURCES, 1 to 20, default 2: lib/followLimit.ts). */
+export const MAX_FOLLOWERS = followLimit();
 /** How many of an add's candidates are asked at all; the rest are `not_tried`. */
 export const MAX_AUTO_CANDIDATES = 6;
 /**

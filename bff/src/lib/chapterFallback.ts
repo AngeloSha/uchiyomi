@@ -37,6 +37,7 @@ import {
 } from './downloader';
 import { getSource, type SourceChapter } from './sources';
 import { isDisabled, blockedNow, classify } from './sourceHealth';
+import { followLimit } from './followLimit';
 
 export interface FallbackInput {
   seriesId: string;
@@ -106,8 +107,8 @@ export type FallbackOutcome =
   | { kind: 'partial'; via: string; pages: number; missing: number[]; chapterUsed: SourceChapter; switched?: { from: string; why: string } }
   | { kind: 'failed'; via: string; err: any };
 
-/** How many other followed sources one failed chapter may be asked from. */
-export const MAX_ALTERNATES = 2;
+/** How many other followed sources one failed chapter may be asked from: as many as a series may follow, to a ceiling of four (env MAX_FOLLOWED_SOURCES, default 2). */
+export const MAX_ALTERNATES = Math.min(4, followLimit());
 
 /**
  * What a failure is called when the job card or the log names it: the source status when the source was
