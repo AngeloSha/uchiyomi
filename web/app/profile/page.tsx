@@ -19,6 +19,7 @@ import { Backdrop } from '@/components/ui';
 import { useToast } from '@/components/Toast';
 import { IcSparkle, IcPlay, IcRefresh, IcSettings, IcLogOut, IcMoments } from '@/components/icons';
 import { BadgesCard, ListsCard, StudioCard, type Stats } from '@/components/ProfileYou';
+import { YouInsights } from '@/components/you/YouInsights';
 import { ProfileSettings } from '@/components/ProfileSettings';
 import { ProfileConnections } from '@/components/ProfileConnections';
 import { ProfileAccount } from '@/components/ProfileAccount';
@@ -195,6 +196,7 @@ function ProfileInner() {
       <HouseBoard span="wide" members={lb?.content ?? []} youId={user?.id ?? ''} weekCovers={week.ids} weekTitles={week.titles} />
       <BadgesCard stats={stats} />
       <StudioCard span="wide" />
+      <YouInsights />
       <ListsCard />
     </div>
   ) : tab === 'Settings' ? (

@@ -221,6 +221,16 @@ update too: a pause of more than five minutes is a break, not reading, and two d
 counted twice. **Wrapped** adds the year's hours, and a series page says how long catching up would take (*Catch up
 in ~2 h*). The household's weekly board stays a count of chapters.
 
+**Insights.** Under the Reading studio, **Profile → You** has a card for each way of looking at your history: your
+**pace** (this week against your weekly average, the last eight weeks, and when you would finish the series you are
+part-way through at that pace), your **streaks**, **when you read** (hour of the day and weekday, in your own
+timezone), the **genre and source mix** of this month's chapters against last month's, your **backlog** (the unread
+chapters in series you have started, which has the most and which has waited longest), a **completion funnel**
+(started, finished, still reading, dropped) and a **year in review**. They are worked out from the same page turns as
+the Reading studio, so Incognito reads are not in them, and 18+ series are named only while **Show 18+** is on. A
+new account sees one line until it has finished a few chapters. The Reading studio's heatmap now writes the number of
+chapters on every day's block.
+
 **Incognito reading** (since v0.61.0, **Profile → Settings → Reading**, or the reader's own settings). While it is
 on, your place is still kept — Keep reading and every resume work as usual — but what you read leaves no trace: no
 history, no stats or streaks, nothing on the household's boards or rails, and nothing sent to AniList, MyAnimeList or

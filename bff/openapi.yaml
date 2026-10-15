@@ -5385,6 +5385,60 @@ paths:
           description: OK
         "401":
           description: Not authenticated
+  /api/stats/insights:
+    get:
+      tags:
+        - personal
+      summary: The raw material of the You page's insight cards -- daily finishes, hours, weekdays and one row per series read.
+      operationId: getApiStatsInsights
+      description: >-
+        The caller's own reading only, from reading_events, so an Incognito read is in none of it. `daily` is
+        [UTC day, chapters finished] for every day with a finish, all time; `byHour` (24) and `byWeekday` (7, Sunday
+        first) count chapters finished in the last 365 days in `tz`; `series` has one row per series the caller has a
+        recorded read in, listed by the same rule as every rail (18+ follows the Show 18+ switch, a series the caller may
+        not open is absent) with `total`, `read`, `lastReadAt` (from events) and the chapters finished in the last 28 days,
+        this UTC month and the month before.
+      parameters:
+        - name: tz
+          in: query
+          required: false
+          description: An IANA timezone for the hours and weekdays; anything else is UTC, and `tz` says so.
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "`{tz, now, daily, byHour, byWeekday, series}`"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tz: { type: string }
+                  now: { type: string }
+                  daily:
+                    type: array
+                    items: { type: array, prefixItems: [{ type: string }, { type: integer }], minItems: 2, maxItems: 2 }
+                  byHour: { type: array, items: { type: integer }, minItems: 24, maxItems: 24 }
+                  byWeekday: { type: array, items: { type: integer }, minItems: 7, maxItems: 7 }
+                  series:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        title: { type: string }
+                        source: { type: string }
+                        genres: { type: array, items: { type: string } }
+                        total: { type: integer }
+                        read: { type: integer }
+                        lastReadAt: { type: [string, "null"] }
+                        recent: { type: integer }
+                        thisMonth: { type: integer }
+                        prevMonth: { type: integer }
+        "401":
+          description: Not authenticated
   /api/stats/time:
     get:
       tags:

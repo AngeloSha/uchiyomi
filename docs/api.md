@@ -1414,6 +1414,7 @@ GET    /api/favorites             POST   /api/favorites
 DELETE /api/favorites/:seriesId   GET    /api/history
 GET    /api/stats                 GET    /api/wrapped
 GET    /api/stats/time            GET    /api/series/:id/reading-pace
+GET    /api/stats/insights
 GET    /api/settings              PUT    /api/settings
 GET    /api/collections           POST   /api/collections
 GET    /api/collections/:id       PATCH  /api/collections/:id
@@ -1477,6 +1478,14 @@ do two of v0.66.0's, kept as written and read by the web app alone: `homeRails: 
 Home's rails as the reader arranged them (keys such as `continue`, `newEpisodes`, `lists`, `top10`; missing or null is
 the default order, and the app puts a rail it does not find in `order` where the default puts it), and `tone: 'oled' |
 'graphite' | 'midnight'`, the background (anything else is OLED black, the default).
+
+**Insights**. `GET /api/stats/insights?tz=Asia/Kolkata` is the raw material of **Profile -> You**'s insight cards, the
+signed-in reader's own history from `reading_events` (so an Incognito read is in none of it): `{tz, now, daily, byHour,
+byWeekday, series}`. `daily` is `[UTC day, chapters finished]` for every day with a finish, all time; `byHour` (24) and
+`byWeekday` (7, Sunday first) count the chapters finished in the last 365 days in `tz` (an IANA name; UTC when it is
+not one); `series` has one row per series the reader has a recorded read in, `{id, title, source, genres, total, read,
+lastReadAt, recent, thisMonth, prevMonth}`, listed by the rule every rail follows (18+ follows the Show 18+ switch, a series
+the reader may not open is absent). The web app works pace, streaks, the funnel and the year in review out from it.
 
 **Reading time** (since v0.61.0). `GET /api/stats/time?days=90&tz=Asia/Kolkata` answers the signed-in reader's own
 reading time, worked out from their page turns (`reading_events`; nothing new is recorded): `{tz, days, week: {ms,

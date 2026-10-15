@@ -297,7 +297,7 @@ const SHIPPED_UNPAIRED = [
   'Merge these {n} pairs?', 'Merged — {n} chapters moved', 'One pair merged, {m} chapters moved', 'Reading pace, busiest day {n} chapters',
   'Syncing {n} series you have already finished…',
   'This one stops working in {n} days. You can revoke it sooner.',
-  '{n} chapters behind across {m} series', '{n} days', '{n} days of reading, {t} chapters in total',
+  '{n} chapters behind across {m} series', '{n} days of reading, {t} chapters in total',
   '{n} of {m} chapters match', '{n} of {m} sources answered · still asking {names}', '{n} of {m} sources answered · still asking {name}',
   '{n} pairs could not be merged', '{n} pairs merged, {m} chapters moved',
   '{n} versions', 'quiet — no release in {n} days', 'waiting for {g} · {n} days left',

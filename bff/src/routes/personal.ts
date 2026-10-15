@@ -22,6 +22,7 @@ import { noticeBook } from '../lib/noticeChapters';
 import { devicesOf, hourIn, lastDays, loadTimeline, summarize, validTz, yearRange } from '../lib/readingTime';
 import { listFor, ownListFor, listsFor, listItems, kindOf, ownerOf, type ListRow } from '../lib/lists';
 import { smartQuery, parseQuery } from '../lib/smartLists';
+import { insightsFor } from '../lib/youInsights';
 
 function computeStreaks(days: string[]): { current: number; longest: number } {
   if (!days.length) return { current: 0, longest: 0 };
@@ -650,6 +651,13 @@ export default async function personalRoutes(app: FastifyInstance) {
       window: { ms: w.ms, chapters: w.chapters, perChapterMs: w.perChapterMs, byHour: w.byHour, byDevice: await devicesOf(uid, w.byDevice) },
     };
   });
+
+  /**
+   * The You page's insight sections (lib/youInsights.ts): daily finishes, the hours and weekdays in `tz`, and one row per
+   * browsable series the reader has recorded reading in. Own reading only; 18+ series follow the request's Show 18+ switch;
+   * incognito reads are not in reading_events, so they are in none of it.
+   */
+  app.get('/api/stats/insights', async (req) => insightsFor(userIdOf(req), vc(req), (req.query as Record<string, string>).tz));
 
   /**
    * v0.61.0: this reader's pace through a series, for its page's "Catch up in ~2 hr" -- the median time of the chapters
