@@ -9523,6 +9523,33 @@ paths:
           description: Not found, or not visible to this account
         "409":
           description: "`refused`: the download directory is not writable; `message` and `fix` say what to do"
+  /api/admin/series/{id}/cover-candidates:
+    get:
+      tags:
+        - admin
+      summary: The covers the sources this series follows have for it.
+      operationId: getApiAdminSeriesIdCoverCandidates
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. One entry per
+        followed source that answered with a picture (`sourceId`, `name`, `primary`, `coverUrl`); show it through
+        /img/sources/cover and apply it with PUT /api/admin/series/{id}/art `{ kind: cover, mode: source, source }`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
   /api/admin/series/{id}/chapters/refetch:
     post:
       tags:
@@ -10064,6 +10091,8 @@ paths:
         `reset` hands the art back to the automatic source. `first_page` (v0.55.7, the cover only; a banner is a 400)
         makes the series' own first page its cover for good: `overrides.cover` on the series reads `first_page`, and
         nothing found online is shown or looked up for it -- its banner is made from its pages unless an admin set one.
+        `source` (the cover only) takes the cover a followed source has for the series: only the source's id is sent, the
+        picture's address is read from the source's own record of the series, and the server keeps its own copy.
         Automatic art is kept from an online entry only when it is named as the series is (v0.55.7).
       parameters:
         - name: id
@@ -10084,7 +10113,10 @@ paths:
                   enum: [cover, banner]
                 mode:
                   type: string
-                  enum: [url, upload, reset, first_page]
+                  enum: [url, upload, reset, first_page, source]
+                source:
+                  type: string
+                  description: For `source` (the cover only), the id of a source this series follows; see GET /api/admin/series/{id}/cover-candidates.
                 url:
                   type: string
                   format: uri

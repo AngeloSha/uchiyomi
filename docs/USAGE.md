@@ -497,6 +497,12 @@ In **Edit details** (the art column, or the *Art* tab on a phone) the cover has 
 
 The line under the cover says which it is.
 
+**Choosing a cover from a source** (admin). On a computer, click the cover on the series page (the cover has a *Change cover* label on hover). The sheet shows the current cover and the cover each source the series follows has for it,
+each labelled with the source's name. Pick one and **Use this cover**: the server fetches the picture itself and keeps
+its own copy, so the cover survives the source changing or going away. **Upload your own…** on the same sheet takes
+a picture from the device instead. The new cover shows at once on every card of this device, not after the browser's
+day-long copy of the old one runs out.
+
 ### Sources & translations
 
 Under the title, every series carries one muted line that says where its chapters come from. On a phone it

@@ -1678,6 +1678,7 @@ POST   /api/admin/series/:id/check
 GET    /api/admin/series/:id/check
 GET    /api/admin/series/:id/numbering POST   /api/admin/series/:id/numbering
 GET    /api/admin/art/overview    GET    /api/admin/art/candidates/:id
+GET    /api/admin/series/:id/cover-candidates
 POST   /api/admin/art/backfill    GET    /api/admin/art/backfill/status
 POST   /api/admin/trackers/relink GET    /api/admin/trackers/relink/status
 POST   /api/admin/import          POST   /api/admin/import/parse
@@ -2803,6 +2804,13 @@ its cover for good: the series payload's `overrides.cover` reads `'first_page'` 
 nothing found online is shown or looked up for it -- its banner is made from its pages unless an admin set one -- and
 `mode: 'reset'` takes it back to the automatic art, which the choice never changed; `kind: 'banner'` with it is a
 **400**. `GET /api/admin/art/overview` marks such a series `first_page: true`.
+
+**Choosing a cover from a source** (series page, admin). `GET /api/admin/series/:id/cover-candidates` answers
+`{content: [{sourceId, name, primary, coverUrl}]}`: one entry for every source the series follows that answered, from the
+source's own record of the series (a source that is down or has no picture is left out). `PUT /api/admin/series/:id/art
+{kind: 'cover', mode: 'source', source}` takes that source's cover: only the source's id comes from the caller (**400**
+`bad_source` when the series does not follow it, **404** `no_cover`, **502** `unavailable`), the server fetches the picture
+itself and keeps its own copy as an upload, so the cover survives the source changing or going away.
 ```
 GET    /img/series/:id/thumb      GET    /img/series/:id/backdrop
 GET    /img/series/:id/hero

@@ -16,6 +16,7 @@ import { useReduceEffects } from '@/lib/effects';
 import { EASE } from '@/lib/motion';
 import { t as tr } from '@/lib/i18n';
 import { statusText } from '@/lib/activity';
+import { useCoverBust, withCoverBust } from '@/lib/coverBust';
 
 function FavButton({ series }: { series: Series }) {
   const qc = useQueryClient();
@@ -45,6 +46,7 @@ const HERO_KEY = 'h-10 w-10 place-items-center rounded-xl border border-white/15
 const SLIDE_MS = 6500;
 
 export function HeroCarousel({ slides }: { slides: Series[] }) {
+  useCoverBust();
   const [i, setI] = useState(0);
   // Held while the pointer is over the hero; `held` is the Pause key's (WCAG 2.2.2: a moving picture can be stopped).
   const [paused, setPaused] = useState(false);
@@ -112,7 +114,7 @@ export function HeroCarousel({ slides }: { slides: Series[] }) {
         <div className="flex items-end gap-7">
           <Link href={`/series/?id=${cur.id}`} className="hidden h-72 w-48 shrink-0 overflow-hidden rounded-2xl border border-white/10 shadow-lift transition hover:-translate-y-1 lg:block">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={img.seriesThumb(cur.id, undefined, 800)} alt={cur.metadata?.title || cur.name} className="h-full w-full object-cover" />
+            <img src={withCoverBust(img.seriesThumb(cur.id, undefined, 800))} alt={cur.metadata?.title || cur.name} className="h-full w-full object-cover" />
           </Link>
           <div className="max-w-xl">
             <span className="mb-3 inline-flex items-center gap-1.5 rounded-md bg-white/10 px-2.5 py-1 text-2xs font-semibold uppercase tracking-wider text-fog-100 backdrop-blur rtl:tracking-normal">★ {tr('Daily pick')}</span>
