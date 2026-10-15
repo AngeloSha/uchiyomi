@@ -1352,6 +1352,11 @@ fix the title's direction: it keeps following the profile. (Before v0.48.0 it di
 kept reading left to right whatever the profile said; those accidental *Series default* pins are ignored now.
 A *Left to right* or *Right to left* chosen for one title in those versions is kept.)
 
+**The reader's keyboard shortcuts** — press **?** in the reader, or use the keyboard button in the top bar (shown on a computer, not on
+a phone), for the keys in force on this device: next and previous page, page left and right, next and previous chapter, full
+screen and the rest, with any key you have rebound to something else shown as you bound it, and **Esc** to leave. **?** or **Esc**
+closes the list; the keys themselves are changed under **Reader settings → Keys**.
+
 **Reader defaults** — mode (webtoon scroll or paged), theme, the cover colour at the edges, repeated pages, fit,
 page gap, auto-scroll and brightness — live under **Profile → Settings → Reading**, where each one saves as you
 change it and says *Saved* beside the row. The reader's own sheet still changes them for the session you are in,

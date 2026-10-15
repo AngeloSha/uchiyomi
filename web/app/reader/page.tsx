@@ -13,7 +13,7 @@ import { openableChapters } from '@/lib/chapterRows';
 import { buildFlow, startIndex, renderWindow } from '@/lib/readerFlow';
 import { AHEAD_SCREENS, APPEND_SCREENS, BEHIND_SCREENS, KEEP_SCREENS, MAX_WINDOW_PAGES, anchorAt, nearEnd, prefetchList, screenRange, scrollTopFor, windowSet, type IndexRange } from '@/lib/readerWindow';
 import { readTap, undoLeft, undoWindow, type TapZone } from '@/lib/readerGesture';
-import { PAGE_ACTIONS, actionForKey, keyMapFor, type ReaderAction } from '@/lib/readerKeys';
+import { PAGE_ACTIONS, READER_ACTIONS, actionForKey, keyMapFor, type ReaderAction } from '@/lib/readerKeys';
 import { padMapFor } from '@/lib/readerPad';
 import { useGamepad } from '@/lib/useGamepad';
 import { ARM_MS, pagesAfter, skipNeedsConfirm, stillArmed } from '@/lib/readerNav';
@@ -42,6 +42,7 @@ import { CHAPTER_SAMPLE, LEFT_HALF, RIGHT_HALF, WHOLE, chapterSideCrop, halfCrop
 import { t as tr } from '@/lib/i18n';
 import { serverReachableHint } from '@/lib/desktop';
 import { IncognitoTag, incognitoRef } from '@/components/IncognitoBanner';
+import { ReaderShortcuts, useHasKeyboard } from '@/components/ReaderShortcuts';
 
 interface PageDim { number: number; width: number | null; height: number | null; junk?: boolean; missing?: boolean }
 /** `sourceId`: the adapter the copy came from, for naming it on a missing page's caption. Unknown for a downloaded copy. */
@@ -203,6 +204,8 @@ function ReaderInner() {
   const [showSettings, setShowSettings] = useState(false);
   const [showPages, setShowPages] = useState(false);
   const [showChapters, setShowChapters] = useState(false);
+  const [showKeys, setShowKeys] = useState(false);
+  const hasKeyboard = useHasKeyboard();
   const [current, setCurrent] = useState(0);
   const { user } = useAuth();
   /** Source id -> display name from the series' own followed sources (set with the reading direction). */
@@ -1212,10 +1215,14 @@ function ReaderInner() {
       // An open sheet (settings, page grid, chapter list) is what the keys are for: turning pages underneath
       // it, or leaving the reader on Escape, acted on the thing the reader was not looking at. None of the
       // three listens for Escape itself, so it is handled here, and it closes the sheet.
-      if (showSettings || showPages || showChapters) {
-        if (e.key === 'Escape') { setShowSettings(false); setShowPages(false); setShowChapters(false); }
+      if (showSettings || showPages || showChapters || showKeys) {
+        if (e.key === 'Escape') { setShowSettings(false); setShowPages(false); setShowChapters(false); setShowKeys(false); }
+        else if (e.key === '?' && showKeys) setShowKeys(false);
         return;
       }
+      // ? lists the shortcuts. Not in a text field, and not a key the reader has bound to something.
+      if (e.key === '?' && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target as HTMLElement | null)?.tagName ?? '')
+        && !READER_ACTIONS.some((a) => keyMap[a].includes('?'))) { e.preventDefault(); setShowKeys(true); return; }
       // Escape is reserved, never bound: it leaves the reader. ⚠️ Once a press -- Escape repeating called
       // history.back() until it left the reader for wherever came before.
       if (e.key === 'Escape') { if (!e.repeat) back(); return; }
@@ -1233,12 +1240,12 @@ function ReaderInner() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keyMap, seriesId, showSettings, showPages, showChapters]);
+  }, [keyMap, seriesId, showSettings, showPages, showChapters, showKeys]);
 
   // ---- a game controller (v0.61.0, lib/readerPad.ts) ----
   // Polled only while one is connected and the tab is visible; still while a sheet is open over the pages.
   const padMap = useMemo(() => padMapFor(device.pad), [device.pad]);
-  const padConnected = useGamepad((a) => performRef.current(a), padMap, showSettings || showPages || showChapters);
+  const padConnected = useGamepad((a) => performRef.current(a), padMap, showSettings || showPages || showChapters || showKeys);
 
   // ---- tap / double-tap / pinch (no overlay -> native scroll works) ----
   const onPointerDown = (e: React.PointerEvent) => {
@@ -1652,6 +1659,14 @@ function ReaderInner() {
                   <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z" />
                 </svg>
               </button>
+              {hasKeyboard && (
+                <button onClick={() => setShowKeys(true)} aria-label={tr('Keyboard shortcuts')} title={tr('Keyboard shortcuts')}
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-black/45 text-white backdrop-blur">
+                  <svg aria-hidden width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2.5" y="6" width="19" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" />
+                  </svg>
+                </button>
+              )}
               <button onClick={() => setShowSettings(true)} data-reader-settings className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-black/45 text-white backdrop-blur">
                 <IcSliders width={20} height={20} />
               </button>
@@ -1751,6 +1766,7 @@ function ReaderInner() {
       </AnimatePresence>
 
       <AnimatePresence>
+        {showKeys && <ReaderShortcuts keyMap={keyMap} onClose={() => setShowKeys(false)} />}
         {showSettings && (
           <ReaderSettings
             prefs={prefs}
