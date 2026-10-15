@@ -140,6 +140,7 @@ import {
   visibleToAll, viewCtxFor, sourceAllowedFor, sourceBrowsableFor, browsable, visible, seriesVisible, Params, type ViewCtx, hideAdult, adultFilter,
   ADULT_RATING,
 } from '../lib/visibility';
+import { adultContentRating } from '../lib/ageRating';
 // v0.52.0 (#72): language editions of one work, and the language model they stand on.
 import { editionFolder, linkEdition, workRows, type WorkRow } from '../lib/editions';
 import { effectiveLang, sourceLanguage } from '../lib/seriesLang';
@@ -1400,6 +1401,11 @@ export async function addSeriesFromSource(opts: {
   /** Which sources THIS viewer may reach; a candidate outside it is reported `unavailable` and never asked. */
   sourceAllowed?: (source: string) => boolean;
   /**
+   * Refuse a title its source rates adults-only (erotica, pornographic): set for an account capped below 18. The
+   * source-level check above cannot see it, because MangaDex as a whole is not an adult source.
+   */
+  refuseAdultTitle?: boolean;
+  /**
    * Queue the rest of the series for the slow archive once the add has settled (#117), as `by`, seen through
    * `ctx` (lib/archive.ts enqueueArchive: the same rules as the queue route). Ignored when the selection is the
    * whole listing: there is no rest.
@@ -1428,6 +1434,9 @@ export async function addSeriesFromSource(opts: {
   // which the add dialog calls seconds earlier for the very same two things: without that, opening the
   // dialog and pressing Add paid for four challenge solves to learn two facts.
   const { series, chapters: listed } = await seriesAndChapters(src, sourceId);
+  if (opts.refuseAdultTitle && adultContentRating(series?.contentRating)) {
+    return { ok: false, status: 403, error: 'forbidden', message: 'That source is not available on this account.' };
+  }
   // No title, no add. This used to fall back to the literal string 'Series', which becomes the folder --
   // so a `getSeries` that timed out while `listChapters` succeeded filed the title under `<Source>/Series`,
   // and the NEXT one to do that was told "already in library" and quietly merged into the same shelf.
@@ -1590,7 +1599,13 @@ export async function addSeriesFromSource(opts: {
   // ComicInfo the downloader writes and, through the scanner, into lib_series.summary.
   // Its genres without a site's genre menu (lib/genres.ts, v0.55.5), whichever source read them: they go into the row and
   // every chapter file's ComicInfo, which a scan reads back.
-  const meta = { series: title, summary: cleanDescription(series?.summary), author: series?.author, genres: cleanGenres(series?.genres), url: series?.url, status: series?.status };
+  const meta = { series: title, summary: cleanDescription(series?.summary), author: series?.author, genres: cleanGenres(series?.genres), url: series?.url, status: series?.status, contentRating: series?.contentRating };
+  // The rating the source itself gives the title. It was dropped here, so a MangaDex title rated erotica was stored
+  // unrated and visible() let every age-capped account read it. Written with GREATEST below: an existing or higher
+  // rating is never lowered, and an admin's override still wins in visible(). Every chapter's ComicInfo carries it
+  // too (downloader.ts), so a rescan from the files keeps it. Reintroduce by writing NULL: "a MangaDex title rated
+  // erotica is stored 18+" in ageRatingOnAdd.int.test.ts reads null.
+  const addedAgeRating = adultContentRating(series?.contentRating) ? ADULT_RATING : null;
 
   /**
    * "Nothing yet": the series is created and followed, and no chapter is fetched.
@@ -1644,16 +1659,16 @@ export async function addSeriesFromSource(opts: {
       : libraryIdFor(folder, libs);
     const { id } = (await q<{ id: string }>(
       `INSERT INTO lib_series (id, source, title, summary, author, status, genres, web, folder, books_count, library_id, scanned_at,
-                               auto_update, source_id, source_series_id, chapter_floor, source_checked_at, source_chapters, source_missing, lang)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,now(),$11,$12,$13,$14,now(),$15,0,$16)
+                               auto_update, source_id, source_series_id, chapter_floor, source_checked_at, source_chapters, source_missing, lang, age_rating)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,now(),$11,$12,$13,$14,now(),$15,0,$16,$17)
        ON CONFLICT (library_id, folder) DO UPDATE SET
          auto_update = EXCLUDED.auto_update, source_id = EXCLUDED.source_id, source_series_id = EXCLUDED.source_series_id,
          chapter_floor = EXCLUDED.chapter_floor, scanned_at = now(), deleted_at = NULL,
          source_checked_at = now(), source_chapters = EXCLUDED.source_chapters, source_missing = EXCLUDED.source_missing,
-         lang = COALESCE(lib_series.lang, EXCLUDED.lang)
+         lang = COALESCE(lib_series.lang, EXCLUDED.lang), age_rating = GREATEST(lib_series.age_rating, EXCLUDED.age_rating)
        RETURNING id`,
       [newSeriesId(), src.name, title, meta.summary || null, meta.author ?? null, meta.status ?? null, meta.genres ?? [], meta.url ?? null,
-       folder, libraryId, autoUpdate !== false, source, sourceId, floor, chosen.length, stateLang],
+       folder, libraryId, autoUpdate !== false, source, sourceId, floor, chosen.length, stateLang, addedAgeRating],
     ))[0];
     const linked = await linkHere(id);
     await stampAddNumbering({ id }, source!, numbered.decision).catch((e) => console.warn(`[add] ${folder}: numbering not recorded: ${(e as Error)?.message || e}`));
@@ -1769,8 +1784,8 @@ export async function addSeriesFromSource(opts: {
     let heldArchive: AddResult['archive'];
     // The numbering before the routing, so no check can reach the row routed and not yet numbered.
     await stampAddNumbering({ folder }, source!, numbered.decision).catch((e) => console.warn(`[add] ${folder}: numbering not recorded: ${(e as Error)?.message || e}`));
-    await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3, chapter_floor = $5, lang = COALESCE(lang, $6) WHERE folder = $4',
-      [autoUpdate !== false, source, sourceId, folder, floor, stateLang]).catch(() => {});
+    await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3, chapter_floor = $5, lang = COALESCE(lang, $6), age_rating = GREATEST(age_rating, $7::int) WHERE folder = $4',
+      [autoUpdate !== false, source, sourceId, folder, floor, stateLang, addedAgeRating]).catch(() => {});
     await learnDirection({ folder }, series?.readingDirection, 'source').catch(() => {});
     await learnTypeFromSource({ folder }, series);
     // The same call the run makes on its full selection, and for the same reason: these dates are the
@@ -1892,8 +1907,8 @@ export async function addSeriesFromSource(opts: {
     await stampAddNumbering({ folder }, source!, numbered.decision).catch((e) => console.warn(`[add] ${folder}: numbering not recorded: ${(e as Error)?.message || e}`));
     // The floor the person's selection earns, computed above the "nothing left to fetch" branch so both
     // writers use the one expression -- and from `selected`, which is what was asked for.
-    await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3, chapter_floor = $5, lang = COALESCE(lang, $6) WHERE folder = $4',
-      [autoUpdate !== false, source, sourceId, folder, floor, stateLang]).catch(() => {});
+    await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3, chapter_floor = $5, lang = COALESCE(lang, $6), age_rating = GREATEST(age_rating, $7::int) WHERE folder = $4',
+      [autoUpdate !== false, source, sourceId, folder, floor, stateLang, addedAgeRating]).catch(() => {});
     // Which way it reads, when the source can say (MangaDex: the original language). After persistScan, so
     // the row exists; below a ComicInfo that already said otherwise (lib/readingDirection.ts).
     await learnDirection({ folder }, series?.readingDirection, 'source').catch(() => {});
@@ -2226,6 +2241,17 @@ export default async function sourceRoutes(app: FastifyInstance) {
   /** Same shape for every by-id rejection, and it does not say what is being withheld. */
   const denySource = (reply: FastifyReply) =>
     reply.code(403).send({ error: 'forbidden', message: 'That source is not available on this account.' });
+  /** An account capped below 18: the age cap's per-title half, for sources (MangaDex) that rate each title. */
+  const cappedBelowAdult = (req: FastifyRequest) => { const cap = vc(req).maxAgeRating; return cap !== null && cap < ADULT_RATING; };
+  /**
+   * What a by-id listing may show this viewer: a title its source rates adults-only is left out for an account capped
+   * below 18 and while the "Show 18+" chip is off -- the rule search-all already applies (ratingOf). sourceAllowedFor
+   * cannot do it, because MangaDex as a whole is not an adult source; without this its erotica covers listed for a
+   * child's account. Reintroduce by returning `items`: "a capped account's MangaDex listing leaves erotica out" in
+   * ageRatingOnAdd.int.test.ts lists it.
+   */
+  const ratedForViewer = <T extends { contentRating?: string }>(req: FastifyRequest, items: T[]): T[] =>
+    cappedBelowAdult(req) || vc(req).hideAdultLibraries ? items.filter((r) => !adultContentRating(r.contentRating)) : items;
   /** The sources this viewer may reach, in registry order. This is the ACCESS rule and nothing else. */
   const reachable = (req: FastifyRequest): SourceAdapter[] =>
     listSources().filter((s) => sourceAllowedFor(s, vc(req).maxAgeRating));
@@ -2393,7 +2419,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const raw = await src.search(query.trim()).catch(() => []);
     // dedupe by sourceId (duplicate ids collide on the React key → wrong cover/title on a card)
     const seen = new Set<string>();
-    const results = raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true)).slice(0, 24);
+    const results = ratedForViewer(req, raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true))).slice(0, 24);
     // flag titles already in the library so the UI can mark them instead of offering a duplicate add
     return { content: await decorate(results, src.id) };
   });
@@ -3259,10 +3285,10 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const resting = await blockedNow(source!).catch(() => null);
     if (resting) {
       const stale = cachedLatest(src.id, p);
-      if (stale.length || !restingForSlowness(resting)) return { content: await decorate(stale, src.id) };
+      if (stale.length || !restingForSlowness(resting)) return { content: await decorate(ratedForViewer(req, stale), src.id) };
     }
     const results = await latestPage(src, p);
-    return { content: await decorate(results, src.id) };
+    return { content: await decorate(ratedForViewer(req, results), src.id) };
   });
 
   /**
@@ -3285,10 +3311,10 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const resting = await blockedNow(source!).catch(() => null);
     if (resting) {
       const stale = cachedLatest(src.id, p, 'popular');
-      if (stale.length || !restingForSlowness(resting)) return { content: await decorate(stale, src.id) };
+      if (stale.length || !restingForSlowness(resting)) return { content: await decorate(ratedForViewer(req, stale), src.id) };
     }
     const results = await latestPage(src, p, 'popular');
-    return { content: await decorate(results, src.id) };
+    return { content: await decorate(ratedForViewer(req, results), src.id) };
   });
 
   /**
@@ -3658,6 +3684,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (!sourceAllowedFor(src, vc(req).maxAgeRating)) return denySource(reply);
     // Through the shared lookup so the add that usually follows this reuses it rather than re-solving.
     const { series, chapters: raw } = await seriesAndChapters(src, sourceId);
+    // The cap's per-title half, as the add below applies it: the chip does not apply here (named, not surfaced).
+    if (cappedBelowAdult(req) && adultContentRating(series?.contentRating)) return denySource(reply);
     // Numbered as the add will number them (#116, lib/numbering.ts): a source that gives many different posts one
     // number is counted in posting order, 1..K, and `numbering` says so -- with the other reading's count under
     // `alt`, for the dialog's "Keep the source's numbers" switch. The cache keeps the raw list: it is shared.
@@ -3749,6 +3777,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const r = await addSeriesFromSource({
       source, sourceId, force, chapterCount, chapterFrom, autoUpdate, wait: false,
       alsoFollow, userId: userIdOf(req), req, sourceAllowed: (s) => sourceAllowedFor(getSource(s), maxAge),
+      refuseAdultTitle: cappedBelowAdult(req),
       numbering: b.data.numbering,
       ...(b.data.archive ? { archive: { by: userIdOf(req), ctx: vc(req) } } : {}),
       ...(b.data.edition ? { edition: b.data.edition } : {}),

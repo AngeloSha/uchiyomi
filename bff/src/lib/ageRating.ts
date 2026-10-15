@@ -43,6 +43,14 @@ export const AGE_CAPS: Array<{ value: number; label: string }> = [
 
 export const MAX_AGE = 18;
 
+/**
+ * A source's own per-title rating that means adults only (MangaDex's contentRating). The same rule search-all's
+ * ratingOf applies; used where a title is added or listed by id, since MangaDex as a whole is not an adult source.
+ */
+export function adultContentRating(rating: string | null | undefined): boolean {
+  return rating === 'erotica' || rating === 'pornographic';
+}
+
 /** Parse ComicInfo's AgeRating into a minimum age, or null when it says nothing useful. */
 export function parseComicInfoAgeRating(raw: string | null | undefined): number | null {
   if (!raw) return null;

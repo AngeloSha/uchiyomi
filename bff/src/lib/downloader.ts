@@ -18,6 +18,7 @@ import { pagePace, paceLevel, noteDownloaded, notePageHosts, noteRateLimited, ra
 import { drawGap } from './archivePace';
 import { pageName, placeholderPng, PARTIAL_MANIFEST, type PartialManifest } from './partial';
 import { realContainedPath } from './fsGuard';
+import { adultContentRating } from './ageRating';
 
 /**
  * A title as a folder name.
@@ -53,7 +54,7 @@ function winSafe(name: string): string {
   return out || 'untitled';
 }
 
-function comicInfo(d: { series: string; number: number; title?: string; summary?: string; author?: string; genres?: string[]; web?: string; status?: string; scanlator?: string }): string {
+function comicInfo(d: { series: string; number: number; title?: string; summary?: string; author?: string; genres?: string[]; web?: string; status?: string; scanlator?: string; contentRating?: string }): string {
   // XML_FORBIDDEN out first: a source's text is copied in verbatim, and a NUL in a description made a file
   // no XML reader should accept and one the scan could not index (#109, lib/library.ts).
   const esc = (x: any = '') => String(x ?? '').replace(XML_FORBIDDEN, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -70,6 +71,9 @@ function comicInfo(d: { series: string; number: number; title?: string; summary?
     // rather than written empty when the source named nobody, since an empty tag reads as "no translator".
     ...(d.scanlator ? [`  <Translator>${esc(d.scanlator)}</Translator>`] : []),
     `  <Genre>${esc((d.genres || []).join(', '))}</Genre>`,
+    // A title its source rates adults-only, in the tag parseComicInfoAgeRating reads back as 18: the scan then keeps
+    // the series' age_rating from the files alone, and so does Komga or Kavita reading this folder.
+    ...(adultContentRating(d.contentRating) ? ['  <AgeRating>Adults Only 18+</AgeRating>'] : []),
     `  <Web>${esc(d.web)}</Web>`,
     `  <ty:PublishingStatusTachiyomi xmlns:ty="http://www.w3.org/2001/XMLSchema">${esc(d.status)}</ty:PublishingStatusTachiyomi>`,
     '</ComicInfo>',
@@ -748,6 +752,7 @@ async function fetchChapter(
     web: input.meta?.url || input.chapter.sourceId,
     status: input.meta?.status,
     scanlator: input.chapter.scanlator,
+    contentRating: input.meta?.contentRating,
   })));
 
   // Recheck after the network work and after creating a missing parent: an existing series folder may have
@@ -820,6 +825,7 @@ function holdFor(
         web: input.meta?.url || input.chapter.sourceId,
         status: input.meta?.status,
         scanlator: input.chapter.scanlator,
+        contentRating: input.meta?.contentRating,
       })));
       if (await realContainedPath(DL_ROOT, rel) !== abs) throw new Error('unsafe download path outside the library root');
       await mkdir(dirname(abs), { recursive: true });
