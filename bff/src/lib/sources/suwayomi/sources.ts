@@ -7,7 +7,7 @@
 // source-native identifier. So a series' sourceId here is Suwayomi's manga id. That is stable for as long as
 // Suwayomi's database lives; wiping it orphans the routing, same as uninstalling an extension would.
 import { UNNUMBERED, type SourceAdapter, type SourceSeries, type SourceChapter } from '../types';
-import { gql as defaultGql, suwayomiUrl, suwayomiImageHeaders, type Gql } from './client';
+import { gql as defaultGql, suwayomiUrl, suwayomiImageHeaders, onEngineOrigin, type Gql } from './client';
 import { OPS } from './operations';
 import { env } from '../../../env';
 
@@ -214,7 +214,11 @@ export function makeSuwayomiAdapter(remote: RemoteSource, run: Gql = defaultGql)
     // reachable from a browser.
     iconUrl: remote.iconUrl?.trim() || undefined,
     requiresCloudflare: false,
-    imageHeaders: suwayomiImageHeaders,
+    // The engine's login, for the engine's own URLs only. Declared as a function of the URL because every caller passes
+    // the URL it is about to fetch, and some of those URLs are not the engine's: the cover proxy's `?u=` is the
+    // caller's, so this used to hand the engine's Basic credentials to any host a member named. Reintroduce by
+    // returning suwayomiImageHeaders() for every URL: outboundGuard.test.ts sees the login offered to another host.
+    imageHeaders: (url: string) => (onEngineOrigin(url) ? suwayomiImageHeaders() : {}),
     // Pages are fetched from the engine, not the site, so they may overlap and need no gap of their own;
     // see the doc comment above and SUWAYOMI_PAGE_CONCURRENCY in env.ts.
     pageConcurrency: env.SUWAYOMI_PAGE_CONCURRENCY,

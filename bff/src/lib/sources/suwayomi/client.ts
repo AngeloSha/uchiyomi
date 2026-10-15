@@ -49,6 +49,16 @@ export function suwayomiUrl(path: string): string {
   return `${suwayomiBase()}/${path.replace(/^\//, '')}`;
 }
 
+/**
+ * Is this URL on the configured engine's own origin (scheme, host and port, compared whole)? The engine's Basic
+ * credentials go to that origin and nowhere else, and only an engine source's first hop there skips the public-host
+ * rule (lib/safeFetch.ts). An unconfigured engine owns nothing.
+ */
+export function onEngineOrigin(u: string | URL, engine: string | undefined = env.SUWAYOMI_URL): boolean {
+  if (!engine) return false;
+  try { return new URL(String(u)).origin === new URL(engine).origin; } catch { return false; }
+}
+
 /** Headers for fetching an image back off Suwayomi (it proxies covers and pages through itself). */
 export function suwayomiImageHeaders(): Record<string, string> {
   return env.SUWAYOMI_USERNAME

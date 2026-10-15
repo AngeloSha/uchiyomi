@@ -119,6 +119,8 @@ export function makeFakeSource(id: string, base: string, cloudflare = false): So
     name: id,
     base,
     requiresCloudflare: cloudflare,
+    // The end-to-end stub serves its pages from loopback, which the downloader refuses for any site (types.ts).
+    localImages: true,
     async search(query) {
       return arrayOf<any>(await json(base, `/search?q=${encodeURIComponent(query)}`, false, cloudflare))
         .filter((v) => v && v.sourceId && v.title)

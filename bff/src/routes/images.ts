@@ -18,7 +18,8 @@ import type { SourceAdapter, SourceChapter } from '../lib/sources/types';
 import { fetchPages } from '../lib/downloader';
 import { previewPageList, isRefusal } from './sources';
 import { assertPublicHost, isBlockedHost, BlockedAddress } from '../lib/ssrfGuard';
-import { suwayomiUrl, suwayomiBase, suwayomiImageHeaders } from '../lib/sources/suwayomi/client';
+import { suwayomiUrl, suwayomiBase, suwayomiImageHeaders, onEngineOrigin } from '../lib/sources/suwayomi/client';
+import { fetchPublic, readCapped, MAX_COVER_BYTES, MAX_ICON_BYTES, MAX_HTML_BYTES } from '../lib/safeFetch';
 import { env } from '../env';
 import { join } from 'path';
 import { readFile } from 'fs/promises';
@@ -183,7 +184,7 @@ export async function fetchCoverImage(u: string, source?: string, opts: { caller
     const r = await fetch(engineTarget, { headers: suwayomiImageHeaders(), redirect: 'error', signal: AbortSignal.timeout(20000) })
       .catch(() => { throw Object.assign(new Error('cover'), { statusCode: 502 }); });
     if (!r.ok) throw Object.assign(new Error('cover'), { statusCode: 502 });
-    return Buffer.from(await r.arrayBuffer());
+    return readCapped(r, MAX_COVER_BYTES).catch(() => { throw Object.assign(new Error('cover'), { statusCode: 502 }); });
   }
 
   // Before anything else, and before any network call: everything below assumes a real http(s) URL.
@@ -277,7 +278,9 @@ export async function fetchCoverImage(u: string, source?: string, opts: { caller
   // 404 meant an open HTTP service, a hang meant a filtered port. `Img` only needs SOME error to fall back
   // to its direct-URL retry, and 502 is the honest one -- the failure was upstream, not in this request.
   if (!r.ok) throw Object.assign(new Error('cover'), { statusCode: 502 });
-  return Buffer.from(await r.arrayBuffer());
+  // Counted as it decodes and refused past the cap (lib/safeFetch.ts): the caller names this URL, and a 49 KB gzip
+  // response decoded into a 48 MiB buffer before anything looked at it.
+  return readCapped(r, MAX_COVER_BYTES).catch(() => { throw Object.assign(new Error('cover'), { statusCode: 502 }); });
 }
 
 /** A Cloudflare refusal: what clearance cookies could get past (v0.59.0). */
@@ -930,7 +933,7 @@ export default async function imageRoutes(app: FastifyInstance) {
         signal: AbortSignal.timeout(15000),
       });
       if (!r.ok) throw new Error(`extension icon ${r.status}`);
-      const buffer = await sharp(Buffer.from(await r.arrayBuffer()))
+      const buffer = await sharp(await readCapped(r, MAX_ICON_BYTES))
         .resize({ width: 96, withoutEnlargement: true })
         .webp({ quality: 80 })
         .toBuffer();
@@ -1049,21 +1052,32 @@ const ICON_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like
  * site that refuses a plain request simply gets a lettered tile.
  */
 async function sourceIconBytes(src: { id: string; iconUrl?: string; base?: string }): Promise<Buffer | null> {
-  const grab = async (url: string, headers: Record<string, string> = {}): Promise<Buffer | null> => {
-    try {
-      const r = await fetch(url, { headers: { 'user-agent': ICON_UA, ...headers }, signal: AbortSignal.timeout(8000) });
-      if (!r.ok) return null;
-      const buf = Buffer.from(await r.arrayBuffer());
-      // A 0-byte body, or an HTML "not found" page wearing an image's URL, is not an icon.
-      return buf.length > 64 && !/^\s*<(?:!doctype|html)/i.test(buf.subarray(0, 40).toString('latin1')) ? buf : null;
-    } catch { return null; }
+  const isIcon = (buf: Buffer | null | undefined): buf is Buffer =>
+    // A 0-byte body, or an HTML "not found" page wearing an image's URL, is not an icon.
+    !!buf && buf.length > 64 && !/^\s*<(?:!doctype|html)/i.test(buf.subarray(0, 40).toString('latin1'));
+  // Every URL here is one a source or its homepage named, so it gets the public-host rule on every hop and a byte cap
+  // (lib/safeFetch.ts). These used to follow redirects with no check: a favicon redirect or a homepage <link rel=icon>
+  // walked the server into the internal network and the answer was served back as the icon. Reintroduce by going back
+  // to fetch(): sourceIconGuard in outboundGuard.test.ts sees the internal server asked.
+  const grab = async (url: string): Promise<Buffer | null> => {
+    const r = await fetchPublic(url, { headers: { 'user-agent': ICON_UA }, timeoutMs: 8000, maxBytes: MAX_ICON_BYTES });
+    return r && r.status >= 200 && r.status < 300 && isIcon(r.body) ? r.body : null;
   };
 
-  // 1. The extension names its own icon. It lives on the extension server, which a browser cannot reach.
+  // 1. The extension names its own icon. It lives on the extension server, which a browser cannot reach: fetched there,
+  //    with the engine's login, only when it really is the engine's URL; any other URL is a public one like the rest.
   if (src.iconUrl) {
     const abs = /^https?:/i.test(src.iconUrl) ? src.iconUrl : suwayomiUrl(src.iconUrl);
-    const hit = await grab(abs, suwayomiImageHeaders());
-    if (hit) return hit;
+    if (onEngineOrigin(abs)) {
+      try {
+        const r = await fetch(abs, { headers: { 'user-agent': ICON_UA, ...suwayomiImageHeaders() }, redirect: 'error', signal: AbortSignal.timeout(8000) });
+        const buf = r.ok ? await readCapped(r, MAX_ICON_BYTES) : null;
+        if (isIcon(buf)) return buf;
+      } catch { /* fall through to the site's own icon */ }
+    } else {
+      const hit = await grab(abs);
+      if (hit) return hit;
+    }
   }
   if (!src.base) return null;
 
@@ -1075,9 +1089,9 @@ async function sourceIconBytes(src: { id: string; iconUrl?: string; base?: strin
 
   // 3. Whatever the homepage declares. Takes the last <link rel=icon>, which is conventionally the largest.
   try {
-    const r = await fetch(origin, { headers: { 'user-agent': ICON_UA }, signal: AbortSignal.timeout(8000) });
-    if (!r.ok) return null;
-    const html = (await r.text()).slice(0, 60000);
+    const r = await fetchPublic(origin, { headers: { 'user-agent': ICON_UA }, timeoutMs: 8000, maxBytes: MAX_HTML_BYTES });
+    if (!r || r.status < 200 || r.status >= 300) return null;
+    const html = r.body.toString('utf8').slice(0, 60000);
     const hrefs = [...html.matchAll(/<link[^>]+rel="[^"]*icon[^"]*"[^>]*>/gi)]
       .map((m) => (m[0].match(/href="([^"]+)"/i) || [])[1])
       .filter(Boolean) as string[];

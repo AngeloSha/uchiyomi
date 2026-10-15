@@ -119,6 +119,12 @@ export interface SourceAdapter {
   // ---- optional, plugin-declared capabilities (the core consults these instead of hardcoding ids) ----
   /** page/cover images sit behind Cloudflare → fetch them with FlareSolverr session cookies. */
   requiresCloudflare?: boolean;
+  /**
+   * This adapter's page images are on a private address by design, so the downloader's public-host rule does not apply
+   * to their first hop. Only the end-to-end fake source sets it, and that adapter exists only when FAKE_SOURCE_URLS is
+   * set (sources/fake.ts). A site's pages never get it: a URL a site names is exactly what the rule is for.
+   */
+  localImages?: boolean;
   /** Referer to send when fetching page/cover images (string, or derived from the chapter url). */
   imageReferer?: string | ((chapterUrl: string) => string);
   /** Extra headers for page/cover image fetches — e.g. auth for a source that proxies its own images. */

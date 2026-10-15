@@ -19,6 +19,10 @@ import { drawGap } from './archivePace';
 import { pageName, placeholderPng, PARTIAL_MANIFEST, type PartialManifest } from './partial';
 import { realContainedPath } from './fsGuard';
 import { adultContentRating } from './ageRating';
+import { MAX_PAGE_BYTES } from './archiveCaps';
+import { fetchFollowingPublic, readCapped } from './safeFetch';
+import { isSwAdapterId } from './sources/suwayomi/sources';
+import { onEngineOrigin } from './sources/suwayomi/client';
 
 /**
  * A title as a folder name.
@@ -457,7 +461,13 @@ export async function fetchPages(src: SourceAdapter, urls: string[], indices: nu
     // capability rather than keyed off the adapter id, so the core never special-cases a particular source.
     Object.assign(headers, typeof src.imageHeaders === 'function' ? src.imageHeaders(u) : src.imageHeaders ?? {});
     try {
-      const r = await fetch(u, { headers, signal: AbortSignal.timeout(45000) });
+      // Every hop on the public internet, the page read within MAX_PAGE_BYTES (lib/safeFetch.ts). A page URL is
+      // whatever the site's HTML or API named, and this followed redirects with no check: the audit had a site's
+      // loopback URL fetched and the internal service's answer stored as a member-readable page. The engine's own page
+      // proxy URLs are private by design and are exempt on their first hop, for an engine source only.
+      const r = await fetchFollowingPublic(u, { headers, signal: AbortSignal.timeout(45000) }, {
+        exemptFirst: (t) => !!src.localImages || (isSwAdapterId(src.id) && onEngineOrigin(t)),
+      });
       if (!r.ok) {
         if (r.status >= 400) worst = Math.max(worst, r.status);
         failed.set(i, { index: i, status: r.status });
@@ -475,7 +485,7 @@ export async function fetchPages(src: SourceAdapter, urls: string[], indices: nu
       const ct = (r.headers.get('content-type') || '').toLowerCase();
       const type = ct.split(';')[0].trim();
       if (/^text\/|html|json/.test(ct)) { worst = Math.max(worst, 415); failed.set(i, { index: i, status: r.status, type }); return; } // hotlink/error page, not an image
-      const buf = Buffer.from(await r.arrayBuffer());
+      const buf = await readCapped(r, MAX_PAGE_BYTES);
       // 200 with nothing behind it -- unless the little that is there decodes as an image (see isImage).
       if (buf.length < 256 && !(await isImage(buf))) { worst = Math.max(worst, EMPTY_BODY); failed.set(i, { index: i, status: r.status, type, bytes: buf.length }); return; }
       // Content-Type first: some sources (and any source proxied through an extension server) serve pages
