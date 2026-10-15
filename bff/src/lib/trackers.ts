@@ -14,6 +14,7 @@ import { q, one } from './db';
 import { seal, open as unseal } from './secretbox';
 import { withGate } from './gate';
 import { ADAPTERS, PROVIDERS, verdictOf, type Provider, type PushStatus, type SeriesState } from './trackerProviders';
+import { connectInfo, type ConnectInfo } from './trackerOauth';
 import { ghostsEnabled, ghostNumbers } from './komgaGhosts';
 import { continuousRun, marksFor, mergeRun, realRows } from './listingProgress';
 import { noticeShown } from './noticeChapters';
@@ -23,7 +24,7 @@ import { incognitoOn } from './incognito';
 export type { Provider } from './trackerProviders';
 
 
-export interface TrackerStatus {
+export interface TrackerStatus extends ConnectInfo {
   provider: Provider;
   /** Display name and where to get a token, so the UI does not hardcode the provider list. */
   label: string;
@@ -77,30 +78,32 @@ export async function statusFor(userId: string): Promise<TrackerStatus[]> {
   // knowing the list itself. A row that exists but is disabled is a connection whose token was rejected --
   // meaningfully different from never having connected, and the error explains which.
   const byProvider = new Map(rows.map((r) => [r.provider, r]));
-  return PROVIDERS.map((p) => {
+  return Promise.all(PROVIDERS.map(async (p): Promise<TrackerStatus> => {
+    const how = await connectInfo(p);
     const r = byProvider.get(p);
     // Additive (v0.61.0): only a provider with such a page carries the key at all.
     const authorizeUrl = ADAPTERS[p].authorizeUrl ? { authorizeUrl: ADAPTERS[p].authorizeUrl } : {};
     if (!r) {
       return {
-        provider: p, connected: false, accountName: null, expiresAt: null,
+        ...how, provider: p, connected: false, accountName: null, expiresAt: null,
         expiringSoon: false, lastSyncAt: null, lastError: null,
         label: ADAPTERS[p].label, tokenHelp: ADAPTERS[p].tokenHelp, ...authorizeUrl,
       };
     }
     return {
-    label: ADAPTERS[p].label,
-    tokenHelp: ADAPTERS[p].tokenHelp,
-    ...authorizeUrl,
-    provider: r.provider,
-    connected: r.enabled,
-    accountName: r.account_name,
-    expiresAt: r.expires_at ? new Date(r.expires_at).toISOString() : null,
-    expiringSoon: !!r.expires_at && new Date(r.expires_at).getTime() - Date.now() < EXPIRY_WARN_DAYS * 86_400_000,
-    lastSyncAt: r.last_sync_at ? new Date(r.last_sync_at).toISOString() : null,
-    lastError: r.last_error,
+      ...how,
+      label: ADAPTERS[p].label,
+      tokenHelp: ADAPTERS[p].tokenHelp,
+      ...authorizeUrl,
+      provider: r.provider,
+      connected: r.enabled,
+      accountName: r.account_name,
+      expiresAt: r.expires_at ? new Date(r.expires_at).toISOString() : null,
+      expiringSoon: !!r.expires_at && new Date(r.expires_at).getTime() - Date.now() < EXPIRY_WARN_DAYS * 86_400_000,
+      lastSyncAt: r.last_sync_at ? new Date(r.last_sync_at).toISOString() : null,
+      lastError: r.last_error,
     };
-  });
+  }));
 }
 
 /** Record which external entry a series maps to. Called wherever an AniList match is resolved (art lookup,

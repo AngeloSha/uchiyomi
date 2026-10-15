@@ -5743,7 +5743,7 @@ paths:
                     type: array
                     items:
                       type: object
-                      required: [provider, label, tokenHelp, connected, accountName, expiresAt, expiringSoon, lastSyncAt, lastError]
+                      required: [provider, label, tokenHelp, method, configured, connected, accountName, expiresAt, expiringSoon, lastSyncAt, lastError]
                       properties:
                         provider: { type: string, enum: [anilist, myanimelist, kitsu] }
                         label: { type: string }
@@ -5759,6 +5759,18 @@ paths:
                         expiringSoon: { type: boolean }
                         lastSyncAt: { type: [string, "null"], format: date-time }
                         lastError: { type: [string, "null"] }
+                        method:
+                          type: string
+                          enum: [oauth-implicit, oauth-code, token]
+                          description: >-
+                            How the service signs people in: `oauth-implicit` (AniList) and `oauth-code` (MyAnimeList) through
+                            an application an admin registers once, `token` for a service with nothing to register (a pasted token).
+                        configured:
+                          type: boolean
+                          description: False until an admin has registered the sign-in application (always true for `token`).
+                        clientId:
+                          type: string
+                          description: The registered application's public client id, once `configured`; no secret is ever sent.
         "401":
           description: Not authenticated
   /api/trackers/anilist:
@@ -5842,6 +5854,41 @@ paths:
           description: >-
             `tracker_unreachable` `{error, message}`, or `tracker_refused` `{error, status?, message}`: the service
             could not be asked, or refused the request for a reason that is not the token.
+  /api/trackers/myanimelist/oauth:
+    post:
+      tags:
+        - personal
+      summary: Finish a MyAnimeList sign-in (authorization code with PKCE).
+      operationId: postApiTrackersMyanimelistOauth
+      description: >-
+        The callback page sends the `code` MyAnimeList redirected back with, the PKCE `verifier` it kept, and the
+        `redirectUri` the sign-in used. The server swaps them for a token (with the saved client secret, if the
+        app has one), proves it against MyAnimeList and stores it. 400 when MyAnimeList refuses the code, 502
+        when it cannot be reached.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+                verifier:
+                  type: string
+                redirectUri:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "502":
+          description: The tracker could not be reached
   /api/trackers/{provider}/test:
     post:
       tags:
@@ -10918,6 +10965,64 @@ paths:
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/trackers/apps:
+    get:
+      tags:
+        - admin
+      summary: The sign-in applications registered for AniList and MyAnimeList.
+      operationId: getApiAdminTrackersApps
+      description: >-
+        Requires an admin account and a token carrying the admin scope. One entry per provider with its public
+        `clientId`, whether a secret is saved (`hasSecret`; the secret itself is never returned) and where the
+        setting comes from (`settings` or the environment).
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/trackers/apps/{provider}:
+    put:
+      tags:
+        - admin
+      summary: Save, or clear, the sign-in application for one tracker.
+      operationId: putApiAdminTrackersAppsProvider
+      description: >-
+        Requires an admin account and a token carrying the admin scope. `provider` is `anilist` or `myanimelist`.
+        An empty `clientId` removes the saved application; an empty or absent `clientSecret` keeps the saved one.
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                clientId:
+                  type: string
+                clientSecret:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
   /api/admin/trackers/relink:
     post:
       tags:

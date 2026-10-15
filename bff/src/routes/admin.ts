@@ -111,6 +111,7 @@ import { withOrigin } from '../lib/downloadActivity';
 import {
   readBulkChapterDeleteRun, requestBulkChapterDeleteCancel, startBulkChapterDelete,
 } from '../lib/bulkChapterDelete';
+import { getApp, saveApp, clearApp } from '../lib/trackerOauth';
 
 type ImportJob = { running: boolean; total: number; done: number; added: number; already: number; notFound: number; failed: number; startedAt: number; details: Array<{ title: string; status: string; source?: string }> };
 let importJob: ImportJob | null = null;
@@ -930,6 +931,37 @@ export default async function adminRoutes(app: FastifyInstance) {
     await applyArchiveSettings(b);
     await logAudit('settings.update', { userId: userIdOf(req), detail: b, req });
     return settingsRow();
+  });
+
+  // ---- tracker sign-in applications ----
+  // The one-time setup that lets everyone else connect AniList or MyAnimeList with a button. The client id is
+  // public (it is in the sign-in link); the secret, which MyAnimeList may issue and AniList's flow does not
+  // use, is sealed and never sent back, only reported as present.
+  const OAUTH_PROVIDERS = ['anilist', 'myanimelist'] as const;
+  app.get('/api/admin/trackers/apps', async () => ({
+    content: await Promise.all(OAUTH_PROVIDERS.map(async (provider) => {
+      const a = await getApp(provider);
+      return { provider, clientId: a?.clientId ?? null, hasSecret: !!a?.clientSecret, source: a?.source ?? null };
+    })),
+  }));
+
+  app.put('/api/admin/trackers/apps/:provider', async (req, reply) => {
+    const { provider } = req.params as { provider: string };
+    if (!(OAUTH_PROVIDERS as readonly string[]).includes(provider)) return reply.code(404).send({ error: 'unknown_provider' });
+    const b = z.object({ clientId: z.string().trim().max(200), clientSecret: z.string().trim().max(500).optional() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Enter the client ID.' });
+    const p = provider as (typeof OAUTH_PROVIDERS)[number];
+    if (!b.data.clientId) {
+      await clearApp(p);
+      await logAudit('tracker.app_clear', { userId: userIdOf(req), detail: { provider }, req });
+      return { ok: true };
+    }
+    // An empty secret keeps the one already saved; the form cannot show it, so blank must mean "unchanged".
+    const keep = b.data.clientSecret === undefined || b.data.clientSecret === '';
+    const secret = keep ? ((await getApp(p))?.source === 'settings' ? (await getApp(p))!.clientSecret : null) : b.data.clientSecret!;
+    await saveApp(p, b.data.clientId, secret);
+    await logAudit('tracker.app_save', { userId: userIdOf(req), detail: { provider, clientId: b.data.clientId }, req });
+    return { ok: true };
   });
 
   // ---- scheduled tasks ----

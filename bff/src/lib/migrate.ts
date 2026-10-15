@@ -669,6 +669,14 @@ CREATE TABLE IF NOT EXISTS user_trackers (
   created_at   timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, provider)
 );
+-- The OAuth application each tracker signs people in through, registered once by an admin (AniList, MyAnimeList).
+-- client_secret is sealed like a token; AniList's implicit flow and MAL's PKCE flow need none, so it is optional.
+CREATE TABLE IF NOT EXISTS tracker_oauth_apps (
+  provider      text PRIMARY KEY,
+  client_id     text NOT NULL,
+  client_secret text,
+  updated_at    timestamptz NOT NULL DEFAULT now()
+);
 -- which external entry a library series maps to. Resolved once from the same AniList match used for art.
 CREATE TABLE IF NOT EXISTS series_trackers (
   series_id   text NOT NULL,

@@ -2966,6 +2966,13 @@ Uchiyomi does not record volumes, so there is no volume count.
 Connect your AniList account once under **Profile → Connections → Progress tracking** (tap **Connect** on the
 AniList row and the token field opens under it) and finishing a chapter here updates your AniList list on its own.
 
+**Signing in instead of pasting.** Once an admin has registered a sign-in application for AniList or MyAnimeList (a
+one-time setup, *One-time setup, by an admin* in [CONFIGURATION.md](CONFIGURATION.md#progress-trackers)), **Connect** on
+that row takes you to the service's own login page and back to Uchiyomi, and you are connected: nothing to copy or paste.
+Admins see **Sign-in settings** on the row to register or change the application; everyone else is told to ask one while
+it is not set up. A connection that is about to lapse or is failing offers **Reconnect** the same way, and **Paste an
+access token instead** is always one link away. Until an application is registered, the token steps below are the way.
+
 **Getting the token** (since v0.61.0, [#190](https://github.com/AngeloSha/uchiyomi/issues/190)): tap **Get a token
 from AniList**, approve Uchiyomi on AniList's page, and AniList shows you a token: copy all of it and paste it into
 the field. That page belongs to Uchiyomi's own public AniList client, so there is nothing to register and no secret

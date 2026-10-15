@@ -1431,6 +1431,7 @@ GET    /api/opds/token            DELETE /api/opds/token
 PATCH  /api/opds/token
 GET    /api/trackers              POST   /api/trackers/anilist
 POST   /api/trackers/:provider/connect
+POST   /api/trackers/myanimelist/oauth
 POST   /api/trackers/:provider/test
 POST   /api/trackers/anilist/backfill
 POST   /api/trackers/:provider/resync/:seriesId
@@ -1554,8 +1555,17 @@ AniList score of at least 75 that nobody on the server has read in any language 
 first (empty on a Komga backend).
 
 **Progress trackers.** `GET /api/trackers` is the caller's own connections, every provider listed connected
-or not; `POST /api/trackers/:provider/connect` takes a pasted token and `DELETE /api/trackers/:provider`
-drops it. Since v0.61.0 ([#190](https://github.com/AngeloSha/uchiyomi/issues/190)) AniList's entry carries
+or not, each with how it signs in (`method`: `oauth-implicit` for AniList, `oauth-code` for MyAnimeList, `token` for a
+service with nothing to register), `configured` (false until an admin has saved the sign-in application) and, when it
+is, the public `clientId` the browser needs to start the sign-in. AniList comes back to the app with the token in the
+URL fragment and sends it to `POST /api/trackers/anilist/connect` (or `/api/trackers/anilist`);
+`POST /api/trackers/myanimelist/oauth {code, verifier, redirectUri}` swaps MyAnimeList's code for a token (**400**
+`rejected` when MyAnimeList refuses it, **502** `unreachable` when it cannot be asked). `POST
+/api/trackers/:provider/connect {token}` still takes a pasted token for any of them, and `DELETE
+/api/trackers/:provider` drops the connection. The sign-in applications are an admin's to set:
+`GET /api/admin/trackers/apps`, and `PUT /api/admin/trackers/apps/:provider {clientId, clientSecret?}` (an empty
+`clientId` clears it, an empty `clientSecret` keeps the saved one; the secret is write-only), also settable with
+`ANILIST_CLIENT_ID`, `MYANIMELIST_CLIENT_ID` and `MYANIMELIST_CLIENT_SECRET`. Since v0.61.0 ([#190](https://github.com/AngeloSha/uchiyomi/issues/190)) AniList's entry carries
 `authorizeUrl` — `https://anilist.co/api/v2/oauth/authorize?client_id=53603&response_type=token`, the project's
 public AniList client: open it, approve, and AniList's own pin page shows the token to paste (an implicit grant;
 nothing comes back to this server and no secret is involved). MyAnimeList and Kitsu have no such page;
@@ -1668,6 +1678,7 @@ GET    /api/admin/series/:id/numbering POST   /api/admin/series/:id/numbering
 GET    /api/admin/art/overview    GET    /api/admin/art/candidates/:id
 POST   /api/admin/art/backfill    GET    /api/admin/art/backfill/status
 POST   /api/admin/trackers/relink GET    /api/admin/trackers/relink/status
+GET    /api/admin/trackers/apps   PUT    /api/admin/trackers/apps/:provider
 POST   /api/admin/import          POST   /api/admin/import/parse
 GET    /api/admin/import/status
 GET    /api/admin/import/batches  POST   /api/admin/import/batches

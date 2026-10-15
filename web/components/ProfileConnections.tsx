@@ -12,6 +12,7 @@ import { ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { IcCloudDownload, IcPlus, IcRefresh } from '@/components/icons';
 import { Row, Section, SETTINGS_GRID, SwitchRow } from '@/components/settings';
 import { isDesktop } from '@/lib/desktop';
+import { callbackUrl, startSignIn } from '@/lib/trackerSignIn';
 import { connectProblem, testProblem, testSaid, tokenFromPaste, tokenSource, type TestResult } from '@/lib/trackerHelp';
 import { PLAN_ON_ADD_TEXT, planOnAddOf } from '@/lib/trackerPlan';
 
@@ -76,6 +77,11 @@ interface TrackerStatus {
   label?: string;
   /** The server's English help: shown only for a provider lib/trackerHelp.ts does not know (v0.61.0). */
   tokenHelp?: string;
+  /** How this service signs people in: a redirect (AniList, MyAnimeList), or a pasted token when there is nothing to register. */
+  method?: 'oauth-implicit' | 'oauth-code' | 'token';
+  /** false until an admin has registered the sign-in application. */
+  configured?: boolean;
+  authorizeUrl?: string; clientId?: string;
   provider: string; connected: boolean; accountName: string | null;
   expiresAt: string | null; expiringSoon: boolean; lastSyncAt: string | null; lastError: string | null;
 }
@@ -86,9 +92,10 @@ interface TrackerStatus {
  * The provider list comes from the server rather than being written here: each one reports its own name and
  * where a token comes from, so adding a fourth service is a backend change alone.
  *
- * Token-paste rather than an OAuth round-trip, for all of them. A real OAuth flow would need every
- * self-hoster to register an application with each service and keep its secret in their compose file, which
- * is a worse trade for a household app than copying a token once.
+ * How each connects is the server's to say (`method`, `configured`): AniList and MyAnimeList go to the service's own
+ * login and come back to app/tracker-callback, and a pasted token still works for both, and is the only way for a service
+ * with nothing to register. The redirect services need an application registered once, which an admin does on the row
+ * (TrackerSetup); everyone else just presses Connect. See lib/trackerSignIn.ts and bff/src/lib/trackerOauth.ts.
  *
  * The section renders nothing at all when the server offers no providers. The old page put the heading
  * outside this component, so an empty list left an orphan "Progress tracking" over blank space.
@@ -145,9 +152,11 @@ function PlanOnAddRow() {
  */
 function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
   const toast = useToast();
+  const { user } = useAuth();
+  const admin = user?.role === 'admin';
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
-  const [open, setOpen] = useState(false);
+  const [panel, setPanel] = useState<null | 'token' | 'setup'>(null);
   // Why the last Connect failed, said under the field (role="status"); cleared as the paste changes.
   const [problem, setProblem] = useState('');
   const [testing, setTesting] = useState(false);
@@ -155,8 +164,21 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
   const formId = useId();
   // A service's own name is a proper noun: it is passed as a placeholder rather than translated.
   const label = t.label || t.provider;
+  const redirects = t.method === 'oauth-implicit' || t.method === 'oauth-code';
 
-  const connect = async () => {
+  const connected = async (account: string) => {
+    toast(tr('Connected to {name} as {account}', { name: label, account }), 'success');
+    setToken('');
+    setPanel(null);
+    refetch();
+    // Only AniList has a backfill endpoint today; the others start syncing from the next chapter read.
+    if (t.provider === 'anilist') {
+      const b = await api<{ series: number }>('/api/trackers/anilist/backfill', { json: {} });
+      if (b.series) toast(tr('Syncing {n} series you have already finished…', { n: b.series }), 'info', { busy: true });
+    }
+  };
+
+  const pasteToken = async () => {
     // The address of AniList's pin page, or a token endpoint's whole JSON answer, carries the token: it is taken out.
     // Anything else is sent as pasted -- a shape only ever chooses the message below, never refuses the paste.
     const sent = tokenFromPaste(token);
@@ -165,17 +187,16 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
     setProblem('');
     try {
       const r = await api<{ account: string }>(`/api/trackers/${t.provider}/connect`, { json: { token: sent } });
-      toast(tr('Connected to {name} as {account}', { name: label, account: r.account }), 'success');
-      setToken('');
-      setOpen(false);
-      refetch();
-      // Only AniList has a backfill endpoint today; the others start syncing from the next chapter read.
-      if (t.provider === 'anilist') {
-        const b = await api<{ series: number }>('/api/trackers/anilist/backfill', { json: {} });
-        if (b.series) toast(tr('Syncing {n} series you have already finished…', { n: b.series }), 'info', { busy: true });
-      }
+      await connected(r.account);
     } catch (e) { setProblem(connectProblem(e, t.provider, label, sent)); }
     setBusy(false);
+  };
+
+  // The button on a row: go to the service's own login, or open whatever this service needs first.
+  const start = () => {
+    if (t.method === 'token') return setPanel((v) => (v ? null : 'token'));
+    if (t.configured) return startSignIn(t, window.location.origin);
+    setPanel((v) => (v ? null : admin ? 'setup' : 'token'));
   };
 
   const test = async () => {
@@ -222,32 +243,52 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
           </>
         }
       >
-        <button type="button" onClick={test} disabled={testing} className="btn-key">
-          {testing ? tr('Testing…') : tr('Test connection')}
-        </button>
-        <button type="button" onClick={disconnect} className="btn-key btn-key-danger">{tr('Disconnect')}</button>
+        <div className="flex gap-2">
+          {redirects && t.configured && (t.expiringSoon || t.lastError) && (
+            <button type="button" onClick={() => startSignIn(t, window.location.origin)} aria-label={tr('Reconnect {name}', { name: label })} className="btn-key">{tr('Reconnect')}</button>
+          )}
+          <button type="button" onClick={test} disabled={testing} className="btn-key">
+            {testing ? tr('Testing…') : tr('Test connection')}
+          </button>
+          <button type="button" onClick={disconnect} aria-label={tr('Disconnect {name}', { name: label })} className="btn-key btn-key-danger">{tr('Disconnect')}</button>
+        </div>
       </Row>
     );
   }
 
+  const link = 'underline underline-offset-2 hover:text-fog-300';
+  const alternatives = (
+    <span className="mt-1 block text-xs text-fog-500">
+      <button type="button" onClick={() => setPanel('token')} className={link}>{tr('Paste an access token instead')}</button>
+      {redirects && admin && <> · <button type="button" onClick={() => setPanel('setup')} className={link}>{tr('Sign-in settings')}</button></>}
+    </span>
+  );
+
   return (
     <>
       {/* ⚠️ The row text keeps `Sync your reading to {name}`: scripts/shots/capture.mjs finds this card by it.
-          While the form is open the row drops its divider (`border-b-0` beats the body's zero-specificity
-          `:where(.divide-y > …)` rule) so the token field reads as part of this provider, not the next one. */}
+          While a panel is open the row drops its divider (`border-b-0` beats the body's zero-specificity
+          `:where(.divide-y > …)` rule) so the form reads as part of this provider, not the next one. */}
       <Row
-        className={open ? 'border-b-0 pb-1' : undefined}
+        className={panel ? 'border-b-0 pb-1' : undefined}
         label={tr('Sync your reading to {name}', { name: label })}
-        help={t.provider === 'anilist'
-          ? <>{tr('Manual AniList actions can contact AniList even when automatic lookups are off.')}{t.lastError && <span className="mt-1 block text-red-300">{t.lastError}</span>}</>
-          : t.lastError ? <span className="text-red-300">{t.lastError}</span> : undefined}
+        help={t.provider === 'anilist' || t.lastError || (!panel && redirects && t.configured) ? <>
+          {t.provider === 'anilist' && tr('Manual AniList actions can contact AniList even when automatic lookups are off.')}
+          {t.lastError && <span className="mt-1 block text-red-300">{t.lastError}</span>}
+          {!panel && redirects && t.configured && alternatives}
+        </> : undefined}
       >
-        <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-controls={formId} className="btn-key">
-          {open ? tr('Cancel') : tr('Connect')}
+        <button type="button" onClick={start} aria-expanded={panel ? true : undefined} aria-controls={panel ? formId : undefined}
+          aria-label={panel ? undefined : tr('Connect {name}', { name: label })} className="btn-key">
+          {panel ? tr('Cancel') : tr('Connect')}
         </button>
       </Row>
-      {open && (
+      {panel === 'setup' && <TrackerSetup t={t} id={formId} onSaved={() => { setPanel(null); refetch(); }} onToken={() => setPanel('token')} />}
+      {panel === 'token' && (
         <div id={formId} className="pb-3 last:pb-0">
+          {redirects && !t.configured && (
+            <p className="max-w-prose text-xs text-fog-500">{tr('Sign-in for {name} is not set up yet. Ask an admin to set it up, or paste an access token.', { name: label })}</p>
+          )}
           <TokenHelp provider={t.provider} name={label} fallback={t.tokenHelp} />
           {/* fog-500, not fog-600: this is the one security fact on the form, and fog-600 measures 2.6:1 on
               the card -- below AA for any size of text. fog-500 (4.1:1) is the floor for helper text. */}
@@ -256,10 +297,10 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
           </p>
           <div className="mt-3 flex gap-2">
             <input value={token} onChange={(e) => { setToken(e.target.value); setProblem(''); }} type="password"
-              onKeyDown={(e) => { if (e.key === 'Enter' && !busy) connect(); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !busy) pasteToken(); }}
               placeholder={tr('{name} access token', { name: label })} aria-label={tr('{name} access token', { name: label })}
-              autoCapitalize="none" autoCorrect="off" autoComplete="off" className="field min-w-0 flex-1" />
-            <button type="button" onClick={connect} disabled={busy || !token.trim()} className="btn-key btn-key-primary shrink-0">
+              autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false} className="field min-w-0 flex-1" />
+            <button type="button" onClick={pasteToken} disabled={busy || !token.trim()} className="btn-key btn-key-primary shrink-0">
               {busy ? tr('Working…') : tr('Connect')}
             </button>
           </div>
@@ -267,6 +308,71 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * The admin's one-time setup for a service that signs people in through an application: where to register it,
+ * the redirect URL to register (this app's own callback page), and the client ID back. After it, every member
+ * just presses Connect. The secret, for the services that issue one, is write-only.
+ */
+function TrackerSetup({ t, id, onSaved, onToken }: { t: TrackerStatus; id: string; onSaved: () => void; onToken: () => void }) {
+  const toast = useToast();
+  const label = t.label || t.provider;
+  const [clientId, setClientId] = useState(t.clientId || '');
+  const [secret, setSecret] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [canCopy, setCanCopy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  // `navigator.clipboard` is missing outside a secure context (plain http on a LAN), so Copy appears only once
+  // a mounted client has seen it; the URL sits in a read-only field either way, ready to select.
+  useEffect(() => { setCanCopy(typeof navigator !== 'undefined' && typeof navigator.clipboard?.writeText === 'function'); }, []);
+  const redirect = typeof window === 'undefined' ? '' : callbackUrl(window.location.origin);
+  const steps = t.provider === 'myanimelist'
+    ? tr('myanimelist.net → Account settings → API → Create ID. Choose app type web.')
+    : tr('anilist.co → Settings → Developer → Create new client.');
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api(`/api/admin/trackers/apps/${t.provider}`, { method: 'PUT', json: { clientId: clientId.trim(), clientSecret: secret.trim() } });
+      toast(tr('Sign-in saved'), 'success');
+      onSaved();
+    } catch (e: any) { toast(msgOf(e, tr('Could not save the sign-in')), 'error'); }
+    setBusy(false);
+  };
+
+  return (
+    <div id={id} className="pb-3 last:pb-0">
+      <p className="max-w-prose text-xs text-fog-500">
+        {tr('Register an application with {name} once, and every member of this server can then connect with a button.', { name: label })}
+      </p>
+      <p className="mt-1 max-w-prose text-xs text-fog-500">{steps}</p>
+      <label className="mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500" htmlFor={`${id}-redirect`}>{tr('Redirect URL')}</label>
+      <div className="mt-1 flex gap-2">
+        <input id={`${id}-redirect`} readOnly value={redirect} onFocus={(e) => e.currentTarget.select()} className="field min-w-0 flex-1" />
+        {canCopy && (
+          <button type="button" className="btn-key"
+            onClick={() => navigator.clipboard.writeText(redirect).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }, () => setCopied(false))}>
+            {copied ? tr('Copied') : tr('Copy')}
+          </button>
+        )}
+      </div>
+      <label className="mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500" htmlFor={`${id}-client`}>{tr('Client ID')}</label>
+      <input id={`${id}-client`} value={clientId} onChange={(e) => setClientId(e.target.value)} autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false} className="field mt-1 w-full" />
+      {t.provider === 'myanimelist' && (
+        <>
+          <label className="mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500" htmlFor={`${id}-secret`}>{tr('Client secret (optional)')}</label>
+          <input id={`${id}-secret`} value={secret} onChange={(e) => setSecret(e.target.value)} type="password" autoComplete="off" className="field mt-1 w-full" />
+        </>
+      )}
+      <div className="mt-3 flex items-center gap-3">
+        <button type="button" onClick={save} disabled={busy || !clientId.trim()} className="btn-key btn-key-primary">
+          {busy ? tr('Working…') : tr('Save')}
+        </button>
+        <button type="button" onClick={onToken} className="text-xs text-fog-500 underline underline-offset-2 hover:text-fog-300">{tr('Paste an access token instead')}</button>
+      </div>
+    </div>
   );
 }
 
