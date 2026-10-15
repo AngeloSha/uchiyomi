@@ -497,13 +497,18 @@ series with a finished chapter (that they may list, in a library with AniList lo
 the server holds and what is 18+ for them -- the first of their last five such series that leaves at least four. Both
 sit behind the `canDownload` gate below; neither asks AniList for anything about the library.
 
-**Recommended for you.** `GET /api/discover/recommendations` answers `{content, sources, pending}` from the trackers the
-caller has connected (AniList and MyAnimeList seed it; any other connected list only adds to what is left out).
+**Recommended for you** (since v0.71.0). `GET /api/discover/recommendations` answers `{content, sources, pending}` from
+the trackers the caller has connected (AniList and MyAnimeList seed it; any other connected list only adds to what is
+left out). It sits behind the same `canDownload` rule as the rest of Discover: **403** for an account that may not add
+series, before anything reads its trackers.
 `content` is ranked, at most 40, and each entry carries `title`, `altTitles`, `cover`, `score` and `sources` -- the
 services that suggested it and, for each, the series of the caller's own it came from (`because`). `sources` says, per
 connected service, how many titles are on the list and how many of them seeded. Left out: everything on any connected
-list under any status, what the library holds (by name, as Discover's index knows it), light novels, and, while the
-caller is hiding 18+ or is capped below it, anything not known to be all-ages. It is answered from two caches
+list under any status, what the library holds (by name, as Discover's index knows it), light novels, and what is 18+
+for the caller as every Discover rail judges it -- an adults-only title past their age cap, and while they hide 18+ one
+in a genre the admin named adult -- with a title no service rated failing closed for a caller hiding 18+ or capped below
+it. The series named in `because` are judged the same way, and a series of the library counts only when the caller may
+browse it, in a library with AniList lookups on, through a checked link. It is answered from two caches
 (`tracker_list_cache`: the list, read at most every 12 hours; `tracker_rec_cache`: what readers recommend after a title,
 once per server per 14 days) and waits up to 8 seconds for a first refresh; `pending: true` says one is still running.
 An account with nothing connected gets an empty `content`, and nothing is asked of any service. `Cache-Control: no-store`.

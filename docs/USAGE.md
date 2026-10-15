@@ -3102,19 +3102,21 @@ admin has switched on **Show missing chapters in Mihon**, and only as part of an
 from the start: chapters read to 12 plus a mark on chapter 1000 still send 12, because a number sent to a
 tracker cannot be taken back there. Section 4, *Marking chapters you don't have as read*, has the whole rule.
 
-**Recommended for you.** With AniList or MyAnimeList connected, **Discover** shows a *Recommended for you* row above
-the wall. For each of up to eight series from your AniList list and five from your MyAnimeList list it takes the service's
+**Recommended for you** (since v0.71.0, from [#248](https://github.com/AngeloSha/uchiyomi/pull/248)). With AniList or
+MyAnimeList connected, and an account that may add series, **Discover** shows a *Recommended for you* row above the wall. For each of up to eight series from your AniList list and five from your MyAnimeList list it takes the service's
 own readers' "if you liked this" suggestions. A series counts as a seed when you finished it, are reading it or have it
 on hold, rated it 5/10 (three stars) or more, or did not rate it (an unrated one on hold does not count), and have read
 it in earnest: a few chapters of an unfinished series say nothing about taste. Stars you give a series in Uchiyomi count
-too, and win over the tracker's number. Reading fades, so a series you last opened years ago pulls less than one you read
+too, and win over the tracker's number, for a series you may open, in a library that looks things up on AniList, and
+linked to its entry by a person or a confirmed match. Reading fades, so a series you last opened years ago pulls less than one you read
 last week. A title several of your seeds point at ranks above one seed's pick, and the genres of what you rated high lift
 a suggestion while the genres of what you rated two stars or less pull it down. Every card says which service it came
 from and, under the title, *Because you read …*; a title both services suggest is one card naming both, and no seed
 fills more than five cards. Left out: everything on any of your connected lists under any status (read, reading, on hold,
 dropped or planned) and anything the library already holds. Light novels are never suggested, and neither is adult work
 while 18+ is hidden or your account is capped below 18 (a MyAnimeList suggestion whose age rating AniList cannot confirm
-counts as adult). Nothing is shown until a tracker is connected, and the row is empty when nothing is left to suggest.
+counts as adult), nor, while 18+ is hidden, a title in a genre the admin named as adult. The same goes for the series a
+card names: an adults-only title on your own list is never named, or used, while it would not be shown to you. Nothing is shown until a tracker is connected, and the row is empty when nothing is left to suggest.
 Tapping a card opens the same add dialog as Trending.
 
 The services are asked as little as possible. Your list is read at most every 12 hours (one request per 500 AniList

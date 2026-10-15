@@ -23,8 +23,10 @@ function RecCard({ r, onPick }: { r: Recommendation; onPick: (r: Recommendation)
           <IcPlus width={15} height={15} />
         </span>
       </div>
-      <p className="mt-1.5 line-clamp-2 text-xs font-medium leading-tight text-fog-300 transition group-hover:text-fog-100">{r.title}</p>
-      {because && <p className="mt-0.5 line-clamp-1 text-[11px] leading-tight text-fog-500">{tr('Because you read {title}', { title: because })}</p>}
+      <p className="mt-1.5 line-clamp-2 text-xs font-medium leading-tight text-fog-300 transition group-hover:text-fog-100" dir="auto">{r.title}</p>
+      {/* The seed's title is isolated, as Discover's own "Because you read" rail isolates it: a Latin title inside an Arabic
+          sentence keeps its own order, and an Arabic one inside an English sentence does not reorder the words around it. */}
+      {because && <p className="mt-0.5 line-clamp-1 text-[11px] leading-tight text-fog-500">{tr('Because you read {title}', { title: `\u2068${because}\u2069` })}</p>}
     </button>
   );
 }

@@ -15,8 +15,15 @@
 //  * a failure puts that service in a cooldown instead of being retried by the next visit, and the old
 //    answer keeps being served meanwhile -- stale beats empty, and beats hammering a service that said no;
 //  * concurrent visits to a refresh already running join it instead of starting another.
+//
+// And it is judged per viewer, as every Discover rail is (#248 review): an item through adultOk with the admin's adult
+// genres, a title no service rated failing closed for a viewer who must not see adult work, the SEEDS the same way before
+// one is named ("Because you read …"), and a series of the library only when this viewer may browse it, in a library
+// whose AniList lookups are on, through a link a person made or a check confirmed.
 import { q, one } from './db';
-import { visibleToAll } from './visibility';
+import { visibleToAll, browsable, Params, ADULT_RATING, type ViewCtx } from './visibility';
+import { adultOk } from './anilistRelated';
+import { TOKEN_REJECTED } from './trackers';
 import { open as unseal } from './secretbox';
 import { withGate } from './gate';
 import {
@@ -39,6 +46,8 @@ export const SEED_COUNT: Record<string, number> = { anilist: 8, myanimelist: 5 }
 const ANILIST_BATCH = 8;
 /** Per service, per hour: list pages + seed calls. A ceiling far above normal use that still bounds a bug. */
 const HOURLY_BUDGET: Record<string, number> = { anilist: 24, myanimelist: 40 };
+/** How many list entries one page of each service's list read holds (lib/trackerProviders.ts), for the budget. */
+const LIST_PAGE: Record<string, number> = { anilist: 500, myanimelist: 1000, kitsu: 500, mangaupdates: 100 };
 const COOLDOWN_MS = 10 * 60_000;
 const COOLDOWN_LIMITED_MS = 45 * 60_000;
 const MAL_GAP_MS = 1500;
@@ -116,14 +125,10 @@ async function writeRecs(provider: Provider, seedId: string, items: RecItem[]): 
   );
 }
 
-/** Forget a person's cached list: their connection changed, so the list may belong to another account. */
-export async function dropListCache(userId: string, provider: Provider): Promise<void> {
-  await q('DELETE FROM tracker_list_cache WHERE user_id = $1 AND provider = $2', [userId, provider]).catch(() => {});
-}
+/* A person's cached list is forgotten when their connection changes (lib/trackers.ts saveConnection and disconnect):
+   the list may belong to another account. */
 
 // ---------------------------------------------------------------------------- refresh
-
-const TOKEN_REJECTED = 'the tracker rejected the saved token -- reconnect to resume syncing';
 
 interface Conn { provider: Provider; token: string }
 
@@ -132,7 +137,7 @@ async function refreshList(userId: string, c: Conn, have: ListRow | null): Promi
   if (!mayCall(c.provider, 2)) return have;
   try {
     const entries = await ADAPTERS[c.provider].listLibrary(c.token, { statuses: [...LIST_STATUSES], max: LIST_MAX });
-    spend(c.provider, 1 + Math.ceil(entries.length / (c.provider === 'anilist' ? 500 : 1000)));
+    spend(c.provider, 1 + Math.ceil(entries.length / (LIST_PAGE[c.provider] ?? 100)));
     await writeList(userId, c.provider, entries);
     return { entries, fetchedAt: Date.now() };
   } catch (e) {
@@ -152,17 +157,31 @@ async function refreshList(userId: string, c: Conn, have: ListRow | null): Promi
  * finished here, and how many the library holds. A series rated here but absent from the list comes in as a
  * title they are reading, so rating something in the app is enough to count.
  */
-async function withLocalSignals(userId: string, provider: Provider, entries: LibraryEntry[]): Promise<LibraryEntry[]> {
+async function withLocalSignals(userId: string, provider: Provider, entries: LibraryEntry[], ctx: ViewCtx): Promise<LibraryEntry[]> {
+  // Only a series this viewer may browse now (a library taken away, an 18+ one while hidden, one above the age cap: none
+  // is named or sends its id anywhere), in a library whose AniList lookups are on (#168: off means its titles and ids are
+  // not sent to AniList, and a recommendation is asked by that id), through a link a person made or the check confirmed
+  // -- the rule "Because you read" (lib/anilistRelated.ts) reads its seeds by.
+  // Reintroduce by dropping the browsable() line: "a series from a library taken away neither seeds nor is named" in
+  // trackerRecs.int.test.ts finds it named.
+  const p = new Params();
+  const uid = p.add(userId);
+  const prov = p.add(provider);
   const rows = await q<{ external_id: string; title: string | null; stars: number | null; read: number; total: number; last: string | null }>(
-    `SELECT st.external_id, st.title, r.stars,
-            (SELECT max(rp.updated_at) FROM read_progress rp WHERE rp.user_id = $1 AND rp.series_id = st.series_id) AS last,
-            (SELECT count(*)::int FROM read_progress rp WHERE rp.user_id = $1 AND rp.series_id = st.series_id AND rp.completed) AS read,
+    `SELECT st.external_id, COALESCE(NULLIF(btrim(o.title), ''), st.title, s.title) AS title, r.stars,
+            (SELECT max(rp.updated_at) FROM read_progress rp WHERE rp.user_id = ${uid} AND rp.series_id = st.series_id) AS last,
+            (SELECT count(*)::int FROM read_progress rp WHERE rp.user_id = ${uid} AND rp.series_id = st.series_id AND rp.completed) AS read,
             (SELECT count(*)::int FROM lib_books b WHERE b.series_id = st.series_id AND b.pruned_at IS NULL) AS total
        FROM series_trackers st
-       LEFT JOIN ratings r ON r.user_id = $1 AND r.series_id = st.series_id
-      WHERE st.provider = $2
-        AND (r.stars IS NOT NULL OR EXISTS (SELECT 1 FROM read_progress rp WHERE rp.user_id = $1 AND rp.series_id = st.series_id AND rp.completed))`,
-    [userId, provider]).catch(() => []);
+       JOIN lib_series s ON s.id = st.series_id
+       JOIN libraries l ON l.id = s.library_id AND l.anilist_lookup
+       LEFT JOIN series_overrides o ON o.series_id = s.id
+       LEFT JOIN ratings r ON r.user_id = ${uid} AND r.series_id = st.series_id
+      WHERE st.provider = ${prov}
+        AND (st.linked_by IS NOT NULL OR st.checked_at IS NOT NULL)
+        AND ${browsable('s', ctx, p)}
+        AND (r.stars IS NOT NULL OR EXISTS (SELECT 1 FROM read_progress rp WHERE rp.user_id = ${uid} AND rp.series_id = st.series_id AND rp.completed))`,
+    p.values as any[]).catch(() => []);
   if (!rows.length) return entries;
   const byId = new Map(rows.map((r) => [r.external_id, r]));
   const out = entries.map((e) => {
@@ -173,7 +192,8 @@ async function withLocalSignals(userId: string, provider: Provider, entries: Lib
   });
   for (const l of byId.values()) {
     if (!l.stars || !l.title) continue;
-    out.push({ externalId: l.external_id, title: l.title, altTitles: [], status: 'reading', progress: l.read, format: 'manga', score: l.stars * 2, total: l.total || undefined, ...(l.last ? { lastRead: new Date(l.last).getTime() } : {}) });
+    // Judged above by browsable() for this viewer, as the library judges it: shown to them, so it may be named to them.
+    out.push({ externalId: l.external_id, title: l.title, altTitles: [], status: 'reading', progress: l.read, format: 'manga', score: l.stars * 2, total: l.total || undefined, adult: false, ...(l.last ? { lastRead: new Date(l.last).getTime() } : {}) });
   }
   return out;
 }
@@ -267,10 +287,29 @@ async function fetchMalSeeds(token: string, missing: LibraryEntry[]): Promise<vo
   for (const [seedId, items] of got) await writeRecs('myanimelist', seedId, items);
 }
 
-async function refresh(userId: string, c: Conn): Promise<void> {
+/**
+ * What THIS viewer may be shown, as every Discover rail judges it (lib/anilistRelated.ts adultOk): not an adults-only
+ * title to an account capped below 18, and while 18+ is hidden neither one nor one in a genre the admin named as adult.
+ * And fail closed: for a viewer who must not see adult work, a title whose rating no service gave is not shown -- a
+ * MyAnimeList suggestion AniList could not confirm, a list entry that did not say. The same judge names a seed.
+ * Reintroduce the boolean the route used to pass (drop adultOk): "a viewer hiding 18+ is not shown a title in a genre
+ * the admin named adult" in trackerRecs.int.test.ts finds it.
+ */
+export function viewerJudge(ctx: ViewCtx): (it: { adult?: boolean | null; genres?: readonly string[] }) => boolean {
+  const restricted = ctx.hideAdultLibraries || (ctx.maxAgeRating !== null && ctx.maxAgeRating < ADULT_RATING);
+  return (it) => !(restricted && typeof it.adult !== 'boolean') && adultOk({ adult: it.adult === true, genres: it.genres ?? [] }, ctx);
+}
+
+/** A person's seeds for one service, as this viewer may have them: their list with what they did here, judged, best first. */
+async function seedsFor(userId: string, provider: Provider, entries: LibraryEntry[], ctx: ViewCtx): Promise<LibraryEntry[]> {
+  const ok = viewerJudge(ctx);
+  return pickSeeds((await withLocalSignals(userId, provider, entries, ctx)).filter(ok), SEED_COUNT[provider] ?? 5);
+}
+
+async function refresh(userId: string, c: Conn, ctx: ViewCtx): Promise<void> {
   const list = await refreshList(userId, c, await readList(userId, c.provider));
   if (!list || !REC_PROVIDERS.includes(c.provider)) return;
-  const seeds = pickSeeds(await withLocalSignals(userId, c.provider, list.entries), SEED_COUNT[c.provider] ?? 5);
+  const seeds = await seedsFor(userId, c.provider, list.entries, ctx);
   const { missing } = await staleSeeds(c.provider, seeds);
   if (!missing.length) return;
   if (c.provider === 'anilist') await fetchAnilistSeeds(missing);
@@ -300,7 +339,7 @@ export interface RecAnswer {
  */
 export async function recommendationsFor(
   userId: string,
-  opts: { restrictAdult: boolean; inLibrary: (titles: string[]) => Promise<Set<string>>; waitMs?: number },
+  opts: { ctx: ViewCtx; inLibrary: (titles: string[]) => Promise<Set<string>>; waitMs?: number },
 ): Promise<RecAnswer> {
   const rows = await q<{ provider: Provider; access_token: string; expires_at: string | null }>(
     'SELECT provider, access_token, expires_at FROM user_trackers WHERE user_id = $1 AND enabled ORDER BY provider', [userId]);
@@ -317,10 +356,10 @@ export async function recommendationsFor(
     const list = await readList(userId, c.provider);
     let stale = !list || Date.now() - list.fetchedAt >= LIST_TTL_MS;
     if (!stale && REC_PROVIDERS.includes(c.provider)) {
-      const seeds = pickSeeds(await withLocalSignals(userId, c.provider, list!.entries), SEED_COUNT[c.provider] ?? 5);
+      const seeds = await seedsFor(userId, c.provider, list!.entries, opts.ctx);
       stale = (await staleSeeds(c.provider, seeds)).missing.length > 0;
     }
-    if (stale && !coolingDown(c.provider)) running.push(once(`${userId}:${c.provider}`, () => refresh(userId, c)));
+    if (stale && !coolingDown(c.provider)) running.push(once(`${userId}:${c.provider}`, () => refresh(userId, c, opts.ctx)));
   }
   if (running.length) {
     let timer: NodeJS.Timeout | undefined;
@@ -340,7 +379,7 @@ export async function recommendationsFor(
     lists.set(c.provider, list.entries);
     let seedCount = 0;
     if (REC_PROVIDERS.includes(c.provider)) {
-      const seeds = pickSeeds(await withLocalSignals(userId, c.provider, list.entries), SEED_COUNT[c.provider] ?? 5);
+      const seeds = await seedsFor(userId, c.provider, list.entries, opts.ctx);
       const cached = await readRecs(c.provider, seeds.map((s) => s.externalId));
       for (const seed of seeds) {
         const r = cached.get(seed.externalId);
@@ -353,7 +392,7 @@ export async function recommendationsFor(
   }
 
   const leave = exclusionsFrom(lists);
-  let content = buildRecs(inputs, leave, { restrictAdult: opts.restrictAdult, taste: await tasteFor(userId) });
+  let content = buildRecs(inputs, leave, { itemOk: viewerJudge(opts.ctx), taste: await tasteFor(userId) });
   if (content.length) {
     const have = await opts.inLibrary(content.flatMap((r) => [r.title, ...r.altTitles]));
     content = content.filter((r) => ![r.title, ...r.altTitles].some((t) => have.has(normTitle(t))));

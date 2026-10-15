@@ -3839,11 +3839,14 @@ paths:
         Returns `{content, sources, pending}`. `content` is ranked, at most 40, each with `title`, `altTitles`,
         `cover`, `score` and `sources` -- the services that suggested it and, for each, the series of the
         account's own it came from (`because`). Titles on any of the account's connected lists, held by the
-        library, light novels, and (while the 18+ reveal is off or the account is capped below 18) anything not
-        known to be all-ages are left out. Answered from caches: the account's list is read at most every 12
+        library, light novels, and what is 18+ for the caller (an adults-only title past the age cap; while 18+ is hidden,
+        one in a genre the admin named adult; a title no service rated, for a caller hiding 18+ or capped below it) are
+        left out. Behind Discover's canDownload rule. Answered from caches: the account's list is read at most every 12
         hours and each seed title's suggestions once per server per 14 days, so calling this repeatedly costs the
         trackers nothing. `pending: true` means a first refresh is still running (the answer waits up to 8 seconds
-        for it); ask again in a few seconds. An account with no tracker connected gets an empty `content`.
+        for it); ask again in a few seconds. An account with no tracker connected gets an empty `content`. The series
+        named in `because` are judged for the caller as the suggestions are, and a series of the library counts only when
+        the caller may browse it, in a library with AniList lookups on, through a checked link.
       security:
         - bearer: []
       responses:
@@ -3851,6 +3854,8 @@ paths:
           description: OK
         "401":
           description: Not authenticated
+        "403":
+          description: This account may not add series
   /api/discover/works:
     get:
       tags:

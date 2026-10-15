@@ -90,7 +90,19 @@ an empty string to make sure it can never send anything regardless of the settin
 
 The tracker calls are the only ones this server makes **with your token**: AniList, MyAnimeList, Kitsu and MangaUpdates,
 each connected by you under **Profile → Connections → Progress tracking**, and only for reading your list (the
-import) and reporting what you finished. Nothing carrying a token goes to a tracker you have not connected.
+import, and since v0.71.0 Discover's *Recommended for you*), reporting what you finished, and asking MyAnimeList what its
+readers recommend after a few titles of your own list (its API needs a token for that). Nothing carrying a token goes
+to a tracker you have not connected.
+
+**Recommended for you** (since v0.71.0) reads a person's connected lists when they open Discover, at most every 12
+hours, and keeps the list in the database (`tracker_list_cache`, removed when they disconnect or sign in as someone
+else). For up to eight titles of their AniList list and five of their MyAnimeList list, it asks what readers recommend
+next: AniList **without** a token (public queries, the AniList ids of those titles), MyAnimeList with theirs, and, for
+what MyAnimeList answers, one AniList query by those MyAnimeList ids for the age rating. Each title's answer is kept two
+weeks for the whole server (`tracker_rec_cache`), so a title two people rated is asked once. Series of the library they
+rated or read count too, but only ones they may open, in a library with *Look up art and metadata on AniList
+automatically* on, through a checked link. An account that may not add series, or has no tracker connected, sends
+nothing.
 
 Two of those services are also asked **without** any token, by title, whether or not anyone has connected
 them. By default, every series added gets its title sent to AniList (`graphql.anilist.co`) once, for banner and cover

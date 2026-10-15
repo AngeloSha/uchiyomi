@@ -87,11 +87,11 @@ interface Cand { rec: Rec; weight: number; best: Map<Provider, number>; lead: nu
  * seed's pick, weighted by how well the person rated the seed and how many readers made the pairing. The
  * same work arriving from both services (matched on any shared name) is one card naming both.
  *
- * `restrictAdult`: drop everything not KNOWN to be all-ages. MyAnimeList says nothing about age rating, so
- * its titles carry what AniList answered for them, and a title neither answered for is not shown to a viewer
- * who must not see adult work (the same fail-closed rule as the age cap).
+ * `itemOk`: whether THIS viewer may be shown a title (lib/trackerRecs.ts viewerJudge: the age cap, the 18+ reveal and
+ * the genres the admin named as adult, as every Discover rail judges them, and a title whose rating no service gave
+ * fails closed for a viewer who must not see adult work). The callers judge the seeds the same way before they get here.
  */
-export function buildRecs(inputs: SeedRecs[], leave: Exclusions, opts: { restrictAdult: boolean; taste?: Map<string, number> }): Rec[] {
+export function buildRecs(inputs: SeedRecs[], leave: Exclusions, opts: { itemOk: (it: RecItem) => boolean; taste?: Map<string, number> }): Rec[] {
   const cands: Cand[] = [];
   const byName = new Map<string, Cand>();
   for (const { provider, seed, items } of inputs) {
@@ -99,7 +99,7 @@ export function buildRecs(inputs: SeedRecs[], leave: Exclusions, opts: { restric
     const seedWeight = seedStrength(seed) / 10;
     for (const it of items) {
       if (it.format === 'novel' || held?.has(it.id)) continue;
-      if (opts.restrictAdult && it.adult !== false) continue;
+      if (!opts.itemOk(it)) continue;
       const names = [it.title, ...it.altTitles].map(normTitle).filter(Boolean);
       if (!names.length || names.some((n) => leave.names.has(n))) continue;
       const gain = seedWeight * (1 + Math.log1p(Math.max(0, it.votes))) * tasteFactor(it.genres, opts.taste);

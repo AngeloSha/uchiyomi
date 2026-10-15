@@ -70,6 +70,13 @@ export interface LibraryEntry {
   total?: number;
   /** When the person last read a chapter of it in Uchiyomi (epoch ms); absent when never read here. */
   lastRead?: number;
+  /**
+   * The service's own word on whether the title is adults-only (AniList `isAdult`, MyAnimeList `nsfw` gray or black), and
+   * its genres: what a recommendation needs to judge a SEED for the viewer before naming it ("Because you read …", #248).
+   * Absent when the service did not say, which reads as not known to be all-ages.
+   */
+  adult?: boolean;
+  genres?: string[];
 }
 /** How many entries one intake reads at most: the review batch keeps 500, one more says "truncated". */
 export const TRACKER_LIST_MAX = 501;
@@ -263,7 +270,7 @@ async function anilistCall(token: string, query: string, variables: Record<strin
 const ANILIST_LIST = `query($userId:Int,$statuses:[MediaListStatus],$chunk:Int,$perChunk:Int){
   MediaListCollection(userId:$userId,type:MANGA,status_in:$statuses,chunk:$chunk,perChunk:$perChunk,forceSingleCompletedList:true){
     hasNextChunk
-    lists{ isCustomList entries{ mediaId status progress score(format:POINT_10_DECIMAL) media{ id format title{ romaji english } synonyms } } }
+    lists{ isCustomList entries{ mediaId status progress score(format:POINT_10_DECIMAL) media{ id format isAdult genres title{ romaji english } synonyms } } }
   }
 }`;
 const ANILIST_PER_CHUNK = 500;
@@ -337,6 +344,8 @@ export const anilistAdapter: TrackerAdapter = {
             progress: Math.max(0, Math.floor(Number(e.progress) || 0)),
             format: anilistFormat(e.media?.format),
             ...(Number(e.score) > 0 ? { score: Number(e.score) } : {}),
+            ...(typeof e.media?.isAdult === 'boolean' ? { adult: e.media.isAdult } : {}),
+            ...(Array.isArray(e.media?.genres) && e.media.genres.length ? { genres: e.media.genres.filter((g: unknown) => typeof g === 'string') } : {}),
           });
           if (out.length >= max) return out;
         }
@@ -420,7 +429,7 @@ export const malAdapter: TrackerAdapter = {
     for (const pass of everything ? [null] : statuses) {
       for (let offset = 0, more = true; more; ) {
         const qs = new URLSearchParams({
-          fields: 'list_status,alternative_titles,media_type',
+          fields: 'list_status,alternative_titles,media_type,nsfw,genres',
           limit: String(MAL_PAGE), offset: String(offset), nsfw: 'true',
         });
         if (pass) qs.set('status', MAL_STATUS[pass]);
@@ -448,6 +457,9 @@ export const malAdapter: TrackerAdapter = {
             progress: Math.max(0, Math.floor(Number(row?.list_status?.num_chapters_read) || 0)),
             format: malFormat(node.media_type),
             ...(Number(row?.list_status?.score) > 0 ? { score: Number(row.list_status.score) } : {}),
+            // `white` is all-ages; `gray` (may not be) and `black` are read as adult, failing closed.
+            ...(node.nsfw === 'white' ? { adult: false } : node.nsfw === 'gray' || node.nsfw === 'black' ? { adult: true } : {}),
+            ...(Array.isArray(node.genres) && node.genres.length ? { genres: node.genres.map((g: any) => g?.name).filter((g: unknown) => typeof g === 'string') } : {}),
           });
           if (out.length >= max) return out;
         }

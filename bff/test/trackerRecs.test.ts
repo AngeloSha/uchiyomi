@@ -1,9 +1,19 @@
 // Recommendations from connected trackers: which of the person's titles seed them, how the answers are
 // combined, and what is left out. The calls to the services are in trackerRecs.int.test.ts.
-import test from 'node:test';
+import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
 import { pickSeeds, buildRecs, exclusionsFrom, tasteFactor, type SeedRecs } from '../src/lib/trackerRecsCore';
 import type { LibraryEntry, RecItem } from '../src/lib/trackerProviders';
+
+// The viewer's judge lives beside the stores (lib/trackerRecs.ts), which open no database until asked.
+process.env.DATABASE_URL ||= 'postgres://unused:unused@127.0.0.1:1/unused';
+let viewerJudge: typeof import('../src/lib/trackerRecs').viewerJudge;
+before(async () => { ({ viewerJudge } = await import('../src/lib/trackerRecs')); });
+const viewer = (o: { hideAdultLibraries?: boolean; maxAgeRating?: number | null; adultGenres?: string[] } = {}) => ({
+  userId: 'u', libraryIds: null, maxAgeRating: o.maxAgeRating ?? null, hideAdultLibraries: !!o.hideAdultLibraries,
+  adultGenres: o.adultGenres ?? [], adultSources: [] as string[],
+});
+const open = () => ({ itemOk: viewerJudge(viewer()) });
 
 const entry = (id: string, title: string, status: LibraryEntry['status'], progress: number, score?: number, format: LibraryEntry['format'] = 'manga', altTitles: string[] = []): LibraryEntry =>
   ({ externalId: id, title, altTitles, status, progress, format, ...(score != null ? { score } : {}) });
@@ -57,7 +67,7 @@ test('taste: a genre of well-rated series lifts a suggestion, one of badly rated
   assert.equal(tasteFactor(undefined, taste), 1);
   const seed = entry('1', 'S', 'completed', 50, 9);
   const out = buildRecs([{ provider: 'anilist', seed, items: [item('a', 'Love Story', { genres: ['Romance'] }), item('b', 'Fight Story', { genres: ['Action'] })] }],
-    exclusionsFrom(new Map()), { restrictAdult: false, taste });
+    exclusionsFrom(new Map()), { ...open(), taste });
   assert.deepEqual(out.map((r) => r.title), ['Fight Story', 'Love Story']);
 });
 
@@ -84,7 +94,7 @@ test('what the person already has is left out: by id at the same service, by any
       item('902', 'Monster'),
     ],
   };
-  const out = buildRecs([seed], exclusionsFrom(mine), { restrictAdult: false });
+  const out = buildRecs([seed], exclusionsFrom(mine), open());
   assert.deepEqual(out.map((r) => r.title), ['Monster']);
 });
 
@@ -96,7 +106,7 @@ test('the same series suggested by both services is one card naming both, and by
     { provider: 'anilist', seed: s1, items: [item('10', 'Monster', { votes: 30 }), item('11', 'Only Berserk', { votes: 30 })] },
     { provider: 'anilist', seed: s2, items: [item('10', 'Monster', { votes: 2 })] },
     { provider: 'myanimelist', seed: m1, items: [item('700', 'MONSTER', { cover: null, score: null, votes: 4 })] },
-  ], exclusionsFrom(new Map()), { restrictAdult: false });
+  ], exclusionsFrom(new Map()), open());
   assert.equal(out[0].title, 'Monster', 'three pairings beat one');
   assert.deepEqual(out[0].sources.map((s) => [s.provider, s.because]).sort(), [['anilist', 'Berserk'], ['myanimelist', 'Vagabond']],
     'each service names the seed ITS strongest pairing came from');
@@ -109,9 +119,12 @@ test('an adult or unknown-rating title is withheld from a restricted viewer, and
     provider: 'myanimelist', seed: entry('5', 'X', 'completed', 10, 9),
     items: [item('1', 'Safe'), item('2', 'Adult', { adult: true }), item('3', 'Unknown', { adult: null }), item('4', 'A Novel', { format: 'novel' })],
   };
-  // Reintroduce by testing `adult === true` instead of `!== false`: Unknown (MyAnimeList said nothing and AniList did not know it) is shown.
-  assert.deepEqual(buildRecs([seed], exclusionsFrom(new Map()), { restrictAdult: true }).map((r) => r.title), ['Safe']);
-  assert.deepEqual(buildRecs([seed], exclusionsFrom(new Map()), { restrictAdult: false }).map((r) => r.title), ['Adult', 'Safe', 'Unknown']);
+  // Reintroduce by testing `adult === true` instead of failing closed: Unknown (MyAnimeList said nothing and AniList did
+  // not know it) is shown. Hiding 18+ and an age cap below 18 both restrict.
+  for (const v of [viewer({ hideAdultLibraries: true }), viewer({ maxAgeRating: 13 })]) {
+    assert.deepEqual(buildRecs([seed], exclusionsFrom(new Map()), { itemOk: viewerJudge(v) }).map((r) => r.title), ['Safe']);
+  }
+  assert.deepEqual(buildRecs([seed], exclusionsFrom(new Map()), open()).map((r) => r.title), ['Adult', 'Safe', 'Unknown']);
 });
 
 test('one seed cannot fill the whole rail', () => {
@@ -120,7 +133,21 @@ test('one seed cannot fill the whole rail', () => {
   const out = buildRecs([
     { provider: 'anilist', seed: entry('1', 'Big', 'completed', 1, 10), items: many },
     { provider: 'anilist', seed: entry('2', 'Small', 'completed', 1, 7), items: other },
-  ], exclusionsFrom(new Map()), { restrictAdult: false });
+  ], exclusionsFrom(new Map()), open());
   assert.equal(out.filter((r) => r.sources[0].because === 'Big').length, 5);
   assert.ok(out.some((r) => r.title === 'Other seed pick'));
+});
+
+test('a viewer hiding 18+ is not shown a title in a genre the admin named adult; an open one is (#248)', () => {
+  const seed: SeedRecs = {
+    provider: 'anilist', seed: entry('5', 'X', 'completed', 10, 9),
+    items: [item('1', 'Plain', { genres: ['Drama'] }), item('2', 'Tagged', { genres: ['Ecchi', 'Comedy'] })],
+  };
+  const titles = (v: ReturnType<typeof viewer>) => buildRecs([seed], exclusionsFrom(new Map()), { itemOk: viewerJudge(v) }).map((r) => r.title);
+  assert.deepEqual(titles(viewer()), ['Plain', 'Tagged']);
+  assert.deepEqual(titles(viewer({ hideAdultLibraries: true })), ['Plain', 'Tagged'], 'no genre named: nothing more is hidden');
+  // Compared as browsable() compares them: trimmed and case-blind.
+  assert.deepEqual(titles(viewer({ hideAdultLibraries: true, adultGenres: [' ECCHI '] })), ['Plain']);
+  // The age cap is a permission, the genres a surfacing choice: a capped viewer not hiding 18+ keeps an all-ages title.
+  assert.deepEqual(titles(viewer({ maxAgeRating: 13, adultGenres: ['Ecchi'] })), ['Plain', 'Tagged']);
 });

@@ -34,4 +34,6 @@ test('Discover shows the rail while browsing only, and the rail draws nothing wi
   const rail = readFileSync(new URL('../components/RecommendationRail.tsx', import.meta.url), 'utf8');
   assert.match(rail, /enabled,\n/, 'it asks only when the page may add');
   assert.match(rail, /if \(!items\.length\) return null;/);
+  // The seed's title is isolated in the sentence, as Discover's own rail does it. Reintroduce `{ title: because }`: this fails.
+  assert.match(rail, /tr\('Because you read \{title\}', \{ title: `\\u2068\$\{because\}\\u2069` \}\)/, 'the seed title is not isolated');
 });

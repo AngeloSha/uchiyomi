@@ -14,7 +14,6 @@ import { q, one } from './db';
 import { seal, open as unseal } from './secretbox';
 import { withGate } from './gate';
 import { ADAPTERS, PROVIDERS, verdictOf, type Provider, type PushStatus, type SeriesState } from './trackerProviders';
-import { dropListCache } from './trackerRecs';
 import { ghostsEnabled, ghostNumbers } from './komgaGhosts';
 import { continuousRun, marksFor, mergeRun, realRows } from './listingProgress';
 import { noticeShown } from './noticeChapters';
@@ -84,8 +83,13 @@ export async function saveConnection(
            expires_at = EXCLUDED.expires_at, enabled = true, last_error = NULL`,
     [userId, provider, seal(token), accountName, expiresAt],
   );
-  // A new sign-in can be a different account, whose list is not the one cached.
+  // A new sign-in can be a different account, whose list is not the one cached (#248, lib/trackerRecs.ts). Written here,
+  // not imported: lib/trackerRecs.ts reads this module's TOKEN_REJECTED, and the two must not import each other.
   await dropListCache(userId, provider);
+}
+
+async function dropListCache(userId: string, provider: Provider): Promise<void> {
+  await q('DELETE FROM tracker_list_cache WHERE user_id = $1 AND provider = $2', [userId, provider]).catch(() => {});
 }
 
 export async function disconnect(userId: string, provider: Provider): Promise<void> {

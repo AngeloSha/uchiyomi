@@ -44,6 +44,15 @@ test('the recommendations route', { skip }, async () => {
     assert.equal(r.headers['cache-control'], 'no-store');
     assert.deepEqual(r.json(), { content: [], sources: [], pending: false }, 'no tracker connected: nothing to say');
     assert.deepEqual(asked, [], 'and no service is asked');
+
+    // A member who may not add series is refused, as every Discover route is, before anything reads their trackers --
+    // a connected AniList included. Reintroduce by dropping the hook: this answers 200 and asks AniList for the list.
+    const { seal } = await import('../src/lib/secretbox');
+    await q(`UPDATE users SET perms = '{"canDownload": false}'::jsonb WHERE id = $1`, [u.id]);
+    await q(`INSERT INTO user_trackers (user_id, provider, access_token) VALUES ($1, 'anilist', $2)`, [u.id, seal('tok')]);
+    const denied = await app.inject({ method: 'GET', url: '/api/discover/recommendations', headers: { authorization: `Bearer ${app.jwt.sign({ sub: u.id, role: 'user' })}` } });
+    assert.equal(denied.statusCode, 403, denied.body);
+    assert.deepEqual(asked, [], 'a member who may not add series spent their token on suggestions');
   } finally {
     await app.close();
     await q(`DELETE FROM users WHERE username = 'recs-route'`).catch(() => {});
