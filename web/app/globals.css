@@ -328,8 +328,17 @@
   .card {
     @apply rounded-3xl border border-ink-700/70 bg-ink-850/70 backdrop-blur;
   }
+  /* `content-visibility: auto`: a placeholder well off the screen is skipped, and its shimmer with it. A grid renders one
+     for every cover that has not loaded, and lazy covers below the fold wait: the 200-cover Library kept 158 shimmers
+     running where nobody could see them, and every frame of theirs was main-thread work for the whole page -- restyle,
+     pre-paint, re-layering (idle at 4x CPU: 325 ms of re-layering in every 2.5 s; Home on a phone: half its idle main
+     thread). What shows is the same: a skipped placeholder is still its grey box, and its shimmer starts as it comes
+     within about half a screen -- so a row scrolled to sweeps in step with its own row rather than with the first
+     screenful, as every later page of covers already did. Every placeholder takes its size from its classes, never its
+     content, so skipping one moves nothing. Pinned in web/test/idleWork.test.ts. */
   .skeleton {
     @apply relative overflow-hidden bg-ink-800;
+    content-visibility: auto;
   }
   .skeleton::after {
     content: '';

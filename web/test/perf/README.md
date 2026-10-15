@@ -180,3 +180,38 @@ strips; a run of strip chapters (Eleceed 215 on the live server, two 689 × 54,0
 to nine strips in v0.60's window, about 1.3 GB decoded, and holds at most three now -- the browser walk
 (test/e2e/v610Walk-reader.mjs, "mid-strip, at most three full-size images are decoded") counts seven on v0.60.1 at
 1280 wide on this library.
+
+## Idle work (v0.67.2): `profile.mjs`
+
+"The app feels a bit clanky", on computers and phones (2026-10-15). `scroll.mjs` read what it read for v0.43.0 (the
+Library at 38 fps at 4x), so the frame rate was not where to look. `profile.mjs` traces each scenario and sums what the
+renderer's main thread did, and an idle Library was re-layering (`Layerize`) the whole page on every frame.
+`document.getAnimations()` named the cause: 158 `.skeleton::after` shimmers running, every one off the screen -- the
+placeholders of the lazy covers below the fold -- and each of their frames restyled, pre-painted and re-layered the
+whole page. `content-visibility: auto` on `.skeleton` skips them (the Library's layers: 177 → 57, none animated; Home's:
+85 → 37). In the same release a phone stopped running Lenis's frame loop, and the page fade stopped rendering the next
+page inside the outgoing one (components/PageTransition.tsx).
+
+Main-thread busy time, CPU throttled 4x, the profiler's own cost (`V8.InvokeApiInterruptCallbacks`) subtracted; the
+v0.67.1 and v0.67.2 web builds in front of the same instance; the navigation rows are medians of three runs.
+
+| scenario | v0.67.1 | v0.67.2 |
+| --- | --- | --- |
+| Library idle, 1440 (2.5 s) | 1131 ms | 598 ms (−47%) |
+| Library scroll, 1440 | 2959 ms | 2299 ms (−22%) |
+| Home idle, 1440 | 677 ms | 364 ms (−46%) |
+| Home idle, 390 | 584 ms | 301 ms (−49%) |
+| Home scroll, 390 | 752 ms | 399 ms (−47%) |
+| pointer swept across the Library's covers | 5760 ms | 2815 ms (−51%) |
+| Home → Library | 1734 ms | 1178 ms (−32%) |
+| a series → back | 1339 ms | 633 ms (−53%) |
+| Library → a series | 349 ms | 411 ms (+18%: the Library now really fades out) |
+
+- ⚠️ **The frame rate barely moved** (the Library with the shimmer forced off: 37.4 → 38.2 fps). Headless Chrome composites
+  in software, so its frames wait on the compositor's blends and blurs; a machine with a GPU waits on the main thread,
+  which is what this table measures.
+- ⚠️ **"The same look" was checked, not assumed:** six views at 1440 and 390, both builds, reduced motion forced so every
+  animation has finished, differ by 0 pixels. What can differ is when a shimmer starts: a skipped placeholder starts
+  sweeping as it comes within about half a screen, where it used to start when its page mounted.
+- The pointer sweep (`tilt1440`) is where the card tilt's cost turned out to be the shimmers' too: 2821 ms of `Layerize`
+  with their layers, 66 ms without them. A rewrite of the tilt to skip React was planned and dropped as unneeded.
