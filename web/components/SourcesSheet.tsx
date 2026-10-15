@@ -38,6 +38,7 @@ import {
 import { useFindRuns } from '@/lib/useFindRun';
 import { FindModeChoice, SeriesReview, type EditionAsk } from '@/components/FindSources';
 import { makeMainQuestion, mayMakeMain } from '@/lib/mainSource';
+import { MigrateSourceSheet } from '@/components/MigrateSourceSheet';
 
 // The patience field, and only that: `w-14`, not the page's `w-full` field class, so "Patience [ 2 ] days ·
 // Currently 2" and the two buttons share one row -- on a phone the footer sits under the sheet's cap and
@@ -486,10 +487,12 @@ function GroupRow({ g, blocked, serverBlocked, haveNumbers, seriesStatus, contro
  * turn "follows the defaults" into a per-series copy of them on the first tap -- a copy that then stops
  * following when the defaults change. Blank patience means the same thing for the same reason.
  */
-export function SourcesSheet({ id, series, groups, admin, error, isLoading, haveNumbers, checkedAt, onSaved, onClose, onExplain, onFindMissing, onShowChapter, onAddLanguage, onChangeLanguage, onUnlink, onAddEdition }: {
+export function SourcesSheet({ id, title: seriesTitle, series, groups, admin, error, isLoading, haveNumbers, checkedAt, onSaved, onClose, onExplain, onFindMissing, onShowChapter, onAddLanguage, onChangeLanguage, onUnlink, onAddEdition }: {
   id: string;
   series: Series | undefined;
   groups: GroupStat[];
+  /** The series' title: where the Add more sources search starts. */
+  title: string;
   /** The admin route's payload, or null for everyone else (and while it has not arrived). */
   admin: ScanlatorInfo | null;
   error: unknown;
@@ -635,6 +638,10 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
   // Extra sources are added from Find missing chapters, where a person has seen the source's title and its
   // overlap with what is on disk. Here they can only be removed; the main one is not removable at all,
   // since it is the row the series was created from.
+  // Add more sources / move (MigrateSourceSheet): a hand-picked attach with no chapter-overlap gate, and the main
+  // source's detach, asked first in one line under the list.
+  const [migrating, setMigrating] = useState(false);
+  const [detachAsk, setDetachAsk] = useState(false);
   const [unfollowing, setUnfollowing] = useState<string | null>(null);
   const unfollow = async (s: SeriesSource) => {
     setUnfollowing(s.sourceId);
@@ -732,6 +739,17 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
     </div>
   );
 
+  if (migrating) {
+    return (
+      <MigrateSourceSheet id={id} title={seriesTitle} attached={sources.map((x) => x.sourceId)} mainId={main?.primary ? main.sourceId : null}
+        listed={main?.chapters ?? null} onClose={() => setMigrating(false)}
+        onDone={() => {
+          setMigrating(false); onSaved();
+          for (const k of ['series-listing', 'series-scanlators', 'series-groups']) qc.invalidateQueries({ queryKey: [k, id] });
+        }} />
+    );
+  }
+
   return (
     <Sheet title={tr('Sources & translations')} onClose={onClose} overBottomNav footer={footer || undefined}
       action={
@@ -746,7 +764,7 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
           ? <div className="divide-y divide-ink-800/70">
               {sources.map((s) => (
                 <SourceRow key={s.sourceId} s={{ ...s, checkedAt: s.checkedAt ?? (s.primary ? checkedAt : null) }}
-                  onUnfollow={isAdmin && !s.primary ? () => unfollow(s) : undefined} unfollowing={unfollowing === s.sourceId}
+                  onUnfollow={isAdmin ? (s.primary ? () => setDetachAsk(true) : () => unfollow(s)) : undefined} unfollowing={unfollowing === s.sourceId}
                   makeMain={adminAccount && mayMakeMain(s) ? {
                     question: makeMainQuestion(s, main?.primary ? main : null),
                     busy: promoting !== null,
@@ -759,6 +777,20 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
               ))}
             </div>
           : <p className="text-xs text-fog-500">{tr('No source — the chapters were scanned from disk.')}</p>}
+        {isAdmin && detachAsk && main?.primary && (
+          <div role="alertdialog" aria-labelledby={`detach-q-${id}`} className="mt-2 border-s-2 border-rose-400/70 bg-ink-850/80 py-2 pe-2 ps-2.5" data-detach-confirm>
+            <p id={`detach-q-${id}`} className="text-[12px] leading-relaxed text-fog-100">
+              {sources.length > 1
+                ? tr('Detach {name}? The next source takes over as main. Downloaded chapters and your progress stay.', { name: main.name })
+                : tr('Detach {name}? The series keeps its chapters and progress but will have no source to update from.', { name: main.name })}
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button type="button" disabled={unfollowing !== null} className="btn-key" data-detach-yes
+                onClick={async () => { await unfollow(main); setDetachAsk(false); }}>{tr('Detach')}</button>
+              <button type="button" autoFocus onClick={() => setDetachAsk(false)} className="btn-key">{tr('Cancel')}</button>
+            </div>
+          </div>
+        )}
         {/* Which source a NEW chapter is taken from when more than one has it (bff lib/sourcePrefs.ts). It
             replaces the server-wide source order for this series, and never touches a chapter already here. */}
         {isAdmin && sources.length > 1 && (
@@ -792,6 +824,7 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
               </button>
             )}
             <button type="button" onClick={onFindMissing} className="chip text-xs">{tr('Add one from Find missing chapters')}</button>
+            <button type="button" onClick={() => setMigrating(true)} className="chip text-xs" data-add-more-sources>{tr('Add more sources…')}</button>
           </div>
         )}
         {isAdmin && series?.borrowNamesEffective !== undefined && (

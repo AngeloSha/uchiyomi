@@ -542,6 +542,7 @@ Cloudflare) and asked through a pool of `SEARCH_CONCURRENCY` (default: `SCAN_CON
 slot count) at a time, one lane for solver-fronted sources and one for the rest; a source that outruns its
 budget is recorded as slow (never as a failure), one that throws is recorded against its health, and one that
 is disabled or in a cooldown is skipped rather than asked — exactly as the newest listing treats them.
+`sources=a,b,c` (at most 200 ids) asks only those, narrowing exactly as `source=` does: never past the sources the caller may reach.
 
 `&source=<id>` asks only that one source, which is what Discover sends while it is filtered to a source. It
 narrows the set described above and never widens it: an adult source without `adult=1`, one above your age
@@ -1655,6 +1656,7 @@ POST   /api/admin/series/bulk/chapters/delete/cancel
 GET    /api/admin/series/:id/scanlators GET    /api/admin/scanlators
 POST   /api/admin/series/:id/sources DELETE /api/admin/series/:id/sources/:sourceId
 POST   /api/admin/series/:id/main-source
+POST   /api/admin/series/:id/attach-source
 GET    /api/admin/series/:id/alt-titles POST   /api/admin/series/:id/alt-titles
 DELETE /api/admin/series/:id/alt-titles/:norm
 GET    /api/admin/libraries       POST   /api/admin/libraries
@@ -2373,6 +2375,20 @@ alone. A series whose every source is switched off is not asked at all: the swee
 failure), stamps nothing and leaves its listing standing. The sweep's queues follow the source each series is
 asked through -- the first it follows that is loaded and not switched off -- so a dead main source's cooldown no
 longer parks series that update from their followers.
+
+**Attaching a source by hand.** `POST /api/admin/series/:id/attach-source {source, sourceSeriesId, title?, as, old?}`
+attaches a source a person picked (`as`: `follower` or `main`) without the chapter-overlap gates, so a series with one
+chapter or none (which the fill scan and Find other sources cannot judge: they need 3 chapters to line up) can take a
+source. The person has searched and compared, and that is the judgement; what is not a matter of opinion stays: the
+source must be loaded, switched on and within the admin's age reach, the language guard (`language_differs` + `edition`),
+posting-order numbering, a pending renumber and a run inside the series refuse, and a follower is still capped
+(`cap`). `as: main` writes the row past the cap and lets the main-source switch move it (`old` as for `main-source`,
+default `drop`); a series with no main source takes the pick as its main whichever is asked. It answers `{ok, as, from?,
+old?, sources}` and starts a listing refresh, or **409** `{error, message}` (`is_main`, `posting_order`,
+`renumber_pending`, `busy`, `source_unavailable`, `cap`, `moved`, `language_differs`), **404** for a series the admin
+cannot see; audited as `series.attach_source`. `DELETE /api/admin/series/:id/sources/:sourceId` on the **main** source
+detaches it: a follower takes over (the old main is dropped; `{ok, promoted, sources}`), or, with none, the series is left
+with no source (audited as `series.detach_main`). Files, progress and the folder never move either way.
 
 **Making a follower the main source** (since v0.54.0). `POST /api/admin/series/:id/main-source {sourceId, old?}`
 makes a source the series already follows its main source -- only a followed one: its follow is the "same series?"

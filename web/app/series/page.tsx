@@ -1983,7 +1983,7 @@ function SeriesInner() {
 
       {/* The sheets. One at a time (see the state above); each closes itself before anything else opens. */}
       {sourcesOpen && (
-        <SourcesSheet id={id} series={series} groups={groups} admin={adminGroups} error={groupsError} isLoading={groupsLoading} haveNumbers={liveNumbers}
+        <SourcesSheet id={id} title={title} series={series} groups={groups} admin={adminGroups} error={groupsError} isLoading={groupsLoading} haveNumbers={liveNumbers}
           checkedAt={supplyChecked}
           onSaved={() => { for (const k of [['series', id], ['series-books', id], ['home'], ['library']]) qc.invalidateQueries({ queryKey: k }); }}
           onClose={() => setSourcesOpen(false)}

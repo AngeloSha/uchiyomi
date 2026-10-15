@@ -13,7 +13,7 @@ import { selectChapters, type ChapterFrom } from '../lib/selectChapters';
 import { noteChapterFailure } from '../lib/chapterFailures';
 import { scanOrder } from '../lib/scanOrder';
 import { followGuard, seriesLanguage } from '../lib/seriesLang';
-import { searchAll, groupByTitle, bySource, ratingOf, SEARCH_FIRST_ANSWER_MS, type Rated, type RatingFilter } from '../lib/searchAll';
+import { searchAll, groupByTitle, bySource, ratingOf, narrowTo, SEARCH_FIRST_ANSWER_MS, type Rated, type RatingFilter } from '../lib/searchAll';
 import type { SourceSeries as DiscoverItem } from '../lib/sources/types';
 import { budgetFor, listBudgetFor } from '../lib/sources/budget';
 import { SOLVER_CONCURRENCY, withSolverDeadline } from '../lib/sources/flaresolverr';
@@ -3196,7 +3196,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
    * polls the same URL with a short `wait` until it is 0.
    */
   app.get('/api/sources/search-all', async (req) => {
-    const { q: rawQ, groupBy, wait, source, rating: rawRating } = req.query as { q?: string; groupBy?: string; wait?: string; source?: string; rating?: string };
+    const { q: rawQ, groupBy, wait, source, sources: rawSources, rating: rawRating } = req.query as { q?: string; groupBy?: string; wait?: string; source?: string; sources?: string; rating?: string };
     // The 18+ filter (v0.55.4, #158): `rating=all|safe|adult`, anything else read as all. Applied to this viewer's
     // answer only, after the shared entry (lib/searchAll.ts ratingOf, groupByTitle). An account capped below 18 is never
     // shown an 18+ result whatever it asks: the add checks only the source, so the cap is held here. And with "Show 18+"
@@ -3232,7 +3232,10 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // nobody is asked, and the answer is the ordinary nothing-found shape. The entry is still keyed by the
     // term alone, so a narrowed search and a full one share whatever the sources have already answered.
     const only = typeof source === 'string' ? source : '';
-    const ask = only ? all.filter((s) => s.id === only) : all;
+    // `sources`: a comma-separated list of ids, for a search that picks which sources to ask (the Add more sources sheet).
+    // Narrows the same way `source` does -- never widens `surfaceable` -- and an empty value is no list.
+    const picked = narrowTo(rawSources);
+    const ask = all.filter((s) => (!only || s.id === only) && (!picked || picked.has(s.id)));
     const health = new Map((await healthAll().catch(() => [])).map((h) => [h.source_id, h] as const));
     const ans = await searchAll(term, ask, { waitMs, health });
     const byId = new Map(ask.map((s) => [s.id, s] as const));

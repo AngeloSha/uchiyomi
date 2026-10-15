@@ -3223,6 +3223,15 @@ paths:
             fan-out within the sources the caller may be shown, never past them: an id outside that set
             (an adult source without `adult=1`, one above the account's age limit, an unknown id) asks
             nobody and answers the empty shape. Absent means every source.
+        - name: sources
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >-
+            Ask only these source ids, comma-separated (at most 200). Narrows the fan-out exactly as `source`
+            does: within the sources the caller may be shown, never past them. Combines with `source` (both must
+            match). Absent or empty means every source.
         - name: groupBy
           in: query
           required: false
@@ -8549,6 +8558,71 @@ paths:
             source_unavailable (main.unavailable: not loaded, switched off, or beyond the admin's age reach);
             moved (main.moved: the main source changed meanwhile); language_differs (the follow route's refusal:
             follow.languageDiffers or follow.languageDiffersEdition, with `edition: {of, lang, existing?}`).
+  /api/admin/series/{id}/attach-source:
+    post:
+      tags:
+        - admin
+      summary: Attach a source a person picked by hand, with no chapter-overlap gate.
+      operationId: postApiAdminSeriesIdAttachSource
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. For a series too short
+        to be judged by chapter numbers (fewer than 3, or none): the person has searched and chosen, so the fill scan's
+        and Find's overlap gates do not apply. `as: follower` adds the source as a follower (refused `cap` at the follower
+        cap); `as: main` makes it the main source, past the cap, with `old` deciding the old main (default `drop`). A series
+        with no main source takes the pick as its main whichever is asked. Still refused: the source not loaded, switched off
+        or beyond the age reach, another language (`language_differs` + `edition`), posting-order numbering, a pending
+        renumber, a run inside the series. Audited as `series.attach_source`. Starts a listing refresh.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source, sourceSeriesId, as]
+              additionalProperties: false
+              properties:
+                source: { type: string }
+                sourceSeriesId: { type: string }
+                title: { type: [string, "null"] }
+                as: { type: string, enum: [follower, main] }
+                old: { type: string, enum: [auto, keep, drop] }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Attached. The series' full source list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, as, sources]
+                properties:
+                  ok: { type: boolean }
+                  as: { type: string, enum: [follower, main] }
+                  from: { type: [string, "null"] }
+                  old: { type: string, enum: [kept, dropped] }
+                  sources:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SeriesSource"
+        "400":
+          description: bad_request
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: not_found -- not a series this admin may see.
+        "409":
+          description: >-
+            Refused, with `error` and `message`: is_main, posting_order, renumber_pending, busy, source_unavailable, cap,
+            moved, language_differs (with `edition`).
   /api/admin/series/{id}/sources/{sourceId}:
     delete:
       tags:
@@ -8558,8 +8632,9 @@ paths:
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Chapters
         already downloaded from it stay; the listing rows it carried are dropped at once, so nothing can be
-        fetched through it before the next check. The primary cannot be removed this way; it is not a
-        followed source.
+        fetched through it before the next check. The main source can be detached the same way: a follower takes
+        over (the old main dropped), or the series is left with no source when it has none (409 with `error` and
+        `message` when refused, as the attach route).
       parameters:
         - name: id
           in: path
