@@ -215,3 +215,31 @@ v0.67.1 and v0.67.2 web builds in front of the same instance; the navigation row
   sweeping as it comes within about half a screen, where it used to start when its page mounted.
 - The pointer sweep (`tilt1440`) is where the card tilt's cost turned out to be the shimmers' too: 2821 ms of `Layerize`
   with their layers, 66 ms without them. A rewrite of the tilt to skip React was planned and dropped as unneeded.
+
+## Fast scrolling (v0.67.3): `fast.mjs`
+
+"Scrolling down or up fast lags a bit" on a computer: choppy, in Chrome. `fast.mjs` flicks the wheel down and back up and
+prices one effect at a time with `CSS=`. On Home and the Library at 1440, unthrottled, one effect was the whole story:
+
+| a fast flick (fps, frames over 33 ms) | Home | Library |
+| --- | --- | --- |
+| as it was (v0.67.2) | 49–55 (36–52) | 38–41 (109–222) |
+| − film grain | **60 (0)** | **60 (0–2)** |
+| − the top bar's glass | 57–58 | 46–47 |
+| − the mesh | 55 | 40–44 |
+| − the badges' blur | 55–56 | 40–41 |
+| − the vignette | 54–55 | 39–40 |
+| − the covers' sharpen-in | 51–54 | 40 |
+
+The grain's `mix-blend-mode: overlay` makes the compositor draw everything under it into a surface of its own and blend
+the two, on every frame the content moves. The owner chose to pause it while the page moves: `display: none` under
+Lenis's `lenis-scrolling`, back over 0.3 s from `@starting-style` (Home 53–58, Library 56; at rest 0 pixels differ).
+
+- ⚠️ **`opacity: 0` is not a pause** — the blend is still prepared and the Library stayed at 48–50. `visibility: hidden`
+  spared Home's four start-of-scroll layer rebuilds but left the Library at 50–52; `display: none` is the better trade.
+- ⚠️ **Never read `scrollY` in a scroll handler.** It makes the browser finish its style and layout on the spot, once a
+  frame while a wheel scrolls. v0.67.2's scroll memory and the top bar's "scrolled past" both did: 211 ms of the run's
+  script, 50 ms after (the memory files a position once the scrolling pauses; the bar watches a 1-px mark with an
+  IntersectionObserver). `idleWork.test.ts` holds every window scroll listener to that.
+- Compare builds with a warmed server and alternate their order: the first run makes the cover thumbnails, so a later run
+  has more covers arriving mid-scroll, and the build that always went second looked worse than it was.

@@ -60,7 +60,8 @@ function cssRules(css: string): Rule[] {
       let j = open + 1;
       while (j < s.length && depth) { if (s[j] === '{') depth++; else if (s[j] === '}') depth--; j++; }
       const body = s.slice(open + 1, j - 1);
-      if (/^@(media|layer|supports|theme)\b/.test(pre)) walk(body, [...ctx, pre.replace(/\s+/g, ' ')]);
+      // @starting-style too (v0.67.3): a rule inside it restyles a layer as it appears, and the scan below must see it.
+      if (/^@(media|layer|supports|theme|starting-style)\b/.test(pre)) walk(body, [...ctx, pre.replace(/\s+/g, ' ')]);
       else out.push({ sel: pre.replace(/\s+/g, ' '), body, ctx });
       i = j;
     }
@@ -85,6 +86,8 @@ const PINNED: Record<string, string[]> = {
     'opacity: 0.05', 'mix-blend-mode: overlay',
     `background-image: ${GRAIN_URL}`,
     'background-size: 180px 180px',
+    // v0.67.3: the fade back in after a scroll (the pause is pinned in "the grain steps aside while the page moves").
+    'transition: opacity 0.3s ease-out',
   ],
   '.fx-vignette': [
     'position: fixed', 'inset: 0', 'z-index: 2', 'pointer-events: none',
@@ -126,6 +129,9 @@ test('nothing outside the pinned rules restyles a cinematic layer, except the sw
     if (r.ctx.length === 0 && r.sel in PINNED) continue;
     if (r.ctx.length === 0 && r.sel.split(',').every((s) => s.trim().startsWith('html.reduce-effects '))) continue;
     if (r.ctx.join('|') === '@media (prefers-reduced-motion: reduce)' && r.sel === '.fx-mesh' && flat(r.body) === 'animation: none;') continue;
+    // v0.67.3, the owner's call: the grain is out of the page while it moves, and fades back in -- these two exactly.
+    if (r.ctx.length === 0 && r.sel === 'html.lenis-scrolling .fx-grain' && flat(r.body) === 'display: none;') continue;
+    if (r.ctx.join('|') === '@starting-style' && r.sel === '.fx-grain' && flat(r.body) === 'opacity: 0;') continue;
     assert.fail(`a rule outside the pinned three restyles ${r.sel.match(/\.fx-\w+/)![0]}: ${r.ctx.join(' ')} ${r.sel} { ${flat(r.body)} }`);
   }
 });
@@ -473,4 +479,27 @@ test('the perf rig sets the switch off for its baseline instead of inheriting it
     // visible in the log rather than being read as a number.
     assert.match(src, /fmtState\(/, `${f} prints no page state beside its rows`);
   }
+});
+
+test('the grain steps aside while the page moves, and only then', async () => {
+  // v0.67.3, asked as "fast scrolling on desktop lags a bit" and decided by the owner ("pause it while scrolling"). The
+  // grain's overlay blend has the GPU redraw everything under it and blend the two on every frame the content moves: with
+  // it out of the page, a fast scroll went from 39-55 fps to 60 on Home and the Library (Chrome). It is OUT (display: none)
+  // while Lenis marks the page `lenis-scrolling` -- at opacity 0 the blend was still prepared and the Library stayed at 48
+  // -- and fades back in over 0.3 s from @starting-style. Reintroduce the always-on grain by deleting the rule: this fails.
+  const rules = CSS();
+  const pause = rules.filter((r) => r.ctx.length === 0 && r.sel === 'html.lenis-scrolling .fx-grain');
+  assert.equal(pause.length, 1, 'the grain no longer steps aside while the page moves');
+  assert.equal(flat(pause[0].body), 'display: none;', 'paused some cheaper-looking way that still blends: opacity 0 kept the cost');
+  const back = rules.filter((r) => r.ctx.join('|') === '@starting-style' && r.sel === '.fx-grain');
+  assert.equal(back.length, 1, 'the grain no longer fades back in after a scroll');
+  assert.equal(flat(back[0].body), 'opacity: 0;');
+  // Nothing else may pause it: the switch and this are the only two ways the grain leaves the page.
+  assert.ok(!rules.some((r) => /lenis-(smooth|stopped|locked)[^,{]*\.fx-/.test(r.sel)), 'another Lenis state hides an fx layer');
+  // ⚠️ The minifier is where CSS fixes have vanished before (the backdrop-filter trap above): both rules must survive it.
+  const css = read('app/globals.css');
+  const block = css.slice(css.indexOf('html.lenis-scrolling .fx-grain'), css.indexOf('@starting-style { .fx-grain { opacity: 0; } }') + 46);
+  const out = await minify(`.fx-grain{opacity:.05;transition:opacity .3s ease-out}${block}`);
+  assert.match(out, /html\.lenis-scrolling \.fx-grain\{display:none\}/, `the minifier dropped the pause: ${out}`);
+  assert.match(out, /@starting-style\{\.fx-grain\{opacity:0\}\}/, `the minifier dropped the fade back in: ${out}`);
 });

@@ -363,7 +363,16 @@
   opacity: 0.05; mix-blend-mode: overlay;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   background-size: 180px 180px;
+  transition: opacity 0.3s ease-out;
 }
+/* The grain steps aside while the page moves (v0.67.3, the owner's call: "pause it while scrolling"). Its overlay blend has
+   the GPU redraw everything under it into a layer of its own and blend the two, on every frame the content moves: on a
+   fast scroll it was the whole difference between 39-55 fps and a steady 60, on Home and the Library alike. Lenis marks
+   the page `lenis-scrolling` while it moves (wheel, keys, touch, a scrollbar), and the grain is out of the page then --
+   at opacity 0 the blend was still prepared, and the Library stayed at 48 -- and fades back in over 0.3 s once it stops
+   (and on its first paint). At rest it is exactly as before. Pinned in web/test/effects.test.ts. */
+html.lenis-scrolling .fx-grain { display: none; }
+@starting-style { .fx-grain { opacity: 0; } }
 .fx-vignette {
   position: fixed; inset: 0; z-index: 2; pointer-events: none;
   background: radial-gradient(125% 100% at 50% 0%, transparent 52%, rgba(0,0,0,0.5) 100%);
