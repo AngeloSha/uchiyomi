@@ -251,9 +251,37 @@ export class UnsupportedFilter extends Error {
  * said who is asking.
  */
 function condSql(cond: any, params: any[], hasUser = false): string {
+  assertCondBounded(cond);
+  return condSqlOf(cond, params, hasUser);
+}
+
+/**
+ * The largest condition tree a search may send. The Library builds one flat allOf (a library, the two source filters,
+ * a read state, a status and one leaf per chosen genre) and Komga clients nest an anyOf in it at most, so these are far
+ * above any real search. Without a bound the tree was the member's to size: a 1.9 MB body compiled to a 3 MB SQL
+ * string with 40,000 parameters that held a pooled connection for seconds (and each search runs it twice), and a
+ * 2,000-deep allOf chain overflowed this function's own recursion. Reintroduce by removing the call in condSql:
+ * conditionBounds.test.ts compiles the 40,000-leaf tree.
+ */
+export const MAX_COND_NODES = 128;
+export const MAX_COND_DEPTH = 6;
+
+function assertCondBounded(root: any): void {
+  let nodes = 0;
+  const walk = (c: any, depth: number) => {
+    if (!c || typeof c !== 'object') return;
+    if (depth > MAX_COND_DEPTH) throw new UnsupportedFilter('condition nested too deep');
+    if (++nodes > MAX_COND_NODES) throw new UnsupportedFilter('too many conditions');
+    const kids = Array.isArray(c.allOf) ? c.allOf : Array.isArray(c.anyOf) ? c.anyOf : null;
+    if (kids) for (const k of kids) walk(k, depth + 1);
+  };
+  walk(root, 0);
+}
+
+function condSqlOf(cond: any, params: any[], hasUser: boolean): string {
   if (!cond || typeof cond !== 'object') return 'TRUE';
-  if (Array.isArray(cond.allOf)) return cond.allOf.length ? '(' + cond.allOf.map((c: any) => condSql(c, params, hasUser)).join(' AND ') + ')' : 'TRUE';
-  if (Array.isArray(cond.anyOf)) return cond.anyOf.length ? '(' + cond.anyOf.map((c: any) => condSql(c, params, hasUser)).join(' OR ') + ')' : 'TRUE';
+  if (Array.isArray(cond.allOf)) return cond.allOf.length ? '(' + cond.allOf.map((c: any) => condSqlOf(c, params, hasUser)).join(' AND ') + ')' : 'TRUE';
+  if (Array.isArray(cond.anyOf)) return cond.anyOf.length ? '(' + cond.anyOf.map((c: any) => condSqlOf(c, params, hasUser)).join(' OR ') + ')' : 'TRUE';
 
   if (cond.genre && cond.genre.value != null) {
     params.push(String(cond.genre.value));
