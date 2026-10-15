@@ -2145,10 +2145,21 @@ export async function migrate(): Promise<void> {
       );
     }
   } else if (existing) {
-    // pre-existing single user -> promote it to admin
+    // A pre-multi-user install's one account becomes its admin -- but only while the server has no admin at all.
+    // This ran on every boot unconditionally, so a restart undid any demotion of the oldest account made in
+    // Admin -> Members or by OIDC_ADMIN_GROUP, and promoted the next-oldest member once the oldest was deleted.
+    // Reintroduce by dropping the NOT EXISTS: adminPromotion.int.test.ts sees the demoted founder admin again.
     await pool.query(
-      `UPDATE users SET role='admin', username=COALESCE(username,'admin')
-       WHERE created_at = (SELECT min(created_at) FROM users) AND (role <> 'admin' OR username IS NULL)`,
+      `UPDATE users SET role = 'admin'
+        WHERE created_at = (SELECT min(created_at) FROM users) AND role <> 'admin'
+          AND NOT EXISTS (SELECT 1 FROM users WHERE role = 'admin')`,
+    );
+    // The same legacy account may predate usernames. Separate, and guarded, so it can never collide with
+    // uq_users_username or rename anyone once an 'admin' exists.
+    await pool.query(
+      `UPDATE users SET username = 'admin'
+        WHERE created_at = (SELECT min(created_at) FROM users) AND username IS NULL
+          AND NOT EXISTS (SELECT 1 FROM users WHERE username = 'admin')`,
     );
   }
 }
