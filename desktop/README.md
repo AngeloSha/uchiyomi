@@ -57,7 +57,10 @@ that should download it:
 
 1. `git tag engine-v2.4.2366 && git push origin engine-v2.4.2366` (the tag `src/engine-pin.json` names) runs
    `.github/workflows/engine-pack.yml`: each pack is built and booted on its own OS, then all three are published
-   on that tag as a **prerelease**. It refuses to replace a pack the pin already holds a hash for.
+   on that tag as a **prerelease**. It refuses to replace a pack the pin already holds a hash for. ⚠️ Push a branch
+   that holds the tagged commit first: on a commit that only the tag reaches, GitHub refuses the workflow's token the
+   release ("HTTP 403: Resource not accessible by integration", engine-v2.4.2366's first run); once a branch holds it,
+   `gh run rerun <id> --failed` publishes.
 2. `node scripts/release/pin-engine.mjs` downloads the three packs as published, checks each against its
    `.sha256`, and writes `sha256` + `bytes` into `src/engine-pin.json`. Commit it; the next `desktop.yml` run
    installs the published pack in its smokes.

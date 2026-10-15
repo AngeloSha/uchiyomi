@@ -5,8 +5,8 @@
   "tag": "engine-v2.4.2366",
   "baseUrl": "https://github.com/AngeloSha/uchiyomi/releases/download/engine-v2.4.2366",
   "packs": {
-    "win-x64": { "file": "engine-pack-win-x64.zip", "sha256": null, "bytes": null },
-    "mac-arm64": { "file": "engine-pack-mac-arm64.zip", "sha256": null, "bytes": null },
-    "mac-x64": { "file": "engine-pack-mac-x64.zip", "sha256": null, "bytes": null }
+    "win-x64": { "file": "engine-pack-win-x64.zip", "sha256": "998822c1d7d35c0fea0884b2320d9a036e016486432630601aa1b177a36b075b", "bytes": 205633531 },
+    "mac-arm64": { "file": "engine-pack-mac-arm64.zip", "sha256": "832665e18e6a83b5ffd7759b44ad2d81324977c0e7aff2c81d714b130e1afe45", "bytes": 204580453 },
+    "mac-x64": { "file": "engine-pack-mac-x64.zip", "sha256": "9837449b78f7c47605e697d159861f37681c38bb501970170bbd1f69fc598e0e", "bytes": 205772894 }
   }
 }
