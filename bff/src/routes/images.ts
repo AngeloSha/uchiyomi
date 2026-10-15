@@ -558,6 +558,7 @@ export async function authorizeImageRequest(
         // "the image cookie stops working..." in imageBearer.int.test.ts sees a disabled member's page (200).
         if (!(await accountActive(claims.sub))) return reply.code(401).send({ error: 'unauthorized' });
         (req as any).viewCtx = await viewCtxFor(claims.sub ?? null);
+        (req as any).imgCredential = { kind: 'session' } satisfies ImgCredential;
         return;
       }
     } catch { /* fall through to OPDS auth */ }
@@ -576,14 +577,40 @@ export async function authorizeImageRequest(
     const raw = auth.slice(7).trim();
     if (raw.startsWith(API_TOKEN_PREFIX)) {
       const tok = await resolveApiToken(raw);
-      if (tok) { (req as any).viewCtx = await viewCtxFor(tok.userId, tok.role); return; }
+      if (tok) {
+        (req as any).viewCtx = await viewCtxFor(tok.userId, tok.role);
+        (req as any).imgCredential = { kind: 'token', scopes: [...tok.scopes] } satisfies ImgCredential;
+        return;
+      }
       return reply.code(401).send({ error: 'unauthorized' });
     }
   }
   // OPDS readers load covers/pages with the same HTTP Basic token as the feed
   const who = await resolveOpdsBasic(req.headers.authorization);
-  if (who) { (req as any).viewCtx = await viewCtxFor(who.userId); return; }
+  if (who) { (req as any).viewCtx = await viewCtxFor(who.userId); (req as any).imgCredential = { kind: 'opds' } satisfies ImgCredential; return; }
   return reply.code(401).send({ error: 'unauthorized' });
+}
+
+/**
+ * Which credential let an image request in (authorizeImageRequest): the image cookie of a signed-in session, an API token
+ * with its scopes, or an OPDS reader's Basic token. Every image route but one only needs to know WHO; the compare view's
+ * page (#241) is an admin's, and `requireAdmin`'s rule is that an admin's token must also carry the admin scope.
+ */
+export type ImgCredential = { kind: 'session' } | { kind: 'token'; scopes: string[] } | { kind: 'opds' };
+
+/**
+ * The admin rule for an image route, as requireAdmin (lib/auth.ts) holds it for the API: the account is an admin now (read
+ * from the database: the image cookie carries no role), and the credential is a session or an API token carrying the
+ * admin scope -- never an OPDS reader's token, nor a read token an admin minted for a script.
+ * Reintroduce by checking the role alone: "a read-scope token of an admin is refused" in copyPages.int.test.ts sees 200.
+ */
+async function adminImageRequest(req: FastifyRequest): Promise<boolean> {
+  const ctx = (req as any).viewCtx as ViewCtx | undefined;
+  const cred = (req as any).imgCredential as ImgCredential | undefined;
+  if (!ctx?.userId || !cred || cred.kind === 'opds') return false;
+  if (cred.kind === 'token' && !cred.scopes.includes('admin')) return false;
+  const me = await one<{ role: string }>('SELECT role FROM users WHERE id = $1', [ctx.userId]).catch(() => null);
+  return me?.role === 'admin';
 }
 
 // ---- owned library image helpers: serve thumbnails + pages straight from the CBZ files ----
@@ -1011,15 +1038,14 @@ export default async function imageRoutes(app: FastifyInstance) {
     return reply.send(buf);
   });
 
-  // One page of one named copy of a chapter of this series, for the compare view. Admin only, like the replace it
-  // leads to; the copy must be one the series' listing holds (copyPageList).
+  // One page of one named copy of a chapter of this series, for the compare view (#241). Admin only, like the replace it
+  // leads to, and by the API's rule (adminImageRequest); the copy must be one the series' listing holds, of a series the
+  // admin may see (copyPageList).
   app.get('/img/series/:id/copy-page', async (req, reply) => {
     const { id } = req.params as { id: string };
     const { source, chapter, i } = req.query as { source?: string; chapter?: string; i?: string };
-    const ctx = vc(req);
-    const me = ctx.userId ? await one<{ role: string }>('SELECT role FROM users WHERE id = $1', [ctx.userId]).catch(() => null) : null;
-    if (me?.role !== 'admin') return reply.code(403).send({ error: 'forbidden' });
-    const r = await copyPageList(id, source, chapter);
+    if (!(await adminImageRequest(req))) return reply.code(403).send({ error: 'forbidden' });
+    const r = await copyPageList(id, source, chapter, vc(req));
     if (isRefusal(r)) return reply.code(r.code).send({ error: r.error });
     const idx = Number(i);
     if (!Number.isInteger(idx) || idx < 0 || idx >= r.urls.length) return reply.code(404).send({ error: 'not_found' });

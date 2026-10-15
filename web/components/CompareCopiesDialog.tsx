@@ -11,10 +11,14 @@ import type { Book, VersionCopy } from '@/lib/types';
 const who = (c: VersionCopy) => c.groups.join(' & ') || c.scanlator || '';
 
 /**
- * Two copies of one chapter, page by page, side by side: the file on this server against another source's copy of
- * the same number. The pages move together, so the same page of each is always in view; the copy on the right is
- * whichever the admin picks from the chips above, and "Replace with this copy" goes to the page's own confirm.
+ * Two copies of one chapter, page by page, side by side (#241, @Squeaks72): the file on this server against another
+ * source's copy of the same number. The pages move together, so the same page of each is always in view; the other copy
+ * is whichever the admin picks from the chips above, and "Replace with this copy" goes to the page's own confirm.
  * Nothing here changes anything.
+ *
+ * Right to left, "next" is the way the page reads: ArrowLeft goes on and ArrowRight back, as in Settings' choices, and
+ * the ‹ › keys mirror with the row, which puts Previous at the start edge. Reintroduce fixed arrows: compareCopies.test.ts
+ * "the arrows follow the reading direction" fails.
  */
 export function CompareCopiesDialog({ seriesId, book, copies, sourceNames, onReplace, onClose }: {
   seriesId: string;
@@ -39,8 +43,11 @@ export function CompareCopiesDialog({ seriesId, book, copies, sourceNames, onRep
   useEffect(() => { setPage(0); }, [sel]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowRight') setPage((p) => Math.min(last, p + 1));
-      else if (e.key === 'ArrowLeft') setPage((p) => Math.max(0, p - 1));
+      const rtl = getComputedStyle(document.documentElement).direction === 'rtl';
+      const forward = rtl ? 'ArrowLeft' : 'ArrowRight';
+      const back = rtl ? 'ArrowRight' : 'ArrowLeft';
+      if (e.key === forward) setPage((p) => Math.min(last, p + 1));
+      else if (e.key === back) setPage((p) => Math.max(0, p - 1));
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -51,7 +58,7 @@ export function CompareCopiesDialog({ seriesId, book, copies, sourceNames, onRep
   const side = (label: string, sub: string, count: number | null, src: string | null, missing: boolean, failed: boolean) => (
     <div className="min-w-0">
       <div className="mb-1.5 flex items-baseline justify-between gap-2 text-xs">
-        <span className="truncate font-medium text-fog-100">{label}</span>
+        <span className="truncate font-medium text-fog-100" dir="auto">{label}</span>
         <span className="shrink-0 text-fog-500">{count == null ? '' : count === 1 ? tr('1 page') : tr('{n} pages', { n: count })}</span>
       </div>
       <p className="mb-1.5 truncate text-[11px] text-fog-500">{sub || ' '}</p>
@@ -85,9 +92,9 @@ export function CompareCopiesDialog({ seriesId, book, copies, sourceNames, onRep
           </div>
           <div className="mt-3 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <button type="button" className="btn-key" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))} aria-label={tr('Previous page')}>‹</button>
+              <button type="button" className="btn-key" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))} aria-label={tr('Previous page')}><span aria-hidden className="inline-block rtl:-scale-x-100">‹</span></button>
               <span className="min-w-20 text-center text-xs text-fog-300" data-compare-page>{tr('Page {n} of {total}', { n: page + 1, total: Math.max(1, last + 1) })}</span>
-              <button type="button" className="btn-key" disabled={page >= last} onClick={() => setPage((p) => Math.min(last, p + 1))} aria-label={tr('Next page')}>›</button>
+              <button type="button" className="btn-key" disabled={page >= last} onClick={() => setPage((p) => Math.min(last, p + 1))} aria-label={tr('Next page')}><span aria-hidden className="inline-block rtl:-scale-x-100">›</span></button>
             </div>
             <button type="button" className="btn-key btn-key-primary" data-compare-replace onClick={() => onReplace(copy)}>{tr('Replace with this copy')}</button>
           </div>

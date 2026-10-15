@@ -3873,13 +3873,13 @@
   "Your token for {names} no longer works. Reconnect to keep your progress in sync.": "Ваш токен для {names} больше не работает. Подключитесь заново, чтобы прогресс продолжал синхронизироваться.",
   "MangaUpdates list": "Список MangaUpdates",
   "Recommended for you": "Рекомендуем вам",
-  "Replace from another source…": "Replace from another source…",
-  "No page {n}": "No page {n}",
-  "Could not load this page": "Could not load this page",
-  "Compare copies": "Compare copies",
-  "No other source has a copy of this chapter.": "No other source has a copy of this chapter.",
-  "Copy to compare": "Copy to compare",
-  "Page {n} of {total}": "Page {n} of {total}",
-  "Replace with this copy": "Replace with this copy",
-  "The two copies have different page counts, so later pages will not line up.": "The two copies have different page counts, so later pages will not line up."
+  "Replace from another source…": "Заменить из другого источника…",
+  "No page {n}": "Страницы {n} нет",
+  "Could not load this page": "Не удалось загрузить эту страницу",
+  "Compare copies": "Сравнить копии",
+  "No other source has a copy of this chapter.": "Ни у одного другого источника нет копии этой главы.",
+  "Copy to compare": "Копия для сравнения",
+  "Page {n} of {total}": "Страница {n} из {total}",
+  "Replace with this copy": "Заменить этой копией",
+  "The two copies have different page counts, so later pages will not line up.": "В копиях разное число страниц, поэтому дальше страницы не совпадут."
 }

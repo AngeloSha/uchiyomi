@@ -6527,9 +6527,12 @@ paths:
       summary: One page of one named copy of a chapter of a library series, for the compare view.
       operationId: getImgSeriesIdCopyPage
       description: >-
-        Admin only. The copy is named by its source and the source's own chapter id, and must be one this series'
-        listing holds (the `copies` of GET /api/series/{id}/versions) -- never a free-form id. Fetched through the
-        same guard as /img/sources/preview and served as the original bytes with `cache-control: private, no-store`.
+        Admin only, by the API's rule: the account is an admin, and the credential is a signed-in session or an API
+        token carrying the admin scope -- never an OPDS reader's token, nor an admin's read token (403). The copy is
+        named by its source and the source's own chapter id, and must be one this series' listing holds (the `copies`
+        of GET /api/series/{id}/versions) -- never a free-form id -- of a series the admin may see (a hidden or merged
+        one is 404). Fetched through the same guard as /img/sources/preview and served as the original bytes with
+        `cache-control: private, no-store`.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
         - { name: source, in: query, required: true, schema: { type: string } }

@@ -3873,13 +3873,13 @@
   "Your token for {names} no longer works. Reconnect to keep your progress in sync.": "你在 {names} 的令牌已失效。请重新连接，以便继续同步进度。",
   "MangaUpdates list": "MangaUpdates 列表",
   "Recommended for you": "你可能会喜欢",
-  "Replace from another source…": "Replace from another source…",
-  "No page {n}": "No page {n}",
-  "Could not load this page": "Could not load this page",
-  "Compare copies": "Compare copies",
-  "No other source has a copy of this chapter.": "No other source has a copy of this chapter.",
-  "Copy to compare": "Copy to compare",
-  "Page {n} of {total}": "Page {n} of {total}",
-  "Replace with this copy": "Replace with this copy",
-  "The two copies have different page counts, so later pages will not line up.": "The two copies have different page counts, so later pages will not line up."
+  "Replace from another source…": "从其他来源替换…",
+  "No page {n}": "没有第 {n} 页",
+  "Could not load this page": "无法加载此页",
+  "Compare copies": "比较副本",
+  "No other source has a copy of this chapter.": "没有其他来源有此章节的副本。",
+  "Copy to compare": "要比较的副本",
+  "Page {n} of {total}": "第 {n} 页，共 {total} 页",
+  "Replace with this copy": "替换为此副本",
+  "The two copies have different page counts, so later pages will not line up.": "两个副本的页数不同，后面的页面将无法对齐。"
 }

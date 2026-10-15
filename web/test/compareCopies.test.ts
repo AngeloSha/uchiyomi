@@ -21,3 +21,10 @@ test('the dialog reads the copy through the admin routes and changes nothing its
   assert.match(cmp, /data-compare-replace/);
   assert.doesNotMatch(cmp, /method: 'POST'/);
 });
+
+test('the arrows follow the reading direction, and the keys mirror with the row (#241)', () => {
+  const cmp = read('components/CompareCopiesDialog.tsx');
+  assert.match(cmp, /const forward = rtl \? 'ArrowLeft' : 'ArrowRight';/, 'ArrowRight goes on in Arabic too');
+  assert.match(cmp, /const back = rtl \? 'ArrowRight' : 'ArrowLeft';/);
+  assert.equal((cmp.match(/className="inline-block rtl:-scale-x-100">[‹›]<\/span>/g) ?? []).length, 2, 'a ‹ › key does not mirror right to left');
+});

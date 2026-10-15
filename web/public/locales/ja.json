@@ -3873,13 +3873,13 @@
   "Your token for {names} no longer works. Reconnect to keep your progress in sync.": "{names} のトークンが使えなくなりました。進捗の同期を続けるには再連携してください。",
   "MangaUpdates list": "MangaUpdates のリスト",
   "Recommended for you": "あなたへのおすすめ",
-  "Replace from another source…": "Replace from another source…",
-  "No page {n}": "No page {n}",
-  "Could not load this page": "Could not load this page",
-  "Compare copies": "Compare copies",
-  "No other source has a copy of this chapter.": "No other source has a copy of this chapter.",
-  "Copy to compare": "Copy to compare",
-  "Page {n} of {total}": "Page {n} of {total}",
-  "Replace with this copy": "Replace with this copy",
-  "The two copies have different page counts, so later pages will not line up.": "The two copies have different page counts, so later pages will not line up."
+  "Replace from another source…": "別のソースから置き換える…",
+  "No page {n}": "{n} ページ目はありません",
+  "Could not load this page": "このページを読み込めませんでした",
+  "Compare copies": "コピーを比較",
+  "No other source has a copy of this chapter.": "この話のコピーを持つ他のソースはありません。",
+  "Copy to compare": "比較するコピー",
+  "Page {n} of {total}": "{total} ページ中 {n} ページ目",
+  "Replace with this copy": "このコピーに置き換える",
+  "The two copies have different page counts, so later pages will not line up.": "2 つのコピーはページ数が違うため、後半のページはずれます。"
 }

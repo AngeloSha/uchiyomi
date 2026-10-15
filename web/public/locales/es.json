@@ -3873,13 +3873,13 @@
   "Your token for {names} no longer works. Reconnect to keep your progress in sync.": "Tu token de {names} ya no funciona. Vuelve a conectar para mantener tu progreso sincronizado.",
   "MangaUpdates list": "Lista de MangaUpdates",
   "Recommended for you": "Recomendado para ti",
-  "Replace from another source…": "Replace from another source…",
-  "No page {n}": "No page {n}",
-  "Could not load this page": "Could not load this page",
-  "Compare copies": "Compare copies",
-  "No other source has a copy of this chapter.": "No other source has a copy of this chapter.",
-  "Copy to compare": "Copy to compare",
-  "Page {n} of {total}": "Page {n} of {total}",
-  "Replace with this copy": "Replace with this copy",
-  "The two copies have different page counts, so later pages will not line up.": "The two copies have different page counts, so later pages will not line up."
+  "Replace from another source…": "Reemplazar desde otra fuente…",
+  "No page {n}": "No hay página {n}",
+  "Could not load this page": "No se pudo cargar esta página",
+  "Compare copies": "Comparar copias",
+  "No other source has a copy of this chapter.": "Ninguna otra fuente tiene una copia de este capítulo.",
+  "Copy to compare": "Copia que comparar",
+  "Page {n} of {total}": "Página {n} de {total}",
+  "Replace with this copy": "Reemplazar por esta copia",
+  "The two copies have different page counts, so later pages will not line up.": "Las dos copias tienen distinto número de páginas, así que las páginas posteriores no coincidirán."
 }

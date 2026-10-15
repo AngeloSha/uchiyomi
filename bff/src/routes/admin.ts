@@ -2581,7 +2581,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   app.get('/api/admin/series/:id/copy-pages', async (req, reply) => {
     const { id } = req.params as { id: string };
     const { source, chapter } = req.query as { source?: string; chapter?: string };
-    const r = await copyPageList(id, source, chapter);
+    const r = await copyPageList(id, source, chapter, await viewCtxFor(userIdOf(req), roleOf(req)));
     if (isRefusal(r)) return reply.code(r.code).send({ error: r.error, message: r.message });
     return { count: r.urls.length };
   });

@@ -2013,10 +2013,12 @@ chapter. It answers `{ok, applied, bytes, skipped: [{id, reason}]}` with `reason
 `not_owned`, `already_pruned`, `bookmarked`, `outside_root`, `unlink_failed`, or **409** `refused` (with
 `message` and `fix`) when the download directory is not writable.
 `GET /api/admin/series/:id/copy-pages?source=&chapter=` answers `{count}`, the number of pages one copy of a chapter has on
-its source, and `GET /img/series/:id/copy-page?source=&chapter=&i=` is one page of it, by index (admin only, original
-bytes, `cache-control: private, no-store`): the side-by-side compare before a *Replace*. The copy is named by its source
-and the source's own chapter id and must be one this series' listing holds (**404** `not_listed` otherwise), so a made-up id
-never reaches a source; a disabled source is **403**, one in a cooldown **429**.
+its source, and `GET /img/series/:id/copy-page?source=&chapter=&i=` is one page of it, by index (original bytes,
+`cache-control: private, no-store`): the side-by-side compare before a *Replace* (since v0.71.0, #241). Both are an
+admin's by the API's rule -- the image route takes a signed-in session or an API token with the admin scope, never an
+OPDS token or an admin's read token (**403**). The copy is named by its source and the source's own chapter id and must
+be one this series' listing holds (**404** `not_listed` otherwise), so a made-up id never reaches a source, of a series
+the admin may see (a hidden or merged series is **404**); a disabled source is **403**, one in a cooldown **429**.
 `POST /api/admin/series/:id/chapters/refetch {bookIds?[], picks?[]}` (at least one, at most 300 combined)
 downloads the chapters again as the copy the release rules choose *now* — after a change of priority, or a follow, that may be another group's —
 onto the **same rows**, so progress stays attached. Only a row under the download folder (`not_owned`

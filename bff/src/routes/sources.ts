@@ -1117,15 +1117,18 @@ export async function previewPageList(ctx: ViewCtx, source: string | undefined, 
   return { src: r.src, chapter, urls };
 }
 /**
- * The page list of ONE named copy of a chapter of a library series, for the compare view: unlike a preview, which
- * takes the copy the rules would pick for a number, this is the copy the admin is looking at. The copy must be one
- * the series' own listing holds (source and the source's chapter id), so the id is never a free-form request to
- * the source. Callers check that the viewer is an admin.
+ * The page list of ONE named copy of a chapter of a library series, for the compare view (#241, @Squeaks72): unlike a
+ * preview, which takes the copy the rules would pick for a number, this is the copy the admin is looking at. The copy
+ * must be one the series' own listing holds (source and the source's chapter id), so the id is never a free-form request
+ * to the source, and the series must be one `ctx` may see -- a hidden or merged series' listing is not read. Callers
+ * check that the viewer is an admin, and the image route that its credential carries the admin scope.
+ * Reintroduce by dropping the seriesVisible line: "a hidden series' copies are not served" in copyPages.int.test.ts.
  */
-export async function copyPageList(seriesId: string, source: string | undefined, chapterId: string | undefined):
+export async function copyPageList(seriesId: string, source: string | undefined, chapterId: string | undefined, ctx: ViewCtx):
   Promise<{ src: SourceAdapter; chapter: SourceChapter; urls: string[] } | PreviewRefusal> {
   const src = source ? getSource(source) : null;
   if (!src || !chapterId || chapterId.length > 2048) return refused(400, 'bad_request', 'Name a source and one of its chapters.');
+  if (!(await seriesVisible(seriesId, ctx))) return refused(404, 'not_found', 'That series is not there.');
   const known = await one<{ n: number }>(
     'SELECT 1 AS n FROM series_listing WHERE series_id = $1 AND copies @> $2::jsonb LIMIT 1',
     [seriesId, JSON.stringify([{ source: src.id, sourceId: chapterId }])],
