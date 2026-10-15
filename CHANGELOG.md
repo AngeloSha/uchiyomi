@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.67.2 — 2026-10-15
+
+**The app does about half the work while you are not touching it, a page change is the fade it was designed to be
+instead of a flicker, and a series opens already loaded.**
+
+### Less work, the same look
+
+- **Covers still loading below the screen no longer cost anything.** A cover that has not loaded wears a shimmering
+  placeholder, and the Library kept up to 158 of them shimmering where nobody could see them, every frame of them work
+  for the whole page. Off the screen they are now skipped, and a placeholder starts shimmering as it comes near. With
+  the processor slowed four times, as a modest computer or a phone: an idle Library does 47% less work, Home on a phone
+  49% less, scrolling Home on a phone 47% less, and running the pointer across covers 51% less.
+- **A phone no longer runs smooth scrolling's frame loop.** It only ever moves a mouse wheel's scroll, and a phone ran it
+  on every frame of every page, the reader's included, for nothing. A computer's is unchanged.
+
+### The page change, as designed
+
+- **The old page fades out, then the new one fades in, once.** Since it was written, a click showed the next page at
+  once inside the fade-out, faded it to black and faded it in again, and built it twice. Changing pages now does a third
+  to half less work.
+- **A series opens already loaded.** Its details and chapters are asked for at the click on its cover, not after the
+  fade, so it fades in with them.
+
+### Upgrading
+
+- Nothing to do.
+
 ## v0.67.1 — 2026-10-14
 
 **Scrolling with a mouse wheel works over a series again, and on a phone Home opens on a cover too.**
