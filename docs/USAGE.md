@@ -1352,6 +1352,12 @@ fix the title's direction: it keeps following the profile. (Before v0.48.0 it di
 kept reading left to right whatever the profile said; those accidental *Series default* pins are ignored now.
 A *Left to right* or *Right to left* chosen for one title in those versions is kept.)
 
+**The reader's right-click menu** — right-click a page (with a mouse; Shift + right-click is still the browser's own menu, for *Save
+image as*) for what you want while reading: zoom, bookmark the page, jump to a page, the next and previous chapter and the
+chapter list, single pages or double spreads, full screen, show or hide the controls, the reader's settings, the series, and
+leaving the reader. While it is open the arrow keys and Enter move through it and Esc closes it without leaving the reader.
+A right-click used to turn the page like a left click; it no longer does.
+
 **Reader defaults** — mode (webtoon scroll or paged), theme, the cover colour at the edges, repeated pages, fit,
 page gap, auto-scroll and brightness — live under **Profile → Settings → Reading**, where each one saves as you
 change it and says *Saved* beside the row. The reader's own sheet still changes them for the session you are in,
