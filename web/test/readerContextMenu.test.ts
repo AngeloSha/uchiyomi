@@ -16,7 +16,8 @@ test('both tracks open the reader\'s menu on a right click, and the hook\'s touc
 });
 
 test('while the menu is open the keys are its: Escape closes the menu, not the reader', () => {
-  assert.match(page, /if \(menuOpen\.current\) return;[\s\S]{0,900}if \(e\.key === 'Escape'\) \{ if \(!e\.repeat\) back\(\)/);
+  // The menu's guard comes first: before the sheets, the key list's ? and Escape leaving the reader.
+  assert.match(page, /if \(menuOpen\.current\) return;[\s\S]{0,2000}if \(e\.key === 'Escape'\) \{ if \(!e\.repeat\) back\(\)/);
   assert.match(page, /menuOpen\.current = readerMenu\.open;/);
 });
 

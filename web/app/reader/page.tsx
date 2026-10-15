@@ -1219,23 +1219,24 @@ function ReaderInner() {
       if (e.altKey || e.ctrlKey || e.metaKey) return;
       // The right-click menu has the keys while it is open (arrows, Enter, and Escape closes it, not the reader).
       if (menuOpen.current) return;
-      // An open sheet (settings, page grid, chapter list) is what the keys are for: turning pages underneath
-      // it, or leaving the reader on Escape, acted on the thing the reader was not looking at. None of the
-      // three listens for Escape itself, so it is handled here, and it closes the sheet.
+      // An open sheet (settings, page grid, chapter list, the key list) is what the keys are for: turning pages
+      // underneath it, or leaving the reader on Escape, acted on the thing the reader was not looking at. None of
+      // them listens for Escape itself, so it is handled here, and it closes the sheet.
       if (showSettings || showPages || showChapters || showKeys) {
         if (e.key === 'Escape') { setShowSettings(false); setShowPages(false); setShowChapters(false); setShowKeys(false); }
-        else if (e.key === '?' && showKeys) setShowKeys(false);
+        else if (e.key === '?' && showKeys && !e.repeat) setShowKeys(false);
         return;
       }
-      // ? lists the shortcuts. Not in a text field, and not a key the reader has bound to something.
-      if (e.key === '?' && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target as HTMLElement | null)?.tagName ?? '')
+      const t = e.target as HTMLElement | null;
+      // ? lists the shortcuts, once a press: held, its repeats opened and closed the list until the key came up. Not
+      // in a text field or anything editable, and not when the reader has bound ? to something.
+      if (e.key === '?' && !e.repeat && !/^(INPUT|TEXTAREA|SELECT)$/.test(t?.tagName ?? '') && !t?.isContentEditable
         && !READER_ACTIONS.some((a) => keyMap[a].includes('?'))) { e.preventDefault(); setShowKeys(true); return; }
       // Escape is reserved, never bound: it leaves the reader. ⚠️ Once a press -- Escape repeating called
       // history.back() until it left the reader for wherever came before.
       if (e.key === 'Escape') { if (!e.repeat) back(); return; }
       // A focused control owns its keys: the page slider its arrows, a button or link its Space and Enter
       // (turning the page instead swallowed the click), a text field everything.
-      const t = e.target as HTMLElement | null;
       const owned = !!t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable
         || !!t.closest('button, a, [role="button"], [role="dialog"]'));
       const action = actionForKey(e, keyMap, { owned });
