@@ -407,10 +407,12 @@ ever hit.
   `AUTOFIX_MAX_MINUTES` is spent, and the next run continues down the list. `0` switches its extensions phase off. A
   package that carries none of the series it was searched for is removed again at once, and is not tried for those
   series again for a month.
+- `MAX_FOLLOWED_SOURCES` (default `2`, 1 to 20): how many sources besides the main one a series may follow, by hand or
+  automatically. A failed chapter may be asked from that many of them, up to four.
 - `MIN_FREE_GB` (default `10`): refuse to start a download when the download disk has less than this free.
   `0` disables the floor. Fails open if free space cannot be measured.
 
-An ordinary chapter failure may continue from up to two sources already followed for that series. A copy
+An ordinary chapter failure may continue from up to `MAX_FOLLOWED_SOURCES` (default two, at most four) of the sources already followed for that series. A copy
 explicitly picked by a person never switches. A 403/429 never becomes a partial chapter or starts a hunt;
 the refusing source cools down, while an already-followed copy can keep the queue moving. The sweep can also
 find a new matching source when **Admin → Settings → Updates & schedules → Look for failed chapters on other
