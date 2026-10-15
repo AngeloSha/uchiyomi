@@ -12,6 +12,7 @@ import { IcX } from './icons';
 import { Switch } from './Switch';
 import { t as tr } from '@/lib/i18n';
 import { useLayer } from '@/lib/layers';
+import { useReaderWidth, WIDTH_MIN, WIDTH_MAX } from '@/lib/readerWidth';
 import { INCOGNITO_TEXT } from '@/lib/incognito';
 import { useIncognito } from './IncognitoBanner';
 import { useToast } from './Toast';
@@ -89,6 +90,7 @@ export function ReaderSettings({
   // nav band free -- the reader has no nav there anyway -- and its panel is measured, so a notice rises above
   // it rather than covering its last rows.
   const panelRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useReaderWidth();
   useLayer('dialog', true, { ref: panelRef });
   // The library key's question is open (#235): the key saves for every account, so it asks first.
   const [askLibrary, setAskLibrary] = useState(false);
@@ -262,6 +264,13 @@ export function ReaderSettings({
               <input type="range" min={0} max={40} step={2} value={prefs.gap}
                 onChange={(e) => set({ gap: Number(e.target.value) })}
                 className="w-full accent-[rgb(var(--accent))]" />
+            </Row>
+            <Row label={`${tr('Column width on this device')} · ${width}%`}>
+              <input type="range" min={WIDTH_MIN} max={WIDTH_MAX} step={5} value={width}
+                aria-label={tr('Column width on this device')} aria-valuetext={`${width}%`}
+                onChange={(e) => setWidth(Number(e.target.value))}
+                className="w-full accent-[rgb(var(--accent))]" data-reader-width />
+              <p className="mt-1 text-xs leading-snug text-fog-500">{tr('Narrows the webtoon column. Saved on this device only, so your other screens are unaffected.')}</p>
             </Row>
             <Row label={`${tr('Auto-scroll')} · ${prefs.autoScroll === 0 ? tr('off') : prefs.autoScroll.toFixed(1)}`}>
               <input type="range" min={0} max={6} step={0.5} value={prefs.autoScroll}
