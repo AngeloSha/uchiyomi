@@ -2705,6 +2705,16 @@ paths:
           required: true
           schema:
             type: string
+        - name: spreads
+          in: query
+          required: false
+          description: >-
+            `1` (v0.77.0, #229, Join split double pages): add `join` to pages that are, with the next, one double-page
+            spread the source served as two files. Only reads the chapter's stored answer; one not found yet is queued
+            for the background measure, and `x-spreads` says so.
+          schema:
+            type: string
+            enum: ["1"]
       security:
         - bearer: []
       responses:
@@ -2712,6 +2722,14 @@ paths:
           description: >-
             Pages stay at their original one-based positions. A repair placeholder carries `missing: true`;
             it may also carry `junk`, but clients must not hide a missing page.
+          headers:
+            x-spreads:
+              description: >-
+                With `spreads=1` only: `done` (looked at; joins on the pages), `pending` (queued now, ask again
+                shortly) or `none` (nothing to look at).
+              schema:
+                type: string
+                enum: [done, pending, none]
           content:
             application/json:
               schema:
@@ -2728,6 +2746,12 @@ paths:
                     sizeBytes: { type: [integer, "null"] }
                     junk: { type: boolean }
                     missing: { type: boolean, description: True only for a repair placeholder in a partial chapter. }
+                    join:
+                      type: string
+                      enum: [rtl, ltr]
+                      description: >-
+                        With `spreads=1`: this page and the next are one spread cut in two; which side the next page
+                        sits on (`rtl` on its left).
         "401":
           description: Not authenticated
         "404":

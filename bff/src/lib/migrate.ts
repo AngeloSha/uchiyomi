@@ -1821,6 +1821,13 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS new_member_perms          j
 -- Additive: v0.71.0 boots on this schema and shows every chapter.
 ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS hidden_numbers real[];
 CREATE INDEX IF NOT EXISTS lib_series_hiding_idx ON lib_series (id) WHERE hidden_numbers IS NOT NULL;
+
+-- v0.77.0 (#229): spread joining's answer for a chapter file (lib/spreadMeasure.ts SpreadAnswer): which of its pages are
+-- one double-page spread a source served as two files, with the detector's version and the file's mtime and page count
+-- when it was measured. NULL until a reader who turned Join split double pages on opens the chapter. Written for every
+-- chapter looked at, nothing found and unreadable alike, so none is measured twice; a new mtime or detector measures
+-- again. Additive: v0.76.x ignores it.
+ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS spreads jsonb;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

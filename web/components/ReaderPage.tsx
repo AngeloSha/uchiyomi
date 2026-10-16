@@ -268,6 +268,30 @@ export function SlideTurned({ src, alt, width, height, area, zoom, filter }: {
 }
 
 /**
+ * A spread joined from two files (#229) turned on its side to fill a slide held upright (Wide pages → Rotate), as
+ * SlideTurned turns one in a single file: the two pages side by side, `pages[0]` on the left as drawn, at one height, in a
+ * box of the spread's shape sized so that once turned a quarter it fits the slide.
+ */
+export function SlideTurnedPair({ pages, area, zoom, filter }: {
+  pages: Array<{ src: string; alt: string; width: number; height: number }>; area: { w: number; h: number }; zoom: number; filter?: string;
+}) {
+  // At the first page's height: the second's width scaled to it. The detector only joins pages within 2 % of each other.
+  const h = pages[0].height;
+  const widths = pages.map((p) => p.width * (h / p.height));
+  const w = widths[0] + widths[1];
+  const fit = fitBox(h, w, area.w, area.h);
+  return (
+    <div data-rotated data-joined-turned dir="ltr" className="flex shrink-0"
+      style={{ width: fit.height, height: fit.width, transform: `rotate(90deg)${zoom !== 1 ? ` scale(${zoom})` : ''}` }}>
+      {pages.map((p, k) => (
+        <ReaderImg key={p.src} src={p.src} alt={p.alt} className="block h-full max-w-none" filter={filter}
+          style={{ width: `${(widths[k] / w) * 100}%` }} />
+      ))}
+    </div>
+  );
+}
+
+/**
  * One reader page, with a retry.
  *
  * Both call sites -- the continuous column and the paged slide -- keep their own classes, because the two

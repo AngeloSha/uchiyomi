@@ -67,6 +67,13 @@ export interface ReaderPrefs {
    */
   cropBorders: boolean;
   /**
+   * Join split double pages (#229): two pages a source served as the two halves of one double-page spread are shown as
+   * the spread, in paged mode, single page and Double spread alike (lib/readerSpread.ts). The server finds them from the
+   * pictures running across the seam (bff lib/spreadJoin.ts), in the background, and only for a reader who asks. Off by
+   * default: a join that is wrong puts two unrelated pages side by side. One setting for every title, synced, not a look.
+   */
+  joinSplit: boolean;
+  /**
    * Pick Webtoon or Paged for each series from the shape of its pages and its type (v0.61.0, lib/readerAuto.ts), for a
    * title whose own memory and source default hold no mode. Off by default; synced, not a look.
    */
@@ -89,6 +96,7 @@ export const DEFAULT_PREFS: ReaderPrefs = {
   coverEdges: true,
   widePages: 'whole',
   cropBorders: false,
+  joinSplit: false,
   autoMode: false,
 };
 
@@ -137,6 +145,8 @@ export function migratePrefs(raw: unknown): ReaderPrefs {
   if (!WIDE_PAGES.includes(p.widePages)) p.widePages = DEFAULT_PREFS.widePages;
   // Only a real `true` crops: an older row, or junk, reads as the default -- off.
   if (p.cropBorders !== true) p.cropBorders = false;
+  // #229: the same -- only a real `true` joins; an older row, or junk, reads as off.
+  if (p.joinSplit !== true) p.joinSplit = false;
   if (p.autoMode !== true) p.autoMode = false;
   p.skipJunk = p.junkPages !== 'show';
   return p;

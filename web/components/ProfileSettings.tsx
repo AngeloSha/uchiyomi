@@ -348,6 +348,10 @@ function ReadingSection({ weeklyGoal }: { weeklyGoal: number }) {
         help={tr('On a screen held upright, a double-page spread can be split into its two pages, or turned on its side to fill the screen.')}
         options={[{ value: 'whole', label: tr('Whole') }, { value: 'split', label: tr('Split') }, { value: 'rotate', label: tr('Rotate') }]}
         onChange={(widePages) => set({ widePages })} />
+      {/* #229: off until chosen; in Paged mode, whatever the default mode here, since a series can open paged anyway. */}
+      <SwitchRow label={tr('Join split double pages')}
+        help={tr('Shows two pages that a source cut from one double-page spread as that spread, in Paged mode. The server looks for them when a chapter is first opened, so they join a moment later. On a screen held upright, Wide pages applies to them.')}
+        on={prefs.joinSplit} onChange={(joinSplit) => set({ joinSplit })} />
       <SwitchRow label={tr('Crop page borders')}
         help={tr('Trims the blank margins around scanned pages. In Webtoon mode only the sides are trimmed, by the same amount for a whole chapter.')}
         on={prefs.cropBorders} onChange={(cropBorders) => set({ cropBorders })} />

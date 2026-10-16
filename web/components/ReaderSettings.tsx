@@ -227,6 +227,19 @@ export function ReaderSettings({
           </p>
         </Row>
 
+        {/* #229. Off by default; every title, synced. Paged mode only: the webtoon column shows pages one under another. */}
+        {prefs.mode === 'paged' && (
+          <div className="py-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-medium text-fog-200">{tr('Join split double pages')}</span>
+              <Switch on={prefs.joinSplit} onChange={(joinSplit) => set({ joinSplit })} label={tr('Join split double pages')} />
+            </div>
+            <p className="mt-1 text-[11px] leading-snug text-fog-500">
+              {tr('Shows two pages that a source cut from one double-page spread as that spread, in Paged mode. The server looks for them when a chapter is first opened, so they join a moment later. On a screen held upright, Wide pages applies to them.')}
+            </p>
+          </div>
+        )}
+
         {/* v0.61.0. Off by default; every title, synced. The margins are measured from each page's own pixels. */}
         <div className="py-3">
           <div className="flex items-center justify-between gap-3">
@@ -316,6 +329,20 @@ export function ReaderSettings({
             {tr('Where a tap turns the page: the shaded part goes back, the lit part goes on, the rest shows the controls. Automatic turns pages in Paged mode only.')}
           </p>
         </Row>
+
+        {/* #232: a tap on one page of a pair brings it into frame, on this device. Off until chosen: every tap is the tap
+            zones', the middle showing the controls, as it always was. */}
+        {prefs.mode === 'paged' && (
+          <div className="py-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-medium text-fog-200">{`${tr('Tap a page of a pair to see it alone')} · ${tr('This device')}`}</span>
+              <Switch on={device.tapFocus} onChange={(tapFocus) => setDevice({ tapFocus })} label={tr('Tap a page of a pair to see it alone')} />
+            </div>
+            <p className="mt-1 text-[11px] leading-snug text-fog-500">
+              {tr('On two pages side by side, a tap on one shows it alone, and turning toward the other shows that one. Taps beside the pages still do what Tap zones says.')}
+            </p>
+          </div>
+        )}
 
         {/* v0.61.0: the keys and a game controller, on this device. Folded: most readers never change them. */}
         <div className="py-3">

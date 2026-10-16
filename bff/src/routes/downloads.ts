@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { junkPagesFor } from '../lib/junkPages';
+import { storedJoins } from '../lib/spreadMeasure';
 import { z } from 'zod';
 import { q } from '../lib/db';
 import { content } from '../lib/backend';
@@ -49,6 +50,9 @@ export default async function downloadRoutes(app: FastifyInstance) {
     // flag simply would not be there. That is exactly how this was found: the browser suite downloads
     // chapters early on, and every later reader check was quietly taking the offline path.
     const junk = await junkPagesFor(id).catch(() => new Set<number>());
+    // #229: the spreads already found ride along for the same reason, so a downloaded chapter joins them offline as it
+    // does online. Read only: a download never queues a measure, which is the reader's to ask for (?spreads=1).
+    const joins = await storedJoins(id, (pages ?? []).length).catch(() => new Map<number, 'rtl' | 'ltr'>());
 
     let totalBytes = 0;
     const mapped = (pages ?? []).map((p: any) => {
@@ -65,6 +69,7 @@ export default async function downloadRoutes(app: FastifyInstance) {
         // reason as `junk`: the offline reader never asks the server, so the caption has to travel with the
         // download. The placeholder's bytes download like any page.
         missing: p.missing || undefined,
+        join: joins.get(p.number),
       };
     });
 

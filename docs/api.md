@@ -1183,6 +1183,15 @@ missing placeholder. `GET /api/books/:id/download-manifest` copies the same opti
 each affected entry in `pages`, so offline readers preserve the evidence. A complete chapter has
 `missingPages: null` and no page-level `missing` keys.
 
+Since v0.77.0 `GET /api/books/:id/pages?spreads=1` (#229, what the reader asks with *Join split double pages* on) adds
+`join: 'rtl' | 'ltr'` to a page that is, with the page after it, one double-page spread the source served as two files,
+and says which side that next page sits on (`rtl`: on its left, as a right-to-left book runs). The request never
+measures anything: the answer is the chapter's own (`lib_books.spreads`), found in the background, one chapter at a
+time, the first time a reader asks. The response header `x-spreads` says `done` (looked at; any joins are on the
+pages), `pending` (queued just now, ask again shortly) or `none` (nothing to look at: fewer than two pages, a deleted
+file, a Komga-backed library). Without the parameter the list is exactly what it was, and nothing is queued. The
+download manifest's `pages` carry the same `join` once one has been found; a download never queues a look.
+
 Since v0.55.2 every chapter object carries `numberEnd: number | null`: the last chapter of a file that holds
 several, read from a name like `Batman 01-07 (1987).cbz` (USAGE, *How a chapter's number is read*), null for one
 chapter. `number` and `metadata.numberSort` stay the start, 1 there, which is where the book sorts, and

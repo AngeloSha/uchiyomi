@@ -411,6 +411,30 @@ export async function cbzPageDims(path: string): Promise<Array<{ name: string; w
   return out;
 }
 
+/**
+ * Every page's bytes in the reader's order, the archive opened once for a CBZ (#229: spread joining's background measure,
+ * lib/spreadMeasure.ts). `fn` gets each page in turn, null for one that cannot be read (over the cap, a broken entry), so
+ * the rest keep their numbers. Answers how many pages there were; an archive that cannot be opened throws. A PDF hands
+ * over nothing and answers 0: its pages are drawn, not stored, and the measure has nothing to read.
+ */
+export async function eachPageBytes(path: string, fn: (bytes: Buffer | null) => Promise<void>): Promise<number> {
+  const kind = chapterKind(path);
+  if (kind === 'pdf') return 0;
+  if (kind === 'zip') {
+    const zip = new StreamZip.async({ file: path });
+    try {
+      const entries = await zip.entries();
+      const names = Object.keys(entries).filter((n) => !entries[n].isDirectory && IMG.test(n)).sort(naturalCmp);
+      for (const name of names) await fn(await zipEntryCapped(zip, name).catch(() => null));
+      return names.length;
+    } finally { await zip.close(); }
+  }
+  // A folder, a CBR or an EPUB (spine order), page by page as cbzPageDims reads them.
+  const names = await cbzPages(path);
+  for (const name of names) await fn(await cbzEntry(path, name).catch(() => null));
+  return names.length;
+}
+
 // Owned download dir (writable; separate from Suwayomi's read library so permissions stay clean).
 export const DL_ROOT = process.env.DL_ROOT || '/library-dl';
 

@@ -70,7 +70,7 @@ test('the reader applies the title\'s look with `ready`, and no effect lays it o
   // Reintroduce the post-ready look effect (`useEffect(() => { … withTitleLook … }, [seriesId, seriesSourceId])`), or
   // move setPrefs(look.prefs) below setReady(true): one of these fails.
   const src = code(read('app/reader/page.tsx'));
-  const load = between(src, 'const first = await loadChapter(bookId);', '}, [bookId, reloadKey]);', 'the load effect');
+  const load = between(src, 'const first = await loadChapter(bookId, loadPrefs().joinSplit);', '}, [bookId, reloadKey]);', 'the load effect');
   const look = load.indexOf('const look = titleLook(loadPrefs(), { ...(libLook ?? {}), ...(src ? loadSourcePrefs(src.id) : {}) }, memory, autoGuess.current);\n      setPrefs(look.prefs);');
   const ready = load.lastIndexOf('setReady(true);');
   assert.ok(look > 0, 'the load effect does not lay the title\'s look over the STORED default');

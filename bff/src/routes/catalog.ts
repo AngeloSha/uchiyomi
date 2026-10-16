@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { q, one } from '../lib/db';
 import { cleanLibraryReader } from '../lib/libraryReader';
 import { junkPagesFor, setPageOverride } from '../lib/junkPages';
+import { spreadsFor } from '../lib/spreadMeasure';
 import { komgaImage } from '../lib/komga';
 import { content as komga, NATIVE_PROGRESS, OWNED } from '../lib/backend';
 import { UnsupportedFilter, owned } from '../lib/ownedCatalog';
@@ -1006,17 +1007,24 @@ export default async function catalogRoutes(app: FastifyInstance) {
     return (await booksForUser(req, [b]))[0];
   });
 
-  app.get('/api/books/:id/pages', async (req) => {
+  app.get('/api/books/:id/pages', async (req, reply) => {
     const { id } = req.params as { id: string };
     const pages = await komga.bookPages(vc(req), id);
     // `junk` rides along on the page list rather than being its own request, so the reader and the offline
     // download manifest -- which both read this route -- get it without either knowing the feature exists.
     // A chapter whose pages have not been hashed yet simply comes back with nothing flagged.
     const junk = await junkPagesFor(id).catch(() => new Set<number>());
-    if (!junk.size) return pages;
-    return Array.isArray(pages)
+    const listed = junk.size && Array.isArray(pages)
       ? pages.map((p: any) => (junk.has(p.number) ? { ...p, junk: true } : p))
       : pages;
+    // #229, opt-in: a reader who turned Join split double pages on asks with ?spreads=1, and the pages a source cut from
+    // one spread come back with `join` (which side the next page is on). Only READ here: a chapter not measured yet is
+    // queued for the background measure (lib/spreadMeasure.ts) and answered as it is, and `x-spreads: pending` tells the
+    // reader to ask again shortly. Without the parameter the list is exactly what it was, and nothing is measured.
+    if ((req.query as Record<string, string>).spreads !== '1' || !Array.isArray(listed)) return listed;
+    const s = await spreadsFor(id, listed.length);
+    reply.header('x-spreads', s.state);
+    return s.joins.size ? listed.map((p: any) => (s.joins.has(p.number) ? { ...p, join: s.joins.get(p.number) } : p)) : listed;
   });
 
   // Mark or un-mark one page by hand. A person's call outranks the heuristic in both directions.

@@ -310,8 +310,69 @@ def readergroup(root: str) -> None:
     print(f'  seeded {resume}, {gaps} and {wide}')
 
 
+def drawn_rows(w: int, h: int, seed: int):
+    """A drawn page as RGB rows: a screentone over the paper and grey bars at many heights, all from `seed`.
+
+    For spread joining (#229, walk229.mjs): the server joins two pages only where one picture runs across the seam -- the
+    same texture both sides, the small steps lining up, and no other page fitting either edge (bff lib/spreadJoin.ts).
+    A flat page, or the gradient bands() draws on every page alike, would fit any other page's edge and never join.
+    """
+    rnd = random.Random(seed)
+    slope = 1 + seed % 3
+    dot = b''.join(bytes((160, 160, 160)) if (x // 4) % 2 else bytes((200, 200, 200)) for x in range(8))
+    tile = dot * (w // 8 + 2)
+    rows = [bytearray(tile[((y * slope) % 8) * 3:((y * slope) % 8 + w) * 3]) for y in range(h)]
+    for _ in range(70):
+        y0, tall = rnd.randrange(h), max(4, h // 60)
+        x0 = rnd.randrange(int(w * 0.6))
+        x1 = min(w, x0 + int(w * 0.3) + rnd.randrange(int(w * 0.6)))
+        g = 30 + rnd.randrange(190)
+        for y in range(y0, min(h, y0 + tall)):
+            rows[y][x0 * 3:x1 * 3] = bytes((g, g, g)) * (x1 - x0)
+    return rows
+
+
+def drawn_png(w: int, h: int, seed: int) -> bytes:
+    return _png_from_raw(w, h, b''.join(b'\x00' + bytes(r) for r in drawn_rows(w, h, seed)))
+
+
+def spread_halves(w: int, h: int, seed: int):
+    """One drawing twice a page wide, cut down the middle: (its left half, its right half) as page-sized PNGs."""
+    rows = drawn_rows(2 * w, h, seed)
+    half = lambda a: _png_from_raw(w, h, b''.join(b'\x00' + bytes(r[a * 3:(a + w) * 3]) for r in rows))
+    return half(0), half(w)
+
+
+def spreads(root: str) -> None:
+    """The spread-joining walk's library (walk229.mjs: #229, #232, #261), right to left, 600 x 900 pages.
+
+    Only on request (`seed.py <root> --spreads`). Named so that no AniList entry is called that (see rtl()):
+      - Walk Two Two Nine Spreads, chapter 1: eight pages, 4 and 5 the right and the left half of one spread (a
+        right-to-left book serves its right half first): the server should join page 4, 'rtl'.
+      - chapter 2: six pages opening on a spread, 1 and 2, the first page of a chapter as half of one.
+    """
+    d = os.path.join(root, 'Test Source', 'Walk Two Two Nine Spreads')
+    os.makedirs(d, exist_ok=True)
+    w, h = 600, 900
+    info = lambda n: ('<?xml version="1.0"?><ComicInfo><Series>Walk Two Two Nine Spreads</Series>'
+                      f'<Number>{n}</Number><Manga>YesAndRightToLeft</Manga></ComicInfo>')
+    left, right = spread_halves(w, h, 22904)
+    with zipfile.ZipFile(os.path.join(d, 'Chapter 001.cbz'), 'w', zipfile.ZIP_STORED) as z:
+        for i in range(1, 9):
+            z.writestr(f'{i:03d}.png', right if i == 4 else left if i == 5 else drawn_png(w, h, 22900 + i))
+        z.writestr('ComicInfo.xml', info(1))
+    left2, right2 = spread_halves(w, h, 22951)
+    with zipfile.ZipFile(os.path.join(d, 'Chapter 002.cbz'), 'w', zipfile.ZIP_STORED) as z:
+        for i in range(1, 7):
+            z.writestr(f'{i:03d}.png', right2 if i == 1 else left2 if i == 2 else drawn_png(w, h, 22950 + i))
+        z.writestr('ComicInfo.xml', info(2))
+    print(f'  seeded {d}')
+
+
 if __name__ == '__main__':
-    if '--rtl' in sys.argv[2:]:
+    if '--spreads' in sys.argv[2:]:
+        spreads(sys.argv[1])
+    elif '--rtl' in sys.argv[2:]:
         rtl(sys.argv[1])
     elif '--cascade' in sys.argv[2:]:
         cascade(sys.argv[1])
