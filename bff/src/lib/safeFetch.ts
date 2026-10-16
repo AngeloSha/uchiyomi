@@ -147,6 +147,15 @@ async function resolvesPrivate(h: string): Promise<boolean> {
 const CREDENTIAL_HEADERS = new Set(['authorization', 'cookie', 'proxy-authorization']);
 
 /**
+ * `headers` as a hop off the first origin may carry them: without the credential headers, and without any name in
+ * `also` -- a source's own extra headers, which are meant for its hosts alone. Names compare case-insensitively.
+ */
+export function withoutCredentials(headers: Record<string, string>, also: Iterable<string> = []): Record<string, string> {
+  const drop = new Set([...CREDENTIAL_HEADERS, ...[...also].map((k) => k.toLowerCase())]);
+  return Object.fromEntries(Object.entries(headers).filter(([k]) => !drop.has(k.toLowerCase())));
+}
+
+/**
  * fetch() for a URL a site named, with redirects followed by hand so every hop is checked by assertNotPrivateHost.
  * Resolves the final response (the caller reads its status and body, the body with readCapped); throws BlockedAddress
  * for a hop that is not public. `exemptFirst` lets the FIRST hop skip the host rule -- the extension engine's own page
@@ -164,8 +173,7 @@ export async function fetchFollowingPublic(
   for (let hop = 0; ; hop++) {
     if (target.protocol !== 'http:' && target.protocol !== 'https:') throw new BlockedAddress(target.href);
     if (!(hop === 0 && opts.exemptFirst?.(target))) await assertNotPrivateHost(target.hostname);
-    const headers = target.origin === first ? init.headers
-      : Object.fromEntries(Object.entries(init.headers).filter(([k]) => !CREDENTIAL_HEADERS.has(k.toLowerCase())));
+    const headers = target.origin === first ? init.headers : withoutCredentials(init.headers);
     const r = await fetch(target, { headers, redirect: 'manual', signal: init.signal });
     if (r.status < 300 || r.status > 399 || r.status === 304) return r;
     const loc = r.headers.get('location');

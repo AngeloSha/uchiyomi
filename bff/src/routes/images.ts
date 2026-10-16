@@ -19,7 +19,7 @@ import { fetchPages } from '../lib/downloader';
 import { previewPageList, copyPageList, isRefusal } from './sources';
 import { assertPublicHost, isBlockedHost, BlockedAddress } from '../lib/ssrfGuard';
 import { suwayomiUrl, suwayomiBase, suwayomiImageHeaders, onEngineOrigin } from '../lib/sources/suwayomi/client';
-import { fetchPublic, readCapped, MAX_COVER_BYTES, MAX_ICON_BYTES, MAX_HTML_BYTES } from '../lib/safeFetch';
+import { fetchPublic, readCapped, withoutCredentials, MAX_COVER_BYTES, MAX_ICON_BYTES, MAX_HTML_BYTES } from '../lib/safeFetch';
 import { env } from '../env';
 import { join } from 'path';
 import { readFile } from 'fs/promises';
@@ -203,13 +203,14 @@ export async function fetchCoverImage(u: string, source?: string, opts: { caller
   }
   const src = source ? getSource(source) : null;
   const staticReferer = typeof src?.imageReferer === 'string' ? src.imageReferer : undefined;
+  const extras = typeof src?.imageHeaders === 'function' ? src.imageHeaders(u) : src?.imageHeaders ?? {};
   const headers: Record<string, string> = {
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
     accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
     'accept-language': 'en-US,en;q=0.9',
     'sec-fetch-dest': 'image', 'sec-fetch-mode': 'no-cors', 'sec-fetch-site': 'cross-site',
     referer: staticReferer ?? `${parsed.origin}/`,
-    ...(typeof src?.imageHeaders === 'function' ? src.imageHeaders(u) : src?.imageHeaders ?? {}),
+    ...extras,
   };
   // A caller-supplied URL reaches the solver only on a host this source vouched for -- its own site, or one it
   // has served covers from (imageHosts.ts). The solver follows redirects and runs page scripts, so a public page
@@ -232,7 +233,12 @@ export async function fetchCoverImage(u: string, source?: string, opts: { caller
         if (e instanceof BlockedAddress) throw new UnfetchableCoverUrl(u);
         throw e;
       }
-      r = await fetch(target, { headers, redirect: 'manual', signal: AbortSignal.timeout(20000) });
+      // Credentials go to the cover's own origin only, as fetchFollowingPublic sends them (lib/safeFetch.ts): a hop
+      // anywhere else drops the cookie and authorization -- the solver's clearance after a solve among them -- and
+      // the source's own extra headers. Reintroduce by sending `headers` on every hop: "a redirect to another origin
+      // carries none of the first one's credentials" in coverRedirectHeaders.test.ts sees them arrive.
+      const sent = target.origin === parsed.origin ? headers : withoutCredentials(headers, Object.keys(extras));
+      r = await fetch(target, { headers: sent, redirect: 'manual', signal: AbortSignal.timeout(20000) });
       if (r.status < 300 || r.status > 399) break;
       const loc = r.headers.get('location');
       if (!loc || hop >= 4) throw new UnfetchableCoverUrl(u);
