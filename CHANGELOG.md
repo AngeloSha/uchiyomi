@@ -2,6 +2,50 @@
 
 ## v0.73.0 — 2026-10-16
 
+**The reader keeps your place through a refresh, a resized window and a turned phone, says which chapters a series is
+missing as you move on, and can narrow its column or fetch pages at your screen's size.** All four began as pull requests
+from **@Squeaks72** ([#263](https://github.com/AngeloSha/uchiyomi/pull/263), [#236](https://github.com/AngeloSha/uchiyomi/pull/236), [#233](https://github.com/AngeloSha/uchiyomi/pull/233),
+[#234](https://github.com/AngeloSha/uchiyomi/pull/234)), rebuilt on the app's own parts. Thank you.
+
+### The reader keeps your place
+
+- **A refresh reopens the chapter you are reading** ([#263](https://github.com/AngeloSha/uchiyomi/pull/263)). Reading on into the next chapters
+  kept the address on the chapter you had opened, so a refresh went back there -- to its first page, if you had
+  finished it. The address now follows the chapter on screen, and a refresh resumes where you are.
+- **A window made wider or narrower keeps its page** ([#263](https://github.com/AngeloSha/uchiyomi/pull/263)). In paged mode, dragging the window
+  to another screen or resizing it could move you to another page, even chapters on. Turning a phone with Wide pages:
+  Split keeps the page as well.
+
+### Missing chapters
+
+- **Moving on to a chapter that skips numbers says so** ([#236](https://github.com/AngeloSha/uchiyomi/pull/236)): "Chapters 44–99 are missing here.
+  This continues at chapter 100." It is said as you reach the next chapter, and when you go to it with Next chapter,
+  `]`, a controller or the right-click menu.
+  - It counts what Admin → Health → Chapter gaps counts. A file holding several chapters, a chapter deleted on purpose
+    and a gap an admin chose to ignore are not missing.
+  - Offline, nothing is said.
+
+### On this device
+
+- **Column width** ([#233](https://github.com/AngeloSha/uchiyomi/pull/233)). In webtoon scroll, Reader settings → Column width · This device
+  narrows the column to 30–100 % of what Fit gives, for a wide screen. At 100 % it is the column as it was.
+- **Fit pages to my screen** ([#234](https://github.com/AngeloSha/uchiyomi/pull/234)), off until you turn it on. Each page comes at the size it
+  is drawn at instead of as scanned: less data and memory on a phone or a slow connection.
+  - It follows your zoom, Wide pages and Crop page borders, and zooming in fetches a sharper copy.
+  - A page already that small comes exactly as it is, and so do downloaded chapters.
+
+### For scripts
+
+- `GET /api/series/:id/gaps` answers the runs of numbers a series is missing, by Health's Chapter gaps rule.
+- `GET /img/books/:id/page/:n?fit=<px>` answers a page for a screen that shows it that wide. `?w=` is unchanged.
+
+### Upgrading
+
+- **Database:** no new tables or columns.
+- **Nothing changes until you choose:** Column width is 100 % and Fit pages to my screen is off on every device.
+
+## v0.73.0 — 2026-10-16
+
 **A series with no description, genres or author can have them filled in, a whole source can be rated Adult only,
 AniList sync waits when AniList asks instead of giving up, and a new Unraid extension engine asks for a password.**
 The first two began as pull requests from **@Squeaks72**

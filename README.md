@@ -86,8 +86,9 @@ sites' terms and your local law.
 
 - **Webtoon-first reader** — continuous vertical scroll that runs straight into the next chapter, or paged, RTL and
   double-page spreads, with the mode picked for each series from its pages. Wide spreads split or turned on a phone,
-  borders cropped, an e-ink, grayscale or inverted filter, tap zones, rebindable keys and a game controller, each set
-  per device.
+  borders cropped, an e-ink, grayscale or inverted filter, tap zones, rebindable keys and a game controller, a narrower
+  column for a wide screen and pages fetched at your screen's size, each set per device. A refresh reopens the chapter
+  you are reading, and moving on says which chapters the series is missing.
 - **Skips the pages that are not the story** — the scanlator credit page that opens every chapter is found
   by repetition and collapsed into a band you can tap open (or hide entirely, or show everything).
 - **True-black OLED interface**, or a softer *Graphite* or *Midnight* if you prefer, built for a phone and installable
