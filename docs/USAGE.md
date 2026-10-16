@@ -1451,9 +1451,12 @@ not to you: an e-ink tablet wants E-ink, the phone beside it does not.
 - **Colour filter** (this device): *Invert* (light pages turned dark, colours kept), *Grayscale* and *E-ink* (grey with
   more contrast, and every page turn jumps instead of sliding, which e-ink screens draw badly). It is laid over the
   pages only; the reader's own cards and buttons are unchanged, and the theme works as before.
-- **Pages fitted to your screen**: the reader asks the server for each page at the width it is shown at (your column's
-  width in device pixels, in steps of 720, 1080, 1440 and 2000 px), so a phone is not sent a 4000 px scan. A page that is
-  already that narrow, or that would not come out smaller, is sent as it is.
+- **Fit pages to my screen** (this device, since v0.73.0; off until you turn it on): each page comes at the width it is
+  drawn at instead of as scanned, so a phone is not sent a 4,000 px scan to show at 400. The width is the page's as you
+  see it -- the column or the screen, your zoom, a wide page split in two or turned on its side, Crop page borders -- in
+  your screen's pixels, rounded up to 720, 1,080, 1,440 or 2,000 px, and above that the page comes as scanned. Zooming in
+  fetches a sharper copy, and zooming out keeps it. The copy is re-encoded at a high quality, and a page that is already
+  that narrow, animated, or would not come out smaller is sent exactly as it is. Downloaded chapters are unaffected.
 - **Tap zones** (this device): *Automatic* is the reader as it was -- the left and right thirds turn the page in
   paged mode, and a tap in webtoon scroll only shows the controls. *Edges* turns with the thirds in both modes (in
   webtoon scroll a step of most of a screen). *L shape* and *Kindle-style* are the layouts Mihon readers know: the

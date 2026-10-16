@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3948
+    "strings": 3950
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -3951,5 +3951,7 @@
   "Chapters {a}–{b} are missing here. This continues at chapter {next}.": "الفصول {a}–{b} غير موجودة هنا. تستمر القراءة من الفصل {next}.",
   "Chapters {list} are missing here. This continues at chapter {next}.": "الفصول {list} غير موجودة هنا. تستمر القراءة من الفصل {next}.",
   "Column width": "عرض العمود",
-  "A share of the width Fit gives: a narrower column of pages for a wide screen.": "نسبة من العرض الذي يحدده خيار «الملاءمة»: عمود صفحات أضيق للشاشات العريضة."
+  "A share of the width Fit gives: a narrower column of pages for a wide screen.": "نسبة من العرض الذي يحدده خيار «الملاءمة»: عمود صفحات أضيق للشاشات العريضة.",
+  "Fit pages to my screen": "ملاءمة الصفحات لشاشتي",
+  "Each page comes at the size this screen shows it instead of as scanned: less data and memory on a phone or a slow connection. Zooming in fetches a sharper copy.": "تصل كل صفحة بالحجم الذي تعرضها به هذه الشاشة بدلًا من حجم المسح الأصلي: بيانات وذاكرة أقل على الهاتف أو مع اتصال بطيء. التكبير يجلب نسخة أوضح."
 }

@@ -10,7 +10,8 @@ import { api, img } from '@/lib/api';
 import { fetchAllBooks } from '@/lib/seriesBooks';
 import { chapterOutcome } from '@/lib/readerState';
 import { openableChapters } from '@/lib/chapterRows';
-import { buildFlow, startIndex, renderWindow, pageWidthBucket } from '@/lib/readerFlow';
+import { buildFlow, startIndex, renderWindow } from '@/lib/readerFlow';
+import { drawnWidth, fitWidth, neverSofter } from '@/lib/readerFit';
 import { AHEAD_SCREENS, APPEND_SCREENS, BEHIND_SCREENS, KEEP_SCREENS, MAX_WINDOW_PAGES, anchorAt, nearEnd, prefetchList, screenRange, scrollTopFor, windowSet, type IndexRange } from '@/lib/readerWindow';
 import { readTap, undoLeft, undoWindow, type TapZone } from '@/lib/readerGesture';
 import { PAGE_ACTIONS, READER_ACTIONS, actionForKey, keyMapFor, type ReaderAction } from '@/lib/readerKeys';
@@ -226,8 +227,6 @@ function ReaderInner() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [colW, setColW] = useState(0);
-  /** The width page images are asked for: the screen's, in device pixels, in a few steps so the server's cache is shared. 0 until measured. */
-  const [pageW, setPageW] = useState(0);
   const didInitScroll = useRef(false);
   /** The last `chapterId:page` a progress ping was sent for. Declared here rather than beside sendProgress
    *  because the initial-scroll effect seeds it, and that effect is defined above sendProgress. */
@@ -319,6 +318,7 @@ function ReaderInner() {
     setRefsFrom('none');
     completedSent.current.clear();
     warnedGaps.current.clear();
+    fitAsked.current.clear();
     prevPos.current = null;
     setExpanded(new Set());   // a page opened by hand belongs to the chapter it was opened in
     setWin({ from: 0, to: -1 });
@@ -632,7 +632,6 @@ function ReaderInner() {
       // #233: this device's column width, a share of what Fit gives (lib/readerDevice.ts); 100 is the column as it was.
       const base = (prefs.fitWidth ? Math.min(w, 860) : w) * (device.columnWidth / 100);
       setColW(base * zoom);
-      setPageW(pageWidthBucket(base, window.devicePixelRatio || 1));
     };
     measure();
     window.addEventListener('resize', measure);
@@ -777,6 +776,39 @@ function ReaderInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSet]);
 
+  // ---- Fit pages to my screen (#234, this device, off until chosen; lib/readerFit.ts) ----
+  /** The width each page was last asked for at, by key: a page is never asked for again at less (neverSofter). */
+  const fitAsked = useRef<Map<string, number>>(new Map());
+  /**
+   * The CSS width page `i`'s whole width is drawn at, as this layout draws it: the column (zoom and column width in it),
+   * twice it for a wide page split in two, down it for one turned; on a slide, fitted into the slide, half of it for one
+   * of a pair, both halves of a split page, turned on its side; by the zoom; stretched as far as Crop page borders may.
+   * Before anything is measured, the window: never less than what is drawn.
+   */
+  const drawnAt = (i: number): number => {
+    const p = flat[i];
+    if (prefs.mode === 'vertical') {
+      const wide = !p.missing && isWide(p) ? wideMode : 'whole';
+      return drawnWidth(p, { mode: 'column', colW: colW || window.innerWidth, wide, crop: prefs.cropBorders && wide === 'whole' && !p.collapsed && !p.missing });
+    }
+    const s = slideOf[i] ?? i;
+    const shown = slides[s] ?? [i];
+    return drawnWidth(p, {
+      mode: 'slide', w: area.w || window.innerWidth, h: area.h || window.innerHeight, zoom,
+      pair: shown.length === 2, half: !!half[s], rotate: wideMode === 'rotate' && shown.length === 1 && isWide(p), crop: prefs.cropBorders,
+    });
+  };
+  /** The width to ask page `i` for, in device pixels: rounded up to a width the server keeps (0: as scanned), never less than before. */
+  const fitFor = (i: number): number => {
+    const key = flat[i].key;
+    const w = neverSofter(fitAsked.current.get(key), fitWidth(drawnAt(i), window.devicePixelRatio || 1));
+    fitAsked.current.set(key, w);
+    return w;
+  };
+  /** An online page's address: as scanned -- the reader as it always was -- or under Fit pages to my screen, as wide as it is drawn. */
+  const onlineSrc = (ch: Chapter, i: number): string =>
+    (device.fitPages ? img.pageFit(ch.id, flat[i].number, fitFor(i)) : img.page(ch.id, flat[i].number));
+
   // ---- the webtoon column fetches ahead of its window, as bytes (v0.61.0) ----
   // The pages after the window are fetched and dropped: the server serves a page `private, max-age=31536000,
   // immutable`, so the <img> that the window brings later is answered from the browser's cache, and the decode -- the
@@ -789,7 +821,8 @@ function ReaderInner() {
       const ch = chapters[it.ci];
       if (!ch || ch.offline || prefetched.current.has(it.key)) continue;
       prefetched.current.add(it.key);
-      void fetch(img.page(ch.id, it.number, pageW || undefined), { credentials: 'same-origin', priority: 'low' } as RequestInit)
+      // The address the page's <img> will ask for (onlineSrc), so what is warmed is what is then shown.
+      void fetch(onlineSrc(ch, i), { credentials: 'same-origin', priority: 'low' } as RequestInit)
         .then((r) => (r.ok ? r.arrayBuffer() : null))
         .catch(() => { prefetched.current.delete(it.key); });
     }
@@ -801,7 +834,7 @@ function ReaderInner() {
     const ch = chapters[it.ci];
     if (!ch) return null;
     if (ch.offline) return blobUrls.current.get(it.key) || null;
-    return img.page(ch.id, it.number, pageW || undefined);
+    return onlineSrc(ch, i);
   };
 
   /**

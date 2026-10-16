@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3948
+    "strings": 3950
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -3951,5 +3951,7 @@
   "Chapters {a}–{b} are missing here. This continues at chapter {next}.": "Les chapitres {a}–{b} manquent ici. La lecture reprend au chapitre {next}.",
   "Chapters {list} are missing here. This continues at chapter {next}.": "Les chapitres {list} manquent ici. La lecture reprend au chapitre {next}.",
   "Column width": "Largeur de la colonne",
-  "A share of the width Fit gives: a narrower column of pages for a wide screen.": "Une part de la largeur donnée par Ajustement : une colonne de pages plus étroite pour un écran large."
+  "A share of the width Fit gives: a narrower column of pages for a wide screen.": "Une part de la largeur donnée par Ajustement : une colonne de pages plus étroite pour un écran large.",
+  "Fit pages to my screen": "Adapter les pages à mon écran",
+  "Each page comes at the size this screen shows it instead of as scanned: less data and memory on a phone or a slow connection. Zooming in fetches a sharper copy.": "Chaque page arrive à la taille où cet écran l’affiche, plutôt que telle qu’elle a été numérisée : moins de données et de mémoire sur un téléphone ou une connexion lente. Zoomer charge une copie plus nette."
 }

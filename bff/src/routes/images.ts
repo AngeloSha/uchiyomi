@@ -728,6 +728,32 @@ export async function pageAtWidth(input: Buffer, w: number, quality: number): Pr
   return { buffer: input, contentType: `image/${size.format === 'jpg' || !size.format ? 'jpeg' : size.format}` };
 }
 
+/**
+ * The quality a page is re-encoded at for READING (#234, Reader → Fit pages to my screen): above the thumbnails' 72/74,
+ * since this copy is the page itself. Measured on real pages at 1,080 wide: 44 dB PSNR against the plain resize at 85,
+ * 41.5 at 74, for about a third more bytes -- still a fraction of a 4,000 px scan.
+ */
+export const READ_QUALITY = 85;
+
+/**
+ * A page for a screen that shows it `w` pixels wide (#234): pageAtWidth at READ_QUALITY -- WebP, JPEG for a strip too
+ * tall for WebP -- or the page exactly as it is whenever a copy could only be worse: already that narrow (re-encoding a
+ * page that fits only costs it quality), animated (sharp would keep one frame), unreadable, or no smaller once
+ * re-encoded. Only the reader's opt-in asks (`?fit=`); thumbnails keep `?w=`, as they were.
+ */
+export async function pageForScreen(input: Buffer, type: string, w: number): Promise<{ buffer: Buffer; contentType: string }> {
+  const keep = { buffer: input, contentType: type };
+  const m = await sharp(input).metadata().catch(() => null);
+  if (!m?.width || !m.height || m.width <= w || (m.pages ?? 1) > 1) return keep;
+  const out = await pageAtWidth(input, w, READ_QUALITY).catch(() => null);
+  return out && out.buffer.length < input.length ? out : keep;
+}
+/** `?fit=` as the reader sends it: the widths a page is fitted to, else nothing (the page as it is). */
+const fitOf = (v: unknown): number => {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 64 && n <= 2000 ? n : 0;
+};
+
 // A chapter file that is not on disk -- deleted by the read-chapter cleanup or an admin (the row stays as
 // a tombstone), or a library not mounted right now -- is a 404, not a 500. Every chapter row used to ask
 // for its thumbnail regardless, and the ENOENT from the zip reader surfaced as a server error in the log
@@ -758,10 +784,20 @@ export const serveLibBookThumb = async (req: FastifyRequest, reply: FastifyReply
     return { buffer, contentType: 'image/webp' };
   });
 };
-/** One page of a chapter, 1-based. `w` in 64..2000 answers a webp downscale; anything else the original bytes. */
-export const serveLibBookPage = async (req: FastifyRequest, reply: FastifyReply, id: string, pageNo: number, w: number) => {
+/**
+ * One page of a chapter, 1-based. `w` in 64..2000 answers a webp downscale; `fit` in 64..2000 the page for a screen that
+ * shows it that wide (pageForScreen, #234); anything else the original bytes.
+ */
+export const serveLibBookPage = async (req: FastifyRequest, reply: FastifyReply, id: string, pageNo: number, w: number, fit = 0) => {
   const abs = await bookFileAbs(id, vc(req));
   if (!abs) return reply.code(404).send({ error: 'no_book' });
+  if (fit && !w) {
+    return serveImage(req, reply, `lib-page:${id}:${pageNo}:fit${fit}`, async () => {
+      const page = await pageOrGone(abs, pageNo - 1);
+      if (!page) throw Object.assign(new Error('no page'), { statusCode: 404 });
+      return pageForScreen(page.bytes, libCt(page.name), fit);
+    });
+  }
   if (w && Number.isInteger(w) && w >= 64 && w <= 2000) {
     return serveImage(req, reply, `lib-page:${id}:${pageNo}:w${w}`, async () => {
       const page = await pageOrGone(abs, pageNo - 1);
@@ -881,13 +917,22 @@ export default async function imageRoutes(app: FastifyInstance) {
   });
 
   // Full page image. Default: pass-through original bytes (already-optimized JPEGs).
-  // Optional ?w=<px> downscales to webp for lightweight previews.
+  // Optional ?w=<px> downscales to webp for lightweight previews; ?fit=<px> is the reader's page for a screen that shows it
+  // that wide, and the original wherever a copy would not be better (pageForScreen, #234).
   app.get('/img/books/:id/page/:n', async (req, reply) => {
     const { id, n } = req.params as { id: string; n: string };
     const pageNo = Number(n);
     if (!Number.isInteger(pageNo) || pageNo < 1) return reply.code(400).send({ error: 'bad_page' });
     const w = Number((req.query as Record<string, string>).w);
-    if (id.startsWith('b_')) return serveLibBookPage(req, reply, id, pageNo, w);
+    const fit = fitOf((req.query as Record<string, string>).fit);
+    if (id.startsWith('b_')) return serveLibBookPage(req, reply, id, pageNo, w, fit);
+
+    if (fit && !w) {
+      return serveImage(req, reply, `page:${id}:${pageNo}:fit${fit}`, async () => {
+        const up = await fetchUpstreamWithType(komga.bookPagePath(id, pageNo));
+        return pageForScreen(up.buffer, up.contentType, fit);
+      });
+    }
 
     if (w && Number.isInteger(w) && w >= 64 && w <= 2000) {
       return serveImage(req, reply, `page:${id}:${pageNo}:w${w}`, async () => {
@@ -943,7 +988,8 @@ export default async function imageRoutes(app: FastifyInstance) {
     const { id, n } = req.params as { id: string; n: string };
     const pageNo = Number(n);
     if (!Number.isInteger(pageNo) || pageNo < 1) return reply.code(400).send({ error: 'bad_page' });
-    return serveLibBookPage(req, reply, id, pageNo, Number((req.query as Record<string, string>).w));
+    const query = req.query as Record<string, string>;
+    return serveLibBookPage(req, reply, id, pageNo, Number(query.w), fitOf(query.fit));
   });
 
   // Proxy a remote source cover (for search results); handles Cloudflare sites via FlareSolverr cookies.

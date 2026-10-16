@@ -289,6 +289,18 @@ export function ReaderSettings({
           </div>
         </Row>
 
+        {/* #234: each page at the width it is drawn at rather than as scanned, on this device. Off until chosen: every page
+            as scanned is the reader as it always was. */}
+        <div className="py-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-medium text-fog-200">{`${tr('Fit pages to my screen')} · ${tr('This device')}`}</span>
+            <Switch on={device.fitPages} onChange={(fitPages) => setDevice({ fitPages })} label={tr('Fit pages to my screen')} />
+          </div>
+          <p className="mt-1 text-[11px] leading-snug text-fog-500">
+            {tr('Each page comes at the size this screen shows it instead of as scanned: less data and memory on a phone or a slow connection. Zooming in fetches a sharper copy.')}
+          </p>
+        </div>
+
         {/* v0.61.0: where a tap turns the page, on this device. Automatic is the reader as it always was. */}
         <Row label={`${tr('Tap zones')} · ${tr('This device')}`}>
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">

@@ -1,4 +1,5 @@
-// The reader's settings that belong to ONE DEVICE, not to the account (v0.61.0; the column width since v0.73.0, #233).
+// The reader's settings that belong to ONE DEVICE, not to the account (v0.61.0; the column width and Fit pages to my
+// screen since v0.73.0, #233 and #234).
 //
 // A colour filter is a property of the screen it is read on -- an e-ink tablet wants e-ink, the phone beside it does
 // not -- and so is how a hand reaches it. These are kept in this browser only and never synced: the account's reader
@@ -26,6 +27,11 @@ export interface DevicePrefs {
    * narrow strip, the phone beside it the whole width. 100 is the reader as it always was.
    */
   columnWidth: number;
+  /**
+   * Fit pages to my screen (#234): each page asked for at the width it is drawn at (lib/readerFit.ts), not as scanned. A
+   * phone on a slow connection wants it; off -- every page as scanned, the reader as it always was -- until chosen.
+   */
+  fitPages: boolean;
 }
 
 /** Column width's range and step, in percent: the sheet's slider and what a stored value is cleaned to. */
@@ -44,6 +50,7 @@ export const DEFAULT_DEVICE: DevicePrefs = {
   keys: {},
   pad: {},
   columnWidth: COLUMN_WIDTH.max,
+  fitPages: false,
 };
 
 export const DEVICE_KEY = 'yomi_reader_device';
@@ -59,6 +66,7 @@ export function migrateDevicePrefs(raw: unknown): DevicePrefs {
     keys: cleanKeyOverrides(r.keys),
     pad: cleanPadOverrides(r.pad),
     columnWidth: cleanColumnWidth(r.columnWidth),
+    fitPages: r.fitPages === true,
   };
 }
 

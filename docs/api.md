@@ -2893,10 +2893,12 @@ GET    /opds/book/:id/page/:n
 GET    /opds/continue             GET    /opds/favorites
 GET    /opds/lists/:id
 ```
-`GET /img/books/:id/page/:n?w=<64..2000>` and `/img/lib/books/:id/page/:n?w=` answer a page at most `w` pixels wide, as WebP
-(or JPEG for a strip too tall for WebP). A page that is already that narrow, is animated, cannot be read, or would not come out
-smaller is sent as it is, in its original type, so asking for a width never returns a worse copy of a page that already fits.
-The web reader asks for the width its column is shown at (in device pixels, rounded up to 720, 1080, 1440 or 2000).
+`GET /img/books/:id/page/:n?fit=<64..2000>` (and `/img/lib/books/:id/page/:n?fit=`, since v0.73.0, #234) is a page for a
+screen that shows it that wide: at most `fit` pixels wide at quality 85, as WebP (or JPEG for a strip too tall for WebP),
+or exactly as it is -- its own type and bytes -- when it is already that narrow, animated, unreadable, or no smaller once
+re-encoded. The web reader asks for it only under *Fit pages to my screen* (Reader settings, this device, off by default),
+at the width each page is shown at in device pixels rounded up to 720, 1080, 1440 or 2000, and for the page as it is above
+that. `?w=` is the thumbnails' resize, as before.
 
 ### Komga-compatible API (Mihon's Komga extension and tracker)
 ```

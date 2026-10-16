@@ -6295,6 +6295,15 @@ paths:
           required: false
           schema:
             type: integer
+        - name: fit
+          in: query
+          required: false
+          description: >-
+            Since v0.73.0 (#234): the width (64-2000) a screen shows the page at -- the reader's Fit pages to my screen.
+            The page comes at most that wide at quality 85 (WebP, or JPEG for a strip too tall for WebP), or exactly as
+            it is when it is already that narrow, animated, unreadable, or no smaller re-encoded. Ignored beside `w`.
+          schema:
+            type: integer
       security:
         - imgCookie: []
         - bearer: []
@@ -6456,7 +6465,7 @@ paths:
     get:
       tags:
         - images
-      summary: Owned-library page bytes (1-based); ?w (64-2000) fits the page to that width and never returns a larger or worse copy.
+      summary: Owned-library page bytes (1-based); ?w resizes, ?fit fits the page to a screen.
       operationId: getImgLibBooksIdPageN
       parameters:
         - name: id
@@ -6472,6 +6481,15 @@ paths:
         - name: w
           in: query
           required: false
+          schema:
+            type: integer
+        - name: fit
+          in: query
+          required: false
+          description: >-
+            Since v0.73.0 (#234): the width (64-2000) a screen shows the page at -- the reader's Fit pages to my screen.
+            The page comes at most that wide at quality 85 (WebP, or JPEG for a strip too tall for WebP), or exactly as
+            it is when it is already that narrow, animated, unreadable, or no smaller re-encoded. Ignored beside `w`.
           schema:
             type: integer
       security:

@@ -183,4 +183,7 @@ export const img = {
   bookThumb: (id: string) => (id ? `/img/books/${encodeURIComponent(id)}/thumb` : ''),
   page: (bookId: string, n: number, w?: number) =>
     `/img/books/${encodeURIComponent(bookId)}/page/${n}${w ? `?w=${w}` : ''}`,
+  /** A page for a screen that shows it `fit` px wide (#234, lib/readerFit.ts); 0 is the page as scanned. */
+  pageFit: (bookId: string, n: number, fit: number) =>
+    `/img/books/${encodeURIComponent(bookId)}/page/${n}${fit ? `?fit=${fit}` : ''}`,
 };
