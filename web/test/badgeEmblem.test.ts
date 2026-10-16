@@ -1,4 +1,4 @@
-// The badge emblems (components/BadgeEmblem.tsx, v0.74.0, the owner's approved design): drawn earned and locked, a
+// The badge emblems (components/BadgeEmblem.tsx, v0.75.0, the owner's approved design): drawn earned and locked, a
 // streak's rim one notch per day with the days done lit, a chapter badge's ring as far round as its progress, in the
 // reader's accent, no sheen or turning halo under either motion switch, and ids no two emblems share.
 import test from 'node:test';

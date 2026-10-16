@@ -285,7 +285,7 @@ test('/admin and /profile read and write ?tab=, without a history entry or a sna
 });
 
 test('the profile has five tabs and no leftover cards', () => {
-  // You · Insights · Settings · Connections · Account (Insights since v0.73.0, from #249). The old second tab, Reading, was device settings plus one chart
+  // You · Insights · Settings · Connections · Account (Insights since v0.75.0, from #249). The old second tab, Reading, was device settings plus one chart
   // plus one integration; the old Account tab held eight cards including the admin door and a sign-out card
   // that repeated the rail. Everything that is a setting now lives in its tab's component; the page keeps
   // the hero, the rail and the You board. Reintroduce by adding 'Reading' to `keys(...)`: "the profile

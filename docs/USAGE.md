@@ -221,17 +221,17 @@ update too: a pause of more than five minutes is a break, not reading, and two d
 counted twice. **Wrapped** adds the year's hours, and a series page says how long catching up would take (*Catch up
 in ~2 h*). The household's weekly board stays a count of chapters.
 
-**All time** (since v0.73.0). Next to *90 days*, *180 days* and *365 days*, the Reading studio's **All time** shows one
+**All time** (since v0.75.0). Next to *90 days*, *180 days* and *365 days*, the Reading studio's **All time** shows one
 heatmap from the day you started reading to today (up to about ten years), and nothing else: the other panels are
 built for a window of up to a year. Its days keep their size, so a long history scrolls sideways inside the card,
 opening on the newest weeks, with the year and the month over the first week of each.
 
-**Badges** (since v0.73.0). Each badge says what it takes and where you stand: hover it, tab to it or tap it, and the
+**Badges** (since v0.75.0). Each badge says what it takes and where you stand: hover it, tab to it or tap it, and the
 line under the badges says, for example, *Bookworm · Read 50 chapters · you have 40*. Until you pick one, that line is
 about the next badge. **Show locked** lists the badges you have not earned yet, nearest first; it is off until you turn
 it on. Chapters count once each, however many times you read them.
 
-**Insights** (since v0.73.0, **Profile → Insights**). What your reading adds up to, beside what the Reading studio and
+**Insights** (since v0.75.0, **Profile → Insights**). What your reading adds up to, beside what the Reading studio and
 Wrapped already show: **At this pace**, when you would finish each series you are reading at your pace through it over
 the last four weeks; **Your best** day and week; the **genre and source mix** of this month's chapters against last
 month's; **Series you started**, how many you finished, are still reading or dropped (chapters left and nothing read

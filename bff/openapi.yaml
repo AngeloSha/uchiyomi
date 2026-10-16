@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.74.0
+  version: 0.75.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -5468,7 +5468,7 @@ paths:
           in: query
           required: false
           description: >-
-            Size of the daily window, clamped to 7-400. Defaults to 90. `all` (since v0.73.0, #265) is every UTC day
+            Size of the daily window, clamped to 7-400. Defaults to 90. `all` (since v0.75.0, #265) is every UTC day
             from the caller's first read to today, at least 7 and at most 3660 (about ten years); `days` in the answer
             says how many that was.
           schema:
@@ -5492,7 +5492,7 @@ paths:
       summary: "Profile → Insights: the best day and week, and one row per series the caller has read in."
       operationId: getApiStatsInsights
       description: >-
-        Since v0.73.0 (from #249). The caller's own reading only, from reading_events, so an Incognito read is in none of
+        Since v0.75.0 (from #249). The caller's own reading only, from reading_events, so an Incognito read is in none of
         it, and each finished chapter counts once within its window (#264). `bestDay` is the UTC day with the most
         chapters finished and `bestWeek` the Monday-to-Sunday UTC week (`start` is its Monday), each null before any
         chapter is finished. `series` has one row per series the caller has a recorded read in, listed by the rule every

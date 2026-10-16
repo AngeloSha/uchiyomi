@@ -30,7 +30,7 @@ import { hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN } from '@/lib
  * One group, four entries, so `flat` drops the group eyebrow and the phone group sheet: profile has an index,
  * not an information architecture. The seventeen sections underneath used to be one 5000px column.
  *
- * You is the person (badges, the reading studio, lists); Insights is what their reading adds up to (v0.73.0, from #249:
+ * You is the person (badges, the reading studio, lists); Insights is what their reading adds up to (v0.75.0, from #249:
  * the backlog, the series begun, this month's mix, finish dates, their best day and week); Settings is how the app behaves for them
  * (appearance, reader defaults, downloads, this device); Connections is everything that talks to another
  * service (trackers, OPDS readers, API tokens); Account is who they are here (password, 2FA, sessions,

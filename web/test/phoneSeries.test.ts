@@ -25,7 +25,7 @@ test('the cover drifts only when both motion switches allow it', () => {
   // an ungated drift: this fails.
   assert.match(cover, /<div data-phone-hero-cover className=\{`absolute inset-0 \$\{still \? '' : 'hero-drift'\}`\}>/);
   assert.match(page, /const reduced = plain \|\| !!still;/);
-  // ...and plays. It was framer keyframes until v0.73.0 and never ran: a page loaded directly mounts under the page
+  // ...and plays. It was framer keyframes until v0.75.0 and never ran: a page loaded directly mounts under the page
   // transition's AnimatePresence initial={false}, which starts every motion component in it at its last keyframe and plays
   // nothing -- with every line of this test passing. Reintroduce the motion.div: this fails, and so does run.mjs's phone
   // walk ("the hero cover does not drift"), which reads the moving transform.

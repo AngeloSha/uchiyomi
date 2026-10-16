@@ -78,7 +78,7 @@ export function deviceRows(list: ReadingTime['window']['byDevice']): { label: st
  *
  * Every badge is a key that says what it takes (#267): hover, focus or a tap puts its caption in the line under the
  * row, which otherwise says what the next badge takes -- a phone has no hover, so a tooltip alone would tell it nothing.
- * Squared, as the badges are statuses, not filters (web/test/noPills.test.ts). Since v0.74.0 each key is the badge's
+ * Squared, as the badges are statuses, not filters (web/test/noPills.test.ts). Since v0.75.0 each key is the badge's
  * drawn emblem (components/BadgeEmblem.tsx, the owner's approved design) at 56 px over its name, and its progress while
  * it is locked; the emblems' sheen and Legend's halo move only while both motion switches allow it.
  */

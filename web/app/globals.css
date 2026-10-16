@@ -427,13 +427,13 @@ html.lenis-scrolling .fx-grain { display: none; }
 /* The phone hero cover's slow drift (components/PhoneHeroCover.tsx, v0.67.0's design): closer and back, 24 s each way.
    CSS, not framer keyframes: a page loaded directly mounts inside the page transition's AnimatePresence, whose
    initial={false} has framer start every motion component in it at its last keyframe and play nothing -- the drift never
-   ran from v0.67.0 to v0.73.0. The compositor runs this. The component leaves the class off while Reduce effects or the
+   ran from v0.67.0 to v0.74.0. The compositor runs this. The component leaves the class off while Reduce effects or the
    system's reduced motion is on; the two rules below stop it there too, as .fx-mesh is stopped, rather than leave the
    0.001 ms of the reduced-motion rule flickering an infinite animation. */
 @keyframes hero-drift { from { transform: scale(1); } to { transform: scale(1.07); } }
 .hero-drift { animation: hero-drift 24s ease-in-out infinite alternate; }
 
-/* The badge emblems' sheen and Legend's halo (components/BadgeEmblem.tsx, v0.74.0, the owner's approved design): a band of
+/* The badge emblems' sheen and Legend's halo (components/BadgeEmblem.tsx, v0.75.0, the owner's approved design): a band of
    light across an earned medal every 6.5 s, and Legend's aurora turning once in 14 s. The emblem leaves both classes off
    while Reduce effects or the system's reduced motion is on; the rules below stop them there too, as the drift's are. */
 @keyframes badge-sheen { 0% { transform: translateX(0); } 28%, 100% { transform: translateX(210px); } }

@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.75.0 — 2026-10-16
+
+**Your reading, all of it: the Reading studio goes back to your first read, badges say what they take, and a new
+Insights tab shows what your reading adds up to.** The Insights tab began as **@Squeaks72**'s pull request
+([#249](https://github.com/AngeloSha/uchiyomi/pull/249)), rebuilt on the app's own parts. All time and the badges are
+**CheetahDoesStuff**'s ideas ([#265](https://github.com/AngeloSha/uchiyomi/issues/265),
+[#267](https://github.com/AngeloSha/uchiyomi/issues/267)). Thank you both.
+
+### A new Insights tab
+
+- **A new tab** ([#249](https://github.com/AngeloSha/uchiyomi/pull/249), from @Squeaks72), worked out from the chapters you
+  have finished, each counted once:
+  - **At this pace**: when you would finish each series you are reading, at your pace through it over the last four weeks.
+  - **Your best** day and week.
+  - **Genre and source mix**: this month's chapters by genre or by source, and the change since last month.
+  - **Series you started**: how many you finished, are still reading or dropped (chapters left and nothing read in two
+    months), and around which chapter you usually stop.
+  - **Backlog**: the unread chapters of the series you have started, which hold the most and which have waited longest.
+- Incognito reads are not in it, and an 18+ series is named only while Show 18+ is on.
+- The pull request's other cards (when you read, the year in review, numbers on the heatmap) were left out: the Reading
+  studio and Wrapped already show them.
+
+### Reading studio: All time
+
+- **All time** ([#265](https://github.com/AngeloSha/uchiyomi/issues/265), suggested by CheetahDoesStuff). Beside 90, 180
+  and 365 days, the Reading studio shows one heatmap from the day you started reading to today, up to about ten years.
+  - Its days keep their size, so a long history scrolls sideways inside the card.
+  - It opens on the newest weeks, in Arabic too, where the weeks run the other way.
+  - The year and the month are written over the first week of each.
+  - Only the heatmap: the other panels are built for a window of up to a year.
+
+### Badges say what they take
+
+- **Each badge says what it takes** ([#267](https://github.com/AngeloSha/uchiyomi/issues/267), suggested by
+  CheetahDoesStuff). Hover it, tab to it or tap it, and the line under the badges says it: *Bookworm · Read 50 chapters
+  · you have 40*. Until you pick one, the line is about the next badge.
+- **Show locked** lists the badges you have not earned yet, nearest first. It is off until you turn it on.
+- **Badges are drawn emblems now**, in place of the emoji: medals of bronze, silver, gold and an aurora for the chapter
+  badges, ember and moonlight for the streaks, each with its own picture. A locked one shows how close you are: a ring
+  round a chapter badge, the days already done on a streak's rim, both in your accent colour. A shine passes over the
+  earned ones now and then, and Legend glows; both stay still under Reduce effects or your system's reduced motion.
+
+### Phones
+
+- **The cover at the top of a series page and of Home now drifts**, slowly closer and back, as it was designed to in
+  v0.67.0. Until now it sat still, slightly enlarged: the animation was skipped before it began. Reduce effects or your
+  system's reduced motion keep it still.
+
+### Upgrading
+
+- **Database:** no changes.
+- **API:** `GET /api/stats?days=all` and `GET /api/stats/insights` are new; see [docs/api.md](docs/api.md).
+
 ## v0.74.0 — 2026-10-16
 
 **The reader keeps your place through a refresh, a resized window and a turned phone, says which chapters a series is

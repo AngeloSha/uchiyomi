@@ -59,7 +59,7 @@ test('the card: the earned badges and the next as squared keys with their emblem
     assert.match(m[0], /rounded-\[14px\]/);
     assert.doesNotMatch(m[0], /rounded-full/, 'a badge is a capsule again');
   }
-  // v0.74.0: each key is its drawn emblem at 56 px, earned or locked, over its name -- no emoji left.
+  // v0.75.0: each key is its drawn emblem at 56 px, earned or locked, over its name -- no emoji left.
   assert.deepEqual([...html.matchAll(/data-emblem="(earned|locked)"[^>]*style="width:(\d+)px;height:(\d+)px"/g)].map((m) => m.slice(1)),
     [['earned', '56', '56'], ['locked', '56', '56']]);
   assert.doesNotMatch(html, /📖|🐛|🔥|💯|🌙|👑/, 'an emoji is back on a badge');

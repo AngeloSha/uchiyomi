@@ -4,7 +4,7 @@ import { t as tr } from '@/lib/i18n';
 import type { Badge, BadgeMetal } from '@/lib/badges';
 
 /**
- * A badge's emblem (v0.74.0, the owner's approved design): drawn in code, so it is sharp at any size and needs nothing
+ * A badge's emblem (v0.75.0, the owner's approved design): drawn in code, so it is sharp at any size and needs nothing
  * downloaded. Chapter badges are hexagon medals that climb through metals -- Reader bronze with a book, Bookworm silver
  * with a stack of books and a worm, Centurion gold with 100 in a laurel, Legend an aurora with a crown and a slow halo.
  * Streak badges are round medals with one rim notch per day -- On a roll ember with a flame (7), Devoted moonlight with
