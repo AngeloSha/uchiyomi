@@ -60,7 +60,8 @@ Uchiyomi keeps trying on its own too: 5 s, 15 s, 30 s, 1 min and 2 min after a f
 four minutes, and an engine that came up later — a slow NAS, a template installed after Uchiyomi, a container
 restarted by hand, a **Reload sources** during an outage — stayed missing until someone reloaded by hand.
 
-It costs memory: about **750 MB** once running (731 MiB measured on a server with 22 extensions installed).
+It costs memory: **1 to 1.5 GB** once it has run a while, under a 2 GB ceiling
+([Why there is a second container](#why-there-is-a-second-container)).
 
 ## Add an extension repository — step by step
 
@@ -303,17 +304,43 @@ Uchiyomi configures itself to talk to it, and you never open it. Uchiyomi keeps 
 downloads, updates, users and UI; the engine only answers "search this", "list these chapters", "give me this
 chapter's pages".
 
-The cost is honest: it is a JVM, and it uses about 750 MB of memory once running (731 MiB measured on a
-server with 22 extensions installed).
+The cost is honest: it is a JVM, and it uses 1 to 1.5 GB of memory once it has run a while. Less than half of that
+is Java's heap. On a server with 45 extensions the engine held 1.4 GB after two days, 630 MB of it heap; the rest
+was Java's own native memory, and the Chromium (the engine's WebView) and Xvfb that its image runs beside it.
 
-**Since v0.46.0 the compose files cap it**, with the desktop app's own numbers: a 768 MB Java heap under a
-1.5 GB ceiling for the container. Before that there was no cap at all, and a JVM without one sizes its heap
-from the host's memory — up to a quarter of it, 15.7 GiB on a 62 GB server — so on a small NAS the engine could
-take far more than 750 MB. A long extension list may need more: set `SUWAYOMI_MEM_LIMIT` and
-`SUWAYOMI_JAVA_OPTS` ([CONFIGURATION.md](CONFIGURATION.md)). ⚠️ **Updating the image does not update your compose
-file.** An install set up before v0.46.0 gets the cap by downloading the current
-[`deploy/docker-compose.yml`](../deploy/docker-compose.yml) again, or by adding its two lines — `mem_limit` and
-`JAVA_TOOL_OPTIONS` under `uchiyomi-suwayomi` — to the file you have.
+**The compose files cap it** (since v0.46.0): a 768 MB Java heap, the desktop app's number, under a 2 GB ceiling for
+the container. Before v0.46.0 there was no cap at all, and a JVM without one sizes its heap from the host's memory —
+up to a quarter of it, 15.7 GiB on a 62 GB server. The ceiling was 1.5 GB until
+[#275](https://github.com/AngeloSha/uchiyomi/issues/275): the desktop app's engine fits in that, because it runs without
+Chromium, but the one in Docker does not. A long extension list may need more: set `SUWAYOMI_MEM_LIMIT` and
+`SUWAYOMI_JAVA_OPTS` ([CONFIGURATION.md](CONFIGURATION.md)), keeping the ceiling at least 1.25 GB above the heap.
+⚠️ **Updating the image does not update your compose file**: see below for the lines to add.
+
+### If the engine keeps restarting
+
+A container that reaches its memory ceiling is killed by the kernel and started again by Docker. A host with swap
+moves the overflow to disk instead, which is why the same ceiling can hold on one server and kill the engine on
+another: Unraid has no swap unless you add it. To check, run this on the host:
+
+```bash
+docker inspect uchiyomi-suwayomi --format '{{.State.OOMKilled}} {{.State.ExitCode}} {{.RestartCount}}'
+```
+
+`true 137` means the ceiling. Two settings fix it. An install set up before #275 has neither, because an update
+changes the image, never your compose file or template:
+
+- **A 2 GB ceiling.** Docker Compose: `mem_limit: ${SUWAYOMI_MEM_LIMIT:-2048m}` under `uchiyomi-suwayomi` (an older
+  file says `1536m` there, or has no `mem_limit` at all if it is from before v0.46.0). Unraid: edit
+  **uchiyomi-suwayomi**, switch on **Advanced View** and set **Extra Parameters** to `--memory=2048m`. CasaOS: the
+  app's memory limit.
+- **`MALLOC_ARENA_MAX=2`**, a variable on the engine's container: `MALLOC_ARENA_MAX: "2"` under its `environment:`, or
+  on Unraid **Add another Path, Port, Variable, Label or Device** → **Variable**, key `MALLOC_ARENA_MAX`, value `2`.
+  The C library otherwise gives every thread that allocates memory an arena of its own, up to eight per CPU core,
+  and what a thread frees stays in its arena: on that server 94 arenas held 428 MB, and two held about 120 MB less
+  under the same load. A server with more cores has more of them.
+
+Leave `-Xmx768m` as it is unless the engine's log says `java.lang.OutOfMemoryError: Java heap space`. That one is the
+heap: raise `-Xmx` and the ceiling by the same amount.
 
 ## How it behaves
 

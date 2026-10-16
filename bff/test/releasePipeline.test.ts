@@ -231,8 +231,11 @@ function configOf(x: string, target: string): { attrs: string; value: string } |
  * Before it, an Unraid user had to find, pin and configure a Suwayomi container by hand, and the one shipped
  * uncapped in every layout until v0.46.0 took a quarter of the host's memory (discussion #72).
  *
- * Reintroduce by deleting `--memory=1536m` from ExtraParams: the uncapped JVM is back on Unraid. Or write `--`
+ * Reintroduce by deleting `--memory=2048m` from ExtraParams: the uncapped JVM is back on Unraid. Or write `--`
  * into its header comment: dockerMan cannot parse the file (PR #50), and the helper above names it.
+ *
+ * #275: Unraid has no swap by default, so the ceiling is a hard wall there, and 1536m killed engines that needed
+ * 1.4 GB (630 MB of it heap). Reintroduce by putting `1536m` back, raising -Xmx alone, or deleting MALLOC_ARENA_MAX.
  */
 test('the Unraid engine template is the bundled engine', () => {
   const file = 'templates/uchiyomi-suwayomi.xml';
@@ -241,6 +244,14 @@ test('the Unraid engine template is the bundled engine', () => {
   assert.match(x, /<Repository>ghcr\.io\/suwayomi\/suwayomi-server:v[\d.]+<\/Repository>/, 'the engine image is not pinned (enginePins.test.ts holds the version)');
   assert.match(x, /<ExtraParams>[^<]*--memory=\d+[mg]\b[^<]*<\/ExtraParams>/, 'no memory ceiling: a JVM sizes its heap from the whole server');
   assert.match(configOf(x, 'JAVA_TOOL_OPTIONS')?.value ?? '', /-Xmx\d+[mMgG]/, "the engine's heap is not capped");
+  const ceiling = x.match(/<ExtraParams>[^<]*--memory=(\d+)([mg])\b/);
+  const heap = (configOf(x, 'JAVA_TOOL_OPTIONS')?.value ?? '').match(/-Xmx(\d+)([mMgG])/);
+  const mib = (n: string, unit: string) => Number(n) * (/^[gG]$/.test(unit) ? 1024 : 1);
+  assert.ok(ceiling && heap && mib(ceiling[1], ceiling[2]) - mib(heap[1], heap[2]) >= 1280,
+    "the ceiling leaves less than 1.25 GB above the heap: with no swap the kernel kills the engine there (#275)");
+  const arenas = configOf(x, 'MALLOC_ARENA_MAX');
+  assert.equal(arenas?.value, '2', 'glibc may keep freed memory in up to eight arenas per CPU (#275)');
+  assert.match(arenas!.attrs, /Default="2"/, "MALLOC_ARENA_MAX's default is not 2");
   const data = configOf(x, '/home/suwayomi/.local/share/Tachidesk');
   assert.ok(data && /Type="Path"/.test(data.attrs), "no Path for the engine's data: every install would lose its extensions and series links on update");
   assert.match(data!.value, /^\/mnt\/user\/appdata\/uchiyomi-suwayomi$/, 'the engine data is not in its own appdata folder');

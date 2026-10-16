@@ -227,8 +227,8 @@ export function onSteps(p: Platform, h: Headline): Step[] {
       return [
         {
           text: 'Run the engine where Uchiyomi can reach it, with its data in a volume that stays. These are the settings the shipped files use:',
-          command: `docker run -d --name ${ENGINE} --restart unless-stopped --memory=1536m -p 4567:4567 `
-            + `-v uchiyomi_suwayomi:/home/suwayomi/.local/share/Tachidesk -e JAVA_TOOL_OPTIONS="-Xmx768m -XX:+UseSerialGC" `
+          command: `docker run -d --name ${ENGINE} --restart unless-stopped --memory=2048m -p 4567:4567 `
+            + `-v uchiyomi_suwayomi:/home/suwayomi/.local/share/Tachidesk -e JAVA_TOOL_OPTIONS="-Xmx768m -XX:+UseSerialGC" -e MALLOC_ARENA_MAX=2 `
             + '-e AUTO_DOWNLOAD_CHAPTERS=false -e DOWNLOAD_AS_CBZ=true -e WEB_UI_ENABLED=false '
             + `-e FLARESOLVERR_ENABLED=true -e FLARESOLVERR_URL=http://YOUR-SOLVER:8191 ${ENGINE_IMAGE}`,
         },

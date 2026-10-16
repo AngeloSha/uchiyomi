@@ -129,6 +129,7 @@ test('envCheck.mjs names a variable the deploy files set that an image no longer
     const args = await run(['scripts/engine/envCheck.mjs', '--docker-args']);
     assert.match(args.out, /^AUTO_DOWNLOAD_CHAPTERS=false$/m);
     assert.match(args.out, /^JAVA_TOOL_OPTIONS=-Xmx768m -XX:\+UseSerialGC$/m);
+    assert.match(args.out, /^MALLOC_ARENA_MAX=2$/m, 'the canary engine runs without the arena cap the deploy files give it (#275)');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

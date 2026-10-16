@@ -112,7 +112,7 @@ test('somewhere else: the shipped protections in one command, and what publishin
   assert.equal(steps[warn].vars?.port, '4567');
   assert.equal(steps[warn].command, undefined);
   const run = steps[0].command ?? '';
-  for (const part of ['--memory=1536m', '-Xmx768m', 'AUTO_DOWNLOAD_CHAPTERS=false', 'DOWNLOAD_AS_CBZ=true', 'WEB_UI_ENABLED=false',
+  for (const part of ['--memory=2048m', '-Xmx768m', 'MALLOC_ARENA_MAX=2', 'AUTO_DOWNLOAD_CHAPTERS=false', 'DOWNLOAD_AS_CBZ=true', 'WEB_UI_ENABLED=false',
     'FLARESOLVERR_ENABLED=true', '-v uchiyomi_suwayomi:/home/suwayomi/.local/share/Tachidesk', `ghcr.io/suwayomi/suwayomi-server:${PIN}`]) {
     assert.ok(run.includes(part), `the docker run lacks ${part}`);
   }

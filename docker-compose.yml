@@ -226,17 +226,24 @@ services:
       replicas: ${EXTENSION_ENGINE:-1}
     restart: unless-stopped
     # The engine is a JVM, and a JVM with no limit sizes its heap from the HOST's memory -- a quarter of it:
-    # 15.7 GiB on a 62 GB machine, measured 2026-09-25 against this image. It idles near 780 MB, so without a
-    # cap a small NAS is at its mercy (discussion #72). These are the desktop app's own numbers for the same
-    # engine (desktop/src/engine.js): a 768 MB heap and the serial collector, under a hard ceiling that leaves
-    # room for metaspace and native memory. The ceiling turns a runaway into a restart, which the restart
-    # policy above handles. SUWAYOMI_MEM_LIMIT and SUWAYOMI_JAVA_OPTS raise both for a big extension list.
-    mem_limit: ${SUWAYOMI_MEM_LIMIT:-1536m}
+    # 15.7 GiB on a 62 GB machine, measured 2026-09-25 against this image -- so without a cap a small NAS is at
+    # its mercy (discussion #72). JAVA_TOOL_OPTIONS below caps the heap at 768 MB with the serial collector, as
+    # the desktop app does (desktop/src/engine.js). This ceiling has to hold the rest as well: Java's own native
+    # memory, and the Chromium (the engine's WebView) and Xvfb that this image runs and the desktop app turns
+    # off. Measured for #275, with 45 extensions on 12 cores: 1.4 GB after two days, 630 MB of it heap. Under
+    # the old 1.5 GB ceiling it kept going only by swapping; a host with no swap (Unraid's default) kills it
+    # there. The ceiling still turns a runaway into a restart, which the restart policy above handles.
+    # SUWAYOMI_MEM_LIMIT and SUWAYOMI_JAVA_OPTS raise both; keep the ceiling at least 1.25 GB above -Xmx.
+    mem_limit: ${SUWAYOMI_MEM_LIMIT:-2048m}
     environment:
       TZ: UTC
       # The heap cap itself. The image's startup script runs a bare `java -jar` with no options of its own, so
       # JAVA_TOOL_OPTIONS -- which every JVM reads when it starts -- is the way in.
       JAVA_TOOL_OPTIONS: "${SUWAYOMI_JAVA_OPTS:--Xmx768m -XX:+UseSerialGC}"
+      # Two malloc arenas instead of glibc's up to eight per CPU. Each thread that allocates gets an arena of its
+      # own, and what it frees stays there: in #275's engine 94 arenas held 428 MB, and side by side under the
+      # same load two held 120 MB less (measured 2026-10-16). Read by the C library, not the startup script.
+      MALLOC_ARENA_MAX: "2"
       # Uchiyomi does the downloading and owns the library; this instance must never write into it.
       AUTO_DOWNLOAD_CHAPTERS: "false"
       DOWNLOAD_AS_CBZ: "true"

@@ -12,8 +12,8 @@
 // to the list every deploy file sets (scripts/engine/pins.json deployEnv: the compose files, CasaOS and the Unraid
 // template), and fails naming each one it no longer reads.
 //
-// JAVA_TOOL_OPTIONS is read by the JVM and TZ by the system, never by the script. Exit 1 when one is missing, 2 for bad
-// arguments. Reads YAML with bff's own `yaml` package (npm ci in bff first).
+// JAVA_TOOL_OPTIONS is read by the JVM, MALLOC_ARENA_MAX by the C library and TZ by the system, never by the script.
+// Exit 1 when one is missing, 2 for bad arguments. Reads YAML with bff's own `yaml` package (npm ci in bff first).
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('.', import.meta.url)), '..', '..');
 /** Read by something other than the startup script. */
-export const NOT_THE_SCRIPTS = new Set(['JAVA_TOOL_OPTIONS', 'TZ']);
+export const NOT_THE_SCRIPTS = new Set(['JAVA_TOOL_OPTIONS', 'MALLOC_ARENA_MAX', 'TZ']);
 const ENGINE_IMAGE = /ghcr\.io\/suwayomi\/suwayomi-server:/;
 
 /** The engine service of a compose file (the one running the engine image), or null. */

@@ -1,6 +1,6 @@
 # Uchiyomi's optional extension engine, as a CasaOS add-on.
 #
-# The Uchiyomi listing (docker-compose.yml beside this file) ships without it: it is a JVM of about 750 MB, and
+# The Uchiyomi listing (docker-compose.yml beside this file) ships without it: it is a JVM of about 1 GB, and
 # MangaDex and sites you add by address work without it. This adds it next to an installed Uchiyomi:
 #
 #   1. Install Uchiyomi first. This joins its network (`uchiyomi`), where the solver and the app are.
@@ -25,11 +25,16 @@ services:
     hostname: uchiyomi-suwayomi
     image: ghcr.io/suwayomi/suwayomi-server:v2.4.2366
     # A JVM with no limit sizes its heap from the whole machine's memory. The heap cap is JAVA_TOOL_OPTIONS below;
-    # this ceiling turns what the heap cap does not cover (metaspace, threads, native buffers) into a restart.
-    mem_limit: 1536m
+    # this ceiling turns what the heap cap does not cover (Java's native memory, and the Chromium and Xvfb this image
+    # runs) into a restart. That part came to 770 MB beside a 630 MB heap with 45 extensions (#275): keep the ceiling
+    # at least 1.25 GB above -Xmx.
+    mem_limit: 2048m
     environment:
       TZ: ${TZ:-Etc/UTC}
       JAVA_TOOL_OPTIONS: "-Xmx768m -XX:+UseSerialGC"
+      # Two malloc arenas instead of glibc's up to eight per CPU: what a thread frees stays in its own arena, and
+      # two held 120 MB less than 94 under the same load (#275). Read by the C library, not the startup script.
+      MALLOC_ARENA_MAX: "2"
       # Uchiyomi does the downloading and owns the library; the engine must never write a copy of its own.
       AUTO_DOWNLOAD_CHAPTERS: "false"
       DOWNLOAD_AS_CBZ: "true"
@@ -79,8 +84,8 @@ x-casaos:
     en_US: |
       The optional extension engine for Uchiyomi: Suwayomi-Server, run headless, which runs Mihon/Tachiyomi
       extensions so Uchiyomi can search, follow and download from them. You never open it yourself; add
-      repositories and install extensions in Uchiyomi's Admin -> Sources. It uses about 750 MB of memory
-      while it runs and is capped at 1.5 GB.
+      repositories and install extensions in Uchiyomi's Admin -> Sources. It uses 1 to 1.5 GB of memory
+      while it runs and is capped at 2 GB.
   tips:
     before_install:
       en_US: |

@@ -47,6 +47,9 @@ function suwayomiBlock(file: string): string {
 const instructions = (block: string): string =>
   block.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
 
+/** A size as Compose and Docker write it (`2048m`, `2g`), in MiB. */
+const mib = (n: string, unit: string): number => Number(n) * (/^[gG]$/.test(unit) ? 1024 : 1);
+
 const FILES = ['deploy/docker-compose.yml', 'deploy/docker-compose.external-db.yml', 'deploy/docker-compose.split.yml', 'docker-compose.yml'];
 /**
  * Every file that runs the engine: the four above, and the CasaOS listing's add-on (#72), which is the same
@@ -100,12 +103,25 @@ function solverBlock(file: string): string {
  * Both halves are needed. The heap flag keeps the JVM from growing into the ceiling; the ceiling turns what the
  * heap flag does not cover (metaspace, threads, native buffers) into a restart instead of a host that swaps.
  * Reintroduce by deleting either line from any one file: the assertion names the file.
+ *
+ * #275: and the ceiling has to leave room for that. With 45 extensions on 12 cores the engine held 1.4 GB after two
+ * days, 630 MB of it heap: the rest is Java's native memory and the Chromium and Xvfb the image runs (the desktop app
+ * turns them off, which is where 768 MB under 1.5 GB came from). That ceiling held only by swapping, and a host with
+ * no swap killed the engine at it. glibc's malloc arenas were the biggest part: 94 of them held 428 MB, and two held
+ * 120 MB less under the same load. Reintroduce by putting `1536m` back, raising one -Xmx alone, or deleting one
+ * MALLOC_ARENA_MAX.
  */
 test("the extension engine's memory is bounded in every layout", () => {
   for (const file of ENGINE_FILES) {
     const block = instructions(suwayomiBlock(file));
     assert.match(block, /^\s+mem_limit:\s*\S+/m, `${file}: the engine has no memory ceiling, so the JVM sizes itself from the host`);
     assert.match(block, /JAVA_TOOL_OPTIONS:.*-Xmx\d+[mMgG]/, `${file}: the engine's heap is not capped (-Xmx in JAVA_TOOL_OPTIONS)`);
+    const ceiling = block.match(/^\s+mem_limit:\s*(?:\$\{SUWAYOMI_MEM_LIMIT:-)?(\d+)([mg])\b/m);
+    const heap = block.match(/JAVA_TOOL_OPTIONS:.*-Xmx(\d+)([mMgG])/);
+    assert.ok(ceiling && heap, `${file}: the ceiling or the heap is not written as a size this test reads`);
+    assert.ok(mib(ceiling[1], ceiling[2]) - mib(heap[1], heap[2]) >= 1280,
+      `${file}: the ceiling leaves less than 1.25 GB above the heap for Java's native memory and the engine's Chromium (#275)`);
+    assert.match(block, /^\s+MALLOC_ARENA_MAX:\s*"2"$/m, `${file}: glibc may keep freed memory in up to eight arenas per CPU (#275)`);
   }
 });
 

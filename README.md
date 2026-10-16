@@ -233,7 +233,7 @@ docker compose up -d
 Open **http://localhost:8080** and create your admin account in the browser. Nothing to generate, no config
 file to edit. That starts the app (with Postgres inside it), a Cloudflare solver and the optional extension engine,
 from multi-arch images (amd64 + arm64) that run on a NAS or a Raspberry Pi. On a small board, mind the memory: the
-Cloudflare solver idles at about 850 MB and the extension engine is capped at 1.5 GB; `EXTENSION_ENGINE=0` in
+Cloudflare solver idles at about 850 MB and the extension engine is capped at 2 GB; `EXTENSION_ENGINE=0` in
 `.env` leaves the engine out.
 
 > 📦 CasaOS, Unraid, Umbrel, an external database, reverse proxies and updating:

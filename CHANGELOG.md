@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### The extension engine gets the memory it uses
+
+- **Its memory ceiling is 2 GB, up from 1.5 GB** ([#275](https://github.com/AngeloSha/uchiyomi/issues/275), reported by
+  **@Kedryn**). Its Java heap stays at 768 MB. The rest of the ceiling is for what the heap does not cover: Java's own
+  native memory, and the Chromium and Xvfb the engine runs, which came to 770 MB beside a 630 MB heap on a server with
+  45 extensions. At 1.5 GB that server's engine lived only by swapping; on a server without swap, Unraid's default, the
+  kernel kills it at the ceiling instead, which is what #275 reports.
+- **`MALLOC_ARENA_MAX=2` on the engine's container.** The C library otherwise keeps what a thread frees in that thread's
+  own arena, up to eight arenas per CPU core: 94 of them held 428 MB on that server, and two held about 120 MB less
+  under the same load.
+- ⚠️ **An existing install keeps its old values.** An update changes the image, never your compose file, your Unraid
+  container or your CasaOS app: [If the engine keeps restarting](docs/extensions.md#if-the-engine-keeps-restarting) has
+  the two settings to add, and how to tell whether the ceiling is what stops it.
+
 ## v0.75.0 — 2026-10-16
 
 **Your reading, all of it: the Reading studio goes back to your first read, badges say what they take, and a new
