@@ -1227,7 +1227,7 @@ listing number by its *override-aware* number (an admin's correction wins over t
 renumbered from 0 to 105 is no longer also a ghost at 105; and `read: true` is present on a ghost the caller
 marked read (below) — absent, never `false`, for everyone else.
 
-**The chapters a series is missing** (since v0.73.0, #236). `GET /api/series/:id/gaps` answers `{gaps: [{lo, hi}]}`,
+**The chapters a series is missing** (since v0.74.0, #236). `GET /api/series/:id/gaps` answers `{gaps: [{lo, hi}]}`,
 lowest first: the runs of whole numbers between the chapters the series holds, by the Health page's *Chapter gaps* rule --
 every number a range file holds counts as held, and so do a chapter deleted on purpose (the cleanup, *Delete files*) and a
 post its source deleted under posting-order numbering; an impossible number is left out; holes below a Latest-N start are
@@ -2893,7 +2893,7 @@ GET    /opds/book/:id/page/:n
 GET    /opds/continue             GET    /opds/favorites
 GET    /opds/lists/:id
 ```
-`GET /img/books/:id/page/:n?fit=<64..2000>` (and `/img/lib/books/:id/page/:n?fit=`, since v0.73.0, #234) is a page for a
+`GET /img/books/:id/page/:n?fit=<64..2000>` (and `/img/lib/books/:id/page/:n?fit=`, since v0.74.0, #234) is a page for a
 screen that shows it that wide: at most `fit` pixels wide at quality 85, as WebP (or JPEG for a strip too tall for WebP),
 or exactly as it is -- its own type and bytes -- when it is already that narrow, animated, unreadable, or no smaller once
 re-encoded. The web reader asks for it only under *Fit pages to my screen* (Reader settings, this device, off by default),

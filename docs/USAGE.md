@@ -1411,7 +1411,7 @@ The order becomes *your defaults < the library's < the source's < this series*, 
 adjusted by hand still wins, and a library without defaults changes nothing. A chapter downloaded for offline reading
 opens with the library's defaults this device last saw.
 
-**Missing chapters** (since v0.73.0). When the chapter the reader moves on to skips numbers the series is missing (you
+**Missing chapters** (since v0.74.0). When the chapter the reader moves on to skips numbers the series is missing (you
 are on 43 and the next one here is 100), a short notice names them -- *Chapters 44–99 are missing here. This continues
 at chapter 100.* -- as you reach the next chapter in the column or the track, or when you go to it with **Next
 chapter** (the footer button, `]`, a controller or the right-click menu). What counts as missing is what Admin → Health
@@ -1445,13 +1445,13 @@ not to you: an e-ink tablet wants E-ink, the phone beside it does not.
   page's own pixels in your browser (nothing is cut on the server, and downloaded chapters crop too). Page by page
   all four sides are trimmed, never more than 15 % a side, and a two-page spread keeps its gutter. In webtoon
   scroll only the sides are trimmed, by one amount for a whole chapter, so the strips still join.
-- **Column width** (this device, since v0.73.0): in webtoon scroll, narrows the column of pages to between 30 % and
+- **Column width** (this device, since v0.74.0): in webtoon scroll, narrows the column of pages to between 30 % and
   100 % of what *Fit width* or *Original* gives (steps of 5 %). A phone wants 100 %, a wide monitor a narrower strip. Like
   the other *this device* settings it is kept in this browser only, so your other screens are unaffected.
 - **Colour filter** (this device): *Invert* (light pages turned dark, colours kept), *Grayscale* and *E-ink* (grey with
   more contrast, and every page turn jumps instead of sliding, which e-ink screens draw badly). It is laid over the
   pages only; the reader's own cards and buttons are unchanged, and the theme works as before.
-- **Fit pages to my screen** (this device, since v0.73.0; off until you turn it on): each page comes at the width it is
+- **Fit pages to my screen** (this device, since v0.74.0; off until you turn it on): each page comes at the width it is
   drawn at instead of as scanned, so a phone is not sent a 4,000 px scan to show at 400. The width is the page's as you
   see it -- the column or the screen, your zoom, a wide page split in two or turned on its side, Crop page borders -- in
   your screen's pixels, rounded up to 720, 1,080, 1,440 or 2,000 px, and above that the page comes as scanned. Zooming in

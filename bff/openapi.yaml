@@ -2317,7 +2317,7 @@ paths:
       summary: The runs of chapter numbers the series is missing, as the reader warns of them.
       operationId: getApiSeriesIdGaps
       description: >-
-        Since v0.73.0 (#236). `{gaps: [{lo, hi}]}`, lowest first: the whole numbers between the chapters the series holds,
+        Since v0.74.0 (#236). `{gaps: [{lo, hi}]}`, lowest first: the whole numbers between the chapters the series holds,
         by the Health page's Chapter gaps rule -- a range file holds every number in it, a chapter deleted on purpose (the
         cleanup, Delete files) and a post its source deleted under posting-order numbering are held, an impossible number
         is left out -- less the runs an admin ignored on that card. Holes below a Latest-N start are included. The reader
@@ -6299,7 +6299,7 @@ paths:
           in: query
           required: false
           description: >-
-            Since v0.73.0 (#234): the width (64-2000) a screen shows the page at -- the reader's Fit pages to my screen.
+            Since v0.74.0 (#234): the width (64-2000) a screen shows the page at -- the reader's Fit pages to my screen.
             The page comes at most that wide at quality 85 (WebP, or JPEG for a strip too tall for WebP), or exactly as
             it is when it is already that narrow, animated, unreadable, or no smaller re-encoded. Ignored beside `w`.
           schema:
@@ -6487,7 +6487,7 @@ paths:
           in: query
           required: false
           description: >-
-            Since v0.73.0 (#234): the width (64-2000) a screen shows the page at -- the reader's Fit pages to my screen.
+            Since v0.74.0 (#234): the width (64-2000) a screen shows the page at -- the reader's Fit pages to my screen.
             The page comes at most that wide at quality 85 (WebP, or JPEG for a strip too tall for WebP), or exactly as
             it is when it is already that narrow, animated, unreadable, or no smaller re-encoded. Ignored beside `w`.
           schema:

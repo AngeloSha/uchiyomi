@@ -1,5 +1,5 @@
 // The reader's settings that belong to ONE DEVICE, not to the account (v0.61.0; the column width and Fit pages to my
-// screen since v0.73.0, #233 and #234).
+// screen since v0.74.0, #233 and #234).
 //
 // A colour filter is a property of the screen it is read on -- an e-ink tablet wants e-ink, the phone beside it does
 // not -- and so is how a hand reaches it. These are kept in this browser only and never synced: the account's reader

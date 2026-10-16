@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.73.0 — 2026-10-16
+## v0.74.0 — 2026-10-16
 
 **The reader keeps your place through a refresh, a resized window and a turned phone, says which chapters a series is
 missing as you move on, and can narrow its column or fetch pages at your screen's size.** All four began as pull requests
