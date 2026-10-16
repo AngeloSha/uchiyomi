@@ -711,6 +711,11 @@ const EN = {
   'autofix.needs.scan': ({ n }: { n: number }) => `The library scan could not read ${n} folder${s(n, '', 's')}`,
   'autofix.needs.downloadsMissing': ({ n }: { n: number }) => `${n} downloaded chapter${s(n, '', 's')} ${s(n, 'is', 'are')} where the library scan never looks`,
   'autofix.needs.noRoom': ({ name }: { name: string }) => `${name} may carry your series, but the source limit is full: free a slot`,
+  // v0.72.0: the cards no run changes -- a disk to free or a share to mount, a member's tracker sign-in, a chapter file
+  // to fetch again by hand (lib/healthDisk.ts, lib/healthTrackers.ts, lib/healthFiles.ts).
+  'autofix.needs.disk': ({ n }: { n: number }) => `${n} disk${s(n, '', 's')} or folder${s(n, '', 's')} ${s(n, 'needs', 'need')} a look`,
+  'autofix.needs.trackers': ({ n }: { n: number }) => `${n} tracker connection${s(n, '', 's')} ${s(n, 'needs', 'need')} a look`,
+  'autofix.needs.files': ({ n }: { n: number }) => `${n} chapter file${s(n, '', 's')} cannot be read`,
 
   // What clears by itself (summary.clears), with when where there is a time.
   'autofix.clears.cooldown': ({ name }: { name: string }) => `${name} is cooling down`,
@@ -724,6 +729,53 @@ const EN = {
   // helper and never a backup, so neither is ever said there.
   'autofix.clears.mainSolverDown': () => 'The main Cloudflare solver is not answering, and the backup is solving meanwhile',
   'autofix.clears.backupSolverDown': () => 'The backup Cloudflare solver is not answering, and the main one is solving',
+
+  // ---- Disk space and folders (v0.72.0, lib/healthDisk.ts, from @Squeaks72's #253). Sizes in GB of 2^30 bytes, one
+  // decimal, as Admin → Settings → Downloads says them; `floor` is the downloader's MIN_FREE_GB or the archive's floor.
+  'disk.title': () => 'Downloads disk',
+  'disk.free': ({ free, total }: { free: number; total: number }) => `${free} GB free of ${total} GB`,
+  'disk.full': ({ free, total, floor }: { free: number; total: number; floor: number }) =>
+    `${free} GB free of ${total} GB: new downloads stop under ${floor} GB`,
+  'disk.archiveWaits': ({ free, total, floor }: { free: number; total: number; floor: number }) =>
+    `${free} GB free of ${total} GB: the slow archive waits until ${floor} GB are free`,
+  'disk.empty': ({ n }: { n: number }) => `Empty, but the library records ${n} chapter${s(n, '', 's')} in it: is the share mounted?`,
+  'disk.live': ({ n }: { n: number }) => `${n} disk${s(n, '', 's')} or folder${s(n, '', 's')} ${s(n, 'needs', 'need')} a look`,
+  'disk.fine': ({ free }: { free: number }) => `${free} GB free for downloads`,
+  'disk.unmeasured': () => 'Free space could not be measured here',
+  'disk.noteFloor': ({ floor }: { floor: number }) => `New downloads stop when the downloads disk has less than ${floor} GB free.`,
+  'disk.noteNoFloor': () => 'Downloads are never stopped for free space here (MIN_FREE_GB is 0).',
+  'disk.noteArchive': ({ floor }: { floor: number }) => `The slow archive waits below ${floor} GB (Admin → Settings → Downloads).`,
+  'disk.noteFolders': () =>
+    'A library or download folder that cannot be read, or that is empty while the library records chapters in it, is ' +
+    'usually a share that is not mounted; nothing is marked missing because of it. Only the top of each folder is read ' +
+    'here: Verify chapter files (Admin → Tasks) checks every file.',
+
+  // ---- Tracker sync (v0.72.0, lib/healthTrackers.ts, @Squeaks72's card from #253). `error` is the tracker's own.
+  'trackers.refused': () => 'The tracker refused the saved sign-in',
+  'trackers.failed': ({ error }: { error: string }) => `The last sync failed: ${error}`,
+  'trackers.ended': ({ at }: { at: string }) => `The sign-in ended ${day(at)}`,
+  'trackers.ending': ({ at }: { at: string }) => `The sign-in ends ${day(at)}`,
+  'trackers.live': ({ n }: { n: number }) => `${n} tracker connection${s(n, '', 's')} ${s(n, 'needs', 'need')} a look`,
+  'trackers.fine': ({ n }: { n: number }) => (n === 1 ? 'The one tracker connection is syncing' : `All ${n} tracker connections are syncing`),
+  'trackers.none': () => 'Nobody has connected a tracker',
+  'trackers.note': () =>
+    'Only the person can sign in again, under Profile → Connections; a sign-in the tracker refused stays off until they ' +
+    'do. A sign-in ending within 14 days is a finding, and within 30 days is listed for reference.',
+
+  // ---- Chapter files (v0.72.0, lib/healthFiles.ts, rebuilt from @Squeaks72's #252). `numbers` the first five, `more`
+  // how many besides.
+  'files.detail': ({ n, numbers, more }: { n: number; numbers: number[]; more: number }) =>
+    `${n} chapter file${s(n, '', 's')} with no page that can be read: ${numbers.join(', ')}${more > 0 ? ` and ${more} more` : ''}`,
+  'files.notOurs': ({ n }: { n: number }) =>
+    `${n} of them ${s(n, 'is', 'are')} in a library you built: replace ${s(n, 'it', 'them')} by hand`,
+  'files.live': ({ n, m }: { n: number; m: number }) =>
+    `${n} chapter file${s(n, '', 's')}${m > 1 ? ` in ${m} series` : ''} ${s(n, 'has', 'have')} no page that can be read`,
+  'files.none': () => 'Every chapter file the nightly count opened has pages',
+  'files.note': () =>
+    'The nightly repair opens each chapter file once to count its pages, and these are the files it found no page in: ' +
+    'empty, cut short by a download, damaged, or gone. Fetch again downloads a new copy of a file Uchiyomi fetched ' +
+    'itself and keeps the old one until the new copy lands; a file in a library you built is yours to replace. Nothing ' +
+    'here deletes a file, and Fix everything leaves these to you.',
 };
 
 /** Why Fix everything passed a part of its run over (`autofix.item.skipped`). */

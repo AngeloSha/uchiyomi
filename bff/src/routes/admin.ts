@@ -3853,8 +3853,12 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- library health ----
   // Read-only aggregate over the library. Every check is a plain query, so this is safe to hit whenever
   // the tab is opened rather than needing a background job.
-  app.get('/api/admin/health', async () => {
-    const report = await runHealthChecks();
+  // `view=series` (v0.72.0, the page's By series view): also every series with a finding, grouped from each card's full
+  // list (lib/health.ts groupBySeries) -- only when the page shows that view.
+  app.get('/api/admin/health', async (req, reply) => {
+    const v = z.object({ view: z.enum(['checks', 'series']).optional() }).safeParse(req.query ?? {});
+    if (!v.success) return reply.code(400).send({ error: 'bad_request', message: 'view is checks or series' });
+    const report = await runHealthChecks({ bySeries: v.data.view === 'series' });
     // What the header shows (#101): refreshed whenever somebody looks, so it never disagrees with the page.
     await storeHealthSummary(report).catch(() => {});
     return report;

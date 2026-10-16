@@ -1634,6 +1634,20 @@ function summarise(a: Run, report: HealthReport): AutofixSummary {
   if (paused) need('chapter-gaps', say('autofix.needs.gapsPaused', { n: paused }));
   if (cooldown) clear(say('autofix.clears.tomorrow', { n: cooldown }), new Date(Date.now() + 24 * 3600_000).toISOString());
   leftover += gaps.length - paused - cooldown;
+
+  // v0.72.0: the cards no phase of a run works on -- a chapter file to fetch again by hand, a disk to free or a share to
+  // mount, a member's tracker sign-in (a run deletes and replaces nothing new: the owner's rule). Each amber one is a
+  // person's, so the end never reads "All green" over it; LAST, after what a person decides (@Squeaks72's order, #254).
+  // Counted from the card's own summary, as its rows are cut at fifty. Reintroduce by leaving one out: "the cards no run
+  // changes are under Needs you, last" in autofix.int.test.ts.
+  const counted = (id: string, rows: number): number => Number(by.get(id)?.summarySaid?.[0]?.params?.n ?? rows) || rows;
+  const unreadable = findings(by.get('files')).length;
+  if (unreadable) need('files', say('autofix.needs.files', { n: counted('files', unreadable) }));
+  const disk = findings(by.get('disk')).length;
+  if (disk) need('disk', say('autofix.needs.disk', { n: disk }));
+  const trackers = findings(by.get('trackers')).length;
+  if (trackers) need('trackers', say('autofix.needs.trackers', { n: counted('trackers', trackers) }));
+
   if (leftover) clear(say('autofix.clears.nextRun', { n: leftover }));
 
   const green = clears.length === 0;

@@ -263,7 +263,9 @@ async function isImage(buf: Buffer): Promise<boolean> {
  * a filesystem that was already at 87% and holds the library, every download and the only backup. Fails
  * OPEN when statfs is unavailable: a guard that cannot measure must not stop everything.
  */
-const MIN_FREE_GB = process.env.MIN_FREE_GB === undefined ? 10 : Number(process.env.MIN_FREE_GB) || 0;
+// Exported for Health's "Disk space and folders" card (lib/healthDisk.ts), which turns red at this very floor: never green
+// while a download is being refused for space.
+export const MIN_FREE_GB = process.env.MIN_FREE_GB === undefined ? 10 : Number(process.env.MIN_FREE_GB) || 0;
 async function assertFreeSpace(): Promise<void> {
   if (!(MIN_FREE_GB > 0)) return;
   const free = await freeBytes();

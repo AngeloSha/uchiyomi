@@ -111,7 +111,7 @@ const S = {
   twicePartial: 's_af_twicepartial', held: 's_af_held', limit: 's_af_limit', err: 's_af_err', nato: 's_af_nato',
   dupA: 's_af_dupa', dupB: 's_af_dupb', dupC: 's_af_dupc', dupD: 's_af_dupd', edA: 's_af_eda', edB: 's_af_edb',
   numClean: 's_af_numclean', numTracker: 's_af_numtracker', paused: 's_af_paused', cf: 's_af_cf',
-  againA: 's_af_againa', againB: 's_af_againb', againOdd: 's_af_againodd',
+  againA: 's_af_againa', againB: 's_af_againb', againOdd: 's_af_againodd', unread: 's_af_unread',
 };
 const ALL = Object.values(S);
 const T: Record<keyof typeof S, string> = {
@@ -120,7 +120,7 @@ const T: Record<keyof typeof S, string> = {
   twicePartial: 'Fix Twice Partial', held: 'Fix Held', limit: 'Fix Limit', err: 'Fix Err', nato: 'Fix Nato',
   dupA: 'Fix Twin', dupB: 'Fix Twin', dupC: 'Fix Alpha', dupD: 'Totally Unrelated', edA: 'Fix Edition', edB: 'Fix Edicion',
   numClean: 'Istrevelia', numTracker: 'Istrevelia', paused: 'Fix Paused', cf: 'Fix Cloudflare',
-  againA: 'Fix Again', againB: 'Fix Again', againOdd: 'Fix Again Odd',
+  againA: 'Fix Again', againB: 'Fix Again', againOdd: 'Fix Again Odd', unread: 'Fix Unreadable',
 };
 const folderOf = (k: keyof typeof S) => `T!af/${k}`;
 
@@ -346,6 +346,11 @@ test('Fix everything: one run over a library with something wrong on every card'
   // A paused series with a gap: nothing but a person fetches it.
   await seedSeries('paused', { source: MAIN, auto: false });
   for (const n of [1, 3]) await seedBook('paused', n);
+  // v0.72.0: a chapter file the count opened and found no page in (Health's Chapter files): Fetch again is a person's
+  // key, never the run's, which deletes and replaces nothing new.
+  await seedSeries('unread', { source: MAIN, auto: false });
+  await seedBook('unread', 1);
+  await seedBook('unread', 2, { pages: 0 });
 
   // ---- the run
   const started = autofix.startAutofix(adminId, { origin: 'manual' });
@@ -520,6 +525,21 @@ test('Fix everything: one run over a library with something wrong on every card'
       const named = [l.params.a, l.params.b, l.params.from, l.params.into, l.params.title].filter((x) => typeof x === 'string').sort();
       assert.deepEqual((ids as string[]).map((id) => titleOf.get(id)).sort(), named, `${l.code}: its ids are not the series its titles name`);
     }
+  });
+
+  await t.test('the cards no run changes are under Needs you, last, and the run touched nothing of theirs', async () => {
+    // v0.72.0. Reintroduce by leaving the Chapter files card out of summarise: the end reads no line for it.
+    const checks: string[] = run.summary.needsYou.map((n: any) => n.check);
+    assert.ok(checks.includes('files'), `the unreadable file is Needs you: ${checks.join(', ')}`);
+    const LAST = new Set(['files', 'disk', 'trackers']);
+    const first = checks.findIndex((c) => LAST.has(c));
+    assert.ok(checks.slice(first).every((c) => LAST.has(c)), `after what a person decides: ${checks.join(', ')}`);
+    const files = run.summary.needsYou.find((n: any) => n.check === 'files');
+    assert.deepEqual(files.said, { code: 'autofix.needs.files', params: { n: 1 } });
+    assert.deepEqual(files.action, { kind: 'health', check: 'files' });
+    const b = await book(`b_${S.unread}_2`);
+    assert.equal(b.pruned_at, null, 'not marked');
+    assert.ok(existsSync(join(DL, `${folderOf('unread')}/Chapter 2.cbz`)), 'and its file is where it was');
   });
 
   await t.test('what is left reaches Needs you, each with its key, and nothing is ignored', async () => {

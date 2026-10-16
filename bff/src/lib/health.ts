@@ -48,6 +48,10 @@ import { mainSourceCounts } from './findScope';
 import { carries, EXTENSION_OFF, EXTENSION_OFF_BY, standingOf, standingRows, type Standing, type StandingRow } from './sourceStanding';
 import { numKey } from './postingOrder';
 import type { ListingCopy } from './seriesListing';
+import { ALL_ROWS, DAY_MS, MAX_BOOK_IDS, MAX_ITEMS, allRows, hiddenPart, ignoredPart, truncate, verdict, withAll } from './healthKit';
+import { diskAndFolders } from './healthDisk';
+import { trackerSync } from './healthTrackers';
+import { chapterFiles } from './healthFiles';
 
 export type HealthStatus = 'ok' | 'warn' | 'problem';
 
@@ -84,7 +88,11 @@ export type HealthAction =
   | 'link_editions'
   // v0.55.0: a frozen row whose source is dropped by SUWAYOMI_MAX_SOURCES -- open Admin → Sources on `sourceId` to free
   // a slot (no server action). Offered in place of Replace there: the source works, the limit is the cause.
-  | 'free_slot';
+  | 'free_slot'
+  // v0.72.0, the Chapter files card (lib/healthFiles.ts): Fetch again for the row's `bookIds` -- the series page's own
+  // route (POST /api/admin/series/{id}/chapters/refetch), which sets each old file aside until the new copy lands and
+  // puts it back when it does not. Only on files Uchiyomi downloaded and named itself.
+  | 'refetch';
 
 export interface HealthItem {
   seriesId?: string;
@@ -296,42 +304,32 @@ export interface HealthCheck {
   items: HealthItem[];
   /** #115, 'sources' only: how long one Test may take (the smoke test's wall plus the homepage probe). */
   testMs?: number;
+  /** Every row before the cut, for the By series view (lib/healthKit.ts withAll). Never on the wire: a symbol key. */
+  [ALL_ROWS]?: readonly HealthItem[];
+}
+
+/**
+ * One series and everything Health found wrong with it (v0.72.0, the By series view, #254): its findings from every
+ * card that is about one series, each with its card's id, in the cards' order. `status` is the worst of those cards'.
+ */
+export interface SeriesFindings {
+  seriesId: string;
+  title: string;
+  status: Exclude<HealthStatus, 'ok'>;
+  findings: Array<{ check: string; item: HealthItem }>;
 }
 
 export interface HealthReport {
   generatedAt: string;
   checks: HealthCheck[];
+  /** Only when asked for (GET /api/admin/health?view=series): every series with a finding, worst first. */
+  bySeries?: SeriesFindings[];
 }
 
-const MAX_ITEMS = 50; // keep the payload sane; the summary always reports the true total
 /** The most gap numbers one item carries. A "Fill now" chip needs to NAME them; it does not need 4,000. */
 const MAX_NUMBERS = 100;
-/** The most chapters one Delete chip acts on, and the most an admin can sensibly read in a confirmation. */
-const MAX_BOOK_IDS = 20;
-const DAY_MS = 24 * 60 * 60 * 1000;
 /** How long a repair's conclusion about a gap stays a conclusion rather than a finding again. */
 const GAPS_FRESH_MS = 7 * DAY_MS;
-
-/**
- * ⚠️ FINDINGS FIRST, always, before the slice. A check's status is decided by the items WITHOUT `info`
- * (the page's one invariant, pinned in health.int.test.ts), so a check holding sixty greyed rows and three
- * real ones could cut the real ones off and report a warning with nothing in it -- which reads as a page
- * bug rather than as a finding. Sorting by severity first costs nothing and makes the slice safe whatever
- * order the check itself built its rows in.
- */
-function truncate<T extends { info?: boolean }>(rows: T[]): { items: T[]; hidden: number } {
-  const ordered = [...rows].sort((a, b) => Number(!!a.info) - Number(!!b.info));
-  return { items: ordered.slice(0, MAX_ITEMS), hidden: Math.max(0, rows.length - MAX_ITEMS) };
-}
-
-/** A check's verdict, from the items that are findings: the invariant, written once. */
-const verdict = (items: HealthItem[], bad: HealthStatus = 'warn'): HealthStatus =>
-  items.some((i) => !i.info) ? bad : 'ok';
-
-/** A summary's "; 2 ignored": the findings an admin chose to stop being told about (lib/healthIgnore.ts). */
-const ignoredPart = (n: number): Part | null => (n ? say('ignored', { n }) : null);
-/** A note's " 3 more not shown.": the rows past the slice. */
-const hiddenPart = (n: number): Part | null => (n > 0 ? joined('sentence', say('hidden', { n })) : null);
 
 /**
  * The shape lib/repair.ts stores in `lib_series.gaps_result`.
@@ -602,7 +600,7 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
   const archiving = items.filter((i) => i.info && !i.ignored && i.outcome?.kind === 'gaps' && i.outcome.why === 'archiving').length;
   const beforeStart = items.filter((i) => i.beforeStart).length;
   const quiet = items.length - live - ignored - archiving - beforeStart;
-  return {
+  return withAll({
     id: 'chapter-gaps',
     title: 'Chapter gaps',
     status: verdict(items),
@@ -615,7 +613,7 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
     ]),
     ...noteOf([say('gaps.note'), hiddenPart(hidden)]),
     items: shown.map(({ beforeStart: _b, ...it }) => it),
-  };
+  }, items.map(({ beforeStart: _b, ...it }) => it));
 }
 
 /** How long a series numbered by posting order on its own is listed (for reference) after the change. */
@@ -701,7 +699,7 @@ async function numberingCheck(): Promise<HealthCheck | null> {
   const live = items.filter((i) => !i.info).length;
   const numbered = items.filter((i) => i.info && i.actions?.includes('keep_numbers')).length;
   const { items: shown, hidden } = truncate(items);
-  return {
+  return withAll({
     id: 'numbering',
     title: 'Chapter numbering',
     status: verdict(items),
@@ -711,7 +709,7 @@ async function numberingCheck(): Promise<HealthCheck | null> {
     ]),
     ...noteOf([say('numbering.note'), hiddenPart(hidden)]),
     items: shown,
-  };
+  }, items);
 }
 
 /**
@@ -812,7 +810,7 @@ async function shortChapters(): Promise<HealthCheck> {
   const { items: shown, hidden } = truncate(items);
   const live = items.filter((i) => !i.info).length;
   const quiet = items.length - live;
-  return {
+  return withAll({
     id: 'short-chapters',
     title: 'Suspiciously short chapters',
     status: verdict(items, 'problem'),
@@ -822,7 +820,7 @@ async function shortChapters(): Promise<HealthCheck> {
     ]),
     ...noteOf([say('short.note'), hiddenPart(hidden)]),
     items: shown,
-  };
+  }, items);
 }
 
 /** Sources that are failing or blocked, and how much of the library depends on them. */
@@ -1091,7 +1089,7 @@ export async function frozenSeries(
       ...keysFor(r, ['replace_source']),
     });
   }
-  return {
+  return withAll({
     id: 'frozen-series',
     title: 'Series that can no longer update',
     status: stuck ? 'warn' : 'ok',
@@ -1106,7 +1104,7 @@ export async function frozenSeries(
       hiddenPart(frozen.length - 20),
     ]),
     items,
-  };
+  }, found);
 }
 
 /**
@@ -1580,14 +1578,14 @@ async function outlierChapters(held: HeldSeries[], ctx: IgnoreCtx = noIgnores())
   const ignored = applyIgnores('outliers', items, ctx, !readFailed);
   const live = items.filter((i) => !i.info).length;
   items.sort((a, b) => Number(!!a.info) - Number(!!b.info));
-  return {
+  return withAll({
     id: 'outliers',
     title: 'Impossible chapter numbers',
     status: verdict(items, 'problem'),
     ...summaryOf([live ? say('outliers.live', { n: live }) : say('outliers.none'), ignoredPart(ignored)]),
     ...noteOf([say('outliers.note'), hiddenPart(items.length - MAX_ITEMS)]),
     items: items.slice(0, MAX_ITEMS),
-  };
+  }, items);
 }
 
 /**
@@ -1693,14 +1691,14 @@ async function savedTwice(): Promise<HealthCheck> {
       actions: ['delete'],
     });
   }
-  return {
+  return withAll({
     id: 'saved-twice',
     title: 'The same chapter saved twice',
     status: verdict(items),
     ...summaryOf([items.length ? say('twice.live', { n: items.length }) : say('twice.none')]),
     ...noteOf([say('twice.note'), hiddenPart(items.length - MAX_ITEMS)]),
     items: items.slice(0, MAX_ITEMS),
-  };
+  }, items);
 }
 
 /**
@@ -2072,7 +2070,7 @@ async function downloadsMissing(ctx: IgnoreCtx = noIgnores()): Promise<HealthChe
   const n = live.reduce((k, m) => k + m.files.length, 0);
   const unread = all.filter((it) => it.key?.startsWith('unreadable:') && !it.info).length;
   const { items } = truncate(all);
-  return {
+  return withAll({
     ...base,
     status: n || unread ? 'problem' : 'ok',
     ...summaryOf([
@@ -2083,7 +2081,7 @@ async function downloadsMissing(ctx: IgnoreCtx = noIgnores()): Promise<HealthChe
     ]),
     ...noteOf(downloadsNoteParts(c, strays)),
     items,
-  };
+  }, all);
 }
 
 /**
@@ -2138,7 +2136,12 @@ async function foldersScannedTwice(): Promise<HealthCheck | null> {
 
 // ---- report -----------------------------------------------------------------
 
-export async function runHealthChecks(): Promise<HealthReport> {
+/**
+ * Every check, worst first. `bySeries` (v0.72.0, the page's By series view): also every series with a finding, grouped
+ * from each check's FULL list (groupBySeries) -- asked for by GET /api/admin/health?view=series only, never by the
+ * header's six-hourly refresh, which needs the cards alone.
+ */
+export async function runHealthChecks(opts: { bySeries?: boolean } = {}): Promise<HealthReport> {
   // The two checks that reason about chapter NUMBERS share one read of what every series holds, because
   // that read applies the override and tombstone rules per series and is the expensive part of this page.
   const held = await heldBySeries();
@@ -2165,12 +2168,54 @@ export async function runHealthChecks(): Promise<HealthReport> {
     ...(suwayomiConfigured() ? [extensionCap()] : []),
     // #72: the engine itself; null when there is none and nothing depends on one (lib/engineHealth.ts).
     extensionEngineCheck().catch(() => null),
+    // v0.72.0 (#253, #252): the downloads disk and the library's folders, members' tracker sign-ins, and the chapter
+    // files the nightly count could read no page of. A statfs, an opendir and a few queries: never a walk of the
+    // library and never reading_events, because this runs every six hours and after every scan (lib/healthSummary.ts).
+    diskAndFolders(ctx).catch(() => null),
+    trackerSync(ctx).catch(() => null),
+    chapterFiles(ctx).catch(() => null),
   ])).filter((c): c is HealthCheck => c !== null);
   await keepIgnoresAlive(ctx);
   // worst first, so the page opens on whatever needs attention
-  const rank: Record<HealthStatus, number> = { problem: 0, warn: 1, ok: 2 };
-  checks.sort((a, b) => rank[a.status] - rank[b.status]);
-  return { generatedAt: new Date().toISOString(), checks };
+  checks.sort((a, b) => RANK[a.status] - RANK[b.status]);
+  return { generatedAt: new Date().toISOString(), checks, ...(opts.bySeries ? { bySeries: await groupBySeries(checks) } : {}) };
+}
+
+const RANK: Record<HealthStatus, number> = { problem: 0, warn: 1, ok: 2 };
+
+/**
+ * Cards that are about one series per row but stay out of By series: a duplicate pair is about two series at once, and
+ * its Merge acts on both, so it keeps its own card.
+ */
+const NOT_BY_SERIES: ReadonlySet<string> = new Set(['duplicates']);
+
+/**
+ * Health turned around (v0.72.0, @Squeaks72's idea in #254): every series with a finding, and each of its findings with
+ * its card, worst series first, then the one with most findings, then by title. Built on the server, from each card's
+ * FULL list (lib/healthKit.ts allRows): #254 grouped the fifty rows each card sends, so a series past a card's fifty was
+ * missing, and the count, Select all and Remove acted on part of the library. A greyed row is not a finding, and a row
+ * about no single series (a source, a folder) has no series to go under. Reintroduce the cut lists: "By series has every
+ * series, past the fifty a card shows" in healthBySeries.int.test.ts finds series missing.
+ */
+export async function groupBySeries(checks: readonly HealthCheck[]): Promise<SeriesFindings[]> {
+  const by = new Map<string, SeriesFindings>();
+  for (const c of checks) {
+    if (c.status === 'ok' || NOT_BY_SERIES.has(c.id)) continue;
+    for (const item of allRows(c)) {
+      if (!item.seriesId || item.info) continue;
+      const g = by.get(item.seriesId) ?? { seriesId: item.seriesId, title: item.title, status: 'warn' as const, findings: [] };
+      g.findings.push({ check: c.id, item });
+      if (c.status === 'problem') g.status = 'problem';
+      by.set(item.seriesId, g);
+    }
+  }
+  if (!by.size) return [];
+  // A row's title is its series' on every card but Downloads missing, whose rows are titled by their folder.
+  const titles = new Map((await q<{ id: string; title: string }>('SELECT id, title FROM lib_series WHERE id = ANY($1)', [[...by.keys()]])
+    .catch(() => [])).map((r) => [r.id, r.title]));
+  for (const g of by.values()) g.title = titles.get(g.seriesId) ?? g.title;
+  return [...by.values()].sort((a, b) =>
+    RANK[a.status] - RANK[b.status] || b.findings.length - a.findings.length || a.title.localeCompare(b.title));
 }
 
 /**
@@ -2188,6 +2233,9 @@ export async function findingOf(check: IgnorableCheck, key: string): Promise<Fin
     case 'frozen-series': await frozenSeries(ctx); break;
     case 'duplicates': await duplicateSeries(ctx); break;
     case 'downloads-missing': await downloadsMissing(ctx); break;
+    case 'disk': await diskAndFolders(ctx); break;
+    case 'trackers': await trackerSync(ctx); break;
+    case 'files': await chapterFiles(ctx); break;
   }
   return ctx.found.get(`${check}\u0000${key}`) ?? null;
 }

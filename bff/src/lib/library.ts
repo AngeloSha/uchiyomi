@@ -1136,6 +1136,12 @@ async function scanOnce(): Promise<ScanResult> {
           // (fp_at is never retried) or as half a chapter. Kept, Rescan everything could never pair the file once it
           // moved. Cleared, the next pass reads it again; the count below arms that pass. Reintroduce by dropping the
           // four CASEs: "a file whose mtime moved is fingerprinted again" in scan.int.test.ts reads the old fingerprint.
+          //
+          // So does the page count's stamp (v0.72.0): `pages_checked_at` says the nightly count opened THIS file, and with
+          // `pages = 0` it is what Health's Chapter files card lists (lib/healthFiles.ts). A file whose mtime moved -- a
+          // Fetch again that landed, a copy replaced by hand -- is counted again the next night, and leaves the card now.
+          // Only rows still at 0 pages are ever counted (lib/repair.ts stepCount), so clearing it on any other row changes
+          // nothing. Reintroduce by dropping the CASE: "a file whose mtime moved is counted again" in scan.int.test.ts.
           const [up] = await qq<{ unprinted: number }>(
             `WITH up AS (
                INSERT INTO lib_books (id, series_id, source, file, number, title, mtime, root, name_rule, number_end, created_at) VALUES ${tuples.join(',')}
@@ -1145,7 +1151,8 @@ async function scanOnce(): Promise<ScanResult> {
                  fingerprint = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.fingerprint END,
                  fp_kind = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.fp_kind END,
                  fp_at = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.fp_at END,
-                 size = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.size END
+                 size = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.size END,
+                 pages_checked_at = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.pages_checked_at END
                RETURNING fp_at)
              SELECT count(*) FILTER (WHERE fp_at IS NULL)::int AS unprinted FROM up`,
             params,

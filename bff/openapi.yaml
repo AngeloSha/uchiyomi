@@ -10959,11 +10959,37 @@ paths:
         lies before its start is an `info` row with no actions and the detail `gaps.belowFloor` {n, start, ranges}
         (`start` is the first chapter it was started from), counted in the summary by `gaps.beforeStart` {n}: nothing
         fetches below the start unasked, so neither the repair's gap step nor Fill now works on those holes.
+        Since v0.72.0 three more checks (after @Squeaks72's #253 and #252). `disk` ("Disk space and folders"): the
+        downloads disk's free space -- `problem` under the downloader's own floor (MIN_FREE_GB: new downloads stop),
+        `warn` under the slow archive's floor while the archive has a series queued (it waits), otherwise one `info`
+        row -- and a library or download folder that cannot be opened, or that is empty while the library records
+        chapters in it (`problem`; only its first entry is read). Keys `space:downloads`, `folder:library`,
+        `folder:downloads`; an ignore records the level, so an ignored warning does not silence a later problem.
+        `trackers` ("Tracker sync"): every member's tracker connection the tracker refused, whose last sync failed, or
+        whose sign-in ended or ends within 14 days (within 30 days: `info`), titled by the tracker and the member's
+        username; key `PROVIDER:USERID`. `files` ("Chapter files"): one row per series with chapter files the nightly
+        repair's page count opened and found no page in (`pages` 0 with `pages_checked_at` set; a file whose mtime
+        moves is counted again), with `bookIds` and `numbers` (at most 20) of the files Uchiyomi downloaded itself and
+        the action `refetch` -- POST /api/admin/series/{id}/chapters/refetch with those `bookIds`, which keeps each old
+        file until its new copy lands; key `series:ID`. Nothing is deleted by any of them.
+        `view=series` adds `bySeries`: every series with a finding on a card about one series at a time (duplicates
+        aside), grouped from each card's full list rather than the 50 rows a card carries -- [{seriesId, title,
+        status: 'warn'|'problem' (its worst card's), findings: [{check, item}]}], worst first, then most findings,
+        then by title. `view=checks` (or none) leaves it out.
+      parameters:
+        - name: view
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [checks, series]
       security:
         - bearer: []
       responses:
         "200":
           description: OK
+        "400":
+          description: "Bad request: `view` is neither checks nor series"
         "401":
           description: Not authenticated
         "403":
@@ -11002,7 +11028,7 @@ paths:
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
         Body {check, key, ignored}: `check` is one of chapter-gaps, chapter-failures, sources, frozen-series,
-        duplicates, outliers, downloads-missing, and `key` is the finding's `key` as GET /api/admin/health reports
+        duplicates, outliers, downloads-missing, and since v0.72.0 disk, trackers and files, and `key` is the finding's `key` as GET /api/admin/health reports
         it. The server looks the finding up again and records everything it is about (every missing number of a
         gap, not only the hundred the report carries); it then reports it greyed with `ignored` and an `unignore`
         action, and stays quiet while what it is about is part of that. A finding gone for a week forgets its
@@ -11019,7 +11045,7 @@ paths:
               properties:
                 check:
                   type: string
-                  enum: [chapter-gaps, chapter-failures, sources, frozen-series, duplicates, outliers, downloads-missing]
+                  enum: [chapter-gaps, chapter-failures, sources, frozen-series, duplicates, outliers, downloads-missing, disk, trackers, files]
                 key:
                   type: string
                 ignored:

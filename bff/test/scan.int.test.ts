@@ -262,6 +262,30 @@ test('persistScan: a file whose mtime moved is fingerprinted again; one that did
   assert.ok(again.fingerprint && again.fingerprint !== first.fingerprint, 'the replaced file was not read again');
 });
 
+test('persistScan: a file whose mtime moved is counted again; one that did not keeps its count', { skip }, async () => {
+  // v0.72.0: `pages_checked_at` with `pages` 0 is what Health's Chapter files card lists (lib/healthFiles.ts) -- the
+  // nightly count opened the file and found no page. A Fetch again that landed, or a copy replaced by hand, is other
+  // bytes: the stamp goes, the row leaves the card, and the next count reads the new file. Reintroduce by dropping the
+  // pages_checked_at CASE from persistScan's upsert: the stamp stays on the replaced file.
+  const { utimes } = await import('fs/promises');
+  const src = 'T!pgmt';
+  const file = chapter(ROOT_A, src, 'Recounted', 'Chapter 1.cbz');
+  await writeCbz(file, { series: 'Recounted', pages: 1 });
+  await persistScan();
+  const where = [ROOT_A, `${src}/Recounted/Chapter 1.cbz`];
+  // What the count stamps on a file it could read no page of.
+  await q(`UPDATE lib_books SET pages = 0, pages_checked_at = now() WHERE root = $1 AND file = $2`, where);
+  const stamp = async () => (await q<{ checked: boolean }>(
+    `SELECT pages_checked_at IS NOT NULL AS checked FROM lib_books WHERE root = $1 AND file = $2`, where))[0]?.checked;
+  await persistScan();
+  assert.equal(await stamp(), true, 'a scan that found the same file cleared its count');
+  await writeCbz(file, { series: 'Recounted', pages: 3, pixel: 'other-bytes' });
+  const later = new Date(Date.now() + 5_000);
+  await utimes(file, later, later);
+  await persistScan();
+  assert.equal(await stamp(), false, 'the count stayed on a file whose mtime moved');
+});
+
 test('persistScan: TODAY renaming a folder orphans the series — this is the bug being fixed', { skip }, async () => {
   const src = 'T!rename';
   await writeCbz(chapter(ROOT_A, src, 'Old Name', 'Chapter 1.cbz'), { series: 'Old Name' });

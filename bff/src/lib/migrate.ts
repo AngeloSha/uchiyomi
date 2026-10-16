@@ -598,7 +598,8 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS auto_follow_on_failure bool
 -- so a step selecting on a zero page count alone would re-open those same files every night forever and
 -- never reach the rest of the library (30,625 of 43,253 rows were uncounted on this install, because a
 -- page count is stamped only when somebody opens the chapter). Stamped even when the answer is 0, so the
--- queue drains.
+-- queue drains. Since v0.72.0 cleared by a scan that finds the file's mtime moved (lib/library.ts persistScan): the
+-- stamp is about the bytes it counted, and a replaced file is counted again.
 ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS pages_checked_at timestamptz;
 -- short_confirmed_at: this one-or-two-page chapter has been PROVEN to be what the sources hold, so the
 -- Health page stops reporting it. A proof is "every followed copy answered two pages or fewer, none of
@@ -615,6 +616,11 @@ ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS short_confirmed_at timestamptz;
 -- been counted, a full index on mtime would be almost entirely rows this query never wants.
 CREATE INDEX IF NOT EXISTS lib_books_uncounted_idx ON lib_books (mtime DESC)
   WHERE pages = 0 AND pages_checked_at IS NULL AND pruned_at IS NULL;
+-- v0.72.0: the files that count found no page in -- Health's Chapter files card (lib/healthFiles.ts), on every run of
+-- the report. Partial for the same reason: it holds only those rows, none at all on a healthy library. A file whose
+-- mtime moves is counted again (lib/library.ts persistScan clears pages_checked_at).
+CREATE INDEX IF NOT EXISTS lib_books_unreadable_idx ON lib_books (series_id)
+  WHERE pages = 0 AND pages_checked_at IS NOT NULL AND pruned_at IS NULL;
 -- gaps_checked_at / gaps_result: when the repair last looked for a source that could fill this series'
 -- holes, and what it found. Stamped BEFORE the search, exactly like source_hunt_at above, so a crash
 -- mid-search never re-searches the same series every night. The result is what lets the Health page say
