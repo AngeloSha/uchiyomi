@@ -1,5 +1,59 @@
 # Changelog
 
+## v0.71.0 — 2026-10-16
+
+**Reading defaults for a whole library, sources and covers picked by hand, MangaUpdates tracking, and suggestions from
+your own tracker lists.** All of it began as pull requests from **@Squeaks72**, taken and finished on the app's own parts
+([#235](https://github.com/AngeloSha/uchiyomi/pull/235), [#241](https://github.com/AngeloSha/uchiyomi/pull/241), [#242](https://github.com/AngeloSha/uchiyomi/pull/242),
+[#243](https://github.com/AngeloSha/uchiyomi/pull/243), [#244](https://github.com/AngeloSha/uchiyomi/pull/244), [#246](https://github.com/AngeloSha/uchiyomi/pull/246),
+[#248](https://github.com/AngeloSha/uchiyomi/pull/248)). Thank you.
+
+### MangaUpdates, and Recommended for you
+
+- **MangaUpdates** ([#244](https://github.com/AngeloSha/uchiyomi/pull/244)) is a fourth progress tracker: it syncs the chapters you finish and
+  its list can be imported. You paste a session token, which its login gives you; the guide has the command, and your
+  password goes to MangaUpdates only. Uchiyomi asks MangaUpdates at most once a second.
+- **Recommended for you** ([#248](https://github.com/AngeloSha/uchiyomi/pull/248)). With AniList or MyAnimeList connected, Discover shows what
+  their readers suggest after the series you rated well or read, minus everything on your lists and in the library.
+  - Each card says which service suggested it and *Because you read …*.
+  - Your list is read at most twice a day and each title's suggestions once in two weeks for the whole server, so
+    opening Discover again asks nothing.
+  - What is 18+ for you is left out, as in every Discover rail, and so are series of the library you may not open.
+- **A line above every page when a tracker needs a new token** ([#246](https://github.com/AngeloSha/uchiyomi/pull/246)), with **Reconnect** and **Not
+  now**. Only when reconnecting would help: a rejected, lapsed or unreadable token, never a rate limit or an outage.
+
+### Series and libraries
+
+- **Reading defaults for a library** ([#235](https://github.com/AngeloSha/uchiyomi/pull/235)). An admin can give a library a reading mode, pages per
+  view and reading direction, in its dialog under Admin → Libraries, or from the reader with **Use these settings for
+  every series in …**, which asks first. Every account gets them, under a source's default and a series' own; the theme
+  stays each reader's choice. A chapter downloaded for offline reading opens with them too.
+- **Add or move a source by hand** ([#243](https://github.com/AngeloSha/uchiyomi/pull/243)). The Sources sheet has **Add more sources…**: search
+  the sources, compare a pick's cover, title and chapter count, then add it as an extra source or move the series to it.
+  It is for the series *Find other sources* cannot judge, those with fewer than three chapters.
+  - The title is still checked with the source. When the source calls it something else, the sheet says so and offers
+    **Attach anyway**.
+  - The **×** on the main source now detaches it, after asking: the next source takes over, or the series is left with
+    none. Chapters and progress stay. A series numbered by posting order keeps its main source.
+- **Change a cover to a source's** ([#242](https://github.com/AngeloSha/uchiyomi/pull/242)): **More → Change cover**, or a click on the cover on a
+  computer. It shows the cover each source the series uses has for it, and takes an upload too. The server keeps its own
+  copy, and the new cover shows at once on this device's cards. Sources that are switched off, cooling down or failing
+  are not asked.
+- **Compare copies before replacing** ([#241](https://github.com/AngeloSha/uchiyomi/pull/241)). A chapter's **⋯** menu has **Replace from another
+  source…** when another source has a copy: this server's file and that copy side by side, page by page, before the
+  usual *Replace with this version?*.
+
+### Upgrading
+
+- **Database:** additive only. A `reader_prefs` column on `libraries`, and two tables for Recommended for you,
+  `tracker_list_cache` and `tracker_rec_cache`. They are created when the server starts.
+- **Privacy:** *Recommended for you* reads the lists of the trackers a person connected, and asks AniList and
+  MyAnimeList about a few titles of them. [CONFIGURATION.md](docs/CONFIGURATION.md#progress-trackers) says what is
+  sent, with and without a token. An account that may not add series, or has no tracker connected, sends nothing.
+- **API:** `GET /api/trackers` rows carry `needsReconnect`. New: `POST /api/admin/series/:id/attach-source`,
+  `GET /api/admin/series/:id/cover-candidates`, `GET /api/admin/series/:id/copy-pages`,
+  `GET /img/series/:id/copy-page`, `GET /api/discover/recommendations`.
+
 ## v0.70.0 — 2026-10-16
 
 **Each chapter you finish counts once. The reader gains a right-click menu and a list of its keys, and the 18+ reveal
