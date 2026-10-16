@@ -204,7 +204,7 @@ export async function fetchCoverImage(u: string, source?: string, opts: { caller
   const src = source ? getSource(source) : null;
   const staticReferer = typeof src?.imageReferer === 'string' ? src.imageReferer : undefined;
   const extras = typeof src?.imageHeaders === 'function' ? src.imageHeaders(u) : src?.imageHeaders ?? {};
-  const headers: Record<string, string> = {
+  const sourceHeaders: Record<string, string> = {
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
     accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
     'accept-language': 'en-US,en;q=0.9',
@@ -235,10 +235,10 @@ export async function fetchCoverImage(u: string, source?: string, opts: { caller
       }
       // Credentials go to the cover's own origin only, as fetchFollowingPublic sends them (lib/safeFetch.ts): a hop
       // anywhere else drops the cookie and authorization -- the solver's clearance after a solve among them -- and
-      // the source's own extra headers. Reintroduce by sending `headers` on every hop: "a redirect to another origin
-      // carries none of the first one's credentials" in coverRedirectHeaders.test.ts sees them arrive.
-      const sent = target.origin === parsed.origin ? headers : withoutCredentials(headers, Object.keys(extras));
-      r = await fetch(target, { headers: sent, redirect: 'manual', signal: AbortSignal.timeout(20000) });
+      // the source's own extra headers. Reintroduce by sending `sourceHeaders` on every hop: "a redirect to another
+      // origin carries none of the first one's credentials" in coverRedirectHeaders.test.ts sees them arrive.
+      const headers = target.origin === parsed.origin ? sourceHeaders : withoutCredentials(sourceHeaders, Object.keys(extras));
+      r = await fetch(target, { headers, redirect: 'manual', signal: AbortSignal.timeout(20000) });
       if (r.status < 300 || r.status > 399) break;
       const loc = r.headers.get('location');
       if (!loc || hop >= 4) throw new UnfetchableCoverUrl(u);
@@ -272,8 +272,8 @@ export async function fetchCoverImage(u: string, source?: string, opts: { caller
       ]).finally(() => clearTimeout(timer)); // or the loser holds the event loop open for 5s
       if (s.cookie) {
         await r.body?.cancel().catch(() => {});
-        headers.cookie = s.cookie;
-        headers['user-agent'] = s.userAgent;
+        sourceHeaders.cookie = s.cookie;
+        sourceHeaders['user-agent'] = s.userAgent;
         r = await fetchFollowing();
       }
     } catch {

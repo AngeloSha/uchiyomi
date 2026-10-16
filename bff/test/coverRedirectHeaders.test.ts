@@ -70,7 +70,7 @@ test("a redirect to another origin carries none of the first one's credentials",
   assert.deepEqual(hops.map((h) => h.url), [`${A}/cover.jpg`, `${B}/moved.jpg`]);
   const [first, second] = hops;
   for (const [k, v] of Object.entries(SECRETS)) assert.equal(first.headers[k], v, `PREMISE: the source's ${k} goes to its own host`);
-  // Reintroduce by sending `headers` on every hop in fetchCoverImage (routes/images.ts): all three arrive at B.
+  // Reintroduce by sending `sourceHeaders` on every hop in fetchCoverImage (routes/images.ts): all three arrive at B.
   for (const k of Object.keys(SECRETS)) assert.equal(second.headers[k], undefined, `the source's ${k} went to another origin`);
   assert.match(second.headers['user-agent'] ?? '', /Mozilla/, 'the ordinary request headers still go');
   assert.ok(second.headers.accept, 'the ordinary request headers still go');
@@ -89,6 +89,6 @@ test("the solver's clearance cookie stays with the origin it was solved for", as
   assert.deepEqual(hops.map((h) => h.url), [`${A}/guarded.jpg`, `${A}/guarded.jpg`, `${B}/moved.jpg`]);
   assert.equal(hops[1].headers.cookie, 'cf_clearance=solved', 'PREMISE: the solved cookie goes to the origin it was solved for');
   assert.equal(hops[1].headers['user-agent'], 'SolverBrowser/1.0', 'PREMISE: with the user agent it belongs to');
-  // Reintroduce by sending `headers` on every hop: the clearance cookie arrives at B.
+  // Reintroduce by sending `sourceHeaders` on every hop: the clearance cookie arrives at B.
   assert.equal(hops[2].headers.cookie, undefined, 'the solver\'s clearance cookie went to another origin');
 });
