@@ -2,7 +2,7 @@
 import { motion } from 'framer-motion';
 import { useRef, useState } from 'react';
 import { ReaderPrefs } from '@/lib/readerPrefs';
-import type { ColorFilter, DevicePrefs } from '@/lib/readerDevice';
+import { COLUMN_WIDTH, type ColorFilter, type DevicePrefs } from '@/lib/readerDevice';
 import type { AutoGuess } from '@/lib/readerAuto';
 import { seriesTypeKey } from '@/lib/seriesTypes';
 import { tapZone, type TapLayout } from '@/lib/readerGesture';
@@ -12,7 +12,6 @@ import { IcX } from './icons';
 import { Switch } from './Switch';
 import { t as tr } from '@/lib/i18n';
 import { useLayer } from '@/lib/layers';
-import { useReaderWidth, WIDTH_MIN, WIDTH_MAX } from '@/lib/readerWidth';
 import { INCOGNITO_TEXT } from '@/lib/incognito';
 import { useIncognito } from './IncognitoBanner';
 import { useToast } from './Toast';
@@ -90,7 +89,6 @@ export function ReaderSettings({
   // nav band free -- the reader has no nav there anyway -- and its panel is measured, so a notice rises above
   // it rather than covering its last rows.
   const panelRef = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useReaderWidth();
   useLayer('dialog', true, { ref: panelRef });
   // The library key's question is open (#235): the key saves for every account, so it asks first.
   const [askLibrary, setAskLibrary] = useState(false);
@@ -265,12 +263,14 @@ export function ReaderSettings({
                 onChange={(e) => set({ gap: Number(e.target.value) })}
                 className="w-full accent-[rgb(var(--accent))]" />
             </Row>
-            <Row label={`${tr('Column width on this device')} · ${width}%`}>
-              <input type="range" min={WIDTH_MIN} max={WIDTH_MAX} step={5} value={width}
-                aria-label={tr('Column width on this device')} aria-valuetext={`${width}%`}
-                onChange={(e) => setWidth(Number(e.target.value))}
+            {/* #233: a share of what Fit gives, on this device: a wide monitor wants a narrow strip, the phone beside it the
+                whole width. 100 % is the column as it always was. */}
+            <Row label={`${tr('Column width')} · ${tr('This device')} · ${device.columnWidth}%`}>
+              <input type="range" min={COLUMN_WIDTH.min} max={COLUMN_WIDTH.max} step={COLUMN_WIDTH.step} value={device.columnWidth}
+                aria-label={`${tr('Column width')} · ${tr('This device')}`} aria-valuetext={`${device.columnWidth}%`}
+                onChange={(e) => setDevice({ columnWidth: Number(e.target.value) })}
                 className="w-full accent-[rgb(var(--accent))]" data-reader-width />
-              <p className="mt-1 text-xs leading-snug text-fog-500">{tr('Narrows the webtoon column. Saved on this device only, so your other screens are unaffected.')}</p>
+              <p className="mt-2 text-[11px] leading-snug text-fog-500">{tr('A share of the width Fit gives: a narrower column of pages for a wide screen.')}</p>
             </Row>
             <Row label={`${tr('Auto-scroll')} · ${prefs.autoScroll === 0 ? tr('off') : prefs.autoScroll.toFixed(1)}`}>
               <input type="range" min={0} max={6} step={0.5} value={prefs.autoScroll}

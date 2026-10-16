@@ -1,4 +1,4 @@
-// The reader's settings that belong to ONE DEVICE, not to the account (v0.61.0).
+// The reader's settings that belong to ONE DEVICE, not to the account (v0.61.0; the column width since v0.73.0, #233).
 //
 // A colour filter is a property of the screen it is read on -- an e-ink tablet wants e-ink, the phone beside it does
 // not -- and so is how a hand reaches it. These are kept in this browser only and never synced: the account's reader
@@ -21,6 +21,21 @@ export interface DevicePrefs {
   /** This device's own keys and controller buttons, per action; an action not here keeps its defaults. */
   keys: KeyOverrides;
   pad: PadOverrides;
+  /**
+   * The webtoon column's width, as a share of what Fit width / Original gives, in percent (#233): a wide monitor wants a
+   * narrow strip, the phone beside it the whole width. 100 is the reader as it always was.
+   */
+  columnWidth: number;
+}
+
+/** Column width's range and step, in percent: the sheet's slider and what a stored value is cleaned to. */
+export const COLUMN_WIDTH = { min: 30, max: 100, step: 5 } as const;
+
+/** A stored column width made sound: a step of the range, or the full width for anything else. */
+export function cleanColumnWidth(v: unknown): number {
+  const n = typeof v === 'number' ? v : NaN;
+  if (!Number.isFinite(n) || n < COLUMN_WIDTH.min || n > COLUMN_WIDTH.max) return COLUMN_WIDTH.max;
+  return Math.round(n / COLUMN_WIDTH.step) * COLUMN_WIDTH.step;
 }
 
 export const DEFAULT_DEVICE: DevicePrefs = {
@@ -28,6 +43,7 @@ export const DEFAULT_DEVICE: DevicePrefs = {
   tapLayout: 'auto',
   keys: {},
   pad: {},
+  columnWidth: COLUMN_WIDTH.max,
 };
 
 export const DEVICE_KEY = 'yomi_reader_device';
@@ -42,6 +58,7 @@ export function migrateDevicePrefs(raw: unknown): DevicePrefs {
     // button index that is not one.
     keys: cleanKeyOverrides(r.keys),
     pad: cleanPadOverrides(r.pad),
+    columnWidth: cleanColumnWidth(r.columnWidth),
   };
 }
 

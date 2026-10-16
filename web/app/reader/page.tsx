@@ -24,7 +24,6 @@ import { editionChipLabels, readerTarget } from '@/lib/editions';
 import { numLabel } from '@/lib/numbering';
 import { useToast } from '@/components/Toast';
 import { deviceId } from '@/lib/device';
-import { useReaderWidth } from '@/lib/readerWidth';
 import { ReaderEndLabel, ReaderEndRadar } from '@/components/ReaderEndRadar';
 import { getOfflineChapter, getPageBlob, queueProgress, noteOfflineProgress, listSeriesDownloads, setOfflinePageJunk } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
@@ -227,8 +226,6 @@ function ReaderInner() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [colW, setColW] = useState(0);
-  // This device's own column width (lib/readerWidth.ts), not an account setting.
-  const [widthPct] = useReaderWidth();
   const didInitScroll = useRef(false);
   /** The last `chapterId:page` a progress ping was sent for. Declared here rather than beside sendProgress
    *  because the initial-scroll effect seeds it, and that effect is defined above sendProgress. */
@@ -630,13 +627,14 @@ function ReaderInner() {
   useEffect(() => {
     const measure = () => {
       const w = scrollRef.current?.clientWidth || window.innerWidth;
-      const base = (prefs.fitWidth ? Math.min(w, 860) : w) * (widthPct / 100);
+      // #233: this device's column width, a share of what Fit gives (lib/readerDevice.ts); 100 is the column as it was.
+      const base = (prefs.fitWidth ? Math.min(w, 860) : w) * (device.columnWidth / 100);
       setColW(base * zoom);
     };
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, [prefs.fitWidth, ready, zoom, widthPct]);
+  }, [prefs.fitWidth, ready, zoom, device.columnWidth]);
 
   // keep the page roughly centered when zooming
   useEffect(() => {

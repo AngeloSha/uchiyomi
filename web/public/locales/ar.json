@@ -3950,6 +3950,6 @@
   "Chapter {a} is missing here. This continues at chapter {next}.": "الفصل {a} غير موجود هنا. تستمر القراءة من الفصل {next}.",
   "Chapters {a}–{b} are missing here. This continues at chapter {next}.": "الفصول {a}–{b} غير موجودة هنا. تستمر القراءة من الفصل {next}.",
   "Chapters {list} are missing here. This continues at chapter {next}.": "الفصول {list} غير موجودة هنا. تستمر القراءة من الفصل {next}.",
-  "Column width on this device": "Column width on this device",
-  "Narrows the webtoon column. Saved on this device only, so your other screens are unaffected.": "Narrows the webtoon column. Saved on this device only, so your other screens are unaffected."
+  "Column width": "عرض العمود",
+  "A share of the width Fit gives: a narrower column of pages for a wide screen.": "نسبة من العرض الذي يحدده خيار «الملاءمة»: عمود صفحات أضيق للشاشات العريضة."
 }

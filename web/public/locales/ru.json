@@ -3950,6 +3950,6 @@
   "Chapter {a} is missing here. This continues at chapter {next}.": "Главы {a} здесь нет. Чтение продолжится с главы {next}.",
   "Chapters {a}–{b} are missing here. This continues at chapter {next}.": "Глав {a}–{b} здесь нет. Чтение продолжится с главы {next}.",
   "Chapters {list} are missing here. This continues at chapter {next}.": "Глав {list} здесь нет. Чтение продолжится с главы {next}.",
-  "Column width on this device": "Column width on this device",
-  "Narrows the webtoon column. Saved on this device only, so your other screens are unaffected.": "Narrows the webtoon column. Saved on this device only, so your other screens are unaffected."
+  "Column width": "Ширина колонки",
+  "A share of the width Fit gives: a narrower column of pages for a wide screen.": "Доля ширины, которую задаёт «Масштаб»: более узкая колонка страниц для широкого экрана."
 }

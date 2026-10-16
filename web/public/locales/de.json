@@ -3950,6 +3950,6 @@
   "Chapter {a} is missing here. This continues at chapter {next}.": "Kapitel {a} fehlt hier. Weiter geht es mit Kapitel {next}.",
   "Chapters {a}–{b} are missing here. This continues at chapter {next}.": "Kapitel {a}–{b} fehlen hier. Weiter geht es mit Kapitel {next}.",
   "Chapters {list} are missing here. This continues at chapter {next}.": "Kapitel {list} fehlen hier. Weiter geht es mit Kapitel {next}.",
-  "Column width on this device": "Column width on this device",
-  "Narrows the webtoon column. Saved on this device only, so your other screens are unaffected.": "Narrows the webtoon column. Saved on this device only, so your other screens are unaffected."
+  "Column width": "Spaltenbreite",
+  "A share of the width Fit gives: a narrower column of pages for a wide screen.": "Ein Anteil der Breite, die „Anpassung“ ergibt: eine schmalere Seitenspalte für breite Bildschirme."
 }

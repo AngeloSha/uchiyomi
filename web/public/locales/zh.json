@@ -3950,6 +3950,6 @@
   "Chapter {a} is missing here. This continues at chapter {next}.": "这里缺少第{a}话。接下来从第{next}话继续。",
   "Chapters {a}–{b} are missing here. This continues at chapter {next}.": "这里缺少第{a}–{b}话。接下来从第{next}话继续。",
   "Chapters {list} are missing here. This continues at chapter {next}.": "这里缺少第{list}话。接下来从第{next}话继续。",
-  "Column width on this device": "Column width on this device",
-  "Narrows the webtoon column. Saved on this device only, so your other screens are unaffected.": "Narrows the webtoon column. Saved on this device only, so your other screens are unaffected."
+  "Column width": "栏宽",
+  "A share of the width Fit gives: a narrower column of pages for a wide screen.": "“适应方式”所给宽度的一部分：在宽屏上让页面栏更窄。"
 }

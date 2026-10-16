@@ -3950,6 +3950,6 @@
   "Chapter {a} is missing here. This continues at chapter {next}.": "第{a}話はここにありません。第{next}話から続きます。",
   "Chapters {a}–{b} are missing here. This continues at chapter {next}.": "第{a}–{b}話はここにありません。第{next}話から続きます。",
   "Chapters {list} are missing here. This continues at chapter {next}.": "第{list}話はここにありません。第{next}話から続きます。",
-  "Column width on this device": "Column width on this device",
-  "Narrows the webtoon column. Saved on this device only, so your other screens are unaffected.": "Narrows the webtoon column. Saved on this device only, so your other screens are unaffected."
+  "Column width": "列の幅",
+  "A share of the width Fit gives: a narrower column of pages for a wide screen.": "「表示サイズ」で決まる幅に対する割合です。ワイド画面ではページの列を細くできます。"
 }

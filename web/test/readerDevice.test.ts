@@ -92,3 +92,30 @@ test('the colour filter is on the page images, never on the column, the track or
   assert.ok(pageImages.length >= 5, `only ${pageImages.length} page images found in the track -- the scan is broken`);
   for (const tag of pageImages) assert.match(tag, /filter=\{imgFilter\}/, `a page image of the track is not filtered: ${tag.slice(0, 80)}`);
 });
+
+test('the column width is this device\'s: a step of 30 to 100, the full width for anything else', async () => {
+  const d = await import('../lib/readerDevice');
+  // #233. 100 is the column as it always was, so an install that never touches it reads as before.
+  assert.equal(d.DEFAULT_DEVICE.columnWidth, 100);
+  assert.equal(d.migrateDevicePrefs({ columnWidth: 60 }).columnWidth, 60);
+  assert.equal(d.migrateDevicePrefs({ columnWidth: 62 }).columnWidth, 60, 'a value between steps lands on one');
+  assert.equal(d.migrateDevicePrefs({ columnWidth: 30 }).columnWidth, 30);
+  // Reintroduce by trusting storage: a 10 % column -- or a NaN width, no column at all -- survives every reload.
+  for (const junk of [10, 250, -5, 'wide', null, NaN, Infinity, [50]]) {
+    assert.equal(d.migrateDevicePrefs({ columnWidth: junk }).columnWidth, 100, String(junk));
+  }
+  // One store for this device's settings, not a second beside it (the PR's yomi_reader_width): it travels with the rest.
+  d.saveDevicePrefs({ ...d.DEFAULT_DEVICE, columnWidth: 45 });
+  assert.equal(d.loadDevicePrefs().columnWidth, 45);
+  mem.clear();
+  assert.doesNotMatch(code(read('lib/readerPrefs.ts')), /columnWidth/, 'the column width reached the synced reader settings');
+});
+
+test('the column width narrows the reader\'s column, and its row says it is this device\'s', () => {
+  // Reintroduce the measure without it: the slider moves and the column does not.
+  assert.match(code(read('app/reader/page.tsx')), /const base = \(prefs\.fitWidth \? Math\.min\(w, 860\) : w\) \* \(device\.columnWidth \/ 100\);/);
+  const sheet = code(read('components/ReaderSettings.tsx'));
+  assert.match(sheet, /label=\{`\$\{tr\('Column width'\)\} · \$\{tr\('This device'\)\} · \$\{device\.columnWidth\}%`\}/);
+  assert.match(sheet, /onChange=\{\(e\) => setDevice\(\{ columnWidth: Number\(e\.target\.value\) \}\)\}/);
+  assert.doesNotMatch(sheet, /readerWidth|useReaderWidth/, 'a second store for one device setting');
+});
