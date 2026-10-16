@@ -85,7 +85,8 @@ test('a pull of the account\'s settings goes through mergePulled, and a mode swi
   const src = code(read('app/reader/page.tsx'));
   assert.match(src, /syncPrefsFromServer\(\)\.then\(\(p\) => setPrefs\(\(cur\) => mergePulled\(cur, p, titleOpen\.current\)\)\)/, 'the pull is laid over the live look whole');
   const anchor = between(src, 'useLayoutEffect(() => {\n    const el = scrollRef.current;\n    if (!el || !didInitScroll.current || laidOutMode.current === prefs.mode) return;', '}, [prefs.mode]);', 'the mode re-anchor');
-  assert.match(anchor, /el\.scrollLeft = trackSign \* \(slideOf\[current\] \?\? current\) \* el\.clientWidth;/, 'a switch to Paged does not land on the page being read');
+  // Through placeTrack since #263, which also records the place a resize keeps (readerResume.test.ts).
+  assert.match(anchor, /placeTrack\(el, slideOf\[current\] \?\? current\);/, 'a switch to Paged does not land on the page being read');
   assert.match(anchor, /el\.scrollTop = tops\[current\] \?\? 0;/, 'a switch to Webtoon does not land on the page being read');
 });
 

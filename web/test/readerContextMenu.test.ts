@@ -26,8 +26,9 @@ test('the menu offers the page, the chapter, the layout and the way out', () => 
   for (const label of ['Zoom in', 'Bookmark this page', 'Jump to a page', 'Next chapter', 'Previous chapter', 'Chapters', 'Full screen', 'Reader settings', 'Open the series', 'Leave the reader']) {
     assert.ok(menu.includes(`tr('${label}')`), label);
   }
-  // Next and previous are greyed at the ends of the series rather than missing.
-  assert.match(menu, /tr\('Next chapter'\), onSelect: \(\) => goChapter\(nextId\), disabled: !nextId/);
+  // Next and previous are greyed at the ends of the series rather than missing. Next goes the way every Next does, saying
+  // first what it skips (#236, goNextChapter).
+  assert.match(menu, /tr\('Next chapter'\), onSelect: \(\) => goNextChapter\(\), disabled: !nextId/);
 });
 
 test('a touch long-press keeps the browser\'s own menu', () => {

@@ -181,7 +181,8 @@ test('the paged track counts a key press from the slide on screen, and re-anchor
   assert.match(src, /const from = slideNow\(\);\s*const to = Math\.max\(0, Math\.min\(last, from \+ d\)\);/, 'the keyboard counts from slideOf[current] again');
   assert.doesNotMatch(src, /\(slideOf\[current\] \?\? current\) \+ d/, 'a key press counts from the page, not the slide on screen');
   // Turning the phone adds or removes a slide for every wide page before the one being read.
-  assert.match(src, /laidOutSplit\.current === splitTrack\) return;\s*laidOutSplit\.current = splitTrack;\s*el\.scrollLeft = trackSign \* \(slideOf\[current\] \?\? current\) \* el\.clientWidth;/,
+  // (Through placeTrack since #263: the place it puts the track is also the place a resize in the same turn keeps.)
+  assert.match(src, /laidOutSplit\.current === splitTrack\) return;\s*laidOutSplit\.current = splitTrack;\s*placeTrack\(el, slideOf\[current\] \?\? current\);/,
     'a change of split does not put the track back on the page being read');
   // And a split is drawn only upright and never in spread mode.
   assert.match(src, /const wideMode: WidePages = portrait && !\(prefs\.mode === 'paged' && prefs\.spread\) \? prefs\.widePages : 'whole';/);
