@@ -32,7 +32,7 @@ const CHECK_TITLE_KEYS = keys(
   'Chapter gaps', 'Suspiciously short chapters', 'Chapters that would not download', 'Series that can no longer update',
   'Source health', 'Duplicate series', 'Impossible chapter numbers', 'Cloudflare solver', 'Version',
   'Extension source limit', 'Library scan', 'Downloads missing from the library', 'Extension engine', 'Chapter numbering',
-  'The same chapter saved twice', 'Folders scanned twice',
+  'The same chapter saved twice', 'Folders scanned twice', 'Disk space and folders', 'Tracker sync', 'Chapter files',
 );
 export const CHECK_TITLES: Readonly<Record<string, (typeof CHECK_TITLE_KEYS)[number]>> = {
   'chapter-gaps': CHECK_TITLE_KEYS[0],
@@ -55,6 +55,11 @@ export const CHECK_TITLES: Readonly<Record<string, (typeof CHECK_TITLE_KEYS)[num
   'saved-twice': CHECK_TITLE_KEYS[14],
   // v0.52.0 (#134): the downloads folder inside the library, or the library inside it (bff lib/health.ts foldersScannedTwice).
   'folders-twice': CHECK_TITLE_KEYS[15],
+  // v0.72.0 (#253, #252): the downloads disk and the library's folders, members' tracker sign-ins, and chapter files the
+  // nightly count found no page in (bff lib/healthDisk.ts, lib/healthTrackers.ts, lib/healthFiles.ts).
+  disk: CHECK_TITLE_KEYS[16],
+  trackers: CHECK_TITLE_KEYS[17],
+  files: CHECK_TITLE_KEYS[18],
 };
 
 export function checkTitle(c: Pick<HealthCheck, 'id' | 'title'>): string {
@@ -154,6 +159,14 @@ export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
     what: () => tr('Deletes the copy that arrived later; the one you had first stays. The chapter stays listed and reading history is kept; a bookmarked chapter is skipped.'),
     how: () => tr('Only the files the row names go: another site’s split of a chapter you already had, which arrived after it. Each stays listed as a deleted chapter, so updates do not fetch it back.'),
     eta: moment,
+  },
+  // v0.72.0, Chapter files: the series page's Fetch again (POST /api/admin/series/:id/chapters/refetch) for the files the
+  // row names -- only ones Uchiyomi downloaded itself, which the route refuses otherwise.
+  refetch: {
+    label: () => tr('Fetch again'),
+    what: () => tr('Downloads these chapters again from the series’ sources. Each old file is kept until its new copy lands, and put back if it does not.'),
+    how: () => tr('Only a file Uchiyomi downloaded itself is fetched again, as the copy its sources list now; a file in a library you built is yours to replace. The download shows under Library → Downloads.'),
+    eta: () => tr('Starts at once; the download runs in the background'),
   },
   fill: {
     label: () => tr('Fill now'),

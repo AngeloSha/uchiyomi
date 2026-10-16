@@ -61,7 +61,8 @@ test('the admin rail ends with the version, and a phone says it among the header
     'the admin rail has no version');
   const line = slice(admin, 'function VersionLine(', 'function VersionFacts(');
   assert.match(line, /queryKey: \['admin-stats'\], queryFn: \(\) => api<any>\('\/api\/admin\/stats'\)/, 'the version is not the server\'s');
-  assert.match(line, /queryKey: \['admin-health'\],\s*queryFn: \(\) => api<[^\n]*>\('\/api\/admin\/health'\)/, 'the version line asks for an update of its own');
+  // v0.72.0: the one query every reader of the report on Admin shares (lib/healthBySeries.ts healthQuery).
+  assert.match(line, /useQuery\(healthQuery\)/, 'the version line asks for an update of its own');
   assert.doesNotMatch(admin, /api\.github\.com|releases\/latest/, 'the page asks GitHub itself');
   // Desktop: the app's own version, the one the person installed.
   assert.match(line, /const running: string \| null = bridge\(\)\?\.version \|\| stats\?\.version \|\| null;/, 'Desktop does not show the app\'s version');

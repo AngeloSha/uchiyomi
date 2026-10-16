@@ -326,7 +326,8 @@ test('each Needs-you item has its one key: its page, its card, or Admin → Sett
   assert.doesNotMatch(dialog(ended(run({ summary: summary({ done: EIGHT }) }))), /<span dir="auto" class="min-w-0 break-words">/, 'a line of what it did takes its direction from its first letter');
   // The card key closes the dialog, opens the card and scrolls to it, clear of the top bar.
   const health = slice(code('app/admin/page.tsx'), 'function Health()', 'function DesktopUpdateNote()');
-  assert.match(health, /setFixing\(false\);\s*setOpen\(id\);\s*requestAnimationFrame\(\(\) => document\.querySelector\(`\[data-health-check="\$\{CSS\.escape\(id\)\}"\]`\)\?\.scrollIntoView/);
+  // v0.72.0: from the By series view it goes back to the cards first -- a card is only there By check.
+  assert.match(health, /setFixing\(false\);\s*if \(view !== 'checks'\) pickView\('checks'\);\s*setOpen\(id\);\s*requestAnimationFrame\(\(\) => document\.querySelector\(`\[data-health-check="\$\{CSS\.escape\(id\)\}"\]`\)\?\.scrollIntoView/);
   assert.match(health, /data-health-check=\{c\.id\} className=\{`[^`]*\bscroll-mt-4\b[^`]*\blg:scroll-mt-20\b/, 'the card scrolls under the top bar');
   // What clears by itself: one muted line each, with when.
   const at = new Date(Date.now() + 3 * 3_600_000 + 60_000).toISOString();

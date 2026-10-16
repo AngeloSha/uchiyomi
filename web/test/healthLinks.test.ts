@@ -131,3 +131,17 @@ test('a folder scanned twice links to the install guide\'s Volumes section, whic
   assert.match(readFileSync(join(__dirname, '..', 'app', 'admin', 'page.tsx'), 'utf8'),
     /\{\.\.\.\(\/\^https\?:\\\/\\\/\/\.test\(l\.href\) \? \{ target: '_blank', rel: 'noopener noreferrer' \} : \{\}\)\}/, 'the install guide opens in place of the app');
 });
+
+test('v0.72.0: a disk row opens where its floor is set, a folder row Verify chapter files, a chapter file its series', () => {
+  // Reintroduce by dropping the cases: the free-space row and the folder row both fall back to nothing to open.
+  assert.deepEqual(healthLinks('disk', { title: 'Downloads disk', detail: '', key: 'space:downloads' }),
+    [{ href: '/admin/?tab=Settings&section=downloads', label: 'Downloads' }]);
+  assert.deepEqual(healthLinks('disk', { title: 'Library / (the folder itself)', detail: '', key: 'folder:library' }),
+    [{ href: '/admin/?tab=Tasks&section=task-verify', label: 'Verify chapter files' }]);
+  assert.deepEqual(healthLinks('trackers', { title: 'AniList · ana', detail: '', key: 'anilist:u1' }), [],
+    'a member\'s sign-in is theirs to renew: nothing for the admin to open');
+  assert.deepEqual(healthLinks('files', { title: 'Walk', detail: '', seriesId: 's1', numbers: [12, 13] }), [{ href: '/series/?id=s1&ch=12' }],
+    'the series, at the first chapter Fetch again would fetch');
+  assert.deepEqual(healthLinks('files', { title: 'Walk', detail: '', seriesId: 's1' }), [{ href: '/series/?id=s1' }],
+    'a file in a library somebody built: the series');
+});

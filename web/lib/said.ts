@@ -945,6 +945,12 @@ const WORDS: Record<string, (p: P) => string | null> = {
     ? tr('1 downloaded chapter is where the library scan never looks')
     : tr('{n} downloaded chapters are where the library scan never looks', { n: num(p, 'n') })),
   'autofix.needs.noRoom': (p) => tr('{name} may carry your series, but the source limit is full: free a slot', { name: str(p, 'name') }),
+  // v0.72.0: the cards no run changes (bff lib/healthDisk.ts, lib/healthTrackers.ts, lib/healthFiles.ts).
+  'autofix.needs.disk': (p) => (num(p, 'n') === 1 ? tr('1 disk or folder needs a look') : tr('{n} disks or folders need a look', { n: num(p, 'n') })),
+  'autofix.needs.trackers': (p) => (num(p, 'n') === 1
+    ? tr('1 tracker connection needs a look')
+    : tr('{n} tracker connections need a look', { n: num(p, 'n') })),
+  'autofix.needs.files': (p) => (num(p, 'n') === 1 ? tr('1 chapter file cannot be read') : tr('{n} chapter files cannot be read', { n: num(p, 'n') })),
 
   'autofix.clears.cooldown': (p) => tr('{name} is cooling down', { name: str(p, 'name') }),
   'autofix.clears.sweep': (p) => (num(p, 'n') === 1
@@ -963,6 +969,58 @@ const WORDS: Record<string, (p: P) => string | null> = {
   // v0.55.3: one of two solvers is not answering while the other solves (never on the desktop app: one helper, no backup).
   'autofix.clears.mainSolverDown': () => tr('The main Cloudflare solver is not answering, and the backup is solving meanwhile'),
   'autofix.clears.backupSolverDown': () => tr('The backup Cloudflare solver is not answering, and the main one is solving'),
+
+  // ---- Disk space and folders (v0.72.0, bff lib/healthDisk.ts, from #253): sizes in GB, one decimal, the reader's way.
+  'disk.title': () => tr('Downloads disk'),
+  'disk.free': (p) => tr('{free} GB free of {total} GB', { free: numText(num(p, 'free')), total: numText(num(p, 'total')) }),
+  'disk.full': (p) => tr('{free} GB free of {total} GB: new downloads stop under {floor} GB', {
+    free: numText(num(p, 'free')), total: numText(num(p, 'total')), floor: numText(num(p, 'floor')),
+  }),
+  'disk.archiveWaits': (p) => tr('{free} GB free of {total} GB: the slow archive waits until {floor} GB are free', {
+    free: numText(num(p, 'free')), total: numText(num(p, 'total')), floor: numText(num(p, 'floor')),
+  }),
+  'disk.empty': (p) => (num(p, 'n') === 1
+    ? tr('Empty, but the library records 1 chapter in it: is the share mounted?')
+    : tr('Empty, but the library records {n} chapters in it: is the share mounted?', { n: num(p, 'n') })),
+  'disk.live': (p) => (num(p, 'n') === 1 ? tr('1 disk or folder needs a look') : tr('{n} disks or folders need a look', { n: num(p, 'n') })),
+  'disk.fine': (p) => tr('{free} GB free for downloads', { free: numText(num(p, 'free')) }),
+  'disk.unmeasured': () => tr('Free space could not be measured here'),
+  'disk.noteFloor': (p) => tr('New downloads stop when the downloads disk has less than {floor} GB free.', { floor: numText(num(p, 'floor')) }),
+  'disk.noteNoFloor': () => tr('Downloads are never stopped for free space here (MIN_FREE_GB is 0).'),
+  'disk.noteArchive': (p) => tr('The slow archive waits below {floor} GB (Admin → Settings → Downloads).', { floor: numText(num(p, 'floor')) }),
+  'disk.noteFolders': () => tr('A library or download folder that cannot be read, or that is empty while the library records chapters in it, is usually a share that is not mounted; nothing is marked missing because of it. Only the top of each folder is read here: Verify chapter files (Admin → Tasks) checks every file.'),
+
+  // ---- Tracker sync (v0.72.0, bff lib/healthTrackers.ts, @Squeaks72's card from #253). `error` is the tracker's own.
+  'trackers.refused': () => tr('The tracker refused the saved sign-in'),
+  'trackers.failed': (p) => tr('The last sync failed: {error}', { error: str(p, 'error') }),
+  'trackers.ended': (p) => tr('The sign-in ended {date}', { date: dayText(p.at) }),
+  'trackers.ending': (p) => tr('The sign-in ends {date}', { date: dayText(p.at) }),
+  'trackers.live': (p) => (num(p, 'n') === 1 ? tr('1 tracker connection needs a look') : tr('{n} tracker connections need a look', { n: num(p, 'n') })),
+  'trackers.fine': (p) => (num(p, 'n') === 1 ? tr('The one tracker connection is syncing') : tr('All {n} tracker connections are syncing', { n: num(p, 'n') })),
+  'trackers.none': () => tr('Nobody has connected a tracker'),
+  'trackers.note': () => tr('Only the person can sign in again, under Profile → Connections; a sign-in the tracker refused stays off until they do. A sign-in ending within 14 days is a finding, and within 30 days is listed for reference.'),
+
+  // ---- Chapter files (v0.72.0, bff lib/healthFiles.ts, rebuilt from #252)
+  'files.detail': (p) => {
+    const more = num(p, 'more');
+    const numbers = strs(p, 'numbers').join(listSep()) + (more > 0 ? ` ${tr('and {n} more', { n: more })}` : '');
+    return num(p, 'n') === 1
+      ? tr('1 chapter file with no page that can be read: {numbers}', { numbers })
+      : tr('{n} chapter files with no page that can be read: {numbers}', { n: num(p, 'n'), numbers });
+  },
+  'files.notOurs': (p) => (num(p, 'n') === 1
+    ? tr('1 of them is in a library you built: replace it by hand')
+    : tr('{n} of them are in a library you built: replace them by hand', { n: num(p, 'n') })),
+  'files.live': (p) => {
+    const n = num(p, 'n');
+    const m = num(p, 'm');
+    if (n === 1) return tr('1 chapter file has no page that can be read');
+    return m > 1
+      ? tr('{n} chapter files in {m} series have no page that can be read', { n, m })
+      : tr('{n} chapter files have no page that can be read', { n });
+  },
+  'files.none': () => tr('Every chapter file the nightly count opened has pages'),
+  'files.note': () => tr('The nightly repair opens each chapter file once to count its pages, and these are the files it found no page in: empty, cut short by a download, damaged, or gone. Fetch again downloads a new copy of a file Uchiyomi fetched itself and keeps the old one until the new copy lands; a file in a library you built is yours to replace. Nothing here deletes a file, and Fix everything leaves these to you.'),
 
   // ---- A diagnosis's fix (bff lib/sourceDiagnosis.ts FixCode). ADMIN ONLY, like the server's.
   'fix.solverCrash': () => (isDesktop()

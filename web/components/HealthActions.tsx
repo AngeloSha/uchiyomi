@@ -49,6 +49,8 @@ import {
   recordFor, runTouches, solverDown, solverQuiet, stepFindings, type RepairEstimate, type RepairStatus,
 } from '@/lib/repairRun';
 import { useRepairRun } from '@/lib/useRepairRun';
+import { kickDownloads } from '@/lib/useServerDownloads';
+import { fetchingToast } from '@/lib/jobs';
 import { testStep } from '@/lib/sourceEvidence';
 import { diagnosisReason, itemDetail, itemTitle, type Said } from '@/lib/said';
 import { useFindRun } from '@/lib/useFindRun';
@@ -395,6 +397,23 @@ export function HealthRow({ check, item, rowKey, links, children, compact }: {
         };
       case 'delete':
         return { ...base, danger: true, label: bookIds.length === 1 ? tr('Delete chapter') : tr('Delete chapters'), onRun: () => setAsking('delete') };
+      // v0.72.0, Chapter files: the series page's Fetch again for the files the row names, which are only ones Uchiyomi
+      // downloaded itself (bff lib/healthFiles.ts). The route keeps each old file until its new copy lands, so there is
+      // nothing to confirm. The chapters leave the card while they download -- the route marks them -- and the row goes
+      // when Health answers again, taking this line with it: said in a notice too.
+      case 'refetch':
+        return {
+          ...base, primary: true, label: tr('Fetch again'),
+          onRun: () => act(a, async () => {
+            const r = await api<{ total: number; skipped?: Array<{ id: string; reason: string }> }>(
+              `/api/admin/series/${encodeURIComponent(item.seriesId || '')}/chapters/refetch`, { method: 'POST', json: { bookIds } });
+            void kickDownloads(qc);
+            const skipped = r.skipped?.length ?? 0;
+            const text = fetchingToast(r.total) + (skipped ? ` · ${skipped === 1 ? tr('1 skipped') : tr('{n} skipped', { n: skipped })}` : '');
+            toast(text, 'info');
+            return { text, ...(skipped ? { partial: true } : {}) };
+          }, tr('Starting…')),
+        };
       case 'test':
         return {
           ...base, label: tr('Test'),

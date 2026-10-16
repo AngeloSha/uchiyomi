@@ -45,6 +45,9 @@ import Link from 'next/link';
 import { healthLinks } from '@/lib/healthLinks';
 import { useLayer } from '@/lib/layers';
 import { SourceHealthBody } from '@/components/SourceHealthBody';
+import { HealthBySeries } from '@/components/HealthBySeries';
+import { Segmented } from '@/components/settings';
+import { healthQuery, healthView, setHealthView, type HealthView } from '@/lib/healthBySeries';
 import { releaseHref, shownVersion, updateState, type UpdateState } from '@/lib/versionLine';
 import { useSectionArrival } from '@/lib/useSectionArrival';
 import { joinsOnTheirOwn, memberDefaultsOf, type MemberDefaults } from '@/lib/memberDefaults';
@@ -152,10 +155,7 @@ function AdminInner() {
 function AdminHero({ onBack, compact = false }: { onBack: () => void; onScan?: undefined; compact?: boolean }) {
   const qc = useQueryClient();
   const { data: stats } = useQuery({ queryKey: ['admin-stats'], queryFn: () => api<any>('/api/admin/stats') });
-  const { data: health } = useQuery({
-    queryKey: ['admin-health'],
-    queryFn: () => api<{ generatedAt: string; checks: HealthCheck[] }>('/api/admin/health'),
-  });
+  const { data: health } = useQuery(healthQuery);
   // One random series for the wash. `keepPreviousData` is deliberately off: a different backdrop on each
   // visit is the point, and it is the cheapest way to make the panel feel like part of the library.
   const { data: rnd } = useQuery({
@@ -271,10 +271,7 @@ function AdminHero({ onBack, compact = false }: { onBack: () => void; onScan?: u
  */
 function VersionLine() {
   const { data: stats } = useQuery({ queryKey: ['admin-stats'], queryFn: () => api<any>('/api/admin/stats') });
-  const { data: health } = useQuery({
-    queryKey: ['admin-health'],
-    queryFn: () => api<{ generatedAt: string; checks: HealthCheck[] }>('/api/admin/health'),
-  });
+  const { data: health } = useQuery(healthQuery);
   const running: string | null = bridge()?.version || stats?.version || null;
   if (!running) return null;
   return (
@@ -316,10 +313,7 @@ function VersionFacts({ running, update }: { running: string; update: UpdateStat
 function Overview({ onTab }: { onTab: (t: Tab) => void }) {
   const still = useReducedMotion();
   const { data: stats } = useQuery({ queryKey: ['admin-stats'], queryFn: () => api<any>('/api/admin/stats') });
-  const { data: health } = useQuery({
-    queryKey: ['admin-health'],
-    queryFn: () => api<{ generatedAt: string; checks: HealthCheck[] }>('/api/admin/health'),
-  });
+  const { data: health } = useQuery(healthQuery);
   // What the household is actually reading, cross-user and last-14-days. The endpoint has existed since the
   // home screen shipped and admin has never called it; it is the best available answer to "is anyone
   // reading any of this", for one query and no new component.
@@ -1890,19 +1884,28 @@ function Health() {
   const [open, setOpen] = useState<string | null>(null);
   // v0.55.0: Fix everything's dialog -- the question, the run, or how the run ended.
   const [fixing, setFixing] = useState(false);
-  const { data, isFetching, refetch } = useQuery({
-    queryKey: ['admin-health'],
-    queryFn: () => api<{ generatedAt: string; checks: HealthCheck[] }>('/api/admin/health'),
-  });
+  // v0.72.0 (#254): one card per check, or one per series. This device's choice, read after mount: the static export
+  // renders without localStorage. The report asks for the series while it is By series (lib/healthBySeries.ts).
+  const [view, setView] = useState<HealthView>('checks');
+  useEffect(() => { setView(healthView()); }, []);
+  const { data, isFetching, refetch } = useQuery(healthQuery);
   const checks = data?.checks || [];
   const bad = checks.filter((c) => c.status !== 'ok').length;
   // After anything on this page changes a finding -- a repair that ENDED, an ignore -- the page is checked
   // again, and the header's mark with it: the refetch stores a new summary, and the header reads that summary.
   const qc = useQueryClient();
   const recheck = () => refetch().then(() => qc.invalidateQueries({ queryKey: ['health-summary'] }));
-  // A Needs-you item's card key, in Fix everything's end: the dialog closes, and that card opens where it is.
+  const pickView = (v: HealthView) => {
+    setHealthView(v);
+    setView(v);
+    // The cards are the same either way; By series needs the grouping, which the report carries only when asked.
+    if (v === 'series' && !data?.bySeries) void refetch();
+  };
+  // A Needs-you item's card key, in Fix everything's end: the dialog closes, and that card opens where it is -- in the
+  // By check view, which is where a card is.
   const showCheck = (id: string) => {
     setFixing(false);
+    if (view !== 'checks') pickView('checks');
     setOpen(id);
     requestAnimationFrame(() => document.querySelector(`[data-health-check="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'start' }));
   };
@@ -1939,7 +1942,15 @@ function Health() {
         <SafeRepairLine checks={checks} />
         <RepairLiveStrip />
 
-        {checks.map((c) => {
+        {/* v0.72.0 (#254): the same findings, one card per check or one per series. */}
+        <div className="full" data-health-view>
+          <Segmented square label={tr('Group the findings')} value={view} onChange={pickView}
+            options={[{ value: 'checks', label: tr('By check') }, { value: 'series', label: tr('By series') }]} />
+        </div>
+        {view === 'series' && (data?.bySeries
+          ? <HealthBySeries rows={data.bySeries} checks={checks} />
+          : <p role="status" className="full py-8 text-center text-sm text-fog-500">{tr('Checking your library…')}</p>)}
+        {view === 'checks' && checks.map((c) => {
           const isOpen = open === c.id;
           // Notes explain important states that are deliberately not findings. A readable partial chapter, for
           // example, is absent from the active failure ledger but this note is the only place Health says where

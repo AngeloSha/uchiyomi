@@ -95,6 +95,9 @@ const ACTIONS: { action: string; labels: string[]; wants: RegExp }[] = [
   // v0.55.0: a series frozen because its source is over the source limit -- Admin → Sources on that source, a whole page
   // load (the console reads its tab from the address once), where one nothing uses can be switched off to make room.
   { action: 'free_slot', labels: ["tr('Free a slot')"], wants: /onRun: \(\) => \{ window\.location\.assign\(freeSlotHref\(item\)\); \}/ },
+  // v0.72.0, Chapter files: the series page's own Fetch again for the files the row names, which keeps each old file
+  // until its new copy lands -- never a delete, and no confirmation.
+  { action: 'refetch', labels: ["tr('Fetch again')"], wants: /\/api\/admin\/series\/\$\{encodeURIComponent\(item\.seriesId \|\| ''\)\}\/chapters\/refetch`, \{ method: 'POST', json: \{ bookIds \} \}\)/ },
 ];
 
 test('every action the health check can offer renders one key, with the label and the request it promises', () => {

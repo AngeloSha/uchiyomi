@@ -571,7 +571,10 @@ export type HealthAction =
   | 'replace_source'
   // v0.55.0: a frozen series whose source is over the extension engine's source limit. Opens Admin → Sources on that
   // source, where one nothing uses can be switched off to make room (no server action).
-  | 'free_slot';
+  | 'free_slot'
+  // v0.72.0, Chapter files: Fetch again for the row's `bookIds` (POST /api/admin/series/:id/chapters/refetch), the
+  // series page's own route: each old file is kept until its new copy lands.
+  | 'refetch';
 
 /** One step of the nightly repair (`bff/src/lib/repair.ts`), as `POST /api/admin/tasks/repair/run` takes it. */
 export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups' | 'names' | 'directions';
@@ -715,6 +718,25 @@ export interface HealthCheck {
   items: HealthItem[];
   /** #115, 'sources' only: how long one Test may take, for the Test key's running clock. */
   testMs?: number;
+}
+
+/**
+ * v0.72.0, Health's By series view (GET /api/admin/health?view=series, bff lib/health.ts groupBySeries): one series and
+ * every finding about it, each with its card's id, grouped on the server from each card's whole list.
+ */
+export interface SeriesFindings {
+  seriesId: string;
+  title: string;
+  /** Its worst card's. */
+  status: 'warn' | 'problem';
+  findings: Array<{ check: string; item: HealthItem }>;
+}
+
+export interface HealthReport {
+  generatedAt: string;
+  checks: HealthCheck[];
+  /** Only with `?view=series`. */
+  bySeries?: SeriesFindings[];
 }
 
 export interface HomePayload {
