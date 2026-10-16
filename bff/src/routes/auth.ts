@@ -28,7 +28,7 @@ import {
   exchangeRefreshToken,
   refreshExpiresAt,
 } from '../lib/auth';
-import { generateRecoveryCodes, generateSecret, otpauthURL, sha256, verifyTotp } from '../lib/totp';
+import { generateRecoveryCodes, generateSecret, otpauthURL, recoveryCodeForm, sha256, verifyTotp } from '../lib/totp';
 import { oidcEnabled, oidcName, beginLogin, completeLogin, isAdminByGroup, type OidcClaims } from '../lib/oidc';
 import { randomBytes } from 'crypto';
 import { SESSION_COOKIE as KOMGA_SESSION_COOKIE } from '../lib/komgaSession';
@@ -40,7 +40,7 @@ import { applyMemberDefaults } from '../lib/memberDefaults';
 const loginBody = z.object({
   username: z.string().max(64).optional(),
   password: z.string().min(1),
-  code: z.string().max(16).optional(), // TOTP or recovery code
+  code: z.string().max(32).optional(), // TOTP or recovery code (xxxxx-xxxxx-xxxxx-xxxxx is 23)
   deviceId: z.string().max(128).optional(),
   deviceName: z.string().max(128).optional(),
 });
@@ -187,12 +187,11 @@ export default async function authRoutes(app: FastifyInstance) {
       if (!code) return reply.code(401).send({ error: 'totp_required' });
       const clean = code.trim();
       let pass = user.totp_secret ? verifyTotp(user.totp_secret, clean) : false;
-      if (!pass && /^[0-9a-f]{4}-[0-9a-f]{6}$/i.test(clean)) {
-        const h = sha256(clean.toLowerCase());
-        if (user.recovery_codes.includes(h)) {
-          pass = true;
-          await q('UPDATE users SET recovery_codes = array_remove(recovery_codes, $2) WHERE id = $1', [user.id, h]);
-        }
+      const recovery = recoveryCodeForm(clean);
+      if (!pass && recovery) {
+        // Used up in the same statement that finds it, so two sign-ins racing with one code get one session.
+        const h = sha256(recovery);
+        pass = !!(await one('UPDATE users SET recovery_codes = array_remove(recovery_codes, $2) WHERE id = $1 AND $2 = ANY(recovery_codes) RETURNING id', [user.id, h]));
       }
       if (!pass) {
         await logAudit('login.totp_fail', { userId: user.id, username, req });

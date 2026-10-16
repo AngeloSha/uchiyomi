@@ -66,3 +66,16 @@ export const sha256 = (s: string): string => createHash('sha256').update(s).dige
 export function generateRecoveryCodes(n = 8): string[] {
   return Array.from({ length: n }, () => randomBytes(10).toString('hex').replace(/(.{5})(.{5})(.{5})(.{5})/, '$1-$2-$3-$4'));
 }
+
+/**
+ * A typed recovery code in the form its hash was taken of, or null when it cannot be one. Case, spaces and dashes
+ * are forgiven, so a code read aloud or pasted without its dashes still works. Two shapes: today's 20 hex digits
+ * (xxxxx-xxxxx-xxxxx-xxxxx, generateRecoveryCodes) and the 10 of codes made before the move to 10 bytes (xxxx-xxxxxx),
+ * which accounts may still hold. Sign-in tested only the old shape, so no code made since v0.21.0 was ever accepted.
+ */
+export function recoveryCodeForm(typed: string): string | null {
+  const hex = (typed || '').toLowerCase().replace(/[\s-]/g, '');
+  if (/^[0-9a-f]{20}$/.test(hex)) return hex.replace(/(.{5})(.{5})(.{5})(.{5})/, '$1-$2-$3-$4');
+  if (/^[0-9a-f]{10}$/.test(hex)) return hex.replace(/(.{4})(.{6})/, '$1-$2');
+  return null;
+}
