@@ -151,6 +151,18 @@ export async function ignoreFinding(check: IgnorableCheck, key: string, f: Findi
   );
 }
 
+/**
+ * The runs of one series' chapter gaps an admin ignored on Health, as [lo, hi] (#236): what the reader leaves unsaid as it
+ * moves on to the next chapter. The card's own key and members, so the two can never disagree about what was ignored. A
+ * failed read is "nothing ignored", as for the page.
+ */
+export async function ignoredGapRuns(seriesId: string): Promise<Array<[number, number]>> {
+  const rows = await q<{ members: string[] }>(
+    `SELECT members FROM health_ignored WHERE check_id = 'chapter-gaps' AND item_key = $1`, [`series:${seriesId}`],
+  ).catch(() => [] as Array<{ members: string[] }>);
+  return (rows[0]?.members ?? []).map(parseRange).filter((x): x is [number, number] => !!x);
+}
+
 export async function unignoreFinding(check: IgnorableCheck, key: string): Promise<boolean> {
   const r = await q<{ check_id: string }>('DELETE FROM health_ignored WHERE check_id = $1 AND item_key = $2 RETURNING check_id', [check, key]);
   return r.length > 0;

@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { ARM_MS, NEAR_END_PAGES, chapterGap, pagesAfter, skipNeedsConfirm, stillArmed } from '../lib/readerNav';
+import { ARM_MS, NEAR_END_PAGES, gapsBetween, pagesAfter, skipNeedsConfirm, stillArmed } from '../lib/readerNav';
 
 test('skipping ahead from mid-chapter asks twice; the last pages do not', () => {
   assert.equal(skipNeedsConfirm(30), true);
@@ -25,23 +25,39 @@ test('pagesAfter counts only the current chapter', () => {
   assert.equal(pagesAfter(flow, 9), 0);
 });
 
-test('chapterGap names the whole chapters skipped between neighbours', () => {
-  assert.deepEqual(chapterGap(43, 100), { first: 44, last: 99 });
-  assert.deepEqual(chapterGap(100, 102), { first: 101, last: 101 });
-  assert.deepEqual(chapterGap(10.5, 12), { first: 11, last: 11 });
-  assert.equal(chapterGap(43, 44), null);
-  assert.equal(chapterGap(10, 10.5), null);
-  assert.equal(chapterGap(10.5, 11), null);
-  assert.equal(chapterGap(5, 5), null);
-  assert.equal(chapterGap(9, 3), null, 'an order that does not run forward warns of nothing');
-  assert.equal(chapterGap(undefined, 3), null);
-  assert.equal(chapterGap(3, null), null);
-  assert.equal(chapterGap(NaN, 3), null);
+test('gapsBetween names the series\' missing runs that lie between two neighbours, and nothing else', () => {
+  // The runs are the server's (GET /api/series/:id/gaps): 44-99 and 101 missing, 3-7 held by one file, so no run.
+  const runs = [{ lo: 44, hi: 99 }, { lo: 101, hi: 101 }, { lo: 150, hi: 160 }];
+  assert.deepEqual(gapsBetween(runs, 43, 100), [{ lo: 44, hi: 99 }]);
+  assert.deepEqual(gapsBetween(runs, 100, 102), [{ lo: 101, hi: 101 }]);
+  assert.deepEqual(gapsBetween(runs, 43, 102), [{ lo: 44, hi: 99 }, { lo: 101, hi: 101 }], 'a held chapter between two runs');
+  assert.deepEqual(gapsBetween(runs, 155, 170), [{ lo: 156, hi: 160 }], 'cut to the numbers between the two');
+  assert.deepEqual(gapsBetween(runs, 43.5, 99.5), [{ lo: 44, hi: 99 }], 'half chapters at either end');
+  // Reintroduce counting from the chapters' own numbers (the PR's chapterGap): a file holding 1 to 7 then chapter 8 reads
+  // "2-7 missing". By the server's runs there is none there.
+  assert.deepEqual(gapsBetween(runs, 1, 8), []);
+  assert.deepEqual(gapsBetween(runs, 99.5, 100), []);
+  assert.deepEqual(gapsBetween(runs, 5, 5), []);
+  assert.deepEqual(gapsBetween(runs, 120, 40), [], 'an order that does not run forward warns of nothing');
+  assert.deepEqual(gapsBetween(runs, undefined, 100), []);
+  assert.deepEqual(gapsBetween(runs, 43, null), []);
+  assert.deepEqual(gapsBetween(runs, NaN, 100), []);
+  assert.deepEqual(gapsBetween([], 43, 100), [], 'no runs, nothing said: offline, or the series is whole');
 });
 
-test('the reader says so when the chapter it moves to skips numbers, as the next one joins and on Next', () => {
+test('the reader says so as it reaches the next chapter, and on every way to Next chapter', () => {
   const src = readFileSync(join(__dirname, '..', 'app/reader/page.tsx'), 'utf8');
-  // Reintroduce by dropping either call: the reader moves over a hole in silence.
-  assert.match(src, /if \(outcome === 'ok'\) warnGap\(last\?\.id, next\.id\);/);
-  assert.match(src, /warnGap\(activeChapter\?\.id, nextId\); goChapter\(nextId\)/);
+  // From the server's runs, never from the reader's chapter list.
+  assert.match(src, /api<\{ gaps: GapRun\[\] \}>\(`\/api\/series\/\$\{chapters\[0\]!\.seriesId\}\/gaps`\)/);
+  assert.match(src, /gapsBetween\(gapData\?\.gaps \?\? \[\],/);
+  // As the next chapter is reached, once a chapter -- not as it is appended four pages early.
+  assert.match(src, /warnedGaps\.current\.add\(to\.id\);\n\s*warnGap\(chapters\[activeCi - 1\]\?\.id, to\.id\);/);
+  assert.doesNotMatch(src, /if \(outcome === 'ok'\) warnGap/);
+  // The footer, a key or a controller (perform) and the right-click menu all go through goNextChapter. Reintroduce
+  // `goChapter(nextId)` on any of them: `]` skips a hole in silence.
+  assert.match(src, /const goNextChapter = \(\) => \{ if \(!nextId\) return; warnGap\(activeChapter\?\.id, nextId\); goChapter\(nextId\); \};/);
+  assert.match(src, /if \(action === 'nextChapter'\) goNextChapter\(\);/);
+  assert.match(src, /label: tr\('Next chapter'\), onSelect: \(\) => goNextChapter\(\)/);
+  assert.match(src, /setArmedNext\(null\); goNextChapter\(\); return;/);
+  assert.doesNotMatch(src, /goChapter\(nextId\)(?!; \};)/, 'no way to the next chapter around the warning');
 });

@@ -1411,10 +1411,14 @@ The order becomes *your defaults < the library's < the source's < this series*, 
 adjusted by hand still wins, and a library without defaults changes nothing. A chapter downloaded for offline reading
 opens with the library's defaults this device last saw.
 
-**Missing chapters.** When the chapter the reader moves on to skips whole numbers that are not in the library (you are
-on 43 and the next one you have is 100), a short notice names them -- *Chapters 44-99 are missing here. This continues
-at chapter 100.* -- as the next chapter joins the page or when you use **Next chapter**. Nothing is shown when the
-numbers run on, for a half chapter such as 10.5, or when either number is unknown.
+**Missing chapters** (since v0.73.0). When the chapter the reader moves on to skips numbers the series is missing (you
+are on 43 and the next one here is 100), a short notice names them -- *Chapters 44–99 are missing here. This continues
+at chapter 100.* -- as you reach the next chapter in the column or the track, or when you go to it with **Next
+chapter** (the footer button, `]`, a controller or the right-click menu). What counts as missing is what Admin → Health
+→ *Chapter gaps* counts: a file holding several chapters (`Batman 01-07`) holds all of them, a chapter deleted on purpose
+(the read-chapter cleanup, *Delete files*) is not missing, and neither is a gap an admin chose to ignore there. Nothing
+is shown when the numbers run on, for a half chapter such as 10.5, or offline, where the reader cannot tell a missing
+chapter from one that is not downloaded.
 
 ### Reading comfort
 

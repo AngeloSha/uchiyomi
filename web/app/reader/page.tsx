@@ -16,10 +16,10 @@ import { readTap, undoLeft, undoWindow, type TapZone } from '@/lib/readerGesture
 import { PAGE_ACTIONS, READER_ACTIONS, actionForKey, keyMapFor, type ReaderAction } from '@/lib/readerKeys';
 import { padMapFor } from '@/lib/readerPad';
 import { useGamepad } from '@/lib/useGamepad';
-import { ARM_MS, chapterGap, pagesAfter, skipNeedsConfirm, stillArmed } from '@/lib/readerNav';
+import { ARM_MS, gapsBetween, pagesAfter, skipNeedsConfirm, stillArmed, type GapRun } from '@/lib/readerNav';
 import { Book, EditionRow, Page, PageInfo, Series } from '@/lib/types';
 import { useAuth, canDownload } from '@/lib/auth';
-import { chapterLabel, languageName } from '@/lib/format';
+import { activeLocale, chapterLabel, languageName } from '@/lib/format';
 import { editionChipLabels, readerTarget } from '@/lib/editions';
 import { numLabel } from '@/lib/numbering';
 import { useToast } from '@/components/Toast';
@@ -316,6 +316,7 @@ function ReaderInner() {
     noMore.current = false;
     setRefsFrom('none');
     completedSent.current.clear();
+    warnedGaps.current.clear();
     prevPos.current = null;
     setExpanded(new Set());   // a page opened by hand belongs to the chapter it was opened in
     setWin({ from: 0, to: -1 });
@@ -954,15 +955,51 @@ function ReaderInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tops, heights, flat, prefs.mode, slides, trackSign]);
 
-  /** Said as the next chapter joins the column (or is jumped to): the numbers between the two are not in the library. */
+  // ---- the numbers a move to the next chapter skips (#236) ----
+  /**
+   * The runs of numbers the series is missing, by the server's rule (GET /api/series/:id/gaps: the Health card's, less
+   * what an admin ignored there). Asked once per series while the chapter list is the live one: offline the reader cannot
+   * tell a chapter missing from one not downloaded, so it says nothing.
+   */
+  const { data: gapData } = useQuery({
+    queryKey: ['series-gaps', chapters[0]?.seriesId],
+    queryFn: () => api<{ gaps: GapRun[] }>(`/api/series/${chapters[0]!.seriesId}/gaps`),
+    enabled: !!chapters[0]?.seriesId && refsFrom === 'live',
+    staleTime: 5 * 60_000,
+  });
+  /** Said as the reader reaches the next chapter, or is sent to it: the numbers between the two that the series is missing. */
   const warnGap = (fromId?: string, toId?: string) => {
     const to = toId ? numberOf.get(toId) : undefined;
-    const gap = chapterGap(fromId ? numberOf.get(fromId) : undefined, to);
-    if (!gap || to == null) return;
-    toast(gap.first === gap.last
-      ? tr('Chapter {a} is missing here. This continues at chapter {next}.', { a: numLabel(gap.first), next: numLabel(to) })
-      : tr('Chapters {a}–{b} are missing here. This continues at chapter {next}.', { a: numLabel(gap.first), b: numLabel(gap.last), next: numLabel(to) }), 'info');
+    const runs = gapsBetween(gapData?.gaps ?? [], fromId ? numberOf.get(fromId) : undefined, to);
+    if (!runs.length || to == null) return;
+    const next = numLabel(to);
+    if (runs.length === 1) {
+      const [{ lo, hi }] = runs;
+      toast(lo === hi
+        ? tr('Chapter {a} is missing here. This continues at chapter {next}.', { a: numLabel(lo), next })
+        : tr('Chapters {a}–{b} are missing here. This continues at chapter {next}.', { a: numLabel(lo), b: numLabel(hi), next }), 'info');
+      return;
+    }
+    // Two runs or more: a chapter deleted on purpose (held, so not missing) between them, say. Joined the reader's way.
+    const parts = runs.map(({ lo, hi }) => (lo === hi ? numLabel(lo) : `${numLabel(lo)}–${numLabel(hi)}`));
+    let list = parts.join(', ');
+    try { list = new Intl.ListFormat(activeLocale(), { type: 'conjunction' }).format(parts); } catch { /* an old WebView: commas */ }
+    toast(tr('Chapters {list} are missing here. This continues at chapter {next}.', { list, next }), 'info');
   };
+  /**
+   * Said as the next chapter is REACHED in the column or the track, once a chapter: not as it is appended, four pages
+   * before the end of this one, where the toast came and went before the reader got there.
+   */
+  const warnedGaps = useRef(new Set<string>());
+  const activeCi = flat[current]?.ci;
+  useEffect(() => {
+    if (!ready || !didInitScroll.current || activeCi == null || activeCi < 1) return;
+    const to = chapters[activeCi];
+    if (!to || warnedGaps.current.has(to.id)) return;
+    warnedGaps.current.add(to.id);
+    warnGap(chapters[activeCi - 1]?.id, to.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCi, ready]);
   // ---- continuous reading: append next chapter near the end ----
   useEffect(() => {
     if (!ready || !flat.length || appending.current || noMore.current) return;
@@ -987,7 +1024,6 @@ function ReaderInner() {
       const outcome = chapterOutcome(ch);
       await untilStill(lastMoved, rtlTrack);
       hold();
-      if (outcome === 'ok') warnGap(last?.id, next.id);
       if (outcome === 'ok') setChapters((cs) => (cs.some((c) => c.id === ch!.id) ? cs : [...cs, ch!]));
       // There IS a next chapter -- chapterRefs says so -- and it would not load. Claiming the series is
       // finished here is how a corrupt file or a dropped connection came to read as an ending.
@@ -1215,10 +1251,12 @@ function ReaderInner() {
    * at the edge of the footer beside the slider and the page counter, where a thumb aiming for either lands on
    * it, and one press used to drop the chapter with no way to tell it had happened until the new one drew.
    */
+  /** To the next chapter, from the footer, a key, a controller or the menu: said first when it skips numbers (#236). */
+  const goNextChapter = () => { if (!nextId) return; warnGap(activeChapter?.id, nextId); goChapter(nextId); };
   const goNext = () => {
     if (!nextId) return;
     const remaining = pagesAfter(flat, current);
-    if (!skipNeedsConfirm(remaining) || stillArmed(armedNext, Date.now())) { setArmedNext(null); warnGap(activeChapter?.id, nextId); goChapter(nextId); return; }
+    if (!skipNeedsConfirm(remaining) || stillArmed(armedNext, Date.now())) { setArmedNext(null); goNextChapter(); return; }
     setArmedNext(Date.now());
   };
   useEffect(() => {
@@ -1296,7 +1334,7 @@ function ReaderInner() {
       }
       return;
     }
-    if (action === 'nextChapter') goChapter(nextId);
+    if (action === 'nextChapter') goNextChapter();
     else if (action === 'prevChapter') goChapter(prevId, true);
     else if (action === 'fullscreen') toggleFullscreen();
     else if (action === 'menu') setChrome((c) => !c);
@@ -1515,7 +1553,7 @@ function ReaderInner() {
       { label: zoom > 1 ? tr('Reset zoom') : tr('Zoom in'), onSelect: () => applyZoom(zoom > 1 ? 1 : 2) },
       { label: bookmarked ? tr('Remove bookmark') : tr('Bookmark this page'), onSelect: () => { void toggleBookmark(); }, disabled: !activeChapter || !pageInChapter },
       { label: tr('Jump to a page'), onSelect: () => setShowPages(true) },
-      { label: tr('Next chapter'), onSelect: () => goChapter(nextId), disabled: !nextId, divider: true },
+      { label: tr('Next chapter'), onSelect: () => goNextChapter(), disabled: !nextId, divider: true },
       { label: tr('Previous chapter'), onSelect: () => goChapter(prevId, true), disabled: !prevId },
     ];
     if (chapterRefs.length > 0) items.push({ label: tr('Chapters'), onSelect: () => setShowChapters(true) });

@@ -1064,6 +1064,7 @@ GET    /api/books/:id/next        PUT    /api/books/:id/progress
 PUT    /api/books/:id/pages/:n/junk
 GET    /api/offline/plan             GET    /api/series/:id/listing
 GET    /api/series/:id/groups        GET    /api/series/:id/versions
+GET    /api/series/:id/gaps
 POST   /api/series/:id/listing-progress
 DELETE /api/series/:id/listing-progress
 ```
@@ -1225,6 +1226,13 @@ present for admins only. A tombstone is a row, so it is never a ghost. Since v0.
 listing number by its *override-aware* number (an admin's correction wins over the filename), so a chapter
 renumbered from 0 to 105 is no longer also a ghost at 105; and `read: true` is present on a ghost the caller
 marked read (below) — absent, never `false`, for everyone else.
+
+**The chapters a series is missing** (since v0.73.0, #236). `GET /api/series/:id/gaps` answers `{gaps: [{lo, hi}]}`,
+lowest first: the runs of whole numbers between the chapters the series holds, by the Health page's *Chapter gaps* rule --
+every number a range file holds counts as held, and so do a chapter deleted on purpose (the cleanup, *Delete files*) and a
+post its source deleted under posting-order numbering; an impossible number is left out; holes below a Latest-N start are
+included -- less the runs an admin ignored on that card. The reader names the runs between the chapter it leaves and the
+next one ("Chapters 44–99 are missing here"). **404** for a series the caller cannot open.
 
 **Marking chapters you don't have read** (since v0.43.0). `POST /api/series/:id/listing-progress {numbers}`
 marks chapter numbers read for the caller, and `DELETE` on the same path with the same body marks them unread

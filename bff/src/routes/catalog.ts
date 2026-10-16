@@ -42,6 +42,7 @@ import { DL_ROOT, LIBRARY_ROOT, lastScanFailure, lastScanReport, scanProgress, s
 import { noticeBook, noticeListed, noticesShortOnly } from '../lib/noticeChapters';
 import { noticeTypes, hiddenCount } from '../lib/noticeSettings';
 import { heldRecs, relatedFor } from '../lib/anilistRelated';
+import { seriesGaps } from '../lib/seriesGaps';
 import { join } from 'node:path';
 
 
@@ -758,6 +759,17 @@ export default async function catalogRoutes(app: FastifyInstance) {
       deletedAsGhostsOn(),
     ]);
     return { ...listing, numbering, archive, deletedAsGhosts };
+  });
+
+  /**
+   * The runs of chapter numbers the series is missing (#236), for the reader's "Chapters 44–99 are missing here" as it
+   * moves on to the next chapter: the Health card's own rule, less the runs an admin ignored there (lib/seriesGaps.ts).
+   * Behind the series' own gate, like the listing: `komga.series` answers 404 for a series this viewer cannot open.
+   */
+  app.get('/api/series/:id/gaps', async (req) => {
+    const { id } = req.params as { id: string };
+    await komga.series(vc(req), id);
+    return { gaps: await seriesGaps(id) };
   });
 
   /**

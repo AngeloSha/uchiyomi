@@ -2310,6 +2310,49 @@ paths:
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+  /api/series/{id}/gaps:
+    get:
+      tags:
+        - library
+      summary: The runs of chapter numbers the series is missing, as the reader warns of them.
+      operationId: getApiSeriesIdGaps
+      description: >-
+        Since v0.73.0 (#236). `{gaps: [{lo, hi}]}`, lowest first: the whole numbers between the chapters the series holds,
+        by the Health page's Chapter gaps rule -- a range file holds every number in it, a chapter deleted on purpose (the
+        cleanup, Delete files) and a post its source deleted under posting-order numbering are held, an impossible number
+        is left out -- less the runs an admin ignored on that card. Holes below a Latest-N start are included. The reader
+        names the runs between the chapter it leaves and the next one. 404 for a series this account may not open.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [gaps]
+                properties:
+                  gaps:
+                    type: array
+                    items:
+                      type: object
+                      required: [lo, hi]
+                      properties:
+                        lo:
+                          type: number
+                        hi:
+                          type: number
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
   /api/series/{id}/listing-progress:
     post:
       tags:
