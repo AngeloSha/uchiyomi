@@ -124,8 +124,10 @@ sites' terms and your local law.
   at the end of the reader, and recommendations you already own first in *More like this*.
 - **Smart and shared lists** — save any Library view as a live list, share a list with the household (view
   only), and show lists on Home and in OPDS readers.
-- **Health** — finds chapter gaps, suspiciously short chapters, bad downloads, duplicates and failing sources,
-  and names the step a source fails at. **Fix everything** works through every card by itself, once or every
+- **Health** — finds chapter gaps, suspiciously short chapters, bad downloads and chapter files that cannot be read,
+  duplicates and failing sources, a downloads disk too full to download or a share that is not mounted, and members'
+  tracker sign-ins that need renewing, and names the step a source fails at. Read it card by card or series by
+  series. **Fix everything** works through every card by itself, once or every
   night, and then says what only you can decide. Every fix says what it does before you press it, shows its
   progress live, and keeps what it did; *Verify chapter files* re-checks that what the database claims is on
   disk actually is. When something needs you, **Admin** in the sidebar turns amber or red, so you don't have to look.

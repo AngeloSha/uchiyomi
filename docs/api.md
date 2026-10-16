@@ -606,10 +606,22 @@ an item flagged `info` is listed for reference (a source you turned off, a sourc
 already confirmed short, a gap the nightly repair has already searched for) and never decides the verdict.
 Useful as a nightly cron that emails you only when `status` isn't `ok`.
 
+Since v0.72.0 three more checks: `disk` (the downloads disk's free space -- `problem` below `MIN_FREE_GB`, where new
+downloads stop, `warn` below the slow archive's floor while it has a series queued, else one `info` row -- and a
+library or download folder that cannot be opened or is empty while chapters are recorded in it; only its first
+entry is read), `trackers` (each member's tracker connection the tracker refused, whose last sync failed, or whose
+sign-in ended or ends within 14 days; within 30 days `info`) and `files` (per series, the chapter files the nightly
+page count found no page in, from its stamps alone, with `bookIds`/`numbers` of the ones Uchiyomi downloaded itself
+and the `refetch` action: POST /api/admin/series/{id}/chapters/refetch with those `bookIds`). All three can be ignored;
+none deletes anything. `GET /api/admin/health?view=series` adds `bySeries`: every series with a finding on a card
+about one series at a time (a duplicate pair aside), grouped from each card's whole list rather than the 50 rows a
+card carries, as `[{seriesId, title, status, findings: [{check, item}]}]`, worst first.
+
 `POST /api/admin/health/ignore` (since v0.48.3) takes `{check, key, ignored}` and ignores one finding, or stops
 ignoring it: the finding is then reported greyed (`ignored`, `info`), stays quiet while what it is about (a gap's
-missing runs, a folder's files) is part of what was ignored, and its ignore is forgotten once it has been gone
-for a week. Short chapters use confirm-short, which already records the same judgement.
+missing runs, a folder's files, since v0.72.0 how bad a disk finding was and what was wrong with a tracker sign-in)
+is part of what was ignored, and its ignore is forgotten once it has been gone for a week. Short chapters use
+confirm-short, which already records the same judgement.
 
 **Fix everything** (since v0.55.0). `POST /api/admin/health/autofix` (`{}`) starts one background run that drives
 every Health card it can to green -- 202 `{ok, runId}`, or 409 `{error: 'busy', running}` beside another run

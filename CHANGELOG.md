@@ -1,5 +1,50 @@
 # Changelog
 
+## v0.72.0 — 2026-10-16
+
+**Health turns around: one card per series, with everything wrong with it. Three new cards say when the downloads
+disk is too full to download, which members' tracker sign-ins need them, and which chapter files cannot be read.**
+All of it began as pull requests from **@Squeaks72** ([#252](https://github.com/AngeloSha/uchiyomi/pull/252), [#253](https://github.com/AngeloSha/uchiyomi/pull/253), [#254](https://github.com/AngeloSha/uchiyomi/pull/254)), rebuilt on Health's own parts.
+Thank you.
+
+### Health by series
+
+- **By check / By series** ([#254](https://github.com/AngeloSha/uchiyomi/pull/254)), above the cards. By series shows one card per series with every finding about
+  it, each with the keys its own card has. The series that most need you come first.
+  - Every series is there, not only the fifty a card shows.
+  - **Remove from library** hides a series. Tick several to remove them together, after a confirmation that names
+    them. No file is deleted, and everyone's progress is kept.
+  - Only the series on the screen can be ticked, so a series that left the list after a re-check is never removed by
+    mistake.
+  - A finding about no single series, and a duplicate pair, stay in the By check view. Each device remembers its view.
+
+### New Health cards
+
+- **Disk space and folders** ([#253](https://github.com/AngeloSha/uchiyomi/pull/253)). The card turns red when the downloads disk has less than `MIN_FREE_GB`
+  free (10 GB unless you set it), the point where new downloads stop. Before, only each download's error said so. It
+  turns amber below the slow archive's own floor while the archive has a series queued.
+  - It also names a library or download folder that cannot be opened, or that is empty while the library still
+    records chapters in it. That is almost always a network share that is not mounted.
+  - It reads only the first entry of each folder, so it never wakes every disk of an Unraid array.
+  - Ignoring a warning here does not silence a later problem.
+- **Tracker sync** ([#253](https://github.com/AngeloSha/uchiyomi/pull/253)) lists every member's tracker connection with something wrong: a sign-in the tracker
+  refused, a sync that failed, or a sign-in that ended or ends within 14 days. Only the member can sign in again, so
+  the card tells you whom to ask.
+- **Chapter files** ([#252](https://github.com/AngeloSha/uchiyomi/pull/252)) lists the chapter files the nightly repair found no page in: empty, cut short by a
+  download, damaged or gone. Nothing showed them before.
+  - **Fetch again** on a row downloads new copies of the files Uchiyomi downloaded itself. Each old file is kept
+    until its new copy lands.
+  - The card reads only what the nightly count stored, so it costs nothing to run. A file that changes is counted
+    again.
+  - Nothing on the card deletes a file.
+- **Fix everything lists these three under Needs you**, after everything else a person decides. It changes nothing
+  about them.
+
+### For API clients
+
+- `GET /api/admin/health?view=series` adds `bySeries`: every series with a finding, grouped from each card's whole
+  list. The new checks are `disk`, `trackers` and `files`, and each can be ignored.
+
 ## v0.71.0 — 2026-10-16
 
 **Reading defaults for a whole library, sources and covers picked by hand, MangaUpdates tracking, and suggestions from

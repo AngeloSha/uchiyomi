@@ -2088,6 +2088,37 @@ subfolder of a series — is listed dimmed and never turns the check red. It rea
 what it left out. An add or a *Fetch* whose chapters land on disk but not in the library also ends as an error
 on its card that says so.
 
+**Disk space and folders** (since v0.72.0, after @Squeaks72's #253) says how much room the downloads disk has, and
+turns red at the very floor the downloader stops at: below `MIN_FREE_GB` (10 GB unless you set it) no new download
+starts, and before this the only sign was each download's error. It turns amber below the slow archive's own floor
+(**Admin → Settings → Downloads**) while the archive has a series queued, because that is when it waits. It also
+names a library or download folder that cannot be opened, or that is empty while the library still records
+chapters in it — almost always a network share that is not mounted. Nothing is marked missing because of it, and
+only the first entry of each folder is read: a look at a whole folder would wake every disk of an Unraid array
+every few hours. **Verify chapter files** (Admin → Tasks) is the thorough check once the share is back. Ignoring a
+warning here does not silence a later problem: an ignore records how bad it was.
+
+**Tracker sync** (since v0.72.0, @Squeaks72's card from #253) lists every member's tracker connection with
+something wrong: a sign-in the tracker refused (it stays off until its owner signs in again), a sync that failed
+with the tracker's own reason, and a sign-in that ended or ends within 14 days (within 30 days it is listed for
+reference). Only the member can sign in again, under their own **Connections**; the card is there so you know to
+tell them.
+
+**Chapter files** (since v0.72.0, rebuilt from @Squeaks72's #252) lists, series by series, the chapter files the
+nightly repair opened to count their pages and found no page in: empty, cut short by a download, damaged, or gone.
+It reads only what that count stored, so it costs nothing to run, and a file that changes is counted again. **Fetch
+again** on a row downloads a new copy of the files Uchiyomi downloaded itself, the way the series page's *Fetch
+again* does: each old file is kept until its new copy lands, and put back if it does not. A file in a library you
+built is yours to replace. Nothing on this card deletes a file, and Fix everything leaves it to you.
+
+**By check / By series** (since v0.72.0, @Squeaks72's idea in #254), above the cards, turns the page around: one
+card per series with everything Health found wrong with it — a gap, a short chapter, a file that cannot be read,
+a source that cannot update it — each with the keys its own card has, the worst and busiest series first. Every
+series is there, not just the fifty a card shows. **Open** goes to the series; **Remove from library** hides it
+(no file is deleted, and everyone's progress is kept), and ticking several removes them together after a
+confirmation that names them. Only the series on the screen can be ticked. A finding about no single series — a
+source, a folder, the solver — and a duplicate pair stay in the By check view. Each device remembers the view.
+
 **What fixes itself.** Once a day — **Admin → Settings → Library housekeeping → Repair the library nightly**,
 on by default, and **Admin → Tasks → Repair library** with a *Run now* — Uchiyomi does the six things that
 are reversible or provable on their own, and two more only when you switch them on, in this order. Since v0.55.0,
@@ -2098,7 +2129,7 @@ everything**, which does what its key on Health does and can merge, delete and i
   the "could not be solved" marks and those sources' cooldowns; and it forgets any cooldown that lapsed more than
   a day ago. No site is contacted;
 * **counts the pages** of chapter files nobody has opened (2,000 a night), which is what makes the
-  short-chapter check see them at all;
+  short-chapter check see them at all; since v0.72.0 a file it finds no page in is listed under *Chapter files*;
 * **gives chapters that ran out of retries another chance** a week later, when the site has had time to
   calm down (100 a night);
 * **replaces a one- or two-page chapter when another source has a longer copy** (20 a night; one copy from
