@@ -19,7 +19,7 @@
 // Needs TEST_DATABASE_URL and a pg_dump at least as new as the server (GitHub's runner has one).
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readdirSync, statSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -145,4 +145,68 @@ test('a backup reports what it really captured', { skip }, async (t) => {
     assert.notEqual(r.bytes, 0,
       'zero is the empty-archive failure signal; a working backup must never be able to emit it');
   });
+});
+
+test('a backup is readable by the app\'s user and group only (v0.77.1)', { skip }, async () => {
+  // A dump holds every account's password hash and API tokens, and config.tar.gz holds jwt.secret, which signs every
+  // session. Under Docker's default umask -- set here, so the runner's own cannot hide anything -- they were written 0644
+  // in a 0755 folder: anyone who could read the backup folder could read them. Now the folder is 0750 from the moment
+  // it is made, before anything is written into it, and every file in it, and in every earlier run, ends 0640 at most.
+  const mode = (p: string) => statSync(p).mode & 0o777;
+  const BK = process.env.BACKUP_DIR!;
+  const was = process.umask(0o022);
+  // A run made before v0.77.1, as it was written; and a file someone made private by hand, which must stay so.
+  const old = join(BK, '20200101-000000');
+  mkdirSync(old);
+  chmodSync(old, 0o755);
+  writeFileSync(join(old, 'config.tar.gz'), 'jwt.secret inside');
+  chmodSync(join(old, 'config.tar.gz'), 0o644);
+  writeFileSync(join(old, 'db.sql.gz'), 'dump');
+  chmodSync(join(old, 'db.sql.gz'), 0o600);
+  writeFileSync(join(process.env.CONFIG_DIR!, 'jwt.secret'), 'not a real secret');
+  await q('UPDATE server_settings SET backup_keep = 50 WHERE id = 1'); // the old run stays to be looked at
+  // Every mode the new run's folder and files are seen with WHILE it is being written, not only at the end: the
+  // dump takes long enough for a poll every couple of milliseconds to see the folder and the half-written .part. Only
+  // the run made below: the ones earlier subtests left were tightened by their own runs.
+  const runs = new Set(readdirSync(BK));
+  const seen = new Map<string, Set<number>>();
+  const look = () => {
+    for (const run of readdirSync(BK)) {
+      if (!/^\d{8}-\d{6}$/.test(run) || runs.has(run)) continue;
+      const dir = join(BK, run);
+      try {
+        (seen.get('folder') ?? seen.set('folder', new Set()).get('folder')!).add(mode(dir));
+        for (const f of readdirSync(dir)) {
+          const k = f.startsWith('.uchiyomi-run-') ? 'marker' : f;
+          (seen.get(k) ?? seen.set(k, new Set()).get(k)!).add(mode(join(dir, f)));
+        }
+      } catch { /* renamed or removed between the two looks */ }
+    }
+  };
+  const poll = setInterval(look, 2);
+  try {
+    await new Promise((r) => setTimeout(r, 1100)); // a folder of its own
+    const r = await runBackup();
+    clearInterval(poll);
+    assert.ok(!runs.has(r.dir.split('/').pop()!), 'PREMISE: a new run folder');
+    // Reintroduce by making the folder with the umask's mode and tightening it only at the end (drop `mode: RUN_DIR_MODE`
+    // and the tighten after mkdir in runBackup): it is 0755 while the dump is written, and this sees 0755.
+    assert.ok(seen.get('folder')?.size, 'PREMISE: the poll saw the run folder while it was being written');
+    assert.deepEqual([...seen.get('folder')!], [0o750], `the run folder was seen as ${[...seen.get('folder')!].map((m) => m.toString(8))}`);
+    // Reintroduce by dropping `mode: RUN_FILE_MODE` from the dump's write stream: the .part is 0644 while it is written.
+    assert.ok(seen.get('db.sql.gz.part')?.size, 'PREMISE: the poll saw the dump while it was being written');
+    for (const m of seen.get('db.sql.gz.part')!) assert.equal(m & 0o137, 0, `the dump was written ${m.toString(8)}`);
+    assert.equal(mode(r.dir), 0o750);
+    assert.equal(mode(join(r.dir, 'db.sql.gz')), 0o640);
+    // Reintroduce by dropping the tightenBackups() call: tar wrote this one with the umask's 0644, and the old run keeps
+    // its 0755 folder and 0644 archive.
+    assert.equal(mode(join(r.dir, 'config.tar.gz')), 0o640, 'the config archive (jwt.secret) is readable by others');
+    assert.equal(mode(old), 0o750, 'an earlier run\'s folder was left readable by others');
+    assert.equal(mode(join(old, 'config.tar.gz')), 0o640, 'an earlier run\'s config archive was left readable by others');
+    assert.equal(mode(join(old, 'db.sql.gz')), 0o600, 'a file someone made private was loosened');
+  } finally {
+    clearInterval(poll);
+    process.umask(was);
+    await q('UPDATE server_settings SET backup_keep = NULL WHERE id = 1').catch(() => {});
+  }
 });

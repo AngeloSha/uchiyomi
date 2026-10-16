@@ -73,7 +73,7 @@ function dumpSql(target: string): Promise<void> {
       ? desktopDump(['--no-owner', '--no-acl', '--clean', '--if-exists'])
       : spawn('pg_dump', ['--no-owner', '--no-acl', '--clean', '--if-exists', env.DATABASE_URL]);
     const gz = createGzip();
-    const out = createWriteStream(target);
+    const out = createWriteStream(target, { mode: RUN_FILE_MODE });
     let stderr = '';
     let exited: number | null = null;
     // The write stream still finishes when pg_dump never ran at all -- an empty pipe closes cleanly and gzip
@@ -128,7 +128,7 @@ export async function zipConfig(from: string, to: string, skip: string[] = []): 
       }
     };
     await walk(from, '');
-    await fs.writeFile(part, zip.toBuffer());
+    await fs.writeFile(part, zip.toBuffer(), { mode: RUN_FILE_MODE });
     await fs.rename(part, to);
   } catch (e) {
     await fs.rm(part, { force: true }).catch(() => {});
@@ -164,6 +164,42 @@ async function dirSize(dir: string): Promise<number> {
 
 /** The folders this task makes, one per run. Nothing else in BACKUP_DIR is ever pruned or left out. */
 const RUN_DIR = /^\d{8}-\d{6}$/;
+
+/**
+ * The most a backup may be readable by (v0.77.1): its folder 0750, its files 0640. A dump holds every account's password
+ * hash and API tokens, and the config archive holds jwt.secret, the key every session is signed with; under Docker's
+ * default umask both were 0644 in a 0755 folder, so anyone who could read the backup folder -- a shared NAS folder,
+ * another container's mount -- could read them. The group keeps read access on purpose, for a backup job that runs as
+ * another member of it. Modes only ever tighten: a stricter umask, or a mode someone set by hand, is kept.
+ */
+const RUN_DIR_MODE = 0o750;
+const RUN_FILE_MODE = 0o640;
+
+/** Take `p` down to at most `cap`, keeping its setgid and sticky bits (a group-inheriting share stays one). */
+async function tighten(p: string, cap: number): Promise<void> {
+  const mode = (await fs.stat(p)).mode;
+  const want = (mode & 0o7000) | (mode & cap);
+  if ((mode & 0o7777) !== want) await fs.chmod(p, want);
+}
+
+/**
+ * Every run folder in BACKUP_DIR and the files in it, down to RUN_DIR_MODE and RUN_FILE_MODE: the ones made before
+ * v0.77.1 too, which were written readable by everyone. Best effort, one entry at a time: a folder this process does
+ * not own (a restore made as root) is left as it is. Reintroduce by dropping a tighten: "a backup is readable by the
+ * app's user and group only" in backup.int.test.ts finds the earlier run, or this one's archive, readable by others.
+ */
+export async function tightenBackups(root = env.BACKUP_DIR): Promise<void> {
+  let runs: Dirent[];
+  try { runs = await fs.readdir(root, { withFileTypes: true }); } catch { return; }
+  for (const run of runs) {
+    if (!run.isDirectory() || !RUN_DIR.test(run.name)) continue;
+    const dir = path.join(root, run.name);
+    await tighten(dir, RUN_DIR_MODE).catch(() => {});
+    let files: Dirent[];
+    try { files = await fs.readdir(dir, { withFileTypes: true }); } catch { continue; }
+    for (const f of files) if (f.isFile()) await tighten(path.join(dir, f.name), RUN_FILE_MODE).catch(() => {});
+  }
+}
 
 /**
  * The nightly switch and how many runs to keep, as Admin → Settings → Updates & schedules has them (v0.61.1, #199).
@@ -262,7 +298,8 @@ export async function runBackup(): Promise<BackupResult> {
   const started = Date.now();
   const dir = path.join(env.BACKUP_DIR, stamp());
   try {
-    await fs.mkdir(dir, { recursive: true });
+    // 0750 as it is made (RUN_DIR_MODE), before anything is written into it.
+    await fs.mkdir(dir, { recursive: true, mode: RUN_DIR_MODE });
   } catch (e) {
     // The usual cause is a host directory bind-mounted at BACKUP_DIR that the app's user can't write.
     // This runs unattended overnight, so say exactly how to fix it rather than leaving a bare errno.
@@ -275,6 +312,8 @@ export async function runBackup(): Promise<BackupResult> {
     }
     throw e;
   }
+  // And taken down to it if the folder was already there.
+  await tighten(dir, RUN_DIR_MODE).catch(() => {});
 
   try {
     // Written as .part and renamed once pg_dump has exited 0 and the file has closed. A SIGKILL or OOM in the
@@ -306,6 +345,8 @@ export async function runBackup(): Promise<BackupResult> {
   } finally {
     await fs.rm(path.join(dir, marker), { force: true }).catch(() => {});
   }
+  // tar writes its archive with the umask's mode; this run's files, and every earlier run's, end at 0640 at most.
+  await tightenBackups().catch(() => {});
 
   // `bytes` is the ONLY health signal this task has ever shown, so it must never be able to report the
   // failure value on a good run. `.catch(() => 0)` did exactly that: a readdir or stat hiccup inside dirSize

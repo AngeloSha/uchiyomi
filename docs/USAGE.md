@@ -3429,6 +3429,11 @@ backup carry every earlier one, so the folder grew exponentially whatever the nu
 If yours grew like that, you can delete the old oversized runs yourself; the new ones are small again, and the
 oversized ones also age out as new backups are kept.
 
+**Backups are readable only by the app's user and its group** (since v0.77.1): each run's folder is `0750` from the
+moment it is made and its files `0640`, because they hold the server's accounts and secrets. A job that copies them on
+the host must run as that user or as a member of its group, or read them through the container with
+`docker compose exec`, as the restore commands below do. Backups made before v0.77.1 are tightened at the next run.
+
 ### Restoring
 
 Each backup folder is named by timestamp and holds `db.sql.gz` and `config.tar.gz`. The dump is plain SQL
