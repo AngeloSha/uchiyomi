@@ -294,12 +294,19 @@ function ReaderInner() {
     if (seriesId0) saveSeriesPrefs(seriesId0, { zoom: clamped });
   };
 
-  /** The chapter the address was last moved to by reading, so the load below does not run for it. */
+  /** The chapter the address was last moved to by reading on, so the load below does not run for it (#263). */
   const urlSynced = useRef<string | null>(null);
+  /**
+   * The chapter the address names as far as the reader knows: the one the load below was made for, or the one reading on
+   * moved the address to (`readingChapterId`). While the address names any other chapter, a jump to it is loading.
+   */
+  const addressed = useRef('');
   // ---- (re)load on bookId change ----
   useEffect(() => {
-    // The address followed the reader into the next chapter (see urlFollowsReading): the chapters are all loaded already.
+    // The address followed the reader into the next chapter (readingChapterId below): the chapters are all loaded already.
     if (urlSynced.current === bookId) { urlSynced.current = null; return; }
+    urlSynced.current = null;
+    addressed.current = bookId;
     let alive = true;
     setReady(false);
     setEnded(false);
@@ -808,6 +815,23 @@ function ReaderInner() {
     return img.page(ch.id, it.number, 200);
   };
 
+  /**
+   * The paged track's width and the slide it stands on, as last read or placed (#263): what a change of width puts it
+   * back to. Every deliberate placing records them (placeTrack) as well as every scroll, so a width change that lands
+   * after a placing -- turning a phone, where Wide pages: Split moves the slides in the same turn -- puts the track back
+   * on the slide that placing chose, not on the one read before the slides moved.
+   */
+  const pagedWidth = useRef(0);
+  const pagedSlide = useRef(0);
+  /** Put the paged track on `slide` before it paints, and remember that as its place. */
+  const placeTrack = (el: HTMLElement, slide: number) => {
+    const w = el.clientWidth;
+    const left = trackSign * slide * w;
+    if (Math.abs(el.scrollLeft - left) >= 1) el.scrollLeft = left;
+    pagedWidth.current = w;
+    pagedSlide.current = slide;
+  };
+
   // ---- initial scroll to resume page ----
   useEffect(() => {
     if (!ready || didInitScroll.current || !colW || !tops.length) return;
@@ -816,8 +840,8 @@ function ReaderInner() {
     // resume a little past where you left off, by exactly the number of pages removed before you.
     const idx = Math.max(0, Math.min(flat.length - 1, startIndex(flat, 0, startPage)));
     if (prefs.mode === 'vertical' && scrollRef.current && idx > 0) scrollRef.current.scrollTop = tops[idx];
-    if (prefs.mode === 'paged' && scrollRef.current && idx > 0)
-      scrollRef.current.scrollLeft = trackSign * (slideOf[idx] ?? idx) * scrollRef.current.clientWidth;
+    // Page 1 too: the track is the same element from chapter to chapter, still where the last one left it.
+    if (prefs.mode === 'paged' && scrollRef.current) placeTrack(scrollRef.current, slideOf[idx] ?? idx);
     setCurrent(idx);
     // Seed the dedupe key so landing here does not immediately ping progress. Opening a saved Moment is
     // looking something up, not reading it, and it should not move where you were or add a reading event.
@@ -841,14 +865,14 @@ function ReaderInner() {
     const el = scrollRef.current;
     if (!el || !didInitScroll.current || laidOutMode.current === prefs.mode) return;
     laidOutMode.current = prefs.mode;
-    pagedWidth.current = 0; // a new scroller: its width is its own
     if (prefs.mode === 'paged') {
       laidOutSign.current = trackSign;
       laidOutSplit.current = splitTrack;
       // The column's anchor belongs to the column: on the way back it would be a place read before the pages turned.
       anchorRef.current = null;
-      el.scrollLeft = trackSign * (slideOf[current] ?? current) * el.clientWidth;
+      placeTrack(el, slideOf[current] ?? current);
     } else {
+      pagedWidth.current = 0; // the track is gone: the next one's width is its own
       el.scrollTop = tops[current] ?? 0;
       readColumn(el);
     }
@@ -865,7 +889,7 @@ function ReaderInner() {
     // in its closure -- and put every resume and every `?page=` link on a right-to-left series back on page 1.
     if (laidOutSign.current === trackSign) return;
     laidOutSign.current = trackSign;
-    el.scrollLeft = trackSign * (slideOf[current] ?? current) * el.clientWidth;
+    placeTrack(el, slideOf[current] ?? current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trackSign]);
 
@@ -876,14 +900,13 @@ function ReaderInner() {
     const el = scrollRef.current;
     if (!el || !didInitScroll.current || prefs.mode !== 'paged' || laidOutSplit.current === splitTrack) return;
     laidOutSplit.current = splitTrack;
-    el.scrollLeft = trackSign * (slideOf[current] ?? current) * el.clientWidth;
+    // Recorded as the track's place (placeTrack): turning the phone changes the width in the same turn, and the resize
+    // guard below would otherwise put back the slide read BEFORE the halves came or went -- another page.
+    placeTrack(el, slideOf[current] ?? current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [splitTrack]);
 
   // ---- track current page on scroll ----
-  /** The paged track's width and slide as the last scroll event read them: what a resize is put back to. */
-  const pagedWidth = useRef(0);
-  const pagedSlide = useRef(0);
   // A resize that raises no scroll event (the offset still fits) leaves the track between two pages: snap it back too.
   useEffect(() => {
     const el = scrollRef.current;
@@ -927,8 +950,9 @@ function ReaderInner() {
     // the window and the tail up to date (readColumn).
     const ans = readColumn(el);
     setCurrent((c) => (c === ans ? c : ans));
+    // trackSign for the width guard's put-back: a stale sign after a flip put a resized right-to-left track on page 1.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tops, heights, flat, prefs.mode, slides]); // the sign-free Math.abs above needs no trackSign dep
+  }, [tops, heights, flat, prefs.mode, slides, trackSign]);
 
   // ---- continuous reading: append next chapter near the end ----
   useEffect(() => {
@@ -1142,13 +1166,20 @@ function ReaderInner() {
   // ⚠️ Refresh went back to where the reader was OPENED. Continuous reading appends the next chapters to one track, but the
   // address kept naming the first, so a reload reopened that chapter (and its saved page) however far on the reader had got.
   // The address now follows the chapter on screen; progress for it is saved by the same path, so a reload resumes there.
+  // Only while the address is the one the reader knows (`addressed`): a jump changes it first, and until that load has run
+  // the chapter on screen is the old one. And only once the open chapter is laid out, read live: the load clears
+  // `didInitScroll` in the very commit whose address it was asked for.
+  // ⚠️ The first cut held off while `chapters[0]` was not the addressed chapter, and after the first crossing it never was
+  // again (the first chapter stays chapters[0]): the address moved on once, and a refresh two chapters on reopened the
+  // second. Reintroduce that test: walk263 "the address follows into the third chapter" fails.
   const readingChapterId = ready && didInitScroll.current ? chapters[flat[current]?.ci ?? -1]?.id : undefined;
   useEffect(() => {
-    if (!readingChapterId || readingChapterId === bookId || chapters[0]?.id !== bookId) return; // not while a jump is loading
+    if (!readingChapterId || readingChapterId === bookId || bookId !== addressed.current || !didInitScroll.current) return;
+    addressed.current = readingChapterId;
     urlSynced.current = readingChapterId;
     router.replace(`/reader/?book=${readingChapterId}`, { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readingChapterId]);
+  }, [readingChapterId, bookId]);
   const goChapter = (cid?: string, atEnd = false) => { urlSynced.current = null; if (cid) router.replace(`/reader/?book=${cid}${atEnd ? '&page=last' : ''}`); };
   /**
    * Read this chapter in another language edition (v0.52.0): the same number there when the server holds it, else

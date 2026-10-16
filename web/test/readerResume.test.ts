@@ -17,8 +17,21 @@ test('a change of track width puts the track back on its slide instead of readin
   assert.match(src, /trackSign \* pagedSlide\.current \* w/);
 });
 
+test('every deliberate placing of the track is the place a resize keeps, the split of a turned phone above all', () => {
+  // Reintroduce `el.scrollLeft = trackSign * (slideOf[current] ?? current) * el.clientWidth` in the split effect: turning a
+  // phone with Wide pages: Split put back the slide read before the halves moved (walk263's WebKit rotation, another page).
+  const split = src.slice(src.indexOf('laidOutSplit.current === splitTrack) return;'));
+  assert.match(split.slice(0, 600), /placeTrack\(el, slideOf\[current\] \?\? current\)/);
+  assert.match(src, /pagedWidth\.current = w;\n\s*pagedSlide\.current = slide;/, 'placeTrack records the place');
+  assert.doesNotMatch(src, /el\.scrollLeft = trackSign \* \(slideOf\[current\] \?\? current\)/, 'no placing that the guard does not know of');
+});
+
 test('the address follows the chapter on screen, without reloading the reader for it', () => {
   assert.match(src, /urlSynced\.current = readingChapterId/);
   assert.match(src, /if \(urlSynced\.current === bookId\) \{ urlSynced\.current = null; return; \}/);
-  assert.match(src, /chapters\[0\]\?\.id !== bookId/, 'not while a jump to another chapter is loading');
+  // Not while a jump to another chapter is loading: the address is then not the one the reader knows. The first cut tested
+  // `chapters[0]?.id !== bookId`, which after the first crossing was true for good (walk263 holds the behaviour).
+  assert.match(src, /bookId !== addressed\.current \|\| !didInitScroll\.current\) return;/);
+  assert.doesNotMatch(src, /chapters\[0\]\?\.id !== bookId/);
+  assert.match(src, /addressed\.current = readingChapterId;/, 'the address it moved to is the one it knows');
 });
