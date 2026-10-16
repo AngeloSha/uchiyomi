@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.75.0
+  version: 0.76.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -818,7 +818,7 @@ components:
           description: >-
             `duplicate` is a second pick for a number already picked in the same body: the first pick was
             handled, this one was not. `other_language` (since v0.62.0): every copy of the number is in another
-            language than the series' -- a pick takes one anyway. `hidden` (since VNEXT): an admin hid the number
+            language than the series' -- a pick takes one anyway. `hidden` (since v0.76.0): an admin hid the number
             from the series (POST /api/admin/series/{id}/chapters/hide), and nothing fetches it, a pick included.
         source: { type: string, description: Present when the skipped entry was a pick, naming the copy asked for. }
         sourceId: { type: string, description: Present when the skipped entry was a pick. }
@@ -9746,7 +9746,7 @@ paths:
       summary: Hide chapter numbers from a series, for everyone. Nothing is deleted.
       operationId: postApiAdminSeriesIdChaptersHide
       description: >-
-        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since VNEXT (#240,
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since v0.76.0 (#240,
         rebuilt to hide only): for a chapter a source lists that is not part of the work. A hidden number, by its
         effective number (an admin's override when there is one), is left out of every surface for every viewer -- the
         chapter list and its missing-chapter rows, next and previous, Continue reading, the unread counts, Updates,
@@ -9816,7 +9816,7 @@ paths:
       summary: The chapter numbers hidden from a series, with what each one is.
       operationId: getApiAdminSeriesIdChaptersHidden
       description: >-
-        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since VNEXT (#240):
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since v0.76.0 (#240):
         what the series page's Show hidden chapters lists, lowest first. `onServer` counts the chapter rows the server
         keeps at the number (a file, or a deleted one's row; a range file is never one), `listed` says a source the
         series follows lists it, `title` is the source's name for it, else the file's.
@@ -9865,7 +9865,7 @@ paths:
       summary: Show hidden chapter numbers again.
       operationId: postApiAdminSeriesIdChaptersUnhide
       description: >-
-        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since VNEXT (#240):
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since v0.76.0 (#240):
         the numbers named, or every one with `all: true` -- exactly one of the two. Nothing was deleted, so every
         surface shows the chapters again on the next request, their missing-chapter rows included, and the next sweep
         fetches one that is missing. Answers the numbers that were hidden. Audit line `series.chapters_unhide`.

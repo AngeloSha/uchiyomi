@@ -1333,7 +1333,7 @@ Both ask you to confirm, and both are written to the activity log.
 
 A source sometimes lists a chapter that is not part of the work at all — a *0.5* from an unrelated title, a number a
 wrong match brought in — and nothing on the source's side takes it away: the grey row stays, every sweep tries to fetch
-it, and Health counts the hole around it. Since VNEXT an admin can hide that number from the series (an idea from
+it, and Health counts the hole around it. Since v0.76.0 an admin can hide that number from the series (an idea from
 @Squeaks72, #240): **Hide chapter *N*** in a chapter's or a grey row's **⋯**, or **Hide *n* chapters** in the select bar,
 confirmed once.
 

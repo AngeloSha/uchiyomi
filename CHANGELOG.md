@@ -1,6 +1,28 @@
 # Changelog
 
-## Unreleased
+## v0.76.0 — 2026-10-16
+
+**Hide a chapter a source lists that is not part of the series, and the extension engine gets the memory it really
+uses.** Hiding is **@Squeaks72**'s idea, from pull request [#240](https://github.com/AngeloSha/uchiyomi/pull/240),
+rebuilt to hide only: nothing is ever deleted. The engine's memory was reported by **@Kedryn**
+([#275](https://github.com/AngeloSha/uchiyomi/issues/275)). Thank you both.
+
+### Hide a chapter that does not belong
+
+- A source sometimes lists a chapter that is not part of the work, such as a 0.5 from an unrelated title or a number a
+  wrong match brought in. Nothing on the source's side takes it away. An admin can now hide that number with
+  **Hide chapter N** in a chapter's or a grey row's **⋯**, or **Hide n chapters** in the select bar. It asks first.
+- A hidden chapter is gone for everyone: the chapter list and its grey rows, the reader's next and previous, Continue,
+  the unread counts and badges, Updates, history, Insights, OPDS and the Komga-compatible API. Neither Health nor the
+  reader's note about missing chapters counts it as missing, and Health does not call it an impossible number.
+- It is never downloaded, by the nightly check, Check for new chapters, Fetch newest, the slow archive or Find missing
+  chapters. A download already waiting when you hide it stops before it asks the source.
+- Nothing is deleted. The file, the chapter's row and everyone's reading progress stay as they were, and neither the
+  read-chapter cleanup nor Fix everything touches it.
+- **More → Show hidden chapters** lists what is hidden and what each one is, with **Restore** and **Restore all**. A
+  restored chapter is back everywhere at once, and the next check fetches it if it is missing.
+- Merging two series keeps what either one hid, and renumbering a series by posting order moves a hidden number with
+  its post.
 
 ### The extension engine gets the memory it uses
 
@@ -12,9 +34,20 @@
 - **`MALLOC_ARENA_MAX=2` on the engine's container.** The C library otherwise keeps what a thread frees in that thread's
   own arena, up to eight arenas per CPU core: 94 of them held 428 MB on that server, and two held about 120 MB less
   under the same load.
-- ⚠️ **An existing install keeps its old values.** An update changes the image, never your compose file, your Unraid
-  container or your CasaOS app: [If the engine keeps restarting](docs/extensions.md#if-the-engine-keeps-restarting) has
-  the two settings to add, and how to tell whether the ceiling is what stops it.
+- The engine's card on **Admin → Sources** says it uses 1 to 1.5 GB, where it said about 750 MB. That figure is the
+  desktop app's engine, which runs without Chromium.
+
+### Upgrading
+
+- ⚠️ **An existing install keeps its old engine settings.** An update changes the image, never your compose file, your
+  Unraid container or your CasaOS app.
+  [If the engine keeps restarting](docs/extensions.md#if-the-engine-keeps-restarting) has the two settings to add, and
+  how to tell whether the ceiling is what stops it.
+- **Database:** additive only. A nullable `hidden_numbers` column on `lib_series` and a small partial index, created
+  when the server starts. The previous release starts on this schema and shows every chapter.
+- **API:** new `POST /api/admin/series/:id/chapters/hide`, `POST /api/admin/series/:id/chapters/unhide` and
+  `GET /api/admin/series/:id/chapters/hidden`. `POST /api/sources/fetch` skips a hidden number as `hidden`, and the
+  series DTO carries `hiddenChapters` for an admin.
 
 ## v0.75.0 — 2026-10-16
 

@@ -2059,7 +2059,7 @@ chapter. It answers `{ok, applied, bytes, skipped: [{id, reason}]}` with `reason
 `not_owned`, `already_pruned`, `bookmarked`, `outside_root`, `unlink_failed`, or **409** `refused` (with
 `message` and `fix`) when the download directory is not writable.
 
-**Hiding a chapter number from a series** (since VNEXT, #240 rebuilt to hide only). For a chapter a source lists that is
+**Hiding a chapter number from a series** (since v0.76.0, #240 rebuilt to hide only). For a chapter a source lists that is
 not part of the work -- a stray 0.5 from an unrelated title -- which no source-side action takes away.
 `POST /api/admin/series/:id/chapters/hide {numbers[]}` (1–500, effective numbers, as the series page shows them) hides
 them from the series for every viewer: left out of the chapter list and its missing-chapter rows, next and previous,
