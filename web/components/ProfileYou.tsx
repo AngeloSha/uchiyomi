@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { useReducedMotion } from 'framer-motion';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -13,6 +14,8 @@ import { bookCountText, dayText } from '@/lib/format';
 import { hoursText, perChapterText, readerTz } from '@/lib/readingTime';
 import { shownDeviceName } from '@/lib/device';
 import { BADGES, badgeCaption, badgeEarned, badgeHave, lockedBadges } from '@/lib/badges';
+import { useReduceEffects } from '@/lib/effects';
+import { BadgeEmblem } from '@/components/BadgeEmblem';
 
 /**
  * The You tab of the profile: what you have earned, what you have read, and your lists.
@@ -75,13 +78,17 @@ export function deviceRows(list: ReadingTime['window']['byDevice']): { label: st
  *
  * Every badge is a key that says what it takes (#267): hover, focus or a tap puts its caption in the line under the
  * row, which otherwise says what the next badge takes -- a phone has no hover, so a tooltip alone would tell it nothing.
- * Squared, as the badges are statuses, not filters (web/test/noPills.test.ts).
+ * Squared, as the badges are statuses, not filters (web/test/noPills.test.ts). Since v0.74.0 each key is the badge's
+ * drawn emblem (components/BadgeEmblem.tsx, the owner's approved design) at 56 px over its name, and its progress while
+ * it is locked; the emblems' sheen and Legend's halo move only while both motion switches allow it.
  */
 export function BadgesCard({ stats, span = '' }: { stats?: Stats; span?: string }) {
   const [showLocked, setShowLocked] = useState(false);
   // The badge whose caption shows: the one hovered, else the one tapped or focused, else the next.
   const [hovered, setHovered] = useState<string | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
+  // Both of the app's motion gates, read here and handed to every emblem: Reduce effects, and the system's reduced motion.
+  const still = useReduceEffects() || !!useReducedMotion();
   if (!stats) return <div className={`card skeleton h-32 ${span}`} />;
   const earned = BADGES.filter((b) => badgeEarned(b, stats));
   const locked = lockedBadges(stats);
@@ -102,28 +109,27 @@ export function BadgesCard({ stats, span = '' }: { stats?: Stats; span?: string 
           </button>
         )}
       </div>
-      <div className="flex flex-wrap gap-2"
+      <div className="flex flex-wrap gap-x-2.5 gap-y-3.5"
         onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setPicked(null); }}>
-        {shown.map((b) => {
+        {shown.map((b, i) => {
           const got = badgeEarned(b, stats);
-          // The badge the caption is about is lit: an earned one's edge brightens, a locked one comes out of the dim.
+          // The badge the caption is about is lit: its key takes the ink a hover gives it.
           const on = about === b;
-          const tone = got
-            ? `bg-accent-soft text-fog-100 ${on ? 'border-accent/80' : 'border-accent/40'}`
-            : on ? 'border-ink-500 text-fog-400' : 'border-ink-700 text-ink-500 opacity-60';
           return (
             <button key={b.label} type="button" data-badge={b.label} data-earned={got ? '' : undefined}
               title={badgeCaption(b, stats)}
               onClick={() => setPicked(b.label)} onFocus={() => setPicked(b.label)}
               onMouseEnter={() => setHovered(b.label)} onMouseLeave={() => setHovered(null)}
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition ${tone}`}>
-              <span aria-hidden>{b.emoji}</span>{tr(b.label)}
-              {!got && <span className="tabular-nums text-[10px]">{badgeHave(b, stats)}/{b.goal}</span>}
+              className={`grid w-[76px] justify-items-center gap-1.5 rounded-[14px] border px-1 pb-1.5 pt-2 transition ${
+                on ? 'border-ink-700 bg-ink-800' : 'border-transparent hover:border-ink-700 hover:bg-ink-800'}`}>
+              <BadgeEmblem badge={b} earned={got} have={badgeHave(b, stats)} size={56} still={still} delay={2 + i * 0.9} />
+              <span className={`text-center text-[11px] leading-tight ${got ? 'text-fog-100' : 'text-fog-400'}`}>{tr(b.label)}</span>
+              {!got && <span className="-mt-1 text-[10px] tabular-nums text-fog-500">{badgeHave(b, stats)}/{b.goal}</span>}
             </button>
           );
         })}
       </div>
-      <p data-badge-caption className="mt-2.5 text-[11px] text-fog-400">{caption}</p>
+      <p data-badge-caption className="mt-3.5 text-xs text-fog-400">{caption}</p>
     </div>
   );
 }

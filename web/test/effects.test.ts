@@ -141,11 +141,13 @@ test('prefers-reduced-motion does exactly what it did before the switch existed'
   // not ask for the grain or the glass to go. So the media block stays the two rules it was -- no drift, near
   // zero durations -- and gains nothing. Reintroduce by folding the switch into it (hiding the fx layers
   // under the media query): "the reduced-motion block changed" fails. (v0.73.0: the phone hero's drift, a CSS
-  // animation since then, stops here as the mesh's does -- the same "no drift", not a Reduce effects rule.)
+  // animation since then, stops here as the mesh's does -- the same "no drift", not a Reduce effects rule -- and so do the
+  // badge emblems' sheen and Legend's halo, v0.74.0.)
   const inPrm = CSS().filter((r) => r.ctx.join('|') === '@media (prefers-reduced-motion: reduce)');
   assert.deepEqual(inPrm.map((r) => `${r.sel} { ${flat(r.body)} }`), [
     '.fx-mesh { animation: none; }',
     '.hero-drift { animation: none; }',
+    '.badge-sheen, .badge-halo { animation: none; }',
     '*, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }',
   ], 'the reduced-motion block changed');
 });

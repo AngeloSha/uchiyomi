@@ -433,9 +433,18 @@ html.lenis-scrolling .fx-grain { display: none; }
 @keyframes hero-drift { from { transform: scale(1); } to { transform: scale(1.07); } }
 .hero-drift { animation: hero-drift 24s ease-in-out infinite alternate; }
 
+/* The badge emblems' sheen and Legend's halo (components/BadgeEmblem.tsx, v0.74.0, the owner's approved design): a band of
+   light across an earned medal every 6.5 s, and Legend's aurora turning once in 14 s. The emblem leaves both classes off
+   while Reduce effects or the system's reduced motion is on; the rules below stop them there too, as the drift's are. */
+@keyframes badge-sheen { 0% { transform: translateX(0); } 28%, 100% { transform: translateX(210px); } }
+.badge-sheen { animation: badge-sheen 6.5s cubic-bezier(.45, 0, .2, 1) infinite; }
+@keyframes badge-halo { to { transform: rotate(360deg); } }
+.badge-halo { animation: badge-halo 14s linear infinite; }
+
 @media (prefers-reduced-motion: reduce) {
   .fx-mesh { animation: none; }
   .hero-drift { animation: none; }
+  .badge-sheen, .badge-halo { animation: none; }
   *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
 
@@ -518,6 +527,8 @@ html.reduce-effects .glass,
 html.reduce-effects .glass-strong { background: var(--color-ink-900); }
 html.reduce-effects .skeleton::after { animation: none; display: none; }
 html.reduce-effects .hero-drift { animation: none; }
+html.reduce-effects .badge-sheen,
+html.reduce-effects .badge-halo { animation: none; }
 /* The accent hairline is a two-layer mask with `mask-composite: exclude`, on every tile in the grid. Chrome
    barely notices it; Firefox does: with everything above already off, the 200-tile library at 1440 still
    scrolled at 32 fps in headless Firefox, and at 59.5 with only these rings gone. Every element wearing one

@@ -140,6 +140,8 @@ const SURFACES = [
   // v0.73.0: the badges' goals and words (#267) and Profile → Insights' figures (#249).
   'lib/badges.ts',
   'lib/insights.ts',
+  // v0.74.0: the badges' drawn emblems (the owner's approved design) -- a medal and its tab are SVG, never a capsule class.
+  'components/BadgeEmblem.tsx',
 ];
 
 /**

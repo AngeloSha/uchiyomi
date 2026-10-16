@@ -12,16 +12,21 @@ export interface BadgeStats { chapters_completed: number; longestStreak: number 
 // Rendered as `tr(b.label)`, so the labels are declared. See lib/i18n.ts.
 const LABELS = keys('Reader', 'Bookworm', 'On a roll', 'Centurion', 'Devoted', 'Legend');
 
-export interface Badge { emoji: string; label: (typeof LABELS)[number]; kind: 'chapters' | 'streak'; goal: number }
+/** What a badge's emblem is cast in (components/BadgeEmblem.tsx): chapter badges climb through metals, streaks burn. */
+export type BadgeMetal = 'bronze' | 'silver' | 'gold' | 'ember' | 'moon' | 'aurora';
+/** What is drawn on its plate. */
+export type BadgeGlyph = 'book' | 'worm' | 'flame' | 'laurel' | 'moon' | 'crown';
+
+export interface Badge { label: (typeof LABELS)[number]; kind: 'chapters' | 'streak'; goal: number; metal: BadgeMetal; glyph: BadgeGlyph }
 
 /** In the order they are earned on a steady habit: the ladder, and the tie-break for "nearest". */
 export const BADGES: readonly Badge[] = [
-  { emoji: '📖', label: LABELS[0], kind: 'chapters', goal: 10 },
-  { emoji: '🐛', label: LABELS[1], kind: 'chapters', goal: 50 },
-  { emoji: '🔥', label: LABELS[2], kind: 'streak', goal: 7 },
-  { emoji: '💯', label: LABELS[3], kind: 'chapters', goal: 100 },
-  { emoji: '🌙', label: LABELS[4], kind: 'streak', goal: 30 },
-  { emoji: '👑', label: LABELS[5], kind: 'chapters', goal: 500 },
+  { label: LABELS[0], kind: 'chapters', goal: 10, metal: 'bronze', glyph: 'book' },
+  { label: LABELS[1], kind: 'chapters', goal: 50, metal: 'silver', glyph: 'worm' },
+  { label: LABELS[2], kind: 'streak', goal: 7, metal: 'ember', glyph: 'flame' },
+  { label: LABELS[3], kind: 'chapters', goal: 100, metal: 'gold', glyph: 'laurel' },
+  { label: LABELS[4], kind: 'streak', goal: 30, metal: 'moon', glyph: 'moon' },
+  { label: LABELS[5], kind: 'chapters', goal: 500, metal: 'aurora', glyph: 'crown' },
 ];
 
 /** Where the reader stands on a badge's measure. */

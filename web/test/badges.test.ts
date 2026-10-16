@@ -3,6 +3,8 @@
 // wait behind Show locked, nearest first. Part 3 (avatar rewards) is not built.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import * as React from 'react';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -24,7 +26,7 @@ test('every badge is a goal on one measure, and its words say the goal', () => {
   ]);
   assert.equal(badgeGoalText(byLabel('Bookworm')), 'Read 50 chapters');
   assert.equal(badgeGoalText(byLabel('On a roll')), '7 day streak', 'a streak in the words the hero says one in');
-  assert.equal(badgeGoalText({ emoji: '1', label: 'Reader', kind: 'chapters', goal: 1 }), 'Read 1 chapter');
+  assert.equal(badgeGoalText({ label: 'Reader', kind: 'chapters', goal: 1, metal: 'bronze', glyph: 'book' }), 'Read 1 chapter');
   const s = stats(40, 3);
   assert.equal(badgeCaption(byLabel('Bookworm'), s), 'Read 50 chapters · you have 40');
   assert.equal(badgeCaption(byLabel('On a roll'), s), '7 day streak · your best is 3');
@@ -43,7 +45,7 @@ test('the badges still to earn come nearest first, a chapter goal and a streak g
   assert.deepEqual(lockedBadges(stats(600, 40)), []);
 });
 
-test('the card: the earned badges and the next as squared keys, the next one\'s goal said, the rest behind Show locked', () => {
+test('the card: the earned badges and the next as squared keys with their emblems, the next one\'s goal said, the rest behind Show locked', () => {
   const html = renderToStaticMarkup(createElement(BadgesCard, { stats: stats(40, 3) }));
   // Earned: Reader. Next: Bookworm, with where the reader stands. The other four are not drawn until asked for.
   const drawn = [...html.matchAll(/data-badge="([^"]+)"/g)].map((m) => m[1]);
@@ -54,13 +56,26 @@ test('the card: the earned badges and the next as squared keys, the next one\'s 
   // Every badge is a key (a tap shows its caption on a phone, where nothing hovers), squared: statuses, not filters.
   for (const m of html.matchAll(/<(\w+)[^>]*data-badge="[^"]+"[^>]*>/g)) {
     assert.equal(m[1], 'button', 'a badge is not a key');
-    assert.match(m[0], /rounded-lg/);
+    assert.match(m[0], /rounded-\[14px\]/);
     assert.doesNotMatch(m[0], /rounded-full/, 'a badge is a capsule again');
   }
+  // v0.74.0: each key is its drawn emblem at 56 px, earned or locked, over its name -- no emoji left.
+  assert.deepEqual([...html.matchAll(/data-emblem="(earned|locked)"[^>]*style="width:(\d+)px;height:(\d+)px"/g)].map((m) => m.slice(1)),
+    [['earned', '56', '56'], ['locked', '56', '56']]);
+  assert.doesNotMatch(html, /📖|🐛|🔥|💯|🌙|👑/, 'an emoji is back on a badge');
   // Everything earned: no next, no Show locked, and the line says so.
   const all = renderToStaticMarkup(createElement(BadgesCard, { stats: stats(600, 40) }));
   assert.match(all, /data-badge-caption[^>]*>Every badge earned</);
   assert.doesNotMatch(all, /data-badges-locked/);
   // One badge left: Show locked would show nothing new.
   assert.doesNotMatch(renderToStaticMarkup(createElement(BadgesCard, { stats: stats(600, 7) })), /data-badges-locked/);
+});
+
+test('the card hands every emblem both motion gates: Reduce effects and the system\'s reduced motion', () => {
+  // The emblem's sheen and Legend's halo move only when `still` is false. Reintroduce `still={false}`, or read only one
+  // gate, or the settings hook (lib/useReduceEffects.ts, a [value, set] pair): this fails.
+  const src = readFileSync(join(__dirname, '..', 'components/ProfileYou.tsx'), 'utf8');
+  assert.match(src, /import \{ useReduceEffects \} from '@\/lib\/effects';/);
+  assert.match(src, /const still = useReduceEffects\(\) \|\| !!useReducedMotion\(\);/);
+  assert.match(src, /<BadgeEmblem badge=\{b\} earned=\{got\} have=\{badgeHave\(b, stats\)\} size=\{56\} still=\{still\}/);
 });
