@@ -1,5 +1,6 @@
 'use client';
 import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
+import { QueryClientContext } from '@tanstack/react-query';
 import { api, ApiError, refreshSession, setAccessToken, setCurrentUser } from './api';
 import { readOfflineIdentity, writeOfflineIdentity, clearOfflineIdentity, OfflineIdentity } from './offlineIdentity';
 import { deviceId, deviceName } from './device';
@@ -121,6 +122,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status>('loading');
   const [user, setUser] = useState<User | null>(null);
   const timer = useRef<any>(null);
+  // Read from the context rather than with useQueryClient, which throws without a provider: tests mount AuthProvider
+  // alone, and a provider-less AuthProvider simply has no query cache to clear.
+  const qc = useContext(QueryClientContext);
+
+  /**
+   * Everything this tab holds for the account that was signed in: the service worker's caches, and the in-memory query
+   * cache. The query cache outlives a sign-out (no reload, staleTime 30 s, kept 5 min unused), so the next person on a
+   * shared device was shown the last one's Wrapped, history, stats and picks -- 18+ titles to an age-capped account
+   * included -- until each query refetched. Run at sign-out and at every sign-in, whoever signed in before.
+   */
+  const forgetAccountData = async () => {
+    qc?.clear();
+    await purgeAccountCaches();
+  };
 
   /**
    * The server has confirmed who we are. One function, because five paths reach this state (boot, login, sign-up,
@@ -192,7 +207,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // That store has to end with the session, or a shared machine hands the next person a live token.
     clearShownOnce();
     void tellWorkerUser(null);
-    await purgeAccountCaches();
+    await forgetAccountData();
   };
 
   useEffect(() => {
@@ -255,7 +270,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await api<{ accessToken: string; user: User; refreshExpiresAt?: number }>('/auth/login', {
         json: { username, password, code, deviceId: deviceId(), deviceName: deviceName() },
       });
-      await purgeAccountCaches(); // whoever used this device last does not get to answer this account's requests
+      await forgetAccountData(); // whoever used this device last does not get to answer this account's requests
       setAccessToken(res.accessToken);
       // After the purge, never before: the identity write must not be the thing the purge sweeps away.
       adoptAuthed(res.user, res.refreshExpiresAt);
@@ -311,7 +326,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await api<{ accessToken: string; user: User; refreshExpiresAt?: number }>('/auth/register', {
         json: { username, password, deviceId: deviceId(), deviceName: deviceName() },
       });
-      await purgeAccountCaches();
+      await forgetAccountData();
       setAccessToken(res.accessToken);
       adoptAuthed(res.user, res.refreshExpiresAt);
       return { ok: true };

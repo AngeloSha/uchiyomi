@@ -72,7 +72,7 @@ test('a sign-up refusal is said by its code first, and a closed server sends the
   const register = slice(auth, 'const register = async', 'const logout');
   assert.match(register, /api<[^>]*>\('\/auth\/register', \{\s*json: \{ username, password, deviceId: deviceId\(\), deviceName: deviceName\(\) \},/,
     'the device does not name itself at sign-up');
-  assert.match(register, /await purgeAccountCaches\(\);\s*setAccessToken\(res\.accessToken\);\s*adoptAuthed\(res\.user, res\.refreshExpiresAt\);/,
+  assert.match(register, /await forgetAccountData\(\);\s*setAccessToken\(res\.accessToken\);\s*adoptAuthed\(res\.user, res\.refreshExpiresAt\);/,
     'a sign-up does not adopt the session as a sign-in does');
   assert.match(register, /if \(body\.error === 'registration_disabled'\) \{\s*return \{ ok: false, closed: true, error: tr\('Sign-up is turned off on this server\. Ask whoever runs it for an account\.'\) \};/);
   assert.match(register, /const error = body\.error === 'username_taken' \|\| status === 409 \? tr\('That username is taken\.'\)/, 'a taken name is not said by its code first');
