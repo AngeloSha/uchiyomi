@@ -137,6 +137,8 @@ const SURFACES = [
   'components/HomeCustomize.tsx',
   'lib/homeRails.ts',
   'lib/tone.ts',
+  // v0.73.0: the badges' goals and words (#267).
+  'lib/badges.ts',
 ];
 
 /**
@@ -223,6 +225,9 @@ const SLICES: [string, string, string, string][] = [
   ['components/MigrateSourceSheet.tsx', 'Add or move source: the markers', 'function Marker(', ''],
   ['components/SourcesSheet.tsx', 'Sources sheet: detaching the main source', '{isAdmin && detachAsk && main?.primary && (', '{isAdmin && sources.length > 1 && ('],
   ['components/SourcesSheet.tsx', 'Sources sheet: Check now and the ways to add a source', 'onClick={checkNow}', '{isAdmin && series?.borrowNamesEffective'],
+  // v0.73.0 (#267): the badges are keys that say what they take, squared (they were capsules), and Show locked is a key --
+  // beside the Reading studio's range chips (All time among them), filters that stay.
+  ['components/ProfileYou.tsx', 'Badges: the badges and Show locked', 'export function BadgesCard(', 'export function ListsCard('],
 ];
 
 const slice = (src: string, from: string, to: string, name: string): string => {

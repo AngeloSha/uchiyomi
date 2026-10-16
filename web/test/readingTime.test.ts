@@ -68,7 +68,9 @@ test('the Reading Studio: three squared tiles, the pace and its note, then By ho
   const src = code(read('components/ProfileYou.tsx'));
   // Its own key and endpoint, the window's and the reader's timezone in it (queryKeys.test.ts holds keys to endpoints).
   assert.match(src, /queryKey: \['stats-time', days, tz\],\s*queryFn: \(\) => api<ReadingTime>\(`\/api\/stats\/time\?days=\$\{days\}&tz=\$\{encodeURIComponent\(tz\)\}`\)/);
-  const block = src.slice(src.indexOf('<div data-studio-time>'), src.indexOf("{bookCountText(data?.windowChapters ?? total)}"));
+  // The count line after the tiles: All time's view (#265) says the same count before them, on its own.
+  const start = src.indexOf('<div data-studio-time>');
+  const block = src.slice(start, src.indexOf("{bookCountText(data?.windowChapters ?? total)}", start));
   assert.match(block, /\{ label: tr\('Last 7 days'\), \.\.\.time\.week \},\s*\{ label: tr\('Last 30 days'\), \.\.\.time\.month \},\s*\{ label: String\(time\.year\.year\), \.\.\.time\.year \},/);
   assert.match(block, /className="grid grid-cols-3 gap-2"/);
   assert.match(block, /rounded-xl border/, 'the tiles are squared');

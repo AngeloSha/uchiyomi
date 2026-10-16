@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3950
+    "strings": 3960
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -3953,5 +3953,15 @@
   "Column width": "Largeur de la colonne",
   "A share of the width Fit gives: a narrower column of pages for a wide screen.": "Une part de la largeur donnée par Ajustement : une colonne de pages plus étroite pour un écran large.",
   "Fit pages to my screen": "Adapter les pages à mon écran",
-  "Each page comes at the size this screen shows it instead of as scanned: less data and memory on a phone or a slow connection. Zooming in fetches a sharper copy.": "Chaque page arrive à la taille où cet écran l’affiche, plutôt que telle qu’elle a été numérisée : moins de données et de mémoire sur un téléphone ou une connexion lente. Zoomer charge une copie plus nette."
+  "Each page comes at the size this screen shows it instead of as scanned: less data and memory on a phone or a slow connection. Zooming in fetches a sharper copy.": "Chaque page arrive à la taille où cet écran l’affiche, plutôt que telle qu’elle a été numérisée : moins de données et de mémoire sur un téléphone ou une connexion lente. Zoomer charge une copie plus nette.",
+  "All time": "Depuis le début",
+  "since {date}": "depuis le {date}",
+  "Next: {badge}": "Prochain : {badge}",
+  "Every badge earned": "Tous les badges obtenus",
+  "Show locked": "Afficher les verrouillés",
+  "Read 1 chapter": "Lire 1 chapitre",
+  "Read {n} chapters": "Lire {n} chapitres",
+  "Earned": "Obtenu",
+  "you have {n}": "vous en avez {n}",
+  "your best is {n}": "votre record : {n}"
 }

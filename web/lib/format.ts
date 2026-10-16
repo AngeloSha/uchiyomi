@@ -337,6 +337,28 @@ export function relativeTimeShort(iso?: string | null): string {
   }
 }
 
+/**
+ * A UTC calendar day the reader's way, for the days the stats count in (UTC days, as /api/stats buckets them): "Oct 14",
+ * "14 oct.", "10月14日", with the year when asked ("Oct 14, 2025"). Western digits, as numberText.
+ */
+export function dayText(ms: number, withYear = false): string {
+  try {
+    return cached(withYear ? 'day:y' : 'day', () => new Intl.DateTimeFormat(intlTag(), {
+      day: 'numeric', month: 'short', ...(withYear ? { year: 'numeric' as const } : {}), timeZone: 'UTC',
+    })).format(ms);
+  } catch {
+    return new Date(ms).toISOString().slice(0, 10);
+  }
+}
+
+/** The month of a UTC day, short ("Oct", "okt.", "10月"), or its year alone ("2026", "2026 г."): a heatmap's ticks. */
+export function monthText(ms: number): string {
+  try { return cached('month', () => new Intl.DateTimeFormat(intlTag(), { month: 'short', timeZone: 'UTC' })).format(ms); } catch { return new Date(ms).toISOString().slice(5, 7); }
+}
+export function yearText(ms: number): string {
+  try { return cached('year', () => new Intl.DateTimeFormat(intlTag(), { year: 'numeric', timeZone: 'UTC' })).format(ms); } catch { return String(new Date(ms).getUTCFullYear()); }
+}
+
 /** relativeTime for every language but English: the same steps, said by Intl, in either direction. */
 function intlAgo(diff: number, at: number): string | null {
   try {

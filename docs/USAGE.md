@@ -221,6 +221,16 @@ update too: a pause of more than five minutes is a break, not reading, and two d
 counted twice. **Wrapped** adds the year's hours, and a series page says how long catching up would take (*Catch up
 in ~2 h*). The household's weekly board stays a count of chapters.
 
+**All time** (since v0.73.0). Next to *90 days*, *180 days* and *365 days*, the Reading studio's **All time** shows one
+heatmap from the day you started reading to today (up to about ten years), and nothing else: the other panels are
+built for a window of up to a year. Its days keep their size, so a long history scrolls sideways inside the card,
+opening on the newest weeks, with the year and the month over the first week of each.
+
+**Badges** (since v0.73.0). Each badge says what it takes and where you stand: hover it, tab to it or tap it, and the
+line under the badges says, for example, *Bookworm · Read 50 chapters · you have 40*. Until you pick one, that line is
+about the next badge. **Show locked** lists the badges you have not earned yet, nearest first; it is off until you turn
+it on. Chapters count once each, however many times you read them.
+
 **Incognito reading** (since v0.61.0, **Profile → Settings → Reading**, or the reader's own settings). While it is
 on, your place is still kept — Keep reading and every resume work as usual — but what you read leaves no trace: no
 history, no stats or streaks, nothing on the household's boards or rails, and nothing sent to AniList, MyAnimeList or

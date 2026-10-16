@@ -110,6 +110,42 @@ test('reading stats shape', { skip }, async (t) => {
       assert.equal(s.currentStreak, 0);
     });
 
+    await t.test('All time: every day from the first read to today, at most ten years (#265)', async () => {
+      // The Reading studio's "All time" draws one heatmap from the first read on. Reintroduce the plain 7-400 clamp
+      // ("all" reads as NaN, so 90): the strip is 90 days, not 501, and the first read is not on it.
+      const all = async () => (await app.inject({ method: 'GET', url: '/api/stats?days=all', headers: auth })).json();
+      const utcDaysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+      const readOn = (daysAgo: number) => q(
+        `INSERT INTO reading_events (user_id, series_id, book_id, page, completed, created_at)
+         VALUES ($1,$2,$3,5,true, (((now() AT TIME ZONE 'UTC')::date - $4::int) + time '09:00') AT TIME ZONE 'UTC')`,
+        [uid, SERIES, `b_${SERIES}`, daysAgo],
+      );
+      await q('DELETE FROM reading_events WHERE user_id = $1', [uid]);
+      const none = await all();
+      assert.equal(none.byDay.length, 7, 'nothing read yet: a week to draw, not an empty strip');
+      assert.equal(none.days, 7);
+
+      await readOn(500);
+      await readOn(0);
+      const s = await all();
+      assert.equal(s.byDay.length, 501, 'from the first read to today, both days counted');
+      assert.equal(s.days, 501, '`days` says how long the strip is');
+      assert.deepEqual(s.byDay[0], { day: utcDaysAgo(500), chapters: 1 }, 'the strip opens on the day of the first read');
+      assert.equal(s.byDay[500].day, utcDaysAgo(0), 'and ends today');
+      assert.equal(s.windowChapters, 1, 'the one chapter, read twice on two days, counts once over the strip');
+
+      // Every other window keeps the clamp: the Studio's other panels are built around 7-400 days.
+      assert.equal((await stats()).byDay.length, 90);
+      assert.equal((await app.inject({ method: 'GET', url: '/api/stats?days=999', headers: auth })).json().byDay.length, 400);
+
+      // Ten years at most. Reintroduce Math.min with no cap: the strip runs 4001 days.
+      await readOn(4000);
+      const capped = await all();
+      assert.equal(capped.byDay.length, 3660);
+      assert.equal(capped.byDay[3659].day, utcDaysAgo(0));
+      await q('DELETE FROM reading_events WHERE user_id = $1', [uid]);
+    });
+
     await t.test('you can set your own display name', async () => {
       // Only an admin could, and only at account creation, so anyone left on the default saw a generic
       // fallback where their name belongs with nothing on screen suggesting a cause or a fix.

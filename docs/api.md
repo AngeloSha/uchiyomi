@@ -1551,6 +1551,10 @@ the day it was first finished that year; `/api/stats/time`'s `chapters`; and `/a
 They are counted from reading events, never from a chapter's read mark, so marking a chapter read from a list does not
 count and reading it afterwards does.
 
+**All time** (since v0.73.0). `GET /api/stats?days=all` ([#265](https://github.com/AngeloSha/uchiyomi/issues/265))
+answers every UTC day from the reader's first read to today, dense as the other windows (at least 7 days, at most 3660,
+about ten years), with `days` saying how many that was; any other `days` is still clamped to 7–400.
+
 **Release radar** (since v0.61.0). Every enriched series also carries `yomi.radar: {nextAt, dueUntil, quietAfter,
 lastAt, every, kind, steady, ended, basis} | null` — the server's estimate of when its next chapter comes (`series_radar`,
 one row per series, ISO times). The evidence is the dates its sources list for the chosen copies of what it may take

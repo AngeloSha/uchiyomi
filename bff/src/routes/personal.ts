@@ -27,6 +27,9 @@ import { smartQuery, parseQuery } from '../lib/smartLists';
 /** A colour a member stores that other members' browsers paint (avatar, list accent): hex only (v0.69.1). */
 const HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 
+/** The most days `/api/stats?days=all` answers: about ten years, the "All time" heatmap's longest strip (#265). */
+const ALL_TIME_MAX_DAYS = 3660;
+
 function computeStreaks(days: string[]): { current: number; longest: number } {
   if (!days.length) return { current: 0, longest: 0 };
   const set = new Set(days);
@@ -574,10 +577,27 @@ export default async function personalRoutes(app: FastifyInstance) {
 
   app.get('/api/stats', async (req) => {
     const uid = userIdOf(req);
+    // When reading started, so a year picker can offer the years that exist rather than guessing a range.
+    // Null for an account that has never read anything, which is different from "started this year". `span` is the
+    // UTC days from that first day to today, both counted: what "All time" draws.
+    const first = await one<{ at: string | null; span: number | null }>(
+      `SELECT min(created_at) AS at,
+              ((now() AT TIME ZONE 'UTC')::date - (min(created_at) AT TIME ZONE 'UTC')::date + 1)::int AS span
+         FROM reading_events WHERE user_id = $1`,
+      [uid],
+    );
+    const firstRead = first?.at ?? null;
     // Clamped, not trusted: `days` sizes a generate_series, so an unbounded value is a way to ask the
     // database to materialise a few million rows. 400 covers "a year, plus the run-up" -- the widest thing
     // the heatmap draws -- and 7 is the narrowest window in which a week's shape is visible at all.
-    const windowDays = Math.max(7, Math.min(400, Math.floor(Number((req.query as Record<string, string>).days) || 90)));
+    // `days=all` (#265, CheetahDoesStuff: the Reading studio's "All time") is every day from the first read to today,
+    // dense like the others, within ALL_TIME_MAX_DAYS: ten years is still a bounded series, and the heatmap is all
+    // the Studio draws for it. Reintroduce the plain clamp ("all" reads as NaN, so 90): "All time" in
+    // statsShape.int.test.ts gets 90 days back.
+    const asked = (req.query as Record<string, string>).days;
+    const windowDays = asked === 'all'
+      ? Math.max(7, Math.min(ALL_TIME_MAX_DAYS, first?.span ?? 7))
+      : Math.max(7, Math.min(400, Math.floor(Number(asked) || 90)));
     const summary = (await one('SELECT chapters_completed, series_touched, total_events, last_read_at FROM reading_stats WHERE user_id = $1', [uid])) ?? {
       chapters_completed: 0,
       series_touched: 0,
@@ -636,9 +656,6 @@ export default async function personalRoutes(app: FastifyInstance) {
     );
     const weekChapters = counts?.week ?? 0;
     const settings = ((await one<{ data: any }>('SELECT data FROM app_settings WHERE user_id = $1', [uid]))?.data) ?? {};
-    // When reading started, so a year picker can offer the years that exist rather than guessing a range.
-    // Null for an account that has never read anything, which is different from "started this year".
-    const firstRead = (await one<{ at: string | null }>('SELECT min(created_at) AS at FROM reading_events WHERE user_id = $1', [uid]))?.at ?? null;
     return { ...summary, days: windowDays, byDay, windowChapters: counts?.in_window ?? 0, first_read_at: firstRead, currentStreak: streaks.current, longestStreak: streaks.longest, weekChapters, weeklyGoal: settings.weeklyGoal ?? 0 };
   });
 

@@ -9,9 +9,10 @@ import { Pace } from '@/components/charts/Pace';
 import { Bars } from '@/components/charts/Bars';
 import { Columns } from '@/components/charts/Columns';
 import { t as tr, keys } from '@/lib/i18n';
-import { bookCountText } from '@/lib/format';
+import { bookCountText, dayText } from '@/lib/format';
 import { hoursText, perChapterText, readerTz } from '@/lib/readingTime';
 import { shownDeviceName } from '@/lib/device';
+import { BADGES, badgeCaption, badgeEarned, badgeHave, lockedBadges } from '@/lib/badges';
 
 /**
  * The You tab of the profile: what you have earned, what you have read, and your lists.
@@ -64,44 +65,65 @@ export function deviceRows(list: ReadingTime['window']['byDevice']): { label: st
   return [...by].sort((a, b) => b[1] - a[1]).map(([label, ms]) => ({ label, value: ms, hint: hoursText(ms) }));
 }
 
-// Rendered as `tr(b.label)`, so the labels are declared. See lib/i18n.ts.
-const BADGE_LABELS = keys('Reader', 'Bookworm', 'On a roll', 'Centurion', 'Devoted', 'Legend');
-export const BADGES = [
-  { emoji: '📖', label: BADGE_LABELS[0], test: (s: Stats) => s.chapters_completed >= 10 },
-  { emoji: '🐛', label: BADGE_LABELS[1], test: (s: Stats) => s.chapters_completed >= 50 },
-  { emoji: '🔥', label: BADGE_LABELS[2], test: (s: Stats) => s.longestStreak >= 7 },
-  { emoji: '💯', label: BADGE_LABELS[3], test: (s: Stats) => s.chapters_completed >= 100 },
-  { emoji: '🌙', label: BADGE_LABELS[4], test: (s: Stats) => s.longestStreak >= 30 },
-  { emoji: '👑', label: BADGE_LABELS[5], test: (s: Stats) => s.chapters_completed >= 500 },
-];
-
 /* ================================== You ================================== */
 
 /**
  * What you have earned, plus the single next thing.
  *
  * It used to render all six at once with five of them greyed out, which is a wall of things you have not
- * done sitting on your own profile.
+ * done sitting on your own profile. The rest stay behind Show locked (#267), off until asked for, nearest first.
+ *
+ * Every badge is a key that says what it takes (#267): hover, focus or a tap puts its caption in the line under the
+ * row, which otherwise says what the next badge takes -- a phone has no hover, so a tooltip alone would tell it nothing.
+ * Squared, as the badges are statuses, not filters (web/test/noPills.test.ts).
  */
 export function BadgesCard({ stats, span = '' }: { stats?: Stats; span?: string }) {
+  const [showLocked, setShowLocked] = useState(false);
+  // The badge whose caption shows: the one hovered, else the one tapped or focused, else the next.
+  const [hovered, setHovered] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string | null>(null);
   if (!stats) return <div className={`card skeleton h-32 ${span}`} />;
-  const earned = BADGES.filter((b) => b.test(stats));
-  const next = BADGES.find((b) => !b.test(stats));
+  const earned = BADGES.filter((b) => badgeEarned(b, stats));
+  const locked = lockedBadges(stats);
+  const next = locked[0];
+  const shown = showLocked ? [...earned, ...locked] : next ? [...earned, next] : earned;
+  const about = shown.find((b) => b.label === (hovered ?? picked)) ?? null;
+  const caption = about
+    ? `${tr(about.label)} · ${badgeCaption(about, stats)}`
+    : next ? `${tr('Next: {badge}', { badge: tr(next.label) })} · ${badgeCaption(next, stats)}` : tr('Every badge earned');
   return (
     <div id="badges" className={`${CARD} scroll-mt-4 lg:scroll-mt-20 ${span}`}>
-      <h2 className="mb-3 font-display text-base font-semibold">{tr('Badges')}</h2>
-      <div className="flex flex-wrap gap-2">
-        {earned.map((b) => (
-          <span key={b.label} className="inline-flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent-soft px-3 py-1.5 text-xs text-fog-100">
-            <span>{b.emoji}</span>{tr(b.label)}
-          </span>
-        ))}
-        {next && (
-          <span key={next.label} className="inline-flex items-center gap-1.5 rounded-full border border-ink-700 px-3 py-1.5 text-xs text-ink-500 opacity-60">
-            <span>{next.emoji}</span>{tr(next.label)}
-          </span>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h2 className="font-display text-base font-semibold">{tr('Badges')}</h2>
+        {locked.length > 1 && (
+          <button type="button" onClick={() => setShowLocked((v) => !v)} aria-pressed={showLocked} data-badges-locked
+            className={`btn-key h-7 px-2.5 text-[11px] ${showLocked ? 'btn-key-accent' : 'text-fog-400'}`}>
+            {tr('Show locked')}
+          </button>
         )}
       </div>
+      <div className="flex flex-wrap gap-2"
+        onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setPicked(null); }}>
+        {shown.map((b) => {
+          const got = badgeEarned(b, stats);
+          // The badge the caption is about is lit: an earned one's edge brightens, a locked one comes out of the dim.
+          const on = about === b;
+          const tone = got
+            ? `bg-accent-soft text-fog-100 ${on ? 'border-accent/80' : 'border-accent/40'}`
+            : on ? 'border-ink-500 text-fog-400' : 'border-ink-700 text-ink-500 opacity-60';
+          return (
+            <button key={b.label} type="button" data-badge={b.label} data-earned={got ? '' : undefined}
+              title={badgeCaption(b, stats)}
+              onClick={() => setPicked(b.label)} onFocus={() => setPicked(b.label)}
+              onMouseEnter={() => setHovered(b.label)} onMouseLeave={() => setHovered(null)}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs transition ${tone}`}>
+              <span aria-hidden>{b.emoji}</span>{tr(b.label)}
+              {!got && <span className="tabular-nums text-[10px]">{badgeHave(b, stats)}/{b.goal}</span>}
+            </button>
+          );
+        })}
+      </div>
+      <p data-badge-caption className="mt-2.5 text-[11px] text-fog-400">{caption}</p>
     </div>
   );
 }
@@ -139,7 +161,11 @@ export function ListsCard({ span = '' }: { span?: string }) {
  * dense daily series and simply had nowhere to be drawn at more than 90 days.
  */
 export function StudioCard({ span = '' }: { span?: string }) {
-  const [days, setDays] = useState(90);
+  // #265 (CheetahDoesStuff): "All time" is every day since the first read -- the heatmap alone, in a strip that scrolls
+  // sideways and opens on the newest weeks. The other panels are built around 7-400 days (medians, a pace line, hours
+  // over the window), so it asks /api/stats for the strip and nothing else.
+  const [days, setDays] = useState<number | 'all'>(90);
+  const all = days === 'all';
   const { data, isLoading } = useQuery({
     queryKey: ['stats', days],
     queryFn: () => api<Stats>(`/api/stats?days=${days}`),
@@ -149,6 +175,7 @@ export function StudioCard({ span = '' }: { span?: string }) {
   const { data: time } = useQuery({
     queryKey: ['stats-time', days, tz],
     queryFn: () => api<ReadingTime>(`/api/stats/time?days=${days}&tz=${encodeURIComponent(tz)}`),
+    enabled: !all,
   });
   const devices = deviceRows(time?.window.byDevice ?? []);
 
@@ -172,11 +199,11 @@ export function StudioCard({ span = '' }: { span?: string }) {
     <div id="reading-studio" className={`${CARD} scroll-mt-4 lg:scroll-mt-20 ${span}`}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-display text-base font-semibold">{tr('Reading studio')}</h2>
-        <div className="flex gap-1.5">
-          {[90, 180, 365].map((d) => (
-            <button key={d} onClick={() => setDays(d)} aria-pressed={days === d}
+        <div className="flex flex-wrap gap-1.5">
+          {([90, 180, 365, 'all'] as const).map((d) => (
+            <button key={d} onClick={() => setDays(d)} aria-pressed={days === d} data-studio-range={d}
               className={`chip text-[11px] ${days === d ? 'border-accent/50 text-accent' : 'text-fog-400'}`}>
-              {tr('{n} days', { n: d })}
+              {d === 'all' ? tr('All time') : tr('{n} days', { n: d })}
             </button>
           ))}
         </div>
@@ -184,6 +211,16 @@ export function StudioCard({ span = '' }: { span?: string }) {
 
       {total === 0 ? (
         <p className="py-6 text-center text-sm text-fog-500">{tr('Nothing read in this window yet.')}</p>
+      ) : all ? (
+        <div data-studio-all>
+          <p className="mb-1.5 text-[11px] uppercase tracking-widest text-fog-500">
+            {bookCountText(data?.windowChapters ?? total)}
+            {/* The first read, or where a strip of more than ten years begins (it is cut there). */}
+            {data?.first_read_at && series.length > 0
+              && ` · ${tr('since {date}', { date: dayText(Math.max(Date.parse(data.first_read_at), Date.parse(series[0].day)), true) })}`}
+          </p>
+          {series.length > 0 && <Heatmap values={counts} start={series[0].day} scroll />}
+        </div>
       ) : (
         <div className="space-y-5">
           {/* v0.61.0: how long, in three squared tiles -- the last week, the last month and the year (Wrapped's) -- then

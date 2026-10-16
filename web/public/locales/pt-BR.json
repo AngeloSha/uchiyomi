@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3950
+    "strings": 3960
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -3953,5 +3953,15 @@
   "Column width": "Largura da coluna",
   "A share of the width Fit gives: a narrower column of pages for a wide screen.": "Uma parte da largura que o Ajuste dá: uma coluna de páginas mais estreita para telas largas.",
   "Fit pages to my screen": "Ajustar as páginas à minha tela",
-  "Each page comes at the size this screen shows it instead of as scanned: less data and memory on a phone or a slow connection. Zooming in fetches a sharper copy.": "Cada página chega no tamanho em que esta tela a mostra, em vez de como foi escaneada: menos dados e memória no celular ou numa conexão lenta. Ao ampliar, uma cópia mais nítida é baixada."
+  "Each page comes at the size this screen shows it instead of as scanned: less data and memory on a phone or a slow connection. Zooming in fetches a sharper copy.": "Cada página chega no tamanho em que esta tela a mostra, em vez de como foi escaneada: menos dados e memória no celular ou numa conexão lenta. Ao ampliar, uma cópia mais nítida é baixada.",
+  "All time": "Todo o período",
+  "since {date}": "desde {date}",
+  "Next: {badge}": "Próximo: {badge}",
+  "Every badge earned": "Todos os emblemas conquistados",
+  "Show locked": "Mostrar bloqueados",
+  "Read 1 chapter": "Ler 1 capítulo",
+  "Read {n} chapters": "Ler {n} capítulos",
+  "Earned": "Conquistado",
+  "you have {n}": "você tem {n}",
+  "your best is {n}": "seu recorde: {n}"
 }

@@ -5467,11 +5467,17 @@ paths:
         - name: days
           in: query
           required: false
-          description: Size of the daily window, clamped to 7-400. Defaults to 90.
+          description: >-
+            Size of the daily window, clamped to 7-400. Defaults to 90. `all` (since v0.73.0, #265) is every UTC day
+            from the caller's first read to today, at least 7 and at most 3660 (about ten years); `days` in the answer
+            says how many that was.
           schema:
-            type: integer
-            minimum: 7
-            maximum: 400
+            oneOf:
+              - type: integer
+                minimum: 7
+                maximum: 400
+              - type: string
+                enum: [all]
       security:
         - bearer: []
       responses:
