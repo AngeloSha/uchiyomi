@@ -1283,13 +1283,13 @@ function ReaderInner() {
       router.push(`/series/?id=${encodeURIComponent(e.seriesId)}`);
     }
   };
+  /** To the next chapter, from the footer, a key, a controller or the menu: said first when it skips numbers (#236). */
+  const goNextChapter = () => { if (!nextId) return; warnGap(activeChapter?.id, nextId); goChapter(nextId); };
   /**
    * Leave for the next chapter. From anywhere but the end of this one it takes two presses: the button sits
    * at the edge of the footer beside the slider and the page counter, where a thumb aiming for either lands on
    * it, and one press used to drop the chapter with no way to tell it had happened until the new one drew.
    */
-  /** To the next chapter, from the footer, a key, a controller or the menu: said first when it skips numbers (#236). */
-  const goNextChapter = () => { if (!nextId) return; warnGap(activeChapter?.id, nextId); goChapter(nextId); };
   const goNext = () => {
     if (!nextId) return;
     const remaining = pagesAfter(flat, current);
