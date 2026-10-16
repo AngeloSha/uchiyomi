@@ -2214,7 +2214,7 @@
   "Tried {n} times since {time} · next try {when}": "Попыток: {n} с {time} · следующая {when}",
   "Last tried {ago}": "Последняя попытка: {ago}",
   "Check again": "Проверить снова",
-  "The extension engine runs Mihon and Tachiyomi extensions for Uchiyomi. It is an optional extra that uses about 750 MB of memory; MangaDex and sites you add by address work without it.": "Движок расширений запускает расширения Mihon и Tachiyomi для Uchiyomi. Это необязательное дополнение, которому нужно около 750 МБ памяти; MangaDex и сайты, добавленные по адресу, работают и без него.",
+  "The extension engine runs Mihon and Tachiyomi extensions for Uchiyomi. It is an optional extra that uses 1 to 1.5 GB of memory; MangaDex and sites you add by address work without it.": "Движок расширений запускает расширения Mihon и Tachiyomi для Uchiyomi. Это необязательное дополнение, которому нужно от 1 до 1,5 ГБ памяти; MangaDex и сайты, добавленные по адресу, работают и без него.",
   "It takes a minute or two to start the first time. This card turns into your extensions by itself.": "Первый запуск занимает минуту-две. Эта карточка сама сменится списком ваших расширений.",
   "Your extension data is kept while it is off.": "Данные ваших расширений сохраняются, пока движок выключен.",
   "Connected: the extension engine now uses Uchiyomi’s Cloudflare helper.": "Подключено: движок расширений теперь использует помощник Cloudflare из Uchiyomi.",

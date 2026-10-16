@@ -2214,7 +2214,7 @@
   "Tried {n} times since {time} · next try {when}": "عدد المحاولات منذ {time}: {n} · المحاولة التالية {when}",
   "Last tried {ago}": "آخر محاولة: {ago}",
   "Check again": "تحقّق مجددًا",
-  "The extension engine runs Mihon and Tachiyomi extensions for Uchiyomi. It is an optional extra that uses about 750 MB of memory; MangaDex and sites you add by address work without it.": "يشغّل محرّك الإضافات إضافات Mihon وTachiyomi لصالح Uchiyomi. وهو مكوّن اختياري يستهلك نحو 750 ميغابايت من الذاكرة؛ يعمل MangaDex والمواقع التي تضيفها بعنوانها من دونه.",
+  "The extension engine runs Mihon and Tachiyomi extensions for Uchiyomi. It is an optional extra that uses 1 to 1.5 GB of memory; MangaDex and sites you add by address work without it.": "يشغّل محرّك الإضافات إضافات Mihon وTachiyomi لصالح Uchiyomi. وهو مكوّن اختياري يستهلك ما بين 1 و1.5 غيغابايت من الذاكرة؛ يعمل MangaDex والمواقع التي تضيفها بعنوانها من دونه.",
   "It takes a minute or two to start the first time. This card turns into your extensions by itself.": "يستغرق التشغيل الأول دقيقة أو دقيقتين. ستتحوّل هذه البطاقة إلى إضافاتك من تلقاء نفسها.",
   "Your extension data is kept while it is off.": "تبقى بيانات إضافاتك محفوظة ما دام متوقفًا.",
   "Connected: the extension engine now uses Uchiyomi’s Cloudflare helper.": "تم الاتصال: يستخدم محرّك الإضافات الآن مساعد Cloudflare الخاص بـ Uchiyomi.",

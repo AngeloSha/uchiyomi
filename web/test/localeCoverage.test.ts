@@ -278,6 +278,9 @@ const IRREGULAR_PAIRS: Record<string, string> = {
 /** Keys that look counted and are not a pair, each with why. Not a place to park a new key. */
 const NOT_PAIRED: Record<string, string> = {
   '1 to 64 letters, digits, - or _': 'a range, not a count',
+  // #275: the setup card's memory, as docs/extensions.md says it.
+  'The extension engine runs Mihon and Tachiyomi extensions for Uchiyomi. It is an optional extra that uses 1 to 1.5 GB of memory; MangaDex and sites you add by address work without it.':
+    'a range, not a count',
   'Up to {n} hours': 'etaLine says hours only past 90 minutes, rounded up: never 1',
   // One whole sentence per status (FindMissingDialog healthLine), each with its streak inside.
   'rate-limited us {n} times in a row': 'shown only when consecutive > 1; one time is the bare status',

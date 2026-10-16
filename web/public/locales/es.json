@@ -2214,7 +2214,7 @@
   "Tried {n} times since {time} · next try {when}": "Probado {n} veces desde las {time} · próximo intento {when}",
   "Last tried {ago}": "Último intento: {ago}",
   "Check again": "Comprobar de nuevo",
-  "The extension engine runs Mihon and Tachiyomi extensions for Uchiyomi. It is an optional extra that uses about 750 MB of memory; MangaDex and sites you add by address work without it.": "El motor de extensiones ejecuta las extensiones de Mihon y Tachiyomi para Uchiyomi. Es un extra opcional que usa unos 750 MB de memoria; MangaDex y los sitios que añades por dirección funcionan sin él.",
+  "The extension engine runs Mihon and Tachiyomi extensions for Uchiyomi. It is an optional extra that uses 1 to 1.5 GB of memory; MangaDex and sites you add by address work without it.": "El motor de extensiones ejecuta las extensiones de Mihon y Tachiyomi para Uchiyomi. Es un extra opcional que usa entre 1 y 1,5 GB de memoria; MangaDex y los sitios que añades por dirección funcionan sin él.",
   "It takes a minute or two to start the first time. This card turns into your extensions by itself.": "La primera vez tarda uno o dos minutos en arrancar. Esta tarjeta se convierte sola en tus extensiones.",
   "Your extension data is kept while it is off.": "Los datos de tus extensiones se conservan mientras está apagado.",
   "Connected: the extension engine now uses Uchiyomi’s Cloudflare helper.": "Conectado: el motor de extensiones ya usa el asistente de Cloudflare de Uchiyomi.",

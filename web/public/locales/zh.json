@@ -2214,7 +2214,7 @@
   "Tried {n} times since {time} · next try {when}": "自 {time} 起已尝试 {n} 次 · 下次尝试 {when}",
   "Last tried {ago}": "上次尝试：{ago}",
   "Check again": "再检查一次",
-  "The extension engine runs Mihon and Tachiyomi extensions for Uchiyomi. It is an optional extra that uses about 750 MB of memory; MangaDex and sites you add by address work without it.": "扩展引擎为 Uchiyomi 运行 Mihon 和 Tachiyomi 扩展。它是可选组件，约占 750 MB 内存；MangaDex 和按地址添加的网站不需要它也能使用。",
+  "The extension engine runs Mihon and Tachiyomi extensions for Uchiyomi. It is an optional extra that uses 1 to 1.5 GB of memory; MangaDex and sites you add by address work without it.": "扩展引擎为 Uchiyomi 运行 Mihon 和 Tachiyomi 扩展。它是可选组件，占用 1 到 1.5 GB 内存；MangaDex 和按地址添加的网站不需要它也能使用。",
   "It takes a minute or two to start the first time. This card turns into your extensions by itself.": "首次启动需要一两分钟。这张卡片会自动变成你的扩展列表。",
   "Your extension data is kept while it is off.": "关闭期间，你的扩展数据会保留。",
   "Connected: the extension engine now uses Uchiyomi’s Cloudflare helper.": "已连接：扩展引擎现在使用 Uchiyomi 的 Cloudflare 助手。",

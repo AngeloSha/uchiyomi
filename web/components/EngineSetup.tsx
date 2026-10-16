@@ -226,7 +226,7 @@ export function EngineSetup({ status }: { status: EngineReport }) {
       </div>
 
       <p className="mt-3 max-w-prose text-[11px] leading-relaxed text-fog-500">
-        {tr('The extension engine runs Mihon and Tachiyomi extensions for Uchiyomi. It is an optional extra that uses about 750 MB of memory; MangaDex and sites you add by address work without it.')}
+        {tr('The extension engine runs Mihon and Tachiyomi extensions for Uchiyomi. It is an optional extra that uses 1 to 1.5 GB of memory; MangaDex and sites you add by address work without it.')}
       </p>
 
       <PlatformChips value={platform} onChange={setPlatform} />
