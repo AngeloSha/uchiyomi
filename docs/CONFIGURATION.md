@@ -19,7 +19,7 @@ The ones worth knowing:
   the activity log use it). The default, `loopback, linklocal, uniquelocal`, trusts a proxy on this machine, in
   Docker or on your LAN: nginx, Nginx Proxy Manager, Caddy, Traefik, an Umbrel or CasaOS app proxy, a Cloudflare
   tunnel container. A proxy on a public address, or one that reaches the server over Tailscale (`100.x`), needs
-  adding: keep the default names, because the app's own web server is one of those proxies too
+  adding, with the default names kept so a hop between it and the app on this machine or in Docker stays trusted
   (`TRUST_PROXY=loopback, linklocal, uniquelocal, 203.0.113.9`, addresses or CIDR ranges). `true` trusts every
   peer, which lets anyone who can reach the port directly choose their own address. Behind Cloudflare's proxy (the
   orange cloud) the visitor reaches you through Cloudflare's own addresses: have your reverse proxy restore the real
