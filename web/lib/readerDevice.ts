@@ -1,5 +1,5 @@
 // The reader's settings that belong to ONE DEVICE, not to the account (v0.61.0; the column width and Fit pages to my
-// screen since v0.74.0, #233 and #234).
+// screen since v0.74.0, #233 and #234; tapping a page of a pair since v0.77.0, #232).
 //
 // A colour filter is a property of the screen it is read on -- an e-ink tablet wants e-ink, the phone beside it does
 // not -- and so is how a hand reaches it. These are kept in this browser only and never synced: the account's reader
@@ -32,6 +32,12 @@ export interface DevicePrefs {
    * phone on a slow connection wants it; off -- every page as scanned, the reader as it always was -- until chosen.
    */
   fitPages: boolean;
+  /**
+   * Tap a page of a pair to see it alone (#232): on a slide of two pages -- Double spread, or a joined spread (#229) -- a
+   * tap on one of them brings it into frame, in place of what the tap zone would do. A small screen wants it; off -- a tap
+   * does what Tap zones says, the middle shows the controls, the reader as it always was -- until chosen.
+   */
+  tapFocus: boolean;
 }
 
 /** Column width's range and step, in percent: the sheet's slider and what a stored value is cleaned to. */
@@ -51,6 +57,7 @@ export const DEFAULT_DEVICE: DevicePrefs = {
   pad: {},
   columnWidth: COLUMN_WIDTH.max,
   fitPages: false,
+  tapFocus: false,
 };
 
 export const DEVICE_KEY = 'yomi_reader_device';
@@ -67,6 +74,7 @@ export function migrateDevicePrefs(raw: unknown): DevicePrefs {
     pad: cleanPadOverrides(r.pad),
     columnWidth: cleanColumnWidth(r.columnWidth),
     fitPages: r.fitPages === true,
+    tapFocus: r.tapFocus === true,
   };
 }
 

@@ -533,6 +533,11 @@ export interface PageInfo {
    * explanation over it rather than letting a blank page read as a broken image.
    */
   missing?: true;
+  /**
+   * #229, with ?spreads=1 only: this page and the next are one double-page spread a source served as two files, and which
+   * side of the spread the next page is on (bff lib/spreadJoin.ts joinDirection).
+   */
+  join?: 'rtl' | 'ltr';
   fileName: string;
   mediaType: string;
   width?: number;
@@ -774,7 +779,7 @@ export interface DownloadManifest {
   coverUrl: string;
   totalBytes: number;
   /** `missing` rides along like `junk`: the placeholder bytes download like any page, and the caption is drawn offline too. */
-  pages: { number: number; url: string; width: number | null; height: number | null; bytes: number | null; junk?: boolean; missing?: true }[];
+  pages: { number: number; url: string; width: number | null; height: number | null; bytes: number | null; junk?: boolean; missing?: true; join?: 'rtl' | 'ltr' }[];
 }
 
 export function isWebtoon(dir?: string): boolean {

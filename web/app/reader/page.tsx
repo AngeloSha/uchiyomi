@@ -1,12 +1,12 @@
 'use client';
 import { ScrollRail, CARD_RAIL } from '@/components/ScrollRail';
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { isWide, pageHeight, pairSlides, type WidePages } from '@/lib/readerSpread';
+import { isWide, joinedOrder, pageHeight, pairSlides, type WidePages } from '@/lib/readerSpread';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
-import { api, img } from '@/lib/api';
+import { api, apiWithHeaders, img } from '@/lib/api';
 import { fetchAllBooks } from '@/lib/seriesBooks';
 import { chapterOutcome } from '@/lib/readerState';
 import { openableChapters } from '@/lib/chapterRows';
@@ -38,19 +38,31 @@ import { ChapterSheet } from '@/components/ChapterSheet';
 import { SeriesCard } from '@/components/cards';
 import { NextInStory } from '@/components/RelatedRail';
 import { IcChevronLeft, IcChevronRight, IcSliders, IcGrid } from '@/components/icons';
-import { ReaderImg, MissingCaption, ReaderPageRow, SlidePending, SlideRegion, SlideTurned, DIVIDER_H, measurePage } from '@/components/ReaderPage';
+import { ReaderImg, MissingCaption, ReaderPageRow, SlidePending, SlideRegion, SlideTurned, SlideTurnedPair, DIVIDER_H, measurePage } from '@/components/ReaderPage';
 import { CHAPTER_SAMPLE, LEFT_HALF, RIGHT_HALF, WHOLE, chapterSideCrop, halfCrop, pairCrop, type Region } from '@/lib/readerCrop';
 import { t as tr } from '@/lib/i18n';
 import { serverReachableHint } from '@/lib/desktop';
 import { IncognitoTag, incognitoRef } from '@/components/IncognitoBanner';
 import { useContextMenu, type MenuItem } from '@/components/ContextMenu';
 import { ReaderShortcuts, useHasKeyboard } from '@/components/ReaderShortcuts';
+import { capLabel } from '@/components/ReaderKeys';
 
-interface PageDim { number: number; width: number | null; height: number | null; junk?: boolean; missing?: boolean }
-/** `sourceId`: the adapter the copy came from, for naming it on a missing page's caption. Unknown for a downloaded copy. */
-interface Chapter { id: string; seriesId: string; seriesTitle: string; title: string; pages: PageDim[]; offline: boolean; readingDirection?: string | null; pruned?: boolean; sourceId?: string | null }
+interface PageDim { number: number; width: number | null; height: number | null; junk?: boolean; missing?: boolean; join?: 'rtl' | 'ltr' }
+/**
+ * `sourceId`: the adapter the copy came from, for naming it on a missing page's caption. Unknown for a downloaded copy.
+ * `spreads` (#229, Join split double pages): what the server said of the chapter's spreads when asked (`x-spreads`):
+ * found (`done`, the joins on its pages), still being measured (`pending`, asked again shortly), or `none` to find; unset
+ * when it was not asked -- joining off, or a downloaded copy, which carries what was found when it was saved.
+ */
+interface Chapter { id: string; seriesId: string; seriesTitle: string; title: string; pages: PageDim[]; offline: boolean; readingDirection?: string | null; pruned?: boolean; sourceId?: string | null; spreads?: 'done' | 'pending' | 'none' }
 interface ChapterRef { id: string; label: string }
-interface FlatItem { ci: number; number: number; width: number | null; height: number | null; key: string; firstOfChapter: boolean; junk?: boolean; missing?: boolean; collapsed?: boolean }
+interface FlatItem { ci: number; number: number; width: number | null; height: number | null; key: string; firstOfChapter: boolean; junk?: boolean; join?: 'rtl' | 'ltr'; missing?: boolean; collapsed?: boolean }
+
+/**
+ * #229: when to ask again for a chapter whose spreads the server is still measuring, after each `pending`: then the
+ * chapter is left as it is until it is next opened. The measure takes a second or two a chapter when nothing waits.
+ */
+const SPREAD_ASKS = [1500, 4000, 10000];
 
 /** Paged mode's render window, in pages: a slide is one screen, so pages and screens are the same thing there. */
 const WINDOW_BEHIND = 2;
@@ -106,25 +118,39 @@ function usePortrait(): boolean {
   return portrait;
 }
 
-async function loadChapter(bookId: string): Promise<Chapter | null> {
+/**
+ * A chapter's page list as the reader keeps it. `spreads` (#229): asked with ?spreads=1 by a reader who turned Join split
+ * double pages on -- the pages a source cut from one spread then carry `join` -- and the server's word on them with it.
+ */
+async function pageList(bookId: string, spreads: boolean): Promise<{ pages: PageDim[]; spreads?: Chapter['spreads'] }> {
+  const { data, headers } = await apiWithHeaders<PageInfo[]>(`/api/books/${bookId}/pages${spreads ? '?spreads=1' : ''}`);
+  const said = headers.get('x-spreads');
+  return {
+    pages: data.map((p) => ({ number: p.number, width: p.width ?? null, height: p.height ?? null, junk: p.junk, missing: p.missing, join: p.join })),
+    spreads: spreads ? (said === 'done' || said === 'pending' ? said : 'none') : undefined,
+  };
+}
+
+async function loadChapter(bookId: string, spreads = false): Promise<Chapter | null> {
   const off = await getOfflineChapter(bookId);
   if (off) {
     return { id: bookId, seriesId: off.seriesId, seriesTitle: off.seriesTitle, title: off.title, pages: off.pages, offline: true, readingDirection: off.readingDirection };
   }
   try {
     const b = await api<Book>(`/api/books/${bookId}`);
-    const pInfo = await api<PageInfo[]>(`/api/books/${bookId}/pages`);
+    const list = await pageList(bookId, spreads);
     return {
       id: bookId,
       seriesId: b.seriesId,
       seriesTitle: b.seriesTitle,
       title: b.metadata?.title || b.name,
-      pages: pInfo.map((p) => ({ number: p.number, width: p.width ?? null, height: p.height ?? null, junk: p.junk, missing: p.missing })),
+      pages: list.pages,
       offline: false,
       // The server deleted this chapter's file after everyone finished it. Carried so the empty page list
       // below can be explained rather than blamed on the reader's library mount.
       pruned: b.pruned === true,
       sourceId: b.sourceId ?? null,
+      spreads: list.spreads,
     };
   } catch {
     return null;
@@ -180,6 +206,12 @@ function ReaderInner() {
   const imgFilter = COLOR_FILTER[device.colorFilter];
   const behavior = glide(device.colorFilter);
   const [zoom, setZoom] = useState(1);
+  /**
+   * One page of the pair on screen brought into frame (#232 by a tap, #261 by the `focus` key): the slide then shows that
+   * page alone. Only ever a view of a slide that holds two pages, so nothing that counts pages -- progress, the counter,
+   * bookmarks -- sees it; it goes when the track leaves the slide or the slides are laid out again.
+   */
+  const [focus, setFocus] = useState<{ slide: number; page: number } | null>(null);
   const [rtl, setRtl] = useState(false); // series reads right-to-left → double-spread pair order flips
   // Paged mode's track direction: the reader setting (lib/readerPrefs.ts `pagedDirection`), or the series'
   // own direction above when it says `series`. `trackSign` turns a slide index into a scrollLeft: an RTL
@@ -195,6 +227,8 @@ function ReaderInner() {
   const laidOutMode = useRef<ReaderPrefs['mode'] | null>(null);
   /** Whether the paged track was last laid out with wide pages split in two (the split effect below). */
   const laidOutSplit = useRef<boolean | null>(null);
+  /** The joined spreads the paged track was last laid out with (#229, the joins effect below), as the slides' first pages. */
+  const laidOutJoins = useRef<string | null>(null);
   /** When the track last moved -- a scroll event, or a smooth scroll this code started. See untilStill. */
   const lastMoved = useRef(0);
   // The interface's own direction, for the text that sits INSIDE the track and would otherwise take the
@@ -235,6 +269,9 @@ function ReaderInner() {
   const appending = useRef(false);
   /** Where the paged track stood just before the next chapter or a closing card was added to it, and when (#180). */
   const appendAnchor = useRef<{ left: number; at: number } | null>(null);
+  /** #229: how many times each chapter's spreads were asked for again, and the asks still out (the spreads effect). */
+  const spreadTries = useRef<Map<string, number>>(new Map());
+  const spreadAsking = useRef<Set<string>>(new Set());
   const noMore = useRef(false);
   const tap = useRef<{ x: number; y: number; t: number } | null>(null);
   const lastTapAt = useRef(0);
@@ -244,7 +281,8 @@ function ReaderInner() {
    * that far: the OS decides how long a double-click may take (Windows defaults to 500 ms), so the single
    * click of a slow double-click has already acted by the time the browser says the two were one gesture.
    */
-  const acted = useRef<{ kind: 'turn'; slide: number; at: number } | { kind: 'scroll'; top: number; at: number } | { kind: 'chrome'; at: number } | null>(null);
+  const acted = useRef<{ kind: 'turn'; slide: number; at: number } | { kind: 'scroll'; top: number; at: number } | { kind: 'chrome'; at: number }
+    | { kind: 'focus'; prev: { slide: number; page: number } | null; at: number } | null>(null);
   /** When the pointer path handled a double-tap itself. A touch double-tap also raises `dblclick`, and
    *  zooming for both halves of the same gesture would put the zoom straight back where it started. */
   const handledDouble = useRef(0);
@@ -319,6 +357,7 @@ function ReaderInner() {
     completedSent.current.clear();
     warnedGaps.current.clear();
     fitAsked.current.clear();
+    spreadTries.current.clear();
     prevPos.current = null;
     setExpanded(new Set());   // a page opened by hand belongs to the chapter it was opened in
     setWin({ from: 0, to: -1 });
@@ -326,7 +365,7 @@ function ReaderInner() {
     blobUrls.current.forEach((u) => URL.revokeObjectURL(u));
     blobUrls.current.clear();
     (async () => {
-      const first = await loadChapter(bookId);
+      const first = await loadChapter(bookId, loadPrefs().joinSplit);
       if (!alive) return;
       setFailed(null);
       // Empty and absent are different sentences, and neither of them is silence.
@@ -548,10 +587,17 @@ function ReaderInner() {
   const wideMode: WidePages = portrait && !(prefs.mode === 'paged' && prefs.spread) ? prefs.widePages : 'whole';
   const rightFirst = rtl || pagedRtl;
   const splitTrack = prefs.mode === 'paged' && wideMode === 'split';
-  const { slides, slideOf, half } = useMemo(
-    () => pairSlides(flat, prefs.mode === 'paged' && !!prefs.spread, { split: splitTrack, rightFirst }),
-    [flat, prefs.mode, prefs.spread, splitTrack, rightFirst],
+  // #229, Join split double pages (account, off until chosen): two pages a source served as the halves of one spread are
+  // one slide (lib/readerSpread.ts rule 4b). On a screen held upright Wide pages decides, as for a spread in one file:
+  // Whole shows the spread, Split shows its two pages one by one (not joined), Rotate turns it on its side.
+  const { slides, slideOf, half, joined } = useMemo(
+    () => pairSlides(flat, prefs.mode === 'paged' && !!prefs.spread, { split: splitTrack, rightFirst, joinSplit: prefs.joinSplit }),
+    [flat, prefs.mode, prefs.spread, splitTrack, rightFirst, prefs.joinSplit],
   );
+  // A page brought into frame belongs to the slides it was brought out of: laid out again, they give the pair back.
+  useEffect(() => { setFocus(null); }, [slides]);
+  /** Which pages start a joined slide, by key: what the track was laid out for, for the joins effect further down. */
+  const joinedAt = useMemo(() => slides.filter((_, s) => joined[s]).map((idxs) => flat[idxs[0]]?.key).join(','), [slides, joined, flat]);
   /** The paged track's slide, measured: what a split half or a page turned on its side is fitted into. */
   const [area, setArea] = useState({ w: 0, h: 0 });
   useEffect(() => {
@@ -793,10 +839,14 @@ function ReaderInner() {
     }
     const s = slideOf[i] ?? i;
     const shown = slides[s] ?? [i];
-    return drawnWidth(p, {
-      mode: 'slide', w: area.w || window.innerWidth, h: area.h || window.innerHeight, zoom,
-      pair: shown.length === 2, half: !!half[s], rotate: wideMode === 'rotate' && shown.length === 1 && isWide(p), crop: prefs.cropBorders,
-    });
+    // One page of the pair brought into frame (#232/#261) is drawn alone; a joined spread turned on its side (#229, Wide
+    // pages -> Rotate) is one picture twice a page wide, turned, of which this page is half.
+    const pair = shown.length === 2 && focus?.slide !== s;
+    const slide = { mode: 'slide' as const, w: area.w || window.innerWidth, h: area.h || window.innerHeight, zoom, half: !!half[s], crop: prefs.cropBorders };
+    if (pair && joined[s] && wideMode === 'rotate' && p.width && p.height) {
+      return drawnWidth({ width: 2 * p.width, height: p.height }, { ...slide, pair: false, rotate: true }) / 2;
+    }
+    return drawnWidth(p, { ...slide, pair, rotate: wideMode === 'rotate' && shown.length === 1 && isWide(p) });
   };
   /** The width to ask page `i` for, in device pixels: rounded up to a width the server keeps (0: as scanned), never less than before. */
   const fitFor = (i: number): number => {
@@ -888,6 +938,7 @@ function ReaderInner() {
     laidOutSign.current = trackSign;
     laidOutMode.current = prefs.mode;
     laidOutSplit.current = splitTrack;
+    laidOutJoins.current = joinedAt;
     didInitScroll.current = true;
     // The column's window and anchor from where it now stands: a resume on page 1 scrolls nowhere, so no scroll event
     // would ever bring them.
@@ -906,6 +957,7 @@ function ReaderInner() {
     if (prefs.mode === 'paged') {
       laidOutSign.current = trackSign;
       laidOutSplit.current = splitTrack;
+      laidOutJoins.current = joinedAt;
       // The column's anchor belongs to the column: on the way back it would be a place read before the pages turned.
       anchorRef.current = null;
       placeTrack(el, slideOf[current] ?? current);
@@ -944,6 +996,19 @@ function ReaderInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [splitTrack]);
 
+  // #229: the same for joined spreads. A join the server finds while the chapter is open (the measure runs in the
+  // background, and the reader asks again), or Join split double pages switched on or off, makes two slides one or one
+  // two before the page being read, and the track's place then points at another page. Put it back on the page being
+  // read before it paints. Keyed on which pages start a joined slide (`joinedAt`), so nothing else that changes the slides
+  // moves it.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !didInitScroll.current || prefs.mode !== 'paged' || laidOutJoins.current === joinedAt) return;
+    laidOutJoins.current = joinedAt;
+    placeTrack(el, slideOf[current] ?? current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [joinedAt]);
+
   // ---- track current page on scroll ----
   // A resize that raises no scroll event (the offset still fits) leaves the track between two pages: snap it back too.
   useEffect(() => {
@@ -979,6 +1044,8 @@ function ReaderInner() {
       pagedWidth.current = w;
       const s = Math.round(Math.abs(el.scrollLeft) / Math.max(1, w));
       pagedSlide.current = s;
+      // Away from the slide a page was brought into frame on: it shows its pair again when it is next seen.
+      setFocus((f) => (f && f.slide !== s ? null : f));
       const idxs = slides[Math.max(0, Math.min(slides.length - 1, s))];
       const i = idxs ? idxs[idxs.length - 1] : 0; // last page of a spread → completion fires on the final spread
       setCurrent((c) => (c === i ? c : i));
@@ -1057,7 +1124,7 @@ function ReaderInner() {
       // #180: where the track stands now, for the layout effect after `slides` to put it back.
       const hold = () => { appendAnchor.current = scrollRef.current ? { left: scrollRef.current.scrollLeft, at: Date.now() } : null; };
       if (!next) { noMore.current = true; await untilStill(lastMoved, rtlTrack); hold(); setEnded(true); appending.current = false; return; }
-      const ch = await loadChapter(next.id);
+      const ch = await loadChapter(next.id, prefs.joinSplit);
       const outcome = chapterOutcome(ch);
       await untilStill(lastMoved, rtlTrack);
       hold();
@@ -1069,6 +1136,34 @@ function ReaderInner() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current, ready, flat.length, chapterRefs, tail]);
+
+  // ---- #229: spreads the server is still measuring ----
+  // Join split double pages: a chapter's spreads are found in the background (bff lib/spreadMeasure.ts), so a chapter
+  // opened before its measure ran comes back with none, `pending`. Ask again (SPREAD_ASKS), and put the joins on its pages
+  // as they come: the joins effect above keeps the page being read where it is. Switched on mid-chapter, the chapters
+  // already loaded are asked for at once. Online chapters only: a downloaded copy carries what was found when it was saved.
+  useEffect(() => {
+    if (!prefs.joinSplit) return;
+    const tries = (id: string) => spreadTries.current.get(id) ?? 0;
+    const due = chapters.filter((c) => !c.offline && !spreadAsking.current.has(c.id)
+      && (c.spreads === undefined || (c.spreads === 'pending' && tries(c.id) < SPREAD_ASKS.length)));
+    if (!due.length) return;
+    const wait = Math.min(...due.map((c) => (c.spreads === undefined ? 0 : SPREAD_ASKS[tries(c.id)])));
+    const t = setTimeout(() => {
+      for (const c of due) {
+        if (c.spreads === 'pending') spreadTries.current.set(c.id, tries(c.id) + 1);
+        spreadAsking.current.add(c.id);
+        void pageList(c.id, true).then((list) => {
+          // Out of the asks before the answer goes in: the render it causes runs this effect again, and asks what is due.
+          spreadAsking.current.delete(c.id);
+          setChapters((cs) => cs.map((x) => (x.id === c.id && x.pages.length === list.pages.length
+            ? { ...x, spreads: list.spreads, pages: x.pages.map((p, i) => (p.join === list.pages[i].join ? p : { ...p, join: list.pages[i].join })) }
+            : x)));
+        }, () => { spreadAsking.current.delete(c.id); });
+      }
+    }, wait);
+    return () => clearTimeout(t);
+  }, [prefs.joinSplit, chapters]);
 
   // ---- submit progress for the active chapter ----
   // Two paths: (a) regular page progress, debounced 600ms; (b) chapter COMPLETION, sent immediately —
@@ -1348,6 +1443,8 @@ function ReaderInner() {
     const el = scrollRef.current;
     if (PAGE_ACTIONS.has(action)) {
       if (!el) return;
+      // One page of a pair in frame (#261): a turn toward the pair's other page goes there first.
+      if (prefs.mode === 'paged' && stepFocus(action, o)) return;
       // Next and back are reading order, whichever way the pages run. The page to the left or the right is PHYSICAL,
       // like the arrow keys and the thirds: on a right-to-left read the next page is to the left.
       const d = action === 'next' ? 1 : action === 'prev' ? -1 : (action === 'pageRight' ? 1 : -1) * trackSign;
@@ -1375,6 +1472,7 @@ function ReaderInner() {
     else if (action === 'prevChapter') goChapter(prevId, true);
     else if (action === 'fullscreen') toggleFullscreen();
     else if (action === 'menu') setChrome((c) => !c);
+    else if (action === 'focus') toggleFocus();
     else if (action === 'exit') back();
   };
   const performRef = useRef(perform);
@@ -1492,6 +1590,14 @@ function ReaderInner() {
     cancelPendingTap();
     lastTapAt.current = now;
     const zone = act.zone;
+    // #232, Tap a page of a pair to see it alone (this device, off until chosen): a tap ON a page of a pair brings that
+    // page into frame instead of what its zone does. Off, this is never asked, and every tap is the tap layout's.
+    const target = device.tapFocus ? pageOfPairAt(e.clientX, e.clientY) : null;
+    if (target) {
+      const prev = focus;
+      tapTimer.current = setTimeout(() => { tapTimer.current = null; acted.current = { kind: 'focus', prev, at: Date.now() }; setFocus(target); }, act.after);
+      return;
+    }
     tapTimer.current = setTimeout(() => { tapTimer.current = null; runTap(zone); }, act.after);
   };
 
@@ -1503,6 +1609,74 @@ function ReaderInner() {
   const slideNow = () => {
     const el = scrollRef.current;
     return el ? Math.round(Math.abs(el.scrollLeft) / Math.max(1, el.clientWidth)) : 0;
+  };
+
+  // ---- one page of a pair in frame (#232 a tap, #261 the `focus` key) ----
+  /**
+   * The pages of slide `s` in the order the slide draws them (the DOM's). A joined spread (#229) as it sits in the
+   * spread, left to right, by the side the server found: the slide is laid out left to right whatever the track's
+   * direction. Any other pair as the track lays it out -- RTL manga reads its right page first, and on a right-to-left
+   * track `dir` already lays the slide out from the right, so flipping here as well would put it back the wrong way
+   * round; a right-to-left series forced to read left to right still swaps, since a double-page spread is ONE drawing
+   * and only reassembles with its first page on the right.
+   */
+  const shownOf = (s: number): number[] => {
+    const idxs = slides[s] ?? [];
+    if (idxs.length !== 2) return idxs;
+    if (joined[s]) return joinedOrder(idxs[0], idxs[1], flat[idxs[0]]?.join);
+    return rtl && !pagedRtl ? [idxs[1], idxs[0]] : idxs;
+  };
+  /** Slide `s`'s two pages as they sit on screen, left then right; null when it holds no pair (paged mode only). */
+  const pairOnScreen = (s: number): number[] | null => {
+    const shown = shownOf(s);
+    if (prefs.mode !== 'paged' || shown.length !== 2) return null;
+    return pagedRtl && !joined[s] ? [shown[1], shown[0]] : shown;
+  };
+  /** The `focus` action: the pair's first page in reading order into frame, or the pair back. False when there is no pair. */
+  const toggleFocus = (): boolean => {
+    const s = slideNow();
+    if (focus?.slide === s) { setFocus(null); return true; }
+    if (!pairOnScreen(s)) return false;
+    setFocus({ slide: s, page: slides[s][0] });
+    return true;
+  };
+  /**
+   * A turn while one page of the pair is in frame: to the pair's other page when the turn points at it -- ← and → by
+   * the side it sits on, next and back by reading order -- so a spread is read a page at a time. False at the pair's edge,
+   * where the turn moves on as it always does, and the slide after shows its pages whole.
+   */
+  const stepFocus = (action: ReaderAction, o: { tap?: boolean }): boolean => {
+    const s = slideNow();
+    if (!focus || focus.slide !== s) return false;
+    const on = pairOnScreen(s);
+    const idxs = slides[s];
+    if (!on || !idxs) return false;
+    const to = action === 'pageLeft' || action === 'pageRight'
+      ? on[on.indexOf(focus.page) + (action === 'pageLeft' ? -1 : 1)]
+      : idxs[idxs.indexOf(focus.page) + (action === 'next' ? 1 : -1)];
+    if (to === undefined) return false;
+    if (o.tap) acted.current = { kind: 'focus', prev: focus, at: Date.now() };
+    setFocus({ slide: s, page: to });
+    return true;
+  };
+  /**
+   * Under Tap a page of a pair to see it alone (#232, this device): the page of the pair on screen that a tap at (x, y)
+   * landed on, to bring into frame. Null when the slide is no pair, a page of it is in frame already (a single page's
+   * taps are the tap zones'), or the tap fell on the black round the pages. Hit-tested on what is drawn: a page of a
+   * slide is one element of it, in shownOf's order, and a cropped page's image is clipped to its box.
+   */
+  const pageOfPairAt = (x: number, y: number): { slide: number; page: number } | null => {
+    const el = scrollRef.current;
+    const s = slideNow();
+    if (!el || focus?.slide === s || !pairOnScreen(s)) return null;
+    const hit = document.elementFromPoint(x, y);
+    const box = el.children[s] as HTMLElement | undefined;
+    if (!box || !(hit instanceof HTMLImageElement) || !box.contains(hit)) return null;
+    // A joined spread turned on its side (Rotate) is one element holding both pages, left then right as drawn.
+    const imgs = Array.from(box.querySelectorAll('img'));
+    const shown = shownOf(s);
+    const k = box.children.length === 1 ? imgs.indexOf(hit) : Array.from(box.children).findIndex((c) => c.contains(hit));
+    return k >= 0 && shown[k] !== undefined ? { slide: s, page: shown[k] } : null;
   };
 
   /**
@@ -1543,6 +1717,7 @@ function ReaderInner() {
       if (a.kind === 'turn' && el) el.scrollTo({ left: trackSign * a.slide * (el.clientWidth || window.innerWidth) });
       else if (a.kind === 'scroll' && el) el.scrollTo({ top: a.top });
       else if (a.kind === 'chrome') setChrome((c) => !c);
+      else if (a.kind === 'focus') setFocus(a.prev);
     }
     applyZoom(zoom > 1 ? 1 : 2);
   };
@@ -1753,17 +1928,31 @@ function ReaderInner() {
         <div ref={scrollRef} data-lenis-prevent onScroll={onScroll} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd} onDoubleClick={onTrackDoubleClick} {...menuBind}
           dir={pagedRtl ? 'rtl' : 'ltr'}
           className="hide-scrollbar flex h-screen-d snap-x snap-mandatory overflow-x-auto overflow-y-hidden" style={{ filter: THEME_FILTER[prefs.theme] }}>
-          {slides.map((idxs, s) => {
-            // RTL manga: right page reads first. On an RTL track `dir` already lays a spread out right to
-            // left, so flipping here as well would put it back the wrong way round. A right-to-left series
-            // forced to read left to right still swaps: the pages turn the other way, but a double-page spread
-            // is ONE drawing, and it only reassembles with its first page on the right.
-            const shown = rtl && !pagedRtl && idxs.length === 2 ? [idxs[1], idxs[0]] : idxs;
+          {slides.map((slideIdxs, s) => {
+            // One page of the pair brought into frame (#232/#261, `focus`): the slide holds just it, and everything below
+            // lays it out as a single page.
+            const focused = focus?.slide === s && slideIdxs.includes(focus.page);
+            const idxs = focused ? [focus!.page] : slideIdxs;
+            // The pages in the order the slide draws them (shownOf: RTL manga's right page first; a joined spread by the side
+            // the server found).
+            const shown = focused ? idxs : shownOf(s);
+            // #229: a spread joined from two files is one picture. Laid out left to right as drawn, whatever the track's
+            // direction, and with no gap down the middle -- only here: every other pair keeps its gutter. Under Wide pages ->
+            // Rotate, on a screen held upright, it is turned on its side as a spread in one file is.
+            const isJoined = joined[s] && idxs.length === 2;
+            const turnedPair = isJoined && wideMode === 'rotate';
             // v0.61.0: one half of a wide page (Wide pages → Split) is a slide of its own, keyed apart from its twin.
             const halfOf = half[s];
             return (
-              <div key={halfOf ? `${flat[idxs[0]].key}:${halfOf}` : flat[idxs[0]].key} className="relative flex h-full w-full shrink-0 snap-center snap-always items-center justify-center gap-1">
-                {shown.map((i) => {
+              <div key={halfOf ? `${flat[idxs[0]].key}:${halfOf}` : flat[slideIdxs[0]].key} dir={isJoined ? 'ltr' : undefined} data-joined={isJoined || undefined}
+                className={`relative flex h-full w-full shrink-0 snap-center snap-always items-center justify-center${isJoined ? '' : ' gap-1'}`}>
+                {turnedPair ? (
+                  // Both pages, or neither: half a spread turned on its side is no page at all.
+                  shown.every((i) => activeSet.has(i) && srcFor(i) && flat[i].width && flat[i].height)
+                    ? <SlideTurnedPair pages={shown.map((i) => ({ src: srcFor(i)!, alt: tr('Page {n}', { n: flat[i].number }), width: flat[i].width!, height: flat[i].height! }))}
+                        area={area} zoom={zoom} filter={imgFilter} />
+                    : shown.map((i) => <span key={flat[i].key} className="text-ink-600">{flat[i].number}</span>)
+                ) : shown.map((i) => {
                   const p = flat[i];
                   if (!(activeSet.has(i) && srcFor(i))) return <span key={p.key} className="text-ink-600">{p.number}</span>;
                   // A placeholder page gets a box of its own so the caption sits over THAT page and not over
@@ -1807,12 +1996,16 @@ function ReaderInner() {
                     let region: Region = box?.all ?? WHOLE;
                     let pending = box === undefined;
                     if (shown.length === 2) {
-                      const pair = shown.map((j) => pageBoxes.current.get(flat[j].key));
+                      // By where the pages SIT, left then right (pairOnScreen): the gutter is the left page's right side and
+                      // the right page's left side, and on a right-to-left track the first page drawn is the right one.
+                      const sits = pairOnScreen(s) ?? shown;
+                      const pair = sits.map((j) => pageBoxes.current.get(flat[j].key));
                       pending = pair.some((b) => b === undefined);
-                      region = pairCrop(pair[0]?.all ?? WHOLE, pair[1]?.all ?? WHOLE)[shown.indexOf(i)];
+                      region = pairCrop(pair[0]?.all ?? WHOLE, pair[1]?.all ?? WHOLE)[sits.indexOf(i)];
                     }
+                    // Half the slide each, less half the gap -- a joined spread has none.
                     return <SlideRegion key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={w} height={h}
-                      region={region} area={shown.length === 2 ? { w: area.w / 2 - 2, h: area.h } : area} zoom={zoom}
+                      region={region} area={shown.length === 2 ? { w: area.w / 2 - (isJoined ? 0 : 2), h: area.h } : area} zoom={zoom}
                       pending={pending} onLoaded={loaded} filter={imgFilter} trimmed={region.l} />;
                   }
                   return (
@@ -1834,6 +2027,20 @@ function ReaderInner() {
               {failureCard}
             </div>
           )}
+        </div>
+      )}
+
+      {/* #232/#261: one page of a pair in frame -- which one, and the way back to both, as a squared key like the reader's other
+          actions (never a capsule). Under the bars while they show; the key's cap is this device's own binding. */}
+      {prefs.mode === 'paged' && focus && !chrome && flat[focus.page] && (
+        <div dir={uiDir} className="pointer-events-none absolute inset-x-0 bottom-[max(0.9rem,calc(env(safe-area-inset-bottom)+0.4rem))] z-30 flex justify-center" data-focus-label>
+          <button type="button" onClick={() => setFocus(null)}
+            className="pointer-events-auto flex items-center gap-2 rounded-md border border-white/15 bg-black/70 px-3 py-1.5 text-xs text-white backdrop-blur">
+            <span>{tr('Page {n}', { n: flat[focus.page].number })}</span>
+            <span aria-hidden className="text-white/50">·</span>
+            <span>{tr('Show both pages')}</span>
+            {hasKeyboard && keyMap.focus[0] && <kbd dir="ltr" className="min-w-5 rounded border border-white/25 px-1 text-center text-[10px] text-white/80">{capLabel(keyMap.focus[0])}</kbd>}
+          </button>
         </div>
       )}
 

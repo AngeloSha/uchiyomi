@@ -1466,7 +1466,7 @@ chapter from one that is not downloaded.
 ### Reading comfort
 
 Since v0.61.0 the reader has a few more settings. **Every one of them is off, or exactly the old reader, until you
-change it.** Three follow your account like the rest of the reader defaults (the reader's sheet and Profile →
+change it.** Four follow your account like the rest of the reader defaults (the reader's sheet and Profile →
 Settings → Reading); the rest are marked **This device** in the sheet, because they belong to a screen and a hand,
 not to you: an e-ink tablet wants E-ink, the phone beside it does not.
 
@@ -1488,6 +1488,18 @@ not to you: an e-ink tablet wants E-ink, the phone beside it does not.
   page's own pixels in your browser (nothing is cut on the server, and downloaded chapters crop too). Page by page
   all four sides are trimmed, never more than 15 % a side, and a two-page spread keeps its gutter. In webtoon
   scroll only the sides are trimmed, by one amount for a whole chapter, so the strips still join.
+- **Join split double pages** (account, since v0.77.0; off until you turn it on): some sources serve a double-page
+  spread as two ordinary pages, its right half and its left half. In paged mode the reader then shows the two as the
+  spread -- one slide, the halves touching, laid out the way the picture runs whatever your reading direction -- in
+  single page and in *Double spread* alike, and the page before a spread gets a slide of its own, so the pairs after it
+  stay as they were drawn. The server finds such pairs by comparing the inner edge of each page with the next page's:
+  only a pair whose picture runs across the seam, at the same size, with the same texture on both sides and no other
+  page of the chapter fitting either edge as well, is joined, and webtoon strips never are. It looks in the background
+  the first time someone with the setting on opens a chapter, so a chapter's spreads join a moment after it opens, and
+  the answer is kept with the chapter (a replaced file is looked at again). On a screen held upright **Wide pages**
+  applies to a joined spread as to one scanned in one piece: *Whole* shows it across the screen, *Split* shows its two
+  pages one after the other, *Rotate* turns it on its side. The pages themselves are never changed: the counter, your
+  progress, OPDS and your trackers still see two. A chapter downloaded after its spreads were found joins them offline.
 - **Column width** (this device, since v0.74.0): in webtoon scroll, narrows the column of pages to between 30 % and
   100 % of what *Fit width* or *Original* gives (steps of 5 %). A phone wants 100 %, a wide monitor a narrower strip. Like
   the other *this device* settings it is kept in this browser only, so your other screens are unaffected.
@@ -1505,13 +1517,20 @@ not to you: an e-ink tablet wants E-ink, the phone beside it does not.
   webtoon scroll a step of most of a screen). *L shape* and *Kindle-style* are the layouts Mihon readers know: the
   top and the left go back, the bottom and the right go on, the middle shows the controls; in Kindle-style the top
   third shows the controls and a narrow left column goes back. *Off* turns nothing. Each choice shows its map.
+- **Tap a page of a pair to see it alone** (this device, since v0.77.0; off until you turn it on): on a slide of two
+  pages -- *Double spread*, or a joined spread -- a tap on one of them fills the screen with it, in place of what its
+  tap zone would do. Turning toward the other page then shows that one, and turning on past it moves on as before. A
+  small key at the bottom names the page and gives both back (so does **Z**). A tap on the black beside the pages still
+  does what **Tap zones** says; with the setting off every tap does, the middle showing the controls as always.
 - **Keys and controller** (this device): every action -- next and previous page, the page to the left or right,
-  next and previous chapter, full screen, the controls, leaving the reader -- takes the keys you give it: tap
+  next and previous chapter, full screen, the controls, one page of a pair or both (**Z**, since v0.77.0: on two pages
+  side by side it brings the first into frame, the arrows then step to the other, and **Z** again gives both back),
+  leaving the reader -- takes the keys you give it: tap
   *Add a key* and press one; tap a key to take it off; a key already used elsewhere moves and says so. **Esc**
   always leaves the reader, or closes what is open over it, and **Tab** is never bound; keys held with Ctrl, Alt or
   Cmd stay the browser's. A **game controller** works as soon as you plug one in: the D-pad turns pages (← and → to the
   page on that side, like the arrow keys), A goes on and B back, the shoulder buttons change chapter, Start shows
-  the controls, and a held D-pad keeps turning. Its buttons can be rebound the same way. Browsers offer controllers
+  the controls, Y brings one page of a pair into frame, and a held D-pad keeps turning. Its buttons can be rebound the same way. Browsers offer controllers
   to secure pages only, so on a plain `http://` address on your home network the sheet says it cannot.
 
 The webtoon scroll also got smoother: it keeps decoded only the images within a few screens of where you are

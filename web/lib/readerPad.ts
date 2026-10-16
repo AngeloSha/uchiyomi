@@ -16,8 +16,8 @@ export type PadOverrides = Partial<Record<ReaderAction, number[]>>;
 
 /**
  * The defaults: the D-pad turns pages (↑ back, ↓ on, ← → physical, as the arrow keys), A on and B back, the shoulder
- * buttons step a chapter, Start shows the controls. Leaving and full screen are unbound: a controller is held at arm's
- * length, and a stray press should not end the reading.
+ * buttons step a chapter, Start shows the controls, Y brings one page of a pair into frame (v0.77.0, #261). Leaving and
+ * full screen are unbound: a controller is held at arm's length, and a stray press should not end the reading.
  */
 export const DEFAULT_PAD: PadMap = {
   next: [13, 0],
@@ -28,6 +28,7 @@ export const DEFAULT_PAD: PadMap = {
   prevChapter: [4],
   fullscreen: [],
   menu: [9],
+  focus: [3],
   exit: [],
 };
 

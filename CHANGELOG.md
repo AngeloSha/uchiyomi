@@ -1,5 +1,69 @@
 # Changelog
 
+## v0.77.0 — 2026-10-16
+
+**Spreads that a source served as two pages can be read as one, and one page of a pair can be brought into frame.**
+Both began as pull requests from **@Squeaks72** ([#229](https://github.com/AngeloSha/uchiyomi/pull/229),
+[#232](https://github.com/AngeloSha/uchiyomi/pull/232), [#261](https://github.com/AngeloSha/uchiyomi/pull/261)); the
+spread detector is theirs. Thank you.
+
+### Double-page spreads, joined
+
+- **Join split double pages** ([#229](https://github.com/AngeloSha/uchiyomi/pull/229), from @Squeaks72), in Reader
+  settings and Profile → Settings → Reading. **It is off until you turn it on.** Some sources serve a double-page
+  spread as two ordinary pages. In Paged mode the reader then shows the two as the spread, on one slide with the halves
+  touching, in single page and Double spread alike.
+  - The halves sit the way the picture runs, on the side the server found, whatever your reading direction.
+  - The page before a spread gets a slide of its own, so the pairs after it stay as they were drawn. A chapter can open
+    on a spread.
+  - On a phone held upright, **Wide pages** works as it does for a spread scanned in one piece. *Whole* shows it across
+    the screen, *Split* shows its two pages one after the other, and *Rotate* turns it on its side.
+  - Only a joined spread loses the gap down the middle. Every other pair keeps its gutter.
+  - The pages themselves never change: the counter, your progress, OPDS and your trackers still count two.
+- **Found in the background, once.** The server compares the inner edge of each page with the next page's. It looks
+  the first time someone with the setting on opens a chapter, one chapter at a time, and never while it answers the page
+  list. A chapter opens at once, and its spreads join a moment later without moving the page you're on.
+  - The answer is kept with the chapter, even when nothing was found or the file could not be read, so no chapter is
+    looked at twice. A replaced file is looked at again.
+  - A chapter downloaded after its spreads were found joins them offline too.
+- **Checked against this server's own library first.** As first written, the detector joined separate pages far more
+  often than it found spreads. In a sample of 375 chapters, 12 of its 80 joins were real spreads. Two facing pages whose
+  borders line up (a black bleed down both inner edges, or a white gutter crossed by panel borders at the same heights)
+  match as well as a real seam. Four tests now come after the match:
+  - the same texture on both sides of the cut;
+  - the small steps down the edge lining up, not only the bands;
+  - no other page of the chapter fitting either edge as well;
+  - the outermost columns of both pages being the same kind of thing.
+
+  On the first sample it now makes the 12 real joins and no others. On a second sample of 410 chapters, 16 of its 17
+  joins were real, and the one that was not led to the last test. On a third sample of 380 chapters, which it was never
+  tuned on, 14 of its 16 joins were real; the other 2 are facing pages whose drawings run to the seam on panels that
+  line up. No sample had a join in a webtoon chapter.
+
+### One page of a pair in frame
+
+- **Z** ([#261](https://github.com/AngeloSha/uchiyomi/pull/261), from @Squeaks72) brings the first page of the pair on
+  screen into frame, in Double spread or on a joined spread. The arrows then step to the other page before they turn,
+  and Z again gives both back. A small squared key at the bottom names the page and gives both back too.
+  - Z is an action like the others under **Keys and controller**: it can be rebound, Y does it on a controller, and the
+    key list shows it.
+- **Tap a page of a pair to see it alone** ([#232](https://github.com/AngeloSha/uchiyomi/pull/232), from @Squeaks72),
+  a setting for this device. **It is off until you turn it on.** On a slide of two pages, a tap on one of them fills the
+  screen with it in place of what its tap zone does. Turning toward the other page then shows that one.
+  - Taps beside the pages still do what Tap zones says.
+  - Off, every tap works as before, and the middle of the screen shows the controls.
+
+### Fixed
+
+- **Crop page borders on a pair read right to left** trimmed the inner edges of the two pages and left their outer
+  margins. It now trims the outer margins and keeps the gutter, as it always did left to right.
+
+### Upgrading
+
+- **Database:** one new column, `lib_books.spreads`, empty until a chapter is looked at. Additive: v0.76.x ignores it.
+- **API:** `GET /api/books/:id/pages?spreads=1` adds `join` to the pages of a spread. The `x-spreads` header says
+  whether the chapter has been looked at yet. Without the parameter nothing changes. See [docs/api.md](docs/api.md).
+
 ## v0.76.0 — 2026-10-16
 
 **Hide a chapter a source lists that is not part of the series, and the extension engine gets the memory it really

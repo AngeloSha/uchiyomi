@@ -23,6 +23,7 @@ const ACTION_LABEL: Record<ReaderAction, () => string> = {
   prevChapter: () => tr('Previous chapter'),
   fullscreen: () => tr('Full screen'),
   menu: () => tr('Show or hide the controls'),
+  focus: () => tr('One page of a pair, or both'),
   exit: () => tr('Leave the reader'),
 };
 export const actionLabel = (a: ReaderAction) => ACTION_LABEL[a]();

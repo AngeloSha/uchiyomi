@@ -88,8 +88,9 @@ test('slideOf points every page at the slide that holds it', () => {
 
 test('an empty chapter list produces no slides and does not throw', () => {
   // v0.61.0: pairSlides also says which half of a wide page each slide shows (Wide pages → Split), so the empty answer
-  // carries an empty `half` too -- updated deliberately, the slides themselves are unchanged.
-  assert.deepEqual(pairSlides([], true), { slides: [], slideOf: [], half: [] });
+  // carries an empty `half` too -- updated deliberately, the slides themselves are unchanged. And since v0.77.0 (#229)
+  // which slides are a joined spread: `joined`, empty too.
+  assert.deepEqual(pairSlides([], true), { slides: [], slideOf: [], half: [], joined: [] });
 });
 
 // ---- v0.61.0, Reader → Wide pages ----

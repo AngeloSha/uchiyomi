@@ -16,8 +16,12 @@
 //    they are bound to here.
 
 /** What a key, a controller button or a tap can do in the reader. */
-export type ReaderAction = 'next' | 'prev' | 'pageLeft' | 'pageRight' | 'nextChapter' | 'prevChapter' | 'fullscreen' | 'menu' | 'exit';
-export const READER_ACTIONS: readonly ReaderAction[] = ['next', 'prev', 'pageLeft', 'pageRight', 'nextChapter', 'prevChapter', 'fullscreen', 'menu', 'exit'];
+export type ReaderAction = 'next' | 'prev' | 'pageLeft' | 'pageRight' | 'nextChapter' | 'prevChapter' | 'fullscreen' | 'menu' | 'focus' | 'exit';
+/**
+ * `focus` (#261, v0.77.0): bring one page of the pair on screen into frame, and give the pair back -- Double spread, or a
+ * spread joined from two files (#229). Z by default, in paged mode only: the webtoon column has no pairs.
+ */
+export const READER_ACTIONS: readonly ReaderAction[] = ['next', 'prev', 'pageLeft', 'pageRight', 'nextChapter', 'prevChapter', 'fullscreen', 'menu', 'focus', 'exit'];
 
 /** The actions that turn or scroll a page: these repeat while a key or a button is held. The rest happen once a press. */
 export const PAGE_ACTIONS: ReadonlySet<ReaderAction> = new Set(['next', 'prev', 'pageLeft', 'pageRight']);
@@ -29,8 +33,8 @@ export type KeyOverrides = Partial<Record<ReaderAction, string[]>>;
 /**
  * Paged mode's keys, as v0.60's handler had them: Space, ↓ and Page Down for the next page, Shift+Space, ↑ and Page Up
  * for the one before -- whichever way the pages run -- and ← → PHYSICAL, like the tap zones (on a right-to-left read
- * the next page is to the left). [ ] step a chapter, f is full screen. Nothing shows the controls or leaves by key
- * but Escape, which is reserved.
+ * the next page is to the left). [ ] step a chapter, f is full screen, z brings one page of a pair into frame (v0.77.0).
+ * Nothing shows the controls or leaves by key but Escape, which is reserved.
  */
 export const DEFAULT_KEYS_PAGED: KeyMap = {
   next: ['Space', 'ArrowDown', 'PageDown'],
@@ -41,6 +45,7 @@ export const DEFAULT_KEYS_PAGED: KeyMap = {
   prevChapter: ['['],
   fullscreen: ['f'],
   menu: [],
+  focus: ['z'],
   exit: [],
 };
 
@@ -57,6 +62,7 @@ export const DEFAULT_KEYS_VERTICAL: KeyMap = {
   prevChapter: ['['],
   fullscreen: ['f'],
   menu: [],
+  focus: [],
   exit: [],
 };
 

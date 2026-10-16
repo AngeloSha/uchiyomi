@@ -54,7 +54,7 @@ export interface OfflineChapter {
    * `missing` (v0.40.0) likewise: the placeholder bytes download like any page, and the caption over them
    * is drawn from this flag, so a chapter saved short still explains itself with no network.
    */
-  pages: { number: number; width: number | null; height: number | null; junk?: boolean; missing?: true }[];
+  pages: { number: number; width: number | null; height: number | null; junk?: boolean; missing?: true; join?: 'rtl' | 'ltr' }[];
 }
 
 /**
@@ -296,7 +296,7 @@ export async function downloadChapter(
     // consults BEFORE the server for a downloaded chapter, so a flag that only lives in the manifest is a
     // flag the reader never sees. Reintroduce by dropping `missing` here: a chapter saved short, downloaded,
     // shows a blank grey page offline where online it shows the caption.
-    pages: manifest.pages.map((p) => ({ number: p.number, width: p.width, height: p.height, junk: p.junk, missing: p.missing })),
+    pages: manifest.pages.map((p) => ({ number: p.number, width: p.width, height: p.height, junk: p.junk, missing: p.missing, join: p.join })),
   };
   await d.put('chapters', meta);
   invalidateDownloadedSeries();
