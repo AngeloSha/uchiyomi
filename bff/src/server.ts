@@ -49,6 +49,7 @@ import { firstRunFloor, DESKTOP_FLOORS } from './lib/desktop';
 import { KomgaError } from './lib/komga';
 import { ZodError } from 'zod';
 import { registerWebRoot, webRootConfigured } from './lib/webRoot';
+import { addBaseCsp } from './lib/securityHeaders';
 import { registerApiDocs } from './lib/apiDocs';
 import { appVersion } from './lib/appVersion';
 import { buildPayload, installFacts, sendPing } from './lib/installPing';
@@ -132,6 +133,9 @@ async function main() {
   });
 
   await app.register(helmet, { contentSecurityPolicy: false, crossOriginResourcePolicy: false });
+  // helmet's own policy stays off (its defaults would block the static export's inline scripts); the directives that
+  // cost the app nothing are sent instead, on every response (lib/securityHeaders.ts).
+  addBaseCsp(app);
   await app.register(cors, { origin: env.PUBLIC_ORIGIN, credentials: true });
   await app.register(cookie);
   await app.register(jwt, { secret: env.JWT_SECRET });
