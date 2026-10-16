@@ -117,7 +117,7 @@ except updating; the few settings to know about are under Upgrading.
 - **TRUST_PROXY (new):** by default the server believes a forwarded visitor address only from a proxy on the same
   machine, in Docker or on your local network (nginx, Nginx Proxy Manager, Caddy, Traefik, Umbrel, CasaOS, a Cloudflare
   tunnel). If your reverse proxy is on a public address or reaches the server over Tailscale, add its address (or a
-  CIDR range) to the default list rather than replacing it, since the app's own web server is one of those proxies:
+  CIDR range) to the default list rather than replacing it, so a hop on this machine or in Docker stays trusted:
   `TRUST_PROXY=loopback, linklocal, uniquelocal, 203.0.113.9`. Behind Cloudflare's proxy (the orange cloud), have
   your reverse proxy restore the visitor's address from `CF-Connecting-IP`, or add Cloudflare's ranges the same way,
   or the activity log shows Cloudflare's addresses. Otherwise nothing to do. See docs/CONFIGURATION.md.
