@@ -107,6 +107,8 @@ export interface TrackerStatus {
   lastError: string | null;
   /** Only a new token mends it (#246, bff lib/trackers.ts needsReconnect); a rate limit or an outage never sets it. */
   needsReconnect?: boolean;
+  /** v0.73.0: the service asked us to wait (a rate limit), so pushes go slowly; never an error. */
+  slowedDown?: boolean;
 }
 
 /**

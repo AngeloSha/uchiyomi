@@ -16,6 +16,7 @@
 
 import { createHash } from 'crypto';
 import { muTurn } from './mangaupdates';
+import { anilistFetch, WAIT_BACKGROUND_MS, WAIT_INTERACTIVE_MS, type AniListFetchOptions } from './anilistLimit';
 
 export type Provider = 'anilist' | 'myanimelist' | 'kitsu' | 'mangaupdates';
 
@@ -228,13 +229,23 @@ const ANILIST_API = apiUrl('ANILIST_API_URL', 'https://graphql.anilist.co');
 /** AniList says "Invalid token" (HTTP 400) for a bad token and "Unauthorized" for a missing one. */
 const ANILIST_BAD_TOKEN = /invalid token|unauthorized/i;
 
-async function anilistCall(token: string, query: string, variables: Record<string, unknown>): Promise<any> {
-  const r = await fetch(ANILIST_API, {
+/**
+ * How a call waits for the server's one AniList quota (v0.73.0, lib/anilistLimit.ts). A push, in the background, waits
+ * out a 429 for as long as AniList asks and is made again -- a connect's backfill then finishes slowly instead of
+ * dropping the rest -- and only a 429 that outlasts every retry is said, as a rate limit (`rateLimited`), never as an
+ * error with the token. A person's connect, test, import or recommendations is told at once that AniList is busy.
+ */
+const PUSH_WAIT: AniListFetchOptions = { maxWaitMs: WAIT_BACKGROUND_MS, retries: 5, timeoutMs: 15_000 };
+const ASK_WAIT: AniListFetchOptions = { maxWaitMs: WAIT_INTERACTIVE_MS, retries: 1, timeoutMs: 15_000 };
+
+async function anilistCall(token: string, query: string, variables: Record<string, unknown>, wait = ASK_WAIT): Promise<any> {
+  const r = await anilistFetch(ANILIST_API, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify({ query, variables }),
-    signal: AbortSignal.timeout(15000),
-  });
+  }, wait);
+  // Still refused once the retries are spent: AniList asking for room, which a later push mends by itself.
+  if (r.status === 429) throw Object.assign(httpFail('anilist 429', 429), { rateLimited: true });
   // Only a 401 is the token's verdict. ⚠️ A 403 from graphql.anilist.co is Cloudflare's, not AniList's: the
   // edge answers `403 error code: 1010/1020` (text/plain) to a client signature it dislikes, and mapping that
   // to authFail disabled every AniList connection with "rejected the saved token" the moment one push met
@@ -354,7 +365,7 @@ export const anilistAdapter: TrackerAdapter = {
     }
   },
   async seriesState(token, externalId) {
-    const d = await anilistCall(token, ANILIST_STATE, { id: Number(externalId) });
+    const d = await anilistCall(token, ANILIST_STATE, { id: Number(externalId) }, PUSH_WAIT);
     const m = d?.Media;
     const e = m?.mediaListEntry;
     // A re-read is REPEATING, which the list import reads as reading; a push keeps it apart so it can stay one.
@@ -370,7 +381,7 @@ export const anilistAdapter: TrackerAdapter = {
       mediaId: Number(externalId),
       progress: chapters,
       status: ANILIST_PUSH[status],
-    });
+    }, PUSH_WAIT);
   },
 };
 

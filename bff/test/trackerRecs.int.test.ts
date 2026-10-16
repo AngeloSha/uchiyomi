@@ -83,6 +83,9 @@ async function setup() {
   const { seal } = await import('../src/lib/secretbox');
   const { resetRecsState } = await import('../src/lib/trackerRecs');
   resetRecsState();
+  // The server's one AniList quota (v0.73.0, lib/anilistLimit.ts) remembers a 429 for a minute; each case starts as a
+  // fresh process would, or the 429 one case scripts holds every later case's AniList calls.
+  (await import('../src/lib/anilistLimit')).resetAniListQuota();
   await q(`DELETE FROM tracker_rec_cache`);
   await q(`DELETE FROM users WHERE username LIKE 'recs-%'`);
   await q(`DELETE FROM lib_series WHERE id LIKE 's_recs_%'`);

@@ -113,7 +113,9 @@ Kitsu (`kitsu.io`), and `POST /api/admin/trackers/relink` asks AniList for every
 *Trending* rail is AniList's own trending list, fetched at most once every six hours. Since v0.73.0, with **Fill in
 missing details** switched on (off by default), the nightly repair also asks AniList for the description and genres of
 series linked there that have none — by AniList id, fifty to a request, never by title. These lookups carry
-your server's IP address and the title or id asked for, and nothing else. Of the knobs below, only `ANILIST_API_URL`
+your server's IP address and the title or id asked for, and nothing else. Since v0.73.0 every AniList request the
+server makes, these and the tracker pushes alike, is spaced to stay under the limit AniList states for your address, and
+a request AniList asks to wait waits. Of the knobs below, only `ANILIST_API_URL`
 moves them (AniList's, since v0.55.7); the other two point only the token-bearing tracker calls elsewhere.
 
 Since v0.55.8 ([discussion #168](https://github.com/AngeloSha/uchiyomi/discussions/168)), each library — the default

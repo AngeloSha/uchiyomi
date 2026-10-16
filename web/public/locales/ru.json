@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3942
+    "strings": 3943
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -3945,5 +3945,6 @@
   "missing details filled in for 1 series": "недостающие сведения дополнены у 1 серии",
   "missing details filled in for {n} series": "недостающие сведения дополнены — серий: {n}",
   "Off by default. Once a night, a series with no description, genres or author of its own gets them from AniList, when it is linked there and in English, or else from its own source or one it follows; a series with no chapters yet gets a cover too. A series’ own details always win, and so does anything you set in Edit details. Switching this off takes back everything it filled in.": "По умолчанию выключено. Раз в ночь серия без собственного описания, жанров или автора получает их с AniList, если она там привязана и на английском, а иначе — из своего источника или из того, за которым она следит; серия ещё без глав получает и обложку. Собственные сведения серии всегда важнее, как и всё, что вы задали в «Изменить сведения». Если выключить, всё дополненное убирается.",
-  "It asks for a password when you install it. On the uchiyomi container, set {user} to its user name ({default} unless you changed it) and {password} to that password.": "При установке он попросит пароль. У контейнера uchiyomi укажите в {user} его имя пользователя ({default}, если вы его не меняли), а в {password} — этот пароль."
+  "It asks for a password when you install it. On the uchiyomi container, set {user} to its user name ({default} unless you changed it) and {password} to that password.": "При установке он попросит пароль. У контейнера uchiyomi укажите в {user} его имя пользователя ({default}, если вы его не меняли), а в {password} — этот пароль.",
+  "Syncing slowly: {name} asks us to wait.": "Синхронизация замедлена: {name} просит подождать."
 }

@@ -78,6 +78,8 @@ interface TrackerStatus {
   tokenHelp?: string;
   provider: string; connected: boolean; accountName: string | null;
   expiresAt: string | null; expiringSoon: boolean; lastSyncAt: string | null; lastError: string | null;
+  /** v0.73.0: the service asked us to wait, so pushes go slowly for now (bff lib/trackers.ts RATE_LIMITED). Not an error. */
+  slowedDown?: boolean;
 }
 
 /**
@@ -215,6 +217,11 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
             )}
             {t.lastError && (
               <span className="mt-2 block rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-300">{t.lastError}</span>
+            )}
+            {/* v0.73.0: a rate limit is a pace, not a fault -- said plainly, in the help's own colour, never in the red box. The
+                server sends it as `slowedDown` with no `lastError`, and the next push that lands clears it. */}
+            {t.slowedDown && (
+              <span className="mt-2 block text-xs text-fog-400" data-tracker-slowed>{tr('Syncing slowly: {name} asks us to wait.', { name: label })}</span>
             )}
             {/* Always in the tree, so a screen reader hears the answer arrive; hidden while it is empty. */}
             <span role="status" aria-live="polite" data-tracker-test

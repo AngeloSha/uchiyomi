@@ -5794,7 +5794,7 @@ paths:
                     type: array
                     items:
                       type: object
-                      required: [provider, label, tokenHelp, connected, accountName, expiresAt, expiringSoon, lastSyncAt, lastError, needsReconnect]
+                      required: [provider, label, tokenHelp, connected, accountName, expiresAt, expiringSoon, lastSyncAt, lastError, needsReconnect, slowedDown]
                       properties:
                         provider: { type: string, enum: [anilist, myanimelist, kitsu, mangaupdates] }
                         label: { type: string }
@@ -5816,6 +5816,13 @@ paths:
                             Since v0.71.0 (#246): only a new token mends this connection -- its token was rejected (the
                             connection is off), has lapsed, or can no longer be read. A rate limit, an outage or a refused
                             lower number also leave `lastError`, but never set this.
+                        slowedDown:
+                          type: boolean
+                          description: >-
+                            Since v0.73.0: the service asked us to wait (a 429 that outlasted the retries), so pushes go
+                            slowly for now. A pace, not an error: `lastError` is null for it, and the next push that lands
+                            clears it. AniList's pushes share the server's one AniList quota with every other AniList
+                            request, spaced by the limit AniList states, and a 429 is waited out and the push made again.
         "401":
           description: Not authenticated
   /api/trackers/anilist:

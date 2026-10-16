@@ -3104,6 +3104,13 @@ your reading. If the service rejects your token, Uchiyomi disables the connectio
 rather than failing silently; a token that has lapsed is noted on the row too, but the connection is left
 in place until you paste a new one. A service that is blocking or rate-limiting the server is a sync
 error to retry on the next chapter, never a verdict on the token, so it does not disconnect anything.
+
+**AniList's pace** (since v0.73.0). AniList lets each server make a set number of requests a minute, and says how many
+(90 normally, 30 when it is busy). Everything Uchiyomi asks AniList shares that one number: everyone's progress, the
+ratings, art, Discover and filling in missing details. So the requests are spaced to stay under it, whoever makes them.
+When AniList still asks the server to wait, a push waits as long as it asks and is sent again, so a connect's
+*Push everything finished* goes slowly rather than giving up. Meanwhile the row says **Syncing slowly: AniList asks us
+to wait**, which is not an error and clears itself with the next push that lands.
 Disconnect at any time. MyAnimeList, Kitsu and MangaUpdates connect the same way, each on its own row with a token you
 get yourself (the recipes are below; your password goes to the service only, never to Uchiyomi), and more than one can
 be connected at once; each syncs on its own.

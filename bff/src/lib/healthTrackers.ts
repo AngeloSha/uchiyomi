@@ -16,6 +16,7 @@ import { applyIgnores, noIgnores, type IgnoreCtx } from './healthIgnore';
 import { DAY_MS, ignoredPart, hiddenPart, truncate, verdict } from './healthKit';
 import { detailOf, joined, noteOf, say, summaryOf, type Part } from './said';
 import type { HealthCheck, HealthItem } from './health';
+import { isRateLimitedError } from './trackerPace';
 
 /** A sign-in ending this soon is a finding. */
 const SOON_MS = 14 * DAY_MS;
@@ -39,8 +40,10 @@ export async function trackerSync(ctx: IgnoreCtx = noIgnores()): Promise<HealthC
   for (const r of rows) {
     const left = r.expires_at ? new Date(r.expires_at).getTime() - now : null;
     const at = r.expires_at ? new Date(r.expires_at).toISOString() : '';
-    // A refused sign-in's error is our own "reconnect" line (lib/trackers.ts syncFailed): the refusal says it.
-    const failed = r.enabled && !!r.last_error;
+    // A refused sign-in's error is our own "reconnect" line (lib/trackers.ts syncFailed): the refusal says it. A tracker
+    // that asked us to wait (v0.73.0, lib/trackerPace.ts) is a pace the next push clears, not a finding for an admin.
+    // Reintroduce by counting it: "a 429 that does not end" in anilistQuota.int.test.ts finds the member listed.
+    const failed = r.enabled && !!r.last_error && !isRateLimitedError(r.last_error);
     const ended = left !== null && left <= 0;
     const ending = left !== null && left > 0 && left <= HEADS_UP_MS;
     // Side by side, each its own sentence: "The tracker refused the saved sign-in · The sign-in ends 3 Nov".

@@ -20,6 +20,8 @@ import { noticeShown } from './noticeChapters';
 import { lastNumber } from './chapterRanges';
 import type { ScopedQuery } from './anilistPolicy';
 import { incognitoOn } from './incognito';
+import { isRateLimit } from './anilistLimit';
+import { RATE_LIMITED, isRateLimitedError } from './trackerPace';
 export type { Provider } from './trackerProviders';
 
 
@@ -44,6 +46,11 @@ export interface TrackerStatus {
    * `lastError` alone.
    */
   needsReconnect: boolean;
+  /**
+   * v0.73.0: the service asked us to wait (a 429 that outlasted every retry), so pushes go slowly for now. Said as
+   * "Syncing slowly", never as an error: `lastError` is null for it, and the next push that lands clears it.
+   */
+  slowedDown: boolean;
 }
 
 const EXPIRY_WARN_DAYS = 30;
@@ -53,6 +60,9 @@ export const TOKEN_EXPIRED = 'the access token has expired -- reconnect to resum
 export const TOKEN_UNREADABLE = 'stored token could not be read -- reconnect to resume syncing';
 export const TOKEN_REJECTED = 'the tracker rejected the saved token -- reconnect to resume syncing';
 const RECONNECT_ERRORS: ReadonlySet<string> = new Set([TOKEN_EXPIRED, TOKEN_UNREADABLE, TOKEN_REJECTED]);
+// The `last_error` a rate limit leaves (v0.73.0): a state, not an error (lib/trackerPace.ts says why).
+export { RATE_LIMITED } from './trackerPace';
+const slowedDown = isRateLimitedError;
 
 /**
  * Whether a stored connection needs a new token (#246). A row that exists but is switched off is one whose token was
@@ -117,7 +127,7 @@ export async function statusFor(userId: string): Promise<TrackerStatus[]> {
     if (!r) {
       return {
         provider: p, connected: false, accountName: null, expiresAt: null,
-        expiringSoon: false, lastSyncAt: null, lastError: null, needsReconnect: false,
+        expiringSoon: false, lastSyncAt: null, lastError: null, needsReconnect: false, slowedDown: false,
         label: ADAPTERS[p].label, tokenHelp: ADAPTERS[p].tokenHelp, ...authorizeUrl,
       };
     }
@@ -131,8 +141,9 @@ export async function statusFor(userId: string): Promise<TrackerStatus[]> {
     expiresAt: r.expires_at ? new Date(r.expires_at).toISOString() : null,
     expiringSoon: !!r.expires_at && new Date(r.expires_at).getTime() - Date.now() < EXPIRY_WARN_DAYS * 86_400_000,
     lastSyncAt: r.last_sync_at ? new Date(r.last_sync_at).toISOString() : null,
-    lastError: r.last_error,
+    lastError: slowedDown(r.last_error) ? null : r.last_error,
     needsReconnect: needsReconnect(r),
+    slowedDown: slowedDown(r.last_error),
     };
   });
 }
@@ -434,7 +445,8 @@ async function pushOne(
 
   // one lane per user AND provider: a burst of completions trickles out politely to each service, and a slow
   // one cannot hold up a fast one. 2.4 s apart since v0.61.2: a push is a read and a write now, so the calls per
-  // minute are what the 1.2 s of one write each used to be.
+  // minute are what the 1.2 s of one write each used to be. AniList's calls are spaced by the server's one AniList
+  // quota instead (v0.73.0, lib/anilistLimit.ts), which every user's pushes and every other AniList job share.
   await withGate(`tracker:${userId}:${conn.provider}`, async () => {
     try {
       // What the service holds first (v0.61.2, #201): whether the series has ended, its chapter count, and this
@@ -457,8 +469,11 @@ async function pushOne(
     } catch (e) {
       await syncFailed(userId, conn.provider, e);
     }
-  }, { concurrency: 1, minGapMs: 2400 });
+  }, { concurrency: 1, minGapMs: laneGapMs(conn.provider) });
 }
+
+/** The pause between two pushes in one lane: none for AniList, whose quota spaces every call (lib/anilistLimit.ts). */
+const laneGapMs = (provider: Provider): number => (provider === 'anilist' ? 0 : 2400);
 
 /** A write the service refused: a bad token fails every future write too, so it disables the connection; else it says why. */
 async function syncFailed(userId: string, provider: Provider, e: unknown): Promise<void> {
@@ -467,6 +482,10 @@ async function syncFailed(userId: string, provider: Provider, e: unknown): Promi
   if (err.authFailed) {
     await q('UPDATE user_trackers SET enabled=false, last_error=$3 WHERE user_id=$1 AND provider=$2',
       [userId, provider, TOKEN_REJECTED]);
+  } else if (isRateLimit(e)) {
+    // The service asked for room and every retry was spent: a state the next good push clears, never an error.
+    // Reintroduce by writing the message: "a 429 that does not end reads 'syncing slowly'" in anilistQuota.int.test.ts.
+    await markError(userId, provider, RATE_LIMITED);
   } else {
     await markError(userId, provider, err.message?.slice(0, 200) || 'sync failed');
   }
@@ -564,7 +583,7 @@ async function planOne(
     } catch (e) {
       await syncFailed(userId, conn.provider, e);
     }
-  }, { concurrency: 1, minGapMs: 2400 });
+  }, { concurrency: 1, minGapMs: laneGapMs(conn.provider) });
 }
 
 /** Fire-and-forget, from an add: an add never waits for a tracker, nor fails over one. */

@@ -157,3 +157,14 @@ test('the Connections row: the web\'s help, the token taken out of the paste, th
   assert.match(row, /<span role="status" aria-live="polite" data-tracker-test/, 'the test\'s answer is not a status line');
   assert.match(row, /className="btn-key btn-key-accent" data-token-page/, 'AniList\'s token page is not a key');
 });
+
+test('a rate limit reads "Syncing slowly" in the help\'s own colour, never the red error box', () => {
+  // v0.73.0 (bff lib/trackers.ts RATE_LIMITED): the server sends a rate limit as `slowedDown` with no `lastError`, and
+  // the row says it as a pace. Reintroduce the error box for it (render `slowedDown` with the red classes, or drop the
+  // line): the matches below fail -- and "AniList refused the request (HTTP 429)" is what the owner read.
+  const src = code(read('components/ProfileConnections.tsx'));
+  const row = src.slice(src.indexOf('function TrackerRow('), src.indexOf('function OpdsSection('));
+  const line = row.match(/\{t\.slowedDown && \(\s*<span className="([^"]*)" data-tracker-slowed>\{tr\('Syncing slowly: \{name\} asks us to wait\.', \{ name: label \}\)\}<\/span>/);
+  assert.ok(line, 'a rate limit is not said on the row');
+  assert.doesNotMatch(line![1], /red|rose/, 'a rate limit is shown as an error');
+});

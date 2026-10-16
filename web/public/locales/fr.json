@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3942
+    "strings": 3943
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -3945,5 +3945,6 @@
   "missing details filled in for 1 series": "informations manquantes complétées pour 1 série",
   "missing details filled in for {n} series": "informations manquantes complétées pour {n} séries",
   "Off by default. Once a night, a series with no description, genres or author of its own gets them from AniList, when it is linked there and in English, or else from its own source or one it follows; a series with no chapters yet gets a cover too. A series’ own details always win, and so does anything you set in Edit details. Switching this off takes back everything it filled in.": "Désactivé par défaut. Une fois par nuit, une série sans description, genres ni auteur à elle les reçoit d’AniList, si elle y est liée et en anglais, sinon de sa propre source ou d’une source qu’elle suit ; une série encore sans chapitres reçoit aussi une couverture. Les informations propres à une série l’emportent toujours, tout comme ce que vous fixez dans Modifier les détails. Le désactiver retire tout ce qu’il a complété.",
-  "It asks for a password when you install it. On the uchiyomi container, set {user} to its user name ({default} unless you changed it) and {password} to that password.": "Il demande un mot de passe à l’installation. Sur le conteneur uchiyomi, réglez {user} sur son identifiant ({default} si vous ne l’avez pas changé) et {password} sur ce mot de passe."
+  "It asks for a password when you install it. On the uchiyomi container, set {user} to its user name ({default} unless you changed it) and {password} to that password.": "Il demande un mot de passe à l’installation. Sur le conteneur uchiyomi, réglez {user} sur son identifiant ({default} si vous ne l’avez pas changé) et {password} sur ce mot de passe.",
+  "Syncing slowly: {name} asks us to wait.": "Synchronisation au ralenti : {name} nous demande d’attendre."
 }

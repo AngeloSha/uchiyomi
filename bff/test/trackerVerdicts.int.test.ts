@@ -12,6 +12,8 @@
 // The route tests are skipped unless TEST_DATABASE_URL is set; the adapter tests always run.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+// Static, unlike the modules below: it reads no environment and imports nothing.
+import { resetAniListQuota } from '../src/lib/anilistLimit';
 
 const DSN = process.env.TEST_DATABASE_URL;
 if (DSN) {
@@ -36,7 +38,9 @@ globalThis.fetch = (async (u: any, init?: any) => {
   calls.push(c);
   return route(c) ?? new Response('unrouted', { status: 500 });
 }) as typeof fetch;
-const reset = (r: typeof route) => { calls.length = 0; route = r; };
+// Each case starts with the server's AniList quota as a fresh process has it (v0.73.0, lib/anilistLimit.ts): a scripted
+// 429 holds every AniList call for a minute, and a later case's call would be answered "busy" instead of by its script.
+const reset = (r: typeof route) => { calls.length = 0; route = r; resetAniListQuota(); };
 const json = (v: unknown, status = 200) =>
   new Response(JSON.stringify(v), { status, headers: { 'content-type': 'application/json' } });
 

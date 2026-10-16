@@ -5,6 +5,7 @@
 import { plainText } from './htmlText';
 import { namesMatch } from './onlineMatch';
 import { readCapped } from './safeFetch';
+import { anilistFetch, WAIT_BACKGROUND_MS, WAIT_INTERACTIVE_MS, type AniListFetchOptions } from './anilistLimit';
 
 /**
  * Where AniList is: ANILIST_API_URL, the test knob the tracker calls already read (lib/trackerProviders.ts), moves these
@@ -13,6 +14,20 @@ import { readCapped } from './safeFetch';
  * Reintroduce the hard-coded address: "every AniList lookup goes where ANILIST_API_URL says" in anilistUrl.test.ts.
  */
 const ANILIST = (process.env.ANILIST_API_URL || 'https://graphql.anilist.co').replace(/\/+$/, '');
+
+/**
+ * Every request below goes through the server's one AniList quota (v0.73.0, lib/anilistLimit.ts), which spaces them by
+ * the limit AniList states and waits out its 429s. A lookup someone is waiting on -- art behind an image, a search, a
+ * rail -- is told "busy" rather than held past ASK's wait, and throws as any failure does, so nothing is cached as a
+ * miss; a batch in the background waits its turn (BATCH).
+ */
+const ASK: AniListFetchOptions = { maxWaitMs: WAIT_INTERACTIVE_MS, retries: 2, timeoutMs: 10_000 };
+const BATCH: AniListFetchOptions = { maxWaitMs: WAIT_BACKGROUND_MS, retries: 5, timeoutMs: 10_000 };
+const POST = (body: unknown): RequestInit => ({
+  method: 'POST',
+  headers: { 'content-type': 'application/json', accept: 'application/json' },
+  body: JSON.stringify(body),
+});
 
 // `countryOfOrigin` rides along for the series' reading direction (lib/readingDirection.ts), with every title
 // the entry goes by so the direction is taken only from an entry that is visibly the series searched for
@@ -56,21 +71,11 @@ export interface AniListArt {
  * the manga's AniList link). Reintroduce by returning the entry unchecked: "another work's answer is a miss" in
  * onlineMatch.int.test.ts stores the manga's cover.
  */
-export async function fetchAniListArt(rawTitle: string, names: readonly string[], retry = 0): Promise<AniListArt> {
+export async function fetchAniListArt(rawTitle: string, names: readonly string[]): Promise<AniListArt> {
   const s = clean(rawTitle);
   if (!s) return { banner: null, cover: null };
-  const r = await fetch(ANILIST, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify({ query: QUERY, variables: { s } }),
-    signal: AbortSignal.timeout(10000),
-  });
-  // AniList rate-limits (~30/min); wait out Retry-After and retry so we don't lose the match.
-  if (r.status === 429 && retry < 2) {
-    const wait = Math.min(6, Number(r.headers.get('retry-after')) || 4);
-    await new Promise((res) => setTimeout(res, (wait + 0.5) * 1000));
-    return fetchAniListArt(rawTitle, names, retry + 1);
-  }
+  // A 429 is waited out by the quota (lib/anilistLimit.ts), so the match is not lost to a busy minute.
+  const r = await anilistFetch(ANILIST, POST({ query: QUERY, variables: { s } }), ASK);
   if (r.status === 404) return { banner: null, cover: null }; // no match -> cache the miss
   if (!r.ok) throw new Error(`anilist ${r.status}`); // transient -> don't cache
   const j: any = await r.json();
@@ -158,31 +163,16 @@ const MEDIA_MAX_BYTES = 4 * 1024 * 1024;
 
 /**
  * One `query($ids)` over many entries, `chunk` ids per request (fifty; v0.61.0's related query asks ten, as its
- * `Page(perPage:10)` says), `each` called with every media AniList answers. Paced like the art jobs between pages; a 429
- * is waited out as fetchAniListArt waits it out, anything else throws. Read through readCapped (lib/safeFetch.ts), so an
- * answer past MEDIA_MAX_BYTES throws rather than filling memory.
+ * `Page(perPage:10)` says), `each` called with every media AniList answers. Paced, and its 429s waited out, by the
+ * server's one AniList quota (lib/anilistLimit.ts); anything else throws. Read through readCapped (lib/safeFetch.ts), so
+ * an answer past MEDIA_MAX_BYTES throws rather than filling memory.
  */
 async function mediaById(query: string, ids: number[], each: (m: any) => void, chunk = 50): Promise<void> {
   for (let i = 0; i < ids.length; i += chunk) {
-    if (i) await new Promise((res) => setTimeout(res, 2200)); // stay under AniList's ~30 req/min
-    const part = ids.slice(i, i + chunk);
-    let j: any = null;
-    for (let retry = 0; ; retry++) {
-      const r = await fetch(ANILIST, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', accept: 'application/json' },
-        body: JSON.stringify({ query, variables: { ids: part } }),
-        signal: AbortSignal.timeout(10000),
-      });
-      if (r.status === 429 && retry < 2) {
-        const wait = Math.min(6, Number(r.headers.get('retry-after')) || 4);
-        await new Promise((res) => setTimeout(res, (wait + 0.5) * 1000));
-        continue;
-      }
-      if (!r.ok) throw new Error(`anilist ${r.status}`);
-      j = JSON.parse((await readCapped(r, MEDIA_MAX_BYTES)).toString('utf8'));
-      break;
-    }
+    // Paced and 429-aware by the server's one quota (lib/anilistLimit.ts), which every other AniList caller shares.
+    const r = await anilistFetch(ANILIST, POST({ query, variables: { ids: ids.slice(i, i + chunk) } }), BATCH);
+    if (!r.ok) throw new Error(`anilist ${r.status}`);
+    const j: any = JSON.parse((await readCapped(r, MEDIA_MAX_BYTES)).toString('utf8'));
     for (const m of j?.data?.Page?.media ?? []) each(m);
   }
 }
@@ -342,20 +332,10 @@ const ANIME_QUERY =`query($s:String){Media(search:$s,type:ANIME,sort:SEARCH_MATC
  * Only from an anime named as the series is (`names`, lib/onlineMatch.ts namesMatch, v0.55.7): the search answers with
  * its best guess whatever it was asked.
  */
-export async function fetchAnimeBanner(rawTitle: string, names: readonly string[], retry = 0): Promise<string | null> {
+export async function fetchAnimeBanner(rawTitle: string, names: readonly string[]): Promise<string | null> {
   const s = clean(rawTitle);
   if (!s) return null;
-  const r = await fetch(ANILIST, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify({ query: ANIME_QUERY, variables: { s } }),
-    signal: AbortSignal.timeout(10000),
-  });
-  if (r.status === 429 && retry < 2) {
-    const wait = Math.min(6, Number(r.headers.get('retry-after')) || 4);
-    await new Promise((res) => setTimeout(res, (wait + 0.5) * 1000));
-    return fetchAnimeBanner(rawTitle, names, retry + 1);
-  }
+  const r = await anilistFetch(ANILIST, POST({ query: ANIME_QUERY, variables: { s } }), ASK);
   if (!r.ok) return null;
   const j: any = await r.json();
   const m = j?.data?.Media;
@@ -371,20 +351,10 @@ const CANDIDATES = `query($s:String){Page(perPage:5){media(search:$s,type:MANGA,
 export interface ArtCandidate { title: string; banner: string | null; cover: string | null }
 
 /** Top AniList matches for a title (art review UI) — several options, not just the best match. */
-export async function fetchAniListCandidates(rawTitle: string, retry = 0): Promise<ArtCandidate[]> {
+export async function fetchAniListCandidates(rawTitle: string): Promise<ArtCandidate[]> {
   const s = rawTitle.trim();
   if (!s) return [];
-  const r = await fetch(ANILIST, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify({ query: CANDIDATES, variables: { s } }),
-    signal: AbortSignal.timeout(10000),
-  });
-  if (r.status === 429 && retry < 2) {
-    const wait = Math.min(6, Number(r.headers.get('retry-after')) || 4);
-    await new Promise((res) => setTimeout(res, (wait + 0.5) * 1000));
-    return fetchAniListCandidates(rawTitle, retry + 1);
-  }
+  const r = await anilistFetch(ANILIST, POST({ query: CANDIDATES, variables: { s } }), ASK);
   if (!r.ok) return [];
   const j: any = await r.json();
   const media: any[] = j?.data?.Page?.media ?? [];
@@ -407,20 +377,10 @@ export interface AniListWork { id: number; titles: string[] }
  * keep only one that IS the name (namesMatch). Empty for no answer. Throws on a transient failure -- a network error, a
  * 5xx, a 429 still answered after two waits -- so the caller asks again later rather than storing a miss.
  */
-export async function searchAniListWorks(rawTitle: string, retry = 0): Promise<AniListWork[]> {
+export async function searchAniListWorks(rawTitle: string): Promise<AniListWork[]> {
   const s = clean(rawTitle);
   if (!s) return [];
-  const r = await fetch(ANILIST, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify({ query: WORKS, variables: { s } }),
-    signal: AbortSignal.timeout(10000),
-  });
-  if (r.status === 429 && retry < 2) {
-    const wait = Math.min(6, Number(r.headers.get('retry-after')) || 4);
-    await new Promise((res) => setTimeout(res, (wait + 0.5) * 1000));
-    return searchAniListWorks(rawTitle, retry + 1);
-  }
+  const r = await anilistFetch(ANILIST, POST({ query: WORKS, variables: { s } }), ASK);
   if (r.status === 404) return [];
   if (!r.ok) throw Object.assign(new Error(`anilist ${r.status}`), { status: r.status });
   const j: any = await r.json();
@@ -449,18 +409,8 @@ export const TREND_COUNTRIES = ['KR', 'JP', 'CN'] as const;
 export type TrendCountry = (typeof TREND_COUNTRIES)[number];
 
 /** Globally trending manga from one country of origin, from AniList -- for Discover's hero and its trending rails. */
-export async function fetchTrending(country: TrendCountry, page = 1, retry = 0): Promise<TrendingItem[]> {
-  const r = await fetch(ANILIST, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify({ query: TRENDING, variables: { page, country } }),
-    signal: AbortSignal.timeout(10000),
-  });
-  if (r.status === 429 && retry < 2) {
-    const wait = Math.min(6, Number(r.headers.get('retry-after')) || 4);
-    await new Promise((res) => setTimeout(res, (wait + 0.5) * 1000));
-    return fetchTrending(country, page, retry + 1);
-  }
+export async function fetchTrending(country: TrendCountry, page = 1): Promise<TrendingItem[]> {
+  const r = await anilistFetch(ANILIST, POST({ query: TRENDING, variables: { page, country } }), ASK);
   if (!r.ok) throw new Error(`anilist ${r.status}`);
   const j: any = await r.json();
   const media: any[] = j?.data?.Page?.media ?? [];
