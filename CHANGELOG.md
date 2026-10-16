@@ -1,5 +1,60 @@
 # Changelog
 
+## v0.73.0 — 2026-10-16
+
+**A series with no description, genres or author can have them filled in, a whole source can be rated Adult only,
+AniList sync waits when AniList asks instead of giving up, and a new Unraid extension engine asks for a password.**
+The first two began as pull requests from **@Squeaks72**
+([#257](https://github.com/AngeloSha/uchiyomi/pull/257), [#245](https://github.com/AngeloSha/uchiyomi/pull/245),
+[#256](https://github.com/AngeloSha/uchiyomi/pull/256)), rebuilt on the app's own parts. Thank you.
+
+### Missing details, filled in
+
+- **Admin → Settings → Library housekeeping → Fill in missing details** ([#257](https://github.com/AngeloSha/uchiyomi/pull/257),
+  [#245](https://github.com/AngeloSha/uchiyomi/pull/245)). It is off by default. Once a night it fills in a description,
+  genres or an author for a series that has none of its own.
+  - It asks AniList first, for series linked there, in English, in libraries that look AniList up. Fifty series go in
+    one request, by id.
+  - Then it asks the series' own source and the sources it follows, in its language, for up to 15 series a night that
+    you keep updated. A source that is switched off, failing or cooling down is never asked.
+  - A series with no chapters yet gets a cover too.
+- **Nothing is replaced.** A series' own details win as soon as a scan brings them, and anything you set in Edit
+  details wins over both. Genres you cleared on purpose stay cleared.
+- **The 18+ filter sees the genres it adds**, like any others.
+- **A series it could not describe is asked again after a month.** Following a source by hand asks that source at once.
+- **Switching it off takes back everything it filled in**, covers included.
+
+### A whole source can be rated Adult only
+
+- **Admin → Sources**, open a source, **Age rating** ([#256](https://github.com/AngeloSha/uchiyomi/pull/256)): **Automatic**
+  leaves it to the source's extension, and **Adult only** makes the whole source adult whatever the extension says.
+  That helps with built-in sources and sites added by address, which can never say.
+- **Accounts limited below 18 cannot use an Adult only source at all**, by any route, just as with a source whose
+  extension marks itself 18+. With Show 18+ off, it also leaves Discover, search and the latest and popular lists.
+- **No rating opens a source to a younger account.** A source whose extension marks it 18+ stays 18+.
+- **The 18+ filter's "Sources to treat as adult" chips are gone.** Those sources are now rated Adult only (see Upgrading).
+
+### Everywhere else
+
+- **AniList sync waits when AniList asks, instead of giving up.** AniList limits how many requests a server may make
+  a minute, and every AniList request Uchiyomi makes now shares that one limit: everyone's progress, ratings, art,
+  Discover and the new missing details. A push that AniList turns away is sent again after the wait AniList asks for,
+  so connecting AniList and pushing everything you have finished goes slowly instead of stopping after a dozen series.
+  Profile → Connections says **Syncing slowly** meanwhile, not an error, and Health's Tracker sync card leaves it out.
+- **A new Unraid install of the extension engine asks for a password**, and Uchiyomi's template has the matching user
+  name. An engine installed before keeps its settings. [A password on the engine](docs/extensions.md#a-password-on-the-engine)
+  says how to add one.
+- **The desktop app's extension engine gets a new password every time the app starts.** Nothing changes on screen.
+
+### Upgrading
+
+- **Sources you had ticked under Settings → 18+ filter → "Sources to treat as adult" are now rated Adult only, and
+  accounts limited below 18 can no longer use them.** Before, they only left the lists while Show 18+ was off. To let
+  such accounts use one again, set its Age rating back to Automatic under Admin → Sources.
+- **Database:** one new table (`series_auto_details`) and one new setting (`fill_details`, off). Both are additive.
+- **Optional:** `REPAIR_DETAILS_MAX` (1 to 200, 15 by default) sets how many series a night are asked about their
+  sources.
+
 ## v0.72.0 — 2026-10-16
 
 **Health turns around: one card per series, with everything wrong with it. Three new cards say when the downloads
