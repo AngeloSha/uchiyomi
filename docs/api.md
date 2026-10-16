@@ -1037,12 +1037,21 @@ and two sign-ups racing for one name end in one account and a 409, never a 500. 
 outside letters, numbers, `.`, `_`, `-`, 2–64 long) or `weak_password`.
 
 **Two-factor enrolment is one way.** `POST /auth/totp/setup` writes a *pending* secret and answers
-`{secret, otpauth, qr}`; nothing is enforced until `POST /auth/totp/enable` `{code}` confirms a code from
-the app and answers the recovery codes once. While two-factor is already on, setup is **409**
+`{secret, otpauth, qr}`; nothing is enforced until `POST /auth/totp/enable` `{code, password}` confirms a code from
+the app with the account's password (asked for since v0.77.1; **401** `wrong_password`, **400** `totp_invalid` for the
+code) and answers the recovery codes once. While two-factor is already on, setup is **409**
 `{error: 'totp_enabled', message}` and the row is not touched (since v0.39.0): the secret in the row is
 the one the authenticator holds, and rotating it from a stale *Set up 2FA* button left the flag on and the
 app's codes wrong. `POST /auth/totp/disable` `{password}` is the way back (**401** `wrong_password`), and
-setup works again after it.
+setup works again after it. A code is good once (since v0.77.1): after one is accepted, by enable or at sign-in, only a
+code for a later 30-second step is. The sign-in body's `code` is a code from the app or a recovery code
+(`xxxxx-xxxxx-xxxxx-xxxxx`, with or without its dashes, since v0.77.1), each recovery code once.
+
+**The account lock.** Five failures in a row lock an account for 15 minutes: a wrong password or a wrong second-step
+code at `/auth/login`, and since v0.77.1 a wrong current password at `/auth/password`, `/auth/totp/enable` and
+`/auth/totp/disable`. A success clears the count. While the lock lasts these answer **423** `locked` without checking
+anything, and the first failure after it runs out counts as one. The four routes also take at most 10 requests in 5
+minutes from one address (**429**), as `/auth/login` always has.
 
 ### Library and reading
 ```

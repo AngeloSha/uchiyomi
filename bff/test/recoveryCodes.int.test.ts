@@ -72,7 +72,7 @@ test('two-factor recovery codes sign in, once each', { skip }, async (t) => {
   try {
     const setup = await app.inject({ method: 'POST', url: '/auth/totp/setup', headers });
     assert.equal(setup.statusCode, 200, setup.body);
-    const enable = await app.inject({ method: 'POST', url: '/auth/totp/enable', headers, payload: { code: codeFor(setup.json().secret) } });
+    const enable = await app.inject({ method: 'POST', url: '/auth/totp/enable', headers, payload: { code: codeFor(setup.json().secret), password: PASSWORD } });
     assert.equal(enable.statusCode, 200, enable.body);
     const codes: string[] = enable.json().recoveryCodes;
     assert.equal(codes.length, 8);

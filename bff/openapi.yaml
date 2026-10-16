@@ -1216,8 +1216,8 @@ paths:
           description: OK
         "400":
           description: Malformed body or parameter
-        "409":
-          description: "Conflict: already exists, already running, or duplicate"
+        "403":
+          description: "`already_configured`: the server has an account. Two setups at once make one admin (since v0.77.1)."
   /auth/config:
     get:
       tags:
@@ -1254,8 +1254,10 @@ paths:
                   type: string
                 password:
                   type: string
-                totp:
+                code:
                   type: string
+                  maxLength: 32
+                  description: A code from the authenticator app, or a recovery code (xxxxx-xxxxx-xxxxx-xxxxx, dashes optional).
       security: []
       responses:
         "200":
@@ -1264,6 +1266,8 @@ paths:
           description: Malformed body or parameter
         "401":
           description: Not authenticated
+        "423":
+          description: "`locked`: five failures in a row, a wrong password or a wrong code, lock the account for 15 minutes"
         "429":
           description: Too many attempts
   /auth/register:
@@ -1414,7 +1418,11 @@ paths:
         "400":
           description: Malformed body or parameter
         "401":
-          description: Not authenticated
+          description: Not authenticated, or `wrong_password` (counts toward the account lock since v0.77.1)
+        "423":
+          description: "`locked`: the account is locked"
+        "429":
+          description: Too many attempts
   /auth/sessions:
     get:
       tags:
@@ -1473,26 +1481,34 @@ paths:
     post:
       tags:
         - auth
-      summary: Confirm two-factor with a first code; returns recovery codes once.
+      summary: Confirm two-factor with a first code and the account password; returns recovery codes once.
       operationId: postAuthTotpEnable
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
+              required: [code, password]
               properties:
                 code:
                   type: string
+                password:
+                  type: string
+                  description: The account's current password (since v0.77.1).
       security:
         - bearer: []
       responses:
         "200":
           description: OK
         "400":
-          description: Malformed body or parameter
+          description: Malformed body or parameter, or `totp_invalid`
         "401":
-          description: Not authenticated
+          description: Not authenticated, or `wrong_password` (counts toward the account lock)
+        "423":
+          description: "`locked`: the account is locked"
+        "429":
+          description: Too many attempts
   /auth/totp/disable:
     post:
       tags:
@@ -1517,7 +1533,11 @@ paths:
         "400":
           description: Malformed body or parameter
         "401":
-          description: Not authenticated, or `wrong_password`
+          description: Not authenticated, or `wrong_password` (counts toward the account lock since v0.77.1)
+        "423":
+          description: "`locked`: the account is locked"
+        "429":
+          description: Too many attempts
   /auth/oidc/start:
     get:
       tags:

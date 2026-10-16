@@ -382,11 +382,22 @@ export function passwordError(pw: string): string | null {
   return !pw || pw.length < PASSWORD_MIN ? `Password must be at least ${PASSWORD_MIN} characters.` : null;
 }
 
-/** Bump the failed-login counter; lock the account once it crosses the threshold. Returns whether now locked. */
+/**
+ * Bump the failed-login counter; lock the account once it crosses the threshold. Returns whether now locked.
+ *
+ * A lock that has run out ends its count too (v0.77.1): the first failure after it counts as one, not as the sixth, so
+ * the account locks again only after MAX_FAILED more. Every column below reads the row as it was before this update, in
+ * one statement, so failures racing each other still each count. Reintroduce by dropping the `locked_until <= now()`
+ * cases: "a failure after a lock has run out counts from one" in accountLock.int.test.ts is locked again at once.
+ */
 export async function recordFailedLogin(userId: string): Promise<boolean> {
   const row = await one<{ failed_logins: number }>(
-    `UPDATE users SET failed_logins = failed_logins + 1,
-       locked_until = CASE WHEN failed_logins + 1 >= $2 THEN now() + make_interval(mins => $3) ELSE locked_until END
+    `UPDATE users SET
+       failed_logins = CASE WHEN locked_until <= now() THEN 1 ELSE failed_logins + 1 END,
+       locked_until = CASE
+         WHEN (CASE WHEN locked_until <= now() THEN 1 ELSE failed_logins + 1 END) >= $2 THEN now() + make_interval(mins => $3)
+         WHEN locked_until <= now() THEN NULL
+         ELSE locked_until END
      WHERE id = $1 RETURNING failed_logins`,
     [userId, MAX_FAILED, LOCK_MINUTES],
   );
@@ -394,6 +405,18 @@ export async function recordFailedLogin(userId: string): Promise<boolean> {
 }
 export const resetFailedLogins = (userId: string) =>
   q('UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = $1', [userId]);
+
+/**
+ * Spend a two-factor code's step (lib/totp.ts totpStep): true when it is later than the last step this account used,
+ * which it then becomes, in the one statement, so two sign-ins racing with one code get one session. A code is good
+ * once (RFC 6238 section 5.2); the ±1 step drift window had made each one good for about a minute and a half.
+ * Reintroduce by accepting any matching step: "a code signs in once" in totpReplay.int.test.ts signs in twice.
+ */
+export const spendTotpStep = async (userId: string, step: number): Promise<boolean> =>
+  !!(await one(
+    'UPDATE users SET totp_last_step = $2 WHERE id = $1 AND (totp_last_step IS NULL OR totp_last_step < $2) RETURNING id',
+    [userId, step],
+  ));
 
 /** Returns the unlock time if the account is currently locked, else null. */
 export function lockedUntil(user: { locked_until?: string | Date | null }): Date | null {

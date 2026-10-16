@@ -98,9 +98,12 @@ test('two-factor setup refuses to touch a live secret', { skip }, async (t) => {
     });
 
     await t.test('a code from the app enables it', async () => {
-      const wrong = await post('/auth/totp/enable', { code: '000000' });
+      // With the password, which turning it on asks for since v0.77.1 (accountLock.int.test.ts), so the refusal here
+      // is the code's.
+      const wrong = await post('/auth/totp/enable', { code: '000000', password: PASSWORD });
       assert.equal(wrong.statusCode, 400, `a wrong code enabled two-factor: ${wrong.body}`);
-      const ok = await post('/auth/totp/enable', { code: codeFor(pending) });
+      assert.equal(wrong.json().error, 'totp_invalid');
+      const ok = await post('/auth/totp/enable', { code: codeFor(pending), password: PASSWORD });
       assert.equal(ok.statusCode, 200, ok.body);
       assert.ok(Array.isArray(ok.json().recoveryCodes) && ok.json().recoveryCodes.length > 0, 'no recovery codes came back');
       const r = await row();

@@ -38,12 +38,31 @@ export function ProfileAccount() {
 }
 
 /**
+ * A refused password check in the reader's words, by its code, or '' for anything else: the server's sentences are
+ * English (the sign-in screen says its refusals the same way, lib/auth.tsx). Since v0.77.1 the three checks behind a
+ * session -- changing the password, turning two-factor on or off -- count toward the account lock and carry sign-in's
+ * per-address limit, so a 423 or a 429 can answer them too.
+ */
+function refusalText(e: unknown): string {
+  let body: { error?: string } = {};
+  try { body = JSON.parse((e as { body?: string })?.body || '{}'); } catch {}
+  const status = e instanceof ApiError ? e.status : 0;
+  return body.error === 'wrong_password' ? tr('Wrong password')
+    : body.error === 'locked' || status === 423 ? tr('Account locked — too many attempts. Try again later.')
+    : status === 429 ? tr('Too many attempts. Wait a few minutes and try again.')
+    : body.error === 'totp_invalid' ? tr('Incorrect code')
+    : '';
+}
+
+/**
  * `useAutosave` reads the server's sentence out of an ApiError and otherwise says "Could not save"; a bare
  * `401 wrong_password` carries no sentence, so the row would blame the save rather than the password.
- * Re-thrown with the sentence the old toast used, in the shape `msgOf` reads.
+ * Re-thrown with the refusal's own sentence (refusalText), else `fallback` when the server sent none, in the
+ * shape `msgOf` reads.
  */
 function explain(e: unknown, fallback: string): never {
-  if (e instanceof ApiError && !msgOf(e, '')) throw new ApiError(e.status, JSON.stringify({ message: fallback }));
+  const said = refusalText(e);
+  if (e instanceof ApiError && (said || !msgOf(e, ''))) throw new ApiError(e.status, JSON.stringify({ message: said || fallback }));
   throw e;
 }
 
@@ -81,7 +100,7 @@ function IdentitySection({ config, ready }: { config: AuthConfig | undefined; re
     if (!valid) return;
     const ok = await run(async () => {
       try { await api('/auth/password', { json: { current: cur, next } }); }
-      catch (err) { explain(err, err instanceof ApiError && err.status === 401 ? tr('Wrong password') : tr('Could not change password')); }
+      catch (err) { explain(err, tr('Could not change password')); }
       qc.invalidateQueries({ queryKey: ['sessions'] });
     });
     if (!ok) return;
@@ -150,6 +169,8 @@ function TwoFactorSection() {
   const totpOn = !!user?.totpEnabled;
   const [setup, setSetup] = useState<{ qr: string; secret: string } | null>(null);
   const [code, setCode] = useState('');
+  // Turning it on asks for the password, as turning it off does (v0.77.1): a session alone cannot enrol an authenticator.
+  const [enPw, setEnPw] = useState('');
   // Held outside React as well as in it: changing the language remounts this whole subtree, and these codes
   // are shown exactly once. See lib/shownOnce.ts.
   const [recovery, setRecoveryState] = useState<string[] | null>(() => readShownOnce<string[]>('totp.recovery'));
@@ -158,6 +179,7 @@ function TwoFactorSection() {
   const [disPw, setDisPw] = useState('');
   const [busy, setBusy] = useState(false);
   const codeId = useId();
+  const enPwId = useId();
   const pwId = useId();
   // The setup form and the disable form are one box to the header button: only one of them is ever
   // rendered, so they share the id it announces.
@@ -170,19 +192,19 @@ function TwoFactorSection() {
   };
   const enableTotp = async () => {
     try {
-      const r = await api<{ recoveryCodes: string[] }>('/auth/totp/enable', { json: { code: code.trim() } });
-      setRecovery(r.recoveryCodes); setSetup(null); setCode(''); setTotpEnabled(true);
+      const r = await api<{ recoveryCodes: string[] }>('/auth/totp/enable', { json: { code: code.trim(), password: enPw } });
+      setRecovery(r.recoveryCodes); setSetup(null); setCode(''); setTotpEnabled(true); setEnPw('');
       toast(tr('Two-factor enabled'), 'success');
-    } catch (e: any) { toast(msgOf(e, tr('Incorrect code')), 'error'); }
+    } catch (e: any) { toast(refusalText(e) || msgOf(e, tr('Incorrect code')), 'error'); }
   };
   const disableTotp = async () => {
     try {
       await api('/auth/totp/disable', { json: { password: disPw } });
       setDisPw(''); setDisabling(false); setTotpEnabled(false); setRecovery(null);
       toast(tr('Two-factor disabled'), 'success');
-    } catch (e: any) { toast(msgOf(e, tr('Wrong password')), 'error'); }
+    } catch (e: any) { toast(refusalText(e) || msgOf(e, tr('Wrong password')), 'error'); }
   };
-  const cancel = () => { setSetup(null); setCode(''); setDisabling(false); setDisPw(''); };
+  const cancel = () => { setSetup(null); setCode(''); setEnPw(''); setDisabling(false); setDisPw(''); };
 
   // One DOM button in three states, and `aria-expanded` follows the box on all three: a static `false` on
   // Set up / Disable that vanished once pressed meant a screen reader heard "collapsed" and never "expanded".
@@ -211,14 +233,17 @@ function TwoFactorSection() {
       )}
 
       {setup && !totpOn && (
-        <form id={boxId} onSubmit={(e) => { e.preventDefault(); if (code.trim().length >= 6) void enableTotp(); }} className="space-y-3 py-3 last:pb-0">
+        <form id={boxId} onSubmit={(e) => { e.preventDefault(); if (code.trim().length >= 6 && enPw) void enableTotp(); }} className="space-y-3 py-3 last:pb-0">
           <p className="text-sm text-fog-300">{tr('Scan with Google Authenticator, Authy, 1Password, etc.')}</p>
           {setup.qr && /* eslint-disable-next-line @next/next/no-img-element */ <img src={setup.qr} alt={tr('QR code')} className="mx-auto h-44 w-44 rounded-lg bg-white p-1" />}
           <p className="break-all text-center font-mono text-[11px] text-fog-500">{tr('or enter key: {key}', { key: setup.secret })}</p>
+          <label htmlFor={enPwId} className="sr-only">{tr('Current password')}</label>
+          <input id={enPwId} type="password" autoComplete="current-password" value={enPw} onChange={(e) => setEnPw(e.target.value)}
+            placeholder={tr('Current password')} className="field" />
           <label htmlFor={codeId} className="sr-only">{tr('6-digit code')}</label>
           <input id={codeId} type="text" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)}
             placeholder={tr('6-digit code')} className="field text-center tracking-[0.3em]" />
-          <button type="submit" disabled={code.trim().length < 6} className="btn-accent px-4 py-2 text-sm disabled:opacity-50">{tr('Verify and enable')}</button>
+          <button type="submit" disabled={code.trim().length < 6 || !enPw} className="btn-accent px-4 py-2 text-sm disabled:opacity-50">{tr('Verify and enable')}</button>
         </form>
       )}
 
