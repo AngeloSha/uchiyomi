@@ -22,6 +22,7 @@ import { tombstoneBooks } from './chapterCleanup';
 import { LIBRARY_ROOT, DL_ROOT, listChapters } from './library';
 import { reconcileListingProgress } from './listingProgress';
 import { carryAltTitles } from './altTitles';
+import { carryHidden } from './hiddenChapters';
 import { dissolveLoneWork } from './editions';
 import { join, dirname, relative, resolve, sep, isAbsolute } from 'path';
 import { isDesktop } from './desktop';
@@ -305,6 +306,9 @@ export async function mergeSeries(
     // them. The survivor keeps its own row where both had a name. Reintroduce by dropping this: "a merge carries
     // the other names to the survivor" in altTitles.int.test.ts finds them still on the absorbed row.
     await carryAltTitles(qq, fromId, intoId);
+    // The numbers an admin hid in the absorbed series (#240, lib/hiddenChapters.ts) are hidden in the survivor: its
+    // chapters move there with the numbers they had, and a number hidden from the work is no chapter of it either.
+    await carryHidden(qq, fromId, intoId);
 
     // Point the absorbed row at its survivor instead of deleting it: its folder still exists on disk, and
     // persistScan needs this to keep putting those files under the merged series.

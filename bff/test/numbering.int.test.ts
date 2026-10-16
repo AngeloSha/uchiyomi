@@ -260,6 +260,9 @@ test('an existing series is held for review, not renamed', { skip }, async () =>
 
 test('an admin\'s confirmation renumbers it in place: ids, progress, marks, floors and the log follow', { skip }, async () => {
   const before = await booksOf(S);
+  // #240: Chapter 6.cbz (post 110) hidden, and the grey row at 4 (the listing's post 63).
+  const { hideNumbers } = await import('../src/lib/hiddenChapters');
+  await hideNumbers(S, [4, 6], { userId: adminId });
   const r = await numbering.requestNumbering(S, 'posting_order', { confirm: true, userId: adminId });
   assert.equal(r.state, 'applied');
   const after = await booksOf(S);
@@ -273,6 +276,10 @@ test('an admin\'s confirmation renumbers it in place: ids, progress, marks, floo
   // Reintroduce by dropping the listing_progress remap in commit(): the mark stays at 4, which is post 4 now.
   assert.deepEqual((await q('SELECT number::float8 AS n FROM listing_progress WHERE series_id = $1', [S])).map((x: any) => Number(x.n)), [63],
     'the mark on the ghost moved to its post');
+  // The hidden numbers moved the same way (lib/hiddenChapters.ts moveHidden). Reintroduce by dropping the call from
+  // commit(): 4 and 6 stay hidden, which are posts 4 and 6 now, and the chapter hidden as 6 shows as 110.
+  const hidden = async () => ((await q('SELECT hidden_numbers AS h FROM lib_series WHERE id = $1', [S]))[0].h as number[]).map(Number).sort((a, b) => a - b);
+  assert.deepEqual(await hidden(), [63, 110], 'a hidden number stayed behind its post');
   assert.equal((await q('SELECT count(*)::int AS n FROM chapter_failures WHERE series_id = $1', [S]))[0].n, 0, 'failures counted against old numbers are gone');
   // Reintroduce by dropping the archive_queue UPDATE in commit(): the boundary stays at 7 -- post 7 -- and the
   // archive would take posts 7..137 for chapters the sweep already owns.
@@ -311,6 +318,11 @@ test('the undo keeps every file, and keeping the source\'s numbers is sticky', {
   assert.equal(r.state, 'applied');
   const after = await booksOf(S);
   assert.deepEqual([...after.keys()].sort(), ids, 'no book lost or minted');
+  // And back with the undo: the hidden posts are the source's 4 and 6 again (#240).
+  const hidden = ((await q('SELECT hidden_numbers AS h FROM lib_series WHERE id = $1', [S]))[0].h as number[]).map(Number).sort((a, b) => a - b);
+  assert.deepEqual(hidden, [4, 6], 'the undo left a hidden number at its post\'s number');
+  const { unhideNumbers } = await import('../src/lib/hiddenChapters');
+  await unhideNumbers(S, 'all', { userId: adminId });
   assert.deepEqual([...after.values()].map((b) => b.number).sort((a, b) => a - b), [1, 1, 2, 3, 5, 6, 7, 8], 'back at the source\'s numbers');
   // Posts 1 and 2 are both the source's chapter 1: one keeps the plain name, the other reads back as 1 too.
   const files = filesIn(FOLDER);

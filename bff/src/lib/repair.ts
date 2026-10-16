@@ -50,6 +50,8 @@ import { logAudit } from './audit';
 import { containedPath } from './fsGuard';
 import { countPages } from './pageCount';
 import { haveNumbers } from './libraryNumbers';
+import { atHiddenNumber } from './noticeChapters';
+import { numberHiddenNow } from './hiddenChapters';
 import { archiveHoles, type ArchiveHoles } from './archiveBoundaries';
 import { DL_ROOT, persistScan, setBookDates, setBookMeta } from './library';
 import { restampBook } from './partial';
@@ -938,6 +940,7 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
       WHERE b.pages BETWEEN 1 AND 2 AND b.number = floor(b.number)
         AND b.pruned_at IS NULL AND b.short_confirmed_at IS NULL AND b.missing_pages IS NULL
         AND b.root = $1 AND b.file = s.folder || '/Chapter ' || (b.number::int)::text || '.cbz'
+        AND NOT ${atHiddenNumber('b')}
         ${opts.bookId ? 'AND b.id = $3' : 'AND s.auto_update'}
       ORDER BY b.mtime DESC LIMIT $2`,
     // Ten times the cap: long strips are dropped below BEFORE the cap applies (see there).
@@ -1287,7 +1290,7 @@ async function stepGroups(r: RepairResult, opts: RepairOpts, notes: Notes, log?:
        JOIN lib_series s ON s.id = b.series_id AND s.auto_update AND ${visibleToAll('s')}
        JOIN series_listing l ON l.series_id = b.series_id AND l.number = b.number
       WHERE b.root = $1 AND b.pruned_at IS NULL AND b.missing_pages IS NULL AND b.picked_at IS NULL
-        AND b.pages > 0 AND btrim(COALESCE(b.scanlator, '')) <> ''
+        AND b.pages > 0 AND btrim(COALESCE(b.scanlator, '')) <> '' AND NOT ${atHiddenNumber('b')}
         AND (b.upgrade_tried_at IS NULL OR b.upgrade_tried_at < now() - make_interval(days => $2))
       ORDER BY b.mtime DESC LIMIT 2000`,
     [DL_ROOT, GROUP_RETRY_DAYS],
@@ -1501,6 +1504,8 @@ function repairCopyPreflight(
       if (!allowed(sourceId)) return 'source';
     }
     if (!(await automaticChapterAllowedFor(seriesId, chapter))) return 'policy';
+    // A number an admin hid from the series meanwhile (#240): its file is left exactly as it is.
+    if (await numberHiddenNow(seriesId, chapter.number).catch(() => true)) return 'hidden';
     if (await isDisabled(sourceId).catch(() => true)) return 'disabled';
     if (!writing && await blockedNow(sourceId).then(Boolean, () => true)) return 'cooldown';
     return null;

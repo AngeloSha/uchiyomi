@@ -217,8 +217,10 @@ test('a grey row the reader marked reads as read, stays grey, and carries Mark r
   assert.match(row, /read \? 'bg-ink-600' : 'border border-ink-600'/, 'and the filled dot');
   assert.match(row, /read \? 'text-fog-500' : 'text-fog-300'/, 'and the dimmed title');
   assert.match(row, /border border-dashed border-ink-600/, 'the thumb stays dashed: still not on the server');
-  assert.match(row, /\{onMark && !selectable && \(/, 'the menu hides in select mode');
-  assert.match(row, /onMark\(!read\)/, 'the one action toggles');
+  // #240 put an admin's Hide on the same menu: it is drawn for either action, and still never in select mode.
+  assert.match(row, /const hasMenu = !!onMark \|\| !!onHide/, 'the menu is drawn for either of its actions');
+  assert.match(row, /\{hasMenu && !selectable && \(/, 'the menu hides in select mode');
+  assert.match(row, /onMark\(!read\)/, 'the mark toggles');
   assert.match(page, /onMark=\{\(completed\) => markGhost\(r\.ghost, completed\)\}/, 'the page hands every grey row the action and its stable identity');
 });
 
@@ -415,4 +417,58 @@ test('an admin fetches one chapter again, or deletes it from the server, from it
   // with the selection (`deletable`): the row's Delete deletes nothing, or what is ticked.
   assert.match(page, /onConfirm=\{\(\) => deleteBooks\(confirming\.books\)\}/);
   assert.match(page, /onConfirm=\{\(\) => refetchBooks\(confirming\.books\)\}/);
+});
+
+// ---- #240, rebuilt to hide only: Hide chapter N, and Show hidden chapters ----------------------------------------
+
+test('Hide chapter N: an admin\'s, on both kinds of row and in the select bar, never a range, never a delete', () => {
+  // #240's labels sat beside "Remove from library" (the whole series, hidden) and the select bar's "Remove 3 chapters"
+  // (Delete from server): two near-identical destructive actions. Hide says what it does, in the plain key, and asks
+  // first in a dialog that is not red. Reintroduce by drawing it with `btn-key-danger`: "the select bar's Hide is not
+  // the red key" fails; by offering it on a range file: "never on a file holding a range" fails.
+  const page = code(read('app/series/page.tsx'));
+  const row = page.slice(page.indexOf('function ChapterRow('), page.indexOf('function SelectBubble('));
+  assert.match(row, /\.\.\.\(onHide \? \[\{ label: tr\('Hide chapter \{n\}', \{ n: book\.number \}\)/, 'a chapter row offers Hide chapter N');
+  assert.match(row, /hook: 'hide-chapter', onSelect: onHide/, 'the walks find it by what it does, in any language');
+  const ghost = page.slice(page.indexOf('function GhostRow('), page.indexOf('interface StartedJob'));
+  assert.match(ghost, /\.\.\.\(onHide \? \[\{ label: tr\('Hide chapter \{n\}', \{ n: ghost\.number \}\)/, 'a grey row offers Hide chapter N');
+  assert.match(ghost, /hook: 'hide-chapter', onSelect: onHide/);
+  assert.match(page, /onHide=\{isAdmin && b\.numberEnd == null \? \(\) => setHiding\(\[b\.number\]\) : undefined\}/, 'never on a file holding a range');
+  assert.match(page, /onHide=\{isAdmin && r\.ghost\.numberEnd == null \? \(\) => setHiding\(\[r\.ghost\.number\]\) : undefined\}/, 'an admin\'s alone');
+  const bar = page.slice(page.indexOf('data-hide-chapters') - 200, page.indexOf('data-hide-chapters') + 300);
+  assert.ok(bar.includes('isAdmin &&'), 'the select bar\'s Hide is an admin\'s');
+  assert.doesNotMatch(bar, /btn-key-danger/, "the select bar's Hide is not the red key");
+  assert.match(bar, /tr\('Hide 1 chapter'\)/, 'the bar counts what it hides');
+  // The confirmation: asked first, and not the red button.
+  const dialog = page.slice(page.indexOf('{hiding && ('), page.indexOf('{showHidden &&'));
+  assert.ok(dialog.length > 100, 'the hide asks first');
+  assert.doesNotMatch(dialog, /\bdanger\b/, 'the hide is drawn as a delete');
+  assert.match(dialog, /Nothing is deleted/, 'the confirmation says nothing is deleted');
+  // Nothing in it reads like Remove: #240's "Remove from library" and "Remove from series" were the collision.
+  for (const part of [row.slice(row.indexOf('onHide ?')), ghost.slice(ghost.indexOf('onHide ?')), bar, dialog]) {
+    assert.doesNotMatch(part.slice(0, 400), /tr\('Remove/, 'a Hide label says Remove');
+  }
+  // In chunks of the route's 500, and every surface refreshed after.
+  const hide = page.slice(page.indexOf('const hideChapters = async'), page.indexOf('const deleteBooks = async'));
+  assert.match(hide, /i \+= 500/, 'the hide is sent in chunks of the route\'s cap');
+  assert.match(hide, /\/chapters\/hide`/);
+  assert.match(hide, /invalidateChapters\(\)/, 'the chapters, grey rows and More\'s count are refreshed');
+});
+
+test('Show hidden chapters: from More, the hidden numbers with Restore, through the shared dialog', () => {
+  const page = code(read('app/series/page.tsx'));
+  assert.match(page, /case 'hidden': setShowHidden\(true\); break;/, 'More opens the list');
+  assert.match(page, /hiddenChapters: series\?\.hiddenChapters \?\? 0/, "More is told the series' count");
+  const dlg = code(read('components/HiddenChapters.tsx'));
+  // The shared Modal: aria-modal on the notices' dialog layer (useLayer('dialog')), Escape, focus back, and a panel
+  // the smooth scroller leaves alone (data-lenis-prevent). Reintroduce a hand-rolled overlay: this fails.
+  assert.match(dlg, /<Modal title=\{tr\('Hidden chapters'\)\}/, 'the list is a hand-rolled overlay');
+  assert.match(dlg, /const path = `\/api\/admin\/series\/\$\{encodeURIComponent\(seriesId\)\}\/chapters`/);
+  assert.match(dlg, /`\$\{path\}\/hidden`/, 'the list is asked of the hidden route');
+  assert.match(dlg, /`\$\{path\}\/unhide`/, 'Restore goes through the unhide route');
+  assert.match(dlg, /restore\(\{ numbers: \[h\.number\] \}\)/, 'Restore on each');
+  assert.match(dlg, /restore\(\{ all: true \}\)/, 'Restore all');
+  assert.match(dlg, /className="btn-key"/, 'the actions are squared keys');
+  // By the count: an array dependency made fresh each render re-ran the effect for ever (React #185).
+  assert.match(dlg, /\[list\.isSuccess, count, onClose\]/, 'the self-close effect depends on the array');
 });

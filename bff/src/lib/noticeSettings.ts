@@ -1,6 +1,6 @@
 // The notice-chapter reads that need the database (lib/noticeChapters.ts is the rule itself, and pure).
 import { q, one } from './db';
-import { hidesNotices, hiddenNoticeCount, noticesActive, sanitiseNoticeTypes, setNoticesActive, setNoticesShortOnly } from './noticeChapters';
+import { hidesNotices, hiddenNoticeCount, noticesActive, sanitiseNoticeTypes, setHiddenNumbersActive, setNoticesActive, setNoticesShortOnly } from './noticeChapters';
 import type { SeriesType } from './seriesTypeSignals';
 
 /** The server's switches. Read every time, never cached: a change applies to the next request. Off on a failed read. */
@@ -37,10 +37,14 @@ export async function hiddenCount(seriesId: string): Promise<number> {
  * noticeChapters.int.test.ts finds the queries built by the old rule after the PATCH.
  */
 export async function refreshNoticesActive(): Promise<void> {
-  const r = await one<{ active: boolean; short_only: boolean | null }>(
+  const r = await one<{ active: boolean; short_only: boolean | null; hand: boolean }>(
     `SELECT COALESCE((SELECT hide_notice_types <> '[]'::jsonb FROM server_settings WHERE id = 1), false)
          OR EXISTS (SELECT 1 FROM lib_series WHERE hide_notices) AS active,
-            (SELECT hide_notice_short_only FROM server_settings WHERE id = 1) AS short_only`).catch(() => null);
+            (SELECT hide_notice_short_only FROM server_settings WHERE id = 1) AS short_only,
+            EXISTS (SELECT 1 FROM lib_series WHERE hidden_numbers IS NOT NULL) AS hand`).catch(() => null);
   setNoticesActive(r?.active === true);
   setNoticesShortOnly(r?.short_only !== false);
+  // #240: and whether any series hides a number by hand (lib/hiddenChapters.ts). Unlike the switches, a failed read
+  // keeps what was known: the flag only ever drops here, and dropped wrongly it would show every hidden chapter.
+  if (r) setHiddenNumbersActive(r.hand === true);
 }

@@ -43,6 +43,7 @@ import { SourcesExplainer } from '@/components/SourcesExplainer';
 import { SupplyLine } from '@/components/SupplyLine';
 import { ChapterFilterSheet } from '@/components/ChapterFilterSheet';
 import { ChapterVersionsSheet } from '@/components/ChapterVersionsSheet';
+import { HiddenChaptersDialog } from '@/components/HiddenChapters';
 import { CoverPickerSheet } from '@/components/CoverPickerSheet';
 import { CompareCopiesDialog } from '@/components/CompareCopiesDialog';
 import { GroupAvatar } from '@/components/GroupAvatar';
@@ -394,10 +395,15 @@ function ButtonsWrap({ compact, menuOpen, children }: { compact: boolean; menuOp
   return <div className={buttonsClass(menuOpen)}>{children}</div>;
 }
 
-function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, onReader, onToggleDownload, onMark, onEdit, onVersions, onReplaceFrom, onCopyPath, onRefetch, onDelete, selectable, selected, onToggle, compact, lit }: {
+function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, onReader, onToggleDownload, onMark, onEdit, onVersions, onReplaceFrom, onCopyPath, onHide, onRefetch, onDelete, selectable, selected, onToggle, compact, lit }: {
   book: Book;
   /** Admins only (#136): copy the chapter file's full path. Absent for everyone else and for a row with no path. */
   onCopyPath?: () => void;
+  /**
+   * Admins only (#240): hide this chapter's number from the series, for everyone -- it asks first. Nothing is deleted.
+   * Absent for everyone else, and for a file holding a range of chapters, which no number hides.
+   */
+  onHide?: () => void;
   /**
    * Admins only, on a file Uchiyomi downloaded (v0.62.0): the select bar's Fetch again and Delete from server, for this
    * one chapter -- each asks first, as the bar's do. Absent for everyone else, and Delete for a file already deleted.
@@ -443,6 +449,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
     ...(onReplaceFrom ? [{ label: tr('Replace from another source…'), onSelect: onReplaceFrom }] : []),
     ...(onEdit ? [{ label: tr('Edit number & title'), divider: true, onSelect: onEdit }] : []),
     ...(onCopyPath ? [{ label: tr('Copy file path'), divider: !onEdit, onSelect: onCopyPath }] : []),
+    ...(onHide ? [{ label: tr('Hide chapter {n}', { n: book.number }), divider: !onEdit && !onCopyPath, hook: 'hide-chapter', onSelect: onHide }] : []),
     ...(onRefetch ? [{ label: tr('Fetch again'), divider: true, onSelect: onRefetch }] : []),
     ...(onDelete ? [{ label: tr('Delete from server'), divider: !onRefetch, danger: true, onSelect: onDelete }] : []),
   ], { label: tr('Chapter actions') });
@@ -552,7 +559,7 @@ function SelectBubble({ selected }: { selected: boolean }) {
  * dimmed, because "this server does not have it" is still true. The mark lives in its own table and becomes
  * ordinary progress when the chapter lands (bff lib/listingProgress).
  */
-function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onToggle, onFetch, onOpen, onMark, compact, wholeHere }: {
+function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onToggle, onFetch, onOpen, onMark, onHide, compact, wholeHere }: {
   ghost: Ghost;
   /** The series holds a chapter at this ghost's whole number: what a covered row's caption says (lib/chapterRows.ts whyLabel). */
   wholeHere?: boolean;
@@ -574,14 +581,18 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
    * can see the page, download permission or not: a mark costs no bytes. Select mode hides it like the ☁.
    */
   onMark?: (completed: boolean) => void;
+  /** Admins only (#240): hide this number from the series, for everyone -- a source's stray. It asks first. */
+  onHide?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const read = ghost.read === true;
-  // The one action that applies to a chapter that is not here, on the same menu as a chapter row's (#100).
-  const menu = useContextMenu(() => (onMark ? [
-    { label: read ? tr('Mark unread') : tr('Mark read'), onSelect: () => onMark(!read) },
-  ] : []), { label: tr('Chapter actions') });
-  const menuBind = onMark && !selectable ? menu.bind : {};
+  // The actions that apply to a chapter that is not here, on the same menu as a chapter row's (#100).
+  const menu = useContextMenu(() => [
+    ...(onMark ? [{ label: read ? tr('Mark unread') : tr('Mark read'), onSelect: () => onMark(!read) }] : []),
+    ...(onHide ? [{ label: tr('Hide chapter {n}', { n: ghost.number }), divider: !!onMark, hook: 'hide-chapter', onSelect: onHide }] : []),
+  ], { label: tr('Chapter actions') });
+  const hasMenu = !!onMark || !!onHide;
+  const menuBind = hasMenu && !selectable ? menu.bind : {};
   const label = whyLabel(ghost, { wholeHere });
   // The same rule as the chapter row's caption: the series' own source is the normal case, not news. The
   // listing carries the source's name, so an id the followed list no longer resolves still gets one --
@@ -637,8 +648,8 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
           {busy ? <span className="text-[10px] font-semibold text-accent">…</span> : <IcCloudDownload width={16} height={16} />}
         </button>
       )}
-      {/* The chapter row's ⋯, with the one action that applies to a chapter that is not here. */}
-      {onMark && !selectable && (
+      {/* The chapter row's ⋯, with the actions that apply to a chapter that is not here. */}
+      {hasMenu && !selectable && (
         <div className="relative shrink-0">
           <button type="button" onClick={(e) => menu.openFrom(e.currentTarget)} aria-label={tr('Chapter actions')} aria-haspopup="menu" aria-expanded={menu.open}
             className="grid h-9 w-9 place-items-center rounded-lg border border-ink-700 text-fog-500">
@@ -741,6 +752,9 @@ function SeriesInner() {
   const [acting, setActing] = useState(false);
   // What a confirm acts on: the select bar's subset, or the one chapter a row's ⋯ names (v0.62.0).
   const [confirming, setConfirming] = useState<null | { what: 'delete' | 'refetch'; books: Book[] }>(null);
+  // #240: the chapter numbers a Hide asks about -- a row's ⋯, or the select bar's -- and More's Show hidden chapters.
+  const [hiding, setHiding] = useState<number[] | null>(null);
+  const [showHidden, setShowHidden] = useState(false);
   const [started, setStarted] = useState<StartedJob | null>(null);
   const clearPicks = () => { setPickedBooks(new Set()); setPickedGhosts(new Set()); };
   const leaveSelect = () => { setSelecting(false); clearPicks(); };
@@ -1238,6 +1252,11 @@ function SeriesInner() {
   // delete and the server would say `already_pruned` for every one of them. Reintroduce by adding
   // `b.owned &&` back: pick a /library chapter and the delete says "0 deleted" -- or nothing.
   const deletable = pickedBookList.filter((b) => !b.pruned);
+  // #240: the picked chapters' and grey rows' numbers, each once -- a hide is by number -- never a file holding a range.
+  const hideable = useMemo(() => [...new Set([
+    ...pickedBookList.filter((b) => b.numberEnd == null).map((b) => b.number),
+    ...pickedGhostList.filter((g) => g.numberEnd == null).map((g) => g.number),
+  ])].sort((a, b) => a - b), [pickedBookList, pickedGhostList]);
   const pickedCount = pickedBookList.length + pickedGhostList.length;
   // The select bar on the notices' layer stack (lib/layers.ts), measured: it wraps to three rows at 390 px,
   // and a notice has to rise above whichever height it has.
@@ -1387,6 +1406,25 @@ function SeriesInner() {
     if (!replacing) return;
     await startJob(`/api/admin/series/${id}/chapters/refetch`, { picks: [{ bookId: replacing.book.id, source: replacing.copy.source, sourceId: copySourceId(replacing.copy) }] });
     setReplacing(null);
+  };
+  // Hide (#240, bff lib/hiddenChapters.ts): the numbers leave every surface for everyone, and nothing is deleted. In the
+  // route's chunks of 500, as Delete from server is.
+  const hideChapters = async (numbers: number[]) => {
+    setActing(true);
+    try {
+      for (let i = 0; i < numbers.length; i += 500) {
+        await api(`/api/admin/series/${id}/chapters/hide`, { method: 'POST', json: { numbers: numbers.slice(i, i + 500) } });
+      }
+      // What is true now: every number asked about is hidden, whether this press hid it or an earlier one did.
+      toast(numbers.length === 1 ? tr('1 chapter is hidden.') : tr('{n} chapters are hidden.', { n: numbers.length }), 'success');
+      qc.invalidateQueries({ queryKey: ['series-hidden', id] });
+      invalidateChapters();
+      leaveSelect();
+    } catch (e) {
+      toast(msgOf(e, tr('Could not hide that')), 'error');
+    }
+    setActing(false);
+    setHiding(null);
   };
   const deleteBooks = async (picked: Book[]) => {
     setActing(true);
@@ -1596,6 +1634,7 @@ function SeriesInner() {
   const moreGroups = seriesActionGroups({
     isAdmin, mayDownload: canDownload(user), booksCount: series?.booksCount ?? 0, mayArchive,
     autoHero: !!series?.autoHero, hasFolder: !!series?.folder, offline: authStatus === 'offline', notes: notesCounts,
+    hiddenChapters: series?.hiddenChapters ?? 0,
     busy: { checkNew: checking, archive: acting, newBanner: busyAdmin },
   });
   const runAction = (a: SeriesActionId) => {
@@ -1604,6 +1643,7 @@ function SeriesInner() {
       case 'markAllRead': void markAllRead(); break;
       case 'markAllUnread': void markAllUnread(); break;
       case 'findMissing': setFindingMissing(true); break;
+      case 'hidden': setShowHidden(true); break;
       case 'archive': void archiveSlowly(); break;
       case 'checkNew': void checkNow(); break;
       case 'copyLink': void copyLink(); break;
@@ -1766,6 +1806,7 @@ function SeriesInner() {
                 onMark={(mode) => markChapter(b, mode)}
                 onEdit={isAdmin ? () => setEditChapter(b) : undefined}
                 onCopyPath={isAdmin && b.path ? () => void copyPath(b.path!, toast) : undefined}
+                onHide={isAdmin && b.numberEnd == null ? () => setHiding([b.number]) : undefined}
                 onRefetch={isAdmin && b.owned ? () => setConfirming({ what: 'refetch', books: [b] }) : undefined}
                 onDelete={isAdmin && b.owned && !b.pruned ? () => setConfirming({ what: 'delete', books: [b] }) : undefined}
                 selectable={selecting} selected={pickedBooks.has(b.id)} onToggle={() => togglePickBook(b.id)}
@@ -1785,7 +1826,8 @@ function SeriesInner() {
                 onFetch={canDownload(user) && r.ghost.why !== 'blocked'
                   ? () => r.ghost.bookId ? fetchDeleted(r.ghost.bookId) : fetchOne(r.ghost.number)
                   : undefined}
-                onMark={(completed) => markGhost(r.ghost, completed)} />
+                onMark={(completed) => markGhost(r.ghost, completed)}
+                onHide={isAdmin && r.ghost.numberEnd == null ? () => setHiding([r.ghost.number]) : undefined} />
             );
           }
           if (r.kind === 'run') {
@@ -1869,6 +1911,12 @@ function SeriesInner() {
         {!isDesktop() && <button disabled={acting || !saveable.length} onClick={bulkSave} className="btn-key"><IcDownload width={14} height={14} />{tr('Save offline')}</button>}
         {canDownload(user) && <button disabled={acting || !fetchable.length} onClick={bulkFetch} className="btn-key"><IcCloudDownload width={14} height={14} />{tr('Fetch')}</button>}
         {isAdmin && <button disabled={acting || !refetchable.length} onClick={() => setConfirming({ what: 'refetch', books: refetchable })} className="btn-key"><IcCloudDownload width={14} height={14} />{tr('Fetch again')}</button>}
+        {/* #240: hidden for everyone, nothing deleted -- beside the server keys, and never the red one, which deletes. */}
+        {isAdmin && (
+          <button disabled={acting || !hideable.length} onClick={() => setHiding(hideable)} data-hide-chapters className="btn-key">
+            {hideable.length === 1 ? tr('Hide 1 chapter') : hideable.length ? tr('Hide {n} chapters', { n: hideable.length }) : tr('Hide chapters')}
+          </button>
+        )}
         {isAdmin && (
           <button disabled={acting || !deletable.length} onClick={() => setConfirming({ what: 'delete', books: deletable })} data-remove-chapters className="btn-key btn-key-danger text-rose-300">
             {deletable.length === 1 ? tr('Remove 1 chapter') : deletable.length ? tr('Remove {n} chapters', { n: deletable.length }) : tr('Remove chapters')}
@@ -2152,6 +2200,27 @@ function SeriesInner() {
           onClose={() => setConfirming(null)}
         />
       )}
+      {/* #240: a hide asks first -- it changes the series for everyone -- but it is no delete: the plain key, not the red. */}
+      {hiding && (
+        <ConfirmDialog
+          title={hiding.length === 1 ? tr('Hide chapter {n}?', { n: hiding[0] }) : tr('Hide {n} chapters?', { n: hiding.length })}
+          busy={acting}
+          confirmLabel={hiding.length === 1 ? tr('Hide chapter {n}', { n: hiding[0] }) : tr('Hide {n} chapters', { n: hiding.length })}
+          body={
+            <>
+              <p>{hiding.length === 1
+                ? tr('Hidden for everyone: it leaves the chapter list, Continue, the unread counts, Updates and Health, and it is never downloaded again. For a chapter a source lists that is not part of this series.')
+                : tr('Hidden for everyone: they leave the chapter list, Continue, the unread counts, Updates and Health, and they are never downloaded again. For chapters a source lists that are not part of this series.')}</p>
+              <p className="mt-2">{hiding.length === 1
+                ? tr('Nothing is deleted: Show hidden chapters, under More, brings it back as it was.')
+                : tr('Nothing is deleted: Show hidden chapters, under More, brings them back as they were.')}</p>
+            </>
+          }
+          onConfirm={() => void hideChapters(hiding)}
+          onClose={() => setHiding(null)}
+        />
+      )}
+      {showHidden && <HiddenChaptersDialog seriesId={id} onClose={() => setShowHidden(false)} onChanged={invalidateChapters} />}
       {coverPicker && <CoverPickerSheet seriesId={id} artVersion={series?.artVersion} onClose={() => setCoverPicker(false)} />}
       {comparing && (
         <CompareCopiesDialog seriesId={id} book={comparing} copies={versionsOf.get(comparing.number) ?? []} sourceNames={sourceNames}

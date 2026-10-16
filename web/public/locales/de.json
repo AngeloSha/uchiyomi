@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3988
+    "strings": 4016
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -3991,5 +3991,33 @@
   "Series with chapters left": "Serien mit offenen Kapiteln",
   "Waiting the longest": "Am längsten liegen geblieben",
   "Genre": "Genre",
-  "Insights": "Einblicke"
+  "Insights": "Einblicke",
+  "Hide chapter {n}": "Kapitel {n} ausblenden",
+  "1 chapter is hidden.": "1 Kapitel ist ausgeblendet.",
+  "{n} chapters are hidden.": "{n} Kapitel sind ausgeblendet.",
+  "Could not hide that": "Konnte es nicht ausblenden",
+  "Hide 1 chapter": "1 Kapitel ausblenden",
+  "Hide {n} chapters": "{n} Kapitel ausblenden",
+  "Hide chapter {n}?": "Kapitel {n} ausblenden?",
+  "Hide {n} chapters?": "{n} Kapitel ausblenden?",
+  "Hidden for everyone: it leaves the chapter list, Continue, the unread counts, Updates and Health, and it is never downloaded again. For a chapter a source lists that is not part of this series.": "Für alle ausgeblendet: Es verschwindet aus der Kapitelliste, aus „Weiterlesen“, aus den Ungelesen-Zahlen, den „Neuigkeiten“ und dem „Zustand“ und wird nie wieder heruntergeladen. Für ein Kapitel, das eine Quelle listet, das aber nicht zu dieser Serie gehört.",
+  "Hidden for everyone: they leave the chapter list, Continue, the unread counts, Updates and Health, and they are never downloaded again. For chapters a source lists that are not part of this series.": "Für alle ausgeblendet: Sie verschwinden aus der Kapitelliste, aus „Weiterlesen“, aus den Ungelesen-Zahlen, den „Neuigkeiten“ und dem „Zustand“ und werden nie wieder heruntergeladen. Für Kapitel, die eine Quelle listet, die aber nicht zu dieser Serie gehören.",
+  "Nothing is deleted: Show hidden chapters, under More, brings it back as it was.": "Nichts wird gelöscht: „Ausgeblendete Kapitel anzeigen“ unter „Mehr“ holt es so zurück, wie es war.",
+  "Nothing is deleted: Show hidden chapters, under More, brings them back as they were.": "Nichts wird gelöscht: „Ausgeblendete Kapitel anzeigen“ unter „Mehr“ holt sie so zurück, wie sie waren.",
+  "Show hidden chapters ({n})": "Ausgeblendete Kapitel anzeigen ({n})",
+  "{n} copies on the server, listed by a source": "{n} Kopien auf dem Server, von einer Quelle gelistet",
+  "{n} copies on the server": "{n} Kopien auf dem Server",
+  "1 copy on the server, listed by a source": "1 Kopie auf dem Server, von einer Quelle gelistet",
+  "1 copy on the server": "1 Kopie auf dem Server",
+  "Listed by a source": "Von einer Quelle gelistet",
+  "Not listed any more": "Nirgends mehr gelistet",
+  "1 chapter is back.": "1 Kapitel ist wieder da.",
+  "{n} chapters are back.": "{n} Kapitel sind wieder da.",
+  "Could not restore that": "Konnte es nicht wiederherstellen",
+  "Hidden chapters": "Ausgeblendete Kapitel",
+  "Hidden from everyone: not in the chapter list, Continue, the unread counts, Updates or Health, and never downloaded. Nothing was deleted, so Restore brings a chapter back as it was.": "Für alle ausgeblendet: nicht in der Kapitelliste, in „Weiterlesen“, in den Ungelesen-Zahlen, in den „Neuigkeiten“ oder im „Zustand“, und nie heruntergeladen. Gelöscht wurde nichts, daher bringt „Wiederherstellen“ ein Kapitel so zurück, wie es war.",
+  "Could not load the hidden chapters": "Die ausgeblendeten Kapitel konnten nicht geladen werden",
+  "Restore chapter {n}": "Kapitel {n} wiederherstellen",
+  "Restore": "Wiederherstellen",
+  "Restore all": "Alle wiederherstellen"
 }

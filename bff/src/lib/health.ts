@@ -31,7 +31,8 @@ import { gapsOf, splitAtFloor } from './fill';
 import { CHAPTER_RETRY_CAP } from './updater';
 import { diagnose, currentError, type DiagnosisCode } from './sourceDiagnosis';
 import { currentFailures, isRateLimit, openFailures, stageLines, type Stage, type StageLine, type Stages } from './sourceEvidence';
-import { haveNumbers } from './libraryNumbers';
+import { haveNumbers, impossibleLimit, median, plausibleNumbers } from './libraryNumbers';
+import { atHiddenNumber } from './noticeChapters';
 import { slowStreakNow } from './sourceHealth';
 import { listBudgetFor } from './sources/budget';
 import { cbzPageDims, DL_ROOT, LIBRARY_ROOT, lastScanReport, QUIET_WALK, type WalkIssue, type WalkReason } from './library';
@@ -758,6 +759,8 @@ async function shortChapters(): Promise<HealthCheck> {
             b.short_confirmed_at, b.missing_pages, b.short_result, b.page_dims
        FROM lib_books b JOIN lib_series ls ON ls.id = b.series_id AND ${visibleToAll('ls')}
       WHERE b.pages BETWEEN 1 AND 2 AND b.number = floor(b.number) AND b.pruned_at IS NULL
+        -- Not a chapter at a number an admin hid (#240): no chapter here, and its Fix would be refused.
+        AND NOT ${atHiddenNumber('b')}
       ORDER BY ls.title, b.number`,
   );
   const budget = { left: MEASURE_PER_REPORT };
@@ -1494,40 +1497,9 @@ export async function duplicateSeries(ctx: IgnoreCtx = noIgnores()): Promise<Hea
   };
 }
 
-/** percentile_cont(0.5), in JS: the interpolated median, so this check and the SQL it replaced agree. */
-function median(sorted: number[]): number {
-  if (!sorted.length) return 0;
-  const mid = (sorted.length - 1) / 2;
-  return (sorted[Math.floor(mid)] + sorted[Math.ceil(mid)]) / 2;
-}
-
-/**
- * The impossible-number rule over a series' held numbers: the limit a chapter number may not pass -- four times the
- * median, or the median plus 500, whichever is more -- when one does, else null. Exported (v0.55.0) for the repair's
- * gap step under Fix everything, which leaves such a series to the files phase: one chapter numbered 9001 is a
- * 9000-chapter "gap".
- */
-export function impossibleLimit(numbers: readonly number[]): number | null {
-  // Positive numbers only, as the SQL this replaced did: a chapter 0 is a legitimate prologue and
-  // including it would drag the median down towards nothing.
-  const nums = numbers.filter((n) => n > 0).sort((a, b) => a - b);
-  if (!nums.length) return null;
-  const med = median(nums);
-  const limit = Math.max(med * 4, med + 500);
-  return nums[nums.length - 1] > limit ? limit : null;
-}
-
-/**
- * The numbers a series' holes are counted between: all of them but the ones the outliers card names (impossibleLimit).
- * One chapter numbered 9001 among 1 to 4 is a chapter numbered impossibly, not 8,996 missing chapters: counted as a gap
- * it filled the gaps card with a hole nothing can fetch -- which Fix everything left alone, so a bookmarked 9001 kept
- * "the next run continues" and Run again on the end for good -- and sent the nightly searching other sites for
- * thousands of chapters. Health's gaps check and the repair's gap step both count this way (v0.55.0 integration).
- */
-export function plausibleNumbers(numbers: readonly number[]): number[] {
-  const limit = impossibleLimit(numbers);
-  return limit === null ? [...numbers] : numbers.filter((n) => n <= limit);
-}
+// median, impossibleLimit and plausibleNumbers live beside the held numbers they judge (lib/libraryNumbers.ts, #240):
+// a number hidden by hand closes a hole only between plausible numbers. Exported from here too, as they always were.
+export { impossibleLimit, plausibleNumbers } from './libraryNumbers';
 
 /** Chapter numbers far beyond the rest of the series: the sidebar-widget scraping bug's signature. */
 async function outlierChapters(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
@@ -1558,6 +1530,8 @@ async function outlierChapters(held: HeldSeries[], ctx: IgnoreCtx = noIgnores())
       `SELECT b.id, COALESCE(o.number, b.number)::float8 AS number
          FROM lib_books b LEFT JOIN book_overrides o ON o.book_id = b.id
         WHERE b.series_id = $1 AND b.pruned_at IS NULL AND COALESCE(o.number, b.number) > $2
+          -- Not a chapter at a number an admin hid (#240): haveNumbers leaves it out, and so does the Delete chip.
+          AND NOT ${atHiddenNumber('b')}
         ORDER BY 2 DESC`,
       [r.s.id, r.limit],
     ).catch(() => { readFailed = true; return [] as Array<{ id: string; number: number }>; });
@@ -1625,6 +1599,8 @@ export async function savedTwiceGroups(): Promise<Array<{ seriesId: string; titl
        LEFT JOIN book_overrides o ON o.book_id = b.id
       WHERE b.pruned_at IS NULL AND b.source_id IS NOT NULL AND ${visibleToAll('s')}
         AND s.numbering IS DISTINCT FROM 'posting_order' AND s.numbering_pending IS NULL AND s.renumber_plan IS NULL
+        -- A chapter at a number an admin hid (#240) is no chapter here, and Fix everything deletes from this list.
+        AND NOT ${atHiddenNumber('b')}
       ORDER BY s.title, b.series_id, 4`,
   );
   type Book = (typeof rows)[number];

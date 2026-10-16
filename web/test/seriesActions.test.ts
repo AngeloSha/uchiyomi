@@ -172,3 +172,15 @@ test('the page: four keys under the button, More by width, the sheet closed befo
     assert.ok(page.includes(`case '${id}': ${call}; break;`), `${id} does not run ${call}`);
   }
 });
+
+test('Show hidden chapters: an admin\'s, under Chapters, only while a number is hidden (#240)', () => {
+  // Reintroduce it for every admin: "a series with nothing hidden" fails; for a member: "a member is offered it" fails.
+  const chapters = (x: SeriesActionsInput) => seriesActionGroups(x).find((g) => g.id === 'chapters')?.items ?? [];
+  assert.ok(!chapters(ADMIN).some((i) => i.id === 'hidden'), 'a series with nothing hidden offers Show hidden chapters');
+  const item = chapters({ ...ADMIN, hiddenChapters: 2 }).find((i) => i.id === 'hidden');
+  assert.equal(item?.label, 'Show hidden chapters (2)');
+  assert.equal(item?.danger, undefined, 'the way back is drawn as a delete');
+  assert.equal(item?.hook, 'hidden-chapters');
+  assert.ok(!chapters({ ...MEMBER, hiddenChapters: 2 }).some((i) => i.id === 'hidden'), 'a member is offered it');
+  assert.equal(chapters({ ...ADMIN, hiddenChapters: 2, offline: true }).find((i) => i.id === 'hidden')?.disabled, true, 'greyed while offline');
+});

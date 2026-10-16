@@ -62,6 +62,7 @@ import { DL_ROOT } from './library';
 import { allWritable, containedPath } from './fsGuard';
 import { REFETCH_BAK } from './fsAtomic';
 import { runtime, type CleanupResult } from './runtime';
+import { atHiddenNumber, hiddenNumbersActive } from './noticeChapters';
 
 /**
  * Most chapters one run will delete. Not a performance limit -- unlink is cheap -- but a blast radius:
@@ -114,7 +115,9 @@ export function dueSql(limit: number | null): string {
              -- the last reader finished the copy that is on disk now, not the one this file replaced
              AND done.done_at >= to_timestamp(b.mtime / 1000.0)
              AND NOT EXISTS (SELECT 1 FROM bookmarks bm WHERE bm.book_id = b.id)
-             AND NOT EXISTS (SELECT 1 FROM lib_series s WHERE s.cover_book_id = b.id)
+             AND NOT EXISTS (SELECT 1 FROM lib_series s WHERE s.cover_book_id = b.id)${hiddenNumbersActive() ? `
+             -- a chapter at a number an admin hid (#240) is left exactly as it is: Restore brings back what was there
+             AND NOT ${atHiddenNumber('b')}` : ''}
            ORDER BY done.done_at ASC` + (limit === null ? '' : `\n           LIMIT ${limit}`);
 }
 

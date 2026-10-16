@@ -814,11 +814,12 @@ components:
         number: { type: number }
         reason:
           type: string
-          enum: [not_listed, blocked_group, other_language, already_here, source_unavailable, cooldown, duplicate]
+          enum: [not_listed, blocked_group, other_language, already_here, source_unavailable, cooldown, duplicate, hidden]
           description: >-
             `duplicate` is a second pick for a number already picked in the same body: the first pick was
             handled, this one was not. `other_language` (since v0.62.0): every copy of the number is in another
-            language than the series' -- a pick takes one anyway.
+            language than the series' -- a pick takes one anyway. `hidden` (since VNEXT): an admin hid the number
+            from the series (POST /api/admin/series/{id}/chapters/hide), and nothing fetches it, a pick included.
         source: { type: string, description: Present when the skipped entry was a pick, naming the copy asked for. }
         sourceId: { type: string, description: Present when the skipped entry was a pick. }
     Pick:
@@ -9738,6 +9739,186 @@ paths:
           description: Not found, or not visible to this account
         "409":
           description: "`refused`: the download directory is not writable; `message` and `fix` say what to do"
+  /api/admin/series/{id}/chapters/hide:
+    post:
+      tags:
+        - admin
+      summary: Hide chapter numbers from a series, for everyone. Nothing is deleted.
+      operationId: postApiAdminSeriesIdChaptersHide
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since VNEXT (#240,
+        rebuilt to hide only): for a chapter a source lists that is not part of the work. A hidden number, by its
+        effective number (an admin's override when there is one), is left out of every surface for every viewer -- the
+        chapter list and its missing-chapter rows, next and previous, Continue reading, the unread counts, Updates,
+        history, OPDS, the Komga-compatible API and what the trackers are told -- is neither held nor missing for
+        Health, the repair and Find missing chapters, and is never downloaded: not by the sweep, Check for new
+        chapters, Fetch newest, the slow archive or POST /api/sources/fetch (`hidden`), and a download already queued
+        stops before it asks the source. Nothing is deleted: no file, no chapter row and no reading progress is touched,
+        and the read-chapter cleanup and Fix everything leave such a chapter's file alone. A file holding a range of
+        chapters is never hidden by one number. The number's failure-ledger rows are dropped. Restore with
+        /chapters/unhide. A merge carries the absorbed series' hidden numbers to the survivor, and a renumber moves
+        each with its post. Answers the numbers this call hid; one hidden already is not hidden twice. Audit line
+        `series.chapters_hide`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [numbers]
+              properties:
+                numbers:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: number
+                    minimum: 0
+                    maximum: 1000000
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, hidden]
+                properties:
+                  ok:
+                    type: boolean
+                  hidden:
+                    type: array
+                    description: The numbers this call hid, lowest first.
+                    items:
+                      type: number
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "409":
+          description: "`merged`: the series was merged into another, whose chapters and hidden numbers they are now"
+  /api/admin/series/{id}/chapters/hidden:
+    get:
+      tags:
+        - admin
+      summary: The chapter numbers hidden from a series, with what each one is.
+      operationId: getApiAdminSeriesIdChaptersHidden
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since VNEXT (#240):
+        what the series page's Show hidden chapters lists, lowest first. `onServer` counts the chapter rows the server
+        keeps at the number (a file, or a deleted one's row; a range file is never one), `listed` says a source the
+        series follows lists it, `title` is the source's name for it, else the file's.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [content]
+                properties:
+                  content:
+                    type: array
+                    items:
+                      type: object
+                      required: [number, onServer, listed, title]
+                      properties:
+                        number:
+                          type: number
+                        onServer:
+                          type: integer
+                        listed:
+                          type: boolean
+                        title:
+                          type: string
+                          nullable: true
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/series/{id}/chapters/unhide:
+    post:
+      tags:
+        - admin
+      summary: Show hidden chapter numbers again.
+      operationId: postApiAdminSeriesIdChaptersUnhide
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since VNEXT (#240):
+        the numbers named, or every one with `all: true` -- exactly one of the two. Nothing was deleted, so every
+        surface shows the chapters again on the next request, their missing-chapter rows included, and the next sweep
+        fetches one that is missing. Answers the numbers that were hidden. Audit line `series.chapters_unhide`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                numbers:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: number
+                    minimum: 0
+                    maximum: 1000000
+                all:
+                  type: boolean
+                  enum: [true]
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, restored]
+                properties:
+                  ok:
+                    type: boolean
+                  restored:
+                    type: array
+                    description: The numbers shown again, lowest first.
+                    items:
+                      type: number
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
   /api/admin/series/{id}/cover-candidates:
     get:
       tags:

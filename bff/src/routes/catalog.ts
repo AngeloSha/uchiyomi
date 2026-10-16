@@ -518,9 +518,11 @@ export default async function catalogRoutes(app: FastifyInstance) {
     if (roleOf(req) === 'admin') {
       const f = await one<{ folder: string; source_prefs: { priority?: unknown } | null; borrow_names: boolean | null; server_borrow: boolean | null;
                             reading_direction: string | null; reading_direction_from: string | null; lang: string | null; source_id: string | null; roots: string[] | null;
-                            series_type: string | null; series_type_from: string | null; type_override: string | null; hide_notices: boolean | null }>(
+                            series_type: string | null; series_type_from: string | null; type_override: string | null; hide_notices: boolean | null;
+                            hidden_count: number }>(
         `SELECT folder, source_prefs, borrow_names, (SELECT borrow_names FROM server_settings WHERE id = 1) AS server_borrow,
                 reading_direction, reading_direction_from, lang, source_id, series_type, series_type_from, hide_notices,
+                COALESCE(cardinality(hidden_numbers), 0) AS hidden_count,
                 (SELECT o.series_type FROM series_overrides o WHERE o.series_id = lib_series.id) AS type_override,
                 ARRAY(SELECT DISTINCT b.root FROM lib_books b WHERE b.series_id = lib_series.id AND b.root IS NOT NULL ORDER BY b.root) AS roots
            FROM lib_series WHERE id = $1`, [id]);
@@ -553,6 +555,8 @@ export default async function catalogRoutes(app: FastifyInstance) {
       out.hiddenNotices = out.hideNoticesEffective ? await hiddenCount(id) : 0;
       // v0.55.3 (#147): the rule the switches hide by -- short ones only, or every fraction -- so the sheet says which.
       out.hideNoticeShortOnly = noticesShortOnly();
+      // #240: how many chapter numbers an admin hid from it (lib/hiddenChapters.ts), for More's Show hidden chapters.
+      out.hiddenChapters = Number(f?.hidden_count ?? 0);
     }
     return out;
   });

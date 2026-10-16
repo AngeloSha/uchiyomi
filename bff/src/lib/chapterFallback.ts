@@ -38,6 +38,7 @@ import {
 import { getSource, type SourceChapter } from './sources';
 import { isDisabled, blockedNow, classify } from './sourceHealth';
 import { followLimit } from './followLimit';
+import { numberHiddenNow } from './hiddenChapters';
 
 export interface FallbackInput {
   seriesId: string;
@@ -101,9 +102,10 @@ export type FallbackOutcome =
   /**
    * Nothing was written and nothing was wrong: the file was already on disk (`on_disk`), or the chosen
    * copy's source is refusing this run and no other copy could be asked (`refusing`). The second is the
-   * old loops' `continue`: the chapter was never asked, so it is not a failure and earns no ledger row.
+   * old loops' `continue`: the chapter was never asked, so it is not a failure and earns no ledger row. `hidden`: an
+   * admin hid its number from the series (#240), before the queue reached it or while it waited at the source's door.
    */
-  | { kind: 'skipped'; why: 'on_disk' | 'refusing' | 'paused' }
+  | { kind: 'skipped'; why: 'on_disk' | 'refusing' | 'paused' | 'hidden' }
   | { kind: 'partial'; via: string; pages: number; missing: number[]; chapterUsed: SourceChapter; switched?: { from: string; why: string } }
   | { kind: 'failed'; via: string; err: any };
 
@@ -146,8 +148,18 @@ async function tryEachCopy(f: FallbackInput, offered: PartialHold[]): Promise<Fa
     : f.automaticAllowed ? f.automaticAllowed(chapter).catch(() => false) : Promise.resolve(true);
   const sourceAllowed = (chapter: SourceChapter): Promise<boolean> => f.sourceAllowedNow
     ? f.sourceAllowedNow(chapter).catch(() => false) : Promise.resolve(true);
+  // A number an admin hid from the series (#240, lib/hiddenChapters.ts) is never fetched, whoever queued it: the sweep and
+  // the archive leave it out when they choose, and this is where a queue built before the hide finds out -- first here,
+  // and again at the source's door, since the queue can be minutes deep. A failed read is a no: uncertainty is closed at
+  // this outbound boundary, as a disabled source's is. Reintroduce by dropping both: "a download queued before the hide
+  // never reaches the source" in hiddenChapters.int.test.ts finds the page list asked for.
+  const hiddenNow = (num: number) => (f.seriesId ? numberHiddenNow(f.seriesId, num).catch(() => true) : Promise.resolve(false));
+  /** A refusal that ends the chapter, not just this copy: the run is paused, or the number is hidden. */
+  const ends = (reason: DownloadPreflightReason): FallbackOutcome | null =>
+    (reason === 'paused' || reason === 'hidden' ? { kind: 'skipped', why: reason } : null);
   const preflightFor = (chapter: SourceChapter, src: string, writing = false): DownloadPreflight => async () => {
     if (!(await admitted())) return 'paused';
+    if (await hiddenNow(chapter.number)) return 'hidden';
     // Loaded + viewer/sweep scope and current caller-specific ownership are source authorization, and a pin
     // overrides none of them. It overrides only the scanlator block below.
     if (!getSource(src) || (f.allowed && !f.allowed(src)) || !(await sourceAllowed(chapter))) return 'source';
@@ -217,12 +229,14 @@ async function tryEachCopy(f: FallbackInput, offered: PartialHold[]): Promise<Fa
     `[download] ${label}: took from ${to} after ${via} failed (${switched().why})${missing.length ? `, saved with ${missing.length} page${missing.length === 1 ? '' : 's'} missing` : ''}`,
   );
 
+  if (await hiddenNow(n)) return { kind: 'skipped', why: 'hidden' };
+
   // ── 1 + 2. the chosen copy ────────────────────────────────────────────────────────────────────────
   if (!f.refusing.has(via) && !off) {
     if (!(await admitted())) return { kind: 'skipped', why: 'paused' };
     const r = await attempt(f.chapter, via, true);
     if (r === null) return { kind: 'skipped', why: 'on_disk' };
-    if (typeof r === 'object' && 'preflight' in r && r.preflight === 'paused') return { kind: 'skipped', why: 'paused' };
+    if (typeof r === 'object' && 'preflight' in r && ends(r.preflight)) return ends(r.preflight)!;
     if (r !== 'failed' && !(typeof r === 'object' && 'preflight' in r)) return { kind: 'landed', via, pages: r.pages, chapterUsed: f.chapter };
   }
 
@@ -245,7 +259,7 @@ async function tryEachCopy(f: FallbackInput, offered: PartialHold[]): Promise<Fa
       const r = await attempt(alt, src);
       if (r === null) return { kind: 'skipped', why: 'on_disk' };
       if (typeof r === 'object' && 'preflight' in r) {
-        if (r.preflight === 'paused') return { kind: 'skipped', why: 'paused' };
+        if (ends(r.preflight)) return ends(r.preflight)!;
         continue;
       }
       tried++;
@@ -273,7 +287,7 @@ async function tryEachCopy(f: FallbackInput, offered: PartialHold[]): Promise<Fa
         if (!(await admitted())) return { kind: 'skipped', why: 'paused' };
         const r = await attempt(found, src);
         if (r === null) return { kind: 'skipped', why: 'on_disk' };
-        if (typeof r === 'object' && 'preflight' in r && r.preflight === 'paused') return { kind: 'skipped', why: 'paused' };
+        if (typeof r === 'object' && 'preflight' in r && ends(r.preflight)) return ends(r.preflight)!;
         if (r !== 'failed' && !(typeof r === 'object' && 'preflight' in r)) {
           tookFrom(src, []);
           return { kind: 'landed', via: src, pages: r.pages, chapterUsed: found, switched: switched() };
@@ -297,7 +311,7 @@ async function tryEachCopy(f: FallbackInput, offered: PartialHold[]): Promise<Fa
       };
     } catch (e) {
       if (!(e instanceof DownloadPreflightError)) throw e;
-      if (e.reason === 'paused') return { kind: 'skipped', why: 'paused' };
+      if (ends(e.reason)) return ends(e.reason)!;
       // The partial was assembled under stale authority. Keep the prior network failure as the outcome;
       // do not replace the canonical chapter after the policy/source changed.
     }

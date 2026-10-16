@@ -1810,6 +1810,17 @@ ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS lang text;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS new_member_libraries      text[];
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS new_member_max_age_rating int;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS new_member_perms          jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+-- The chapter numbers an admin hid from a series (#240, rebuilt to hide only): for everyone, by the effective number (an
+-- override's when there is one). The hide fragments in lib/noticeChapters.ts leave them out of every surface, the sweep
+-- never fetches one, and nothing is deleted: a hidden chapter's file and rows stay exactly as they are, and Restore shows
+-- it again at once. On the series row, as the notice switch is (hide_notices). NULL when nothing is hidden -- never an
+-- empty array (lib/hiddenChapters.ts) -- so the column's own statistics tell the planner how few series hide anything,
+-- and the partial index finds those few: priced as every series, the hidden-chapter lookup inside Continue reading's
+-- per-series picks crossed jit_inline_above_cost and spent seconds compiling a query that runs in milliseconds.
+-- Additive: v0.71.0 boots on this schema and shows every chapter.
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS hidden_numbers real[];
+CREATE INDEX IF NOT EXISTS lib_series_hiding_idx ON lib_series (id) WHERE hidden_numbers IS NOT NULL;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

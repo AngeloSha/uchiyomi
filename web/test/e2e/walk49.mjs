@@ -137,6 +137,11 @@
 //   the series page, the reader and every count while its twenty-page 3.5 stays; switched off, all of it is back; and
 //   the Library grid's request takes as long off as it did before the switch was ever on.
 //
+//   hiddenchapters -- #240 by @Squeaks72, rebuilt to hide only, on a plain up.sh stack with LIB (hiddenChaptersWalk.mjs):
+//   at 1280, 390 and 390 in Arabic, a row's ⋯ hides chapter 3 and Select hides 1 and 5, each asked first in a dialog
+//   that is not the red one, and they leave the series page and its count while the files stay; More -> Show hidden
+//   chapters lists them with Restore, and Restore all brings every one back.
+//
 //   solver -- v0.55.3, the backup Cloudflare solver (FLARESOLVERR_FALLBACK_URL), on up.sh's E2E_SOLVERS=1 stack
 //   (solverWalk.mjs): at 1280, 390 and 390 in Arabic, the main solver (greeting as trawl) and the backup (FlareSolverr)
 //   both on Health's card, trawl never held against FlareSolverr's releases; the main stopped -- the card amber, "the
@@ -180,7 +185,7 @@
 //   links under reduced motion, not page.goto reloads.
 //
 //   Run order, whatever PHASES lists, is the release plan's (design critic): notices, archive, numbering, sources,
-//   libraries, nosource, filenames, noticechapters, replace, autofix, solver, find, rescan, multisource, adultsearch,
+//   libraries, nosource, filenames, noticechapters, hiddenchapters, replace, autofix, solver, find, rescan, multisource, adultsearch,
 //   matches, rescanmerge, readeredges, lists, librarysort, homelists, anilistprivacy, bulkdelete, engine. The engine phase resets the fake engine
 //   and takes it down, so nothing that needs it can follow; a sources run that stops half-way leaves fake-a's search
 //   failing, which only the engine phase then meets, and it never searches.
@@ -229,7 +234,7 @@ const waitFor = async (fn, ms = 10_000, step = 150) => {
 
 // Only the phases this walk has. Anything else in PHASES -- a typo, or the release plan's name for a phase that
 // lives in another walk -- used to be ignored without a word, and a run of nothing but that read green.
-const KNOWN_PHASES = ['notices', 'archive', 'numbering', 'sources', 'libraries', 'nosource', 'filenames', 'noticechapters', 'replace', 'autofix', 'solver',
+const KNOWN_PHASES = ['notices', 'archive', 'numbering', 'sources', 'libraries', 'nosource', 'filenames', 'noticechapters', 'hiddenchapters', 'replace', 'autofix', 'solver',
   'find', 'rescan', 'multisource', 'adultsearch', 'matches', 'rescanmerge', 'readeredges', 'lists',
   'librarysort', 'homelists', 'anilistprivacy', 'bulkdelete', 'engine'];
 const unknownPhases = PHASES.filter((p) => !KNOWN_PHASES.includes(p));
@@ -1490,6 +1495,10 @@ try {
   if (PHASES.includes('noticechapters')) {
     const { noticeChaptersWalk } = await import('./noticeChaptersWalk.mjs');
     await noticeChaptersWalk({ page, go, shot, check, waitFor, sleep, base: BASE, token: TOKEN, lib: process.env.LIB });
+  }
+  if (PHASES.includes('hiddenchapters')) {
+    const { hiddenChaptersWalk } = await import('./hiddenChaptersWalk.mjs');
+    await hiddenChaptersWalk({ page, go, shot, check, waitFor, sleep, base: BASE, token: TOKEN, lib: process.env.LIB });
   }
   // v0.54.0: Replace a source, Make main, Turn off all and the old tabs' addresses (replaceWalk.mjs; up.sh with
   // E2E_ENGINE=fake E2E_FAKE_EXTRA=v54, and E2E_NET on this command). Before engine, which takes the engine down.

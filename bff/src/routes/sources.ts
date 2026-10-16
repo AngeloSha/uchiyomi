@@ -107,6 +107,7 @@ import { learnDirection, learnDirectionWith, directionFromAniListMatch } from '.
 import { learnTypeFromSource, learnTypeFromAniListWith } from '../lib/seriesType';
 import { linkSeriesWith, planSeriesOnAddAsync } from '../lib/trackers';
 import { noticeListed } from '../lib/noticeChapters';
+import { hiddenNumbersOf } from '../lib/hiddenChapters';
 import { q, one } from '../lib/db';
 import { healthAll, isDisabled, blockedNow, reportLatest, reportFail, reportSlow, classify, noteStage, slowStreakNow } from '../lib/sourceHealth';
 import { diagnose, EMPTY_SUSPECT } from '../lib/sourceDiagnosis';
@@ -3147,9 +3148,18 @@ export default async function sourceRoutes(app: FastifyInstance) {
       sourceState.set(sid, st);
       return st;
     };
+    // A number an admin hid from the series (#240, lib/hiddenChapters.ts) is fetched by nobody, a pick included: said so
+    // rather than started and skipped by the download (lib/chapterFallback.ts), which is what a page from before the
+    // hide would otherwise get. Reintroduce by dropping it: "a fetch of a hidden number is skipped as hidden" in
+    // hiddenChapters.int.test.ts starts a job.
+    const hiddenNums = await hiddenNumbersOf(seriesId);
     for (const n of numbers) {
       const row = listed.get(n);
       const pick = pickOf.get(n);
+      if (hiddenNums.has(numKey(n))) {
+        skipped.push({ number: n, reason: 'hidden', ...(pick ? { source: pick.source, sourceId: pick.sourceId } : {}) });
+        continue;
+      }
       if (pick) {
         // A pick is authorised by the stored copy it names, and by nothing else: the row's status (the
         // group rules' verdict on the NUMBER, blocklist included) is deliberately not consulted -- see the
@@ -3193,6 +3203,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
         : first === 'other_language' ? 'That chapter is only in another language than the series. Pick a copy under Versions to fetch it anyway.'
         : first === 'already_here' ? 'That chapter is already here.'
         : first === 'cooldown' ? 'That source is in a cooldown. Try again later.'
+        : first === 'hidden' ? 'That chapter is hidden from this series. Restore it under More to fetch it.'
         : 'That source is not available right now.';
       return reply.code(409).send({ error: 'nothing_to_fetch', message, skipped });
     }

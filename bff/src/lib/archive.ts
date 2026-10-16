@@ -1124,7 +1124,7 @@ async function runChapter(
     const now = clock();
     // The break that makes this look like a person: jittered, paid for by the chapter's own time, now and then
     // a long one. None after a chapter that was already on disk -- nothing was asked of the site.
-    const skippedWithoutAsk = out?.kind === 'skipped' && (out.why === 'on_disk' || out.why === 'paused');
+    const skippedWithoutAsk = out?.kind === 'skipped' && (out.why === 'on_disk' || out.why === 'paused' || out.why === 'hidden');
     const brk = skippedWithoutAsk ? 0 : nextBreakMs({ perHour: set.perHour, chapterMs: now - t0, rand, minBreakMs: minBreakMs() }).ms;
     const nextAt = diskFull ? now + DISK_WAIT_MS : now + brk;
     // One cycle on this source: from the end of its last chapter to the end of this one, less what was the window's

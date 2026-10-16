@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3988
+    "strings": 4016
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -3991,5 +3991,33 @@
   "Series with chapters left": "Séries com capítulos pendentes",
   "Waiting the longest": "Esperando há mais tempo",
   "Genre": "Gênero",
-  "Insights": "Análises"
+  "Insights": "Análises",
+  "Hide chapter {n}": "Ocultar o capítulo {n}",
+  "1 chapter is hidden.": "1 capítulo ocultado.",
+  "{n} chapters are hidden.": "{n} capítulos ocultados.",
+  "Could not hide that": "Não foi possível ocultar",
+  "Hide 1 chapter": "Ocultar 1 capítulo",
+  "Hide {n} chapters": "Ocultar {n} capítulos",
+  "Hide chapter {n}?": "Ocultar o capítulo {n}?",
+  "Hide {n} chapters?": "Ocultar {n} capítulos?",
+  "Hidden for everyone: it leaves the chapter list, Continue, the unread counts, Updates and Health, and it is never downloaded again. For a chapter a source lists that is not part of this series.": "Oculto para todos: sai da lista de capítulos, de Continuar, das contagens de não lidos, de Novidades e de Diagnóstico, e nunca mais é baixado. Para um capítulo que uma fonte lista, mas que não faz parte desta série.",
+  "Hidden for everyone: they leave the chapter list, Continue, the unread counts, Updates and Health, and they are never downloaded again. For chapters a source lists that are not part of this series.": "Ocultos para todos: saem da lista de capítulos, de Continuar, das contagens de não lidos, de Novidades e de Diagnóstico, e nunca mais são baixados. Para capítulos que uma fonte lista, mas que não fazem parte desta série.",
+  "Nothing is deleted: Show hidden chapters, under More, brings it back as it was.": "Nada é excluído: “Mostrar capítulos ocultos”, em Mais, traz o capítulo de volta como estava.",
+  "Nothing is deleted: Show hidden chapters, under More, brings them back as they were.": "Nada é excluído: “Mostrar capítulos ocultos”, em Mais, traz os capítulos de volta como estavam.",
+  "Show hidden chapters ({n})": "Mostrar capítulos ocultos ({n})",
+  "{n} copies on the server, listed by a source": "{n} cópias no servidor, listado por uma fonte",
+  "{n} copies on the server": "{n} cópias no servidor",
+  "1 copy on the server, listed by a source": "1 cópia no servidor, listado por uma fonte",
+  "1 copy on the server": "1 cópia no servidor",
+  "Listed by a source": "Listado por uma fonte",
+  "Not listed any more": "Não está mais em nenhuma lista",
+  "1 chapter is back.": "1 capítulo restaurado.",
+  "{n} chapters are back.": "{n} capítulos restaurados.",
+  "Could not restore that": "Não foi possível restaurar",
+  "Hidden chapters": "Capítulos ocultos",
+  "Hidden from everyone: not in the chapter list, Continue, the unread counts, Updates or Health, and never downloaded. Nothing was deleted, so Restore brings a chapter back as it was.": "Ocultos para todos: fora da lista de capítulos, de Continuar, das contagens de não lidos, de Novidades e de Diagnóstico, e nunca baixados. Nada foi excluído, então Restaurar traz um capítulo de volta como estava.",
+  "Could not load the hidden chapters": "Não foi possível carregar os capítulos ocultos",
+  "Restore chapter {n}": "Restaurar o capítulo {n}",
+  "Restore": "Restaurar",
+  "Restore all": "Restaurar todos"
 }

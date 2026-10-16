@@ -19,7 +19,7 @@ import { roleOf, userIdOf } from './auth';
 import { autoHeroFor } from './autoHero';
 import { effectiveLang } from './seriesLang';
 import { browsable, Params, type ViewCtx } from './visibility';
-import { noticeBook, noticeHidden, noticesActive } from './noticeChapters';
+import { hidingActive, noticeBook, noticeHidden } from './noticeChapters';
 import { radarsFor } from './releaseRadar';
 
 export async function seriesColors(ids: string[]): Promise<Map<string, string>> {
@@ -33,8 +33,8 @@ export async function seriesColors(ids: string[]): Promise<Map<string, string>> 
 
 /**
  * The chapter count "new since you last looked" is kept in (series_seen.seen_books_count): every chapter row,
- * lib_series.books_count, the notice chapters an admin hides included (lib/noticeChapters.ts) -- where `booksCount`
- * leaves those out. booksCount moves when a switch flips or a notice's pages get counted, and nobody read anything
+ * lib_series.books_count, the notice chapters an admin hides included (lib/noticeChapters.ts), and the numbers an
+ * admin hid by hand (#240) -- where `booksCount` leaves those out. Hiding a chapter is not reading one either. booksCount moves when a switch flips or a notice's pages get counted, and nobody read anything
  * new: kept in it, a hide switched on swallowed the next real chapters of every favourite (the seen count stood
  * above the count left), and one switched off announced every old notice as new. The same as booksCount while
  * nothing hides, so nothing is asked then. Either way the count is what each series' row says when there is none.
@@ -43,7 +43,7 @@ export async function seriesColors(ids: string[]): Promise<Map<string, string>> 
  */
 export async function seenCounts(list: Array<{ id: string; booksCount?: number }>): Promise<Map<string, number>> {
   const out = new Map(list.map((s) => [s.id, s.booksCount ?? 0]));
-  if (!noticesActive() || !list.length) return out;
+  if (!hidingActive() || !list.length) return out;
   const rows = await q<{ id: string; n: number }>('SELECT id, books_count AS n FROM lib_series WHERE id = ANY($1)', [list.map((s) => s.id)]);
   for (const r of rows) out.set(r.id, Number(r.n));
   return out;
@@ -69,7 +69,7 @@ export async function newSinceSeen(seen: Map<string, number>, counts: Map<string
     out.set(id, fresh);
     if (fresh > 0) due.push([id, fresh]);
   }
-  if (!noticesActive() || !due.length) return out;
+  if (!hidingActive() || !due.length) return out;
   const rows = await q<{ id: string; n: number }>(
     `SELECT k.id, count(*) FILTER (WHERE NOT t.hidden)::int AS n
        FROM unnest($1::text[], $2::int[]) AS k(id, fresh)

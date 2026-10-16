@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3988
+    "strings": 4016
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -3991,5 +3991,33 @@
   "Series with chapters left": "Серии с непрочитанными главами",
   "Waiting the longest": "Дольше всего ждут",
   "Genre": "Жанр",
-  "Insights": "Аналитика"
+  "Insights": "Аналитика",
+  "Hide chapter {n}": "Скрыть главу {n}",
+  "1 chapter is hidden.": "Скрыта 1 глава.",
+  "{n} chapters are hidden.": "Скрыто глав: {n}.",
+  "Could not hide that": "Не удалось скрыть",
+  "Hide 1 chapter": "Скрыть 1 главу",
+  "Hide {n} chapters": "Скрыть главы: {n}",
+  "Hide chapter {n}?": "Скрыть главу {n}?",
+  "Hide {n} chapters?": "Скрыть выбранные главы ({n})?",
+  "Hidden for everyone: it leaves the chapter list, Continue, the unread counts, Updates and Health, and it is never downloaded again. For a chapter a source lists that is not part of this series.": "Скрывается для всех: пропадает из списка глав, из «Продолжить», из счётчиков непрочитанного, из «Обновлений» и «Состояния» и больше никогда не загружается. Для главы, которую указывает источник, но которая не относится к этой серии.",
+  "Hidden for everyone: they leave the chapter list, Continue, the unread counts, Updates and Health, and they are never downloaded again. For chapters a source lists that are not part of this series.": "Скрываются для всех: пропадают из списка глав, из «Продолжить», из счётчиков непрочитанного, из «Обновлений» и «Состояния» и больше никогда не загружаются. Для глав, которые указывает источник, но которые не относятся к этой серии.",
+  "Nothing is deleted: Show hidden chapters, under More, brings it back as it was.": "Ничего не удаляется: «Показать скрытые главы» в меню «Ещё» вернёт её в прежнем виде.",
+  "Nothing is deleted: Show hidden chapters, under More, brings them back as they were.": "Ничего не удаляется: «Показать скрытые главы» в меню «Ещё» вернёт их в прежнем виде.",
+  "Show hidden chapters ({n})": "Показать скрытые главы ({n})",
+  "{n} copies on the server, listed by a source": "Копий на сервере: {n}, есть в списке источника",
+  "{n} copies on the server": "Копий на сервере: {n}",
+  "1 copy on the server, listed by a source": "1 копия на сервере, есть в списке источника",
+  "1 copy on the server": "1 копия на сервере",
+  "Listed by a source": "Есть в списке источника",
+  "Not listed any more": "Больше нигде не указана",
+  "1 chapter is back.": "Восстановлена 1 глава.",
+  "{n} chapters are back.": "Восстановлено глав: {n}.",
+  "Could not restore that": "Не удалось восстановить",
+  "Hidden chapters": "Скрытые главы",
+  "Hidden from everyone: not in the chapter list, Continue, the unread counts, Updates or Health, and never downloaded. Nothing was deleted, so Restore brings a chapter back as it was.": "Скрыты для всех: их нет в списке глав, в «Продолжить», в счётчиках непрочитанного, в «Обновлениях» и «Состоянии», и они никогда не загружаются. Ничего не удалено, поэтому «Восстановить» возвращает главу в прежнем виде.",
+  "Could not load the hidden chapters": "Не удалось загрузить скрытые главы",
+  "Restore chapter {n}": "Восстановить главу {n}",
+  "Restore": "Восстановить",
+  "Restore all": "Восстановить все"
 }

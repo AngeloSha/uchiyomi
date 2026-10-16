@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3988
+    "strings": 4016
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -3991,5 +3991,33 @@
   "Series with chapters left": "سلاسل بقيت فيها فصول",
   "Waiting the longest": "الأطول انتظارًا",
   "Genre": "التصنيف",
-  "Insights": "تحليلات"
+  "Insights": "تحليلات",
+  "Hide chapter {n}": "إخفاء الفصل {n}",
+  "1 chapter is hidden.": "أُخفي فصل واحد.",
+  "{n} chapters are hidden.": "أُخفي {n} من الفصول.",
+  "Could not hide that": "تعذّر إخفاؤه",
+  "Hide 1 chapter": "إخفاء فصل واحد",
+  "Hide {n} chapters": "إخفاء {n} من الفصول",
+  "Hide chapter {n}?": "هل تريد إخفاء الفصل {n}؟",
+  "Hide {n} chapters?": "هل تريد إخفاء {n} من الفصول؟",
+  "Hidden for everyone: it leaves the chapter list, Continue, the unread counts, Updates and Health, and it is never downloaded again. For a chapter a source lists that is not part of this series.": "يُخفى عن الجميع: يختفي من قائمة الفصول و«متابعة» وأعداد غير المقروء و«التحديثات» و«الحالة»، ولا يُنزَّل بعد ذلك أبدًا. لفصلٍ يُدرجه مصدرٌ وليس جزءًا من هذه السلسلة.",
+  "Hidden for everyone: they leave the chapter list, Continue, the unread counts, Updates and Health, and they are never downloaded again. For chapters a source lists that are not part of this series.": "تُخفى عن الجميع: تختفي من قائمة الفصول و«متابعة» وأعداد غير المقروء و«التحديثات» و«الحالة»، ولا تُنزَّل بعد ذلك أبدًا. لفصولٍ يُدرجها مصدرٌ وليست جزءًا من هذه السلسلة.",
+  "Nothing is deleted: Show hidden chapters, under More, brings it back as it was.": "لا يُحذف شيء: «إظهار الفصول المخفية» في «المزيد» يعيده كما كان.",
+  "Nothing is deleted: Show hidden chapters, under More, brings them back as they were.": "لا يُحذف شيء: «إظهار الفصول المخفية» في «المزيد» يعيدها كما كانت.",
+  "Show hidden chapters ({n})": "إظهار الفصول المخفية ({n})",
+  "{n} copies on the server, listed by a source": "{n} من النسخ على الخادم، ويُدرجه مصدر",
+  "{n} copies on the server": "{n} من النسخ على الخادم",
+  "1 copy on the server, listed by a source": "نسخة واحدة على الخادم، ويُدرجه مصدر",
+  "1 copy on the server": "نسخة واحدة على الخادم",
+  "Listed by a source": "يُدرجه مصدر",
+  "Not listed any more": "لم يعد مُدرجًا",
+  "1 chapter is back.": "عاد فصل واحد.",
+  "{n} chapters are back.": "عاد {n} من الفصول.",
+  "Could not restore that": "تعذّرت استعادته",
+  "Hidden chapters": "الفصول المخفية",
+  "Hidden from everyone: not in the chapter list, Continue, the unread counts, Updates or Health, and never downloaded. Nothing was deleted, so Restore brings a chapter back as it was.": "مخفية عن الجميع: لا تظهر في قائمة الفصول ولا في «متابعة» ولا في أعداد غير المقروء ولا في «التحديثات» أو «الحالة»، ولا تُنزَّل أبدًا. لم يُحذف شيء، لذا تعيد «استعادة» الفصل كما كان.",
+  "Could not load the hidden chapters": "تعذّر تحميل الفصول المخفية",
+  "Restore chapter {n}": "استعادة الفصل {n}",
+  "Restore": "استعادة",
+  "Restore all": "استعادة الكل"
 }

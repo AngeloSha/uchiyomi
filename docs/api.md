@@ -1734,6 +1734,8 @@ POST   /api/admin/series/:id/delete-files
 POST   /api/admin/series/:id/forget
 POST   /api/admin/series/:id/rename-folder
 POST   /api/admin/series/:id/chapters/delete POST   /api/admin/series/:id/chapters/refetch
+POST   /api/admin/series/:id/chapters/hide POST   /api/admin/series/:id/chapters/unhide
+GET    /api/admin/series/:id/chapters/hidden
 GET    /api/admin/series/:id/copy-pages
 PUT    /api/admin/books/:id/meta POST   /api/admin/books/:id/confirm-short
 POST   /api/admin/series/:id/restore
@@ -2056,6 +2058,23 @@ it: a bookmark names a page inside the file. A chapter whose file *and* folder a
 chapter. It answers `{ok, applied, bytes, skipped: [{id, reason}]}` with `reason` one of `not_found`,
 `not_owned`, `already_pruned`, `bookmarked`, `outside_root`, `unlink_failed`, or **409** `refused` (with
 `message` and `fix`) when the download directory is not writable.
+
+**Hiding a chapter number from a series** (since VNEXT, #240 rebuilt to hide only). For a chapter a source lists that is
+not part of the work -- a stray 0.5 from an unrelated title -- which no source-side action takes away.
+`POST /api/admin/series/:id/chapters/hide {numbers[]}` (1–500, effective numbers, as the series page shows them) hides
+them from the series for every viewer: left out of the chapter list and its missing-chapter rows, next and previous,
+Continue reading, the unread counts, Updates, history, OPDS, the Komga-compatible API and what the trackers are told;
+neither held nor missing for Health, the repair and Find missing chapters; and never downloaded -- not by the sweep,
+Check for new chapters, Fetch newest or the slow archive, and `POST /api/sources/fetch` skips one as `hidden`. A download
+queued before the hide stops before it asks the source. **Nothing is deleted**: no file, no chapter row and no reading
+progress, and the read-chapter cleanup and Fix everything leave such a chapter's file alone. A file holding a range of
+chapters is never hidden by one number. It answers `{ok, hidden}`, the numbers this call hid (one hidden already is
+not hidden twice), or **409** `merged` for a series merged into another. `GET /api/admin/series/:id/chapters/hidden`
+lists `{content: [{number, onServer, listed, title}]}`, and `POST /api/admin/series/:id/chapters/unhide {numbers[]}` or
+`{all: true}` shows them again at once (`{ok, restored}`). A merge carries the absorbed series' hidden numbers to the
+survivor; a renumber moves each with its post, as read marks move. The series DTO carries `hiddenChapters`, the count,
+for an admin. Audit lines `series.chapters_hide` and `series.chapters_unhide`.
+
 `GET /api/admin/series/:id/copy-pages?source=&chapter=` answers `{count}`, the number of pages one copy of a chapter has on
 its source, and `GET /img/series/:id/copy-page?source=&chapter=&i=` is one page of it, by index (original bytes,
 `cache-control: private, no-store`): the side-by-side compare before a *Replace* (since v0.71.0, #241). Both are an

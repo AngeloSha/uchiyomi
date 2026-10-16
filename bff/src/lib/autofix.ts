@@ -81,6 +81,7 @@ import { mergeRefusal, mergeSeries, MergeConflictError, deleteChapterFiles, getS
 import { claimWriterFolders } from './bulkNewest';
 import { linkPair } from './editions';
 import { haveNumbers } from './libraryNumbers';
+import { atHiddenNumber } from './noticeChapters';
 import { effectiveLang, seriesLanguage } from './seriesLang';
 import { canonLang, sameLanguage } from './lang';
 import { titleMatch } from './autoFollow';
@@ -1413,9 +1414,11 @@ async function files(a: Run): Promise<void> {
       const have = await haveNumbers(it.seriesId!).catch(() => [] as number[]);
       const limit = impossibleLimit(have);
       if (limit === null) continue;
+      // Never a chapter at a number an admin hid (#240): hidden is left exactly as it is, and the card leaves it out too.
       const books = await q<{ id: string }>(
         `SELECT b.id FROM lib_books b LEFT JOIN book_overrides o ON o.book_id = b.id
-          WHERE b.series_id = $1 AND b.pruned_at IS NULL AND COALESCE(o.number, b.number) > $2`, [it.seriesId, limit]).catch(() => []);
+          WHERE b.series_id = $1 AND b.pruned_at IS NULL AND COALESCE(o.number, b.number) > $2
+            AND NOT ${atHiddenNumber('b')}`, [it.seriesId, limit]).catch(() => []);
       if (!books.length) continue;
       now(a, say('autofix.now.files'), { title: it.title, seriesIds: [it.seriesId!] });
       const row = await getSeriesRow(it.seriesId!);

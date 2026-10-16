@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3988
+    "strings": 4016
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -3991,5 +3991,33 @@
   "Series with chapters left": "还有未读的系列",
   "Waiting the longest": "搁置最久",
   "Genre": "类型",
-  "Insights": "分析"
+  "Insights": "分析",
+  "Hide chapter {n}": "隐藏第{n}话",
+  "1 chapter is hidden.": "已隐藏 1 章。",
+  "{n} chapters are hidden.": "已隐藏 {n} 章。",
+  "Could not hide that": "无法隐藏",
+  "Hide 1 chapter": "隐藏 1 章",
+  "Hide {n} chapters": "隐藏 {n} 章",
+  "Hide chapter {n}?": "要隐藏第{n}话吗？",
+  "Hide {n} chapters?": "要隐藏 {n} 章吗？",
+  "Hidden for everyone: it leaves the chapter list, Continue, the unread counts, Updates and Health, and it is never downloaded again. For a chapter a source lists that is not part of this series.": "对所有人隐藏：它会从章节列表、“继续阅读”、未读数、“更新”和“健康检查”中消失，并且以后都不会再下载。用于来源列出、但不属于本系列的章节。",
+  "Hidden for everyone: they leave the chapter list, Continue, the unread counts, Updates and Health, and they are never downloaded again. For chapters a source lists that are not part of this series.": "对所有人隐藏：这些章节会从章节列表、“继续阅读”、未读数、“更新”和“健康检查”中消失，并且以后都不会再下载。用于来源列出、但不属于本系列的章节。",
+  "Nothing is deleted: Show hidden chapters, under More, brings it back as it was.": "不会删除任何内容：“更多”中的“显示已隐藏的章节”可以把它原样恢复。",
+  "Nothing is deleted: Show hidden chapters, under More, brings them back as they were.": "不会删除任何内容：“更多”中的“显示已隐藏的章节”可以把它们原样恢复。",
+  "Show hidden chapters ({n})": "显示已隐藏的章节（{n}）",
+  "{n} copies on the server, listed by a source": "服务器上有 {n} 份副本，来源有列出",
+  "{n} copies on the server": "服务器上有 {n} 份副本",
+  "1 copy on the server, listed by a source": "服务器上有 1 份副本，来源有列出",
+  "1 copy on the server": "服务器上有 1 份副本",
+  "Listed by a source": "来源有列出",
+  "Not listed any more": "已不再被列出",
+  "1 chapter is back.": "已恢复 1 章。",
+  "{n} chapters are back.": "已恢复 {n} 章。",
+  "Could not restore that": "无法恢复",
+  "Hidden chapters": "已隐藏的章节",
+  "Hidden from everyone: not in the chapter list, Continue, the unread counts, Updates or Health, and never downloaded. Nothing was deleted, so Restore brings a chapter back as it was.": "对所有人隐藏：不出现在章节列表、“继续阅读”、未读数、“更新”或“健康检查”中，也不会被下载。没有删除任何内容，所以“恢复”会把章节原样找回。",
+  "Could not load the hidden chapters": "无法加载已隐藏的章节",
+  "Restore chapter {n}": "恢复第{n}话",
+  "Restore": "恢复",
+  "Restore all": "全部恢复"
 }

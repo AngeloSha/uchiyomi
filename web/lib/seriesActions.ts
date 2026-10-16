@@ -13,7 +13,7 @@ import { t as tr } from './i18n';
 
 export type SeriesActionId =
   | 'notes' | 'markAllRead' | 'markAllUnread'
-  | 'findMissing' | 'archive' | 'checkNew'
+  | 'findMissing' | 'hidden' | 'archive' | 'checkNew'
   | 'copyLink' | 'openTab'
   | 'edit' | 'cover' | 'newBanner' | 'rename' | 'remove';
 
@@ -52,6 +52,8 @@ export interface SeriesActionsInput {
   /** `series.folder`, sent to admins only: Rename folder. */
   hasFolder: boolean;
   offline?: boolean;
+  /** `series.hiddenChapters`, sent to admins only (#240): how many chapter numbers are hidden, for Show hidden chapters. */
+  hiddenChapters?: number;
   /**
    * Items whose work this page already has running -- a Check for new chapters, an archive being queued, a banner being
    * made: greyed until it ends, as their keys were under the cover.
@@ -88,6 +90,10 @@ export function seriesActionGroups(x: SeriesActionsInput): SeriesActionGroup[] {
   const chapters: SeriesAction[] = [
     // Refused below three chapters by the route itself, so not offered there.
     ...(x.mayDownload && x.booksCount >= 3 ? [{ id: 'findMissing' as const, label: tr('Find missing chapters'), disabled: offline }] : []),
+    // #240: an admin's way back to the numbers hidden from this series, only while there is one -- a series with nothing
+    // hidden has no use for it.
+    ...(x.isAdmin && (x.hiddenChapters ?? 0) > 0
+      ? [{ id: 'hidden' as const, label: tr('Show hidden chapters ({n})', { n: x.hiddenChapters ?? 0 }), hook: 'hidden-chapters', disabled: offline }] : []),
     ...(x.mayArchive ? [{ id: 'archive' as const, label: tr('Archive slowly'), hook: 'archive-slowly', disabled: offline }] : []),
     ...(x.isAdmin ? [{ id: 'checkNew' as const, label: tr('Check for new chapters'), disabled: offline }] : []),
   ];

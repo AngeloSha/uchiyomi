@@ -66,6 +66,7 @@ import { clearAutoDetails, fillDetailsFromSources, fillDetailsOn } from '../lib/
 import { lookupsChanged } from '../lib/discoverIdentity';
 import { sanitiseNoticeTypes, visibleBookCount } from '../lib/noticeChapters';
 import { seriesHidesNotices, hiddenCount, refreshNoticesActive } from '../lib/noticeSettings';
+import { HIDE_MAX, hideNumbers, hiddenChapters, unhideNumbers } from '../lib/hiddenChapters';
 import { SERIES_TYPES, isKnownSeriesType, learnTypeFromAniList } from '../lib/seriesType';
 import {
   copyPageList, isRefusal, addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, claimDownloadJob, releaseDownloadJobClaim,
@@ -2594,6 +2595,41 @@ export default async function adminRoutes(app: FastifyInstance) {
       if ('refused' in r) return reply.code(409).send({ error: 'refused', message: r.refused.reason, fix: r.refused.fix });
       return { ok: true, applied: r.applied, bytes: r.bytes, skipped: r.skipped };
     } finally { claim.release(); }
+  });
+
+  /**
+   * Hide chapter numbers from a series, for everyone (#240 by @Squeaks72, rebuilt to hide only; lib/hiddenChapters.ts):
+   * for a chapter a source lists that is not part of the work. Every surface leaves it out, the sweep never fetches it,
+   * and nothing is deleted -- no file, no row, no reading history -- which is why it needs no hold on the series folder:
+   * the download reads the hidden numbers again at the source's door. By the effective number, as the series page
+   * shows it. A series merged into another is refused: its chapters, and its hidden numbers, are the survivor's.
+   */
+  const hideNumbersBody = z.array(z.number().finite().min(0).max(1e6)).min(1).max(HIDE_MAX);
+  app.post('/api/admin/series/:id/chapters/hide', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ numbers: hideNumbersBody }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const r = await hideNumbers(id, b.data.numbers, { userId: userIdOf(req), req });
+    if ('refused' in r) return r.refused === 'not_found' ? reply.code(404).send({ error: 'not_found' }) : reply.code(409).send({ error: 'merged' });
+    return { ok: true, hidden: r.hidden };
+  });
+
+  /** Show hidden numbers again: those named, or `all`. Everything they had is still there, and shows at once. */
+  app.post('/api/admin/series/:id/chapters/unhide', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ numbers: hideNumbersBody.optional(), all: z.literal(true).optional() })
+      .refine((v) => !!v.numbers !== !!v.all, { message: 'numbers or all' }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const r = await unhideNumbers(id, b.data.all ? 'all' : b.data.numbers!, { userId: userIdOf(req), req });
+    if ('refused' in r) return reply.code(404).send({ error: 'not_found' });
+    return { ok: true, restored: r.restored };
+  });
+
+  /** The numbers hidden from a series, lowest first, with what each one is: Show hidden chapters. */
+  app.get('/api/admin/series/:id/chapters/hidden', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!(await getSeriesRow(id))) return reply.code(404).send({ error: 'not_found' });
+    return { content: await hiddenChapters(id) };
   });
 
   // How many pages one copy of a chapter has on its source, for the side-by-side compare. The pages themselves

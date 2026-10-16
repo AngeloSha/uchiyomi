@@ -33,8 +33,17 @@
 // (series_listing, `listedIsNotice`) by what the listing says.
 //
 // Pure: no database (seriesTypeSignals.test.ts imports it). The reads that need one are lib/noticeSettings.ts.
+//
+// AND THE NUMBERS AN ADMIN HIDES BY HAND (#240, rebuilt to hide only). A source sometimes lists a chapter that is not
+// part of the work -- a 0.5 from an unrelated title, a stray number no source-side action removes -- and an admin may
+// hide that number from the series, for everyone (lib_series.hidden_numbers, the effective number, as a notice is
+// judged). It is the same hide as a notice's, so it is written into the same fragments below rather than beside them:
+// every surface that leaves a hidden notice out leaves a hidden number out by the same clause, and the sweep never
+// fetches one (lib/updater.ts, lib/chapterFallback.ts). Nothing is deleted, and Restore shows it again at once. Never a
+// file holding a range of chapters, as a notice never is. While no series hides a number, every fragment is exactly
+// what it was (`handActive`), so an install that never hides one runs the queries it always ran.
 import { SERIES_TYPES, isSeriesType, type SeriesType } from './seriesTypeSignals';
-import { holds, rangeEnd } from './chapterRanges';
+import { holds, isRange, rangeEnd } from './chapterRanges';
 
 /** The most pages a notice has. One more and it is a chapter -- a part of one, a short extra -- and stays. */
 export const NOTICE_MAX_PAGES = 3;
@@ -58,6 +67,67 @@ export const noticesActive = (): boolean => active;
 let shortOnly = true;
 export const setNoticesShortOnly = (on: boolean): void => { shortOnly = on; };
 export const noticesShortOnly = (): boolean => shortOnly;
+
+/**
+ * Does any series hide a number by hand (lib_series.hidden_numbers not NULL)? Kept like `active`: by
+ * refreshNoticesActive at boot and after every Restore, and set at once by a hide (lib/hiddenChapters.ts) -- a stale
+ * true costs a clause that matches nothing, a stale false would show a hidden chapter, so only a refresh lowers it.
+ */
+let handActive = false;
+export const setHiddenNumbersActive = (on: boolean): void => { handActive = on; };
+export const hiddenNumbersActive = (): boolean => handActive;
+
+/** Is anything hidden at all, a notice or a number? While not, every fragment below is a constant. */
+export const hidingActive = (): boolean => active || handActive;
+
+/**
+ * Is the effective number `num` (an SQL expression) one that series `s` (an alias of lib_series) hid by hand? Never
+ * NULL: a NULL number is not hidden. `real = ANY(real[])`, so the stored 12.5 and a file's 12.5 compare exactly.
+ */
+export const numberHidden = (s: string, num: string): string =>
+  (handActive ? `COALESCE(${num} = ANY(${s}.hidden_numbers), false)` : 'false');
+
+/**
+ * Is the lib_books row `b` (`ov` its LEFT JOINed book_overrides row) of series `s` at a number that series hid? By the
+ * effective number, and never a file holding a range of chapters: `Chapter 01-07.cbz` is seven chapters, and hiding
+ * one number must not take the other six with it (the notice rule, bookIsNotice).
+ */
+const bookHiddenByHand = (s: string, b: string, ov: string): string =>
+  `(${rangeEnd(b, ov)} IS NULL AND ${numberHidden(s, `COALESCE(${ov}.number, ${b}.number)`)})`;
+
+/** The hand half alone, for a caller that keeps notices and hidden numbers apart (lib/libraryNumbers.ts). */
+export const bookHiddenNumber = (s: string, b: string, ov: string): string => (handActive ? bookHiddenByHand(s, b, ov) : 'false');
+
+/**
+ * The ids of the chapters at a number their series hid, as bookHiddenByHand judges them: an uncorrelated ARRAY, which
+ * Postgres reads ONCE per query (an InitPlan) -- a handful of rows from the few series that hide anything, by the series
+ * index -- and a row is then tested with `id = ANY(...)`. For the fragments that hold a book id and no series alias.
+ * Written as a correlated EXISTS, it was planned as an anti-join over every chapter of the library probing each one's
+ * series: on a copy of a 50,000-chapter library the Library's read-progress roll-up went from 6 ms to 160 ms, and
+ * Continue reading past jit_above_cost, the moment one number was hidden. Reintroduce the EXISTS: "the hide fragments
+ * read the hidden chapters once" in hiddenChapters.int.test.ts finds no InitPlan.
+ */
+const hiddenBookIds = (): string => `ARRAY(
+  SELECT hb_hn.id FROM lib_series hs_hn
+    JOIN lib_books hb_hn ON hb_hn.series_id = hs_hn.id AND hb_hn.number = ANY(hs_hn.hidden_numbers)
+   WHERE hs_hn.hidden_numbers IS NOT NULL AND NOT ${isRange('hb_hn')}
+     AND NOT EXISTS (SELECT 1 FROM book_overrides bo_hn WHERE bo_hn.book_id = hb_hn.id AND bo_hn.number IS NOT NULL)
+  UNION ALL
+  SELECT bo_hn.book_id FROM book_overrides bo_hn
+    JOIN lib_books hb_hn ON hb_hn.id = bo_hn.book_id
+    JOIN lib_series hs_hn ON hs_hn.id = hb_hn.series_id
+   WHERE bo_hn.number = ANY(hs_hn.hidden_numbers))`;
+
+/**
+ * The hand half alone and self-contained, for a query over lib_books that holds no lib_series alias: the jobs that
+ * delete or rewrite files (the read-chapter cleanup, Fix everything's files step, the completion pass) leave a chapter
+ * at a hidden number exactly as it is.
+ */
+export const atHiddenNumber = (b: string): string => (handActive ? `${b}.id = ANY(${hiddenBookIds()})` : 'false');
+
+/** Either clause, or the one that is on: a hide written once for both kinds. Only called while something hides. */
+const either = (notice: string | null, hand: string | null): string =>
+  (notice && hand ? `(${notice} OR ${hand})` : (notice ?? hand ?? 'false'));
 
 /** Is this number a fraction? NULL is not. `real` holds 100 exactly, so floor() compares cleanly. */
 export const isFractional = (num: string): string => `(${num} IS NOT NULL AND ${num} <> floor(${num}))`;
@@ -124,35 +194,62 @@ export const hidesNotices = (s: string): string =>
      COALESCE((SELECT st_nt.hide_notice_types FROM server_settings st_nt WHERE st_nt.id = 1), '[]'::jsonb) ? ${seriesTypeSql(s)},
      false)`;
 
-/** Is the lib_books row `b` of series `s` (`ov` its LEFT JOINed book_overrides row) a notice that series hides? */
-export const noticeHidden = (s: string, b: string, ov: string): string =>
-  (active ? `(${bookIsNotice(b, ov)} AND ${hidesNotices(s)})` : 'false');
-
-/** The negation, for a WHERE that keeps what is shown. */
-export const noticeShown = (s: string, b: string, ov: string): string => (active ? `NOT ${noticeHidden(s, b, ov)}` : 'true');
-
-/** Is the series_listing row `l` of series `s` a notice that series hides? */
-export const listedHidden = (s: string, l: string): string => (active ? `(${listedIsNotice(l)} AND ${hidesNotices(s)})` : 'false');
-
-/** The negation, for a WHERE over the listing that keeps what is shown. */
-export const listedShown = (s: string, l: string): string => (active ? `NOT ${listedHidden(s, l)}` : 'true');
+/** The notice half alone: a notice the series hides, whatever it hides by hand. */
+const noticeOnly = (s: string, b: string, ov: string): string => `(${bookIsNotice(b, ov)} AND ${hidesNotices(s)})`;
 
 /**
- * Is the lib_books row `bookId` (an SQL expression) a hidden notice? Self-contained, for queries that hold only a
- * book id: read_progress, bookmarks, history. A book id that names nothing is not hidden.
+ * Is the lib_books row `b` of series `s` (`ov` its LEFT JOINed book_overrides row) hidden: a notice that series hides,
+ * or at a number it hid by hand?
  */
-export const noticeBook = (bookId: string): string => (!active ? 'false' : `EXISTS (
+export const noticeHidden = (s: string, b: string, ov: string): string =>
+  (hidingActive() ? either(active ? noticeOnly(s, b, ov) : null, handActive ? bookHiddenByHand(s, b, ov) : null) : 'false');
+
+/** The negation, for a WHERE that keeps what is shown. */
+export const noticeShown = (s: string, b: string, ov: string): string => (hidingActive() ? `NOT ${noticeHidden(s, b, ov)}` : 'true');
+
+/**
+ * Is the series_listing row `l` of series `s` a notice that series hides -- the notice half alone? For the held numbers
+ * (lib/libraryNumbers.ts HAVE_SQL), which count a hidden notice only the sources list as held, and a number hidden by
+ * hand by its own rule.
+ */
+export const listedNoticeHidden = (s: string, l: string): string => (active ? `(${listedIsNotice(l)} AND ${hidesNotices(s)})` : 'false');
+
+/** Is the series_listing row `l` of series `s` hidden: a notice that series hides, or a number it hid by hand? */
+export const listedHidden = (s: string, l: string): string =>
+  (hidingActive() ? either(active ? listedNoticeHidden(s, l) : null, handActive ? numberHidden(s, `${l}.number`) : null) : 'false');
+
+/** The negation, for a WHERE over the listing that keeps what is shown. */
+export const listedShown = (s: string, l: string): string => (hidingActive() ? `NOT ${listedHidden(s, l)}` : 'true');
+
+/**
+ * Is the lib_books row `bookId` (an SQL expression) hidden? Self-contained, for queries that hold only a book id:
+ * read_progress, bookmarks, history. A book id that names nothing is not hidden. The notice test is a lookup by the
+ * book's own key behind its index-served one (mayBeNotice); a number hidden by hand is the hidden chapters' ids, read
+ * once (hiddenBookIds).
+ *
+ * ⚠️ With both on, the hand test goes INSIDE the notice EXISTS, never beside it. Callers write `NOT ${noticeBook(..)}`,
+ * and `NOT (EXISTS (..) OR x = ANY(..))` is a shape the planner cannot turn into an anti-join: the notice lookup became a
+ * subplan per row, and on a copy of a 50,000-chapter library Continue reading was priced at 834,549 -- past
+ * jit_inline_above_cost, so a Postgres with JIT spent six seconds compiling a query that runs in thirty milliseconds.
+ * Folded in, it is priced as the notice test alone (242,001, v0.71.0's own 246,457). Reintroduce the OR beside it:
+ * "...and keep the notice lookup an anti-join" in hiddenChapters.int.test.ts finds no anti-join.
+ */
+export const noticeBook = (bookId: string): string => {
+  if (!hidingActive()) return 'false';
+  if (!active) return `${bookId} = ANY(${hiddenBookIds()})`;
+  const notice = `${mayBeNotice('nb_nt')} AND ${noticeOnly('ns_nt', 'nb_nt', 'nov_nt')}`;
+  return `EXISTS (
   SELECT 1 FROM lib_books nb_nt
     JOIN lib_series ns_nt ON ns_nt.id = nb_nt.series_id
     LEFT JOIN book_overrides nov_nt ON nov_nt.book_id = nb_nt.id
-   WHERE nb_nt.id = ${bookId} AND ${mayBeNotice('nb_nt')}
-     AND ${noticeHidden('ns_nt', 'nb_nt', 'nov_nt')})`);
+   WHERE nb_nt.id = ${bookId} AND ${handActive ? `((${notice}) OR nb_nt.id = ANY(${hiddenBookIds()}))` : notice})`;
+};
 
 /**
- * Is the series_listing row `l` a hidden notice? Self-contained, for queries over the listing that hold no lib_series
- * alias: the archive's work list.
+ * Is the series_listing row `l` hidden? Self-contained, for queries over the listing that hold no lib_series alias:
+ * the archive's work list.
  */
-export const noticeListed = (l: string): string => (!active ? 'false' : `EXISTS (
+export const noticeListed = (l: string): string => (!hidingActive() ? 'false' : `EXISTS (
   SELECT 1 FROM lib_series nl_nt WHERE nl_nt.id = ${l}.series_id AND ${listedHidden('nl_nt', l)})`);
 
 /**
@@ -166,8 +263,13 @@ export const noticeListed = (l: string): string => (!active ? 'false' : `EXISTS 
  * as one count over all its chapters the planner priced the grid past jit_above_cost (the review: 9.9 -> 67 ms).
  * Reintroduce the single count: "the hidden counts are read through the fractional index" in
  * noticeChapters.int.test.ts finds the series index instead.
+ *
+ * Plus the rows at a number the series hid by hand, a notice it hides counted once, on the notice side. Two counts as
+ * well, each an index's: the rows whose file's own number is hidden (lib_books_series_idx, by series and number), and
+ * the handful an override puts on one. Only for a series that hides a number: the rest count nothing.
  */
-export const hiddenBookCount = (s: string): string => `(CASE WHEN ${hidesNotices(s)} THEN (
+export const hiddenBookCount = (s: string): string => {
+  const notice = active ? `(CASE WHEN ${hidesNotices(s)} THEN (
   SELECT count(*) FROM lib_books hb_nt LEFT JOIN book_overrides hov_nt ON hov_nt.book_id = hb_nt.id
    WHERE hb_nt.series_id = ${s}.id AND hb_nt.number <> floor(hb_nt.number)
      AND ${bookIsNotice('hb_nt', 'hov_nt')}
@@ -175,7 +277,19 @@ export const hiddenBookCount = (s: string): string => `(CASE WHEN ${hidesNotices
   SELECT count(*) FROM lib_books hb_nt JOIN book_overrides hov_nt ON hov_nt.book_id = hb_nt.id
    WHERE hb_nt.id = ANY(ARRAY(SELECT bo_nt.book_id FROM book_overrides bo_nt WHERE bo_nt.number <> floor(bo_nt.number)))
      AND hb_nt.series_id = ${s}.id AND hb_nt.number = floor(hb_nt.number) AND ${bookIsNotice('hb_nt', 'hov_nt')}
-) ELSE 0 END)::int`;
+) ELSE 0 END)` : null;
+  const notNotice = (b: string, ov: string) => (active ? ` AND NOT ${noticeOnly(s, b, ov)}` : '');
+  const hand = handActive ? `(CASE WHEN ${s}.hidden_numbers IS NOT NULL THEN (
+  SELECT count(*) FROM lib_books hb_hn LEFT JOIN book_overrides hov_hn ON hov_hn.book_id = hb_hn.id
+   WHERE hb_hn.series_id = ${s}.id AND hb_hn.number = ANY(${s}.hidden_numbers) AND hov_hn.number IS NULL
+     AND ${bookHiddenByHand(s, 'hb_hn', 'hov_hn')}${notNotice('hb_hn', 'hov_hn')}
+) + (
+  SELECT count(*) FROM book_overrides hov_hn JOIN lib_books hb_hn ON hb_hn.id = hov_hn.book_id
+   WHERE hov_hn.number = ANY(${s}.hidden_numbers) AND hb_hn.series_id = ${s}.id
+     AND ${bookHiddenByHand(s, 'hb_hn', 'hov_hn')}${notNotice('hb_hn', 'hov_hn')}
+) ELSE 0 END)` : null;
+  return `(${[notice, hand].filter(Boolean).join(' + ') || '0'})::int`;
+};
 
 /**
  * How many notice chapters series `s` hides: every distinct number of a hidden saved chapter (its effective number),
@@ -202,7 +316,7 @@ export const hiddenNoticeCount = (s: string): string => `(CASE WHEN ${hidesNotic
 ) ELSE 0 END)::int`;
 
 /** books_count as a reader sees it. */
-export const visibleBookCount = (s: string): string => (active ? `GREATEST(0, ${s}.books_count - ${hiddenBookCount(s)})` : `${s}.books_count`);
+export const visibleBookCount = (s: string): string => (hidingActive() ? `GREATEST(0, ${s}.books_count - ${hiddenBookCount(s)})` : `${s}.books_count`);
 
 /** A whole number? The JS twin of `isFractional`, for lists already in memory (the sweep, the listing). */
 export const isFractionalNumber = (n: number): boolean => Number.isFinite(n) && n !== Math.floor(n);

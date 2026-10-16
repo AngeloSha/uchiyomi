@@ -50,6 +50,7 @@ import { updateSeries, runsInside } from './updater';
 import { scheduleHealthSummaryRefresh } from './healthSummary';
 import { say, saidOf, type Part, type Said } from './said';
 import { isRange } from './chapterRanges';
+import { moveHidden } from './hiddenChapters';
 
 /** How a series' chapters are numbered: by the source, or by posting order. NULL in the row is "automatic". */
 export type NumberingMode = 'source' | 'posting_order';
@@ -560,6 +561,8 @@ async function commit(seriesId: string, j: Journal): Promise<void> {
         await qq(`INSERT INTO listing_progress (user_id, series_id, number, completed_at, source) VALUES ${values.join(',')}`, params as any[]);
       }
     }
+    // The numbers an admin hid (#240, lib/hiddenChapters.ts) follow their posts as the marks do; one with no place goes.
+    await moveHidden(qq, seriesId, markMap);
     if (j.newFloor != null) await qq('UPDATE lib_series SET chapter_floor = $2 WHERE id = $1 AND chapter_floor IS NOT NULL', [seriesId, j.newFloor]);
     // The slow archive (#117) owns listed numbers below its boundary: moved through the same rule as the floor,
     // or the sweep would skip posts 1..8 and the archive fetch the wrong ones.

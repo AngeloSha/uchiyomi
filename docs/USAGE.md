@@ -327,7 +327,8 @@ genres, description, and the **chapter list**.
 - Four keys sit under the cover (since v0.60.0): **Favourite** (heart; adds it to your favourites and smart offline
   sync), **Offline** (*Save all offline*: copies every chapter to this device for reading with no connection), **List**
   (*Add to list*) and **More**. **More** holds the rest, grouped: *Reading* (notes and saved pages, mark all read
-  or unread), *Chapters* (Find missing chapters, Archive slowly, and for an admin Check for new chapters), *Share* (copy
+  or unread), *Chapters* (Find missing chapters, Archive slowly, and for an admin Check for new chapters and, while any
+  is hidden, Show hidden chapters), *Share* (copy
   the link, open in a new tab), and for an admin *Edit details*, *New banner*, *Rename folder* and *Remove from
   library*. On a computer it opens as a menu, on a phone as a sheet.
 
@@ -1290,6 +1291,8 @@ row too), and the bar at the bottom shows what can be done with the selection. *
 - **Fetch again** and **Remove *n* chapters** — admins only, for chapters Uchiyomi downloaded itself. See
   the next section. With nothing ticked the bar says so, and links to **Remove the whole series** — the series'
   own *Remove from library*, which this bar is not.
+- **Hide *n* chapters** — admins only, for ticked chapters and grey rows alike: their numbers are hidden from the
+  series for everyone, and nothing is deleted. See *Hiding a chapter that is not part of the series*.
 
 The bar is up from the moment you tap Select. The selection is cleared when you leave the page or flip the sort
 order.
@@ -1297,7 +1300,7 @@ order.
 An admin's chapter menu (⋯) also has **Copy file path**: the chapter's file, in full, on the server. The series'
 folder is in *Edit details* (**Folder on the server**), with a Copy beside each path. Since v0.62.0 it has **Fetch
 again** and **Delete from server** too, for that one chapter, on a chapter Uchiyomi downloaded: each asks first, as
-the bar's do (next section).
+the bar's do (next section). And **Hide chapter *N***, on a chapter row and on a grey row alike (below).
 
 ### Deleting a chapter from the server and fetching it again
 
@@ -1325,6 +1328,28 @@ back and the chapter is exactly as it was. Like a manual fetch, this ignores pat
 never the blocklist.
 
 Both ask you to confirm, and both are written to the activity log.
+
+### Hiding a chapter that is not part of the series
+
+A source sometimes lists a chapter that is not part of the work at all — a *0.5* from an unrelated title, a number a
+wrong match brought in — and nothing on the source's side takes it away: the grey row stays, every sweep tries to fetch
+it, and Health counts the hole around it. Since VNEXT an admin can hide that number from the series (an idea from
+@Squeaks72, #240): **Hide chapter *N*** in a chapter's or a grey row's **⋯**, or **Hide *n* chapters** in the select bar,
+confirmed once.
+
+A hidden chapter is gone for **everyone**: from the chapter list and its grey rows, the reader's next and previous,
+*Continue*, the unread counts and badges, Updates, history, OPDS and the Komga-compatible API Mihon reads, and from what
+the trackers are told. Health neither counts it as a gap nor as an impossible number, and **it is never downloaded**:
+not by the sweep, *Check for new chapters*, *Fetch newest*, the slow archive or *Find missing chapters* — a download
+already waiting when you hid it stops before it asks the source. **Nothing is deleted**: the file stays on the server,
+its row and everyone's reading progress stay as they were, and neither the read-chapter cleanup nor *Fix everything*
+deletes it. A file holding several chapters (*Chapters 1–7*) cannot be hidden by one number.
+
+**More → Chapters → Show hidden chapters (*n*)**, shown while anything is hidden, lists each number with what it is
+(a copy on the server, a number a source lists, or one nothing holds any more), with **Restore** for each and **Restore
+all**. A restored chapter is back on every surface at once, and the next sweep fetches it if it is missing. Merging two
+series keeps what was hidden in either, and renumbering a series by posting order moves a hidden number with its
+post. To get rid of a chapter's file as well, *Delete from server* is still the way.
 
 ### Chapters in another language
 

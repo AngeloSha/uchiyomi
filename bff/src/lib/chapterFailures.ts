@@ -11,6 +11,7 @@
 // that the health page reads and persistScan deletes the moment the chapter lands.
 import { q } from './db';
 import type { PageFailure } from './downloader';
+import { hiddenNumbersActive } from './noticeChapters';
 
 export interface ChapterFailure {
   seriesId: string;
@@ -91,9 +92,14 @@ export async function noteChapterFailure(f: ChapterFailure): Promise<void> {
   if (e?.diskFull) return; // not the chapter's fault, and not the source's
   // `at` is the latest attempt; `first_at` (v0.49.0) the first failure, kept on every later one -- the Health
   // page's "failing since" -- and filled from `at` for a row written before the column (or by a rollback).
+  // Never for a number an admin hid while it was being fetched (#240): nothing tries it again, so the row would sit on
+  // Health's failures card for good. Hiding drops the rows already there (lib/hiddenChapters.ts).
   await q(
     `INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts, at, first_at)
-     VALUES ($1, $2, $3, $4, $5, 1, now(), now())
+     ${hiddenNumbersActive()
+    ? `SELECT $1::text, $2::real, $3::text, $4::text, $5::text, 1, now(), now()
+         WHERE NOT EXISTS (SELECT 1 FROM lib_series hs WHERE hs.id = $1::text AND $2::real = ANY(hs.hidden_numbers))`
+    : 'VALUES ($1, $2, $3, $4, $5, 1, now(), now())'}
      ON CONFLICT (series_id, number) DO UPDATE SET
        source_id = EXCLUDED.source_id, status = EXCLUDED.status, reason = EXCLUDED.reason,
        attempts = chapter_failures.attempts + 1, first_at = COALESCE(chapter_failures.first_at, chapter_failures.at),

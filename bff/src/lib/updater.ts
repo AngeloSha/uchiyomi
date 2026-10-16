@@ -27,7 +27,9 @@ import { say } from './said';
 import { withOrigin } from './downloadActivity';
 import { decideNumbering, folderBusy, numberedChapters, renumberRunning, resumeRenumber, settleNumbering, NUMBERING_COLUMNS, type Settled } from './numbering';
 import { aliasParts, partRulesApply } from './partAlias';
-import { isListedNotice } from './noticeChapters';
+import { atHiddenNumber, isListedNotice } from './noticeChapters';
+import { hiddenNumbersOf } from './hiddenChapters';
+import { numKey } from './postingOrder';
 import { seriesHidesNotices } from './noticeSettings';
 import { heldBy, rangeEnd, rawRangeEnd } from './chapterRanges';
 import { isDue, refreshRadar } from './releaseRadar';
@@ -480,7 +482,15 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
     for (const c of tagged) { const l = pagesOf.get(c.number); if (l) l.push(c.pages); else pagesOf.set(c.number, [c.pages]); }
   }
   const notice = (n: number) => hidesNotice && isListedNotice(n, pagesOf.get(n) ?? []);
-  const wanted = releases.filter((c) => c.number >= floor && !notice(c.number));
+  // And the numbers an admin hid by hand (#240, lib/hiddenChapters.ts), the same way: not fetched, not "behind", not in
+  // the count of what the sources list, and kept in the listing, so Restore shows the grey row again at once and the
+  // next sweep fetches it. Read here, after the sources answered, so a hide made while they did is already in force; one
+  // made after still never downloads (lib/chapterFallback.ts reads them again at the source's door). By the number's
+  // key: a source's 7.0200005 is the 7.02 hidden. Reintroduce by dropping `hidden`: "the sweep never fetches a hidden
+  // number" in hiddenChapters.int.test.ts finds it asked for.
+  const hiddenNums = await hiddenNumbersOf(seriesId);
+  const hidden = (n: number) => notice(n) || hiddenNums.has(numKey(n));
+  const wanted = releases.filter((c) => c.number >= floor && !hidden(c.number));
   // What is on disk is never replaced, whoever released it: a copy from a better-ranked group appearing
   // later is not a missing chapter. (A deliberate "replace with the preferred group" would be its own path.)
   // "On disk" includes the tombstones the library keeps on purpose -- a chapter the read-chapter cleanup
@@ -506,7 +516,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   const live = heldBy(heldRows.filter((r) => r.pruned_at == null));
   // A covered number is another site's split of a chapter (R2, R3): not this sweep's to fetch, and not "behind" either.
   const missing = wanted.filter((c) => !have.has(c.number) && !covered.has(c.number)).sort((a, b) => a.number - b.number);
-  await stampChecked(seriesId, releases.filter((c) => !notice(c.number)).length, missing.length);
+  await stampChecked(seriesId, releases.filter((c) => !hidden(c.number)).length, missing.length);
   // The ledger for this series, read once: which chapters have already failed CHAPTER_RETRY_CAP times and
   // are not attempted again by the sweep, and which have been REFUSED twice by the very source that still
   // lists them. The second set is `persistent` for the fallback helper (lib/chapterFallback.ts): a refusal
@@ -562,7 +572,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
     // the source that ranks first (R3, whose own parts are the ones to fetch). Reintroduce by taking the top of every
     // release: "Fetch newest takes the newest chapter, not another site's part of one" in updater.int.test.ts finds
     // 78.9 queued for download.
-    const top = releases.filter((c) => !covered.has(c.number) && !notice(c.number))
+    const top = releases.filter((c) => !covered.has(c.number) && !hidden(c.number))
       .reduce<SourceChapter | null>((best, c) => (best && best.number >= c.number ? best : c), null);
     const via = top ? (top.source ?? (s.source_id as string)) : '';
     if (!top) newest = { number: null, state: 'unlisted' };
@@ -705,8 +715,9 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
       // newest" scans the folder and reports the chapter as already here rather than as a failed fetch.
       if (out.why === 'on_disk' && newest && newest.number === ch.number) newest = { ...newest, state: 'on_disk' };
       // Never asked -- its source is refusing and nothing else lists it -- is the old loop's `continue`:
-      // not an attempt, not a failure, and no ledger row towards the retry cap for a chapter nobody tried.
-      if (out.why === 'refusing') attempts--;
+      // not an attempt, not a failure, and no ledger row towards the retry cap for a chapter nobody tried. Nor is a
+      // number hidden while the queue waited (#240).
+      if (out.why === 'refusing' || out.why === 'hidden') attempts--;
     } else {
       failed++; // a failed chapter shouldn't abort the rest, but it must not vanish either
       await noteChapterFailure({ seriesId, title: s.title, number: ch.number, sourceId: out.via, err: out.err });
@@ -924,6 +935,8 @@ export async function runUpdateAll(opts: {
         WHERE b.missing_pages IS NOT NULL AND b.pruned_at IS NULL AND b.root = $1 AND ${visibleToAll('s')}
           -- An unmonitored series (auto_update off) gets nothing unattended, its missing pages included.
           AND s.auto_update
+          -- Nor a chapter at a number an admin hid (#240): its file is left exactly as it is.
+          AND NOT ${atHiddenNumber('b')}
         ORDER BY b.updated_at ASC LIMIT $2`, [DL_ROOT, PARTIAL_COMPLETE_MAX],
     ).catch(() => []);
     for (const b of partials) {

@@ -120,8 +120,11 @@ export interface PartialHold {
   drop?(): void;
 }
 
-/** Why a queued automatic download was no longer allowed when its source slot finally opened. */
-export type DownloadPreflightReason = 'paused' | 'policy' | 'source' | 'disabled' | 'cooldown';
+/**
+ * Why a queued automatic download was no longer allowed when its source slot finally opened. `hidden`: an admin hid
+ * the chapter's number from its series meanwhile (#240, lib/hiddenChapters.ts), and nothing fetches a hidden number.
+ */
+export type DownloadPreflightReason = 'paused' | 'policy' | 'source' | 'disabled' | 'cooldown' | 'hidden';
 /**
  * Last-responsible-moment admission.  Returning a reason refuses the operation without blaming the source.
  * It is deliberately asynchronous: current follows, preferences and unattended state all live in the database.

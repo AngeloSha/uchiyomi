@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3988
+    "strings": 4016
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -3991,5 +3991,33 @@
   "Series with chapters left": "Séries avec des chapitres restants",
   "Waiting the longest": "En attente depuis le plus longtemps",
   "Genre": "Genre",
-  "Insights": "Analyses"
+  "Insights": "Analyses",
+  "Hide chapter {n}": "Masquer le chapitre {n}",
+  "1 chapter is hidden.": "1 chapitre masqué.",
+  "{n} chapters are hidden.": "{n} chapitres masqués.",
+  "Could not hide that": "Impossible de le masquer",
+  "Hide 1 chapter": "Masquer 1 chapitre",
+  "Hide {n} chapters": "Masquer {n} chapitres",
+  "Hide chapter {n}?": "Masquer le chapitre {n} ?",
+  "Hide {n} chapters?": "Masquer {n} chapitres ?",
+  "Hidden for everyone: it leaves the chapter list, Continue, the unread counts, Updates and Health, and it is never downloaded again. For a chapter a source lists that is not part of this series.": "Masqué pour tout le monde : il sort de la liste des chapitres, de Continuer, des compteurs de non-lus, des Nouveautés et de l’État, et n’est plus jamais téléchargé. Pour un chapitre qu’une source liste mais qui ne fait pas partie de cette série.",
+  "Hidden for everyone: they leave the chapter list, Continue, the unread counts, Updates and Health, and they are never downloaded again. For chapters a source lists that are not part of this series.": "Masqués pour tout le monde : ils sortent de la liste des chapitres, de Continuer, des compteurs de non-lus, des Nouveautés et de l’État, et ne sont plus jamais téléchargés. Pour des chapitres qu’une source liste mais qui ne font pas partie de cette série.",
+  "Nothing is deleted: Show hidden chapters, under More, brings it back as it was.": "Rien n’est supprimé : « Afficher les chapitres masqués », dans Plus, le rétablit tel qu’il était.",
+  "Nothing is deleted: Show hidden chapters, under More, brings them back as they were.": "Rien n’est supprimé : « Afficher les chapitres masqués », dans Plus, les rétablit tels qu’ils étaient.",
+  "Show hidden chapters ({n})": "Afficher les chapitres masqués ({n})",
+  "{n} copies on the server, listed by a source": "{n} copies sur le serveur, listé par une source",
+  "{n} copies on the server": "{n} copies sur le serveur",
+  "1 copy on the server, listed by a source": "1 copie sur le serveur, listé par une source",
+  "1 copy on the server": "1 copie sur le serveur",
+  "Listed by a source": "Listé par une source",
+  "Not listed any more": "Plus listé nulle part",
+  "1 chapter is back.": "1 chapitre rétabli.",
+  "{n} chapters are back.": "{n} chapitres rétablis.",
+  "Could not restore that": "Impossible de le rétablir",
+  "Hidden chapters": "Chapitres masqués",
+  "Hidden from everyone: not in the chapter list, Continue, the unread counts, Updates or Health, and never downloaded. Nothing was deleted, so Restore brings a chapter back as it was.": "Masqués pour tout le monde : absents de la liste des chapitres, de Continuer, des compteurs de non-lus, des Nouveautés et de l’État, et jamais téléchargés. Rien n’a été supprimé : Rétablir ramène un chapitre tel qu’il était.",
+  "Could not load the hidden chapters": "Impossible de charger les chapitres masqués",
+  "Restore chapter {n}": "Rétablir le chapitre {n}",
+  "Restore": "Rétablir",
+  "Restore all": "Tout rétablir"
 }
