@@ -6,6 +6,7 @@ the ones the README actually names -- if a format is added, this file is where i
 browser pass never opened one.
 """
 import os
+import random
 import struct
 import sys
 import zipfile
@@ -263,6 +264,52 @@ def comfort(root: str) -> None:
     print(f'  seeded {strip} and {manga}')
 
 
+def noise_png(w: int, h: int, seed: int) -> bytes:
+    """A page of noise: nothing in it compresses, so any copy of it made narrower is smaller -- where bordered_png's
+    repeated rows make a PNG so small that no narrower copy of it is (and the server rightly sends the page as it is)."""
+    rnd = random.Random(seed)
+    return _rows_png(w, h, lambda y: rnd.randbytes(w * 3))
+
+
+def readergroup(root: str) -> None:
+    """The reader walk's library (walk263.mjs: #263, #236, #233, #234), every page different from every other.
+
+    Only on request (`seed.py <root> --reader`). Named so that no AniList entry is called that (see rtl()):
+      - Walk Two Six Three Resume (left to right): four twelve-page chapters of 300 x 450 pages -- the address following
+        three crossings and a refresh, a resize; pages narrower than any width Fit pages to my screen asks for.
+      - Walk Two Six Three Gaps: chapters 1, 2, 5, one file holding 6 to 8, and 9, four pages each -- 3 and 4 are missing,
+        6 to 8 are one file's.
+      - Walk Two Six Three Wide (left to right): one twelve-page chapter of 1,200 x 1,700 pages with 2,400 x 1,700 double
+        spreads at pages 5 and 9, their halves told apart by their art -- Wide pages: Split across a turn of the phone,
+        and pages wider than a phone shows them (page 2 noise, so a narrower copy of it is smaller).
+    """
+    resume = os.path.join(root, 'Test Source', 'Walk Two Six Three Resume')
+    os.makedirs(resume, exist_ok=True)
+    for ch in (1, 2, 3, 4):
+        with zipfile.ZipFile(os.path.join(resume, f'Chapter {ch:03d}.cbz'), 'w') as z:
+            for i in range(1, 13):
+                z.writestr(f'{i:03d}.png', bands(300, 450, 2600 + ch * 100 + i))
+            z.writestr('ComicInfo.xml', '<?xml version="1.0"?><ComicInfo><Series>Walk Two Six Three Resume</Series>'
+                       f'<Number>{ch}</Number><Manga>No</Manga></ComicInfo>')
+    gaps = os.path.join(root, 'Test Source', 'Walk Two Six Three Gaps')
+    os.makedirs(gaps, exist_ok=True)
+    for k, name in enumerate(('Chapter 001', 'Chapter 002', 'Chapter 005', 'Chapter 006-008', 'Chapter 009')):
+        with zipfile.ZipFile(os.path.join(gaps, f'{name}.cbz'), 'w') as z:
+            for i in range(1, 5):
+                z.writestr(f'{i:03d}.png', bands(300, 450, 2700 + k * 10 + i))
+    wide = os.path.join(root, 'Test Source', 'Walk Two Six Three Wide')
+    os.makedirs(wide, exist_ok=True)
+    with zipfile.ZipFile(os.path.join(wide, 'Chapter 001.cbz'), 'w', zipfile.ZIP_STORED) as z:
+        for i in range(1, 13):
+            spread = i in (5, 9)
+            # Page 2 is noise: the one a narrower copy of is smaller, which Fit pages to my screen is then sent.
+            z.writestr(f'{i:03d}.png', noise_png(1200, 1700, 2802) if i == 2
+                       else bordered_png(2400 if spread else 1200, 1700, 2800 + i, halves=spread))
+        z.writestr('ComicInfo.xml', '<?xml version="1.0"?><ComicInfo><Series>Walk Two Six Three Wide</Series>'
+                   '<Number>1</Number><Manga>No</Manga></ComicInfo>')
+    print(f'  seeded {resume}, {gaps} and {wide}')
+
+
 if __name__ == '__main__':
     if '--rtl' in sys.argv[2:]:
         rtl(sys.argv[1])
@@ -270,5 +317,7 @@ if __name__ == '__main__':
         cascade(sys.argv[1])
     elif '--comfort' in sys.argv[2:]:
         comfort(sys.argv[1])
+    elif '--reader' in sys.argv[2:]:
+        readergroup(sys.argv[1])
     else:
         main(sys.argv[1])
