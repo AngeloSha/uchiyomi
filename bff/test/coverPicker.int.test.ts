@@ -22,6 +22,9 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 /** A public address for the CDN (an IP literal: no resolver involved), whose answers this test scripts through fetch. */
 const CDN = 'https://93.184.215.14';
+/** Hosts the scripted fetch answers, matched exactly: the CDN, and the one a client tries to slip a picture in from
+ *  (answered too, so a fetch of it is recorded instead of leaving the machine). */
+const SCRIPTED = new Set([new URL(CDN).host, 'evil.example']);
 const SID = 's_coverpick';
 const SOURCES = ['cv-a', 'cv-b', 'cv-off', 'cv-cool'];
 /** Every getSeries a fake source was asked, by source id; every URL the server fetched. */
@@ -45,7 +48,7 @@ before(async () => {
   PNG = await sharp({ create: { width: 20, height: 30, channels: 3, background: '#5a7fa2' } }).png().toBuffer();
   globalThis.fetch = (async (u: any, init?: any) => {
     const url = String(u instanceof Request ? u.url : u);
-    if (url.startsWith(CDN) || url.startsWith('https://evil.example')) {
+    if (URL.canParse(url) && SCRIPTED.has(new URL(url).host)) {
       fetched.push(url);
       return new Response(PNG, { status: 200, headers: { 'content-type': 'image/png' } });
     }
