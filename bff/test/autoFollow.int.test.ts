@@ -35,6 +35,13 @@ if (DSN) {
   process.env.DOWNLOAD_MIN_GAP_MS = '0';
   process.env.MIN_FREE_GB = '0';
   process.env.SCAN_SEARCH_MS = '2000';
+  // This file's one fill scan ("a person confirming the automatic follower ...") needs RICH in its answer, and a scan
+  // stops asking once SCAN_ENOUGH sources have the title: under load RICH could get its slot after three sources it
+  // was queued ahead of had answered, come back not_tried with no id, and the follow it feeds answered 400 (CI round 1
+  // of #228 and #268). With more than every source this file registers, the scan asks them all, whatever finishes
+  // first. Only the fill scan reads SCAN_ENOUGH: the add's auto-follow, whose not_tried and wall the tests below
+  // read, has its own limits.
+  process.env.SCAN_ENOUGH = '50';
   process.env.SOLVER_BUDGET_MS = '800';
 }
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
@@ -119,6 +126,9 @@ before(async () => {
   registerAdapter(fake(SEQUEL, 'Sequel Source', range(1, 20), 'Another Story Entirely') as any);
   registerAdapter(fake(THROW, 'Throwing Source', [], TITLE, { async listChapters() { asks[THROW] = (asks[THROW] ?? 0) + 1; throw new Error('site refused'); } }) as any);
   registerAdapter(fake(HANG, 'Hanging Source', [], TITLE, {
+    // Its search never answers either, as its name says: the scan above asks every source, and a HANG that found the
+    // title would hold that scan for its whole 20 s listing budget.
+    async search() { return new Promise(() => {}); },
     async getSeries() { return new Promise(() => {}); },
     async listChapters() { asks[HANG] = (asks[HANG] ?? 0) + 1; return new Promise(() => {}); },
   }) as any);
@@ -348,7 +358,8 @@ test('a nothing-yet add with alsoFollow judges every candidate after its listing
     }
     const plan = (await app.inject({ method: 'POST', url: '/api/sources/fill/scan', headers: auth, payload: { seriesId: id } })).json();
     const rich = plan.candidates.find((c: any) => c.source === RICH);
-    assert.ok(rich && rich.why !== 'unreachable', `PREMISE: the scan found RICH: ${JSON.stringify(plan.candidates?.map((c: any) => [c.source, c.why]))}`);
+    // Found, with its id: a not_tried candidate has none, and the follow below would answer 400 bad_request for it.
+    assert.ok(rich?.sourceSeriesId, `PREMISE: the scan found RICH, with its id: ${JSON.stringify(plan.candidates?.map((c: any) => [c.source, c.why, c.sourceSeriesId]))}`);
     const manual = await app.inject({ method: 'POST', url: `/api/admin/series/${id}/sources`, headers: auth,
       payload: { planId: plan.planId, source: RICH, sourceSeriesId: rich.sourceSeriesId } });
     assert.equal(manual.statusCode, 200, manual.body);
