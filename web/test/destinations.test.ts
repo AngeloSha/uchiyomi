@@ -32,6 +32,7 @@ const PROFILE_TABS = keysOf(read('app/profile/page.tsx'));
 const TAB_FILES: Record<string, string[]> = {
   '/admin/ Settings': ['components/AdminSettings.tsx', 'components/AdminNotifications.tsx', 'components/ArchiveSettings.tsx'],
   '/profile/ You': ['components/ProfileYou.tsx'],
+  '/profile/ Insights': ['components/ProfileInsights.tsx'],
   '/profile/ Settings': ['components/ProfileSettings.tsx'],
   '/profile/ Connections': ['components/ProfileConnections.tsx'],
   '/profile/ Account': ['components/ProfileAccount.tsx'],
@@ -48,7 +49,7 @@ const TASK_IDS = (() => {
 test('every destination lands where it says: a real page, one of its tabs, and a card that tab draws', () => {
   // Reintroduce a section without its id (drop `id="notice-chapters"` from AdminSettings.tsx), or a tab that is gone
   // (`?tab=Providers`): the destination is named here by its key.
-  assert.ok(ADMIN_TABS.length === 10 && PROFILE_TABS.length === 4, 'the console tab lists were not read');
+  assert.ok(ADMIN_TABS.length === 10 && PROFILE_TABS.length === 5, 'the console tab lists were not read');
   for (const d of DESTINATIONS) {
     const u = new URL(d.href, 'http://x');
     assert.ok(['/admin/', '/profile/', '/admin/import/'].includes(u.pathname), `${d.key}: ${u.pathname} is not a page this lists`);

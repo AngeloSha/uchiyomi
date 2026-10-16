@@ -1461,6 +1461,7 @@ GET    /api/favorites             POST   /api/favorites
 DELETE /api/favorites/:seriesId   GET    /api/history
 GET    /api/stats                 GET    /api/wrapped
 GET    /api/stats/time            GET    /api/series/:id/reading-pace
+GET    /api/stats/insights
 GET    /api/settings              PUT    /api/settings
 GET    /api/collections           POST   /api/collections
 GET    /api/collections/:id       PATCH  /api/collections/:id
@@ -1551,9 +1552,17 @@ the day it was first finished that year; `/api/stats/time`'s `chapters`; and `/a
 They are counted from reading events, never from a chapter's read mark, so marking a chapter read from a list does not
 count and reading it afterwards does.
 
-**All time** (since v0.73.0). `GET /api/stats?days=all` ([#265](https://github.com/AngeloSha/uchiyomi/issues/265))
+**All time and Insights** (since v0.73.0). `GET /api/stats?days=all` ([#265](https://github.com/AngeloSha/uchiyomi/issues/265))
 answers every UTC day from the reader's first read to today, dense as the other windows (at least 7 days, at most 3660,
 about ten years), with `days` saying how many that was; any other `days` is still clamped to 7–400.
+`GET /api/stats/insights` is the raw material of **Profile → Insights**, the reader's own history from `reading_events` (so
+an Incognito read is in none of it), each finished chapter once: `{now, bestDay: {day, chapters} | null, bestWeek: {start,
+chapters} | null, series}`. `bestWeek` is a Monday-to-Sunday UTC week and `start` its Monday. `series` has one row per
+series the reader has a recorded read in, `{id, title, source, genres, total, read, lastReadAt, recent, thisMonth,
+prevMonth}`: its chapters (hidden notice chapters left out), how many they have finished, when they last read it, and the
+chapters of it they finished in the last 28 days, this UTC month and the month before. It is listed by the rule every rail
+follows (18+ follows the Show 18+ switch, a series the reader may not open is absent). The app works the backlog, the
+completion funnel, the genre and source mix and "at this pace, finished by" out from it.
 
 **Release radar** (since v0.61.0). Every enriched series also carries `yomi.radar: {nextAt, dueUntil, quietAfter,
 lastAt, every, kind, steady, ended, basis} | null` — the server's estimate of when its next chapter comes (`series_radar`,

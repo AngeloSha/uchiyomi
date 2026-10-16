@@ -84,7 +84,7 @@ test('the admin and profile consoles hide tabs by filtering what the rail receiv
   assert.match(admin, /\{hiddenTab \? null : panel\}/, 'a hidden tab\'s panel renders');
   const profile = code(read('app/profile/page.tsx'));
   assert.match(profile, /const \[tab, setTab\] = useTabParam<Tab>\(PROFILE_TABS, 'You'\);/, 'the pinned profile useTabParam line changed');
-  assert.match(profile, /keys\('You', 'Settings', 'Connections', 'Account'\)/, 'the pinned profile tab literal changed');
+  assert.match(profile, /keys\('You', 'Insights', 'Settings', 'Connections', 'Account'\)/, 'the pinned profile tab literal changed');
   assert.match(profile, /<ConsoleNav groups=\{isDesktop\(\) \? visibleGroups\(PROFILE_GROUPS, DESKTOP_HIDDEN\.profileTabs\) : PROFILE_GROUPS\}/, 'the profile rail still lists Account on desktop');
   assert.match(profile, /useEffect\(\(\) => \{ if \(hiddenTab\) setTab\('You'\); \}, \[hiddenTab\]\);/, 'a deep link to Account does not fall back to You');
   assert.match(profile, /\{hiddenTab \? null : panel\}/, 'the Account panel renders on desktop');

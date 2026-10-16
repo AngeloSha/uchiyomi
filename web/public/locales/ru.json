@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3960
+    "strings": 3988
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -3963,5 +3963,33 @@
   "Read {n} chapters": "Прочитать {n} глав",
   "Earned": "Получен",
   "you have {n}": "у вас {n}",
-  "your best is {n}": "ваш рекорд: {n}"
+  "your best is {n}": "ваш рекорд: {n}",
+  "Finish a few chapters and your insights show up here.": "Дочитайте несколько глав, и здесь появится ваша аналитика.",
+  "1 chapter left": "осталась 1 глава",
+  "{n} chapters left": "осталось глав: {n}",
+  "At this pace": "В этом темпе",
+  "When you would finish the series you are reading, at your pace through each over the last four weeks.": "Когда вы дочитаете серии, которые читаете сейчас, в вашем темпе по каждой за последние четыре недели.",
+  "Read a series you are part-way through and its finish date shows up here.": "Почитайте начатую серию, и здесь появится дата, когда вы её закончите.",
+  "Your best": "Ваши рекорды",
+  "Best day": "Лучший день",
+  "Best week": "Лучшая неделя",
+  "week of {date}": "неделя с {date}",
+  "new": "новое",
+  "Genre and source mix": "Жанры и источники",
+  "Nothing finished this month yet.": "В этом месяце вы пока ничего не дочитали.",
+  "Each one’s share of this month’s chapters, and the change in points since last month.": "Доля каждого в главах этого месяца и изменение в пунктах по сравнению с прошлым месяцем.",
+  "A chapter counts toward every genre of its series.": "Глава засчитывается в каждый жанр своей серии.",
+  "Series you started": "Начатые серии",
+  "Still reading": "Читаю",
+  "Nothing dropped yet.": "Пока ничего не брошено.",
+  "You usually stop around chapter {n}, about {pct}% of the way in.": "Обычно вы бросаете примерно на {n}-й главе, пройдя около {pct}% серии.",
+  "You usually stop around chapter {n}.": "Обычно вы бросаете примерно на {n}-й главе.",
+  "Dropped: chapters left, and nothing read in two months.": "Брошено: остались главы, и ничего не прочитано за два месяца.",
+  "Backlog": "Непрочитанное",
+  "Nothing unread in the series you have started.": "В начатых сериях нет непрочитанного.",
+  "Unread chapters": "Непрочитанные главы",
+  "Series with chapters left": "Серии с непрочитанными главами",
+  "Waiting the longest": "Дольше всего ждут",
+  "Genre": "Жанр",
+  "Insights": "Аналитика"
 }

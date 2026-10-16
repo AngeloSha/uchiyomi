@@ -99,8 +99,10 @@ sites' terms and your local law.
   ago, *Hidden gems* (well rated on AniList, read by nobody in the house) and *Because you read*, in the order you
   choose: **Customize** moves its rails and hides the ones you don't use.
 - **Moments** — star a page and it lands on its own screen as the panel itself, with notes.
-- **Reading Studio & Wrapped** — a year heat-map, chapters by month and weekday, your top series and genres, and
-  how long you read: hours, minutes a chapter, by hour of the day and by device.
+- **Reading Studio & Wrapped** — a year heat-map (or all time, scrolling back to your first read), chapters by month
+  and weekday, your top series and genres, and how long you read: hours, minutes a chapter, by hour of the day and by
+  device. **Insights** adds when you would finish what you are reading, your best day and week, this month's genre
+  mix, the series you dropped and your backlog; badges say what they take.
 - **Release radar** — when each series' next chapter is likely, said as an estimate (*~Friday*, *usually Fridays*,
   *running late*), with an *Expected this week* list and a *Releasing soon* order.
 - **Incognito reading** — keep your place without leaving history, stats or tracker updates, on every device.

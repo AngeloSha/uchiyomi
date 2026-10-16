@@ -5485,6 +5485,58 @@ paths:
           description: OK
         "401":
           description: Not authenticated
+  /api/stats/insights:
+    get:
+      tags:
+        - personal
+      summary: "Profile → Insights: the best day and week, and one row per series the caller has read in."
+      operationId: getApiStatsInsights
+      description: >-
+        Since v0.73.0 (from #249). The caller's own reading only, from reading_events, so an Incognito read is in none of
+        it, and each finished chapter counts once within its window (#264). `bestDay` is the UTC day with the most
+        chapters finished and `bestWeek` the Monday-to-Sunday UTC week (`start` is its Monday), each null before any
+        chapter is finished. `series` has one row per series the caller has a recorded read in, listed by the rule every
+        rail follows (18+ follows the Show 18+ switch, `adult=1`; a series the caller may not open is absent): `total`
+        chapters (hidden notice chapters left out), how many of them the caller has finished (`read`), `lastReadAt` (from
+        events) and the chapters of it finished in the last 28 days (`recent`), this UTC month and the month before.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "`{now, bestDay, bestWeek, series}`"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  now: { type: string }
+                  bestDay:
+                    type: [object, "null"]
+                    properties:
+                      day: { type: string }
+                      chapters: { type: integer }
+                  bestWeek:
+                    type: [object, "null"]
+                    properties:
+                      start: { type: string }
+                      chapters: { type: integer }
+                  series:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        title: { type: string }
+                        source: { type: string }
+                        genres: { type: array, items: { type: string } }
+                        total: { type: integer }
+                        read: { type: integer }
+                        lastReadAt: { type: [string, "null"] }
+                        recent: { type: integer }
+                        thisMonth: { type: integer }
+                        prevMonth: { type: integer }
+        "401":
+          description: Not authenticated
   /api/stats/time:
     get:
       tags:

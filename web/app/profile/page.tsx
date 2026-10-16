@@ -19,6 +19,7 @@ import { Backdrop } from '@/components/ui';
 import { useToast } from '@/components/Toast';
 import { IcSparkle, IcPlay, IcRefresh, IcSettings, IcLogOut, IcMoments } from '@/components/icons';
 import { BadgesCard, ListsCard, StudioCard, type Stats } from '@/components/ProfileYou';
+import { ProfileInsights } from '@/components/ProfileInsights';
 import { ProfileSettings } from '@/components/ProfileSettings';
 import { ProfileConnections } from '@/components/ProfileConnections';
 import { ProfileAccount } from '@/components/ProfileAccount';
@@ -29,7 +30,8 @@ import { hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN } from '@/lib
  * One group, four entries, so `flat` drops the group eyebrow and the phone group sheet: profile has an index,
  * not an information architecture. The seventeen sections underneath used to be one 5000px column.
  *
- * You is the person (badges, the reading studio, lists); Settings is how the app behaves for them
+ * You is the person (badges, the reading studio, lists); Insights is what their reading adds up to (v0.73.0, from #249:
+ * the backlog, the series begun, this month's mix, finish dates, their best day and week); Settings is how the app behaves for them
  * (appearance, reader defaults, downloads, this device); Connections is everything that talks to another
  * service (trackers, OPDS readers, API tokens); Account is who they are here (password, 2FA, sessions,
  * sign out). Until v0.39.0 the second tab was "Reading" and held device settings plus one chart, Settings
@@ -39,7 +41,7 @@ import { hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN } from '@/lib
 const PROFILE_GROUPS = [
   // `keys()` is the identity function; it exists so these reach the translation extractor. ConsoleNav
   // renders them as `tr(tab)`, which a scan for inline tr() calls cannot see. See lib/i18n.ts.
-  { id: 'you', label: 'You', tabs: keys('You', 'Settings', 'Connections', 'Account') },
+  { id: 'you', label: 'You', tabs: keys('You', 'Insights', 'Settings', 'Connections', 'Account') },
 ] as const;
 const PROFILE_TABS = PROFILE_GROUPS[0].tabs;
 type Tab = (typeof PROFILE_TABS)[number];
@@ -197,6 +199,8 @@ function ProfileInner() {
       <StudioCard span="wide" />
       <ListsCard />
     </div>
+  ) : tab === 'Insights' ? (
+    <ProfileInsights />
   ) : tab === 'Settings' ? (
     <ProfileSettings weeklyGoal={stats?.weeklyGoal ?? 0} />
   ) : tab === 'Connections' ? (

@@ -231,6 +231,14 @@ line under the badges says, for example, *Bookworm · Read 50 chapters · you ha
 about the next badge. **Show locked** lists the badges you have not earned yet, nearest first; it is off until you turn
 it on. Chapters count once each, however many times you read them.
 
+**Insights** (since v0.73.0, **Profile → Insights**). What your reading adds up to, beside what the Reading studio and
+Wrapped already show: **At this pace**, when you would finish each series you are reading at your pace through it over
+the last four weeks; **Your best** day and week; the **genre and source mix** of this month's chapters against last
+month's; **Series you started**, how many you finished, are still reading or dropped (chapters left and nothing read
+in two months), and around which chapter you usually stop; and your **backlog**, the unread chapters of the series you
+have started, which hold the most and which have waited longest. It is worked out from the same page turns as the
+Reading studio, so Incognito reads are not in it, and 18+ series are named only while **Show 18+** is on.
+
 **Incognito reading** (since v0.61.0, **Profile → Settings → Reading**, or the reader's own settings). While it is
 on, your place is still kept — Keep reading and every resume work as usual — but what you read leaves no trace: no
 history, no stats or streaks, nothing on the household's boards or rails, and nothing sent to AniList, MyAnimeList or

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3960
+    "strings": 3988
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -3963,5 +3963,33 @@
   "Read {n} chapters": "Ler {n} capítulos",
   "Earned": "Conquistado",
   "you have {n}": "você tem {n}",
-  "your best is {n}": "seu recorde: {n}"
+  "your best is {n}": "seu recorde: {n}",
+  "Finish a few chapters and your insights show up here.": "Termine alguns capítulos e suas análises aparecerão aqui.",
+  "1 chapter left": "falta 1 capítulo",
+  "{n} chapters left": "faltam {n} capítulos",
+  "At this pace": "Neste ritmo",
+  "When you would finish the series you are reading, at your pace through each over the last four weeks.": "Quando você terminaria as séries que está lendo, no seu ritmo em cada uma nas últimas quatro semanas.",
+  "Read a series you are part-way through and its finish date shows up here.": "Leia uma série que você começou e a data em que vai terminá-la aparecerá aqui.",
+  "Your best": "Seus recordes",
+  "Best day": "Melhor dia",
+  "Best week": "Melhor semana",
+  "week of {date}": "semana de {date}",
+  "new": "novo",
+  "Genre and source mix": "Mistura de gêneros e fontes",
+  "Nothing finished this month yet.": "Nada concluído este mês ainda.",
+  "Each one’s share of this month’s chapters, and the change in points since last month.": "A parte de cada um nos capítulos deste mês e a variação em pontos desde o mês passado.",
+  "A chapter counts toward every genre of its series.": "Um capítulo conta para cada gênero da sua série.",
+  "Series you started": "Séries que você começou",
+  "Still reading": "Lendo",
+  "Nothing dropped yet.": "Nada abandonado ainda.",
+  "You usually stop around chapter {n}, about {pct}% of the way in.": "Você costuma parar por volta do capítulo {n}, cerca de {pct}% da série.",
+  "You usually stop around chapter {n}.": "Você costuma parar por volta do capítulo {n}.",
+  "Dropped: chapters left, and nothing read in two months.": "Abandonadas: ainda têm capítulos e nada foi lido em dois meses.",
+  "Backlog": "Pendentes",
+  "Nothing unread in the series you have started.": "Nada não lido nas séries que você começou.",
+  "Unread chapters": "Capítulos não lidos",
+  "Series with chapters left": "Séries com capítulos pendentes",
+  "Waiting the longest": "Esperando há mais tempo",
+  "Genre": "Gênero",
+  "Insights": "Análises"
 }

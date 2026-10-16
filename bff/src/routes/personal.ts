@@ -23,6 +23,7 @@ import { noticeBook } from '../lib/noticeChapters';
 import { devicesOf, hourIn, lastDays, loadTimeline, summarize, validTz, yearRange } from '../lib/readingTime';
 import { listFor, ownListFor, listsFor, listItems, kindOf, ownerOf, type ListRow } from '../lib/lists';
 import { smartQuery, parseQuery } from '../lib/smartLists';
+import { insightsFor } from '../lib/readingInsights';
 
 /** A colour a member stores that other members' browsers paint (avatar, list accent): hex only (v0.69.1). */
 const HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
@@ -693,6 +694,15 @@ export default async function personalRoutes(app: FastifyInstance) {
       window: { ms: w.ms, chapters: w.chapters, perChapterMs: w.perChapterMs, byHour: w.byHour, byDevice: await devicesOf(uid, w.byDevice) },
     };
   });
+
+  /**
+   * Profile → Insights (lib/readingInsights.ts, from @Squeaks72's #249): the best day and week, and one row per browsable
+   * series the reader has a recorded read in -- its chapters, how many they have finished, when they last read it and
+   * what they finished of it lately. Own reading only, each chapter once; 18+ series follow the request's Show 18+ switch;
+   * incognito reads are not in reading_events, so they are in none of it. Reintroduce `WHERE true` for browsable():
+   * "a hidden 18+ series never appears" in readingInsights.int.test.ts lists it.
+   */
+  app.get('/api/stats/insights', async (req) => insightsFor(userIdOf(req), vc(req)));
 
   /**
    * v0.61.0: this reader's pace through a series, for its page's "Catch up in ~2 hr" -- the median time of the chapters

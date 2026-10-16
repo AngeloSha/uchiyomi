@@ -284,15 +284,15 @@ test('/admin and /profile read and write ?tab=, without a history entry or a sna
   assert.equal(withTab('http://x/profile/', 'Connections', 'You'), '/profile/?tab=Connections', 'withTab does not add the tab to a bare address');
 });
 
-test('the profile has four tabs and no leftover cards', () => {
-  // You · Settings · Connections · Account. The old second tab, Reading, was device settings plus one chart
+test('the profile has five tabs and no leftover cards', () => {
+  // You · Insights · Settings · Connections · Account (Insights since v0.73.0, from #249). The old second tab, Reading, was device settings plus one chart
   // plus one integration; the old Account tab held eight cards including the admin door and a sign-out card
   // that repeated the rail. Everything that is a setting now lives in its tab's component; the page keeps
   // the hero, the rail and the You board. Reintroduce by adding 'Reading' to `keys(...)`: "the profile
   // still has a Reading tab" fails; by importing `SecurityPanel` on the page: "a retired card is back on
   // the page" fails.
   const src = code(read('app/profile/page.tsx'));
-  assert.match(src, /keys\('You', 'Settings', 'Connections', 'Account'\)/, 'the profile tabs are not You · Settings · Connections · Account');
+  assert.match(src, /keys\('You', 'Insights', 'Settings', 'Connections', 'Account'\)/, 'the profile tabs are not You · Insights · Settings · Connections · Account');
   assert.doesNotMatch(src, /keys\([^)]*'Reading'/, 'the profile still has a Reading tab');
   assert.doesNotMatch(src, /AdminCard|SignOutCard|SettingsCard|SecurityPanel/, 'a retired card is back on the page');
   // The two files behind the Manage layer are gone, not merely unimported: a file nobody imports still

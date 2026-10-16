@@ -137,8 +137,9 @@ const SURFACES = [
   'components/HomeCustomize.tsx',
   'lib/homeRails.ts',
   'lib/tone.ts',
-  // v0.73.0: the badges' goals and words (#267).
+  // v0.73.0: the badges' goals and words (#267) and Profile → Insights' figures (#249).
   'lib/badges.ts',
+  'lib/insights.ts',
 ];
 
 /**
@@ -228,6 +229,9 @@ const SLICES: [string, string, string, string][] = [
   // v0.73.0 (#267): the badges are keys that say what they take, squared (they were capsules), and Show locked is a key --
   // beside the Reading studio's range chips (All time among them), filters that stay.
   ['components/ProfileYou.tsx', 'Badges: the badges and Show locked', 'export function BadgesCard(', 'export function ListsCard('],
+  // v0.73.0, Profile → Insights (#249): its cards, tiles and rows, beside the mix's Genre | Source chips, a filter that stays.
+  ['components/ProfileInsights.tsx', 'Insights: the cards before the mix', 'export function ProfileInsights(', 'const MIX_BY'],
+  ['components/ProfileInsights.tsx', 'Insights: the series begun and the backlog', 'function Funnel(', ''],
 ];
 
 const slice = (src: string, from: string, to: string, name: string): string => {
