@@ -23,9 +23,19 @@ test('a phone\'s hero is the cover, filling it: the sharp 1600-px copy, cropped 
 test('the cover drifts only when both motion switches allow it', () => {
   // `reduced` is Reduce effects OR the system's reduced motion, both read on every render (effects.test.ts). Reintroduce
   // an ungated drift: this fails.
-  assert.match(cover, /animate=\{still \? \{ scale: 1 \} : \{ scale: \[1, 1\.07\] \}\}/);
-  assert.match(cover, /transition=\{still \? \{ duration: 0 \} : \{[^}]*repeat: Infinity[^}]*\}\}/);
+  assert.match(cover, /<div data-phone-hero-cover className=\{`absolute inset-0 \$\{still \? '' : 'hero-drift'\}`\}>/);
   assert.match(page, /const reduced = plain \|\| !!still;/);
+  // ...and plays. It was framer keyframes until v0.73.0 and never ran: a page loaded directly mounts under the page
+  // transition's AnimatePresence initial={false}, which starts every motion component in it at its last keyframe and plays
+  // nothing -- with every line of this test passing. Reintroduce the motion.div: this fails, and so does run.mjs's phone
+  // walk ("the hero cover does not drift"), which reads the moving transform.
+  assert.doesNotMatch(cover, /motion\./, 'the drift is framer keyframes again, which never play on a page loaded directly');
+  const css = readFileSync(join(__dirname, '..', 'app/globals.css'), 'utf8');
+  assert.match(css, /@keyframes hero-drift \{ from \{ transform: scale\(1\); \} to \{ transform: scale\(1\.07\); \} \}/);
+  assert.match(css, /\.hero-drift \{ animation: hero-drift 24s ease-in-out infinite alternate; \}/);
+  // Stopped by both switches in CSS too, or the reduced-motion rule's 0.001 ms flickers an infinite animation.
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\) \{\s*\.fx-mesh \{ animation: none; \}\s*\.hero-drift \{ animation: none; \}/);
+  assert.match(css, /html\.reduce-effects \.hero-drift \{ animation: none; \}/);
 });
 
 test('the phone bar is clear over the cover and glass with the title once the cover\'s title has gone', () => {

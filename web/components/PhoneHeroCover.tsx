@@ -1,5 +1,4 @@
 'use client';
-import { motion } from 'framer-motion';
 import { img } from '@/lib/api';
 import { Img } from './ui';
 
@@ -11,11 +10,12 @@ import { Img } from './ui';
  * or the system's reduced motion is on (`still`), where it is simply there.
  */
 export function PhoneHeroCover({ id, version, still }: { id: string; version?: number; still: boolean }) {
+  // The drift is app/globals.css's `.hero-drift`, a CSS animation: framer keyframes never ran here, because a page loaded
+  // directly mounts under the page transition's AnimatePresence, which starts them at their last keyframe and plays
+  // nothing. web/test/e2e/run.mjs reads the moving transform on a phone.
   return (
-    <motion.div className="absolute inset-0" initial={false}
-      animate={still ? { scale: 1 } : { scale: [1, 1.07] }}
-      transition={still ? { duration: 0 } : { duration: 24, ease: 'easeInOut', repeat: Infinity, repeatType: 'reverse' }}>
+    <div data-phone-hero-cover className={`absolute inset-0 ${still ? '' : 'hero-drift'}`}>
       <Img src={img.seriesThumb(id, version, 1600)} alt="" eager className="h-full w-full" imgClassName="object-cover object-top" />
-    </motion.div>
+    </div>
   );
 }

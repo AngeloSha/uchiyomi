@@ -755,6 +755,33 @@ try {
     }
   }
 
+  // The phone hero's slow drift (components/PhoneHeroCover.tsx): two reads of the cover's transform two seconds apart
+  // differ, and under reduced motion they do not. As framer keyframes it never ran from v0.67.0 on -- a page loaded
+  // directly mounts under the page transition's AnimatePresence initial={false}, which starts them at their last
+  // keyframe -- while every source pin passed. Reintroduce the motion.div: "the hero cover does not drift" fails.
+  if (seriesHref) {
+    const drifting = async () => {
+      await page.goto(BASE + seriesHref, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+      await sleep(1500);
+      return page.evaluate(async () => {
+        const el = document.querySelector('[data-phone-hero-cover]');
+        if (!el) return null;
+        const before = getComputedStyle(el).transform;
+        await new Promise((r) => setTimeout(r, 2000));
+        return getComputedStyle(el).transform !== before;
+      });
+    };
+    const moves = await drifting();
+    if (moves === null) bad('phone series page: no hero cover');
+    else moves ? ok('phone series page: the hero cover drifts') : bad('phone series page: the hero cover does not drift');
+    await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+    const reducedMoves = await drifting();
+    await page.emulateMediaFeatures();
+    reducedMoves === false
+      ? ok('phone series page: the cover holds still under reduced motion')
+      : bad(`phone series page: under reduced motion the cover ${reducedMoves === null ? 'is missing' : 'still drifts'}`);
+  }
+
   // ------------------------------------------------- the library's filters, on a phone and on a laptop
   //
   // The library used to carry three horizontally-scrolling chip rails in its header -- one of them seven

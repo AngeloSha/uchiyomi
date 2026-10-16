@@ -424,8 +424,18 @@ html.lenis-scrolling .fx-grain { display: none; }
   -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none;
 }
 
+/* The phone hero cover's slow drift (components/PhoneHeroCover.tsx, v0.67.0's design): closer and back, 24 s each way.
+   CSS, not framer keyframes: a page loaded directly mounts inside the page transition's AnimatePresence, whose
+   initial={false} has framer start every motion component in it at its last keyframe and play nothing -- the drift never
+   ran from v0.67.0 to v0.73.0. The compositor runs this. The component leaves the class off while Reduce effects or the
+   system's reduced motion is on; the two rules below stop it there too, as .fx-mesh is stopped, rather than leave the
+   0.001 ms of the reduced-motion rule flickering an infinite animation. */
+@keyframes hero-drift { from { transform: scale(1); } to { transform: scale(1.07); } }
+.hero-drift { animation: hero-drift 24s ease-in-out infinite alternate; }
+
 @media (prefers-reduced-motion: reduce) {
   .fx-mesh { animation: none; }
+  .hero-drift { animation: none; }
   *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
 
@@ -507,6 +517,7 @@ html.reduce-effects *::after { -webkit-backdrop-filter: none; backdrop-filter: n
 html.reduce-effects .glass,
 html.reduce-effects .glass-strong { background: var(--color-ink-900); }
 html.reduce-effects .skeleton::after { animation: none; display: none; }
+html.reduce-effects .hero-drift { animation: none; }
 /* The accent hairline is a two-layer mask with `mask-composite: exclude`, on every tile in the grid. Chrome
    barely notices it; Firefox does: with everything above already off, the 200-tile library at 1440 still
    scrolled at 32 fps in headless Firefox, and at 59.5 with only these rings gone. Every element wearing one
