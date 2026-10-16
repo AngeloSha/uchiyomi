@@ -1306,8 +1306,8 @@ async function smokeEngine(base, token) {
   }
   const installMs = Date.now() - t0;
   await Promise.race([restarted, new Promise((r) => setTimeout(r, 90_000))]);
-  const creds = s.secrets;
-  const about = await fetch(`http://127.0.0.1:${s.state.enginePort}/api/v1/settings/about`, { headers: { authorization: `Basic ${Buffer.from(`${creds.engineUser}:${creds.enginePass}`).toString('base64')}` } }).then((r) => r.status).catch(() => 0);
+  const creds = s.engineCreds;
+  const about = await fetch(`http://127.0.0.1:${s.state.enginePort}/api/v1/settings/about`, { headers: { authorization: `Basic ${Buffer.from(`${creds.user}:${creds.pass}`).toString('base64')}` } }).then((r) => r.status).catch(() => 0);
   const anon = await fetch(`http://127.0.0.1:${s.state.enginePort}/api/v1/settings/about`).then((r) => r.status).catch(() => 0);
   // A fresh token: the bff restarted since the first one was issued (same JWT secret, so it may still work).
   const tok = await fetch(`${base}/auth/desktop`, { method: 'POST', headers: { [HEADER]: s.o.secret } }).then((r) => r.json()).then((j) => j.accessToken).catch(() => token);

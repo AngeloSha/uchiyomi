@@ -92,9 +92,9 @@ test('start order, the env the bff gets, and the ordered stop', async () => {
     for (const k of CONTRACT.filter((x) => x !== 'LIBRARY_ROOT')) assert.ok(env[k] !== undefined && env[k] !== '', `${k} missing from the bff env`);
     assert.equal(env.FLARESOLVERR_URL, 'http://127.0.0.1:1/solvertoken0123456789');
     assert.equal(env.SUWAYOMI_URL, `http://127.0.0.1:${sup.state.enginePort}`);
-    // Secrets persisted 0600, ports persisted (chosen once).
+    // The database password persisted 0600 (the engine's pair never is: the next test), ports persisted (chosen once).
     const secrets = JSON.parse(fs.readFileSync(sup.L.secrets, 'utf8'));
-    assert.ok(secrets.pgPassword && secrets.engineUser && secrets.enginePass);
+    assert.ok(secrets.pgPassword);
     if (process.platform !== 'win32') assert.equal(fs.statSync(sup.L.secrets).mode & 0o777, 0o600);
     const st = JSON.parse(fs.readFileSync(sup.L.state, 'utf8'));
     assert.ok(st.uiPort && st.pgPort && st.enginePort);
@@ -110,6 +110,46 @@ test('start order, the env the bff gets, and the ordered stop', async () => {
     assert.equal(after.mainPid, undefined);
     assert.equal(after.uiPort, st.uiPort);
     assert.equal(await sup.stop('again'), r, 'a second stop joins the first');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("the engine's pair is new at every launch, and only the app holds it", async () => {
+  // v0.73.0. Until then the engine's basic-auth pair was made once and kept in secrets.json. Now each launch makes its
+  // own, hands it to the engine and the bff, and writes it nowhere. Reintroduce the stored pair (made once in start(),
+  // saved with the database password): the second launch's pair equals the first's, and secrets.json holds it.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'uchi-sup-'));
+  try {
+    const launch = async () => {
+      const f = fakes([], { installed: true });
+      /** @type {any} */
+      let engineOpts = null;
+      const sup = make(tmp, f, { makeEngine: (/** @type {any} */ o) => { engineOpts = o; return f.engine; } });
+      await sup.start();
+      const env = f.forks[0].env;
+      const creds = engineOpts.creds();
+      await sup.stop('test');
+      return { env, creds };
+    };
+    // A data folder from before: secrets.json carries the old, permanent pair.
+    fs.mkdirSync(path.join(tmp, 'data'), { recursive: true });
+    const L = layout(path.join(tmp, 'data'));
+    fs.writeFileSync(L.secrets, JSON.stringify({ pgPassword: 'kept', engineUser: 'uchiyomi-old', enginePass: 'old-pass' }));
+    const one = await launch();
+    const two = await launch();
+    for (const r of [one, two]) {
+      assert.match(String(r.env.SUWAYOMI_USERNAME), /^uchiyomi-[0-9a-f]{12}$/);
+      assert.match(String(r.env.SUWAYOMI_PASSWORD), /^[0-9a-f]{48}$/);
+      assert.notEqual(r.env.SUWAYOMI_PASSWORD, 'old-pass', 'the pair kept from before is still in use');
+    }
+    assert.notEqual(two.env.SUWAYOMI_PASSWORD, one.env.SUWAYOMI_PASSWORD, 'a second launch reused the first one\'s password');
+    assert.notEqual(two.env.SUWAYOMI_USERNAME, one.env.SUWAYOMI_USERNAME);
+    // The engine is started with the same pair the bff is given.
+    for (const r of [one, two]) assert.deepEqual(r.creds, { user: r.env.SUWAYOMI_USERNAME, pass: r.env.SUWAYOMI_PASSWORD });
+    const stored = fs.readFileSync(L.secrets, 'utf8');
+    assert.deepEqual(JSON.parse(stored), { pgPassword: 'kept' }, 'secrets.json holds more than the database password');
+    assert.ok(!stored.includes(two.env.SUWAYOMI_PASSWORD), "this launch's engine password was written to disk");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

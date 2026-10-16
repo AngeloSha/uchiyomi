@@ -83,12 +83,17 @@ class Supervisor extends EventEmitter {
     const pgAscii = onWin && typeof this.pg.fallbackReasons === 'function' && this.pg.fallbackReasons().length > 0;
     this.asciiBase = engineAscii || pgAscii ? (isFallbackName(this.state.asciiBase) ? this.state.asciiBase : newFallbackName()) : null;
     this.engineBase = engineAscii ? this.asciiBase : null;
+    // The engine's basic-auth pair (v0.73.0): new at every launch and held only here, in memory. The engine gets it in
+    // its environment (engine.js buildLaunch, never a command line), the bff as SUWAYOMI_*; nothing writes it to disk.
+    // Made with the Supervisor, so an engine or a bff restarted inside one launch keeps the same pair.
+    // Reintroduce the stored pair (secrets.json): "the engine's pair is new at every launch" in shell.supervisor.test.mjs.
+    this.engineCreds = { user: `uchiyomi-${crypto.randomBytes(6).toString('hex')}`, pass: crypto.randomBytes(24).toString('hex') };
     const engineOpts = {
       L: o.L,
       log: o.log,
       pack: o.enginePack,
       port: () => Number(this.state.enginePort) || 0,
-      creds: () => ({ user: this.secrets.engineUser, pass: this.secrets.enginePass }),
+      creds: () => this.engineCreds,
       solverUrl: () => this.solverUrl,
       asciiBase: this.engineBase,
       fetch: o.engineFetch,
@@ -150,10 +155,8 @@ class Supervisor extends EventEmitter {
     const secrets = state.read(L.secrets);
     let changed = false;
     if (!secrets.pgPassword) { secrets.pgPassword = crypto.randomBytes(24).toString('hex'); changed = true; }
-    // The engine's basic-auth pair: made once, before the engine exists, because the bff gets SUWAYOMI_* from
-    // the very first boot (contract 1).
-    if (!secrets.engineUser) { secrets.engineUser = `uchiyomi-${crypto.randomBytes(6).toString('hex')}`; changed = true; }
-    if (!secrets.enginePass) { secrets.enginePass = crypto.randomBytes(24).toString('hex'); changed = true; }
+    // The engine's pair is this launch's (this.engineCreds, above). Before v0.73.0 one was kept here; it is dropped.
+    if ('engineUser' in secrets || 'enginePass' in secrets) { delete secrets.engineUser; delete secrets.enginePass; changed = true; }
     if (changed) state.write(L.secrets, secrets, 0o600);
     this.secrets = secrets;
     this.pg.password = secrets.pgPassword;
@@ -214,8 +217,8 @@ class Supervisor extends EventEmitter {
       secret: this.o.secret,
       solverUrl: this.solverUrl,
       enginePort: Number(this.state.enginePort),
-      engineUser: this.secrets.engineUser,
-      enginePass: this.secrets.enginePass,
+      engineUser: this.engineCreds.user,
+      enginePass: this.engineCreds.pass,
       osUser: this.o.osUser,
     });
   }

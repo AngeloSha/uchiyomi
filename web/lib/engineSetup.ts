@@ -101,6 +101,7 @@ export const STEP_TEXT = keys(
   // Unraid
   'In Unraid, open Apps, search for {name} and install it.',
   'Before its first start, create its folder from the Unraid terminal (the engine runs as user 1000):',
+  'It asks for a password when you install it. On the uchiyomi container, set {user} to its user name ({default} unless you changed it) and {password} to that password.',
   'Then set {name} on the uchiyomi container to this address, with your server’s IP, and apply:',
   'On the Docker tab, start {name}. If it keeps stopping, its log says why.',
   'Check that {name} on the uchiyomi container is still this address, with your server’s IP:',
@@ -197,6 +198,12 @@ export function onSteps(p: Platform, h: Headline): Step[] {
       return [
         { text: 'In Unraid, open Apps, search for {name} and install it.', vars: { name: ENGINE } },
         { text: 'Before its first start, create its folder from the Unraid terminal (the engine runs as user 1000):', command: `mkdir -p /mnt/user/appdata/${ENGINE} && chown 1000:1000 /mnt/user/appdata/${ENGINE}` },
+        // v0.73.0: the Unraid template publishes the engine's port, so a new install asks for a password (AUTH_MODE
+        // basic_auth) and Uchiyomi has to send the same pair. An install from before keeps its own settings.
+        {
+          text: 'It asks for a password when you install it. On the uchiyomi container, set {user} to its user name ({default} unless you changed it) and {password} to that password.',
+          vars: { user: 'SUWAYOMI_USERNAME', default: 'uchiyomi', password: 'SUWAYOMI_PASSWORD' },
+        },
         { text: 'Then set {name} on the uchiyomi container to this address, with your server’s IP, and apply:', vars: { name: URL_VAR }, command: 'http://YOUR-SERVER-IP:4567' },
       ];
     case 'casaos':

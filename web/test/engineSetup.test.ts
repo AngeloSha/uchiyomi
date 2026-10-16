@@ -85,7 +85,9 @@ test('every step names the shipped engine, never the development stack', () => {
   const unraid = onSteps('unraid', 'unset');
   assert.equal(unraid[0].vars?.name, 'uchiyomi-suwayomi', 'the Unraid template is named');
   assert.match(unraid[1].command ?? '', /chown 1000:1000 \/mnt\/user\/appdata\/uchiyomi-suwayomi$/, 'its folder is made writable for the engine first');
-  assert.equal(unraid[2].command, 'http://YOUR-SERVER-IP:4567');
+  // v0.73.0: the template asks for the engine's password, and Uchiyomi must send the same pair before it is pointed there.
+  assert.deepEqual(unraid[2].vars, { user: 'SUWAYOMI_USERNAME', default: 'uchiyomi', password: 'SUWAYOMI_PASSWORD' }, 'the engine password is not carried over');
+  assert.equal(unraid[3].command, 'http://YOUR-SERVER-IP:4567');
   const casaos = onSteps('casaos', 'switched_off');
   assert.match(casaos[1].command ?? '', /\/deploy\/casaos\/uchiyomi-suwayomi\.yml$/, 'the CasaOS add-on is the file to import');
   assert.equal(casaos[2].command, 'http://uchiyomi-suwayomi:4567');

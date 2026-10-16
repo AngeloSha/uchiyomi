@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3941
+    "strings": 3942
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -3944,5 +3944,6 @@
   "Filling in missing details": "足りない情報を補っています",
   "missing details filled in for 1 series": "1 シリーズの足りない情報を補充",
   "missing details filled in for {n} series": "{n} シリーズの足りない情報を補充",
-  "Off by default. Once a night, a series with no description, genres or author of its own gets them from AniList, when it is linked there and in English, or else from its own source or one it follows; a series with no chapters yet gets a cover too. A series’ own details always win, and so does anything you set in Edit details. Switching this off takes back everything it filled in.": "既定ではオフです。毎晩1回、自前の説明・ジャンル・作者がないシリーズに、AniList（そこでリンク済みで英語の場合）から、そうでなければシリーズ自身のソースか追従しているソースから補います。まだ話がないシリーズには表紙も補います。シリーズ自身の情報が常に優先され、「詳細を編集」で設定した内容も優先されます。オフにすると、補ったものはすべて取り消されます。"
+  "Off by default. Once a night, a series with no description, genres or author of its own gets them from AniList, when it is linked there and in English, or else from its own source or one it follows; a series with no chapters yet gets a cover too. A series’ own details always win, and so does anything you set in Edit details. Switching this off takes back everything it filled in.": "既定ではオフです。毎晩1回、自前の説明・ジャンル・作者がないシリーズに、AniList（そこでリンク済みで英語の場合）から、そうでなければシリーズ自身のソースか追従しているソースから補います。まだ話がないシリーズには表紙も補います。シリーズ自身の情報が常に優先され、「詳細を編集」で設定した内容も優先されます。オフにすると、補ったものはすべて取り消されます。",
+  "It asks for a password when you install it. On the uchiyomi container, set {user} to its user name ({default} unless you changed it) and {password} to that password.": "インストール時にパスワードを求められます。uchiyomi コンテナーの {user} にはそのユーザー名（変更していなければ {default}）を、{password} にはそのパスワードを設定します。"
 }

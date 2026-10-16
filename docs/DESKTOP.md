@@ -170,8 +170,9 @@ them:
       the engine off there.
 
    If the download fails, *The extension engine could not be installed.* shows the reason and **Try again**.
-   From then on the engine starts with Uchiyomi. It listens only on this computer, with a random password,
-   and uses about 750 MB of memory while it runs (731 MiB measured on a server with 22 extensions installed).
+   From then on the engine starts with Uchiyomi. It listens only on this computer, with a random password that
+   only the app knows and that changes every time Uchiyomi starts, and uses about 750 MB of memory while it runs
+   (731 MiB measured on a server with 22 extensions installed).
 
 ⚠️ **Extensions that need an in-app web view do not work in the desktop app.** The extension engine can
 download a browser of its own (KCEF, about 230 MB more) for the few extensions that need one; the desktop app
@@ -460,7 +461,7 @@ The data folder holds:
 - `electron/` — the window's own browser profile: in server mode, your sign-in and offline chapters for each
   server;
 - `state.json` (the mode, the server's address, the trusted certificates, ports, the library folder, the hidden
-  settings below) and `secrets.json` (the database and engine passwords).
+  settings below) and `secrets.json` (the database password).
 
 In server mode only `logs/`, `electron/` and `state.json` are used; the rest appears once you use the app on this
 computer.

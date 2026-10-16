@@ -252,11 +252,22 @@ test('the Unraid engine template is the bundled engine', () => {
   }
   assert.ok(configOf(x, 'FLARESOLVERR_URL'), 'no FLARESOLVERR_URL to point the engine at a solver');
   assert.match(configOf(x, 'AUTH_PASSWORD')?.attrs ?? '', /Mask="true"/, "the engine's password is shown in clear");
+  // v0.73.0: the port is published on the bridge network, so a new install signs in. Reintroduce the empty AUTH_MODE
+  // (or a password Unraid lets you leave blank): a new engine starts with no password, and these fail.
+  // An install from before keeps its own values: the three variables have been here since the template's first version.
+  const auth = configOf(x, 'AUTH_MODE');
+  assert.equal(auth?.value, 'basic_auth', 'a new Unraid engine starts with its sign-in off');
+  assert.match(auth!.attrs, /Default="basic_auth"/, "AUTH_MODE's default is not basic_auth");
+  assert.match(configOf(x, 'AUTH_PASSWORD')!.attrs, /Required="true"/, 'the engine can be installed without a password');
+  assert.equal(configOf(x, 'AUTH_PASSWORD')!.value, '', 'the template ships a password everyone knows');
   assert.match(x, /<TemplateURL>https:\/\/raw\.githubusercontent\.com\/AngeloSha\/uchiyomi\/main\/templates\/uchiyomi-suwayomi\.xml<\/TemplateURL>/, 'TemplateURL does not point at this file');
   // The way in: the main template's help names the engine template, and it can pass the engine's credentials.
   const main = read('templates/uchiyomi.xml');
   assert.match(configOf(main, 'SUWAYOMI_URL')?.attrs ?? '', /Description="[^"]*uchiyomi-suwayomi[^"]*:4567/, "the main template's SUWAYOMI_URL help does not point at the engine template");
   assert.ok(configOf(main, 'SUWAYOMI_USERNAME'), 'the main template cannot pass the engine user name');
+  // The two user names match out of the box, so a new install types the password twice and nothing else.
+  assert.equal(configOf(main, 'SUWAYOMI_USERNAME')!.value, configOf(x, 'AUTH_USERNAME')?.value, 'the two templates name different engine users');
+  assert.ok(configOf(x, 'AUTH_USERNAME')?.value, 'the engine has no user name');
   assert.match(configOf(main, 'SUWAYOMI_PASSWORD')?.attrs ?? '', /Mask="true"/, "the main template shows the engine's password in clear");
 });
 

@@ -93,9 +93,11 @@ actually open (the manifest defaults to `http://localhost:8080`) or logins will 
 install it like anything else. One container, database included; set PUID/PGID to the owner of your library
 so renames work. For Mihon/Tachiyomi extensions, install **uchiyomi-suwayomi** from Apps as well
 ([`templates/uchiyomi-suwayomi.xml`](../templates/uchiyomi-suwayomi.xml): the extension engine, pinned and
-memory-capped), create its folder first (`mkdir -p /mnt/user/appdata/uchiyomi-suwayomi && chown 1000:1000
-/mnt/user/appdata/uchiyomi-suwayomi` in the Unraid terminal), then set Uchiyomi's advanced *SUWAYOMI_URL* to
-`http://YOUR-SERVER-IP:4567`. Admin → Sources walks through the same steps.
+memory-capped), choose the password it asks for, create its folder first (`mkdir -p /mnt/user/appdata/uchiyomi-suwayomi
+&& chown 1000:1000 /mnt/user/appdata/uchiyomi-suwayomi` in the Unraid terminal), then set Uchiyomi's advanced
+*SUWAYOMI_URL* to `http://YOUR-SERVER-IP:4567` and *SUWAYOMI_USERNAME* / *SUWAYOMI_PASSWORD* to the engine's user name
+(`uchiyomi` unless you changed it) and password. Admin → Sources walks through the same steps. An engine installed
+before v0.73.0 has no password; [A password on the engine](extensions.md#a-password-on-the-engine) adds one.
 
 The template behind that listing is [`templates/uchiyomi.xml`](../templates/uchiyomi.xml) in this
 repository, which is laid out as a Community Applications template repository (`templates/` plus the

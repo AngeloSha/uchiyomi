@@ -30,7 +30,7 @@ Where it comes from depends on how you run Uchiyomi:
 | **Uchiyomi Desktop, on this computer** | A download of about 200 MB, once: **Admin → Sources** → **Download the extension engine (about 200 MB)**. Step by step in [the desktop guide](DESKTOP.md#add-your-first-sources). |
 | **Uchiyomi Desktop, connected to your server** | Your server's. Nothing runs on the computer; Admin → Sources is the server's own. |
 | **CasaOS** | An add-on beside the listing. Import [`deploy/casaos/uchiyomi-suwayomi.yml`](../deploy/casaos/uchiyomi-suwayomi.yml) as a custom app (its tips give the one folder command to run first), then set `SUWAYOMI_URL` to `http://uchiyomi-suwayomi:4567` in Uchiyomi's settings. |
-| **Unraid** | A template of its own: install **uchiyomi-suwayomi** from Apps ([`templates/uchiyomi-suwayomi.xml`](../templates/uchiyomi-suwayomi.xml): pinned, memory-capped, chapter downloads off, Cloudflare helper on). Set its *FLARESOLVERR_URL* to the solver Uchiyomi uses, then set Uchiyomi's advanced *SUWAYOMI_URL* to `http://YOUR-SERVER-IP:4567`. |
+| **Unraid** | A template of its own: install **uchiyomi-suwayomi** from Apps ([`templates/uchiyomi-suwayomi.xml`](../templates/uchiyomi-suwayomi.xml): pinned, memory-capped, chapter downloads off, Cloudflare helper on, and a password on its port). Choose its password (*AUTH_PASSWORD*) when it asks, and set its *FLARESOLVERR_URL* to the solver Uchiyomi uses. Then set Uchiyomi's advanced *SUWAYOMI_URL* to `http://YOUR-SERVER-IP:4567`, *SUWAYOMI_USERNAME* to the engine's user name (`uchiyomi` unless you changed it) and *SUWAYOMI_PASSWORD* to its password. An engine installed before v0.73.0 has no password: [A password on the engine](#a-password-on-the-engine) says how to add one. |
 | **Umbrel** | Not available. An Umbrel app cannot offer an optional second container, and putting the engine in the package would cost every Umbrel install about 800 MB whether it uses extensions or not. MangaDex and sites you add by address work there as everywhere. |
 
 When the engine is there, the top of **Admin → Sources** is a slim strip of two cells (since v0.53.0): **Extension
@@ -514,13 +514,30 @@ The same three steps: back its data up with it stopped, change its tag, start it
 and newer and was tested with v2.4.2366. Health calls a newer one *newer than the version this Uchiyomi was tested
 with*: likely fine, and only a backup from before takes you back.
 
+## A password on the engine
+
+On Unraid the engine's port is published to your network, because Uchiyomi reaches it at your server's address, so it
+should ask for a password. Since v0.73.0 the Unraid template turns the engine's own sign-in on for a **new** install
+(`AUTH_MODE` `basic_auth`) and asks for one. An engine installed before that keeps the settings it has, with no
+password, until you add one:
+
+1. On the **Docker** tab, edit **uchiyomi-suwayomi**. Under *Show more settings*, set **AUTH_MODE** to `basic_auth`,
+   **AUTH_USERNAME** to a user name (`uchiyomi`, say) and **AUTH_PASSWORD** to a password, and **Apply**.
+2. Edit **uchiyomi**. Under *Show more settings*, set **SUWAYOMI_USERNAME** and **SUWAYOMI_PASSWORD** to the same two,
+   and **Apply**.
+3. Admin → Sources should say *Ready* again. *The extension engine refused Uchiyomi's login* means the two pairs differ.
+
+The Docker Compose files never publish the engine's port: it is reachable only from Uchiyomi's own network, and needs no
+password. On CasaOS the add-on is on that network too. The desktop app gives its engine a new random password every time
+it starts, which only the app knows.
+
 ## Settings
 
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `EXTENSION_ENGINE` | `1` | `0` doesn't run the bundled engine: Compose scales it to zero, and the app treats extensions as off. Read by both, from the same `.env` line. Compose only accepts `0` or `1` here (it is the engine's replica count, and any other value stops `docker compose up` for the whole stack); the app also reads `off`, `false` and `no`, for setups that don't pass the line to Compose. Only applies while `SUWAYOMI_URL` names the bundled container (`uchiyomi-suwayomi`, or `yomi-suwayomi` in the development stack). |
 | `SUWAYOMI_URL` | the bundled engine | Where the extension engine is. Empty turns the feature off (in the v0.49.0 compose files and later). A trailing slash (or two), a query string or a fragment on this value is ignored; the scheme, host, port and any sub-path are what count. |
-| `SUWAYOMI_USERNAME` / `SUWAYOMI_PASSWORD` | empty | Only if your engine has authentication enabled. |
+| `SUWAYOMI_USERNAME` / `SUWAYOMI_PASSWORD` | empty | The engine's user name and password, when it asks for them: the Unraid template's engine does since v0.73.0 ([A password on the engine](#a-password-on-the-engine)). Sent only to `SUWAYOMI_URL`. |
 | `SUWAYOMI_MAX_SOURCES` | `25` | Ceiling on how many extension sources register at once. The sources a series reads through register first, then the rest; since v0.59.0 a source switched off in Health registers last of all, so it never holds a slot a working source needs, and switching one off or on there while the limit is full applies at once. |
 | `SUWAYOMI_PAGE_CONCURRENCY` | `4` | Pages of one chapter fetched from the engine at once (1-8). The engine rate-limits the site itself, so extension downloads skip the one-at-a-time pacing that scraped sites need; a 429 from the engine drops back to one for the rest of the chapter. |
 | `SOURCE_LATEST_TIMEOUT_MS` | `8000` | How long one source gets to answer "what's new" on Discover before it is given up on and marked unhealthy. A source that keeps overrunning it is diagnosed *answers, but more slowly than it is given* — since v0.37.0 by the admin *Test* button and the daily source check too, not only Discover's health view — and the fix sentence names this budget. |
