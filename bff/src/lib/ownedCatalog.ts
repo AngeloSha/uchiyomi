@@ -8,6 +8,7 @@ import { effectiveLang } from './seriesLang';
 import { noticeBook, noticeShown, visibleBookCount } from './noticeChapters';
 import { rangeEnd, numberText } from './chapterRanges';
 import { anilistScoreOf } from './anilistScores';
+import { AUTO_DETAILS, authorOf, genresOf, summaryOf } from './autoDetailsSql';
 
 interface Page<T> { content: T[]; totalElements: number; totalPages: number; number: number; size: number; first: boolean; last: boolean }
 
@@ -38,9 +39,12 @@ const SERIES_COLS = 'id, title, summary, status, genres, author, age_rating, rea
 type Gate = (alias: string, ctx: ViewCtx, p: Params) => string;
 
 const seriesSrcWith = (gate: Gate, ctx: ViewCtx, p: Params, alias: string) => `(
-  SELECT s.id, COALESCE(o.title, s.title) AS title, COALESCE(o.summary, s.summary) AS summary,
-         COALESCE(o.status, s.status) AS status, COALESCE(o.genres, s.genres) AS genres,
-         COALESCE(o.author, s.author) AS author,
+  SELECT s.id, COALESCE(o.title, s.title) AS title,
+         -- The description, genres and author: the admin's, else the series' own, else what the server filled in where
+         -- both were empty (v0.73.0, lib/autoDetailsSql.ts) -- below the scan, so it never hides a scanned value.
+         ${summaryOf('o', 's', 'sad')} AS summary,
+         COALESCE(o.status, s.status) AS status, ${genresOf('o', 's', 'sad')} AS genres,
+         ${authorOf('o', 's', 'sad')} AS author,
          COALESCE(o.age_rating, s.age_rating) AS age_rating,
          -- The admin's direction, else what the evidence said (lib/readingDirection.ts), else NULL: unknown.
          COALESCE(o.reading_direction, s.reading_direction) AS reading_direction,
@@ -55,6 +59,7 @@ const seriesSrcWith = (gate: Gate, ctx: ViewCtx, p: Params, alias: string) => `(
          -- it is an edition of (lib/editions.ts), which the Library collapses to one card.
          s.source_id, s.lang, s.work_id
     FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
+    LEFT JOIN ${AUTO_DETAILS} sad ON sad.series_id = s.id
    WHERE ${gate('s', ctx, p)}
 ) ${alias}`;
 

@@ -123,6 +123,12 @@ export function taskResult(r: any): string {
       const n = r.directions.learned ?? 0;
       bits.push(n === 1 ? tr('1 reading direction learned') : tr('{n} reading directions learned', { n }));
     }
+    // Missing details (v0.73.0, bff lib/autoDetails.ts) are off unless switched on, so like the group upgrades the clause
+    // is never "off"; with the switch on it says how many series got something, when one did or when it ran alone.
+    if (ran('details') && r.details && !r.details.off && (r.details.filled || (only?.length === 1))) {
+      const n = r.details.filled ?? 0;
+      bits.push(n === 1 ? tr('missing details filled in for 1 series') : tr('missing details filled in for {n} series', { n }));
+    }
     if (ran('failures')) {
       const n = r.failures?.reset ?? 0;
       bits.push(n === 1 ? tr('1 failure reset') : tr('{n} failures reset', { n }));

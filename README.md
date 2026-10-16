@@ -113,7 +113,8 @@ sites' terms and your local law.
   in rows that fold.
 - **Library management** — several libraries, each over as many folders as you like, *Select all* with bulk
   fetch and removal, editable metadata that survives a rescan, merge (each chapter kept once), delete, restore
-  and forget, and *Rescan everything* for files changed behind its back.
+  and forget, and *Rescan everything* for files changed behind its back. Optionally, a series with no description,
+  genres or author gets them filled in overnight from AniList or another of its sources, never over its own.
 - **Banners made from the series itself** — a series with no banner on AniList gets one built from striking panels of
   its own pages.
 - **Language editions** — the same series in English and in Spanish is one card, with chips to switch between

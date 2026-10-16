@@ -971,14 +971,15 @@ test('the nightly runs Fix everything when Settings chose it, and the safe repai
 });
 
 test('a nightly Fix everything runs the repair steps it does not drive itself (v0.60.1)', { skip }, async () => {
-  // The plain nightly runs all eight repair steps; Fix everything drives five of them, so a nightly set to Fix everything
-  // never ran the opt-in group upgrades, the borrowed names or the reading directions (found in Squeaks72's fork).
+  // The plain nightly runs all nine repair steps; Fix everything drives five of them, so a nightly set to Fix everything
+  // never ran the opt-in group upgrades, the borrowed names or the reading directions (found in Squeaks72's fork) -- nor,
+  // since v0.73.0, the missing details.
   // Reintroduce by dropping the follow-up runRepair from server.ts's repair tick: the last assertion fails. Adding a
   // repairForAutofix step without listing it in AUTOFIX_REPAIR_STEPS fails the second.
   const { readFileSync } = await import('node:fs');
   const { REPAIR_STEPS } = await import('../src/lib/repair');
   const { AUTOFIX_REPAIR_STEPS, AFTER_NIGHTLY_AUTOFIX } = await import('../src/lib/autofix');
-  assert.deepEqual([...AFTER_NIGHTLY_AUTOFIX], ['groups', 'names', 'directions']);
+  assert.deepEqual([...AFTER_NIGHTLY_AUTOFIX], ['groups', 'names', 'directions', 'details']);
   const auto = readFileSync(join(__dirname, '..', 'src', 'lib', 'autofix.ts'), 'utf8');
   const driven = [...auto.matchAll(/repairForAutofix\([^,]+,\s*\{\s*only:\s*\[([^\]]*)\]/g)]
     .flatMap((m) => [...m[1].matchAll(/'([a-z]+)'/g)].map((x) => x[1]));

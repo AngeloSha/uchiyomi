@@ -24,6 +24,7 @@ import { API_TOKEN_PREFIX, resolveApiToken, resolveApiTokenById, type ResolvedTo
 import { SESSION_COOKIE, mintSession, verifySession, shouldRemint } from '../lib/komgaSession';
 import { owned, UnsupportedFilter } from '../lib/ownedCatalog';
 import { viewCtxFor, seriesVisible, browsable, Params, type ViewCtx } from '../lib/visibility';
+import { AUTO_DETAILS, authorOf } from '../lib/autoDetailsSql';
 import { q, one } from '../lib/db';
 import { pushSeriesProgressAsync } from '../lib/trackers';
 import { serveLibSeriesThumb, serveLibBookThumb, serveLibBookPage } from './images';
@@ -435,9 +436,10 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
   app.get('/api/v1/authors', async (req) => {
     const p = new Params();
     const rows = await q<{ author: string }>(
-      `SELECT DISTINCT COALESCE(o.author, s.author) AS author
+      `SELECT DISTINCT ${authorOf('o', 's', 'sad')} AS author
          FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
-        WHERE ${browsable('s', vc(req), p)} AND btrim(COALESCE(o.author, s.author, '')) <> ''
+         LEFT JOIN ${AUTO_DETAILS} sad ON sad.series_id = s.id
+        WHERE ${browsable('s', vc(req), p)} AND btrim(COALESCE(${authorOf('o', 's', 'sad')}, '')) <> ''
         ORDER BY author`,
       p.values as any[],
     );

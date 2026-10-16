@@ -59,6 +59,7 @@ test('a repair names the step it is on, from one list shared with Health', () =>
   assert.equal(repairStepLabel('failures'), 'Retrying failed chapters', 'the failures step is named for another step');
   assert.equal(repairStepLabel('short'), 'Looking for longer copies', 'the short step is named for another step');
   assert.equal(repairStepLabel('directions'), 'Learning reading directions', 'the directions step is named for another step');
+  assert.equal(repairStepLabel('details'), 'Filling in missing details', 'the details step is named for another step');
   assert.equal(repairStepLabel('someday'), '', 'a step this build does not know is named anyway');
   assert.equal(repairStepLabel(undefined), '');
   assert.equal(runTitle('sweep'), 'Checking for new chapters');

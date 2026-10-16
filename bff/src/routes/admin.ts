@@ -62,6 +62,7 @@ import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSour
 import { cleanSourceOrder, invalidateSourcePrefs } from '../lib/sourcePrefs';
 import { keepRestricted, memberDefaults, memberDefaultsShape, permsShape, saveMemberDefaults } from '../lib/memberDefaults';
 import { borrowNamesFor, clearBorrowedNames } from '../lib/borrowNames';
+import { clearAutoDetails, fillDetailsFromSources, fillDetailsOn } from '../lib/autoDetails';
 import { lookupsChanged } from '../lib/discoverIdentity';
 import { sanitiseNoticeTypes, visibleBookCount } from '../lib/noticeChapters';
 import { seriesHidesNotices, hiddenCount, refreshNoticesActive } from '../lib/noticeSettings';
@@ -618,7 +619,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- server settings ----
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, backup_enabled, auto_follow_on_failure, '
-    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, discover_lookups, '
+    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, fill_details, discover_lookups, '
     + 'mangadex_langs, unstated_lang, hide_notice_types, deleted_as_ghosts, update_smart, '
     + ARCHIVE_SETTINGS_COLS;
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
@@ -771,6 +772,12 @@ export default async function adminRoutes(app: FastifyInstance) {
        */
       borrowNames: z.boolean().optional(),
       /**
+       * Fill in missing details (lib/autoDetails.ts, v0.73.0, #257 and #245): the repair's ninth step gives a series
+       * with no description, genres or author of its own the ones AniList or another of its sources has, in a layer
+       * below the scan. Off by default. Off takes back everything it filled in.
+       */
+      fillDetails: z.boolean().optional(),
+      /**
        * Discover's online name lookups (v0.56.0, lib/discoverIdentity.ts): AniList, MangaDex and MangaUpdates are asked,
        * once per name, which work a title shown in Discover is. On by default; off, nothing is sent anywhere and cards
        * fold by their names alone.
@@ -904,6 +911,11 @@ export default async function adminRoutes(app: FastifyInstance) {
       await q('UPDATE server_settings SET borrow_names = $1, updated_at = now() WHERE id = 1', [b.borrowNames]);
       // "Stop doing that" means the names it wrote go too; a series switched on for itself keeps its own.
       if (!b.borrowNames) await clearBorrowedNames('following-server').catch(() => 0);
+    }
+    if (b.fillDetails !== undefined) {
+      await q('UPDATE server_settings SET fill_details = $1, updated_at = now() WHERE id = 1', [b.fillDetails]);
+      // The same promise: off, every series shows again exactly what it showed before it was switched on.
+      if (!b.fillDetails) await clearAutoDetails().catch(() => 0);
     }
     if (b.mangadexLangs !== undefined) {
       const before = mangadexLangs();
@@ -1852,6 +1864,10 @@ export default async function adminRoutes(app: FastifyInstance) {
     // shows on the next read.
     // Reintroduce by reading this after the refresh has started: "never checked yet" in seriesSources.int.test.ts.
     const list = await seriesSourcesFor(id);
+    // A description, genres, an author or a cover the series lacks and this source has (lib/autoDetails.ts), when
+    // Fill in missing details is on: asked now, past the month a series asked at night waits -- the new source may be
+    // the one that has them. Not waited for, and it only ever fills what is empty.
+    void fillDetailsOn().then((on) => (on ? fillDetailsFromSources(id) : null)).catch(() => {});
     // The listing again, now with this source in it, as an unfollow does (below): the chapters it has that the
     // series lacks show up on the series page at once, as rows to fetch, instead of at the next sweep -- which
     // is when the owner expected them and saw nothing (v0.48.3). Not waited for: a Cloudflare source can take

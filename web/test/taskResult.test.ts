@@ -268,6 +268,17 @@ test('the repair says when it learned reading directions, and a directions-only 
   assert.equal(taskResult({ ...base, only: ['directions'], directions: { asked: 1, learned: 1 } }), ' · 1 reading direction learned');
 });
 
+test('the repair says when it filled in missing details, never that the switch is off, and a details-only run always answers', () => {
+  // v0.73.0 (bff lib/autoDetails.ts). Off by default, like the group upgrades: a nightly line that said "details: off"
+  // every night would be noise about a switch nobody chose. Reintroduce by dropping `!r.details.off`: the off case reads.
+  const base = { counted: 0, uncounted: 0, short: {}, gaps: {}, failures: { reset: 0 }, solver: {} };
+  assert.match(taskResult({ ...base, details: { asked: 12, filled: 4 } }), /missing details filled in for 4 series/);
+  assert.doesNotMatch(taskResult({ ...base, details: { asked: 12, filled: 0 } }), /missing details/);
+  assert.doesNotMatch(taskResult({ ...base, only: ['details'], details: { off: true, asked: 0, filled: 0 } }), /missing details/);
+  assert.equal(taskResult({ ...base, only: ['details'], details: { asked: 3, filled: 1 } }), ' · missing details filled in for 1 series');
+  assert.equal(taskResult({ ...base, only: ['details'], details: { asked: 3, filled: 0 } }), ' · missing details filled in for 0 series');
+});
+
 // ---- v0.49.0: how long, and the Tasks tab in every language ----
 
 test('a repair says how long it took, last, and the English line is otherwise unchanged', () => {

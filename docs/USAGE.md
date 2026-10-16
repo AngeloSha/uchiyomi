@@ -2121,7 +2121,7 @@ source, a folder, the solver — and a duplicate pair stay in the By check view.
 
 **What fixes itself.** Once a day — **Admin → Settings → Library housekeeping → Repair the library nightly**,
 on by default, and **Admin → Tasks → Repair library** with a *Run now* — Uchiyomi does the six things that
-are reversible or provable on their own, and two more only when you switch them on, in this order. Since v0.55.0,
+are reversible or provable on their own, and three more only when you switch them on, in this order. Since v0.55.0,
 **Every night**, just under that switch, chooses what runs: this **Safe repair** (the default), or a whole **Fix
 everything**, which does what its key on Health does and can merge, delete and install extensions without asking.
 
@@ -2145,7 +2145,16 @@ everything**, which does what its key on Health does and can merge, delete and i
 * **learns which way series read** (since v0.48.0) for the ones nothing has said about yet: it asks MangaDex
   for the original language of every series that follows it, then AniList for the country of origin of every
   series linked there — a few batch requests a night, at most 500 series each. It only ever writes the reading
-  direction, never over one you set by hand.
+  direction, never over one you set by hand;
+* **fills in missing details** (since v0.73.0, from ideas by @Squeaks72), if you switch on **Admin → Settings → Library
+  housekeeping → Fill in missing details**: a series with no description, genres or author of its own gets them from
+  AniList — for series linked there, in English, in libraries that look AniList up, all in one request per fifty — or
+  else from its own source or one it follows in its language, for up to 15 series a night that you keep updated (and
+  a series with no chapters yet gets a cover). Only sources that are not switched off, failing or cooling down are
+  asked. What it fills in never replaces anything: a series' own details win the moment a scan brings them, and so does
+  anything you set in **Edit details**; the 18+ filter judges the genres it adds like any others. A series it could
+  not describe is asked again after a month, and following a source by hand asks at once. Switching it off takes back
+  everything it filled in.
 
 A whole run starts at most five searches, however many findings there are, shared between the steps that
 need one — and the short chapters may take at most two of them, so a library full of short chapters cannot

@@ -90,7 +90,7 @@ export const isFullRun = (opts: Opts): boolean => !opts.only?.length;
 
 /**
  * Whether the run can download a chapter at all. A run that cannot -- the solver reset, the page count, the
- * names, the directions, and the failures step without a source or `now` (it only resets ledger rows) -- is
+ * names, the directions, the details, and the failures step without a source or `now` (it only resets ledger rows) -- is
  * still a Server task, but it must not turn the Library ring: every Health press starts a repair run, and a
  * ring that turns for a solver reset says the server is fetching when it is not.
  */

@@ -68,7 +68,7 @@ export function worstCase(kind: string, L: EstimateLimits, opts: { n?: number; s
 
   const m = /^steps:([a-z+]+)(:now)?$/.exec(kind);
   const steps = kind === 'full'
-    ? ['solver', 'count', 'failures', 'short', 'gaps', 'groups', 'names', 'directions']
+    ? ['solver', 'count', 'failures', 'short', 'gaps', 'groups', 'names', 'directions', 'details']
     : m ? m[1].split('+') : null;
   if (!steps) return { boundedMs: null, downloads: 0 };
   const now = !!m?.[2];
@@ -92,7 +92,7 @@ export function worstCase(kind: string, L: EstimateLimits, opts: { n?: number; s
           ? { ms: L.retrySeries * (Lst + L.paceMs), hunts: 0, afterHunt: 0, downloads: L.retrySeries * 10 }
           : { ms: 0, hunts: 0, afterHunt: 0, downloads: 0 };
       default:
-        // count, groups, names, directions: bounded by their caps, not by a wait the code names.
+        // count, groups, names, directions, details: bounded by their caps, not by a wait the code names.
         return { ms: null, hunts: 0, afterHunt: 0, downloads: 0 };
     }
   };

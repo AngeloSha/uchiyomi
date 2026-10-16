@@ -1229,6 +1229,30 @@ ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS borrow_names boolean;
 ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS name_donor jsonb;
 ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS chapter_name_source text;
 
+-- v0.73.0: the details the server fills in for a series that has none of its own (lib/autoDetails.ts, #257 and #245
+-- from @Squeaks72), the repair's ninth step. A layer of its own, BELOW the scan: a series shows its own description,
+-- genres or author whenever its files or its source gave one (lib_series), an admin's edit beats both
+-- (series_overrides), and this is read only where both are empty (lib/autoDetailsSql.ts). A scan never writes it and
+-- an edit never does, so it never shadows better data, and switching fill_details off deletes it whole. *_from names
+-- where each came from: 'anilist' or a source id. cover is the cover it put in series_art for a series with no chapters
+-- yet, kept so switching off can take exactly that back. sources_at and anilist_at are when each was last asked, so a
+-- series nobody can describe waits a month before it is asked again. Off by default; additive: v0.72.x ignores it all.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS fill_details boolean NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS series_auto_details (
+  series_id    text PRIMARY KEY REFERENCES lib_series(id) ON DELETE CASCADE,
+  summary      text,
+  summary_from text,
+  genres       text[],
+  genres_from  text,
+  author       text,
+  author_from  text,
+  cover        text,
+  cover_from   text,
+  sources_at   timestamptz,
+  anilist_at   timestamptz,
+  updated_at   timestamptz NOT NULL DEFAULT now()
+);
+
 -- v0.48.0: which way a series reads (lib/readingDirection.ts, #102). Until now every series answered WEBTOON,
 -- so the reader's "Series default" direction could never turn a page right to left. reading_direction is one
 -- of Komga's four values, NULL meaning nobody knows, which still reads as WEBTOON. reading_direction_from names

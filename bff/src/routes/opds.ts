@@ -14,6 +14,7 @@ import sharp from 'sharp';
 import { q, one } from '../lib/db';
 import { resolveOpdsBasic } from '../lib/auth';
 import { viewCtxFor, visibleBookFile, Params, visible, browsable, type ViewCtx } from '../lib/visibility';
+import { AUTO_DETAILS, authorOf, genresOf, summaryOf } from '../lib/autoDetailsSql';
 import { LIBRARY_ROOT, cbzPageAt } from '../lib/library';
 import { regularFiles, readRegularFile } from '../lib/archiveCaps';
 import { serveImage } from '../lib/imageCache';
@@ -189,10 +190,11 @@ export default async function opdsRoutes(app: FastifyInstance) {
    * would have inherited a change made to the real one in ownedCatalog.
    */
   const seriesSrcWith = (gate: typeof visible, ctx: ViewCtx, p: Params) => `(SELECT s.id, COALESCE(o.title, s.title) AS title,
-          COALESCE(o.summary, s.summary) AS summary, COALESCE(o.author, s.author) AS author, ${visibleBookCount('s')} AS books_count,
-          COALESCE(o.genres, s.genres) AS genres, COALESCE(o.status, s.status) AS status, s.library_id,
+          ${summaryOf('o', 's', 'sad')} AS summary, ${authorOf('o', 's', 'sad')} AS author, ${visibleBookCount('s')} AS books_count,
+          ${genresOf('o', 's', 'sad')} AS genres, COALESCE(o.status, s.status) AS status, s.library_id,
           s.latest_mtime, s.created_at
      FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
+     LEFT JOIN ${AUTO_DETAILS} sad ON sad.series_id = s.id
     WHERE ${gate('s', ctx, p)}) sv`;
   /** The browsing feeds: 18+ hidden unless this reader's token says otherwise (see the preHandler). */
   const seriesSrc = (ctx: ViewCtx, p: Params) => seriesSrcWith(browsable, ctx, p);

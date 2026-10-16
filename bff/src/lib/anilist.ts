@@ -4,6 +4,7 @@
 // than re-resolved later by another fuzzy title search.
 import { plainText } from './htmlText';
 import { namesMatch } from './onlineMatch';
+import { readCapped } from './safeFetch';
 
 /**
  * Where AniList is: ANILIST_API_URL, the test knob the tracker calls already read (lib/trackerProviders.ts), moves these
@@ -128,10 +129,38 @@ export async function fetchAniListScores(ids: number[]): Promise<Map<number, Ani
   return out;
 }
 
+const DETAILS = `query($ids:[Int]){Page(perPage:50){media(id_in:$ids,type:MANGA){id description(asHtml:false) genres}}}`;
+
+/** What AniList says a linked entry is about (v0.73.0, lib/autoDetails.ts): its description as AniList writes it, and its genres. */
+export interface AniListDetails { description: string | null; genres: string[] }
+
+/**
+ * The description and genres of many linked entries at once (series_trackers' AniList ids), fifty per request, for the
+ * series that have none of their own (lib/autoDetails.ts; #245 from @Squeaks72, ported AniList-first). By id, never a
+ * search: no title is sent, and nothing can match another work. Raw: the caller cleans the text (cleanDescription,
+ * cleanGenres). An id AniList does not answer is absent from the map. Public data: no token. Paced and 429-handled by
+ * mediaById; anything else throws.
+ */
+export async function fetchAniListDetails(ids: number[]): Promise<Map<number, AniListDetails>> {
+  const out = new Map<number, AniListDetails>();
+  await mediaById(DETAILS, [...new Set(ids)], (m) => {
+    if (!Number.isInteger(m?.id)) return;
+    out.set(m.id, {
+      description: typeof m.description === 'string' && m.description.trim() ? m.description : null,
+      genres: Array.isArray(m.genres) ? m.genres.filter((g: unknown): g is string => typeof g === 'string') : [],
+    });
+  });
+  return out;
+}
+
+/** The most one batched answer may be: fifty entries with their descriptions are a few hundred KB. */
+const MEDIA_MAX_BYTES = 4 * 1024 * 1024;
+
 /**
  * One `query($ids)` over many entries, `chunk` ids per request (fifty; v0.61.0's related query asks ten, as its
  * `Page(perPage:10)` says), `each` called with every media AniList answers. Paced like the art jobs between pages; a 429
- * is waited out as fetchAniListArt waits it out, anything else throws.
+ * is waited out as fetchAniListArt waits it out, anything else throws. Read through readCapped (lib/safeFetch.ts), so an
+ * answer past MEDIA_MAX_BYTES throws rather than filling memory.
  */
 async function mediaById(query: string, ids: number[], each: (m: any) => void, chunk = 50): Promise<void> {
   for (let i = 0; i < ids.length; i += chunk) {
@@ -151,7 +180,7 @@ async function mediaById(query: string, ids: number[], each: (m: any) => void, c
         continue;
       }
       if (!r.ok) throw new Error(`anilist ${r.status}`);
-      j = await r.json();
+      j = JSON.parse((await readCapped(r, MEDIA_MAX_BYTES)).toString('utf8'));
       break;
     }
     for (const m of j?.data?.Page?.media ?? []) each(m);

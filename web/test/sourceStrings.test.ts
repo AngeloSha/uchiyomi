@@ -50,6 +50,7 @@ test('a count of one takes its singular key, never a plural key filled with 1', 
     gaps: { series: 1, followed: 1, fetched: 1, unfillable: 0, sweep: 0 },
     groups: { looked: 2, replaced: 1, left: 1 },
     directions: { asked: 1, learned: 1 },
+    details: { asked: 1, filled: 1 },
     failures: { reset: 1, retried: { series: 1, added: 1, failed: 1 } },
     solver: { reset: true, unblocked: 1, expired: 1 },
   }));

@@ -50,6 +50,7 @@ import { getOrFetch, type FetchedImage } from './imageCache';
 import { firstRunFloor } from './desktop';
 import { ADULT_RATING, visibleToAll } from './visibility';
 import { FIRST_PAGE } from './seriesArt';
+import { AUTO_DETAILS } from './autoDetailsSql';
 
 // ── the frames ───────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -540,8 +541,8 @@ async function drawHero(picks: Sourced[], deadline: number): Promise<HeroImages>
 
 /**
  * SQL: the series under `alias` may have an automatic banner. Every 18+ rule counts on its own -- the series' own
- * rating or an admin's, its library's, one of the admin's 18+ genres in its own genres or an admin's, its source
- * named adult by the admin -- unlike `visible()`, where an admin's lower rating lets one series out of an 18+
+ * rating or an admin's, its library's, one of the admin's 18+ genres in its own genres, an admin's or the ones the
+ * server filled in for it (v0.73.0, lib/autoDetails.ts), its source rated Adult only by the admin -- unlike `visible()`, where an admin's lower rating lets one series out of an 18+
  * library: a banner is shown to everyone who can open the series, unasked, and an explicit panel must never become
  * one. "Always show" (adult_exempt) is a shelf switch and lifts nothing here either. An extension that declares
  * itself adult is checked in code (adultSource), since only the source registry knows.
@@ -567,7 +568,8 @@ export function heroEligible(alias: string): string {
       SELECT 1 FROM server_settings hs, jsonb_array_elements_text(hs.adult_genres) AS hg
        WHERE hs.id = 1 AND jsonb_typeof(hs.adult_genres) = 'array'
          AND lower(btrim(hg)) IN (SELECT lower(btrim(g)) FROM unnest(${s}.genres || COALESCE(
-               (SELECT ho2.genres FROM series_overrides ho2 WHERE ho2.series_id = ${s}.id), '{}'::text[])) AS g))
+               (SELECT ho2.genres FROM series_overrides ho2 WHERE ho2.series_id = ${s}.id), '{}'::text[]) || COALESCE(
+               (SELECT hm.genres FROM ${AUTO_DETAILS} hm WHERE hm.series_id = ${s}.id), '{}'::text[])) AS g))
     AND NOT EXISTS (SELECT 1 FROM server_settings hs3 WHERE hs3.id = 1 AND jsonb_typeof(hs3.adult_sources) = 'array'
                      AND hs3.adult_sources ? lower(COALESCE(${s}.source_id, '')))`;
 }

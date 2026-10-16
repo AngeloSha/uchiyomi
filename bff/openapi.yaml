@@ -7086,6 +7086,9 @@ paths:
                   borrow_names:
                     type: boolean
                     description: Whether the nightly repair borrows chapter names from another source. See borrowNames on PATCH.
+                  fill_details:
+                    type: boolean
+                    description: Whether the nightly repair fills in missing descriptions, genres, authors and covers. See fillDetails on PATCH.
                   archive_paused: { type: boolean, description: "The slow archive (#117) is paused server-wide. See archivePaused on PATCH." }
                   archive_per_hour: { type: integer, minimum: 1, maximum: 30 }
                   archive_window_from: { type: [integer, "null"], minimum: 0, maximum: 23 }
@@ -7310,6 +7313,19 @@ paths:
                     this off clears exactly the names it wrote for every series that follows this setting
                     (a series switched on for itself keeps its own).
                   type: boolean
+                fillDetails:
+                  description: >-
+                    Fill in missing details (since v0.73.0), the nightly repair's ninth step. Off by default.
+                    A series with no description, genres or author of its own is given them from AniList (in one
+                    batched request by id, for series linked there with a checked link, in libraries whose
+                    AniList lookups are on, and in English only), else from its own source or one it follows in
+                    its language -- only sources that are not off, failing or cooling down, for at most
+                    REPAIR_DETAILS_MAX (15) series a night that are kept updated; a series with no chapters yet is
+                    given a cover too. What it fills in is kept in a layer of its own below the scan: a series'
+                    own details always win, an admin's edit wins over both, and the 18+ filter judges the genres
+                    a series shows. A series asked is asked again after 30 days. A manual follow asks at once.
+                    Switching this off deletes everything it filled in, and puts back any cover it set.
+                  type: boolean
                 archivePaused:
                   type: boolean
                   description: >-
@@ -7482,7 +7498,7 @@ paths:
         any kind -- how a page that pressed a one-row fix learns that ITS run (the id the run route answered)
         ended, even one that took 5 ms; `recent` the five newest finished runs {id, finishedAt, status, kind,
         target}; `lastFull` {id, at, ms, origin, result} the newest full run. `limits` is every bound the
-        running process uses (env overrides applied): shortMax, gapsMax, groupsMax, namesMax, countMax,
+        running process uses (env overrides applied): shortMax, gapsMax, groupsMax, namesMax, detailsMax, countMax,
         directionsMax, huntBudget, shortHuntMax, gapChapters, retrySeries, shortCopies, failuresMax, retryCap,
         paceMs, pageListMs, listingRefreshMs, listTimeoutMs, huntWallMs, huntMaxSources, solverBudgetMs,
         expiredBlockHours, repairHours. `estimates` maps a run kind to {typicalMs (median of its last five
@@ -7730,7 +7746,7 @@ paths:
         schedule. Audit: `task.run` {task: 'verify'} at the press and `library.verify` {checked, missing,
         readLibraryMissing, unmounted, ms} when the walk ends.
         `repair` (since v0.41.0) is the only task that takes a body, and it is also detached. With no body it
-        runs all eight steps over the whole library; `only` narrows it to named steps, and the three targets
+        runs all nine steps over the whole library; `only` narrows it to named steps, and the three targets
         each belong to exactly one step -- `seriesId` to `gaps` ("Fill now" on one series), `bookId` to
         `short` ("Fix" on one chapter), `sourceId` to `failures` ("Retry now" on one source) -- so a target
         sent without `only: ["<its step>"]` is refused with 400 rather than quietly widened into a full run.
@@ -7783,14 +7799,16 @@ paths:
                   minItems: 1
                   maxItems: 9
                   description: >-
-                    Which steps to run, each at most once. Omitted means all eight, in this order. `groups`
-                    and `names` (since v0.47.0) do nothing unless group upgrades, or chapter-name borrowing,
-                    are switched on (groupUpgrade and borrowNames on PATCH /api/admin/settings).
+                    Which steps to run, each at most once. Omitted means all nine, in this order. `groups`,
+                    `names` (since v0.47.0) and `details` (since v0.73.0) do nothing unless group upgrades,
+                    chapter-name borrowing or Fill in missing details are switched on (groupUpgrade,
+                    borrowNames and fillDetails on PATCH /api/admin/settings) -- `details` then reports
+                    `details: {asked, filled}`, and `details: {off: true, asked: 0, filled: 0}` while it is off.
                     `directions` (since v0.48.0) asks MangaDex and AniList which way series with no known
                     reading direction read, at most REPAIR_DIRECTIONS_MAX (500) series per service.
                   items:
                     type: string
-                    enum: [solver, count, failures, short, gaps, groups, names, directions]
+                    enum: [solver, count, failures, short, gaps, groups, names, directions, details]
                 seriesId:
                   type: string
                   description: >-

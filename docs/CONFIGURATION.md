@@ -110,8 +110,10 @@ art; a series with no art on record is looked up the same way the first time its
 match also records the AniList id progress sync writes against. The admin panel's **Cover & banner health**
 card — its *Backfill*, and picking art for one series by hand — asks AniList again and, for wide cover art,
 Kitsu (`kitsu.io`), and `POST /api/admin/trackers/relink` asks AniList for every unlinked series. Discover's
-*Trending* rail is AniList's own trending list, fetched at most once every six hours. These lookups carry
-your server's IP address and the title asked for, and nothing else. Of the knobs below, only `ANILIST_API_URL`
+*Trending* rail is AniList's own trending list, fetched at most once every six hours. Since v0.73.0, with **Fill in
+missing details** switched on (off by default), the nightly repair also asks AniList for the description and genres of
+series linked there that have none — by AniList id, fifty to a request, never by title. These lookups carry
+your server's IP address and the title or id asked for, and nothing else. Of the knobs below, only `ANILIST_API_URL`
 moves them (AniList's, since v0.55.7); the other two point only the token-bearing tracker calls elsewhere.
 
 Since v0.55.8 ([discussion #168](https://github.com/AngeloSha/uchiyomi/discussions/168)), each library — the default
@@ -405,6 +407,9 @@ ever hit.
   borrowing is switched on (step 7 below).
 - `REPAIR_DIRECTIONS_MAX` (default `500`, 1–5000): series one run asks each service — MangaDex, then AniList —
   about their reading direction (step 8 below): at most five and ten requests a night at the default.
+- `REPAIR_DETAILS_MAX` (default `15`, 1–200): series one run asks their own source and the ones they follow about a
+  missing description, genres, author or cover, when Fill in missing details is switched on (step 9 below). AniList's
+  part is one batched request per fifty series and has its own fixed ceiling of 500.
 - `REPAIR_PACE_MS` (default `1500`, 0 or more): the pause between two series the repair's *Retry now* step
   re-checks. `0` is a legitimate value and means no pause at all. Fix everything paces every series of its
   failures, short and gap steps by it too.
@@ -521,6 +526,16 @@ provable on their own, and two more only when you switch them on, in this order:
    asked for the original language of the ones that follow it, then AniList for the country of origin of the ones
    linked there — at most `REPAIR_DIRECTIONS_MAX` series from each in a run, picked at random. Only the reading
    direction is ever written, and never over one set by hand.
+9. **Missing details** (since v0.73.0), **off** until **Admin → Settings → Library housekeeping → Fill in missing
+   details** is switched on. A series with no description, genres or author of its own is given them: first by
+   AniList, for series linked there with a checked link, in libraries whose AniList lookups are on, in English, at most
+   500 a run in requests of fifty by id; then, for at most `REPAIR_DETAILS_MAX` series that are kept updated, by the
+   series' own source and the ones it follows in its language, each lookup bounded by the source's own time budget and
+   only of sources that are not off, failing or cooling down. A series with no chapters yet also gets a cover. What it
+   finds is kept in a layer of its own (`series_auto_details`) that a series shows only where its own details and an
+   admin's edit are both empty, so a scan never fights it and nothing is ever replaced; the 18+ filter judges the
+   genres it adds. A series asked is left for 30 days. Nothing here is reported to source health. Switching it off
+   deletes the layer and puts back any cover it set.
 
 Fixed rather than configurable, because they are the blast radius rather than a preference: 5 searches for a
 whole run, shared by steps 3–5, of which the short step may spend at most 2 — so a library full of short

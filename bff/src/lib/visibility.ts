@@ -11,6 +11,7 @@
 // one more clause on `visible()`, and every caller inherits it because they all go through here.
 import { q, one } from './db';
 import { noticeBook } from './noticeChapters';
+import { genresByIdOf } from './autoDetailsSql';
 
 export interface ViewCtx {
   /** null only for background work that legitimately sees everything: the scanner, the hero pre-warmer. */
@@ -288,16 +289,17 @@ export function browsable(alias: string, ctx: ViewCtx, p: Params): string {
   // with `lower(btrim())` on both sides, the same fold the genre overview applies. The first branch is
   // uncorrelated, so Postgres evaluates it once per query: with no genre configured, no row pays for the rest.
   // An admin override of a series' genres wins over what the scan read, as the age rating does in `visible()`,
-  // and an `adult_exempt` override lets one series through.
+  // and an `adult_exempt` override lets one series through. The genres are the ones the series SHOWS
+  // (lib/autoDetailsSql.ts): since v0.73.0 that includes genres the server filled in for a series with none of its
+  // own, so a series whose filled-in genres name an adult genre is hidden like one that was scanned with it.
+  // Reintroduce by reading the override and the scan alone: "filled-in genres are judged by the 18+ filter" in
+  // autoDetails.int.test.ts lists the series while Show 18+ is off.
   parts.push(`(
     NOT EXISTS (SELECT 1 FROM server_settings s_ad
                  WHERE s_ad.id = 1 AND jsonb_typeof(s_ad.adult_genres) = 'array' AND jsonb_array_length(s_ad.adult_genres) > 0)
     OR NOT (
       EXISTS (
-        SELECT 1 FROM unnest(COALESCE(
-          (SELECT o_ad.genres FROM series_overrides o_ad WHERE o_ad.series_id = ${alias}.id),
-          ${alias}.genres
-        )) AS g_ad
+        SELECT 1 FROM unnest(${genresByIdOf(alias)}) AS g_ad
         WHERE lower(btrim(g_ad)) IN (
           SELECT lower(btrim(x_ad)) FROM server_settings s2_ad, jsonb_array_elements_text(s2_ad.adult_genres) AS x_ad
            WHERE s2_ad.id = 1 AND jsonb_typeof(s2_ad.adult_genres) = 'array')

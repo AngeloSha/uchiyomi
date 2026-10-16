@@ -2299,8 +2299,8 @@ library*, and the *Fix* / *Fill now* / *Retry now* keys and the *Reset the solve
 `{ok: true, started: true}` (since v0.49.0 with the run's id, below); a full run's counts land on `GET
 /api/admin/tasks` as the `repair` entry's `lastResult`.
 It is the only task that takes a **body**: `{only?: ('solver' | 'count' | 'failures' | 'short' | 'gaps' |
-'groups' | 'names' | 'directions')[], seriesId?, bookId?, sourceId?, now?}`. With no body it runs all eight steps over
-the whole library, in that order. `directions` (since v0.48.0) asks MangaDex (the original language of every
+'groups' | 'names' | 'directions' | 'details')[], seriesId?, bookId?, sourceId?, now?}`. With no body it runs all nine
+steps over the whole library, in that order. `directions` (since v0.48.0) asks MangaDex (the original language of every
 series that follows it) and AniList (the country of origin of every linked series) about the series whose
 reading direction nothing has said yet — at most `REPAIR_DIRECTIONS_MAX` (500) series per service a night, 100
 ids per MangaDex request and 50 per AniList request — and reports `directions: {asked, learned}`.
@@ -2310,7 +2310,13 @@ makes is audited as `book.group_upgraded`. `names` (also v0.47.0) borrows chapte
 and likewise does nothing unless `borrowNames` is on for the server or for a series (`borrow_names` on the
 settings GET, `borrowNames` on `PATCH /api/admin/series/:id`, where `null` follows the server); it writes
 `lib_books.chapter_name` only, marked with the donor in `chapter_name_source`, and switching it off clears
-exactly those.
+exactly those. `details` (since v0.73.0) fills in a description, genres or an author for the series that have none of
+their own, and a cover for one with no chapters yet — from AniList in one batched request by id (series linked there,
+in libraries whose AniList lookups are on, in English), then from a series' own source and the ones it follows, for at
+most `REPAIR_DETAILS_MAX` (15) series a night that are kept updated. It does nothing unless `fillDetails` is on
+(`fill_details` on the settings GET, off by default), and reports `details: {asked, filled}` (`{off: true, …}` while
+off). What it fills in sits below the series' own details and an admin's edit (`series_auto_details`), and switching
+it off deletes it.
 Each target belongs to exactly one step — `seriesId` to `gaps` (that series, ignoring the 24-hour re-check
 cooldown), `bookId` to `short` (that chapter), `sourceId` to `failures` (that source's failed chapters,
 whatever their age) — and a target sent **without** `only: ["<its step>"]` is a **400** `bad_request` with a

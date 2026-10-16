@@ -44,8 +44,9 @@ export type RunKind = 'sweep' | 'repair' | 'newest' | 'find_sources' | 'autofix'
 export const REPAIR_STEP_LABELS = keys(
   'Checking the solver', 'Counting pages', 'Retrying failed chapters', 'Looking for longer copies',
   'Filling gaps', 'Upgrading to preferred groups', 'Tidying chapter names', 'Learning reading directions',
+  'Filling in missing details',
 );
-export const REPAIR_STEP_KEYS = ['solver', 'count', 'failures', 'short', 'gaps', 'groups', 'names', 'directions'] as const;
+export const REPAIR_STEP_KEYS = ['solver', 'count', 'failures', 'short', 'gaps', 'groups', 'names', 'directions', 'details'] as const;
 
 /** The step a repair is on, in words; nothing for a step this build does not know (a newer server's). */
 export function repairStepLabel(step: string | undefined): string {

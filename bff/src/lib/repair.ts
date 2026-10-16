@@ -62,6 +62,7 @@ import { automaticChapterAllowedFor, automaticCopiesFor, copyToChapter, seriesFo
 import { groupsOf, normGroup, type ReleasePrefs } from './releases';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { borrowNamesFor, NAMES_RETRY_MS } from './borrowNames';
+import { fillDetailsFromAniList, fillDetailsFromSources, fillDetailsOn, seriesLackingDetails } from './autoDetails';
 import { busyFolders } from './bulkNewest';
 import { beginRun, dismissRun, endRun, stopRequested, type RunCard } from './downloadJobs';
 import { say } from './said';
@@ -83,14 +84,15 @@ import { standingsOf } from './sourceStanding';
 import { folderBusy } from './numbering';
 
 /**
- * Which of the eight steps to run. `only` on the options picks a subset; the nightly runs them all. `groups`
- * and `names` (v0.47.0) do nothing unless an admin has switched them on -- see stepGroups and stepNames.
- * `directions` (v0.48.0) only reads: it asks MangaDex and AniList which way series read (stepDirections).
+ * Which of the nine steps to run. `only` on the options picks a subset; the nightly runs them all. `groups`
+ * and `names` (v0.47.0) do nothing unless an admin has switched them on -- see stepGroups and stepNames -- and
+ * neither does `details` (v0.73.0, stepDetails). `directions` (v0.48.0) only reads: it asks MangaDex and AniList which
+ * way series read (stepDirections).
  */
-export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups' | 'names' | 'directions';
+export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups' | 'names' | 'directions' | 'details';
 
 /** In the order the run takes them, which is also the order a caller's `only` is reported in. */
-export const REPAIR_STEPS: readonly RepairStep[] = ['solver', 'count', 'failures', 'short', 'gaps', 'groups', 'names', 'directions'];
+export const REPAIR_STEPS: readonly RepairStep[] = ['solver', 'count', 'failures', 'short', 'gaps', 'groups', 'names', 'directions', 'details'];
 
 /**
  * An integer knob from the environment, clamped. Out-of-range, unparseable and absent all fall back to the
@@ -132,6 +134,12 @@ export const REPAIR_NAMES_MAX = envInt('REPAIR_NAMES_MAX', 5, 1, 100);
  * request and AniList 50, so the default is at most five and ten requests a night.
  */
 export const REPAIR_DIRECTIONS_MAX = envInt('REPAIR_DIRECTIONS_MAX', 500, 1, 5000);
+/**
+ * Series one run may ask their sources about for a missing description, genres, author or cover (stepDetails,
+ * lib/autoDetails.ts). Each is a detail lookup on its own source and on the ones it follows, for something cosmetic,
+ * so a library catches up over a few weeks of nights rather than in one. AniList's part is batched and has its own cap.
+ */
+export const REPAIR_DETAILS_MAX = envInt('REPAIR_DETAILS_MAX', 15, 1, 200);
 /**
  * The pause between two series the failures step retries, as the sweep paces itself. Tests set it to 0.
  *
@@ -190,6 +198,7 @@ export const REPAIR_LIMITS = Object.freeze({
   gapsMax: REPAIR_GAPS_MAX,
   groupsMax: REPAIR_GROUPS_MAX,
   namesMax: REPAIR_NAMES_MAX,
+  detailsMax: REPAIR_DETAILS_MAX,
   countMax: REPAIR_COUNT_MAX,
   directionsMax: REPAIR_DIRECTIONS_MAX,
   huntBudget: REPAIR_HUNT_BUDGET,
@@ -308,6 +317,12 @@ export interface RepairResult {
    * changed because of it.
    */
   directions: { asked: number; learned: number };
+  /**
+   * Details filled in (stepDetails, v0.73.0): series asked about -- of AniList, then of their sources -- and series given
+   * a description, genres, an author or a cover. `off` when the switch is off, which is the default, and then nothing was
+   * asked.
+   */
+  details: { off?: true; asked: number; filled: number };
   failures: {
     /** Ledger rows put back to zero attempts. */
     reset: number;
@@ -1543,6 +1558,39 @@ async function stepDirections(r: RepairResult, log?: Log): Promise<void> {
   });
 }
 
+/**
+ * (i) Details filled in (lib/autoDetails.ts; #257 and #245 from @Squeaks72, rebuilt): a description, genres, an author
+ * or a cover for the series that have none, into a layer of their own below the scan, so nothing a scan or an admin
+ * wrote is ever replaced. Off unless an admin switches it on. AniList first, in one batched request by id per fifty
+ * linked series; then, for at most REPAIR_DETAILS_MAX series that are kept updated, their own source and the ones they
+ * follow -- only usable ones, each lookup bounded. A series asked is stamped and left for a month. Writes no file; it
+ * stops between series for a Cancel or a shutdown.
+ */
+async function stepDetails(r: RepairResult, log?: Log): Promise<RepairResult['stopped']> {
+  if (!(await fillDetailsOn())) { r.details.off = true; return undefined; }
+  try {
+    const a = await fillDetailsFromAniList();
+    r.details.asked += a.asked;
+    r.details.filled += a.filled;
+    if (a.filled) log?.info(`repair: details from AniList for ${a.filled} of ${a.asked} series`);
+  } catch (e) {
+    // AniList down or refusing: the sources below are asked as usual, and AniList again tomorrow (nothing was stamped).
+    log?.warn(`repair: details from AniList: ${(e as Error)?.message || e}`);
+  }
+  const rows = await seriesLackingDetails(REPAIR_DETAILS_MAX).catch(() => [] as Array<{ id: string; title: string }>);
+  for (const s of rows) {
+    { const h = halted(); if (h) return h; }
+    if (!(await seriesIsMonitored(s.id))) continue;
+    const res = await fillDetailsFromSources(s.id, log);
+    r.details.asked++;
+    if (res.filled.length) {
+      r.details.filled++;
+      log?.info(`repair: "${s.title}": ${res.filled.join(', ')} from ${res.from.join(', ')}`);
+    }
+  }
+  return undefined;
+}
+
 /** What one series' gap hunt concluded, stored on lib_series.gaps_result for the Health page to read. */
 interface GapsResult {
   at: string;
@@ -1854,6 +1902,7 @@ function blank(): RepairResult {
     groups: { looked: 0, replaced: 0, left: 0 },
     names: { series: 0, named: 0 },
     directions: { asked: 0, learned: 0 },
+    details: { asked: 0, filled: 0 },
     failures: { reset: 0 },
     solver: { reset: false, unblocked: 0, expired: 0 },
   };
@@ -1867,7 +1916,8 @@ function summaryOf(r: RepairResult): string {
     + `(${r.solver.unblocked} unblocked, ${r.solver.expired} expired), groups `
     + (r.groups.off ? 'off' : `${r.groups.replaced} replaced / ${r.groups.left} left of ${r.groups.looked}`)
     + ', names ' + (r.names.off ? 'off' : `${r.names.named} named in ${r.names.series} series`)
-    + `, directions ${r.directions.learned} learned of ${r.directions.asked} asked`;
+    + `, directions ${r.directions.learned} learned of ${r.directions.asked} asked`
+    + ', details ' + (r.details.off ? 'off' : `${r.details.filled} filled of ${r.details.asked} asked`);
 }
 
 /** One pass. Exported for the tests; everything else goes through runRepair, which owns the flags. */
@@ -1920,6 +1970,7 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
     else if (step === 'groups') stopped = await stepGroups(r, opts, notes, log);
     else if (step === 'names') stopped = await stepNames(r, log);
     else if (step === 'directions') await stepDirections(r, log);
+    else if (step === 'details') stopped = await stepDetails(r, log);
     r.stepMs[step] = Date.now() - t;
     if (live) live.stepMs[step] = r.stepMs[step];
     if (activeCard) {

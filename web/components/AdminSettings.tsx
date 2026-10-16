@@ -804,6 +804,11 @@ function ScanlatorsSection({ data, save }: { data: any; save: Save }) {
       <SwitchRow label={tr('Borrow chapter names from other sources')}
         help={tr('Off by default. When a series’ own source only ever says “Chapter 12”, take the names from another source whose numbering was checked against this one — a source that numbers the chapters differently is never used, and the names go into the chapter name only, never the file. The chapter’s own source naming it later wins, and switching this off takes the borrowed names back.')}
         on={data.borrow_names === true} onChange={(next) => save({ borrowNames: next })} />
+      {/* v0.73.0 (#257 and #245 from @Squeaks72): the nightly repair's ninth step. Off by default: it asks sources about
+          series, and AniList's text is English. What it fills in sits below a series' own details, never over them. */}
+      <SwitchRow label={tr('Fill in missing details')}
+        help={tr('Off by default. Once a night, a series with no description, genres or author of its own gets them from AniList, when it is linked there and in English, or else from its own source or one it follows; a series with no chapters yet gets a cover too. A series’ own details always win, and so does anything you set in Edit details. Switching this off takes back everything it filled in.')}
+        on={data.fill_details === true} onChange={(next) => save({ fillDetails: next })} />
       {/* v0.56.0: Discover's names looked up on AniList, MangaDex and MangaUpdates, beside the other row that sends titles
           off the server. ON by default, which `!== false` reads as: a server that does not send the key yet looks them up. */}
       <SwitchRow label={tr('Match Discover titles online')}

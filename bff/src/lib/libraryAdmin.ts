@@ -583,6 +583,8 @@ const SERIES_KEYED_TABLES = [
   'set_aside_files',
   // v0.61.0: its release radar (lib/releaseRadar.ts). Cascades too; named for the same count.
   'series_radar',
+  // v0.73.0: the details the server filled in for it (lib/autoDetails.ts). Cascades too; named for the same count.
+  'series_auto_details',
 ] as const;
 
 export interface ForgetRefusal {
