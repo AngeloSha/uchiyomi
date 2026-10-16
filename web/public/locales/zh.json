@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3929
+    "strings": 3936
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -1301,7 +1301,6 @@
   "18+ filter": "18+ 过滤",
   "Genres to keep off the shelf while “Show 18+” is off. This hides nothing from anyone who goes looking: links, bookmarks, downloads and reading progress are unaffected.": "在“显示 18+”关闭时不在书架上出现的类型。主动去找的人仍然能找到：链接、书签、下载和阅读进度都不受影响。",
   "No genres yet.": "还没有类型。",
-  "Sources to treat as adult, on top of the ones their extension already declares.": "除扩展本身已声明的之外，另外视为成人内容的来源。",
   "One series can be let through on its own page — Edit details ▸ “Always show”.": "单部作品可以在它自己的页面上放行 — 编辑详情 ▸ “始终显示”。",
   "Always show": "始终显示",
   "Type anywhere to search": "在任意位置输入即可搜索",
@@ -3932,5 +3931,13 @@
   "{n} chapter files in {m} series have no page that can be read": "{m} 部作品中的 {n} 个章节文件没有可读取的页面",
   "{n} chapter files have no page that can be read": "{n} 个章节文件没有可读取的页面",
   "Every chapter file the nightly count opened has pages": "夜间统计打开过的章节文件都有页面",
-  "The nightly repair opens each chapter file once to count its pages, and these are the files it found no page in: empty, cut short by a download, damaged, or gone. Fetch again downloads a new copy of a file Uchiyomi fetched itself and keeps the old one until the new copy lands; a file in a library you built is yours to replace. Nothing here deletes a file, and Fix everything leaves these to you.": "夜间修复会把每个章节文件打开一次来统计页数，这里列出的是它一页都没找到的文件：空文件、下载中断、已损坏或已消失。“重新获取”会为 Uchiyomi 自己获取的文件下载新副本，并在新副本到达前保留旧文件；你手动搭建的库中的文件需要你自己替换。这里不会删除任何文件，“一键修复”也会把这些留给你。"
+  "The nightly repair opens each chapter file once to count its pages, and these are the files it found no page in: empty, cut short by a download, damaged, or gone. Fetch again downloads a new copy of a file Uchiyomi fetched itself and keeps the old one until the new copy lands; a file in a library you built is yours to replace. Nothing here deletes a file, and Fix everything leaves these to you.": "夜间修复会把每个章节文件打开一次来统计页数，这里列出的是它一页都没找到的文件：空文件、下载中断、已损坏或已消失。“重新获取”会为 Uchiyomi 自己获取的文件下载新副本，并在新副本到达前保留旧文件；你手动搭建的库中的文件需要你自己替换。这里不会删除任何文件，“一键修复”也会把这些留给你。",
+  "A whole source is rated on its own sheet: Sources ▸ the source ▸ Age rating. Adult only also keeps it from accounts limited below 18.": "整个来源的分级在它自己的面板里设置：来源 ▸ 该来源 ▸ 年龄分级。设为“仅限成人”后，年龄限制低于 18 的账户也无法使用它。",
+  "Adult only": "仅限成人",
+  "Rated Adult only": "已设为“仅限成人”",
+  "Age rating reset to automatic": "年龄分级已恢复为自动",
+  "Adult only: accounts limited below 18 can’t use it, and while Show 18+ is off it stays out of Discover and search.": "仅限成人：年龄限制低于 18 的账户无法使用它；关闭“显示 18+”时，它也不会出现在“发现”和搜索中。",
+  "Its extension marks it 18+, so accounts limited below 18 can’t use it either way.": "它的扩展把它标为 18+，因此无论如何，年龄限制低于 18 的账户都无法使用它。",
+  "Open to every account. Adult only keeps it from accounts limited below 18, and out of Discover and search while Show 18+ is off.": "对所有账户开放。设为“仅限成人”后，年龄限制低于 18 的账户将无法使用它；关闭“显示 18+”时，它也不会出现在“发现”和搜索中。",
+  "At most {limit} sources can be rated Adult only.": "最多只能把 {limit} 个来源设为“仅限成人”。"
 }

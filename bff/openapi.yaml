@@ -7077,7 +7077,7 @@ paths:
                     type: array
                     items:
                       type: string
-                    description: The source ids the 18+ filter treats as adult. See adultSources on PATCH.
+                    description: The source ids rated Adult only, lowercased. See adultSources on PATCH.
                   source_prefs:
                     $ref: "#/components/schemas/SourceOrder"
                   group_upgrade:
@@ -7265,10 +7265,14 @@ paths:
                     maxLength: 60
                 adultSources:
                   description: >-
-                    Source ids to treat as adult on top of the ones whose extension declares itself NSFW,
-                    replaced whole. While a request does not carry adult=1 they drop out of the routes that
-                    list sources or fan out over them (GET /api/sources, search-all, latest, popular). By-id
-                    routes are unaffected. Same normalisation as adultGenres. Empty by default.
+                    The source ids rated Adult only, on top of the ones whose extension declares itself NSFW,
+                    replaced whole (PUT /api/admin/sources/{id}/age-rating rates one at a time). Since v0.73.0 a
+                    permission: an account limited below 18 is refused these sources everywhere, by-id routes
+                    included (latest, popular, detail, add, preview), as it is refused a self-declared adult
+                    one. And while a request does not carry adult=1 they drop out of the routes that list
+                    sources or fan out over them (GET /api/sources, search-all, latest, popular). Ids are
+                    lowercased and trimmed; anything outside letters, digits and _ . : - is dropped. Empty by
+                    default.
                   type: array
                   maxItems: 200
                   items:
@@ -7777,7 +7781,7 @@ paths:
                 only:
                   type: array
                   minItems: 1
-                  maxItems: 8
+                  maxItems: 9
                   description: >-
                     Which steps to run, each at most once. Omitted means all eight, in this order. `groups`
                     and `names` (since v0.47.0) do nothing unless group upgrades, or chapter-name borrowing,
@@ -12146,6 +12150,8 @@ paths:
                         followed: { type: integer, minimum: 0 }
                         withBackup: { type: integer, minimum: 0 }
                         lastTestedAt: { type: [string, "null"], format: date-time, description: The last deliberate live check (Test or the daily check). }
+                        ageRating: { type: [integer, "null"], enum: [18, null], description: "Since v0.73.0: 18 when the admin rated the whole source Adult only (PUT /api/admin/sources/{id}/age-rating), else null." }
+                        defaultAgeRating: { type: [integer, "null"], enum: [18, null], description: "What the source is held to without that rating: 18 for an extension that declares itself adult, else null. Either 18 refuses the source to an account limited below 18." }
                         icon: { type: boolean, description: "GET /img/sources/icon/{id} serves an extension's logo." }
                         address: { type: string, description: A site added by address only. }
                         overLimit:
@@ -12265,6 +12271,57 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+  /api/admin/sources/{id}/age-rating:
+    put:
+      tags:
+        - admin
+      summary: Rate a whole source Adult only, or take the rating off.
+      operationId: putApiAdminSourcesIdAgeRating
+      description: >-
+        Since v0.73.0. Requires an admin account and a token carrying the admin scope. `ageRating` 18 rates the
+        source Adult only: an account limited below 18 is refused it everywhere -- the by-id routes included
+        (latest, popular, detail, add, preview) -- as it is refused a source whose extension declares itself adult,
+        and while a request does not carry adult=1 it leaves Discover, search and the latest and popular lists.
+        `null` takes the rating off, so the extension's own flag decides again. Nothing rates a source below its
+        extension's flag. Stored in the settings' adultSources, so the two are one list. The id need not be loaded
+        now (an extension's source is registered only while the engine is up). Audited as `source.age_rating`
+        {source, ageRating}.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [ageRating]
+              properties:
+                ageRating: { type: [integer, "null"], enum: [18, null], description: "18 = Adult only; null = the source's default." }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Saved.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, ageRating]
+                properties:
+                  ok: { type: boolean }
+                  ageRating: { type: [integer, "null"] }
+        "400":
+          description: "`bad_request`: not 18 or null, or an id that is not a source id"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "409":
+          description: "`too_many`: 200 sources are rated Adult only already. With `message` and `messageSaid` (`rating.tooMany`)."
   /api/admin/sources/{id}/{action}:
     post:
       tags:

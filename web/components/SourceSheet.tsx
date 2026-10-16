@@ -37,7 +37,8 @@ import { useToast } from '@/components/Toast';
 import { StatusMark } from '@/components/StatusMark';
 import { SourceEvidence } from '@/components/SourceEvidence';
 import { SourceTile } from '@/components/SourceTile';
-import { Disclosure } from '@/components/settings';
+import { Disclosure, Segmented } from '@/components/settings';
+import { AGE_CHOICES, ageChoice, ageRequest, ageWhy, type AgeChoice } from '@/lib/sourceAge';
 import { Busy, ExtIcon, ExtTags, Facts, busyKey } from '@/components/ExtensionBits';
 import { ExtensionRemove, ExtensionSection, ExtensionUpdateKey } from '@/components/ExtensionSheet';
 import { MangadexLanguages, SiteLanguage } from '@/components/MangadexCard';
@@ -60,6 +61,15 @@ export function resolveTarget(target: SheetTarget, sources: readonly OverviewSou
   const raw = extSourceIdOf(target.id);
   const ext = installed.find((e) => (source?.pkgName && e.pkgName === source.pkgName) || (!!raw && e.sources.some((x) => x.id === raw))) ?? null;
   return { source, ext };
+}
+
+/** What the source's age rating means, in a sentence under the choices (lib/sourceAge.ts ageWhy). */
+function ageNote(s: OverviewSource): string {
+  switch (ageWhy(s)) {
+    case 'rated': return tr('Adult only: accounts limited below 18 can’t use it, and while Show 18+ is off it stays out of Discover and search.');
+    case 'flagged': return tr('Its extension marks it 18+, so accounts limited below 18 can’t use it either way.');
+    default: return tr('Open to every account. Adult only keeps it from accounts limited below 18, and out of Discover and search while Show 18+ is off.');
+  }
 }
 
 export function SourceSheet({ target, overview, evidence, testMs, status, actions, installed, hiddenLangs, onClose, onReplace, onLanguages, onChanged }: {
@@ -85,10 +95,10 @@ export function SourceSheet({ target, overview, evidence, testMs, status, action
   const toast = useToast();
   const qc = useQueryClient();
   const { source: s, ext } = resolveTarget(target, overview?.sources ?? [], installed);
-  const [busy, setBusy] = useState<SheetKey | 'address' | null>(null);
+  const [busy, setBusy] = useState<SheetKey | 'address' | 'age' | null>(null);
   const [asking, setAsking] = useState<'turn-off' | 'remove' | 'address' | null>(null);
-  // Said where it was asked: under the keys, or under the address form for Update address.
-  const [refusal, setRefusal] = useState<{ key: SheetKey | 'address'; text: string } | null>(null);
+  // Said where it was asked: under the keys, under the address form for Update address, or under the age rating.
+  const [refusal, setRefusal] = useState<{ key: SheetKey | 'address' | 'age'; text: string } | null>(null);
   const [answer, setAnswer] = useState<(TestAnswer & { probe?: { finalUrl?: string } }) | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [testFrom, setTestFrom] = useState(0);
@@ -110,7 +120,7 @@ export function SourceSheet({ target, overview, evidence, testMs, status, action
    * in the reader's language. Remove's 409 `in_use` is `retire.inUse` ("It is the main source of n series. Replace it
    * first."): one wording, the server's, never a second one of the web's own.
    */
-  const run = async (key: SheetKey | 'address', go: () => Promise<string | null>) => {
+  const run = async (key: SheetKey | 'address' | 'age', go: () => Promise<string | null>) => {
     setBusy(key);
     setRefusal(null);
     try {
@@ -245,7 +255,7 @@ export function SourceSheet({ target, overview, evidence, testMs, status, action
                 </div>
               </div>
             )}
-            {refusal && refusal.key !== 'address' && <p role="alert" dir="auto" className="mt-2 text-[12px] leading-relaxed text-amber-300" data-source-refusal>{refusal.text}</p>}
+            {refusal && refusal.key !== 'address' && refusal.key !== 'age' && <p role="alert" dir="auto" className="mt-2 text-[12px] leading-relaxed text-amber-300" data-source-refusal>{refusal.text}</p>}
           </section>
         )}
 
@@ -265,6 +275,29 @@ export function SourceSheet({ target, overview, evidence, testMs, status, action
                 : <SourceEvidence lines={row?.evidence} tested={row?.live} failing={!!row?.failing?.length} />}
             </Disclosure>
           </div>
+        )}
+
+        {/* The age rating (v0.73.0, #256 from @Squeaks72): Automatic, or Adult only -- a permission, refused to accounts limited
+            below 18 as an extension's own adult flag is. Every kind of source, built-in and added sites included: they are
+            the ones whose extension can never say. */}
+        {s && (
+          <section aria-label={tr('Age rating')} className="border-t border-ink-800/70 pt-3" data-source-age={ageChoice(s)}>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-fog-500 rtl:tracking-normal">{tr('Age rating')}</p>
+            <div className="mt-1.5">
+              <Segmented<AgeChoice> square label={tr('Age rating')} value={ageChoice(s)} disabled={!!busy}
+                options={AGE_CHOICES.map((c) => ({ value: c, label: c === 'adult' ? tr('Adult only') : tr('Automatic') }))}
+                onChange={(c) => void run('age', async () => {
+                  await api(`/api/admin/sources/${encodeURIComponent(s.id)}/age-rating`, { method: 'PUT', json: ageRequest(c) });
+                  // Discover's source list hides an Adult only source while Show 18+ is off: asked again, not kept for minutes.
+                  void qc.invalidateQueries({ queryKey: ['sources'] });
+                  // …and Library and Home offer the reveal when a source is rated (/api/adult-filter `configured`).
+                  void qc.invalidateQueries({ queryKey: ['adult-filter'] });
+                  return c === 'adult' ? tr('Rated Adult only') : tr('Age rating reset to automatic');
+                })} />
+            </div>
+            <p className="mt-2 text-[12px] leading-relaxed text-fog-400" data-source-age-note={ageWhy(s)}>{ageNote(s)}</p>
+            {refusal?.key === 'age' && <p role="alert" dir="auto" className="mt-2 text-[12px] leading-relaxed text-amber-300" data-source-refusal>{refusal.text}</p>}
+          </section>
         )}
 
         {s?.kind === 'site' && (

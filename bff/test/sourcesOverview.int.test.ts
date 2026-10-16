@@ -115,6 +115,7 @@ test('every source of every kind in one answer, each with its state, standing an
   assert.deepEqual(by['ov-off'], {
     id: 'ov-off', name: 'Name ov-off', kind: 'builtin', lang: null, standing: 'off', offBy: 'admin', state: 'off', stage: null,
     cooldown: null, offline: false, main: 3, followed: 0, withBackup: 2, lastTestedAt: null, icon: false,
+    ageRating: null, defaultAgeRating: null,
   }, 'a switched-off main source, its series and how many a working follower would take over');
   assert.deepEqual([by['ov-fail'].standing, by['ov-fail'].state, by['ov-fail'].stage, by['ov-fail'].lastTestedAt], ['failing', 'failing', 'chapters', at]);
   assert.deepEqual([by['ov-used'].main, by['ov-used'].followed], [0, 2], 'followed without being the main source');

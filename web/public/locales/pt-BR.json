@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 3929
+    "strings": 3936
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -1301,7 +1301,6 @@
   "18+ filter": "Filtro +18",
   "Genres to keep off the shelf while “Show 18+” is off. This hides nothing from anyone who goes looking: links, bookmarks, downloads and reading progress are unaffected.": "Gêneros que ficam fora da estante enquanto “Mostrar +18” estiver desligado. Nada fica escondido de quem procura: links, marcadores, downloads e o progresso de leitura não mudam.",
   "No genres yet.": "Ainda não há gêneros.",
-  "Sources to treat as adult, on top of the ones their extension already declares.": "Fontes a tratar como adultas, além das que a própria extensão já declara.",
   "One series can be let through on its own page — Edit details ▸ “Always show”.": "Uma série específica pode ser liberada na própria página — Editar detalhes ▸ “Sempre mostrar”.",
   "Always show": "Sempre mostrar",
   "Type anywhere to search": "Digite em qualquer lugar para pesquisar",
@@ -3932,5 +3931,13 @@
   "{n} chapter files in {m} series have no page that can be read": "{n} arquivos de capítulos em {m} séries não têm nenhuma página legível",
   "{n} chapter files have no page that can be read": "{n} arquivos de capítulos não têm nenhuma página legível",
   "Every chapter file the nightly count opened has pages": "Todo arquivo de capítulo que a contagem noturna abriu tem páginas",
-  "The nightly repair opens each chapter file once to count its pages, and these are the files it found no page in: empty, cut short by a download, damaged, or gone. Fetch again downloads a new copy of a file Uchiyomi fetched itself and keeps the old one until the new copy lands; a file in a library you built is yours to replace. Nothing here deletes a file, and Fix everything leaves these to you.": "O reparo noturno abre cada arquivo de capítulo uma vez para contar as páginas, e estes são os arquivos em que não achou nenhuma: vazios, cortados por um download, danificados ou sumidos. Buscar de novo baixa uma cópia nova de um arquivo que o Uchiyomi buscou sozinho e mantém o antigo até a cópia nova chegar; um arquivo de uma biblioteca montada à mão é você quem substitui. Nada aqui apaga arquivos, e Resolver tudo deixa estes com você."
+  "The nightly repair opens each chapter file once to count its pages, and these are the files it found no page in: empty, cut short by a download, damaged, or gone. Fetch again downloads a new copy of a file Uchiyomi fetched itself and keeps the old one until the new copy lands; a file in a library you built is yours to replace. Nothing here deletes a file, and Fix everything leaves these to you.": "O reparo noturno abre cada arquivo de capítulo uma vez para contar as páginas, e estes são os arquivos em que não achou nenhuma: vazios, cortados por um download, danificados ou sumidos. Buscar de novo baixa uma cópia nova de um arquivo que o Uchiyomi buscou sozinho e mantém o antigo até a cópia nova chegar; um arquivo de uma biblioteca montada à mão é você quem substitui. Nada aqui apaga arquivos, e Resolver tudo deixa estes com você.",
+  "A whole source is rated on its own sheet: Sources ▸ the source ▸ Age rating. Adult only also keeps it from accounts limited below 18.": "Uma fonte inteira é classificada na própria folha: Fontes ▸ a fonte ▸ Classificação indicativa. “Somente adultos” também a afasta das contas com limite de idade abaixo de 18.",
+  "Adult only": "Somente adultos",
+  "Rated Adult only": "Classificada como “Somente adultos”",
+  "Age rating reset to automatic": "Classificação indicativa redefinida para automática",
+  "Adult only: accounts limited below 18 can’t use it, and while Show 18+ is off it stays out of Discover and search.": "Somente adultos: contas com limite de idade abaixo de 18 não podem usá-la e, enquanto “Mostrar +18” estiver desligado, ela fica fora de Descobrir e da busca.",
+  "Its extension marks it 18+, so accounts limited below 18 can’t use it either way.": "A extensão dela a marca como +18, então contas com limite de idade abaixo de 18 não podem usá-la de qualquer forma.",
+  "Open to every account. Adult only keeps it from accounts limited below 18, and out of Discover and search while Show 18+ is off.": "Aberta a todas as contas. “Somente adultos” a afasta das contas com limite de idade abaixo de 18 e, enquanto “Mostrar +18” estiver desligado, de Descobrir e da busca.",
+  "At most {limit} sources can be rated Adult only.": "No máximo {limit} fontes podem ser classificadas como “Somente adultos”."
 }

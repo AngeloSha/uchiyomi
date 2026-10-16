@@ -58,7 +58,7 @@ import sharp from 'sharp';
 import { ART_BODY_LIMIT, ART_DIR, FIRST_PAGE, artFile, artOverview } from '../lib/seriesArt';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
-import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, browsableIds, nameableIds, viewCtxFor, hideAdult } from '../lib/visibility';
+import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, applyAdultSources, rateSourceAdult, MAX_ADULT_SOURCES, browsableIds, nameableIds, viewCtxFor, hideAdult, ADULT_RATING } from '../lib/visibility';
 import { cleanSourceOrder, invalidateSourcePrefs } from '../lib/sourcePrefs';
 import { keepRestricted, memberDefaults, memberDefaultsShape, permsShape, saveMemberDefaults } from '../lib/memberDefaults';
 import { borrowNamesFor, clearBorrowedNames } from '../lib/borrowNames';
@@ -745,10 +745,12 @@ export default async function adminRoutes(app: FastifyInstance) {
        */
       deletedAsGhosts: z.boolean().optional(),
       /**
-       * What the 18+ switch hides besides 18+ libraries: genres to treat as adult, and sources to treat
-       * as adult whatever their extension says. Both are surfacing preferences -- nothing here changes
-       * who may open a series, and an individual title can be exempted from the genre rule on its own
-       * page (`adultExempt` on the series meta route).
+       * What the 18+ switch hides besides 18+ libraries: genres to treat as adult -- a surfacing preference, which
+       * changes nothing about who may open a series, and one title can be exempted from it on its own page
+       * (`adultExempt` on the series meta route) -- and the sources rated Adult only, whatever their extension says.
+       * Since v0.73.0 that rating is also a permission (lib/visibility.ts sourceRatedAdult): an account limited
+       * below 18 is refused those sources, as it is a source whose extension declares itself adult. The Sources
+       * sheet rates one source at a time (PUT /api/admin/sources/:id/age-rating); this replaces the whole list.
        */
       adultGenres: z.array(z.string().min(1).max(60)).max(60).optional(),
       adultSources: z.array(z.string().min(1).max(120)).max(200).optional(),
@@ -885,8 +887,10 @@ export default async function adminRoutes(app: FastifyInstance) {
         [JSON.stringify(sanitiseAdultList(b.adultGenres))]);
     }
     if (b.adultSources !== undefined) {
-      await q('UPDATE server_settings SET adult_sources = $1::jsonb, updated_at = now() WHERE id = 1',
-        [JSON.stringify(sanitiseSourceIds(b.adultSources))]);
+      const list = sanitiseSourceIds(b.adultSources);
+      await q('UPDATE server_settings SET adult_sources = $1::jsonb, updated_at = now() WHERE id = 1', [JSON.stringify(list)]);
+      // The permission's own copy (sourceRatedAdult), at once: the next request of a capped account is refused them.
+      applyAdultSources(list);
     }
     // The view context caches these for a few seconds; a save must take effect on the next request,
     // not whenever that window happens to lapse.
@@ -4652,6 +4656,31 @@ export default async function adminRoutes(app: FastifyInstance) {
     const r = await retireSource(id, { how: b.data.how ?? 'off', userId: userIdOf(req), req });
     if ('inUse' in r) return reply.code(409).send(inUse(r.inUse));
     return r;
+  });
+
+  /**
+   * Rate a whole source Adult only (`ageRating: 18`), or take the rating off (`null`) so its extension's own word
+   * decides again (v0.73.0, #256 from @Squeaks72). Adult only is a permission: accounts limited below 18 are refused
+   * the source everywhere, as they are one whose extension declares itself adult -- and with Show 18+ off it leaves
+   * Discover, search and the latest and popular lists. Nothing rates a source BELOW its extension's flag: no setting
+   * here lets a capped account into a site. Stored in the 18+ lists' `adult_sources` (lib/visibility.ts
+   * rateSourceAdult), so the settings route's `adultSources` is the same list. The id need not be loaded now: an
+   * extension's source is only registered while the engine is up. 409 `too_many` past MAX_ADULT_SOURCES.
+   */
+  app.put('/api/admin/sources/:id/age-rating', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ ageRating: z.union([z.literal(ADULT_RATING), z.null()]) }).strict().safeParse(req.body ?? {});
+    if (!b.success || !sanitiseSourceIds([id]).length) {
+      return reply.code(400).send({ error: 'bad_request', message: 'Send {ageRating: 18} or {ageRating: null}.' });
+    }
+    const adult = b.data.ageRating === ADULT_RATING;
+    const list = await rateSourceAdult(id, adult);
+    if (adult && !list) {
+      const said = say('rating.tooMany', { limit: MAX_ADULT_SOURCES });
+      return reply.code(409).send({ error: 'too_many', message: said.text, messageSaid: saidOf(said) });
+    }
+    await logAudit('source.age_rating', { userId: userIdOf(req), detail: { source: id, ageRating: b.data.ageRating }, req });
+    return reply.send({ ok: true, ageRating: b.data.ageRating });
   });
 
   app.post('/api/admin/sources/:id/:action', async (req, reply) => {

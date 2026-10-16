@@ -259,6 +259,16 @@ extension (`done: switched_off`; the extension stays installed), and only turns 
 turned_off`). It answers `{ok, done, followsDropped}`, audited `source.retire`. `DELETE /api/admin/sources/custom/:id`
 answers the same **409** `in_use` while the site is some series' main source.
 
+`PUT /api/admin/sources/:id/age-rating {ageRating: 18 | null}` (admin, since v0.73.0) rates a whole source **Adult
+only**, or takes the rating off so its extension's own flag decides again. Adult only is a permission: an account
+limited below 18 is refused the source everywhere — `latest`, `popular`, `detail`, `add` and `preview` by id too — as
+it is refused one whose extension declares itself adult, and while a request does not carry `adult=1` the source leaves
+Discover, search and the latest and popular lists. Nothing rates a source below its extension's flag. The rating is
+the settings' `adultSources` list (one list, two ways to write it); `GET /api/admin/sources/overview` reports it as
+`ageRating` (18 or null) beside `defaultAgeRating` (18 for an extension that declares itself adult). The id need not be
+loaded now. **400** for anything but 18 or null, **409** `too_many` past 200 rated sources (`messageSaid`
+`rating.tooMany`). Audited `source.age_rating`.
+
 `PATCH /api/admin/sources/custom/:id` (admin) changes a custom site's `base` address, its `lang`, or both, and
 nothing else. The source id is derived from its name and the library is keyed on that id, so editing in place is
 the only way to follow a site to a new domain without orphaning every series that came from it. A new `lang`
@@ -1665,6 +1675,7 @@ POST   /api/sources/runs/:kind/cancel
 DELETE /api/sources/runs/:kind
 GET    /api/admin/sources         POST   /api/admin/sources/:id/:action
 POST   /api/admin/sources/:id/test
+PUT    /api/admin/sources/:id/age-rating
 POST   /api/admin/sources/:id/retire GET    /api/admin/sources/overview
 POST   /api/admin/sources/check   GET    /api/admin/sources/check
 POST   /api/admin/sources/find    GET    /api/admin/sources/find

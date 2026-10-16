@@ -58,6 +58,12 @@ export interface OverviewSource {
   /** A site added by address: where it lives. */
   address?: string | null;
   /**
+   * v0.73.0 (#256): 18 when the admin rated the whole source Adult only, else null; `defaultAgeRating` is what it is held
+   * to without that, 18 for an extension that declares itself adult (lib/sourceAge.ts). Absent from an older server.
+   */
+  ageRating?: number | null;
+  defaultAgeRating?: number | null;
+  /**
    * v0.55.1: not loaded because the engine's source limit is full, with the limit it is over -- not broken, and Replace is
    * not its fix (the sheet says so instead: limitLine). Absent from every other source, and from an older server.
    */

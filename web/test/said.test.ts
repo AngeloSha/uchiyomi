@@ -59,6 +59,8 @@ const SAMPLE: Record<string, (c: number) => unknown> = {
   command: () => 'docker compose up -d uchiyomi-suwayomi', service: () => 'uchiyomi-suwayomi', path: () => '/mnt/user/appdata/uchiyomi-suwayomi',
   // v0.72.0, Disk space and folders (bff lib/healthDisk.ts): GB with one decimal, and a floor.
   free: () => 12.5, floor: () => 10,
+  // v0.73.0, rating.tooMany: how many sources may be rated Adult only (bff lib/visibility.ts MAX_ADULT_SOURCES).
+  limit: () => 200,
 };
 
 /**

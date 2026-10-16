@@ -32,20 +32,27 @@ test('the section comes after Notifications, so the pinned order of the others i
     'the 18+ filter is not after Notifications');
 });
 
-test('both pickers ask with the reveal on, so ticking an entry cannot hide its own chip', () => {
-  // With "Show 18+" off, a genre or source ticked here is exactly what the listings stop returning, so a
-  // picker built from them loses the chip the moment it is lit and it can never be unticked. Reintroduce by
-  // asking `/api/genres/overview` or `/api/sources` as they are: both matches below fail. And never an
-  // unconditional `?adult=1` (lib/api.ts adds its own when the reveal is on; two copies read as hidden).
+test('the genre picker asks with the reveal on, so ticking an entry cannot hide its own chip', () => {
+  // With "Show 18+" off, a genre ticked here is exactly what the listings stop returning, so a picker built
+  // from them loses the chip the moment it is lit and it can never be unticked. Reintroduce by asking
+  // `/api/genres/overview` as it is: the match below fails. And never an unconditional `?adult=1`
+  // (lib/api.ts adds its own when the reveal is on; two copies read as hidden).
   const s = section();
   assert.match(s, /const revealed = \(path: string\) => \(adultShown\(\) \? path : `\$\{path\}\$\{path\.includes\('\?'\) \? '&' : '\?'\}adult=1`\);/,
     'the reveal-aware URL rule is gone');
   assert.match(s, /revealed\('\/api\/genres\/overview\?covers=1'\)/, 'the genre picker is built from the filtered list');
-  assert.match(s, /revealed\('\/api\/sources'\)/, 'the source picker is built from the filtered list');
   assert.doesNotMatch(s, /\('\/api\/(?:sources|genres\/overview)[^']*adult=1'\)/, 'adult=1 is hard-coded');
-  // Its own keys: a revealed answer under a browsing screen's key is replayed to that screen.
+  // Its own key: a revealed answer under a browsing screen's key is replayed to that screen.
   assert.match(s, /queryKey: \['genres-overview', 'all'\]/);
-  assert.match(s, /queryKey: \['sources', 'all'\]/);
+});
+
+test('sources are not ticked here any more: each is rated on its own sheet (#256)', () => {
+  // Since v0.73.0 the list these chips saved is a permission -- a source rated Adult only is refused to an account
+  // limited below 18 -- so it is set where the source is (components/SourceSheet.tsx), and this section says where.
+  // Reintroduce the chips: the first match fails; drop the pointer: the second does.
+  const s = section();
+  assert.doesNotMatch(s, /adultSources/, 'the source chips save the Adult only list from the 18+ filter again');
+  assert.match(s, /data-source-ratings-note/, 'the 18+ filter no longer says where sources are rated');
 });
 
 test('a toggle is saved from local state, and a failed save puts the chip back', () => {
@@ -54,9 +61,7 @@ test('a toggle is saved from local state, and a failed save puts the chip back',
   // `onClick={() => save({ adultGenres: toggle(genres, g.key) })}` over `data.adult_genres`: fails.
   const s = section();
   assert.match(s, /const \[genres, setGenres\] = useState<string\[\]>/, 'the genre list is not held locally');
-  assert.match(s, /const \[sources, setSources\] = useState<string\[\]>/, 'the source list is not held locally');
   assert.match(s, /onClick=\{\(\) => flip\('adultGenres', genres, setGenres, g\.key\)\}/);
-  assert.match(s, /onClick=\{\(\) => flip\('adultSources', sources, setSources, src\.id\)\}/);
   assert.match(s, /\.catch\(\(\) => \{ set\(list\); toast\(tr\('Could not save'\), 'error'\); \}\);/,
     'a failed save leaves the chip lit over a list that was not stored');
 });
@@ -87,7 +92,7 @@ test('every new string is in all eight locale files', () => {
   // "Always show" from public/locales/ar.json.
   const keys = [
     '18+ filter', 'No genres yet.', 'Always show',
-    'Sources to treat as adult, on top of the ones their extension already declares.',
+    'A whole source is rated on its own sheet: Sources ▸ the source ▸ Age rating. Adult only also keeps it from accounts limited below 18.',
     'One series can be let through on its own page — Edit details ▸ “Always show”.',
     'Keep this series on the shelf while “Show 18+” is off, even if it or one of its genres is 18+.',
   ];

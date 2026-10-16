@@ -179,7 +179,8 @@ sites' terms and your local law.
 
 - **Multi-user** — accounts, per-user progress and favourites, streaks and a leaderboard.
 - **Age ratings and an 18+ library** that stays off the home screen, the grid and search until somebody asks
-  for it, with a per-member rating cap and a per-member permission to add series at all.
+  for it, with a per-member rating cap, a whole source rated *Adult only* when its extension does not say so, and a
+  per-member permission to add series at all.
 - **Security** — 2FA, lockout, active sessions, an audit log, and **OIDC single sign-on** against Authentik,
   Authelia or Keycloak.
 - **Scoped API tokens** — read, write or admin, revocable, with an opt-in for 18+ libraries.

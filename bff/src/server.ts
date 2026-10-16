@@ -36,6 +36,7 @@ import { startHeroWarmup } from './lib/autoHero';
 import { closeInterruptedFindRuns, findSettledWithin } from './lib/findSources';
 import { loadUnstatedLang } from './lib/seriesLang';
 import { refreshNoticesActive } from './lib/noticeSettings';
+import { loadAdultSources } from './lib/visibility';
 import { loadMangadexLangs } from './lib/sources/mangadexLangs';
 import { runChapterCleanup, unpruneRestored } from './lib/chapterCleanup';
 import { runExtensionMonitor } from './lib/extensionMonitor';
@@ -86,6 +87,9 @@ async function main() {
   // Whether any notice-chapter switch is on (lib/noticeChapters.ts), before the first query is built: while none is,
   // every query is the one the previous release ran. Unreadable leaves them off, as they were before the feature.
   await refreshNoticesActive().catch((e) => console.warn(`[notices] could not read the switches: ${(e as Error)?.message || e}`));
+  // The sources the admin rated Adult only (lib/visibility.ts sourceRatedAdult), before anything asks which sources an
+  // account may reach. Unreadable, the first read of the 18+ lists loads them.
+  await loadAdultSources().catch((e) => console.warn(`[adult] could not read the sources rated Adult only: ${(e as Error)?.message || e}`));
   // A Find other sources run still `running` belonged to the process that just went away (v0.49.1): say so.
   await closeInterruptedFindRuns().catch((e) => console.warn(`[find] could not close interrupted runs: ${(e as Error)?.message || e}`));
   // v0.55.0: a Fix everything run the last process was in the middle of (lib/autofix.ts) reads `interrupted`, not running.
