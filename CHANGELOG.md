@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.77.1 — 2026-10-16
+
+**Sign-in and backup hardening, and recovery codes that work.** Update soon, especially if people outside your
+household can reach your server. Thank you to **@globalteddy**, who reported these and sent
+[#279](https://github.com/AngeloSha/uchiyomi/pull/279), [#280](https://github.com/AngeloSha/uchiyomi/pull/280) and
+[#281](https://github.com/AngeloSha/uchiyomi/pull/281).
+
+### Security fixes
+
+- **The account lock covers every password and two-factor check.** A wrong two-factor or recovery code at sign-in
+  counts toward it, as a wrong password does. So does a wrong current password when you change your password or turn
+  two-factor on or off, and those three take at most 10 tries in 5 minutes from one address, like sign-in. Once a lock
+  has run out, the count starts again from one.
+- **Turning two-factor on asks for your password,** as turning it off already did. **Profile → Account → Two-factor
+  authentication** has a **Current password** field beside the code.
+- **A two-factor code signs in once.** After a code is used, only a newer one works: if you sign out and back in within
+  the same half minute, wait for the next code.
+- **First-run setup makes one admin,** however many setups arrive at once.
+- **Backups are readable only by the app's user and its group.** Each backup folder is `0750` from the moment it is
+  made, and its files are `0640`. Backups made before this version are tightened the next time a backup runs.
+- **A cover that redirects to another site is fetched without the first site's cookies, login or extra headers.**
+- **Every response carries a base Content-Security-Policy,** `object-src 'none'; base-uri 'self'; frame-ancestors
+  'self'; form-action 'self'`, from the server and from nginx in the split layout
+  ([#281](https://github.com/AngeloSha/uchiyomi/pull/281)).
+- **Signing out clears the page's cached answers,** and so does every sign-in and sign-up, so the next person on a
+  shared device sees nothing of the last one's ([#280](https://github.com/AngeloSha/uchiyomi/pull/280)).
+
+### Fixed
+
+- **Recovery codes work at sign-in.** The codes handed out since v0.21.0 were longer than sign-in accepted, so none of
+  them ever worked. They do now, typed with or without their dashes and in any case, and each one works once
+  ([#279](https://github.com/AngeloSha/uchiyomi/pull/279)).
+
+### Upgrading
+
+- **If something outside the app reads your backup folder** (a job on the host, a NAS share), it now has to run as the
+  app's user or as a member of its group. Reading through the container (`docker compose exec`) works as before.
+- **Database:** additive only. A nullable `totp_last_step` column on `users`, created when the server starts. The
+  previous release starts on this schema.
+- **API:** `POST /auth/totp/enable` takes `password` beside `code`. `POST /auth/password`, `/auth/totp/enable` and
+  `/auth/totp/disable` answer **423** `locked` while the account is locked, and **429** past 10 requests in 5 minutes
+  from one address, as `/auth/login` does. The sign-in body's `code` takes up to 32 characters.
+
 ## v0.77.0 — 2026-10-16
 
 **Spreads that a source served as two pages can be read as one, and one page of a pair can be brought into frame.**
