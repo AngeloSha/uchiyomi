@@ -38,6 +38,7 @@ import { desktopFailAudit, desktopSecretMatches, isDesktop, isLoopback } from '.
 import { desktopUserId, ensureDesktopUser } from '../lib/desktopUser';
 import { authMode, bootstrapSub, mayBootstrap, rescueAdmin, ssoOnly } from '../lib/authMode';
 import { applyMemberDefaults } from '../lib/memberDefaults';
+import { verifyLoginPassword } from '../lib/loginPassword';
 
 const loginBody = z.object({
   username: z.string().max(64).optional(),
@@ -114,10 +115,11 @@ const SIGN_IN_LIMIT = { rateLimit: { max: 10, timeWindow: '5 minutes' } };
 const LOCKED_NOW = { error: 'locked', message: 'Account locked after too many failed attempts. Try again in 15 minutes.' };
 
 /**
- * The current password, asked for behind a session (v0.77.1): changing it, and turning two-factor on or off. Counted
- * and locked with other authenticated password/second-factor checks (recordFailedLogin), and not checked while the account is
+ * The current password, asked for behind a session: changing it, and turning two-factor on or off. These failures
+ * share the account-wide second-factor counter (recordFailedLogin), and are not checked while the account is
  * locked, so a session alone -- a borrowed phone, a stolen refresh cookie -- cannot guess its way to the password; the
- * routes carry SIGN_IN_LIMIT too. A right password clears the count, as a sign-in does. Null when it is right, else the
+ * routes carry SIGN_IN_LIMIT too. Public password failures instead use a source/name budget. A right password
+ * clears the authenticated-check count. Null when it is right, else the
  * refusal to send. Reintroduce by checking the password alone: "a session cannot guess the password" in
  * accountLock.int.test.ts is never locked.
  */
@@ -139,17 +141,12 @@ async function currentPasswordRefusal(req: FastifyRequest, password: string): Pr
 
 export default async function authRoutes(app: FastifyInstance) {
   if (!app.hasDecorator('createRateLimit')) await app.register(rateLimit, { global: false });
-  const signInPair = app.createRateLimit({ max: 5, timeWindow: '15 minutes',
-    keyGenerator: (req) => JSON.stringify([clientIp(req), (req.body as {username?: string})?.username?.trim() || 'admin']),
+  // Check failed attempts before looking up the account, for every name. A caller can exhaust only this
+  // (address, username) pair; merely knowing a username must never suspend its owner everywhere.
+  const signInPair = app.createRateLimit({
+    max: 5, timeWindow: '15 minutes',
+    keyGenerator: (req) => JSON.stringify([clientIp(req), (req.body as { username?: string })?.username?.trim() || 'admin']),
   });
-  const countPasswordFailure = async (req: FastifyRequest, reply: any) => {
-    const r = await signInPair(req);
-    if (!r.isAllowed && r.isExceeded) {
-      reply.code(429).header('Retry-After', String(r.ttlInSeconds)).send({error:'too_many_requests',message:'Too many sign-in attempts. Try again later.'});
-      return true;
-    }
-    return false;
-  };
   /**
    * v0.63.0 (#208, lib/authMode.ts): in SSO-only mode the routes that take a password are not registered at all --
    * first-run setup, sign-up, password change, two-factor -- and sign-in only while AUTH_RESCUE_ADMIN names an admin.
@@ -207,9 +204,11 @@ export default async function authRoutes(app: FastifyInstance) {
     const username = (parsed.data.username || 'admin').trim();
     const ip = clientIp(req);
     const ua = (req.headers['user-agent'] as string) || null;
-    const budget = await signInPair(req, {increment:false});
-    if (!budget.isAllowed && budget.isExceeded) return reply.code(429).header('Retry-After', String(budget.ttlInSeconds))
-      .send({error:'too_many_requests',message:'Too many sign-in attempts. Try again later.'});
+    const budget = await signInPair(req, { increment: false });
+    if (!budget.isAllowed && budget.isExceeded) {
+      return reply.code(429).header('Retry-After', String(budget.ttlInSeconds))
+        .send({ error: 'too_many_requests', message: 'Too many sign-in attempts. Try again later.' });
+    }
 
     // SSO-only mode's way back in (lib/authMode.ts rescueAdmin): this route answers only while AUTH_RESCUE_ADMIN names
     // an admin, and then for that account alone. Any other name, or a rescue name that is no admin, is refused exactly
@@ -217,33 +216,20 @@ export default async function authRoutes(app: FastifyInstance) {
     // rescue opens one admin's password sign-in and nobody else's" in ssoRescue.int.test.ts signs a member in.
     const rescue = local ? null : rescueAdmin();
     const user = await one<FullUser>(`SELECT ${USER_AUTH_COLS} FROM users WHERE username = $1`, [username]);
-    if (!local && (username !== rescue || user?.role !== 'admin')) {
-      const limited = await countPasswordFailure(req, reply); if (limited) return reply;
-      await logAudit('login.fail', { userId: user?.id, username, detail: { reason: 'sso_only' }, req });
+    const refusal = !local && (username !== rescue || user?.role !== 'admin') ? 'sso_only'
+      : !user ? 'no_user' : user.disabled ? 'disabled' : lockedUntil(user) ? 'locked' : null;
+    const ok = await verifyLoginPassword(!refusal && user ? user.password_hash : null, password);
+    if (!user || refusal || !ok) {
+      // Public password failures never increment the account-wide counter. Keep that counter for
+      // authenticated password checks and wrong second factors, where the attacker already has a credential.
+      await logAudit('login.fail', { userId: user?.id, username, detail: { reason: refusal || 'bad_password' }, req });
+      const failed = await signInPair(req);
+      if (!failed.isAllowed && failed.isExceeded) {
+        return reply.code(429).header('Retry-After', String(failed.ttlInSeconds))
+          .send({ error: 'too_many_requests', message: 'Too many sign-in attempts. Try again later.' });
+      }
       return reply.code(401).send({ error: 'invalid_credentials' });
     }
-    if (!user) {
-      const limited = await countPasswordFailure(req, reply); if (limited) return reply;
-      await logAudit('login.fail', { username, detail: { reason: 'no_user' }, req });
-      return reply.code(401).send({ error: 'invalid_credentials' });
-    }
-    if (user.disabled) {
-      const limited = await countPasswordFailure(req, reply); if (limited) return reply;
-      await logAudit('login.blocked', { userId: user.id, username, detail: { reason: 'disabled' }, req });
-      return reply.code(403).send({ error: 'disabled', message: 'This account is disabled.' });
-    }
-    const lock = lockedUntil(user);
-    if (lock) { const limited = await countPasswordFailure(req, reply); if (limited) return reply; return reply.code(423).send({ error: 'locked', until: lock.toISOString(), message: 'Account locked after too many attempts. Try again later.' }); }
-
-    let ok = false;
-    try { ok = await verify(user.password_hash, password); } catch { ok = false; }
-    if (!ok) {
-      // Unauthenticated password failures may throttle only this source/name pair, never suspend the owner.
-      await logAudit('login.fail', { userId: user.id, username, detail: { reason: 'bad_password' }, req });
-      const limited = await countPasswordFailure(req, reply); if (limited) return reply;
-      return reply.code(401).send({ error: 'invalid_credentials' });
-    }
-
     // second factor
     if (user.totp_enabled) {
       if (!code) return reply.code(401).send({ error: 'totp_required' });
@@ -263,6 +249,7 @@ export default async function authRoutes(app: FastifyInstance) {
         // account" in accountLock.int.test.ts is never locked.
         const nowLocked = await recordFailedLogin(user.id);
         await logAudit('login.totp_fail', { userId: user.id, username, detail: { locked: nowLocked }, req });
+        // At this point the caller proved the password; keep the second-step UX and its brute-force lock.
         if (nowLocked) return reply.code(423).send(LOCKED_NOW);
         return reply.code(401).send({ error: 'totp_invalid', message: 'Incorrect authentication code.' });
       }

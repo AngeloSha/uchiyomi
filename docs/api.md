@@ -19,6 +19,8 @@ Session-authenticated API requests check that the account still exists and is en
 
 Password sign-in keeps the ten-attempts-per-address/five-minute limit and allows five failed password checks per address/username in fifteen minutes; further attempts receive **429** with `Retry-After`. A stranger's wrong passwords do not lock the account for other clients. Authenticated password checks and second-factor failures retain their account lock protection. Source limits and optional two-factor authentication remain important against distributed guessing.
 
+Unknown usernames, disabled or locked accounts, and wrong passwords return the same **401** `{ "error": "invalid_credentials" }` before a password has been accepted. Clients should not use the public password response to determine account state. Successful password sign-in and its second-factor challenge keep their existing behavior.
+
 **API tokens** are long-lived, revocable, and scoped. Create one under **Profile → Connections → API tokens → New token** (the form opens inline).
 The token is shown once, so copy it then. It looks like `uy_` followed by random characters.
 
