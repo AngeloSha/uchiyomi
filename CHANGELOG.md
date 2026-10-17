@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.80.0 — 2026-10-18
+
+**A series its sources cannot get its chapters from finds another source on its own.** When every site a series
+follows is rate-limiting, blocking or failing it, the server now looks for the series on your other installed sources
+in the background, follows one that has the missing chapters, and carries on from there. It works the same whether
+the series came from Discover, **Find missing chapters** or the scheduled checks.
+
+### Another source, found for you
+
+- **The scout.** Every few minutes it takes one stuck series and looks for it on the other installed sources:
+  - which series: any whose sources are all cooling, silent or refusing it; an add or Fetch a site refused; or chapters
+    left after their tries;
+  - which sources: only ones in the series' language, and no 18+ source for a series that isn't 18+;
+  - what it follows: a source that passes the same title and chapter-number check as any second source, and that lists
+    a chapter the series is waiting for.
+  The series keeps its main source; the new one fills in. Chapters that had used up their tries get them back, and the
+  series goes first in the next **Finish downloads on their own** run.
+- **It looks in the right places first.** Sources it has already found the series on come first. Next are sources
+  that downloaded well on your server this week, then the rest. Within each group, sites with fewer chapters already
+  waiting on them come before busy ones. It never asks a site that shares an image server with one the series already
+  follows: Mangakakalot can't stand in for Natomanga, because they slow down together.
+- **It remembers.** A source that said "not this series" isn't asked again for two weeks, and one that didn't answer
+  for a day. The sweep's own search for a failed chapter shares that memory, and so does **Find other sources**.
+  - A source you unfollow from a series is never followed there again on its own. Following it yourself undoes that.
+- **Gentle by design.**
+  - One series at a time, at most twelve sources and sixteen searches each.
+  - Forty searches an hour in all (`SCOUT_SEARCHES_PER_HOUR`).
+  - A series it just looked at waits: six hours after a follow, up to three days after every source said no.
+- **Room for it.** A series may now follow three other sources (two before). For the server's own follows, a broken,
+  switched-off or uninstalled follower doesn't count toward that limit, and it is kept.
+
+### Changed
+
+- The switch **Look for failed chapters on other sources** is now **Use other sources on their own**, in Admin →
+  Settings → Updates & schedules. It turns the scout and the sweep's own search on or off together, and it is still on
+  unless you turned it off.
+
+### Upgrading
+
+- **Database:** two new tables, `series_scout` and `scout_verdicts`. Additive: v0.79.x ignores them.
+- **Settings:** `MAX_FOLLOWED_SOURCES` now defaults to 3. To keep two, set it to `2`. The new `SCOUT_SEARCHES_PER_HOUR`
+  (default 40) can be set to `0` to turn the scout off on its own. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
 ## v0.79.0 — 2026-10-17
 
 **A site that is cooling down no longer holds a series up.** When a site rate-limits or blocks the server, the series
