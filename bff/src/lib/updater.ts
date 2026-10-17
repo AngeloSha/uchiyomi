@@ -6,7 +6,7 @@ import { q, one } from './db';
 import { getSource, SourceChapter, withTimeout } from './sources';
 import { persistScan, setBookDates, setBookMeta, DL_ROOT } from './library';
 import { blockedNow, isDisabled, noteStage } from './sourceHealth';
-import { switchedOff } from './sourceStanding';
+import { standingsOf, switchedOff } from './sourceStanding';
 import { noteChapterFailure } from './chapterFailures';
 import { budgetFor } from './sources/budget';
 import { notifyNewChapter } from './push';
@@ -33,7 +33,7 @@ import { numKey } from './postingOrder';
 import { seriesHidesNotices } from './noticeSettings';
 import { heldBy, rangeEnd, rawRangeEnd } from './chapterRanges';
 import { isDue, refreshRadar } from './releaseRadar';
-import { finishDownloadsOn, retryCapFor, BEHIND_SQL } from './finishDownloads';
+import { finishDownloadsOn, retryCapFor, BEHIND_SQL, FINISH_MINUTES, clearQuiet, quietWanted } from './finishDownloads';
 
 /**
  * Why a series produced nothing this run.
@@ -84,7 +84,23 @@ const SWEEP_MAX = Number(process.env.UPDATER_SWEEP_MAX) || 150;
 export const CHAPTER_RETRY_CAP = Math.max(1, Number(process.env.CHAPTER_RETRY_CAP) || 3);
 
 /** `cancelled`: an admin pressed Cancel on the run's card (lib/downloadJobs.ts), and it stopped after the chapter in flight. */
-export type SweepStop = 'budget' | 'disk' | 'shutdown' | 'cancelled';
+/** `yield` (v0.79.0): a finishing sweep that gave way to another job (lib/finishDownloads.ts wantQuiet). */
+export type SweepStop = 'budget' | 'disk' | 'shutdown' | 'cancelled' | 'yield';
+
+/**
+ * When the first of these sources, which did not answer this run, can be asked again (v0.79.0, `finish_after`): a cooling
+ * one at the end of its cooldown; one that threw, or is resting (Fix everything's run-long pause), a finishing interval on.
+ */
+async function staleUntil(stale: ReadonlyMap<string, 'cooling' | 'threw'>): Promise<Date> {
+  const soon = Date.now() + FINISH_MINUTES * 60_000;
+  const cooling = [...stale].filter(([, why]) => why === 'cooling').map(([id]) => id);
+  const rows = cooling.length
+    ? await q<{ until: Date }>('SELECT blocked_until AS until FROM source_health WHERE source_id = ANY($1) AND blocked_until > now()', [cooling]).catch(() => [])
+    : [];
+  const ends = rows.map((r) => new Date(r.until).getTime());
+  if (ends.length < stale.size) ends.push(soon);
+  return new Date(Math.min(...ends));
+}
 
 /**
  * What the source said, kept on the row. See the migrate comment on source_chapters. No answer (`missing` null) clears
@@ -94,7 +110,8 @@ export type SweepStop = 'budget' | 'disk' | 'shutdown' | 'cancelled';
 async function stampChecked(seriesId: string, chapters: number | null, missing: number | null): Promise<void> {
   await q(
     `UPDATE lib_series SET source_checked_at = now(), source_chapters = $2, source_missing = $3,
-            finish_missing = CASE WHEN $3::int IS NULL THEN NULL ELSE finish_missing END WHERE id = $1`,
+            finish_missing = CASE WHEN $3::int IS NULL THEN NULL ELSE finish_missing END,
+            finish_after = CASE WHEN $3::int IS NULL THEN NULL ELSE finish_after END WHERE id = $1`,
     [seriesId, chapters, missing],
   ).catch(() => {});
 }
@@ -340,7 +357,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
     const on = followed.filter((f) => !off.has(f.source));
     if (!on.length) {
       // Nothing to fetch it from: not behind for the finishing sweep until a source is switched back on and a sweep says so.
-      await q('UPDATE lib_series SET finish_missing = 0 WHERE id = $1', [seriesId]).catch(() => {});
+      await q('UPDATE lib_series SET finish_missing = 0, finish_after = NULL WHERE id = $1', [seriesId]).catch(() => {});
       return opts.newestOnly ? { ...nothing(s.title, 'ok'), newest: { number: null, state: 'disabled' } } : nothing(s.title, 'off');
     }
     followed = on;
@@ -353,6 +370,11 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   let blocked = 0;
   let answered = 0;
   let askedSource = false;
+  // v0.79.0: which followed sources answered with chapters this run (`fresh`), and which said nothing because they could
+  // not be asked or did not answer (`stale`: cooling, resting, a throw or our own timeout). A stale source's chapters are
+  // still its chapters -- see the merge after the parts rules below.
+  const fresh = new Set<string>();
+  const stale = new Map<string, 'cooling' | 'threw'>();
   // The numbering source's own list, untouched: what the detector judges and what posting numbers are given to.
   let rawNumbering: SourceChapter[] | null = null;
   for (const f of followed) {
@@ -362,7 +384,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
     if (opts.unattended && !(await seriesIsMonitored(seriesId))) {
       return { ...nothing(s.title, 'paused'), asked: askedSource };
     }
-    if (opts.resting?.(f.source) || await blockedNow(f.source)) { blocked++; continue; }
+    if (opts.resting?.(f.source) || await blockedNow(f.source)) { blocked++; stale.set(f.source, 'cooling'); continue; }
     // Looked up again after the awaits above: an extension refresh can unregister an adapter between
     // building the list and asking it, and that is a source that did not answer, not a crash.
     const adapter = getSource(f.source);
@@ -374,9 +396,9 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
       if (!e?.selfTimeout) void noteStage(f.source, 'chapters', 'fail', { error: String(e?.message || 'listChapters failed') });
       return null;
     });
-    if (!list) continue;
+    if (!list) { stale.set(f.source, 'threw'); continue; }
     // On the RAW list, before any numbering or choosing: the source answered with chapters.
-    if (list.length) void noteStage(f.source, 'chapters', 'ok');
+    if (list.length) { void noteStage(f.source, 'chapters', 'ok'); fresh.add(f.source); }
     answered++;
     if (f.source === numberingSource) rawNumbering = list;
     // Copied, not annotated in place: an adapter may hand back the very array its detail cache holds, and
@@ -409,7 +431,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
     // series waiting for review would be the first one visited every night.
     const held = async (r?: Settled): Promise<UpdateResult> => {
       // Held, it fetches nothing: not behind for the finishing sweep (lib/finishDownloads.ts) until the review is done.
-      await q('UPDATE lib_series SET source_checked_at = now(), finish_missing = 0 WHERE id = $1', [seriesId]).catch(() => {});
+      await q('UPDATE lib_series SET source_checked_at = now(), finish_missing = 0, finish_after = NULL WHERE id = $1', [seriesId]).catch(() => {});
       return { ...nothing(s.title, 'renumber_pending'), asked: true, ...(r ? { renumber: r } : {}) };
     };
     if (!rawNumbering?.length || !numberingSource) return held();
@@ -449,7 +471,12 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   // Reintroduce by dropping the spread: "an English series never downloads the Spanish copy" in
   // copyLanguage.int.test.ts downloads it.
   const language = await languageRulesFor(seriesId, followed.map((f) => f.source)).catch(() => ({}));
-  const chooseOpts = { sourceRank: rankSources(priority, followed.map((f) => f.source)), ...language };
+  // A source that did not answer this run (v0.79.0, `stale`) ranks after every source that did: its copies are kept (the
+  // merge below) but cannot be fetched now, so a number another followed source lists is taken from that one. An
+  // explicit source order still wins (rankSources puts it first), and the fallback helper then takes the number from
+  // another source anyway, the stale one being in `refusing`.
+  const followOrder = [...followed.filter((f) => !stale.has(f.source)), ...followed.filter((f) => stale.has(f.source))].map((f) => f.source);
+  const chooseOpts = { sourceRank: rankSources(priority, followOrder), ...language };
   // Chapter parts that sources number or split differently (lib/partAlias.ts): another site's N.1 / N.6 for the N /
   // N.5 on disk is renumbered onto them (R1), and another site's split of a chapter already here (R2), or of a new one
   // whose first-ranked source splits it another way (R3), is `covered` --
@@ -469,6 +496,28 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
         tagged, held: disk.map((r) => ({ number: Number(r.number), sourceId: r.source_id })), primary: s.source_id ?? null,
         sourceRank: chooseOpts.sourceRank,
       }));
+    }
+  }
+  // v0.79.0: a followed source that could not be asked this run (cooling, resting) or did not answer keeps the chapters it
+  // listed last time. The listing was rewritten from the sources that answered, so a main in a cooldown lost every number
+  // only it lists: "{n} behind" and the finishing sweep's count dropped, the series read caught up, and its chapters
+  // waited for the scheduled check -- the stall the owner saw on every Natomanga series whose follower answered. Its
+  // stored copies (already in this series' numbering, as written last time) go back into the pool, ranked last, never
+  // asked for pages this run (`refusing` below); a covered row is another site's split and stays out. Only for a source
+  // still worth waiting for -- usable or cooling, never failing, switched off or gone -- and never under posting order.
+  // Reintroduce by dropping the merge: "a cooling main's numbers stay listed and behind while a follower answers" in
+  // updater.int.test.ts finds them gone from the listing and finish_missing 0.
+  if (!posting && fresh.size && stale.size) {
+    const standing = await standingsOf([...stale.keys()]).catch(() => new Map<string, string>());
+    const keep = new Set([...stale.keys()].filter((id) => standing.get(id) === 'usable' || standing.get(id) === 'cooling'));
+    if (keep.size) {
+      const rows = await q<{ number: number; title: string | null; copies: ListingCopy[] | null; status: string; unblocked_status: string | null }>(
+        'SELECT number::float8 AS number, title, copies, status, unblocked_status FROM series_listing WHERE series_id = $1', [seriesId],
+      ).catch(() => []);
+      for (const row of rows) {
+        if (row.status === 'covered' || row.unblocked_status === 'covered') continue;
+        for (const copy of row.copies ?? []) if (keep.has(copy.source)) tagged.push(copyToChapter(copy, row));
+      }
     }
   }
   const { releases, waiting: held } = chooseReleases(tagged, prefs, chooseOpts);
@@ -569,7 +618,16 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   // or every quarter of an hour its sources would be asked for a list that can fetch nothing. Reintroduce by stamping
   // `missing.length`: "a series behind only on chapters it leaves alone is not gone back for" in
   // finishDownloads.int.test.ts finds it three behind for the finishing sweep, and asked.
-  await q('UPDATE lib_series SET finish_missing = $2 WHERE id = $1', [seriesId, eligible.length]).catch(() => {});
+  // v0.79.0: and only what it can fetch NOW. A number whose every copy is on a source that did not answer this run (the
+  // kept copies above) is still behind -- source_missing counts it -- but asking again before that source can answer
+  // fetches nothing and costs the others a listing each quarter of an hour. Such a series is gone back to when the
+  // source's cooldown ends (`finish_after`, BEHIND_SQL), or a quarter of an hour on for one that did not answer.
+  // Reintroduce by stamping `eligible.length`: "a series waiting only on its cooling main is gone back to when the
+  // cooldown ends" in updater.int.test.ts finds it behind at once.
+  const reachable = stale.size ? new Set(tagged.filter((c) => !stale.has(c.source ?? '')).map((c) => c.number)) : null;
+  const fetchable = reachable ? eligible.filter((c) => reachable.has(c.number)).length : eligible.length;
+  const after = fetchable < eligible.length ? await staleUntil(stale) : null;
+  await q('UPDATE lib_series SET finish_missing = $2, finish_after = $3 WHERE id = $1', [seriesId, fetchable, after]).catch(() => {});
   const capped = missing.filter((c) => cappedNums.has(c.number)).length;
   const waiting = missing.filter((c) => heldNums.has(c.number)).length;
 
@@ -635,7 +693,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   // previous listing standing" in seriesListing.int.test.ts reads 0 rows.
   // The copies of each number are stored in the same order the chooser ranked them (releaseOrder with
   // the same source ranks), so the listing's "best first" is the sweep's, not a second opinion.
-  if (tagged.length) await replaceListing(seriesId, listingRows(tagged, releases, heldNums, s.source_id, releaseOrder(prefs, chooseOpts), covered)).catch(() => {});
+  if (fresh.size) await replaceListing(seriesId, listingRows(tagged, releases, heldNums, s.source_id, releaseOrder(prefs, chooseOpts), covered)).catch(() => {});
 
   let added = 0;
   let failed = 0;
@@ -651,7 +709,11 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   // refusal, as before -- so each source still costs at most one strike per run. The set is written by
   // the fallback helper (a copy that earns `blockStatus` puts its source here) and read by it (a chosen
   // copy on a refusing source is skipped, and the number is taken from another followed source instead).
-  const refusing = new Set<string>();
+  // v0.79.0: a source that did not answer this run is not asked for pages either (`stale`, above): its kept copies wait
+  // for its next answer, and a number another source lists is taken from that one by the fallback helper.
+  // Reintroduce by starting the set empty: "a shared number comes from the follower" in updater.int.test.ts finds the
+  // cooling main asked for pages.
+  const refusing = new Set<string>(stale.keys());
   // Which sources the sweep may reach on this series' behalf, for the alternates and the hunt: never an
   // adult source on a clean series (lib/sourceHunt.ts sweepAllowedFor), and never past the viewer's own
   // cap when a viewer drove the run. The chosen copy itself is not held to the adult rule -- a person followed
@@ -873,16 +935,35 @@ export async function runUpdateAll(opts: {
   // parking and un-parking by its own cooldown, and one series blocked on its follower parked every series of the
   // dead main behind it (v0.54.0: aqua off, 195 series). Reintroduce by keying on `source_id`: "queues follow the
   // source a series is asked through" in updater.int.test.ts finds the series on the fine follower skipped.
+  //
+  // v0.79.0: and one that can be asked NOW. A main in a cooldown is still loaded and switched on, so it kept the queue of
+  // every series it is the main of: the first of them whose followers were cooling too came back `blocked`, parked the
+  // queue, and every series behind it -- the ones a working follower would have served -- was skipped until the
+  // cooldown ended. The owner's Natomanga series waited exactly so. A series goes on the queue of the first source on
+  // its route that is not cooling; one with none waits aside (`waiting`), costs nothing, joins a queue the moment a
+  // source on its route comes out of its cooldown, and counts as `blocked` if none does before the sweep ends. And when
+  // a queue parks, the series still in it move on to the next source on their own route that can be asked.
+  // Reintroduce by keying on the first loaded source: "a cooling-main series goes on its follower's queue" in
+  // updater.int.test.ts finds it skipped; by dropping the move on parking: "a parked queue hands its series on" there.
   const offNow = await switchedOff(rows.flatMap((r) => [r.source_id ?? '', ...(r.extra ?? [])]));
-  const askedThrough = (r: SweepRow): string => {
-    const route = r.numbering === 'posting_order' ? [r.numbering_source ?? r.source_id] : [r.source_id, ...(r.extra ?? [])];
-    return route.find((id): id is string => !!id && !!getSource(id) && !offNow.has(id)) ?? (r.source_id || '');
-  };
+  const coolingSet = async (): Promise<Set<string>> =>
+    new Set((await q<{ source_id: string }>('SELECT source_id FROM source_health WHERE blocked_until > now()').catch(() => [])).map((r) => r.source_id));
+  let coolingNow = await coolingSet();
+  const routeOf = (r: SweepRow): string[] =>
+    (r.numbering === 'posting_order' ? [r.numbering_source ?? r.source_id] : [r.source_id, ...(r.extra ?? [])]).filter((id): id is string => !!id);
+  const askable = (id: string) => !!getSource(id) && !offNow.has(id);
+  const routes = new Map(rows.map((r) => [r.id, routeOf(r)] as const));
   const queues = new Map<string, string[]>();
+  const enqueue = (src: string, id: string) => { if (!queues.has(src)) queues.set(src, []); queues.get(src)!.push(id); };
+  const waiting = new Set<string>();
   for (const r of rows) {
-    const k = askedThrough(r);
-    if (!queues.has(k)) queues.set(k, []);
-    queues.get(k)!.push(r.id);
+    const route = routes.get(r.id)!;
+    const k = route.find((id) => askable(id) && !coolingNow.has(id));
+    if (k) enqueue(k, r.id);
+    // Nothing on its route that may be asked at all (unloaded, switched off): the queue it always had, where the
+    // visit says so (`unrouted`, `off`) without asking anyone.
+    else if (!route.some(askable)) enqueue(r.source_id || '', r.id);
+    else waiting.add(r.id);
   }
   const parked = new Set<string>();
 
@@ -905,13 +986,15 @@ export async function runUpdateAll(opts: {
   const dated: { id: string; folder: string; chapters: SourceChapter[]; landed: Landed[] }[] = [];
   const newChapters: DigestSeries[] = [];
 
-  sweep: while (queues.size) {
+  sweep: while (queues.size || waiting.size) {
     let progressed = false;
     for (const [src, ids] of [...queues]) {
       if (!ids.length) { queues.delete(src); continue; }
       if (parked.has(src)) continue;
       if (runtime.stopping) { stopped = 'shutdown'; break sweep; }
       if (stopRequested(card)) { stopped = 'cancelled'; break sweep; }
+      // v0.79.0: the finishing sweep gives way between series when another job asked (lib/finishDownloads.ts).
+      if (opts.behindOnly && quietWanted()) { stopped = 'yield'; break sweep; }
       if (spent >= sweepMax) { stopped = 'budget'; break sweep; }
       const id = ids.shift()!;
       progressed = true;
@@ -935,7 +1018,9 @@ export async function runUpdateAll(opts: {
       if (card) card.current = { id, title: titles.get(id) ?? '' };
       // The card's cancel reaches INSIDE the series too: a series with ten new chapters is a few minutes of
       // downloading, and "Cancel" that waits for all ten reads as "Cancel does nothing".
-      const r = await updateSeries(id, Math.min(opts.maxNew ?? 10, Math.max(1, sweepMax - spent)), { hunt: huntBudget, unattended: true, finish, ...(card ? { cancelled: () => stopRequested(card) } : {}) })
+      // ...and between chapters: a series with ten chapters to fetch is minutes of downloading.
+      const yielded = () => !!opts.behindOnly && quietWanted();
+      const r = await updateSeries(id, Math.min(opts.maxNew ?? 10, Math.max(1, sweepMax - spent)), { hunt: huntBudget, unattended: true, finish, ...(card ? { cancelled: () => stopRequested(card) || yielded() } : { cancelled: yielded }) })
         .catch(() => ({ added: 0, outcome: 'threw' as const, failed: 0, landed: [] } as { added: number; outcome: 'threw'; failed: number; folder?: string; chapters?: SourceChapter[]; landed: Landed[]; diskFull?: boolean; switched?: number; partial?: number }));
       added += r.added;
       chapterFailures += r.failed ?? 0;
@@ -949,7 +1034,18 @@ export async function runUpdateAll(opts: {
       if (r.added && (r as { title?: string }).title) newChapters.push({ id, title: (r as { title: string }).title, added: r.added });
       if (card) { card.done = visited; card.fetched = added; card.failed = chapterFailures; }
       if (r.diskFull) { stopped = 'disk'; break sweep; }
-      if (r.outcome === 'blocked') parked.add(src);
+      if (r.outcome === 'blocked') {
+        parked.add(src);
+        coolingNow = await coolingSet();
+        const rest = queues.get(src) ?? [];
+        const stay: string[] = [];
+        for (const other of rest) {
+          const to = (routes.get(other) ?? []).find((id) => id !== src && askable(id) && !coolingNow.has(id) && !parked.has(id));
+          if (to) enqueue(to, other);
+          else stay.push(other);
+        }
+        rest.splice(0, rest.length, ...stay);
+      }
       // The pause is for the sources' sake: a series no source was asked about (gone, unrouted, every source in a
       // cooldown or switched off) cost them nothing, as bulk Fetch newest already reads it. A throw counts as asked.
       if ((r as { asked?: boolean }).asked !== false) await new Promise((res) => setTimeout(res, 1500));
@@ -958,10 +1054,21 @@ export async function runUpdateAll(opts: {
       // Only parked queues remain. Ask once whether any cooldown has lapsed; if none has, the sweep is over.
       let freed = false;
       for (const src of parked) if (!(await blockedNow(src))) { parked.delete(src); freed = true; }
+      // And a series that had no source to go on at the start takes the first that has come out of its cooldown.
+      if (waiting.size) {
+        coolingNow = await coolingSet();
+        for (const id of [...waiting]) {
+          const to = (routes.get(id) ?? []).find((s) => askable(s) && !coolingNow.has(s) && !parked.has(s));
+          if (to) { waiting.delete(id); enqueue(to, id); freed = true; }
+        }
+      }
       if (!freed) break;
     }
   }
   for (const ids of queues.values()) outcomes.skipped += ids.length;
+  // Never asked, because every source it could be asked through was cooling the whole sweep long: blocked, as the
+  // visit itself would have said, not "skipped" -- nothing was left over for lack of time.
+  outcomes.blocked += waiting.size;
 
   // The completion pass: partial chapters from earlier sweeps, oldest-stamped first, each asked for exactly
   // its missing pages (lib/partial.ts). Only when the sweep itself ran to its end -- a night the budget,
@@ -1117,6 +1224,10 @@ export function runSweep(
   // The run's card in Library -> Downloads (lib/downloadJobs.ts, #82): the sweep writes its progress there and
   // stops when an admin presses its Cancel. `by` is who pressed Run now; the schedule is nobody.
   const { by, finishing, ...rest } = opts ?? {};
+  // v0.79.0: the finishing sweep says so on the flag, so a job that wants its place can ask it to give way
+  // (lib/finishDownloads.ts wantQuiet); any other sweep is that place taken, and the request is answered.
+  runtime.finishing = !!finishing;
+  if (!finishing) clearQuiet();
   const sweepOpts = finishing ? { ...rest, behindOnly: true } : rest;
   const card = beginRun('sweep', by ?? null);
   // Every chapter this run downloads is the sweep's, for the downloads view (lib/downloadActivity.ts).
@@ -1184,6 +1295,7 @@ export function runSweep(
       return null;
     } finally {
       runtime.updating = false;
+      runtime.finishing = false;
     }
   });
 }

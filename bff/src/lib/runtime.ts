@@ -41,7 +41,7 @@ export const runtime: {
     series: number; visited?: number; added: number; failed?: number; chapterFailures?: number;
     /** Chapters recovered from another source, saved with placeholders, or completed from an earlier run. */
     switched?: number; partial?: number; completed?: number;
-    healthy?: boolean; stopped?: 'budget' | 'disk' | 'shutdown' | 'cancelled';
+    healthy?: boolean; stopped?: 'budget' | 'disk' | 'shutdown' | 'cancelled' | 'yield';
     /** v0.61.0: monitored series the smart update checks left for a later sweep (lib/releaseRadar.ts isDue). */
     rested?: number;
   } | null;
@@ -91,6 +91,14 @@ export const runtime: {
    */
   autofixing: boolean;
   /**
+   * v0.79.0: the sweep holding `updating` is the finishing sweep of the behind series (lib/finishDownloads.ts), which
+   * gives way when another job asks (`quietWantedAt`, wantQuiet): it runs every quarter of an hour, and the full sweep,
+   * the repair, Fix everything and Find runs used to wait out whole passes of it.
+   */
+  finishing: boolean;
+  /** When a job last asked the finishing sweep to give way (ms since the epoch), 0 for never; see finishDownloads.ts. */
+  quietWantedAt: number;
+  /**
    * Re-arms the nightly backup timer, installed by server.ts once the scheduler exists.
    *
    * The scheduler arms ONE timer per run and re-reads `backup_hour` only when that timer fires, so before
@@ -115,5 +123,7 @@ export const runtime: {
   cleaning: false,
   repairing: false,
   autofixing: false,
+  finishing: false,
+  quietWantedAt: 0,
   rearmBackup: null,
 };

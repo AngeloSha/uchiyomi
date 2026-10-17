@@ -585,7 +585,10 @@ async function tickOnce(opts: TickOpts): Promise<TickReport> {
   const g = globalWait({
     stopping: runtime.stopping, paused: set.paused,
     windowFrom: set.windowFrom, windowTo: set.windowTo, hour: new Date(now).getHours(), now, opensAt: windowOpensAt, inWindow,
-    updating: runtime.updating, repairing: runtime.repairing, checking: checkRunning(),
+    // v0.79.0: not for the finishing sweep of the behind series (lib/finishDownloads.ts), which runs every quarter of
+    // an hour: the archive gives way per source already (a key's gate must be idle before it starts a chapter), and
+    // waiting out every pass would leave it hardly any turns at all.
+    updating: runtime.updating && !runtime.finishing, repairing: runtime.repairing, checking: checkRunning(),
     freeBytes: free, minFreeGb: set.minFreeGb,
   });
   if (g) {

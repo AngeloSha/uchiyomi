@@ -663,6 +663,15 @@ async function fetchChapter(
     // #115: evidence whatever classify() makes of it. An extension's own exception classifies as nothing, so
     // the cooldown never saw it and neither did Health; the stage note sees everything and escalates nothing.
     void noteStage(input.sourceId, 'pages', 'fail', { error: (e as Error)?.message || 'getPageUrls failed' });
+    // v0.79.0: a site saying "slow down" (429) or "no" (403) to a chapter's page list is the same refusal as saying it to
+    // the page images. The run stops asking that source, the ledger files it as a refusal (Finish downloads on their own
+    // gives one twelve tries, lib/finishDownloads.ts) and the pace slows. Rethrown bare, it read as a broken chapter:
+    // `error`, three tries, and the same source asked again for the next chapter of the run. Reintroduce by rethrowing
+    // `e` as it was: "a page list refused with 429 is a refusal" in downloadBlame.int.test.ts reads `error`.
+    if (s === 'rate_limited' || s === 'blocked') {
+      if (s === 'rate_limited') noteRateLimited(src.id);
+      throw Object.assign(e instanceof Error ? e : new Error(String(e)), { blockStatus: s, status: s });
+    }
     throw e;
   }
   if (!urls.length) throw new Error('no page urls');

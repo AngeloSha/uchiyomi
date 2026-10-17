@@ -28,7 +28,7 @@ import { scheduleAniListScores } from './lib/anilistScores';
 import { notifyAdmins } from './lib/push';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
-import { behindCount, finishDownloadsOn, nextCooldownEnd as finishCooldownEnd, FINISH_MINUTES, FINISH_PER_SERIES, FINISH_SWEEP_MAX } from './lib/finishDownloads';
+import { behindCount, finishDownloadsOn, nextCooldownEnd as finishCooldownEnd, wantQuiet, FINISH_MINUTES, FINISH_PER_SERIES, FINISH_SWEEP_MAX } from './lib/finishDownloads';
 import { refreshMissingRadars } from './lib/releaseRadar';
 import { runRepair, setRepairNext, REPAIR_HOURS } from './lib/repair';
 import { AFTER_NIGHTLY_AUTOFIX, autofixSettled, closeInterruptedAutofix, startAutofix } from './lib/autofix';
@@ -283,10 +283,15 @@ async function main() {
           // "Run now" button gets the same treatment as this tick -- and this tick can see the button's sweep.
           const run = smart ? runSweep({ maxNew: 5, smart }, app.log) : runSweep({ maxNew: 5 }, app.log);
           if (run) await run;
-          else {
-            // Another sweep holds the flag -- since "Finish downloads on their own", most often the finishing sweep
-            // of the behind series, a few minutes long. Ten minutes on, as beside a repair, not a whole interval:
-            // the full sweep must not lose six hours to a quarter-hour pass.
+          else if (runtime.finishing) {
+            // v0.79.0: the finishing sweep of the behind series holds the flag. Asked to give way at its next chapter
+            // (lib/finishDownloads.ts wantQuiet), it does, and the full sweep starts a minute on.
+            wantQuiet();
+            app.log.info('updater: the finishing downloads are giving way, trying again in a minute');
+            retryIn = 60 * 1000;
+          } else {
+            // Another sweep holds the flag (Run now, or a check). Ten minutes on, as beside a repair, not a whole
+            // interval: the full sweep must not lose six hours to it.
             app.log.info('updater: another sweep is running, trying again in 10 minutes');
             retryIn = 10 * 60 * 1000;
           }
@@ -325,14 +330,15 @@ async function main() {
     const finishTick = async () => {
       let next = FINISH_MINUTES * 60_000;
       try {
-        if ((await finishDownloadsOn()) && (await behindCount()) > 0) {
-          if (!runtime.updating && !runtime.repairing) {
+        if (await finishDownloadsOn()) {
+          if ((await behindCount()) > 0 && !runtime.updating && !runtime.repairing) {
             const run = runSweep({ maxNew: FINISH_PER_SERIES, sweepMax: FINISH_SWEEP_MAX, finishing: true }, app.log);
             if (run) await run;
           }
           // A site's cooldown ending before the next quarter-hour brings the next pass forward to it (half a minute
           // after, so the source is out of it), never closer than two minutes: a cooldown that keeps being renewed
-          // must not turn this into a loop.
+          // must not turn this into a loop. Read even with nothing behind now (v0.79.0): a series waiting only on a
+          // cooling source is not behind until that source can answer (`finish_after`), and this is its way back.
           const cool = await finishCooldownEnd();
           if (cool) next = Math.max(2 * 60_000, Math.min(next, cool.getTime() - Date.now() + 30_000));
         }
@@ -547,6 +553,12 @@ async function main() {
         const s = await pool.query('SELECT repair_enabled, nightly_mode FROM server_settings WHERE id = 1');
         if (s.rows[0]?.repair_enabled === false) {
           app.log.info('repair: switched off in settings, nothing to do');
+        } else if (runtime.updating && runtime.finishing) {
+          // v0.79.0: the finishing sweep of the behind series (lib/finishDownloads.ts) gives way when asked; a minute on,
+          // the nightly has its place instead of waiting out passes that come every quarter of an hour.
+          wantQuiet();
+          app.log.info('repair: the finishing downloads are giving way, trying again in a minute');
+          next = 60 * 1000;
         } else if (runtime.updating) {
           app.log.info('repair: a chapter sweep is running, trying again in 10 minutes');
           next = 10 * 60 * 1000;
@@ -557,8 +569,8 @@ async function main() {
           // everything it waits ten minutes, as for a sweep.
           const r = startAutofix(null, { origin: 'nightly', log: app.log });
           if ('busy' in r) {
-            app.log.info(`repair: Fix everything could not start beside a running ${r.busy}, trying again in 10 minutes`);
-            next = 10 * 60 * 1000;
+            app.log.info(`repair: Fix everything could not start beside a running ${r.busy}, trying again in ${r.busy === 'sweep' && runtime.finishing ? 'a minute' : '10 minutes'}`);
+            next = r.busy === 'sweep' && runtime.finishing ? 60 * 1000 : 10 * 60 * 1000;
           } else {
             await autofixSettled();
             // v0.60.1: then the repair steps Fix everything does not drive itself (lib/autofix.ts AFTER_NIGHTLY_AUTOFIX),

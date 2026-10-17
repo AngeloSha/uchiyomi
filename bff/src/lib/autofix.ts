@@ -89,6 +89,7 @@ import { altTitlesFor } from './altTitles';
 import { normGroup } from './releases';
 import type { RunOrigin } from './repairRuns';
 import { clearRunDigest, pruneRuns } from './repairRuns';
+import { wantQuiet } from './finishDownloads';
 
 // ── the shapes on the wire (SP/v491/V0550-API.md §1) ──────────────────────────────────────────────────────────────
 
@@ -291,7 +292,8 @@ function busyWith(): AutofixBusy | null {
   if (active || runtime.autofixing) return 'autofix';
   if (repairState.running || runtime.repairing) return 'repair';
   if (findRunning()) return 'find';
-  if (runtime.updating) return 'sweep';
+  // v0.79.0: the finishing sweep (lib/finishDownloads.ts) is asked to give way, so a second press a moment on starts.
+  if (runtime.updating) { wantQuiet(); return 'sweep'; }
   return null;
 }
 
@@ -351,6 +353,7 @@ export function setAutofixTiming(t: { quietMs?: number; clock?: () => number } =
 async function waitSweep(a: Run): Promise<boolean> {
   while (runtime.updating) {
     if (halted(a)) return false;
+    wantQuiet();
     now(a, say('autofix.now.waitSweep'));
     await nap(quietMs);
   }

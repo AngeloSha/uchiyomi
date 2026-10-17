@@ -166,6 +166,7 @@ import { numberText } from './chapterRanges';
 import { matchCheckState } from './matchCheck';
 import { namesOfMany } from './altTitles';
 import { nameKey } from './onlineMatch';
+import { wantQuiet } from './finishDownloads';
 
 /** How many stats are in flight at once: a NAS answers a handful in parallel well and thousands badly (Verify's). */
 const CONCURRENCY = 16;
@@ -761,7 +762,8 @@ export interface ApplyOpts { held?: () => Promise<void>; renumbered?: () => Prom
  * applied one, and beside another job" in rescan.int.test.ts names the job that was let through.
  */
 function clashing(): ApplyRefusal | null {
-  if (runtime.updating) return 'sweep_running';
+  // v0.79.0: the finishing sweep (lib/finishDownloads.ts) is asked to give way, so Apply works a moment on.
+  if (runtime.updating) { wantQuiet(); return 'sweep_running'; }
   if (runtime.autofixing) return 'autofix_running';
   if (runtime.repairing) return 'repair_running';
   if (verifyState.running) return 'verify_running';

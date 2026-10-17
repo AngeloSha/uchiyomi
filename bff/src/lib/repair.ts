@@ -69,7 +69,7 @@ import { busyFolders } from './bulkNewest';
 import { beginRun, dismissRun, endRun, stopRequested, type RunCard } from './downloadJobs';
 import { say } from './said';
 import { updateSeries, CHAPTER_RETRY_CAP, LIST_TIMEOUT, seriesIsMonitored, type Landed } from './updater';
-import { finishDownloadsOn, REFUSAL_RETRY_CAP } from './finishDownloads';
+import { finishDownloadsOn, REFUSAL_RETRY_CAP, wantQuiet } from './finishDownloads';
 import { huntCandidates, huntSource, followHunted, seriesIsAdult, sweepAllowedFor, HUNT_WALL_MS, HUNT_MAX_SOURCES } from './sourceHunt';
 import { SOLVER_BUDGET_MS } from './sources/budget';
 import { canDownload, finishRunRecord, isFullRun, kindOf, startRunRecord, targetOf, type RunOrigin, type RunStatus, type RunTarget } from './repairRuns';
@@ -2065,7 +2065,11 @@ export function runRepair(log?: Log, opts: RepairOpts = {}): Promise<RepairResul
   // v0.55.0: never beside Fix everything either, which drives these very steps itself (repairForAutofix). Reintroduce by
   // dropping `runtime.autofixing`: "one Fix everything at a time, and never beside a repair" in autofix.int.test.ts
   // starts a repair under it.
-  if (repairState.running || runtime.updating || runtime.autofixing || driven) return false;
+  if (repairState.running || runtime.updating || runtime.autofixing || driven) {
+    // v0.79.0: asked of the finishing sweep (lib/finishDownloads.ts), which gives way; a no-op for any other sweep.
+    if (runtime.updating) wantQuiet();
+    return false;
+  }
   repairState.running = true;
   runtime.repairing = true;
   const full = isFullRun(opts);

@@ -36,6 +36,10 @@ const LIB = 'lib_fin';
 const FIN = 'fin-ok';
 /** Lists chapters 1-3 of one title; every page answers 429. */
 const REF = 'fin-refuse';
+/** v0.79.0: in a cooldown before the add starts; its pages would be fine. */
+const COOLED = 'fin-cooled';
+/** v0.79.0: its chapters' page lists answer 429. */
+const PLREF = 'fin-plref';
 const S = (k: string) => `s_fin_${k}`;
 const PIXEL = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(400, 7)]);
 const realFetch = globalThis.fetch;
@@ -69,6 +73,23 @@ before(async () => {
     async getPageUrls(chId: string) { return [`https://example.invalid/refuse/${chId}.png`]; },
     async latest() { return []; },
   } as any);
+  registerAdapter({
+    id: COOLED, name: 'Fin Cooled',
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: COOLED, title: 'Cooled At Start' }; },
+    async listChapters() { return [1, 2, 3].map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `k${n}`, pages: 1 })); },
+    async getPageUrls(chId: string) { return [`https://example.invalid/fin/${chId}.png`]; },
+    async latest() { return []; },
+  } as any);
+  registerAdapter({
+    id: PLREF, name: 'Fin Page List',
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: PLREF, title: 'Page List Refused' }; },
+    async listChapters() { return [1, 2, 3].map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `l${n}`, pages: 1 })); },
+    // The chapter's page list itself answers 429, as an engine relays a site's refusal.
+    async getPageUrls() { throw new Error('suwayomi: HTTP error 429 Too Many Requests'); },
+    async latest() { return []; },
+  } as any);
   globalThis.fetch = (async (u: any) => (String(u).includes('/refuse/')
     ? new Response('slow down', { status: 429, headers: { 'retry-after': '1' } })
     : new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } }))) as typeof fetch;
@@ -82,7 +103,8 @@ after(async () => {
   await q('UPDATE server_settings SET finish_downloads = true WHERE id = 1').catch(() => {});
   await q(`DELETE FROM lib_books WHERE series_id LIKE 's_fin_%'`).catch(() => {});
   await q(`DELETE FROM lib_series WHERE id LIKE 's_fin_%' OR folder LIKE 'Fin Refuse/%' OR library_id = $1`, [LIB]).catch(() => {});
-  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[FIN, REF]]).catch(() => {});
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[FIN, REF, COOLED, PLREF]]).catch(() => {});
+  await q(`DELETE FROM lib_series WHERE folder LIKE 'Fin Cooled/%' OR folder LIKE 'Fin Page List/%'`).catch(() => {});
   await q('DELETE FROM libraries WHERE id = $1', [LIB]).catch(() => {});
 });
 
@@ -318,5 +340,81 @@ test('a hole no source lists is not a missing chapter', { skip }, async () => {
     await q('DELETE FROM series_listing WHERE series_id = ANY($1)', [[S('half'), S('none'), S('bare')]]).catch(() => {});
     await q('DELETE FROM lib_books WHERE series_id = ANY($1)', [[S('half'), S('none'), S('bare')]]).catch(() => {});
     await q('DELETE FROM lib_series WHERE id = ANY($1)', [[S('half'), S('none'), S('bare')]]).catch(() => {});
+  }
+});
+
+test('an add whose source is cooling keeps the series, and so does one whose page list is refused', { skip }, async () => {
+  const { addSeriesFromSource, jobBusy } = await import('../src/routes/sources');
+  const settle = async (folder: string) => {
+    const until = Date.now() + 20_000;
+    while (Date.now() < until && jobBusy(folder)) await new Promise((r) => setTimeout(r, 100));
+    return (await q('SELECT id, source_checked_at, source_missing FROM lib_series WHERE folder = $1', [folder]))[0];
+  };
+  try {
+    // In a cooldown before the add began (a Discover search a moment ago can do that): chapter 1 is never asked.
+    // Reintroduce by dropping the `refusing` skip branch in routes/sources.ts run(): 422, no row.
+    await q(`INSERT INTO source_health (source_id, status, blocked_until) VALUES ($1, 'rate_limited', now() + interval '1 hour')
+             ON CONFLICT (source_id) DO UPDATE SET blocked_until = EXCLUDED.blocked_until`, [COOLED]);
+    const r1 = await addSeriesFromSource({ source: COOLED, sourceId: `${COOLED}-1`, wait: false });
+    assert.equal(r1.started, true, r1.message);
+    const row1 = await settle('Fin Cooled/Cooled At Start');
+    assert.ok(row1, 'the series is kept although its source was cooling');
+    assert.equal(row1.source_checked_at, null);
+    assert.equal(Number(row1.source_missing), 3);
+    // The page list refused (v0.79.0, lib/downloader.ts): a refusal like an image's. Reintroduce by rethrowing the page
+    // list's error bare: no blockStatus, 422, no row.
+    const r2 = await addSeriesFromSource({ source: PLREF, sourceId: `${PLREF}-1`, wait: false });
+    assert.equal(r2.started, true, r2.message);
+    const row2 = await settle('Fin Page List/Page List Refused');
+    assert.ok(row2, 'the series is kept although its source refused the page list');
+    assert.equal(row2.source_checked_at, null);
+  } finally {
+    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[COOLED, PLREF]]).catch(() => {});
+    await q(`DELETE FROM lib_series WHERE folder LIKE 'Fin Cooled/%' OR folder LIKE 'Fin Page List/%'`).catch(() => {});
+  }
+});
+
+test('the finishing sweep yields to a waiting full sweep', { skip }, async () => {
+  const { runSweep } = await import('../src/lib/updater');
+  const { wantQuiet } = await import('../src/lib/finishDownloads');
+  const { runtime } = await import('../src/lib/runtime');
+  const { registerAdapter } = await import('../src/lib/sources');
+  // One page held until released: the finishing sweep is inside its first series when the full sweep comes asking.
+  let release!: () => void;
+  const held = new Promise<void>((r) => { release = r; });
+  let pagesAsked = 0;
+  registerAdapter({
+    id: 'fin-gate', name: 'Fin Gate',
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: 'fin-gate', title: sid }; },
+    async listChapters(sid: string) { listed.add(sid); return [1, 2].map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `${sid}:${n}` })); },
+    async getPageUrls(chId: string) { pagesAsked++; if (pagesAsked === 1) await held; return [`https://example.invalid/fin/${encodeURIComponent(chId)}.png`]; },
+    async latest() { return []; },
+  } as any);
+  const keys = ['yA', 'yB', 'yC'];
+  for (const k of keys) {
+    await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id, auto_update)
+             VALUES ($1,'T!fin',$1,$1,0,$2,'fin-gate',$3,true) ON CONFLICT (id) DO NOTHING`, [S(k), LIB, k]);
+  }
+  try {
+    listed.clear();
+    const run = runSweep({ maxNew: 10, sweepMax: 60, finishing: true }, quiet);
+    assert.notEqual(run, false, 'PREMISE: the finishing sweep started');
+    while (pagesAsked < 1) await new Promise((r) => setTimeout(r, 20));
+    assert.equal(runSweep({ maxNew: 5 }, quiet), false, 'PREMISE: a full sweep is refused while it runs');
+    assert.equal(runtime.finishing, true);
+    wantQuiet();   // what the full sweep's tick does now (server.ts)
+    release();
+    const r = await run;
+    // Reintroduce by dropping the quietWanted checks (lib/updater.ts runUpdateAll): every series is visited.
+    assert.equal(r?.stopped, 'yield', 'it gave way');
+    assert.equal(listed.size, 1, 'at the chapter it was on, before the other series');
+    assert.equal(runtime.finishing, false);
+    const full = runSweep({ maxNew: 5 }, quiet);
+    assert.notEqual(full, false, 'and the full sweep starts');
+    await full;
+  } finally {
+    await q('DELETE FROM lib_books WHERE series_id = ANY($1)', [keys.map(S)]).catch(() => {});
+    await q('DELETE FROM lib_series WHERE id = ANY($1)', [keys.map(S)]).catch(() => {});
   }
 });

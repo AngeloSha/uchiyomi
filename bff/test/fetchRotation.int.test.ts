@@ -66,10 +66,13 @@ const peak = new Map<string, number>();
 let peakAll = 0;
 
 const realFetch = globalThis.fetch;
+/** Image servers that answer 403 to every page (v0.79.0: a job every source refuses). */
+const refuseHosts = new Set<string>();
 globalThis.fetch = (async (u: any, init?: any) => {
   const url = String(u);
   if (!/-rot\.com\//.test(url)) return realFetch(u, init);
   const server = new URL(url).hostname.split('.').slice(-2).join('.');
+  if (refuseHosts.has(server)) return new Response('go away', { status: 403 });
   inFlight.set(server, (inFlight.get(server) ?? 0) + 1);
   peak.set(server, Math.max(peak.get(server) ?? 0, inFlight.get(server)!));
   peakAll = Math.max(peakAll, [...inFlight.values()].reduce((a, b) => a + b, 0));
@@ -172,6 +175,7 @@ before(async () => {
 beforeEach(async () => {
   if (!DSN) return;
   clearPace();
+  refuseHosts.clear();
   await q(`DELETE FROM source_health WHERE source_id LIKE 'rot-%'`);
   asked.length = 0;
   inFlight.clear();
@@ -249,8 +253,9 @@ test('a pick never switches, nor a number once picked; a slowed site gives way t
 });
 
 test('never a source the job may not ask: switched off, cooling down, or past the viewer\'s cap', { skip }, async () => {
-  // Switched off or in a cooldown since the listing was read (the route's refresh drops such a source's copies, so the
-  // job is started from the listing as it stands). Switched off, the helper would refuse the copy and switch back, which
+  // Switched off or in a cooldown since the listing was read (the job is started from the listing as it stands: since
+  // v0.79.0 the route's refresh keeps a cooling source's copies, and the route itself takes another source's copy of a
+  // number whose chosen one is cooling -- "a Fetch while the main cools" below). Switched off, the helper would refuse the copy and switch back, which
   // the card shows; in a cooldown nothing else stops a chosen copy. Reintroduce by dropping isDisabled from `may`: the
   // card lists switches from BETA; by dropping blockedNow: BETA is asked.
   const s = await series('may', ALPHA, [BETA], [1, 2, 3]);
@@ -314,4 +319,39 @@ test('a Fetch that starts while a Rescan holds its series waits for it, then tak
   assert.deepEqual([job.done, job.total], [4, 4]);
   const by = servedBy('held', [1, 2, 3, 4]);
   assert.ok(by.includes(ALPHA) && by.includes(BETA), `the Fetch that waited lost its turns: ${by}`);
+});
+
+test('a Fetch while the main cools takes the follower\'s copy, and hands main-only numbers on', { skip }, async () => {
+  // The series ranks ALPHA first on its own (its source order), so the stored copy of 1-3 stays ALPHA's even while it
+  // cools; BETA lists 1-3 only. Reintroduce by skipping a cooling chosen copy as `cooldown` (routes/sources.ts fetch
+  // route): 409, nothing fetched. Reintroduce by dropping the hand-off: 4 and 5 read `cooldown` and the series keeps
+  // its stamp.
+  const s = await series('fcool', ALPHA, [BETA], [1, 2, 3, 4, 5]);
+  listed.set('fcool-rot-beta', [1, 2, 3]);
+  await q(`UPDATE lib_series SET source_prefs = '{"priority":["rot-alpha"]}'::jsonb WHERE id = $1`, [s.id]);
+  const { updateSeries } = await import('../src/lib/updater');
+  await updateSeries(s.id, 0);
+  await q(`INSERT INTO source_health (source_id, status, blocked_until) VALUES ($1, 'rate_limited', now() + interval '10 minutes')
+           ON CONFLICT (source_id) DO UPDATE SET blocked_until = EXCLUDED.blocked_until`, [ALPHA]);
+  const r = await fetchNums(s.id, [1, 2, 3, 4, 5]);
+  assert.equal(r.statusCode, 200, r.payload);
+  assert.deepEqual(r.json().skipped.map((x: any) => [x.number, x.reason]), [[4, 'later'], [5, 'later']], 'what only the cooling main has is handed on');
+  assert.equal((await jobDone(s.folder))?.status, 'done');
+  assert.deepEqual(servedBy('fcool', [1, 2, 3]), [BETA, BETA, BETA], 'the rest came from the follower');
+  const row = (await q('SELECT source_checked_at FROM lib_series WHERE id = $1', [s.id]))[0];
+  assert.equal(row.source_checked_at, null, 'first in the finishing sweep\'s line');
+});
+
+test('a Fetch job every source refuses hands the rest on', { skip }, async () => {
+  // Reintroduce by dropping `handsOn` (routes/sources.ts startDownloadJob): the series keeps its stamp.
+  const s = await series('fex', ALPHA, [], [1, 2, 3]);
+  await q('UPDATE lib_series SET source_checked_at = now() WHERE id = $1', [s.id]);
+  refuseHosts.add('alpha-rot.com');
+  const r = await fetchNums(s.id, [1, 2, 3]);
+  assert.equal(r.statusCode, 200, r.payload);
+  const job = await jobDone(s.folder);
+  assert.equal(job?.status, 'error', 'PREMISE: the only source refused');
+  assert.match(job.reason ?? '', /The rest will download on their own/, 'the card says what happens next');
+  const row = (await q('SELECT source_checked_at FROM lib_series WHERE id = $1', [s.id]))[0];
+  assert.equal(row.source_checked_at, null, 'and the series is first in the finishing sweep\'s line');
 });

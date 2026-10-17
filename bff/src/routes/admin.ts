@@ -115,6 +115,7 @@ import { appVersion } from '../lib/appVersion';
 import { PING_URL, buildPayload, installFacts, monthlyId, newSecret, sendForget } from '../lib/installPing';
 import { withOrigin } from '../lib/downloadActivity';
 import { cleanLibraryReader } from '../lib/libraryReader';
+import { wantQuiet } from '../lib/finishDownloads';
 import {
   readBulkChapterDeleteRun, requestBulkChapterDeleteCancel, startBulkChapterDelete,
 } from '../lib/bulkChapterDelete';
@@ -1266,7 +1267,8 @@ export default async function adminRoutes(app: FastifyInstance) {
       // lib_books for what landed). runRepair refuses on its own, but it cannot say WHY, and "busy" on a
       // press the admin made while a sweep is running reads as "the repair is stuck". Answered separately
       // so the page can say "a chapter sweep is running; try again in a few minutes".
-      if (runtime.updating) return { ok: false, error: 'sweep_running' };
+      // v0.79.0: the finishing sweep (lib/finishDownloads.ts) is asked to give way, so a second press a moment on starts.
+      if (runtime.updating) { wantQuiet(); return { ok: false, error: 'sweep_running' }; }
       // Never awaited: a full repair opens two thousand archives and can download chapters. The panel polls
       // `running` and keeps the persisted result, exactly as the verify and the sweep do.
       // ⚠️ `userId` is always passed, even though it is the admin's own id: an explicit run ignores the

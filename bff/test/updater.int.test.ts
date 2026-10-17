@@ -1615,3 +1615,171 @@ test('the sweep leaves a held series for later, and visits it once the hold is g
     await q('DELETE FROM source_health WHERE source_id = $1', ['upd-hold']);
   }
 });
+
+// ---- v0.79.0: a series is never parked behind a cooling source, nor forgotten while one cools ----
+
+/** A source whose chapter list can be made to throw, counting what it is asked. */
+function switchable(id: string, nums: number[]) {
+  const state = { throws: false, listed: 0, pages: [] as string[] };
+  const adapter = {
+    id, name: id,
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: id, title: sid }; },
+    async listChapters() {
+      state.listed++;
+      if (state.throws) throw new Error(`${id}: listChapters exploded`);
+      return nums.map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `${id}:${n}` }));
+    },
+    async getPageUrls(chId: string) { state.pages.push(chId); return [`https://example.invalid/${chId}.png`]; },
+    async latest() { return []; },
+  };
+  return { adapter, state };
+}
+
+/** Main lists 1-10, the follower 1-5, 1-3 are on disk (rows): the shape of a Natomanga series with a short follower. */
+async function coolingFixture(key: string, mainId: string, folId: string) {
+  const { registerAdapter } = await import('../src/lib/sources');
+  const main = switchable(mainId, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  const fol = switchable(folId, [1, 2, 3, 4, 5]);
+  registerAdapter(main.adapter as any);
+  registerAdapter(fol.adapter as any);
+  await mkSeries(key, mainId);
+  await q('DELETE FROM lib_books WHERE series_id = $1', [S(key)]);
+  await q('DELETE FROM chapter_failures WHERE series_id = $1', [S(key)]);
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [S(key), folId, `${folId}-${key}`]);
+  for (const n of [1, 2, 3]) await book(key, n);
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[mainId, folId]]);
+  return { main, fol };
+}
+const listedNums = async (key: string): Promise<number[]> =>
+  (await q('SELECT number::float8 AS n FROM series_listing WHERE series_id = $1 ORDER BY number', [S(key)])).map((r: any) => Number(r.n));
+const coolFor = (id: string) =>
+  q(`INSERT INTO source_health (source_id, status, consecutive, blocked_until) VALUES ($1, 'rate_limited', 1, now() + interval '1 hour')
+     ON CONFLICT (source_id) DO UPDATE SET status = 'rate_limited', blocked_until = now() + interval '1 hour'`, [id]);
+
+test('a cooling main\'s numbers stay listed and behind while a follower answers', { skip }, async () => {
+  const { main } = await coolingFixture('cmk', 'upd-cmk-main', 'upd-cmk-fol');
+  try {
+    await updateSeries(S('cmk'), 0);
+    assert.deepEqual(await listedNums('cmk'), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 'PREMISE: both answered');
+    await coolFor('upd-cmk-main');
+    main.state.listed = 0;
+    await updateSeries(S('cmk'), 0);
+    assert.equal(main.state.listed, 0, 'PREMISE: the cooling main was not asked');
+    // Reintroduce by dropping the merge (lib/updater.ts visitSeries): 6-10 are gone and the series reads two behind.
+    assert.deepEqual(await listedNums('cmk'), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 'what only the main lists is kept while it cools');
+    const row = (await q('SELECT source_missing, finish_missing, finish_after FROM lib_series WHERE id = $1', [S('cmk')]))[0];
+    assert.equal(row.source_missing, 7, 'still behind by 4-10');
+    // Reintroduce by stamping `eligible.length`: 7, and the finishing sweep asks the follower again every pass.
+    assert.equal(row.finish_missing, 2, 'of which 4 and 5 can be fetched now, from the follower');
+    assert.ok(row.finish_after && new Date(row.finish_after).getTime() > Date.now(), 'and the rest once the main can answer');
+  } finally {
+    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [['upd-cmk-main', 'upd-cmk-fol']]);
+    await q('DELETE FROM lib_series WHERE id = $1', [S('cmk')]).catch(() => {});
+  }
+});
+
+test('a shared number comes from the follower, and a main that did not answer is never asked for pages', { skip }, async () => {
+  const { main, fol } = await coolingFixture('cms', 'upd-cms-main', 'upd-cms-fol');
+  globalThis.fetch = (async () => png()) as typeof fetch;
+  try {
+    await updateSeries(S('cms'), 0);
+    // The main stops answering its chapter list -- not a cooldown: it would answer a page request.
+    main.state.throws = true;
+    const r = await updateSeries(S('cms'), 10);
+    assert.deepEqual(fol.state.pages.sort(), ['upd-cms-fol:4', 'upd-cms-fol:5'], '4 and 5 from the follower');
+    // Reintroduce by starting `refusing` empty: the main is asked for 6-10's pages (and serves them).
+    assert.deepEqual(main.state.pages, [], 'the main, which did not answer this run, is not asked for pages');
+    assert.equal(r.added, 2);
+    assert.deepEqual(await listedNums('cms'), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 'its numbers are kept for its next answer');
+    assert.deepEqual((await q('SELECT number FROM chapter_failures WHERE series_id = $1', [S('cms')])), [], 'and nothing is filed as failed');
+  } finally {
+    await q('DELETE FROM chapter_failures WHERE series_id = $1', [S('cms')]).catch(() => {});
+    await q('DELETE FROM lib_books WHERE series_id = $1', [S('cms')]).catch(() => {});
+    await q('DELETE FROM lib_series WHERE id = $1', [S('cms')]).catch(() => {});
+  }
+});
+
+test('a failing source stops keeping its rows', { skip }, async () => {
+  const { main } = await coolingFixture('cmf', 'upd-cmf-main', 'upd-cmf-fol');
+  try {
+    await updateSeries(S('cmf'), 0);
+    main.state.throws = true;
+    // Confirmed failing at its chapter list: not worth waiting for (lib/sourceStanding.ts standingOf).
+    await q(`INSERT INTO source_health (source_id, status, stages) VALUES ($1, 'ok', $2::jsonb)
+             ON CONFLICT (source_id) DO UPDATE SET stages = EXCLUDED.stages`,
+      ['upd-cmf-main', JSON.stringify({ chapters: { failAt: new Date().toISOString(), failBy: 'test', streak: 3, kind: 'error', error: 'gone' } })]);
+    await updateSeries(S('cmf'), 0);
+    // Reintroduce by keeping every stale source's rows: 6-10 stay, and the series waits for a dead site forever.
+    assert.deepEqual(await listedNums('cmf'), [1, 2, 3, 4, 5], 'a failing main\'s numbers are not kept');
+  } finally {
+    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [['upd-cmf-main', 'upd-cmf-fol']]);
+    await q('DELETE FROM lib_series WHERE id = $1', [S('cmf')]).catch(() => {});
+  }
+});
+
+test('a cooling-main series goes on its follower\'s queue', { skip }, async () => {
+  // Two series on one main. A: main + a follower that is cooling too. B: main + a working follower. The main is cooling.
+  // Keyed on the main, A comes back blocked, parks the main's queue, and B -- which its follower would serve -- is
+  // skipped. Reintroduce by keying on the first loaded source (lib/updater.ts runUpdateAll): B is `skipped`.
+  const { registerAdapter } = await import('../src/lib/sources');
+  const main = switchable('upd-qk-main', [1]);
+  const cool = switchable('upd-qk-cool', [1]);
+  const fine = switchable('upd-qk-fine', [1]);
+  for (const s of [main, cool, fine]) registerAdapter(s.adapter as any);
+  for (const [key, fol] of [['qka', 'upd-qk-cool'], ['qkb', 'upd-qk-fine']] as const) {
+    await mkSeries(key, 'upd-qk-main');
+    await q('DELETE FROM lib_books WHERE series_id = $1', [S(key)]);
+    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [S(key), fol, `${fol}-${key}`]);
+  }
+  await q(`UPDATE lib_series SET source_checked_at = NULL, latest_mtime = CASE id WHEN $1 THEN 2000 ELSE 1000 END WHERE id = ANY($2::text[])`,
+    [S('qka'), [S('qka'), S('qkb')]]);
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [['upd-qk-main', 'upd-qk-cool', 'upd-qk-fine']]);
+  await coolFor('upd-qk-main');
+  await coolFor('upd-qk-cool');
+  await only(['qka', 'qkb']);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+  try {
+    const r = await runUpdateAll({ maxNew: 5 });
+    assert.equal(r.outcomes.skipped, 0, 'the series on the working follower was visited, not parked behind its cooling main');
+    assert.ok(onDisk('qkb', 1), 'and landed its chapter from the follower');
+    assert.equal(r.outcomes.blocked, 1, 'the one with no source to ask waits, counted as blocked');
+    assert.equal(main.state.listed + cool.state.listed, 0, 'and no cooling source was asked anything');
+  } finally {
+    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [['upd-qk-main', 'upd-qk-cool', 'upd-qk-fine']]);
+    await q('DELETE FROM lib_books WHERE series_id = ANY($1::text[])', [[S('qka'), S('qkb')]]).catch(() => {});
+  }
+});
+
+test('a parked queue hands its series on', { skip }, async () => {
+  // Three series on one main, which is fine when the sweep starts. The first one's chapter makes the main refuse (a
+  // cooldown starts), the second then comes back blocked and parks the main's queue; the third has a working follower.
+  // Reintroduce by dropping the move on parking (lib/updater.ts runUpdateAll): the third is `skipped`.
+  const { registerAdapter } = await import('../src/lib/sources');
+  const main = switchable('upd-pq-main', [1]);
+  const fine = switchable('upd-pq-fine', [1]);
+  registerAdapter(main.adapter as any);
+  registerAdapter(fine.adapter as any);
+  for (const key of ['pqa', 'pqb', 'pqc']) {
+    await mkSeries(key, 'upd-pq-main');
+    await q('DELETE FROM lib_books WHERE series_id = $1', [S(key)]);
+    await q('DELETE FROM chapter_failures WHERE series_id = $1', [S(key)]);
+  }
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, 'upd-pq-fine', 'upd-pq-fine-pqc') ON CONFLICT DO NOTHING`, [S('pqc')]);
+  await q(`UPDATE lib_series SET source_checked_at = NULL, latest_mtime = CASE id WHEN $1 THEN 3000 WHEN $2 THEN 2000 ELSE 1000 END WHERE id = ANY($3::text[])`,
+    [S('pqa'), S('pqb'), [S('pqa'), S('pqb'), S('pqc')]]);
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [['upd-pq-main', 'upd-pq-fine']]);
+  await only(['pqa', 'pqb', 'pqc']);
+  // The main's pages answer 403: its first chapter puts it in a cooldown.
+  globalThis.fetch = (async (u: any) => (String(u).includes('upd-pq-main') ? new Response('go away', { status: 403 }) : png())) as typeof fetch;
+  try {
+    const r = await runUpdateAll({ maxNew: 5 });
+    assert.equal(r.outcomes.blocked, 1, 'PREMISE: the second series found the main cooling');
+    assert.equal(r.outcomes.skipped, 0, 'the third was handed to its follower, not left in the parked queue');
+    assert.ok(onDisk('pqc', 1), 'and landed its chapter there');
+  } finally {
+    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [['upd-pq-main', 'upd-pq-fine']]);
+    await q('DELETE FROM chapter_failures WHERE series_id = ANY($1::text[])', [[S('pqa'), S('pqb'), S('pqc')]]).catch(() => {});
+    await q('DELETE FROM lib_books WHERE series_id = ANY($1::text[])', [[S('pqa'), S('pqb'), S('pqc')]]).catch(() => {});
+  }
+});

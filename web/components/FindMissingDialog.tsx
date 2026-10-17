@@ -64,6 +64,14 @@ function codeOf(e: unknown): string | null {
   try { return e instanceof ApiError ? (JSON.parse(e.body)?.error ?? null) : null; } catch { return null; }
 }
 
+/** v0.79.0: every chapter of a refused fetch was handed to "Finish downloads on their own" (`later`), none refused. */
+function allLater(e: unknown): boolean {
+  try {
+    const skipped = e instanceof ApiError ? (JSON.parse(e.body)?.skipped as Array<{ reason: string }> | undefined) : undefined;
+    return !!skipped?.length && skipped.every((x) => x.reason === 'later' || x.reason === 'duplicate');
+  } catch { return false; }
+}
+
 /** Why a source was not offered, in words rather than a code. */
 function whyText(c: Candidate): string {
   switch (c.why) {
@@ -296,13 +304,18 @@ export function FindMissingDialog({ seriesId, onClose, onAddEdition }: {
         setStarted(res.folder);
         const skipped = res.skipped ?? [];
         const later = skipped.filter((x) => x.reason === 'not_listed').length;
-        const other = skipped.filter((x) => x.reason !== 'not_listed' && x.reason !== 'already_here').length;
+        // v0.79.0: its site is in a cooldown and no other source the series follows has it: handed to "Finish downloads
+        // on their own", which fetches it when the site can answer.
+        const onTheirOwn = skipped.filter((x) => x.reason === 'later').length;
+        const other = skipped.filter((x) => x.reason !== 'not_listed' && x.reason !== 'already_here' && x.reason !== 'later').length;
         // Two sentences, each with its own count, so both agree at one: "1 is not listed yet", "Downloading 1 chapter."
         const also = later
           ? later === 1 ? tr('1 is not listed yet and comes with the next check.') : tr('{m} are not listed yet and come with the next check.', { m: later })
-          : other
-            ? other === 1 ? tr('1 could not be fetched now.') : tr('{m} could not be fetched now.', { m: other })
-            : '';
+          : onTheirOwn
+            ? onTheirOwn === 1 ? tr('1 will download on its own when its site is ready.') : tr('{m} will download on their own when their site is ready.', { m: onTheirOwn })
+            : other
+              ? other === 1 ? tr('1 could not be fetched now.') : tr('{m} could not be fetched now.', { m: other })
+              : '';
         const downloading = res.total === 1 ? tr('Downloading 1 chapter.') : tr('Downloading {n} chapters.', { n: res.total });
         toast(also ? joinSentences(downloading, also) : fetchingToast(res.total), 'info', { busy: true });
       }
@@ -315,6 +328,7 @@ export function FindMissingDialog({ seriesId, onClose, onAddEdition }: {
       // Followed, but a slow source (a Cloudflare challenge can take a minute) has not listed its chapters yet:
       // the follow stands, and the card now offers a plain Download for when it has.
       else if (followedNow && code === 'nothing_to_fetch') toast(tr('Now following {s}. It is still listing its chapters: press Download again in a minute.', { s: c.name }), 'info');
+      else if (code === 'nothing_to_fetch' && allLater(e)) toast(tr('Its site is busy right now. These chapters will download on their own when it is ready.'), 'info');
       else toast(msgOf(e, tr('Could not start.')), 'error');
     } finally {
       setBusy(false);

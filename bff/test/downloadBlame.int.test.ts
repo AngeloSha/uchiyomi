@@ -29,6 +29,9 @@ if (DSN) {
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 const SRC = 'blame-src';
+/** A source whose chapters' page lists answer 429 (v0.79.0). */
+const SRC_PL = 'blame-pagelist';
+let pageListAsks = 0;
 const PIXEL = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(400, 7)]);
 let q: any, downloadChapter: any;
 
@@ -76,14 +79,22 @@ before(async () => {
     search: async () => [], getSeries: async () => null, listChapters: async () => [],
     getPageUrls: async () => Array.from({ length: 110 }, (_, i) => `https://example.invalid/p${i}.png`),
   } as any);
+  registerAdapter({
+    id: SRC_PL, name: 'Blame Page List',
+    search: async () => [], getSeries: async () => null, listChapters: async () => [],
+    // The chapter's page list itself refused, the way an engine relays a site's 429 (no image was ever asked for).
+    getPageUrls: async () => { pageListAsks++; throw new Error('suwayomi: HTTP error 429 Too Many Requests'); },
+  } as any);
 });
 
-beforeEach(async () => { if (DSN) await q('DELETE FROM source_health WHERE source_id = $1', [SRC]); });
+beforeEach(async () => { if (DSN) await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[SRC, SRC_PL]]); });
 
 after(async () => {
   if (ROOT) rmSync(ROOT, { recursive: true, force: true });
   if (!DSN) return;
-  await q('DELETE FROM source_health WHERE source_id = $1', [SRC]).catch(() => {});
+  await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[SRC, SRC_PL]]).catch(() => {});
+  await q(`DELETE FROM chapter_failures WHERE series_id = 's_blame_pl'`).catch(() => {});
+  await q(`DELETE FROM lib_series WHERE id = 's_blame_pl'`).catch(() => {});
 });
 
 test('THE COOLDOWN: one page lost in a hundred leaves the source alone', { skip }, async () => {
@@ -185,6 +196,28 @@ test('a source that says 429 to everything is still eventually a refusal', { ski
  * broken source, and Fix everything replaced a source that had only asked for room; a 403 beside a 429 read as a rate
  * limit. Reintroduce `worstLabel(worst)` in lib/downloader.ts: this reads HTTP 500.
  */
+/**
+ * v0.79.0: a chapter's PAGE LIST refused with a 429 is a refusal, as a 429 on its images is. It was rethrown bare -- filed
+ * as a broken chapter (`error`, three tries), and the same source asked again for the run's next chapter. Reintroduce by
+ * rethrowing the page-list error as it was (lib/downloader.ts fetchChapter): blockStatus is undefined and the ledger
+ * reads `error`.
+ */
+test('a page list refused with 429 is a refusal: rate-limited, and filed as one', { skip }, async () => {
+  const { noteChapterFailure } = await import('../src/lib/chapterFailures');
+  pageListAsks = 0;
+  const err: any = await downloadChapter({ sourceId: SRC_PL, seriesFolder: 'B/PL', chapter: { sourceId: 'pl1', number: 1 } })
+    .then(() => assert.fail('a refused page list must not land a chapter'), (e: unknown) => e);
+  assert.equal(pageListAsks, 1, 'PREMISE: the page list was asked once');
+  assert.equal(err?.blockStatus, 'rate_limited', 'the run sees the source refusing');
+  const h = (await q(`SELECT status, blocked_until FROM source_health WHERE source_id = $1`, [SRC_PL]))[0];
+  assert.equal(h?.status, 'rate_limited');
+  assert.ok(h?.blocked_until, 'and the source cools down');
+  await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ('s_blame_pl', 'test', 'Blame PL', 's_blame_pl') ON CONFLICT (id) DO NOTHING`);
+  await noteChapterFailure({ seriesId: 's_blame_pl', number: 1, sourceId: SRC_PL, title: 'Blame PL', err });
+  const row = (await q(`SELECT status FROM chapter_failures WHERE series_id = 's_blame_pl' AND number = 1`))[0];
+  assert.equal(row?.status, 'rate_limited', 'the ledger files it as a refusal: twelve tries, not three');
+});
+
 test('a refused chapter names the refusal it was blamed for', { skip }, async () => {
   globalThis.fetch = (async (u: any) => {
     const i = Number(String(u).match(/p(\d+)\.png$/)?.[1] ?? -1);

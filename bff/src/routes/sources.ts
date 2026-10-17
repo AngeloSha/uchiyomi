@@ -582,6 +582,11 @@ export function startDownloadJob(input: DownloadJobInput, reserved?: DownloadJob
       ...(await q<{ source_id: string }>('SELECT source_id FROM series_sources WHERE series_id = $1', [seriesId]).catch(() => [])).map((r) => r.source_id),
     ]);
     const exhausted = () => [...sources, ...followed].every((sid) => refusing.has(sid));
+    // v0.79.0: a Fetch, a fill or an add's job that every source refuses hands what is left to "Finish downloads on their
+    // own" (lib/finishDownloads.ts) -- first in its line, which comes back when a source can answer -- instead of
+    // ending a card that a person must remember to press again. Reintroduce by dropping `handsOn`: "a Fetch job every
+    // source refuses hands the rest on" in fetchRotation.int.test.ts finds source_checked_at unchanged.
+    const handsOn = !!seriesId && (origin === 'fetch' || origin === 'add' || origin === 'fill') && await finishDownloadsOn().catch(() => false);
     // Whichever way it failed -- a full disk, every source refusing, chapters that would not save, a scan that
     // missed them -- a failed card says what is still to fetch (`Job.left`). Twice: the moment the loop stops,
     // because the library scan after it can take minutes and the card already reads failed; and at the very
@@ -748,7 +753,7 @@ export function startDownloadJob(input: DownloadJobInput, reserved?: DownloadJob
         await settle(ch, false);
         if (refusing.has(out.via)) {
           if (j) {
-            tell(j, say('job.stopped', { source: nameOf(out.via) }), savedSoFar(j));
+            tell(j, handsOn && exhausted() ? say('job.stoppedWillFinish', { source: nameOf(out.via) }) : say('job.stopped', { source: nameOf(out.via) }), savedSoFar(j));
             if (exhausted()) { j.status = 'error'; j.finishedAt = Date.now(); }
           }
         } else if (j) {
@@ -805,6 +810,7 @@ export function startDownloadJob(input: DownloadJobInput, reserved?: DownloadJob
     }
     await Promise.all([...running].map((l) => l.done));
     noteLeft();
+    if (handsOn && refusing.size && exhausted()) await backFirst(seriesId);
     // Settled BEFORE the scan, so a copy the hook puts back is on disk when the scanner looks.
     for (const ch of chapters) if (!settled.has(ch)) await settle(ch, false);
     await persistScan().catch((e) => console.warn(`[download] ${folder}: the library scan after the job threw: ${(e as Error)?.message || e}`));
@@ -1966,6 +1972,14 @@ export async function addSeriesFromSource(opts: {
       } else if (out.kind === 'skipped' && out.why === 'on_disk') {
         firstPages = 1;
         onDisk.push(toFetch[0].number);
+      } else if (out.kind === 'skipped' && out.why === 'refusing') {
+        // v0.79.0: not asked at all -- the source was already in a cooldown when the add began (a Discover search a
+        // moment ago can put it there). That is the same "not now" as a refusal, and with Finish downloads on their own
+        // the series is kept for later; it read as an undownloadable title ("Try a different source", 422). Reintroduce
+        // by dropping this branch: "an add whose source is cooling keeps the series" in finishDownloads.int.test.ts
+        // finds no row.
+        const h = await blockedNow(source!).catch(() => null);
+        if (h) blockReason = h.status === 'ok' ? 'down' : h.status;
       } else if (out.kind === 'failed') {
         blockReason = out.err?.blockStatus || null;
       }
@@ -3111,7 +3125,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const p = new Params();
     const rows = await q<any>(
       `SELECT s.id, s.title, s.folder, s.summary, s.author, s.genres, s.web, s.status, s.source_id,
-              s.numbering, s.numbering_pending, s.renumber_plan
+              s.numbering, s.numbering_pending, s.renumber_plan, s.auto_update
          FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${visible('s', vc(req), p)}`, p.values,
     ).then((r) => r, () => null);
     if (rows === null) return reply.code(503).send({ error: 'unavailable' });
@@ -3203,6 +3217,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
     ));
 
     const chapters: Array<SourceChapter & { pinned?: boolean }> = [];
+    // "Finish downloads on their own" (lib/finishDownloads.ts): a number no source can serve now is handed to it.
+    const finishOn = await finishDownloadsOn().catch(() => false);
+    let handOff = false;
     // Health is per source, asked once per source rather than once per number.
     const sourceState = new Map<string, 'ok' | 'source_unavailable' | 'cooldown' | 'denied'>();
     // The series' language rules (v0.62.0), read once and only when a blocked number needs explaining.
@@ -3261,9 +3278,26 @@ export default async function sourceRoutes(app: FastifyInstance) {
       const st = await stateOf(row.source_id);
       // The same by-id rejection the rest of this file gives, and it does not say what is being withheld.
       if (st === 'denied') return denySource(reply);
+      if (st === 'cooldown') {
+        // v0.79.0: the copy the rules chose is on a source in a cooldown. Another followed source's copy of the same
+        // number, as the sweep's fallback would take it (the blocklist and the series' language as they stand), is
+        // fetched instead. It worked only by accident before -- the refresh above rewrote the listing from the source
+        // that answered -- and stopped working once a cooling source's rows are kept (lib/updater.ts). With none, the
+        // number is left to the finishing sweep (`later`, lib/finishDownloads.ts), which comes back when the source
+        // can answer. Reintroduce by skipping it as `cooldown`: "a Fetch while the main cools takes the follower's copy"
+        // in fetchRotation.int.test.ts reads 409.
+        let alt: ListingCopy | null = null;
+        for (const c of await automaticCopiesFor(seriesId, row.copies ?? [])) {
+          if (c.source !== row.source_id && (await stateOf(c.source)) === 'ok') { alt = c; break; }
+        }
+        if (alt) { chapters.push(copyToChapter(alt, { number: n, title: row.title })); continue; }
+        if (finishOn && s.auto_update !== false) { skipped.push({ number: n, reason: 'later' }); handOff = true; continue; }
+      }
       if (st !== 'ok') { skipped.push({ number: n, reason: st }); continue; }
       chapters.push({ ...row.chosen, source: row.source_id });
     }
+    // What a cooldown left (v0.79.0): first in the finishing sweep's line, so it comes back for them the moment it can.
+    if (handOff) await backFirst(seriesId);
     chapters.sort((a, b) => a.number - b.number);
     if (!chapters.length) {
       // The first reason that is about a chapter, not about the body: a duplicate pick is never why
@@ -3274,6 +3308,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
         : first === 'other_language' ? 'That chapter is only in another language than the series. Pick a copy under Versions to fetch it anyway.'
         : first === 'already_here' ? 'That chapter is already here.'
         : first === 'cooldown' ? 'That source is in a cooldown. Try again later.'
+        : first === 'later' ? 'That source is in a cooldown. These chapters will download on their own when it is ready.'
         : first === 'hidden' ? 'That chapter is hidden from this series. Restore it under More to fetch it.'
         : 'That source is not available right now.';
       return reply.code(409).send({ error: 'nothing_to_fetch', message, skipped });

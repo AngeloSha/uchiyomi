@@ -105,6 +105,7 @@ import { refileFailures } from './chapterFailures';
 import { deadFollowers, rankFollowers, replaceCounts, replaceFacts, type RankedFollower, type SeriesFacts, type SkipWhy } from './replaceSource';
 import { MIN_COVERAGE } from './fill';
 import { carries, standingsOf, type Standing } from './sourceStanding';
+import { wantQuiet } from './finishDownloads';
 
 /** How long one series may spend searching and judging before what is left of it is `not_tried`. */
 export const FIND_SERIES_WALL_MS = 90_000;
@@ -400,6 +401,8 @@ async function waitQuiet(a: ActiveRun): Promise<boolean> {
   for (;;) {
     if (isStopped(a)) return false;
     a.waiting = runtime.updating ? 'sweep' : runtime.repairing ? 'repair' : checkRunning() ? 'check' : null;
+    // v0.79.0: a finishing sweep (lib/finishDownloads.ts) gives way when asked, instead of holding the run for its pass.
+    if (a.waiting === 'sweep') wantQuiet();
     if (a.waiting) a.card.waiting = a.waiting;
     else delete a.card.waiting;
     if (!a.waiting) return true;

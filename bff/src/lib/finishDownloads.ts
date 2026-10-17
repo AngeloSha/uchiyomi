@@ -21,6 +21,7 @@
 // Off, every one of these behaves as it did in v0.77.x.
 import { one } from './db';
 import { visibleToAll } from './visibility';
+import { runtime } from './runtime';
 
 const envInt = (name: string, fallback: number, min: number, max: number): number => {
   const v = Number(process.env[name]);
@@ -56,9 +57,10 @@ export const retryCapFor = (status: string | null | undefined, finish: boolean, 
 /**
  * The SQL predicate for "this monitored series is behind": chapters its sources list that the sweep would still fetch
  * (`finish_missing`, the sweep's own stamp beside source_missing, which a row stamped before it existed stands in for),
- * or a row no sweep has checked yet.
+ * a row no sweep has checked yet, or (v0.79.0) one whose remaining chapters wait on a source that could not answer,
+ * once that source can (`finish_after`, lib/updater.ts staleUntil).
  */
-export const BEHIND_SQL = '(s.source_checked_at IS NULL OR COALESCE(s.finish_missing, s.source_missing) > 0)';
+export const BEHIND_SQL = '(s.source_checked_at IS NULL OR COALESCE(s.finish_missing, s.source_missing) > 0 OR s.finish_after <= now())';
 
 /**
  * When the earliest cooldown of a source a behind series is asked through ends, or null when none of them is cooling.
@@ -76,7 +78,12 @@ export async function nextCooldownEnd(): Promise<Date | null> {
                             SELECT ss.source_id FROM series_sources ss JOIN lib_series s ON s.id = ss.series_id
                              WHERE s.auto_update AND ${visibleToAll('s')} AND ${BEHIND_SQL})`,
   ).catch(() => null);
-  return r?.at ? new Date(r.at) : null;
+  // v0.79.0: and the first series waiting on a source that could not answer comes due (`finish_after`).
+  const w = await one<{ at: Date | null }>(
+    `SELECT min(s.finish_after) AS at FROM lib_series s WHERE s.auto_update AND ${visibleToAll('s')} AND s.finish_after > now()`,
+  ).catch(() => null);
+  const ends = [r?.at, w?.at].filter((d): d is Date => !!d).map((d) => new Date(d).getTime());
+  return ends.length ? new Date(Math.min(...ends)) : null;
 }
 
 /** How many monitored series are behind: none, and the finishing sweep does not start (no run card, no queries). */
@@ -85,4 +92,26 @@ export async function behindCount(): Promise<number> {
     `SELECT count(*)::int AS n FROM lib_series s WHERE s.auto_update AND ${visibleToAll('s')} AND ${BEHIND_SQL}`,
   ).catch(() => null);
   return r?.n ?? 0;
+}
+
+/**
+ * v0.79.0: ask the finishing sweep to give way. Another job that wants the sweep's place -- the full sweep, the nightly
+ * repair, Fix everything, a Find or Replace run, Rescan everything -- calls this where it would wait or refuse; the
+ * finishing sweep stops at its next chapter (`stopped: 'yield'`) and the asker gets the flag a moment later. A request
+ * lasts half an hour, so a job that asked and went away does not keep the next passes from running for good; the full
+ * sweep clears it when it starts. A no-op while no finishing sweep runs. Reintroduce by never asking: "the finishing
+ * sweep yields to a waiting full sweep" in finishDownloads.int.test.ts finds the full sweep still refused.
+ */
+export function wantQuiet(): void {
+  if (runtime.finishing) runtime.quietWantedAt = Date.now();
+}
+
+/** Whether a job asked the finishing sweep to give way in the last half hour. */
+export function quietWanted(): boolean {
+  return runtime.quietWantedAt > 0 && Date.now() - runtime.quietWantedAt < 30 * 60_000;
+}
+
+/** The request answered: the job that asked has its place. */
+export function clearQuiet(): void {
+  runtime.quietWantedAt = 0;
 }

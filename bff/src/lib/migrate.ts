@@ -1843,6 +1843,10 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS finish_downloads boolean NO
 -- counts those too ("{n} behind" must), and a series behind only on them was visited every quarter of an hour by a
 -- sweep that could fetch nothing of it. NULL until the next visit, read as source_missing. Additive: v0.77.x ignores it.
 ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS finish_missing integer;
+-- v0.79.0: when a series whose remaining chapters only a source that did not answer lists is worth going back to: that
+-- source's cooldown end, or a quarter of an hour on (lib/updater.ts staleUntil). NULL when it is not waiting on one.
+-- Additive: v0.78.x ignores it.
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS finish_after timestamptz;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

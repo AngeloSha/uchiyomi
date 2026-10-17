@@ -814,8 +814,10 @@ components:
         number: { type: number }
         reason:
           type: string
-          enum: [not_listed, blocked_group, other_language, already_here, source_unavailable, cooldown, duplicate, hidden]
+          enum: [not_listed, blocked_group, other_language, already_here, source_unavailable, cooldown, later, duplicate, hidden]
           description: >-
+            `later` (since v0.79.0): the chosen copy's source is in a cooldown and no other followed source lists the
+            number; with Finish downloads on their own it downloads on its own when the source can answer.
             `duplicate` is a second pick for a number already picked in the same body: the first pick was
             handled, this one was not. `other_language` (since v0.62.0): every copy of the number is in another
             language than the series' -- a pick takes one anyway. `hidden` (since v0.76.0): an admin hid the number

@@ -1388,7 +1388,10 @@ numbers the fill scan reports, which is what the Find missing chapters dialog se
 `{ok, started, folder, total, skipped: [{number, reason}]}` with `reason` one of `not_listed` (run
 **Check for new chapters** first), `blocked_group`, `other_language` (since v0.62.0: every copy of the number is in
 another language than the series' -- a pick takes one anyway), `already_here` (a live chapter, not a tombstone),
-`source_unavailable` (adapter not loaded or disabled, or a source the series no longer follows), `cooldown`,
+`source_unavailable` (adapter not loaded or disabled, or a source the series no longer follows), `cooldown`, `later`
+(since v0.79.0: the chosen copy's source is in a cooldown and no other followed source lists the number; with
+*Finish downloads on their own* on it downloads on its own when the source can answer -- a number another followed
+source lists is fetched from that one instead),
 `over_cap` (with `floored`, a chapter past the 300 the expansion reached — press again for the rest);
 **409** `nothing_to_fetch` (with `skipped`) when nothing is fetchable, **409** `busy` while a download for
 that series is running — since v0.37.0 that includes the series a bulk *Fetch newest* run is currently

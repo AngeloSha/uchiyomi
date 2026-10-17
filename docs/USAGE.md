@@ -702,7 +702,9 @@ sources it already follows are kept but not asked, and a new follow is refused w
   selection **now**: *Download* for the series' own source or one it already follows (the best copy of each
   chapter across them), *Follow and download* for one it does not follow yet. Following on its own downloads
   nothing until the next check; it lists the source's chapters on the series page straight away, as rows you
-  can fetch.
+  can fetch. Since v0.79.0 a chapter whose site is cooling down comes from another source the series follows that has
+  it. With none, and *Finish downloads on their own* on, it downloads on its own when the site is ready, and the
+  dialog says so.
 - **The add dialog**, at the moment an admin adds a series (section 6). When it already holds the list of
   sources that carry the title, the options step offers **Also check the other sources that carry this
   title**; with the switch on, the sources it found are checked once the series' own listing is written,
@@ -889,6 +891,13 @@ chapter twice the sweep also searches the other sources for it (with *Look for f
 series added from Discover whose very first chapter the site refused is kept — its download card says the chapters
 will come on their own — where it used to be not added at all. Off, chapters wait for the library update, as before.
 The knobs are under *Downloading* in [CONFIGURATION.md](CONFIGURATION.md).
+
+Since v0.79.0 a site's cooldown no longer holds a series up. The update takes chapters from the other sources the series
+follows that can answer, keeps the chapters only the cooling site lists on the series' list, and comes back for them as
+soon as that cooldown ends. A page list the site refuses counts as a refusal, like refused images. An add from Discover
+whose site is already cooling down, or refuses the page list, is kept the same way. The finishing runs give way to the
+library update, the nightly repair, *Fix everything* and *Find other sources*: a run stops at its next chapter and picks
+up after them.
 
 ### What is downloading, and stopping it
 

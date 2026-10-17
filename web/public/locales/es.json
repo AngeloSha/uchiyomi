@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4037
+    "strings": 4040
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -4040,5 +4040,8 @@
   "{source} stopped part-way: it is blocking downloads. The rest will download on their own when the site is ready.": "{source} se detuvo a medias: está bloqueando las descargas. El resto se descargará solo cuando el sitio esté listo.",
   "{source} stopped part-way: it is unreachable for downloads. The rest will download on their own when the site is ready.": "{source} se detuvo a medias: no está accesible para las descargas. El resto se descargará solo cuando el sitio esté listo.",
   "{source} stopped part-way. The rest will download on their own.": "{source} se detuvo a medias. El resto se descargará solo.",
-  "While \"Finish downloads on their own\" is on, a chapter a site refused (a rate limit or a block) is tried up to {cap} times.": "Mientras «Terminar las descargas solas» está activado, un capítulo que un sitio rechazó (por un límite de frecuencia o un bloqueo) se intenta hasta {cap} veces."
+  "While \"Finish downloads on their own\" is on, a chapter a site refused (a rate limit or a block) is tried up to {cap} times.": "Mientras «Terminar las descargas solas» está activado, un capítulo que un sitio rechazó (por un límite de frecuencia o un bloqueo) se intenta hasta {cap} veces.",
+  "1 will download on its own when its site is ready.": "1 se descargará solo cuando su sitio esté listo.",
+  "{m} will download on their own when their site is ready.": "{m} se descargarán solos cuando su sitio esté listo.",
+  "Its site is busy right now. These chapters will download on their own when it is ready.": "Su sitio está ocupado ahora mismo. Estos capítulos se descargarán solos cuando esté listo."
 }
