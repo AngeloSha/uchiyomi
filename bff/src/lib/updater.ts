@@ -36,6 +36,7 @@ import { isDue, refreshRadar } from './releaseRadar';
 import { finishDownloadsOn, retryCapFor, BEHIND_SQL, FINISH_MINUTES, FINISH_LANES, clearQuiet, quietWanted } from './finishDownloads';
 import { requestScout } from './scoutRequests';
 import { rateKeyOf } from './pace';
+import { routeCopy, sameReleaseChapters } from './copyRouter';
 
 /**
  * Why a series produced nothing this run.
@@ -760,10 +761,24 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   const meta = { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status };
   // oldest-missing-first: a partial "first N" add fills forward coherently, and new releases (all > our max)
   // are still the only gap once a series is fully downloaded. (`queue` is `eligible` unless newestOnly.)
-  for (const ch of queue) {
+  // v0.81.0: of the same release on several followed sources, the copy at full speed on the quietest image server, and
+  // not the one that failed this chapter last (lib/copyRouter.ts). Never for a copy someone picked, a series with a
+  // source order (its own or the server's: an admin who ranked the sources gets their ranking), a series numbered by
+  // posting order, or Fetch newest. Reintroduce by downloading the chosen copy always: "a slowed main gives way to the
+  // same release on a follower at full speed" in copyRouter.int.test.ts asks the main.
+  const routable = !posting && !opts.newestOnly && !(priority?.order.length);
+  const followedIds = followed.map((f) => f.source);
+  const blamedFor = new Map(ledger.map((r) => [Number(r.number), r.source_id] as const));
+  for (const chosen of queue) {
     if (attempts >= maxNew) break;
     if (runtime.stopping || opts.cancelled?.()) break; // between chapters, never mid-write
     if (opts.unattended && !(await seriesIsMonitored(seriesId))) { paused = true; break; }
+    const ch = routable && !(chosen as { pinned?: boolean }).pinned
+      ? routeCopy(chosen, sameReleaseChapters(chosen, copiesOf(tagged, chosen.number, prefs, chooseOpts), followedIds), {
+        may: (src) => !!getSource(src) && !refusing.has(src) && (src === (chosen.source ?? s.source_id) || allowed(src)),
+        blamed: blamedFor.get(chosen.number) ?? null,
+      })
+      : chosen;
     // A preference save can land after the listing/queue was built. Never let that stale chosen copy put a
     // blocked group through the automatic path; an explicit versions pick is the sole exception, and never
     // reaches updateSeries.
