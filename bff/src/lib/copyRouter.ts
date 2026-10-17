@@ -45,10 +45,15 @@ export interface RouteFacts {
 /**
  * Of a chapter's chosen copy and the same release elsewhere, the one to download: one that may be asked, at full speed
  * before slowed, not the source that failed it last time before that one, then the image server with the least on it,
- * then the chosen copy. The chosen copy when nothing may be asked: the fallback helper says why. Pure but for the
- * pace and gate it reads by default.
+ * then the chosen copy. Pure but for the pace and gate it reads by default.
+ *
+ * The chosen copy, untouched, when its own source may not be asked (refusing this run, cooling, switched off): that is
+ * the fallback helper's case (lib/chapterFallback.ts), which takes the number from another followed source and says
+ * so on the card as a switch. Routing is for a source that can answer, only not best. Reintroduce by routing past it:
+ * "a refusing primary costs one strike" in updater.int.test.ts counts one switch, not two.
  */
 export function routeCopy<T extends { source?: string }>(own: T, others: readonly T[], f: RouteFacts): T {
+  if (!own.source || !f.may(own.source)) return own;
   const load = f.load ?? ((key: string) => { const d = gateDepth(key); return d.active + d.queued; });
   const slowed = f.slowed ?? ((s: string) => paceLevel(s) > 0 || restLeft(s) > 0);
   const open = [own, ...others]

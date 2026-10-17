@@ -27,8 +27,10 @@ test('full speed first, then not the source that failed it, then the load', () =
   assert.equal(routeCopy(own, [a, b], { may: () => true, load, slowed: none, blamed: 'main' }).source, 'a', 'the source that failed it goes after its twins');
 });
 
-test('only a source that may be asked, else the chosen copy', () => {
-  const own = c('main'), a = c('a');
-  assert.equal(routeCopy(own, [a], { may: (s) => s === 'a', load: () => 0, slowed: none }).source, 'a');
-  assert.equal(routeCopy(own, [a], { may: () => false, load: () => 0, slowed: none }).source, 'main');
+test('only a source that may be asked; a chosen copy that may not is left to the fallback helper', () => {
+  const own = c('main'), a = c('a'), b = c('b');
+  const load = (k: string) => ({ main: 9, a: 0, b: 0 } as Record<string, number>)[k] ?? 0;
+  assert.equal(routeCopy(own, [a, b], { may: (s) => s !== 'a', load, slowed: none }).source, 'b');
+  // The chosen copy's own source is refusing: untouched, the fallback helper switches it and says so.
+  assert.equal(routeCopy(own, [a], { may: (s) => s === 'a', load: () => 0, slowed: none }).source, 'main');
 });
