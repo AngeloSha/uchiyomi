@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.79.0 — 2026-10-17
+
+**A site that is cooling down no longer holds a series up.** When a site rate-limits or blocks the server, the series
+that use it keep downloading from the other sources they follow, and the chapters only that site has are kept for when
+it can answer, wherever the download started: an add from Discover, **Find missing chapters**, or the scheduled checks.
+
+### Downloads that keep going
+
+- **A series whose main site is cooling down downloads from the other sources it follows.** The library update and
+  **Finish downloads on their own** used to line up every series behind its main site and wait out the cooldown, even
+  when another source had the chapters.
+- **The chapters only the cooling site lists stay on the list.** They used to drop out until the site answered again,
+  so the series looked caught up. Now they wait, and they are fetched as soon as the cooldown ends.
+- **A site that refuses a chapter's page list is treated as a refusal,** like refused images. The chapter gets the
+  twelve tries a refused chapter gets, and the site is given its cooldown, instead of three tries as a broken chapter.
+- **Adding from Discover while the site is cooling down keeps the series,** and so does an add whose page list the site
+  refuses. Its chapters come on their own. It used to answer "try a different source" and add nothing.
+- **Find missing chapters takes a chapter from another followed source when its own site is cooling down.** A chapter
+  no other source has downloads on its own when the site is ready, and the dialog says so. A download that every source
+  refuses part-way hands the rest on the same way.
+- **The finishing runs give way.** The library update, the nightly repair, **Fix everything** and **Find other
+  sources** no longer wait for a finishing run to end. It stops at the next chapter and picks up after them.
+
+### Upgrading
+
+- **Database:** one new column, `lib_series.finish_after`. Additive: v0.78.x ignores it.
+- **API:** `POST /api/sources/fetch` can skip a number with the reason `later`. Its site is cooling down, no other
+  followed source lists it, and **Finish downloads on their own** will fetch it. See [docs/api.md](docs/api.md).
+
 ## v0.78.1 — 2026-10-17
 
 **Sign-in and account hardening.** Update soon, especially if people outside your household can reach your server.
