@@ -630,7 +630,7 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
       notListed > 0 && say('gaps.notListedSeries', { n: notListed }),
       ignoredPart(ignored),
     ]),
-    ...noteOf([say('gaps.note'), rows.some((r) => r.notListed > 0) && say('gaps.notListedNote'), hiddenPart(hidden)]),
+    ...noteOf([say('gaps.note'), rows.some((r) => r.notListed > 0) && joined('sentence', say('gaps.notListedNote')), hiddenPart(hidden)]),
     items: shown.map(({ beforeStart: _b, notListed: _n, ...it }) => it),
   }, items.map(({ beforeStart: _b, notListed: _n, ...it }) => it));
 }
@@ -954,7 +954,7 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
     ]),
     // The note's last sentence is not about a failure row: a chapter saved short is on disk and readable, so it is
     // not in this ledger at all. Said here because this is where an admin looks for "why is a chapter not whole".
-    ...noteOf([say('failures.note', { cap: CHAPTER_RETRY_CAP }), finish && say('failures.noteRefusals', { cap: refusalCap }), hiddenPart(rows.length - 20)]),
+    ...noteOf([say('failures.note', { cap: CHAPTER_RETRY_CAP }), finish && joined('sentence', say('failures.noteRefusals', { cap: refusalCap })), hiddenPart(rows.length - 20)]),
     items,
   };
 }

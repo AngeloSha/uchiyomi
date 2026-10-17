@@ -27,6 +27,8 @@ Thank you to **@globalteddy**, who reported these and wrote the fixes.
 
 - **Health's "Chapters that would not download"** no longer says a chapter a site refused was left alone after three
   tries while **Finish downloads on their own** is still trying it. Its note says how many tries a refused chapter gets.
+- **Health's Chapter gaps note** read "…greyed with what it found.; Numbers none of…" since v0.78.0. Its sentences are
+  joined as sentences now.
 
 ### Upgrading
 

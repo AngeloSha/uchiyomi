@@ -205,6 +205,7 @@ test('Health says a refused chapter is still being tried', { skip }, async () =>
     // Reintroduce by counting every status at CHAPTER_RETRY_CAP (lib/health.ts chapterFailures): "2 left alone".
     assert.match(row(c).detail, new RegExp(`, 1 left alone after ${CHAPTER_RETRY_CAP};`), 'only the broken one is left alone');
     assert.match(c.note, new RegExp(`tried up to ${REFUSAL_RETRY_CAP} times`), 'and the note says how long a refusal is tried');
+    assert.doesNotMatch(c.note, /\.;/, 'the note joins its sentences as sentences');
     await q('UPDATE server_settings SET finish_downloads = false WHERE id = 1');
     c = await card();
     assert.match(row(c).detail, new RegExp(`, 2 left alone after ${CHAPTER_RETRY_CAP};`), 'off, a refusal is left alone at three, as before');
@@ -301,6 +302,8 @@ test('a hole no source lists is not a missing chapter', { skip }, async () => {
     assert.ok(none.actions.includes('fill'), 'Fill now still asks other sources for them');
     assert.match(c.summary, /\b1 with numbers none of their sources list\b/);
     assert.match(c.note, /are not counted as missing/);
+    // A sentence after a sentence, never "found.; Numbers". Reintroduce by dropping joined('sentence', …) in chapterGaps.
+    assert.doesNotMatch(c.note, /\.;/, 'the note joins its sentences as sentences');
 
     const bare = item('bare');
     assert.notEqual(bare.info, true, 'a series no source ever answered for counts its holes as before');
