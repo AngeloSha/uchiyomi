@@ -286,6 +286,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           : body.error === 'totp_invalid' ? tr('Incorrect authentication code.')
           : body.error === 'disabled' ? tr('This account is disabled.')
           : body.error === 'locked' ? tr('Account locked — too many attempts. Try again later.')
+          // The per-address limit and the per-name one both answer 429; the address limit's body is the plugin's English.
+          : body.error === 'too_many_requests' || e?.status === 429 ? tr('Too many attempts. Wait a few minutes and try again.')
           : body.message || tr('Login failed — please try again.');
       return { ok: false, error: msg };
     }

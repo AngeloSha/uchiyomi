@@ -8,7 +8,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { q } from '../lib/db';
-import { actsAsAdmin, userIdOf, } from '../lib/auth';
+import { actsAsAdmin, userIdOf } from '../lib/auth';
 import { logAudit } from '../lib/audit';
 import { browsableIds, type ViewCtx } from '../lib/visibility';
 import { enqueueArchive, archiveAct, archiveView, archiveSeriesIds, type EnqueueOutcome } from '../lib/archive';

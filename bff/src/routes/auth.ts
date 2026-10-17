@@ -216,13 +216,20 @@ export default async function authRoutes(app: FastifyInstance) {
     // rescue opens one admin's password sign-in and nobody else's" in ssoRescue.int.test.ts signs a member in.
     const rescue = local ? null : rescueAdmin();
     const user = await one<FullUser>(`SELECT ${USER_AUTH_COLS} FROM users WHERE username = $1`, [username]);
-    const refusal = !local && (username !== rescue || user?.role !== 'admin') ? 'sso_only'
-      : !user ? 'no_user' : user.disabled ? 'disabled' : lockedUntil(user) ? 'locked' : null;
+    const refusal = !local && (username !== rescue || user?.role !== 'admin') ? 'sso_only' : !user ? 'no_user' : null;
+    // Before a password is accepted every refusal is one answer, after one verification each (lib/loginPassword.ts): a
+    // name nobody has, a name SSO-only mode does not let in, and a wrong password. A disabled or locked account is
+    // checked against its own password, and only the right password is told why it cannot sign in -- someone who has
+    // it learns the account's state, nobody else does, and its owner is not told "wrong password" for the right one.
+    // Reintroduce by answering a disabled account before its password: "pre-password account states have uniform
+    // refusals" in uniformPasswordRefusal.int.test.ts sees a 403; by folding the states into the 401: "wrong
+    // second-step codes lock the account" in accountLock.int.test.ts sees the right password told it is wrong.
     const ok = await verifyLoginPassword(!refusal && user ? user.password_hash : null, password);
     if (!user || refusal || !ok) {
       // Public password failures never increment the account-wide counter. Keep that counter for
       // authenticated password checks and wrong second factors, where the attacker already has a credential.
-      await logAudit('login.fail', { userId: user?.id, username, detail: { reason: refusal || 'bad_password' }, req });
+      const why = refusal ?? (user?.disabled ? 'disabled' : user && lockedUntil(user) ? 'locked' : 'bad_password');
+      await logAudit('login.fail', { userId: user?.id, username, detail: { reason: why }, req });
       const failed = await signInPair(req);
       if (!failed.isAllowed && failed.isExceeded) {
         return reply.code(429).header('Retry-After', String(failed.ttlInSeconds))
@@ -230,6 +237,12 @@ export default async function authRoutes(app: FastifyInstance) {
       }
       return reply.code(401).send({ error: 'invalid_credentials' });
     }
+    if (user.disabled) {
+      await logAudit('login.blocked', { userId: user.id, username, detail: { reason: 'disabled' }, req });
+      return reply.code(403).send({ error: 'disabled', message: 'This account is disabled.' });
+    }
+    const lock = lockedUntil(user);
+    if (lock) return reply.code(423).send({ error: 'locked', until: lock.toISOString(), message: 'Account locked after too many attempts. Try again later.' });
     // second factor
     if (user.totp_enabled) {
       if (!code) return reply.code(401).send({ error: 'totp_required' });

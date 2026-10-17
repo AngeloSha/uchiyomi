@@ -26,7 +26,11 @@ export function publicLookup(resolve: PublicResolver = systemResolver) {
 
 // Node 24's bundled fetch uses the v1 dispatcher handler API. Undici 8 exposes its compatibility wrapper
 // for exactly that consumer; passing a bare v2 Agent would reject every request before opening a socket.
-const dispatcher = new Dispatcher1Wrapper(new Agent({ connect: { lookup: publicLookup() } }));
+// ⚠️ HTTP/1.1 only. undici 8 offers HTTP/2 unless told not to, and an HTTP/2 answer handed to Node's bundled fetch
+// through the package's dispatcher arrived without its content-encoding in 8.11.0 (nodejs/undici#5811): a gzipped body
+// read as raw bytes. globalFetch.test.ts guards the global dispatcher; this one is the package's too, and a cover or a
+// site's page gains nothing from HTTP/2.
+const dispatcher = new Dispatcher1Wrapper(new Agent({ allowH2: false, connect: { lookup: publicLookup() } }));
 
 /** One guarded hop. Callers own redirect policy and body caps; the socket cannot re-resolve an unchecked address. */
 export function fetchPublicHop(target: URL, init: { headers?: Record<string, string>; signal: AbortSignal }): Promise<Response> {

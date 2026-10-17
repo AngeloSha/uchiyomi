@@ -1,7 +1,7 @@
 // Discover's "Recommended for you" (#248, @Squeaks72): suggestions built from the trackers a person has connected.
 // The work, and the care taken not to wear out AniList and MyAnimeList, is in lib/trackerRecs.ts.
 import type { FastifyInstance } from 'fastify';
-import { authenticate, userIdOf, roleOf } from '../lib/auth';
+import { actsAsAdmin, authenticate, userIdOf, roleOf } from '../lib/auth';
 import { one } from '../lib/db';
 import { viewCtxFor, hideAdult } from '../lib/visibility';
 import { recommendationsFor } from '../lib/trackerRecs';
@@ -23,7 +23,7 @@ export default async function recommendationRoutes(app: FastifyInstance) {
     const me = await one<{ role: string; perms: { canDownload?: boolean } | null }>(
       'SELECT role, perms FROM users WHERE id = $1', [userIdOf(req)]).catch(() => null);
     if (!me) return reply.code(403).send({ error: 'forbidden', message: 'Could not check your permissions.' });
-    if (me.role !== 'admin' && me.perms?.canDownload === false) {
+    if (!actsAsAdmin(req) && me.perms?.canDownload === false) {
       return reply.code(403).send({ error: 'forbidden', message: "You don't have permission to add series." });
     }
   });
