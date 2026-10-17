@@ -1845,7 +1845,8 @@ controls the bounded once-per-series-per-day source hunt after an ordinary sched
 v0.80.0) the scout: in the background, a series whose sources cannot get its chapters -- cooling, refusing, broken, or
 chapters at their retry cap, whoever started the download -- is looked for on the other installed sources, within
 `SCOUT_SEARCHES_PER_HOUR`, and one that has them is followed (never made the main source). An interactive Add or Fetch
-still never hunts while it runs. `PATCH
+still never hunts while it runs. Since v0.81.0 Admin → Settings shows one switch, *Finish downloads on their own*, and
+writes `finishDownloads` and `autoFollowOnFailure` together; the API still takes each on its own. `PATCH
 /api/admin/settings` takes any subset of `serverName` (1–64 chars), `allowRegistration`, `updaterHours`
 (1–168), `extensionHours` (1–168), `extensionAutoUpdate`, `updateCheck`, `installPing`, `cleanupRead`,
 `cleanupReadDays` (0–3650; 0 is a value, "at the next run"), `backupHour` (0–23, the local hour of the nightly

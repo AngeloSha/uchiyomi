@@ -488,6 +488,29 @@ export function gapsAnswered(
  * definitions of one fact is how that happens; there is now one. The numbers themselves come from
  * `haveNumbers` for the same reason (see heldBySeries above).
  */
+/**
+ * v0.81.0: what the scout (lib/sourceScout.ts) last did for each of these series, as the line a Health row ends on:
+ * how many other sources it asked, when, and the one it followed, or that none has it yet. A look that asked nobody (a
+ * series at its follower limit, every source cooling) says nothing. Best effort: a row never fails over it.
+ */
+async function scoutLines(ids: readonly string[]): Promise<Map<string, Part>> {
+  if (!ids.length) return new Map();
+  const rows = await q<{ series_id: string; last_at: Date; verdict: string | null; detail: { asked?: number; followed?: string } | null }>(
+    'SELECT series_id, last_at, verdict, detail FROM series_scout WHERE series_id = ANY($1::text[]) AND last_at IS NOT NULL', [[...ids]],
+  ).catch(() => []);
+  const out = new Map<string, Part>();
+  for (const r of rows) {
+    const n = Number(r.detail?.asked ?? 0);
+    if (!n) continue;
+    const at = new Date(r.last_at).toISOString();
+    const followed = r.verdict === 'followed' && r.detail?.followed ? String(r.detail.followed) : null;
+    out.set(r.series_id, followed
+      ? say('scout.following', { n, at, source: sourceLabel(followed, null) })
+      : say('scout.notFound', { n, at }));
+  }
+  return out;
+}
+
 async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const rows = held
     .map((s) => {
@@ -516,6 +539,8 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
   /** The first chapter the series was started from: the first whole number at or above its floor. */
   const startOf = (r: (typeof rows)[number]) => Math.ceil(Number(r.s.floor));
   const short = (t: string) => (t.length > 90 ? t.slice(0, 90) + '…' : t);
+  // v0.81.0: the scout's last look, ending the row of a series it looked for (scoutLines).
+  const scouted = await scoutLines(rows.map((r) => r.s.id));
 
   const items: Array<HealthItem & { members?: string[]; beforeStart?: true; notListed?: true }> = rows.map((r) => {
     if (!r.missing && !r.notListed) {
@@ -573,6 +598,8 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
         r.missing > 0 && say('gaps.detail', { n: r.missing, ranges: short(rangeText(r.listed)) }),
         r.notListed > 0 && say('gaps.notListed', { n: r.notListed, ranges: short(rangeText(r.unlisted)) }),
         r.before > 0 && say('gaps.alsoBelowFloor', { n: r.before, start: startOf(r) }),
+        // Reintroduce by dropping it: "a Health row says what the scout did" in scoutWords.int.test.ts finds no line.
+        scouted.get(r.s.id),
       ]),
       numbers: r.numbers,
       actions: ['fill'] as HealthAction[],
@@ -1087,6 +1114,8 @@ export async function frozenSeries(
   // Reintroduce `source: r.source_id`: "a switched-off source is said to be switched off" and "the engine is the
   // reason" in health.int.test.ts read the id.
   const named = (r: typeof rows[number]): string => (r.source_id ? sourceLabel(r.source_id, r.engine_name) : '');
+  // v0.81.0: the scout's last look, ending the row of a series it looked for (scoutLines).
+  const scouted = await scoutLines(frozen.map((r) => r.id));
   const found: HealthItem[] = frozen.map((r) => {
     const p = { n: r.books_count, source: named(r) };
     return {
@@ -1097,7 +1126,7 @@ export async function frozenSeries(
         ? say('frozen.noSource', { n: r.books_count })
         : engineWhy(r)
           ? say(engine === 'unreachable' ? 'frozen.engineDown' : engine === 'incompatible' ? 'frozen.engineIncompatible' : 'frozen.engineOff', p)
-          : why(r, p)]),
+          : why(r, p), scouted.get(r.id)]),
       ...keysFor(r, ['replace_source', 'find_sources']),
     };
   });

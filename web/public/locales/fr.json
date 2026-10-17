@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4040
+    "strings": 4047
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -4030,7 +4030,6 @@
   "{n} with numbers none of their sources list": "{n} avec des numéros qu’aucune de leurs sources ne propose",
   "Numbers none of a series' sources list are not counted as missing: usually a source numbered the same chapters another way, such as counting split parts as chapters. \"Fill now\" still asks other sources for them.": "Les numéros qu’aucune source d’une série ne propose ne comptent pas comme manquants : en général, une source a numéroté les mêmes chapitres autrement, par exemple en comptant des parties découpées comme des chapitres. « Combler maintenant » les cherche quand même sur d’autres sources.",
   "Finish downloads on their own": "Terminer les téléchargements tout seul",
-  "On by default. A series that still has chapters to download keeps going on its own, every 15 minutes or as soon as a site that was refusing is ready again, instead of waiting for the next library update. A chapter a site refused is tried 12 times instead of 3, and a series added from Discover is kept even when its site refuses the first chapter. Off, they wait for the library update.": "Activé par défaut. Une série à laquelle il reste des chapitres à télécharger continue toute seule, toutes les 15 minutes ou dès qu’un site qui refusait est de nouveau prêt, au lieu d’attendre la prochaine mise à jour de la bibliothèque. Un chapitre refusé par un site est tenté 12 fois au lieu de 3, et une série ajoutée depuis Découvrir est conservée même si son site refuse le premier chapitre. Désactivé, ils attendent la mise à jour de la bibliothèque.",
   "{source} is currently rate-limiting downloads. The series is saved, and its chapters will download on their own when the site is ready.": "{source} limite actuellement le débit des téléchargements. La série est enregistrée et ses chapitres se téléchargeront tout seuls quand le site sera prêt.",
   "{source} is currently blocking downloads. The series is saved, and its chapters will download on their own when the site is ready.": "{source} bloque actuellement les téléchargements. La série est enregistrée et ses chapitres se téléchargeront tout seuls quand le site sera prêt.",
   "{source} is currently unreachable for downloads. The series is saved, and its chapters will download on their own when the site is ready.": "{source} est actuellement injoignable pour les téléchargements. La série est enregistrée et ses chapitres se téléchargeront tout seuls quand le site sera prêt.",
@@ -4042,6 +4041,14 @@
   "1 will download on its own when its site is ready.": "1 se téléchargera tout seul quand son site sera prêt.",
   "{m} will download on their own when their site is ready.": "{m} se téléchargeront tout seuls quand leur site sera prêt.",
   "Its site is busy right now. These chapters will download on their own when it is ready.": "Son site est occupé pour le moment. Ces chapitres se téléchargeront tout seuls quand il sera prêt.",
-  "Use other sources on their own": "Utiliser d’autres sources tout seul",
-  "When the sources a series follows cannot get its chapters (a rate limit, a block, a broken chapter), look for it on the other installed sources and follow one that has them": "Quand les sources suivies par une série ne peuvent pas obtenir ses chapitres (une limite de requêtes, un blocage, un chapitre cassé), la cherche parmi les autres sources installées et suit celle qui les a"
+  "On by default. Uchiyomi keeps downloading until every chapter is here: when a site is slow, blocked or missing chapters, it uses the series’ other sources, and finds a new one when none of them can help. Off, chapters come only with the library update, from the sources you picked.": "Activé par défaut. Uchiyomi continue de télécharger jusqu’à avoir tous les chapitres : si un site est lent, bloqué ou incomplet, il utilise les autres sources de la série, et en trouve une nouvelle quand aucune ne peut aider. Désactivé, les chapitres n’arrivent qu’avec la mise à jour de la bibliothèque, depuis les sources que vous avez choisies.",
+  "Added {ago}: the other sources could not get its chapters": "Ajoutée {ago} : les autres sources ne pouvaient pas obtenir ses chapitres",
+  "Added {ago}: a chapter failed on the other sources": "Ajoutée {ago} : un chapitre a échoué sur les autres sources",
+  "Added {ago}: a chapter was incomplete on the other sources": "Ajoutée {ago} : un chapitre était incomplet sur les autres sources",
+  "Added {ago}: it has chapters the other sources do not": "Ajoutée {ago} : elle a des chapitres que les autres sources n’ont pas",
+  "Added with the series, {ago}": "Ajoutée avec la série, {ago}",
+  "Searched 1 other source on {date}: now also using {source}": "Cherchée sur 1 autre source le {date} : {source} est aussi utilisée désormais",
+  "Searched {n} other sources on {date}: now also using {source}": "Cherchée sur {n} autres sources le {date} : {source} est aussi utilisée désormais",
+  "Searched 1 other source on {date}: none has it yet": "Cherchée sur 1 autre source le {date} : aucune ne l’a encore",
+  "Searched {n} other sources on {date}: none has it yet": "Cherchée sur {n} autres sources le {date} : aucune ne l’a encore"
 }

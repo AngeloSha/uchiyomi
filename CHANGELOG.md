@@ -2,27 +2,33 @@
 
 ## v0.81.0 — 2026-10-18
 
-**Several sites at once, and the copy that can come now.** The runs that finish downloads on their own no longer wait
-for one slow site before starting on the next, and a chapter that two of a series' sources carry comes from whichever
-is free.
+**Simpler, and faster.** Everything automatic about downloads is one switch now, a series says what it did for you,
+and a slow site no longer holds up the others.
 
-### Faster finishing
+### One switch
 
-- **Up to three series at once,** each on a different image server, in the runs that finish downloads on their own.
-  Never two through the extension engine, and never two behind the Cloudflare solver. Before, one series on a slow site
-  held up every series on every other site: the first such run on a large library took more than half an hour for 18
-  series. Set `FINISH_DOWNLOADS_LANES` to `1` for one at a time; the scheduled library update is always one at a time.
-- **The copy that can come now.** When the same release of a chapter (the same group and language) is on several
-  sources a series follows, the update takes it from the one downloading at full speed, on the image server with the
-  least waiting on it, and not from the one that failed that chapter last time.
-  - A version you picked, a source order you set (the series' own or the server's) and a series numbered by posting
-    order are kept as they are.
-  - Another group's copy is never taken in its place.
+- **Finish downloads on their own** (Admin → Settings → Updates & schedules) now covers everything automatic about
+  downloads: going back for what is left, using a series' other sources when a site is slow or blocked, and finding a
+  new source when none of them can help. It is on by default. Off, chapters come only with the library update, from
+  the sources you picked. The separate *Use other sources on their own* switch is gone.
+- **You can see what it did.** A source Uchiyomi added is marked *followed for you* on the series' Sources list, with
+  when and why. Press × to remove it, and it is never added back for that series. Health's chapter gaps say where it
+  searched, too.
+
+### Faster
+
+- **Several sites at once.** Up to three series download side by side, each from a different site, so one slow site no
+  longer holds up the rest.
+- **The copy that can come now.** When two of a series' sources have the same release of a chapter, it comes from the
+  one that is quicker right now, not from the one that just failed it. A version you picked and a source order you set
+  are kept.
 
 ### Upgrading
 
-- **Database:** no change.
-- **Settings:** one optional knob, `FINISH_DOWNLOADS_LANES` (default 3). See [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+- **Settings:** if *Finish downloads on their own* and *Use other sources on their own* were set differently, both are
+  off after the upgrade. Turn the switch back on to use them. One optional knob, `FINISH_DOWNLOADS_LANES` (default
+  3), is in [docs/CONFIGURATION.md](docs/CONFIGURATION.md) with the others, under *advanced, rarely needed*.
+- **Database:** no change to its tables.
 
 ## v0.80.0 — 2026-10-18
 
@@ -4608,8 +4614,8 @@ removes the partial mark when the chapter is whole.
 
 ### A bounded source hunt
 
-**Admin → Settings → Updates & schedules → Use other sources on their own** (named *Look for failed chapters on other
-sources* until v0.80.0) is on by default.
+**Admin → Settings → Updates & schedules → Finish downloads on their own** (since v0.81.0; its own switch before, named
+*Look for failed chapters on other sources* and then *Use other sources on their own*) is on by default.
 After an ordinary failure, the scheduled sweep may search up to six eligible sources and follow one that
 matches the title and at least 90% of the known chapter numbering. A series is hunted at most once per day,
 only five hunts start in one sweep, and at most two extra sources are followed. Adult sources are eligible

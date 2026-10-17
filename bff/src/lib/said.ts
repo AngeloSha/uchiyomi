@@ -153,6 +153,13 @@ const EN = {
   'numbering.askedWaits': () => 'Numbering by posting order, as asked, waits to be applied.',
   'numbering.sourceWaits': ({ name }: { name: string | null }) => `Going back to ${name ?? 'its source'}'s own numbers waits to be applied.`,
   'numbering.since': ({ at }: { at: string }) => `numbered by posting order since ${day(at)}.`,
+
+  // ---- v0.81.0, the scout (lib/sourceScout.ts) on a Health row: when it last looked for the series on other sources,
+  // how many it asked, and what came of it. `source` is the source it followed, by name.
+  'scout.following': ({ n, at, source }: { n: number; at: string; source: string }) =>
+    `Searched ${n} other source${s(n, '', 's')} on ${day(at)}: now also using ${source}`,
+  'scout.notFound': ({ n, at }: { n: number; at: string }) =>
+    `Searched ${n} other source${s(n, '', 's')} on ${day(at)}: none has it yet`,
   'numbering.hint': () => 'they may be different chapters listed as versions of one.',
   'numbering.kept': () => "you chose to keep the source's own numbers.",
   'numbering.held': () => 'Nothing downloads for this series until then.',

@@ -876,58 +876,23 @@ reader never hides a missing placeholder — even when that position was also ma
 labels it *Page {n} could not be fetched* and *It will be retried automatically.* The nightly update pass tries only those missing indices and
 heals at most ten partial chapters at a time; once every real page lands, the badge and captions disappear.
 
-For ordinary sweep failures, admins can leave **Admin → Settings → Updates & schedules → Use other sources
-on their own** on (the default; *Look for failed chapters on other sources* before v0.80.0). The sweep may search for a
-matching copy and follow it, but only once per series per day, against six candidates, for no more than five series
-per sweep. A clean series never searches an adult source.
+**Downloads that finish on their own** (**Admin → Settings → Updates & schedules → Finish downloads on their own**, on
+by default). Uchiyomi keeps downloading until every chapter of a series is here, whether the series came from Discover,
+*Find missing chapters* or the library update:
 
-**When a series' sources cannot get its chapters** (since v0.80.0, the same switch). A series whose chapters none of
-its sources can serve now — every one cooling down, refusing or broken for what it lacks, or the chapters left at
-their retry cap — is looked for on the other installed sources in the background, one series every few minutes:
+- **A slow or blocked site doesn't hold a series up.** When a site is slow, refusing (a rate limit or a block) or
+  missing chapters, the chapters come from the other sources the series follows. What only that site has waits, and is
+  fetched as soon as the site is ready again.
+- **It finds another source when none can help.** In the background, it looks for the series on your other installed
+  sources (in the series' language, and no 18+ source for a series that isn't) and adds one that has the missing
+  chapters. The series keeps its main source; the new one only fills in.
+- **You can see what it did.** A source it added is marked *followed for you* on the series' Sources list, with when
+  and why. Press × to remove it: it is never added back for that series. Health says it too where a gap is waiting.
+- **Off,** chapters come only with the library update, from the sources you picked.
 
-- **Which series.** One the sweep found with every source cooling, silent or refusing; an add from Discover, a Fetch or
-  *Find missing chapters* that a site refused or could not serve; a chapter left at its tries or saved with pages
-  missing. With none of those waiting, a behind series none of whose sources can be asked now, and once an hour one
-  whose every source is broken. A series it just looked at waits: six hours after following a source, an hour or more
-  after a look that ran out of time or searches, up to three days after every source said no.
-- **Where it looks.** Every installed source the series may use (its language, and no 18+ source for a series that is
-  not 18+) that it does not follow, best first: sources it already found the series on, then the ones that downloaded
-  well on this server this week, then the rest; the series' language first, and sites with less already waiting on
-  them before busy ones. It never asks a source on the image server of one the series follows (Mangakakalot cannot
-  stand in for Natomanga: they slow down together), a source that is cooling down (it is asked next time), or a source
-  that said "not this series" lately: an answer is remembered for two weeks (a site that did not answer, one day).
-- **What it follows.** A source that passes the same check as any second source (*Following a second source*) and
-  lists a chapter the series is waiting for, or one newer than any it has. It is followed, never made the main
-  source; chapters left at their tries get them back; and the series goes first in the next *Finish downloads on
-  their own* run, which takes each chapter from wherever it can come now. A source you unfollow from a series is never
-  followed there again on its own; following it yourself undoes that.
-- **How much.** One look at a time, at most twelve sources and sixteen searches each, and forty searches an hour in
-  all (`SCOUT_SEARCHES_PER_HOUR` in [CONFIGURATION.md](CONFIGURATION.md)). A series follows at most three other sources;
-  one that is broken, switched off or no longer installed does not count, and is kept.
-
-**Downloads that finish on their own** (since v0.78.0; **Admin → Settings → Updates & schedules → Finish downloads on
-their own**, on by default). A series that still has chapters to download — its sources list chapters the server does
-not have, or it was just added — is gone back to every 15 minutes, and again as soon as a site's cooldown ends, instead
-of waiting for the next library update: up to ten chapters a series each time. A chapter a site refused (a 429 or a
-403) is tried up to twelve times instead of three, the cooldowns spacing the tries out, and once a site has refused a
-chapter twice the sweep also searches the other sources for it (with *Use other sources on their own* on). A
-series added from Discover whose very first chapter the site refused is kept — its download card says the chapters
-will come on their own — where it used to be not added at all. Off, chapters wait for the library update, as before.
-The knobs are under *Downloading* in [CONFIGURATION.md](CONFIGURATION.md).
-
-Since v0.79.0 a site's cooldown no longer holds a series up. The update takes chapters from the other sources the series
-follows that can answer, keeps the chapters only the cooling site lists on the series' list, and comes back for them as
-soon as that cooldown ends. A page list the site refuses counts as a refusal, like refused images. An add from Discover
-whose site is already cooling down, or refuses the page list, is kept the same way. The finishing runs give way to the
-library update, the nightly repair, *Fix everything* and *Find other sources*: a run stops at its next chapter and picks
-up after them.
-
-Since v0.81.0 the finishing runs work on up to three series at once, each on a different image server (never two
-through the extension engine, or two behind the Cloudflare solver), so one slow site no longer holds up the series on
-every other site. And when the same release of a chapter — the same group, the same language — is on several sources a
-series follows, the update takes it from the one downloading at full speed, on the image server with the least waiting
-on it, and not from the one that failed that chapter last time. A version you picked, a source order you set (the
-series' own or the server's) and a series numbered by posting order are kept exactly as they are.
+It goes back for what is left every quarter of an hour, a few series at once on different sites, and gives way when
+the library update, the nightly repair, *Fix everything* or *Find other sources* needs the sources. The rarely needed
+tuning settings are under *Downloading* in [CONFIGURATION.md](CONFIGURATION.md).
 
 ### What is downloading, and stopping it
 
@@ -2994,9 +2959,8 @@ is due by the release radar; *Check now* and everything you start yourself alway
 (since v0.61.1, on by default), the **Backup time (hour, 0–23)** of the nightly backup — change it and the pending timer
 is re-armed at once, so the next run is at the new hour — and **Backups to keep** (since v0.61.1; section 12 has all
 three), and, when the extension engine is configured, **Update extensions
-automatically** and its check interval. **Use other sources on their own** (*Look for failed chapters on other
-sources* before v0.80.0) controls the bounded, once-a-day source hunt and the scout described in section 4, and is on
-by default. **Library housekeeping**: **Delete read chapters** and its **Wait
+automatically** and its check interval. **Finish downloads on their own** (on by default) is the one switch for
+everything automatic about downloads, described in section 4: finishing what is left, and finding other sources. **Library housekeeping**: **Delete read chapters** and its **Wait
 (days)**, below, **Repair the library nightly** (on by default), the job described under *Health* above, and
 **Every night** (since v0.55.0): *Safe repair*, or *Fix everything*. **Scanlators**: the server-wide defaults for choosing between scanlation groups — **Blocked
 groups**, which apply to every series, a **Default priority** for series that have no ranking of their own, and

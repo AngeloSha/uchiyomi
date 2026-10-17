@@ -329,19 +329,20 @@ ever hit.
 - `UPDATER_SWEEP_MAX` (default `150`): most chapter-fetch attempts in one scheduled sweep, so a backlog
   cannot occupy the whole night.
 - `CHAPTER_RETRY_CAP` (default `3`): ordinary failures before a chapter is left as failed until a person
-  explicitly retries it. With **Finish downloads on their own** on (Admin → Settings → Updates & schedules, on by
-  default, v0.78.0), a site refusing a chapter (a 429 or a 403) is not an ordinary failure: it gets
-  `FINISH_DOWNLOADS_REFUSAL_CAP` tries.
-- `FINISH_DOWNLOADS_MINUTES` (default `15`, at least `5`): with that switch on, how often the series still behind their
-  sources are gone back to -- or right after the earliest cooldown of their sites ends, whichever comes first.
-- `FINISH_DOWNLOADS_PER_SERIES` (default `10`): chapters one of those runs fetches for a series.
-- `FINISH_DOWNLOADS_SWEEP_MAX` (default `60`): chapter-fetch attempts one of those runs makes in all.
-- `FINISH_DOWNLOADS_LANES` (default `3`, 1 to 6; v0.81.0): series one of those runs works on at once, each on its own
-  image server, never two through the extension engine and never two behind the Cloudflare solver. `1` is one series
-  at a time, as before v0.81.0. The scheduled library update always goes one series at a time.
-- `FINISH_DOWNLOADS_REFUSAL_CAP` (default `12`): tries a chapter a site refused gets before it is left as failed, with
-  the switch on. The cooldowns space the tries out; once a site has refused a chapter twice, the sweep also searches the
-  other sources for it.
+  explicitly retries it. A chapter a site refused (a 429 or a 403) gets `FINISH_DOWNLOADS_REFUSAL_CAP` tries instead
+  while **Finish downloads on their own** is on.
+
+**Finish downloads on their own** (Admin → Settings → Updates & schedules, on by default) needs nothing set. Advanced,
+rarely needed:
+
+- `FINISH_DOWNLOADS_MINUTES` (default `15`, at least `5`): how often the series with chapters left are gone back to,
+  or right after a site's cooldown ends if that comes first.
+- `FINISH_DOWNLOADS_PER_SERIES` (default `10`) and `FINISH_DOWNLOADS_SWEEP_MAX` (default `60`): chapters one of those
+  runs fetches for a series, and in all.
+- `FINISH_DOWNLOADS_LANES` (default `3`, 1 to 6): series one of those runs works on at once, each on a different site.
+- `FINISH_DOWNLOADS_REFUSAL_CAP` (default `12`): tries a chapter a site refused gets.
+- `SCOUT_SEARCHES_PER_HOUR` (default `40`; `0` stops it looking for new sources on its own, and keeps the rest):
+  searches it may make in an hour when it looks for a series on your other installed sources.
 
 - `DOWNLOAD_CONCURRENCY` (default `2`): chapters downloaded at once, per source -- per rate key: the MangaDex languages
   share one, and since v0.55.3 so do sources whose pages come from one image server (Natomanga and Mangakakalot). One
@@ -448,24 +449,18 @@ ever hit.
   `AUTOFIX_MAX_MINUTES` is spent, and the next run continues down the list. `0` switches its extensions phase off. A
   package that carries none of the series it was searched for is removed again at once, and is not tried for those
   series again for a month.
-- `MAX_FOLLOWED_SOURCES` (default `3` since v0.80.0, `2` before; 1 to 6): how many sources besides the main one a
-  series may follow, by hand or automatically. A failed chapter may be asked from that many of them, up to four. Each
-  one is another chapter list read on every sweep, for every series. For the automatic follows (the hunt and the
-  scout), a follower that is broken, switched off or no longer installed does not count, and is kept.
-- `SCOUT_SEARCHES_PER_HOUR` (default `40`, `0` turns it off): search requests the scout may make in any hour, across
-  every series it looks for (v0.80.0; USAGE.md, *When a series' sources cannot get its chapters*). One look asks at
-  most twelve sources and makes at most sixteen searches. The admin switch **Use other sources on their own** turns
-  the scout and the hunt off together.
+- `MAX_FOLLOWED_SOURCES` (default `3`, 1 to 6): how many sources besides the main one a series may follow, by hand or
+  automatically. Each one is another chapter list read on every update. A source that is broken, switched off or no
+  longer installed does not count toward it for the sources Uchiyomi adds on its own.
 - `MIN_FREE_GB` (default `10`): refuse to start a download when the download disk has less than this free.
   `0` disables the floor. Fails open if free space cannot be measured.
 
 An ordinary chapter failure may continue from up to `MAX_FOLLOWED_SOURCES` (default three, at most four) of the sources
-already followed for that series. A copy explicitly picked by a person never switches. A 403/429 never becomes a partial chapter or starts a hunt;
-the refusing source cools down, while an already-followed copy can keep the queue moving. The sweep can also
-find a new matching source when **Admin → Settings → Updates & schedules → Use other sources on their own** is on
-(the default): once per series per day, at most six candidates and five hunts per sweep, within the follower limit
-above. Title and 90%-chapter matching apply, and a clean series never
-causes an adult source to be followed. There is intentionally no environment variable for this switch.
+already followed for that series. A copy explicitly picked by a person never switches. A 403/429 never becomes a
+partial chapter; the refusing source cools down, while an already-followed copy can keep the queue moving. With
+**Admin → Settings → Updates & schedules → Finish downloads on their own** on (the default), Uchiyomi also finds and
+follows a new source for a series its sources cannot serve. Title and 90%-chapter matching apply, and a clean series
+never causes an adult source to be followed.
 
 ## The slow archive
 

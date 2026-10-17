@@ -7392,7 +7392,8 @@ paths:
                   description: >-
                     Allow the scheduled sweep to search for and follow a matching source after an ordinary
                     chapter failure, and (since v0.80.0) the scout to follow one for a series whose sources
-                    cannot get its chapters. "Use other sources on their own" in Admin → Settings.
+                    cannot get its chapters. Since v0.81.0 Admin → Settings writes it together with
+                    finishDownloads, as its one switch "Finish downloads on their own".
                 repairEnabled:
                   type: boolean
                   description: >-

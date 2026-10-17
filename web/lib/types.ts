@@ -86,6 +86,13 @@ export interface SeriesSource {
    * loaded. A follower that works is what the Sources sheet offers Make main for. Absent from an older server.
    */
   standing?: 'usable' | 'cooling' | 'failing' | 'off' | 'not_loaded';
+  /**
+   * v0.81.0, an automatic follow only: when it was followed, and what found it (bff lib/seriesSources.ts): the scout
+   * (its other sources could not get its chapters), the sweep's hunt for a failed or short chapter, the repair's search
+   * for a gap, or the add itself. Null or absent otherwise, and from an older server.
+   */
+  followedAt?: string | null;
+  foundFor?: 'scout' | 'failed_chapter' | 'short_chapter' | 'gap' | 'add' | null;
 }
 
 /**

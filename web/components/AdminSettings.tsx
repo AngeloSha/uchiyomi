@@ -471,18 +471,16 @@ function SchedulesSection({ data, save }: { data: any; save: Save }) {
             onSave={(n) => save({ extensionHours: n })} />
         </>
       )}
-      {/* v0.40.0: the sweep's hunt for a chapter none of the followed sources could serve; since v0.80.0 the scout too
-          (bff lib/sourceScout.ts), which looks for a series whose sources cannot get its chapters. ON by default,
-          which `!== false` reads as: a server that does not send the key yet is a server that hunts. It sits
-          outside the extensions block because the hunt asks every registered source, engine or not. */}
-      <SwitchRow label={tr('Use other sources on their own')}
-        help={tr('When the sources a series follows cannot get its chapters (a rate limit, a block, a broken chapter), look for it on the other installed sources and follow one that has them')}
-        on={data.auto_follow_on_failure !== false} onChange={(next) => save({ autoFollowOnFailure: next })} />
-      {/* Downloads that finish on their own (bff lib/finishDownloads.ts). ON by default (`finish_downloads NOT NULL DEFAULT
-          true`), which `!== false` reads as: a server that does not send the key yet finishes them. */}
+      {/* v0.81.0: ONE switch for everything automatic about downloads (the owner, 2026-10-18: too many options to follow).
+          Finishing what is still to download (bff lib/finishDownloads.ts) and looking for other sources --
+          the sweep's hunt and the scout (lib/sourceHunt.ts, lib/sourceScout.ts), "Use other sources on their own" until
+          v0.81.0 -- are written together, and the switch reads on only while both are. ON by default (both columns
+          default true), which `!== false` reads as: a server that does not send a key yet does it. It sits outside the
+          extensions block because the search asks every installed source, engine or not. */}
       <SwitchRow label={tr('Finish downloads on their own')}
-        help={tr('On by default. A series that still has chapters to download keeps going on its own, every 15 minutes or as soon as a site that was refusing is ready again, instead of waiting for the next library update. A chapter a site refused is tried 12 times instead of 3, and a series added from Discover is kept even when its site refuses the first chapter. Off, they wait for the library update.')}
-        on={data.finish_downloads !== false} onChange={(next) => save({ finishDownloads: next })} />
+        help={tr('On by default. Uchiyomi keeps downloading until every chapter is here: when a site is slow, blocked or missing chapters, it uses the series’ other sources, and finds a new one when none of them can help. Off, chapters come only with the library update, from the sources you picked.')}
+        on={data.finish_downloads !== false && data.auto_follow_on_failure !== false}
+        onChange={(next) => save({ finishDownloads: next, autoFollowOnFailure: next })} />
     </Section>
   );
 }

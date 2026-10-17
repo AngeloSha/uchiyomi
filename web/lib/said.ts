@@ -293,6 +293,13 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'numbering.askedWaits': () => tr('Numbering by posting order, as asked, waits to be applied.'),
   'numbering.sourceWaits': (p) => opensOnOwnWords(p, tr('Going back to {name}\'s own numbers waits to be applied.', { name: sourceNameMid(p) })),
   'numbering.since': (p) => tr('numbered by posting order since {date}.', { date: dayText(p.at) }),
+  // v0.81.0: what the scout (bff lib/sourceScout.ts) last did for the series on a Health row.
+  'scout.following': (p) => (num(p, 'n') === 1
+    ? tr('Searched 1 other source on {date}: now also using {source}', { date: dayText(p.at), source: str(p, 'source') })
+    : tr('Searched {n} other sources on {date}: now also using {source}', { n: num(p, 'n'), date: dayText(p.at), source: str(p, 'source') })),
+  'scout.notFound': (p) => (num(p, 'n') === 1
+    ? tr('Searched 1 other source on {date}: none has it yet', { date: dayText(p.at) })
+    : tr('Searched {n} other sources on {date}: none has it yet', { n: num(p, 'n'), date: dayText(p.at) })),
   'numbering.hint': () => tr('they may be different chapters listed as versions of one.'),
   'numbering.kept': () => tr('you chose to keep the source\'s own numbers.'),
   'numbering.held': () => tr('Nothing downloads for this series until then.'),

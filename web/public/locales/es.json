@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4040
+    "strings": 4047
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -4030,7 +4030,6 @@
   "{n} with numbers none of their sources list": "{n} con números que ninguna de sus fuentes ofrece",
   "Numbers none of a series' sources list are not counted as missing: usually a source numbered the same chapters another way, such as counting split parts as chapters. \"Fill now\" still asks other sources for them.": "Los números que ninguna fuente de una serie ofrece no cuentan como faltantes: normalmente una fuente numeró los mismos capítulos de otra forma, por ejemplo contando como capítulos las partes divididas. «Rellenar ahora» igualmente los busca en otras fuentes.",
   "Finish downloads on their own": "Terminar las descargas solas",
-  "On by default. A series that still has chapters to download keeps going on its own, every 15 minutes or as soon as a site that was refusing is ready again, instead of waiting for the next library update. A chapter a site refused is tried 12 times instead of 3, and a series added from Discover is kept even when its site refuses the first chapter. Off, they wait for the library update.": "Activado por defecto. Una serie a la que aún le quedan capítulos por descargar sigue sola, cada 15 minutos o en cuanto un sitio que los rechazaba vuelve a estar listo, en lugar de esperar a la siguiente actualización de la biblioteca. Un capítulo que un sitio rechazó se intenta 12 veces en lugar de 3, y una serie añadida desde Descubrir se conserva aunque su sitio rechace el primer capítulo. Desactivado, esperan a la actualización de la biblioteca.",
   "{source} is currently rate-limiting downloads. The series is saved, and its chapters will download on their own when the site is ready.": "{source} está limitando la frecuencia de las descargas ahora mismo. La serie está guardada y sus capítulos se descargarán solos cuando el sitio esté listo.",
   "{source} is currently blocking downloads. The series is saved, and its chapters will download on their own when the site is ready.": "{source} está bloqueando las descargas ahora mismo. La serie está guardada y sus capítulos se descargarán solos cuando el sitio esté listo.",
   "{source} is currently unreachable for downloads. The series is saved, and its chapters will download on their own when the site is ready.": "{source} no está accesible para las descargas ahora mismo. La serie está guardada y sus capítulos se descargarán solos cuando el sitio esté listo.",
@@ -4042,6 +4041,14 @@
   "1 will download on its own when its site is ready.": "1 se descargará solo cuando su sitio esté listo.",
   "{m} will download on their own when their site is ready.": "{m} se descargarán solos cuando su sitio esté listo.",
   "Its site is busy right now. These chapters will download on their own when it is ready.": "Su sitio está ocupado ahora mismo. Estos capítulos se descargarán solos cuando esté listo.",
-  "Use other sources on their own": "Usar otras fuentes solas",
-  "When the sources a series follows cannot get its chapters (a rate limit, a block, a broken chapter), look for it on the other installed sources and follow one that has them": "Cuando las fuentes que sigue una serie no pueden conseguir sus capítulos (un límite de solicitudes, un bloqueo, un capítulo roto), se busca en las demás fuentes instaladas y se sigue una que los tenga"
+  "On by default. Uchiyomi keeps downloading until every chapter is here: when a site is slow, blocked or missing chapters, it uses the series’ other sources, and finds a new one when none of them can help. Off, chapters come only with the library update, from the sources you picked.": "Activado por defecto. Uchiyomi sigue descargando hasta tener todos los capítulos: si un sitio va lento, está bloqueado o le faltan capítulos, usa las otras fuentes de la serie y encuentra una nueva cuando ninguna puede ayudar. Desactivado, los capítulos llegan solo con la actualización de la biblioteca, desde las fuentes que elegiste.",
+  "Added {ago}: the other sources could not get its chapters": "Añadida {ago}: las otras fuentes no podían conseguir sus capítulos",
+  "Added {ago}: a chapter failed on the other sources": "Añadida {ago}: un capítulo falló en las otras fuentes",
+  "Added {ago}: a chapter was incomplete on the other sources": "Añadida {ago}: un capítulo estaba incompleto en las otras fuentes",
+  "Added {ago}: it has chapters the other sources do not": "Añadida {ago}: tiene capítulos que las otras fuentes no tienen",
+  "Added with the series, {ago}": "Añadida con la serie, {ago}",
+  "Searched 1 other source on {date}: now also using {source}": "Buscada en 1 fuente más el {date}: ahora también se usa {source}",
+  "Searched {n} other sources on {date}: now also using {source}": "Buscada en {n} fuentes más el {date}: ahora también se usa {source}",
+  "Searched 1 other source on {date}: none has it yet": "Buscada en 1 fuente más el {date}: ninguna la tiene todavía",
+  "Searched {n} other sources on {date}: none has it yet": "Buscada en {n} fuentes más el {date}: ninguna la tiene todavía"
 }

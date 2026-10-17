@@ -2230,6 +2230,18 @@ const DATA_MIGRATIONS: { id: string; run: (c: PoolClient) => Promise<void> }[] =
       );
     },
   },
+  {
+    // v0.81.0: "Finish downloads on their own" is the one switch for everything automatic about downloads, looking for
+    // other sources included -- that was its own switch, "Use other sources on their own" (auto_follow_on_failure,
+    // "Look for failed chapters on other sources" before v0.80.0). The two columns stay, and Admin -> Settings now
+    // writes both together. Where they disagree, both go off: an admin who turned either off never finds part of it
+    // switched back on by an upgrade.
+    id: 'v0.81.0-one-switch-for-automatic-downloads',
+    run: async (c) => {
+      await c.query(`UPDATE server_settings SET finish_downloads = false, auto_follow_on_failure = false
+                      WHERE id = 1 AND finish_downloads IS DISTINCT FROM auto_follow_on_failure`);
+    },
+  },
 ];
 
 export async function migrate(): Promise<void> {

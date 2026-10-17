@@ -342,6 +342,18 @@ function Languages({ series, onAdd, onChange, onUnlink, onOpen }: {
   );
 }
 
+/** Why the server followed a source on its own, and when (v0.81.0; bff lib/seriesSources.ts `foundFor`). */
+export function foundForText(why: NonNullable<SeriesSource['foundFor']>, at: string): string {
+  const ago = relativeTime(at);
+  switch (why) {
+    case 'scout': return tr('Added {ago}: the other sources could not get its chapters', { ago });
+    case 'failed_chapter': return tr('Added {ago}: a chapter failed on the other sources', { ago });
+    case 'short_chapter': return tr('Added {ago}: a chapter was incomplete on the other sources', { ago });
+    case 'gap': return tr('Added {ago}: it has chapters the other sources do not', { ago });
+    default: return tr('Added with the series, {ago}', { ago });
+  }
+}
+
 /**
  * One source the updater asks: favicon, name, its role, what it lists, when it was last asked -- and, for an admin, the
  * × that stops following it and (v0.54.0) Make main on a follower that works: it asks first, in one line, what becomes
@@ -374,6 +386,10 @@ export function SourceRow({ s, onUnfollow, unfollowing, makeMain }: {
           {s.chapters != null && s.checkedAt && ' · '}
           {s.checkedAt && tr('checked {ago}', { ago: relativeTime(s.checkedAt) })}
         </span>
+        {/* v0.81.0: why a source nobody here chose is followed, in the reader's words, before they press ×. */}
+        {s.auto && s.foundFor && s.followedAt && (
+          <span className="block text-[11px] leading-snug text-fog-500" data-found-for={s.foundFor}>{foundForText(s.foundFor, s.followedAt)}</span>
+        )}
       </span>
       {makeMain && !makeMain.asking && (
         <button type="button" onClick={makeMain.onAsk} disabled={makeMain.busy} className="btn-key shrink-0" data-make-main={s.sourceId}>

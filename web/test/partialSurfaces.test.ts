@@ -166,15 +166,16 @@ test('Admin → Settings has exactly one switch for the hunt, under Updates & sc
   // The hunt is on by default (server column `auto_follow_on_failure NOT NULL DEFAULT true`), so the row
   // reads `!== false`: a server that does not send the key yet is a server that hunts, and the switch says
   // so. It lives outside the extensions block because the hunt asks every registered source.
-  // Reintroduce by a second `autoFollowOnFailure` anywhere in the file, or by `on={!!data.auto_follow_on_failure}`.
+  // v0.81.0: it is no longer a switch of its own -- "Finish downloads on their own" writes it with finish_downloads, the
+  // one switch for everything automatic about downloads (finishDownloads.test.ts pins that row).
+  // Reintroduce by a second `autoFollowOnFailure` anywhere in the file, or by `!!data.auto_follow_on_failure`.
   const src = code(read('components/AdminSettings.tsx'));
   assert.equal((src.match(/autoFollowOnFailure/g) ?? []).length, 1, 'the hunt switch is saved from more or fewer than one place');
+  assert.match(src, /data\.auto_follow_on_failure !== false/, 'the hunt is not on unless told otherwise');
   const section = between(src, 'function SchedulesSection(', 'function HousekeepingSection(', 'SchedulesSection');
-  // v0.80.0: relabelled for the scout, which uses the same switch (bff lib/sourceScout.ts).
-  assert.match(section, /<SwitchRow label=\{tr\('Use other sources on their own'\)\}\s*help=\{tr\('When the sources a series follows cannot get its chapters \(a rate limit, a block, a broken chapter\), look for it on the other installed sources and follow one that has them'\)\}\s*on=\{data\.auto_follow_on_failure !== false\} onChange=\{\(next\) => save\(\{ autoFollowOnFailure: next \}\)\} \/>/, 'the hunt switch is not the one SwitchRow with these words, or is not on by default');
   // After the extensions block, not inside it: an install without an engine still hunts.
   const ext = section.indexOf('data.extensions_configured && (');
-  const sw = section.indexOf("tr('Use other sources on their own')");
+  const sw = section.indexOf('autoFollowOnFailure: next');
   const extEnd = section.indexOf('</>\n      )}', ext);
   assert.ok(ext > 0 && extEnd > ext && sw > extEnd, 'the hunt switch is inside the extensions block, so an install without an engine cannot see it');
 });
