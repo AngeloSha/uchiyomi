@@ -15,6 +15,8 @@ There are two ways in, and for scripts you want the second one.
 **Session tokens** are what the web app uses: `POST /auth/login` returns a JWT that expires after 15 minutes,
 refreshed with a rotating cookie. Fine for a browser, miserable for a cron job.
 
+Session-authenticated API requests check that the account still exists and is enabled, and use its current role. Disabling or deleting an account ends its API access on the next request; demotion removes its administrative authority. This is an account-state check, not a promise that every individual access JWT is revoked by signing out.
+
 **API tokens** are long-lived, revocable, and scoped. Create one under **Profile → Connections → API tokens → New token** (the form opens inline).
 The token is shown once, so copy it then. It looks like `uy_` followed by random characters.
 

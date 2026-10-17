@@ -670,7 +670,7 @@ export async function resolveApiTokenById(id: string): Promise<ResolvedToken | n
 /** Preflight guard usable as a route preHandler. */
 export async function authenticate(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   // An API token is recognised by its prefix and resolved from the database. Everything else takes the
-  // original JWT path untouched, so sessions, 2FA and refresh behave exactly as before.
+  // JWT path below, which also rechecks the account's current enabled state and role.
   const header = request.headers.authorization;
   if (header && /^bearer /i.test(header)) {
     const raw = header.slice(7).trim();
@@ -702,4 +702,11 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
   if ((request.user as { typ?: unknown })?.typ !== undefined) {
     return reply.code(401).send({ error: 'unauthorized' });
   }
+  // A valid signature describes who signed in then, not the account's authority now. Do not cache this:
+  // disabling/deleting an account or withdrawing its admin role must apply to the next API request.
+  const subject = (request.user as { sub?: string }).sub;
+  if (!subject || !UUID.test(subject)) return reply.code(401).send({ error: 'unauthorized' });
+  const current = await one<{ role: string }>('SELECT role FROM users WHERE id = $1 AND NOT disabled', [subject]);
+  if (!current) return reply.code(401).send({ error: 'unauthorized' });
+  (request.user as { role: string }).role = current.role;
 }
