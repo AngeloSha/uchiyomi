@@ -1,9 +1,9 @@
-// The account lock, wherever a password or a second-step code is checked (v0.77.1).
+// The account lock for authenticated password checks and second-step codes.
 //
 //   - a failure after a lock has run out counts from one, so the account locks again only after five more;
-//   - a wrong second-step code at sign-in counts as a wrong password does;
+//   - a wrong second-step code at sign-in counts toward the account lock;
 //   - the three password checks behind a session -- changing the password, turning two-factor on or off -- count and
-//     lock as sign-in does, are not checked at all while the account is locked, and carry sign-in's per-address limit;
+//     lock, are not checked at all while the account is locked, and carry sign-in's per-address limit;
 //   - turning two-factor on asks for the password, as turning it off does.
 //
 // Against the real routes and real rows. Skipped automatically unless TEST_DATABASE_URL is set.
@@ -89,8 +89,9 @@ async function account(name: string): Promise<string> {
   return row.id;
 }
 const bearer = (id: string) => ({ authorization: `Bearer ${app.jwt.sign({ sub: id, role: 'user' }, { expiresIn: 300 })}` });
+let loginPeer = 1;
 const login = (name: string, password: string, code?: string) =>
-  app.inject({ method: 'POST', url: '/auth/login', payload: { username: PREFIX + name, password, ...(code ? { code } : {}) } });
+  app.inject({ method: 'POST', url: '/auth/login', remoteAddress: `203.0.113.${loginPeer++}`, payload: { username: PREFIX + name, password, ...(code ? { code } : {}) } });
 const post = (id: string, url: string, payload: unknown, on = app) => on.inject({ method: 'POST', url, headers: bearer(id), payload });
 const lockOf = async (id: string) => {
   const r = await one('SELECT failed_logins, locked_until > now() AS locked FROM users WHERE id = $1', [id]);
@@ -107,23 +108,24 @@ async function enrol(id: string): Promise<string> {
   return secret;
 }
 
-test('a failure after a lock has run out counts from one', { skip }, async () => {
+test('an authenticated failure after a lock has run out counts from one', { skip }, async () => {
   const id = await account('expired');
   // Five failures, fifteen minutes ago: the lock they made has just run out.
   await q(`UPDATE users SET failed_logins = 5, locked_until = now() - interval '1 second' WHERE id = $1`, [id]);
   // Reintroduce by dropping the `locked_until <= now()` cases in recordFailedLogin (lib/auth.ts): this first failure
   // is the sixth, and locks the account again at once -- one wrong password every fifteen minutes keeps it locked.
-  const first = await login('expired', 'not the password');
+  const check = (current: string) => post(id, '/auth/password', { current, next: PASSWORD });
+  const first = await check('not the password');
   assert.equal(first.statusCode, 401, `the first failure after the lock locked it again: ${first.body}`);
-  assert.equal(first.json().error, 'invalid_credentials');
+  assert.equal(first.json().error, 'wrong_password');
   assert.deepEqual(await lockOf(id), { count: 1, locked: false }, 'the count did not start again at one');
   // And it takes the usual five to lock it again.
-  for (let n = 2; n <= 4; n++) assert.equal((await login('expired', 'not the password')).statusCode, 401, `failure ${n}`);
-  const fifth = await login('expired', 'not the password');
+  for (let n = 2; n <= 4; n++) assert.equal((await check('not the password')).statusCode, 401, `failure ${n}`);
+  const fifth = await check('not the password');
   assert.equal(fifth.statusCode, 423, fifth.body);
   assert.deepEqual(await lockOf(id), { count: 5, locked: true });
   // While it lasts, even the right password is refused unread.
-  assert.equal((await login('expired', PASSWORD)).statusCode, 423);
+  assert.equal((await check(PASSWORD)).statusCode, 423);
 });
 
 test('wrong second-step codes lock the account', { skip }, async () => {
@@ -141,9 +143,10 @@ test('wrong second-step codes lock the account', { skip }, async () => {
   const fifth = await login('codes', PASSWORD, wrongCode(secret));
   assert.equal(fifth.statusCode, 423, `five wrong codes did not lock the account: ${fifth.body}`);
   assert.equal(fifth.json().error, 'locked');
+  assert.deepEqual(await lockOf(id), { count: 5, locked: true });
   // Locked means locked: the right code is not even looked at.
   const right = await login('codes', PASSWORD, codeFor(secret, 1));
-  assert.equal(right.statusCode, 423, right.body);
+  assert.equal(right.statusCode, 401, right.body);
   // Once the lock runs out the right code signs in, and the count is cleared.
   await q(`UPDATE users SET locked_until = now() - interval '1 second' WHERE id = $1`, [id]);
   const after = await login('codes', PASSWORD, codeFor(secret, 1));
@@ -173,8 +176,8 @@ test('a session cannot guess the password', { skip }, async () => {
   // While it lasts the right password is refused unread, here and at sign-in, and nothing changes.
   const right = await post(id, '/auth/password', { current: PASSWORD, next: 'a new password' });
   assert.equal(right.statusCode, 423, right.body);
-  assert.equal((await login('session', PASSWORD)).statusCode, 423);
-  assert.equal((await login('session', 'a new password')).statusCode, 423, 'the password changed while the account was locked');
+  assert.equal((await login('session', PASSWORD)).statusCode, 401);
+  assert.equal((await login('session', 'a new password')).statusCode, 401, 'the password changed while the account was locked');
   // Once it runs out the right password works, and clears the count as a sign-in does.
   await q(`UPDATE users SET locked_until = now() - interval '1 second' WHERE id = $1`, [id]);
   const ok = await post(id, '/auth/password', { current: PASSWORD, next: 'a new password' });

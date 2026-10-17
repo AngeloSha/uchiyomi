@@ -115,7 +115,7 @@ const LOCKED_NOW = { error: 'locked', message: 'Account locked after too many fa
 
 /**
  * The current password, asked for behind a session (v0.77.1): changing it, and turning two-factor on or off. Counted
- * and locked exactly as a sign-in's password is (recordFailedLogin), and not checked at all while the account is
+ * and locked with other authenticated password/second-factor checks (recordFailedLogin), and not checked while the account is
  * locked, so a session alone -- a borrowed phone, a stolen refresh cookie -- cannot guess its way to the password; the
  * routes carry SIGN_IN_LIMIT too. A right password clears the count, as a sign-in does. Null when it is right, else the
  * refusal to send. Reintroduce by checking the password alone: "a session cannot guess the password" in
@@ -144,8 +144,11 @@ export default async function authRoutes(app: FastifyInstance) {
   });
   const countPasswordFailure = async (req: FastifyRequest, reply: any) => {
     const r = await signInPair(req);
-    return !r.isAllowed && r.isExceeded ? reply.code(429).header('Retry-After', String(r.ttlInSeconds))
-      .send({error:'too_many_requests',message:'Too many sign-in attempts. Try again later.'}) : null;
+    if (!r.isAllowed && r.isExceeded) {
+      reply.code(429).header('Retry-After', String(r.ttlInSeconds)).send({error:'too_many_requests',message:'Too many sign-in attempts. Try again later.'});
+      return true;
+    }
+    return false;
   };
   /**
    * v0.63.0 (#208, lib/authMode.ts): in SSO-only mode the routes that take a password are not registered at all --
@@ -215,29 +218,29 @@ export default async function authRoutes(app: FastifyInstance) {
     const rescue = local ? null : rescueAdmin();
     const user = await one<FullUser>(`SELECT ${USER_AUTH_COLS} FROM users WHERE username = $1`, [username]);
     if (!local && (username !== rescue || user?.role !== 'admin')) {
-      const limited = await countPasswordFailure(req, reply); if (limited) return limited;
+      const limited = await countPasswordFailure(req, reply); if (limited) return reply;
       await logAudit('login.fail', { userId: user?.id, username, detail: { reason: 'sso_only' }, req });
       return reply.code(401).send({ error: 'invalid_credentials' });
     }
     if (!user) {
-      const limited = await countPasswordFailure(req, reply); if (limited) return limited;
+      const limited = await countPasswordFailure(req, reply); if (limited) return reply;
       await logAudit('login.fail', { username, detail: { reason: 'no_user' }, req });
       return reply.code(401).send({ error: 'invalid_credentials' });
     }
     if (user.disabled) {
-      const limited = await countPasswordFailure(req, reply); if (limited) return limited;
+      const limited = await countPasswordFailure(req, reply); if (limited) return reply;
       await logAudit('login.blocked', { userId: user.id, username, detail: { reason: 'disabled' }, req });
       return reply.code(403).send({ error: 'disabled', message: 'This account is disabled.' });
     }
     const lock = lockedUntil(user);
-    if (lock) { const limited = await countPasswordFailure(req, reply); if (limited) return limited; return reply.code(423).send({ error: 'locked', until: lock.toISOString(), message: 'Account locked after too many attempts. Try again later.' }); }
+    if (lock) { const limited = await countPasswordFailure(req, reply); if (limited) return reply; return reply.code(423).send({ error: 'locked', until: lock.toISOString(), message: 'Account locked after too many attempts. Try again later.' }); }
 
     let ok = false;
     try { ok = await verify(user.password_hash, password); } catch { ok = false; }
     if (!ok) {
       // Unauthenticated password failures may throttle only this source/name pair, never suspend the owner.
       await logAudit('login.fail', { userId: user.id, username, detail: { reason: 'bad_password' }, req });
-      const limited = await countPasswordFailure(req, reply); if (limited) return limited;
+      const limited = await countPasswordFailure(req, reply); if (limited) return reply;
       return reply.code(401).send({ error: 'invalid_credentials' });
     }
 
