@@ -20,6 +20,7 @@
 //     checked, so the next of these sweeps picks it up.
 // Off, every one of these behaves as it did in v0.77.x.
 import { one } from './db';
+import { visibleToAll } from './visibility';
 
 const envInt = (name: string, fallback: number, min: number, max: number): number => {
   const v = Number(process.env[name]);
@@ -70,10 +71,10 @@ export async function nextCooldownEnd(): Promise<Date | null> {
        FROM source_health h
       WHERE h.blocked_until > now() AND NOT h.disabled
         AND h.source_id IN (SELECT s.source_id FROM lib_series s
-                             WHERE s.auto_update AND s.deleted_at IS NULL AND s.merged_into IS NULL AND ${BEHIND_SQL}
+                             WHERE s.auto_update AND ${visibleToAll('s')} AND ${BEHIND_SQL}
                             UNION
                             SELECT ss.source_id FROM series_sources ss JOIN lib_series s ON s.id = ss.series_id
-                             WHERE s.auto_update AND s.deleted_at IS NULL AND s.merged_into IS NULL AND ${BEHIND_SQL})`,
+                             WHERE s.auto_update AND ${visibleToAll('s')} AND ${BEHIND_SQL})`,
   ).catch(() => null);
   return r?.at ? new Date(r.at) : null;
 }
@@ -81,7 +82,7 @@ export async function nextCooldownEnd(): Promise<Date | null> {
 /** How many monitored series are behind: none, and the finishing sweep does not start (no run card, no queries). */
 export async function behindCount(): Promise<number> {
   const r = await one<{ n: number }>(
-    `SELECT count(*)::int AS n FROM lib_series s WHERE s.auto_update AND s.deleted_at IS NULL AND s.merged_into IS NULL AND ${BEHIND_SQL}`,
+    `SELECT count(*)::int AS n FROM lib_series s WHERE s.auto_update AND ${visibleToAll('s')} AND ${BEHIND_SQL}`,
   ).catch(() => null);
   return r?.n ?? 0;
 }
