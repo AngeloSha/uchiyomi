@@ -9,6 +9,7 @@
 import { isIP } from 'node:net';
 import { lookup } from 'node:dns/promises';
 import { BlockedAddress, isBlockedHost, isPrivateAddress } from './ssrfGuard';
+import { fetchPublicHop } from './publicConnection';
 
 /** A body over its cap. Callers treat it like any failed fetch. */
 export class ResponseTooLarge extends Error {
@@ -86,7 +87,7 @@ export async function fetchPublic(
         throw e;
       }
       const headers = target.origin === first ? opts.headers : undefined;
-      const r = await fetch(target, { headers, redirect: 'manual', signal });
+      const r = await fetchPublicHop(target, { headers, signal });
       if (r.status >= 300 && r.status <= 399) {
         await r.body?.cancel().catch(() => {});
         const loc = r.headers.get('location');
@@ -174,7 +175,11 @@ export async function fetchFollowingPublic(
     if (target.protocol !== 'http:' && target.protocol !== 'https:') throw new BlockedAddress(target.href);
     if (!(hop === 0 && opts.exemptFirst?.(target))) await assertNotPrivateHost(target.hostname);
     const headers = target.origin === first ? init.headers : withoutCredentials(init.headers);
-    const r = await fetch(target, { headers, redirect: 'manual', signal: init.signal });
+    // The trusted engine exemption applies to exactly the first hop. Every public hop uses a dispatcher
+    // whose connection lookup validates the actual socket address, even when the preflight cache is stale.
+    const r = hop === 0 && opts.exemptFirst?.(target)
+      ? await fetch(target, { headers, redirect: 'manual', signal: init.signal })
+      : await fetchPublicHop(target, { headers, signal: init.signal });
     if (r.status < 300 || r.status > 399 || r.status === 304) return r;
     const loc = r.headers.get('location');
     if (!loc || hop >= (opts.maxHops ?? 4)) return r; // an unfollowed redirect reads as the failed status it is
