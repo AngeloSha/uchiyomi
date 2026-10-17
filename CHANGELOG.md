@@ -4584,7 +4584,8 @@ removes the partial mark when the chapter is whole.
 
 ### A bounded source hunt
 
-**Admin → Settings → Updates & schedules → Look for failed chapters on other sources** is on by default.
+**Admin → Settings → Updates & schedules → Use other sources on their own** (named *Look for failed chapters on other
+sources* until v0.80.0) is on by default.
 After an ordinary failure, the scheduled sweep may search up to six eligible sources and follow one that
 matches the title and at least 90% of the known chapter numbering. A series is hunted at most once per day,
 only five hunts start in one sweep, and at most two extra sources are followed. Adult sources are eligible
