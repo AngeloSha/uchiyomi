@@ -37,6 +37,7 @@ import { desktopFailAudit, desktopSecretMatches, isDesktop, isLoopback } from '.
 import { desktopUserId, ensureDesktopUser } from '../lib/desktopUser';
 import { authMode, bootstrapSub, mayBootstrap, rescueAdmin, ssoOnly } from '../lib/authMode';
 import { applyMemberDefaults } from '../lib/memberDefaults';
+import { verifyLoginPassword } from '../lib/loginPassword';
 
 const loginBody = z.object({
   username: z.string().max(64).optional(),
@@ -201,27 +202,13 @@ export default async function authRoutes(app: FastifyInstance) {
     // rescue opens one admin's password sign-in and nobody else's" in ssoRescue.int.test.ts signs a member in.
     const rescue = local ? null : rescueAdmin();
     const user = await one<FullUser>(`SELECT ${USER_AUTH_COLS} FROM users WHERE username = $1`, [username]);
-    if (!local && (username !== rescue || user?.role !== 'admin')) {
-      await logAudit('login.fail', { userId: user?.id, username, detail: { reason: 'sso_only' }, req });
-      return reply.code(401).send({ error: 'invalid_credentials' });
-    }
-    if (!user) {
-      await logAudit('login.fail', { username, detail: { reason: 'no_user' }, req });
-      return reply.code(401).send({ error: 'invalid_credentials' });
-    }
-    if (user.disabled) {
-      await logAudit('login.blocked', { userId: user.id, username, detail: { reason: 'disabled' }, req });
-      return reply.code(403).send({ error: 'disabled', message: 'This account is disabled.' });
-    }
-    const lock = lockedUntil(user);
-    if (lock) return reply.code(423).send({ error: 'locked', until: lock.toISOString(), message: 'Account locked after too many attempts. Try again later.' });
-
-    let ok = false;
-    try { ok = await verify(user.password_hash, password); } catch { ok = false; }
-    if (!ok) {
-      const nowLocked = await recordFailedLogin(user.id);
-      await logAudit('login.fail', { userId: user.id, username, detail: { reason: 'bad_password', locked: nowLocked }, req });
-      if (nowLocked) return reply.code(423).send(LOCKED_NOW);
+    const refusal = !local && (username !== rescue || user?.role !== 'admin') ? 'sso_only'
+      : !user ? 'no_user' : user.disabled ? 'disabled' : lockedUntil(user) ? 'locked' : null;
+    const ok = await verifyLoginPassword(!refusal && user ? user.password_hash : null, password);
+    if (!user || refusal || !ok) {
+      // Preserve the existing counter here; removing unauthenticated account-wide locks is a separate change.
+      const locked = user && !refusal ? await recordFailedLogin(user.id) : false;
+      await logAudit('login.fail', { userId: user?.id, username, detail: { reason: refusal || 'bad_password', locked }, req });
       return reply.code(401).send({ error: 'invalid_credentials' });
     }
 
