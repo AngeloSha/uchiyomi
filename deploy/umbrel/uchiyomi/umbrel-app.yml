@@ -11,7 +11,7 @@ folderAccess:
         targetPath: /library
 category: media
 name: Uchiyomi
-version: "0.79.0"
+version: "0.80.0"
 tagline: Self-hosted manga server that downloads too
 description: >-
   Uchiyomi is a self-hosted manga server that also downloads: it serves your manga, manhwa and webtoons
