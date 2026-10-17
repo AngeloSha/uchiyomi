@@ -37,6 +37,6 @@ test('access JWTs follow current account state and role',{skip:!DSN},async()=>{
   assert.equal((await app.inject({method:'GET',url:'/auth/me',headers:bearer(old)})).statusCode,401);
   const gone=await account('deleted'),deleted=app.jwt.sign({sub:gone,role:'admin'});await q('DELETE FROM users WHERE id=$1',[gone]);
   assert.equal((await app.inject({method:'GET',url:'/api/admin/users',headers:bearer(deleted)})).statusCode,401);
- 
+
  }finally{globalThis.fetch=nativeFetch;await app.close();await q('DELETE FROM audit_log WHERE user_id=ANY($1::uuid[]) OR username LIKE $2',[ids,prefix+'%']);await q('DELETE FROM users WHERE id=ANY($1::uuid[])',[ids]);await pool.end();}
 });
