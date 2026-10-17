@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.81.0 — 2026-10-18
+
+**Several sites at once, and the copy that can come now.** The runs that finish downloads on their own no longer wait
+for one slow site before starting on the next, and a chapter that two of a series' sources carry comes from whichever
+is free.
+
+### Faster finishing
+
+- **Up to three series at once,** each on a different image server, in the runs that finish downloads on their own.
+  Never two through the extension engine, and never two behind the Cloudflare solver. Before, one series on a slow site
+  held up every series on every other site: the first such run on a large library took more than half an hour for 18
+  series. Set `FINISH_DOWNLOADS_LANES` to `1` for one at a time; the scheduled library update is always one at a time.
+- **The copy that can come now.** When the same release of a chapter (the same group and language) is on several
+  sources a series follows, the update takes it from the one downloading at full speed, on the image server with the
+  least waiting on it, and not from the one that failed that chapter last time.
+  - A version you picked, a source order you set (the series' own or the server's) and a series numbered by posting
+    order are kept as they are.
+  - Another group's copy is never taken in its place.
+
+### Upgrading
+
+- **Database:** no change.
+- **Settings:** one optional knob, `FINISH_DOWNLOADS_LANES` (default 3). See [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
 ## v0.80.0 — 2026-10-18
 
 **A series its sources cannot get its chapters from finds another source on its own.** When every site a series
