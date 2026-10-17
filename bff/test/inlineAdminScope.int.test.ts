@@ -45,6 +45,6 @@ test('inline administration intersects account role and API-token scope',{skip:!
   assert.equal((await remove(ops)).statusCode,200);
   await q(`INSERT INTO archive_queue(series_id,state,added_by) VALUES ($1,'done',$2)`,[sid,owner]);assert.equal((await remove(own)).statusCode,200);
  }finally{runs.clearRuns();if(sid)await q('DELETE FROM lib_series WHERE id=$1',[sid]);if(lib)await q('DELETE FROM libraries WHERE id=$1',[lib]);}
- 
+
  }finally{globalThis.fetch=nativeFetch;await app.close();await q('DELETE FROM audit_log WHERE user_id=ANY($1::uuid[]) OR username LIKE $2',[ids,prefix+'%']);await q('DELETE FROM users WHERE id=ANY($1::uuid[])',[ids]);await pool.end();}
 });
