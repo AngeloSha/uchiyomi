@@ -3098,7 +3098,9 @@ In **Profile → Account** (`/profile/?tab=Account`; every user has this):
 
 API tokens, progress trackers and the OPDS link are not here any more: they are on **Profile → Connections**.
 
-Uchiyomi also locks an account after repeated failed logins and records everything in the admin audit feed.
+Wrong passwords slow down that address and username; they do not let a stranger lock your account for everyone.
+Repeated second-factor failures or password failures behind an existing session can still lock the account.
+Sign-in events are recorded in the admin audit feed.
 
 ---
 

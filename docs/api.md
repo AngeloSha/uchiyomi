@@ -15,6 +15,8 @@ There are two ways in, and for scripts you want the second one.
 **Session tokens** are what the web app uses: `POST /auth/login` returns a JWT that expires after 15 minutes,
 refreshed with a rotating cookie. Fine for a browser, miserable for a cron job.
 
+Password sign-in keeps the ten-attempts-per-address/five-minute limit and allows five failed password checks per address/username in fifteen minutes; further attempts receive **429** with `Retry-After`. A stranger's wrong passwords do not lock the account for other clients. Authenticated password checks and second-factor failures retain their account lock protection. Source limits and optional two-factor authentication remain important against distributed guessing.
+
 **API tokens** are long-lived, revocable, and scoped. Create one under **Profile → Connections → API tokens → New token** (the form opens inline).
 The token is shown once, so copy it then. It looks like `uy_` followed by random characters.
 
