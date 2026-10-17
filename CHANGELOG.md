@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.78.0 — 2026-10-17
+
+**Downloads that finish on their own, and gaps that are really gaps.** A series you add from Discover, or one whose
+sources have chapters you don't, keeps downloading through rate limits and blocks until it is done. And Health no
+longer calls hundreds of chapters missing when a site only numbered them differently.
+
+### Downloads that finish on their own
+
+- **Finish downloads on their own**, in **Admin → Settings → Updates & schedules**. **It is on unless you turn it off.**
+  A series that still has chapters to download is gone back to every 15 minutes, and again as soon as a site that was
+  refusing is ready, instead of waiting for the next library update: up to ten chapters a series each time. Before, a
+  series a site rate-limited half-way through an add got five chapters every six hours, and none while the site was
+  cooling down.
+- **A chapter a site refused is tried 12 times, not 3.** A rate limit or a block is a site saying "not now", so it no
+  longer uses up the three tries a broken chapter gets. The cooldowns space the tries out, and once a site has refused a
+  chapter twice the update also looks for it on other sources (with **Look for failed chapters on other sources** on, as
+  it is unless you turned it off).
+- **An add whose first chapter the site refused is kept.** The series is saved, its download card says the chapters will
+  come on their own, and they do. It used to be not added at all, with nothing left to carry on from.
+- **The library update no longer skips a turn** when another update is running at that moment. It tries again ten
+  minutes later, where it used to wait a whole interval.
+
+### Fixed
+
+- **Chapter gaps counts only chapters a site lists.** A series that took chapters from two sites numbering them
+  differently showed a long run of chapters missing that were the same chapters under the other site's numbers: one
+  series read 306 missing. Health now says those numbers apart on the row, greyed when they are all it has, as *numbers
+  none of its sources list*, and the reader's missing-chapters notice leaves them out. **Fill now** still asks other
+  sources for them, so a chapter some site really has is still found.
+
+### Upgrading
+
+- **Database:** one new column, `server_settings.finish_downloads`, on by default. Additive: v0.77.x ignores it.
+- **Settings:** four optional knobs, `FINISH_DOWNLOADS_MINUTES`, `FINISH_DOWNLOADS_PER_SERIES`,
+  `FINISH_DOWNLOADS_SWEEP_MAX` and `FINISH_DOWNLOADS_REFUSAL_CAP`. The defaults need nothing set. See
+  [docs/CONFIGURATION.md](docs/CONFIGURATION.md) → *Downloading*.
+- To keep downloads as they were, turn **Finish downloads on their own** off.
+
 ## v0.77.1 — 2026-10-16
 
 **Sign-in and backup hardening, and recovery codes that work.** Update soon, especially if people outside your

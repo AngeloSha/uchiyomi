@@ -268,6 +268,12 @@ const WORDS: Record<string, (p: P) => string | null> = {
     ? tr('1 more before where you started (chapter {start})', { start: num(p, 'start') })
     : tr('{n} more before where you started (chapter {start})', { n: num(p, 'n'), start: num(p, 'start') })),
   'gaps.beforeStart': (p) => (num(p, 'n') === 1 ? tr('1 before where you started') : tr('{n} before where you started', { n: num(p, 'n') })),
+  // Holes none of the series' sources lists: not counted as missing.
+  'gaps.notListed': (p) => (num(p, 'n') === 1
+    ? tr('1 number none of its sources list — {ranges}', { ranges: str(p, 'ranges') })
+    : tr('{n} numbers none of its sources list — {ranges}', { n: num(p, 'n'), ranges: str(p, 'ranges') })),
+  'gaps.notListedSeries': (p) => (num(p, 'n') === 1 ? tr('1 with numbers none of their sources list') : tr('{n} with numbers none of their sources list', { n: num(p, 'n') })),
+  'gaps.notListedNote': () => tr('Numbers none of a series\' sources list are not counted as missing: usually a source numbered the same chapters another way, such as counting split parts as chapters. "Fill now" still asks other sources for them.'),
 
   // ---- Chapter numbering (#116). A source that could not be named at all is "Its source" where it opens the sentence,
   // "its source" inside one.
@@ -715,6 +721,20 @@ const WORDS: Record<string, (p: P) => string | null> = {
     return p.status === 'rate_limited' ? tr('{source} is currently rate-limiting downloads.', v)
       : p.status === 'blocked' ? tr('{source} is currently blocking downloads.', v)
       : tr('{source} is currently unreachable for downloads.', v);
+  },
+  // "Finish downloads on their own" (bff lib/finishDownloads.ts): the same stops, with what happens next.
+  'job.refusingWillFinish': (p) => {
+    const v = { source: str(p, 'source') };
+    return p.status === 'rate_limited' ? tr('{source} is currently rate-limiting downloads. The series is saved, and its chapters will download on their own when the site is ready.', v)
+      : p.status === 'blocked' ? tr('{source} is currently blocking downloads. The series is saved, and its chapters will download on their own when the site is ready.', v)
+      : tr('{source} is currently unreachable for downloads. The series is saved, and its chapters will download on their own when the site is ready.', v);
+  },
+  'job.stoppedWillFinish': (p) => tr('{source} stopped part-way. The rest will download on their own.', { source: str(p, 'source') }),
+  'job.stoppedRefusingWillFinish': (p) => {
+    const v = { source: str(p, 'source') };
+    return p.status === 'rate_limited' ? tr('{source} stopped part-way: it is rate-limiting downloads. The rest will download on their own when the site is ready.', v)
+      : p.status === 'blocked' ? tr('{source} stopped part-way: it is blocking downloads. The rest will download on their own when the site is ready.', v)
+      : tr('{source} stopped part-way: it is unreachable for downloads. The rest will download on their own when the site is ready.', v);
   },
   'job.undownloadable': () => tr('No downloadable chapters here — this title may be licensed or hosted externally on this source.'),
   'job.failed': (p) => (num(p, 'n') === 1

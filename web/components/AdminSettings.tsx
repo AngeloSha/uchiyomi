@@ -477,6 +477,11 @@ function SchedulesSection({ data, save }: { data: any; save: Save }) {
       <SwitchRow label={tr('Look for failed chapters on other sources')}
         help={tr('When a chapter cannot be saved from the sources this series follows, search the others once a day and follow the one that has it')}
         on={data.auto_follow_on_failure !== false} onChange={(next) => save({ autoFollowOnFailure: next })} />
+      {/* Downloads that finish on their own (bff lib/finishDownloads.ts). ON by default (`finish_downloads NOT NULL DEFAULT
+          true`), which `!== false` reads as: a server that does not send the key yet finishes them. */}
+      <SwitchRow label={tr('Finish downloads on their own')}
+        help={tr('On by default. A series that still has chapters to download keeps going on its own, every 15 minutes or as soon as a site that was refusing is ready again, instead of waiting for the next library update. A chapter a site refused is tried 12 times instead of 3, and a series added from Discover is kept even when its site refuses the first chapter. Off, they wait for the library update.')}
+        on={data.finish_downloads !== false} onChange={(next) => save({ finishDownloads: next })} />
     </Section>
   );
 }

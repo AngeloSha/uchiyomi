@@ -24,7 +24,7 @@ const LABELS = keys(
   // Settings people ask for by name.
   'Check for updates', 'Open registration', 'Backup time', 'Delete read chapters', 'Show missing chapters in Mihon',
   'Slow archive', 'Cloudflare solver', 'Version', 'Import a list', 'Rescan everything', 'Smart update checks',
-  'Backups to keep',
+  'Backups to keep', 'Finish downloads on their own',
   // The profile: its tabs, its cards and its settings by name.
   'You', 'Insights', 'Connections', 'Account', 'Badges', 'Reading studio', 'Appearance', 'Language', 'Reduce effects', 'Reading',
   'Weekly goal', 'Reading direction', 'Offline downloads', 'This device', 'New-chapter alerts', 'Progress tracking',
@@ -112,6 +112,9 @@ export const DESTINATIONS: readonly Destination[] = [
   // v0.61.0: the release radar's schedule switch, beside the update interval it bends.
   { key: 'smart-checks', label: 'Smart update checks', where: ADMIN_SETTINGS, href: settings('schedules'), admin: true,
     keywords: ['smart', 'quiet series', 'check less often', 'release radar', 'sweep'] },
+  // v0.78.0: the switch behind downloads that carry on through a site's rate limits (bff lib/finishDownloads.ts).
+  { key: 'finish-downloads', label: 'Finish downloads on their own', where: ADMIN_SETTINGS, href: settings('schedules'), admin: true,
+    keywords: ['rate limit', 'rate limited', 'blocked', 'stuck downloads', 'resume downloads', 'retry', 'keep downloading'] },
   { key: 'delete-read', label: 'Delete read chapters', where: ADMIN_SETTINGS, href: settings('housekeeping'), admin: true,
     keywords: ['cleanup', 'free space', 'disk space'] },
   { key: 'mihon-missing', label: 'Show missing chapters in Mihon', where: ADMIN_SETTINGS, href: settings('housekeeping'), admin: true,

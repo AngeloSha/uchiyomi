@@ -880,6 +880,16 @@ once per series per day, against six candidates, for no more than five series pe
 follows per series. A clean series never searches an adult source. Interactive Add and Fetch requests do
 not hunt behind the person's back.
 
+**Downloads that finish on their own** (since v0.78.0; **Admin → Settings → Updates & schedules → Finish downloads on
+their own**, on by default). A series that still has chapters to download — its sources list chapters the server does
+not have, or it was just added — is gone back to every 15 minutes, and again as soon as a site's cooldown ends, instead
+of waiting for the next library update: up to ten chapters a series each time. A chapter a site refused (a 429 or a
+403) is tried up to twelve times instead of three, the cooldowns spacing the tries out, and once a site has refused a
+chapter twice the sweep also searches the other sources for it (with *Look for failed chapters on other sources* on). A
+series added from Discover whose very first chapter the site refused is kept — its download card says the chapters
+will come on their own — where it used to be not added at all. Off, chapters wait for the library update, as before.
+The knobs are under *Downloading* in [CONFIGURATION.md](CONFIGURATION.md).
+
 ### What is downloading, and stopping it
 
 Everything the server is fetching, whoever started it, is under **Library → Downloads** (since v0.49.0; it used
@@ -1121,6 +1131,14 @@ numbers:
 
 None of these rules applies to a series numbered by posting order, or while a numbering change is waiting for you.
 Chapters downloaded twice before v0.50.0 are listed by Health's *The same chapter saved twice* check.
+
+**Numbers no site lists** (since v0.78.0). A series that took chapters from two sites numbering them differently can
+hold, say, 1 to 576 from one and 883 to 897 from the other, with nothing between: the second site counted every part as
+a chapter, so its 883 is a chapter you already have. Health's *Chapter gaps* used to call that 306 chapters missing. It
+now counts as missing only the numbers one of the series' sources lists; the rest are said apart on the row, greyed when
+they are all it has, as *numbers none of its sources list*, and the reader's *missing chapters* notice leaves them out.
+*Fill now* still asks other sources for them, so a chapter a site really has is still found. A series no source has
+answered for yet counts every hole, as before.
 
 ### Marking chapters you don't have as read
 
@@ -1459,7 +1477,8 @@ are on 43 and the next one here is 100), a short notice names them -- *Chapters 
 at chapter 100.* -- as you reach the next chapter in the column or the track, or when you go to it with **Next
 chapter** (the footer button, `]`, a controller or the right-click menu). What counts as missing is what Admin → Health
 → *Chapter gaps* counts: a file holding several chapters (`Batman 01-07`) holds all of them, a chapter deleted on purpose
-(the read-chapter cleanup, *Delete files*) is not missing, and neither is a gap an admin chose to ignore there. Nothing
+(the read-chapter cleanup, *Delete files*) is not missing, and neither is a gap an admin chose to ignore there, or (since
+v0.78.0) a run of numbers none of the series' sources lists (*Parts that sites number differently*, below). Nothing
 is shown when the numbers run on, for a half chapter such as 10.5, or offline, where the reader cannot tell a missing
 chapter from one that is not downloaded.
 
