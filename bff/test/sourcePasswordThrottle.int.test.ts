@@ -33,6 +33,6 @@ test('public password failures throttle the source without locking its victim',{
   for(let i=0;i<6;i++)assert.equal((await login('victim','wrong',`192.0.2.${i+1}`)).statusCode,401);
   assert.deepEqual(await one('SELECT failed_logins,locked_until FROM users WHERE id=$1',[victim]),{failed_logins:0,locked_until:null});
   for(let i=0;i<6;i++)assert.equal((await login('victim',password,`203.0.113.${i+50}`)).statusCode,200);
- 
+
  }finally{globalThis.fetch=nativeFetch;await app.close();await q('DELETE FROM audit_log WHERE user_id=ANY($1::uuid[]) OR username LIKE $2',[ids,prefix+'%']);await q('DELETE FROM users WHERE id=ANY($1::uuid[])',[ids]);await pool.end();}
 });
