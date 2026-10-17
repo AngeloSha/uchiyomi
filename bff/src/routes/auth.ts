@@ -1,5 +1,6 @@
 import { verify, hash } from '@node-rs/argon2';
 import QRCode from 'qrcode';
+import rateLimit from '@fastify/rate-limit';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { env } from '../env';
@@ -137,6 +138,15 @@ async function currentPasswordRefusal(req: FastifyRequest, password: string): Pr
 }
 
 export default async function authRoutes(app: FastifyInstance) {
+  if (!app.hasDecorator('createRateLimit')) await app.register(rateLimit, { global: false });
+  const signInPair = app.createRateLimit({ max: 5, timeWindow: '15 minutes',
+    keyGenerator: (req) => JSON.stringify([clientIp(req), (req.body as {username?: string})?.username?.trim() || 'admin']),
+  });
+  const countPasswordFailure = async (req: FastifyRequest, reply: any) => {
+    const r = await signInPair(req);
+    return !r.isAllowed && r.isExceeded ? reply.code(429).header('Retry-After', String(r.ttlInSeconds))
+      .send({error:'too_many_requests',message:'Too many sign-in attempts. Try again later.'}) : null;
+  };
   /**
    * v0.63.0 (#208, lib/authMode.ts): in SSO-only mode the routes that take a password are not registered at all --
    * first-run setup, sign-up, password change, two-factor -- and sign-in only while AUTH_RESCUE_ADMIN names an admin.
@@ -194,6 +204,9 @@ export default async function authRoutes(app: FastifyInstance) {
     const username = (parsed.data.username || 'admin').trim();
     const ip = clientIp(req);
     const ua = (req.headers['user-agent'] as string) || null;
+    const budget = await signInPair(req, {increment:false});
+    if (!budget.isAllowed && budget.isExceeded) return reply.code(429).header('Retry-After', String(budget.ttlInSeconds))
+      .send({error:'too_many_requests',message:'Too many sign-in attempts. Try again later.'});
 
     // SSO-only mode's way back in (lib/authMode.ts rescueAdmin): this route answers only while AUTH_RESCUE_ADMIN names
     // an admin, and then for that account alone. Any other name, or a rescue name that is no admin, is refused exactly
@@ -202,26 +215,29 @@ export default async function authRoutes(app: FastifyInstance) {
     const rescue = local ? null : rescueAdmin();
     const user = await one<FullUser>(`SELECT ${USER_AUTH_COLS} FROM users WHERE username = $1`, [username]);
     if (!local && (username !== rescue || user?.role !== 'admin')) {
+      const limited = await countPasswordFailure(req, reply); if (limited) return limited;
       await logAudit('login.fail', { userId: user?.id, username, detail: { reason: 'sso_only' }, req });
       return reply.code(401).send({ error: 'invalid_credentials' });
     }
     if (!user) {
+      const limited = await countPasswordFailure(req, reply); if (limited) return limited;
       await logAudit('login.fail', { username, detail: { reason: 'no_user' }, req });
       return reply.code(401).send({ error: 'invalid_credentials' });
     }
     if (user.disabled) {
+      const limited = await countPasswordFailure(req, reply); if (limited) return limited;
       await logAudit('login.blocked', { userId: user.id, username, detail: { reason: 'disabled' }, req });
       return reply.code(403).send({ error: 'disabled', message: 'This account is disabled.' });
     }
     const lock = lockedUntil(user);
-    if (lock) return reply.code(423).send({ error: 'locked', until: lock.toISOString(), message: 'Account locked after too many attempts. Try again later.' });
+    if (lock) { const limited = await countPasswordFailure(req, reply); if (limited) return limited; return reply.code(423).send({ error: 'locked', until: lock.toISOString(), message: 'Account locked after too many attempts. Try again later.' }); }
 
     let ok = false;
     try { ok = await verify(user.password_hash, password); } catch { ok = false; }
     if (!ok) {
-      const nowLocked = await recordFailedLogin(user.id);
-      await logAudit('login.fail', { userId: user.id, username, detail: { reason: 'bad_password', locked: nowLocked }, req });
-      if (nowLocked) return reply.code(423).send(LOCKED_NOW);
+      // Unauthenticated password failures may throttle only this source/name pair, never suspend the owner.
+      await logAudit('login.fail', { userId: user.id, username, detail: { reason: 'bad_password' }, req });
+      const limited = await countPasswordFailure(req, reply); if (limited) return limited;
       return reply.code(401).send({ error: 'invalid_credentials' });
     }
 
