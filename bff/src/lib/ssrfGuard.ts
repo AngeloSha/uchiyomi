@@ -17,12 +17,8 @@
  * The rule here is deliberately an ALLOWLIST OF THE PUBLIC INTERNET rather than a blocklist of things we
  * happen to run: a blocklist has to be updated every time the compose file gains a service.
  *
- * ⚠️ Residual risk, stated rather than hidden: this resolves the hostname and rejects private answers, but
- * does not pin the connection to the address it checked, so a DNS entry that changes between the check and
- * the connection (rebinding) is not covered. Closing that needs a custom undici dispatcher that connects to
- * a pinned IP while keeping SNI and Host intact. It is a much narrower attack than the direct one -- it
- * needs an attacker-controlled authoritative nameserver with a ~1s TTL -- and it is worth doing separately
- * rather than pretending this covers it.
+ * This is a preflight predicate, not socket authorization. Public HTTP callers also use publicConnection.ts:
+ * its dispatcher validates and returns the exact addresses net.connect uses, closing the DNS-rebinding gap.
  */
 import { isIP } from 'node:net';
 import { lookup } from 'node:dns/promises';

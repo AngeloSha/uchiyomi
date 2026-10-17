@@ -18,6 +18,7 @@ import type { SourceAdapter, SourceChapter } from '../lib/sources/types';
 import { fetchPages } from '../lib/downloader';
 import { previewPageList, copyPageList, isRefusal } from './sources';
 import { assertPublicHost, isBlockedHost, BlockedAddress } from '../lib/ssrfGuard';
+import { fetchPublicHop } from '../lib/publicConnection';
 import { suwayomiUrl, suwayomiBase, suwayomiImageHeaders, onEngineOrigin } from '../lib/sources/suwayomi/client';
 import { fetchPublic, readCapped, withoutCredentials, MAX_COVER_BYTES, MAX_ICON_BYTES, MAX_HTML_BYTES } from '../lib/safeFetch';
 import { env } from '../env';
@@ -238,7 +239,7 @@ export async function fetchCoverImage(u: string, source?: string, opts: { caller
       // the source's own extra headers. Reintroduce by sending `sourceHeaders` on every hop: "a redirect to another
       // origin carries none of the first one's credentials" in coverRedirectHeaders.test.ts sees them arrive.
       const headers = target.origin === parsed.origin ? sourceHeaders : withoutCredentials(sourceHeaders, Object.keys(extras));
-      r = await fetch(target, { headers, redirect: 'manual', signal: AbortSignal.timeout(20000) });
+      r = await fetchPublicHop(target, { headers, signal: AbortSignal.timeout(20000) });
       if (r.status < 300 || r.status > 399) break;
       const loc = r.headers.get('location');
       if (!loc || hop >= 4) throw new UnfetchableCoverUrl(u);
