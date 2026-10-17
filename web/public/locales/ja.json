@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4036
+    "strings": 4037
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -4039,5 +4039,6 @@
   "{source} stopped part-way: it is rate-limiting downloads. The rest will download on their own when the site is ready.": "{source} からの取得が途中で止まりました：ダウンロードに速度制限をかけています。残りはサイトが使えるようになると自動でダウンロードされます。",
   "{source} stopped part-way: it is blocking downloads. The rest will download on their own when the site is ready.": "{source} からの取得が途中で止まりました：ダウンロードをブロックしています。残りはサイトが使えるようになると自動でダウンロードされます。",
   "{source} stopped part-way: it is unreachable for downloads. The rest will download on their own when the site is ready.": "{source} からの取得が途中で止まりました：ダウンロードのために接続できません。残りはサイトが使えるようになると自動でダウンロードされます。",
-  "{source} stopped part-way. The rest will download on their own.": "{source} からの取得が途中で止まりました。残りは自動でダウンロードされます。"
+  "{source} stopped part-way. The rest will download on their own.": "{source} からの取得が途中で止まりました。残りは自動でダウンロードされます。",
+  "While \"Finish downloads on their own\" is on, a chapter a site refused (a rate limit or a block) is tried up to {cap} times.": "「ダウンロードを自動で最後まで続ける」がオンの間は、サイトに拒否された話（速度制限やブロック）を最大 {cap} 回まで試します。"
 }

@@ -321,6 +321,7 @@ const WORDS: Record<string, (p: P) => string | null> = {
     ? tr('1 more waits for a site that asked for a pause')
     : tr('{n} more wait for a site that asked for a pause', { n: num(p, 'n') })),
   'failures.note': (p) => tr('One entry per source, counting chapters still missing after an attempt and how often each has been tried. They clear themselves the moment the chapter lands. After {cap} failed tries the nightly sweep leaves a chapter alone until the nightly repair gives it another chance a week later; "Retry now" does that for this source at once, and "Find missing chapters" on the series still fetches it on purpose. A chapter saved with pages missing is listed on its series page and re-tried by the sweep, up to 10 a night.', { cap: num(p, 'cap') }),
+  'failures.noteRefusals': (p) => tr('While "Finish downloads on their own" is on, a chapter a site refused (a rate limit or a block) is tried up to {cap} times.', { cap: num(p, 'cap') }),
   'failures.detail': (p) => {
     const n = num(p, 'n');
     const m = num(p, 'series');

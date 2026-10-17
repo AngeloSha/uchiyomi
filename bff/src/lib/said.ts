@@ -184,6 +184,9 @@ const EN = {
     'until the nightly repair gives it another chance a week later; "Retry now" does that for this source at once, ' +
     'and "Find missing chapters" on the series still fetches it on purpose. ' +
     'A chapter saved with pages missing is listed on its series page and re-tried by the sweep, up to 10 a night.',
+  // v0.78.1: with "Finish downloads on their own" on, a refused chapter's own cap (lib/finishDownloads.ts).
+  'failures.noteRefusals': ({ cap }: { cap: number }) =>
+    `While "Finish downloads on their own" is on, a chapter a site refused (a rate limit or a block) is tried up to ${cap} times.`,
   // `status` is the ledger's (lib/chapterFailures.ts): incomplete, error, or the source's own status -- or, since v0.55.3,
   // moved (filed under the main source from one the series no longer uses); `reason` the downloader's own words.
   'failures.detail': ({ n, series, since, tries, capped, cap, title, number, status, reason }: {

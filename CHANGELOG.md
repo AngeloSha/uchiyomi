@@ -23,6 +23,11 @@ Thank you to **@globalteddy**, who reported these and wrote the fixes.
 
 - **A sign-in that is being rate-limited** says so in your language.
 
+### Fixed
+
+- **Health's "Chapters that would not download"** no longer says a chapter a site refused was left alone after three
+  tries while **Finish downloads on their own** is still trying it. Its note says how many tries a refused chapter gets.
+
 ### Upgrading
 
 - **API:** `POST /auth/login` answers **429** with `Retry-After` after five failed passwords for one name from one

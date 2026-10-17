@@ -190,6 +190,32 @@ test('a refused chapter is tried past three with the switch on, and left at thre
   }
 });
 
+test('Health says a refused chapter is still being tried', { skip }, async () => {
+  const { CHAPTER_RETRY_CAP } = await import('../src/lib/updater');
+  const { REFUSAL_RETRY_CAP } = await import('../src/lib/finishDownloads');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await mk('hl', 'hl');
+  // One chapter the site refused three times, one that broke three times.
+  await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts)
+           VALUES ($1, 1, $2, 'rate_limited', 'HTTP 429', $3), ($1, 2, $2, 'error', 'x', $3)`, [S('hl'), FIN, CHAPTER_RETRY_CAP]);
+  const card = async () => (await runHealthChecks()).checks.find((x: any) => x.id === 'chapter-failures');
+  const row = (c: any) => c.items.find((i: any) => i.sourceId === FIN);
+  try {
+    let c = await card();
+    // Reintroduce by counting every status at CHAPTER_RETRY_CAP (lib/health.ts chapterFailures): "2 left alone".
+    assert.match(row(c).detail, new RegExp(`, 1 left alone after ${CHAPTER_RETRY_CAP};`), 'only the broken one is left alone');
+    assert.match(c.note, new RegExp(`tried up to ${REFUSAL_RETRY_CAP} times`), 'and the note says how long a refusal is tried');
+    await q('UPDATE server_settings SET finish_downloads = false WHERE id = 1');
+    c = await card();
+    assert.match(row(c).detail, new RegExp(`, 2 left alone after ${CHAPTER_RETRY_CAP};`), 'off, a refusal is left alone at three, as before');
+    assert.doesNotMatch(c.note, /Finish downloads on their own/);
+  } finally {
+    await q('UPDATE server_settings SET finish_downloads = true WHERE id = 1');
+    await q('DELETE FROM chapter_failures WHERE series_id = $1', [S('hl')]).catch(() => {});
+    await q('DELETE FROM lib_series WHERE id = $1', [S('hl')]).catch(() => {});
+  }
+});
+
 test('an add whose first chapter a site refused keeps the series, behind', { skip }, async () => {
   const { addSeriesFromSource, jobBusy } = await import('../src/routes/sources');
   /** Waits for the detached add on `folder` to finish, then reads its row. */

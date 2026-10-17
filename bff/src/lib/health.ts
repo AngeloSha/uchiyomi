@@ -29,6 +29,7 @@ import { extensionEngineCheck } from './engineHealth';
 import { env } from '../env';
 import { gapsOf, splitAtFloor, splitListed } from './fill';
 import { CHAPTER_RETRY_CAP } from './updater';
+import { finishDownloadsOn, REFUSAL_RETRY_CAP } from './finishDownloads';
 import { diagnose, currentError, type DiagnosisCode } from './sourceDiagnosis';
 import { currentFailures, isRateLimit, openFailures, stageLines, type Stage, type StageLine, type Stages } from './sourceEvidence';
 import { haveNumbers, impossibleLimit, listedWholeNumbers, median, plausibleNumbers } from './libraryNumbers';
@@ -853,6 +854,12 @@ async function shortChapters(): Promise<HealthCheck> {
  */
 async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   let readFailed = false;
+  // "Left alone" is the sweep's own cap (lib/finishDownloads.ts retryCapFor): with "Finish downloads on their own" on, a
+  // site's refusal is still being tried until REFUSAL_RETRY_CAP, and the card said it was left alone after three.
+  // Reintroduce by counting every status at CHAPTER_RETRY_CAP: "Health says a refused chapter is still being tried" in
+  // finishDownloads.int.test.ts finds one left alone.
+  const finish = await finishDownloadsOn();
+  const refusalCap = Math.max(CHAPTER_RETRY_CAP, REFUSAL_RETRY_CAP);
   const rows = await q<{
     source_id: string; chapters: number; series: number; since: string; last_at: string; attempts: number; capped: number;
     latest_title: string; latest_number: number; latest_status: string; latest_reason: string | null; failing: string[]; limited: number;
@@ -869,7 +876,7 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
             min(COALESCE(f.first_at, f.at)) AS since,
             max(f.at) AS last_at,
             max(f.attempts)::int AS attempts,
-            count(*) FILTER (WHERE f.attempts >= ${CHAPTER_RETRY_CAP})::int AS capped,
+            count(*) FILTER (WHERE f.attempts >= CASE WHEN $2 AND f.status IN ('rate_limited', 'blocked') THEN $3::int ELSE $4::int END)::int AS capped,
             -- v0.55.1: refused for room (HTTP 429, lib/downloader.ts records it as rate_limited). A source whose every
             -- failing chapter is one of these is waiting, not failing: Fix everything says it clears by itself.
             -- v0.55.3: so is a chapter filed here from a source its series no longer uses (status moved,
@@ -890,7 +897,7 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
        FROM chapter_failures f JOIN lib_series ls ON ls.id = f.series_id AND ${visibleToAll('ls')}
        LEFT JOIN source_health h ON h.source_id = f.source_id
       GROUP BY f.source_id ORDER BY chapters DESC`,
-    [slowedSources()],
+    [slowedSources(), finish, refusalCap, CHAPTER_RETRY_CAP],
   ).catch(() => { readFailed = true; return [] as any[]; });
   const all: Array<HealthItem & { members?: string[] }> = rows.map((r) => ({
     title: sourceLabel(r.source_id),
@@ -947,7 +954,7 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
     ]),
     // The note's last sentence is not about a failure row: a chapter saved short is on disk and readable, so it is
     // not in this ledger at all. Said here because this is where an admin looks for "why is a chapter not whole".
-    ...noteOf([say('failures.note', { cap: CHAPTER_RETRY_CAP }), hiddenPart(rows.length - 20)]),
+    ...noteOf([say('failures.note', { cap: CHAPTER_RETRY_CAP }), finish && say('failures.noteRefusals', { cap: refusalCap }), hiddenPart(rows.length - 20)]),
     items,
   };
 }
