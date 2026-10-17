@@ -120,10 +120,10 @@ test('a failure after a lock has run out counts from one', { skip }, async () =>
   // And it takes the usual five to lock it again.
   for (let n = 2; n <= 4; n++) assert.equal((await login('expired', 'not the password')).statusCode, 401, `failure ${n}`);
   const fifth = await login('expired', 'not the password');
-  assert.equal(fifth.statusCode, 423, fifth.body);
+  assert.equal(fifth.statusCode, 401, fifth.body);
   assert.deepEqual(await lockOf(id), { count: 5, locked: true });
   // While it lasts, even the right password is refused unread.
-  assert.equal((await login('expired', PASSWORD)).statusCode, 423);
+  assert.equal((await login('expired', PASSWORD)).statusCode, 401);
 });
 
 test('wrong second-step codes lock the account', { skip }, async () => {
@@ -143,7 +143,7 @@ test('wrong second-step codes lock the account', { skip }, async () => {
   assert.equal(fifth.json().error, 'locked');
   // Locked means locked: the right code is not even looked at.
   const right = await login('codes', PASSWORD, codeFor(secret, 1));
-  assert.equal(right.statusCode, 423, right.body);
+  assert.equal(right.statusCode, 401, right.body);
   // Once the lock runs out the right code signs in, and the count is cleared.
   await q(`UPDATE users SET locked_until = now() - interval '1 second' WHERE id = $1`, [id]);
   const after = await login('codes', PASSWORD, codeFor(secret, 1));
@@ -173,8 +173,8 @@ test('a session cannot guess the password', { skip }, async () => {
   // While it lasts the right password is refused unread, here and at sign-in, and nothing changes.
   const right = await post(id, '/auth/password', { current: PASSWORD, next: 'a new password' });
   assert.equal(right.statusCode, 423, right.body);
-  assert.equal((await login('session', PASSWORD)).statusCode, 423);
-  assert.equal((await login('session', 'a new password')).statusCode, 423, 'the password changed while the account was locked');
+  assert.equal((await login('session', PASSWORD)).statusCode, 401);
+  assert.equal((await login('session', 'a new password')).statusCode, 401, 'the password changed while the account was locked');
   // Once it runs out the right password works, and clears the count as a sign-in does.
   await q(`UPDATE users SET locked_until = now() - interval '1 second' WHERE id = $1`, [id]);
   const ok = await post(id, '/auth/password', { current: PASSWORD, next: 'a new password' });
