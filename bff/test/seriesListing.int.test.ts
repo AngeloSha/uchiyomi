@@ -241,13 +241,16 @@ test('a source that answered with nothing leaves the previous listing standing',
 });
 
 /**
- * The accepted limitation, pinned so a test name cannot contradict it: with ONE of two sources erroring,
- * the listing is rewritten from the source that answered, and the numbers the dead source alone carried
- * are not ghosts (and are not_listed to a manual fetch) until it answers again. USAGE.md says so for a
- * cooldown; it is equally true of an error. Keeping a per-source memory of the last listing would be the
- * fix, and is not this release's.
+ * v0.79.0: with ONE of two sources erroring, the numbers the erroring source listed stay listed. It can still carry the
+ * series (lib/sourceStanding.ts: usable or cooling), so its stored rows are kept beside what the other one answered
+ * (lib/updater.ts visitSeries). This test used to pin the opposite as an accepted limitation: the listing was rewritten
+ * from the source that answered, and the numbers only the erroring one carried were not ghosts, and not_listed to a
+ * manual fetch, until it answered again. Reintroduce by dropping the merge: only 7 is left. A source that is failing
+ * does not keep its rows ("a failing source stops keeping its rows" in updater.int.test.ts).
  */
-test('one source erroring while another answers rewrites the listing from the one that answered', { skip }, async () => {
+test('one source erroring while another answers keeps what the erroring one listed', { skip }, async () => {
+  const before = (await rows()).map((x: any) => Number(x.number));
+  assert.equal(before.length, 7, 'PREMISE: both listed');
   throwing.add(PRI);
   try {
     const r = await updateSeries(S, 0);
@@ -255,8 +258,8 @@ test('one source erroring while another answers rewrites the listing from the on
   } finally {
     throwing.clear();
   }
-  assert.deepEqual((await rows()).map((x: any) => Number(x.number)), [7], 'only what the follower lists');
-  // Put the listing back for the tests after this one: both answer again.
+  assert.deepEqual((await rows()).map((x: any) => Number(x.number)), before, 'every number stays listed');
+  // Both answer again: the listing is theirs, as before.
   assert.equal((await updateSeries(S, 0)).outcome, 'ok');
   assert.equal((await rows()).length, 7);
 });

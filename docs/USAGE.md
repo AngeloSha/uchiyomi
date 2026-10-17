@@ -1104,9 +1104,9 @@ sweep, or *Check now* — and the line under the title says how old it is on a w
 ago*); the *Sources* rows in its sheet say it on any screen. A series that has never been checked shows no
 grey rows and the line says *not checked yet*; *Check now* is how to get them. (A series added as *Nothing
 yet* is the exception: the add itself was its first check, so its older-chapters line, its count and the
-time of that check are there from the start.) A followed source that was in a cooldown at the last check is
-not in that listing either, so
-chapters only it carries drop off the page until the next sweep.
+time of that check are there from the start.) A followed source that was in a cooldown at the last check, or
+did not answer it, keeps the chapters it listed before (since v0.79.0), so they stay on the page; one that is
+failing, switched off or no longer installed does not.
 
 The **Filter** chip's switch, **Show chapters not on the server yet**, hides or shows the grey rows on this
 device. Members see them too — a grey row is how anyone can tell the difference between "the source has not
