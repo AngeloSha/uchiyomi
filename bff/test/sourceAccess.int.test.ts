@@ -280,13 +280,14 @@ test('sources: who may reach them, and how long they get', { skip }, async (t) =
 
     await t.test('a user row that cannot be read is denied, not allowed through', async () => {
       // The old check was `if (me && ...)`, so a token for a deleted user fell through to allowed on the
-      // one route in this file that writes to disk.
+      // one route in this file that writes to disk. Since v0.78.1 such a token is refused before any route, by
+      // authenticate itself (lib/auth.ts: a session whose account is gone is no session), so the answer is 401.
       const ghost = app.jwt.sign({ sub: '00000000-0000-0000-0000-000000000000', role: 'user' });
       const res = await app.inject({
         method: 'POST', url: '/api/sources/add', headers: { authorization: `Bearer ${ghost}` },
         payload: { source: CLEAN, sourceId: `${CLEAN}-1` },
       });
-      assert.equal(res.statusCode, 403, 'a token for a nonexistent user was allowed to add');
+      assert.equal(res.statusCode, 401, 'a token for a nonexistent user was allowed to add');
     });
 
     // ------------------------------------------------------------------ speed
