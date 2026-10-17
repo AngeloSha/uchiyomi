@@ -125,8 +125,23 @@ test('a series its main cannot serve is scouted, and the source that has its cha
   // What the others said is kept (lib/scoutMemory.ts).
   const v = await verdicts();
   assert.equal(v[GOOD], 'ok');
-  // Reintroduce by dropping the image-server rule (lib/sourceScout.ts `taken`): TWIN, which cools with MAIN, is searched.
   assert.equal(searched.get(TWIN) ?? 0, 0, 'a source on the main\'s image server is never asked');
+});
+
+test('a source on a followed source\'s image server is not asked', { skip }, async () => {
+  // TWIN shares MAIN's image server (one rate group): it cools when MAIN does. With GOOD gone there is nothing else that
+  // has the series, and TWIN, which lists it, must still not be asked. Reintroduce by dropping the image-server rule
+  // (lib/sourceScout.ts `taken`): TWIN is searched, last (its server already has the series' backlog), and followed.
+  const { unregisterAdapter, registerAdapter } = await import('../src/lib/sources');
+  unregisterAdapter(GOOD);
+  try {
+    const out = await sc.runScout(SER);
+    assert.equal(searched.get(TWIN) ?? 0, 0, JSON.stringify(out));
+    assert.equal(out.verdict, 'exhausted');
+    assert.deepEqual(await follows(), []);
+  } finally {
+    registerAdapter(adapter(GOOD, { hit: TITLE }) as any);
+  }
 });
 
 test('a source that said no is not asked again', { skip }, async () => {

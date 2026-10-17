@@ -589,6 +589,9 @@ const SERIES_KEYED_TABLES = [
   'series_radar',
   // v0.73.0: the details the server filled in for it (lib/autoDetails.ts). Cascades too; named for the same count.
   'series_auto_details',
+  // v0.80.0: the scout's request for it and what sources said about it (lib/sourceScout.ts, lib/scoutMemory.ts).
+  // Both cascade too; named for the same count.
+  'series_scout', 'scout_verdicts',
 ] as const;
 
 export interface ForgetRefusal {
