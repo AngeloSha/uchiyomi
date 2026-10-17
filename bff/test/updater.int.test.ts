@@ -1720,8 +1720,11 @@ test('a failing source stops keeping its rows', { skip }, async () => {
 
 test('a cooling-main series goes on its follower\'s queue', { skip }, async () => {
   // Two series on one main. A: main + a follower that is cooling too. B: main + a working follower. The main is cooling.
-  // Keyed on the main, A comes back blocked, parks the main's queue, and B -- which its follower would serve -- is
-  // skipped. Reintroduce by keying on the first loaded source (lib/updater.ts runUpdateAll): B is `skipped`.
+  // Keyed on the main, A came back blocked, parked the main's queue, and B -- which its follower would serve -- was
+  // skipped. Two changes each serve B now: B is queued on its follower from the start, and a parked queue hands its
+  // series on ("a parked queue hands its series on" below). Reintroduce by keying on the first loaded source AND dropping
+  // the move on parking (lib/updater.ts runUpdateAll): B is `skipped`. The first alone: "a series with nothing to ask at
+  // the start waits" below.
   const { registerAdapter } = await import('../src/lib/sources');
   const main = switchable('upd-qk-main', [1]);
   const cool = switchable('upd-qk-cool', [1]);
@@ -1748,6 +1751,41 @@ test('a cooling-main series goes on its follower\'s queue', { skip }, async () =
   } finally {
     await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [['upd-qk-main', 'upd-qk-cool', 'upd-qk-fine']]);
     await q('DELETE FROM lib_books WHERE series_id = ANY($1::text[])', [[S('qka'), S('qkb')]]).catch(() => {});
+  }
+});
+
+test('a series with nothing to ask at the start waits, and goes once its source comes out of its cooldown', { skip }, async () => {
+  // v0.79.0 (lib/updater.ts runUpdateAll): a series whose every source is cooling when the sweep starts waits aside
+  // instead of taking a queue, and joins one as soon as a source on its route can be asked. Here its main's cooldown
+  // ends while another series is visited. Reintroduce by keying on the first loaded source: it is visited first, comes
+  // back blocked, and is not asked again that sweep, so its chapter does not land.
+  const { registerAdapter } = await import('../src/lib/sources');
+  const main = switchable('upd-ws-main', [1]);
+  const other = switchable('upd-ws-other', [1]);
+  registerAdapter(main.adapter as any);
+  registerAdapter(other.adapter as any);
+  await mkSeries('wsa', 'upd-ws-main');
+  await mkSeries('wsb', 'upd-ws-other');
+  for (const key of ['wsa', 'wsb']) {
+    await q('DELETE FROM lib_books WHERE series_id = $1', [S(key)]);
+    await q('DELETE FROM chapter_failures WHERE series_id = $1', [S(key)]);
+  }
+  // The waiting one first in the sweep's order, as a series keyed on its cooling main would be visited first.
+  await q(`UPDATE lib_series SET source_checked_at = NULL, latest_mtime = CASE id WHEN $1 THEN 2000 ELSE 1000 END WHERE id = ANY($2::text[])`,
+    [S('wsa'), [S('wsa'), S('wsb')]]);
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [['upd-ws-main', 'upd-ws-other']]);
+  // A cooldown that ends a moment into the sweep: the other series' visit, and the pause after it, outlast it.
+  await q(`INSERT INTO source_health (source_id, status, consecutive, blocked_until) VALUES ('upd-ws-main', 'rate_limited', 1, now() + interval '1 second')`);
+  await only(['wsa', 'wsb']);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+  try {
+    const r = await runUpdateAll({ maxNew: 5 });
+    assert.ok(onDisk('wsb', 1), 'PREMISE: the other series landed its chapter');
+    assert.ok(onDisk('wsa', 1), 'the waiting series was visited once its main could be asked, and landed its chapter');
+    assert.equal(r.outcomes.blocked, 0, 'and it is not counted as blocked');
+  } finally {
+    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [['upd-ws-main', 'upd-ws-other']]);
+    await q('DELETE FROM lib_books WHERE series_id = ANY($1::text[])', [[S('wsa'), S('wsb')]]).catch(() => {});
   }
 });
 
