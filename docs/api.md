@@ -15,11 +15,16 @@ There are two ways in, and for scripts you want the second one.
 **Session tokens** are what the web app uses: `POST /auth/login` returns a JWT that expires after 15 minutes,
 refreshed with a rotating cookie. Fine for a browser, miserable for a cron job.
 
-Session-authenticated API requests check that the account still exists and is enabled, and use its current role. Disabling or deleting an account ends its API access on the next request; demotion removes its administrative authority. This is an account-state check, not a promise that every individual access JWT is revoked by signing out.
+A session token is checked against its account on every request (since v0.78.1): a disabled or deleted account's
+token stops working on its next request, and an admin whose role is taken away loses admin access at once. Signing out
+ends the refresh cookie; an access token already handed out still works until it expires, within 15 minutes.
 
-Password sign-in keeps the ten-attempts-per-address/five-minute limit and allows five failed password checks per address/username in fifteen minutes; further attempts receive **429** with `Retry-After`. A stranger's wrong passwords do not lock the account for other clients. Authenticated password checks and second-factor failures retain their account lock protection. Source limits and optional two-factor authentication remain important against distributed guessing.
-
-Unknown usernames, disabled or locked accounts, and wrong passwords return the same **401** `{ "error": "invalid_credentials" }` before a password has been accepted. Clients should not use the public password response to determine account state. Successful password sign-in and its second-factor challenge keep their existing behavior.
+Password sign-in takes at most ten requests per address in five minutes, and five failed passwords for one username
+from one address in fifteen minutes. Past either it answers **429** with `Retry-After`. A wrong password never locks the
+account; wrong two-factor codes, and wrong current passwords behind a session, still do (five, for 15 minutes). Until a
+password is accepted, an unknown username, a wrong password and a disabled or locked account all get the same **401**
+`{ "error": "invalid_credentials" }`; the right password for a disabled account gets **403** `{ "error": "disabled" }`,
+and for a locked one **423** `{ "error": "locked" }`.
 
 **API tokens** are long-lived, revocable, and scoped. Create one under **Profile → Connections → API tokens → New token** (the form opens inline).
 The token is shown once, so copy it then. It looks like `uy_` followed by random characters.
@@ -43,7 +48,9 @@ admin API, and a token without `write` gets `403` on any non-`GET` request other
 { "error": "forbidden", "message": "This token is read-only." }
 ```
 
-Administrative exceptions outside `/api/admin/*` also require the account to be an admin and the API token to carry `admin`. A `read`/`write` token can still perform its owner's permitted actions, but cannot use its owner's admin role to manage another account's jobs or archive entries.
+The same holds outside `/api/admin/*` (since v0.78.1): wherever an admin may do more than a member -- stop someone
+else's download or archive, or see a series' admin details -- a token needs the `admin` scope too. Without it, an
+admin's `read`/`write` token acts as an ordinary account there.
 
 Give a token the least it needs. A backup script that only reads your library should be `read`, so that a
 token accidentally committed to a repo cannot delete anything.

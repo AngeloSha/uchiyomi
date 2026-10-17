@@ -3117,9 +3117,10 @@ In **Profile → Account** (`/profile/?tab=Account`; every user has this):
 
 API tokens, progress trackers and the OPDS link are not here any more: they are on **Profile → Connections**.
 
-Wrong passwords slow down that address and username; they do not let a stranger lock your account for everyone.
-Repeated second-factor failures or password failures behind an existing session can still lock the account.
-Sign-in events are recorded in the admin audit feed.
+Five wrong passwords for one username from one address pause sign-in for that name from that address for 15 minutes
+(since v0.78.1); a stranger guessing can no longer lock your account for everyone, and you can still sign in from
+anywhere else. Five wrong two-factor codes, or five wrong current passwords behind a signed-in session, still lock the
+account for 15 minutes. Every sign-in is recorded in the admin audit feed.
 
 ---
 
