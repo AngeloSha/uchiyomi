@@ -56,7 +56,7 @@ test('the Health route stores what it found, and the summary route answers from 
   await app.register(jwt, { secret: process.env.JWT_SECRET! });
   await app.register((await import('../src/routes/admin')).default);
   await app.ready();
-  await q(`DELETE FROM users WHERE username = 'hs-admin'`);
+  await q(`DELETE FROM users WHERE username IN ('hs-admin', 'hs-member')`);
   const admin = (await q<{ id: string }>(`INSERT INTO users (username, display_name, password_hash, role, auth_kind)
                                            VALUES ('hs-admin','hs-admin','x','admin','password') RETURNING id`))[0].id;
   const as = { authorization: `Bearer ${app.jwt.sign({ sub: admin, role: 'admin' })}` };
@@ -77,11 +77,15 @@ test('the Health route stores what it found, and the summary route answers from 
     await q(`UPDATE server_settings SET health_summary = '{"at":"x","worst":"warn","count":7,"headline":"planted","key":"p","checks":[]}' WHERE id = 1`);
     assert.equal((await app.inject({ method: 'GET', url: '/api/admin/health/summary', headers: as })).json().summary.headline, 'planted');
 
-    const member = await app.inject({ method: 'GET', url: '/api/admin/health/summary', headers: { authorization: `Bearer ${app.jwt.sign({ sub: admin, role: 'user' })}` } });
+    // A member account of its own: since v0.78.1 a session takes its account's role as it is now (lib/auth.ts
+    // authenticate), so a token that only claims 'user' for the admin is still the admin's.
+    const memberId = (await q<{ id: string }>(`INSERT INTO users (username, display_name, password_hash, role, auth_kind)
+                                                VALUES ('hs-member','hs-member','x','user','password') RETURNING id`))[0].id;
+    const member = await app.inject({ method: 'GET', url: '/api/admin/health/summary', headers: { authorization: `Bearer ${app.jwt.sign({ sub: memberId, role: 'user' })}` } });
     assert.equal(member.statusCode, 403, 'admins only: the text names sources and folders');
   } finally {
     await app.close();
-    await q(`DELETE FROM users WHERE username = 'hs-admin'`).catch(() => {});
+    await q(`DELETE FROM users WHERE username IN ('hs-admin', 'hs-member')`).catch(() => {});
     await q('UPDATE server_settings SET health_summary = NULL WHERE id = 1').catch(() => {});
   }
 });
