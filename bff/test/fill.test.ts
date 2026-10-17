@@ -9,7 +9,7 @@
 // is shown to the person rather than swallowed.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gapsOf, assess, verdict, authorise, putPlan, getPlan, _clearPlans, planKey, MIN_COVERAGE, PLAN_TTL } from '../src/lib/fill';
+import { gapsOf, assess, verdict, authorise, putPlan, getPlan, _clearPlans, planKey, MIN_COVERAGE, PLAN_TTL, splitListed } from '../src/lib/fill';
 
 const ch = (n: number) => ({ sourceId: `u/${n}`, number: n, title: `Chapter ${n}` });
 
@@ -151,4 +151,20 @@ test('a candidate that was shown as refused cannot then be filled from', () => {
   const r = authorise(p, 'src', 'x', [2], 100);
   assert.equal(r.ok, false, 'the gate has to hold at fill time too, not only in the dialog');
   assert.equal((r as any).error, 'not_in_plan');
+});
+
+test('splitListed: a hole is split into the numbers a source lists and the ones none does', () => {
+  const runs = (gs: Array<{ lo: number; hi: number; count: number }>) => gs.map((g) => [g.lo, g.hi, g.count]);
+  // 4-9 missing; the sources list 4, 5 and 8 of it.
+  const { listed, unlisted } = splitListed(gapsOf([1, 2, 3, 10]), new Set([1, 2, 3, 4, 5, 8, 10]));
+  assert.deepEqual(runs(listed), [[4, 5, 2], [8, 8, 1]]);
+  assert.deepEqual(runs(unlisted), [[6, 7, 2], [9, 9, 1]]);
+  // Every number of every hole lands on exactly one side, and a run keeps its hole's anchoring.
+  assert.equal([...listed, ...unlisted].reduce((n, g) => n + g.count, 0), 6);
+  assert.ok([...listed, ...unlisted].every((g) => g.anchored));
+  // No answer from any source: every hole is listed, as before the rule.
+  assert.deepEqual(runs(splitListed(gapsOf([1, 5]), null).listed), [[2, 4, 3]]);
+  assert.deepEqual(splitListed(gapsOf([1, 5]), null).unlisted, []);
+  // Answers that list none of it: all of it is unlisted.
+  assert.deepEqual(runs(splitListed(gapsOf([1, 5]), new Set([1, 5])).unlisted), [[2, 4, 3]]);
 });

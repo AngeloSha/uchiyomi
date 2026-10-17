@@ -33,6 +33,7 @@ import { numKey } from './postingOrder';
 import { seriesHidesNotices } from './noticeSettings';
 import { heldBy, rangeEnd, rawRangeEnd } from './chapterRanges';
 import { isDue, refreshRadar } from './releaseRadar';
+import { finishDownloadsOn, retryCapFor, BEHIND_SQL } from './finishDownloads';
 
 /**
  * Why a series produced nothing this run.
@@ -208,6 +209,12 @@ export interface UpdateOpts {
    * Fetch, Fetch again, Fill now -- which an unmonitored series still answers.
    */
   unattended?: boolean;
+  /**
+   * Admin -> Settings "Finish downloads on their own" (lib/finishDownloads.ts), read once by the sweep and handed to
+   * every series it visits. Absent, the series reads the switch itself. On, a chapter a site refused (rate-limited,
+   * blocked) gets REFUSAL_RETRY_CAP tries instead of CHAPTER_RETRY_CAP before this run leaves it alone.
+   */
+  finish?: boolean;
   /**
    * The caller already owns this folder's shared writer mark (`busyFolders`). Internal only: bulk newest,
    * archive and repair take the mark synchronously before entering updateSeries and must be allowed through
@@ -531,7 +538,13 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   const ledger = await q<{ number: number; attempts: number; status: string; source_id: string }>(
     `SELECT number, attempts, status, source_id FROM chapter_failures WHERE series_id = $1`, [seriesId],
   ).catch(() => []);
-  const cappedNums = new Set(ledger.filter((r) => Number(r.attempts) >= CHAPTER_RETRY_CAP).map((r) => Number(r.number)));
+  // "Finish downloads on their own" (lib/finishDownloads.ts): a site's refusal is a later, not a never, so it is capped
+  // at REFUSAL_RETRY_CAP tries while the switch is on; a chapter that broke is capped at three either way. The refusal
+  // still counts toward `persistentVia` below at two, so a site that keeps refusing a number sends the sweep to other
+  // sources for it long before the cap. Reintroduce by capping every status at CHAPTER_RETRY_CAP: "a refused chapter
+  // is tried past three with the switch on" in finishDownloads.int.test.ts finds it left alone.
+  const finish = opts.finish ?? await finishDownloadsOn();
+  const cappedNums = new Set(ledger.filter((r) => Number(r.attempts) >= retryCapFor(r.status, finish, CHAPTER_RETRY_CAP)).map((r) => Number(r.number)));
   const persistentVia = new Map(
     ledger
       .filter((r) => (r.status === 'rate_limited' || r.status === 'blocked') && Number(r.attempts) >= 2)
@@ -767,6 +780,12 @@ export async function runUpdateAll(opts: {
    * everything and the slow archive ask every series they mean to, as before.
    */
   smart?: { hoursMs: number };
+  /**
+   * "Finish downloads on their own" (lib/finishDownloads.ts): visit only the series that are behind -- their source lists
+   * chapters they do not have (`source_missing`, the sweep's own stamp), or no sweep has checked them yet -- the
+   * finishing sweep server.ts starts every FINISH_MINUTES and after a cooldown ends. Every other sweep visits them all.
+   */
+  behindOnly?: boolean;
 } = {}): Promise<{
   series: number; visited: number; added: number; failed: number; chapterFailures: number; capped: number;
   outcomes: Record<UpdateOutcome | 'threw' | 'skipped', number>; healthy: boolean; stopped?: SweepStop;
@@ -802,9 +821,14 @@ export async function runUpdateAll(opts: {
     checked_at?: Date | null; source_missing?: number | null; latest_ms?: number | string | null; created_at?: Date | null;
     next_at?: Date | null; due_until?: Date | null; last_at?: Date | null;
   };
+  // The finishing sweep (lib/finishDownloads.ts) takes the behind series alone. Reintroduce by dropping the filter:
+  // "the finishing sweep visits only the series that are behind" in finishDownloads.int.test.ts finds the caught-up one asked.
+  const behind = opts.behindOnly ? ` AND ${BEHIND_SQL}` : '';
   let rows = opts.onlyFavorites
-      ? await q<SweepRow>(`SELECT DISTINCT s.id, s.source_id, s.title, s.folder, s.source_checked_at, s.latest_mtime, ${routing}${dueCols} FROM favorites f JOIN lib_series s ON s.id = f.series_id WHERE s.auto_update AND ${visibleToAll('s')} ${order}`)
-      : await q<SweepRow>(`SELECT s.id, s.source_id, s.title, s.folder, ${routing}${dueCols} FROM lib_series s WHERE s.auto_update AND ${visibleToAll('s')} ${order}`);
+      ? await q<SweepRow>(`SELECT DISTINCT s.id, s.source_id, s.title, s.folder, s.source_checked_at, s.latest_mtime, ${routing}${dueCols} FROM favorites f JOIN lib_series s ON s.id = f.series_id WHERE s.auto_update AND ${visibleToAll('s')}${behind} ${order}`)
+      : await q<SweepRow>(`SELECT s.id, s.source_id, s.title, s.folder, ${routing}${dueCols} FROM lib_series s WHERE s.auto_update AND ${visibleToAll('s')}${behind} ${order}`);
+  // The switch, read once for the whole sweep and handed to every series it visits (UpdateOpts.finish).
+  const finish = await finishDownloadsOn();
   // v0.61.0: the smart checks rest the series that are not due BEFORE the per-source queues are built, so a rested
   // series costs its source nothing, takes no turn and no pause, and is not counted on the run's card. Reintroduce by
   // filtering nothing: "a smart sweep rests the quiet series that are not due, and asks the rest" in smartSweep.int.test.ts
@@ -895,7 +919,7 @@ export async function runUpdateAll(opts: {
       if (card) card.current = { id, title: titles.get(id) ?? '' };
       // The card's cancel reaches INSIDE the series too: a series with ten new chapters is a few minutes of
       // downloading, and "Cancel" that waits for all ten reads as "Cancel does nothing".
-      const r = await updateSeries(id, Math.min(opts.maxNew ?? 10, Math.max(1, sweepMax - spent)), { hunt: huntBudget, unattended: true, ...(card ? { cancelled: () => stopRequested(card) } : {}) })
+      const r = await updateSeries(id, Math.min(opts.maxNew ?? 10, Math.max(1, sweepMax - spent)), { hunt: huntBudget, unattended: true, finish, ...(card ? { cancelled: () => stopRequested(card) } : {}) })
         .catch(() => ({ added: 0, outcome: 'threw' as const, failed: 0, landed: [] } as { added: number; outcome: 'threw'; failed: number; folder?: string; chapters?: SourceChapter[]; landed: Landed[]; diskFull?: boolean; switched?: number; partial?: number }));
       added += r.added;
       chapterFailures += r.failed ?? 0;
@@ -1057,13 +1081,27 @@ export type SweepResult = Awaited<ReturnType<typeof runUpdateAll>>;
  * Reintroduce by dropping `runtime.repairing` from the check: "the sweep stands down while a repair runs"
  * in updater.int.test.ts gets a promise instead of false.
  */
-export function runSweep(opts: SweepOpts & { by?: string | null }, log: SweepLog, sweep: typeof runUpdateAll = runUpdateAll): Promise<SweepResult | null> | false {
+export function runSweep(
+  opts: SweepOpts & {
+    by?: string | null;
+    /**
+     * The finishing sweep (lib/finishDownloads.ts, server.ts): the behind series alone, every quarter of an hour. It is
+     * not "the last sweep": it neither moves `updater_last_run` (the full sweep's interval, which a restart resumes) nor
+     * replaces the panel's last result, and it sends no digest -- a back catalogue arriving ten chapters at a time is
+     * not news every fifteen minutes; the full sweep's digest is. Reintroduce by persisting it: "the finishing sweep
+     * leaves the full sweep's clock alone" in finishDownloads.int.test.ts sees updater_last_run move.
+     */
+    finishing?: boolean;
+  },
+  log: SweepLog, sweep: typeof runUpdateAll = runUpdateAll,
+): Promise<SweepResult | null> | false {
   if (runtime.updating || runtime.repairing) return false;
   // Set before the first await, so two starts in the same turn of the event loop cannot both get through.
   runtime.updating = true;
   // The run's card in Library -> Downloads (lib/downloadJobs.ts, #82): the sweep writes its progress there and
   // stops when an admin presses its Cancel. `by` is who pressed Run now; the schedule is nobody.
-  const { by, ...sweepOpts } = opts ?? {};
+  const { by, finishing, ...rest } = opts ?? {};
+  const sweepOpts = finishing ? { ...rest, behindOnly: true } : rest;
   const card = beginRun('sweep', by ?? null);
   // Every chapter this run downloads is the sweep's, for the downloads view (lib/downloadActivity.ts).
   return withOrigin('sweep', by ?? null, async () => {
@@ -1073,6 +1111,12 @@ export function runSweep(opts: SweepOpts & { by?: string | null }, log: SweepLog
         r.stopped === 'disk' ? say('run.diskFull')
           : r.stopped === 'budget' ? say('run.chapterLimit')
           : undefined);
+      if (finishing) {
+        // The finishing sweep's own line, and nothing else: the full sweep's clock, result and digest are its own.
+        log.info(`updater (finishing downloads): +${r.added} chapters, visited ${r.visited} of ${r.series} behind series`
+          + `${r.stopped ? ` (stopped: ${r.stopped})` : ''}${r.failed ? `, ${r.failed} did not answer` : ''}`);
+        return r;
+      }
       runtime.lastUpdate = Date.now();
       // Persisted so a restart schedules the remainder of the interval rather than a whole new one.
       await q(`UPDATE server_settings SET updater_last_run = now() WHERE id = 1`).catch(() => {});
@@ -1114,8 +1158,11 @@ export function runSweep(opts: SweepOpts & { by?: string | null }, log: SweepLog
     } catch (e) {
       // The rule the backup path already follows: the panel must not keep showing the last good run as if it
       // were this one. Last run moves to now, the result is cleared, and the reason is in `docker logs`.
-      runtime.lastUpdate = Date.now();
-      runtime.lastUpdateResult = null;
+      // A finishing sweep is not the panel's run, so it leaves both alone.
+      if (!finishing) {
+        runtime.lastUpdate = Date.now();
+        runtime.lastUpdateResult = null;
+      }
       endRun(card, 'error', say('run.updateFailed'));
       log.error(e);
       return null;

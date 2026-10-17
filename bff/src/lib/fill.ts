@@ -73,6 +73,38 @@ export function gapsOf(have: number[]): Gap[] {
 }
 
 /**
+ * Holes split by whether any source lists their numbers (series_listing, every status): the part a site offers -- a
+ * chapter that exists and is not here -- and the part no source lists at all. `listed` null (a series no source has
+ * ever answered for: a hand-made or local library) counts every hole as listed, as before.
+ *
+ * The owner, about a series "missing 300 chapters": "not sure if those chapters are split chapters that are duplicated
+ * or real chapters". Measured live: Tales of Demons and Gods held 0-576 from one site, which numbered every part on its
+ * own, and 883-897 from the next, which numbers the same chapters higher; the two sites it follows list it to ~534 and
+ * nothing lists 577-882 -- no chapter is missing, the numbering moved. Every whole number between two held ones used to
+ * be a missing chapter here, on Health and in the reader's notice alike. Reintroduce by returning every hole as listed:
+ * "a hole no source lists is not a missing chapter" in finishDownloads.int.test.ts counts 577-882.
+ */
+export function splitListed(gaps: Gap[], listed: ReadonlySet<number> | null): { listed: Gap[]; unlisted: Gap[] } {
+  if (!listed) return { listed: gaps, unlisted: [] };
+  const on: Gap[] = [];
+  const off: Gap[] = [];
+  for (const g of gaps) {
+    let lo = g.lo;
+    let inList = listed.has(g.lo);
+    for (let n = g.lo + 1; n <= g.hi; n++) {
+      const here = listed.has(n);
+      if (here !== inList) {
+        (inList ? on : off).push({ lo, hi: n - 1, count: n - lo, anchored: g.anchored });
+        lo = n;
+        inList = here;
+      }
+    }
+    (inList ? on : off).push({ lo, hi: g.hi, count: g.hi - lo + 1, anchored: g.anchored });
+  }
+  return { listed: on, unlisted: off };
+}
+
+/**
  * Holes split at a series' "Latest N" start, lib_series.chapter_floor (v0.55.0): the part at or above it, which the
  * sweep fetches and the repair's gap step works on, and the part below it, which nothing fetches unasked -- the series
  * was added from there on purpose, and the sweep, Fill now and a follow's fetch all stop at the floor (lib/updater.ts).

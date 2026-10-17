@@ -110,6 +110,7 @@ import { noticeListed } from '../lib/noticeChapters';
 import { hiddenNumbersOf } from '../lib/hiddenChapters';
 import { q, one } from '../lib/db';
 import { healthAll, isDisabled, blockedNow, reportLatest, reportFail, reportSlow, classify, noteStage, slowStreakNow } from '../lib/sourceHealth';
+import { finishDownloadsOn } from '../lib/finishDownloads';
 import { diagnose, EMPTY_SUSPECT } from '../lib/sourceDiagnosis';
 import {
   gapsOf, assess, verdict, authorise, putPlan, getPlan, planKey, sweepPlans,
@@ -268,6 +269,15 @@ export function releaseDownloadJobClaim(claim: DownloadJobClaim | null | undefin
  * refetch card names nothing to try again" in downloadsView.int.test.ts reads [2, 3, 4].
  */
 const REDOABLE: ReadonlySet<Origin> = new Set<Origin>(['fetch', 'add']);
+
+/**
+ * "Finish downloads on their own" (lib/finishDownloads.ts): an add that stopped part-way -- a site refused, or was cooling
+ * down -- puts its series back to the front of the finishing sweep's queue (never checked = behind, and first in the
+ * sweep's order), instead of leaving the rest to the next six-hourly sweep five chapters at a time. Best effort.
+ */
+async function backFirst(seriesId: string): Promise<void> {
+  await q('UPDATE lib_series SET source_checked_at = NULL WHERE id = $1', [seriesId]).catch(() => {});
+}
 
 /** A failed job's chapters that did not land, for its Try again (`Job.left`). */
 function leftOf(asked: ReadonlyArray<{ number: number }>, landed: ReadonlyArray<{ number: number }>, onDisk: readonly number[]): number[] {
@@ -1869,7 +1879,52 @@ export async function addSeriesFromSource(opts: {
    * Cloudflare source every step is a real challenge solve. The job row already existed by this point, so
    * the Discover strip knew the download had started while the caller was still waiting to be told.
    */
+  /**
+   * "Finish downloads on their own" (lib/finishDownloads.ts): an add whose FIRST chapter a site refused -- a rate limit,
+   * a block -- used to leave no series at all. Only the card knew what was asked for, nothing could resume it, and a
+   * restart lost even the card. With the switch on, the series is written the way a nothing-yet add writes it, but
+   * BEHIND and never checked: the selection's floor (none for All), `source_checked_at` NULL and `source_missing` what
+   * was selected, so the next finishing sweep (server.ts) takes it first, once the site's cooldown is over. The other
+   * sources the dialog asked to check are judged as on any add, and the rest the person asked to archive is queued.
+   * Returns the series id. Reintroduce by answering the refusal alone: "an add whose first chapter a site refused keeps
+   * the series, behind" in finishDownloads.int.test.ts finds no row.
+   */
+  const keepForLater = async (): Promise<string> => {
+    const libs = await libraryRows();
+    const libraryId = existing
+      ? (await one<{ library_id: string }>('SELECT library_id FROM lib_series WHERE id = $1', [existing.id]))?.library_id ?? libraryIdFor(folder, libs)
+      : libraryIdFor(folder, libs);
+    const { id } = (await q<{ id: string }>(
+      `INSERT INTO lib_series (id, source, title, summary, author, status, genres, web, folder, books_count, library_id, scanned_at,
+                               auto_update, source_id, source_series_id, chapter_floor, source_checked_at, source_chapters, source_missing, lang, age_rating)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,now(),$11,$12,$13,$14,NULL,$15,$16,$17,$18)
+       ON CONFLICT (library_id, folder) DO UPDATE SET
+         auto_update = EXCLUDED.auto_update, source_id = EXCLUDED.source_id, source_series_id = EXCLUDED.source_series_id,
+         chapter_floor = EXCLUDED.chapter_floor, scanned_at = now(), deleted_at = NULL,
+         source_checked_at = NULL, source_chapters = EXCLUDED.source_chapters, source_missing = EXCLUDED.source_missing,
+         lang = COALESCE(lib_series.lang, EXCLUDED.lang), age_rating = GREATEST(lib_series.age_rating, EXCLUDED.age_rating)
+       RETURNING id`,
+      [newSeriesId(), src.name, title, meta.summary || null, meta.author ?? null, meta.status ?? null, meta.genres ?? [], meta.url ?? null,
+       folder, libraryId, autoUpdate !== false, source, sourceId, floor, chosen.length, toFetch.length, stateLang, addedAgeRating],
+    ))[0];
+    await linkHere(id);
+    await stampAddNumbering({ id }, source!, numbered.decision).catch((e) => console.warn(`[add] ${folder}: numbering not recorded: ${(e as Error)?.message || e}`));
+    await replaceListing(id, listingRows(chapters, chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+    await learnAltTitles(id, series?.summary);
+    if (series?.coverUrl) {
+      await q(`INSERT INTO series_art (series_id, cover, checked_at) VALUES ($1, $2, NULL)
+        ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [id, series.coverUrl]).catch(() => {});
+    }
+    await learnDirection({ id }, series?.readingDirection, 'source').catch(() => {});
+    await learnTypeFromSource({ id }, series);
+    void artByTitle({ id }, title, opts.userId ?? null);
+    if (archiveOpt) await archiveRest(id, archiveOpt).catch(() => {});
+    if (opts.alsoFollow?.length) judgeAlsoFollow(folder, id, opts);
+    return id;
+  };
+
   const run = async (): Promise<AddResult> => {
+    const finishOn = opts.wait === false && await finishDownloadsOn().catch(() => false);
     // Which chapters this run wrote, for the provenance stamp. Only what LANDED, never the selection: a
     // copy the downloader skipped because the file was already there is somebody else's work.
     const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string; chapterId?: string }> = [];
@@ -1916,6 +1971,18 @@ export async function addSeriesFromSource(opts: {
       }
     }
     catch (e: any) { blockReason = e?.blockStatus || null; diskFull = e?.diskFull ? String(e.message) : null; }
+    if (!firstPages && finishOn && blockReason && !diskFull) {
+      const kept = await keepForLater().catch((e) => { console.warn(`[add] ${folder}: not kept for later: ${(e as Error)?.message || e}`); return null; });
+      if (kept) {
+        const j = jobs.get(folder);
+        if (j) {
+          j.status = 'error'; j.seriesId = kept; j.finishedAt = Date.now(); j.left = leftOf(toFetch, [], []);
+          tell(j, say('job.refusingWillFinish', { source: src.name, status: blockReason }));
+        }
+        return { ok: false, status: 429, error: 'blocked', blockStatus: blockReason, seriesId: kept,
+          message: `${say('job.refusingWillFinish', { source: src.name, status: blockReason }).text}` };
+      }
+    }
     if (!firstPages) {
       // A full disk used to read as "this title may be licensed", which sends a person off to try another
       // source for a problem no source can fix.
@@ -2036,9 +2103,10 @@ export async function addSeriesFromSource(opts: {
           }
           if (j) {
             j.status = 'error';
-            tell(j, say('job.stopped', { source: src.name }), savedSoFar(j));
+            tell(j, finishOn ? say('job.stoppedWillFinish', { source: src.name }) : say('job.stopped', { source: src.name }), savedSoFar(j));
             j.finishedAt = Date.now();
           }
+          if (finishOn && seriesId) await backFirst(seriesId);
           break;
         }
 
@@ -2047,9 +2115,12 @@ export async function addSeriesFromSource(opts: {
         if (refusing.has(out.via)) {
           if (j) {
             j.status = 'error';
-            tell(j, say('job.stoppedRefusing', { source: src.name, status: String(out.err?.blockStatus ?? '') }), savedSoFar(j));
+            tell(j, finishOn
+              ? say('job.stoppedRefusingWillFinish', { source: src.name, status: String(out.err?.blockStatus ?? '') })
+              : say('job.stoppedRefusing', { source: src.name, status: String(out.err?.blockStatus ?? '') }), savedSoFar(j));
             j.finishedAt = Date.now();
           }
+          if (finishOn && seriesId) await backFirst(seriesId);
           break;
         }
         // ANY other failure -- a permission error, a chapter with no readable pages -- must not advance

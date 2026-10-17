@@ -19,6 +19,7 @@ import { q, one, tx } from './db';
 import { getSource, type SourceChapter } from './sources';
 import { chooseReleases, groupsOf, mergePrefs, normGroup, releaseOrder, type ChooseOpts, type ReleasePrefs, type StoredPrefs } from './releases';
 import { CHAPTER_RETRY_CAP } from './updater';
+import { finishDownloadsOn, retryCapFor } from './finishDownloads';
 import { chapterName } from './library';
 import { HEALED_NAME } from './naming';
 import { holds, isRange } from './chapterRanges';
@@ -740,12 +741,17 @@ export interface Ghost {
  * takes a covered number (it fetches `available` only), so it cannot come first. Reintroduce by testing the floor
  * first: "another split below the floor" in seriesListing.test.ts reads floor.
  */
-export function whyOf(status: ListingStatus, number: number, floor: number | null, attempts: number, archiveBoundary: number | null = null): GhostWhy {
-  if (archiveBoundary != null && number < archiveBoundary && status === 'available' && attempts < CHAPTER_RETRY_CAP) return 'archive';
+export function whyOf(
+  status: ListingStatus, number: number, floor: number | null, attempts: number, archiveBoundary: number | null = null,
+  // The tries this number's ledger row allows (lib/finishDownloads.ts retryCapFor): a refusal gets more while "Finish
+  // downloads on their own" is on, so the page does not call "failed" a chapter the sweep is still going back for.
+  cap: number = CHAPTER_RETRY_CAP,
+): GhostWhy {
+  if (archiveBoundary != null && number < archiveBoundary && status === 'available' && attempts < cap) return 'archive';
   if (status === 'covered') return 'covered';
   if (floor != null && number < floor) return 'floor';
   if (status === 'blocked') return 'blocked';
-  if (attempts >= CHAPTER_RETRY_CAP) return 'failed';
+  if (attempts >= cap) return 'failed';
   if (status === 'held') return 'held';
   return 'missing';
 }
@@ -754,6 +760,8 @@ interface GhostRow {
   number: number; title: string | null; published_at: Date | null; scanlator: string | null;
   groups: string[]; source_id: string; status: ListingStatus; attempts: number | null; reason: string | null;
   copies: ListingCopy[] | null; marked: boolean;
+  /** The ledger row's status (chapter_failures.status): a refusal or a failure, for the row's retry cap. */
+  fail_status: string | null;
 }
 
 const DAY_MS = 86_400_000;
@@ -800,7 +808,7 @@ export async function listingFor(seriesId: string, opts: { floor: number | null;
   const s = await one<{ source_checked_at: Date | null }>('SELECT source_checked_at FROM lib_series WHERE id = $1', [seriesId]);
   const rows = await q<GhostRow>(
     `SELECT l.number, l.title, l.published_at, l.scanlator, l.groups, l.source_id, l.status, l.copies, f.attempts, f.reason,
-            (lp.user_id IS NOT NULL) AS marked
+            f.status AS fail_status, (lp.user_id IS NOT NULL) AS marked
        FROM series_listing l
        LEFT JOIN chapter_failures f ON f.series_id = l.series_id AND f.number = l.number
        LEFT JOIN listing_progress lp ON lp.user_id = $2 AND lp.series_id = l.series_id AND lp.number = l.number
@@ -831,10 +839,12 @@ export async function listingFor(seriesId: string, opts: { floor: number | null;
   const waitingFor = prefs.priority.find((p) => normGroup(p) && !blocked.has(normGroup(p)));
   const now = Date.now();
   const iso = (v: Date | string | null): string | null => (v == null ? null : v instanceof Date ? v.toISOString() : new Date(v).toISOString());
+  const finish = await finishDownloadsOn();
   return {
     checkedAt: iso(s?.source_checked_at ?? null),
     content: rows.map((r) => {
       const attempts = Number(r.attempts ?? 0);
+      const cap = retryCapFor(r.fail_status, finish, CHAPTER_RETRY_CAP);
       const g: Ghost = {
         number: Number(r.number),
         title: r.title,
@@ -843,7 +853,7 @@ export async function listingFor(seriesId: string, opts: { floor: number | null;
         groups: r.groups ?? [],
         sourceId: r.source_id,
         sourceName: getSource(r.source_id)?.name ?? r.source_id,
-        why: whyOf(r.status, Number(r.number), opts.floor, attempts, opts.archiveBoundary ?? null),
+        why: whyOf(r.status, Number(r.number), opts.floor, attempts, opts.archiveBoundary ?? null, cap),
       };
       if (attempts > 0) g.attempts = attempts;
       if (opts.admin && r.reason) g.reason = r.reason;

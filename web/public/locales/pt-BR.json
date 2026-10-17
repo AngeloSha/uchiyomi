@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4022
+    "strings": 4036
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -4025,5 +4025,19 @@
   "Tap a page of a pair to see it alone": "Tocar numa página de um par para vê-la sozinha",
   "On two pages side by side, a tap on one shows it alone, and turning toward the other shows that one. Taps beside the pages still do what Tap zones says.": "Com duas páginas lado a lado, um toque numa delas a mostra sozinha, e virar para a outra mostra essa. Toques ao lado das páginas continuam fazendo o que as Áreas de toque dizem.",
   "One page of a pair, or both": "Uma página do par, ou as duas",
-  "Show both pages": "Mostrar as duas páginas"
+  "Show both pages": "Mostrar as duas páginas",
+  "1 number none of its sources list — {ranges}": "1 número que nenhuma das suas fontes oferece — {ranges}",
+  "{n} numbers none of its sources list — {ranges}": "{n} números que nenhuma das suas fontes oferece — {ranges}",
+  "1 with numbers none of their sources list": "1 com números que nenhuma das suas fontes oferece",
+  "{n} with numbers none of their sources list": "{n} com números que nenhuma das suas fontes oferece",
+  "Numbers none of a series' sources list are not counted as missing: usually a source numbered the same chapters another way, such as counting split parts as chapters. \"Fill now\" still asks other sources for them.": "Números que nenhuma fonte de uma série oferece não contam como faltando: geralmente uma fonte numerou os mesmos capítulos de outro jeito, por exemplo contando partes divididas como capítulos. “Preencher agora” ainda procura por eles em outras fontes.",
+  "Finish downloads on their own": "Concluir os downloads sozinho",
+  "On by default. A series that still has chapters to download keeps going on its own, every 15 minutes or as soon as a site that was refusing is ready again, instead of waiting for the next library update. A chapter a site refused is tried 12 times instead of 3, and a series added from Discover is kept even when its site refuses the first chapter. Off, they wait for the library update.": "Ativado por padrão. Uma série que ainda tem capítulos para baixar continua sozinha, a cada 15 minutos ou assim que um site que estava recusando fica pronto de novo, em vez de esperar a próxima atualização da biblioteca. Um capítulo que um site recusou é tentado 12 vezes em vez de 3, e uma série adicionada pelo Descobrir é mantida mesmo quando o site dela recusa o primeiro capítulo. Desativado, eles esperam a atualização da biblioteca.",
+  "{source} is currently rate-limiting downloads. The series is saved, and its chapters will download on their own when the site is ready.": "{source} está limitando os downloads no momento. A série está salva, e os capítulos serão baixados sozinhos quando o site estiver pronto.",
+  "{source} is currently blocking downloads. The series is saved, and its chapters will download on their own when the site is ready.": "{source} está bloqueando os downloads no momento. A série está salva, e os capítulos serão baixados sozinhos quando o site estiver pronto.",
+  "{source} is currently unreachable for downloads. The series is saved, and its chapters will download on their own when the site is ready.": "{source} está inacessível para downloads no momento. A série está salva, e os capítulos serão baixados sozinhos quando o site estiver pronto.",
+  "{source} stopped part-way: it is rate-limiting downloads. The rest will download on their own when the site is ready.": "{source} parou no meio do caminho: está limitando os downloads. O restante será baixado sozinho quando o site estiver pronto.",
+  "{source} stopped part-way: it is blocking downloads. The rest will download on their own when the site is ready.": "{source} parou no meio do caminho: está bloqueando os downloads. O restante será baixado sozinho quando o site estiver pronto.",
+  "{source} stopped part-way: it is unreachable for downloads. The rest will download on their own when the site is ready.": "{source} parou no meio do caminho: está inacessível para downloads. O restante será baixado sozinho quando o site estiver pronto.",
+  "{source} stopped part-way. The rest will download on their own.": "{source} parou no meio do caminho. O restante será baixado sozinho."
 }

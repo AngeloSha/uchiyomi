@@ -121,6 +121,13 @@ const EN = {
     `${n} missing before where you started (chapter ${start}) — ${ranges}`,
   'gaps.alsoBelowFloor': ({ n, start }: { n: number; start: number }) => `${n} more before where you started (chapter ${start})`,
   'gaps.beforeStart': ({ n }: { n: number }) => `${n} before where you started`,
+  // Holes none of the series' sources lists (lib/fill.ts splitListed): not counted as missing.
+  'gaps.notListed': ({ n, ranges }: { n: number; ranges: string }) =>
+    `${n} ${s(n, 'number', 'numbers')} none of its sources list — ${ranges}`,
+  'gaps.notListedSeries': ({ n }: { n: number }) => `${n} with numbers none of their sources list`,
+  'gaps.notListedNote': () =>
+    'Numbers none of a series\' sources list are not counted as missing: usually a source numbered the same chapters ' +
+    'another way, such as counting split parts as chapters. "Fill now" still asks other sources for them.',
 
   // ---- Chapter numbering (#116). `name` null: the source could not be named at all.
   'numbering.live': ({ n }: { n: number }) => `${n} series ${s(n, 'waits', 'wait')} for a numbering review`,
@@ -531,6 +538,12 @@ const EN = {
   'job.stopped': ({ source }: { source: string }) => `${source} stopped part-way`,
   'job.stoppedRefusing': ({ source, status }: { source: string; status: string }) => `${source} stopped part-way: it is ${statusWord(status)} downloads`,
   'job.refusing': ({ source, status }: { source: string; status: string }) => `${source} is currently ${statusWord(status)} downloads.`,
+  // "Finish downloads on their own" (lib/finishDownloads.ts): the same stops, with what happens next.
+  'job.refusingWillFinish': ({ source, status }: { source: string; status: string }) =>
+    `${source} is currently ${statusWord(status)} downloads. The series is saved, and its chapters will download on their own when the site is ready.`,
+  'job.stoppedWillFinish': ({ source }: { source: string }) => `${source} stopped part-way. The rest will download on their own.`,
+  'job.stoppedRefusingWillFinish': ({ source, status }: { source: string; status: string }) =>
+    `${source} stopped part-way: it is ${statusWord(status)} downloads. The rest will download on their own when the site is ready.`,
   'job.undownloadable': () => 'No downloadable chapters here — this title may be licensed or hosted externally on this source.',
   'job.failed': ({ n, error }: { n: number; error: string }) => `${n} chapter${s(n, '', 's')} could not be saved: ${error}`,
   'job.cancelled': ({ done, total }: { done: number; total: number }) => `Cancelled after ${done} of ${total} chapter${s(total, '', 's')}.`,

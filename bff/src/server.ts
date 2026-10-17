@@ -28,6 +28,7 @@ import { scheduleAniListScores } from './lib/anilistScores';
 import { notifyAdmins } from './lib/push';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
+import { behindCount, finishDownloadsOn, nextCooldownEnd as finishCooldownEnd, FINISH_MINUTES, FINISH_PER_SERIES, FINISH_SWEEP_MAX } from './lib/finishDownloads';
 import { refreshMissingRadars } from './lib/releaseRadar';
 import { runRepair, setRepairNext, REPAIR_HOURS } from './lib/repair';
 import { AFTER_NIGHTLY_AUTOFIX, autofixSettled, closeInterruptedAutofix, startAutofix } from './lib/autofix';
@@ -282,7 +283,13 @@ async function main() {
           // "Run now" button gets the same treatment as this tick -- and this tick can see the button's sweep.
           const run = smart ? runSweep({ maxNew: 5, smart }, app.log) : runSweep({ maxNew: 5 }, app.log);
           if (run) await run;
-          else app.log.info('updater: the previous sweep is still running, skipping this tick');
+          else {
+            // Another sweep holds the flag -- since "Finish downloads on their own", most often the finishing sweep
+            // of the behind series, a few minutes long. Ten minutes on, as beside a repair, not a whole interval:
+            // the full sweep must not lose six hours to a quarter-hour pass.
+            app.log.info('updater: another sweep is running, trying again in 10 minutes');
+            retryIn = 10 * 60 * 1000;
+          }
         }
       } catch (e) {
         app.log.error(e as any);
@@ -309,6 +316,32 @@ async function main() {
       app.log.info(`updater: first sweep in ${Math.round(delay / 60000)} min` + (last ? ` (last completed ${new Date(last).toISOString()})` : ' (no completed sweep on record)'));
       setTimeout(tick, delay).unref();
     })();
+    // "Finish downloads on their own" (lib/finishDownloads.ts, Admin -> Settings, ON by default): the series that are
+    // behind -- their source lists chapters they do not have yet -- are gone back to every FINISH_MINUTES by a sweep of
+    // those series alone, and right after the earliest cooldown of their sources ends, so a series a site rate-limited
+    // half-way through an add carries on by itself the minute the site said, instead of five chapters every six hours.
+    // It never runs beside the full sweep or a repair (runSweep refuses, and it simply tries again next time), and with
+    // nothing behind it starts nothing. The switch is read every tick, so turning it off stops it from the next one.
+    const finishTick = async () => {
+      let next = FINISH_MINUTES * 60_000;
+      try {
+        if ((await finishDownloadsOn()) && (await behindCount()) > 0) {
+          if (!runtime.updating && !runtime.repairing) {
+            const run = runSweep({ maxNew: FINISH_PER_SERIES, sweepMax: FINISH_SWEEP_MAX, finishing: true }, app.log);
+            if (run) await run;
+          }
+          // A site's cooldown ending before the next quarter-hour brings the next pass forward to it (half a minute
+          // after, so the source is out of it), never closer than two minutes: a cooldown that keeps being renewed
+          // must not turn this into a loop.
+          const cool = await finishCooldownEnd();
+          if (cool) next = Math.max(2 * 60_000, Math.min(next, cool.getTime() - Date.now() + 30_000));
+        }
+      } catch (e) {
+        app.log.error(e as any);
+      }
+      setTimeout(finishTick, next).unref();
+    };
+    setTimeout(finishTick, firstRunFloor(5 * 60 * 1000, 'sweep')).unref();
     // v0.61.0, the release radar (lib/releaseRadar.ts): once, a minute after boot, every series with a source and no
     // radar yet is dated from what is already stored -- its listing and its chapters' arrivals, no source asked -- so
     // an upgrade's Releasing soon and Expected this week are not empty until each series' next check.

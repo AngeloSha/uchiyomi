@@ -27,11 +27,11 @@ import { lastSuwayomiLoad, leftOutByLimit } from './sources/suwayomi/register';
 import { engineState, type EngineState } from './sources/suwayomi/engineState';
 import { extensionEngineCheck } from './engineHealth';
 import { env } from '../env';
-import { gapsOf, splitAtFloor } from './fill';
+import { gapsOf, splitAtFloor, splitListed } from './fill';
 import { CHAPTER_RETRY_CAP } from './updater';
 import { diagnose, currentError, type DiagnosisCode } from './sourceDiagnosis';
 import { currentFailures, isRateLimit, openFailures, stageLines, type Stage, type StageLine, type Stages } from './sourceEvidence';
-import { haveNumbers, impossibleLimit, median, plausibleNumbers } from './libraryNumbers';
+import { haveNumbers, impossibleLimit, listedWholeNumbers, median, plausibleNumbers } from './libraryNumbers';
 import { atHiddenNumber } from './noticeChapters';
 import { slowStreakNow } from './sourceHealth';
 import { listBudgetFor } from './sources/budget';
@@ -366,6 +366,8 @@ interface HeldSeries {
   archive: ArchiveHoles | null;
   /** Its "Latest N" start (lib_series.chapter_floor), null for none: holes below it are nobody's to fetch (v0.55.0). */
   floor: number | null;
+  /** The whole numbers its sources list (lib/fill.ts splitListed), null when no source ever answered for it. */
+  listed: ReadonlySet<number> | null;
 }
 
 /**
@@ -388,6 +390,8 @@ async function heldBySeries(): Promise<HeldSeries[]> {
   );
   // One read for every archive: a handful of rows, where a per-series query would double the page's cost.
   const archiving = await archiveHoles(undefined, CHAPTER_RETRY_CAP);
+  // And every series' listed numbers, one grouped read: a hole no source lists is no missing chapter (fill.ts splitListed).
+  const listedBy = await listedWholeNumbers();
   const out: HeldSeries[] = [];
   for (const s of series) {
     out.push({
@@ -399,6 +403,7 @@ async function heldBySeries(): Promise<HeldSeries[]> {
       autoUpdate: s.auto_update !== false,
       archive: archiving.get(s.id) ?? null,
       floor: s.floor == null ? null : Number(s.floor),
+      listed: listedBy.get(s.id) ?? null,
     });
   }
   return out;
@@ -494,18 +499,25 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
       // counting every number: "an impossible number is the outliers card's, not a gap of thousands" in
       // health.int.test.ts finds Odd Walk on this card.
       const { above: gaps, below } = splitAtFloor(gapsOf(plausibleNumbers(s.numbers)), s.floor);
+      // A hole none of the series' sources lists is not counted as missing (lib/fill.ts splitListed): most often a site
+      // numbered the same chapters another way (split parts counted as chapters), which leaves a run of numbers between
+      // two held ones that nobody offers -- Tales of Demons and Gods read "306 missing" for chapters it had. The row says
+      // those numbers apart, greyed when they are all it has, and Fill now still asks other sites for them. Reintroduce
+      // by counting every hole: "a hole no source lists is not a missing chapter" in finishDownloads.int.test.ts.
+      const { listed, unlisted } = splitListed(gaps, s.listed);
       const numbers: number[] = [];
-      for (const g of gaps) for (let n = g.lo; n <= g.hi && numbers.length < MAX_NUMBERS; n++) numbers.push(n);
-      return { s, gaps, below, missing: gaps.reduce((n, g) => n + g.count, 0), before: below.reduce((n, g) => n + g.count, 0), numbers };
+      for (const g of [...listed, ...unlisted]) for (let n = g.lo; n <= g.hi && numbers.length < MAX_NUMBERS; n++) numbers.push(n);
+      return { s, gaps, below, listed, unlisted, missing: listed.reduce((n, g) => n + g.count, 0), before: below.reduce((n, g) => n + g.count, 0),
+        notListed: unlisted.reduce((n, g) => n + g.count, 0), numbers };
     })
-    .filter((r) => r.missing > 0 || r.before > 0)
-    .sort((a, b) => b.missing - a.missing || b.before - a.before);
+    .filter((r) => r.missing > 0 || r.before > 0 || r.notListed > 0)
+    .sort((a, b) => b.missing - a.missing || b.notListed - a.notListed || b.before - a.before);
   /** The first chapter the series was started from: the first whole number at or above its floor. */
   const startOf = (r: (typeof rows)[number]) => Math.ceil(Number(r.s.floor));
   const short = (t: string) => (t.length > 90 ? t.slice(0, 90) + '…' : t);
 
-  const items: Array<HealthItem & { members?: string[]; beforeStart?: true }> = rows.map((r) => {
-    if (!r.missing) {
+  const items: Array<HealthItem & { members?: string[]; beforeStart?: true; notListed?: true }> = rows.map((r) => {
+    if (!r.missing && !r.notListed) {
       // Every hole is below where the series was started: for reference, with nothing to press -- Fill now cannot
       // fetch below the start either.
       return {
@@ -516,7 +528,6 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
         beforeStart: true,
       };
     }
-    const ranges = rangeText(r.gaps);
     const g = r.s.gapsResult;
     // ⚠️ When the CONCLUSION was reached (gaps_result.at), not when the series was stamped (gapsCheckedAt says why).
     const checked = gapsCheckedAt(g, r.s.gapsCheckedAt);
@@ -541,7 +552,9 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
     // below the boundary, or a paused archive, its "not listed" and "paused" assertions read archiving.
     const takes = r.gaps.map((x) => archiveTakes(r.s.archive ?? undefined, x.lo, x.hi));
     const archived = !!r.s.archive && !r.s.archive.paused && r.gaps.every((x, i) => takes[i] === x.count);
-    const info = archived || answeredFresh || (fresh && sweepsIt);
+    // Only numbers none of its sources lists: nothing is missing that a site offers (see splitListed above).
+    const onlyUnlisted = !r.missing;
+    const info = archived || answeredFresh || (fresh && sweepsIt) || onlyUnlisted;
     const what = g ? gapConclusion(g) : null;
     // What Fill now will do that the row would not otherwise say: fetch at once, at normal pace, numbers the
     // archive was going to fetch slowly (it passes ignoreArchiveBoundary, lib/repair.ts), and fetch a paused
@@ -556,7 +569,8 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
       // The conclusion is `outcome` now, rendered by the page in the reader's language; the detail is the
       // finding alone.
       ...detailOf([
-        say('gaps.detail', { n: r.missing, ranges: short(ranges) }),
+        r.missing > 0 && say('gaps.detail', { n: r.missing, ranges: short(rangeText(r.listed)) }),
+        r.notListed > 0 && say('gaps.notListed', { n: r.notListed, ranges: short(rangeText(r.unlisted)) }),
         r.before > 0 && say('gaps.alsoBelowFloor', { n: r.before, start: startOf(r) }),
       ]),
       numbers: r.numbers,
@@ -593,6 +607,7 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
       // An older search's answer is not what is happening to an archived hole: the outcome above is.
       ...(checked && what && !archived ? { fixed: { at: checked.toISOString(), what } } : {}),
       ...(info ? { info: true } : {}),
+      ...(onlyUnlisted && !archived && !answeredFresh ? { notListed: true as const } : {}),
     };
   });
   const ignored = applyIgnores('chapter-gaps', items, ctx);
@@ -600,7 +615,8 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
   const live = items.filter((i) => !i.info).length;
   const archiving = items.filter((i) => i.info && !i.ignored && i.outcome?.kind === 'gaps' && i.outcome.why === 'archiving').length;
   const beforeStart = items.filter((i) => i.beforeStart).length;
-  const quiet = items.length - live - ignored - archiving - beforeStart;
+  const notListed = items.filter((i) => i.notListed && !i.ignored).length;
+  const quiet = items.length - live - ignored - archiving - beforeStart - notListed;
   return withAll({
     id: 'chapter-gaps',
     title: 'Chapter gaps',
@@ -610,11 +626,12 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
       quiet > 0 && say('gaps.quiet', { n: quiet }),
       archiving > 0 && say('gaps.archiving', { n: archiving }),
       beforeStart > 0 && say('gaps.beforeStart', { n: beforeStart }),
+      notListed > 0 && say('gaps.notListedSeries', { n: notListed }),
       ignoredPart(ignored),
     ]),
-    ...noteOf([say('gaps.note'), hiddenPart(hidden)]),
-    items: shown.map(({ beforeStart: _b, ...it }) => it),
-  }, items.map(({ beforeStart: _b, ...it }) => it));
+    ...noteOf([say('gaps.note'), rows.some((r) => r.notListed > 0) && say('gaps.notListedNote'), hiddenPart(hidden)]),
+    items: shown.map(({ beforeStart: _b, notListed: _n, ...it }) => it),
+  }, items.map(({ beforeStart: _b, notListed: _n, ...it }) => it));
 }
 
 /** How long a series numbered by posting order on its own is listed (for reference) after the change. */

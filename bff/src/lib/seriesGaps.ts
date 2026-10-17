@@ -10,9 +10,11 @@
 // run the cleanup deleted after everyone read it as a hole, every time someone re-read across it.
 //
 // Holes below a series' Latest-N start are kept: nothing fetches them (fill.ts splitAtFloor), but the chapters are not
-// here, and a reader crossing one is skipping them all the same.
-import { haveNumbers } from './libraryNumbers';
-import { gapsOf } from './fill';
+// here, and a reader crossing one is skipping them all the same. A hole none of its sources lists is not (fill.ts
+// splitListed), as on the card: most often a site numbered the same chapters another way, and "306 chapters missing"
+// between two chapters that follow on is news that is not true.
+import { haveNumbers, listedWholeNumbers } from './libraryNumbers';
+import { gapsOf, splitListed } from './fill';
 import { plausibleNumbers } from './health';
 import { ignoredGapRuns } from './healthIgnore';
 
@@ -25,6 +27,7 @@ export function notIgnored(gaps: GapRun[], ignored: Array<[number, number]>): Ga
 
 /** One series' missing runs, lowest first. */
 export async function seriesGaps(seriesId: string): Promise<GapRun[]> {
-  const [have, ignored] = await Promise.all([haveNumbers(seriesId), ignoredGapRuns(seriesId)]);
-  return notIgnored(gapsOf(plausibleNumbers(have)).map(({ lo, hi }) => ({ lo, hi })), ignored);
+  const [have, ignored, listed] = await Promise.all([haveNumbers(seriesId), ignoredGapRuns(seriesId), listedWholeNumbers([seriesId])]);
+  const gaps = splitListed(gapsOf(plausibleNumbers(have)), listed.get(seriesId) ?? null).listed;
+  return notIgnored(gaps.map(({ lo, hi }) => ({ lo, hi })), ignored);
 }

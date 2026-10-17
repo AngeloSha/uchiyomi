@@ -143,3 +143,17 @@ export function plausibleNumbers(numbers: readonly number[]): number[] {
   return limit === null ? [...numbers] : numbers.filter((n) => n <= limit);
 }
 
+
+/**
+ * The whole numbers each series' sources list (series_listing, every status), for the gap rule's "does a site offer
+ * it" (lib/fill.ts splitListed). One grouped read for Health's report, `seriesIds` for one series; a series no source
+ * has answered for is absent, and its holes count as before. A read that fails is an empty map: every hole counts.
+ */
+export async function listedWholeNumbers(seriesIds?: readonly string[]): Promise<Map<string, Set<number>>> {
+  const rows = await q<{ series_id: string; nums: number[] }>(
+    `SELECT series_id, array_agg(DISTINCT floor(number)::int) AS nums FROM series_listing
+      WHERE number IS NOT NULL ${seriesIds ? 'AND series_id = ANY($1)' : ''} GROUP BY series_id`,
+    seriesIds ? [seriesIds as string[]] : [],
+  ).catch(() => []);
+  return new Map(rows.map((r) => [r.series_id, new Set((r.nums ?? []).map(Number))]));
+}

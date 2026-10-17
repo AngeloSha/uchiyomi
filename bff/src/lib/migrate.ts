@@ -1831,6 +1831,13 @@ CREATE INDEX IF NOT EXISTS lib_series_hiding_idx ON lib_series (id) WHERE hidden
 -- chapter looked at, nothing found and unreadable alike, so none is measured twice; a new mtime or detector measures
 -- again. Additive: v0.76.x ignores it.
 ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS spreads jsonb;
+
+-- Admin -> Settings "Finish downloads on their own" (lib/finishDownloads.ts). ON by default: a series whose source
+-- lists chapters it does not have yet is gone back to every quarter of an hour, and again the moment a site's
+-- cooldown ends, instead of five chapters every six hours; a site's "slow down" (429) or block (403) is a later, not
+-- a never, so it does not use up a chapter's three tries; and an add whose first chapter a site refused keeps the
+-- series, so it can be finished. Off, all of it behaves as v0.77.x did. Additive: v0.77.x ignores it.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS finish_downloads boolean NOT NULL DEFAULT true;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

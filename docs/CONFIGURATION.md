@@ -324,7 +324,16 @@ ever hit.
 - `UPDATER_SWEEP_MAX` (default `150`): most chapter-fetch attempts in one scheduled sweep, so a backlog
   cannot occupy the whole night.
 - `CHAPTER_RETRY_CAP` (default `3`): ordinary failures before a chapter is left as failed until a person
-  explicitly retries it.
+  explicitly retries it. With **Finish downloads on their own** on (Admin → Settings → Updates & schedules, on by
+  default, v0.78.0), a site refusing a chapter (a 429 or a 403) is not an ordinary failure: it gets
+  `FINISH_DOWNLOADS_REFUSAL_CAP` tries.
+- `FINISH_DOWNLOADS_MINUTES` (default `15`, at least `5`): with that switch on, how often the series still behind their
+  sources are gone back to -- or right after the earliest cooldown of their sites ends, whichever comes first.
+- `FINISH_DOWNLOADS_PER_SERIES` (default `10`): chapters one of those runs fetches for a series.
+- `FINISH_DOWNLOADS_SWEEP_MAX` (default `60`): chapter-fetch attempts one of those runs makes in all.
+- `FINISH_DOWNLOADS_REFUSAL_CAP` (default `12`): tries a chapter a site refused gets before it is left as failed, with
+  the switch on. The cooldowns space the tries out; once a site has refused a chapter twice, the sweep also searches the
+  other sources for it.
 
 - `DOWNLOAD_CONCURRENCY` (default `2`): chapters downloaded at once, per source -- per rate key: the MangaDex languages
   share one, and since v0.55.3 so do sources whose pages come from one image server (Natomanga and Mangakakalot). One

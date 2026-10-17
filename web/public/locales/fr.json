@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4022
+    "strings": 4036
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -4025,5 +4025,19 @@
   "Tap a page of a pair to see it alone": "Toucher une page d’une paire pour la voir seule",
   "On two pages side by side, a tap on one shows it alone, and turning toward the other shows that one. Taps beside the pages still do what Tap zones says.": "Sur deux pages côte à côte, un toucher sur l’une l’affiche seule, et tourner vers l’autre affiche celle-ci. Les touchers à côté des pages font toujours ce que disent les Zones de toucher.",
   "One page of a pair, or both": "Une page de la paire, ou les deux",
-  "Show both pages": "Afficher les deux pages"
+  "Show both pages": "Afficher les deux pages",
+  "1 number none of its sources list — {ranges}": "1 numéro qu’aucune de ses sources ne propose — {ranges}",
+  "{n} numbers none of its sources list — {ranges}": "{n} numéros qu’aucune de ses sources ne propose — {ranges}",
+  "1 with numbers none of their sources list": "1 avec des numéros qu’aucune de ses sources ne propose",
+  "{n} with numbers none of their sources list": "{n} avec des numéros qu’aucune de leurs sources ne propose",
+  "Numbers none of a series' sources list are not counted as missing: usually a source numbered the same chapters another way, such as counting split parts as chapters. \"Fill now\" still asks other sources for them.": "Les numéros qu’aucune source d’une série ne propose ne comptent pas comme manquants : en général, une source a numéroté les mêmes chapitres autrement, par exemple en comptant des parties découpées comme des chapitres. « Combler maintenant » les cherche quand même sur d’autres sources.",
+  "Finish downloads on their own": "Terminer les téléchargements tout seul",
+  "On by default. A series that still has chapters to download keeps going on its own, every 15 minutes or as soon as a site that was refusing is ready again, instead of waiting for the next library update. A chapter a site refused is tried 12 times instead of 3, and a series added from Discover is kept even when its site refuses the first chapter. Off, they wait for the library update.": "Activé par défaut. Une série à laquelle il reste des chapitres à télécharger continue toute seule, toutes les 15 minutes ou dès qu’un site qui refusait est de nouveau prêt, au lieu d’attendre la prochaine mise à jour de la bibliothèque. Un chapitre refusé par un site est tenté 12 fois au lieu de 3, et une série ajoutée depuis Découvrir est conservée même si son site refuse le premier chapitre. Désactivé, ils attendent la mise à jour de la bibliothèque.",
+  "{source} is currently rate-limiting downloads. The series is saved, and its chapters will download on their own when the site is ready.": "{source} limite actuellement le débit des téléchargements. La série est enregistrée et ses chapitres se téléchargeront tout seuls quand le site sera prêt.",
+  "{source} is currently blocking downloads. The series is saved, and its chapters will download on their own when the site is ready.": "{source} bloque actuellement les téléchargements. La série est enregistrée et ses chapitres se téléchargeront tout seuls quand le site sera prêt.",
+  "{source} is currently unreachable for downloads. The series is saved, and its chapters will download on their own when the site is ready.": "{source} est actuellement injoignable pour les téléchargements. La série est enregistrée et ses chapitres se téléchargeront tout seuls quand le site sera prêt.",
+  "{source} stopped part-way: it is rate-limiting downloads. The rest will download on their own when the site is ready.": "{source} s’est arrêtée en cours de route : elle limite le débit des téléchargements. Le reste se téléchargera tout seul quand le site sera prêt.",
+  "{source} stopped part-way: it is blocking downloads. The rest will download on their own when the site is ready.": "{source} s’est arrêtée en cours de route : elle bloque les téléchargements. Le reste se téléchargera tout seul quand le site sera prêt.",
+  "{source} stopped part-way: it is unreachable for downloads. The rest will download on their own when the site is ready.": "{source} s’est arrêtée en cours de route : elle est injoignable pour les téléchargements. Le reste se téléchargera tout seul quand le site sera prêt.",
+  "{source} stopped part-way. The rest will download on their own.": "{source} s’est arrêtée en cours de route. Le reste se téléchargera tout seul."
 }

@@ -621,7 +621,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, backup_enabled, auto_follow_on_failure, '
     + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, fill_details, discover_lookups, '
-    + 'mangadex_langs, unstated_lang, hide_notice_types, deleted_as_ghosts, update_smart, '
+    + 'mangadex_langs, unstated_lang, hide_notice_types, deleted_as_ghosts, update_smart, finish_downloads, '
     + ARCHIVE_SETTINGS_COLS;
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
@@ -791,6 +791,12 @@ export default async function adminRoutes(app: FastifyInstance) {
        */
       updateSmart: z.boolean().optional(),
       /**
+       * Finish downloads on their own (lib/finishDownloads.ts): a series still behind its sources is swept again every
+       * FINISH_DOWNLOADS_MINUTES or as a cooldown ends, a refused chapter is tried REFUSAL_RETRY_CAP times instead of
+       * CHAPTER_RETRY_CAP, and a Discover add whose first chapter was refused is kept to finish later. On by default.
+       */
+      finishDownloads: z.boolean().optional(),
+      /**
        * MangaDex in other languages (v0.52.0, #123): the languages besides English that are on, replaced whole, as
        * app codes from lib/lang.ts MANGADEX_LANGS ("es-419", "pt-BR"; MangaDex's own "es-la" is read as es-419).
        * Applied live: each language turned on becomes its own source, each turned off goes. English is always on,
@@ -847,6 +853,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (b.updateCheck !== undefined) await q('UPDATE server_settings SET update_check = $1, updated_at = now() WHERE id = 1', [b.updateCheck]);
     // Read by the sweep's tick each time it fires (server.ts), so the switch applies to the next scheduled sweep.
     if (b.updateSmart !== undefined) await q('UPDATE server_settings SET update_smart = $1, updated_at = now() WHERE id = 1', [b.updateSmart]);
+    if (b.finishDownloads !== undefined) await q('UPDATE server_settings SET finish_downloads = $1, updated_at = now() WHERE id = 1', [b.finishDownloads]);
     if (b.autoFollowOnFailure !== undefined) await q('UPDATE server_settings SET auto_follow_on_failure = $1, updated_at = now() WHERE id = 1', [b.autoFollowOnFailure]);
     if (b.installPing !== undefined) await setInstallPing(b.installPing);
     const nextGlobalSources = b.sourcePrefs === undefined

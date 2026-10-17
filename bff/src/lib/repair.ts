@@ -69,6 +69,7 @@ import { busyFolders } from './bulkNewest';
 import { beginRun, dismissRun, endRun, stopRequested, type RunCard } from './downloadJobs';
 import { say } from './said';
 import { updateSeries, CHAPTER_RETRY_CAP, LIST_TIMEOUT, seriesIsMonitored, type Landed } from './updater';
+import { finishDownloadsOn, REFUSAL_RETRY_CAP } from './finishDownloads';
 import { huntCandidates, huntSource, followHunted, seriesIsAdult, sweepAllowedFor, HUNT_WALL_MS, HUNT_MAX_SOURCES } from './sourceHunt';
 import { SOLVER_BUDGET_MS } from './sources/budget';
 import { canDownload, finishRunRecord, isFullRun, kindOf, startRunRecord, targetOf, type RunOrigin, type RunStatus, type RunTarget } from './repairRuns';
@@ -1646,6 +1647,7 @@ interface GapsResult {
  * search that never happened.
  */
 async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: number }, pending: Dated[], notes: Notes, log?: Log): Promise<RepairResult['stopped']> {
+  const finishOn = await finishDownloadsOn();
   // Series with something to look at. `gaps_checked_at` bounds the rescan; `seriesId` (a person pressing
   // "Fill now") ignores it, because they are asking about this series now -- and ignores `auto_update` as
   // well (v0.49.0): a series whose automatic updates are paused is exactly one whose holes nothing else
@@ -1734,8 +1736,12 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
       'SELECT number::float8 AS number, status FROM series_listing WHERE series_id = $1', [s.id]).catch(() => []);
     const listedNums = new Set(listed.map((x) => Math.floor(Number(x.number))));
     const availNums = new Set(listed.filter((x) => x.status === 'available').map((x) => Math.floor(Number(x.number))));
+    // The sweep's own cap (lib/finishDownloads.ts retryCapFor): with "Finish downloads on their own" on, a refusal is
+    // still being tried until REFUSAL_RETRY_CAP, so it is sweep work here, not a capped number.
     const cappedRows = await q<{ number: number }>(
-      'SELECT number::float8 AS number FROM chapter_failures WHERE series_id = $1 AND attempts >= $2', [s.id, CHAPTER_RETRY_CAP],
+      `SELECT number::float8 AS number FROM chapter_failures
+        WHERE series_id = $1 AND attempts >= CASE WHEN $3 AND status IN ('rate_limited', 'blocked') THEN $4::int ELSE $2::int END`,
+      [s.id, CHAPTER_RETRY_CAP, finishOn, Math.max(CHAPTER_RETRY_CAP, REFUSAL_RETRY_CAP)],
     ).catch(() => []);
     const cappedNums = new Set(cappedRows.map((x) => Math.floor(Number(x.number))));
     const capped = s.gapNums.filter((n) => cappedNums.has(n));
