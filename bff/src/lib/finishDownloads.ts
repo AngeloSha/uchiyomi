@@ -34,6 +34,11 @@ export const FINISH_MINUTES = envInt('FINISH_DOWNLOADS_MINUTES', 15, 5, 24 * 60)
 export const FINISH_PER_SERIES = envInt('FINISH_DOWNLOADS_PER_SERIES', 10, 1, 200);
 /** Download attempts one of those sweeps makes in all, landed and failed (UPDATER_SWEEP_MAX is the full sweep's). */
 export const FINISH_SWEEP_MAX = envInt('FINISH_DOWNLOADS_SWEEP_MAX', 60, 1, 2000);
+/**
+ * v0.81.0: series one of those sweeps works on at once, each on its own image server (lib/updater.ts runUpdateAll), and
+ * never two through the extension engine or two behind the Cloudflare solver. 1 is the old one-at-a-time sweep.
+ */
+export const FINISH_LANES = envInt('FINISH_DOWNLOADS_LANES', 3, 1, 6);
 /** Tries a refused chapter gets before the sweep leaves it alone, with the switch on (a broken one gets three). */
 export const REFUSAL_RETRY_CAP = envInt('FINISH_DOWNLOADS_REFUSAL_CAP', 12, 1, 1000);
 

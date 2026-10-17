@@ -33,8 +33,9 @@ import { numKey } from './postingOrder';
 import { seriesHidesNotices } from './noticeSettings';
 import { heldBy, rangeEnd, rawRangeEnd } from './chapterRanges';
 import { isDue, refreshRadar } from './releaseRadar';
-import { finishDownloadsOn, retryCapFor, BEHIND_SQL, FINISH_MINUTES, clearQuiet, quietWanted } from './finishDownloads';
+import { finishDownloadsOn, retryCapFor, BEHIND_SQL, FINISH_MINUTES, FINISH_LANES, clearQuiet, quietWanted } from './finishDownloads';
 import { requestScout } from './scoutRequests';
+import { rateKeyOf } from './pace';
 
 /**
  * Why a series produced nothing this run.
@@ -1006,85 +1007,158 @@ export async function runUpdateAll(opts: {
   const dated: { id: string; folder: string; chapters: SourceChapter[]; landed: Landed[] }[] = [];
   const newChapters: DigestSeries[] = [];
 
-  sweep: while (queues.size || waiting.size) {
-    let progressed = false;
-    for (const [src, ids] of [...queues]) {
-      if (!ids.length) { queues.delete(src); continue; }
-      if (parked.has(src)) continue;
-      if (runtime.stopping) { stopped = 'shutdown'; break sweep; }
-      if (stopRequested(card)) { stopped = 'cancelled'; break sweep; }
-      // v0.79.0: the finishing sweep gives way between series when another job asked (lib/finishDownloads.ts).
-      if (opts.behindOnly && quietWanted()) { stopped = 'yield'; break sweep; }
-      if (spent >= sweepMax) { stopped = 'budget'; break sweep; }
-      const id = ids.shift()!;
-      progressed = true;
-      // ⚠️ A HELD SERIES WAITS (v0.55.7, #150). Every other writer honours the one busy mark (numbering.ts folderBusy:
-      // bulkNewest's busyFolders, a download running into the folder): Rescan everything's Apply holds each series it
-      // marks, merges or renumbers, a renumber the folder it renames, the slow archive the one it fetches into, a
-      // Fetch newest the series it is in. The sweep never asked, and downloaded into a series an Apply was changing --
-      // chapters chosen by numbers the Apply was about to move. It goes to the back of its queue once; held still when
-      // its turn comes again, it is `skipped`: not asked, not stamped, so the next sweep takes it first. The test and
-      // updateSeries (which counts itself inside the series, runsInside, before its first await) are one turn: a hold
-      // taken after this sees the sweep inside and leaves the series alone (lib/rescan.ts holdSeries).
-      // Reintroduce by dropping the test: "the sweep leaves a held series for later" in updater.int.test.ts finds the
-      // held series listed and its chapter fetched.
-      const folder = folders.get(id);
-      if (folder && folderBusy(folder)) {
-        if (deferred.has(id)) outcomes.skipped++;
-        else { deferred.add(id); ids.push(id); }
-        continue;
+  // The finishing sweep's give-way, as a visit asks it between chapters. A visit it cut short is a sweep that gave way,
+  // said so at the end even when no turn was left to refuse (every lane was already inside its series).
+  let cutByYield = false;
+  const yielded = () => {
+    const y = !!opts.behindOnly && quietWanted();
+    if (y) cutByYield = true;
+    return y;
+  };
+  // One series' visit, start to pause, with `take` chapters to spend at most: what both loops below run for each turn.
+  const visitOne = async (src: string, id: string, take: number): Promise<void> => {
+    visited++;
+    if (card) card.current = { id, title: titles.get(id) ?? '' };
+    // The card's cancel reaches INSIDE the series too: a series with ten new chapters is a few minutes of
+    // downloading, and "Cancel" that waits for all ten reads as "Cancel does nothing".
+    // ...and between chapters: a series with ten chapters to fetch is minutes of downloading.
+    const r = await updateSeries(id, take, { hunt: huntBudget, unattended: true, finish, ...(card ? { cancelled: () => stopRequested(card) || yielded() } : { cancelled: yielded }) })
+      .catch(() => ({ added: 0, outcome: 'threw' as const, failed: 0, landed: [] } as { added: number; outcome: 'threw'; failed: number; folder?: string; chapters?: SourceChapter[]; landed: Landed[]; diskFull?: boolean; switched?: number; partial?: number }));
+    added += r.added;
+    chapterFailures += r.failed ?? 0;
+    capped += (r as { capped?: number }).capped ?? 0;
+    switched += r.switched ?? 0;
+    partial += r.partial ?? 0;
+    spent += r.added + (r.failed ?? 0);
+    outcomes[r.outcome] = (outcomes[r.outcome] ?? 0) + 1;
+    if (r.added && r.folder && r.chapters?.length) dated.push({ id, folder: r.folder, chapters: r.chapters, landed: r.landed });
+    // The throw fallback above has `added: 0` and no title, so it can never reach the digest.
+    if (r.added && (r as { title?: string }).title) newChapters.push({ id, title: (r as { title: string }).title, added: r.added });
+    if (card) { card.done = visited; card.fetched = added; card.failed = chapterFailures; }
+    if (r.diskFull) { stopped = 'disk'; return; }
+    if (r.outcome === 'blocked') {
+      parked.add(src);
+      coolingNow = await coolingSet();
+      const rest = queues.get(src) ?? [];
+      const stay: string[] = [];
+      for (const other of rest) {
+        const to = (routes.get(other) ?? []).find((s) => s !== src && askable(s) && !coolingNow.has(s) && !parked.has(s));
+        if (to) enqueue(to, other);
+        else stay.push(other);
       }
-      visited++;
-      if (card) card.current = { id, title: titles.get(id) ?? '' };
-      // The card's cancel reaches INSIDE the series too: a series with ten new chapters is a few minutes of
-      // downloading, and "Cancel" that waits for all ten reads as "Cancel does nothing".
-      // ...and between chapters: a series with ten chapters to fetch is minutes of downloading.
-      const yielded = () => !!opts.behindOnly && quietWanted();
-      const r = await updateSeries(id, Math.min(opts.maxNew ?? 10, Math.max(1, sweepMax - spent)), { hunt: huntBudget, unattended: true, finish, ...(card ? { cancelled: () => stopRequested(card) || yielded() } : { cancelled: yielded }) })
-        .catch(() => ({ added: 0, outcome: 'threw' as const, failed: 0, landed: [] } as { added: number; outcome: 'threw'; failed: number; folder?: string; chapters?: SourceChapter[]; landed: Landed[]; diskFull?: boolean; switched?: number; partial?: number }));
-      added += r.added;
-      chapterFailures += r.failed ?? 0;
-      capped += (r as { capped?: number }).capped ?? 0;
-      switched += r.switched ?? 0;
-      partial += r.partial ?? 0;
-      spent += r.added + (r.failed ?? 0);
-      outcomes[r.outcome] = (outcomes[r.outcome] ?? 0) + 1;
-      if (r.added && r.folder && r.chapters?.length) dated.push({ id, folder: r.folder, chapters: r.chapters, landed: r.landed });
-      // The throw fallback above has `added: 0` and no title, so it can never reach the digest.
-      if (r.added && (r as { title?: string }).title) newChapters.push({ id, title: (r as { title: string }).title, added: r.added });
-      if (card) { card.done = visited; card.fetched = added; card.failed = chapterFailures; }
-      if (r.diskFull) { stopped = 'disk'; break sweep; }
-      if (r.outcome === 'blocked') {
-        parked.add(src);
-        coolingNow = await coolingSet();
-        const rest = queues.get(src) ?? [];
-        const stay: string[] = [];
-        for (const other of rest) {
-          const to = (routes.get(other) ?? []).find((id) => id !== src && askable(id) && !coolingNow.has(id) && !parked.has(id));
-          if (to) enqueue(to, other);
-          else stay.push(other);
-        }
-        rest.splice(0, rest.length, ...stay);
-      }
-      // The pause is for the sources' sake: a series no source was asked about (gone, unrouted, every source in a
-      // cooldown or switched off) cost them nothing, as bulk Fetch newest already reads it. A throw counts as asked.
-      if ((r as { asked?: boolean }).asked !== false) await new Promise((res) => setTimeout(res, 1500));
+      rest.splice(0, rest.length, ...stay);
     }
-    if (!progressed) {
-      // Only parked queues remain. Ask once whether any cooldown has lapsed; if none has, the sweep is over.
-      let freed = false;
-      for (const src of parked) if (!(await blockedNow(src))) { parked.delete(src); freed = true; }
-      // And a series that had no source to go on at the start takes the first that has come out of its cooldown.
-      if (waiting.size) {
-        coolingNow = await coolingSet();
-        for (const id of [...waiting]) {
-          const to = (routes.get(id) ?? []).find((s) => askable(s) && !coolingNow.has(s) && !parked.has(s));
-          if (to) { waiting.delete(id); enqueue(to, id); freed = true; }
-        }
+    // The pause is for the sources' sake: a series no source was asked about (gone, unrouted, every source in a
+    // cooldown or switched off) cost them nothing, as bulk Fetch newest already reads it. A throw counts as asked.
+    if ((r as { asked?: boolean }).asked !== false) await new Promise((res) => setTimeout(res, 1500));
+  };
+  /** Why the sweep stops before its next turn, if it does: a shutdown, the card's cancel, a yield, the budget. */
+  const stopNow = (reserved: number): SweepStop | undefined => {
+    if (runtime.stopping) return 'shutdown';
+    if (stopRequested(card)) return 'cancelled';
+    // v0.79.0: the finishing sweep gives way between series when another job asked (lib/finishDownloads.ts).
+    if (opts.behindOnly && quietWanted()) return 'yield';
+    if (spent + reserved >= sweepMax) return 'budget';
+    return undefined;
+  };
+  // ⚠️ A HELD SERIES WAITS (v0.55.7, #150). Every other writer honours the one busy mark (numbering.ts folderBusy:
+  // bulkNewest's busyFolders, a download running into the folder): Rescan everything's Apply holds each series it
+  // marks, merges or renumbers, a renumber the folder it renames, the slow archive the one it fetches into, a
+  // Fetch newest the series it is in. The sweep never asked, and downloaded into a series an Apply was changing --
+  // chapters chosen by numbers the Apply was about to move. It goes to the back of its queue once; held still when
+  // its turn comes again, it is `skipped`: not asked, not stamped, so the next sweep takes it first. The test and
+  // updateSeries (which counts itself inside the series, runsInside, before its first await) are one turn: a hold
+  // taken after this sees the sweep inside and leaves the series alone (lib/rescan.ts holdSeries).
+  // Reintroduce by dropping the test: "the sweep leaves a held series for later" in updater.int.test.ts finds the
+  // held series listed and its chapter fetched.
+  const heldNow = (id: string, ids: string[]): boolean => {
+    const folder = folders.get(id);
+    if (!folder || !folderBusy(folder)) return false;
+    if (deferred.has(id)) outcomes.skipped++;
+    else { deferred.add(id); ids.push(id); }
+    return true;
+  };
+  /**
+   * Only parked queues and waiting series remain, and nothing is running: ask once whether any cooldown has lapsed, and
+   * give a waiting series the first source on its route that has come out of its own. False: the sweep is over.
+   */
+  const freeSome = async (): Promise<boolean> => {
+    let freed = false;
+    for (const src of parked) if (!(await blockedNow(src))) { parked.delete(src); freed = true; }
+    // And a series that had no source to go on at the start takes the first that has come out of its cooldown.
+    if (waiting.size) {
+      coolingNow = await coolingSet();
+      for (const id of [...waiting]) {
+        const to = (routes.get(id) ?? []).find((s) => askable(s) && !coolingNow.has(s) && !parked.has(s));
+        if (to) { waiting.delete(id); enqueue(to, id); freed = true; }
       }
-      if (!freed) break;
     }
+    return freed;
+  };
+
+  // v0.81.0: the finishing sweep works on up to FINISH_LANES series at once (lib/finishDownloads.ts), each on its own
+  // image server (pace.ts rateKeyOf of the source its queue is asked through), never two through the extension engine
+  // and never two behind the Cloudflare solver: one site's slow chapters no longer hold up the series on every other
+  // site. Each lane reserves the chapters it may spend before it starts, so the budget holds across lanes; a stop
+  // (shutdown, cancel, yield, the budget, a full disk) starts nothing more, and the lanes already running stop between
+  // chapters through `cancelled`. Every other sweep -- the scheduled one, Run now, the repair's -- stays one series at
+  // a time. Reintroduce by running the finishing sweep one lane wide: "two series on two image servers finish side by
+  // side" in finishLanes.int.test.ts sees a peak of one.
+  const lanes = opts.behindOnly ? FINISH_LANES : 1;
+  if (lanes <= 1) {
+    sweep: while (queues.size || waiting.size) {
+      let progressed = false;
+      for (const [src, ids] of [...queues]) {
+        if (!ids.length) { queues.delete(src); continue; }
+        if (parked.has(src)) continue;
+        const why = stopNow(0);
+        if (why) { stopped = why; break sweep; }
+        const id = ids.shift()!;
+        progressed = true;
+        if (heldNow(id, ids)) continue;
+        await visitOne(src, id, Math.min(opts.maxNew ?? 10, Math.max(1, sweepMax - spent)));
+        if (stopped) break sweep;
+      }
+      if (!progressed && !(await freeSome())) break;
+    }
+  } else {
+    /** The visits running now, by image server. */
+    const running = new Map<string, { engine: boolean; solver: boolean; done: Promise<void> }>();
+    let reserved = 0;
+    const kindOf = (src: string) => ({ engine: src.startsWith('sw:'), solver: !!getSource(src)?.requiresCloudflare });
+    sweep: while (true) {
+      let started = false;
+      for (const [src, ids] of [...queues]) {
+        if (running.size >= lanes) break;
+        if (!ids.length) { queues.delete(src); continue; }
+        if (parked.has(src)) continue;
+        const key = rateKeyOf(src);
+        if (running.has(key)) continue;
+        const kind = kindOf(src);
+        const busy = [...running.values()];
+        if ((kind.engine && busy.some((l) => l.engine)) || (kind.solver && busy.some((l) => l.solver))) continue;
+        const why = stopNow(reserved);
+        if (why) { stopped = why; break sweep; }
+        const id = ids.shift()!;
+        if (heldNow(id, ids)) { started = true; continue; }
+        const take = Math.max(1, Math.min(opts.maxNew ?? 10, sweepMax - spent - reserved));
+        reserved += take;
+        started = true;
+        const lane = { ...kind, done: Promise.resolve() };
+        lane.done = visitOne(src, id, take).finally(() => { reserved -= take; running.delete(key); });
+        running.set(key, lane);
+        // Round the queues: this one goes last, so a lane that frees is offered to the other image servers first.
+        queues.delete(src);
+        queues.set(src, ids);
+      }
+      if (stopped) break;
+      if (running.size) { await Promise.race([...running.values()].map((l) => l.done)); continue; }
+      if (!started && !(await freeSome())) break;
+    }
+    // What is running when the sweep stops finishes its chapter (it stops between chapters on a cancel or a yield).
+    await Promise.all([...running.values()].map((l) => l.done));
   }
+  if (!stopped && cutByYield) stopped = 'yield';
   for (const ids of queues.values()) outcomes.skipped += ids.length;
   // Never asked, because every source it could be asked through was cooling the whole sweep long: blocked, as the
   // visit itself would have said, not "skipped" -- nothing was left over for lack of time. v0.80.0: and put forward
