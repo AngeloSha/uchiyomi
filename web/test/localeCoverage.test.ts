@@ -223,6 +223,8 @@ function otherHalf(all: readonly string[], k: string, at: number, one: boolean):
 /** Pairs English inflects around the count as well as after it, named explicitly: singular → plural. */
 const IRREGULAR_PAIRS: Record<string, string> = {
   '1 is not listed yet and comes with the next check.': '{m} are not listed yet and come with the next check.',
+  // v0.79.0, Find missing's chapters left to Finish downloads on their own: the verb and two pronouns agree.
+  '1 will download on its own when its site is ready.': '{m} will download on their own when their site is ready.',
   '1 chapter behind': '{n} chapters behind in 1 series',
   '{n} chapters behind in 1 series': '{n} chapters behind across {m} series',
   'Ch. {n} · 1 older chapter not here yet': 'Ch. {a}–{b} · {n} older chapters not here yet',
