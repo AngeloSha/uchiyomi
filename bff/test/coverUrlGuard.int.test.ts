@@ -142,7 +142,9 @@ test('the upstream status is never reflected to the caller', { skip }, async () 
     'the cover fetch must not hand the caller the upstream status');
   assert.match(src, /statusCode:\s*502/, 'a failed upstream fetch should answer a flat 502');
   // And redirects must be walked by hand, or a public URL can bounce into the private range unchecked.
-  assert.match(src, /redirect:\s*'manual'/, "the cover fetch must not let fetch() follow redirects itself");
+  const transport = await readFile(new URL('../src/lib/publicConnection.ts', import.meta.url), 'utf8');
+  assert.match(src, /fetchPublicHop\(/, 'cover requests must use the guarded transport');
+  assert.match(transport, /redirect:\s*'manual'/, "the cover fetch must not let fetch() follow redirects itself");
 });
 
 test('fetchableCoverUrl accepts http(s) and nothing else', { skip }, async () => {
