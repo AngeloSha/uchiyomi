@@ -15,6 +15,8 @@ There are two ways in, and for scripts you want the second one.
 **Session tokens** are what the web app uses: `POST /auth/login` returns a JWT that expires after 15 minutes,
 refreshed with a rotating cookie. Fine for a browser, miserable for a cron job.
 
+Unknown usernames, disabled or locked accounts, and wrong passwords return the same **401** `{ "error": "invalid_credentials" }` before a password has been accepted. Clients should not use the public password response to determine account state. Successful password sign-in and its second-factor challenge keep their existing behavior.
+
 **API tokens** are long-lived, revocable, and scoped. Create one under **Profile → Connections → API tokens → New token** (the form opens inline).
 The token is shown once, so copy it then. It looks like `uy_` followed by random characters.
 
