@@ -34,6 +34,6 @@ test('pre-password account states have uniform refusals and verification work',{
   for(let i=0;i<35;i++){await q('UPDATE users SET failed_logins=0,locked_until=null WHERE id=$1',[member]);for(const name of rng()<0.5?['member','missing']:['missing','member']){const start=performance.now(),r=await login(name,'wrong',`198.51.100.${i+1}`);assert.equal(r.statusCode,401);if(i>=5)samples[name as 'member'|'missing'].push(performance.now()-start);}}
   const median=(a:number[])=>[...a].sort((a,b)=>a-b)[a.length>>1];t.diagnostic(`30 randomized pairs after 5 warmups: existing ${median(samples.member).toFixed(3)} ms, missing ${median(samples.missing).toFixed(3)} ms. Local observations, not a remote timing proof.`);
   assert.equal((await login('member')).statusCode,200);
- 
+
  }finally{globalThis.fetch=nativeFetch;await app.close();await q('DELETE FROM audit_log WHERE user_id=ANY($1::uuid[]) OR username LIKE $2',[ids,prefix+'%']);await q('DELETE FROM users WHERE id=ANY($1::uuid[])',[ids]);await pool.end();}
 });
