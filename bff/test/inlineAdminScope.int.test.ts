@@ -25,6 +25,7 @@ test('inline administration intersects account role and API-token scope',{skip:!
  const nativeFetch=globalThis.fetch;
  globalThis.fetch=(async()=>{throw Error('No external fetch permitted');}) as typeof fetch;
 
+ try{
  const runs=await import('../src/lib/downloadJobs');let sid:string|undefined,lib:string|undefined;
  try{
   const admin=await account('admin','admin'),owner=await account('owner'),other=await account('other');
@@ -44,7 +45,6 @@ test('inline administration intersects account role and API-token scope',{skip:!
   assert.equal((await remove(ops)).statusCode,200);
   await q(`INSERT INTO archive_queue(series_id,state,added_by) VALUES ($1,'done',$2)`,[sid,owner]);assert.equal((await remove(own)).statusCode,200);
  }finally{runs.clearRuns();if(sid)await q('DELETE FROM lib_series WHERE id=$1',[sid]);if(lib)await q('DELETE FROM libraries WHERE id=$1',[lib]);}
- try{
  
  }finally{globalThis.fetch=nativeFetch;await app.close();await q('DELETE FROM audit_log WHERE user_id=ANY($1::uuid[]) OR username LIKE $2',[ids,prefix+'%']);await q('DELETE FROM users WHERE id=ANY($1::uuid[])',[ids]);await pool.end();}
 });
