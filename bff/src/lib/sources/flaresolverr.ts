@@ -125,6 +125,9 @@ function release(): void {
   waiting.shift()?.go();
 }
 
+/** v0.80.0: whether solves are queueing for a browser now. The scout leaves a source behind the solver for later then. */
+export const solverQueueing = (): boolean => waiting.length > 0;
+
 /** Tests only: how many solves are running and waiting. */
 export const _solverQueue = () => ({ inFlight, waiting: waiting.length });
 

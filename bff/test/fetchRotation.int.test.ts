@@ -340,6 +340,10 @@ test('a Fetch while the main cools takes the follower\'s copy, and hands main-on
   assert.deepEqual(servedBy('fcool', [1, 2, 3]), [BETA, BETA, BETA], 'the rest came from the follower');
   const row = (await q('SELECT source_checked_at FROM lib_series WHERE id = $1', [s.id]))[0];
   assert.equal(row.source_checked_at, null, 'first in the finishing sweep\'s line');
+  // v0.80.0: and the scout looks for 4 and 5 on other sources meanwhile (lib/sourceScout.ts).
+  const ask = (await q('SELECT reason, numbers FROM series_scout WHERE series_id = $1', [s.id]))[0];
+  assert.equal(ask?.reason, 'refused', 'put forward for the scout');
+  assert.deepEqual(ask.numbers.map(Number), [4, 5]);
 });
 
 test('a Fetch job every source refuses hands the rest on', { skip }, async () => {
@@ -354,4 +358,8 @@ test('a Fetch job every source refuses hands the rest on', { skip }, async () =>
   assert.match(job.reason ?? '', /The rest will download on their own/, 'the card says what happens next');
   const row = (await q('SELECT source_checked_at FROM lib_series WHERE id = $1', [s.id]))[0];
   assert.equal(row.source_checked_at, null, 'and the series is first in the finishing sweep\'s line');
+  // v0.80.0: and put forward for the scout, with what did not land (lib/sourceScout.ts).
+  const ask = (await q('SELECT reason, numbers FROM series_scout WHERE series_id = $1', [s.id]))[0];
+  assert.equal(ask?.reason, 'refused', 'put forward for the scout');
+  assert.ok(ask.numbers.length >= 1, JSON.stringify(ask));
 });

@@ -1054,8 +1054,6 @@
   "took chapter {n} from {to}": "Kapitel {n} von {to} genommen",
   "1 chapter saved with pages missing": "1 Kapitel mit fehlenden Seiten gespeichert",
   "{n} chapters saved with pages missing": "{n} Kapitel mit fehlenden Seiten gespeichert",
-  "Look for failed chapters on other sources": "Fehlgeschlagene Kapitel bei anderen Quellen suchen",
-  "When a chapter cannot be saved from the sources this series follows, search the others once a day and follow the one that has it": "Wenn ein Kapitel aus den Quellen, denen diese Serie folgt, nicht gespeichert werden kann, werden einmal am Tag die anderen durchsucht und die verfolgt, die es hat",
   "Fix": "Beheben",
   "Fix all": "Alle beheben",
   "It’s fine": "Ist in Ordnung",
@@ -4043,5 +4041,7 @@
   "While \"Finish downloads on their own\" is on, a chapter a site refused (a rate limit or a block) is tried up to {cap} times.": "Solange „Downloads von selbst abschließen“ an ist, wird ein Kapitel, das eine Seite abgelehnt hat (wegen Drosselung oder einer Sperre), bis zu {cap}-mal versucht.",
   "1 will download on its own when its site is ready.": "1 wird von selbst heruntergeladen, sobald die Seite bereit ist.",
   "{m} will download on their own when their site is ready.": "{m} werden von selbst heruntergeladen, sobald die Seite bereit ist.",
-  "Its site is busy right now. These chapters will download on their own when it is ready.": "Die Seite ist gerade ausgelastet. Diese Kapitel werden von selbst heruntergeladen, sobald sie bereit ist."
+  "Its site is busy right now. These chapters will download on their own when it is ready.": "Die Seite ist gerade ausgelastet. Diese Kapitel werden von selbst heruntergeladen, sobald sie bereit ist.",
+  "Use other sources on their own": "Andere Quellen von selbst nutzen",
+  "When the sources a series follows cannot get its chapters (a rate limit, a block, a broken chapter), look for it on the other installed sources and follow one that has them": "Wenn die Quellen, denen eine Serie folgt, ihre Kapitel nicht liefern können (ein Ratenlimit, eine Sperre, ein defektes Kapitel), wird sie bei den anderen installierten Quellen gesucht und einer gefolgt, die sie hat"
 }

@@ -45,6 +45,8 @@ import { followGuard, seriesLanguage } from './seriesLang';
 import { aliasParts, partRulesApply, type HeldPart } from './partAlias';
 import { numKey } from './postingOrder';
 import { heldBooks } from './chapterCleanup';
+import { notCarrying } from './sourceStanding';
+import { sourcesToSkip, recordVerdict } from './scoutMemory';
 
 /** How long after one hunt a series may be hunted for again, whatever became of the first. */
 export const HUNT_COOLDOWN_MS = 24 * 3600_000;
@@ -160,7 +162,10 @@ async function huntOn(): Promise<boolean> {
   return row?.on !== false;
 }
 
-export type HuntReason = 'failed_chapter' | 'short_chapter' | 'gap';
+export type HuntReason = 'failed_chapter' | 'short_chapter' | 'gap' | 'scout';
+
+/** v0.80.0: a series the scout (lib/sourceScout.ts) looked at less than this long ago is not hunted for: it just was. */
+export const HUNT_AFTER_SCOUT_MS = 3600_000;
 
 export interface HuntOpts {
   /** Which sources may be reached on this series' behalf (sweepAllowedFor, or a viewer's own cap). */
@@ -235,14 +240,28 @@ export async function huntCandidates(
   if (s.numbering === 'posting_order') return none('posting_order');
   const now = opts.now ?? Date.now();
   if (!opts.force && s.source_hunt_at && now - new Date(s.source_hunt_at).getTime() < HUNT_COOLDOWN_MS) return none('cooldown');
+  // v0.80.0: the scout looked for this series within the hour -- it asked more sources than a hunt would, and what they
+  // said is remembered (lib/scoutMemory.ts). Reintroduce by dropping it: "a series the scout just looked at is not
+  // hunted for" in sourceScout.int.test.ts finds a search.
+  if (!opts.force) {
+    const scouted = await one<{ at: string | null }>('SELECT last_at AS at FROM series_scout WHERE series_id = $1', [seriesId]).catch(() => null);
+    if (scouted?.at && Date.now() - new Date(scouted.at).getTime() < HUNT_AFTER_SCOUT_MS) return none('cooldown');
+  }
 
   const followers = (await q<{ source_id: string }>('SELECT source_id FROM series_sources WHERE series_id = $1', [seriesId]).catch(() => []))
     .map((r) => r.source_id);
-  // The same count followJudged applies under its lock; checked here so a capped series costs no search.
-  if (followers.filter((id) => id !== s.source_id).length >= MAX_FOLLOWERS) return none('cap');
+  // The same count followHunted applies under its lock; checked here so a capped series costs no search. A follower
+  // that cannot carry the series now (v0.80.0: failing, switched off, not loaded) is not counted.
+  const notCounted = new Set(await notCarrying(followers).catch(() => [] as string[]));
+  if (followers.filter((id) => id !== s.source_id && !notCounted.has(id)).length >= MAX_FOLLOWERS) return none('cap');
   const numbers = (await q<{ number: number }>('SELECT DISTINCT number FROM series_listing WHERE series_id = $1', [seriesId]).catch(() => []))
     .map((r) => Number(r.number)).filter((n) => Number.isFinite(n));
   if (numbers.length < MIN_HAVE) return none('no_candidate');
+  // What sources already said about this series (v0.80.0, lib/scoutMemory.ts): one that said "not this series" lately,
+  // or that an admin unfollowed from it, is not searched again. Shared with the scout and the nightly repair.
+  // Reintroduce by searching them anyway: "the hunt skips a source that already said no" in sourceScout.int.test.ts
+  // counts a search.
+  const saidNo = await sourcesToSkip(seriesId, numbers.length).catch(() => new Set<string>());
 
   // ⚠️ Stamped BEFORE the search and charged to the budget BEFORE the search: whatever happens from here
   // on -- a crash, a wall, six sources that all say no -- this series is not searched for again today.
@@ -277,7 +296,7 @@ export async function huntCandidates(
   const candidates = scanOrder(listSources().filter((src) => opts.allowed(src.id)), { id: s.source_id ?? '', lang: lang.lang })
     .filter(fits)
     .filter((id) => {
-      if (followed.has(id)) return false;
+      if (followed.has(id) || saidNo.has(id)) return false;
       const h = health.get(id);
       if (h?.disabled) return false;
       if (h?.blocked_until && new Date(h.blocked_until).getTime() > now) return false;
@@ -311,6 +330,7 @@ export async function huntCandidates(
       if (searched.paused) { stopped = true; return; }
       const { hit } = searched;
       if (hit?.sourceId) hits[i] = { source: id, sourceId: hit.sourceId };
+      else if (searched.answered) void recordVerdict(seriesId, id, 'no_hit', { ourCount: numbers.length });
     } catch { /* not this series' problem */ } finally { releaseHuntSlot(); }
   }));
   if (stopped || !(await admitted())) return paused();
@@ -327,11 +347,23 @@ export async function huntCandidates(
     if (!(await admitted())) return paused();
     const j = await bounded(judgeCandidate(primary, hit, { prefs, health, admit: opts.admit }), left).catch(() => null);
     if (!(await admitted())) return paused();
+    if (j) await rememberJudgement(seriesId, j, numbers.length);
     if (!j || j.why !== 'ok') continue;
     if (opts.wants(j, prefs)) return { chosen: j, fallback, why: 'followed', title };
     fallback ??= j;
   }
   return { chosen: null, fallback, why: 'no_candidate', title };
+}
+
+/**
+ * What a judgement says about a source for this series, kept for the scout and the next hunt (v0.80.0,
+ * lib/scoutMemory.ts). `unavailable` and `too_few_listed` say nothing about the source: not kept.
+ */
+export async function rememberJudgement(seriesId: string, j: Judgement, ourCount: number): Promise<void> {
+  if (j.why === 'unavailable' || j.why === 'too_few_listed' || j.why === 'posting_order') return;
+  await recordVerdict(seriesId, j.source, j.why, {
+    theirTitle: j.theirTitle, sourceSeriesId: j.sourceSeriesId, coverage: j.coverage, ourCount,
+  });
 }
 
 /**
@@ -355,7 +387,11 @@ export async function followHunted(
   if (admit && !(await admit().catch(() => false))) {
     throw Object.assign(new Error(`"${title}": automatic follow was paused`), { why: 'no_candidate' });
   }
-  const written = await followJudged(seriesId, j).catch(() => 'gone' as const);
+  // A follower that cannot carry the series now does not count toward its limit (v0.80.0): kept, and not counted.
+  const followers = (await q<{ source_id: string }>('SELECT source_id FROM series_sources WHERE series_id = $1', [seriesId]).catch(() => []))
+    .map((r) => r.source_id);
+  const notCounted = await notCarrying(followers).catch(() => [] as string[]);
+  const written = await followJudged(seriesId, j, { notCounted }).catch(() => 'gone' as const);
   if (written !== 'inserted') {
     throw Object.assign(new Error(`"${title}": could not follow ${j.source} (${written})`), { why: written === 'cap' ? 'cap' : 'no_candidate' });
   }

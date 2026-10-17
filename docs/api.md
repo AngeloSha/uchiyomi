@@ -328,7 +328,7 @@ must agree **both ways** — at least 90% of the primary's numbers listed by the
 of the candidate's listed by the primary — else `numbering_differs`, so a sequel that continues past the
 primary ("Tokyo Ghoul:re" 1..60 for "Tokyo Ghoul" 1..20) is refused although it lists every number, while
 "(Official)" 1..22 for 1..20 (20 of 22 = 0.91) follows. The `coverage` reported for a two-way judgement is
-the lower of the two shares. At most `MAX_FOLLOWED_SOURCES` (default two) sources are followed per series, in the order
+the lower of the two shares. At most `MAX_FOLLOWED_SOURCES` (default three since v0.80.0) sources are followed per series, in the order
 given; a follower this path wrote has no author and reads `auto: true` on the series' sources. The results are not in the
 add's answer: they land on the series' job card (below), which a `none` add gets minted for the purpose.
 
@@ -1841,8 +1841,11 @@ they are manual actions; clients should say that those actions may contact AniLi
 `repair_enabled`, `source_prefs`, `group_upgrade`, `borrow_names`, `mangadex_langs`, `unstated_lang`,
 `deleted_as_ghosts`, `update_smart` (since v0.61.0), `backup_enabled` and `backup_keep` (since v0.61.1),
 `newMemberDefaults` (below), plus `extensions_configured` and `mangadex_available` (computed). `auto_follow_on_failure` defaults to true and
-controls the bounded once-per-series-per-day source hunt after an ordinary scheduled-download failure; it
-never makes an interactive Add/Fetch hunt and never runs after a refusal. `PATCH
+controls the bounded once-per-series-per-day source hunt after an ordinary scheduled-download failure, and (since
+v0.80.0) the scout: in the background, a series whose sources cannot get its chapters -- cooling, refusing, broken, or
+chapters at their retry cap, whoever started the download -- is looked for on the other installed sources, within
+`SCOUT_SEARCHES_PER_HOUR`, and one that has them is followed (never made the main source). An interactive Add or Fetch
+still never hunts while it runs. `PATCH
 /api/admin/settings` takes any subset of `serverName` (1–64 chars), `allowRegistration`, `updaterHours`
 (1–168), `extensionHours` (1–168), `extensionAutoUpdate`, `updateCheck`, `installPing`, `cleanupRead`,
 `cleanupReadDays` (0–3650; 0 is a value, "at the next run"), `backupHour` (0–23, the local hour of the nightly

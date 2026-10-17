@@ -1054,8 +1054,6 @@
   "took chapter {n} from {to}": "глава {n} взята с {to}",
   "1 chapter saved with pages missing": "1 глава сохранена с недостающими страницами",
   "{n} chapters saved with pages missing": "Глав сохранено с недостающими страницами: {n}",
-  "Look for failed chapters on other sources": "Искать неудавшиеся главы в других источниках",
-  "When a chapter cannot be saved from the sources this series follows, search the others once a day and follow the one that has it": "Если главу не удаётся сохранить из источников, за которыми следит эта серия, раз в день искать её в остальных и начать следить за тем, где она есть",
   "Fix": "Исправить",
   "Fix all": "Исправить все",
   "It’s fine": "Всё в порядке",
@@ -4043,5 +4041,7 @@
   "While \"Finish downloads on their own\" is on, a chapter a site refused (a rate limit or a block) is tried up to {cap} times.": "Пока включено «Завершать загрузки автоматически», главу, которую сайт отказался отдать (ограничение частоты или блокировка), пробуют загрузить до {cap} раз.",
   "1 will download on its own when its site is ready.": "Ещё 1 загрузится сама, когда сайт будет готов.",
   "{m} will download on their own when their site is ready.": "Ещё {m} загрузятся сами, когда сайт будет готов.",
-  "Its site is busy right now. These chapters will download on their own when it is ready.": "Сайт сейчас занят. Эти главы загрузятся сами, когда он будет готов."
+  "Its site is busy right now. These chapters will download on their own when it is ready.": "Сайт сейчас занят. Эти главы загрузятся сами, когда он будет готов.",
+  "Use other sources on their own": "Использовать другие источники автоматически",
+  "When the sources a series follows cannot get its chapters (a rate limit, a block, a broken chapter), look for it on the other installed sources and follow one that has them": "Если источники, за которыми следит серия, не могут получить её главы (ограничение запросов, блокировка, сломанная глава), искать её в других установленных источниках и начать следить за тем, где они есть"
 }

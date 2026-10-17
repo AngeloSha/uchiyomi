@@ -66,6 +66,8 @@ export const DESKTOP_FLOORS = Object.freeze({
   autoHero: 10 * 60 * 1000,
   // The sweep of the series still behind their sources (lib/finishDownloads.ts), just after the full sweep's own floor.
   finishDownloads: 3 * 60 * 1000,
+  // The scout (lib/sourceScout.ts), after the finishing sweep has had its first go.
+  scout: 5 * 60 * 1000,
 });
 export type DesktopFloor = keyof typeof DESKTOP_FLOORS;
 

@@ -87,6 +87,16 @@ export async function standingRows(ids: readonly string[]): Promise<Map<string, 
   return new Map(rows.map((r) => [r.source_id, r]));
 }
 
+/**
+ * v0.80.0: which of these sources cannot carry a series now -- failing, switched off or not loaded (`carries` is false).
+ * A follower like that does not count toward a series' follower limit for the automatic follows (lib/sourceHunt.ts
+ * followHunted, lib/sourceScout.ts): it is kept, never deleted, and the series may still follow a working one.
+ */
+export async function notCarrying(ids: readonly string[], now = Date.now()): Promise<string[]> {
+  const st = await standingsOf(ids, now);
+  return [...st].filter(([, s]) => !carries(s)).map(([id]) => id);
+}
+
 /** Each id's standing, read in one query. */
 export async function standingsOf(ids: readonly string[], now = Date.now()): Promise<Map<string, Standing>> {
   const rows = await standingRows(ids);

@@ -1054,8 +1054,6 @@
   "took chapter {n} from {to}": "chapitre {n} pris depuis {to}",
   "1 chapter saved with pages missing": "1 chapitre enregistré avec des pages manquantes",
   "{n} chapters saved with pages missing": "{n} chapitres enregistrés avec des pages manquantes",
-  "Look for failed chapters on other sources": "Chercher les chapitres en échec sur d'autres sources",
-  "When a chapter cannot be saved from the sources this series follows, search the others once a day and follow the one that has it": "Quand un chapitre ne peut pas être enregistré depuis les sources suivies par cette série, cherche une fois par jour parmi les autres et suit celle qui l'a",
   "Fix": "Corriger",
   "Fix all": "Tout corriger",
   "It’s fine": "C’est normal",
@@ -4043,5 +4041,7 @@
   "While \"Finish downloads on their own\" is on, a chapter a site refused (a rate limit or a block) is tried up to {cap} times.": "Tant que « Terminer les téléchargements tout seul » est activé, un chapitre refusé par un site (limite de débit ou blocage) est tenté jusqu’à {cap} fois.",
   "1 will download on its own when its site is ready.": "1 se téléchargera tout seul quand son site sera prêt.",
   "{m} will download on their own when their site is ready.": "{m} se téléchargeront tout seuls quand leur site sera prêt.",
-  "Its site is busy right now. These chapters will download on their own when it is ready.": "Son site est occupé pour le moment. Ces chapitres se téléchargeront tout seuls quand il sera prêt."
+  "Its site is busy right now. These chapters will download on their own when it is ready.": "Son site est occupé pour le moment. Ces chapitres se téléchargeront tout seuls quand il sera prêt.",
+  "Use other sources on their own": "Utiliser d’autres sources tout seul",
+  "When the sources a series follows cannot get its chapters (a rate limit, a block, a broken chapter), look for it on the other installed sources and follow one that has them": "Quand les sources suivies par une série ne peuvent pas obtenir ses chapitres (une limite de requêtes, un blocage, un chapitre cassé), la cherche parmi les autres sources installées et suit celle qui les a"
 }

@@ -1,13 +1,15 @@
-// MAX_FOLLOWED_SOURCES: how many other sources a series may follow. Two stays the default; an operator may raise it to 20.
+// MAX_FOLLOWED_SOURCES: how many other sources a series may follow. Three by default since v0.80.0 (two before), when the
+// scout began following sources on its own; an operator may set 1 to 6.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { followLimit } from '../src/lib/followLimit';
 
-test('two unless the operator says otherwise', () => {
-  assert.equal(followLimit(undefined), 2);
-  assert.equal(followLimit(''), 2);
-  assert.equal(followLimit('not a number'), 2);
-  assert.equal(followLimit('0'), 2, '0 is not a limit, it is nothing set');
+test('three unless the operator says otherwise', () => {
+  assert.equal(followLimit(undefined), 3);
+  assert.equal(followLimit(''), 3);
+  assert.equal(followLimit('not a number'), 3);
+  assert.equal(followLimit('0'), 3, '0 is not a limit, it is nothing set');
+  assert.equal(followLimit('2'), 2, 'the old default, set on purpose');
 });
 
 test('a number is taken whole, between 1 and 6', () => {

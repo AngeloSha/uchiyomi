@@ -361,6 +361,11 @@ test('an add whose source is cooling keeps the series, and so does one whose pag
     assert.ok(row1, 'the series is kept although its source was cooling');
     assert.equal(row1.source_checked_at, null);
     assert.equal(Number(row1.source_missing), 3);
+    // v0.80.0: and the scout looks for it on the other sources meanwhile (lib/sourceScout.ts). Reintroduce by dropping
+    // the request after keepForLater (routes/sources.ts): no row.
+    const ask = (await q('SELECT reason, priority FROM series_scout WHERE series_id = $1', [row1.id]))[0];
+    assert.equal(ask?.reason, 'refused');
+    assert.equal(ask?.priority, 3, 'before anything the sweep put forward');
     // The page list refused (v0.79.0, lib/downloader.ts): a refusal like an image's. Reintroduce by rethrowing the page
     // list's error bare: no blockStatus, 422, no row.
     const r2 = await addSeriesFromSource({ source: PLREF, sourceId: `${PLREF}-1`, wait: false });

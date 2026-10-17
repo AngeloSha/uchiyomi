@@ -471,11 +471,12 @@ function SchedulesSection({ data, save }: { data: any; save: Save }) {
             onSave={(n) => save({ extensionHours: n })} />
         </>
       )}
-      {/* v0.40.0: the sweep's hunt for a chapter none of the followed sources could serve. ON by default,
+      {/* v0.40.0: the sweep's hunt for a chapter none of the followed sources could serve; since v0.80.0 the scout too
+          (bff lib/sourceScout.ts), which looks for a series whose sources cannot get its chapters. ON by default,
           which `!== false` reads as: a server that does not send the key yet is a server that hunts. It sits
           outside the extensions block because the hunt asks every registered source, engine or not. */}
-      <SwitchRow label={tr('Look for failed chapters on other sources')}
-        help={tr('When a chapter cannot be saved from the sources this series follows, search the others once a day and follow the one that has it')}
+      <SwitchRow label={tr('Use other sources on their own')}
+        help={tr('When the sources a series follows cannot get its chapters (a rate limit, a block, a broken chapter), look for it on the other installed sources and follow one that has them')}
         on={data.auto_follow_on_failure !== false} onChange={(next) => save({ autoFollowOnFailure: next })} />
       {/* Downloads that finish on their own (bff lib/finishDownloads.ts). ON by default (`finish_downloads NOT NULL DEFAULT
           true`), which `!== false` reads as: a server that does not send the key yet finishes them. */}

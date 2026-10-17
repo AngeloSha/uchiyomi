@@ -170,10 +170,11 @@ test('Admin → Settings has exactly one switch for the hunt, under Updates & sc
   const src = code(read('components/AdminSettings.tsx'));
   assert.equal((src.match(/autoFollowOnFailure/g) ?? []).length, 1, 'the hunt switch is saved from more or fewer than one place');
   const section = between(src, 'function SchedulesSection(', 'function HousekeepingSection(', 'SchedulesSection');
-  assert.match(section, /<SwitchRow label=\{tr\('Look for failed chapters on other sources'\)\}\s*help=\{tr\('When a chapter cannot be saved from the sources this series follows, search the others once a day and follow the one that has it'\)\}\s*on=\{data\.auto_follow_on_failure !== false\} onChange=\{\(next\) => save\(\{ autoFollowOnFailure: next \}\)\} \/>/, 'the hunt switch is not the one SwitchRow with these words, or is not on by default');
+  // v0.80.0: relabelled for the scout, which uses the same switch (bff lib/sourceScout.ts).
+  assert.match(section, /<SwitchRow label=\{tr\('Use other sources on their own'\)\}\s*help=\{tr\('When the sources a series follows cannot get its chapters \(a rate limit, a block, a broken chapter\), look for it on the other installed sources and follow one that has them'\)\}\s*on=\{data\.auto_follow_on_failure !== false\} onChange=\{\(next\) => save\(\{ autoFollowOnFailure: next \}\)\} \/>/, 'the hunt switch is not the one SwitchRow with these words, or is not on by default');
   // After the extensions block, not inside it: an install without an engine still hunts.
   const ext = section.indexOf('data.extensions_configured && (');
-  const sw = section.indexOf("tr('Look for failed chapters on other sources')");
+  const sw = section.indexOf("tr('Use other sources on their own')");
   const extEnd = section.indexOf('</>\n      )}', ext);
   assert.ok(ext > 0 && extEnd > ext && sw > extEnd, 'the hunt switch is inside the extensions block, so an install without an engine cannot see it');
 });

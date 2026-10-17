@@ -1847,6 +1847,41 @@ ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS finish_missing integer;
 -- source's cooldown end, or a quarter of an hour on (lib/updater.ts staleUntil). NULL when it is not waiting on one.
 -- Additive: v0.78.x ignores it.
 ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS finish_after timestamptz;
+
+-- v0.80.0, the scout (lib/sourceScout.ts): a series whose sources cannot get it its chapters -- every one cooling,
+-- refusing or broken for the numbers it lacks -- is looked for on the other installed sources, and a source that is
+-- this series and lists what it lacks is followed on its own. series_scout is the series' request: why, which numbers,
+-- which sources to try first, and when it may be looked at again (the backoff). Written by a cheap upsert wherever a
+-- series gets stuck (lib/scoutRequests.ts); the worker decides what, if anything, to search. Additive: v0.79.x ignores
+-- it.
+CREATE TABLE IF NOT EXISTS series_scout (
+  series_id  text PRIMARY KEY REFERENCES lib_series(id) ON DELETE CASCADE,
+  reason     text NOT NULL,
+  numbers    real[] NOT NULL DEFAULT '{}',
+  seeds      text[] NOT NULL DEFAULT '{}',
+  priority   int NOT NULL DEFAULT 0,
+  asked_at   timestamptz NOT NULL DEFAULT now(),
+  next_at    timestamptz NOT NULL DEFAULT now(),
+  last_at    timestamptz,
+  fruitless  int NOT NULL DEFAULT 0,
+  verdict    text,
+  detail     jsonb
+);
+CREATE INDEX IF NOT EXISTS idx_series_scout_next ON series_scout (next_at);
+-- What each source said when the server looked for a series on it (lib/scoutMemory.ts): one row per series and
+-- source, kept for a while so a source that said no is not asked again every day. 'removed': an admin unfollowed it,
+-- and nothing automatic follows it again for that series. Additive: v0.79.x ignores it.
+CREATE TABLE IF NOT EXISTS scout_verdicts (
+  series_id        text NOT NULL REFERENCES lib_series(id) ON DELETE CASCADE,
+  source_id        text NOT NULL,
+  verdict          text NOT NULL,
+  their_title      text,
+  source_series_id text,
+  coverage         real,
+  our_count        int,
+  at               timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (series_id, source_id)
+);
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

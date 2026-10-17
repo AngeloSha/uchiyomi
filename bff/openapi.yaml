@@ -7165,7 +7165,8 @@ paths:
         includes scanlator_prefs, the server-wide release preferences (ScanlatorPrefs; the default is no
         priority, nothing blocked, two days of patience), backup_hour, the local hour (0-23) of the nightly
         backup, and auto_follow_on_failure, the on-by-default bounded source hunt after an ordinary scheduled
-        chapter failure. The hunt never runs for interactive Add/Fetch or after a 403/429 refusal. Since v0.61.0
+        chapter failure, and since v0.80.0 the scout, which follows another source in the background for a series
+        whose sources cannot get its chapters. An interactive Add/Fetch still never hunts while it runs. Since v0.61.0
         update_smart, the smart update checks (off by default; see updateSmart on PATCH). Since v0.61.1
         backup_enabled and backup_keep, the nightly backup's switch and how many runs it keeps. newMemberDefaults
         (#208), what a member who signs up starts with.
@@ -7234,7 +7235,9 @@ paths:
                     type: boolean
                     description: >-
                       Whether a scheduled sweep may find and follow another matching source after an
-                      ordinary failed chapter. On by default; bounded to one hunt per series per day.
+                      ordinary failed chapter, and (since v0.80.0) whether the scout may follow one for a series
+                      whose sources cannot get its chapters. On by default; bounded to one hunt per series per day
+                      and SCOUT_SEARCHES_PER_HOUR searches.
                   repair_enabled:
                     type: boolean
                     description: >-
@@ -7388,7 +7391,8 @@ paths:
                   type: boolean
                   description: >-
                     Allow the scheduled sweep to search for and follow a matching source after an ordinary
-                    chapter failure. Does not affect interactive requests or refusals.
+                    chapter failure, and (since v0.80.0) the scout to follow one for a series whose sources
+                    cannot get its chapters. "Use other sources on their own" in Admin → Settings.
                 repairEnabled:
                   type: boolean
                   description: >-

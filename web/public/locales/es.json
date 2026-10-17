@@ -1054,8 +1054,6 @@
   "took chapter {n} from {to}": "el capítulo {n} se tomó de {to}",
   "1 chapter saved with pages missing": "1 capítulo guardado con páginas faltantes",
   "{n} chapters saved with pages missing": "{n} capítulos guardados con páginas faltantes",
-  "Look for failed chapters on other sources": "Buscar los capítulos fallidos en otras fuentes",
-  "When a chapter cannot be saved from the sources this series follows, search the others once a day and follow the one that has it": "Cuando un capítulo no se puede guardar desde las fuentes que sigue esta serie, se buscan las otras una vez al día y se sigue la que lo tenga",
   "Fix": "Corregir",
   "Fix all": "Corregir todo",
   "It’s fine": "Está bien",
@@ -4043,5 +4041,7 @@
   "While \"Finish downloads on their own\" is on, a chapter a site refused (a rate limit or a block) is tried up to {cap} times.": "Mientras «Terminar las descargas solas» está activado, un capítulo que un sitio rechazó (por un límite de frecuencia o un bloqueo) se intenta hasta {cap} veces.",
   "1 will download on its own when its site is ready.": "1 se descargará solo cuando su sitio esté listo.",
   "{m} will download on their own when their site is ready.": "{m} se descargarán solos cuando su sitio esté listo.",
-  "Its site is busy right now. These chapters will download on their own when it is ready.": "Su sitio está ocupado ahora mismo. Estos capítulos se descargarán solos cuando esté listo."
+  "Its site is busy right now. These chapters will download on their own when it is ready.": "Su sitio está ocupado ahora mismo. Estos capítulos se descargarán solos cuando esté listo.",
+  "Use other sources on their own": "Usar otras fuentes solas",
+  "When the sources a series follows cannot get its chapters (a rate limit, a block, a broken chapter), look for it on the other installed sources and follow one that has them": "Cuando las fuentes que sigue una serie no pueden conseguir sus capítulos (un límite de solicitudes, un bloqueo, un capítulo roto), se busca en las demás fuentes instaladas y se sigue una que los tenga"
 }

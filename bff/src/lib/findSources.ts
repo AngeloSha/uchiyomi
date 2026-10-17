@@ -82,7 +82,8 @@ import { assess, MIN_HAVE } from './fill';
 import { postingOrderSeries } from './numbering';
 import { haveNumbers } from './libraryNumbers';
 import { altTitlesFor, learnAltTitles, parseAltTitles, SEARCH_NAMES } from './altTitles';
-import { searchByNames, takeHuntSlot, releaseHuntSlot } from './sourceHunt';
+import { searchByNames, takeHuntSlot, releaseHuntSlot, rememberJudgement } from './sourceHunt';
+import { recordVerdict } from './scoutMemory';
 import { budgetFor } from './sources/budget';
 import { seriesByIds, seriesOfMainSource } from './findScope';
 import { runtime } from './runtime';
@@ -699,6 +700,8 @@ async function findFor(
       asked = true;
       const found = await searchByNames(src, row.title, names, left);
       if (found.answered) answered++;
+      // v0.80.0: what it said is kept for the scout and the hunt (lib/scoutMemory.ts), as theirs is.
+      if (found.answered && !found.hit) void recordVerdict(s.id, id, 'no_hit', { ourCount: numbers.length });
       if (!found.hit || enough() || isStopped(a)) return;
       carriers++;
       if (left() < MIN_TRY_MS) { cut = true; return; }
@@ -708,6 +711,7 @@ async function findFor(
       if (!j) { cut = true; return; }
       judged[i] = j;
       hits[i] = found.hit;
+      void rememberJudgement(s.id, j, numbers.length);
       if (j.why === 'ok') ok++;
       // Failed the title or the chapter-number check: the one thing `refused` says. (`too_few_listed` cannot come
       // back: a series listing too few numbers ended `too_few` before any search.)

@@ -35,6 +35,7 @@ const AdmZip = require('adm-zip');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const StreamZip = require('node-stream-zip');
 import { MAX_META_BYTES, zipEntryCapped } from './archiveCaps';
+import { requestScout } from './scoutRequests';
 
 /** The manifest's entry name at the archive root. Not an image extension, so the scanner never counts it. */
 export const PARTIAL_MANIFEST = 'uchiyomi-partial.json';
@@ -419,6 +420,10 @@ export async function completePartial(
     // described the better one.
     acceptPartial: (hold: { missing: number[] }) => hold.missing.length < missing.length,
   });
+  // v0.80.0: no source the series follows had it whole. The hunt above never runs here (the chain starts past the copy
+  // that failed, so there is no failure of its own to hunt on); the scout looks for a source that has the chapter
+  // instead (lib/sourceScout.ts), and the next completion pass takes its copy as an alternate.
+  if (out.kind !== 'landed') await requestScout(book.series_id, 'capped', { numbers: [Number(chapter.number)] });
   if (out.kind === 'landed') {
     await restampBook(book.id, abs, [], { source: out.via, scanlator: out.chapterUsed?.scanlator, chapterId: out.chapterUsed?.sourceId });
     const after = (await stat(abs)).size;

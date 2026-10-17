@@ -110,7 +110,8 @@ import { noticeListed } from '../lib/noticeChapters';
 import { hiddenNumbersOf } from '../lib/hiddenChapters';
 import { q, one } from '../lib/db';
 import { healthAll, isDisabled, blockedNow, reportLatest, reportFail, reportSlow, classify, noteStage, slowStreakNow } from '../lib/sourceHealth';
-import { finishDownloadsOn } from '../lib/finishDownloads';
+import { finishDownloadsOn, backFirst } from '../lib/finishDownloads';
+import { requestScout } from '../lib/scoutRequests';
 import { diagnose, EMPTY_SUSPECT } from '../lib/sourceDiagnosis';
 import {
   gapsOf, assess, verdict, authorise, putPlan, getPlan, planKey, sweepPlans,
@@ -269,15 +270,6 @@ export function releaseDownloadJobClaim(claim: DownloadJobClaim | null | undefin
  * refetch card names nothing to try again" in downloadsView.int.test.ts reads [2, 3, 4].
  */
 const REDOABLE: ReadonlySet<Origin> = new Set<Origin>(['fetch', 'add']);
-
-/**
- * "Finish downloads on their own" (lib/finishDownloads.ts): an add that stopped part-way -- a site refused, or was cooling
- * down -- puts its series back to the front of the finishing sweep's queue (never checked = behind, and first in the
- * sweep's order), instead of leaving the rest to the next six-hourly sweep five chapters at a time. Best effort.
- */
-async function backFirst(seriesId: string): Promise<void> {
-  await q('UPDATE lib_series SET source_checked_at = NULL WHERE id = $1', [seriesId]).catch(() => {});
-}
 
 /** A failed job's chapters that did not land, for its Try again (`Job.left`). */
 function leftOf(asked: ReadonlyArray<{ number: number }>, landed: ReadonlyArray<{ number: number }>, onDisk: readonly number[]): number[] {
@@ -810,7 +802,16 @@ export function startDownloadJob(input: DownloadJobInput, reserved?: DownloadJob
     }
     await Promise.all([...running].map((l) => l.done));
     noteLeft();
-    if (handsOn && refusing.size && exhausted()) await backFirst(seriesId);
+    if (handsOn && refusing.size && exhausted()) {
+      await backFirst(seriesId);
+      // v0.80.0: and the scout looks for the rest elsewhere (lib/sourceScout.ts). A fill's chapters came from a source
+      // the series may not follow: it is the first the scout tries. Reintroduce by dropping it: "a Fetch job every
+      // source refuses hands the rest on" in fetchRotation.int.test.ts finds no request.
+      const rest = leftOf(chapters, landed, onDisk);
+      await requestScout(seriesId, origin === 'fill' ? 'capped' : 'refused', {
+        numbers: rest, ...(origin === 'fill' ? { seeds: [...new Set(chapters.map((c) => c.source ?? '').filter(Boolean))] } : {}),
+      });
+    }
     // Settled BEFORE the scan, so a copy the hook puts back is on disk when the scanner looks.
     for (const ch of chapters) if (!settled.has(ch)) await settle(ch, false);
     await persistScan().catch((e) => console.warn(`[download] ${folder}: the library scan after the job threw: ${(e as Error)?.message || e}`));
@@ -1988,6 +1989,10 @@ export async function addSeriesFromSource(opts: {
     if (!firstPages && finishOn && blockReason && !diskFull) {
       const kept = await keepForLater().catch((e) => { console.warn(`[add] ${folder}: not kept for later: ${(e as Error)?.message || e}`); return null; });
       if (kept) {
+        // v0.80.0: the scout looks for it on the other sources meanwhile (lib/sourceScout.ts), first of all.
+        // Reintroduce by dropping it: "an add whose source is cooling keeps the series" in finishDownloads.int.test.ts
+        // finds no request.
+        await requestScout(kept, 'refused');
         const j = jobs.get(folder);
         if (j) {
           j.status = 'error'; j.seriesId = kept; j.finishedAt = Date.now(); j.left = leftOf(toFetch, [], []);
@@ -2120,7 +2125,10 @@ export async function addSeriesFromSource(opts: {
             tell(j, finishOn ? say('job.stoppedWillFinish', { source: src.name }) : say('job.stopped', { source: src.name }), savedSoFar(j));
             j.finishedAt = Date.now();
           }
-          if (finishOn && seriesId) await backFirst(seriesId);
+          if (finishOn && seriesId) {
+            await backFirst(seriesId);
+            await requestScout(seriesId, 'refused', { numbers: leftOf(toFetch, landed, onDisk) });
+          }
           break;
         }
 
@@ -2134,7 +2142,10 @@ export async function addSeriesFromSource(opts: {
               : say('job.stoppedRefusing', { source: src.name, status: String(out.err?.blockStatus ?? '') }), savedSoFar(j));
             j.finishedAt = Date.now();
           }
-          if (finishOn && seriesId) await backFirst(seriesId);
+          if (finishOn && seriesId) {
+            await backFirst(seriesId);
+            await requestScout(seriesId, 'refused', { numbers: leftOf(toFetch, landed, onDisk) });
+          }
           break;
         }
         // ANY other failure -- a permission error, a chapter with no readable pages -- must not advance
@@ -3297,7 +3308,12 @@ export default async function sourceRoutes(app: FastifyInstance) {
       chapters.push({ ...row.chosen, source: row.source_id });
     }
     // What a cooldown left (v0.79.0): first in the finishing sweep's line, so it comes back for them the moment it can.
-    if (handOff) await backFirst(seriesId);
+    if (handOff) {
+      await backFirst(seriesId);
+      // v0.80.0: and the scout looks for them on other sources (lib/sourceScout.ts). Reintroduce by dropping it: "a Fetch
+      // while the main cools takes the follower's copy" in fetchRotation.int.test.ts finds no request.
+      await requestScout(seriesId, 'refused', { numbers: skipped.filter((x) => x.reason === 'later').map((x) => x.number) });
+    }
     chapters.sort((a, b) => a.number - b.number);
     if (!chapters.length) {
       // The first reason that is about a chapter, not about the body: a duplicate pick is never why

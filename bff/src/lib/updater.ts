@@ -34,6 +34,7 @@ import { seriesHidesNotices } from './noticeSettings';
 import { heldBy, rangeEnd, rawRangeEnd } from './chapterRanges';
 import { isDue, refreshRadar } from './releaseRadar';
 import { finishDownloadsOn, retryCapFor, BEHIND_SQL, FINISH_MINUTES, clearQuiet, quietWanted } from './finishDownloads';
+import { requestScout } from './scoutRequests';
 
 /**
  * Why a series produced nothing this run.
@@ -412,8 +413,18 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   }
   // Stamped on every path where a source was ASKED, so a dead source's series still rotate to the back of
   // the queue instead of sitting at its front forever. Not stamped on the cooldown path: never asked.
-  if (blocked === followed.length) return nothing(s.title, 'blocked');
-  if (!answered) { await stampChecked(seriesId, null, null); return { ...nothing(s.title, 'source_error'), asked: true }; }
+  // v0.80.0: a behind series none of whose sources could be asked, or answered, is put forward for the scout
+  // (lib/sourceScout.ts), which looks for it on the other installed sources. Reintroduce by dropping either:
+  // "a series every source of which is cooling is put forward for the scout" in sourceScout.int.test.ts finds no row.
+  if (blocked === followed.length) {
+    if (s.numbering !== 'posting_order') await requestScout(seriesId, 'stuck', { ifBehind: true });
+    return nothing(s.title, 'blocked');
+  }
+  if (!answered) {
+    await stampChecked(seriesId, null, null);
+    if (s.numbering !== 'posting_order') await requestScout(seriesId, 'stuck', { ifBehind: true });
+    return { ...nothing(s.title, 'source_error'), asked: true };
+  }
 
   // Numbering (#116, lib/numbering.ts), in the listing layer: before the chooser, the floor, the have-set and the
   // stored listing, so every one of them sees the same numbers. The detector's verdict first, on the source's own
@@ -630,6 +641,11 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   await q('UPDATE lib_series SET finish_missing = $2, finish_after = $3 WHERE id = $1', [seriesId, fetchable, after]).catch(() => {});
   const capped = missing.filter((c) => cappedNums.has(c.number)).length;
   const waiting = missing.filter((c) => heldNums.has(c.number)).length;
+  // v0.80.0: chapters left at their retry cap are chapters no source it follows could serve: the scout looks for one
+  // that can (lib/sourceScout.ts), and they get their tries back if it follows one.
+  if (capped && !posting) {
+    await requestScout(seriesId, 'capped', { numbers: missing.filter((c) => cappedNums.has(c.number)).map((c) => c.number) });
+  }
 
   // "Fetch newest" (lib/bulkNewest.ts) replaces the sweep's queue with the newest LISTED release, floor
   // ignored for that one number -- see UpdateOpts.newestOnly for why it is max(listed) and never "the
@@ -821,6 +837,10 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
     // the helper is what adds to the set now, and a chapter that landed from the follower after the
     // primary refused has still left the primary refusing.
     if (refusing.size && followed.every((f) => refusing.has(f.source))) break;
+  }
+  // v0.80.0: every source it follows refused it and nothing came: the scout looks further (lib/sourceScout.ts).
+  if (!added && !posting && refusing.size && followed.every((f) => refusing.has(f.source))) {
+    await requestScout(seriesId, 'stuck', { ifBehind: true });
   }
   if (added) notifyNewChapter(seriesId, s.title, added).catch(() => {});
   // backfill release dates onto already-scanned books; freshly downloaded ones are stamped after the sweep's scan
@@ -1067,8 +1087,10 @@ export async function runUpdateAll(opts: {
   }
   for (const ids of queues.values()) outcomes.skipped += ids.length;
   // Never asked, because every source it could be asked through was cooling the whole sweep long: blocked, as the
-  // visit itself would have said, not "skipped" -- nothing was left over for lack of time.
+  // visit itself would have said, not "skipped" -- nothing was left over for lack of time. v0.80.0: and put forward
+  // for the scout, which looks for it elsewhere (lib/sourceScout.ts).
   outcomes.blocked += waiting.size;
+  for (const id of waiting) await requestScout(id, 'stuck', { ifBehind: true });
 
   // The completion pass: partial chapters from earlier sweeps, oldest-stamped first, each asked for exactly
   // its missing pages (lib/partial.ts). Only when the sweep itself ran to its end -- a night the budget,

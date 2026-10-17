@@ -32,6 +32,7 @@ import { listRunRecords, runDigest, type RunTarget } from '../lib/repairRuns';
 import { worstCase } from '../lib/repairEstimate';
 import { authenticate, requireAdmin, userIdOf, roleOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
 import { logAudit, recentAudit } from '../lib/audit';
+import { markRemoved, forgetVerdict } from '../lib/scoutMemory';
 import { namesOf, recordAltTitles } from '../lib/altTitles';
 import { healthAllWithEvidence, setDisabled, clearBlock, pruneOrphanedHealth, isDisabled, blockedNow } from '../lib/sourceHealth';
 import { smokeTest } from '../lib/sourceProbe';
@@ -1865,6 +1866,9 @@ export default async function adminRoutes(app: FastifyInstance) {
          added_by = COALESCE(EXCLUDED.added_by, series_sources.added_by)`,
       [id, source, sourceSeriesId, cand.title || null, cand.coverage, userIdOf(req)],
     );
+    // An admin's own follow (v0.80.0): whatever the scout remembered about this source for this series, `removed`
+    // included, no longer applies (lib/scoutMemory.ts).
+    await forgetVerdict(id, source);
     await logAudit('series.follow_source', { userId: userIdOf(req), detail: { id, title: row.title, source, sourceSeriesId, coverage: cand.coverage }, req });
     // The answer is the list as the follow left it, read BEFORE the refresh below starts: a follow is not a check.
     // Read after it, the answer raced the refresh's own stamp on the new source (updater.ts writes
@@ -1944,6 +1948,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       ctx: await viewCtxFor(userIdOf(req), roleOf(req)), userId: userIdOf(req), old: b.data.old, req,
     });
     if ('refused' in out) return refusedAttach(reply, out);
+    await forgetVerdict(id, b.data.source);
     // Read before the refresh starts, as the follow's answer is (above): an attach is not a check.
     const list = await seriesSourcesFor(id);
     void updateSeries(id, 0).catch(() => {});
@@ -1958,6 +1963,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (mainRow?.source_id && mainRow.source_id === sourceId) {
       const out = await detachMain(id, { ctx: await viewCtxFor(userIdOf(req), roleOf(req)), userId: userIdOf(req), req });
       if ('refused' in out) return refusedAttach(reply, out);
+      await markRemoved(id, sourceId);
       const list = await seriesSourcesFor(id);
       void updateSeries(id, 0).catch(() => {});
       return { ok: true, promoted: out.promoted, sources: list };
@@ -1965,6 +1971,10 @@ export default async function adminRoutes(app: FastifyInstance) {
     const gone = await q<{ source_id: string }>(
       'DELETE FROM series_sources WHERE series_id = $1 AND source_id = $2 RETURNING source_id', [id, sourceId]);
     if (!gone.length) return reply.code(404).send({ error: 'not_found' });
+    // v0.80.0: and nothing automatic follows it onto this series again -- not the scout, not the hunt -- until an admin
+    // does (lib/scoutMemory.ts). Reintroduce by dropping it: "a source an admin unfollowed is not followed again" in
+    // sourceScout.int.test.ts finds it followed.
+    await markRemoved(id, sourceId);
     // The listing rows this source carried go with it. A listing row is the authorisation for a manual
     // fetch (POST /api/sources/fetch, the refetch below), and the rows are otherwise rewritten only by the
     // series' next successful check -- a full sweep cycle away on a large install, never if auto_update is

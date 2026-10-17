@@ -1054,8 +1054,6 @@
   "took chapter {n} from {to}": "capítulo {n} obtido de {to}",
   "1 chapter saved with pages missing": "1 capítulo salvo com páginas faltando",
   "{n} chapters saved with pages missing": "{n} capítulos salvos com páginas faltando",
-  "Look for failed chapters on other sources": "Procurar capítulos com falha em outras fontes",
-  "When a chapter cannot be saved from the sources this series follows, search the others once a day and follow the one that has it": "Quando um capítulo não pode ser salvo das fontes que esta série acompanha, procura nas outras uma vez por dia e acompanha a que o tiver",
   "Fix": "Corrigir",
   "Fix all": "Corrigir tudo",
   "It’s fine": "Está tudo bem",
@@ -4043,5 +4041,7 @@
   "While \"Finish downloads on their own\" is on, a chapter a site refused (a rate limit or a block) is tried up to {cap} times.": "Enquanto “Concluir os downloads sozinho” está ativado, um capítulo que um site recusou (por limite de requisições ou bloqueio) é tentado até {cap} vezes.",
   "1 will download on its own when its site is ready.": "1 será baixado sozinho quando o site estiver pronto.",
   "{m} will download on their own when their site is ready.": "{m} serão baixados sozinhos quando o site estiver pronto.",
-  "Its site is busy right now. These chapters will download on their own when it is ready.": "O site está ocupado agora. Estes capítulos serão baixados sozinhos quando ele estiver pronto."
+  "Its site is busy right now. These chapters will download on their own when it is ready.": "O site está ocupado agora. Estes capítulos serão baixados sozinhos quando ele estiver pronto.",
+  "Use other sources on their own": "Usar outras fontes sozinho",
+  "When the sources a series follows cannot get its chapters (a rate limit, a block, a broken chapter), look for it on the other installed sources and follow one that has them": "Quando as fontes que uma série acompanha não conseguem obter seus capítulos (um limite de requisições, um bloqueio, um capítulo quebrado), procura a série nas outras fontes instaladas e acompanha uma que os tenha"
 }

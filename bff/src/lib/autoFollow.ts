@@ -42,7 +42,7 @@ import { followLimit } from './followLimit';
 import { altTitlesFor, MIN_ALT_KEY } from './altTitles';
 import { languageFits, seriesLanguage } from './seriesLang';
 
-/** How many sources a series may FOLLOW, on top of its primary (env MAX_FOLLOWED_SOURCES, 1 to 6, default 2: lib/followLimit.ts). */
+/** How many sources a series may FOLLOW, on top of its primary (env MAX_FOLLOWED_SOURCES, 1 to 6, default 3: lib/followLimit.ts). */
 export const MAX_FOLLOWERS = followLimit();
 /** How many of an add's candidates are asked at all; the rest are `not_tried`. */
 export const MAX_AUTO_CANDIDATES = 6;
@@ -476,9 +476,14 @@ export async function autoFollow(seriesId: string, candidates: FollowCandidate[]
  * in the same instant could both pass it (READ COMMITTED sees neither's row yet). That window is
  * microseconds wide -- the racing test does not open it, and passes with the lock removed -- so the lock
  * is here for the day the window is hit, not because a test says so.
+ *
+ * `notCounted` (v0.80.0): followers left out of the count -- the automatic follows pass the ones that cannot carry the
+ * series now (lib/sourceStanding.ts notCarrying), so a broken follower does not hold a series at its limit. Nothing is
+ * deleted. Reintroduce by counting every follower: "a broken follower does not hold the series at its limit" in
+ * sourceScout.int.test.ts reads cap.
  */
 export async function followJudged(
-  seriesId: string, j: Omit<Judgement, 'why' | 'chapters'>, opts: { addedBy?: string | null } = {},
+  seriesId: string, j: Omit<Judgement, 'why' | 'chapters'>, opts: { addedBy?: string | null; notCounted?: readonly string[] } = {},
 ): Promise<'inserted' | 'cap' | 'gone'> {
   return tx(async (qq) => {
     const row = (await qq<{ deleted_at: string | null; merged_into: string | null }>(
@@ -487,12 +492,12 @@ export async function followJudged(
     const r = await qq<{ source_id: string }>(
       `INSERT INTO series_sources (series_id, source_id, source_series_id, title, coverage, added_by)
        SELECT $1::text, $2::text, $3::text, $4::text, $5::real, $7::uuid
-        WHERE (SELECT count(*) FROM series_sources WHERE series_id = $1 AND source_id <> $2) < $6::int
+        WHERE (SELECT count(*) FROM series_sources WHERE series_id = $1 AND source_id <> $2 AND source_id <> ALL($8::text[])) < $6::int
        ON CONFLICT (series_id, source_id) DO UPDATE SET source_series_id = EXCLUDED.source_series_id,
          title = EXCLUDED.title, coverage = EXCLUDED.coverage,
          added_by = COALESCE(EXCLUDED.added_by, series_sources.added_by)
        RETURNING source_id`,
-      [seriesId, j.source, j.sourceSeriesId, j.theirTitle, j.coverage, MAX_FOLLOWERS, opts.addedBy ?? null]);
+      [seriesId, j.source, j.sourceSeriesId, j.theirTitle, j.coverage, MAX_FOLLOWERS, opts.addedBy ?? null, [...(opts.notCounted ?? [])]]);
     return r.length ? 'inserted' : 'cap';
   });
 }

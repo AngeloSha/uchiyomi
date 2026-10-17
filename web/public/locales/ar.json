@@ -1054,8 +1054,6 @@
   "took chapter {n} from {to}": "تم أخذ الفصل {n} من {to}",
   "1 chapter saved with pages missing": "حُفظ فصل واحد بصفحات مفقودة",
   "{n} chapters saved with pages missing": "الفصول المحفوظة مع صفحات مفقودة: {n}",
-  "Look for failed chapters on other sources": "البحث عن الفصول المتعذّرة في مصادر أخرى",
-  "When a chapter cannot be saved from the sources this series follows, search the others once a day and follow the one that has it": "عندما يتعذّر حفظ فصل من المصادر التي تتابعها هذه السلسلة، يُبحث في المصادر الأخرى مرة يوميًا وتُتابَع التي لديها الفصل",
   "Fix": "إصلاح",
   "Fix all": "إصلاح الكل",
   "It’s fine": "لا بأس بها",
@@ -4043,5 +4041,7 @@
   "While \"Finish downloads on their own\" is on, a chapter a site refused (a rate limit or a block) is tried up to {cap} times.": "ما دام «إكمال التنزيلات تلقائيًا» مفعّلًا، يُحاوَل الفصل الذي رفضه موقع (بسبب حدّ للطلبات أو حظر) حتى {cap} مرة.",
   "1 will download on its own when its site is ready.": "سيُنزَّل فصل واحد تلقائيًا حين يصبح موقعه جاهزًا.",
   "{m} will download on their own when their site is ready.": "سيُنزَّل {m} تلقائيًا حين يصبح موقعها جاهزًا.",
-  "Its site is busy right now. These chapters will download on their own when it is ready.": "موقعها مشغول الآن. ستُنزَّل هذه الفصول تلقائيًا حين يصبح جاهزًا."
+  "Its site is busy right now. These chapters will download on their own when it is ready.": "موقعها مشغول الآن. ستُنزَّل هذه الفصول تلقائيًا حين يصبح جاهزًا.",
+  "Use other sources on their own": "استخدام مصادر أخرى تلقائيًا",
+  "When the sources a series follows cannot get its chapters (a rate limit, a block, a broken chapter), look for it on the other installed sources and follow one that has them": "عندما يتعذّر على المصادر التي تتابعها السلسلة جلب فصولها (حدّ للطلبات، أو حظر، أو فصل تالف)، يُبحث عنها في المصادر الأخرى المثبّتة وتُتابَع واحدة لديها هذه الفصول"
 }

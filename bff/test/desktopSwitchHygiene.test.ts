@@ -192,6 +192,7 @@ test('every scheduler first run keeps its server literal inside firstRunFloor', 
     ['cleanup', /setTimeout\(tick, firstRunFloor\(15 \* 60 \* 1000, 'cleanup'\)\)\.unref\(\);/],
     ['health summary', /setTimeout\(tick, firstRunFloor\(20 \* 60 \* 1000, 'healthSummary'\)\)\.unref\(\);/],
     ['finish downloads', /setTimeout\(finishTick, firstRunFloor\(5 \* 60 \* 1000, 'finishDownloads'\)\)\.unref\(\);/],
+    ['scout', /setTimeout\(scoutLoop, firstRunFloor\(10 \* 60 \* 1000, 'scout'\)\)\.unref\(\);/],
   ];
   for (const [what, re] of sites) assert.match(s, re, `${what}: the first run lost its server literal or its firstRunFloor`);
   assert.equal(s.match(/firstRunFloor\(/g)?.length, sites.length, 'a first-run site was added or removed; list it here');

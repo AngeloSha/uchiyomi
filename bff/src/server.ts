@@ -47,6 +47,7 @@ import { pruneAudit } from './lib/audit';
 import { startActivityLog, flushActivityLog } from './lib/activityLog';
 import { runBackup, backupDelay, backupSettings, stampDelay } from './lib/backup';
 import { firstRunFloor, DESKTOP_FLOORS } from './lib/desktop';
+import { scoutTick, SCOUT_TICK_MS } from './lib/sourceScout';
 import { KomgaError } from './lib/komga';
 import { ZodError } from 'zod';
 import { registerWebRoot, webRootConfigured } from './lib/webRoot';
@@ -348,6 +349,19 @@ async function main() {
       setTimeout(finishTick, next).unref();
     };
     setTimeout(finishTick, firstRunFloor(5 * 60 * 1000, 'finishDownloads')).unref();
+    // v0.80.0, the scout (lib/sourceScout.ts): every few minutes, one series whose own sources cannot get it its chapters
+    // -- every one cooling, refusing or broken for what it lacks -- is looked for on the other installed sources, and a
+    // source that is this series and has them is followed. The switch "Use other sources on their own", the hour's
+    // search budget and the series' own backoff decide whether a look searches anything at all.
+    const scoutLoop = async () => {
+      try {
+        await scoutTick();
+      } catch (e) {
+        app.log.error(e as any);
+      }
+      setTimeout(scoutLoop, SCOUT_TICK_MS).unref();
+    };
+    setTimeout(scoutLoop, firstRunFloor(10 * 60 * 1000, 'scout')).unref();
     // v0.61.0, the release radar (lib/releaseRadar.ts): once, a minute after boot, every series with a source and no
     // radar yet is dated from what is already stored -- its listing and its chapters' arrivals, no source asked -- so
     // an upgrade's Releasing soon and Expected this week are not empty until each series' next check.

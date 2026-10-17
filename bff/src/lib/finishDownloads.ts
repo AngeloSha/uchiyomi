@@ -19,7 +19,7 @@
 //   - an add from Discover whose first chapter a site refused keeps the series (routes/sources.ts), behind and never
 //     checked, so the next of these sweeps picks it up.
 // Off, every one of these behaves as it did in v0.77.x.
-import { one } from './db';
+import { one, q } from './db';
 import { visibleToAll } from './visibility';
 import { runtime } from './runtime';
 
@@ -84,6 +84,16 @@ export async function nextCooldownEnd(): Promise<Date | null> {
   ).catch(() => null);
   const ends = [r?.at, w?.at].filter((d): d is Date => !!d).map((d) => new Date(d).getTime());
   return ends.length ? new Date(Math.min(...ends)) : null;
+}
+
+/**
+ * Put a series at the front of the finishing sweep's queue: never checked is behind, and first in the sweep's order. An
+ * add, a Fetch or a job that stopped part-way (a site refused, or was cooling down) does it, instead of leaving the rest
+ * to the next six-hourly sweep five chapters at a time; so does the scout (lib/sourceScout.ts) once it followed a
+ * source. Best effort.
+ */
+export async function backFirst(seriesId: string): Promise<void> {
+  await q('UPDATE lib_series SET source_checked_at = NULL WHERE id = $1', [seriesId]).catch(() => {});
 }
 
 /** How many monitored series are behind: none, and the finishing sweep does not start (no run card, no queries). */

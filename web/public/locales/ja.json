@@ -1054,8 +1054,6 @@
   "took chapter {n} from {to}": "第 {n} 話を {to} から取得しました",
   "1 chapter saved with pages missing": "1 話をページ欠落のまま保存しました",
   "{n} chapters saved with pages missing": "{n} 話をページ欠落のまま保存しました",
-  "Look for failed chapters on other sources": "取得に失敗した話を他のソースで探す",
-  "When a chapter cannot be saved from the sources this series follows, search the others once a day and follow the one that has it": "このシリーズが追跡しているソースから話を保存できない場合、1 日 1 回他のソースを検索し、その話があるソースを追跡します",
   "Fix": "修復",
   "Fix all": "すべて修復",
   "It’s fine": "問題なし",
@@ -4043,5 +4041,7 @@
   "While \"Finish downloads on their own\" is on, a chapter a site refused (a rate limit or a block) is tried up to {cap} times.": "「ダウンロードを自動で最後まで続ける」がオンの間は、サイトに拒否された話（速度制限やブロック）を最大 {cap} 回まで試します。",
   "1 will download on its own when its site is ready.": "1 章はサイトが使えるようになると自動でダウンロードされます。",
   "{m} will download on their own when their site is ready.": "{m} 章はサイトが使えるようになると自動でダウンロードされます。",
-  "Its site is busy right now. These chapters will download on their own when it is ready.": "サイトが今は混み合っています。これらの章はサイトが使えるようになると自動でダウンロードされます。"
+  "Its site is busy right now. These chapters will download on their own when it is ready.": "サイトが今は混み合っています。これらの章はサイトが使えるようになると自動でダウンロードされます。",
+  "Use other sources on their own": "他のソースを自動で使う",
+  "When the sources a series follows cannot get its chapters (a rate limit, a block, a broken chapter), look for it on the other installed sources and follow one that has them": "シリーズが追跡しているソースから話を取得できないとき（リクエスト制限、ブロック、壊れた話）、インストール済みの他のソースでシリーズを探し、その話があるソースを追跡します"
 }

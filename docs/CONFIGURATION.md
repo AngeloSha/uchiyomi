@@ -445,18 +445,23 @@ ever hit.
   `AUTOFIX_MAX_MINUTES` is spent, and the next run continues down the list. `0` switches its extensions phase off. A
   package that carries none of the series it was searched for is removed again at once, and is not tried for those
   series again for a month.
-- `MAX_FOLLOWED_SOURCES` (default `2`, 1 to 6): how many sources besides the main one a series may follow, by hand or
-  automatically. A failed chapter may be asked from that many of them, up to four. Each one is another chapter list
-  read on every sweep, for every series.
+- `MAX_FOLLOWED_SOURCES` (default `3` since v0.80.0, `2` before; 1 to 6): how many sources besides the main one a
+  series may follow, by hand or automatically. A failed chapter may be asked from that many of them, up to four. Each
+  one is another chapter list read on every sweep, for every series. For the automatic follows (the hunt and the
+  scout), a follower that is broken, switched off or no longer installed does not count, and is kept.
+- `SCOUT_SEARCHES_PER_HOUR` (default `40`, `0` turns it off): search requests the scout may make in any hour, across
+  every series it looks for (v0.80.0; USAGE.md, *When a series' sources cannot get its chapters*). One look asks at
+  most twelve sources and makes at most sixteen searches. The admin switch **Use other sources on their own** turns
+  the scout and the hunt off together.
 - `MIN_FREE_GB` (default `10`): refuse to start a download when the download disk has less than this free.
   `0` disables the floor. Fails open if free space cannot be measured.
 
-An ordinary chapter failure may continue from up to `MAX_FOLLOWED_SOURCES` (default two, at most four) of the sources
+An ordinary chapter failure may continue from up to `MAX_FOLLOWED_SOURCES` (default three, at most four) of the sources
 already followed for that series. A copy explicitly picked by a person never switches. A 403/429 never becomes a partial chapter or starts a hunt;
 the refusing source cools down, while an already-followed copy can keep the queue moving. The sweep can also
-find a new matching source when **Admin → Settings → Updates & schedules → Look for failed chapters on other
-sources** is on (the default): once per series per day, at most six candidates and five hunts per
-sweep, with no more than two extra follows. Title and 90%-chapter matching apply, and a clean series never
+find a new matching source when **Admin → Settings → Updates & schedules → Use other sources on their own** is on
+(the default): once per series per day, at most six candidates and five hunts per sweep, within the follower limit
+above. Title and 90%-chapter matching apply, and a clean series never
 causes an adult source to be followed. There is intentionally no environment variable for this switch.
 
 ## The slow archive

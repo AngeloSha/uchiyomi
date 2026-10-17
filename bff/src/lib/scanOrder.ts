@@ -17,14 +17,20 @@ export interface Orderable {
 /** 'pt-BR' and 'pt' are the same language for this purpose; case is noise. */
 const base = (l: string | null | undefined) => (l || '').toLowerCase().split(/[-_]/)[0];
 
-export function scanOrder(all: Orderable[], own: { id: string; lang?: string | null } | null): string[] {
+/**
+ * How likely a source is to carry a series in `own`'s language, as a rank: 0 the series' own source, 1 its language,
+ * 2 no pinned language, 3 another one. The scout (lib/sourceScout.ts) orders by it first within a tier.
+ */
+export function scanRank(s: Orderable, own: { id: string; lang?: string | null } | null): number {
   const ownLang = base(own?.lang);
-  const rank = (s: Orderable): number => {
-    if (own && s.id === own.id) return 0;
-    if (ownLang && base(s.lang) === ownLang) return 1;
-    if (!s.lang) return 2;
-    return 3;
-  };
+  if (own && s.id === own.id) return 0;
+  if (ownLang && base(s.lang) === ownLang) return 1;
+  if (!s.lang) return 2;
+  return 3;
+}
+
+export function scanOrder(all: Orderable[], own: { id: string; lang?: string | null } | null): string[] {
+  const rank = (s: Orderable): number => scanRank(s, own);
   return all
     .map((s, i) => ({ s, i, r: rank(s), p: s.preferredOrder ?? 999 }))
     .sort((a, b) => a.r - b.r || a.p - b.p || a.i - b.i)

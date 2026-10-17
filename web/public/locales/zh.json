@@ -1054,8 +1054,6 @@
   "took chapter {n} from {to}": "第 {n} 章已改从 {to} 获取",
   "1 chapter saved with pages missing": "1 章已在缺页的情况下保存",
   "{n} chapters saved with pages missing": "{n} 章已在缺页的情况下保存",
-  "Look for failed chapters on other sources": "在其他来源查找获取失败的章节",
-  "When a chapter cannot be saved from the sources this series follows, search the others once a day and follow the one that has it": "当无法从此系列追踪的来源保存某一章时，每天在其他来源中搜索一次，并追踪拥有该章的来源",
   "Fix": "修复",
   "Fix all": "全部修复",
   "It’s fine": "没问题",
@@ -4043,5 +4041,7 @@
   "While \"Finish downloads on their own\" is on, a chapter a site refused (a rate limit or a block) is tried up to {cap} times.": "开启“自动完成下载”时，被网站拒绝的章节（限流或屏蔽）最多尝试 {cap} 次。",
   "1 will download on its own when its site is ready.": "还有 1 章会在其网站就绪后自动下载。",
   "{m} will download on their own when their site is ready.": "还有 {m} 章会在其网站就绪后自动下载。",
-  "Its site is busy right now. These chapters will download on their own when it is ready.": "其网站目前繁忙。这些章节会在网站就绪后自动下载。"
+  "Its site is busy right now. These chapters will download on their own when it is ready.": "其网站目前繁忙。这些章节会在网站就绪后自动下载。",
+  "Use other sources on their own": "自动使用其他来源",
+  "When the sources a series follows cannot get its chapters (a rate limit, a block, a broken chapter), look for it on the other installed sources and follow one that has them": "当系列追踪的来源无法获取其章节（请求限制、屏蔽或章节损坏）时，在其他已安装的来源中查找该系列，并追踪拥有这些章节的来源"
 }
