@@ -336,6 +336,9 @@ ever hit.
   sources are gone back to -- or right after the earliest cooldown of their sites ends, whichever comes first.
 - `FINISH_DOWNLOADS_PER_SERIES` (default `10`): chapters one of those runs fetches for a series.
 - `FINISH_DOWNLOADS_SWEEP_MAX` (default `60`): chapter-fetch attempts one of those runs makes in all.
+- `FINISH_DOWNLOADS_LANES` (default `3`, 1 to 6; v0.81.0): series one of those runs works on at once, each on its own
+  image server, never two through the extension engine and never two behind the Cloudflare solver. `1` is one series
+  at a time, as before v0.81.0. The scheduled library update always goes one series at a time.
 - `FINISH_DOWNLOADS_REFUSAL_CAP` (default `12`): tries a chapter a site refused gets before it is left as failed, with
   the switch on. The cooldowns space the tries out; once a site has refused a chapter twice, the sweep also searches the
   other sources for it.

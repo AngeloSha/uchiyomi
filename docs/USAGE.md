@@ -922,6 +922,13 @@ whose site is already cooling down, or refuses the page list, is kept the same w
 library update, the nightly repair, *Fix everything* and *Find other sources*: a run stops at its next chapter and picks
 up after them.
 
+Since v0.81.0 the finishing runs work on up to three series at once, each on a different image server (never two
+through the extension engine, or two behind the Cloudflare solver), so one slow site no longer holds up the series on
+every other site. And when the same release of a chapter — the same group, the same language — is on several sources a
+series follows, the update takes it from the one downloading at full speed, on the image server with the least waiting
+on it, and not from the one that failed that chapter last time. A version you picked, a source order you set (the
+series' own or the server's) and a series numbered by posting order are kept exactly as they are.
+
 ### What is downloading, and stopping it
 
 Everything the server is fetching, whoever started it, is under **Library → Downloads** (since v0.49.0; it used
