@@ -8,9 +8,10 @@
 // cooldown to end, and a three-tries cap that counted a site's "slow down" as one of the three.
 //
 // With the switch on:
-//   - a series its source lists chapters for that it does not have yet ("behind", lib_series.source_missing > 0, or a
-//     row no sweep has checked yet) is gone back to every FINISH_MINUTES by a sweep of the behind series alone, and again
-//     right after the earliest cooldown of their sources ends (server.ts), FINISH_PER_SERIES chapters a visit;
+//   - a series its source lists chapters for that it does not have yet and the sweep would still fetch ("behind",
+//     lib_series.finish_missing > 0, or a row no sweep has checked yet) is gone back to every FINISH_MINUTES by a sweep
+//     of the behind series alone, and again right after the earliest cooldown of their sources ends (server.ts),
+//     FINISH_PER_SERIES chapters a visit;
 //   - a refusal (`rate_limited`, `blocked` in chapter_failures) is a later, not a never: it is capped at
 //     REFUSAL_RETRY_CAP tries, not CHAPTER_RETRY_CAP, so a site that is busy for a day is waited out, the cooldowns
 //     (lib/sourceHealth.ts) spacing the tries, while the second refusal of a number still sends the sweep to other
@@ -19,6 +20,7 @@
 //     checked, so the next of these sweeps picks it up.
 // Off, every one of these behaves as it did in v0.77.x.
 import { one } from './db';
+import { visibleToAll } from './visibility';
 
 const envInt = (name: string, fallback: number, min: number, max: number): number => {
   const v = Number(process.env[name]);
@@ -51,8 +53,12 @@ export const isRefusal = (status: string | null | undefined): boolean => status 
 export const retryCapFor = (status: string | null | undefined, finish: boolean, base: number): number =>
   finish && isRefusal(status) ? Math.max(base, REFUSAL_RETRY_CAP) : base;
 
-/** The SQL predicate for "this monitored series is behind": the sweep's own stamp, or a row no sweep has checked yet. */
-export const BEHIND_SQL = '(s.source_missing > 0 OR s.source_checked_at IS NULL)';
+/**
+ * The SQL predicate for "this monitored series is behind": chapters its sources list that the sweep would still fetch
+ * (`finish_missing`, the sweep's own stamp beside source_missing, which a row stamped before it existed stands in for),
+ * or a row no sweep has checked yet.
+ */
+export const BEHIND_SQL = '(s.source_checked_at IS NULL OR COALESCE(s.finish_missing, s.source_missing) > 0)';
 
 /**
  * When the earliest cooldown of a source a behind series is asked through ends, or null when none of them is cooling.
@@ -65,10 +71,10 @@ export async function nextCooldownEnd(): Promise<Date | null> {
        FROM source_health h
       WHERE h.blocked_until > now() AND NOT h.disabled
         AND h.source_id IN (SELECT s.source_id FROM lib_series s
-                             WHERE s.auto_update AND s.deleted_at IS NULL AND s.merged_into IS NULL AND ${BEHIND_SQL}
+                             WHERE s.auto_update AND ${visibleToAll('s')} AND ${BEHIND_SQL}
                             UNION
                             SELECT ss.source_id FROM series_sources ss JOIN lib_series s ON s.id = ss.series_id
-                             WHERE s.auto_update AND s.deleted_at IS NULL AND s.merged_into IS NULL AND ${BEHIND_SQL})`,
+                             WHERE s.auto_update AND ${visibleToAll('s')} AND ${BEHIND_SQL})`,
   ).catch(() => null);
   return r?.at ? new Date(r.at) : null;
 }
@@ -76,7 +82,7 @@ export async function nextCooldownEnd(): Promise<Date | null> {
 /** How many monitored series are behind: none, and the finishing sweep does not start (no run card, no queries). */
 export async function behindCount(): Promise<number> {
   const r = await one<{ n: number }>(
-    `SELECT count(*)::int AS n FROM lib_series s WHERE s.auto_update AND s.deleted_at IS NULL AND s.merged_into IS NULL AND ${BEHIND_SQL}`,
+    `SELECT count(*)::int AS n FROM lib_series s WHERE s.auto_update AND ${visibleToAll('s')} AND ${BEHIND_SQL}`,
   ).catch(() => null);
   return r?.n ?? 0;
 }

@@ -86,10 +86,15 @@ export const CHAPTER_RETRY_CAP = Math.max(1, Number(process.env.CHAPTER_RETRY_CA
 /** `cancelled`: an admin pressed Cancel on the run's card (lib/downloadJobs.ts), and it stopped after the chapter in flight. */
 export type SweepStop = 'budget' | 'disk' | 'shutdown' | 'cancelled';
 
-/** What the source said, kept on the row. See the migrate comment on source_chapters. */
+/**
+ * What the source said, kept on the row. See the migrate comment on source_chapters. No answer (`missing` null) clears
+ * finish_missing too: the finishing sweep (lib/finishDownloads.ts) must not go back every quarter of an hour to a source
+ * that is not answering -- the scheduled sweep asks it again.
+ */
 async function stampChecked(seriesId: string, chapters: number | null, missing: number | null): Promise<void> {
   await q(
-    `UPDATE lib_series SET source_checked_at = now(), source_chapters = $2, source_missing = $3 WHERE id = $1`,
+    `UPDATE lib_series SET source_checked_at = now(), source_chapters = $2, source_missing = $3,
+            finish_missing = CASE WHEN $3::int IS NULL THEN NULL ELSE finish_missing END WHERE id = $1`,
     [seriesId, chapters, missing],
   ).catch(() => {});
 }
@@ -333,7 +338,11 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   const off = await switchedOff(followed.map((f) => f.source));
   if (off.size) {
     const on = followed.filter((f) => !off.has(f.source));
-    if (!on.length) return opts.newestOnly ? { ...nothing(s.title, 'ok'), newest: { number: null, state: 'disabled' } } : nothing(s.title, 'off');
+    if (!on.length) {
+      // Nothing to fetch it from: not behind for the finishing sweep until a source is switched back on and a sweep says so.
+      await q('UPDATE lib_series SET finish_missing = 0 WHERE id = $1', [seriesId]).catch(() => {});
+      return opts.newestOnly ? { ...nothing(s.title, 'ok'), newest: { number: null, state: 'disabled' } } : nothing(s.title, 'off');
+    }
     followed = on;
   }
 
@@ -399,7 +408,8 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
     // Held or not, the source was asked: the series goes to the back of the sweep's queue like any other, or a
     // series waiting for review would be the first one visited every night.
     const held = async (r?: Settled): Promise<UpdateResult> => {
-      await q('UPDATE lib_series SET source_checked_at = now() WHERE id = $1', [seriesId]).catch(() => {});
+      // Held, it fetches nothing: not behind for the finishing sweep (lib/finishDownloads.ts) until the review is done.
+      await q('UPDATE lib_series SET source_checked_at = now(), finish_missing = 0 WHERE id = $1', [seriesId]).catch(() => {});
       return { ...nothing(s.title, 'renumber_pending'), asked: true, ...(r ? { renumber: r } : {}) };
     };
     if (!rawNumbering?.length || !numberingSource) return held();
@@ -554,6 +564,12 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   // not fetched: the whole point of the hold is that the copy on offer is not the one wanted yet.
   const heldNums = new Set(held);
   const eligible = missing.filter((c) => !cappedNums.has(c.number) && !heldNums.has(c.number));
+  // "Finish downloads on their own" (lib/finishDownloads.ts) goes back for what this queue would fetch, not for the whole
+  // of `missing`: a series behind only on chapters left alone at the cap, or held for their group, is not behind for it,
+  // or every quarter of an hour its sources would be asked for a list that can fetch nothing. Reintroduce by stamping
+  // `missing.length`: "a series behind only on chapters it leaves alone is not gone back for" in
+  // finishDownloads.int.test.ts finds it three behind for the finishing sweep, and asked.
+  await q('UPDATE lib_series SET finish_missing = $2 WHERE id = $1', [seriesId, eligible.length]).catch(() => {});
   const capped = missing.filter((c) => cappedNums.has(c.number)).length;
   const waiting = missing.filter((c) => heldNums.has(c.number)).length;
 

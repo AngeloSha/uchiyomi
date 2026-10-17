@@ -208,12 +208,13 @@ test('Plan to Read on add', { skip }, async (t) => {
 });
 
 test('an add hands its person to the art lookup, which plans once it has run', () => {
-  // The add route's own walk is in addSeries.int.test.ts (a series already here, added again). These are the other three
-  // ways an add ends -- nothing downloaded yet, everything already held, a download -- each through artByTitle, which
-  // links the series to AniList and THEN plans, so a fresh series is linked by the time it is asked about.
+  // The add route's own walk is in addSeries.int.test.ts (a series already here, added again). These are the other four
+  // ways an add ends -- nothing downloaded yet, everything already held, a download, and (v0.78.0) a first chapter a site
+  // refused, kept for the finishing sweep (lib/finishDownloads.ts) -- each through artByTitle, which links the series to
+  // AniList and THEN plans, so a fresh series is linked by the time it is asked about.
   const src = readFileSync(join(__dirname, '..', 'src', 'routes', 'sources.ts'), 'utf8');
   const calls = src.match(/void artByTitle\([^)]*\);/g) ?? [];
-  assert.equal(calls.length, 3, calls.join('\n'));
+  assert.equal(calls.length, 4, calls.join('\n'));
   for (const c of calls) assert.match(c, /, title, opts\.userId \?\? null\)/, `${c} does not say whose add it is`);
   const fn = src.slice(src.indexOf('async function artByTitle('), src.indexOf('/** Add one series from a source to the library'));
   assert.match(fn, /if \(seriesId\) planSeriesOnAddAsync\(addedBy, seriesId\);/);

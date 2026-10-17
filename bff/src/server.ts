@@ -341,7 +341,7 @@ async function main() {
       }
       setTimeout(finishTick, next).unref();
     };
-    setTimeout(finishTick, firstRunFloor(5 * 60 * 1000, 'sweep')).unref();
+    setTimeout(finishTick, firstRunFloor(5 * 60 * 1000, 'finishDownloads')).unref();
     // v0.61.0, the release radar (lib/releaseRadar.ts): once, a minute after boot, every series with a source and no
     // radar yet is dated from what is already stored -- its listing and its chapters' arrivals, no source asked -- so
     // an upgrade's Releasing soon and Expected this week are not empty until each series' next check.
