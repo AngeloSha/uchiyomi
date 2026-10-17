@@ -39,6 +39,8 @@ admin API, and a token without `write` gets `403` on any non-`GET` request other
 { "error": "forbidden", "message": "This token is read-only." }
 ```
 
+Administrative exceptions outside `/api/admin/*` also require the account to be an admin and the API token to carry `admin`. A `read`/`write` token can still perform its owner's permitted actions, but cannot use its owner's admin role to manage another account's jobs or archive entries.
+
 Give a token the least it needs. A backup script that only reads your library should be `read`, so that a
 token accidentally committed to a repo cannot delete anything.
 

@@ -8,7 +8,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { q } from '../lib/db';
-import { userIdOf, roleOf } from '../lib/auth';
+import { actsAsAdmin, userIdOf, } from '../lib/auth';
 import { logAudit } from '../lib/audit';
 import { browsableIds, type ViewCtx } from '../lib/visibility';
 import { enqueueArchive, archiveAct, archiveView, archiveSeriesIds, type EnqueueOutcome } from '../lib/archive';
@@ -55,7 +55,7 @@ export function registerArchiveRoutes(app: FastifyInstance, vc: (req: FastifyReq
 
   const act = (what: 'pause' | 'resume' | 'stop') => async (req: FastifyRequest, reply: any) => {
     const { seriesId } = req.params as { seriesId: string };
-    const r = await archiveAct(what, seriesId, { userId: userIdOf(req), admin: roleOf(req) === 'admin', ctx: vc(req) });
+    const r = await archiveAct(what, seriesId, { userId: userIdOf(req), admin: actsAsAdmin(req), ctx: vc(req) });
     if (r === 'not_found') return reply.code(404).send({ error: 'not_found' });
     if (r === 'forbidden') return reply.code(403).send({ error: 'forbidden', message: 'Only the person who queued this archive, or an admin, may change it.' });
     if (r === 'done') return reply.code(409).send({ error: 'done', message: 'This archive has finished.' });

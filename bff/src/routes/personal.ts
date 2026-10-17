@@ -943,7 +943,7 @@ export default async function personalRoutes(app: FastifyInstance) {
     const me = await one<{ role: string; perms: { canDownload?: boolean } | null }>(
       'SELECT role, perms FROM users WHERE id = $1', [userIdOf(req)]).catch(() => null);
     if (!me) return false;
-    return me.role === 'admin' || me.perms?.canDownload !== false;
+    return actsAsAdmin(req) || me.perms?.canDownload !== false;
   };
 
   app.post('/api/library/bulk/newest', async (req, reply) => {
@@ -968,7 +968,7 @@ export default async function personalRoutes(app: FastifyInstance) {
   });
 
   // Counts for everyone, results for the starter and admins (lib/bulkNewest.ts says why).
-  app.get('/api/library/bulk/newest', async (req) => bulkNewestState({ userId: userIdOf(req), admin: roleOf(req) === 'admin' }));
+  app.get('/api/library/bulk/newest', async (req) => bulkNewestState({ userId: userIdOf(req), admin: actsAsAdmin(req) }));
 
   // ---- external progress trackers (AniList) ----
   app.get('/api/trackers', async (req) => ({ content: await statusFor(userIdOf(req)) }));
