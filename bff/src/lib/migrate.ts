@@ -1838,6 +1838,11 @@ ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS spreads jsonb;
 -- a never, so it does not use up a chapter's three tries; and an add whose first chapter a site refused keeps the
 -- series, so it can be finished. Off, all of it behaves as v0.77.x did. Additive: v0.77.x ignores it.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS finish_downloads boolean NOT NULL DEFAULT true;
+-- What the finishing sweep goes back for (lib/finishDownloads.ts BEHIND_SQL): the chapters a series is behind on that
+-- the sweep still tries -- not one left alone at its retry cap, nor one held for its preferred group. source_missing
+-- counts those too ("{n} behind" must), and a series behind only on them was visited every quarter of an hour by a
+-- sweep that could fetch nothing of it. NULL until the next visit, read as source_missing. Additive: v0.77.x ignores it.
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS finish_missing integer;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

@@ -125,6 +125,41 @@ test('the finishing sweep visits only the series that are behind, and leaves the
   }
 });
 
+test('a series behind only on chapters it leaves alone is not gone back for', { skip }, async () => {
+  const { CHAPTER_RETRY_CAP, updateSeries, runSweep } = await import('../src/lib/updater');
+  await mk('stuck', 'stuck');
+  await mk('owed', 'owed');
+  // Every chapter of `stuck` broke three times: the sweep leaves all three alone. `owed` has one that did, and two it fetches.
+  await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts)
+           VALUES ($1, 1, $3, 'incomplete', 'x', $4), ($1, 2, $3, 'incomplete', 'x', $4), ($1, 3, $3, 'incomplete', 'x', $4),
+                  ($2, 1, $3, 'incomplete', 'x', $4)`, [S('stuck'), S('owed'), FIN, CHAPTER_RETRY_CAP]);
+  // `owed`'s two land on this visit; stopping them would need a refusing fetch, so its count is read back first.
+  globalThis.fetch = (async (u: any) => (String(u).includes('/refuse/') || String(u).includes('owed')
+    ? new Response('broken', { status: 500 })
+    : new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } }))) as typeof fetch;
+  const behind = async (k: string) => (await q('SELECT source_missing, finish_missing FROM lib_series WHERE id = $1', [S(k)]))[0];
+  try {
+    await updateSeries(S('stuck'), 5);
+    await updateSeries(S('owed'), 5);
+    // Reintroduce by stamping `missing.length` (lib/updater.ts visitSeries finish_missing): finish_missing reads 3 here.
+    assert.deepEqual(await behind('stuck'), { source_missing: 3, finish_missing: 0 }, 'three behind, none of them still tried');
+    assert.equal((await behind('owed')).finish_missing, 2, 'PREMISE: what it still tries is counted');
+    await q('DELETE FROM source_health WHERE source_id = $1', [FIN]); // the 500s' cooldown, or nothing is asked at all
+    listed.clear();
+    await runSweep({ maxNew: 10, sweepMax: 60, finishing: true }, quiet);
+    assert.ok(!listed.has('stuck'), 'a series behind only on chapters left alone is not asked for its list again');
+    assert.ok(listed.has('owed'), 'PREMISE: one with chapters still tried is');
+  } finally {
+    globalThis.fetch = (async (u: any) => (String(u).includes('/refuse/')
+      ? new Response('slow down', { status: 429, headers: { 'retry-after': '1' } })
+      : new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } }))) as typeof fetch;
+    await q('DELETE FROM source_health WHERE source_id = $1', [FIN]).catch(() => {});
+    await q('DELETE FROM chapter_failures WHERE series_id = ANY($1)', [[S('stuck'), S('owed')]]).catch(() => {});
+    await q('DELETE FROM lib_books WHERE series_id = ANY($1)', [[S('stuck'), S('owed')]]).catch(() => {});
+    await q('DELETE FROM lib_series WHERE id = ANY($1)', [[S('stuck'), S('owed')]]).catch(() => {});
+  }
+});
+
 test('a refused chapter is tried past three with the switch on, and left at three with it off', { skip }, async () => {
   const { CHAPTER_RETRY_CAP, updateSeries } = await import('../src/lib/updater');
   const { REFUSAL_RETRY_CAP } = await import('../src/lib/finishDownloads');
