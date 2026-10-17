@@ -102,12 +102,8 @@ const schema = z.object({
   // admin instead. argon2 hashes contain '$' which breaks compose ${} interpolation -> carried base64-encoded.
   INITIAL_USER_PASSWORD_HASH_B64: z.string().optional(),
   PUBLIC_ORIGIN: z.string().url().default('http://localhost:3000'),
-  // Which peers may tell us the client's address in X-Forwarded-For (v0.69.1). It used to be every peer, so a client
-  // talking to the app port directly chose its own address for the sign-in rate limits and the activity log. The
-  // default trusts the proxies a home server actually has -- loopback, link-local and private networks (Docker, an
-  // Umbrel app proxy, nginx or Nginx Proxy Manager on the LAN). `true` trusts every peer as before; `false` none; or a
-  // comma list of addresses and CIDR ranges (for a proxy on a public address).
-  TRUST_PROXY: z.string().default('loopback, linklocal, uniquelocal'),
+  // Trust forwarded addresses only from operator-configured proxy peers; a private address alone grants no authority.
+  TRUST_PROXY: z.string().default('false'),
   CACHE_DIR: z.string().default('/cache'),
   CONFIG_DIR: z.string().default('/config'),
   // Optional OIDC / SSO. Everything stays off unless an issuer and client id are set, so an install that

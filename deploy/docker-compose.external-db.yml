@@ -56,6 +56,7 @@ services:
       DATABASE_URL: postgres://yomi:${DB_PASSWORD:-uchiyomi}@uchiyomi-db:5432/yomi
       LIBRARY_BACKEND: ${LIBRARY_BACKEND:-owned}
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
       FLARESOLVERR_URL: http://uchiyomi-flaresolverr:8191
       SOURCES_DIR: /sources
       CUSTOM_SITES_FILE: /config/sites.json

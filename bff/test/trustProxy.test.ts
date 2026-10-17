@@ -2,8 +2,7 @@
 //
 // Every peer used to be trusted, and clientIp read the first X-Forwarded-For entry -- the one a client writes itself.
 // The audit's sign-in check: 14 POSTs to a 10-per-5-minutes route with a rotating X-Forwarded-For all answered 401 and
-// none 429. Now only loopback, link-local and private-network peers (a Docker proxy, nginx, NPM) are trusted by
-// default. A Fastify app with the real setting and a stand-in route; no database.
+// none 429. Forwarding peers must now be named explicitly by the operator. A Fastify app with the real setting and a stand-in route; no database.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -35,9 +34,8 @@ test('a client on the app port cannot choose its own address with X-Forwarded-Fo
   await app.close();
 });
 
-test('behind a proxy on a private network the forwarded address is believed', async () => {
-  const { env } = await import('../src/env');
-  const app = await appWith(env.TRUST_PROXY);
+test('behind an explicitly trusted private proxy the forwarded address is believed', async () => {
+  const app = await appWith('172.18.0.5');
   const r = await app.inject({ method: 'POST', url: '/login', remoteAddress: '172.18.0.5', headers: { 'x-forwarded-for': '198.51.100.7' } });
   assert.equal(r.json().ip, '198.51.100.7');
   // and a client that prepends its own entry is not believed: the proxy appended the real one last

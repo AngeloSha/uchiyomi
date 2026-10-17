@@ -15,15 +15,12 @@ The ones worth knowing:
 - `WEB_PORT`: host port the app is published on — `8080` everywhere. (`SPLIT_WEB_PORT`, default `8081`, is
   the split's own port under `--profile split`, so both can run side by side.)
 - `PUBLIC_ORIGIN`: the URL the app is served from (match your domain behind a reverse proxy).
-- `TRUST_PROXY`: which peers may tell the app the visitor's address in `X-Forwarded-For` (sign-in rate limits and
-  the activity log use it). The default, `loopback, linklocal, uniquelocal`, trusts a proxy on this machine, in
-  Docker or on your LAN: nginx, Nginx Proxy Manager, Caddy, Traefik, an Umbrel or CasaOS app proxy, a Cloudflare
-  tunnel container. A proxy on a public address, or one that reaches the server over Tailscale (`100.x`), needs
-  adding, with the default names kept so a hop between it and the app on this machine or in Docker stays trusted
-  (`TRUST_PROXY=loopback, linklocal, uniquelocal, 203.0.113.9`, addresses or CIDR ranges). `true` trusts every
-  peer, which lets anyone who can reach the port directly choose their own address. Behind Cloudflare's proxy (the
-  orange cloud) the visitor reaches you through Cloudflare's own addresses: have your reverse proxy restore the real
-  address from `CF-Connecting-IP`, or add Cloudflare's published ranges the same way, or the log shows Cloudflare's.
+- `TRUST_PROXY`: which proxy peers may supply the visitor's address in `X-Forwarded-For` (used by sign-in
+  throttling and the activity log). The default is `false`: direct LAN and loopback clients cannot choose
+  their own address. Behind a reverse proxy, set its exact address or the narrowest dedicated proxy CIDR,
+  for example `TRUST_PROXY=172.18.0.5`, and prevent clients from reaching the app port around that proxy.
+  The proxy must overwrite or correctly append forwarded addresses. Do not trust all private networks when
+  untrusted LAN clients can reach the port. `true` trusts every peer and is unsuitable for direct exposure.
 - **Database** — `DATABASE_URL`, on the app container. **Unset** (the shipped one-container file leaves it
   unset on purpose): the container runs its own Postgres 16 in `/data/pg` (the `uchiyomi_data` volume), on a
   unix socket only — no network listener, no password — and the nightly task dumps it into `/backups` like

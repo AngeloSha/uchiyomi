@@ -51,6 +51,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-}                                 # optional: auto-generated + persisted to /config if empty
       INITIAL_USER_PASSWORD_HASH_B64: ${INITIAL_USER_PASSWORD_HASH_B64:-}   # optional: first-run web setup creates the admin
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8081}   # the split serves on SPLIT_WEB_PORT
+      TRUST_PROXY: ${TRUST_PROXY:-false}
       CACHE_DIR: /cache
       CACHE_MAX_BYTES: "16106127360"   # 15 GiB image cache cap
       LIBRARY_ROOT: /library
@@ -134,6 +135,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-}                                 # auto-generated + persisted to /config if empty
       INITIAL_USER_PASSWORD_HASH_B64: ${INITIAL_USER_PASSWORD_HASH_B64:-}
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
       CACHE_DIR: /cache
       CACHE_MAX_BYTES: "16106127360"   # 15 GiB image cache cap
       LIBRARY_ROOT: /library

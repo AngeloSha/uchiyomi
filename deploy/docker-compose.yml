@@ -39,6 +39,7 @@ services:
       # No DATABASE_URL: that is the switch. Set one here and the embedded database is not started.
       LIBRARY_BACKEND: ${LIBRARY_BACKEND:-owned}
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
       FLARESOLVERR_URL: http://uchiyomi-flaresolverr:8191
       SOURCES_DIR: /sources
       CUSTOM_SITES_FILE: /config/sites.json
