@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.78.1 — 2026-10-17
+
+**Sign-in and account hardening.** Update soon, especially if people outside your household can reach your server.
+Thank you to **@globalteddy**, who reported these and wrote the fixes.
+
+### Security fixes
+
+- **A session follows its account as it is now.** Disabling or deleting an account ends its sessions on their next
+  request, and taking away someone's admin role takes it away at once, not when their session is next renewed.
+- **An admin's API token needs the admin scope for every admin-only action,** not only under `/api/admin`: stopping
+  someone else's download or archive, or seeing a series' admin details. Without it, the token acts as an ordinary
+  account.
+- **Covers and pages fetched on your behalf connect only to public addresses,** checked at the moment of connecting.
+- **A stranger's wrong passwords no longer lock an account.** Five wrong passwords for one name from one address pause
+  sign-in for that name from that address for 15 minutes, and the account's owner can still sign in from anywhere
+  else. Wrong two-factor codes, and wrong current passwords behind a signed-in session, still lock the account.
+- **Sign-in answers every wrong guess the same way,** whether the name exists or not. A disabled or locked account is
+  told so only once the right password is given.
+
+### Changed
+
+- **A sign-in that is being rate-limited** says so in your language.
+
+### Upgrading
+
+- **API:** `POST /auth/login` answers **429** with `Retry-After` after five failed passwords for one name from one
+  address in 15 minutes. A wrong password for a disabled or locked account is now **401** `invalid_credentials`; the
+  right one is still **403** `disabled` or **423** `locked`. See [docs/api.md](docs/api.md).
+- **Database:** no change.
+
 ## v0.78.0 — 2026-10-17
 
 **Downloads that finish on their own, and gaps that are really gaps.** A series you add from Discover, or one whose
