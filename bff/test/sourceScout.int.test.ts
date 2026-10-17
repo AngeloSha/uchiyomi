@@ -159,6 +159,24 @@ test('a series its own sources can serve is not scouted', { skip }, async () => 
   assert.deepEqual(await follows(), []);
 });
 
+test('a chapter that came whole since it was asked for is not looked for; one saved with pages missing is', { skip }, async () => {
+  // MAIN can serve the series again; what is left is what a request named: chapter 5, which is here now.
+  await q('DELETE FROM source_health WHERE source_id = $1', [MAIN]);
+  await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, root) VALUES ('b_sct_5', $1, 'T!sct', 'x/5.cbz', 5, 'Chapter 5', '/library')`, [SER]);
+  try {
+    const out = await sc.runScout(SER, { numbers: [5] });
+    // Reintroduce by wanting every number a request named: GOOD lists 5, and is searched and followed.
+    assert.equal(out.verdict, 'not_needed', JSON.stringify(out));
+    assert.equal(out.searches, 0);
+    // Saved with a page missing (lib/partial.ts): still wanted, and a source that has it whole is followed.
+    await q(`UPDATE lib_books SET missing_pages = '{3}' WHERE id = 'b_sct_5'`);
+    const again = await sc.runScout(SER, { numbers: [5] });
+    assert.equal(again.verdict, 'followed', JSON.stringify(again));
+  } finally {
+    await q(`DELETE FROM lib_books WHERE id = 'b_sct_5'`);
+  }
+});
+
 test('chapters at their retry cap make a series worth scouting, and get their tries back', { skip }, async () => {
   await q('DELETE FROM source_health WHERE source_id = $1', [MAIN]);
   await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, attempts) VALUES ($1, 11, $2, 'error', 3), ($1, 12, $2, 'error', 3)

@@ -192,8 +192,10 @@ async function needOf(
   const fails = new Map((await q<{ number: number; status: string; attempts: number }>(
     'SELECT number::float8 AS number, status, attempts FROM chapter_failures WHERE series_id = $1', [seriesId]))
     .map((r) => [Number(r.number), r]));
-  const held = await one<{ top: number | null }>(
-    'SELECT max(number)::float8 AS top FROM lib_books WHERE series_id = $1 AND number IS NOT NULL', [seriesId]).catch(() => null);
+  const held = await one<{ top: number | null; whole: number[] | null }>(
+    `SELECT max(number)::float8 AS top,
+            array_agg(number::float8) FILTER (WHERE number IS NOT NULL AND (missing_pages IS NULL OR cardinality(missing_pages) = 0)) AS whole
+       FROM lib_books WHERE series_id = $1 AND number IS NOT NULL`, [seriesId]).catch(() => null);
   const numbers = new Set<number>();
   const capped: number[] = [];
   const listed: number[] = [];
@@ -208,8 +210,11 @@ async function needOf(
     if (f && Number(f.attempts) >= retryCapFor(f.status, finish, CHAPTER_RETRY_CAP)) { capped.push(n); numbers.add(n); continue; }
     if (!(r.copies ?? []).some((c) => !!c.source && standing.get(c.source) === 'usable')) numbers.add(n);
   }
-  // What the request named (a chapter saved with pages missing, a fill's numbers): wanted whatever the listing says.
-  for (const n of asked) if (Number.isFinite(n)) numbers.add(n);
+  // What the request named (a chapter saved with pages missing, a fill's numbers): wanted whatever the listing says,
+  // until a whole copy of it is here. Reintroduce by keeping them all: "a chapter that came whole since it was asked
+  // for is not looked for" in sourceScout.int.test.ts searches.
+  const whole = new Set((held?.whole ?? []).map(Number));
+  for (const n of asked) if (Number.isFinite(n) && !whole.has(n)) numbers.add(n);
   const frozen = mine.length > 0 && mine.every((id) => !carries(standing.get(id) ?? 'usable'))
     && !mine.every((id) => standing.get(id) === 'off');
   return { numbers, capped, listed: [...new Set(listed)], top, frozen };
