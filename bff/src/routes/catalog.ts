@@ -16,7 +16,7 @@ import { dominantHex } from '../lib/color';
 import { runtime } from '../lib/runtime';
 import { scheduleHealthSummaryRefresh } from '../lib/healthSummary';
 import { sourceLabel } from '../lib/health';
-import { authenticate, roleOf, userIdOf } from '../lib/auth';
+import { actsAsAdmin, authenticate, roleOf, userIdOf } from '../lib/auth';
 import { warmHeroBackdrops } from './images';
 import { writeProgress, reachedEnd } from '../lib/progress';
 import { onDeckPicks, type DeckPick } from '../lib/onDeck';
@@ -68,7 +68,7 @@ function overlay(books: any[], map: Map<string, { page: number; completed: boole
 
 /** Apply this user's reading state to a set of Komga books (no-op for admin = native Komga state). */
 async function booksForUser(req: FastifyRequest, books: any[]): Promise<any[]> {
-  if ((NATIVE_PROGRESS && roleOf(req) === 'admin') || !books.length) return books;
+  if ((NATIVE_PROGRESS && actsAsAdmin(req)) || !books.length) return books;
   return overlay(books, await userProgress(userIdOf(req), books.map((b) => b.id)));
 }
 
@@ -285,7 +285,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // ⚠️ The owned library has ONE scan, of every root, whatever library id it is handed (lib/ownedCatalog.ts):
     // one call per library started that whole scan once per library, all at the same time. Komga scans each.
     const targets = NATIVE_PROGRESS ? libs : [libs[0] ?? { id: 'lib' }];
-    const admin = roleOf(req) === 'admin';
+    const admin = actsAsAdmin(req);
     // Each library's answer, or why its scan failed: v0.49.0 swallowed a failure into "scanned" without counts.
     const run = Promise.all(targets.map((l: any) => komga.scanLibrary(SYSTEM_CTX, l.id)
       .then((a: any) => ({ a }), (e: unknown) => ({ a: null, failed: (e as Error)?.message || String(e) }))));
@@ -324,7 +324,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
   // and the server's clock, so the web compares the server's times with each other and never with its own.
   app.get('/api/refresh', async (req) => {
     const running = scanRunning();
-    if (roleOf(req) !== 'admin') return { running };
+    if (!actsAsAdmin(req)) return { running };
     const p = scanProgress();
     const last = lastScanReport();
     const failed = lastScanFailure();
@@ -338,7 +338,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
 
   app.get('/api/home', async (req) => {
     const uid = userIdOf(req);
-    const admin = NATIVE_PROGRESS && roleOf(req) === 'admin';
+    const admin = NATIVE_PROGRESS && actsAsAdmin(req);
     // The part-way-through pick is a read_progress row, which survives a prune by design, so the resolved book is checked
     // as well: Continue Reading must never hand someone a chapter with no pages.
     const resolvePicks = async (picks: DeckPick[]): Promise<any[]> => {
@@ -501,7 +501,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
          FROM lib_series s LEFT JOIN libraries l ON l.id = s.library_id WHERE s.id = $1`, [id]);
     out.libraryReader = cleanLibraryReader(lr?.p);
     // Admins only: which library it is in, for the reader's "use these settings for the library" key.
-    if (roleOf(req) === 'admin' && lr?.lid) out.library = { id: lr.lid, name: lr.lname };
+    if (actsAsAdmin(req) && lr?.lid) out.library = { id: lr.lid, name: lr.lname };
     // v0.61.0: what kind of comic it is -- the admin's override, else what the evidence learned, else unknown -- for EVERY
     // viewer: the reader's "Pick the mode for each series" opens a manhwa as a webtoon and a manga page by page. The
     // evidence behind it (`detectedType`) stays an admin's, below. Additive: the admin block sets the same value.
@@ -516,7 +516,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // null (rather than absent) says "none of its own, the global ones apply".
     // So does its own source order (lib/sourcePrefs.ts), for the Sources sheet's preferred-source chips: null
     // means the server-wide order applies.
-    if (roleOf(req) === 'admin') {
+    if (actsAsAdmin(req)) {
       const f = await one<{ folder: string; source_prefs: { priority?: unknown } | null; borrow_names: boolean | null; server_borrow: boolean | null;
                             reading_direction: string | null; reading_direction_from: string | null; lang: string | null; source_id: string | null; roots: string[] | null;
                             series_type: string | null; series_type_from: string | null; type_override: string | null; hide_notices: boolean | null;
@@ -727,7 +727,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const res = await komga.seriesBooks(vc(req), id, Number(page), Number(size), sort || undefined);
     const content = await booksForUser(req, res.content);
     // An admin's chapter menu copies the file's full path (#136). Nobody else is told where anything is on the host.
-    if (roleOf(req) !== 'admin' || !OWNED) return { ...res, content };
+    if (!actsAsAdmin(req) || !OWNED) return { ...res, content };
     const paths = await bookPaths(content.map((b: any) => b.id));
     return { ...res, content: content.map((b: any) => (paths.has(b.id) ? { ...b, path: paths.get(b.id) } : b)) };
   });
@@ -758,7 +758,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // page draws a deliberately deleted chapter as a ghost row from it. Here rather than in the series' admin block,
     // which only an admin is sent.
     const [listing, numbering, archive, deletedAsGhosts] = await Promise.all([
-      listingFor(id, { floor, archiveBoundary, admin: roleOf(req) === 'admin', userId: userIdOf(req) }),
+      listingFor(id, { floor, archiveBoundary, admin: actsAsAdmin(req), userId: userIdOf(req) }),
       numberingSummary(id),
       archiveSummaryFor(id, userIdOf(req)).catch(() => null),
       deletedAsGhostsOn(),
@@ -1120,7 +1120,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
 
     await writeProgress({ userId: uid, bookId: id, seriesId: sid, page, completed: done, silent, deviceId, at, incognito });
 
-    if (NATIVE_PROGRESS && roleOf(req) === 'admin') komga.setReadProgress(vc(req), id, page, done).catch(() => {});
+    if (NATIVE_PROGRESS && actsAsAdmin(req)) komga.setReadProgress(vc(req), id, page, done).catch(() => {});
     return reply.send({ ok: true });
   });
 }

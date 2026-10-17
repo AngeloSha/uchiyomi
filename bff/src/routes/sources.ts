@@ -3,7 +3,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
-import { authenticate, userIdOf, roleOf } from '../lib/auth';
+import { actsAsAdmin, authenticate, userIdOf, roleOf } from '../lib/auth';
 import { getSource, listSources, isSwAdapterId, SW_PREFIX, swAdapterId, withTimeout } from '../lib/sources';
 import { MANGADEX_GROUP } from '../lib/sources/mangadex';
 import type { SourceAdapter, SourceSeries, SourceChapter } from '../lib/sources/types';
@@ -2269,7 +2269,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const me = await one<{ role: string; perms: { canDownload?: boolean } | null }>(
       'SELECT role, perms FROM users WHERE id = $1', [userIdOf(req)]).catch(() => null);
     if (!me) return reply.code(403).send({ error: 'forbidden', message: 'Could not check your permissions.' });
-    if (me.role !== 'admin' && me.perms?.canDownload === false) {
+    if (!actsAsAdmin(req) && me.perms?.canDownload === false) {
       return reply.code(403).send({ error: 'forbidden', message: "You don't have permission to add series." });
     }
     // Resolved once per request, as in catalog.ts. Only `maxAgeRating` is read here, but taking the whole
@@ -3385,7 +3385,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
    */
   const receivedBy = async (req: FastifyRequest, folder: string, j: Job) => {
     const me = userIdOf(req);
-    const admin = roleOf(req) === 'admin';
+    const admin = actsAsAdmin(req);
     return receives(await downloadsAudience(vc(req), me, admin, { folders: [folder] }), admin, me, folder, j);
   };
 
@@ -3397,7 +3397,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
   app.get('/api/sources/jobs', async (req) => {
     sweepJobs();
     const me = userIdOf(req);
-    const admin = roleOf(req) === 'admin';
+    const admin = actsAsAdmin(req);
     // The server's own runs (lib/downloadJobs.ts, #82): the sweep, the repair, a bulk "Fetch newest". An
     // admin's to see and stop -- and a bulk run its starter's too, since it is their selection. Nobody
     // else's: the series a sweep is on may be in a library this viewer cannot open.
@@ -3452,7 +3452,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const { folder } = req.params as { folder: string };
     const j = jobs.get(folder);
     if (!j || !(await receivedBy(req, folder, j))) return reply.code(404).send({ error: 'not_found' });
-    if (roleOf(req) !== 'admin' && !(j.by && j.by === userIdOf(req))) return reply.code(403).send({ error: 'forbidden' });
+    if (!actsAsAdmin(req) && !(j.by && j.by === userIdOf(req))) return reply.code(403).send({ error: 'forbidden' });
     if (j.status !== 'downloading') return reply.code(409).send({ error: 'not_running' });
     j.cancelRequested = true;
     await logAudit('download.cancel', { userId: userIdOf(req), detail: { folder, title: j.title }, req });
@@ -3464,7 +3464,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const { kind } = req.params as { kind: string };
     const card = listRuns().find((r) => r.kind === kind && r.status === 'running');
     if (!card) return reply.code(404).send({ error: 'not_found' });
-    if (roleOf(req) !== 'admin' && !(card.by && card.by === userIdOf(req))) return reply.code(403).send({ error: 'forbidden' });
+    if (!actsAsAdmin(req) && !(card.by && card.by === userIdOf(req))) return reply.code(403).send({ error: 'forbidden' });
     requestStop(card.kind);
     await logAudit('download.cancel', { userId: userIdOf(req), detail: { run: card.kind }, req });
     return { ok: true };
@@ -3475,7 +3475,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const { kind } = req.params as { kind: string };
     const card = listRuns().find((r) => r.kind === kind);
     if (!card) return reply.code(404).send({ error: 'not_found' });
-    if (roleOf(req) !== 'admin' && !(card.by && card.by === userIdOf(req))) return reply.code(403).send({ error: 'forbidden' });
+    if (!actsAsAdmin(req) && !(card.by && card.by === userIdOf(req))) return reply.code(403).send({ error: 'forbidden' });
     const r = dismissRun(card.kind);
     if (r === 'running') return reply.code(409).send({ error: 'running' });
     return { ok: true };
@@ -3491,7 +3491,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
   app.delete('/api/sources/jobs/:folder', async (req, reply) => {
     const { folder } = req.params as { folder: string };
     const j = jobs.get(folder);
-    const admin = roleOf(req) === 'admin';
+    const admin = actsAsAdmin(req);
     const me = userIdOf(req);
     if (!j) {
       // v0.50.0: a Needs attention card can be only chapters that could not be saved -- the scheduled check's, a
@@ -3823,7 +3823,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // dropped here, before the add, rather than refused: the add itself is theirs to make, and it goes
     // through exactly as if the switch had been off (no judgement, no carrier card). The dialog hides the
     // switch from members; this is the server's half of that.
-    const alsoFollow = roleOf(req) === 'admin' ? b.data.alsoFollow : undefined;
+    const alsoFollow = actsAsAdmin(req) ? b.data.alsoFollow : undefined;
     // canDownload is now checked for the whole plugin in the preHandler above, including this route.
     if (!sourceAllowedFor(getSource(source), vc(req).maxAgeRating)) return denySource(reply);
     // `wait: false` -- answer once the decision is made and download afterwards. Everything that decides
@@ -3852,7 +3852,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
       // makes, asked here because this is where the viewer is (#67).
       const seen = r.existing && await seriesVisible(r.existing.id, vc(req)).catch(() => false);
       // A removed edition is visible to nobody; its id goes to an admin, who can put it back (Admin → Library).
-      const named = seen || (r.existing?.hidden && roleOf(req) === 'admin');
+      const named = seen || (r.existing?.hidden && actsAsAdmin(req));
       const existing = r.existing && {
         title: r.existing.title, ...(r.existing.source ? { source: r.existing.source } : {}),
         ...(r.existing.lang ? { lang: r.existing.lang } : {}), ...(named ? { id: r.existing.id } : {}),

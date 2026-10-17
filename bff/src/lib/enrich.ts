@@ -15,7 +15,7 @@
 import type { FastifyRequest } from 'fastify';
 import { q } from './db';
 import { NATIVE_PROGRESS } from './backend';
-import { roleOf, userIdOf } from './auth';
+import { actsAsAdmin, userIdOf } from './auth';
 import { autoHeroFor } from './autoHero';
 import { effectiveLang } from './seriesLang';
 import { browsable, Params, type ViewCtx } from './visibility';
@@ -176,7 +176,7 @@ export async function enrichSeries(req: FastifyRequest, list: any[]): Promise<an
   const userId = userIdOf(req);
   // Only a Komga backend reports real per-user counts of its own; in owned mode NATIVE_PROGRESS is false, so
   // admins take the computed path like everyone else.
-  const admin = NATIVE_PROGRESS && roleOf(req) === 'admin';
+  const admin = NATIVE_PROGRESS && actsAsAdmin(req);
   const favs = new Set(
     (await q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1', [userId])).map((r) => r.series_id),
   );
