@@ -17,6 +17,8 @@ refreshed with a rotating cookie. Fine for a browser, miserable for a cron job.
 
 Session-authenticated API requests check that the account still exists and is enabled, and use its current role. Disabling or deleting an account ends its API access on the next request; demotion removes its administrative authority. This is an account-state check, not a promise that every individual access JWT is revoked by signing out.
 
+Password sign-in keeps the ten-attempts-per-address/five-minute limit and allows five failed password checks per address/username in fifteen minutes; further attempts receive **429** with `Retry-After`. A stranger's wrong passwords do not lock the account for other clients. Authenticated password checks and second-factor failures retain their account lock protection. Source limits and optional two-factor authentication remain important against distributed guessing.
+
 **API tokens** are long-lived, revocable, and scoped. Create one under **Profile → Connections → API tokens → New token** (the form opens inline).
 The token is shown once, so copy it then. It looks like `uy_` followed by random characters.
 

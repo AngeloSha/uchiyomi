@@ -42,8 +42,10 @@ test('signing up', { skip }, async (t) => {
   await app.register(jwt, { secret: process.env.JWT_SECRET! });
   await app.register(authRoutes);
   await app.ready();
+  // Independent fixture clients: this suite tests registration validation/races, not one client's rate budget.
+  let peer = 1;
   const register = (payload: Record<string, unknown>) =>
-    app.inject({ method: 'POST', url: '/auth/register', headers: { 'user-agent': 'register-int-test' }, payload });
+    app.inject({ method: 'POST', url: '/auth/register', remoteAddress: `203.0.113.${peer++}`, headers: { 'user-agent': 'register-int-test' }, payload });
   const named = async (name: string) =>
     (await one<{ n: number }>('SELECT count(*)::int AS n FROM users WHERE lower(username) = lower($1)', [name]))!.n;
 
