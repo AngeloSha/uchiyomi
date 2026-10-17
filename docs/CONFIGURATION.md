@@ -24,6 +24,11 @@ The ones worth knowing:
   peer, which lets anyone who can reach the port directly choose their own address. Behind Cloudflare's proxy (the
   orange cloud) the visitor reaches you through Cloudflare's own addresses: have your reverse proxy restore the real
   address from `CF-Connecting-IP`, or add Cloudflare's published ranges the same way, or the log shows Cloudflare's.
+  The default trusts every device and container on those networks too. If someone you do not trust can reach the
+  app's port directly, around your proxy (another device on the LAN, another container on its Docker network), set
+  `TRUST_PROXY` to your proxy's own address, so only it can say who a visitor is (`TRUST_PROXY=172.18.0.5`), or to
+  `false` when there is no proxy at all. Since v0.78.1 sign-in counts wrong passwords per address and name, so the
+  address the app sees is worth getting right.
 - **Database** — `DATABASE_URL`, on the app container. **Unset** (the shipped one-container file leaves it
   unset on purpose): the container runs its own Postgres 16 in `/data/pg` (the `uchiyomi_data` volume), on a
   unix socket only — no network listener, no password — and the nightly task dumps it into `/backups` like
