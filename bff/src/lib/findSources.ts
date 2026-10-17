@@ -83,7 +83,7 @@ import { postingOrderSeries } from './numbering';
 import { haveNumbers } from './libraryNumbers';
 import { altTitlesFor, learnAltTitles, parseAltTitles, SEARCH_NAMES } from './altTitles';
 import { searchByNames, takeHuntSlot, releaseHuntSlot, rememberJudgement } from './sourceHunt';
-import { recordVerdict } from './scoutMemory';
+import { recordVerdict, forgetVerdict } from './scoutMemory';
 import { budgetFor } from './sources/budget';
 import { seriesByIds, seriesOfMainSource } from './findScope';
 import { runtime } from './runtime';
@@ -1066,6 +1066,8 @@ async function decide(
       { addedBy: userId }).catch(() => 'gone' as const);
     if (written === 'cap') return { refused: 'full' };
     if (written !== 'inserted') return { refused: 'not_found' };
+    // An admin's own pick (v0.80.0): what the scout remembered about it for this series, `removed` included, is gone.
+    await forgetVerdict(seriesId, sourceId);
     await logAudit('series.follow_source', {
       userId,
       detail: {
@@ -1164,6 +1166,7 @@ async function promote(
         { addedBy: userId }).catch(() => 'gone' as const);
       if (written === 'cap') return { refused: 'full' };
       if (written !== 'inserted') return { refused: 'not_found' };
+      await forgetVerdict(seriesId, sourceId);
       await logAudit('series.follow_source', {
         userId,
         detail: {

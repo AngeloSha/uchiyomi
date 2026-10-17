@@ -32,6 +32,9 @@ if (DSN) {
   // One search at a time, so "asked in scan order" and "stopped before asking" are exact.
   process.env.SCAN_CONCURRENCY = '1';
   process.env.UCHIYOMI_PING_URL = '';
+  // The follower limit these tests count to. Three by default since v0.80.0 (lib/followLimit.ts, pinned in
+  // followLimit.test.ts); the rules here are the same at any limit, and these fixtures measure them at two.
+  process.env.MAX_FOLLOWED_SOURCES = '2';
 }
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 

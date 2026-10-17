@@ -15,6 +15,9 @@ const DSN = process.env.TEST_DATABASE_URL;
 if (DSN) {
   process.env.DATABASE_URL = DSN;
   process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-at-least-16-chars';
+  // The follower limit these tests count to. Three by default since v0.80.0 (lib/followLimit.ts, pinned in
+  // followLimit.test.ts); the rules here are the same at any limit, and these fixtures measure them at two.
+  process.env.MAX_FOLLOWED_SOURCES = '2';
   process.env.CONFIG_DIR = process.env.CONFIG_DIR || '/tmp/uchiyomi-test-config';
 }
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';

@@ -35,6 +35,10 @@ if (DSN) {
   process.env.DOWNLOAD_MIN_GAP_MS = '0';
   process.env.MIN_FREE_GB = '0';
   process.env.SCAN_SEARCH_MS = '2000';
+  // The limit these tests count to. Three by default since v0.80.0 (lib/followLimit.ts, pinned in followLimit.test.ts);
+  // the cap, the race and the order below are the same rule at any limit, and this file's four candidates measure it
+  // at two.
+  process.env.MAX_FOLLOWED_SOURCES = '2';
   // This file's one fill scan ("a person confirming the automatic follower ...") needs RICH in its answer, and a scan
   // stops asking once SCAN_ENOUGH sources have the title: under load RICH could get its slot after three sources it
   // was queued ahead of had answered, come back not_tried with no id, and the follow it feeds answered 400 (CI round 1

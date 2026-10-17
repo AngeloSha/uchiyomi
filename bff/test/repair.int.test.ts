@@ -282,6 +282,9 @@ beforeEach(async () => {
   await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[...SOURCES, BLAMER]]);
   await q('DELETE FROM chapter_failures');
   await q('DELETE FROM series_sources WHERE series_id = ANY($1)', [MINE]);
+  // What sources said about these series (v0.80.0, lib/scoutMemory.ts): kept for days on a server, and shared by every
+  // search, so a source one test found empty would be skipped by the next test's hunt for the same series.
+  await q('DELETE FROM scout_verdicts WHERE series_id = ANY($1)', [MINE]);
   await q('DELETE FROM read_progress WHERE series_id = ANY($1)', [MINE]);
   await q('DELETE FROM lib_books WHERE series_id = $1', [SHORT]);
   // The gap test fills Repair Gap's hole for real, on disk and in the listing. Put the library back, so
