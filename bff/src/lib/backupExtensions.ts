@@ -322,7 +322,7 @@ export async function neededBackups(): Promise<Map<string, { pinned: boolean; ne
     out.set(pkg, { pinned: was.pinned || pinned, needed: true });
   };
   for (const r of await q<{ source_id: string }>(
-    `SELECT DISTINCT source_id FROM lib_series WHERE source_id = ANY($1::text[]) AND deleted_at IS NULL AND merged_into IS NULL`, [ids]).catch(() => [])) {
+    `SELECT DISTINCT s.source_id FROM lib_series s WHERE s.source_id = ANY($1::text[]) AND ${visibleToAll('s')}`, [ids]).catch(() => [])) {
     mark(r.source_id, true);
   }
   for (const r of await q<{ source: string }>(
@@ -365,7 +365,7 @@ async function stampNeeded(needed: ReadonlyMap<string, { needed: boolean }>): Pr
 export async function parkPackage(pkg: string, why: string): Promise<'parked' | 'pinned' | 'busy'> {
   const ids = (await packageSourceIds(pkg)).map((id) => `${SW_PREFIX}${id}`);
   const isMain = async () => ids.length > 0 && ((await one<{ n: number }>(
-    'SELECT count(*)::int AS n FROM lib_series WHERE source_id = ANY($1::text[]) AND deleted_at IS NULL AND merged_into IS NULL', [ids]).catch(() => null))?.n ?? 0) > 0;
+    `SELECT count(*)::int AS n FROM lib_series s WHERE s.source_id = ANY($1::text[]) AND ${visibleToAll('s')}`, [ids]).catch(() => null))?.n ?? 0) > 0;
   if (await isMain()) return 'pinned';
   // Under the install lock from the follows' move to the reload, and with the scout told (parkingNow): nothing follows
   // one of its sources again while it goes.
