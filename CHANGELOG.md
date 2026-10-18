@@ -2,10 +2,14 @@
 
 ## v0.84.1 — 2026-10-18
 
-**Reading on into the next chapter no longer reloads the reader.** The reader keeps the address on the chapter you are
-reading, and moving it asked for the page again. When Uchiyomi had been updated since the reader opened, or the
-connection dropped at that moment, the whole page loaded again on the new chapter, and the chapter before was gone. The
-address now changes in place: reading on stays seamless, and scrolling back reaches the chapter before.
+**Reading on into the next chapter no longer reloads the reader.**
+
+### Seamless chapters
+
+- **The next chapter joins the one you are reading, every time.** The reader keeps the address on the chapter you are
+  reading, and moving it asked for the page again. When Uchiyomi had been updated since the reader opened, or the
+  connection dropped at that moment, the whole page loaded again on the new chapter, and the chapter before was gone.
+  The address now changes in place: reading on stays seamless, and scrolling back reaches the chapter before.
 
 ### Upgrading
 
