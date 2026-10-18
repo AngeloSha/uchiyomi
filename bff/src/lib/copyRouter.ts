@@ -40,12 +40,21 @@ export interface RouteFacts {
   load?: (key: string) => number;
   /** A source downloading at a raised pace or resting after a 429 (lib/pace.ts). Tests pass their own. */
   slowed?: (source: string) => boolean;
+  /**
+   * A backup extension's source (v0.82.0, lib/backupExtensions.ts). Asked after the others among equals: the owner's
+   * "when there is new chapters it will just use main until it rate limits or fail again". A backup's copy beats the
+   * main's only when the main's is slowed or failed this chapter last -- never because the main's image server is
+   * busier, which would keep a backup in use, and installed, for good. Absent: none is.
+   */
+  backup?: (source: string) => boolean;
 }
 
 /**
  * Of a chapter's chosen copy and the same release elsewhere, the one to download: one that may be asked, at full speed
- * before slowed, not the source that failed it last time before that one, then the image server with the least on it,
- * then the chosen copy. Pure but for the pace and gate it reads by default.
+ * before slowed, not the source that failed it last time before that one, not a backup extension's before one (v0.82.0),
+ * then the image server with the least on it, then the chosen copy. Pure but for the pace and gate it reads by default.
+ * Reintroduce the backup's turn by dropping it: "the main at full speed wins over a backup on a quieter server" in
+ * copyRouter.test.ts takes the backup.
  *
  * The chosen copy, untouched, when its own source may not be asked (refusing this run, cooling, switched off): that is
  * the fallback helper's case (lib/chapterFallback.ts), which takes the number from another followed source and says
@@ -56,11 +65,12 @@ export function routeCopy<T extends { source?: string }>(own: T, others: readonl
   if (!own.source || !f.may(own.source)) return own;
   const load = f.load ?? ((key: string) => { const d = gateDepth(key); return d.active + d.queued; });
   const slowed = f.slowed ?? ((s: string) => paceLevel(s) > 0 || restLeft(s) > 0);
+  const backup = f.backup ?? (() => false);
   const open = [own, ...others]
     .map((c, i) => ({ c, i, s: c.source ?? '' }))
     .filter((x) => x.s && f.may(x.s))
-    .map((x) => ({ ...x, slow: slowed(x.s) ? 1 : 0, blamed: x.s === f.blamed ? 1 : 0, load: load(rateKeyOf(x.s)) }));
+    .map((x) => ({ ...x, slow: slowed(x.s) ? 1 : 0, blamed: x.s === f.blamed ? 1 : 0, spare: backup(x.s) ? 1 : 0, load: load(rateKeyOf(x.s)) }));
   if (!open.length) return own;
-  open.sort((a, b) => a.slow - b.slow || a.blamed - b.blamed || a.load - b.load || a.i - b.i);
+  open.sort((a, b) => a.slow - b.slow || a.blamed - b.blamed || a.spare - b.spare || a.load - b.load || a.i - b.i);
   return open[0].c;
 }

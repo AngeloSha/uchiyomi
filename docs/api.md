@@ -166,7 +166,20 @@ which also answers `chapters: 0`.
 `GET /api/sources` lists what you can reach: each entry carries `id`, `name`, `lang` (null when the source
 declares no single language, which means it belongs to every language group), `latest` (whether it can be
 browsed without a query), `popular` (whether it can offer its own popularity ranking), `used` (how many
-series in the library came from it), its health `status`, and `note`.
+series in the library came from it), its health `status`, and `note`. Since v0.82.0 a backup extension's source (one
+Uchiyomi installed by itself to finish downloads, removed again when unused) carries `backup: true`: it is listed so a
+chapter's source can be named, and left out of every route Discover uses -- `search-all`, `search`, `latest`,
+`popular`, `find` and `edition-candidates` never ask it.
+
+**Backup extensions** (since v0.82.0). Extensions Uchiyomi installed by itself are backups: a row of
+`GET /api/admin/extensions/catalog` carries `backup: true`, an `extension` source of
+`GET /api/admin/sources/overview` carries `backup: {lastNeededAt, removesAt}` (`removesAt` null while a series uses it
+as its main source), and a source of `GET /api/series/:id` (and the admin follow routes' `sources`) carries
+`backup: true`. `POST /api/admin/extensions/catalog/:pkgName` with `{action: "keep"}` makes one the admin's (`{ok,
+kept}`); `install`, `enable`, a person's follow, attach or Make main do the same. An `uninstall` there marks the
+package refused: Uchiyomi never installs it again. Installs, updates and removals run one at a time: `install`,
+`update`, `uninstall` and `POST /api/admin/extensions/update-all` wait up to two minutes for another, then answer
+**409** `busy` with `messageSaid` `extension.busy`.
 
 **MangaDex in other languages** (since v0.52.0, #123). `mangadex` is MangaDex in English, always on. Every other
 language an admin switches on (`mangadexLangs` on `PATCH /api/admin/settings`) is a source of its own, with the id

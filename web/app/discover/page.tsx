@@ -17,7 +17,7 @@ import { ScrollRail } from '@/components/ScrollRail';
 import { DiscoverHero, TrendingCard, Trending } from '@/components/DiscoverHero';
 import { RecommendationRail } from '@/components/RecommendationRail';
 import { SourcePicker, SourceLatest, Src, SrcState } from '@/components/SourcePicker';
-import { aloneEmpty, answeredPage, budgetForMode, WALL_IN_FLIGHT, type ListMode, type SrcExtension, type StackSource } from '@/lib/sourceGroups';
+import { aloneEmpty, answeredPage, budgetForMode, discoverSources, WALL_IN_FLIGHT, type ListMode, type SrcExtension, type StackSource } from '@/lib/sourceGroups';
 import { normTitle } from '@/lib/normTitle';
 import { applyWorks, foldByWork, followWorks, mergeGroups, unknownWorks, workKey, type WallProvider } from '@/lib/wall';
 import { useLiveWorks } from '@/lib/useLiveWorks';
@@ -157,7 +157,8 @@ function DiscoverInner() {
     staleTime: 30_000,
     refetchInterval: 60_000,
   });
-  const sources = useMemo(() => sourcesData?.content ?? [], [sourcesData]);
+  // Never a backup extension's (v0.82.0, lib/sourceGroups.ts discoverSources): only the sources a person added.
+  const sources = useMemo(() => discoverSources(sourcesData?.content ?? []), [sourcesData]);
   /**
    * Whether to offer the reveal chip here at all.
    *

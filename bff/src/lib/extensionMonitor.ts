@@ -39,6 +39,25 @@ import {
   listExtensions, refreshExtensions, setExtensionState, getRepos, addRepo, repoKey,
   type ExtensionInfo,
 } from './sources/suwayomi/extensions';
+import { withInstallLock, BUSY } from './sources/suwayomi/installLock';
+
+/**
+ * Keep the catalogue snapshot's `installed` in step with an install or removal Uchiyomi made itself (v0.82.0): an
+ * admin's Install or Remove, Fix everything's trials, a backup extension put back or removed (lib/backupExtensions.ts).
+ * The next check compares the engine with this snapshot, and a package the snapshot still had installed reads "removed
+ * outside Uchiyomi" -- and, when the engine was wiped, is installed again. Uchiyomi's own removals are neither, and a
+ * removed backup must stay removed. A package the snapshot has not seen yet waits for the next check. Best effort.
+ * Reintroduce by dropping it: "a wiped engine puts back the backup in use, never one Uchiyomi removed" in
+ * backupExtensions.int.test.ts finds the removed one installed again.
+ */
+export async function markInstalled(pkgName: string, installed: boolean): Promise<void> {
+  await q(
+    `UPDATE extension_catalog SET installed = $2, installed_version = CASE WHEN $2 THEN installed_version ELSE NULL END, updated_at = now()
+      WHERE pkg_name = $1`, [pkgName, installed]).catch(() => {});
+}
+
+/** How long the scheduled check waits for another install or removal to finish before it leaves this round. */
+const LOCK_WAIT_MS = 5 * 60_000;
 
 /** Re-reading every repository index is slower than one person waiting on a button; give it more room. */
 const REFRESH_TIMEOUT_MS = 300_000;
@@ -163,6 +182,12 @@ export interface ExtensionCheckDeps {
   notifyAdmins: typeof liveNotifyAdmins;
   /** A library sweep is using the engine's extensions right now, so updating one would break it mid-fetch. */
   sweepRunning: () => boolean;
+  /**
+   * The packages Uchiyomi installed by itself and keeps only while needed (v0.82.0, lib/backupExtensions.ts). Kept up
+   * to date like any other, and left out of the notifications: nobody installed them, and "MangaBolt updated" is noise
+   * about something they never chose. Absent: none.
+   */
+  backupPkgs?: () => Promise<Set<string>>;
 }
 
 const LIVE: ExtensionCheckDeps = {
@@ -172,6 +197,8 @@ const LIVE: ExtensionCheckDeps = {
   logAudit: liveLogAudit,
   notifyAdmins: liveNotifyAdmins,
   sweepRunning: () => runtime.updating,
+  backupPkgs: async () => new Set((await q<{ pkg_name: string }>(
+    `SELECT pkg_name FROM backup_extensions WHERE state IN ('trial', 'active')`).catch(() => [])).map((r) => r.pkg_name)),
 };
 
 /**
@@ -417,32 +444,46 @@ export async function runExtensionCheck(
   const changed = <T>(now: T[], was: T[] | undefined) =>
     now.length > 0 && JSON.stringify([...now].sort()) !== JSON.stringify([...(was ?? [])].sort());
 
-  if (result.updated.length) {
+  // A backup extension (v0.82.0) is updated like any other and named in no notification: nobody installed it. The
+  // panel's result keeps every name. Reintroduce by notifying them all: "a backup's update is no notification" in
+  // extensionMonitor.test.ts finds MangaBolt in the push.
+  const quiet = new Set<string>();
+  if (deps.backupPkgs) {
+    const pkgs = await deps.backupPkgs().catch(() => new Set<string>());
+    for (const e of before) if (pkgs.has(e.pkgName)) quiet.add(e.name);
+  }
+  const loud = <T>(items: readonly T[] | undefined, nameOf: (x: T) => string): T[] => (items ?? []).filter((x) => !quiet.has(nameOf(x)));
+  const updated = loud(result.updated, (u) => u.name);
+  const failed = loud(result.failed, (f) => f.name);
+  const waiting = loud(result.updatesAvailable, (n) => n);
+  const obsolete = loud(result.obsolete, (n) => n);
+
+  if (updated.length) {
     await deps.notifyAdmins(
-      result.updated.length === 1 ? `${result.updated[0].name} updated` : `${result.updated.length} extensions updated`,
-      result.updated.map((u) => `${u.name} ${u.from ?? '?'} → ${u.to ?? '?'}`).join(' · ').slice(0, 300),
+      updated.length === 1 ? `${updated[0].name} updated` : `${updated.length} extensions updated`,
+      updated.map((u) => `${u.name} ${u.from ?? '?'} → ${u.to ?? '?'}`).join(' · ').slice(0, 300),
       '/admin/', 'extensions',
     ).catch(() => {});
   }
-  if (result.failed.length) {
-    const lead = result.failed[0];
+  if (failed.length) {
+    const lead = failed[0];
     await deps.notifyAdmins(
-      result.failed.length === 1 ? `${lead.name} could not be updated` : `${result.failed.length} extensions could not be updated`,
-      result.failed.map((f) => `${f.name}: ${f.reason}`).join(' · ').slice(0, 300),
+      failed.length === 1 ? `${lead.name} could not be updated` : `${failed.length} extensions could not be updated`,
+      failed.map((f) => `${f.name}: ${f.reason}`).join(' · ').slice(0, 300),
       '/admin/', 'extensions',
     ).catch(() => {});
   }
-  if (!mayUpdate && changed(result.updatesAvailable, settings.last?.updatesAvailable)) {
+  if (!mayUpdate && changed(waiting, loud(settings.last?.updatesAvailable, (n) => n))) {
     await deps.notifyAdmins(
-      `${result.updatesAvailable.length} extension update${result.updatesAvailable.length === 1 ? '' : 's'} waiting`,
-      `${result.updatesAvailable.join(', ')}. Automatic updates are switched off; update them from Admin.`.slice(0, 300),
+      `${waiting.length} extension update${waiting.length === 1 ? '' : 's'} waiting`,
+      `${waiting.join(', ')}. Automatic updates are switched off; update them from Admin.`.slice(0, 300),
       '/admin/', 'extensions',
     ).catch(() => {});
   }
-  if (changed(result.obsolete, settings.last?.obsolete)) {
+  if (changed(obsolete, loud(settings.last?.obsolete, (n) => n))) {
     await deps.notifyAdmins(
-      `${result.obsolete.length} installed extension${result.obsolete.length === 1 ? ' is' : 's are'} no longer offered`,
-      `${result.obsolete.join(', ')}. They keep working, but will not get updates. Check the repository still lists them.`.slice(0, 300),
+      `${obsolete.length} installed extension${obsolete.length === 1 ? ' is' : 's are'} no longer offered`,
+      `${obsolete.join(', ')}. They keep working, but will not get updates. Check the repository still lists them.`.slice(0, 300),
       '/admin/', 'extensions',
     ).catch(() => {});
   }
@@ -476,7 +517,14 @@ export function runExtensionMonitor(
   extState.running = true;
   return (async () => {
     try {
-      const r = await check();
+      // One install or removal at a time (v0.82.0, sources/suwayomi/installLock.ts): a check behind another's install
+      // waits for it, and one that waits too long is left for the next round, its last result standing.
+      const got = await withInstallLock('extension check', () => check(), LOCK_WAIT_MS);
+      if (got === BUSY) {
+        log.info('extensions: another extension install is running; the check waits for the next round');
+        return null;
+      }
+      const r = got;
       if (!r.refreshed) {
         log.warn(`extensions: could not read the repositories (${r.refreshError})`);
       } else {

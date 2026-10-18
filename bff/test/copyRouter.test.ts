@@ -34,3 +34,17 @@ test('only a source that may be asked; a chosen copy that may not is left to the
   // The chosen copy's own source is refusing: untouched, the fallback helper switches it and says so.
   assert.equal(routeCopy(own, [a], { may: (s) => s === 'a', load: () => 0, slowed: none }).source, 'main');
 });
+
+test('the main at full speed wins over a backup on a quieter server; a slowed or blamed main gives way to it', () => {
+  // v0.82.0: a backup extension's copy (lib/backupExtensions.ts) is taken only when the main's is slowed or failed this
+  // chapter last -- never because the backup's image server is quieter, which would keep it in use, and installed, for
+  // good. Reintroduce by dropping the backup's turn from the order: the backup is taken on the first line.
+  const own = c('main'), spare = c('spare');
+  const load = (k: string) => ({ main: 4, spare: 0 } as Record<string, number>)[k] ?? 0;
+  const backup = (s: string) => s === 'spare';
+  assert.equal(routeCopy(own, [spare], { may: () => true, load, slowed: none, backup }).source, 'main', 'the main at full speed');
+  assert.equal(routeCopy(own, [spare], { may: () => true, load, slowed: (s) => s === 'main', backup }).source, 'spare', 'a slowed main gives way');
+  assert.equal(routeCopy(own, [spare], { may: () => true, load, slowed: none, blamed: 'main', backup }).source, 'spare', 'so does the one that failed it');
+  // And a backup's copy chosen by the release rules gives way to the main's, the same release, at full speed.
+  assert.equal(routeCopy(spare, [own], { may: () => true, load, slowed: none, backup }).source, 'main');
+});

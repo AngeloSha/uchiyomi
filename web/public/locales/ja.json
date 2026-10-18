@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4049
+    "strings": 4059
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -4051,6 +4051,16 @@
   "Searched {n} other sources on {date}: now also using {source}": "{date} に他のソース {n} 件で検索：{source} も使うようになりました",
   "Searched 1 other source on {date}: none has it yet": "{date} に他のソース 1 件で検索：まだどこにもありません",
   "Searched {n} other sources on {date}: none has it yet": "{date} に他のソース {n} 件で検索：まだどこにもありません",
+  "Another extension is being added or removed. Try again in a minute.": "別の拡張機能を追加または削除しています。1 分後にもう一度お試しください。",
+  "Added {ago} as a backup, until the other sources can get its chapters": "{ago}に予備として追加：他のソースで話を取得できるようになるまで",
+  "A backup, until the other sources can get its chapters": "予備：他のソースで話を取得できるようになるまで",
+  "Backup": "予備",
+  "Added by Uchiyomi": "Uchiyomi が追加",
+  "Added by Uchiyomi to finish downloads. Not shown in Discover.": "ダウンロードを最後まで続けるために Uchiyomi が追加しました。「さがす」には表示されません。",
+  "Removed after 3 days without use.": "3 日間使われないと削除されます。",
+  "Kept while a series uses it as its main source.": "シリーズがメインのソースとして使っている間は残ります。",
+  "Keeping…": "残しています…",
+  "Kept {name}: it is one of your sources now": "{name} を残しました：これからはあなたのソースです",
   "Shift pairs by one page": "見開きを1ページずらす",
   "For chapters whose first page is not a cover: the first page is paired with the second, so the spreads line up. Remembered for this title.": "最初のページが表紙ではない章向け：最初のページと次のページを組み合わせ、見開きを揃えます。この作品ごとに記憶されます。"
 }

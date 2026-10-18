@@ -277,8 +277,27 @@ What it does on its own:
   keeps working but will never update again. It is reported, never uninstalled — uninstalling would orphan
   every series routed through it.
 
-What it will not do: install extensions you did not ask for, uninstall anything, or reinstall something you
-removed yourself. Removing an extension in the engine's own interface is reported, not undone.
+What the check itself will not do: install extensions you did not ask for, uninstall anything, or reinstall something
+you removed yourself. Removing an extension in the engine's own interface is reported, not undone. (A wiped engine is
+the exception it always was: what was installed is put back. Backup extensions, below, are the one other thing that
+adds and removes extensions, and only its own.)
+
+## Backup extensions
+
+To finish downloads, Uchiyomi sometimes installs an extension itself: *Fix everything* does when no installed source
+has a series. Since v0.82.0 such an extension is a **backup**:
+
+- It isn't shown in Discover or anywhere you pick a source. You only see the sources you added.
+- It stays while a series needs it, and is removed after **3 days without use**. It is never removed while a series
+  uses it as its main source.
+- When a series it carried is stuck again (its sources refusing or missing chapters for an hour or more), it is put
+  back and the series picks up where it was.
+- At most 5 are installed at once (`BACKUP_EXTENSIONS_MAX`), so the engine's memory isn't spent on what nothing needs.
+
+They're listed under **Admin → Sources → Added by Uchiyomi**. Press **Keep** on one to make it yours: it shows in
+Discover and is never removed for being unused. Installing one yourself, switching its sources on, or choosing it for a
+series does the same. Remove one yourself and Uchiyomi never installs it again. Turning off **Finish downloads on their
+own** stops it adding or putting back any; the ones there still go when unused.
 
 **To turn it off:** **Admin → Settings → Updates & schedules** → *Update extensions automatically*. The check still runs and
 still tells you what is waiting; it just does not install anything. **Update all** in Admin → Sources' Needs attention

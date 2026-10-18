@@ -21,6 +21,7 @@ import {
   decideProposal, findState, promoteProposal, replacePreview, startFind, stopFind,
   type DecideRefusal, type FindProposal, type FindResult, type FindScope, type PromoteRefusal,
 } from '../lib/findSources';
+import { adoptBackupOfSource } from '../lib/backupExtensions';
 
 const REFUSED: Record<string, string> = {
   too_short: 'A name needs at least five letters or digits to be matched.',
@@ -222,6 +223,8 @@ export default async function findSourcesRoutes(app: FastifyInstance) {
       const [code, message] = DECLINED[out.refused];
       return reply.code(code).send({ error: out.refused, message, ...(out.state ? { state: out.state } : {}), ...(out.edition ? { edition: out.edition } : {}) });
     }
+    // A person chose it for the series: a backup extension's source is theirs now (v0.82.0, lib/backupExtensions.ts).
+    if (kind === 'follow') await adoptBackupOfSource(b.data.sourceId, userIdOf(req));
     return { result: shown(out.result, await listable(req, [out.result.seriesId])) };
   };
   app.post('/api/admin/sources/find/:runId/follow', decision('follow'));
@@ -246,6 +249,7 @@ export default async function findSourcesRoutes(app: FastifyInstance) {
         ...(out.state ? { state: out.state } : {}), ...(out.edition ? { edition: out.edition } : {}),
       });
     }
+    await adoptBackupOfSource(b.data.sourceId, userIdOf(req));
     return { result: shown(out.result, await listable(req, [out.result.seriesId])) };
   });
 

@@ -40,6 +40,7 @@ import { isDesktop } from '@/lib/desktop';
 import { ssoOnly, useAuthConfig } from '@/lib/authConfig';
 import { adultShown } from '@/lib/adult';
 import { addable, moveIn, orderRows } from '@/lib/sourceOrder';
+import { discoverSources } from '@/lib/sourceGroups';
 
 /** One PATCH. Resolves once the server has answered, so the row that called it can show its tick. */
 type Save = (body: Record<string, unknown>) => Promise<unknown>;
@@ -249,12 +250,13 @@ function SourceOrderSection({ data, save }: { data: any; save: Save }) {
   // answer. `?adult=1` only when the reveal is off -- lib/api.ts adds its own when it is on.
   const { data: srcList } = useQuery({
     queryKey: ['sources', 'all'],
-    queryFn: () => api<{ content: Array<{ id: string; name: string }> }>(adultShown() ? '/api/sources' : '/api/sources?adult=1'),
+    queryFn: () => api<{ content: Array<{ id: string; name: string; backup?: boolean }> }>(adultShown() ? '/api/sources' : '/api/sources?adult=1'),
     staleTime: 5 * 60_000,
   });
   const all = srcList?.content ?? [];
   const rows = orderRows(order, all);
-  const rest = addable(order, all);
+  // A backup extension's source is never offered to rank (v0.82.0): it is not one the admin chose.
+  const rest = addable(order, discoverSources(all));
   // A failed save puts the list back and says so, rather than leaving an order on screen that is not stored.
   const commit = (next: string[]) => {
     const was = order;

@@ -888,6 +888,10 @@ by default). Uchiyomi keeps downloading until every chapter of a series is here,
   chapters. The series keeps its main source; the new one only fills in.
 - **You can see what it did.** A source it added is marked *followed for you* on the series' Sources list, with when
   and why. Press × to remove it: it is never added back for that series. Health says it too where a gap is waiting.
+- **Extensions it added are backups.** An extension Uchiyomi installed by itself (*Fix everything* does) is a backup:
+  it isn't shown in Discover, it stays while a series needs it, and it's removed after 3 days without use (never while
+  a series uses it as its main source). When that series is stuck again, the backup is put back. To keep one, open it
+  under **Admin → Sources → Added by Uchiyomi** and press **Keep**. One you remove yourself is never added again.
 - **Off,** chapters come only with the library update, from the sources you picked.
 
 It goes back for what is left every quarter of an hour, a few series at once on different sites, and gives way when

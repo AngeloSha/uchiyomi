@@ -777,6 +777,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
       ? routeCopy(chosen, sameReleaseChapters(chosen, copiesOf(tagged, chosen.number, prefs, chooseOpts), followedIds), {
         may: (src) => !!getSource(src) && !refusing.has(src) && (src === (chosen.source ?? s.source_id) || allowed(src)),
         blamed: blamedFor.get(chosen.number) ?? null,
+        backup: (src) => !!getSource(src)?.backup,
       })
       : chosen;
     // A preference save can land after the listing/queue was built. Never let that stale chosen copy put a

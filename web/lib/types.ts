@@ -93,6 +93,11 @@ export interface SeriesSource {
    */
   followedAt?: string | null;
   foundFor?: 'scout' | 'failed_chapter' | 'short_chapter' | 'gap' | 'add' | null;
+  /**
+   * v0.82.0: a backup extension's source (bff lib/backupExtensions.ts): one Uchiyomi installed by itself to finish
+   * downloads, and removes again once nothing needs it. Absent from an older server.
+   */
+  backup?: boolean;
 }
 
 /**

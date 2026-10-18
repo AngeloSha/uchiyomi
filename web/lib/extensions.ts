@@ -27,6 +27,11 @@ export interface CatalogExt {
   hasUpdate: boolean;
   obsolete: boolean;
   nsfw: boolean;
+  /**
+   * v0.82.0: installed by Uchiyomi itself to finish downloads (bff lib/backupExtensions.ts) -- out of Discover, and
+   * removed again once nothing needs it. Absent for every other extension, and from an older server.
+   */
+  backup?: boolean;
 }
 
 /** One page of GET /api/admin/extensions/catalog (bff routes/admin.ts). `offset`/`limit` are absent from an older server. */
