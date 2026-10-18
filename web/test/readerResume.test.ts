@@ -1,9 +1,11 @@
-// Two ways the reader lost its place, pinned as source guards (the behaviour is the browser's; see the comments in
+// Three ways the reader lost its place, pinned as source guards (the behaviour is the browser's; see the comments in
 // app/reader/page.tsx):
 //   1. A paged track whose WIDTH changed (the window dragged to a screen of another size) kept its scrollLeft in pixels,
 //      so the same offset read as another slide and progress was saved for a different page or chapter.
 //   2. Continuous reading appends chapters to one track while the address kept naming the first, so a refresh reopened
 //      the chapter the reader was opened on, not the one being read.
+//   3. That address then moved through the router, which reloads the whole page when it cannot use the route's answer
+//      (a deploy since the page was loaded): the reader reopened on the next chapter, the one before gone from the track.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
@@ -34,4 +36,12 @@ test('the address follows the chapter on screen, without reloading the reader fo
   assert.match(src, /bookId !== addressed\.current \|\| !didInitScroll\.current\) return;/);
   assert.doesNotMatch(src, /chapters\[0\]\?\.id !== bookId/);
   assert.match(src, /addressed\.current = readingChapterId;/, 'the address it moved to is the one it knows');
+});
+
+test('the address moves in place, never through the router, so crossing into a chapter never reloads the page', () => {
+  // `router.replace` asks for the route again and loads the whole page when it cannot use the answer: after a deploy, every
+  // open reader reloaded at its next chapter, and the chapter before was gone from the track. Reintroduce it: this test and
+  // walk263 "crossing into the next chapter never reloads the page" fail.
+  assert.match(src, /window\.history\.replaceState\(null, '', `\/reader\/\?book=\$\{readingChapterId\}`\);/);
+  assert.doesNotMatch(src, /router\.(replace|push)\(`\/reader\/\?book=\$\{readingChapterId\}/);
 });

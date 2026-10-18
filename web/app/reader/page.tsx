@@ -1373,12 +1373,17 @@ function ReaderInner() {
   // ⚠️ The first cut held off while `chapters[0]` was not the addressed chapter, and after the first crossing it never was
   // again (the first chapter stays chapters[0]): the address moved on once, and a refresh two chapters on reopened the
   // second. Reintroduce that test: walk263 "the address follows into the third chapter" fails.
+  // ⚠️ In place, never through the router. `router.replace` asked the server for the route again, and when that answer
+  // could not be used -- a deploy since the page was loaded, or a dropped connection -- Next loaded the whole page
+  // instead: crossing into the next chapter reloaded the reader on it, and the chapter before was gone from the track.
+  // Next keeps useSearchParams in step with history.replaceState. Reintroduce that test: walk263 "crossing into the next
+  // chapter never reloads the page" fails.
   const readingChapterId = ready && didInitScroll.current ? chapters[flat[current]?.ci ?? -1]?.id : undefined;
   useEffect(() => {
     if (!readingChapterId || readingChapterId === bookId || bookId !== addressed.current || !didInitScroll.current) return;
     addressed.current = readingChapterId;
     urlSynced.current = readingChapterId;
-    router.replace(`/reader/?book=${readingChapterId}`, { scroll: false });
+    window.history.replaceState(null, '', `/reader/?book=${readingChapterId}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readingChapterId, bookId]);
   const goChapter = (cid?: string, atEnd = false) => { urlSynced.current = null; if (cid) router.replace(`/reader/?book=${cid}${atEnd ? '&page=last' : ''}`); };

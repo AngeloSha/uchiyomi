@@ -3,6 +3,8 @@
 //   1. #263 -- continuous reading moves the address with the chapter on screen, over three chapters (the first cut moved
 //      it once: chapters[0] stayed the first chapter, so the second crossing was never written), and a refresh reopens
 //      the chapter and page being read.
+//   1b. -- crossing into the next chapter never reloads the page, even when the route comes back from another build
+//      (a deploy since the page was loaded), so the chapter before stays on the track.
 //   2. #263 -- a paged track whose width changes stays on its page.
 //   3. #263 -- Wide pages: Split, the phone turned on a page after a split spread and on a spread itself: the split and
 //      the width change in one turn, and the resize guard must not put back the slide read before the halves moved.
@@ -174,6 +176,33 @@ for (const width of [900, 1600, 1280]) {
   m = await where();
   check(`the window made ${width} px wide: still page 3 of chapter 3`, m.chapter === R[2] && m.page === 3 && m.shown?.page === 3 && m.shown?.book === R[2], JSON.stringify(m));
 }
+
+// ---- 1b. crossing into the next chapter never reloads the page (after 2, which reads on from 1) ----
+// The address moved through the router, which asks for the route again (/reader/index.txt?_rsc=...) and loads the whole
+// page when it cannot use the answer: on the live server, every reader open across a deploy reloaded at its next
+// chapter. Here every such answer comes from another build.
+const askedAgain = [];
+const routeAgain = (u) => u.pathname.startsWith('/reader/') && u.pathname.endsWith('.txt');
+await page.route(routeAgain, async (route) => {
+  askedAgain.push(route.request().url());
+  const res = await route.fetch();
+  await route.fulfill({ response: res, body: (await res.text()).replace(/"b":"[^"]*"/, '"b":"another-build"') });
+});
+await settings({});
+await open(R[0], 9);
+await page.evaluate(() => { window.walk263 = 'this page'; });
+await press('PageDown', 4);
+m = await where();
+let samePage = await page.evaluate(() => window.walk263 === 'this page');
+// Reintroduce `router.replace` for the address: the reader reloads on chapter 2, and chapter 1 is gone from the track.
+check('crossing into the next chapter never reloads the page, though the route comes back from another build',
+  samePage && m.chapter === R[1] && m.book === R[1], `same page ${samePage}, route asked ${askedAgain.length}x ${JSON.stringify(m)}`);
+await press('PageUp');
+m = await where();
+samePage = await page.evaluate(() => window.walk263 === 'this page');
+check('and one press back is chapter 1 again, on the same track, the address with it',
+  samePage && m.chapter === R[0] && m.shown?.book === R[0] && m.book === R[0], `same page ${samePage} ${JSON.stringify(m)}`);
+await page.unroute(routeAgain);
 
 // ---- 3. #263: Wide pages: Split, the phone turned (WebKit is the one that matters) ----
 const PORTRAIT = { width: 390, height: 844 };
