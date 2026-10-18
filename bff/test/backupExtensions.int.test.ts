@@ -28,16 +28,17 @@ const PKG = {
   busy: 'eu.kanade.tachiyomi.extension.en.bkbusy',
   pin: 'eu.kanade.tachiyomi.extension.en.bkpin',
   mine: 'eu.kanade.tachiyomi.extension.en.bkmine',
+  late: 'eu.kanade.tachiyomi.extension.en.bklate',
 } as const;
 type Key = keyof typeof PKG;
 const ID: Record<Key, string> = {
   main: '7200000000000000001', spare: '7200000000000000002', idle: '7200000000000000003',
-  busy: '7200000000000000004', pin: '7200000000000000005', mine: '7200000000000000006',
+  busy: '7200000000000000004', pin: '7200000000000000005', mine: '7200000000000000006', late: '7200000000000000007',
 };
 const SW = (k: Key) => `sw:${ID[k]}`;
-const NAME: Record<Key, string> = { main: 'BK Main', spare: 'BK Spare', idle: 'BK Idle', busy: 'BK Busy', pin: 'BK Pin', mine: 'BK Mine' };
-const SILVER = 's_bkx_silver', IRON = 's_bkx_iron', IRON2 = 's_bkx_iron2', PINS = 's_bkx_pins';
-const SERIES = [SILVER, IRON, IRON2, PINS];
+const NAME: Record<Key, string> = { main: 'BK Main', spare: 'BK Spare', idle: 'BK Idle', busy: 'BK Busy', pin: 'BK Pin', mine: 'BK Mine', late: 'BK Late' };
+const SILVER = 's_bkx_silver', IRON = 's_bkx_iron', IRON2 = 's_bkx_iron2', PINS = 's_bkx_pins', LATE = 's_bkx_late';
+const SERIES = [SILVER, IRON, IRON2, PINS, LATE];
 const LIB = 'lib_bkx';
 
 const chapters = (title: string, upTo: number) => Array.from({ length: upTo }, (_, i) => upTo - i)
@@ -58,10 +59,11 @@ function seed(): FakeSeed {
       src('busy', 'BK Busy', [manga('Iron Bloom', 7)]),
       src('pin', 'BK Pin', [manga('Pin Story', 6)]),
       src('mine', 'BK Mine'),
+      src('late', 'BK Late', [manga('Late Bloom', 6)]),
     ],
     extensions: [
       ext('main', 'BK Main', true), ext('spare', 'BK Spare', false), ext('idle', 'BK Idle', true),
-      ext('busy', 'BK Busy', true), ext('pin', 'BK Pin', true), ext('mine', 'BK Mine', true),
+      ext('busy', 'BK Busy', true), ext('pin', 'BK Pin', true), ext('mine', 'BK Mine', true), ext('late', 'BK Late', false),
     ],
     settings: {},
   };
@@ -455,4 +457,33 @@ test('a backup removed in the engine\'s own page is a person\'s act; a wiped eng
   assert.deepEqual(out?.refused, [PKG.busy], 'removed outside Uchiyomi: never installed by it again');
   assert.equal((await row('busy'))?.state, 'refused');
   assert.deepEqual(await follows(IRON2), [], 'and its follow, a source nothing can ask now, goes');
+});
+
+test('a backup the look ran out of time for is kept for the next, and put back then', { skip }, async () => {
+  // The link is used up only once the source answered. Reintroduce by dropping it whatever the answer (before the
+  // look): "a backup the look ran out of time for is kept for the next" finds the link gone, and Late Bloom never gets
+  // BK Late back.
+  await series(LATE, 'Late Bloom', { main: SW('main'), mainRef: mangaId('main'), have: 4, listed: 6, listedOn: SW('main') });
+  await cool(SW('main'));
+  await backup('late', 1, 'parked');
+  await q(`INSERT INTO backup_links (series_id, source_id, pkg_name, source_series_id, their_title) VALUES ($1, $2, $3, $4, 'Late Bloom')`,
+    [LATE, SW('late'), PKG.late, mangaId('late')]);
+  await q(`INSERT INTO series_scout (series_id, reason, stuck_since) VALUES ($1, 'stuck', now() - interval '2 hours')
+           ON CONFLICT (series_id) DO UPDATE SET stuck_since = EXCLUDED.stuck_since`, [LATE]);
+  const wall = scout._scoutLimits().wallMs;
+  scout._setScoutLimits({ wallMs: 0 });
+  try {
+    scout._resetScout();
+    const out = await scout.runScout(LATE);
+    assert.notEqual(out.verdict, 'followed', 'PREMISE: no time to ask it');
+  } finally {
+    scout._setScoutLimits({ wallMs: wall });
+  }
+  assert.equal(installed('late'), false, 'removed again, unused');
+  assert.equal((await row('late'))?.state, 'parked');
+  assert.equal((await q('SELECT count(*)::int AS n FROM backup_links WHERE series_id = $1', [LATE]))[0].n, 1, 'and its link kept for the next look');
+  scout._resetScout();
+  const again = await scout.runScout(LATE);
+  assert.equal(again.followed?.backup, PKG.late, 'which puts it back');
+  assert.deepEqual(await follows(LATE), [{ source_id: SW('late'), source_series_id: mangaId('late') }]);
 });

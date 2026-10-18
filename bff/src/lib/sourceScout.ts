@@ -447,13 +447,19 @@ export async function runScout(seriesId: string, ask: ScoutAsk = {}): Promise<Sc
         name: link.name, lang: link.lang ?? lang.lang, via: link.via ?? 'scout', who: 'backup', want: link.source_id.slice(SW_PREFIX.length),
       });
       if (got !== BUSY) {
-        await dropLink(seriesId, link.source_id);
-        let r: Asked = 'no';
+        // An install the engine refused is no answer: the link stays for the next look.
+        let r: Asked = got ? 'no' : 'left';
         const id = got?.sourceId || '';
         if (id && getSource(id) && allowed(id) && fits(id) && !taken.has(rateKeyOf(id))) {
           r = await askOne(id, link.source_series_id);
           if (r === 'stale') r = await askOne(id, null, link.their_title ? [link.their_title] : []);
         }
+        // The link is used up once the source has answered -- followed, or not this series. Out of time or searches,
+        // not now, at the follower limit, or the series caught up meanwhile: it stays, and the backup is put back again
+        // the next time the series is stuck. Before the settle, which keeps the package parked only while a link names
+        // it. Reintroduce by dropping it whatever the answer: "a backup the look ran out of time for is kept for the
+        // next" in backupExtensions.int.test.ts finds the link gone.
+        if (typeof r === 'object' || r === 'no' || r === 'stale') await dropLink(seriesId, link.source_id);
         if (got) await settleTrial(link.pkg_name, { via: link.via ?? 'scout', who: 'backup', why: 'no_series' });
         if (typeof r === 'object') return { ...r.followed, followed: { ...r.followed.followed!, backup: link.pkg_name } };
         if (r === 'cap') return done('cap', SCOUT_BACKOFF.cap);
