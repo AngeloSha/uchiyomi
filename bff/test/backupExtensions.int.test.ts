@@ -263,7 +263,8 @@ test('a backup stays while it brings chapters: one only it lists, or one landed 
 });
 
 test('a series\' main source is never removed, however long unused', { skip }, async () => {
-  // Reintroduce by dropping the pin in neededBackups: BK Pin goes, and Pin Story is left with no source at all.
+  // Reintroduce by dropping the pin -- in neededBackups and parkPackage's own check together: BK Pin goes, and Pin
+  // Story is left with no source at all.
   await series(PINS, 'Pin Story', { main: SW('pin'), mainRef: mangaId('pin'), have: 6, listed: 6, listedOn: SW('pin') });
   await backup('pin', 10);
   const out = await bx.backupUpkeep();
@@ -411,4 +412,21 @@ test('Keep makes a backup the admin\'s; one a person removed is never installed 
   assert.equal(await bx.installTrial(PKG.idle, { name: 'BK Idle', lang: 'en', via: 'scout', who: 'test' }), null, 'refused');
   assert.equal(installed('idle'), false, 'never installed again');
   assert.equal((await q('SELECT count(*)::int AS n FROM backup_links WHERE pkg_name = $1', [PKG.idle]))[0].n, 0, 'and nothing would put it back for a series');
+});
+
+test('how long a series has waited is kept across its requests, and over once a source is followed', { skip }, async () => {
+  // series_scout.stuck_since (lib/scoutRequests.ts, lib/sourceScout.ts settleScout): what stuckLongEnough reads.
+  // Reintroduce by stamping it on every request (`stuck_since = now()` on conflict): a series the sweep reports stuck
+  // every few minutes never waits an hour, and never gets its backup back.
+  const { requestScout } = await import('../src/lib/scoutRequests');
+  await q('DELETE FROM series_scout WHERE series_id = $1', [IRON]);
+  await requestScout(IRON, 'stuck');
+  assert.ok((await q('SELECT stuck_since FROM series_scout WHERE series_id = $1', [IRON]))[0]?.stuck_since, 'the first request starts the wait');
+  await q(`UPDATE series_scout SET stuck_since = now() - interval '2 hours' WHERE series_id = $1`, [IRON]);
+  await requestScout(IRON, 'refused');
+  assert.equal(await bx.stuckLongEnough(IRON), true, 'a later request keeps when it started');
+  await scout.settleScout(IRON, 'stuck', { verdict: 'left', title: 'Iron Bloom', searches: 1, asked: [], nextAt: new Date(Date.now() + 3600_000) }, new Date());
+  assert.equal(await bx.stuckLongEnough(IRON), true, 'and so does a look that found nothing');
+  await scout.settleScout(IRON, 'stuck', { verdict: 'followed', title: 'Iron Bloom', searches: 1, asked: [], nextAt: new Date(Date.now() + 3600_000) }, new Date());
+  assert.equal(await bx.stuckLongEnough(IRON), false, 'a source followed ends the wait');
 });
