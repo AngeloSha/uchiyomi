@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.84.1 — 2026-10-18
+
+**Reading on into the next chapter no longer reloads the reader.** The reader keeps the address on the chapter you are
+reading, and moving it asked for the page again. When Uchiyomi had been updated since the reader opened, or the
+connection dropped at that moment, the whole page loaded again on the new chapter, and the chapter before was gone. The
+address now changes in place: reading on stays seamless, and scrolling back reaches the chapter before.
+
+### Upgrading
+
+- Nothing to do. A reader left open across this update can still reload once, at its next chapter: the open page runs
+  the previous version until then.
+
 ## v0.84.0 — 2026-10-18
 
 **Downloads you can watch page by page, double pages that line up, and gallery chapters.** All three are pull requests
