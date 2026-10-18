@@ -50,6 +50,8 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 export function ReaderSettings({
   prefs,
   set,
+  spreadShift = false,
+  onSpreadShift,
   device,
   setDevice,
   autoApplied,
@@ -64,6 +66,9 @@ export function ReaderSettings({
 }: {
   prefs: ReaderPrefs;
   set: (p: Partial<ReaderPrefs>) => void;
+  /** double spreads shifted by one page for this title, and how to change it (remembered per title). */
+  spreadShift?: boolean;
+  onSpreadShift?: (v: boolean) => void;
   /** This device's own settings (v0.61.0, lib/readerDevice.ts): kept in this browser, never synced. */
   device: DevicePrefs;
   setDevice: (p: Partial<DevicePrefs>) => void;
@@ -199,6 +204,15 @@ export function ReaderSettings({
               <button onClick={() => set({ spread: true })}
                 className={`rounded-2xl border py-3 text-sm ${prefs.spread ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{tr('Double spread')}</button>
             </div>
+            {prefs.spread && onSpreadShift && (
+              <label data-spread-shift className="mt-3 flex items-start gap-3 text-sm text-fog-300">
+                <input type="checkbox" checked={spreadShift} onChange={(e) => onSpreadShift(e.target.checked)}
+                  className="mt-0.5 size-4 accent-[rgb(var(--accent))]" />
+                <span>{tr('Shift pairs by one page')}
+                  <span className="mt-0.5 block text-[11px] leading-relaxed text-fog-500">{tr('For chapters whose first page is not a cover: the first page is paired with the second, so the spreads line up. Remembered for this title.')}</span>
+                </span>
+              </label>
+            )}
           </Row>
         )}
 

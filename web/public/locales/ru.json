@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4047
+    "strings": 4049
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -4050,5 +4050,7 @@
   "Searched 1 other source on {date}: now also using {source}": "Искали в 1 другом источнике {date}: теперь используется и {source}",
   "Searched {n} other sources on {date}: now also using {source}": "Искали в других источниках ({n}) {date}: теперь используется и {source}",
   "Searched 1 other source on {date}: none has it yet": "Искали в 1 другом источнике {date}: пока ни в одном нет",
-  "Searched {n} other sources on {date}: none has it yet": "Искали в других источниках ({n}) {date}: пока ни в одном нет"
+  "Searched {n} other sources on {date}: none has it yet": "Искали в других источниках ({n}) {date}: пока ни в одном нет",
+  "Shift pairs by one page": "Сдвинуть пары на одну страницу",
+  "For chapters whose first page is not a cover: the first page is paired with the second, so the spreads line up. Remembered for this title.": "Для глав, у которых первая страница не обложка: первая страница идёт в паре со второй, и развороты совпадают. Запоминается для этого тайтла."
 }

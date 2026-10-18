@@ -1511,6 +1511,9 @@ not to you: an e-ink tablet wants E-ink, the phone beside it does not.
   page's own pixels in your browser (nothing is cut on the server, and downloaded chapters crop too). Page by page
   all four sides are trimmed, never more than 15 % a side, and a two-page spread keeps its gutter. In webtoon
   scroll only the sides are trimmed, by one amount for a whole chapter, so the strips still join.
+- **Shift pairs by one page** (remembered for this title): in paged **Double spread** mode, pairs the first
+  page with the second when the chapter starts with a story page rather than a cover. Wide pages still stand
+  alone, pairs never cross chapter boundaries, and changing the setting keeps the page being read in view.
 - **Join split double pages** (account, since v0.77.0; off until you turn it on): some sources serve a double-page
   spread as two ordinary pages, its right half and its left half. In paged mode the reader then shows the two as the
   spread -- one slide, the halves touching, laid out the way the picture runs whatever your reading direction -- in

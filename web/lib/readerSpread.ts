@@ -7,8 +7,8 @@
  * The rules, in the order they are applied:
  *
  *  1. **Not in spread mode** — one page per slide. Nothing else applies.
- *  2. **The first page of a chapter is solo.** The manga convention: page 1 is a cover, and pairing it with
- *     page 2 puts every later pair off by one relative to how the book was drawn.
+ *  2. **The first page of a chapter is solo unless shifted.** The manga convention: page 1 is a cover, and pairing it
+ *     with page 2 puts every later pair off by one. `shift` instead pairs from page 1 when it is a story page.
  *  3. **Pages never pair across chapters.** Continuous reading loads the next chapter into the same flat
  *     list, and a slide holding the last page of one chapter and the first of the next belongs to neither.
  *  4. **A wide page is solo**, and so is the page *before* it. A double-page spread scanned as one landscape
@@ -62,7 +62,7 @@ export type Half = 'left' | 'right' | null;
 export function pairSlides(
   items: SpreadItem[],
   spread: boolean,
-  opts: { split?: boolean; rightFirst?: boolean; joinSplit?: boolean } = {},
+  opts: { split?: boolean; rightFirst?: boolean; shift?: boolean; joinSplit?: boolean } = {},
 ): { slides: number[][]; slideOf: number[]; half: Half[]; joined: boolean[] } {
   const slides: number[][] = [];
   const half: Half[] = [];
@@ -97,8 +97,10 @@ export function pairSlides(
       const it = items[k];
       const nxt = items[k + 1];
       if (joinAt(k)) { slides.push([k, k + 1]); half.push(null); joined.push(true); k += 2; continue; }
+      // `shift`: a chapter file's page 1 is usually a story page, not a cover, and keeping it solo put
+      // every later pair one off from how the book was drawn. Shifted, rule 2 is off and page 1 pairs with page 2.
       const soloed =
-        it.firstOfChapter ||          // rule 2
+        (it.firstOfChapter && !opts.shift) ||  // rule 2
         !nxt || nxt.ci !== it.ci ||   // rule 3
         isWide(it) ||                 // rule 4, the wide page itself
         isWide(nxt) ||                // rule 4, the page before a wide one
