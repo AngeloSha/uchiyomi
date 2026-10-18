@@ -206,6 +206,8 @@ function ReaderInner() {
   const imgFilter = COLOR_FILTER[device.colorFilter];
   const behavior = glide(device.colorFilter);
   const [zoom, setZoom] = useState(1);
+  // Shift pairs by one page, the title's memory like the zoom (lib/readerSpread.ts pairSlides `shift`).
+  const [spreadShift, setSpreadShift] = useState(false);
   /**
    * One page of the pair on screen brought into frame (#232 by a tap, #261 by the `focus` key): the slide then shows that
    * page alone. Only ever a view of a slide that holds two pages, so nothing that counts pages -- progress, the counter,
@@ -227,6 +229,8 @@ function ReaderInner() {
   const laidOutMode = useRef<ReaderPrefs['mode'] | null>(null);
   /** Whether the paged track was last laid out with wide pages split in two (the split effect below). */
   const laidOutSplit = useRef<boolean | null>(null);
+  /** the pairing the paged track was laid out for: spreads on or off, shifted or not. */
+  const laidOutPairs = useRef<string | null>(null);
   /** The joined spreads the paged track was last laid out with (#229, the joins effect below), as the slides' first pages. */
   const laidOutJoins = useRef<string | null>(null);
   /** When the track last moved -- a scroll event, or a smooth scroll this code started. See untilStill. */
@@ -326,6 +330,10 @@ function ReaderInner() {
       if (pin) saveSeriesPrefs(seriesId0, pin);
       return n;
     });
+  };
+  const applyShift = (v: boolean) => {
+    setSpreadShift(v);
+    if (seriesId0) saveSeriesPrefs(seriesId0, { spreadShift: v });
   };
   const applyZoom = (z: number) => {
     const clamped = Math.max(1, Math.min(3, z));
@@ -487,6 +495,7 @@ function ReaderInner() {
       setPrefs(look.prefs);
       setAutoApplied(look.autoApplied);
       setZoom(memory.zoom && memory.zoom >= 1 ? memory.zoom : 1);
+      setSpreadShift(memory.spreadShift === true);
       titleOpen.current = true;
       setReady(true);
     })();
@@ -590,9 +599,11 @@ function ReaderInner() {
   // #229, Join split double pages (account, off until chosen): two pages a source served as the halves of one spread are
   // one slide (lib/readerSpread.ts rule 4b). On a screen held upright Wide pages decides, as for a spread in one file:
   // Whole shows the spread, Split shows its two pages one by one (not joined), Rotate turns it on its side.
+  // and Shift pairs by one page (`shift`), in the dependencies too -- without it the Shift checkbox changed
+  // nothing until the pages did.
   const { slides, slideOf, half, joined } = useMemo(
-    () => pairSlides(flat, prefs.mode === 'paged' && !!prefs.spread, { split: splitTrack, rightFirst, joinSplit: prefs.joinSplit }),
-    [flat, prefs.mode, prefs.spread, splitTrack, rightFirst, prefs.joinSplit],
+    () => pairSlides(flat, prefs.mode === 'paged' && !!prefs.spread, { split: splitTrack, rightFirst, shift: spreadShift, joinSplit: prefs.joinSplit }),
+    [flat, prefs.mode, prefs.spread, splitTrack, rightFirst, spreadShift, prefs.joinSplit],
   );
   // A page brought into frame belongs to the slides it was brought out of: laid out again, they give the pair back.
   useEffect(() => { setFocus(null); }, [slides]);
@@ -938,6 +949,7 @@ function ReaderInner() {
     laidOutSign.current = trackSign;
     laidOutMode.current = prefs.mode;
     laidOutSplit.current = splitTrack;
+    laidOutPairs.current = `${!!prefs.spread}:${spreadShift}`;
     laidOutJoins.current = joinedAt;
     didInitScroll.current = true;
     // The column's window and anchor from where it now stands: a resume on page 1 scrolls nowhere, so no scroll event
@@ -996,6 +1008,17 @@ function ReaderInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [splitTrack]);
 
+  // the same for turning spreads on or off and for Shift pairs by one page: every slide after the first
+  // changes which pages it holds, so the track's place pointed at another page and the counter followed it there.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const pairs = `${!!prefs.spread}:${spreadShift}`;
+    if (!el || !didInitScroll.current || prefs.mode !== 'paged' || laidOutPairs.current === pairs) return;
+    laidOutPairs.current = pairs;
+    // Through placeTrack (v0.74.0's resize guard), so a resize after the pairs change keeps this slide, not the old one.
+    placeTrack(el, slideOf[current] ?? current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefs.spread, spreadShift]);
   // #229: the same for joined spreads. A join the server finds while the chapter is open (the measure runs in the
   // background, and the reader asks again), or Join split double pages switched on or off, makes two slides one or one
   // two before the page being read, and the track's place then points at another page. Put it back on the page being
@@ -2202,6 +2225,8 @@ function ReaderInner() {
           <ReaderSettings
             prefs={prefs}
             set={setPref}
+            spreadShift={spreadShift}
+            onSpreadShift={applyShift}
             device={device}
             setDevice={setDevice}
             autoApplied={autoApplied}
