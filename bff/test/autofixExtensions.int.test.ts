@@ -460,6 +460,9 @@ test('an extension a person removed is never tried', { skip }, async () => {
     const run = await runOnce();
     assert.deepEqual(await installs(run.id), [], 'the package a person removed is not tried');
     assert.equal(fake!.extension(PKG.amber).installed, false);
+    // Not even attempted: the install's own backstop (installTrial) would refuse it, and the run would spend an install
+    // on it and tell the admin it "could not install" an extension they removed on purpose.
+    assert.ok(!run.log!.some((l) => l.code === 'autofix.item.installFailed'), 'not even attempted');
   } finally {
     await q('DELETE FROM backup_extensions WHERE pkg_name = $1', [PKG.amber]);
   }
