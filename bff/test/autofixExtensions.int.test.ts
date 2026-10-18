@@ -278,6 +278,18 @@ test('the extensions phase: the groups first, then the most downloaded, with no 
     assert.ok(!run.summary!.needsYou.some((n) => n.check === 'frozen-series'), 'nothing is left without a source');
     assert.equal(run.summary!.again, false);
   });
+
+  await t.test('what it keeps is a backup extension, out of Discover; what it removed leaves nothing behind', async () => {
+    // v0.82.0 (lib/backupExtensions.ts): Fix everything's installs are kept only while needed -- and never while a series
+    // uses one as its main, as these three are. Reintroduce by settling a kept package as a plain install (no
+    // settleTrial): it has no backup row, and shows in Discover as if a person had added it.
+    const rows = Object.fromEntries((await q(`SELECT pkg_name, state, via FROM backup_extensions WHERE pkg_name = ANY($1::text[])`,
+      [[PKG.velvet, PKG.ember, PKG.birch, PKG.cedar, PKG.amber, PKG.dune]])).map((r: any) => [r.pkg_name, `${r.state}/${r.via}`]));
+    assert.deepEqual(rows, { [PKG.velvet]: 'active/autofix', [PKG.ember]: 'active/autofix', [PKG.birch]: 'active/autofix' });
+    const { getSource } = await import('../src/lib/sources');
+    assert.equal(getSource(`sw:${ID.ember}`)?.backup, true, 'its source is a backup\'s, out of Discover');
+    assert.ok(!getSource(`sw:${ID.ball}`)?.backup, 'never one a person installed');
+  });
 });
 
 test('an 18+ package is tried only for a series rated 18+, and after the others', { skip }, async () => {
@@ -433,4 +445,25 @@ test('with nothing left to try, the run\'s time running out is no reason to run 
   assert.equal(run.summary!.again, false, 'with nothing left to try, the run\'s time running out is no reason to run again');
   assert.ok(!run.log!.some((l) => l.code === 'autofix.item.skipped' && l.params?.why === 'time'), 'the run was not cut short');
   assert.ok(run.summary!.needsYou.some((n) => n.check === 'frozen-series'), 'and the series nothing in reach carries is Needs you');
+});
+
+test('an extension a person removed is never tried', { skip }, async () => {
+  // v0.82.0: a package a person removed is `refused` (lib/backupExtensions.ts): neither Fix everything nor a backup
+  // installs it again -- the extension check never did either. Amber Tale is carried by nothing, and Amber Comics is the
+  // only package left that the run may try for it. Reintroduce by dropping the refused filter in extensions(): Amber
+  // Comics is installed.
+  await series('ambertale', 'Amber Tale');
+  await only('ambertale');
+  await q(`INSERT INTO backup_extensions (pkg_name, state, why) VALUES ($1, 'refused', 'by_admin')
+           ON CONFLICT (pkg_name) DO UPDATE SET state = 'refused'`, [PKG.amber]);
+  try {
+    const run = await runOnce();
+    assert.deepEqual(await installs(run.id), [], 'the package a person removed is not tried');
+    assert.equal(fake!.extension(PKG.amber).installed, false);
+    // Not even attempted: the install's own backstop (installTrial) would refuse it, and the run would spend an install
+    // on it and tell the admin it "could not install" an extension they removed on purpose.
+    assert.ok(!run.log!.some((l) => l.code === 'autofix.item.installFailed'), 'not even attempted');
+  } finally {
+    await q('DELETE FROM backup_extensions WHERE pkg_name = $1', [PKG.amber]);
+  }
 });

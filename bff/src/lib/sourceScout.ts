@@ -30,7 +30,7 @@
 // (lib/followLimit.ts, where a follower that cannot carry the series is not counted); the hunt's shared search slots;
 // and the admin switch "Use other sources on their own" (server_settings.auto_follow_on_failure).
 import { q, one } from './db';
-import { getSource, listSources } from './sources';
+import { getSource, listSources, SW_PREFIX } from './sources';
 import { healthAll } from './sourceHealth';
 import { scanOrder, scanRank, type Orderable } from './scanOrder';
 import { judgeCandidate, bounded, MAX_FOLLOWERS, MIN_TRY_MS, type Judgement, type PrimaryFacts } from './autoFollow';
@@ -51,6 +51,10 @@ import { findRunning } from './findSources';
 import { CHAPTER_RETRY_CAP, seriesIsMonitored } from './updater';
 import { finishDownloadsOn, retryCapFor, backFirst } from './finishDownloads';
 import type { ScoutReason } from './scoutRequests';
+import {
+  backupsAllowed, stuckLongEnough, parkedLinksFor, dropLink, makeRoom, installTrial, settleTrial, parkingNow,
+} from './backupExtensions';
+import { BUSY, installLockHolder } from './sources/suwayomi/installLock';
 
 const envInt = (name: string, fallback: number, min: number, max: number): number => {
   const raw = process.env[name];
@@ -261,8 +265,11 @@ export type ScoutVerdictKind =
 export interface ScoutOutcome {
   verdict: ScoutVerdictKind;
   title: string;
-  /** The source it followed, and how many chapters it lists that the series was waiting for. */
-  followed?: { source: string; sourceSeriesId: string; brings: number };
+  /**
+   * The source it followed, and how many chapters it lists that the series was waiting for. `backup`: the package of a
+   * backup extension put back for it (v0.82.0, lib/backupExtensions.ts).
+   */
+  followed?: { source: string; sourceSeriesId: string; brings: number; backup?: string };
   /** Search requests made, and the sources asked (searched, or judged from memory), in order. */
   searches: number;
   asked: string[];
@@ -317,7 +324,9 @@ export async function runScout(seriesId: string, ask: ScoutAsk = {}): Promise<Sc
   // A source on the image server of one the series follows shares its cooldowns and its blocks. Reintroduce by
   // dropping the rule: "a source on a followed source's image server is not asked" in sourceScout.int.test.ts searches it.
   const taken = new Set(mine.map(rateKeyOf));
-  const pool = listSources().filter((src) => !mine.includes(src.id) && allowed(src.id) && fits(src.id) && !taken.has(rateKeyOf(src.id)));
+  // A backup extension being removed right now is nobody's to follow (v0.82.0, lib/backupExtensions.ts parkingNow).
+  const pool = listSources().filter((src) => !mine.includes(src.id) && allowed(src.id) && fits(src.id) && !taken.has(rateKeyOf(src.id))
+    && !(src.backup && parkingNow()));
   const poolStanding = await standingsOf(pool.map((p) => p.id));
   const record = await recentRecord();
   const seeds = new Set(ask.seeds ?? []);
@@ -353,15 +362,24 @@ export async function runScout(seriesId: string, ask: ScoutAsk = {}): Promise<Sc
   const primary: PrimaryFacts = { title: s.title, altTitles: names, numbers: need.listed, lang: lang.lang, exactLang: lang.sameBaseSibling };
   const admit = () => seriesIsMonitored(seriesId);
   let left = order.length < cands.length;
+  /** The look ran out of time or searches before the installed sources' turn. */
+  let cut = false;
 
-  for (const id of order) {
-    if (runtime.stopping || deadline - Date.now() < MIN_TRY_MS) { left = true; break; }
-    if (!(await admit().catch(() => false))) return done('not_needed', null);
+  /**
+   * Ask one source for the series: by the id it is known under there (`known`), else searched for under every name it
+   * goes by (and `more`). What came of it: followed (the outcome to return), the follower limit (`cap`), nothing to do
+   * any more (`not_needed`), out of time or searches (`left`), not now (`deferred`), not this series (`no`), or a known
+   * id that no longer is (`stale`).
+   */
+  type Asked = { followed: ScoutOutcome } | 'cap' | 'not_needed' | 'left' | 'deferred' | 'no' | 'stale';
+  const askOne = async (id: string, known: string | null, more: readonly string[] = []): Promise<Asked> => {
+    if (runtime.stopping || deadline - Date.now() < MIN_TRY_MS) return 'left';
+    if (!(await admit().catch(() => false))) return 'not_needed';
     const src = getSource(id);
-    if (!src) continue;
-    let ref = knownIds.get(id) ?? null;
+    if (!src) return 'no';
+    let ref = known;
     if (!ref) {
-      if (searches >= limits.maxSearches || scoutSearchesLeft() <= 0) { left = true; break; }
+      if (searches >= limits.maxSearches || scoutSearchesLeft() <= 0) return 'left';
       // Every search is counted against this scout and the hour before it is made; one past either is not made.
       let outOfSearches = false;
       const counted = {
@@ -377,42 +395,88 @@ export async function runScout(seriesId: string, ask: ScoutAsk = {}): Promise<Sc
       await takeHuntSlot();
       let found: Awaited<ReturnType<typeof searchByNames>>;
       try {
-        found = await searchByNames(counted, s.title, names, () => deadline - Date.now(), SEARCH_MS, admit);
+        found = await searchByNames(counted, s.title, [...names, ...more.filter((m) => !names.includes(m))], () => deadline - Date.now(), SEARCH_MS, admit);
       } finally {
         releaseHuntSlot();
       }
-      if (found.paused) return done('not_needed', null);
+      if (found.paused) return 'not_needed';
       asked.push(id);
-      if (outOfSearches && !found.hit) { left = true; break; }
+      if (outOfSearches && !found.hit) return 'left';
       if (!found.hit?.sourceId) {
         // Answered and not there; or never answered at all. Searched under every name either way.
         await recordVerdict(seriesId, id, found.answered ? 'no_hit' : 'unreachable', { ourCount });
-        continue;
+        return 'no';
       }
       ref = found.hit.sourceId;
     } else {
       asked.push(id);
     }
     const room = deadline - Date.now();
-    if (room < MIN_TRY_MS) { left = true; break; }
+    if (room < MIN_TRY_MS) return 'left';
     const j = await bounded(judgeCandidate(primary, { source: id, sourceId: ref }, { prefs, health, admit }), room).catch(() => null);
     // The wall cut it short: nothing is known about the source, and it is asked next time.
-    if (!j) { left = true; break; }
-    if (j.why === 'unavailable') { deferred++; continue; }
+    if (!j) return 'left';
+    if (j.why === 'unavailable') return 'deferred';
     await rememberJudgement(seriesId, j, ourCount);
-    if (j.why !== 'ok') continue;
+    if (j.why !== 'ok') return known ? 'stale' : 'no';
     const brings = bringsOf(j, prefs, need);
     // It is this series, and lists nothing it is waiting for: remembered as `ok`, and judged first next time.
-    if (!brings.length) continue;
+    if (!brings.length) return 'no';
     try {
       const followed = await followHunted(seriesId, s.title, j, 'scout', { brings: brings.length }, admit);
       await afterFollow(seriesId, need, brings);
-      return done('followed', SCOUT_BACKOFF.followed, { followed: { ...followed, brings: brings.length } });
+      return { followed: done('followed', SCOUT_BACKOFF.followed, { followed: { ...followed, brings: brings.length } }) };
     } catch (e) {
-      if ((e as { why?: string })?.why === 'cap') return done('cap', SCOUT_BACKOFF.cap);
+      if ((e as { why?: string })?.why === 'cap') return 'cap';
       // Gone, unmonitored, or a lost race: not this source's fault, and the next candidate is not asked either.
-      return done('not_needed', null);
+      return 'not_needed';
     }
+  };
+
+  // v0.82.0: a backup extension that carried this series before, and that Uchiyomi removed once nothing needed it
+  // (lib/backupExtensions.ts), is put back first -- the owner's "when there is new chapters it will just use main until
+  // it rate limits or fail again and then it can reinstall/reuse those" -- once the series has waited an hour, so a
+  // cooldown of a few minutes never reinstalls anything. One per look, the newest; asked by the id it had there, and
+  // searched for again when that id is gone (a reinstall can renumber the engine's series). Reintroduce by trusting the
+  // stored id: "a series stuck an hour gets its backup back, found again by its title" in backupExtensions.int.test.ts
+  // never follows it.
+  if (await backupsAllowed() && await stuckLongEnough(seriesId)) {
+    const link = (await parkedLinksFor(seriesId))[0];
+    if (link && engineState() === 'up' && installLockHolder() === null && await makeRoom()) {
+      const got = await installTrial(link.pkg_name, {
+        name: link.name, lang: link.lang ?? lang.lang, via: link.via ?? 'scout', who: 'backup', want: link.source_id.slice(SW_PREFIX.length),
+      });
+      if (got !== BUSY) {
+        // An install the engine refused is no answer: the link stays for the next look.
+        let r: Asked = got ? 'no' : 'left';
+        const id = got?.sourceId || '';
+        if (id && getSource(id) && allowed(id) && fits(id) && !taken.has(rateKeyOf(id))) {
+          r = await askOne(id, link.source_series_id);
+          if (r === 'stale') r = await askOne(id, null, link.their_title ? [link.their_title] : []);
+        }
+        // The link is used up once the source has answered -- followed, or not this series. Out of time or searches,
+        // not now, at the follower limit, or the series caught up meanwhile: it stays, and the backup is put back again
+        // the next time the series is stuck. Before the settle, which keeps the package parked only while a link names
+        // it. Reintroduce by dropping it whatever the answer: "a backup the look ran out of time for is kept for the
+        // next" in backupExtensions.int.test.ts finds the link gone.
+        if (typeof r === 'object' || r === 'no' || r === 'stale') await dropLink(seriesId, link.source_id);
+        if (got) await settleTrial(link.pkg_name, { via: link.via ?? 'scout', who: 'backup', why: 'no_series' });
+        if (typeof r === 'object') return { ...r.followed, followed: { ...r.followed.followed!, backup: link.pkg_name } };
+        if (r === 'cap') return done('cap', SCOUT_BACKOFF.cap);
+        if (r === 'not_needed') return done('not_needed', null);
+        if (r === 'left') { left = true; cut = true; }
+      }
+    }
+  }
+
+  for (const id of order) {
+    if (cut) break;
+    const r = await askOne(id, knownIds.get(id) ?? null);
+    if (typeof r === 'object') return r.followed;
+    if (r === 'cap') return done('cap', SCOUT_BACKOFF.cap);
+    if (r === 'not_needed') return done('not_needed', null);
+    if (r === 'left') { left = true; break; }
+    if (r === 'deferred') deferred++;
   }
 
   const fruitless = (ask.fruitless ?? 0) + 1;
@@ -446,17 +510,24 @@ export async function settleScout(seriesId: string, reason: ScoutReason, out: Sc
     return;
   }
   const count = out.verdict === 'followed' ? 'reset' : out.verdict === 'left' || out.verdict === 'exhausted' ? 'add' : 'keep';
+  // Since when it has been stuck (v0.82.0, lib/backupExtensions.ts stuckLongEnough): kept across looks, and over once a
+  // source is followed -- the next time it is stuck is a new wait.
   await q(
-    `INSERT INTO series_scout (series_id, reason, next_at, last_at, fruitless, verdict, detail)
-     SELECT $1, $2, $3, now(), $4, $5, $6::jsonb WHERE EXISTS (SELECT 1 FROM lib_series WHERE id = $1)
+    `INSERT INTO series_scout (series_id, reason, next_at, last_at, fruitless, verdict, detail, stuck_since)
+     SELECT $1, $2, $3, now(), $4, $5, $6::jsonb, CASE WHEN $5 = 'followed' THEN NULL ELSE now() END
+      WHERE EXISTS (SELECT 1 FROM lib_series WHERE id = $1)
      ON CONFLICT (series_id) DO UPDATE SET
+       stuck_since = CASE WHEN EXCLUDED.verdict = 'followed' THEN NULL ELSE COALESCE(series_scout.stuck_since, now()) END,
        next_at = EXCLUDED.next_at, last_at = now(), verdict = EXCLUDED.verdict, detail = EXCLUDED.detail,
        fruitless = CASE $7 WHEN 'reset' THEN 0 WHEN 'add' THEN series_scout.fruitless + 1 ELSE series_scout.fruitless END,
        priority = CASE WHEN series_scout.asked_at > $8 THEN series_scout.priority ELSE 0 END,
        numbers = CASE WHEN series_scout.asked_at > $8 OR EXCLUDED.verdict <> 'followed' THEN series_scout.numbers ELSE '{}' END,
        seeds = CASE WHEN series_scout.asked_at > $8 THEN series_scout.seeds ELSE '{}' END`,
     [seriesId, reason, out.nextAt, count === 'add' ? 1 : 0, out.verdict,
-      JSON.stringify({ asked: out.asked.length, searches: out.searches, ...(out.followed ? { followed: out.followed.source } : {}) }),
+      JSON.stringify({
+        asked: out.asked.length, searches: out.searches,
+        ...(out.followed ? { followed: out.followed.source, ...(out.followed.backup ? { backup: out.followed.backup } : {}) } : {}),
+      }),
       count, started],
   ).catch(() => {});
 }
@@ -526,7 +597,8 @@ export async function scoutTick(): Promise<(ScoutOutcome & { seriesId: string })
     const out = await runScout(pick.seriesId, pick);
     await settleScout(pick.seriesId, pick.reason, out, started);
     if (out.followed) {
-      console.log(`[scout] "${out.title}": followed ${out.followed.source}, which lists ${out.followed.brings} chapter${out.followed.brings === 1 ? '' : 's'} it was waiting for (${out.asked.length} source${out.asked.length === 1 ? '' : 's'} asked)`);
+      const back = out.followed.backup ? `, a backup extension put back (${out.followed.backup})` : '';
+      console.log(`[scout] "${out.title}": followed ${out.followed.source}${back}, which lists ${out.followed.brings} chapter${out.followed.brings === 1 ? '' : 's'} it was waiting for (${out.asked.length} source${out.asked.length === 1 ? '' : 's'} asked)`);
     } else if (out.asked.length) {
       console.log(`[scout] "${out.title}": ${out.verdict} after asking ${out.asked.length} source${out.asked.length === 1 ? '' : 's'} (${out.searches} search${out.searches === 1 ? '' : 'es'})`);
     }

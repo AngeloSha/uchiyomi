@@ -2417,6 +2417,15 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const ctx = vc(req);
     return reachable(req).filter((s) => sourceBrowsableFor(s, ctx));
   };
+  /**
+   * The sources a person may browse, search and pick from: `surfaceable` minus the backup extensions' (v0.82.0,
+   * lib/backupExtensions.ts) -- the ones Uchiyomi installed by itself to finish downloads, which download like any
+   * source and are nobody's choice. The owner: Discover should show "only the sources he actually added". Every
+   * Discover fan-out and listing reads this; GET /api/sources still lists them, flagged, because it is also how the
+   * reader, the series page and the downloads name a chapter's source. Reintroduce by reading `surfaceable` here:
+   * "a backup is listed for its name, flagged, and never asked by Discover" in backupDiscover.int.test.ts finds it searched.
+   */
+  const discoverable = (req: FastifyRequest): SourceAdapter[] => surfaceable(req).filter((s) => !s.backup);
 
   app.get('/api/sources', async (req) => {
     const health = new Map((await healthAll()).map((h) => [h.source_id, h]));
@@ -2510,6 +2519,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
           // null for the other built-ins, packs and custom sites. Providers groups by `pkgName` (or by `name` when
           // that is null) so 3Hentai's twenty-nine language variants are one card rather than twenty-nine.
           extension: extensionOf(s),
+          // v0.82.0: a backup extension's source (lib/backupExtensions.ts). Listed for its name; Discover and every
+          // source picker leave it out (web lib/sourceGroups.ts discoverSources).
+          ...(s.backup ? { backup: true } : {}),
           latest: typeof s.latest === 'function',
           // Reported from the method's presence, exactly as `latest` is. A source without it simply
           // drops out of the wall while Popular is selected, the same way one without `latest` does.
@@ -2553,7 +2565,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // `denySource` -- 403 is the permission answer and this is not a permission (the same account with
     // `?adult=1` gets the results), and `{ content: [] }` is already what this route answers for a source
     // that has nothing. The source is never even asked, so hiding it costs nothing outbound either.
-    if (!surfaceable(req).some((s) => s.id === src.id)) return { content: [] };
+    if (!discoverable(req).some((s) => s.id === src.id)) return { content: [] };
     const raw = await src.search(query.trim()).catch(() => []);
     // dedupe by sourceId (duplicate ids collide on the React key → wrong cover/title on a card)
     const seen = new Set<string>();
@@ -3387,7 +3399,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // "Show 18+" chip. The chip belongs here and not only in the shaping below, because a source left in
     // `ask` is a source this request STARTS -- an outbound query to an adult site on behalf of someone who
     // asked not to see one, and its results would then also land in the shared entry under this term.
-    const all = surfaceable(req);
+    const all = discoverable(req);
     // `source` narrows the fan-out to one source, for a search made while Discover is filtered to it. The
     // filter was display-only before, and did not survive a search at all: submitting a term asked every
     // source and answered with everything, so choosing a source and then searching within it was not
@@ -3455,7 +3467,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // surfacing rule rather than the permission one, and it answers exactly what a source with nothing new
     // answers. It sits beside the disabled short-circuit because it means the same thing to the caller --
     // this source paints no covers right now -- and above it because it needs no database read (#64).
-    if (!surfaceable(req).some((s) => s.id === src.id)) return { content: [] };
+    if (!discoverable(req).some((s) => s.id === src.id)) return { content: [] };
     if (await isDisabled(source!).catch(() => false)) return { content: [] };
     const p = Math.max(1, parseInt(page || '1', 10) || 1);
     // A source serving out a cooldown is not asked again -- that is what the cooldown is FOR. Reporting
@@ -3486,7 +3498,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (!src || typeof src.popular !== 'function') return { content: [] };
     if (!sourceAllowedFor(src, vc(req).maxAgeRating)) return denySource(reply);
     // The 18+ hide, exactly as on the newest listing above and for the same reason (#64).
-    if (!surfaceable(req).some((s) => s.id === src.id)) return { content: [] };
+    if (!discoverable(req).some((s) => s.id === src.id)) return { content: [] };
     if (await isDisabled(source!).catch(() => false)) return { content: [] };
     const p = Math.max(1, parseInt(page || '1', 10) || 1);
     const resting = await blockedNow(source!).catch(() => null);
@@ -3746,7 +3758,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // `surfaceable`, like search-all above: this is the other cross-source fan-out Discover runs, so a
     // source the "Show 18+" chip is hiding must be neither asked nor listed here (#64). A client naming it
     // in `sources` does not override the hide -- `wanted` only narrows the set, it never widens it.
-    const allowed = new Set(surfaceable(req).map((x) => x.id));
+    const allowed = new Set(discoverable(req).map((x) => x.id));
     const ids = findOrder().filter((id) => allowed.has(id) && (!wanted || wanted.has(id)));
     const one = async (id: string) => {
       const src = getSource(id);
@@ -3797,7 +3809,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const taken = new Set(rows.map((r) => r.lang));
     const health = new Map((await healthAll().catch(() => [])).map((h) => [h.source_id, h] as const));
     const now = Date.now();
-    const usable = surfaceable(req).filter((x) => {
+    const usable = discoverable(req).filter((x) => {
       const h = health.get(x.id);
       return !h?.disabled && !(h?.blocked_until && new Date(h.blocked_until).getTime() > now);
     });

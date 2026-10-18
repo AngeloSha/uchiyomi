@@ -544,3 +544,25 @@ test('a check that throws clears the last result rather than leaving the last go
   assert.equal(extState.running, false);
   assert.ok(lines.some((l) => /boom/.test(l)), 'the reason has to reach the log');
 });
+
+test('a backup\'s update is no notification: it is updated like any other, and named only in the panel', async () => {
+  // v0.82.0 (lib/backupExtensions.ts): nobody installed a backup extension, and "MangaBolt updated" would be news about
+  // something nobody chose. Reintroduce by notifying them all (drop `quiet` in runExtensionCheck): MangaBolt is in the
+  // push.
+  const { runExtensionCheck } = await load();
+  const e = engine([hasNewer('org.x.a', 'Alpha'), hasNewer('org.x.bolt', 'MangaBolt')], { repos: ['https://r/i.json'] });
+  const d = deps(e, store({ repos: ['https://r/i.json'] }), { backupPkgs: async () => new Set(['org.x.bolt']) });
+
+  const r = await runExtensionCheck({}, d.deps as any);
+
+  assert.deepEqual(r.updated.map((u) => u.name).sort(), ['Alpha', 'MangaBolt'], 'both are updated, and the panel says both');
+  assert.equal(d.pushes.length, 1);
+  assert.match(d.pushes[0].title, /^Alpha updated$/, 'the push names only the one a person installed');
+  assert.doesNotMatch(d.pushes[0].body, /MangaBolt/);
+
+  // A check where only a backup changed sends nothing at all.
+  const e2 = engine([upToDate('org.x.a', 'Alpha'), hasNewer('org.x.bolt', 'MangaBolt')], { repos: ['https://r/i.json'] });
+  const d2 = deps(e2, store({ repos: ['https://r/i.json'] }), { backupPkgs: async () => new Set(['org.x.bolt']) });
+  await runExtensionCheck({}, d2.deps as any);
+  assert.deepEqual(d2.pushes, []);
+});

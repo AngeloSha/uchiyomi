@@ -45,7 +45,21 @@ export interface Src {
    * other built-ins, packs and custom sites. Read by a Discover card's icons (`iconStack`), one per extension.
    */
   extension?: SrcExtension | null;
+  /**
+   * v0.82.0: a backup extension's source -- one Uchiyomi installed by itself to finish downloads, and removes again once
+   * nothing needs it (bff lib/backupExtensions.ts). Listed so a chapter's source can still be named; never offered to
+   * browse or pick (discoverSources).
+   */
+  backup?: boolean;
 }
+
+/**
+ * The sources a person browses and picks from (v0.82.0): every one but a backup extension's. The owner: Discover should
+ * show "only the sources he actually added". The server never asks a backup for Discover either (bff routes/sources.ts
+ * discoverable); GET /api/sources lists them only so the reader, the series page and the downloads can name one.
+ * Reintroduce by returning `list`: "Discover and every source picker leave a backup out" in backupSources.test.ts.
+ */
+export const discoverSources = <T extends { backup?: boolean }>(list: readonly T[]): T[] => list.filter((s) => !s.backup);
 
 /**
  * An extension as GET /api/sources names it. `pkgName` is null when the engine never said (a source remembered before

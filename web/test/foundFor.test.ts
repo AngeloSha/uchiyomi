@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { foundForText } from '../components/SourcesSheet';
+import { backupText, foundForText } from '../components/SourcesSheet';
 
 test('each reason is one plain sentence with when', () => {
   const at = new Date(Date.now() - 2 * 3600_000).toISOString();
@@ -19,5 +19,15 @@ test('each reason is one plain sentence with when', () => {
 test('the sentence is said only under a source the server followed', () => {
   const src = readFileSync(join(__dirname, '..', 'components', 'SourcesSheet.tsx'), 'utf8');
   // Reintroduce by dropping `s.auto &&`: a person's own follow would carry a reason nobody gave.
-  assert.match(src, /\{s\.auto && s\.foundFor && s\.followedAt && \(/);
+  assert.match(src, /\{!s\.backup && s\.auto && s\.foundFor && s\.followedAt && \(/);
+});
+
+test('a backup extension\'s source says it is one, and that it stays only until the other sources can get the chapters', () => {
+  // v0.82.0 (bff lib/backupExtensions.ts). Reintroduce by giving it the automatic follow's own reason (drop the backup
+  // line): the reader is never told it goes again.
+  const at = new Date(Date.now() - 2 * 3600_000).toISOString();
+  assert.match(backupText(at), /^Added .+ as a backup, until the other sources can get its chapters$/);
+  assert.equal(backupText(null), 'A backup, until the other sources can get its chapters');
+  const src = readFileSync(join(__dirname, '..', 'components', 'SourcesSheet.tsx'), 'utf8');
+  assert.match(src, /\{!s\.primary && s\.backup && \(\s*<span[^>]*data-backup-source>\{backupText\(s\.followedAt\)\}<\/span>/);
 });

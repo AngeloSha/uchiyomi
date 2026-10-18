@@ -17,7 +17,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setActiveLocale } from '../lib/format';
 import { setActiveDict } from '../lib/i18n';
 import {
-  attentionRows, initialView, limitLine, needsAttention, replaceLine, replacePlan, rowAction, settingsTarget, sheetKeys, splitSources, turnOffQuestion,
+  attentionRows, backupLine, initialView, limitLine, needsAttention, replaceLine, replacePlan, rowAction, settingsTarget, sheetKeys, splitSources, turnOffQuestion,
   type OverviewSource, type ReplacePreview, type SourcesOverview,
 } from '../lib/sourcesPanel';
 import { makeMainQuestion, mayMakeMain } from '../lib/mainSource';
@@ -149,7 +149,33 @@ test('the list leads with the sources your series use, the most used first, then
     'not the most used first (main and followed together), then the rest by name, whatever their state');
   assert.deepEqual(off, ['off-more', 'off-used', 'off-none'], 'the switched-off fold is not in the same order');
   // The panel draws that order, and the count on its tab is of the sources switched on.
-  assert.match(code('components/SourcesPanel.tsx'), /const \{ on, off \} = splitSources\(overview\.sources\);/);
+  assert.match(code('components/SourcesPanel.tsx'), /const \{ on, off, backups \} = splitSources\(overview\.sources\);/);
+});
+
+test('the backup extensions Uchiyomi added are folded apart, each saying what it is, with Keep', () => {
+  // v0.82.0 (bff lib/backupExtensions.ts). The list above is the sources a person added; the ones Uchiyomi added by
+  // itself to finish downloads sit in a closed fold of their own. Reintroduce by leaving them in the list (splitSources
+  // without `backups`): "a backup is folded apart" fails.
+  const at = new Date(Date.now() - 3600_000).toISOString();
+  const SPARE = src('sw:9001', { name: 'BK Spare', kind: 'extension', pkgName: 'pkg.spare', followed: 2, backup: { lastNeededAt: at, removesAt: at } });
+  const PIN = src('sw:9002', { name: 'BK Pin', kind: 'extension', pkgName: 'pkg.pin', main: 3, backup: { lastNeededAt: at, removesAt: null } });
+  const overview: SourcesOverview = { sources: [...OVERVIEW.sources, SPARE, PIN], attention: OVERVIEW.attention };
+  const { on, off, backups } = splitSources(overview.sources);
+  assert.deepEqual(backups.map((s) => s.id), ['sw:9002', 'sw:9001'], 'a backup is folded apart, the most used first');
+  assert.ok(![...on, ...off].some((s) => s.backup), 'a backup is folded apart');
+  const html = renderToStaticMarkup(createElement(YourSources, {
+    overview, failed: false, evidence: new Map(), onRetry: noop, onOpen: noop, onChanged: later, onAdd: noop,
+  }));
+  assert.ok(!slice(html, 'data-sources-list', '</ul>').includes('sw:9001'), 'not in the list of the sources a person added');
+  const fold = slice(html, 'data-sources-fold="backups"', '</section>');
+  assert.match(fold, />Added by Uchiyomi<span[^>]*>2<\/span>/, 'the fold names them and counts them');
+  assert.match(fold, /aria-expanded="false"/, 'closed until opened');
+  // The sheet: what it is, in one line, and Keep -- the one key that makes it a person's own.
+  assert.match(backupLine(SPARE) ?? '', /^Added by Uchiyomi to finish downloads\. Not shown in Discover\. Removed after 3 days without use\.$/);
+  assert.match(backupLine(PIN) ?? '', /Kept while a series uses it as its main source\.$/, 'a series\' main is kept, and says so');
+  assert.equal(backupLine(src('x')), null);
+  assert.ok(sheetKeys(SPARE).includes('keep'));
+  assert.ok(!sheetKeys(src('sw:5', { kind: 'extension', pkgName: 'pkg.five' })).includes('keep'), 'nothing to keep on a person\'s own');
 });
 
 test('a row offers at most one key -- Turn on, for a source switched off that series use -- else a chevron', () => {

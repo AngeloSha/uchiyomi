@@ -288,6 +288,28 @@ test('Admin → Extensions on a repository the size of a real one', { skip: DSN 
         forgetUpdates();
       }
     });
+
+    /**
+     * v0.82.0: one install or removal at a time (lib/sources/suwayomi/installLock.ts). An admin's Install behind another
+     * waits for it, then goes. Reintroduce by acting at once (the route without withInstallLock): "an admin's install
+     * waits for one in progress" finds Shelf Two installed while the other still holds the engine. Last: it installs.
+     */
+    await t.test('an admin\'s install waits for one in progress, then goes', async () => {
+      const { withInstallLock } = await import('../src/lib/sources/suwayomi/installLock');
+      let release!: () => void;
+      const held = withInstallLock('test', () => new Promise<void>((r) => { release = r; }));
+      const pending = post(`/api/admin/extensions/catalog/${encodeURIComponent(PKG.shelfTwo)}`, { action: 'install' });
+      try {
+        await new Promise((r) => setTimeout(r, 150));
+        assert.equal(fake.extension(PKG.shelfTwo).installed, false, 'nothing is installed while another install holds the engine');
+      } finally {
+        release();
+        await held;
+      }
+      const r = await pending;
+      assert.equal(r.statusCode, 200, r.body);
+      assert.equal(fake.extension(PKG.shelfTwo).installed, true, 'then it goes');
+    });
   } finally {
     [console.warn, console.log] = quiet;
     await q('DELETE FROM lib_series WHERE id = ANY($1)', [SERIES]).catch(() => {});

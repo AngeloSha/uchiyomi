@@ -42,10 +42,12 @@ export async function requestScout(
     ? ` AND (s.source_checked_at IS NULL OR COALESCE(s.finish_missing, s.source_missing) > 0 OR s.finish_after IS NOT NULL)`
     : '';
   await q(
-    `INSERT INTO series_scout (series_id, reason, numbers, seeds, priority)
-     SELECT $1, $2, $3::real[], $4::text[], $5 WHERE EXISTS (SELECT 1 FROM lib_series s WHERE s.id = $1${behind})
+    `INSERT INTO series_scout (series_id, reason, numbers, seeds, priority, stuck_since)
+     SELECT $1, $2, $3::real[], $4::text[], $5, now() WHERE EXISTS (SELECT 1 FROM lib_series s WHERE s.id = $1${behind})
      ON CONFLICT (series_id) DO UPDATE SET
        reason = EXCLUDED.reason,
+       -- Since when it has been stuck (v0.82.0): the first request of a wait sets it, a later one keeps it.
+       stuck_since = COALESCE(series_scout.stuck_since, now()),
        numbers = (SELECT COALESCE(array_agg(DISTINCT n ORDER BY n), '{}') FROM
                    (SELECT n FROM unnest(series_scout.numbers || EXCLUDED.numbers) AS n LIMIT 400) x),
        seeds = (SELECT COALESCE(array_agg(DISTINCT x), '{}') FROM unnest(series_scout.seeds || EXCLUDED.seeds) AS x),

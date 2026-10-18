@@ -48,6 +48,7 @@ import { startActivityLog, flushActivityLog } from './lib/activityLog';
 import { runBackup, backupDelay, backupSettings, stampDelay } from './lib/backup';
 import { firstRunFloor, DESKTOP_FLOORS } from './lib/desktop';
 import { scoutTick, SCOUT_TICK_MS } from './lib/sourceScout';
+import { backupUpkeep, BACKUP_UPKEEP_MS } from './lib/backupExtensions';
 import { KomgaError } from './lib/komga';
 import { ZodError } from 'zod';
 import { registerWebRoot, webRootConfigured } from './lib/webRoot';
@@ -362,6 +363,18 @@ async function main() {
       setTimeout(scoutLoop, SCOUT_TICK_MS).unref();
     };
     setTimeout(scoutLoop, firstRunFloor(10 * 60 * 1000, 'scout')).unref();
+    // v0.82.0, the backup extensions (lib/backupExtensions.ts): every half hour, the extensions Uchiyomi installed by
+    // itself to finish downloads are checked against what the series need, and one nothing has needed for three days
+    // is removed -- remembered, and put back by the scout when a series it carried is stuck again.
+    const backupLoop = async () => {
+      try {
+        await backupUpkeep();
+      } catch (e) {
+        app.log.error(e as any);
+      }
+      setTimeout(backupLoop, BACKUP_UPKEEP_MS).unref();
+    };
+    setTimeout(backupLoop, firstRunFloor(15 * 60 * 1000, 'backups')).unref();
     // v0.61.0, the release radar (lib/releaseRadar.ts): once, a minute after boot, every series with a source and no
     // radar yet is dated from what is already stored -- its listing and its chapters' arrivals, no source asked -- so
     // an upgrade's Releasing soon and Expected this week are not empty until each series' next check.

@@ -39,7 +39,9 @@ import { smokeTest } from '../lib/sourceProbe';
 import { startSourceCheck, checkRunning, checkProgress } from '../lib/sourceWatchdog';
 import { testSource } from '../lib/sourceCheck';
 import { currentFailures, stageLines } from '../lib/sourceEvidence';
-import { runExtensionMonitor, runExtensionCheck, extState, liveStore as extensionStore } from '../lib/extensionMonitor';
+import { runExtensionMonitor, runExtensionCheck, extState, liveStore as extensionStore, markInstalled } from '../lib/extensionMonitor';
+import { withInstallLock, BUSY } from '../lib/sources/suwayomi/installLock';
+import { adoptBackup, adoptBackupOfSource, backupRows, refuseBackup, dropLink } from '../lib/backupExtensions';
 import { readSites, writeSites } from '../lib/sources/customSites';
 import { reloadAll, listSources, getSource, sniffSite, listRemoteSources, suwayomiConfigured, suwayomiAbout, swAdapterId, isSwAdapterId, withTimeout } from '../lib/sources';
 import {
@@ -1870,6 +1872,8 @@ export default async function adminRoutes(app: FastifyInstance) {
     // included, no longer applies (lib/scoutMemory.ts).
     await forgetVerdict(id, source);
     await logAudit('series.follow_source', { userId: userIdOf(req), detail: { id, title: row.title, source, sourceSeriesId, coverage: cand.coverage }, req });
+    // A person chose it: a backup extension's source is theirs now (v0.82.0, lib/backupExtensions.ts adoptBackup).
+    await adoptBackupOfSource(source, userIdOf(req));
     // The answer is the list as the follow left it, read BEFORE the refresh below starts: a follow is not a check.
     // Read after it, the answer raced the refresh's own stamp on the new source (updater.ts writes
     // series_sources.checked_at as soon as the source answers) and said "never checked" or "checked just now" by
@@ -1912,6 +1916,8 @@ export default async function adminRoutes(app: FastifyInstance) {
         error: out.refused, message: out.said.text, messageSaid: saidOf(out.said), ...(out.edition ? { edition: out.edition } : {}),
       });
     }
+    // Made the main by a person: a backup extension's source is theirs now (v0.82.0, lib/backupExtensions.ts).
+    await adoptBackupOfSource(b.data.sourceId, userIdOf(req));
     // Read before the refresh starts, as the follow's answer is (above): the switch is not a check.
     const list = await seriesSourcesFor(id);
     // The listing again, through the new main: its chapters show on the series page now, not at the next sweep.
@@ -1949,6 +1955,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     });
     if ('refused' in out) return refusedAttach(reply, out);
     await forgetVerdict(id, b.data.source);
+    await adoptBackupOfSource(b.data.source, userIdOf(req));
     // Read before the refresh starts, as the follow's answer is (above): an attach is not a check.
     const list = await seriesSourcesFor(id);
     void updateSeries(id, 0).catch(() => {});
@@ -1975,6 +1982,8 @@ export default async function adminRoutes(app: FastifyInstance) {
     // does (lib/scoutMemory.ts). Reintroduce by dropping it: "a source an admin unfollowed is not followed again" in
     // sourceScout.int.test.ts finds it followed.
     await markRemoved(id, sourceId);
+    // And no parked backup puts it back for this series (v0.82.0, lib/backupExtensions.ts).
+    await dropLink(id, sourceId);
     // The listing rows this source carried go with it. A listing row is the authorisation for a manual
     // fetch (POST /api/sources/fetch, the refetch below), and the rows are otherwise rewritten only by the
     // series' next successful check -- a full sweep cycle away on a large install, never if auto_update is
@@ -3616,8 +3625,12 @@ export default async function adminRoutes(app: FastifyInstance) {
       // installed first, then updatable, then alphabetical — the things you can act on float up
       .sort((a, b) => Number(b.installed) - Number(a.installed) || Number(b.hasUpdate) - Number(a.hasUpdate) || a.name.localeCompare(b.name));
     const langs = [...new Set(all.map((e) => e.lang).filter(Boolean))].sort() as string[];
+    // v0.82.0: the ones Uchiyomi installed by itself to finish downloads (lib/backupExtensions.ts) say so.
+    const backups = new Set([...(await backupRows())].filter(([, r]) => r.state === 'trial' || r.state === 'active').map(([k]) => k));
     // Serve icons through our own origin; the extension server is not reachable from a browser.
-    const page = filtered.slice(offset, offset + limit).map((e) => ({ ...e, iconUrl: e.iconUrl ? `/img/extensions/icon/${e.pkgName}` : null }));
+    const page = filtered.slice(offset, offset + limit).map((e) => ({
+      ...e, iconUrl: e.iconUrl ? `/img/extensions/icon/${e.pkgName}` : null, ...(backups.has(e.pkgName) ? { backup: true } : {}),
+    }));
     return {
       content: page,
       total: all.length,
@@ -3653,7 +3666,13 @@ export default async function adminRoutes(app: FastifyInstance) {
   app.post('/api/admin/extensions/update-all', async (req, reply) => {
     if (needExt(reply)) return;
     if (extState.running) return reply.code(409).send({ error: 'busy', message: 'An extension check is already running.' });
-    const r = await runExtensionCheck({ forceUpdate: true });
+    // Behind another install or removal (v0.82.0), as an install is: it waits for it, and says so past two minutes.
+    const got = await withInstallLock('admin', () => runExtensionCheck({ forceUpdate: true }), 2 * 60_000);
+    if (got === BUSY) {
+      const said = say('extension.busy');
+      return reply.code(409).send({ error: 'busy', message: said.text, messageSaid: saidOf(said) });
+    }
+    const r = got;
     await logAudit('extension.update_all', {
       userId: userIdOf(req), detail: { updated: r.updated.length, failed: r.failed.length, refreshed: r.refreshed }, req,
     });
@@ -3690,8 +3709,15 @@ export default async function adminRoutes(app: FastifyInstance) {
   app.post('/api/admin/extensions/catalog/:pkgName', async (req, reply) => {
     if (needExt(reply)) return;
     const { pkgName } = req.params as { pkgName: string };
-    const b = z.object({ action: z.enum(['install', 'uninstall', 'update', 'enable']) }).safeParse(req.body);
+    const b = z.object({ action: z.enum(['install', 'uninstall', 'update', 'enable', 'keep']) }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+
+    // Keep (v0.82.0): a backup extension Uchiyomi added for itself becomes the admin's -- in Discover, and never removed
+    // for being unused (lib/backupExtensions.ts adoptBackup). An extension that is not a backup is theirs already.
+    if (b.data.action === 'keep') {
+      const kept = await adoptBackup(pkgName, { userId: userIdOf(req) });
+      return { ok: true, kept, sources: 0 };
+    }
 
     // "Turn on its sources" (v0.53.0): an installed extension's sources switched on as its install would have, and the
     // engine asked for nothing but the list. An extension installed in the engine's own page showed as installed with
@@ -3708,38 +3734,66 @@ export default async function adminRoutes(app: FastifyInstance) {
       }
       const turned = await turnOnExtensionSources(provided);
       await logAudit('extension.enable', { userId: userIdOf(req), detail: { pkgName, on: turned.on }, req });
+      // Turning a backup's sources on is choosing it: it is the admin's now (v0.82.0).
+      await adoptBackup(pkgName, { userId: userIdOf(req), reload: false });
       const load = await reloadAll();
       return { ok: true, sources: provided.length, on: turned.on, hidden: turned.hidden, registered: load.suwayomi };
     }
 
-    // Ask which sources this extension provides BEFORE acting: once it is uninstalled it provides none, and
-    // we would leave the rows behind claiming sources that no longer exist.
-    const enable = b.data.action !== 'uninstall';
-    const priorSources = enable ? [] : await sourcesOfExtension(pkgName).catch(() => []);
+    // One install or removal at a time (v0.82.0, lib/sources/suwayomi/installLock.ts): behind Fix everything's, the
+    // extension check's or a backup's, this one waits for it, and says so past two minutes rather than running beside
+    // it. Reintroduce by acting at once: "an admin's install waits for one in progress" in extensionCatalog.int.test.ts
+    // finds two installs in the engine at the same moment.
+    const action = b.data.action;
+    const done = await withInstallLock('admin', async () => {
+      // Ask which sources this extension provides BEFORE acting: once it is uninstalled it provides none, and
+      // we would leave the rows behind claiming sources that no longer exist.
+      const enable = action !== 'uninstall';
+      const priorSources = enable ? [] : await sourcesOfExtension(pkgName).catch(() => []);
 
-    try {
-      await setExtensionState(pkgName, b.data.action);
-    } catch (e) {
-      return reply.code(502).send({ error: 'failed', message: (e as Error)?.message || 'The extension server refused that.' });
-    }
-    await logAudit(`extension.${b.data.action}`, { userId: userIdOf(req), detail: { pkgName }, req });
+      try {
+        await setExtensionState(pkgName, action);
+      } catch (e) {
+        return { failed: (e as Error)?.message || 'The extension server refused that.' };
+      }
+      await logAudit(`extension.${action}`, { userId: userIdOf(req), detail: { pkgName }, req });
 
-    // Installing an extension and then having to hunt for its sources in a second list is exactly the
-    // friction this feature exists to remove, so switch them on (or off) as part of the same action --
-    // except the ones in a language the operator has hidden, which stay off and are counted back.
-    const provided = enable ? await sourcesOfExtension(pkgName).catch(() => []) : priorSources;
-    const adopted = await adoptExtensionSources(provided, enable);
-    if (b.data.action === 'uninstall') {
-      // the sources are gone from the server too; don't leave rows implying otherwise
-      await q('DELETE FROM suwayomi_sources WHERE source_id = ANY($1)', [provided.map((s) => s.id)]).catch(() => {});
-      // ...and neither their health rows, which nothing else ever deletes. Live this had accumulated twelve
-      // orphans, three of them recording 404s from the very evening their extensions were pulled. A row whose
-      // source still has series is kept: it is the only record that source ever existed, and those series
-      // are frozen, not gone -- the health page says so.
-      await pruneOrphanedHealth(provided.map((s) => `sw:${s.id}`));
+      // Installing an extension and then having to hunt for its sources in a second list is exactly the
+      // friction this feature exists to remove, so switch them on (or off) as part of the same action --
+      // except the ones in a language the operator has hidden, which stay off and are counted back.
+      const provided = enable ? await sourcesOfExtension(pkgName).catch(() => []) : priorSources;
+      const adopted = await adoptExtensionSources(provided, enable);
+      if (action === 'install') {
+        // The admin's now, a backup's row or a refusal of theirs forgotten (v0.82.0); and the extension check's copy
+        // says installed, so its next look does not call the extension new.
+        await adoptBackup(pkgName, { userId: userIdOf(req), reload: false });
+        await markInstalled(pkgName, true);
+      }
+      if (action === 'uninstall') {
+        // Uchiyomi never installs it again (v0.82.0, `refused`), and a backup's own follows go with it: they were the
+        // server's, and a follow on a removed extension is a source nothing can ask. Before the rows below go, which
+        // are how its sources are found.
+        const wasBackup = (await backupRows()).get(pkgName);
+        await refuseBackup(pkgName, { why: 'by_admin', dropFollows: wasBackup?.state === 'trial' || wasBackup?.state === 'active' });
+        // the sources are gone from the server too; don't leave rows implying otherwise
+        await q('DELETE FROM suwayomi_sources WHERE source_id = ANY($1)', [provided.map((s) => s.id)]).catch(() => {});
+        // ...and neither their health rows, which nothing else ever deletes. Live this had accumulated twelve
+        // orphans, three of them recording 404s from the very evening their extensions were pulled. A row whose
+        // source still has series is kept: it is the only record that source ever existed, and those series
+        // are frozen, not gone -- the health page says so.
+        await pruneOrphanedHealth(provided.map((s) => `sw:${s.id}`));
+        // Removed here, so the extension check never reports it as removed in the engine's own page.
+        await markInstalled(pkgName, false);
+      }
+      const r = await reloadAll();
+      return { ok: true as const, sources: provided.length, on: adopted.on, hidden: adopted.hidden, registered: r.suwayomi };
+    }, 2 * 60_000);
+    if (done === BUSY) {
+      const said = say('extension.busy');
+      return reply.code(409).send({ error: 'busy', message: said.text, messageSaid: saidOf(said) });
     }
-    const r = await reloadAll();
-    return { ok: true, sources: provided.length, on: adopted.on, hidden: adopted.hidden, registered: r.suwayomi };
+    if ('failed' in done) return reply.code(502).send({ error: 'failed', message: done.failed });
+    return done;
   });
 
   // ---- extension repositories ----

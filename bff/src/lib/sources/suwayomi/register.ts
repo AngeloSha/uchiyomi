@@ -110,6 +110,20 @@ async function switchedOffInHealth(ids: string[]): Promise<Set<string>> {
   return new Set(rows.map((r) => r.source_id.slice(SW_PREFIX.length)));
 }
 
+/**
+ * The engine's ids of the sources of the backup extensions (v0.82.0, lib/backupExtensions.ts): the packages Uchiyomi
+ * installed by itself, being checked or in use. Their adapters are marked `backup`, which keeps them out of Discover.
+ * Inlined, like switchedOffInHealth: lib/backupExtensions.ts reads the registry this module fills. A read that fails
+ * marks none, as before backups existed.
+ */
+async function backupSourceIds(): Promise<Set<string>> {
+  const rows = await q<{ source_id: string }>(
+    `SELECT s.source_id FROM suwayomi_sources s JOIN backup_extensions b ON b.pkg_name = s.pkg_name
+      WHERE b.state IN ('trial', 'active')`,
+  ).catch(() => [] as Array<{ source_id: string }>);
+  return new Set(rows.map((r) => r.source_id));
+}
+
 /** Whether the last load left this source (`sw:<id>`) out because the source limit was full. */
 export function leftOutByLimit(adapterId: string | null | undefined): boolean {
   return !!adapterId?.startsWith(SW_PREFIX) && leftOut.has(adapterId.slice(SW_PREFIX.length));
@@ -254,6 +268,11 @@ async function load(list: () => Promise<RemoteSource[]>, quiet: boolean, beforeR
   // working source skipped.
   const off = await switchedOffInHealth(on.map((s) => String(s.id)));
   const isOff = (s: RemoteSource) => off.has(String(s.id));
+  // The order is the same for a backup's source (v0.82.0): one a series uses is a used source like any other, and one
+  // still being checked takes a slot only while there is room -- lib/backupExtensions.ts asks wouldFit before it
+  // installs. Reintroduce by registering backups after every other source: "a backup a series uses keeps its
+  // place under the source limit" in backupExtensions.int.test.ts finds it left out.
+  const backups = await backupSourceIds();
   const live = on.filter((s) => !isOff(s));
   const wanted = [
     ...live.filter((s) => used.has(String(s.id))), ...live.filter((s) => !used.has(String(s.id))), ...on.filter(isOff),
@@ -272,7 +291,9 @@ async function load(list: () => Promise<RemoteSource[]>, quiet: boolean, beforeR
       out.add(String(s.id));
       continue;
     }
-    if (registerAdapter(makeSuwayomiAdapter(s))) registered++;
+    const adapter = makeSuwayomiAdapter(s);
+    if (backups.has(String(s.id))) adapter.backup = true;
+    if (registerAdapter(adapter)) registered++;
   }
   leftOut = out;
   if (skipped) {

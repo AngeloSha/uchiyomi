@@ -68,6 +68,8 @@ export const DESKTOP_FLOORS = Object.freeze({
   finishDownloads: 3 * 60 * 1000,
   // The scout (lib/sourceScout.ts), after the finishing sweep has had its first go.
   scout: 5 * 60 * 1000,
+  // The backup extensions' upkeep (lib/backupExtensions.ts), after the scout's first look.
+  backups: 8 * 60 * 1000,
 });
 export type DesktopFloor = keyof typeof DESKTOP_FLOORS;
 
