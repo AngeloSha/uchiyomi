@@ -8,7 +8,8 @@ kept as a backup; the others are removed at once.
 
 ### A few at a time
 
-- **Best matches first:** an extension named after the series' translation group, then the most downloaded.
+- **Best matches first:** an extension named after a group that translates the series (as its chapters or
+  MangaUpdates say), then the most downloaded.
 - **Gently:** one install at a time, at most one an hour and six a day, and within the backup limit (5).
 - **One install, every waiting series:** each extension it tries is asked about every series waiting in that language
   before it is kept or removed.
