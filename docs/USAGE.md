@@ -1685,6 +1685,10 @@ again.
   cadence rule calls the group quiet, otherwise *last release {ago}*) — and *{n} chapters have more than one
   version*, from the chapter list it already fetched to count them. Sources that name no groups show nothing
   there.
+- **Unnumbered galleries:** an extension may list a gallery as one chapter without a chapter number. It is
+  treated as chapter 1. If an NSFW extension lists only unnumbered parts, they are numbered from 1 in posting
+  order, oldest first when the dates establish the direction. Lists with numbered chapters and multi-part
+  non-NSFW lists keep their existing handling.
 - **Numbered by posting order** (since v0.49.0): when the source gives many different posts one chapter number — the
   Webtoons extension on a series posted in parts — a note under the chapter count says so, and why (*Webtoons gives
   many different posts the same chapter number (73 posts are all numbered 7).*), with the two readings side by side,

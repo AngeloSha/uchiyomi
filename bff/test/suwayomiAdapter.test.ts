@@ -416,3 +416,66 @@ test("a manga of another source is not this source's: no series, no chapters", a
   }));
   assert.equal((await own.getSeries('8'))?.title, 'Own Manga');
 });
+
+// Unnumbered galleries.
+test('a single unnumbered gallery is chapter 1, and an NSFW source numbers its parts oldest first', async () => {
+  // Reintroduce by deleting the galleryChapters branch in listChapters: single-gallery titles list nothing.
+  const { makeSuwayomiAdapter } = await load();
+  const { unnumberedOf } = await import('../src/lib/sources/types');
+  const one = makeSuwayomiAdapter({ ...LOCAL, isNsfw: false }, fakeGql({
+    fetchChapters: { fetchMangaAndChapters: { manga: { sourceId: String(LOCAL.id) }, chapters: [{ id: 9, chapterNumber: -1, name: 'Chapter', uploadDate: '1700000000000', pageCount: 24 }] } },
+  }));
+  const g = await one.listChapters('5');
+  assert.deepEqual(g.map((c) => [c.sourceId, c.number, c.title, c.pages]), [['9', 1, 'Chapter', 24]]);
+  assert.equal(unnumberedOf(g), 0);
+  const parts = makeSuwayomiAdapter({ ...LOCAL, isNsfw: true }, fakeGql({
+    // newest first, as an engine that counts from the top answers
+    fetchChapters: { fetchMangaAndChapters: { manga: { sourceId: String(LOCAL.id) }, chapters: [
+      { id: 3, chapterNumber: -1, name: 'Part 3', sourceOrder: 1, uploadDate: '1700000300000' },
+      { id: 2, chapterNumber: -1, name: 'Part 2', sourceOrder: 2, uploadDate: '1700000200000' },
+      { id: 1, chapterNumber: -1, name: 'Part 1', sourceOrder: 3, uploadDate: '1700000100000' },
+    ] } },
+  }));
+  assert.deepEqual((await parts.listChapters('5')).map((c) => [c.title, c.number]), [['Part 1', 1], ['Part 2', 2], ['Part 3', 3]]);
+});
+
+test('gallery numbering preserves existing handling: a numbered list, and a multi-row SFW list, still drop unnumbered rows', async () => {
+  const { makeSuwayomiAdapter } = await load();
+  const mixed = makeSuwayomiAdapter({ ...LOCAL, isNsfw: true }, fakeGql({
+    fetchChapters: { fetchMangaAndChapters: { manga: { sourceId: String(LOCAL.id) }, chapters: [{ id: 1, chapterNumber: 1, name: 'One' }, { id: 2, chapterNumber: -1, name: 'Notice' }] } },
+  }));
+  assert.deepEqual((await mixed.listChapters('5')).map((c) => c.number), [1]);
+  const sfw = makeSuwayomiAdapter({ ...LOCAL, isNsfw: false }, fakeGql({
+    fetchChapters: { fetchMangaAndChapters: { manga: { sourceId: String(LOCAL.id) }, chapters: [{ id: 1, chapterNumber: -1, name: 'Prologue' }, { id: 2, chapterNumber: -1, name: 'Notice' }] } },
+  }));
+  assert.deepEqual(await sfw.listChapters('5'), []);
+});
+
+test('gallery numbering keeps engine order without dates and preserves chapter metadata', async () => {
+  const { makeSuwayomiAdapter } = await load();
+  const a = makeSuwayomiAdapter({ ...LOCAL, isNsfw: true }, fakeGql({
+    fetchChapters: { fetchMangaAndChapters: { manga: { sourceId: String(LOCAL.id) }, chapters: [
+      { id: 2, chapterNumber: -1, name: 'Second', sourceOrder: 2, scanlator: 'Team', url: '/part/2', pageCount: 8 },
+      { id: 1, chapterNumber: -1, name: 'First', sourceOrder: 1, pageCount: 12 },
+    ] } },
+  }));
+  const rows = await a.listChapters('5');
+  assert.deepEqual(rows.map((c) => [c.sourceId, c.number, c.order]), [['1', 1, 1], ['2', 2, 2]]);
+  assert.deepEqual([rows[1].scanlator, rows[1].url, rows[1].pages], ['Team', '/part/2', 8]);
+});
+
+test('gallery numbering ignores rows without ids and does not cross source ownership', async () => {
+  const { makeSuwayomiAdapter } = await load();
+  const { unnumberedOf } = await import('../src/lib/sources/types');
+  const response = (sourceId: string, chapters: unknown[]) => fakeGql({
+    fetchChapters: { fetchMangaAndChapters: { manga: { sourceId }, chapters } },
+  });
+  const chapters = [{ chapterNumber: -1, name: 'Junk' }, { id: 3, chapterNumber: -1, name: 'Gallery' }];
+  const own = makeSuwayomiAdapter(LOCAL, response(String(LOCAL.id), chapters));
+  const rows = await own.listChapters('5');
+  assert.deepEqual(rows.map((c) => [c.sourceId, c.number]), [['3', 1]]);
+  assert.equal(unnumberedOf(rows), 0);
+  const foreign = makeSuwayomiAdapter({ ...LOCAL, isNsfw: true }, response('another-source', chapters));
+  assert.deepEqual(await foreign.listChapters('5'), []);
+  assert.deepEqual(await makeSuwayomiAdapter(LOCAL, response(String(LOCAL.id), [])).listChapters('5'), []);
+});
