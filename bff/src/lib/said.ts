@@ -627,6 +627,8 @@ const EN = {
   'detach.noMain': () => 'This series has no main source to detach.',
   // A source retired, or a site removed, while some series still has it as its main source (v0.54.0, lib/retireSource.ts).
   'retire.inUse': ({ n }: { n: number }) => `It is the main source of ${n} series. Replace it first.`,
+  // An install or removal while another one runs (v0.82.0, lib/sources/suwayomi/installLock.ts): one at a time.
+  'extension.busy': () => 'Another extension is being added or removed. Try again in a minute.',
   // Rating a source Adult only past the list's limit (v0.73.0, lib/visibility.ts MAX_ADULT_SOURCES).
   'rating.tooMany': ({ limit }: { limit: number }) => `At most ${limit} sources can be rated Adult only.`,
 

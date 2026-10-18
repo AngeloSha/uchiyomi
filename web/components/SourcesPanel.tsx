@@ -485,7 +485,7 @@ export function YourSources({ overview, failed, evidence, onRetry, onOpen, onCha
       </div>
     );
   }
-  const { on, off } = splitSources(overview.sources);
+  const { on, off, backups } = splitSources(overview.sources);
   const row = (s: OverviewSource) => (
     <SourceRow key={s.id} s={s} since={failingSince(evidence.get(s.id))} action={rowAction(s, overview.attention)} onOpen={() => onOpen(s.id)} onChanged={onChanged} />
   );
@@ -505,20 +505,22 @@ export function YourSources({ overview, failed, evidence, onRetry, onOpen, onCha
   return (
     <div className="space-y-3" data-sources-yours>
       {on.length > 0 && <ul className="card grad-border divide-y divide-ink-800/70 overflow-hidden rounded-2xl" data-sources-list>{on.map(row)}</ul>}
-      {off.length > 0 && <OffFold n={off.length}>{off.map(row)}</OffFold>}
+      {off.length > 0 && <Fold kind="off" title={tr('Switched off')} n={off.length}>{off.map(row)}</Fold>}
+      {/* v0.82.0: the backup extensions Uchiyomi added by itself to finish downloads, apart from the sources you added. */}
+      {backups.length > 0 && <Fold kind="backups" title={tr('Added by Uchiyomi')} n={backups.length}>{backups.map(row)}</Fold>}
     </div>
   );
 }
 
-/** Switched off, folded: closed until opened, its count beside its name. */
-function OffFold({ n, children }: { n: number; children: ReactNode }) {
+/** A fold under the list -- the switched-off sources, the backup extensions' -- closed until opened, its count beside its name. */
+function Fold({ kind, title, n, children }: { kind: 'off' | 'backups'; title: string; n: number; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const plain = useReduceEffects();
   return (
-    <section data-sources-fold="off" className="card overflow-hidden rounded-2xl">
-      <button type="button" aria-expanded={open} aria-controls="sources-off" onClick={() => setOpen(!open)}
+    <section data-sources-fold={kind} className="card overflow-hidden rounded-2xl">
+      <button type="button" aria-expanded={open} aria-controls={`sources-${kind}`} onClick={() => setOpen(!open)}
         className="flex w-full min-w-0 items-center gap-3 px-4 py-3 text-start text-sm text-fog-300 hover:text-fog-100">
-        <span className="min-w-0 flex-1">{tr('Switched off')}<span className="ms-2 tabular-nums text-fog-500">{numberText(n)}</span></span>
+        <span className="min-w-0 flex-1">{title}<span className="ms-2 tabular-nums text-fog-500">{numberText(n)}</span></span>
         <span className="flex shrink-0 items-center gap-1 text-xs text-fog-500">
           {open ? tr('Hide') : tr('Show')}
           {/* Mirrored on the outer span and turned on the inner one (ActionList.tsx): both on one pointed it up in Arabic. */}
@@ -527,7 +529,7 @@ function OffFold({ n, children }: { n: number; children: ReactNode }) {
           </span>
         </span>
       </button>
-      {open && <ul id="sources-off" className="divide-y divide-ink-800/70 border-t border-ink-800/60">{children}</ul>}
+      {open && <ul id={`sources-${kind}`} className="divide-y divide-ink-800/70 border-t border-ink-800/60">{children}</ul>}
     </section>
   );
 }

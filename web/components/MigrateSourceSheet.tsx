@@ -21,7 +21,7 @@ import { IcCheck, IcSearch, IcX } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
 import { bookCountText } from '@/lib/format';
 import { attachButtons, migrateTerms, sourcesParam } from '@/lib/migrateSource';
-import type { Src } from '@/lib/sourceGroups';
+import { discoverSources, type Src } from '@/lib/sourceGroups';
 import type { AltTitle } from '@/lib/findSources';
 
 interface SourceResult { sourceId: string; title: string; coverUrl?: string }
@@ -81,9 +81,10 @@ export function MigrateSourceSheet({ id, title, attached, mainId, listed, onDone
     queryFn: () => api<{ content: Src[] }>(withAdult('/api/sources')),
     staleTime: 60_000,
   });
-  // A to Z by name, so a source can be found by eye in a list of fifty; the server's order is install order.
+  // A to Z by name, so a source can be found by eye in a list of fifty; the server's order is install order. Never a
+  // backup extension's (v0.82.0, lib/sourceGroups.ts discoverSources): the sources a person picks from are their own.
   const allSources = useMemo(
-    () => [...(srcs.data?.content ?? [])].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }) || a.id.localeCompare(b.id)),
+    () => discoverSources(srcs.data?.content ?? []).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }) || a.id.localeCompare(b.id)),
     [srcs.data],
   );
   const allIds = allSources.map((s) => s.id);

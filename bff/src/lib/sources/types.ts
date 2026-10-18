@@ -198,6 +198,13 @@ export interface SourceAdapter {
    * unrated content stays visible rather than vanishing the moment someone sets an age limit.
    */
   isNsfw?: boolean;
+  /**
+   * An extension's source Uchiyomi installed by itself to finish downloads, and keeps only while it is needed (v0.82.0,
+   * lib/backupExtensions.ts): a "backup extension". It downloads like any source; it is left out of Discover and of
+   * every list a person picks a source from (routes/sources.ts discoverable), and GET /api/sources says it, so the pages
+   * that name a chapter's source still can. Set by registration (suwayomi/register.ts), never by an adapter.
+   */
+  backup?: boolean;
 }
 
 /** Host services the core injects into a source plugin's register(host) (so plugins never import core internals). */

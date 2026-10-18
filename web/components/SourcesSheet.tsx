@@ -355,6 +355,16 @@ export function foundForText(why: NonNullable<SeriesSource['foundFor']>, at: str
 }
 
 /**
+ * Why a backup extension's source is on the series (v0.82.0, bff lib/backupExtensions.ts), in one line: Uchiyomi added
+ * it because the other sources could not get the chapters, and it stays only while they cannot. Said instead of the
+ * automatic follow's own reason, which would leave out that it goes again.
+ */
+export function backupText(at: string | null | undefined): string {
+  return at ? tr('Added {ago} as a backup, until the other sources can get its chapters', { ago: relativeTime(at) })
+    : tr('A backup, until the other sources can get its chapters');
+}
+
+/**
  * One source the updater asks: favicon, name, its role, what it lists, when it was last asked -- and, for an admin, the
  * × that stops following it and (v0.54.0) Make main on a follower that works: it asks first, in one line, what becomes
  * of the main source it replaces (lib/mainSource.ts).
@@ -386,8 +396,12 @@ export function SourceRow({ s, onUnfollow, unfollowing, makeMain }: {
           {s.chapters != null && s.checkedAt && ' · '}
           {s.checkedAt && tr('checked {ago}', { ago: relativeTime(s.checkedAt) })}
         </span>
-        {/* v0.81.0: why a source nobody here chose is followed, in the reader's words, before they press ×. */}
-        {s.auto && s.foundFor && s.followedAt && (
+        {/* v0.81.0: why a source nobody here chose is followed, in the reader's words, before they press ×. v0.82.0: a
+            backup extension's says that it is one, and that it goes again. */}
+        {!s.primary && s.backup && (
+          <span className="block text-[11px] leading-snug text-fog-500" data-backup-source>{backupText(s.followedAt)}</span>
+        )}
+        {!s.backup && s.auto && s.foundFor && s.followedAt && (
           <span className="block text-[11px] leading-snug text-fog-500" data-found-for={s.foundFor}>{foundForText(s.foundFor, s.followedAt)}</span>
         )}
       </span>

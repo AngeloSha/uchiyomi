@@ -825,6 +825,8 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'retire.inUse': (p) => (num(p, 'n') === 1
     ? tr('It is the main source of 1 series. Replace it first.')
     : tr('It is the main source of {n} series. Replace it first.', { n: num(p, 'n') })),
+  // An install or removal while another one runs (v0.82.0, bff lib/sources/suwayomi/installLock.ts): one at a time.
+  'extension.busy': () => tr('Another extension is being added or removed. Try again in a minute.'),
   // Rating a source Adult only past the list's limit (bff lib/visibility.ts MAX_ADULT_SOURCES): always a big number.
   'rating.tooMany': (p) => tr('At most {limit} sources can be rated Adult only.', { limit: num(p, 'limit') }),
 

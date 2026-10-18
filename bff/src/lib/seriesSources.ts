@@ -48,6 +48,11 @@ export interface SeriesSource {
    */
   followedAt: string | null;
   foundFor: 'scout' | 'failed_chapter' | 'short_chapter' | 'gap' | 'add' | null;
+  /**
+   * v0.82.0: a source of a backup extension (lib/backupExtensions.ts) -- one Uchiyomi installed by itself to finish
+   * downloads and removes again once nothing needs it. The sheet says so under it.
+   */
+  backup: boolean;
 }
 
 const iso = (v: string | Date | null | undefined): string | null =>
@@ -93,6 +98,7 @@ export async function seriesSourcesFor(seriesId: string): Promise<SeriesSource[]
       standing: standing(s.source_id),
       followedAt: null,
       foundFor: null,
+      backup: !!getSource(s.source_id)?.backup,
     });
   }
   for (const r of extras) {
@@ -111,6 +117,7 @@ export async function seriesSourcesFor(seriesId: string): Promise<SeriesSource[]
       standing: standing(r.source_id),
       followedAt: r.added_by == null ? iso(r.created_at) : null,
       foundFor: r.added_by == null ? foundFor(r.source_id) : null,
+      backup: !!getSource(r.source_id)?.backup,
     });
   }
   return out;

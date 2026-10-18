@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4047
+    "strings": 4057
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -4050,5 +4050,15 @@
   "Searched 1 other source on {date}: now also using {source}": "Procurada em 1 outra fonte em {date}: agora também usa {source}",
   "Searched {n} other sources on {date}: now also using {source}": "Procurada em {n} outras fontes em {date}: agora também usa {source}",
   "Searched 1 other source on {date}: none has it yet": "Procurada em 1 outra fonte em {date}: nenhuma a tem ainda",
-  "Searched {n} other sources on {date}: none has it yet": "Procurada em {n} outras fontes em {date}: nenhuma a tem ainda"
+  "Searched {n} other sources on {date}: none has it yet": "Procurada em {n} outras fontes em {date}: nenhuma a tem ainda",
+  "Another extension is being added or removed. Try again in a minute.": "Outra extensão está sendo adicionada ou removida. Tente de novo em um minuto.",
+  "Added {ago} as a backup, until the other sources can get its chapters": "Adicionada {ago} como reserva, até as outras fontes conseguirem obter os capítulos",
+  "A backup, until the other sources can get its chapters": "Uma reserva, até as outras fontes conseguirem obter os capítulos",
+  "Backup": "Reserva",
+  "Added by Uchiyomi": "Adicionadas pelo Uchiyomi",
+  "Added by Uchiyomi to finish downloads. Not shown in Discover.": "Adicionada pelo Uchiyomi para concluir os downloads. Não aparece em Descobrir.",
+  "Removed after 3 days without use.": "É removida após 3 dias sem uso.",
+  "Kept while a series uses it as its main source.": "É mantida enquanto uma série a usar como fonte principal.",
+  "Keeping…": "Mantendo…",
+  "Kept {name}: it is one of your sources now": "{name} mantida: agora é uma das suas fontes"
 }

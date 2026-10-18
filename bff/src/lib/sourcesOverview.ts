@@ -29,6 +29,7 @@ import { loadIgnores } from './healthIgnore';
 import { EXTENSION_OFF_BY, standingOf, standingRows, type Standing } from './sourceStanding';
 import { currentFailures, type Stage, type Stages } from './sourceEvidence';
 import { replaceCountsByMain } from './replaceSource';
+import { backupRows, backupLimits } from './backupExtensions';
 
 export type SourceKind = 'builtin' | 'mangadex' | 'site' | 'extension' | 'pack';
 export type OverviewState = 'blocked' | 'failing' | 'slow' | 'empty' | 'inconclusive' | 'untested' | 'off' | 'slowed' | 'ok';
@@ -68,6 +69,13 @@ export interface OverviewSource {
    * is. Absent for every other source.
    */
   overLimit?: { limit: number };
+  /**
+   * v0.82.0: a backup extension's source (lib/backupExtensions.ts) -- Uchiyomi installed it by itself to finish
+   * downloads, keeps it out of Discover, and removes it once it has not been needed for a few days. `removesAt`: from
+   * when it may go if nothing needs it before then; null while a series uses it as its main source, which keeps it.
+   * Absent for every other source.
+   */
+  backup?: { lastNeededAt: string; removesAt: string | null };
 }
 
 export interface SourcesOverview {
@@ -116,6 +124,8 @@ export async function sourcesOverview(): Promise<SourcesOverview> {
   const rows = new Map<string, HealthItem>(health.items.filter((i) => i.sourceId).map((i) => [i.sourceId!, i]));
   const sw = new Map((await q<{ source_id: string; name: string | null; lang: string | null; pkg_name: string | null; nsfw: boolean | null }>(
     'SELECT source_id, name, lang, pkg_name, nsfw FROM suwayomi_sources').catch(() => [])).map((r) => [`${SW_PREFIX}${r.source_id}`, r]));
+  const backups = new Map([...(await backupRows())].filter(([, b]) => b.state === 'trial' || b.state === 'active'));
+  const idleMs = backupLimits().idleMs;
   const sites = new Map((await readSites()).filter((s) => s.id).map((s) => [s.id!, s]));
   const used = await q<{ source_id: string }>(
     `SELECT DISTINCT x.source_id FROM (
@@ -141,8 +151,16 @@ export async function sourcesOverview(): Promise<SourcesOverview> {
   const series = mains.length
     ? await q<{ id: string }>(`SELECT s.id FROM lib_series s WHERE s.source_id = ANY($1::text[]) AND ${visibleToAll('s')}`, [mains])
     : [];
-  const backups = await replaceCountsByMain(series.map((r) => r.id), null);
+  const takeOver = await replaceCountsByMain(series.map((r) => r.id), null);
 
+  /** A backup extension's source: when it was last needed, and from when it may be removed (never while it is a main). */
+  const backupOf = (id: string): Pick<OverviewSource, 'backup'> => {
+    const pkg = isSwAdapterId(id) ? sw.get(id)?.pkg_name : null;
+    const b = pkg ? backups.get(pkg) : undefined;
+    if (!b) return {};
+    const last = new Date(b.last_needed_at);
+    return { backup: { lastNeededAt: last.toISOString(), removesAt: (main.get(id) ?? 0) > 0 ? null : new Date(last.getTime() + idleMs).toISOString() } };
+  };
   const kindOf = (id: string): SourceKind => {
     if (isSwAdapterId(id)) return 'extension';
     if (getSource(id)?.rateGroup === MANGADEX_GROUP || /^mangadex(-|$)/.test(id)) return 'mangadex';
@@ -177,7 +195,7 @@ export async function sourcesOverview(): Promise<SourcesOverview> {
       offline: currentFailures(standing.get(id)?.stages as Stages | null | undefined, now).some((f) => f.kind === 'site_offline'),
       main: main.get(id) ?? 0,
       followed: followed.get(id) ?? 0,
-      withBackup: backups.get(id)?.withBackup ?? 0,
+      withBackup: takeOver.get(id)?.withBackup ?? 0,
       lastTestedAt: o?.live_at ? new Date(o.live_at).toISOString() : null,
       icon: !!src?.iconUrl,
       ...(site?.base ? { address: site.base } : {}),
@@ -188,12 +206,15 @@ export async function sourcesOverview(): Promise<SourcesOverview> {
       // here: the sheet says why it is not loaded instead of offering Replace. Reintroduce by leaving it out: "a source
       // the limit left out says so" in sourcesOverview.int.test.ts finds nothing.
       ...(st === 'not_loaded' && leftOutByLimit(id) ? { overLimit: { limit: env.SUWAYOMI_MAX_SOURCES } } : {}),
+      ...backupOf(id),
     };
   });
 
   // Health's `replace_source` rule: off or failing, and some series' main source.
   const replace = sources.filter((s) => (s.standing === 'off' || s.standing === 'failing') && s.main > 0).map((s) => s.id);
-  const failingUnused = health.items.filter((i) => i.group === 'unused' && i.sourceId).map((i) => i.sourceId!);
+  // A backup nothing uses goes by itself (lib/backupExtensions.ts): nothing for a person to do about it.
+  const isBackup = (id: string) => !!sources.find((s) => s.id === id)?.backup;
+  const failingUnused = health.items.filter((i) => i.group === 'unused' && i.sourceId && !isBackup(i.sourceId)).map((i) => i.sourceId!);
   const attention = new Set([...replace, ...failingUnused]);
   // What needs a look first, then what the library uses most, then by name; switched off last.
   const rank = (s: OverviewSource) => (attention.has(s.id) ? 0 : s.standing === 'off' ? 2 : 1);

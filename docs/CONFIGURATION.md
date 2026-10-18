@@ -343,6 +343,9 @@ rarely needed:
 - `FINISH_DOWNLOADS_REFUSAL_CAP` (default `12`): tries a chapter a site refused gets.
 - `SCOUT_SEARCHES_PER_HOUR` (default `40`; `0` stops it looking for new sources on its own, and keeps the rest):
   searches it may make in an hour when it looks for a series on your other installed sources.
+- `BACKUP_EXTENSIONS_MAX` (default `5`, the desktop app `3`; `0`: never): backup extensions -- the ones Uchiyomi
+  installed by itself -- installed at once. One a series uses as its main source does not count. When it is full, the
+  one needed longest ago is removed to make room, and one in use never is.
 
 - `DOWNLOAD_CONCURRENCY` (default `2`): chapters downloaded at once, per source -- per rate key: the MangaDex languages
   share one, and since v0.55.3 so do sources whose pages come from one image server (Natomanga and Mangakakalot). One

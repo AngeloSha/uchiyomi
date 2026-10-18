@@ -26,7 +26,7 @@ import { diagnosisReason } from '@/lib/said';
 import { useTicker } from '@/lib/ticker';
 import { testClock, type TestAnswer } from '@/lib/sourceEvidence';
 import {
-  failingSince, libraryHref, limitLine, sheetFacts, sheetKeys, sourceSays, turnOffQuestion, turnOffRequest, turnOnRequest,
+  backupLine, failingSince, libraryHref, limitLine, sheetFacts, sheetKeys, sourceSays, turnOffQuestion, turnOffRequest, turnOnRequest,
   usedBy, usedByLink, type OverviewSource, type SheetKey, type SourceEvidenceRow, type SourcesOverview,
 } from '@/lib/sourcesPanel';
 import { extSourceIdOf } from '@/lib/sourcePrefs';
@@ -112,6 +112,8 @@ export function SourceSheet({ target, overview, evidence, testMs, status, action
   const keys = s ? sheetKeys(s, overview?.attention) : [];
   // Not loaded because the engine's source limit is full (v0.55.1): why, and the way to room, where Replace was.
   const limit = s ? limitLine(s, isDesktop()) : null;
+  // A backup extension Uchiyomi added by itself (v0.82.0): what it is, and that it goes again.
+  const backup = s ? backupLine(s) : null;
   const offByAdmin = new Set((overview?.sources ?? []).filter((x) => x.kind === 'extension' && x.offBy === 'admin')
     .map((x) => extSourceIdOf(x.id)).filter((x): x is string => !!x));
 
@@ -155,6 +157,12 @@ export function SourceSheet({ target, overview, evidence, testMs, status, action
     const r = turnOffRequest(s);
     await api(r.path, r.json ? { json: r.json } : { method: 'POST' });
     return tr('That source is switched off');
+  });
+  // Keep (v0.82.0): the backup becomes the admin's -- in Discover, never removed for being unused.
+  const keep = () => s?.pkgName && run('keep', async () => {
+    await api(`/api/admin/extensions/catalog/${encodeURIComponent(s.pkgName!)}`, { json: { action: 'keep' } });
+    void qc.invalidateQueries({ queryKey: ['sources'] });
+    return tr('Kept {name}: it is one of your sources now', { name: `\u2068${s.name}\u2069` });
   });
   const turnOn = () => s && run('turn-on', async () => {
     const r = turnOnRequest(s);
@@ -231,6 +239,7 @@ export function SourceSheet({ target, overview, evidence, testMs, status, action
               {says.reason && <span className="text-fog-400">— {says.reason}</span>}
             </p>
             {limit && <p className="mt-1.5 text-[12px] leading-relaxed text-fog-400" data-source-limit>{limit}</p>}
+            {backup && <p className="mt-1.5 text-[12px] leading-relaxed text-fog-400" data-source-backup>{backup}</p>}
             {/* A source in every language (v0.62.0): what Uchiyomi does about it, said where the admin looks at it. */}
             {s.lang === 'all' && (
               <p className="mt-1.5 text-[12px] leading-relaxed text-fog-400" data-source-mixed>
@@ -240,6 +249,7 @@ export function SourceSheet({ target, overview, evidence, testMs, status, action
             <div className="mt-3 flex flex-wrap items-center gap-2" data-source-keys>
               {keys.includes('replace') && key('replace', tr('Replace'), () => onReplace(s), 'btn-key btn-key-primary')}
               {keys.includes('test') && key('test', busy === 'test' ? testClock(now - testFrom, testMs) : tr('Test'), test, 'btn-key', { 'data-source-test': s.id })}
+              {keys.includes('keep') && key('keep', busy === 'keep' ? <Busy tone="muted">{tr('Keeping…')}</Busy> : tr('Keep'), () => void keep(), 'btn-key btn-key-accent')}
               {keys.includes('unblock') && key('unblock', tr('Clear block'), () => void unblock())}
               {keys.includes('turn-on') && key('turn-on', busy === 'turn-on' ? <Busy tone="muted">{tr('Turning on…')}</Busy> : tr('Turn on'), () => void turnOn(), 'btn-key btn-key-accent')}
               {keys.includes('turn-off') && asking !== 'turn-off' && key('turn-off', tr('Turn off'), () => (used > 0 ? setAsking('turn-off') : void turnOff()), 'btn-key btn-key-danger')}

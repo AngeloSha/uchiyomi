@@ -21,10 +21,16 @@ export function ExtIcon({ url, name, size = 40 }: { url: string | null; name: st
   return <img src={url} alt="" width={size} height={size} loading="lazy" onError={() => setFailed(true)} style={box} className="shrink-0 rounded-xl bg-ink-800 object-cover" />;
 }
 
-/** The small marks after an extension's name: 18+, and no longer in any repository. Squared tags, never capsules. */
-export function ExtTags({ e }: { e: Pick<CatalogExt, 'nsfw' | 'obsolete'> }) {
+/**
+ * The small marks after an extension's name: 18+, no longer in any repository, and (v0.82.0) a backup Uchiyomi added by
+ * itself. Squared tags, never capsules.
+ */
+export function ExtTags({ e }: { e: Pick<CatalogExt, 'nsfw' | 'obsolete'> & { backup?: boolean } }) {
   return (
     <>
+      {e.backup && (
+        <span className="shrink-0 rounded-[4px] border border-ink-600 px-1 text-[10px] font-medium leading-[15px] text-fog-400" data-ext-backup>{tr('Backup')}</span>
+      )}
       {/* dir="ltr": in an Arabic line the "+" of a bare "18+" printed on the wrong side ("+18"). */}
       {e.nsfw && <span dir="ltr" className="shrink-0 rounded-[4px] border border-red-400/30 px-1 text-[10px] font-semibold leading-[15px] text-red-300">18+</span>}
       {e.obsolete && (

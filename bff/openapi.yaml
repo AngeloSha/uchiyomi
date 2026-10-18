@@ -673,6 +673,9 @@ components:
         auto: { type: boolean, description: "Followed by the add-time auto-follow (POST /api/sources/add alsoFollow) rather than by a person: the row has no author. Always false for the primary. A person confirming the same source through a fill-scan plan turns it false." }
         standing:
           $ref: "#/components/schemas/SourceStanding"
+        backup:
+          type: boolean
+          description: Since v0.82.0, a backup extension's source (bff lib/backupExtensions.ts) -- installed by Uchiyomi to finish downloads, removed again when unused.
     SourceStanding:
       type: string
       enum: [usable, cooling, failing, off, not_loaded]
@@ -2965,6 +2968,14 @@ paths:
                                 name:
                                   type: string
                             - type: "null"
+                        backup:
+                          type: boolean
+                          enum: [true]
+                          description: >-
+                            Since v0.82.0: a backup extension's source -- one Uchiyomi installed by itself to finish
+                            downloads, and removes again once nothing has needed it for three days. Listed so a
+                            chapter's source can be named; never asked by search-all, search, latest, popular, find
+                            or edition-candidates. Absent for every other source.
         "401":
           description: Not authenticated
         "403":
@@ -11015,7 +11026,7 @@ paths:
       tags:
         - admin
       summary: Re-read the repositories, then update every installed extension with a newer version. 409 while a
-        check runs.
+        check runs, or (since v0.82.0, `busy`) while another install or removal still runs after two minutes.
       operationId: postApiAdminExtensionsUpdateAll
       description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
       security:
@@ -11086,7 +11097,11 @@ paths:
         asks the engine for nothing but the extension's sources and switches them on as an install would, never
         switching one off: for an extension installed in the engine's own page, which shows as installed with
         every source off. It answers 409 `no_sources` when the extension is not installed or provides no source,
-        and is audited as `extension.enable`."
+        and is audited as `extension.enable`. Since v0.82.0 `keep` makes a backup extension (one Uchiyomi installed
+        by itself to finish downloads) the admin's own, answering `{ok, kept}`; `install` and `enable` do the same,
+        and `uninstall` marks the package so Uchiyomi never installs it again. Installs, updates and removals run one
+        at a time: behind another, this waits up to two minutes, then answers 409 `busy` (`messageSaid`
+        `extension.busy`)."
 
       parameters:
         - name: pkgName
@@ -11105,7 +11120,7 @@ paths:
               properties:
                 action:
                   type: string
-                  enum: [install, uninstall, update, enable]
+                  enum: [install, uninstall, update, enable, keep]
       security:
         - bearer: []
       responses:
@@ -11120,7 +11135,7 @@ paths:
         "404":
           description: Not found, or not visible to this account
         "409":
-          description: "`enable` on an extension that is not installed, or provides no source (`no_sources`)"
+          description: "`enable` on an extension that is not installed, or provides no source (`no_sources`); or another install or removal still running after two minutes (`busy`)"
         "502":
           description: The extension engine did not answer, or refused the change
   /api/admin/extensions/repos:
@@ -12480,9 +12495,11 @@ paths:
         whose main source it is, `followed` the series that follow it without it being their main source, and
         `withBackup`, of `main`, the series a working follower would take over -- the Replace preview's own count.
         `offline`: a confirmed failure that is the site's own offline notice. `overLimit` (since v0.55.1): `{limit}` on
-        a source the extension engine's source limit left out. `attention` is what the section leads
+        a source the extension engine's source limit left out. `backup` (since v0.82.0): `{lastNeededAt, removesAt}` on
+        a backup extension's source, one Uchiyomi installed by itself to finish downloads; `removesAt` is null while a
+        series uses it as its main source. `attention` is what the section leads
         with: `replace` (off or failing, and some series' main source -- Health's replace_source rule), `failingUnused`
-        (Health's `unused` group: a finding on a source no series uses) and `updates` (installed extensions with an
+        (Health's `unused` group: a finding on a source no series uses, a backup's left out) and `updates` (installed extensions with an
         update waiting: the engine asked briefly and kept 30 s, else the last extension check's). Ordered: the
         sources in `attention` first, then by main + followed, most first, then by name; switched-off sources last.
         The extension engine's own state stays GET /api/admin/extensions/status's.

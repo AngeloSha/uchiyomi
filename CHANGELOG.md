@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.82.0 — 2026-10-18
+
+**Extensions Uchiyomi added by itself are backups now.** They help while a series needs them, then go, and come back
+when the series is stuck again. Discover shows only the sources you added, and the extension engine doesn't keep
+extensions nothing uses.
+
+### Backup extensions
+
+- **Not in Discover.** An extension Uchiyomi installed by itself (*Fix everything* does, when no installed source has a
+  series) isn't shown in Discover or anywhere you pick a source. Your series still name it where a chapter came from.
+- **Removed when unused.** It stays while a series needs it, and is removed after 3 days without use. It is never
+  removed while a series uses it as its main source.
+- **Back when needed.** When a series it carried is stuck again for an hour or more, it is put back and the series
+  carries on, without searching every extension again.
+- **New chapters come from the main source** while that source works; a backup's copy is taken only when the main is
+  slowed or failed that chapter.
+- **At most 5 at once.** The one needed longest ago makes room; one in use never does.
+- **Yours if you want it.** **Admin → Sources → Added by Uchiyomi** lists them; **Keep** makes one yours. Installing
+  one yourself, switching its sources on or choosing it for a series does the same. One you remove is never installed
+  again, by *Fix everything* or anything else.
+- **One install at a time.** An extension you add or remove while another install runs waits for it, and says so if
+  it takes more than two minutes.
+
+### Upgrading
+
+- **Your extensions:** the ones *Fix everything* installed, and that nobody chose for a series since, become backups.
+  Each gets three days before anything is removed. An extension you removed yourself is remembered.
+- **One optional knob,** `BACKUP_EXTENSIONS_MAX` (default 5, `0` turns backups off), is in
+  [docs/CONFIGURATION.md](docs/CONFIGURATION.md) under *advanced, rarely needed*.
+- **Database:** two new tables (`backup_extensions`, `backup_links`) and one new column on `series_scout`. All additive.
+
 ## v0.81.0 — 2026-10-18
 
 **Simpler, and faster.** Everything automatic about downloads is one switch now, a series says what it did for you,

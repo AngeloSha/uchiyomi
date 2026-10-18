@@ -68,6 +68,12 @@ export interface OverviewSource {
    * not its fix (the sheet says so instead: limitLine). Absent from every other source, and from an older server.
    */
   overLimit?: { limit: number } | null;
+  /**
+   * v0.82.0: a backup extension's source (bff lib/backupExtensions.ts) -- Uchiyomi installed it by itself to finish
+   * downloads -- with when it was last needed and from when it may be removed (null while it is a series' main source,
+   * which keeps it). Absent for every other source, and from an older server.
+   */
+  backup?: { lastNeededAt: string; removesAt: string | null } | null;
 }
 
 export interface SourcesAttention {
@@ -257,10 +263,25 @@ export function rowFacts(s: OverviewSource): string[] {
  * uses topped this list too, a second time, above the sources the library reads from. Here they sort with the other
  * sources nothing uses.
  */
-export function splitSources(list: readonly OverviewSource[]): { on: OverviewSource[]; off: OverviewSource[] } {
+export function splitSources(list: readonly OverviewSource[]): { on: OverviewSource[]; off: OverviewSource[]; backups: OverviewSource[] } {
   const byName = new Intl.Collator(activeLocale(), { numeric: true, sensitivity: 'base' });
   const shown = [...list].sort((a, b) => usedBy(b) - usedBy(a) || byName.compare(a.name, b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  return { on: shown.filter((s) => s.standing !== 'off'), off: shown.filter((s) => s.standing === 'off') };
+  // v0.82.0: the backup extensions' sources, whatever their state, folded apart under "Added by Uchiyomi": the list
+  // above them is the sources a person added. Reintroduce by listing them with the rest: "a backup is folded apart"
+  // in sourcesPanel.test.ts finds it in `on`.
+  const mine = shown.filter((s) => !s.backup);
+  return { on: mine.filter((s) => s.standing !== 'off'), off: mine.filter((s) => s.standing === 'off'), backups: shown.filter((s) => !!s.backup) };
+}
+
+/**
+ * What a backup extension's source is, in the sheet's one line under its state (v0.82.0): Uchiyomi added it, it is not
+ * in Discover, and it goes once nothing has needed it for a few days -- or, a series' main source, that it is kept.
+ * Null for any other source.
+ */
+export function backupLine(s: Pick<OverviewSource, 'backup'>): string | null {
+  if (!s.backup) return null;
+  const what = tr('Added by Uchiyomi to finish downloads. Not shown in Discover.');
+  return joinSentences(what, s.backup.removesAt ? tr('Removed after 3 days without use.') : tr('Kept while a series uses it as its main source.'));
 }
 
 /**
@@ -313,7 +334,7 @@ export const updatesTitle = (n: number): string =>
 
 // ---- the sheet's keys --------------------------------------------------------------------------------------------
 
-export type SheetKey = 'replace' | 'test' | 'unblock' | 'turn-off' | 'turn-on' | 'remove';
+export type SheetKey = 'replace' | 'test' | 'keep' | 'unblock' | 'turn-off' | 'turn-on' | 'remove';
 
 /**
  * What a source's sheet offers, in the order its keys sit:
@@ -321,6 +342,7 @@ export type SheetKey = 'replace' | 'test' | 'unblock' | 'turn-off' | 'turn-on' |
  *   but not loaded because the engine's source limit is full (v0.55.1, `overLimit`): that source works, Health's Free a
  *   slot lands on its sheet, and room under the limit is the fix, which its line says (limitLine);
  * - Test, for a source Uchiyomi has loaded (a source its extension switched off is not, and its Test would only say so);
+ * - Keep, for a backup extension's source (v0.82.0): it becomes the admin's own;
  * - Clear block, while a cooldown holds it;
  * - Turn off, or Turn on for one switched off;
  * - Remove, for a site added by address -- built-ins and packs have nothing to remove, an extension's source goes with
@@ -332,6 +354,8 @@ export function sheetKeys(s: OverviewSource, a?: Pick<SourcesAttention, 'replace
   if (dead && s.main > 0 && !s.overLimit) out.push('replace');
   const loaded = s.standing !== 'not_loaded' && !(s.standing === 'off' && (s.offBy === 'extension' || s.offBy === 'language'));
   if (loaded) out.push('test');
+  // v0.82.0: a backup extension's source can be made the admin's own -- in Discover, and never removed for being unused.
+  if (s.backup && s.pkgName) out.push('keep');
   if (s.standing === 'cooling' || s.state === 'blocked') out.push('unblock');
   if (s.standing === 'off') out.push('turn-on');
   else if (s.standing !== 'not_loaded') out.push('turn-off');

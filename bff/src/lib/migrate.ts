@@ -1882,6 +1882,39 @@ CREATE TABLE IF NOT EXISTS scout_verdicts (
   at               timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (series_id, source_id)
 );
+
+-- Backup extensions (v0.82.0, lib/backupExtensions.ts): the extensions Uchiyomi installed by itself to finish downloads
+-- -- Fix everything's, and the scout's. Hidden from Discover, removed after three days without use, put back when a
+-- series is stuck again. state: trial (installed, being checked), active, parked (removed by Uchiyomi, may come back),
+-- refused (a person removed it: Uchiyomi never installs it again). via: autofix or scout. A package with no row is the
+-- admin's own. Additive: v0.81.x ignores it.
+CREATE TABLE IF NOT EXISTS backup_extensions (
+  pkg_name       text PRIMARY KEY,
+  name           text,
+  lang           text,
+  state          text NOT NULL,
+  via            text,
+  installed_at   timestamptz,
+  last_needed_at timestamptz NOT NULL DEFAULT now(),
+  parked_at      timestamptz,
+  why            text,
+  updated_at     timestamptz NOT NULL DEFAULT now()
+);
+-- The follows a removed backup took with it: the series, its id there and its title there, so a series stuck again
+-- gets it back with one reinstall and one look instead of a search through every extension.
+CREATE TABLE IF NOT EXISTS backup_links (
+  series_id        text NOT NULL REFERENCES lib_series(id) ON DELETE CASCADE,
+  source_id        text NOT NULL,
+  pkg_name         text NOT NULL REFERENCES backup_extensions(pkg_name) ON DELETE CASCADE,
+  source_series_id text,
+  their_title      text,
+  parked_at        timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (series_id, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_backup_links_pkg ON backup_links (pkg_name);
+-- Since when the series has been waiting for the scout, kept across its requests: a backup is reinstalled only for a
+-- series stuck an hour or more, never for a cooldown of a few minutes.
+ALTER TABLE series_scout ADD COLUMN IF NOT EXISTS stuck_since timestamptz;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:
@@ -1927,6 +1960,58 @@ export async function runOnce(
  * are permanent, and this one was written before its release had a number.
  */
 export const CHAPTER_DATES_MIGRATION = 'suwayomi-chapter-dates-in-seconds';
+
+/** The backup extensions' one-time seed, apart because backupExtensions.int.test.ts runs it again by name. */
+export const BACKUP_SEED_MIGRATION = 'v0.82.0-backup-extensions';
+
+/**
+ * v0.82.0: the extensions Fix everything installed before backups existed become backups, by the audit log -- the one
+ * record of who installed what. Per package, its newest install, uninstall or "turn on its sources":
+ *   - a Fix everything install, still installed, and none of its sources since followed, attached or made a series'
+ *     main by a person: a backup (`active`), needed as of now -- three days' grace before anything is removed;
+ *   - otherwise, when a person's newest act on it was to remove it and it is not installed: `refused`, never installed
+ *     by Uchiyomi again.
+ * A person's follow is one with neither `auto` nor a Find run's own pick (`find_sources`, `replace`): the follow route,
+ * a Find review, an attach, a Make main. Anything else -- an extension a person installed, or turned on, or chose for
+ * a series -- stays theirs, as it was.
+ */
+async function seedBackupExtensions(c: PoolClient): Promise<void> {
+  await c.query(`
+    WITH last AS (
+      SELECT DISTINCT ON (detail->>'pkgName') detail->>'pkgName' AS pkg, event, detail->>'via' AS via, at
+        FROM audit_log
+       WHERE event IN ('extension.install', 'extension.uninstall', 'extension.enable') AND detail->>'pkgName' IS NOT NULL
+       ORDER BY detail->>'pkgName', at DESC, id DESC),
+    srcs AS (
+      SELECT pkg_name, array_agg('sw:' || source_id) AS ids, max(ext_name) AS name,
+             min(lang) FILTER (WHERE enabled) AS lang
+        FROM suwayomi_sources WHERE pkg_name IS NOT NULL GROUP BY pkg_name),
+    chosen AS (
+      SELECT DISTINCT s.pkg_name FROM srcs s JOIN last l ON l.pkg = s.pkg_name JOIN audit_log a ON a.at > l.at
+       WHERE (a.event = 'series.follow_source' AND a.detail->>'auto' IS NULL
+               AND (a.detail->>'via' IS NULL OR a.detail->>'via' IN ('find_review', 'replace_review'))
+               AND a.detail->>'source' = ANY(s.ids))
+          OR (a.event = 'series.attach_source' AND a.detail->>'source' = ANY(s.ids))
+          OR (a.event = 'series.main_source' AND a.detail->>'via' IN ('manual', 'review') AND a.detail->>'to' = ANY(s.ids)))
+    INSERT INTO backup_extensions (pkg_name, name, lang, state, via, installed_at, last_needed_at, why)
+    SELECT l.pkg, s.name, s.lang, 'active', 'autofix', l.at, now(), 'seed'
+      FROM last l JOIN srcs s ON s.pkg_name = l.pkg
+     WHERE l.event = 'extension.install' AND l.via = 'autofix'
+       AND NOT EXISTS (SELECT 1 FROM chosen ch WHERE ch.pkg_name = l.pkg)
+    ON CONFLICT (pkg_name) DO NOTHING`);
+  await c.query(`
+    WITH person AS (
+      SELECT DISTINCT ON (detail->>'pkgName') detail->>'pkgName' AS pkg, event, at
+        FROM audit_log
+       WHERE event IN ('extension.install', 'extension.uninstall', 'extension.enable')
+         AND detail->>'via' IS NULL AND detail->>'pkgName' IS NOT NULL
+       ORDER BY detail->>'pkgName', at DESC, id DESC)
+    INSERT INTO backup_extensions (pkg_name, state, parked_at, why)
+    SELECT p.pkg, 'refused', p.at, 'by_admin' FROM person p
+     WHERE p.event = 'extension.uninstall'
+       AND NOT EXISTS (SELECT 1 FROM suwayomi_sources ss WHERE ss.pkg_name = p.pkg)
+    ON CONFLICT (pkg_name) DO NOTHING`);
+}
 
 /**
  * Run-once data migrations, oldest first. Ids are permanent: renaming one re-runs it everywhere.
@@ -2241,6 +2326,10 @@ const DATA_MIGRATIONS: { id: string; run: (c: PoolClient) => Promise<void> }[] =
       await c.query(`UPDATE server_settings SET finish_downloads = false, auto_follow_on_failure = false
                       WHERE id = 1 AND finish_downloads IS DISTINCT FROM auto_follow_on_failure`);
     },
+  },
+  {
+    id: BACKUP_SEED_MIGRATION,
+    run: seedBackupExtensions,
   },
 ];
 
