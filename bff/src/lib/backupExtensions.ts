@@ -25,7 +25,7 @@
 import { q, one } from './db';
 import { logAudit } from './audit';
 import { runtime } from './runtime';
-import { forDesktop } from './desktop';
+import { isDesktop } from './desktop';
 import { visibleToAll } from './visibility';
 import { reloadAll, SW_PREFIX } from './sources';
 import { setExtensionState, sourcesOfExtension, listExtensions } from './sources/suwayomi/extensions';
@@ -56,7 +56,7 @@ const envInt = (name: string, fallback: number, min: number, max: number): numbe
  * waiting this long gets a backup back -- never for a cooldown of a few minutes. Tests narrow them (_setBackupLimits).
  */
 const limits = {
-  max: envInt('BACKUP_EXTENSIONS_MAX', forDesktop(5, 3), 0, 50),
+  max: envInt('BACKUP_EXTENSIONS_MAX', isDesktop() ? 3 : 5, 0, 50),
   idleMs: 3 * DAY,
   stuckMs: HOUR,
 };
