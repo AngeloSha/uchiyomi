@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.84.0 — 2026-10-18
+
+**Downloads you can watch page by page, double pages that line up, and gallery chapters.** All three are pull requests
+from **@globalteddy** ([#296](https://github.com/AngeloSha/uchiyomi/pull/296),
+[#295](https://github.com/AngeloSha/uchiyomi/pull/295), [#294](https://github.com/AngeloSha/uchiyomi/pull/294)), merged
+with his own commits. Thank you.
+
+- **Page-by-page download progress** ([#296](https://github.com/AngeloSha/uchiyomi/pull/296)). A chapter coming in
+  shows its pages and the time left under the series in **Library → Downloads** and on the series page (*34/78 pages ·
+  about 40 s left*). The time left covers the chapters still to come, and the Library ring moves while a long chapter
+  comes in, not only when it lands. The time is measured by the server, so a device whose clock is off still reads it
+  right.
+- **Shift pairs by one page** ([#295](https://github.com/AngeloSha/uchiyomi/pull/295)). In **Double spread**, the
+  reader keeps a chapter's first page alone as a cover. For a title whose chapters start on a story page, **Shift pairs
+  by one page** in Reader settings pairs pages 1–2, 3–4 and so on. It is remembered for that title, and the page you
+  are reading stays in view when you switch it.
+- **Gallery chapters** ([#294](https://github.com/AngeloSha/uchiyomi/pull/294)). An extension that lists a gallery as
+  one chapter with no number made the series look empty. That chapter now counts as chapter 1, and an 18+ extension
+  listing only unnumbered parts gets them numbered in posting order. Chapters that have numbers are read as before.
+
+### Upgrading
+
+- Nothing to do. The database has no change.
+
 ## v0.83.0 — 2026-10-18
 
 **When none of your sources has a series, Uchiyomi tries a few extensions from your repository.** A series stuck for an
