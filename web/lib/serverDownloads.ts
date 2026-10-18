@@ -45,6 +45,56 @@ export interface ActivityEntry {
   /** v0.49.1: `reason` as codes lib/said.ts words; absent for a download's own error, shown as sent. */
   reasonSaid?: Said[];
   mine?: boolean;
+  /** while it downloads, pages in hand of how many, and when its first page was asked for (bff downloadActivity). */
+  pagesDone?: number;
+  pagesTotal?: number;
+  pagesSince?: number;
+}
+
+/**
+ * how much of the chapters in flight is in hand, in chapters (0.5 = half of one chapter's pages). The
+ * ring moved per chapter, so a one-chapter Fetch from a source limited to two requests a second (MangaFire: ~50 s for
+ * 78 pages) showed nothing until it was over.
+ */
+export function inFlight(entries: readonly ActivityEntry[]): number {
+  return entries.reduce((n, e) => n + (e.status === 'downloading' && e.pagesTotal ? Math.min(1, (e.pagesDone ?? 0) / e.pagesTotal) : 0), 0);
+}
+
+/** a job's chapters not yet started: neither landed nor in flight. */
+export function chaptersAfter(job: { done: number; total: number } | undefined, entries: readonly ActivityEntry[]): number {
+  if (!job) return 0;
+  return Math.max(0, job.total - Math.min(job.done, job.total) - entries.filter((e) => e.status === 'downloading').length);
+}
+
+/** a tile's progress: the job's chapters plus the share of the ones in flight, or the in-flight pages alone. */
+export function tileFraction(job: { done: number; total: number } | undefined, entries: readonly ActivityEntry[]): RingValue {
+  if (job) return job.total > 0 ? ringFraction(Math.min(job.total, Math.min(job.done, job.total) + inFlight(entries)), job.total) : 'spin';
+  const sized = entries.filter((e) => e.status === 'downloading' && e.pagesTotal);
+  if (!sized.length) return 'spin';
+  return ringFraction(sized.reduce((n, e) => n + (e.pagesDone ?? 0), 0), sized.reduce((n, e) => n + (e.pagesTotal ?? 0), 0));
+}
+
+export interface PageLine { number: number; done: number; total: number; fraction: number; secondsLeft: number | null }
+
+/**
+ * the chapter a tile is fetching now, in pages, with a time left once three pages have come in two
+ * seconds or more after the first was asked for (before that a rate is a guess). The oldest chapter in flight.
+ * The time left is for the WHOLE download: `chaptersAfter` more chapters the size of this one at this page rate.
+ * Seen in the series band, a chapter's own 17 s beside "Fetching 11 chapters" read as the whole job's.
+ */
+export function pageLine(entries: readonly ActivityEntry[], now = Date.now(), { chaptersAfter = 0 }: { chaptersAfter?: number } = {}): PageLine | null {
+  const e = entries.filter((x) => x.status === 'downloading' && x.pagesTotal).sort((a, b) => a.startedAt - b.startedAt)[0];
+  if (!e || !e.pagesTotal) return null;
+  const done = Math.min(e.pagesDone ?? 0, e.pagesTotal);
+  const spent = e.pagesSince ? now - e.pagesSince : 0;
+  const pagesLeft = e.pagesTotal - done + Math.max(0, chaptersAfter) * e.pagesTotal;
+  const secondsLeft = done >= 3 && spent >= 2000 && pagesLeft > 0 ? Math.ceil((pagesLeft * spent) / done / 1000) : null;
+  return { number: e.number, done, total: e.pagesTotal, fraction: done / e.pagesTotal, secondsLeft };
+}
+
+/** "about 40 s left", "about 3 min left". */
+export function leftText(seconds: number): string {
+  return seconds < 90 ? tr('about {n} s left', { n: Math.max(1, Math.round(seconds)) }) : tr('about {n} min left', { n: Math.round(seconds / 60) });
 }
 
 export interface Activity { active: ActivityEntry[]; recent: ActivityEntry[] }
@@ -247,7 +297,8 @@ export function downloadSections<J extends DownloadJob>(d: Partial<SourceJobs<J>
   for (const j of live) {
     running.push({
       key: j.seriesId ?? j.folder, seriesId: j.seriesId ?? null, folder: j.folder, title: j.title, job: j,
-      entries: active.filter((e) => e.folder === j.folder), archive: false, progress: ringFraction(j.done, j.total),
+      entries: active.filter((e) => e.folder === j.folder), archive: false,
+      progress: tileFraction(j, active.filter((e) => e.folder === j.folder)), // pages of the chapters in flight count
     });
   }
   // The archive's rows first: its chapters in flight belong on the row's own cover, never on a second one.
@@ -269,6 +320,7 @@ export function downloadSections<J extends DownloadJob>(d: Partial<SourceJobs<J>
       groups.set(key, t);
     }
     t.entries.push(e);
+    if (!t.archive) t.progress = tileFraction(undefined, t.entries); // pages, once a chapter is sized
   }
   const byStart = (a: Tile<J>, b: Tile<J>) => (a.entries[0]?.startedAt ?? 0) - (b.entries[0]?.startedAt ?? 0);
   for (const t of [...groups.values()].sort(byStart)) {
@@ -409,7 +461,9 @@ export function navRing(d: Partial<SourceJobs> | undefined): NavRing {
   // Reintroduce by dropping `live`: "a paused archive puts no mark on the ring" in serverDownloads.test.ts.
   const slow = !active && s.queued.some((t) => t.archive && (t.item ? t.item.live : true));
   const failed = (d?.content ?? []).filter((j) => j.status === 'error').length;
-  const progress: RingValue = jobs.length ? ringFraction(jobs.reduce((n, j) => n + Math.min(j.done, j.total), 0), jobs.reduce((n, j) => n + j.total, 0))
+  // with the share of the chapters in flight, so the Library ring moves while a long chapter comes in.
+  const flying = s.running.filter((t) => t.job).reduce((n, t) => n + inFlight(t.entries), 0);
+  const progress: RingValue = jobs.length ? ringFraction(Math.min(jobs.reduce((n, j) => n + j.total, 0), jobs.reduce((n, j) => n + Math.min(j.done, j.total), 0) + flying), jobs.reduce((n, j) => n + j.total, 0))
     : runs.length ? ringFraction(runs[0].done, runs[0].total)
     : active || slow ? 'spin'
     : 'idle';

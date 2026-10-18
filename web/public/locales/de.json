@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4047
+    "strings": 4050
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -4050,5 +4050,8 @@
   "Searched 1 other source on {date}: now also using {source}": "Am {date} bei 1 anderen Quelle gesucht: jetzt wird auch {source} genutzt",
   "Searched {n} other sources on {date}: now also using {source}": "Am {date} bei {n} anderen Quellen gesucht: jetzt wird auch {source} genutzt",
   "Searched 1 other source on {date}: none has it yet": "Am {date} bei 1 anderen Quelle gesucht: noch keine hat sie",
-  "Searched {n} other sources on {date}: none has it yet": "Am {date} bei {n} anderen Quellen gesucht: noch keine hat sie"
+  "Searched {n} other sources on {date}: none has it yet": "Am {date} bei {n} anderen Quellen gesucht: noch keine hat sie",
+  "{done}/{total} pages": "{done}/{total} Seiten",
+  "about {n} s left": "noch etwa {n} s",
+  "about {n} min left": "noch etwa {n} Min."
 }

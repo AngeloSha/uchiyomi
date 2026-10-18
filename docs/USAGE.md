@@ -896,6 +896,10 @@ tuning settings are under *Downloading* in [CONFIGURATION.md](CONFIGURATION.md).
 
 ### What is downloading, and stopping it
 
+While a chapter downloads, its card and the series page show pages received, a progress bar and an estimated
+time left for the whole download once enough pages have arrived to estimate a rate. The library ring also
+advances within a chapter instead of waiting for it to finish.
+
 Everything the server is fetching, whoever started it, is under **Library → Downloads** (since v0.49.0; it used
 to be a small pill in the bottom corner). While something comes in, the **Library** tab's icon on a phone wears
 a thin ring that fills as the chapters land, with a small count of the series being fetched; on a computer the
