@@ -1915,6 +1915,15 @@ CREATE INDEX IF NOT EXISTS idx_backup_links_pkg ON backup_links (pkg_name);
 -- Since when the series has been waiting for the scout, kept across its requests: a backup is reinstalled only for a
 -- series stuck an hour or more, never for a cooldown of a few minutes.
 ALTER TABLE series_scout ADD COLUMN IF NOT EXISTS stuck_since timestamptz;
+-- v0.83.0: what a repository extension the scout tried did not have (lib/backupExtensions.ts recordMiss): a series it
+-- was searched for in vain, or (series_id NULL) a language it has no source in. Not tried again for it for 30 days.
+CREATE TABLE IF NOT EXISTS backup_misses (
+  pkg_name  text NOT NULL,
+  series_id text REFERENCES lib_series(id) ON DELETE CASCADE,
+  lang      text,
+  at        timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_backup_misses ON backup_misses (pkg_name, COALESCE(series_id, ''), COALESCE(lang, ''));
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

@@ -47,7 +47,7 @@ import { pruneAudit } from './lib/audit';
 import { startActivityLog, flushActivityLog } from './lib/activityLog';
 import { runBackup, backupDelay, backupSettings, stampDelay } from './lib/backup';
 import { firstRunFloor, DESKTOP_FLOORS } from './lib/desktop';
-import { scoutTick, SCOUT_TICK_MS } from './lib/sourceScout';
+import { scoutTick, storeLook, SCOUT_TICK_MS } from './lib/sourceScout';
 import { backupUpkeep, BACKUP_UPKEEP_MS } from './lib/backupExtensions';
 import { KomgaError } from './lib/komga';
 import { ZodError } from 'zod';
@@ -365,10 +365,12 @@ async function main() {
     setTimeout(scoutLoop, firstRunFloor(10 * 60 * 1000, 'scout')).unref();
     // v0.82.0, the backup extensions (lib/backupExtensions.ts): every half hour, the extensions Uchiyomi installed by
     // itself to finish downloads are checked against what the series need, and one nothing has needed for three days
-    // is removed -- remembered, and put back by the scout when a series it carried is stuck again.
+    // is removed -- remembered, and put back by the scout when a series it carried is stuck again. v0.83.0: then, for the
+    // series no installed source has, one extension from the repository may be tried (at most one an hour, six a day).
     const backupLoop = async () => {
       try {
         await backupUpkeep();
+        await storeLook();
       } catch (e) {
         app.log.error(e as any);
       }

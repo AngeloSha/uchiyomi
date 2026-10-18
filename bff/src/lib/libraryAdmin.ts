@@ -595,6 +595,8 @@ const SERIES_KEYED_TABLES = [
   // v0.82.0: the follows a removed backup extension took with it (lib/backupExtensions.ts). Cascades too; named for the
   // same count.
   'backup_links',
+  // v0.83.0: the repository extensions the scout tried for it in vain (lib/backupExtensions.ts recordMiss). Cascades too.
+  'backup_misses',
 ] as const;
 
 export interface ForgetRefusal {

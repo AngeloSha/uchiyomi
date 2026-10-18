@@ -885,10 +885,13 @@ by default). Uchiyomi keeps downloading until every chapter of a series is here,
   fetched as soon as the site is ready again.
 - **It finds another source when none can help.** In the background, it looks for the series on your other installed
   sources (in the series' language, and no 18+ source for a series that isn't) and adds one that has the missing
-  chapters. The series keeps its main source; the new one only fills in.
+  chapters. The series keeps its main source; the new one only fills in. When none of your installed sources has it,
+  it tries a few extensions from your repository: the best matches first, at most one an hour and six a day, and never
+  an 18+ one for a series that isn't. One that has the series stays as a backup (below); the others are removed at once
+  and not tried for that series again for a month.
 - **You can see what it did.** A source it added is marked *followed for you* on the series' Sources list, with when
   and why. Press × to remove it: it is never added back for that series. Health says it too where a gap is waiting.
-- **Extensions it added are backups.** An extension Uchiyomi installed by itself (*Fix everything* does) is a backup:
+- **Extensions it added are backups.** An extension Uchiyomi installed by itself (*Fix everything* or the search above) is a backup:
   it isn't shown in Discover, it stays while a series needs it, and it's removed after 3 days without use (never while
   a series uses it as its main source). When that series is stuck again, the backup is put back. To keep one, open it
   under **Admin → Sources → Added by Uchiyomi** and press **Keep**. One you remove yourself is never added again.

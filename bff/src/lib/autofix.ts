@@ -57,7 +57,7 @@ import { mangadexLangOf } from './sources/mangadexLangs';
 import { solverPing, solverUrl } from './sources/flaresolverr';
 import { suwayomiConfigured } from './sources/suwayomi/client';
 import { extensionFacts, listExtensions, type ExtensionInfo } from './sources/suwayomi/extensions';
-import { downloadsPerDay, rankPackages } from './extensionRank';
+import { downloadsPerDay, groupsOf, pkgFits, rankPackages } from './extensionRank';
 import { seriesIsAdult } from './sourceHunt';
 import { getHiddenLangs } from './sources/suwayomi/langs';
 import { BUSY } from './sources/suwayomi/installLock';
@@ -85,7 +85,7 @@ import { linkPair } from './editions';
 import { haveNumbers } from './libraryNumbers';
 import { atHiddenNumber } from './noticeChapters';
 import { effectiveLang, seriesLanguage } from './seriesLang';
-import { canonLang, sameLanguage } from './lang';
+import { sameLanguage } from './lang';
 import { titleMatch } from './autoFollow';
 import { altTitlesFor } from './altTitles';
 import { normGroup } from './releases';
@@ -1076,13 +1076,6 @@ async function extensionTargets(a: Run): Promise<Target[]> {
   return out;
 }
 
-/** The series' own translation groups, normalised (releases.ts normGroup): on disk, and listed by its sources. */
-async function groupsOf(seriesId: string): Promise<Set<string>> {
-  const rows = await q<{ g: string }>(
-    `SELECT DISTINCT scanlator AS g FROM lib_books WHERE series_id = $1 AND scanlator IS NOT NULL
-     UNION SELECT DISTINCT unnest(groups) AS g FROM series_listing WHERE series_id = $1`, [seriesId]).catch(() => []);
-  return new Set(rows.map((r) => normGroup(r.g)).filter((k) => k.length >= 3));
-}
 
 /**
  * Whether a package was searched for a target within TRIED_DAYS and did not carry it: it is not tried for that series
@@ -1102,15 +1095,17 @@ async function recentlyTried(): Promise<(pkg: string, t: Target) => boolean> {
       else langs.add(`${t.pkg}\u0000${t.lang}`);
     }
   }
+  // v0.83.0: and what the scout tried from the repository in vain (lib/backupExtensions.ts recordMiss). Reintroduce by
+  // reading only the runs: "a package the scout tried from the repository in vain is not tried by Fix everything" in
+  // autofixExtensions.int.test.ts finds it installed again.
+  for (const r of await q<{ pkg_name: string; series_id: string | null; lang: string | null }>(
+    `SELECT pkg_name, series_id, lang FROM backup_misses WHERE at > now() - ($1 || ' days')::interval`, [String(TRIED_DAYS)]).catch(() => [])) {
+    if (r.series_id) pairs.add(`${r.pkg_name}\u0000${r.series_id}`);
+    else langs.add(`${r.pkg_name}\u0000${r.lang}`);
+  }
   return (pkg, t) => pairs.has(`${pkg}\u0000${t.id}`) || langs.has(`${pkg}\u0000${t.lang}`);
 }
 
-/** A catalogue package's language fits a series': the same language, or a package that serves several. */
-const pkgFits = (e: ExtensionInfo, lang: string): boolean => {
-  if (!e.lang || e.lang === 'all' || e.lang === 'multi') return true;
-  const c = canonLang(e.lang);
-  return !!c && sameLanguage(c, lang);
-};
 
 /**
  * For each language with targets: the catalogue's packages that are not installed, not obsolete, and in that language

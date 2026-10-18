@@ -480,7 +480,7 @@ function SchedulesSection({ data, save }: { data: any; save: Save }) {
           default true), which `!== false` reads as: a server that does not send a key yet does it. It sits outside the
           extensions block because the search asks every installed source, engine or not. */}
       <SwitchRow label={tr('Finish downloads on their own')}
-        help={tr('On by default. Uchiyomi keeps downloading until every chapter is here: when a site is slow, blocked or missing chapters, it uses the series’ other sources, and finds a new one when none of them can help. Off, chapters come only with the library update, from the sources you picked.')}
+        help={tr('On by default. Uchiyomi keeps downloading until every chapter is here: when a site is slow, blocked or missing chapters, it uses the series’ other sources, and finds a new one when none of them can help, trying a few extensions from your repository if it has to. Off, chapters come only with the library update, from the sources you picked.')}
         on={data.finish_downloads !== false && data.auto_follow_on_failure !== false}
         onChange={(next) => save({ finishDownloads: next, autoFollowOnFailure: next })} />
     </Section>

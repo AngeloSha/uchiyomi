@@ -467,3 +467,20 @@ test('an extension a person removed is never tried', { skip }, async () => {
     await q('DELETE FROM backup_extensions WHERE pkg_name = $1', [PKG.amber]);
   }
 });
+
+test('a package the scout tried from the repository in vain is not tried by Fix everything', { skip }, async () => {
+  // v0.83.0 (lib/backupExtensions.ts recordMiss): what the scout asked a repository extension about and it did not have
+  // counts as tried here too, for the same month. Amber Mist is carried by nothing, and Amber Comics is the only package
+  // left the run may try for it -- the scout asked it already. Reintroduce by reading only the runs in recentlyTried:
+  // Amber Comics is installed again.
+  await series('ambermist', 'Amber Mist');
+  await only('ambermist');
+  await q(`INSERT INTO backup_misses (pkg_name, series_id) VALUES ($1, $2)`, [PKG.amber, S('ambermist')]);
+  try {
+    const run = await runOnce();
+    assert.deepEqual(await installs(run.id), [], 'a package the scout tried in vain is not tried again');
+    assert.equal(fake!.extension(PKG.amber).installed, false);
+  } finally {
+    await q('DELETE FROM backup_misses WHERE pkg_name = $1', [PKG.amber]);
+  }
+});

@@ -285,7 +285,12 @@ adds and removes extensions, and only its own.)
 ## Backup extensions
 
 To finish downloads, Uchiyomi sometimes installs an extension itself: *Fix everything* does when no installed source
-has a series. Since v0.82.0 such an extension is a **backup**:
+has a series, and since v0.83.0 so does the background search for a series stuck an hour with no installed source
+that has it. That search tries **a few at a time**: the best matches first (an extension named after the series'
+translation group, then the most downloaded), one install at a time, at most one an hour and six a day, never an 18+
+extension for a series that isn't, and never one you removed. Each install is asked about every waiting series in its
+language before it is kept or removed, and an extension that doesn't have a series isn't tried for it again for a
+month. Since v0.82.0 an extension Uchiyomi installed is a **backup**:
 
 - It isn't shown in Discover or anywhere you pick a source. You only see the sources you added.
 - It stays while a series needs it, and is removed after **3 days without use**. It is never removed while a series

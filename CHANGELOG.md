@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.83.0 — 2026-10-18
+
+**When none of your sources has a series, Uchiyomi tries a few extensions from your repository.** A series stuck for an
+hour that no installed source has is looked for on extensions from your repository, a few at a time. One that has it is
+kept as a backup; the others are removed at once.
+
+### A few at a time
+
+- **Best matches first:** an extension named after the series' translation group, then the most downloaded.
+- **Gently:** one install at a time, at most one an hour and six a day, and within the backup limit (5).
+- **One install, every waiting series:** each extension it tries is asked about every series waiting in that language
+  before it is kept or removed.
+- **Never twice for nothing:** an extension that doesn't have a series isn't tried for it again for a month. That
+  includes the ones *Fix everything* already tried, and *Fix everything* skips the ones this tried.
+- **Never** an 18+ extension for a series that isn't, one in a language you've hidden, or one you removed.
+- **One switch, as before:** *Finish downloads on their own*. Off, nothing is tried.
+
+### Upgrading
+
+- **Database:** one new table (`backup_misses`). Additive.
+
 ## v0.82.0 — 2026-10-18
 
 **Extensions Uchiyomi added by itself are backups now.** They help while a series needs them, then go, and come back

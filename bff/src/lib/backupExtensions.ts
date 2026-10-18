@@ -59,6 +59,12 @@ const limits = {
   max: envInt('BACKUP_EXTENSIONS_MAX', isDesktop() ? 3 : 5, 0, 50),
   idleMs: 3 * DAY,
   stuckMs: HOUR,
+  // v0.83.0, trying extensions from the repository (lib/sourceScout.ts storeLook): installs an hour and a day, the
+  // series one install is asked for, and how long a miss is remembered.
+  trialsPerHour: 1,
+  trialsPerDay: 6,
+  seriesPerTrial: 6,
+  missMs: 30 * DAY,
 };
 export const BACKUP_IDLE_DAYS = 3;
 export const backupLimits = (): Readonly<typeof limits> => ({ ...limits });
@@ -217,7 +223,11 @@ export interface Installed {
  */
 export async function installTrial(
   pkg: string,
-  o: { name?: string | null; lang: string | null; via: BackupVia; who: string; waitMs?: number; want?: string | null; userId?: string | null; runId?: string },
+  o: {
+    name?: string | null; lang: string | null; via: BackupVia; who: string; waitMs?: number; want?: string | null; userId?: string | null; runId?: string;
+    /** Why the scout installed it (v0.83.0): `store`, a repository extension tried for the first time; `link`, a backup put back. */
+    reason?: 'store' | 'link';
+  },
 ): Promise<Installed | null | typeof BUSY> {
   // A package a person removed is never installed by Uchiyomi (the callers leave it out; this is the backstop).
   const refused = await one<{ n: number }>(`SELECT count(*)::int AS n FROM backup_extensions WHERE pkg_name = $1 AND state = 'refused'`, [pkg]).catch(() => null);
@@ -229,7 +239,9 @@ export async function installTrial(
     } catch {
       return null;
     }
-    await logAudit('extension.install', { userId: o.userId ?? null, detail: { pkgName: pkg, via: o.via, ...(o.runId ? { runId: o.runId } : {}) } });
+    await logAudit('extension.install', {
+      userId: o.userId ?? null, detail: { pkgName: pkg, via: o.via, ...(o.runId ? { runId: o.runId } : {}), ...(o.reason ? { reason: o.reason } : {}) },
+    });
     await markInstalled(pkg, true);
     const provided = await sourcesOfExtension(pkg).catch(() => []);
     // Recorded, every one switched off; then only the one wanted. adoptExtensionSources records no package; the
@@ -514,4 +526,58 @@ export async function dropLink(seriesId: string, sourceId: string): Promise<void
 export async function stuckLongEnough(seriesId: string): Promise<boolean> {
   const r = await one<{ since: Date | null }>('SELECT stuck_since AS since FROM series_scout WHERE series_id = $1', [seriesId]).catch(() => null);
   return !!r?.since && Date.now() - new Date(r.since).getTime() >= limits.stuckMs;
+}
+
+// ---- trying extensions from the repository (v0.83.0) -----------------------------------------------------------------
+
+/** How many repository extensions the scout installed to try since `ms` ago (audit `extension.install`, `reason: store`). */
+export async function trialsSince(ms: number): Promise<number> {
+  const r = await one<{ n: number }>(
+    `SELECT count(*)::int AS n FROM audit_log WHERE event = 'extension.install' AND detail->>'reason' = 'store'
+        AND at > now() - ($1 || ' milliseconds')::interval`, [String(ms)]).catch(() => null);
+  return r?.n ?? 0;
+}
+
+/** Whether another repository extension may be tried now: under an hour's and a day's installs. */
+export async function trialAllowed(): Promise<boolean> {
+  return (await trialsSince(HOUR)) < limits.trialsPerHour && (await trialsSince(DAY)) < limits.trialsPerDay;
+}
+
+/**
+ * Remember that a package tried does not have a series -- or, with no series, any source in `lang`: it is not tried for
+ * it again for 30 days (missedRecently). Best effort.
+ */
+export async function recordMiss(pkg: string, o: { seriesId?: string | null; lang?: string | null }): Promise<void> {
+  await q(
+    `INSERT INTO backup_misses (pkg_name, series_id, lang, at)
+     SELECT $1, $2::text, $3::text, now() WHERE $2::text IS NULL OR EXISTS (SELECT 1 FROM lib_series WHERE id = $2::text)
+     ON CONFLICT (pkg_name, COALESCE(series_id, ''), COALESCE(lang, '')) DO UPDATE SET at = now()`,
+    [pkg, o.seriesId ?? null, o.seriesId ? null : (o.lang ?? null)]).catch(() => {});
+}
+
+/**
+ * The packages tried in vain within 30 days, as a question: has `pkg` missed this series, or has it no source in `lang`?
+ * Both what the scout remembered (backup_misses) and Fix everything's own record of its runs (repair_runs
+ * result.tried, lib/autofix.ts recentlyTried): neither tries a package again for a series the other already asked it
+ * about.
+ */
+export async function missedRecently(): Promise<(pkg: string, seriesId: string, lang: string | null) => boolean> {
+  const pairs = new Set<string>();
+  const langs = new Set<string>();
+  const key = (a: string, b: string | null) => `${a}\u0000${b ?? ''}`;
+  for (const r of await q<{ pkg_name: string; series_id: string | null; lang: string | null }>(
+    `SELECT pkg_name, series_id, lang FROM backup_misses WHERE at > now() - ($1 || ' milliseconds')::interval`, [String(limits.missMs)]).catch(() => [])) {
+    if (r.series_id) pairs.add(key(r.pkg_name, r.series_id));
+    else langs.add(key(r.pkg_name, r.lang));
+  }
+  const runs = await q<{ result: { tried?: Array<{ pkg: string; lang?: string; series?: string[] }> } | null }>(
+    `SELECT result FROM repair_runs WHERE kind = 'autofix' AND started_at > now() - ($1 || ' milliseconds')::interval`,
+    [String(limits.missMs)]).catch(() => []);
+  for (const r of runs) {
+    for (const t of r.result?.tried ?? []) {
+      if (Array.isArray(t.series)) for (const id of t.series) pairs.add(key(t.pkg, id));
+      else langs.add(key(t.pkg, t.lang ?? null));
+    }
+  }
+  return (pkg, seriesId, lang) => pairs.has(key(pkg, seriesId)) || langs.has(key(pkg, lang));
 }

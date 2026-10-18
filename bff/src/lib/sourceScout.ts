@@ -53,8 +53,13 @@ import { finishDownloadsOn, retryCapFor, backFirst } from './finishDownloads';
 import type { ScoutReason } from './scoutRequests';
 import {
   backupsAllowed, stuckLongEnough, parkedLinksFor, dropLink, makeRoom, installTrial, settleTrial, parkingNow,
+  backupRows, backupLimits, trialAllowed, recordMiss, missedRecently,
 } from './backupExtensions';
 import { BUSY, installLockHolder } from './sources/suwayomi/installLock';
+import { listExtensions, extensionFacts, type ExtensionInfo } from './sources/suwayomi/extensions';
+import { getHiddenLangs } from './sources/suwayomi/langs';
+import { downloadsPerDay, groupsOf, pkgFits, rankPackages } from './extensionRank';
+import { normGroup } from './releases';
 
 const envInt = (name: string, fallback: number, min: number, max: number): number => {
   const raw = process.env[name];
@@ -283,6 +288,11 @@ export interface ScoutAsk {
   seeds?: readonly string[];
   /** Looks in a row that found nothing to follow: the `left` backoff grows with it. */
   fruitless?: number;
+  /**
+   * v0.83.0: ask this one source alone -- a repository extension being tried (storeLook) -- and put no backup back
+   * first.
+   */
+  only?: string;
 }
 
 /** Look for another source for one series, and follow it when one will do. Never throws for a source's sake. */
@@ -326,7 +336,7 @@ export async function runScout(seriesId: string, ask: ScoutAsk = {}): Promise<Sc
   const taken = new Set(mine.map(rateKeyOf));
   // A backup extension being removed right now is nobody's to follow (v0.82.0, lib/backupExtensions.ts parkingNow).
   const pool = listSources().filter((src) => !mine.includes(src.id) && allowed(src.id) && fits(src.id) && !taken.has(rateKeyOf(src.id))
-    && !(src.backup && parkingNow()));
+    && !(src.backup && parkingNow()) && (!ask.only || src.id === ask.only));
   const poolStanding = await standingsOf(pool.map((p) => p.id));
   const record = await recentRecord();
   const seeds = new Set(ask.seeds ?? []);
@@ -440,11 +450,12 @@ export async function runScout(seriesId: string, ask: ScoutAsk = {}): Promise<Sc
   // searched for again when that id is gone (a reinstall can renumber the engine's series). Reintroduce by trusting the
   // stored id: "a series stuck an hour gets its backup back, found again by its title" in backupExtensions.int.test.ts
   // never follows it.
-  if (await backupsAllowed() && await stuckLongEnough(seriesId)) {
+  if (!ask.only && await backupsAllowed() && await stuckLongEnough(seriesId)) {
     const link = (await parkedLinksFor(seriesId))[0];
     if (link && engineState() === 'up' && installLockHolder() === null && await makeRoom()) {
       const got = await installTrial(link.pkg_name, {
         name: link.name, lang: link.lang ?? lang.lang, via: link.via ?? 'scout', who: 'backup', want: link.source_id.slice(SW_PREFIX.length),
+        reason: 'link',
       });
       if (got !== BUSY) {
         // An install the engine refused is no answer: the link stays for the next look.
@@ -603,6 +614,132 @@ export async function scoutTick(): Promise<(ScoutOutcome & { seriesId: string })
       console.log(`[scout] "${out.title}": ${out.verdict} after asking ${out.asked.length} source${out.asked.length === 1 ? '' : 's'} (${out.searches} search${out.searches === 1 ? '' : 'es'})`);
     }
     return { ...out, seriesId: pick.seriesId };
+  } finally {
+    scouting = false;
+  }
+}
+
+// ---- trying extensions from the repository (v0.83.0) -----------------------------------------------------------------
+//
+// The owner's answer (2026-10-18): when no installed source has a series, try extensions from the repository -- "a few
+// at a time": the best matches first, one install at a time, a handful a day, never an 18+ one for a series that is
+// not 18+. The series this is for are the ones the scout asked every installed source about in vain (`exhausted`), that
+// have waited an hour, and that have no backup of their own to put back. One install is asked about every such series
+// in its language -- up to SERIES_PER_TRIAL -- before it is kept (a backup now) or removed, and what it did not have is
+// remembered for a month (lib/backupExtensions.ts recordMiss), Fix everything's own tries included.
+
+/** A series waiting for the repository: its language, and whether an 18+ extension may be tried for it. */
+interface StoreSeries { id: string; title: string; lang: string; adult: boolean }
+
+/** The series every installed source said no to, waiting an hour or more, with no backup of their own to put back. */
+async function storeQueue(): Promise<StoreSeries[]> {
+  const rows = await q<{ id: string; title: string }>(
+    `SELECT r.series_id AS id, s.title FROM series_scout r JOIN lib_series s ON s.id = r.series_id
+      WHERE r.verdict = 'exhausted' AND s.auto_update AND ${visibleToAll('s')} AND s.numbering IS DISTINCT FROM 'posting_order'
+        AND r.stuck_since IS NOT NULL AND r.stuck_since <= now() - ($1 || ' milliseconds')::interval
+        AND NOT EXISTS (SELECT 1 FROM backup_links l JOIN backup_extensions b ON b.pkg_name = l.pkg_name AND b.state = 'parked'
+                         WHERE l.series_id = r.series_id)
+      ORDER BY r.priority DESC, r.stuck_since ASC LIMIT 30`, [String(backupLimits().stuckMs)]).catch(() => []);
+  const hidden = new Set(await getHiddenLangs().catch(() => [] as string[]));
+  const out: StoreSeries[] = [];
+  for (const r of rows) {
+    const lang = (await seriesLanguage(r.id).catch(() => null))?.lang;
+    // A series in a language the admin hides is theirs to decide, as Fix everything's rule is.
+    if (!lang || hidden.has(lang)) continue;
+    out.push({ id: r.id, title: r.title, lang, adult: await seriesIsAdult(r.id).catch(() => false) });
+  }
+  return out;
+}
+
+/** What one look in the repository did. */
+export interface StoreLook {
+  pkg: string;
+  name: string;
+  lang: string;
+  /** The series it was asked about, and the ones that follow it now. */
+  asked: string[];
+  followed: string[];
+  /** Kept as a backup (something follows it), or removed at once. */
+  kept: boolean;
+}
+
+/**
+ * One look (server.ts, with the backup upkeep): the best extension from the repository for the language with the most
+ * series waiting, installed, asked about each of them (runScout over that one source), then kept as a backup when one
+ * follows it, else removed -- and what it did not have remembered. Nothing while another look runs, the server stops, a
+ * sweep, a repair, Fix everything or a Find run has the sources, the engine is not up, someone holds the install lock,
+ * the switch is off, or an hour's or a day's installs are spent (lib/backupExtensions.ts trialAllowed). Null when it did
+ * not look.
+ */
+export async function storeLook(): Promise<StoreLook | null> {
+  if (scouting || runtime.stopping || runtime.updating || runtime.repairing || runtime.autofixing || findRunning()) return null;
+  if (engineState() !== 'up' || installLockHolder() !== null) return null;
+  if (limits.perHour <= 0 || scoutSearchesLeft() <= 0) return null;
+  if (!(await backupsAllowed()) || !(await trialAllowed())) return null;
+  scouting = true;
+  try {
+    const queue = await storeQueue();
+    if (!queue.length) return null;
+    const byLang = new Map<string, StoreSeries[]>();
+    for (const x of queue) byLang.set(x.lang, [...(byLang.get(x.lang) ?? []), x]);
+    const [lang, waiting] = [...byLang].sort((a, b) => b[1].length - a[1].length)[0];
+    let catalogue: ExtensionInfo[];
+    try { catalogue = await listExtensions(); } catch { return null; }
+    const hidden = new Set(await getHiddenLangs().catch(() => [] as string[]));
+    // Never one a person removed (`refused`), one already installed, an obsolete one, or one in another language.
+    const refused = new Set([...(await backupRows())].filter(([, r]) => r.state === 'refused').map(([k]) => k));
+    const missed = await missedRecently();
+    // For each package, the waiting series it may be asked about: not missed for them (or their language) within the
+    // month, and an 18+ package only for a series rated 18+. Reintroduce the 18+ rule's absence: "never an 18+ extension
+    // for a series that is not" in backupStore.int.test.ts finds it installed.
+    const forIt = (e: ExtensionInfo) => waiting.filter((x) => !missed(e.pkgName, x.id, lang) && (!e.nsfw || x.adult));
+    const open = catalogue.filter((e) => !e.installed && !e.obsolete && !refused.has(e.pkgName) && pkgFits(e, lang)
+      && !(e.lang && hidden.has(e.lang)) && forIt(e).length > 0);
+    if (!open.length) return null;
+    // Fix everything's order (lib/extensionRank.ts): the series' own translation groups first, then not 18+, then the
+    // most downloaded a day, then the most updated.
+    const groups = new Map<string, Set<string>>();
+    for (const x of waiting) groups.set(x.id, await groupsOf(x.id));
+    const facts = await extensionFacts();
+    const perDay = await downloadsPerDay(open.map((e) => {
+      const f = facts.get(e.pkgName);
+      return { pkgName: e.pkgName, apkUrl: f?.apkUrl ?? null, jarUrl: f?.jarUrl ?? null, apkName: f?.apkName ?? null, index: f?.index ?? e.repo };
+    }));
+    const ranked = rankPackages(open.map((e) => {
+      const key = normGroup(e.name);
+      const named = key.length >= 3 ? waiting.filter((x) => [...groups.get(x.id)!].some((g) => g.includes(key) || key.includes(g))).length : 0;
+      return { e, pkgName: e.pkgName, name: e.name, nsfw: e.nsfw, named, perDay: perDay.get(e.pkgName) ?? null, versionCode: facts.get(e.pkgName)?.versionCode ?? null };
+    }));
+    const pick = ranked[0].e;
+    const ask = forIt(pick).slice(0, backupLimits().seriesPerTrial);
+    // Room first (BACKUP_EXTENSIONS_MAX, the engine's source limit): the one needed longest ago makes way, never one in
+    // use. Reintroduce by installing whatever the cap says: "the cap holds for the repository's extensions too" in
+    // backupStore.int.test.ts finds a sixth installed.
+    if (!(await makeRoom())) return null;
+    const got = await installTrial(pick.pkgName, { name: pick.name, lang, via: 'scout', who: 'backup', reason: 'store' });
+    if (got === BUSY || !got) return null;
+    const out: StoreLook = { pkg: pick.pkgName, name: pick.name, lang, asked: [], followed: [], kept: false };
+    if (!got.sourceId) {
+      // No source in this language: it has none of these series, nor any other in the language, for a month.
+      await recordMiss(pick.pkgName, { lang });
+    } else {
+      for (const x of ask) {
+        if (runtime.stopping) break;
+        const started = new Date();
+        const r = await runScout(x.id, { only: got.sourceId });
+        if (r.verdict === 'followed') {
+          out.followed.push(x.id);
+          await settleScout(x.id, 'stuck', r, started);
+        }
+        if (r.asked.includes(got.sourceId)) out.asked.push(x.id);
+        // Asked, and not this series (or nothing it waits for): not tried for it again for a month.
+        if (r.verdict !== 'followed' && r.asked.includes(got.sourceId)) await recordMiss(pick.pkgName, { seriesId: x.id });
+      }
+    }
+    out.kept = (await settleTrial(pick.pkgName, { via: 'scout', who: 'backup', why: 'no_series' })) === 'kept';
+    console.log(`[scout] tried ${pick.name} from the repository for ${out.asked.length} series in ${lang}: ${out.kept
+      ? `kept as a backup, followed by ${out.followed.length}` : 'none of them there, removed'}`);
+    return out;
   } finally {
     scouting = false;
   }

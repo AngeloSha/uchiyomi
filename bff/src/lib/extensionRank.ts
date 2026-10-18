@@ -16,7 +16,11 @@
 // The order only: every package is still tried, the least downloaded last (v0.55.3, the owner's choice). A floor was
 // weighed and not built: an extension for every language -- xkcd, League of Legends, Cubari -- is downloaded by the
 // readers of every language, and no number of downloads a day skips those without skipping sites people read through.
+import { q } from './db';
 import { releaseAssets, type ReleaseAsset } from './githubRelease';
+import { normGroup } from './releases';
+import { canonLang, sameLanguage } from './lang';
+import type { ExtensionInfo } from './sources/suwayomi/extensions';
 
 /** What ranks a package: its own facts (lib/sources/suwayomi/extensions.ts) and how many targets' groups name it. */
 export interface Ranked {
@@ -126,3 +130,18 @@ export function rankPackages<T extends Ranked>(list: readonly T[]): T[] {
     || (b.versionCode ?? -1) - (a.versionCode ?? -1)
     || a.name.localeCompare(b.name));
 }
+
+/** The series' own translation groups, normalised (releases.ts normGroup): on disk, and listed by its sources. */
+export async function groupsOf(seriesId: string): Promise<Set<string>> {
+  const rows = await q<{ g: string }>(
+    `SELECT DISTINCT scanlator AS g FROM lib_books WHERE series_id = $1 AND scanlator IS NOT NULL
+     UNION SELECT DISTINCT unnest(groups) AS g FROM series_listing WHERE series_id = $1`, [seriesId]).catch(() => []);
+  return new Set(rows.map((r) => normGroup(r.g)).filter((k) => k.length >= 3));
+}
+
+/** A catalogue package's language fits a series': the same language, or a package that serves several. */
+export const pkgFits = (e: ExtensionInfo, lang: string): boolean => {
+  if (!e.lang || e.lang === 'all' || e.lang === 'multi') return true;
+  const c = canonLang(e.lang);
+  return !!c && sameLanguage(c, lang);
+};
