@@ -66,6 +66,9 @@ const IS_DESKTOP_ALLOWED = new Set([
   'lib/health.ts',
   // v0.63.0 (#208): Uchiyomi Desktop signs its one person in through the app, so AUTH_MODE=oidc-only is ignored there.
   'lib/authMode.ts',
+  // v0.82.0: a PC's engine keeps fewer backup extensions installed at once (BACKUP_EXTENSIONS_MAX 3, not 5). A number,
+  // so not forDesktop, whose server arms are the words a Docker admin reads (desktopCopy.test.ts).
+  'lib/backupExtensions.ts',
 ]);
 
 test('UCHIYOMI_DESKTOP is read in lib/desktop.ts and nowhere else', () => {
