@@ -430,3 +430,29 @@ test('how long a series has waited is kept across its requests, and over once a 
   await scout.settleScout(IRON, 'stuck', { verdict: 'followed', title: 'Iron Bloom', searches: 1, asked: [], nextAt: new Date(Date.now() + 3600_000) }, new Date());
   assert.equal(await bx.stuckLongEnough(IRON), false, 'a source followed ends the wait');
 });
+
+test('a backup removed in the engine\'s own page is a person\'s act; a wiped engine is not', { skip }, async () => {
+  // Reintroduce by judging an engine with nothing installed (drop the `installed.size === 0` guard in backupUpkeep):
+  // "a wiped engine's backups are not taken for a person's removals" finds BK Busy refused, its follow dropped, and the
+  // extension check's own repair would put back an extension nothing may use again.
+  const got = await bx.installTrial(PKG.busy, { name: 'BK Busy', lang: 'en', via: 'scout', who: 'test' });
+  assert.ok(got && got !== lock.BUSY, 'PREMISE: BK Busy installed');
+  await backup('busy', 0);
+  await follow(IRON2, 'busy', 'Iron Bloom');
+  const keys = Object.keys(PKG) as Key[];
+  const was = new Map(keys.map((k) => [k, installed(k)]));
+  for (const k of keys) fake!.extension(PKG[k]).installed = false;
+  try {
+    const out = await bx.backupUpkeep();
+    assert.deepEqual(out?.refused, [], 'a wiped engine\'s backups are not taken for a person\'s removals');
+    assert.equal((await row('busy'))?.state, 'active');
+  } finally {
+    for (const [k, on] of was) fake!.extension(PKG[k]).installed = on;
+  }
+  // One extension gone while the others are there: someone removed it in the engine's own page.
+  fake!.extension(PKG.busy).installed = false;
+  const out = await bx.backupUpkeep();
+  assert.deepEqual(out?.refused, [PKG.busy], 'removed outside Uchiyomi: never installed by it again');
+  assert.equal((await row('busy'))?.state, 'refused');
+  assert.deepEqual(await follows(IRON2), [], 'and its follow, a source nothing can ask now, goes');
+});

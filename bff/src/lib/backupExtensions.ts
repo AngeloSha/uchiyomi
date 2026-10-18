@@ -438,11 +438,16 @@ export async function backupUpkeep(): Promise<{ parked: string[]; refused: strin
   upkeeping = true;
   const out = { parked: [] as string[], refused: [] as string[], settled: [] as string[] };
   try {
-    // What the engine has: a backup it no longer has was removed in its own page -- a person's act, kept to.
+    // What the engine has: a backup it no longer has was removed in its own page -- a person's act, kept to. Never judged
+    // against an engine with nothing installed at all: that is a wiped volume (or one still starting), which the
+    // extension check puts back (lib/extensionMonitor.ts), not a person removing every extension. Reintroduce by
+    // judging it anyway: "a wiped engine's backups are not taken for a person's removals" in
+    // backupExtensions.int.test.ts finds the backup refused.
     let installed: Set<string> | null = null;
     try {
       installed = new Set((await listExtensions()).filter((e) => e.installed).map((e) => e.pkgName));
     } catch { /* the engine did not answer: nothing is judged gone this time */ }
+    if (installed && installed.size === 0) installed = null;
     for (const r of rows) {
       if (installed && !installed.has(r.pkg_name)) {
         await refuseBackup(r.pkg_name, { why: 'outside', dropFollows: true });
