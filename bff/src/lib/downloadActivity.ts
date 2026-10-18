@@ -51,6 +51,14 @@ export interface ActivityEntry {
   reasonSaid?: Said[];
   /** Arrived incomplete, and the caller has not yet decided whether to keep it (`holdPartial`). */
   heldAt?: number;
+  /**
+   * while it downloads, its pages in hand and its page count, and when its first page was asked for
+   * (`pagesProgress`). The Downloads view's ring moved per CHAPTER, so a one-chapter Fetch from a source its extension
+   * limits to two requests a second (MangaFire: 78 pages, ~50 s) sat at 0 until it was over.
+   */
+  pagesDone?: number;
+  pagesTotal?: number;
+  pagesSince?: number;
 }
 
 const store = new AsyncLocalStorage<{ origin: Origin; by: string | null }>();
@@ -150,6 +158,14 @@ export function startedDownload(id: number): void {
   const x = live.get(id);
   if (x) x.status = 'downloading';
 }
+/** how far a chapter in flight has got, in pages (ActivityEntry.pagesDone). */
+export function pagesProgress(id: number, done: number, total: number): void {
+  const x = live.get(id);
+  if (!x || !(total > 0)) return;
+  if (x.pagesTotal == null) x.pagesSince = Date.now();
+  x.pagesTotal = total;
+  x.pagesDone = Math.min(done, total);
+}
 /**
  * The end of one download. `skipped` (the file was already there) leaves no trace: nothing came in, and a
  * sweep over a full library would otherwise list every chapter it did not fetch.
@@ -163,7 +179,7 @@ export function endDownload(
   if (outcome === 'skipped') return;
   // The same chapter, whole this time: written over the file an earlier download left with holes in it.
   if (outcome.status === 'done') healFinished(x.folder, x.number);
-  const { heldAt: _held, ...rest } = x;
+  const { heldAt: _held, pagesDone: _pd, pagesTotal: _pt, pagesSince: _ps, ...rest } = x;
   const done: ActivityEntry = { ...rest, ...outcome, finishedAt: Date.now() };
   finished[capClass(done.origin)].push(done);
   for (const fn of listeners) {

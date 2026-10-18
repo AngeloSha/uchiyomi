@@ -25,6 +25,7 @@ import {
 } from '@/lib/serverDownloads';
 import { kickDownloads, useServerDownloads } from '@/lib/useServerDownloads';
 import { archiveProgressText } from '@/lib/archive';
+import { PageProgress } from '@/components/PageProgress';
 import { ArchiveAttentionRow, ArchiveQueueNote, ArchiveTile } from '@/components/ArchiveQueue';
 import { FindResultsSheet } from '@/components/FindSources';
 import { autofixPhaseLabel } from '@/lib/autofix';
@@ -293,6 +294,8 @@ function DownloadTile({ t, section, admin, nameOf, onCancel, focusRef }: {
         </button>
       )}
       <p className="mt-1.5 line-clamp-2 text-xs font-medium leading-tight text-fog-200">{t.title}</p>
+      {/* the chapter coming in now, page by page, with the time left. */}
+      {section === 'running' && !t.archive && <PageProgress entries={t.entries} job={job} />}
       {status && <p className={`mt-0.5 truncate text-[11px] ${job?.cancelRequested ? 'text-fog-300' : 'text-fog-500'}`}>{status}</p>}
       {origin && <p className="truncate text-[11px] text-fog-500">{origin}</p>}
       {/* What the job did that the ring cannot show: a chapter taken from another source, one saved short. */}

@@ -9,7 +9,7 @@ import sharp from 'sharp';
 import { getSource, SourceAdapter, SourceChapter, SourceSeries } from './sources';
 import { cfSession } from './sources/flaresolverr';
 import { DL_ROOT, XML_FORBIDDEN } from './library';
-import { beginDownload, startedDownload, endDownload, holdPartial } from './downloadActivity';
+import { beginDownload, startedDownload, endDownload, holdPartial, pagesProgress } from './downloadActivity';
 import { classify, noteStage, reportOk, reportFail, SourceStatus } from './sourceHealth';
 import { withGate } from './gate';
 import { imageExt } from './imageExt';
@@ -368,7 +368,7 @@ export async function downloadChapter(
       // waiting wins the race and the source is never contacted.
       await assertDownloadPreflight(opts.preflight);
       startedDownload(act);
-      return fetchChapter(src, input, rel);
+      return fetchChapter(src, input, rel, act);
     });
     endDownload(act, { status: 'done', pages: r.pages });
     return r;
@@ -403,6 +403,8 @@ export interface PageCtx {
    * are holes, and a 429 is still noted for the pace. Default true: the resume loop below.
    */
   retry?: boolean;
+  /** Called when another page is in hand, for live download progress. */
+  onPage?: (got: number) => void;
 }
 
 export interface PagesResult {
@@ -438,6 +440,7 @@ export async function fetchPages(src: SourceAdapter, urls: string[], indices: nu
     ? src.imageReferer(ctx.chapterSourceId)
     : src.imageReferer
       ?? (/^https?:/.test(ctx.chapterSourceId) ? `${new URL(ctx.chapterSourceId).origin}/` : '');
+  let got = 0; // Pages in hand; retries of a page do not count it twice.
   let worst = 0; // worst HTTP status seen on a failed page, or a sentinel below 400 (EMPTY_BODY, NET_ERROR)
 
   // Held by position rather than appended as they arrive, so a page fetched on the RETRY below still lands
@@ -495,6 +498,7 @@ export async function fetchPages(src: SourceAdapter, urls: string[], indices: nu
       if (buf.length < 256 && !(await isImage(buf))) { worst = Math.max(worst, EMPTY_BODY); failed.set(i, { index: i, status: r.status, type, bytes: buf.length }); return; }
       // Content-Type first: some sources (and any source proxied through an extension server) serve pages
       // from extension-less URLs, and a wrong extension makes the chapter read as zero pages.
+      if (!page[i]) ctx.onPage?.(++got);
       page[i] = buf;
       ext[i] = imageExt(u, ct);
       failed.delete(i);
@@ -652,6 +656,7 @@ async function fetchChapter(
   src: SourceAdapter,
   input: DownloadInput,
   rel: string,
+  act?: number,
 ): Promise<{ file: string; pages: number }> {
   const abs = join(DL_ROOT, rel);
   let urls: string[];
@@ -680,8 +685,10 @@ async function fetchChapter(
   // pagePace, not paceFor: under withSlowPace this is where Suwayomi's gap 0 and its pool give way to the
   // archive's one worker and random gaps. Everywhere else the two are the same thing.
   const pace = pagePace(src, { gapMs: DL_PAGE_GAP_MS });
+  if (act != null) pagesProgress(act, 0, urls.length);
   const { page, ext, worst, failed, refusal } = await fetchPages(src, urls, urls.map((_, i) => i), {
     chapterSourceId: input.chapter.sourceId, gap: pace.gap, workers: pace.workers, jitter: pace.jitter, rand: pace.rand,
+    ...(act != null ? { onPage: (got: number) => pagesProgress(act, got, urls.length) } : {}),
   });
 
   const zip = new AdmZip();

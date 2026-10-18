@@ -16,6 +16,7 @@ import { downloadsHref } from '@/lib/libraryView';
 import { bandFor, bandReload, downloadSections, landedFor, originLabel, tileStatus, type BandSeen } from '@/lib/serverDownloads';
 import { kickDownloads, useServerDownloads } from '@/lib/useServerDownloads';
 import { ArchiveBand } from '@/components/ArchiveQueue';
+import { PageProgress } from '@/components/PageProgress';
 
 /** How often at most the band re-reads the chapter list while chapters land: a sweep can land one a second. */
 const RELOAD_EVERY_MS = 4000;
@@ -98,13 +99,17 @@ export function SeriesServerDownloads({ seriesId, folder }: { seriesId: string; 
               label={sentence || tile.title} valueText={job && job.total > 0 ? `${job.done}/${job.total}` : undefined} />
             {tile.archive && <IcHourglass width={12} height={12} className="absolute text-amber-400" aria-hidden />}
           </span>
-          <p className="min-w-0 flex-1 text-[13px] leading-snug text-fog-200">
+          <div className="min-w-0 flex-1">
+          <p className="text-[13px] leading-snug text-fog-200">
             {sentence}
             {/* The count is its own bidi run, in the line's direction. Not isolated, a sentence ending in a source's
                 Latin name ("… · fake-a") took "1/3" into that name's run: in Arabic it printed "fake-a1/3", its gap
                 on the far side. Isolated, it follows the name in either direction, the gap between them. */}
             {job && job.total > 0 && <span className="ms-1.5 tabular-nums text-fog-500 [unicode-bidi:isolate]">{Math.min(job.done, job.total)}/{job.total}</span>}
           </p>
+          {/* the chapter coming in now, page by page. */}
+          {!tile.archive && <PageProgress entries={tile.entries} job={job} />}
+          </div>
           {job && mayCancel(job, isAdmin) && (
             <button type="button" onClick={() => call(`/api/sources/jobs/${encodeURIComponent(job.folder)}/cancel`, 'POST')} className="btn-key">
               {tr('Cancel')}

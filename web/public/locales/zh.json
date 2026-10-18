@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4059
+    "strings": 4063
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4062,5 +4062,9 @@
   "Keeping…": "正在保留…",
   "Kept {name}: it is one of your sources now": "已保留 {name}：它现在是你的来源之一",
   "Shift pairs by one page": "将双页错开一页",
-  "For chapters whose first page is not a cover: the first page is paired with the second, so the spreads line up. Remembered for this title.": "适用于首页不是封面的章节：首页与第二页配成一对，使跨页对齐。会为此作品记住。"
+  "For chapters whose first page is not a cover: the first page is paired with the second, so the spreads line up. Remembered for this title.": "适用于首页不是封面的章节：首页与第二页配成一对，使跨页对齐。会为此作品记住。",
+  "On by default. Uchiyomi keeps downloading until every chapter is here: when a site is slow, blocked or missing chapters, it uses the series’ other sources, and finds a new one when none of them can help. Off, chapters come only with the library update, from the sources you picked.": "默认开启。Uchiyomi 会持续下载，直到所有章节都到齐：网站缓慢、被屏蔽或缺少章节时，会使用该系列的其他来源；都无法提供时，会找一个新来源。关闭后，章节只随媒体库更新到来，并且只来自你选择的来源。",
+  "{done}/{total} pages": "{done}/{total} 页",
+  "about {n} s left": "约剩 {n} 秒",
+  "about {n} min left": "约剩 {n} 分钟"
 }
