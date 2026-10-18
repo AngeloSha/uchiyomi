@@ -49,6 +49,8 @@ export interface ActivityEntry {
   pagesDone?: number;
   pagesTotal?: number;
   pagesSince?: number;
+  /** How long its pages have been coming in, in ms, by the server's clock as of its answer (bff downloadActivity). */
+  pagesFor?: number;
 }
 
 /**
@@ -86,7 +88,8 @@ export function pageLine(entries: readonly ActivityEntry[], now = Date.now(), { 
   const e = entries.filter((x) => x.status === 'downloading' && x.pagesTotal).sort((a, b) => a.startedAt - b.startedAt)[0];
   if (!e || !e.pagesTotal) return null;
   const done = Math.min(e.pagesDone ?? 0, e.pagesTotal);
-  const spent = e.pagesSince ? now - e.pagesSince : 0;
+  // The server's own measure first: `pagesSince` is the server's clock, and the browser's may be minutes off.
+  const spent = e.pagesFor ?? (e.pagesSince ? now - e.pagesSince : 0);
   const pagesLeft = e.pagesTotal - done + Math.max(0, chaptersAfter) * e.pagesTotal;
   const secondsLeft = done >= 3 && spent >= 2000 && pagesLeft > 0 ? Math.ceil((pagesLeft * spent) / done / 1000) : null;
   return { number: e.number, done, total: e.pagesTotal, fraction: done / e.pagesTotal, secondsLeft };

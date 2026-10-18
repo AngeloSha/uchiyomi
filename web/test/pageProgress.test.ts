@@ -43,3 +43,14 @@ test('the time left is the whole download: the chapters not yet started, at this
   // 58 pages of this chapter and 10 more of 78, at 2 pages a second
   assert.equal(pageLine(flying, now, { chaptersAfter: 10 })!.secondsLeft, Math.ceil((58 + 780) / 2));
 });
+
+test('the time left is the server\'s elapsed time, whatever the browser\'s clock says', () => {
+  // `pagesSince` is the server's clock; a phone a minute behind read every rate a minute long. The server sends how long
+  // the pages have taken (`pagesFor`), and that is what counts. Reintroduce by reckoning from `pagesSince` alone: the
+  // skewed entry reads about four minutes left instead of about thirty seconds.
+  const now = 100_000;
+  const right = pageLine([e({ pagesDone: 20, pagesTotal: 78, pagesSince: now - 10_000, pagesFor: 10_000 })], now)!;
+  const skewed = pageLine([e({ pagesDone: 20, pagesTotal: 78, pagesSince: now - 70_000, pagesFor: 10_000 })], now)!;
+  assert.equal(skewed.secondsLeft, right.secondsLeft);
+  assert.equal(right.secondsLeft, Math.ceil(58 / 2));
+});

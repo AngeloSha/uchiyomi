@@ -59,6 +59,12 @@ export interface ActivityEntry {
   pagesDone?: number;
   pagesTotal?: number;
   pagesSince?: number;
+  /**
+   * How long its pages have been coming in, in ms, as of the answer that lists it (listActivity). The time left is
+   * reckoned from this, never from `pagesSince` against the browser's clock: a device whose clock is a minute off
+   * read a rate a minute wrong.
+   */
+  pagesFor?: number;
 }
 
 const store = new AsyncLocalStorage<{ origin: Origin; by: string | null }>();
@@ -229,7 +235,11 @@ export function holdPartial(id: number, hold: {
 export function listActivity(now = Date.now()): { active: ActivityEntry[]; recent: ActivityEntry[] } {
   prune(now);
   return {
-    active: [...live.values()].sort((a, b) => a.startedAt - b.startedAt),
+    // `pagesFor`: the time its pages have taken so far, by this server's clock (ActivityEntry.pagesFor).
+    // Reintroduce by sending `pagesSince` alone: "the time left is the server's elapsed time, whatever the browser's
+    // clock says" in pageProgress.test.ts (web) reads a skewed clock's rate.
+    active: [...live.values()].sort((a, b) => a.startedAt - b.startedAt)
+      .map((x) => (x.pagesSince != null ? { ...x, pagesFor: Math.max(0, now - x.pagesSince) } : x)),
     // The classes merged back into one timeline. A stable sort of lists that are each oldest first, reversed:
     // with no archive entries this is exactly the one list reversed, as it always was.
     recent: [...finished.main, ...finished.archive].sort((a, b) => (a.finishedAt ?? 0) - (b.finishedAt ?? 0)).reverse(),
