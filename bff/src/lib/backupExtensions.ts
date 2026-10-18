@@ -229,7 +229,7 @@ export async function installTrial(
     } catch {
       return null;
     }
-    await logAudit('extension.install',{ userId: o.userId ?? null, detail: { pkgName: pkg, via: o.via, ...(o.runId ? { runId: o.runId } : {}) } });
+    await logAudit('extension.install', { userId: o.userId ?? null, detail: { pkgName: pkg, via: o.via, ...(o.runId ? { runId: o.runId } : {}) } });
     await markInstalled(pkg, true);
     const provided = await sourcesOfExtension(pkg).catch(() => []);
     // Recorded, every one switched off; then only the one wanted. adoptExtensionSources records no package; the
