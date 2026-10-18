@@ -12,6 +12,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import type { FakeSeed, FakeSuwayomi } from './fixtures/fakeSuwayomi';
 
 const DSN = process.env.TEST_DATABASE_URL;
@@ -31,15 +33,20 @@ const PKG = {
   adult: 'eu.kanade.tachiyomi.extension.en.bsadult',
   /** Japanese: never for an English series. */
   ja: 'eu.kanade.tachiyomi.extension.ja.bsja',
+  /** Has Brass Bay; MangaUpdates says BS Brass translates it. The oldest version: last, but for that. */
+  brass: 'eu.kanade.tachiyomi.extension.en.bsbrass',
+  /** More updated than BS Brass, and has none of the series. */
+  other: 'eu.kanade.tachiyomi.extension.en.bsother',
 } as const;
 type Key = keyof typeof PKG;
 const ID: Record<Key, string> = {
   main: '7300000000000000001', nolang: '7300000000000000002', miss: '7300000000000000003',
   hit: '7300000000000000004', adult: '7300000000000000005', ja: '7300000000000000006',
+  brass: '7300000000000000007', other: '7300000000000000008',
 };
 const SW = (k: Key) => `sw:${ID[k]}`;
-const GOLD = 's_bks_gold', COPPER = 's_bks_copper', IRONG = 's_bks_iron', TIN = 's_bks_tin';
-const SERIES = [GOLD, COPPER, IRONG, TIN];
+const GOLD = 's_bks_gold', COPPER = 's_bks_copper', IRONG = 's_bks_iron', TIN = 's_bks_tin', BRASS = 's_bks_brass';
+const SERIES = [GOLD, COPPER, IRONG, TIN, BRASS];
 const LIB = 'lib_bks';
 
 const chapters = (title: string, upTo: number) => Array.from({ length: upTo }, (_, i) => upTo - i)
@@ -49,8 +56,8 @@ const manga = (title: string, upTo: number) => ({ title, url: `/${title.toLowerC
 function seed(): FakeSeed {
   const src = (k: Key, name: string, lang: string, mangas: Array<ReturnType<typeof manga>> = [], o: { isNsfw?: boolean; id?: string } = {}) =>
     ({ id: o.id ?? ID[k], name, lang, pkgName: PKG[k], supportsLatest: true, isNsfw: !!o.isNsfw, baseUrl: `https://${k}.bks.example`, mangas });
-  const ext = (k: Key, name: string, lang: string, versionCode: number, o: { installed?: boolean; isNsfw?: boolean } = {}) =>
-    ({ pkgName: PKG[k], name, lang, versionName: '1.0.0', installed: !!o.installed, obsolete: false, isNsfw: !!o.isNsfw, versionCode, repo: REPO });
+  const ext = (k: Key, name: string, lang: string, versionCode: number, o: { installed?: boolean; isNsfw?: boolean; obsolete?: boolean } = {}) =>
+    ({ pkgName: PKG[k], name, lang, versionName: '1.0.0', installed: !!o.installed, obsolete: !!o.obsolete, isNsfw: !!o.isNsfw, versionCode, repo: REPO });
   return {
     sources: [
       src('main', 'BS Main', 'en', [manga('Gold Harbor', 12), manga('Copper Vale', 8), manga('Iron Gate', 8), manga('Tin Road', 8)]),
@@ -59,6 +66,8 @@ function seed(): FakeSeed {
       src('hit', 'BS Hit', 'en', [manga('Gold Harbor', 14), manga('Copper Vale', 8)]),
       src('adult', 'BS Adult', 'en', [manga('Iron Gate', 10)], { isNsfw: true }),
       src('ja', 'BS Ja', 'ja', [manga('Gold Harbor', 14)]),
+      src('brass', 'BS Brass', 'en', [manga('Brass Bay', 8)]),
+      src('other', 'BS Other', 'en', [manga('Other Bay', 5)]),
     ],
     extensions: [
       ext('main', 'BS Main', 'en', 1, { installed: true }),
@@ -67,12 +76,17 @@ function seed(): FakeSeed {
       ext('hit', 'BS Hit', 'en', 3),
       ext('adult', 'BS Adult', 'en', 10, { isNsfw: true }),
       ext('ja', 'BS Ja', 'ja', 20),
+      // Out of the repository (obsolete) until the last test, so the earlier ones never see them.
+      ext('brass', 'BS Brass', 'en', 1, { obsolete: true }),
+      ext('other', 'BS Other', 'en', 2, { obsolete: true }),
     ],
     settings: {},
   };
 }
 
 let fake: FakeSuwayomi | null = null;
+/** A fake MangaUpdates: it knows Brass Bay, and that BS Brass translates it; no other series. */
+let mu: Server | null = null;
 let q: any;
 let bx: typeof import('../src/lib/backupExtensions');
 let scout: typeof import('../src/lib/sourceScout');
@@ -110,6 +124,23 @@ before(async () => {
   for (const d of ['dl', 'lib', 'packs']) mkdirSync(join(ROOT, d), { recursive: true });
   const { startFakeSuwayomi } = await import('./fixtures/fakeSuwayomi');
   fake = await startFakeSuwayomi({ seed: seed() });
+  mu = createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      const send = (j: unknown) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(j)); };
+      if (req.method === 'POST' && req.url === '/series/search') {
+        const term = String(JSON.parse(body || '{}').search ?? '');
+        return send(term === 'Brass Bay' ? { results: [{ record: { series_id: 77, title: 'Brass Bay' }, hit_title: 'Brass Bay' }] } : { results: [] });
+      }
+      if (req.url === '/series/77') return send({ associated: [] });
+      if (req.url === '/series/77/groups') return send({ group_list: [{ name: 'BS Brass' }] });
+      res.writeHead(404);
+      res.end();
+    });
+  });
+  await new Promise<void>((go) => mu!.listen(0, '127.0.0.1', go));
+  process.env.MANGAUPDATES_API_URL = `http://127.0.0.1:${(mu.address() as AddressInfo).port}`;
   // ⚠️ Before anything from src: env.ts reads these once.
   process.env.DATABASE_URL = DSN;
   process.env.SUWAYOMI_URL = fake.url;
@@ -131,6 +162,7 @@ before(async () => {
   ({ q } = (await import('../src/lib/db')) as any);
   bx = await import('../src/lib/backupExtensions');
   scout = await import('../src/lib/sourceScout');
+  (await import('../src/lib/mangaupdates')).setMangaUpdatesGap(0);
   const sources = await import('../src/lib/sources');
   await q('DELETE FROM suwayomi_sources');
   await q(`DELETE FROM source_health WHERE source_id LIKE 'sw:%'`);
@@ -155,6 +187,7 @@ before(async () => {
 after(async () => {
   if (ROOT) rmSync(ROOT, { recursive: true, force: true });
   await fake?.close();
+  mu?.close();
   if (!DSN) return;
   bx._setBackupLimits({ trialsPerHour: 1, trialsPerDay: 6, max: 5 });
   await q('DELETE FROM lib_series WHERE id = ANY($1)', [SERIES]).catch(() => {});
@@ -248,4 +281,17 @@ test('the cap holds for the repository\'s extensions too, and the switch turns i
   assert.equal((await scout.storeLook())?.pkg, PKG.miss, 'PREMISE: it was the room, and the switch, that held it');
   scout._resetScout();
   assert.equal((await scout.storeLook())?.pkg, PKG.adult, 'for a series rated 18+, an 18+ extension may be tried');
+});
+
+test('a group MangaUpdates says translates the series puts its extension first', { skip }, async () => {
+  // Brass Bay's chapters name no group -- most sources name none -- and BS Other is more updated than BS Brass. MangaUpdates
+  // says BS Brass translates it. Reintroduce by reading only the chapters' groups in storeLook: BS Other is tried first.
+  fake!.extension(PKG.brass).obsolete = false;
+  fake!.extension(PKG.other).obsolete = false;
+  await stuck(BRASS, 'Brass Bay', 5, 8);
+  scout._resetScout();
+  const look = await scout.storeLook();
+  assert.equal(look?.pkg, PKG.brass, 'the extension of the group that translates it, first');
+  assert.ok(look?.followed.includes(BRASS), 'and Brass Bay follows it');
+  assert.equal(installed('other'), false, 'the more updated one is not tried for it');
 });

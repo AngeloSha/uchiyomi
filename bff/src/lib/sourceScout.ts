@@ -60,6 +60,7 @@ import { listExtensions, extensionFacts, type ExtensionInfo } from './sources/su
 import { getHiddenLangs } from './sources/suwayomi/langs';
 import { downloadsPerDay, groupsOf, pkgFits, rankPackages } from './extensionRank';
 import { normGroup } from './releases';
+import { mangaUpdatesGroups } from './mangaupdates';
 
 const envInt = (name: string, fallback: number, min: number, max: number): number => {
   const raw = process.env[name];
@@ -697,9 +698,21 @@ export async function storeLook(): Promise<StoreLook | null> {
       && !(e.lang && hidden.has(e.lang)) && forIt(e).length > 0);
     if (!open.length) return null;
     // Fix everything's order (lib/extensionRank.ts): the series' own translation groups first, then not 18+, then the
-    // most downloaded a day, then the most updated.
+    // most downloaded a day, then the most updated. The groups are the ones its chapters name and, for the series one
+    // install is asked about, the ones MangaUpdates says release it (lib/mangaupdates.ts mangaUpdatesGroups): most
+    // sources name none, and then the most downloaded went first -- an official catalogue and a Western-comics site for a
+    // Korean webtoon on the owner's library, ahead of Flame Comics, which translates it. Reintroduce by reading only the
+    // chapters' groups: "a group MangaUpdates says translates the series puts its extension first" in
+    // backupStore.int.test.ts tries the most updated first.
     const groups = new Map<string, Set<string>>();
     for (const x of waiting) groups.set(x.id, await groupsOf(x.id));
+    for (const x of waiting.slice(0, backupLimits().seriesPerTrial)) {
+      const names = [x.title, ...(await altTitlesFor(x.id, SEARCH_NAMES).catch(() => [] as string[]))];
+      for (const g of await mangaUpdatesGroups(x.id, names)) {
+        const k = normGroup(g);
+        if (k.length >= 3) groups.get(x.id)!.add(k);
+      }
+    }
     const facts = await extensionFacts();
     const perDay = await downloadsPerDay(open.map((e) => {
       const f = facts.get(e.pkgName);

@@ -2,6 +2,7 @@
 // keeps the most complete list of the names a series goes by -- every scanlation title a manhwa was ever posted under --
 // which is exactly what tells two sites naming one series differently apart. Free, no key. Asked only after AniList and
 // MangaDex found nothing, and paced well under its limits: one request a second, from this module alone.
+import { normTitle } from './titleMatch';
 
 /**
  * Where MangaUpdates is: MANGAUPDATES_API_URL moves it (a test points it at a fake), as ANILIST_API_URL moves AniList.
@@ -66,4 +67,43 @@ export async function searchMangaUpdates(title: string, accept: (names: string[]
     return { id: String(id), names: [...new Set([...seen, ...associated])] };
   }
   return null;
+}
+
+/** How long the groups found for a series are kept: a series' translators change over months, not hours. */
+const GROUPS_KEEP_MS = 7 * 24 * 3600_000;
+const groupsSeen = new Map<string, { at: number; groups: string[] }>();
+
+/** Tests only. */
+export function _forgetMangaUpdatesGroups(): void { groupsSeen.clear(); }
+
+/**
+ * The scanlation groups MangaUpdates says release a series (v0.83.0): what puts a repository extension named after one of
+ * them first when the scout tries extensions for a series no installed source has (lib/sourceScout.ts storeLook). Most
+ * sources name no group on their chapters, so without this a series has none to go by, and the ranking falls back to
+ * how often each extension is downloaded -- which put MANGA Plus and a Western-comics site first for a Korean webtoon on
+ * the owner's library, and Flame Comics, which MangaUpdates says translates it, third.
+ *
+ * Found by its names: the series' title and other names (`names`) against the hit's own title and the name it matched on,
+ * equal once normalised (lib/titleMatch.ts normTitle) -- a series with a similar name is never taken for it. Kept a week
+ * per series. Empty when MangaUpdates does not know it; empty and not kept when it did not answer, so the next look asks
+ * again. Never throws.
+ */
+export async function mangaUpdatesGroups(seriesId: string, names: readonly string[]): Promise<string[]> {
+  const kept = groupsSeen.get(seriesId);
+  if (kept && Date.now() - kept.at < GROUPS_KEEP_MS) return kept.groups;
+  const want = new Set(names.map(normTitle).filter((k) => k.length >= 3));
+  if (!want.size) return [];
+  let groups: string[] = [];
+  try {
+    const work = await searchMangaUpdates(names[0], (seen) => seen.some((n) => want.has(normTitle(n))));
+    if (work) {
+      const j = await muFetch(`/series/${encodeURIComponent(work.id)}/groups`);
+      const list: any[] = Array.isArray(j?.group_list) ? j.group_list : [];
+      groups = [...new Set(list.map((g) => g?.name).filter((n: unknown): n is string => typeof n === 'string' && !!n.trim()))];
+    }
+  } catch {
+    return [];
+  }
+  groupsSeen.set(seriesId, { at: Date.now(), groups });
+  return groups;
 }
