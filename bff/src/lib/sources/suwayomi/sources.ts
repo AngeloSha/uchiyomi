@@ -145,9 +145,9 @@ function toSeries(m: RemoteManga, adapterId: string): SourceSeries | null {
 }
 
 /** `position` is the row's 1-based place in the engine's answer: the order when the row carries none. */
-function toChapter(c: RemoteChapter, position: number): SourceChapter | null {
+function toChapter(c: RemoteChapter, position: number, assigned?: number): SourceChapter | null {
   if (c?.id == null) return null;
-  const num = typeof c.chapterNumber === 'number' ? c.chapterNumber : NaN;
+  const num = assigned ?? (typeof c.chapterNumber === 'number' ? c.chapterNumber : NaN);
   // A chapter with no usable number can't be ordered, named or diffed against the library — drop it rather
   // than inventing 0, which would collide with a real chapter 0.
   if (!Number.isFinite(num) || num < 0) return null;
@@ -167,6 +167,20 @@ function toChapter(c: RemoteChapter, position: number): SourceChapter | null {
   const url = typeof c.url === 'string' ? c.url.trim() : '';
   if (url) out.url = url;
   return out;
+}
+
+/**
+ * Unnumbered rows (a gallery and its parts) as chapters 1..n, oldest first. The engine's order is the
+ * posting order; an engine that counts from the newest is caught by the dates at the two ends, as in
+ * lib/postingOrder.ts postingSequence.
+ */
+function galleryChapters(rows: RemoteChapter[]): SourceChapter[] {
+  const seq = rows.map((c, i) => ({ c, i, order: typeof c.sourceOrder === 'number' && c.sourceOrder > 0 ? c.sourceOrder : i + 1,
+    t: Number(c.uploadDate) > 0 ? Number(c.uploadDate) : null }));
+  seq.sort((a, b) => a.order - b.order || a.i - b.i);
+  const dated = seq.filter((r) => r.t != null);
+  if (dated.length >= 2 && (dated[0].t as number) > (dated[dated.length - 1].t as number)) seq.reverse();
+  return seq.map((r, k) => toChapter(r.c, r.i + 1, k + 1)).filter((c): c is SourceChapter => !!c);
 }
 
 /**
@@ -260,10 +274,15 @@ export function makeSuwayomiAdapter(remote: RemoteSource, run: Gql = defaultGql)
       // say who released what. Sorting stays: callers diff the list in order. The position is taken BEFORE
       // the sort and before junk rows are dropped: the engine answers in sourceOrder, so a row's place in
       // its answer is its posting order when the row does not say.
-      const out = list
+      let out = list
         .map((c, i) => toChapter(c, i + 1))
         .filter((c): c is SourceChapter => !!c)
         .sort((a, b) => a.number - b.number);
+      // A single gallery, or the parts of an NSFW gallery, may have no chapter numbers at all.
+      // Assign posting-order numbers only when no usable number exists. Mixed lists and multi-row
+      // SFW lists keep dropping unnumbered notices rather than inventing chapters for them.
+      const rows = list.filter((c) => c?.id != null);
+      if (!out.length && rows.length && (rows.length === 1 || remote.isNsfw)) out = galleryChapters(rows);
       // How many rows toChapter dropped for having no usable number (#115): on the FINAL array, after the sort,
       // so the smoke test can tell "no numbers" from "no chapters". Non-enumerable (types.ts UNNUMBERED).
       const dropped = list.filter((c) => c?.id != null).length - out.length;
