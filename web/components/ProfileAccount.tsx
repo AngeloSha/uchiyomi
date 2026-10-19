@@ -210,12 +210,12 @@ function TwoFactorSection() {
   // Set up / Disable that vanished once pressed meant a screen reader heard "collapsed" and never "expanded".
   const open = !!setup || disabling;
   const action = open ? (
-    <button type="button" onClick={cancel} aria-expanded={open} aria-controls={boxId} className="chip text-xs">{tr('Cancel')}</button>
+    <button type="button" onClick={cancel} aria-expanded={open} aria-controls={boxId} className="btn-key">{tr('Cancel')}</button>
   ) : totpOn ? (
     <button type="button" onClick={() => setDisabling(true)} aria-expanded={open} aria-controls={boxId}
-      className="chip text-xs hover:border-rose-500/50 hover:text-rose-400">{tr('Disable 2FA')}</button>
+      className="btn-key btn-key-danger">{tr('Disable 2FA')}</button>
   ) : (
-    <button type="button" onClick={startTotp} disabled={busy} aria-expanded={open} aria-controls={boxId} className="chip text-xs disabled:opacity-50">
+    <button type="button" onClick={startTotp} disabled={busy} aria-expanded={open} aria-controls={boxId} className="btn-key">
       {tr('Set up 2FA')}
     </button>
   );
@@ -253,7 +253,7 @@ function TwoFactorSection() {
           <input id={pwId} type="password" autoComplete="current-password" value={disPw} onChange={(e) => setDisPw(e.target.value)}
             placeholder={tr('Confirm password to disable')} className="field" />
           <button type="submit" disabled={!disPw}
-            className="rounded-full border border-red-500/40 px-4 py-2 text-sm text-red-300 hover:bg-red-500/10 disabled:opacity-50">{tr('Disable 2FA')}</button>
+            className="btn-key btn-key-danger text-red-300">{tr('Disable 2FA')}</button>
         </form>
       )}
     </Section>
@@ -281,7 +281,7 @@ function SessionsSection() {
 
   return (
     <Section id="sessions" title={tr('Active sessions')} icon={<IcGrid width={18} height={18} />}
-      action={rows.length > 1 ? <button type="button" onClick={logoutAll} className="chip text-xs">{tr('Log out others')}</button> : undefined}>
+      action={rows.length > 1 ? <button type="button" onClick={logoutAll} className="btn-key">{tr('Log out others')}</button> : undefined}>
       {rows.map((s) => (
         <Row key={s.id}
           label={<>
@@ -290,7 +290,7 @@ function SessionsSection() {
           </>}
           help={`${s.ip || tr('unknown ip')} · ${tr('active {when}', { when: relativeTime(s.last_seen) })}`}>
           {!s.current && (
-            <button type="button" onClick={() => revoke(s.id)} className="chip text-xs hover:border-rose-500/50 hover:text-rose-400">{tr('Revoke')}</button>
+            <button type="button" onClick={() => revoke(s.id)} className="btn-key btn-key-danger">{tr('Revoke')}</button>
           )}
         </Row>
       ))}
@@ -310,7 +310,7 @@ function SignOutSection() {
   return (
     <Section id="sign-out" title={tr('Sign out')} icon={<IcLogOut width={18} height={18} />}>
       <Row label={tr('Sign out of this device')} help={tr('Other devices stay signed in.')}>
-        <button type="button" onClick={logout} className="rounded-full border border-red-500/40 px-4 py-1.5 text-sm text-red-300 hover:bg-red-500/10">
+        <button type="button" onClick={logout} className="btn-key btn-key-danger text-red-300">
           {tr('Sign out')}
         </button>
       </Row>

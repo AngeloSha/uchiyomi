@@ -339,7 +339,7 @@ ever hit.
   explicitly retries it. A chapter a site refused (a 429 or a 403) gets `FINISH_DOWNLOADS_REFUSAL_CAP` tries instead
   while **Finish downloads on their own** is on.
 
-**Finish downloads on their own** (Admin → Settings → Updates & schedules, on by default) needs nothing set. Advanced,
+**Finish downloads on their own** (Admin → Settings → Downloads, on by default) needs nothing set. Advanced,
 rarely needed:
 
 - `FINISH_DOWNLOADS_MINUTES` (default `15`, at least `5`): how often the series with chapters left are gone back to,
@@ -468,7 +468,7 @@ rarely needed:
 An ordinary chapter failure may continue from up to `MAX_FOLLOWED_SOURCES` (default three, at most four) of the sources
 already followed for that series. A copy explicitly picked by a person never switches. A 403/429 never becomes a
 partial chapter; the refusing source cools down, while an already-followed copy can keep the queue moving. With
-**Admin → Settings → Updates & schedules → Finish downloads on their own** on (the default), Uchiyomi also finds and
+**Admin → Settings → Downloads → Finish downloads on their own** on (the default), Uchiyomi also finds and
 follows a new source for a series its sources cannot serve. Title and 90%-chapter matching apply, and a clean series
 never causes an adult source to be followed.
 
@@ -476,7 +476,7 @@ never causes an adult source to be followed.
 
 Since v0.49.0 a series can be queued to come in a chapter at a time over nights or days
 ([USAGE §4](USAGE.md#fetching-a-whole-series-slowly-the-slow-archive)). Its pace is set in the admin panel, not
-here — **Admin → Settings → Downloads**, and every change reaches the running archive at once, with no restart:
+here — **Admin → Settings → Downloads → Slow archive**, and every change reaches the running archive at once, with no restart:
 
 - *Slow archive* — on unless you pause it; off pauses every archive, and nothing queued is lost.
 - *Chapters an hour, per source* — default `4`, 1–30. A break after each chapter is drawn at random around what is
@@ -506,7 +506,7 @@ break and the scheduler's one-minute look, so a test can watch a chapter land. L
 
 ## The nightly repair
 
-On by default, under **Admin → Settings → Library housekeeping → Repair the library nightly**, and listed as
+On by default, under **Admin → Settings → Maintenance → Repair the library nightly**, and listed as
 **Admin → Tasks → Repair library**. Once every `REPAIR_HOURS` it does the six things that are reversible or
 provable on their own, and two more only when you switch them on, in this order:
 
@@ -541,13 +541,13 @@ provable on their own, and two more only when you switch them on, in this order:
    it keeps its place and is looked at on the next run rather than skipped for a day. Since v0.49.0 a series whose
    every gap its slow archive is going to fetch is left to the archive, and is not marked as checked, so it comes
    back once the archive is done; *Fill now* on Health still fetches those chapters at once.
-6. **Group upgrades** (since v0.47.0), **off** until **Admin → Settings → Scanlators → Upgrade chapters to a
+6. **Group upgrades** (since v0.47.0), **off** until **Admin → Settings → Downloads → Scanlation groups → Upgrade chapters to a
    preferred group** is switched on. `REPAIR_GROUPS_MAX` chapters Uchiyomi downloaded itself whose group
    ranks below one your release preferences name, when that group's copy is on a source the series follows:
    the listing is refreshed first, the preferred copy's page list is counted before anything is downloaded,
    and a copy with fewer pages than the file on disk, or one that arrives incomplete, never replaces it. A
    chapter someone picked a version for by hand is never touched, and one whose swap failed waits a week.
-7. **Chapter names from another source** (since v0.47.0), **off** until **Admin → Settings → Scanlators →
+7. **Chapter names from another source** (since v0.47.0), **off** until **Admin → Settings → Series & chapters →
    Borrow chapter names from other sources** is switched on, or a series ticks the box on its own sheet.
    `REPAIR_NAMES_MAX` series that hold a chapter with no name: a donor is searched for across at most
    `HUNT_MAX_SOURCES` sources in the series' own language, and used only if it passes the same identity and
@@ -560,7 +560,7 @@ provable on their own, and two more only when you switch them on, in this order:
    asked for the original language of the ones that follow it, then AniList for the country of origin of the ones
    linked there — at most `REPAIR_DIRECTIONS_MAX` series from each in a run, picked at random. Only the reading
    direction is ever written, and never over one set by hand.
-9. **Missing details** (since v0.73.0), **off** until **Admin → Settings → Library housekeeping → Fill in missing
+9. **Missing details** (since v0.73.0), **off** until **Admin → Settings → Series & chapters → Fill in missing
    details** is switched on. A series with no description, genres or author of its own is given them: first by
    AniList, for series linked there with a checked link, in libraries whose AniList lookups are on, in English, at most
    500 a run in requests of fifty by id; then, for at most `REPAIR_DETAILS_MAX` series that are kept updated, by the
@@ -595,7 +595,7 @@ actions an admin confirms.
 ## Deleting chapters after they are read
 
 Off, and there is deliberately **no environment variable that turns it on**. It is switched on in
-**Admin → Settings → Library housekeeping → Delete read chapters**, behind a confirmation, because an install that upgraded into a
+**Admin → Settings → Downloads → Delete read chapters**, behind a confirmation, because an install that upgraded into a
 file-deleting job because of a line in a compose file would be indefensible. See
 [USAGE](USAGE.md#deleting-chapters-after-they-are-read) for what it will and will not touch.
 

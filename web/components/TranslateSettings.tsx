@@ -1,11 +1,11 @@
 'use client';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { bytes } from '@/lib/format';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { ProgressBar } from '@/components/ui';
-import { Row, SwitchRow, useAutosave } from '@/components/settings';
+import { OnBody, ProgressBar } from '@/components/ui';
+import { Row, RowBlock, RowGroup, SwitchRow, useAutosave } from '@/components/settings';
 import { t as tr } from '@/lib/i18n';
 
 /** GET /api/admin/translate. */
@@ -32,8 +32,11 @@ const KEY = ['admin-translate'];
  * Uchiyomi until an admin asks for it. Download first -- the engine and a model, about 19 GB on a server with the memory
  * for the large model, 3 GB elsewhere -- with its progress here, then the one switch, and Remove. Gone on an install that
  * cannot run it (the desktop app). It reads its own endpoint, and asks again every 2 s while a download runs.
+ *
+ * Its own group (v0.86.0), so an install that cannot run it shows no empty card where the row would be.
  */
 export function TranslateRow() {
+  const wrap = (row: ReactNode) => <RowGroup>{row}</RowGroup>;
   const qc = useQueryClient();
   const { data: st } = useQuery({
     queryKey: KEY,
@@ -49,8 +52,9 @@ export function TranslateRow() {
   const where = tr('Runs on this server: pages never leave it.');
 
   if (st.state === 'ready') {
-    return (
-      <div className="py-3 first:pt-1 last:pb-0" data-translate-engine="ready">
+    return wrap(
+      <RowBlock id="translate">
+        <div data-translate-engine="ready">
         <SwitchRow label={label}
           help={`${tr('Readers turn it on for a series in the reader’s settings, and pages are translated into their language as they read.')} ${where}`}
           on={st.enabled} onChange={(next) => call('/api/admin/translate', 'PUT', { enabled: next })} />
@@ -62,20 +66,24 @@ export function TranslateRow() {
         <button type="button" onClick={() => setRemoving(true)} className="mt-1 text-[11px] text-fog-500 underline-offset-2 hover:text-fog-300 hover:underline">
           {tr('Remove the translation engine')}
         </button>
+        {/* Out to <body>: a `.card` blurs its backdrop, which traps a fixed dialog inside it (components/ui.tsx OnBody). */}
         {removing && (
-          <ConfirmDialog danger title={tr('Remove the translation engine?')} confirmLabel={tr('Remove')}
-            body={tr('Its files are deleted and translating stops. Pages already translated come back if you download it again.')}
-            onConfirm={() => { setRemoving(false); void call('/api/admin/translate', 'DELETE'); }}
-            onClose={() => setRemoving(false)} />
+          <OnBody>
+            <ConfirmDialog danger title={tr('Remove the translation engine?')} confirmLabel={tr('Remove')}
+              body={tr('Its files are deleted and translating stops. Pages already translated come back if you download it again.')}
+              onConfirm={() => { setRemoving(false); void call('/api/admin/translate', 'DELETE'); }}
+              onClose={() => setRemoving(false)} />
+          </OnBody>
         )}
-      </div>
+        </div>
+      </RowBlock>,
     );
   }
 
   if (st.state === 'downloading') {
     const pct = st.total ? st.done / st.total : 0;
-    return (
-      <Row label={label} stacked status={status}>
+    return wrap(
+      <Row id="translate" label={label} stacked status={status}>
         <div role="status" aria-live="polite" data-translate-engine="downloading">
           <p className="text-sm text-fog-200">{tr('Downloading the translation engine…')}</p>
           <div className="mt-2" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct * 100)}>
@@ -88,14 +96,14 @@ export function TranslateRow() {
             </button>
           </div>
         </div>
-      </Row>
+      </Row>,
     );
   }
 
   // Missing, or a download that failed: the button, and what it costs before it is pressed.
   const short = st.free > 0 && st.free < st.need;
-  return (
-    <Row label={label} status={status} stacked
+  return wrap(
+    <Row id="translate" label={label} status={status} stacked
       help={`${tr('Translate the speech bubbles of any chapter into each reader’s language. Needs a one-time download of {size}, and {memory} of memory while it translates.', { size: bytes(st.need), memory: bytes(st.ram) })} ${where}`}>
       <div data-translate-engine={st.state}>
         {st.state === 'failed' && (
@@ -114,6 +122,6 @@ export function TranslateRow() {
           {st.state === 'failed' ? tr('Try again') : tr('Download ({size})', { size: bytes(st.need) })}
         </button>
       </div>
-    </Row>
+    </Row>,
   );
 }

@@ -578,19 +578,19 @@ test('Scan library now says what it found, or why it did not scan, and Health is
   assert.match(code(read('lib/refresh.ts')), /return \{ scanned: false, reason: 'error' \};/, 'a failed scan is not told apart from a refused one');
 });
 
-test('the nightly repair has one switch, under Library housekeeping, on unless the server says otherwise', () => {
-  // On by default (`repair_enabled NOT NULL DEFAULT true`), so the row reads `!== false`: a server that
-  // does not send the key yet is a server that repairs, and the switch says so.
-  // ⚠️ Saved through `patch`, the section's prop, not through the local `save` -- that one takes a success
-  // sentence as its second argument and would toast `undefined`. Reintroduce by `save({ repairEnabled: next })`.
+test('the nightly repair is one control, under Maintenance, on unless the server says otherwise', () => {
+  // On by default (`repair_enabled NOT NULL DEFAULT true`), so the control reads `=== false` for Off: a server that does
+  // not send the key yet is a server that repairs, and the control says so. v0.86.0 (cut D): the switch and its "Every
+  // night" choice are one control, saved from one place. Reintroduce a second `repairEnabled` save anywhere:
+  // "the repair is saved from more or fewer than one place" fails.
   const src = code(read(SETTINGS));
-  assert.equal((src.match(/repairEnabled/g) ?? []).length, 1, 'the repair switch is saved from more or fewer than one place');
-  // v0.55.0: the help follows what the nightly runs (Every night, below it): the safe repair's words, or Fix everything's.
-  assert.match(src, /<SwitchRow label=\{tr\('Repair the library nightly'\)\}\s*help=\{nightlyModeOf\(data\) === 'autofix'\s*\? tr\('Once a day, Fix everything runs by itself[^']*'\)\s*: tr\('Once a day: counts pages in files never opened[^']*'\)\}\s*on=\{data\.repair_enabled !== false\} onChange=\{\(next\) => patch\(\{ repairEnabled: next \}\)\} \/>/, 'the repair switch is not one SwitchRow with these words, is not on by default, or saves through the wrong function');
-  const house = src.slice(src.indexOf('function HousekeepingSection('));
-  assert.ok(house.includes("tr('Repair the library nightly')"), 'the repair switch is not in Library housekeeping');
-  // The help has to name what runs unattended AND what never does, or an admin cannot decide anything.
-  assert.match(src, /Nothing is deleted or merged without you\./, 'the help does not say what the nightly never does');
+  assert.equal((src.match(/save\(m === 'off' \? \{ repairEnabled: false \} : \{ repairEnabled: true, nightlyMode: m \}\)/g) ?? []).length, 1,
+    'the repair is saved from more or fewer than one place');
+  assert.equal((src.match(/repairEnabled/g) ?? []).length, 2, 'the repair is saved from more or fewer than one place');
+  const maintenance = src.slice(src.indexOf('function MaintenanceSection('), src.indexOf('export function NightlyModeRow('));
+  assert.match(maintenance, /<NightlyModeRow mode=\{nightlyModeOf\(data\)\} off=\{data\.repair_enabled === false\}/, 'the repair is not in Maintenance, or is off unless on');
+  // What each choice does has to say what runs unattended AND what never does, or an admin cannot decide anything.
+  assert.match(src, /nothing is deleted or merged\./, 'the safe repair does not say what it never does');
 });
 
 test('the header counts chapters behind in words that agree, in every language', () => {

@@ -54,7 +54,7 @@ test('the profile manages no password and no 2FA in SSO-only mode, and links an 
   // A link, never a request: the server takes the account from this browser's session (bff /auth/oidc/link).
   assert.match(profile, /\{!user\?\.sso && <a href="\/auth\/oidc\/link" className="btn-key" data-sso-link>/);
   const settings = code(read('components/AdminSettings.tsx'));
-  assert.match(settings, /\{!desktop && !ssoOnly\(authConfig\) && \(\s*<SwitchRow label=\{tr\('Open registration'\)\}/,
+  assert.match(settings, /\{!desktop && !ssoOnly\(authConfig\) && \(\s*<SwitchRow id="registration" label=\{tr\('Open registration'\)\}/,
     'Open registration is offered where there is no sign-up');
 });
 

@@ -13,13 +13,14 @@
 // width cap wider than `max-w-prose`/`.field`, because the owner's "768 px ribbon" complaint was exactly a
 // settings grid living inside a capped container on a 2560 px display.
 import Link from 'next/link';
-import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type MouseEvent, type ReactNode, type Ref, type RefObject } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Switch } from './Switch';
 import { msgOf } from './ConfirmDialog';
-import { useRtl } from './ui';
-import { IcChevronRight } from './icons';
+import { OnBody, Sheet, useRtl } from './ui';
+import { IcCheck, IcChevronRight } from './icons';
 import { useReduceEffects } from '@/lib/effects';
+import { arrival } from '@/lib/destinations';
 import { t as tr } from '@/lib/i18n';
 
 export type SaveStatus = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved' } | { kind: 'error'; message: string };
@@ -27,6 +28,19 @@ const IDLE: SaveStatus = { kind: 'idle' };
 /** How long the tick stays before it fades. Long enough to be seen after a Tab away, short enough that a
  *  row edited twice in a row reads as two saves rather than one that never ends. */
 const SAVED_MS = 1500;
+
+/**
+ * Where a row sits decides its padding (v0.86.0). Loose, the rhythm every row had before: rows down a card, the first
+ * and last flush with its title and its end. In a `RowGroup`, an inset list: each row padded on all sides, so the hairline
+ * between rows runs edge to edge and a whole-row button (`SummaryRow`) lights up to the card's edge. Bare, inside a
+ * `RowBlock`, which pads the row and what hangs under it as one. ProfileMenu, Edit details and the source sheet render
+ * rows with no group around them, and keep exactly the loose rhythm they had.
+ */
+type Pad = 'loose' | 'group' | 'bare';
+const RowPad = createContext<Pad>('loose');
+const PAD: Record<Pad, string> = { loose: 'py-3 first:pt-1 last:pb-0', group: 'px-4 py-3', bare: '' };
+/** Help folded to two lines (v0.86.0): on the settings pages' groups, not in an editor, which is where the detail lives. */
+const Folded = createContext(false);
 
 /**
  * The settings grid: more columns on a wider display, never wider columns, and NO cap.
@@ -37,30 +51,6 @@ const SAVED_MS = 1500;
  * instead: `max-w-prose` on help text and `.field` on inputs, both under 700 px.
  */
 export const SETTINGS_GRID = 'grid items-start gap-3 lg:gap-4 xl:grid-cols-2 3xl:grid-cols-3';
-
-/**
- * The page's sections as a row of keys above the grid (UI refresh): Admin → Settings is nine cards, and one low in the
- * grid was a long scroll away. A key scrolls its card to the top, instantly under reduced motion or Reduce effects, as
- * a `?section=` arrival does (lib/useSectionArrival.ts). One row that scrolls sideways on a phone; it wraps at lg.
- */
-export function SectionIndex({ label, sections, className = '' }: {
-  label: string;
-  sections: ReadonlyArray<readonly [id: string, title: string]>;
-  className?: string;
-}) {
-  // `title` arrives translated: the caller's own literals are what the locale scan reads.
-  const reduced = useReducedMotion();
-  const fewer = useReduceEffects();
-  const go = (id: string) => document.getElementById(id)?.scrollIntoView({ block: 'start', behavior: reduced || fewer ? 'auto' : 'smooth' });
-  return (
-    <div role="navigation" aria-label={label} data-settings-index data-lenis-prevent-horizontal
-      className={`-mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0 [&::-webkit-scrollbar]:hidden ${className}`}>
-      {sections.map(([id, title]) => (
-        <button key={id} type="button" onClick={() => go(id)} className="btn-key">{title}</button>
-      ))}
-    </div>
-  );
-}
 
 /**
  * The one feedback idiom for a setting.
@@ -259,27 +249,33 @@ export function Section({ title, description, icon, action, id, className, ref, 
  * range. The label line then carries the `SaveState`.
  *
  * Under a `SaveScope` there is no `SaveState` here at all: the scope's one label says it (see useSaveScope).
+ *
+ * The padding is the place's (`RowPad`): the loose rhythm down a card, an inset row in a `RowGroup`, none in a `RowBlock`.
  */
-export function Row({ label, help, htmlFor, stacked, status, id, className, children }: {
+export function Row({ label, help, htmlFor, stacked, status, id, device, className, children }: {
   label: ReactNode;
   help?: ReactNode;
   htmlFor?: string;
   stacked?: boolean;
   status?: SaveStatus;
   id?: string;
+  /** Kept by this browser, not by the account: a small tag after the label says so (`DeviceTag`). */
+  device?: boolean;
   className?: string;
   children?: ReactNode;
 }) {
   const scoped = useContext(ScopeReport) !== null;
+  const pad = PAD[useContext(RowPad)];
+  const name = device ? <>{label}<DeviceTag /></> : label;
   // A `<label>` only when there is a control to point at; a `<label>` with nothing to label is announced as
   // one anyway and confuses the reading order.
   const labelEl = htmlFor
-    ? <label htmlFor={htmlFor} className="text-sm text-fog-100">{label}</label>
-    : <p className="text-sm text-fog-100">{label}</p>;
-  const helpEl = help != null && help !== false ? <p className="max-w-prose text-[11px] leading-relaxed text-fog-500">{help}</p> : null;
+    ? <label htmlFor={htmlFor} className="text-sm text-fog-100">{name}</label>
+    : <p className="text-sm text-fog-100">{name}</p>;
+  const helpEl = help != null && help !== false ? <Help>{help}</Help> : null;
   if (stacked) {
     return (
-      <div id={id} className={`py-3 first:pt-1 last:pb-0 ${className ?? ''}`}>
+      <div id={id} className={`${pad} ${className ?? ''}`}>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">{labelEl}{helpEl}</div>
           {!scoped && <SaveState status={status ?? IDLE} />}
@@ -289,7 +285,7 @@ export function Row({ label, help, htmlFor, stacked, status, id, className, chil
     );
   }
   return (
-    <div id={id} className={`flex flex-wrap items-center gap-x-4 gap-y-2 py-3 first:pt-1 last:pb-0 ${className ?? ''}`}>
+    <div id={id} className={`flex flex-wrap items-center gap-x-4 gap-y-2 ${pad} ${className ?? ''}`}>
       <div className="min-w-0 flex-1 basis-32">{labelEl}{helpEl}</div>
       <div className="ms-auto flex max-w-full flex-wrap items-center justify-end gap-2">
         {children}
@@ -308,11 +304,13 @@ export function Row({ label, help, htmlFor, stacked, status, id, className, chil
  * server refused. It is NOT disabled while saving -- a disabled button drops focus, and keyboard users
  * would lose their place on every flip.
  */
-export function SwitchRow({ label, help, on, disabled, onChange }: {
+export function SwitchRow({ label, help, on, disabled, id, device, onChange }: {
   label: string;
   help?: ReactNode;
   on: boolean;
   disabled?: boolean;
+  id?: string;
+  device?: boolean;
   onChange: (next: boolean) => Promise<unknown> | unknown;
 }) {
   const { status, run } = useAutosave();
@@ -327,7 +325,7 @@ export function SwitchRow({ label, help, on, disabled, onChange }: {
     if (!ok) setLocal(on);
   };
   return (
-    <Row label={label} help={help} status={status}>
+    <Row id={id} label={label} help={help} status={status} device={device}>
       <Switch on={local} onChange={(next) => { void flip(next); }} disabled={disabled} label={label} />
     </Row>
   );
@@ -351,9 +349,9 @@ export function SwitchRow({ label, help, on, disabled, onChange }: {
  * ran past the card and scrolled the page sideways at 390 px. Wrapped, the second pill sits under the
  * first inside the same rounded border; nothing is clipped and nothing leaves the card.
  *
- * `square` (v0.53.0): the same group with 8 px corners instead of capsules, for the surfaces redesigned after the
- * owner's "no more pills" (Edit details). A wrapped square group also reads as one grid of choices, where a
- * capsule bent around two rows does not.
+ * Square, 8 px corners: the owner's "no more pills" (v0.53.0 brought `square` to Edit details; since v0.86.0 it is the
+ * only shape, and `square` is still accepted so no caller changes). A wrapped square group also reads as one grid of
+ * choices, where a capsule bent around two rows does not.
  *
  * The checked mark slides only when motion is welcome: still under Reduce effects as under the system's reduced
  * motion, as the Library's tabs are.
@@ -361,7 +359,7 @@ export function SwitchRow({ label, help, on, disabled, onChange }: {
  * An option with an `icon` (v0.60.0, the Library's layouts) shows the icon alone -- pass it `aria-hidden` -- and its label
  * is the radio's name, for a screen reader, and its hover.
  */
-export function Segmented<T extends string>({ label, value, options, disabled, square, onChange }: {
+export function Segmented<T extends string>({ label, value, options, disabled, onChange }: {
   label: string;
   value: T | null;
   options: ReadonlyArray<{ value: T; label: string; icon?: ReactNode }>;
@@ -383,22 +381,15 @@ export function Segmented<T extends string>({ label, value, options, disabled, s
     if (o.value !== value) onChange(o.value);
     refs.current[i]?.focus();
   };
-  const onKey = (e: KeyboardEvent<HTMLButtonElement>, i: number) => {
-    const n = options.length;
-    const forward = rtl ? 'ArrowLeft' : 'ArrowRight';
-    const back = rtl ? 'ArrowRight' : 'ArrowLeft';
-    let next: number | null = null;
-    if (e.key === forward || e.key === 'ArrowDown') next = (i + 1) % n;
-    else if (e.key === back || e.key === 'ArrowUp') next = (i - 1 + n) % n;
-    else if (e.key === 'Home') next = 0;
-    else if (e.key === 'End') next = n - 1;
+  const onKey = (e: { key: string; preventDefault: () => void }, i: number) => {
+    const next = radioKey(e.key, i, options.length, rtl);
     if (next === null) return;
     e.preventDefault();
     pick(next);
   };
   return (
     <div role="radiogroup" aria-label={label}
-      className={`relative inline-flex max-w-full flex-wrap border border-ink-700 bg-ink-850 p-0.5 ${square ? 'gap-0.5 rounded-xl' : 'rounded-full'} ${disabled ? 'opacity-40' : ''}`}>
+      className={`relative inline-flex max-w-full flex-wrap gap-0.5 rounded-xl border border-ink-700 bg-ink-850 p-0.5 ${disabled ? 'opacity-40' : ''}`}>
       {options.map((o, i) => {
         const selected = i === checked;
         return (
@@ -413,10 +404,10 @@ export function Segmented<T extends string>({ label, value, options, disabled, s
             onClick={() => pick(i)}
             onKeyDown={(e) => onKey(e, i)}
             title={o.icon ? o.label : undefined}
-            className={`relative ${o.icon ? 'px-2' : 'px-3'} py-1.5 text-xs disabled:cursor-not-allowed ${square ? 'rounded-lg' : 'rounded-full'}`}
+            className={`relative rounded-lg ${o.icon ? 'px-2' : 'px-3'} py-1.5 text-xs disabled:cursor-not-allowed`}
           >
             {selected && (
-              <motion.span aria-hidden layoutId={id} className={`absolute inset-0 bg-accent-soft ${square ? 'rounded-lg' : 'rounded-full'}`}
+              <motion.span aria-hidden layoutId={id} className="absolute inset-0 rounded-lg bg-accent-soft"
                 transition={still || plain ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 34 }} />
             )}
             {o.icon
@@ -643,7 +634,7 @@ export function LinkRow({ href, label, help, onClick }: {
   help?: ReactNode;
   onClick?: () => void;
 }) {
-  const cls = 'group flex w-full items-center gap-3 py-3 text-start first:pt-1 last:pb-0';
+  const cls = `group flex w-full items-center gap-3 text-start ${PAD[useContext(RowPad)]}`;
   const inner = (
     <>
       <span className="min-w-0 flex-1">
@@ -698,4 +689,413 @@ export function Disclosure({ label, open, defaultOpen, onOpenChange, id, childre
       {isOpen && <div id={cid} className="mt-2">{children}</div>}
     </div>
   );
+}
+
+/* ============================ v0.86.0: the settings redesign ============================ */
+//
+// The owner, 2026-10-19: "a million toggle in setting and a million section a million pill … organized, look cooler,
+// more user friendly … easier to find, understand what it does". Profile → Settings and Admin → Settings became a few
+// categories with search (components/SettingsLayout.tsx), each a short page of titled groups. The pieces below are what
+// those groups are made of: the inset group itself, pictures for choices that are easier seen than named, the
+// platform's own menu for long lists, one summary row for a setting too big for a row (it opens an editor), and a fold
+// for the rows few people change. Every one saves the way the rows above do -- at once, with the tick at its end.
+
+/** Where search or `?section=` asked the settings to go (components/SettingsLayout.tsx): a row, and the More options or
+ *  editor that holds it, which open themselves for it. `seq` makes the same row asked for twice two arrivals. */
+export interface SettingsTarget { row: string; more?: string; editor?: string; seq: number }
+export const SettingsGo = createContext<SettingsTarget | null>(null);
+
+/**
+ * The arrow keys of a radio group, as `Segmented` has always read them: the next or previous option in the reading
+ * direction (ArrowLeft is "next" under RTL), ArrowDown/ArrowUp likewise, Home and End. `null` for any other key.
+ */
+export function radioKey(key: string, i: number, n: number, rtl: boolean): number | null {
+  const forward = rtl ? 'ArrowLeft' : 'ArrowRight';
+  const back = rtl ? 'ArrowRight' : 'ArrowLeft';
+  if (key === forward || key === 'ArrowDown') return (i + 1) % n;
+  if (key === back || key === 'ArrowUp') return (i - 1 + n) % n;
+  if (key === 'Home') return 0;
+  if (key === 'End') return n - 1;
+  return null;
+}
+
+/**
+ * A row's help, folded to two lines in a settings group until asked for (v0.86.0). The page used to show seventeen
+ * paragraphs at once, and the switches drowned in them. Folded, not cut: the whole sentence is in the DOM -- a screen
+ * reader reads it all, and the settings search matches it -- and "More" opens it where it is. "More" shows only when
+ * the text really runs past two lines, measured, so a short help never offers to open.
+ */
+function Help({ children }: { children: ReactNode }) {
+  const folded = useContext(Folded);
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [open, setOpen] = useState(false);
+  const [long, setLong] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!folded || !el || typeof ResizeObserver === 'undefined') return;
+    const measure = () => setLong(el.scrollHeight > el.clientHeight + 1);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [folded, children]);
+  const cls = 'max-w-prose text-[11px] leading-relaxed text-fog-500';
+  if (!folded) return <p className={cls}>{children}</p>;
+  return (
+    <>
+      <p ref={ref} className={`${cls} ${open ? '' : 'line-clamp-2'}`}>{children}</p>
+      {(long || open) && (
+        <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
+          className="-my-1 py-1 text-[11px] font-medium text-fog-400 hover:text-fog-100">
+          {open ? tr('Less') : tr('More')}
+        </button>
+      )}
+    </>
+  );
+}
+
+/**
+ * A tag after a row's label: the choice is kept by this browser, not by the account (v0.86.0). It says where the setting
+ * lives, which four helps used to end on ("This device only."), and squared like every key since "no more pills".
+ */
+export function DeviceTag() {
+  return (
+    <span className="ms-1.5 inline-flex -translate-y-px items-center rounded-md border border-ink-600 px-1.5 align-middle text-[10px] font-medium leading-4 text-fog-400">
+      {tr('This device')}
+    </span>
+  );
+}
+
+/**
+ * A titled group of rows (v0.86.0): a short sentence-case heading, then one card whose rows are divided by hairlines,
+ * iPhone Settings' inset list. The settings pages are made of these instead of a card per section, so a page reads as a
+ * few named groups rather than a wall of equal cards. A note about the whole group goes UNDER it (`description`), as
+ * those lists do, where it explains without standing between the heading and the first switch.
+ *
+ * `overflow-hidden` so a whole-row button's hover and the arrival flash keep the card's corners; nothing inside opens in
+ * place over its edge (editors and dialogs are moved out to <body>, see `EditorSheet`). `min-w-0`, as Section's is, so
+ * a wide row wraps inside the card instead of widening the grid column.
+ */
+export function RowGroup({ title, description, action, id, className, children }: {
+  title?: string;
+  description?: ReactNode;
+  /** A key at the end of the heading: Notifications' Add. */
+  action?: ReactNode;
+  id?: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  const hid = useId();
+  return (
+    <section id={id} aria-labelledby={title ? hid : undefined} data-row-group className={`min-w-0 scroll-mt-4 lg:scroll-mt-20 ${className ?? ''}`}>
+      {(title || action) && (
+        <div className="mb-1.5 flex min-h-8 items-end justify-between gap-3 px-1">
+          {title ? <h3 id={hid} className="text-[13px] font-semibold text-fog-300">{title}</h3> : <span />}
+          {action && <div className="shrink-0">{action}</div>}
+        </div>
+      )}
+      <div className="card grad-border divide-y divide-ink-800/80 overflow-hidden rounded-2xl">
+        <RowPad.Provider value="group"><Folded.Provider value={true}>{children}</Folded.Provider></RowPad.Provider>
+      </div>
+      {description && <p className="mt-1.5 max-w-prose px-1 text-[11px] leading-relaxed text-fog-500">{description}</p>}
+    </section>
+  );
+}
+
+/**
+ * A row and whatever hangs under it -- a disclosure, a note, a second field -- as ONE divider unit: the group draws
+ * one line under the pair, and the block pads the pair as a row is padded where it sits. It replaces the wrapper plus
+ * `py-0!` on the Row inside that SwitchWithMore and the cleanup's day count each built by hand.
+ */
+export function RowBlock({ id, className, children }: { id?: string; className?: string; children: ReactNode }) {
+  const pad = useContext(RowPad);
+  return (
+    <div id={id} className={`${PAD[pad]} ${className ?? ''}`}>
+      <RowPad.Provider value="bare">{children}</RowPad.Provider>
+    </div>
+  );
+}
+
+/**
+ * A few rows under a small heading inside a group or More options: "Paged mode", "Webtoon mode". The group's hairline
+ * runs above it, and its own rows are divided as the group's are.
+ */
+export function RowSubgroup({ title, children }: { title: string; children: ReactNode }) {
+  const inset = useContext(RowPad) === 'group' ? 'px-4' : '';
+  return (
+    <div>
+      <p className={`${inset} pt-3 text-[11px] font-semibold text-fog-500`}>{title}</p>
+      <div className="divide-y divide-ink-800/80">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * Picture cards (v0.86.0): a choice that is easier seen than named -- the reader's mode and theme, what a wide page
+ * becomes, the page's background -- as square cards with a small drawing of the result (components/settingsArt.tsx),
+ * where a row of pills asked the reader to imagine it.
+ *
+ * The same radio group as `Segmented`: one tab stop, the arrows inside it (swapped under RTL, `radioKey`), "2 of 3,
+ * checked" announced, and a value outside the options checks nothing with the first card as the tab stop. Two options
+ * are two columns, more are three, never wider than `max-w-md`: on a wide pane they stay pictures, not banners.
+ * `optionProps` puts attributes on each card (the background's `data-tone-choice`, which the tests and walks select by).
+ */
+export function ChoiceCards<T extends string>({ label, value, options, disabled, onChange, optionProps }: {
+  label: string;
+  value: T | null;
+  options: ReadonlyArray<{ value: T; label: string; art: ReactNode }>;
+  disabled?: boolean;
+  onChange: (v: T) => void;
+  optionProps?: (v: T) => Record<string, string>;
+}) {
+  const rtl = useRtl();
+  const refs = useRef<Array<HTMLButtonElement | null>>([]);
+  const checked = options.findIndex((o) => o.value === value);
+  const pick = (i: number) => {
+    const o = options[i];
+    if (!o) return;
+    if (o.value !== value) onChange(o.value);
+    refs.current[i]?.focus();
+  };
+  return (
+    <div role="radiogroup" aria-label={label} data-choice-cards
+      className={`grid max-w-md gap-2.5 ${options.length === 2 ? 'grid-cols-2' : 'grid-cols-3'} ${disabled ? 'opacity-40' : ''}`}>
+      {options.map((o, i) => {
+        const on = i === checked;
+        return (
+          <button key={o.value} type="button" role="radio" aria-checked={on}
+            tabIndex={on || (checked === -1 && i === 0) ? 0 : -1} disabled={disabled}
+            ref={(el) => { refs.current[i] = el; }}
+            onClick={() => pick(i)}
+            onKeyDown={(e) => {
+              const next = radioKey(e.key, i, options.length, rtl);
+              if (next === null) return;
+              e.preventDefault();
+              pick(next);
+            }}
+            {...optionProps?.(o.value)}
+            className={`min-w-0 rounded-xl border p-1.5 text-start transition disabled:cursor-not-allowed ${on ? 'border-accent bg-accent-soft' : 'border-ink-700 hover:border-ink-500'}`}>
+            <span aria-hidden className="relative block h-16 overflow-hidden rounded-lg">{o.art}</span>
+            <span className="mt-1.5 flex items-start gap-1 px-0.5 text-xs font-medium leading-tight text-fog-100">
+              {on && <IcCheck width={12} height={12} className="mt-px shrink-0 text-accent" aria-hidden />}
+              <span className="min-w-0 break-words">{o.label}</span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Picture cards as a row of their own, under the label, with the tick beside the label. */
+export function ChoiceRow<T extends string>({ id, label, help, value, options, disabled, device, onChange, optionProps }: {
+  id?: string;
+  label: string;
+  help?: ReactNode;
+  value: T | null;
+  options: ReadonlyArray<{ value: T; label: string; art: ReactNode }>;
+  disabled?: boolean;
+  device?: boolean;
+  onChange: (v: T) => Promise<unknown> | unknown;
+  optionProps?: (v: T) => Record<string, string>;
+}) {
+  const { status, run } = useAutosave();
+  return (
+    <Row id={id} stacked label={label} help={help} status={status} device={device}>
+      <ChoiceCards label={label} value={value} options={options} disabled={disabled} optionProps={optionProps}
+        onChange={(v) => { void run(() => onChange(v)); }} />
+    </Row>
+  );
+}
+
+/** Two or three named values as square keys beside the label, saved as picked (the profile's own `Choice` until v0.86.0). */
+export function SegmentedRow<T extends string>({ id, label, help, value, options, disabled, device, onChange }: {
+  id?: string;
+  label: string;
+  help?: ReactNode;
+  value: T | null;
+  options: ReadonlyArray<{ value: T; label: string }>;
+  disabled?: boolean;
+  device?: boolean;
+  onChange: (v: T) => Promise<unknown> | unknown;
+}) {
+  const { status, run } = useAutosave();
+  return (
+    <Row id={id} label={label} help={help} status={status} device={device}>
+      <Segmented label={label} value={value} options={options} disabled={disabled} onChange={(v) => { void run(() => onChange(v)); }} />
+    </Row>
+  );
+}
+
+/**
+ * A long list as the platform's own menu (v0.86.0): the language, an interval in hours, a time of day. A native
+ * `<select>`, so a phone shows its own wheel or sheet and a keyboard types to jump, and the stored value is always one of
+ * the options -- the number boxes it replaces took any number and clamped it after. Optimistic as `SwitchRow` is: the
+ * menu shows the pick at once and goes back to the stored value if the save is refused.
+ *
+ * `[color-scheme:dark]` keeps the opened list dark on every tone; the chevron is drawn, at the end in either direction,
+ * because `appearance-none` takes the platform's away.
+ */
+export function SelectRow<T extends string>({ id, label, help, value, options, disabled, device, onChange }: {
+  id?: string;
+  label: string;
+  help?: ReactNode;
+  value: T;
+  options: ReadonlyArray<{ value: T; label: string }>;
+  disabled?: boolean;
+  device?: boolean;
+  onChange: (v: T) => Promise<unknown> | unknown;
+}) {
+  const fid = useId();
+  const { status, run } = useAutosave();
+  const [local, setLocal] = useState<T>(value);
+  // The prop catching up is adopted during render (SwitchRow's "previous prop" pattern).
+  const [seen, setSeen] = useState<T>(value);
+  if (value !== seen) { setSeen(value); setLocal(value); }
+  const pick = async (v: T) => {
+    setLocal(v);
+    if (!(await run(() => onChange(v)))) setLocal(value);
+  };
+  return (
+    <Row id={id} label={label} help={help} htmlFor={fid} status={status} device={device}>
+      <span className="relative inline-flex max-w-full">
+        <select id={fid} value={local} disabled={disabled} onChange={(e) => { void pick(e.target.value as T); }}
+          className="field w-auto max-w-full cursor-pointer appearance-none py-2 pe-9 [color-scheme:dark] disabled:cursor-default disabled:opacity-40">
+          {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+          strokeLinejoin="round" aria-hidden className="pointer-events-none absolute end-3 top-1/2 -translate-y-1/2 text-fog-500">
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </span>
+    </Row>
+  );
+}
+
+/**
+ * A setting too big for one row -- a list, a ranking, a few fields that only make sense together -- as ONE row that says
+ * what is set now and opens its editor (`EditorSheet`), or that leads to the page where it lives (`href`). The WHOLE row
+ * is the target, as LinkRow's is, so there is no small key to aim for.
+ *
+ * `href` is a real link -- a middle click still opens a tab -- whose plain click arrives the way the search palette's
+ * destinations do (lib/destinations.ts arrival): another page is a client-side navigation, this console on another tab a
+ * whole load, because a console reads its `?tab=` once.
+ */
+export function SummaryRow({ id, label, value, help, href, onClick, ref, device }: {
+  id?: string;
+  label: string;
+  /** What is set now, short: "2 blocked · 3 ranked". */
+  value?: ReactNode;
+  help?: ReactNode;
+  href?: string;
+  onClick?: () => void;
+  ref?: Ref<HTMLElement | null>;
+  device?: boolean;
+}) {
+  const pad = PAD[useContext(RowPad)];
+  const cls = `group flex w-full items-center gap-3 text-start transition hover:bg-ink-800/40 focus-visible:outline-offset-[-2px] ${pad}`;
+  const inner = (
+    <>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm text-fog-100">{label}{device && <DeviceTag />}</span>
+        {help != null && help !== false && <span className="mt-0.5 block max-w-prose text-[11px] leading-relaxed text-fog-500">{help}</span>}
+      </span>
+      {value != null && value !== false && <span className="min-w-0 max-w-[45%] truncate text-end text-xs text-fog-400">{value}</span>}
+      <IcChevronRight width={18} height={18} aria-hidden className="shrink-0 text-fog-500 transition group-hover:text-fog-200 rtl:-scale-x-100" />
+    </>
+  );
+  if (href) {
+    const go = (e: MouseEvent<HTMLAnchorElement>) => {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const how = arrival(href, window.location, (s) => !!document.getElementById(s));
+      if (how === 'push') return; // Link's own client-side navigation
+      e.preventDefault();
+      if (how === 'load') window.location.assign(href);
+      else if (how === 'scroll') {
+        const s = new URL(href, window.location.href).searchParams.get('section');
+        if (s) document.getElementById(s)?.scrollIntoView({ block: 'start' });
+      }
+    };
+    return <Link id={id} ref={ref as Ref<HTMLAnchorElement>} href={href} onClick={go} className={cls}>{inner}</Link>;
+  }
+  return (
+    <button id={id} ref={ref as Ref<HTMLButtonElement>} type="button" aria-haspopup="dialog" onClick={onClick} className={cls}>{inner}</button>
+  );
+}
+
+/**
+ * An editor's open state (v0.86.0), opened as well when search or `?section=` arrives at a row inside it (`SettingsGo`),
+ * once per arrival. Closing puts focus back on the summary row that opened it -- hand `row` to that row's `ref`.
+ */
+export function useEditor(id: string): { open: boolean; show: () => void; close: () => void; row: RefObject<HTMLElement | null> } {
+  const go = useContext(SettingsGo);
+  const [open, setOpen] = useState(false);
+  const [seen, setSeen] = useState(0);
+  if (go && go.editor === id && go.seq !== seen) { setSeen(go.seq); setOpen(true); }
+  const row = useRef<HTMLElement | null>(null);
+  const show = useCallback(() => setOpen(true), []);
+  const close = useCallback(() => {
+    setOpen(false);
+    requestAnimationFrame(() => row.current?.focus());
+  }, []);
+  return { open, show, close, row };
+}
+
+/**
+ * The editor a SummaryRow opens (v0.86.0): the app's bottom sheet -- centred on a wide screen -- moved out to <body>,
+ * because a `.card` blurs its backdrop and that traps fixed children (OnBody says why), and clear of the phone's bottom
+ * nav. Its rows keep the loose rhythm and show their help in full: the editor is where the detail lives. `footer` pins a
+ * row under the scroller, as the scanlation groups' one Save.
+ */
+export function EditorSheet({ title, open, onClose, footer, children }: {
+  title: string;
+  open: boolean;
+  onClose: () => void;
+  footer?: ReactNode;
+  children: ReactNode;
+}) {
+  if (!open) return null;
+  return (
+    <OnBody>
+      <Sheet title={title} onClose={onClose} overBottomNav footer={footer} wrapTitle>
+        <RowPad.Provider value="loose">
+          <Folded.Provider value={false}>
+            <div className="divide-y divide-ink-800/80 pb-3" data-editor-sheet>{children}</div>
+          </Folded.Provider>
+        </RowPad.Provider>
+      </Sheet>
+    </OnBody>
+  );
+}
+
+/**
+ * The rows few people change, folded under one "More options" row at the end of a group (v0.86.0). Search and
+ * `?section=` open it when they arrive at a row inside (`SettingsGo`), so a folded setting is never hidden from someone
+ * looking for it.
+ */
+export function MoreOptions({ id, label, children }: { id: string; label?: string; children: ReactNode }) {
+  const go = useContext(SettingsGo);
+  const [open, setOpen] = useState(false);
+  const [seen, setSeen] = useState(0);
+  if (go && go.more === id && go.seq !== seen) { setSeen(go.seq); setOpen(true); }
+  const pad = PAD[useContext(RowPad)];
+  const cid = `${id}-rows`;
+  return (
+    <div id={id} data-more-options>
+      <button type="button" aria-expanded={open} aria-controls={cid} onClick={() => setOpen((o) => !o)}
+        className={`group flex w-full items-center gap-2 text-start text-sm text-fog-300 transition hover:bg-ink-800/40 hover:text-fog-100 focus-visible:outline-offset-[-2px] ${pad}`}>
+        <span className="min-w-0 flex-1">{label ?? tr('More options')}</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+          strokeLinejoin="round" aria-hidden className={`shrink-0 text-fog-500 transition-transform ${open ? 'rotate-180' : ''}`}>
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+      {open && <div id={cid} className="divide-y divide-ink-800/80 border-t border-ink-800/80">{children}</div>}
+    </div>
+  );
+}
+
+/** The padding a row has where it is drawn (`RowPad`): for a row that is not a `Row` -- a notification target's. */
+export function useRowPad(): string {
+  return PAD[useContext(RowPad)];
 }

@@ -357,19 +357,24 @@ test('Run again only while something a run could still change is left: the serve
 
 /* ================================================================ the nightly */
 
-test('the nightly choice: Safe repair or Fix everything, saved as it is picked', () => {
-  // Reintroduce `patch({ nightly: m })` (or drop the row): "the nightly choice is not saved as nightlyMode" fails.
+test('the nightly choice: Off, Safe repair or Fix everything, saved as it is picked', () => {
+  // v0.86.0 (the owner's yes to cut D): the switch and the choice are ONE control. Off turns the nightly off; a mode turns
+  // it on and picks what it runs, in one save. Reintroduce `save({ nightly: m })` (or drop the row): "the nightly choice
+  // is not saved as nightlyMode" fails; save a mode without `repairEnabled: true`: a nightly turned off stays off when a
+  // mode is picked, and the same assertion fails.
   const settings = code('components/AdminSettings.tsx');
-  assert.match(settings, /<NightlyModeRow mode=\{nightlyModeOf\(data\)\} off=\{data\.repair_enabled === false\} onPick=\{\(m\) => patch\(\{ nightlyMode: m \}\)\} \/>/,
+  assert.match(settings, /<NightlyModeRow mode=\{nightlyModeOf\(data\)\} off=\{data\.repair_enabled === false\}\s*onPick=\{\(m\) => save\(m === 'off' \? \{ repairEnabled: false \} : \{ repairEnabled: true, nightlyMode: m \}\)\} \/>/,
     'the nightly choice is not saved as nightlyMode');
   const row = slice(settings, 'export function NightlyModeRow(', 'function HousekeepingSection(');
-  assert.match(row, /if \(!\(await run\(\(\) => onPick\(m\)\)\)\) setLocal\(mode\);/, 'a refused save leaves the choice where it was not saved');
-  assert.match(row, /<Segmented square label=\{label\} value=\{local\} disabled=\{off\}/);
+  assert.match(row, /if \(!\(await run\(\(\) => onPick\(m\)\)\)\) setLocal\(now\);/, 'a refused save leaves the choice where it was not saved');
+  assert.match(row, /<Segmented label=\{label\} value=\{local\}/);
   const html = renderToStaticMarkup(createElement(NightlyModeRow, { mode: 'autofix', off: false, onPick: async () => {} }));
-  assert.match(html, /role="radiogroup" aria-label="Every night"/);
+  assert.match(html, /role="radiogroup" aria-label="Repair the library nightly"/);
   assert.match(html, /aria-checked="true"[^>]*>(?:<span[^>]*><\/span>)?<span class="relative text-accent">Fix everything</, 'the stored choice is not the checked one');
   assert.ok(html.includes('Safe repair: retries, short chapters, gaps and the solver; nothing is deleted or merged.'));
-  assert.match(renderToStaticMarkup(createElement(NightlyModeRow, { mode: 'repair', off: true, onPick: async () => {} })), /disabled=""/, 'the choice is live while the nightly is off');
+  // Off is a choice of its own now, checked while the nightly is off (whatever mode is stored for when it is back on).
+  assert.match(renderToStaticMarkup(createElement(NightlyModeRow, { mode: 'autofix', off: true, onPick: async () => {} })),
+    /aria-checked="true"[^>]*>(?:<span[^>]*><\/span>)?<span class="relative text-accent">Off</, 'Off is not the checked choice while the nightly is off');
   // The answer's name is the contract's `nightlyMode`, the one the server sends, and the only one read (the
   // integration's answer to W's question 3); anything else is the safe repair. Reintroduce a read of `nightly_mode`:
   // "the column's name is read" fails.
@@ -377,8 +382,9 @@ test('the nightly choice: Safe repair or Fix everything, saved as it is picked',
   assert.equal(nightlyModeOf({ nightly_mode: 'autofix' } as { nightlyMode?: unknown }), 'repair', 'the column\'s name is read');
   assert.equal(nightlyModeOf({ nightlyMode: 'bogus' }), 'repair');
   assert.equal(nightlyModeOf(undefined), 'repair');
-  // The switch above no longer says "nothing is deleted or merged" over a nightly Fix everything.
-  assert.match(settings, /help=\{nightlyModeOf\(data\) === 'autofix'\s*\? tr\('Once a day, Fix everything runs by itself/);
+  // What each choice does is said beside it, the one in force brighter, so what Fix everything may do is read before it is
+  // picked -- and a nightly Fix everything is never described as "nothing is deleted or merged".
+  assert.match(row, /data-nightly-help="autofix">\s*\{tr\('Fix everything: also replaces sources, merges, deletes and installs extensions/);
 });
 
 /* ================================================================ Free a slot */

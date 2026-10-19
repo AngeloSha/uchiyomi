@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4077
+    "strings": 4104
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4080,5 +4080,32 @@
   "Translate the speech bubbles of any chapter into each reader’s language. Needs a one-time download of {size}, and {memory} of memory while it translates.": "将任意章节的对话气泡翻译成每位读者的语言。需要一次性下载 {size}，翻译时占用 {memory} 内存。",
   "The translation engine could not be downloaded.": "无法下载翻译引擎。",
   "Not enough free space: {free} free where it goes.": "可用空间不足：存放位置仅剩 {free}。",
-  "Download ({size})": "下载（{size}）"
+  "Download ({size})": "下载（{size}）",
+  "Alerts and app": "提醒与应用",
+  "Backups": "备份",
+  "Backups and repairs, every night.": "每晚的备份与修复。",
+  "Brightness, the gap between pages, auto-scroll and the cover’s colour at the edges are set in the reader, while you look at a page.": "亮度、页间距、自动滚动以及边缘的封面颜色，在阅读器里边看页面边设置。",
+  "Disk space": "磁盘空间",
+  "From the internet": "来自网络",
+  "General": "通用",
+  "Getting chapters": "获取章节",
+  "How new chapters arrive, and the space they take.": "新章节如何到来，以及占用的空间。",
+  "Its name, who may join, updates, and translation.": "名称、谁可以加入、更新与翻译。",
+  "Less": "收起",
+  "Library update interval": "书库更新间隔",
+  "Maintenance": "维护",
+  "More options": "更多选项",
+  "New chapters and problems, sent to your phone, Home Assistant or Discord.": "新章节和问题，发送到你的手机、Home Assistant 或 Discord。",
+  "Not saved": "未保存",
+  "Paged mode": "翻页模式",
+  "Privacy": "隐私",
+  "Repair": "修复",
+  "Scanlation groups": "汉化组",
+  "Search settings": "搜索设置",
+  "Series & chapters": "系列与章节",
+  "Series pages": "系列页面",
+  "Shortcuts": "快捷方式",
+  "Shown to members": "成员看到的内容",
+  "Updates and privacy": "更新与隐私",
+  "What members see, and what is looked up online.": "成员看到的内容，以及在网上查询的内容。"
 }

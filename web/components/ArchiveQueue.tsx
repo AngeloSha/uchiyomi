@@ -264,7 +264,7 @@ export function ArchiveAttentionRow({ item, view, admin }: { item: ArchiveItem; 
         <div className="mt-2 flex flex-wrap gap-2">
           <ArchiveKeys item={item} />
           <button type="button" onClick={() => setOpen(true)} aria-haspopup="dialog" className="btn-key">{tr('Details')}</button>
-          {admin && item.entry.attention?.why === 'disk' && <Link href="/admin/?tab=Settings" className="btn-key">{tr('Settings')}</Link>}
+          {admin && item.entry.attention?.why === 'disk' && <Link href="/admin/?tab=Settings&section=archive-free-space" className="btn-key">{tr('Settings')}</Link>}
         </div>
       </div>
       {open && <ArchiveSheet item={item} view={view} onClose={() => setOpen(false)} />}
@@ -299,7 +299,7 @@ export function ArchiveQueueNote({ view, admin }: { view: ArchiveView; admin: bo
       {admin && (
         <span className="flex items-center gap-3">
           <button type="button" disabled={busy} onClick={flip} className="btn-key">{view.paused ? tr('Resume all') : tr('Pause all')}</button>
-          <Link href="/admin/?tab=Settings" className="text-accent hover:underline">{tr('Settings')}</Link>
+          <Link href="/admin/?tab=Settings&section=slow-archive" className="text-accent hover:underline">{tr('Settings')}</Link>
         </span>
       )}
     </div>

@@ -162,7 +162,7 @@ test('the three job-card readers all draw the lines through jobNoteLines', () =>
 
 // ---- the admin switch ----
 
-test('Admin → Settings has exactly one switch for the hunt, under Updates & schedules, on unless told otherwise', () => {
+test('Admin → Settings has exactly one switch for the hunt, under Downloads, on unless told otherwise', () => {
   // The hunt is on by default (server column `auto_follow_on_failure NOT NULL DEFAULT true`), so the row
   // reads `!== false`: a server that does not send the key yet is a server that hunts, and the switch says
   // so. It lives outside the extensions block because the hunt asks every registered source.
@@ -172,12 +172,12 @@ test('Admin → Settings has exactly one switch for the hunt, under Updates & sc
   const src = code(read('components/AdminSettings.tsx'));
   assert.equal((src.match(/autoFollowOnFailure/g) ?? []).length, 1, 'the hunt switch is saved from more or fewer than one place');
   assert.match(src, /data\.auto_follow_on_failure !== false/, 'the hunt is not on unless told otherwise');
-  const section = between(src, 'function SchedulesSection(', 'function HousekeepingSection(', 'SchedulesSection');
-  // After the extensions block, not inside it: an install without an engine still hunts.
-  const ext = section.indexOf('data.extensions_configured && (');
-  const sw = section.indexOf('autoFollowOnFailure: next');
-  const extEnd = section.indexOf('</>\n      )}', ext);
-  assert.ok(ext > 0 && extEnd > ext && sw > extEnd, 'the hunt switch is inside the extensions block, so an install without an engine cannot see it');
+  // In Downloads (v0.86.0), and never behind the extensions' condition: an install without an engine still hunts.
+  // Reintroduce by wrapping the row in `data.extensions_configured && (…)`: "the hunt switch is behind the extensions"
+  // fails.
+  const section = between(src, 'function SchedulesSection(', 'function MaintenanceSection(', 'SchedulesSection');
+  assert.ok(section.includes('autoFollowOnFailure: next'), 'the hunt switch is not in Downloads');
+  assert.ok(!section.includes('extensions_configured'), 'the hunt switch is behind the extensions');
 });
 
 test('Health keeps explanatory notes reachable when a check has no active findings', () => {

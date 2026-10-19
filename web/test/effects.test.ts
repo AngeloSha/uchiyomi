@@ -142,12 +142,14 @@ test('prefers-reduced-motion does exactly what it did before the switch existed'
   // zero durations -- and gains nothing. Reintroduce by folding the switch into it (hiding the fx layers
   // under the media query): "the reduced-motion block changed" fails. (v0.75.0: the phone hero's drift, a CSS
   // animation since then, stops here as the mesh's does -- the same "no drift", not a Reduce effects rule -- and so do the
-  // badge emblems' sheen and Legend's halo, v0.75.0.)
+  // badge emblems' sheen and Legend's halo, v0.75.0. v0.86.0: a settings row search lands on is lit still instead of
+  // fading -- a fade cut to nothing by the last rule would never show where the row is; the same "no motion".)
   const inPrm = CSS().filter((r) => r.ctx.join('|') === '@media (prefers-reduced-motion: reduce)');
   assert.deepEqual(inPrm.map((r) => `${r.sel} { ${flat(r.body)} }`), [
     '.fx-mesh { animation: none; }',
     '.hero-drift { animation: none; }',
     '.badge-sheen, .badge-halo { animation: none; }',
+    '.settings-flash { animation: none; background-color: rgb(var(--accent) / 0.14); }',
     '*, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }',
   ], 'the reduced-motion block changed');
 });
@@ -353,7 +355,7 @@ test('the Appearance section has the Reduce effects switch, and it saves to the 
   const end = src.indexOf('function ReadingSection(');
   assert.ok(start > 0 && end > start, 'AppearanceSection or ReadingSection moved');
   const slice = src.slice(start, end);
-  assert.match(slice, /<SwitchRow label=\{tr\('Reduce effects'\)\}\s*help=\{tr\('Turns off the animated background, blur, smooth scrolling and transitions\. Try it if scrolling feels slow\.'\)\}\s*on=\{reduceEffects\} onChange=\{saveReduceEffects\} \/>/,
+  assert.match(slice, /<SwitchRow id="reduce-effects" label=\{tr\('Reduce effects'\)\}\s*help=\{tr\('Turns off the animated background, blur, smooth scrolling and transitions\. Try it if scrolling feels slow\.'\)\}\s*on=\{reduceEffects\} onChange=\{saveReduceEffects\} \/>/,
     'the Reduce effects row is not in Appearance');
   assert.match(slice, /const \[reduceEffects, saveReduceEffects\] = useReduceEffects\(\);/, 'the row does not read the account setting');
   // The hook is shared with the profile's quick settings (components/ProfileMenu.tsx), so it is read where it lives.

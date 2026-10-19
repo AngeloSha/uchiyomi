@@ -282,7 +282,7 @@ uninstalling — is in **[the desktop guide](docs/DESKTOP.md)**. No Linux or Win
 ## Translations
 
 The interface ships in **English, Spanish, French, German, Portuguese (Brazil), Russian, Japanese, Chinese
-and Arabic**, with right-to-left layout for Arabic. Pick one under **Profile → Settings → Language**; the choice
+and Arabic**, with right-to-left layout for Arabic. Pick one under **Profile → Settings → General → Language**; the choice
 follows your account to other devices.
 
 **Everything except English is machine-assisted and has not been checked by a native speaker.** If something

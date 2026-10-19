@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import * as preview from '../lib/notifyDigest';
+import { ADMIN_SETTINGS } from '../lib/settingsIndex.admin';
 
 const ROOT = join(__dirname, '..');
 // ⚠️ The server's template is loaded at RUN time, by a computed path, and never with `import … from
@@ -23,16 +24,17 @@ const code = (src: string): string =>
   src.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
 const PANEL = 'components/AdminNotifications.tsx';
 
-test('the Notifications section is mounted once, after the four pinned sections, and Server stays first', () => {
-  // run.mjs reads the first 4000 characters of the Settings tab for the install-count payload, so Server
-  // must stay first, and settingsConsole.test.ts pins the other three after it in order.
-  // Reintroduce by moving `<NotificationsSection />` above `<ServerSection`: the order assertion fails.
+test('Notifications is mounted once, as the last category, and Server stays first', () => {
+  // run.mjs reads the first 4000 characters of the Settings tab for the install-count payload, so Server must stay the
+  // category shown first (v0.86.0, lib/settingsIndex.admin.ts). Reintroduce by moving `notifications` to the top of the
+  // registry's categories: "Server is not first" fails.
   const src = code(read('components/AdminSettings.tsx'));
   assert.match(src, /import \{ NotificationsSection \} from '@\/components\/AdminNotifications';/);
   assert.equal((src.match(/<NotificationsSection\b/g) ?? []).length, 1, 'the section is mounted more than once, or not at all');
-  const grid = src.slice(src.indexOf('return (\n    <div className={SETTINGS_GRID}>'));
-  assert.match(grid, /<ServerSection [^\n]*\/>\s*<SchedulesSection [^\n]*\/>\s*<HousekeepingSection [^\n]*\/>\s*<ScanlatorsSection [^\n]*\/>\s*\{\}\s*<NotificationsSection \/>/,
-    'Notifications is not the last section after Server, Updates & schedules, Library housekeeping and Scanlators');
+  assert.match(src, /notifications: \{[^\n]*\n\s*pane: <NotificationsSection \/> \}/, 'Notifications is not the notifications category\'s pane');
+  const ids = ADMIN_SETTINGS.categories.map((c) => c.id);
+  assert.equal(ids[0], 'server', 'Server is not first');
+  assert.equal(ids[ids.length - 1], 'notifications', 'Notifications is not the last category');
 });
 
 test('A STORED ADDRESS, TOKEN OR TOPIC IS NEVER PUT BACK ON SCREEN -- credential fields start empty, even on edit', () => {

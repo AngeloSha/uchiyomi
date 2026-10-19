@@ -19,19 +19,20 @@ const slice = (src: string, from: string, to: string): string => {
   return src.slice(a, src.indexOf(to, a + 1));
 };
 
-test('Admin → Settings: Finish downloads on their own in Updates & schedules, the one switch, on unless off', () => {
+test('Admin → Settings: Finish downloads on their own in Downloads, the one switch, on unless off', () => {
   const schedules = slice(code(read('components/AdminSettings.tsx')), 'function SchedulesSection(', 'export function NightlyModeRow(');
   // Reintroduce `=== true`: a server that does not send the key yet (and every new one, whose column defaults on) would
   // show the switch off while it is on. v0.81.0: it is also the switch for looking for other sources (it was "Use other
   // sources on their own"): both written together, and on only while both are. Reintroduce by saving finishDownloads
   // alone: the search for other sources can no longer be turned off.
-  assert.match(schedules, /<SwitchRow label=\{tr\('Finish downloads on their own'\)\}[\s\S]*?on=\{data\.finish_downloads !== false && data\.auto_follow_on_failure !== false\}\s*onChange=\{\(next\) => save\(\{ finishDownloads: next, autoFollowOnFailure: next \}\)\} \/>/);
+  assert.match(schedules, /<SwitchRow id="finish-downloads" label=\{tr\('Finish downloads on their own'\)\}[\s\S]*?on=\{data\.finish_downloads !== false && data\.auto_follow_on_failure !== false\}\s*onChange=\{\(next\) => save\(\{ finishDownloads: next, autoFollowOnFailure: next \}\)\} \/>/);
   assert.match(schedules, /On by default\./, 'the help does not say it is on until turned off');
   assert.match(schedules, /finds a new one/, 'the help does not say it looks for other sources');
   assert.match(schedules, /Off, chapters come only with the library update, from the sources you picked\./, 'the help does not say what off means');
   assert.doesNotMatch(schedules, /Use other sources on their own/, 'a second switch for the same thing');
-  const d = DESTINATIONS.find((x) => x.key === 'finish-downloads');
-  assert.equal(d?.href, '/admin/?tab=Settings&section=schedules');
+  // Search lands on the row itself since v0.86.0 (lib/settingsIndex.admin.ts generates it).
+  const d = DESTINATIONS.find((x) => x.key === 'admin-finish-downloads');
+  assert.equal(d?.href, '/admin/?tab=Settings&section=finish-downloads');
   assert.equal(d?.admin, true);
   assert.ok(d?.keywords?.includes('rate limit'), 'searching "rate limit" does not find it');
 });

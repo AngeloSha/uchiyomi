@@ -65,12 +65,13 @@ export function healthLinks(check: string, it: HealthItem): HealthLink[] {
     // #72: the engine's row is about no series; its setup steps, Check again and Connect are on Admin → Sources.
     case 'extension-engine':
       return [{ href: '/admin/?tab=Sources' }];
-    // v0.72.0: free space to the floors' own settings (the slow archive's is there; the downloader's is MIN_FREE_GB), and
+    // v0.72.0: free space to the floors' own settings (the slow archive's free-space row, in its editor since v0.86.0; the
+    // downloader's is MIN_FREE_GB), and
     // a folder that is empty or cannot be read to Verify chapter files, which checks every file once it is back.
     case 'disk':
       return it.key?.startsWith('folder:')
         ? [{ href: '/admin/?tab=Tasks&section=task-verify', label: tr('Verify chapter files') }]
-        : [{ href: '/admin/?tab=Settings&section=downloads', label: tr('Downloads') }];
+        : [{ href: '/admin/?tab=Settings&section=archive-free-space', label: tr('Downloads') }];
     // v0.72.0: a member's tracker sign-in is theirs to renew, under their own Profile: nothing here to open.
     case 'trackers':
       return [];

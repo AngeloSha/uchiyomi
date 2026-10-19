@@ -1075,7 +1075,7 @@ signed in on that browser to an identity at the provider. The whole mode is unde
 [Single sign-on (OIDC)](#single-sign-on-oidc), below.
 
 **Signing up** (the form since v0.61.0). `POST /auth/register` `{username, password, displayName?, deviceId?,
-deviceName?}` works only while **Admin → Settings → Open registration** is on — `GET /auth/config` says so as
+deviceName?}` works only while **Admin → Settings → Server → Open registration** is on — `GET /auth/config` says so as
 `allowRegistration`, which the sign-in screen reads to offer *Create an account*, and which is always false on
 Uchiyomi Desktop — and is otherwise **403** `registration_disabled`. It makes a member (role `user`), with the
 new-member defaults (`newMemberDefaults` under [Admin](#admin)), and signs them in exactly as `/auth/login` does: the same body, cookies and session, named by `deviceId`/`deviceName` like a sign-in's.

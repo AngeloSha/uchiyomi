@@ -16,6 +16,7 @@ import { t as tr } from '@/lib/i18n';
 import { hiddenOnDesktop, isDesktop, DESKTOP_HIDDEN } from '@/lib/desktop';
 import { effectsReduced } from '@/lib/effects';
 import { arrival, findDestinations, whereText, type Destination } from '@/lib/destinations';
+import { settingsGoTo, settingsKnow } from '@/components/SettingsLayout';
 import { isTypingTarget, seedFor, typeToSearchKey, typeToSearchOn } from '@/lib/typeToSearch';
 import { useLayer } from '@/lib/layers';
 import { canDownload, useAuth } from '@/lib/auth';
@@ -93,13 +94,15 @@ export function CommandPalette({ open, seed = '', onClose }: { open: boolean; se
   // console reads `?tab=` once (lib/destinations.ts `arrival`, lib/useTabParam.ts).
   const goTo = useCallback((href: string) => {
     onClose();
-    const how = arrival(href, window.location, (id) => !!document.getElementById(id));
+    // A setting whose page is open is the settings layout's to open (v0.86.0): its category may not be the one on screen.
+    const how = arrival(href, window.location, (id) => settingsKnow(id) || !!document.getElementById(id));
     if (how === 'push') router.push(href);
     else if (how === 'load') window.location.assign(href);
     else if (how === 'scroll') {
       const id = new URL(href, window.location.href).searchParams.get('section');
       const still = effectsReduced() || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      if (id) document.getElementById(id)?.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' });
+      if (id && settingsKnow(id)) settingsGoTo(id);
+      else if (id) document.getElementById(id)?.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' });
     }
   }, [onClose, router]);
 

@@ -12,6 +12,7 @@ import { join } from 'path';
 // Pure, so it is called rather than pinned (builder A's tab-address test below).
 import { readTab, withTab } from '../lib/tabParam';
 import { SOURCES_TAB_ALIASES } from '../lib/sourcesPanel';
+import { ADMIN_SETTINGS } from '../lib/settingsIndex.admin';
 
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -119,7 +120,11 @@ test('the settings grid never caps the page', () => {
   assert.ok(m, 'SETTINGS_GRID is not exported as a string constant');
   assert.match(m[1], /\bxl:grid-cols-2\b/, 'the grid no longer goes to two columns at xl');
   assert.doesNotMatch(m[1], /max-w/, 'SETTINGS_GRID caps the page');
-  assert.doesNotMatch(src, /max-w-(?:xs|sm|lg|xl|\dxl|screen|\[)/, 'a cap wider than max-w-prose/max-w-md somewhere in settings.tsx');
+  // A share of a row (`max-w-[45%]`, a summary row's value) is no page cap: it shrinks with the row.
+  assert.doesNotMatch(src, /max-w-(?:xs|sm|lg|xl|\dxl|screen|\[(?!\d+%\]))/, 'a cap wider than max-w-prose/max-w-md somewhere in settings.tsx');
+  // v0.86.0: the settings layout holds the panes, and answers width with columns too (layout.mjs measures it).
+  // Reintroduce by `max-w-5xl` on the pane: "the settings layout caps the page" fails.
+  assert.doesNotMatch(code(read('components/SettingsLayout.tsx')), /max-w-(?:xs|sm|md|lg|xl|\dxl|screen|\[)/, 'the settings layout caps the page');
 });
 
 // ---- builder C: ProfileSettings (Appearance · Reading · Downloads · This device) and ProfileAccount ----
@@ -136,28 +141,32 @@ test('reader defaults on the profile write through the reader\'s own store', () 
   assert.match(src, /import \{ ReaderPrefs, loadPrefs, savePrefs, syncPrefsFromServer \} from '@\/lib\/readerPrefs';/, 'the profile does not use the reader store');
   assert.doesNotMatch(src, /yomi_reader_prefs|json: \{ reader/, 'the profile writes the reader store itself');
   // Local-first, exactly as the reader's sheet: state first, then the store (which debounces the server).
-  assert.match(src, /const set = \(p: Partial<ReaderPrefs>\) => \{ const n = \{ \.\.\.prefs, \.\.\.p \}; setPrefs\(n\); savePrefs\(n\); \};/, 'a reader default is not written local-first through savePrefs');
+  assert.match(src, /const setReader = \(p: Partial<ReaderPrefs>\) => \{ const n = \{ \.\.\.prefs, \.\.\.p \}; setPrefs\(n\); savePrefs\(n\); \};/, 'a reader default is not written local-first through savePrefs');
   assert.match(src, /const \[prefs, setPrefs\] = useState\(loadPrefs\);/, 'the defaults do not start from the local store');
   // The server copy is adopted once it answers, and never after the section is gone.
   assert.match(src, /syncPrefsFromServer\(\)\.then\(\(p\) => \{ if \(live\) setPrefs\(p\); \}\);/, 'the server copy is not adopted, or is adopted after unmount');
-  // The goal is the stats query's number, so a change must refetch the stats or the hero pill lies.
-  assert.match(src, /json: \{ weeklyGoal: n \}/, 'the weekly goal does not PUT {weeklyGoal}');
-  assert.match(src, /qc\.invalidateQueries\(\{ queryKey: \['stats'\] \}\)/, 'saving the goal does not refetch the stats');
+  // The goal is the stats query's number, so a change must refetch the stats or the hero pill lies. Since v0.86.0 the
+  // goal lives in the hero alone (the owner's yes to cut A): its dialog saves it there.
+  const page = code(read('app/profile/page.tsx'));
+  assert.match(page, /json: \{ weeklyGoal: n \}/, 'the weekly goal does not PUT {weeklyGoal}');
+  assert.match(page, /qc\.invalidateQueries\(\{ queryKey: \['stats'\] \}\)/, 'saving the goal does not refetch the stats');
+  assert.doesNotMatch(src, /weeklyGoal/, 'the weekly goal is back in Settings, a third place to set it');
   // Smart downloads keep the body the server already takes.
   assert.match(src, /json: \{ smartOffline: next \}/, 'Keep favorites offline no longer PUTs {smartOffline}');
 });
 
-test('the language chips stay locked while a once-only secret is on screen', () => {
+test('the language menu stays locked while a once-only secret is on screen', () => {
   // I18nProvider remounts its whole subtree on a language change (`<div key={lang}>`), and three values are
   // shown exactly once and never again: the OPDS password, a fresh API token, the 2FA recovery codes. They
   // live on OTHER tabs now, so the Language row cannot see them in React state; it asks lib/shownOnce.ts at
   // render time instead, which any tab switch re-runs. Reintroduce by dropping `disabled={locked}` from the
-  // chips: "the chips are not locked" fails; or by holding `locked` in a `useState` read once: "the lock is
+  // menu (chips until v0.86.0): "the menu is not locked" fails; or by holding `locked` in a `useState` read once: "the lock is
   // not read at render time" fails, because a token minted after the Settings tab first rendered would not
   // lock it.
   const src = code(read('components/ProfileSettings.tsx'));
   assert.match(src, /const locked = !!readShownOnce\('opds\.link'\) \|\| !!readShownOnce\('apiToken\.fresh'\) \|\| !!readShownOnce\('totp\.recovery'\);/, 'the lock is not read at render time, or misses one of the three secrets');
-  assert.match(src, /onClick=\{\(\) => setLang\(l\.code\)\} disabled=\{locked\}/, 'the chips are not locked');
+  assert.match(src, /<SelectRow<Locale> label=\{tr\('Language'\)\} value=\{lang\} disabled=\{locked\}/, 'the menu is not locked');
+  assert.match(src, /onChange=\{\(code\) => setLang\(code\)\}/, 'the menu does not set the language');
   assert.match(src, /\{locked && \(\s*<p className="mt-2 max-w-prose text-\[11px\] text-amber-300">/, 'the lock has no sentence explaining itself');
   assert.doesNotMatch(src, /useState\([^)]*readShownOnce/, 'the lock is held in state rather than read on every render');
 });
@@ -301,7 +310,7 @@ test('the profile has five tabs and no leftover cards', () => {
   assert.equal(existsSync(join(ROOT, 'components/SettingsCard.tsx')), false, 'SettingsCard.tsx is back');
   assert.equal(existsSync(join(ROOT, 'components/SecurityPanel.tsx')), false, 'SecurityPanel.tsx is back');
   // The three settings tabs render their own grid; only You is a board of cards.
-  assert.match(src, /<ProfileSettings weeklyGoal=\{stats\?\.weeklyGoal \?\? 0\} \/>/, 'the Settings tab is not ProfileSettings');
+  assert.match(src, /<ProfileSettings \/>/, 'the Settings tab is not ProfileSettings');
   assert.match(src, /<ProfileConnections focusTracking=\{focusTracking && tab === 'Connections'\} \/>/, 'the Connections tab is not ProfileConnections');
   assert.match(src, /<ProfileAccount \/>/, 'the Account tab is not ProfileAccount');
   assert.equal((src.match(/className="board"/g) || []).length, 1, 'the .board wrapper is not the You tab alone');
@@ -415,9 +424,11 @@ test('the install-count disclosure opens with the switch and is open while count
   const drawer = section.slice(section.indexOf("<Disclosure key={on ? 'counting'"), section.indexOf('</Disclosure>', section.indexOf("<Disclosure key={on ? 'counting'")));
   assert.match(drawer, /<code>\{`POST \$\{preview\.url\}\\n\$\{JSON\.stringify\(preview\.payload, null, 2\)\}`\}<\/code>/, 'the payload is described rather than shown');
   assert.equal((drawer.match(/<li>\{tr\('/g) ?? []).length, 3, 'the three promises are not all inside the disclosure');
-  // Server is the first section in the DOM: run.mjs reads the first 4000 characters of body text for it.
-  const grid = src.slice(src.indexOf('<div className={SETTINGS_GRID}>', src.indexOf('return (\n    <div className={SETTINGS_GRID}>')));
-  assert.match(grid, /<ServerSection [^\n]*\/>\s*<SchedulesSection [^\n]*\/>\s*<HousekeepingSection [^\n]*\/>\s*<ScanlatorsSection /, 'the sections are not in the order Server, Updates & schedules, Library housekeeping, Scanlators');
+  // Server is the category shown first (v0.86.0: the layout opens the first one when the address names none), so its rows
+  // are in the first 4000 characters of body text run.mjs reads for the payload. Reintroduce by moving Downloads first in
+  // the registry: "Server is not the category shown first" fails.
+  assert.equal(ADMIN_SETTINGS.categories[0].id, 'server', 'Server is not the category shown first');
+  assert.match(src, /server: \{[^\n]*\n\s*pane: <ServerSection data=\{data\} save=\{save\} \/> \}/, 'Server does not draw ServerSection');
 });
 
 // ---- fixer X2 (review R1/R2): keyboard focus on Connections, the dialogs, the phone pills, 2FA state ----
@@ -443,15 +454,15 @@ test('focus never drops to <body> on the Connections tab', () => {
   assert.match(opds, /const r = await api<OpdsLink>\('\/api\/opds\/token', \{ method: 'POST' \}\); after\(doneRef\); setLink\(r\);/, 'Generate does not send focus to Done');
   assert.match(opds, /const done = \(\) => \{ after\(actionRef\); setLink\(null\); \};/, 'OPDS Done does not send focus back to the header action');
   assert.match(opds, /await api\('\/api\/opds\/token', \{ method: 'DELETE' \}\); setLink\(null\); await load\(\); after\(actionRef\);/, 'OPDS Revoke does not send focus to the header action');
-  assert.match(opds, /<button ref=\{actionRef\} type="button" onClick=\{gen\} disabled=\{busy\} className="chip text-xs disabled:opacity-50">/, 'the OPDS action is not the ref-carrying chip (an accent button wrapped the German title to three lines at 390)');
-  assert.match(opds, /<button ref=\{doneRef\} type="button" onClick=\{done\} className="chip text-xs">\{tr\('Done'\)\}<\/button>/, 'the OPDS Done is not the ref-carrying chip');
+  assert.match(opds, /<button ref=\{actionRef\} type="button" onClick=\{gen\} disabled=\{busy\} className="btn-key">/, 'the OPDS action is not the ref-carrying key (an accent button wrapped the German title to three lines at 390)');
+  assert.match(opds, /<button ref=\{doneRef\} type="button" onClick=\{done\} className="btn-key">\{tr\('Done'\)\}<\/button>/, 'the OPDS Done is not the ref-carrying key');
   // Tokens: Create → Done, Done → New token, Revoke → New token; the form's Cancel forgets the scopes.
   const tokens = src.slice(src.indexOf('function TokensSection('));
   assert.match(tokens, /after\(doneRef\); setFresh\(r\.token\);/, 'Create does not send focus to Done');
   assert.match(tokens, /const done = \(\) => \{ after\(actionRef\); setFresh\(null\); \};/, 'token Done does not send focus back to New token');
   assert.match(tokens, /await api\(`\/api\/tokens\/\$\{id\}`, \{ method: 'DELETE' \}\); after\(actionRef\);/, 'token Revoke does not send focus to New token');
   assert.match(tokens, /<button ref=\{actionRef\} type="button" onClick=\{\(\) => \(open \? cancel\(\) : setOpen\(true\)\)\}/, 'New token does not carry the action ref');
-  assert.match(tokens, /<button ref=\{doneRef\} type="button" onClick=\{done\} className="chip mt-2 text-xs">\{tr\('Done'\)\}<\/button>/, 'the token Done is not the ref-carrying chip');
+  assert.match(tokens, /<button ref=\{doneRef\} type="button" onClick=\{done\} className="btn-key mt-2">\{tr\('Done'\)\}<\/button>/, 'the token Done is not the ref-carrying key');
   // R2: a scope ticked for an abandoned token carried over to the next one. The mint's own reset line is
   // pinned by forgetSeries.test.ts and stays as it is; Cancel resets the same three.
   assert.match(tokens, /const cancel = \(\) => \{ setOpen\(false\); setName\(''\); setWrite\(false\); setAdmin\(false\); setAdult\(false\); \};/, 'Cancel keeps the scopes ticked for the next token');
@@ -640,19 +651,23 @@ test('Admin → Settings notes are readable and its group inputs are named', () 
   assert.ok(chips.length > 0, 'no GroupChips');
   assert.match(chips, /<input\s*value=\{draft\}\s*aria-label=\{label\}/, 'the group input has no accessible name');
   assert.doesNotMatch(src, /text-\[10px\]/, 'text under 11 px is back on Admin → Settings');
-  assert.match(chips, /text-\[11px\] font-semibold uppercase tracking-wider text-fog-500">\{tr\('Known groups'\)\}/, 'the Known groups eyebrow is not 11 px fog-500');
+  // Sentence case since v0.86.0: no CSS capitals in the settings (they read as shouting in German and do nothing in Arabic).
+  assert.match(chips, /text-\[11px\] font-semibold text-fog-500">\{tr\('Known groups'\)\}/, 'the Known groups heading is not 11 px fog-500');
+  assert.doesNotMatch(src, /\buppercase\b/, 'a CSS-capitals eyebrow is back in Admin → Settings');
   assert.equal((src.match(/text-fog-600/g) ?? []).length, 1, 'fog-600 is used for more than the one decorative count');
 });
 
-test('Admin → Settings → Downloads comes after the pinned sections, and saves each knob the way the server takes it', () => {
-  // #117. Its switch reads "on" for a running archive, and the column is `archive_paused`; the window's two
-  // ends go together because the server refuses one alone. Reintroduce `save({ archivePaused: next })`: "the
-  // switch pauses the archive when it is turned on" fails; save one end alone: "one end of the window".
-  const grid = code(read('components/AdminSettings.tsx'));
-  assert.match(grid, /<ScanlatorsSection [^\n]*\/>\s*\{\}\s*<NotificationsSection \/>\s*\{\}\s*<DownloadsSection data=\{data\} save=\{save\} \/>/,
-    'the Downloads section is not after the pinned sections');
+test('Admin → Settings → Downloads → Slow archive is one row with its editor, and saves each knob the way the server takes it', () => {
+  // #117. v0.86.0: one row in the Downloads category says whether it runs and opens the knobs. Its switch reads "on" for
+  // a running archive, and the column is `archive_paused`; the window's two ends go together because the server refuses
+  // one alone. Reintroduce `save({ archivePaused: next })`: "the switch pauses the archive when it is turned on" fails;
+  // save one end alone: "one end of the window".
+  const admin = code(read('components/AdminSettings.tsx'));
+  const downloads = admin.slice(admin.indexOf('function SchedulesSection('), admin.indexOf('function MaintenanceSection('));
+  assert.match(downloads, /<SlowArchiveRow data=\{data\} save=\{save\} \/>/, 'the slow archive is not a row of Downloads');
   const src = code(read('components/ArchiveSettings.tsx'));
-  assert.match(src, /<Section id="downloads" title=\{tr\('Downloads'\)\}/, 'the section is not Downloads');
+  assert.match(src, /<SummaryRow id="slow-archive" ref=\{editor\.row\} label=\{tr\('Slow archive'\)\} onClick=\{editor\.show\}/, 'the row is not the slow archive\'s summary');
+  assert.match(src, /<EditorSheet title=\{tr\('Slow archive'\)\} open=\{editor\.open\} onClose=\{editor\.close\}>/, 'the knobs are not in the row\'s editor');
   assert.match(src, /on=\{data\.archive_paused !== true\} onChange=\{\(next\) => save\(\{ archivePaused: !next \}\)\}/, 'the switch pauses the archive when it is turned on');
   assert.match(src, /min=\{ARCHIVE_PACE\.perHourRange\[0\]\} max=\{ARCHIVE_PACE\.perHourRange\[1\]\}/, 'the pace row is not held to the server\'s range');
   assert.match(src, /help=\{archivePaceHelp\(perHour\)\} onSave=\{\(n\) => save\(\{ archivePerHour: n \}\)\}/, 'the pace row does not say what it comes to');
@@ -662,22 +677,19 @@ test('Admin → Settings → Downloads comes after the pinned sections, and save
   assert.match(src, /onSave=\{\(n\) => save\(\{ archiveMinFreeGb: n \}\)\}/);
   // Its strings are in all eight languages (the console test above lists this file too).
   assert.ok(trKeys(['components/ArchiveSettings.tsx']).size >= 15, 'the scan found too few strings in the section');
-  for (const f of localeFiles()) assert.deepEqual(missingIn(f, trKeys(['components/ArchiveSettings.tsx'])), [], `${f} lacks a Downloads string`);
+  for (const f of localeFiles()) assert.deepEqual(missingIn(f, trKeys(['components/ArchiveSettings.tsx'])), [], `${f} lacks a slow archive string`);
 });
 
-test('Admin → Settings has a key for every card above them, each to its own card', () => {
-  // UI refresh: nine cards in a grid, and the one at the bottom was a long scroll away. The index names each card by its
-  // `<Section id>` and its own title. Reintroduce by adding a card without its key: "a card has no key" fails; by
-  // pointing a key at an id that no card has: "a key goes nowhere" fails.
-  const files = ['components/AdminSettings.tsx', 'components/AdminNotifications.tsx', 'components/ArchiveSettings.tsx'];
-  const cards = files.flatMap((f) => [...code(read(f)).matchAll(/<Section id="([^"]+)" title=\{tr\('([^']+)'\)\}/g)].map((m) => `${m[1]} ${m[2]}`));
-  assert.equal(cards.length, 9, 'the cards are not where this test looks');
+test('Admin → Settings draws every category the registry names, and nothing else', () => {
+  // v0.86.0: the nine cards and their row of keys became five categories (lib/settingsIndex.admin.ts), drawn by
+  // components/SettingsLayout.tsx from the views AdminSettings gives it. A view the registry does not name is never
+  // drawn, and a category with no view is skipped: both would be settings nobody can reach. Reintroduce by dropping
+  // `maintenance:` from the views: "a category has no view" fails.
   const admin = code(read('components/AdminSettings.tsx'));
-  const index = admin.slice(admin.indexOf('<SectionIndex '), admin.indexOf(']} />', admin.indexOf('<SectionIndex ')));
-  const keys = [...index.matchAll(/\['([^']+)', tr\('([^']+)'\)\]/g)].map((m) => `${m[1]} ${m[2]}`);
-  for (const c of cards) assert.ok(keys.includes(c), `a card has no key: ${c}`);
-  for (const k of keys) assert.ok(cards.includes(k), `a key goes nowhere: ${k}`);
-  // Instantly under reduced motion or Reduce effects, as a `?section=` arrival is.
-  const shared = code(read('components/settings.tsx'));
-  assert.match(shared, /scrollIntoView\(\{ block: 'start', behavior: reduced \|\| fewer \? 'auto' : 'smooth' \}\)/);
+  const views = admin.slice(admin.indexOf('const views: Record<string, CategoryView> = {'), admin.indexOf('  };', admin.indexOf('const views: Record<string, CategoryView> = {')));
+  const drawn = [...views.matchAll(/^\s{4}(\w+): \{/gm)].map((m) => m[1]);
+  const named = ADMIN_SETTINGS.categories.map((c) => c.id);
+  for (const c of named) assert.ok(drawn.includes(c), `a category has no view: ${c}`);
+  for (const v of drawn) assert.ok(named.includes(v), `a view no category names: ${v}`);
+  assert.match(admin, /<SettingsLayout index=\{ADMIN_SETTINGS\} label=\{tr\('Settings'\)\} views=\{views\}/, 'Admin → Settings is not drawn by the settings layout');
 });

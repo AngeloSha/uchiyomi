@@ -656,16 +656,17 @@ function NewMemberDefaults({ sso, provider, signup }: { sso?: boolean; provider:
       <AgeCap cap={d.maxAgeRating} save={(maxAgeRating) => save({ maxAgeRating })} onSaved={saved} />
     </div>
   );
+  // `id`: Admin → Settings → Server's "When someone signs up" row lands here (`?section=member-defaults`, v0.86.0).
   if (sso) {
     return (
-      <div className="mt-3 border-t border-ink-800 pt-3">
+      <div id="member-defaults" className="mt-3 scroll-mt-4 border-t border-ink-800 pt-3 lg:scroll-mt-20">
         <p className="text-[11px] leading-relaxed text-fog-500">{tr('Each new member starts with these. Existing accounts are not affected.')}</p>
         {chips}
       </div>
     );
   }
   return (
-    <div className="card grad-border p-4">
+    <div id="member-defaults" className="card grad-border scroll-mt-4 p-4 lg:scroll-mt-20">
       <h2 className="mb-2 font-display text-base font-semibold">{tr('When someone signs up')}</h2>
       <p className="text-sm leading-relaxed text-fog-300">
         {provider && signup

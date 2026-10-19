@@ -441,10 +441,18 @@ html.lenis-scrolling .fx-grain { display: none; }
 @keyframes badge-halo { to { transform: rotate(360deg); } }
 .badge-halo { animation: badge-halo 14s linear infinite; }
 
+/* A settings row that search or a link has just landed on (components/SettingsLayout.tsx, v0.86.0): lit in the accent,
+   then fading back. Still -- lit for the two seconds the class stays, then gone -- under reduced motion and Reduce
+   effects, where a fade would be cut to nothing by the rules below and the row would never show where it is. */
+@keyframes settings-flash { 0%, 35% { background-color: rgb(var(--accent) / 0.18); } 100% { background-color: transparent; } }
+.settings-flash { animation: settings-flash 1.8s ease-out; }
+html.reduce-effects .settings-flash { animation: none; background-color: rgb(var(--accent) / 0.14); }
+
 @media (prefers-reduced-motion: reduce) {
   .fx-mesh { animation: none; }
   .hero-drift { animation: none; }
   .badge-sheen, .badge-halo { animation: none; }
+  .settings-flash { animation: none; background-color: rgb(var(--accent) / 0.14); }
   *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
 

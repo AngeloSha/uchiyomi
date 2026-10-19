@@ -128,7 +128,7 @@ test("'Downloads' names the server's view only: the reader's way to this device'
   // "a second meaning of Downloads" fails.
   const reader = code(read('app/reader/page.tsx'));
   assert.match(reader, /router\.push\('\/downloads\/'\)\} className="[^"]*">\{tr\('Offline'\)\}<\/button>/, "the reader's button to the Offline tab is not called Offline");
-  assert.match(code(read('components/ProfileSettings.tsx')), /<Section id="downloads" title=\{tr\('Offline downloads'\)\}/,
+  assert.match(code(read('components/ProfileSettings.tsx')), /<RowGroup id="downloads" title=\{tr\('Offline downloads'\)\}/,
     "the profile's section about this device's copies is called Downloads");
   const users: string[] = [];
   for (const f of ['app/reader/page.tsx', 'components/ProfileSettings.tsx', 'app/library/page.tsx', 'app/downloads/page.tsx', 'components/BottomNav.tsx', 'components/TopNav.tsx']) {

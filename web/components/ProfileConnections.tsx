@@ -366,10 +366,10 @@ function OpdsSection() {
       icon={<IcCloudDownload width={18} height={18} />}
       description={tr('Add Uchiyomi as an OPDS catalog in readers like Panels, Chunky, KOReader or Moon+. Generate a personal link, then enter the URL and credentials below in your reader.')}
       // Hidden while the fresh password is on screen: generating again would replace the one being copied.
-      // A chip, like every other section action: the accent button was 172 px wide at 390 and wrapped
+      // A key, like every other section action (a chip until v0.86.0's "no pills"): the accent button was 172 px wide at 390 and wrapped
       // "Externe Leseprogramme (OPDS)" onto three lines beside it.
       action={!link && (
-        <button ref={actionRef} type="button" onClick={gen} disabled={busy} className="chip text-xs disabled:opacity-50">
+        <button ref={actionRef} type="button" onClick={gen} disabled={busy} className="btn-key">
           {busy ? tr('Working…') : st?.exists ? tr('Generate a new link') : tr('Generate OPDS link')}
         </button>
       )}
@@ -393,9 +393,9 @@ function OpdsSection() {
             {tr('Generating again replaces the previous token.')}
             {link.expiresInDays != null && <> {tr('This one stops working in {n} days. You can revoke it sooner.', { n: link.expiresInDays })}</>}
           </p>
-          {/* A chip rather than a 12-px link: this is the control that dismisses a once-only secret, and a
+          {/* A key rather than a 12-px link: this is the control that dismisses a once-only secret, and a
               link-styled button was a 16-px tap target on a phone. */}
-          <button ref={doneRef} type="button" onClick={done} className="chip text-xs">{tr('Done')}</button>
+          <button ref={doneRef} type="button" onClick={done} className="btn-key">{tr('Done')}</button>
         </div>
       )}
 
@@ -415,7 +415,7 @@ function OpdsSection() {
         >
           {st.exists && (
             <button type="button" onClick={revoke} disabled={busy}
-              className="chip text-xs hover:border-rose-500/50 hover:text-rose-400 disabled:opacity-50">{tr('Revoke')}</button>
+              className="btn-key btn-key-danger">{tr('Revoke')}</button>
           )}
         </Row>
       )}
@@ -502,7 +502,7 @@ function TokensSection() {
       description={`${tr('For scripts and integrations. A normal login expires every 15 minutes; these do not, so treat one like a password.')} ${tr('Mihon’s Komga extension and the Uchiyomi extension use these too.')}`}
       action={
         <button ref={actionRef} type="button" onClick={() => (open ? cancel() : setOpen(true))} aria-expanded={open} aria-controls={formId}
-          className={`chip text-xs ${open ? 'chip-active' : ''}`}>
+          className={`btn-key ${open ? 'btn-key-accent' : ''}`}>
           <IcPlus width={14} height={14} aria-hidden />{tr('New token')}
         </button>
       }
@@ -512,8 +512,8 @@ function TokensSection() {
         <div className="my-1 rounded-xl border border-accent/40 bg-accent/10 p-3">
           <p className="text-xs text-fog-100">{tr('Copy this now. It will not be shown again.')}</p>
           <p className="mt-1.5 break-all rounded-lg border border-ink-700 bg-ink-900/60 px-2 py-1.5 font-mono text-xs text-accent">{fresh}</p>
-          {/* A chip, like the OPDS box's Done: the control that dismisses a once-only secret was a 16-px link. */}
-          <button ref={doneRef} type="button" onClick={done} className="chip mt-2 text-xs">{tr('Done')}</button>
+          {/* A key, like the OPDS box's Done: the control that dismisses a once-only secret was a 16-px link. */}
+          <button ref={doneRef} type="button" onClick={done} className="btn-key mt-2">{tr('Done')}</button>
         </div>
       )}
 
@@ -537,7 +537,7 @@ function TokensSection() {
             {/* An admin-scoped token never expires and can do anything its owner can, so it costs one more
                 deliberate step. The rest of the form is unchanged. */}
             <button type="button" onClick={() => (admin ? setConfirmAdmin(true) : create())} disabled={!name.trim()} className="btn-accent px-5 py-2 text-sm disabled:opacity-50">{tr('Create')}</button>
-            <button type="button" onClick={cancel} className="chip text-xs">{tr('Cancel')}</button>
+            <button type="button" onClick={cancel} className="btn-key">{tr('Cancel')}</button>
           </div>
         </div>
       )}
@@ -559,7 +559,7 @@ function TokensSection() {
             </>
           }
         >
-          <button type="button" onClick={() => revoke(t.id)} className="chip text-xs hover:border-rose-500/50 hover:text-rose-400">{tr('Revoke')}</button>
+          <button type="button" onClick={() => revoke(t.id)} className="btn-key btn-key-danger">{tr('Revoke')}</button>
         </Row>
       ))}
       {!tokens.length && !open && <p className="py-3 text-xs text-fog-600">{tr('No tokens yet.')}</p>}

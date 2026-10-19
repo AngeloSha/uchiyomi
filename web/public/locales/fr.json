@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4077
+    "strings": 4104
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -4080,5 +4080,32 @@
   "Translate the speech bubbles of any chapter into each reader’s language. Needs a one-time download of {size}, and {memory} of memory while it translates.": "Traduit les bulles de n’importe quel chapitre dans la langue de chaque lecteur. Nécessite un téléchargement unique de {size}, et {memory} de mémoire pendant la traduction.",
   "The translation engine could not be downloaded.": "Le moteur de traduction n’a pas pu être téléchargé.",
   "Not enough free space: {free} free where it goes.": "Pas assez d’espace libre : {free} libres à l’emplacement prévu.",
-  "Download ({size})": "Télécharger ({size})"
+  "Download ({size})": "Télécharger ({size})",
+  "Alerts and app": "Alertes et application",
+  "Backups": "Sauvegardes",
+  "Backups and repairs, every night.": "Sauvegardes et réparations, chaque nuit.",
+  "Brightness, the gap between pages, auto-scroll and the cover’s colour at the edges are set in the reader, while you look at a page.": "La luminosité, l’espace entre les pages, le défilement automatique et la couleur de la couverture sur les bords se règlent dans le lecteur, pendant que vous regardez une page.",
+  "Disk space": "Espace disque",
+  "From the internet": "Depuis internet",
+  "General": "Général",
+  "Getting chapters": "Arrivée des chapitres",
+  "How new chapters arrive, and the space they take.": "Comment arrivent les nouveaux chapitres, et la place qu’ils prennent.",
+  "Its name, who may join, updates, and translation.": "Son nom, qui peut s’inscrire, les mises à jour et la traduction.",
+  "Less": "Moins",
+  "Library update interval": "Intervalle de mise à jour de la bibliothèque",
+  "Maintenance": "Maintenance",
+  "More options": "Plus d’options",
+  "New chapters and problems, sent to your phone, Home Assistant or Discord.": "Nouveaux chapitres et problèmes, envoyés sur votre téléphone, dans Home Assistant ou sur Discord.",
+  "Not saved": "Non enregistré",
+  "Paged mode": "Mode par pages",
+  "Privacy": "Confidentialité",
+  "Repair": "Réparation",
+  "Scanlation groups": "Groupes de scantrad",
+  "Search settings": "Rechercher dans les paramètres",
+  "Series & chapters": "Séries et chapitres",
+  "Series pages": "Pages des séries",
+  "Shortcuts": "Raccourcis",
+  "Shown to members": "Ce que voient les membres",
+  "Updates and privacy": "Mises à jour et confidentialité",
+  "What members see, and what is looked up online.": "Ce que voient les membres, et ce qui est cherché en ligne."
 }

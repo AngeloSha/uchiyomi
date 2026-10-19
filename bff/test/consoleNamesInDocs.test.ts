@@ -34,6 +34,9 @@ function consoleNames(): Set<string> {
     'web/app/profile/page.tsx',
     'web/app/admin/page.tsx',
     'bff/src/routes/admin.ts',
+    // v0.86.0: the settings pages' categories, groups and rows are named in the settings registry.
+    'web/lib/settingsIndex.profile.ts',
+    'web/lib/settingsIndex.admin.ts',
     ...readdirSync(join(REPO, 'web/components')).filter((f) => f.endsWith('.tsx')).map((f) => `web/components/${f}`),
   ];
   const names = new Set<string>();
@@ -46,7 +49,23 @@ function consoleNames(): Set<string> {
     for (const m of src.matchAll(/\?\s*'[^']*'\s*:\s*'([^']+)'/g)) names.add(norm(m[1]));
   }
   for (const alias of tabAliases(names)) names.add(alias);
+  for (const alias of settingsAliases(names)) names.add(alias);
   return names;
+}
+
+/**
+ * The names an Admin → Settings section had before v0.86.0 made the page five categories: "Updates & schedules" is
+ * Downloads now, "Library housekeeping" Maintenance, "Scanlators" the Scanlation groups row
+ * (web/lib/settingsIndex.admin.ts SETTINGS_NAME_ALIASES, which the settings search and the palette read too). An older
+ * CHANGELOG entry keeps its words and still leads somewhere -- but only while the name it went to is on screen.
+ * Reintroduce by emptying the map: the CHANGELOG's "Admin → Settings → Updates & schedules" is named as leading nowhere.
+ */
+function settingsAliases(names: Set<string>): string[] {
+  const src = read('web/lib/settingsIndex.admin.ts');
+  const map = /export const SETTINGS_NAME_ALIASES[^=]*= \{([^}]*)\}/.exec(src)?.[1] ?? '';
+  const out: string[] = [];
+  for (const [, a, b, to] of map.matchAll(/(?:'([^']+)'|(\w+)): '([^']+)'/g)) if (names.has(norm(to))) out.push(norm(a ?? b));
+  return out;
 }
 
 /**

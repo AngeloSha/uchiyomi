@@ -245,7 +245,7 @@ test('Admin → Settings switches the lookups, on unless the server says off', (
   // a server that does not send the key yet is one that looks names up. Reintroduce `on={!!data.discover_lookups}`:
   // "the switch is not on by default" fails.
   const src = readFileSync(join(ROOT, 'components/AdminSettings.tsx'), 'utf8');
-  assert.match(src, /<SwitchRow label=\{tr\('Match Discover titles online'\)\}\s*help=\{tr\('On by default\. Titles shown in Discover are looked up on AniList, MangaDex and MangaUpdates, once each and in the background, so that a series several sources name differently shows as one card and one you already have stays hidden\. Off, only the names themselves are compared and nothing is sent anywhere\.'\)\}\s*on=\{data\.discover_lookups !== false\} onChange=\{\(next\) => save\(\{ discoverLookups: next \}\)\} \/>/,
+  assert.match(src, /<SwitchRow id="discover-lookups" label=\{tr\('Match Discover titles online'\)\}\s*help=\{tr\('On by default\. Titles shown in Discover are looked up on AniList, MangaDex and MangaUpdates, once each and in the background, so that a series several sources name differently shows as one card and one you already have stays hidden\. Off, only the names themselves are compared and nothing is sent anywhere\.'\)\}\s*on=\{data\.discover_lookups !== false\} onChange=\{\(next\) => save\(\{ discoverLookups: next \}\)\} \/>/,
     'the switch is not on by default, or saves the wrong key');
   // Beside the other row that sends titles off the server.
   assert.ok(src.indexOf("tr('Match Discover titles online')") > src.indexOf("tr('Borrow chapter names from other sources')"));

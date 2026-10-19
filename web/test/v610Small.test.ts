@@ -74,7 +74,7 @@ test('the shell keeps the switch for the reader, and says it is on above every p
   assert.match(banner, /className="btn-key [^"]*" data-incognito-off>\{tr\('Turn off'\)\}/, 'Turn off is not a key');
   assert.match(banner, /if \(!on\) return null;[\s\S]*data-incognito-banner/, 'the banner shows while it is off');
   // Both switches are the account's, through the one hook.
-  assert.match(code(read('components/ProfileSettings.tsx')), /<SwitchRow label=\{tr\(INCOGNITO_TEXT\[0\]\)\} help=\{tr\(INCOGNITO_TEXT\[1\]\)\} on=\{incognito\.on\} onChange=\{incognito\.set\} \/>/);
+  assert.match(code(read('components/ProfileSettings.tsx')), /<SwitchRow id="incognito" label=\{tr\(INCOGNITO_TEXT\[0\]\)\} help=\{tr\(INCOGNITO_TEXT\[1\]\)\} on=\{incognito\.on\} onChange=\{incognito\.set\} \/>/);
   assert.match(code(read('components/ReaderSettings.tsx')), /<Switch on=\{incognito\.on\} label=\{tr\(INCOGNITO_TEXT\[0\]\)\}/);
 });
 

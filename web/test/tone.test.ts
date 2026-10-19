@@ -122,14 +122,20 @@ test('the account\'s tone is applied where the accent and Reduce effects are', (
 });
 
 test('Profile → Settings → Appearance offers every tone, saves it to the account, and takes it back if refused', () => {
+  // v0.86.0: picture cards (components/settings.tsx ChoiceRow), each tone drawn by components/settingsArt.tsx ToneArt, and
+  // every card keeps the `data-tone-choice` the walks pick it by. Reintroduce by dropping `optionProps`: "a card lost its
+  // data-tone-choice" fails.
   const src = code(read('components/ProfileSettings.tsx'));
-  const row = src.slice(src.indexOf("<Row stacked label={tr('Background')}"), src.indexOf("<SwitchRow label={tr('Reduce effects')}"));
-  assert.ok(row.length > 100, 'no Background row before Reduce effects');
-  assert.match(row, /\{TONES\.map\(\(t\) => \{/);
-  assert.match(row, /onClick=\{\(\) => pickTone\(t\.key\)\} aria-pressed=\{on\} data-tone-choice=\{t\.key\}/);
-  // Each swatch is drawn in its own tone's colours, not the page's: the three side by side whatever is on.
-  assert.match(row, /style=\{\{ background: t\.page, boxShadow: `inset 0 0 0 1px \$\{t\.line\}` \}\}/);
-  assert.match(row, /style=\{\{ background: t\.surface, boxShadow: `inset 0 0 0 1px \$\{t\.line\}` \}\}/);
-  assert.doesNotMatch(row, /rounded-full/, 'a tone is a squared swatch, not a capsule');
-  assert.match(src, /setSettings\(\{ tone: next \}\);\s*void toneSave\.run\(\(\) => api\('\/api\/settings', \{ method: 'PUT', json: \{ tone: next \} \}\)\)\s*\.then\(\(ok\) => \{ if \(!ok\) setSettings\(\{ tone: prev \}\); \}\);/);
+  const row = src.slice(src.indexOf("<ChoiceRow<Tone> id=\"background\" label={tr('Background')}"), src.indexOf('<Row id="accent"'));
+  assert.ok(row.length > 100, 'no Background row before the accent');
+  assert.match(row, /options=\{TONES\.map\(\(t\) => \(\{ value: t\.key, label: tr\(t\.label\), art: <ToneArt tone=\{t\.key\} \/> \}\)\)\}/, 'not every tone is offered');
+  assert.match(row, /value=\{tone\} onChange=\{pickTone\} optionProps=\{\(v\) => \(\{ 'data-tone-choice': v \}\)\}/, 'a card lost its data-tone-choice');
+  // Each card is drawn in its own tone's colours, not the page's: the three side by side whatever is on.
+  const art = code(read('components/settingsArt.tsx'));
+  const tone = art.slice(art.indexOf('export function ToneArt('));
+  assert.match(tone, /style=\{\{ background: t\.page, boxShadow: `inset 0 0 0 1px \$\{t\.line\}` \}\}/);
+  assert.match(tone, /style=\{\{ background: t\.surface, boxShadow: `inset 0 0 0 1px \$\{t\.line\}` \}\}/);
+  assert.doesNotMatch(row + tone, /rounded-full/, 'a tone is a squared swatch, not a capsule');
+  // Applied at once, saved, and taken back if the server refuses -- the row's tick says so (ChoiceRow's autosave).
+  assert.match(src, /setSettings\(\{ tone: next \}\);\s*try \{ await api\('\/api\/settings', \{ method: 'PUT', json: \{ tone: next \} \}\); \}\s*catch \(e\) \{ setSettings\(\{ tone: prev \}\); throw e; \}/);
 });

@@ -134,7 +134,9 @@ export function Sheet({ title, onClose, overBottomNav, action, footer, wrapTitle
   // notices rise above it instead of sitting on its last rows.
   useLayer('dialog', true, { navBandFree: !!overBottomNav, ref: overBottomNav ? undefined : panelRef });
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    // An Escape a field inside already used -- a text row putting its edit back marks it handled (settings.tsx TextRow) --
+    // is that and nothing more: closing on it too dropped the edit with the sheet (v0.86.0, the settings editors).
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) onClose(); };
     document.addEventListener('keydown', onKey);
     // Open where you already are. A `<select>` -- which the chapter sheet replaced -- scrolls to the
     // selected option for free; a scrollable div does not, so on chapter 180 of 200 this opened at

@@ -81,7 +81,7 @@ admin has not signed in for the first time yet. An account you already had keeps
 Log in with the username/password you set in `setup.sh` (the first account is `admin`). If you've turned on
 two-factor auth, you'll be asked for your 6-digit code (or a recovery code) after the password.
 
-**Creating your own account** (since v0.61.0). When the admin has turned on **Admin → Settings → Open registration**,
+**Creating your own account** (since v0.61.0). When the admin has turned on **Admin → Settings → Server → Open registration**,
 the sign-in form offers **Create an account** under it: a username (letters, numbers, `.`, `_` and `-`), a password
 of at least 8 characters, typed twice, and you are signed in as a member. A name someone already has is taken,
 whatever its capital letters: with `admin` here, `Admin` is taken too. What a new account can open (which
@@ -199,17 +199,16 @@ already in the box, so *"one p"* typed on the library page is a search. Only let
 only when nothing else wants the key: not while you are typing in a field, not with a dialog open, not with
 Ctrl, Alt or ⌘ held, and never in the reader, which keeps its own keys. Under a Japanese or Chinese
 interface the palette opens empty instead, so the input method composes the whole title. **Profile → Settings →
-Appearance → Type anywhere to search** switches the typing, and the **/** shortcut with it, off on that device;
+General → Type anywhere to search** switches the typing, and the **/** shortcut with it, off on that device;
 **Ctrl+K** keeps working.
 
 **Search finds pages and settings too** (since v0.55.4). Type two letters or more and, under the series, **Pages and
-settings** lists what the words name: every admin tab, each section of **Admin → Settings**, the profile's tabs and
-cards, the import, and settings by name — *Notice chapters*, *18+ filter*, *Source order*, *Slow archive*, *Backup
-time*, *Delete read chapters*, *Scanlators*, *Check for updates*, the *Cloudflare solver* and the *Version* on Health,
-*Rescan everything* on Tasks, *Language*, *API tokens*, *Two-factor authentication* and more. A name works in your
-language and in English, and so do a few words people type instead (*flaresolverr*, *mihon*, *2fa*). Each row says
-where it is (*Admin → Settings*), and choosing it opens that page on that tab, scrolled to that card once it has
-loaded. Admin pages are listed for admins only, and what the desktop app does not have is not listed there. On a phone,
+settings** lists what the words name: every admin tab, every setting on **Admin → Settings** and **Profile → Settings**
+(since v0.86.0), the profile's tabs and cards, the import, the *Cloudflare solver* and the *Version* on Health, and
+*Rescan everything* on Tasks. A name works in your language and in English, and so do a few words people type instead
+(*flaresolverr*, *mihon*, *2fa*, *discord*), and a section's old name still finds where it went (*Scanlators*,
+*Updates & schedules*). Each row says where it is (*Admin → Settings → Downloads*), and choosing it opens that page,
+that category and the row itself, highlighted once it has loaded. Admin pages are listed for admins only, and what the desktop app does not have is not listed there. On a phone,
 the **Search** tab lists the same ones under the series it finds.
 
 ### Your reading: time, Wrapped and Incognito
@@ -239,7 +238,7 @@ in two months), and around which chapter you usually stop; and your **backlog**,
 have started, which hold the most and which have waited longest. It is worked out from the same page turns as the
 Reading studio, so Incognito reads are not in it, and 18+ series are named only while **Show 18+** is on.
 
-**Incognito reading** (since v0.61.0, **Profile → Settings → Reading**, or the reader's own settings). While it is
+**Incognito reading** (since v0.61.0, **Profile → Settings → General**, or the reader's own settings). While it is
 on, your place is still kept — Keep reading and every resume work as usual — but what you read leaves no trace: no
 history, no stats or streaks, nothing on the household's boards or rails, and nothing sent to AniList, MyAnimeList or
 Kitsu. It covers your whole account, on every device and in Mihon too, because the server applies it. A line at the
@@ -343,15 +342,15 @@ genres, description, and the **chapter list**.
   page holding the chapter *Continue* would open, so a reader on chapter 956 lands among the 900s. Picking a
   page keeps you there; a new series, sort order or filter goes back to following *Continue*. Every chapter
   is listed — before this, the list and the reader's chapter list stopped at chapter 1000.
-- **Show all chapters at once** (**Profile → Settings → Appearance**, off by default, saved to your account so
+- **Show all chapters at once** (**Profile → Settings → General**, off by default, saved to your account so
   every device you sign in on follows it): the whole list on one page, with no pager. Every grey row is shown
   too — no *Show all {n}* row — and the runs of older chapters start unfolded; *Hide* on one still folds it for
   as long as you are on the page.
 - **Right-click a chapter** (or press and hold it on a touchscreen, or Shift+F10 on the keyboard) for the same
   menu its ⋯ button opens: mark it read or unread, mark everything before it read, its versions, and for an
   admin its number and title (since v0.48.0).
-- **Compact chapter list** (since v0.47.0, **Profile → Settings → Appearance**, off by default, this device
-  only): on a computer, rows without the thumbnail and the status dot, with a row's buttons appearing when
+- **Compact chapter list** (since v0.47.0, **Profile → Settings → General**, off by default, this device
+  only, and shown only on a device with a mouse or trackpad): on a computer, rows without the thumbnail and the status dot, with a row's buttons appearing when
   you point at it — more chapters on one screen. The title's colour still says read or unread; the
   thumbnail's progress bar is what the row gives up. Phones and tablets keep the full row.
 - The line under the title — *MangaDex · Example Scans +2 · 4 not here yet ›* — is the series' source, who
@@ -612,7 +611,7 @@ list, the *{n} not here yet* count and the list Mihon and your trackers read the
 no check needed, and nothing fetches it (the hourly check, the slow archive, *Fetch*). A chapter an unblocked
 group has also released stays, and its copy becomes that group's. **Unblock** brings the hidden chapters back
 just as fast, as chapters you can fetch. The same goes for a group blocked for every series under **Admin →
-Settings → Scanlators**. A chapter already downloaded from a group you block stays on the shelf.
+Settings → Downloads → Scanlation groups**. A chapter already downloaded from a group you block stays on the shelf.
 
 **In the series' language** (since v0.62.0). A copy known to be in another language than the series' is never
 taken, exactly like a blocked group's: a Spanish copy never fills a chapter of an English series, whichever source
@@ -650,14 +649,14 @@ files downloaded before v0.31.0 show no group either.
 
 **Use server defaults**, in the sheet's footer, drops everything the series set for itself — ranking, blocks and
 patience; the defaults themselves live under
-**Admin → Settings → Scanlators** (the two lists and the patience share one *Save scanlator defaults* button —
+**Admin → Settings → Downloads → Scanlation groups** (the two lists and the patience share one *Save scanlator defaults* button —
 the only Save button on that tab). The two combine sensibly: a group blocked on the server is blocked in
 every series, a series with its own ranking ignores the server's ranking, and a series with no patience of
 its own uses the server's.
 
 **Upgrading to your preferred group** (since v0.47.0, off by default). Patience only goes so far: when the
 wait is over a new chapter is taken from whoever has it, and until now a copy from the group you prefer that
-turned up a day later was never looked at again. Switch on **Admin → Settings → Scanlators → Upgrade
+turned up a day later was never looked at again. Switch on **Admin → Settings → Downloads → Scanlation groups → Upgrade
 chapters to a preferred group** and the nightly repair does that second look: a chapter you already have from
 another group is replaced when a group you rank higher has released it on a source the series follows. It is
 careful — only files Uchiyomi downloaded itself, never a copy with fewer pages than the file you have (a
@@ -667,7 +666,7 @@ night, and a chapter whose swap failed is left for a week. Reading progress and 
 
 **Borrowing chapter names** (since v0.47.0, from a pull request by @Squeaks72, off by default). Some sources
 publish no chapter titles at all — every row reads *Ch. 12* — while another source has had *Romance Dawn*
-all along. Switch on **Admin → Settings → Scanlators → Borrow chapter names from other sources**, or tick
+all along. Switch on **Admin → Settings → Series & chapters → Borrow chapter names from other sources**, or tick
 the box on one series' *Sources & translations* sheet, and the nightly repair looks for a source that carries
 the same work and takes the names from it.
 
@@ -807,7 +806,7 @@ once, calmly. The idea is @TIGamingTV's ([#119](https://github.com/AngeloSha/uch
 
 When two followed sources both have a chapter and your scanlator preferences do not decide between the
 copies, the source the series was added from used to win. A **source order** changes that (since v0.47.0,
-from a pull request by @Squeaks72): **Admin → Settings → Source order** ranks sources for the whole server
+from a pull request by @Squeaks72): **Admin → Settings → Downloads → Source order** ranks sources for the whole server
 (↑ ↓ to move one, ✕ to take it off, a chip to add one), and an admin can override it for one series with the
 source chips in its *Sources & translations* sheet — tapping one makes it that series' first choice, **Use
 the server default** clears it. A series' own order replaces the server's rather than merging with it, and
@@ -876,7 +875,7 @@ reader never hides a missing placeholder — even when that position was also ma
 labels it *Page {n} could not be fetched* and *It will be retried automatically.* The nightly update pass tries only those missing indices and
 heals at most ten partial chapters at a time; once every real page lands, the badge and captions disappear.
 
-**Downloads that finish on their own** (**Admin → Settings → Updates & schedules → Finish downloads on their own**, on
+**Downloads that finish on their own** (**Admin → Settings → Downloads → Finish downloads on their own**, on
 by default). Uchiyomi keeps downloading until every chapter of a series is here, whether the series came from Discover,
 *Find missing chapters* or the library update:
 
@@ -1048,7 +1047,7 @@ The rest goes back to where it was before: under a *Latest N* or *Nothing yet* f
 *Find missing chapters*), otherwise the scheduled check fetches it at its own pace. A series' floor is never
 changed while an archive runs; one that finishes lifts it, unless somebody changed it meanwhile.
 
-**Admin → Settings → Downloads** (admins) holds the pace for the whole server, and every change applies at once:
+**Admin → Settings → Downloads → Slow archive** (admins) holds the pace for the whole server, and every change applies at once:
 
 - **Slow archive** — off pauses every archive; nothing queued is lost, and switching it on carries on.
 - **Chapters an hour, per source** — 1 to 30, 4 by default, with what that comes to a day and how long 1,000
@@ -1413,7 +1412,7 @@ you keep scrolling through a series without interruption.
 - **Themes:** AMOLED black, sepia, or gray, from the reader settings.
 - **Cover colour at the edges:** a soft wash of the series' cover colour across the top and bottom of the screen,
   so a gold cover tints the edges gold. To read with plain black edges, switch **Cover colour at the edges** off in
-  the reader's settings sheet or under Profile → Settings → Reading (since v0.55.7,
+  the reader's settings sheet or under Profile → Settings → Reading → More options (since v0.55.7,
   [#170](https://github.com/AngeloSha/uchiyomi/discussions/170)). It is one setting for every title, saved to your
   account. The top and bottom bars' dark shading now also runs past the screen edge, so no strip of page shows
   while they spring into place.
@@ -1430,7 +1429,7 @@ you keep scrolling through a series without interruption.
 It remembers your scroll position, so closing and reopening drops you right back where you were.
 
 **Right-to-left paged reading.** In paged mode, *Reading direction* (in the reader's settings sheet and under
-Profile → Settings → Reading) can lay the pages out right to left, the way manga is printed: the next page is
+Profile → Settings → Reading → More options) can lay the pages out right to left, the way manga is printed: the next page is
 to the left, so you swipe right, tap the left edge or press ←. A double spread puts its first page on the
 right, and the bottom bar mirrors with it — the page slider fills from the right, and the next-chapter button
 moves to the left. The webtoon scroll is unaffected.
@@ -1444,7 +1443,7 @@ moves to the left. The webtoon scroll is unaffected.
   to right anyway, a double spread's two halves are swapped so the drawing still joins up.
 - **Left to right** and **Right to left** override it for every series.
 
-Choose it under **Profile → Settings** for everything. Choosing it in the reader's sheet while a title is open
+Choose it under **Profile → Settings → Reading → More options** for everything. Choosing it in the reader's sheet while a title is open
 sets it for **that title only**, and the title keeps it when the profile changes — including *Series default*,
 if that is what you picked for it. Changing anything else in the sheet (mode, theme, two-page spread) does not
 fix the title's direction: it keeps following the profile. (Before v0.48.0 it did, so a title you had adjusted
@@ -1463,11 +1462,13 @@ a phone), for the keys in force on this device: next and previous page, page lef
 screen and the rest, with any key you have rebound to something else shown as you bound it, and **Esc** to leave. **?** or **Esc**
 closes the list; the keys themselves are changed under **Reader settings → Keys**.
 
-**Reader defaults** — mode (webtoon scroll or paged), theme, the cover colour at the edges, repeated pages, fit,
-page gap, auto-scroll and brightness — live under **Profile → Settings → Reading**, where each one saves as you
-change it and says *Saved* beside the row. The reader's own sheet still changes them for the session you are in,
-and a series you have adjusted keeps its own memory, which wins over the defaults. The weekly goal, offline downloads and
-new-chapter alerts are on the same tab.
+**Reader defaults** — mode (webtoon scroll or paged), theme, fit, wide pages and repeated pages, and under **More
+options** the reading direction, pages per view, joining split pages and cropping borders — live under **Profile →
+Settings → Reading**, where each one saves as you change it and says *Saved* beside the row. The reader's own sheet
+still changes them for the session you are in, and a series you have adjusted keeps its own memory, which wins over
+the defaults. Brightness, the page gap, auto-scroll and the cover colour at the edges are set in the reader's own
+sheet, while you look at a page (since v0.86.0). Offline downloads and new-chapter alerts are under **Profile →
+Settings → This device**; the weekly goal is the ring at the top of your profile.
 
 **A default per source.** A source is usually one format: a webtoon site wants the continuous vertical scroll,
 a manga site wants paged right-to-left. At the bottom of the reader's settings sheet, **Use this reader for
@@ -1692,7 +1693,7 @@ translated once per language and kept, so reading it again costs nothing.
   - *Newest*, *Popular* and *Trending* leave out everything your library already holds, in any language. That covers
     a series held under another name, followed on another source, or linked to the same AniList entry. Search still
     shows those, marked **✓ In library**.
-  - Admin → Settings → *Match Discover titles online* switches the lookups off; cards then fold by their names alone.
+  - Admin → Settings → Series & chapters → *Match Discover titles online* switches the lookups off; cards then fold by their names alone.
 - **Hide 18+ and 18+ only** (since v0.55.4, [#158](https://github.com/AngeloSha/uchiyomi/discussions/158)): with
   **Show 18+** on, three chips under *Results across your sources* — **All**, **Hide 18+**, **18+ only** — filter the
   results by what is known of each. A result is 18+ when its provider is rated *Adult only* (**Admin → Sources** → the source → **Age rating**),
@@ -2248,7 +2249,7 @@ on its card that says so.
 **Disk space and folders** (since v0.72.0, after @Squeaks72's #253) says how much room the downloads disk has, and
 turns red at the very floor the downloader stops at: below `MIN_FREE_GB` (10 GB unless you set it) no new download
 starts, and before this the only sign was each download's error. It turns amber below the slow archive's own floor
-(**Admin → Settings → Downloads**) while the archive has a series queued, because that is when it waits. It also
+(**Admin → Settings → Downloads → Slow archive**) while the archive has a series queued, because that is when it waits. It also
 names a library or download folder that cannot be opened, or that is empty while the library still records
 chapters in it — almost always a network share that is not mounted. Nothing is marked missing because of it, and
 only the first entry of each folder is read: a look at a whole folder would wake every disk of an Unraid array
@@ -2276,7 +2277,7 @@ series is there, not just the fifty a card shows. **Open** goes to the series; *
 confirmation that names them. Only the series on the screen can be ticked. A finding about no single series — a
 source, a folder, the solver — and a duplicate pair stay in the By check view. Each device remembers the view.
 
-**What fixes itself.** Once a day — **Admin → Settings → Library housekeeping → Repair the library nightly**,
+**What fixes itself.** Once a day — **Admin → Settings → Maintenance → Repair the library nightly**,
 on by default, and **Admin → Tasks → Repair library** with a *Run now* — Uchiyomi does the six things that
 are reversible or provable on their own, and three more only when you switch them on, in this order. Since v0.55.0,
 **Every night**, just under that switch, chooses what runs: this **Safe repair** (the default), or a whole **Fix
@@ -2296,7 +2297,7 @@ everything**, which does what its key on Health does and can merge, delete and i
   page list ends the proof, and the chapter is looked at again another night;
 * **looks for a source that can fill a gap** (five series a night) and fetches what it finds;
 * **swaps a chapter for your preferred group's copy** once that group has released it, if you switched it
-  on under **Admin → Settings → Scanlators** (see *Choosing a scanlation group*);
+  on under **Admin → Settings → Downloads → Scanlation groups** (see *Choosing a scanlation group*);
 * **borrows chapter names** from another source for series whose own source names nothing, if you switched
   that on as well (below);
 * **learns which way series read** (since v0.48.0) for the ones nothing has said about yet: it asks MangaDex
@@ -2610,7 +2611,7 @@ posting order, or in the middle of a renumber, is not listed.
 
 ### Deleting chapters after they are read
 
-**Admin → Settings → Library housekeeping → Delete read chapters**. Off by default, and turning it on asks
+**Admin → Settings → Downloads → Delete read chapters**. Off by default, and turning it on asks
 you to confirm, with the number of chapters that would go on the first run in front of you (and the day count
 it will use — a *Wait (days)* you have just typed is saved along with the switch, so the job never runs at a
 value the row no longer shows). It is the only scheduled job in Uchiyomi that destroys anything.
@@ -2651,7 +2652,7 @@ job fails toward keeping. It corrects itself as chapters are read again.
 **Admin → Tasks → Delete read chapters** shows the last run, how much it freed, and how many chapters are
 waiting. **Run now** is there if you would rather not wait for the hour.
 
-**Show missing chapters in Mihon** (**Admin → Settings → Library housekeeping**, off by default, since
+**Show missing chapters in Mihon** (**Admin → Settings → Series & chapters → More options**, off by default, since
 v0.42.0) is for libraries that deliberately hold less than the sources list. Mihon works out how many
 chapters a series has from the list Uchiyomi hands its Komga extension, so it counts what is on disk: turn
 this on if you run the cleanup above, if you **follow** series without fetching them, or if you use a
@@ -2664,7 +2665,7 @@ as *Completed* — a chapter that can never be read is listed, not counted as un
 sees these rows: the app, OPDS and offline reading list what is on disk exactly as before, and turning the
 switch off puts the list back at once.
 
-**Show deleted chapters as ghosts** (**Admin → Settings → Library housekeeping**, off by default) changes how a
+**Show deleted chapters as ghosts** (**Admin → Settings → Series & chapters**, off by default) changes how a
 chapter whose file was deleted on purpose looks — by the cleanup above, *Remove chapters*, *Delete chapters* or
 *Delete files*. Instead of a row marked *Deleted from the server*, the series page shows it like a chapter not
 downloaded yet: a grey row saying *deleted*, with its read tick, **Mark read / unread** and ☁ **Fetch** to bring
@@ -2776,7 +2777,7 @@ limit below 18 is the other thing entirely: those sources are refused by name wh
 **The reveal can also cover genres.** Rating a whole library 18+ is the only thing the
 switch knew about, so keeping, say, *Ecchi* off the shelf meant moving those series into an 18+ library — a
 filing decision made to get a display outcome, and one the scanner argues with on the next rescan.
-**Admin → Settings → 18+ filter** says it directly instead: tick the genres (the list is the genres your
+**Admin → Settings → Series & chapters → 18+ filter** says it directly instead: tick the genres (the list is the genres your
 library actually has). With **Show 18+** off, a series carrying one of those genres leaves the same places an 18+
 library does. Nothing is refiled and nothing is refused: it is the same surfacing filter, with the same exceptions as
 above. One title that is tagged wrongly, or that you simply want to keep, can be let through on its own: **Edit
@@ -2959,7 +2960,7 @@ and get your server blocked.
 
 **Tasks:** run the **library scan**, **check-for-new-chapters** or **extension updates** on demand, and see
 when each last ran and what it did. Extension updates run every 6 hours on their own and can be switched
-off under **Admin → Settings → Updates & schedules**; see [extensions.md](extensions.md). The nightly backup's
+off under **Admin → Settings → Maintenance**; see [extensions.md](extensions.md). The nightly backup's
 hour is shown here and changed there. **Verify chapter files** is the one task that never
 runs by itself: it is the repair for a database restored without its chapter files, and section 12 says
 when to run it and what it will not do. Like the sweep, it starts in the background and its line shows what
@@ -2975,8 +2976,8 @@ source's own cover are never touched. Its line says how many it checked and how 
 
 **Repair library** is the nightly that fixes what Health used to only report (the Health section above lists
 what it does and the two things it never does). Its schedule reads *every 24h · never during a chapter
-sweep*, or *switched off · on demand* when the switch under **Admin → Settings → Library housekeeping** is
-off — and *Run now* works either way, because nothing it does deletes, merges or renumbers anything. Like
+sweep*, or *switched off · on demand* when **Admin → Settings → Maintenance → Repair the library nightly** is
+set to *Off* — and *Run now* works either way, because nothing it does deletes, merges or renumbers anything. Like
 the sweep it is detached, so the message only says it started; its line shows what it did when it is done and
 keeps it across restarts, for example: *2000 page counts stamped, 28625 still to count · short: 3 replaced,
 5 confirmed, 12 left unchanged · gaps: 5 series, 2 followed a new source, 9 chapters fetched · 41 failures reset ·
@@ -3003,26 +3004,30 @@ stuck.
 
 ![Settings](shots/admin-settings.webp)
 
-**Settings** (`/admin/?tab=Settings`) is five sections. **Server**: the server name, an **Open registration**
-switch (let anyone sign up: the sign-in screen then offers *Create an account*, section 2), **Check for updates** and the anonymous **install count**, each of the last two
-with a fold (*How this works* / *What is sent, once a day*) that spells out exactly what leaves the server.
-**Updates & schedules**: the **Library update interval (hours)** (how often followed series are asked for new
-chapters), **Smart update checks** (since v0.61.0, off by default: the scheduled check asks a series that has been
-quiet for a long time less often, at least every three days, and every series at the normal rate while its next chapter
-is due by the release radar; *Check now* and everything you start yourself always ask at once), **Nightly backup**
-(since v0.61.1, on by default), the **Backup time (hour, 0–23)** of the nightly backup — change it and the pending timer
-is re-armed at once, so the next run is at the new hour — and **Backups to keep** (since v0.61.1; section 12 has all
-three), and, when the extension engine is configured, **Update extensions
-automatically** and its check interval. **Finish downloads on their own** (on by default) is the one switch for
-everything automatic about downloads, described in section 4: finishing what is left, and finding other sources. **Library housekeeping**: **Delete read chapters** and its **Wait
-(days)**, below, **Repair the library nightly** (on by default), the job described under *Health* above, and
-**Every night** (since v0.55.0): *Safe repair*, or *Fix everything*. **Scanlators**: the server-wide defaults for choosing between scanlation groups — **Blocked
-groups**, which apply to every series, a **Default priority** for series that have no ranking of their own, and
-the **Patience (days)** before a chapter is taken from a group lower down the list; see *Sources & translations*
-in section 4. **Notifications** (since v0.43.0): where new chapters and server problems are sent besides
-this browser — see the next section. Switches save the moment they flip; text and number fields save when you
-leave them or press Enter, and each row says *Saved* beside itself. Only the scanlator lists have a Save
-button (**Save scanlator defaults**), because a half-typed list is not something to save on every keystroke.
+**Settings** (`/admin/?tab=Settings`) is five categories (since v0.86.0), with a box above them that finds any setting
+by name; on a phone the categories are a list, and a tap opens one. **Server**: the server name, an **Open
+registration** switch (let anyone sign up: the sign-in screen then offers *Create an account*, section 2), **When
+someone signs up** (what a new member starts with, set on Members), **Check for updates** and the anonymous **install
+count**, each of the last two with a fold (*How this works* / *What is sent, once a day*) that spells out exactly what
+leaves the server, and **Translate pages**. **Series & chapters**: **Notice chapters** and the **18+ filter** (each a row
+that opens its own editor), **Show deleted chapters as ghosts**, and what is looked up online — **Fill in missing
+details**, **Borrow chapter names from other sources** and **Match Discover titles online**; **Show missing chapters in
+Mihon** is under *More options*. **Downloads**: the **Library update interval** (how often followed series are asked
+for new chapters), **Finish downloads on their own** (on by default, the one switch for everything automatic about
+downloads, described in section 4), the **Source order**, the **Scanlation groups** — **Blocked groups**, which apply to
+every series, a **Default priority** for series that have no ranking of their own, the **Patience (days)** before a
+chapter is taken from a group lower down the list (see *Sources & translations* in section 4), and **Upgrade chapters to
+a preferred group** — the **Slow archive**, **MangaDex languages** (a link to Sources), and **Delete read chapters** with
+its **Wait (days)**, below. **Smart update checks** (since v0.61.0, off by default: the scheduled check asks a series
+that has been quiet for a long time less often, at least every three days, and every series at the normal rate while
+its next chapter is due by the release radar; *Check now* and everything you start yourself always ask at once) is under
+*More options*. **Maintenance**: the **Nightly backup** — *Off*, or the time it runs — and **Backups to keep** (section 12
+has both), **Repair the library nightly** — *Off*, *Safe repair* or *Fix everything* — the job described under *Health*
+above, and, when the extension engine is configured, **Update extensions automatically** and its check interval.
+**Notifications** (since v0.43.0): where new chapters and server problems are sent besides this browser — see the next
+section. Switches and menus save the moment they change; text and number fields save when you leave them or press
+Enter, and each row says *Saved* beside itself. Only the scanlation groups have a Save button (**Save scanlator
+defaults**, at the bottom of their editor), because a half-typed list is not something to save on every keystroke.
 
 ### Notice chapters
 
@@ -3422,7 +3427,7 @@ steps for the browser you are in.
 
 **Offline:** favorite a series (or use the series page's **Offline** key, *Save all offline*, or a chapter's ⬇), and those chapters are stored on the
 device for reading with no connection. The **Offline** tab shows what's saved and a **Sync now** button;
-with **Keep favorites offline** on (**Profile → Settings → Offline downloads**), your favorites' next unread chapters
+with **Keep favorites offline** on (**Profile → Settings → This device**), your favorites' next unread chapters
 auto-download while you're online. A cover with a
 small ⌁ badge has something saved on this device.
 
@@ -3462,8 +3467,8 @@ keeps its own separate storage. Private / Incognito windows keep nothing at all 
 
 Uchiyomi backs itself up. Every night (03:00 by default) it writes a compressed dump of the database plus an
 archive of your config to `/backups`, keeping the most recent 14 runs. You can also run it on demand from
-**Admin → Tasks → Backup database & config → Run now**, which shows the last run time and size. All three — whether
-it runs at night, the hour and how many runs to keep — are under **Admin → Settings → Updates & schedules** (below).
+**Admin → Tasks → Backup database & config → Run now**, which shows the last run time and size. Whether it runs at
+night, the hour and how many runs to keep are under **Admin → Settings → Maintenance** (below).
 
 > Worth doing once, on any install: confirm the image can actually dump, rather than trusting the panel.
 >
@@ -3490,12 +3495,12 @@ BACKUP_PATH=/mnt/backups/uchiyomi
 The directory must be writable by uid `10002` (the app's user):
 `docker run --rm -v /mnt/backups:/b alpine chown 10002:10002 /b/uchiyomi`
 
-**Admin → Settings → Updates & schedules** has three rows for it:
+**Admin → Settings → Maintenance** has two rows for it:
 
-- **Nightly backup** (since v0.61.1, on by default) — switch it off if you back up another way. Nothing then runs at
-  night and the Tasks row says *switched off · on demand*; **Run now** still makes a backup.
-- **Backup time** — the hour, local time (a field there since v0.39.0). The pending timer is re-armed as soon as you
-  change it, so the next run is at the new hour.
+- **Nightly backup** — *Off*, or the time it runs, local time (one menu since v0.86.0; on at 3:00 by default). Pick
+  *Off* if you back up another way: nothing then runs at night and the Tasks row says *switched off · on demand*;
+  **Run now** still makes a backup. The pending timer is re-armed as soon as you change the time, so the next run is
+  at the new hour.
 - **Backups to keep** (since v0.61.1, 1–365) — how many runs are kept. Saving a lower number deletes nothing at once:
   the oldest beyond it go after the next backup. The `BACKUP_KEEP` variable (default 14) is only where the field
   starts, until you save a number there.
@@ -3711,7 +3716,7 @@ source's numbers**; either way the series updates again.
 archive is waiting, and on a series' own sheet (tap its cover) otherwise: it is between chapters (at the default
 pace about a quarter of an hour, now and then much longer), another download is using the same site, the site is
 cooling down, asked for a slower pace within the hour or refused a chapter, a check or a repair is running, it is outside the hours
-it may run (the server's local time), or the download disk is below its floor (**Admin → Settings → Downloads**).
+it may run (the server's local time), or the download disk is below its floor (**Admin → Settings → Downloads → Slow archive**).
 After a restart its first look waits ten minutes.
 
 **An extension source says `Cloudflare bypass currently disabled`.** The extension engine has no browser of its own

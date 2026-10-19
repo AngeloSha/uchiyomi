@@ -202,7 +202,7 @@ function ProfileInner() {
   ) : tab === 'Insights' ? (
     <ProfileInsights />
   ) : tab === 'Settings' ? (
-    <ProfileSettings weeklyGoal={stats?.weeklyGoal ?? 0} />
+    <ProfileSettings />
   ) : tab === 'Connections' ? (
     <ProfileConnections focusTracking={focusTracking && tab === 'Connections'} />
   ) : (
@@ -257,7 +257,8 @@ function ProfileInner() {
                         <div className="skeleton h-10 w-24 rounded-lg" />
                       </>
                     ) : stats.weeklyGoal > 0 ? (
-                      <div className="glass relative inline-flex items-center gap-2 rounded-full px-3 py-1.5 lg:px-3.5 lg:py-2">
+                      // `id`: the weekly goal's one home since v0.86.0 (search's Weekly goal lands here, lib/destinations.ts).
+                      <div id="weekly-goal" className="glass relative inline-flex items-center gap-2 rounded-full px-3 py-1.5 lg:px-3.5 lg:py-2">
                         {/* The whole pill opens the goal dialog. The button stretches over the pill with an
                             ::after rather than wrapping it, so <dt>/<dd> stay direct children of a <div> in
                             the <dl> instead of being buried in a <button>. */}
@@ -269,7 +270,7 @@ function ProfileInner() {
                         <dd className="sr-only">{stats.weekChapters}/{stats.weeklyGoal}</dd>
                       </div>
                     ) : (
-                      <div className="glass inline-flex flex-wrap items-center gap-2 rounded-full px-3 py-1.5 lg:px-3.5 lg:py-2">
+                      <div id="weekly-goal" className="glass inline-flex flex-wrap items-center gap-2 rounded-full px-3 py-1.5 lg:px-3.5 lg:py-2">
                         <dt className="text-[11px] uppercase tracking-wider text-fog-400">{tr('Weekly goal')}</dt>
                         {/* flex-wrap, because three chips at their 98px min-content are what tipped a 390px
                             phone into horizontal overflow. */}

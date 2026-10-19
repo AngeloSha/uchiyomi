@@ -15,10 +15,12 @@ test('one switch per series type, the server\'s six in its order, each with a la
   assert.deepEqual(SERIES_TYPES.map(seriesTypeKey), ['Manga', 'Manhwa', 'Manhua', 'Webtoon', 'Comic', 'Unknown / other']);
 });
 
-test('Admin → Settings: the section comes after the pinned ones and saves the list whole', () => {
+test('Admin → Settings: notice chapters are a row of Series & chapters, and save the list whole', () => {
+  // v0.86.0: one row that names the types switched on, and an editor with the switches. Reintroduce by moving the row out
+  // of SeriesSection: "Notice chapters is not under Series & chapters" fails.
   const src = read('components/AdminSettings.tsx');
-  const grid = src.slice(src.indexOf('<ServerSection '));  // the grid from its first card (the section index is above it since the UI refresh)
-  assert.match(grid, /<SourceOrderSection [^\n]*\/>\s*<NoticeChaptersSection /, 'Notice chapters is not last, after the source order');
+  const series = src.slice(src.indexOf('function SeriesSection('), src.indexOf('function SchedulesSection('));
+  assert.match(series, /<RowGroup title=\{tr\('Shown to members'\)\}>\s*<NoticeChaptersSection data=\{data\} save=\{save\} \/>/, 'Notice chapters is not under Series & chapters');
   const section = src.slice(src.indexOf('function NoticeChaptersSection('));
   assert.match(section, /save\(\{ hideNoticeTypes: next \}\)/, 'the section does not PATCH hideNoticeTypes');
   // Held locally and rolled back on a failed save, so two quick flips do not undo each other.
@@ -42,12 +44,12 @@ test('"Only hide short ones": a switch of its own, on unless the server says off
   const settings = read('components/AdminSettings.tsx');
   const section = settings.slice(settings.indexOf('function NoticeChaptersSection('));
   assert.match(section, /const shortOnly = data\.hideNoticeShortOnly !== false;/, 'on unless the server says off');
-  assert.match(section, /<SwitchRow label=\{tr\('Only hide short ones \(3 pages or fewer\)'\)\}/);
+  assert.match(section, /<SwitchRow id="notice-short-only" label=\{tr\('Only hide short ones \(3 pages or fewer\)'\)\}/);
   assert.match(section, /help=\{tr\('Off hides every chapter numbered like 12\.5 of the types switched on, including real chapters a site split into parts\.'\)\}/,
     'the switch does not say what off hides');
   assert.match(section, /on=\{shortOnly\} onChange=\{\(next\) => save\(\{ hideNoticeShortOnly: next \}\)\}/, 'the switch does not PATCH hideNoticeShortOnly');
-  assert.match(section, /description=\{shortOnly\s*\? tr\('[^']*with 3 pages or fewer are hidden[^']*'\)\s*: tr\('[^']*every chapter numbered like 12\.5 is hidden[^']*'\)\}/,
-    'the section says one rule whichever is in force');
+  assert.match(section, /\{shortOnly\s*\? tr\('[^']*with 3 pages or fewer are hidden[^']*'\)\s*: tr\('[^']*every chapter numbered like 12\.5 is hidden[^']*'\)\}/,
+    'the editor says one rule whichever is in force');
   const sheet = read('components/SourcesSheet.tsx');
   assert.match(sheet, /series\.hideNoticeShortOnly === false\s*\? tr\('Hide notice chapters \(numbered like 12\.5\) here, in Mihon and everywhere else\. Switching this off shows them again\.'\)/,
     'the series switch says the off rule');

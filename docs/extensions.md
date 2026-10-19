@@ -304,7 +304,7 @@ Discover and is never removed for being unused. Installing one yourself, switchi
 series does the same. Remove one yourself and Uchiyomi never installs it again. Turning off **Finish downloads on their
 own** stops it adding or putting back any; the ones there still go when unused.
 
-**To turn it off:** **Admin → Settings → Updates & schedules** → *Update extensions automatically*. The check still runs and
+**To turn it off:** **Admin → Settings → Maintenance** → *Update extensions automatically*. The check still runs and
 still tells you what is waiting; it just does not install anything. **Update all** in Admin → Sources' Needs attention
 remains the manual path, and it now refreshes the repositories first, so it no longer says
 "everything is already up to date" against a stale catalogue.
@@ -594,7 +594,7 @@ it starts, which only the app knows.
 | `SOURCE_LATEST_TIMEOUT_MS` | `8000` | How long one source gets to answer "what's new" on Discover before it is given up on and marked unhealthy. A source that keeps overrunning it is diagnosed *answers, but more slowly than it is given* — since v0.37.0 by the admin *Test* button and the daily source check too, not only Discover's health view — and the fix sentence names this budget. |
 | `SOURCE_LATEST_SOLVER_TIMEOUT_MS` | `45000` | Since v0.59.0, the same budget for a site this server opens through the Cloudflare solver (a site added by address, a built-in engine). An extension source is fetched by the engine, with the engine's own solver, so it keeps `SOURCE_LATEST_TIMEOUT_MS`. |
 
-The update check's own settings live in **Admin → Settings → Updates & schedules**, not here: *Update extensions
+The update check's own settings live in **Admin → Settings → Maintenance**, not here: *Update extensions
 automatically* (on by default) and *Extension check interval (hours)* (6). The switch saves as it flips; the interval saves when you leave the field or press Enter, and the row says *Saved*.
 
 **Adult sources.** Extensions declare whether they are adult, and Uchiyomi records that per source. A member

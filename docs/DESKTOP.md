@@ -220,11 +220,11 @@ languages as the app).
   late; only the backup re-aims.
 - **The slow archive runs only while Uchiyomi does** — the window or the tray (since v0.49.0; [the user
   guide](USAGE.md#fetching-a-whole-series-slowly-the-slow-archive)). It never keeps the computer awake, so a PC that
-  sleeps at night is rarely inside a night-time window set under **Admin → Settings → Downloads**; a quit or a sleep
+  sleeps at night is rarely inside a night-time window set under **Admin → Settings → Downloads → Slow archive**; a quit or a sleep
   costs it nothing but time, since it carries on from where it was.
 - **Room.** Downloads stop when the library's drive has less than **5 GB** free (a server keeps 10), and the
   image cache is capped at **4 GB** (16 on a server). The slow archive keeps its own floor, 20 GB by default,
-  under **Admin → Settings → Downloads**.
+  under **Admin → Settings → Downloads → Slow archive**.
 - **Windows-safe folder names** (Windows only): a series folder loses control characters and trailing dots and
   spaces, and the names Windows reserves — `CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9`, also with
   an extension — get a `_` (`CON` becomes `CON_`). A custom site's name is treated the same when it becomes the
@@ -416,7 +416,7 @@ card says why.
 The app backs itself up every night, exactly as a server does, to the `backups` folder in its data folder:
 one folder per run named by date and time, holding `db.sql.gz` (the whole database as plain SQL) and
 `config.zip` (the settings, custom sites and art; a server writes `config.tar.gz`). The time is the backup hour
-under **Admin → Settings → Updates & schedules**, 03:00 by default. A computer is not always on at 3 am, so:
+under **Admin → Settings → Maintenance → Nightly backup**, 03:00 by default. A computer is not always on at 3 am, so:
 
 - If there has never been a backup, or the last one — or the last attempt — is more than a day old, one runs
   about five minutes after Uchiyomi starts. If the computer is off then, it runs the next time Uchiyomi opens.

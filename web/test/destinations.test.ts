@@ -13,6 +13,8 @@ import { join } from 'path';
 import { DESTINATIONS, arrival, findDestinations, fold, whereText } from '../lib/destinations';
 import { DESKTOP_HIDDEN } from '../lib/desktop';
 import { CHECK_TITLES } from '../lib/healthCopy';
+import { PROFILE_SETTINGS } from '../lib/settingsIndex.profile';
+import { ADMIN_SETTINGS } from '../lib/settingsIndex.admin';
 
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -30,8 +32,9 @@ const ADMIN_TABS = keysOf(read('app/admin/page.tsx'));
 const PROFILE_TABS = keysOf(read('app/profile/page.tsx'));
 /** Where each console tab's cards are drawn: the files whose `id="…"` a `?section=` on that tab may name. */
 const TAB_FILES: Record<string, string[]> = {
-  '/admin/ Settings': ['components/AdminSettings.tsx', 'components/AdminNotifications.tsx', 'components/ArchiveSettings.tsx'],
-  '/profile/ You': ['components/ProfileYou.tsx'],
+  '/admin/ Settings': ['components/AdminSettings.tsx', 'components/AdminNotifications.tsx', 'components/ArchiveSettings.tsx', 'components/TranslateSettings.tsx'],
+  // The hero's weekly goal is drawn by the page itself (v0.86.0: its one home).
+  '/profile/ You': ['components/ProfileYou.tsx', 'app/profile/page.tsx'],
   '/profile/ Insights': ['components/ProfileInsights.tsx'],
   '/profile/ Settings': ['components/ProfileSettings.tsx'],
   '/profile/ Connections': ['components/ProfileConnections.tsx'],
@@ -40,6 +43,11 @@ const TAB_FILES: Record<string, string[]> = {
 const sectionIds = (files: string[]): Set<string> =>
   new Set(files.flatMap((f) => [...code(read(f)).matchAll(/\bid="([a-z0-9-]+)"/g)].map((m) => m[1])));
 const viewer = { admin: true, desktop: false, label: (k: string) => k };
+/** A settings page's categories, which its `?section=` may name too: the settings layout opens the category (v0.86.0). */
+const CATEGORIES: Record<string, Set<string>> = {
+  '/admin/ Settings': new Set(ADMIN_SETTINGS.categories.map((c) => c.id)),
+  '/profile/ Settings': new Set(PROFILE_SETTINGS.categories.map((c) => c.id)),
+};
 /** The ids of the tasks the server lists on Admin → Tasks (bff routes/admin.ts GET /api/admin/tasks). */
 const TASK_IDS = (() => {
   const route = readFileSync(join(ROOT, '../bff/src/routes/admin.ts'), 'utf8');
@@ -72,6 +80,7 @@ test('every destination lands where it says: a real page, one of its tabs, and a
       assert.ok(TASK_IDS.includes(section.slice(5)), `${d.key}: the server lists no ${section.slice(5)} task (it has ${TASK_IDS.join(', ')})`);
       continue;
     }
+    if (CATEGORIES[at]?.has(section)) continue;
     assert.ok(TAB_FILES[at], `${d.key}: nothing says where ${at} draws its cards`);
     assert.ok(sectionIds(TAB_FILES[at]).has(section), `${d.key}: no card with id="${section}" on ${at}`);
   }
@@ -82,28 +91,33 @@ test('every destination lands where it says: a real page, one of its tabs, and a
   assert.equal(new Set(DESTINATIONS.map((d) => d.key)).size, DESTINATIONS.length, 'two destinations share a key');
 });
 
-test('it covers every admin tab, every section of Admin → Settings, the profile, the import and the settings asked for by name', () => {
-  // Reintroduce a section with no id (`<Section title={tr('Scanlators')}`): "a section of Admin → Settings has no id"
-  // fails; drop a tab's entry: it is named.
+test('it covers every admin tab, every setting of both settings pages, the profile, the import and the names people use', () => {
+  // v0.86.0: every row and every category of Admin → Settings and Profile → Settings is a destination, generated from the
+  // settings registry (lib/settingsIndex*.ts; settingsIndex.test.ts holds the registry to the rows). Reintroduce by
+  // dropping the registry's destinations from DESTINATIONS: "a setting is not a destination" fails, by name.
   for (const tab of ADMIN_TABS) {
     assert.ok(DESTINATIONS.some((d) => d.href === (tab === 'Overview' ? '/admin/' : `/admin/?tab=${tab}`)), `the admin tab ${tab} is not a destination`);
   }
   for (const tab of PROFILE_TABS) {
     assert.ok(DESTINATIONS.some((d) => d.href === (tab === 'You' ? '/profile/' : `/profile/?tab=${tab}`)), `the profile tab ${tab} is not a destination`);
   }
-  const files = TAB_FILES['/admin/ Settings'].map((f) => code(read(f)));
-  const sections = files.flatMap((src) => [...src.matchAll(/<Section\b[^>]*?>/gs)].map((m) => m[0]));
-  assert.ok(sections.length >= 9, `only ${sections.length} sections found on Admin → Settings`);
-  for (const s of sections) {
-    const id = /\bid="([a-z0-9-]+)"/.exec(s)?.[1];
-    assert.ok(id, `a section of Admin → Settings has no id: ${s.slice(0, 80)}`);
-    assert.ok(DESTINATIONS.some((d) => d.href === `/admin/?tab=Settings&section=${id}`), `the section ${id} is not a destination`);
+  for (const [index, base] of [[ADMIN_SETTINGS, '/admin/?tab=Settings'], [PROFILE_SETTINGS, '/profile/?tab=Settings']] as const) {
+    for (const id of [...index.categories.map((c) => c.id), ...index.entries.map((e) => e.id)]) {
+      assert.ok(DESTINATIONS.some((d) => d.href === `${base}&section=${id}`), `a setting is not a destination: ${base} ${id}`);
+    }
   }
   assert.ok(DESTINATIONS.some((d) => d.href === '/admin/import/' && d.label === 'Import a list'), 'the import page is not a destination');
-  for (const name of ['Check for updates', 'Notice chapters', '18+ filter', 'Source order', 'Slow archive', 'Backup time', 'Delete read chapters',
-    'Scanlators', 'Cloudflare solver', 'Version', 'Rescan everything']) {
+  for (const name of ['Check for updates', 'Notice chapters', '18+ filter', 'Source order', 'Slow archive', 'Nightly backup', 'Delete read chapters',
+    'Scanlation groups', 'Cloudflare solver', 'Version', 'Rescan everything', 'Weekly goal', 'Translate pages']) {
     assert.ok(DESTINATIONS.some((d) => d.label === name), `"${name}" is not found by name`);
   }
+  // The names a section had before v0.86.0 still find where it went (lib/settingsIndex.admin.ts SETTINGS_NAME_ALIASES).
+  // Reintroduce by dropping the aliases from the keywords: "an old name finds nothing" fails.
+  const keys = (q: string) => findDestinations(q, { ...viewer, limit: 50 }).map((d) => d.key);
+  assert.ok(keys('scanlators').includes('admin-scanlators'), 'an old name finds nothing: Scanlators');
+  assert.ok(keys('updates & schedules').includes('admin-cat-downloads'), 'an old name finds nothing: Updates & schedules');
+  assert.ok(keys('library housekeeping').includes('admin-cat-maintenance'), 'an old name finds nothing: Library housekeeping');
+  assert.ok(keys('backup time').includes('admin-nightly-backup'), 'the backup time is not found by its old name');
 });
 
 test('admins only where the page is theirs, and nothing Uchiyomi Desktop does not have', () => {
@@ -117,7 +131,8 @@ test('admins only where the page is theirs, and nothing Uchiyomi Desktop does no
     if (hiddenTabs.includes(tab)) assert.ok(d.desktopHidden, `${d.key}: ${tab} is not on Desktop, and neither may its destination be`);
   }
   // Desktop hides these settings and cards too (lib/desktop.ts, ProfileSettings, ProfileConnections, AdminSettings).
-  for (const key of ['registration', 'mihon-missing', 'offline-downloads', 'this-device', 'chapter-alerts', 'opds', 'api-tokens']) {
+  for (const key of ['admin-registration', 'admin-mihon-missing', 'admin-install-count', 'admin-translate', 'profile-downloads', 'profile-cat-device',
+    'profile-chapter-alerts', 'opds', 'api-tokens']) {
     assert.ok(DESTINATIONS.find((d) => d.key === key)?.desktopHidden, `${key} shows on Desktop, which has no such thing`);
   }
   const member = (q: string) => findDestinations(q, { ...viewer, admin: false, limit: 50 }).map((d) => d.key);
@@ -127,14 +142,14 @@ test('admins only where the page is theirs, and nothing Uchiyomi Desktop does no
   const desk = (q: string) => findDestinations(q, { ...viewer, desktop: true, limit: 50 }).map((d) => d.key);
   assert.ok(!desk('members').includes('admin-members'), 'Desktop is offered Members');
   assert.ok(!desk('api').includes('api-tokens'), 'Desktop is offered API tokens');
-  assert.ok(desk('notice').includes('settings-notice'), 'Desktop loses what it does have');
+  assert.ok(desk('notice').includes('admin-notice-chapters'), 'Desktop loses what it does have');
 });
 
 test('a query finds by the label in the reader\'s language or in English, then by its words, best first', () => {
   // Reintroduce matching on the English label alone (drop `fold(label(d.label))`): "the label in the reader's language"
   // fails; match anywhere from two characters: "two letters inside a word" fails.
   const keysFor = (q: string, o: Partial<typeof viewer> = {}) => findDestinations(q, { ...viewer, ...o }).map((d) => d.key);
-  assert.equal(keysFor('notice')[0], 'settings-notice');
+  assert.equal(keysFor('notice')[0], 'admin-notice-chapters');
   assert.equal(keysFor('import')[0], 'import');
   assert.equal(keysFor('Version')[0], 'version');
   // v0.55.4 (#150): Kedryn's words for it find Rescan everything.
@@ -143,12 +158,12 @@ test('a query finds by the label in the reader\'s language or in English, then b
   assert.ok(keysFor('flaresolverr').includes('solver'), 'a word someone types for it does not find it');
   assert.ok(keysFor('mihon').includes('import'));
   assert.ok(keysFor('2fa').includes('two-factor'));
-  assert.ok(keysFor('slow arch').includes('slow-archive'), 'two words at the start of two words');
+  assert.ok(keysFor('slow arch').includes('admin-slow-archive'), 'two words at the start of two words');
   // In the reader's language: the row's own words find it, and so does English.
   const de: Record<string, string> = { 'Notice chapters': 'Hinweis-Kapitel', Settings: 'Einstellungen', Appearance: 'Erscheinungsbild' };
   const label = (k: string) => de[k] ?? k;
-  assert.equal(keysFor('kapitel', { label })[0], 'settings-notice', 'the label in the reader\'s language does not find it');
-  assert.equal(keysFor('notice', { label })[0], 'settings-notice', 'English stops finding it in another language');
+  assert.equal(keysFor('kapitel', { label })[0], 'admin-notice-chapters', 'the label in the reader\'s language does not find it');
+  assert.equal(keysFor('notice', { label })[0], 'admin-notice-chapters', 'English stops finding it in another language');
   assert.ok(keysFor('einstellungen', { label }).includes('profile-settings'));
   // Accents and case do not matter.
   assert.equal(fold('Paramètres'), 'parametres');
@@ -158,19 +173,20 @@ test('a query finds by the label in the reader\'s language or in English, then b
   assert.deepEqual(keysFor('  '), []);
   assert.deepEqual(keysFor('pd'), [], 'two letters inside a word');  // "Updates", "Check for updates", "OPDS"
   // …except where words are not spaced: two characters inside a Japanese or Chinese label find it.
-  assert.equal(keysFor('知ら', { label: (k) => (k === 'Notice chapters' ? 'お知らせの話' : k) })[0], 'settings-notice', 'a Japanese label is not found from its middle');
+  assert.equal(keysFor('知ら', { label: (k) => (k === 'Notice chapters' ? 'お知らせの話' : k) })[0], 'admin-notice-chapters', 'a Japanese label is not found from its middle');
   assert.equal(keysFor('设置', { label: (k) => (k === 'Settings' ? '服务器设置' : k) })[0], 'admin-settings');
-  assert.ok(keysFor('chedul').includes('settings-schedules'), 'three letters inside a word do not find it');
+  assert.ok(keysFor('chedul').includes('admin-cat-downloads'), 'three letters inside a word do not find it');
   // At most six, unless the caller asks for more.
   assert.ok(keysFor('s').length === 0 && findDestinations('se', viewer).length <= 6);
   assert.ok(findDestinations('se', { ...viewer, limit: 50 }).length > 6, 'the limit is the only thing holding the list at six');
 });
 
 test('where a row says it is reads the way the page does', () => {
-  const notice = DESTINATIONS.find((d) => d.key === 'settings-notice')!;
-  assert.equal(whereText(notice, false), 'Admin → Settings');
+  // A setting says its category too since v0.86.0, as the page shows it.
+  const notice = DESTINATIONS.find((d) => d.key === 'admin-notice-chapters')!;
+  assert.equal(whereText(notice, false), 'Admin → Settings → Series & chapters');
   // Arabic writes these paths with "←" (its own translations of "Admin → Sources" do).
-  assert.equal(whereText(notice, true), 'Admin ← Settings');
+  assert.equal(whereText(notice, true), 'Admin ← Settings ← Series & chapters');
 });
 
 test('getting there: another page is a push, another tab of this page a whole load, a card already here a scroll', () => {
@@ -202,7 +218,10 @@ test('the palette lists them after the series under their own heading, and goes 
   assert.match(pal, /\{rows\[i - 1\]\?\.kind !== 'action' && <p [^>]*>\{tr\('Actions'\)\}<\/p>\}/, 'the Actions heading is placed by the series count alone');
   assert.match(pal, /else if \(r\.kind === 'place'\) goTo\(r\.place\.href\);/, 'a destination is not opened');
   const goTo = slice(pal, 'const goTo = useCallback(', '}, [onClose, router]);');
-  assert.match(goTo, /const how = arrival\(href, window\.location, \(id\) => !!document\.getElementById\(id\)\);/);
+  // A setting whose page is open is opened in place by the settings layout (v0.86.0): its category may not be on screen.
+  // Reintroduce the plain `!!document.getElementById(id)`: a setting in another category is a whole page load again.
+  assert.match(goTo, /const how = arrival\(href, window\.location, \(id\) => settingsKnow\(id\) \|\| !!document\.getElementById\(id\)\);/);
+  assert.match(goTo, /if \(id && settingsKnow\(id\)\) settingsGoTo\(id\);/, 'a setting on this page is scrolled to, not opened');
   assert.match(goTo, /if \(how === 'push'\) router\.push\(href\);\s*else if \(how === 'load'\) window\.location\.assign\(href\);/, 'another tab of this page is pushed, which does nothing');
   // "No series match" in the reader's language, the query isolated inside it.
   assert.match(pal, /\{tr\('No series match “\{query\}”\.', \{ query: `\\u2068\$\{q\.trim\(\)\}\\u2069` \}\)\}/, '"No series match" is English in every language');

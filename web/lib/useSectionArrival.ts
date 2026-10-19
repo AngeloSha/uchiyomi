@@ -57,6 +57,9 @@ export function useSectionArrival(): void {
       const el = document.getElementById(id);
       if (!el) return;
       finish();
+      // A row of the settings pages (v0.86.0) is the settings layout's to land on: it opens the row's category and
+      // whatever folds it, then brings it into view and flashes it (components/SettingsLayout.tsx). Two scrolls would fight.
+      if (el.closest('[data-settings-layout]')) return;
       el.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' });
     };
     // Every change to the page restarts the wait, once the card is there.

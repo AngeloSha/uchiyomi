@@ -23,8 +23,8 @@ import { DEFAULT_TEMPLATE, renderDigest } from '@/lib/notifyDigest';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { Switch } from '@/components/Switch';
-import { IcBell, IcPlus } from '@/components/icons';
-import { SaveState, Section, Segmented, useAutosave } from '@/components/settings';
+import { IcPlus } from '@/components/icons';
+import { RowGroup, SaveState, Segmented, useAutosave, useRowPad } from '@/components/settings';
 
 type Kind = 'webhook' | 'home_assistant' | 'ntfy' | 'discord';
 type NotifyEvent = 'new_chapters' | 'health';
@@ -114,23 +114,24 @@ export function NotificationsSection() {
 
   return (
     <>
-      <Section id="notifications" title={tr('Notifications')} icon={<IcBell width={18} height={18} />}
+      {/* One group of targets (v0.86.0) under the category's own title, Add above its end, and the note about them under it. */}
+      <RowGroup id="notify-targets"
         description={tr('Send new chapters and server problems somewhere besides this browser: a webhook, Home Assistant, ntfy or Discord. One message per library update, not one per chapter.')}
         action={(
-          <button type="button" onClick={() => setEditing('new')} className="chip inline-flex items-center gap-1 text-xs">
+          <button type="button" onClick={() => setEditing('new')} className="btn-key">
             <IcPlus width={14} height={14} />{tr('Add')}
           </button>
         )}>
         {!data ? (
-          <p className="py-3 text-sm text-fog-500">{tr('Loading…')}</p>
+          <p className="px-4 py-3 text-sm text-fog-500">{tr('Loading…')}</p>
         ) : targets.length ? (
           targets.map((t) => <TargetRow key={t.id} t={t} onEdit={() => setEditing(t)} onDelete={() => setDeleting(t)} refresh={refresh} />)
         ) : (
-          <p className="max-w-prose py-3 text-[11px] leading-relaxed text-fog-500">
+          <p className="max-w-prose px-4 py-3 text-[11px] leading-relaxed text-fog-500">
             {tr('Nothing is set up yet. Add a target to hear about new chapters on your phone, in Home Assistant or in a Discord channel.')}
           </p>
         )}
-      </Section>
+      </RowGroup>
       {editing && (
         <TargetDialog target={editing === 'new' ? null : editing}
           onClose={() => setEditing(null)}
@@ -162,6 +163,7 @@ function TargetRow({ t, onEdit, onDelete, refresh }: {
   t: NotifyTarget; onEdit: () => void; onDelete: () => void; refresh: () => Promise<unknown>;
 }) {
   const toast = useToast();
+  const pad = useRowPad();
   const { status, run } = useAutosave();
   const [local, setLocal] = useState(t.enabled);
   const [seen, setSeen] = useState(t.enabled);
@@ -203,7 +205,7 @@ function TargetRow({ t, onEdit, onDelete, refresh }: {
   ].filter(Boolean).join(' · ');
 
   return (
-    <div className="py-3 first:pt-1 last:pb-0">
+    <div className={pad}>
       <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
         <div className="min-w-0 flex-1 basis-40">
           <p className="truncate text-sm text-fog-100">{t.name}</p>
@@ -221,11 +223,11 @@ function TargetRow({ t, onEdit, onDelete, refresh }: {
         </div>
       </div>
       <div className="mt-2 flex flex-wrap gap-1.5">
-        <button type="button" onClick={test} disabled={testing} className="chip text-xs disabled:opacity-50">
+        <button type="button" onClick={test} disabled={testing} className="btn-key">
           {testing ? tr('Sending…') : tr('Send a test')}
         </button>
-        <button type="button" onClick={onEdit} className="chip text-xs">{tr('Edit')}</button>
-        <button type="button" onClick={onDelete} className="chip text-xs hover:text-rose-300">{tr('Delete')}</button>
+        <button type="button" onClick={onEdit} className="btn-key">{tr('Edit')}</button>
+        <button type="button" onClick={onDelete} className="btn-key btn-key-danger">{tr('Delete')}</button>
       </div>
     </div>
   );
@@ -375,7 +377,7 @@ function TargetDialog({ target, onClose, onSaved }: { target: NotifyTarget | nul
         )}
 
         <fieldset>
-          <legend className="mb-1 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Send')}</legend>
+          <legend className="mb-1 text-xs font-semibold text-fog-400">{tr('Send')}</legend>
           {/* items-start: these labels run to two lines at 390 px, and a centred box would float between them. */}
           <label className="flex items-start gap-2 text-xs text-fog-300">
             <input type="checkbox" checked={events.includes('new_chapters')} onChange={(e) => toggle('new_chapters', e.target.checked)} className="mt-0.5 shrink-0 accent-accent" />
@@ -440,7 +442,7 @@ function TargetDialog({ target, onClose, onSaved }: { target: NotifyTarget | nul
 function Field({ label, help, children }: { label: string; help?: React.ReactNode; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{label}</span>
+      <span className="mb-1 block text-xs font-semibold text-fog-400">{label}</span>
       {children}
       {help && <span className="mt-1 block max-w-prose text-[11px] leading-relaxed text-fog-500">{help}</span>}
     </label>

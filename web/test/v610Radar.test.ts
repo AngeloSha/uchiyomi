@@ -74,12 +74,12 @@ test('Admin → Settings: Smart update checks under the update interval, saved a
   const settings = code(read('components/AdminSettings.tsx'));
   const schedules = slice(settings, 'function SchedulesSection(', 'export function NightlyModeRow(');
   // Reintroduce `!== false`: a server older than v0.61.0 (no key) would show the switch on.
-  assert.match(schedules, /<SwitchRow label=\{tr\('Smart update checks'\)\}[\s\S]*?on=\{data\.update_smart === true\} onChange=\{\(next\) => save\(\{ updateSmart: next \}\)\} \/>/);
-  assert.ok(schedules.indexOf("tr('Smart update checks')") > schedules.indexOf("tr('Library update interval (hours)')"), 'not under the update interval');
+  assert.match(schedules, /<SwitchRow id="smart-checks" label=\{tr\('Smart update checks'\)\}[\s\S]*?on=\{data\.update_smart === true\} onChange=\{\(next\) => save\(\{ updateSmart: next \}\)\} \/>/);
+  assert.ok(schedules.indexOf("tr('Smart update checks')") > schedules.indexOf("tr('Library update interval')"), 'not under the update interval');
   assert.match(schedules, /at least every 3 days/, 'the help does not say the limit');
   assert.match(schedules, /Check now always asks at once/, 'the help does not say Check now is never kept waiting');
   // And the search palette finds it by name, where it is.
   const d = DESTINATIONS.find((x) => x.label === 'Smart update checks');
-  assert.equal(d?.href, '/admin/?tab=Settings&section=schedules');
+  assert.equal(d?.href, '/admin/?tab=Settings&section=smart-checks');
   assert.equal(d?.admin, true);
 });
