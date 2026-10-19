@@ -1,0 +1,132 @@
+name: Translate pack
+
+# The translation engine Uchiyomi downloads when an admin presses Download (Admin -> Settings -> Translate pages): per
+# Linux architecture, llama-server built for the app image (Alpine, musl) plus onnxruntime-web, PaddleOCR's models and
+# the fonts, assembled by scripts/translate-pack/. It is NOT in the image (owner's decision: opt-in, nothing for anyone
+# who never presses Download), so it is published once on its own prerelease, `translate-v<n>`, and every app version
+# pins the packs' SHA-256 and size in bff/src/lib/translate/pin.ts (PACKS). The model itself comes from Hugging Face.
+#
+#   1. push the tag pin.ts names -- `git tag translate-v1 && git push origin translate-v1` -- or run this workflow by
+#      hand once it is on the default branch;
+#   2. each pack is built AND booted (check.mjs: llama-server writes tokens, every OCR model runs) on its own
+#      architecture, in node:24-alpine, the app image's base; then both are uploaded to the prerelease;
+#   3. download what was published, check it against the .sha256, and write each pack's sha256 and bytes into pin.ts;
+#      commit that before tagging the app release.
+#
+# The same rules as engine-pack.yml:
+#   * PRERELEASE, always, and never "latest": the app's update check follows GitHub's latest release. The tag is
+#     `translate-v*`, never `v*`, so release.yml never builds images for it.
+#   * A pinned pack is never replaced: every install of an app version that pins it checks its download against that
+#     hash. The jobs refuse when pin.ts at this commit already pins one; a new pack is a new tag.
+#   * Nothing publishes unless both built and booted.
+
+on:
+  push:
+    tags: ['translate-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: translate-pack-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  pack:
+    name: pack ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, platform: linux-x64 }
+          - { os: ubuntu-24.04-arm, platform: linux-arm64 }
+    steps:
+      - uses: actions/checkout@v7
+      - name: The pack being built is the one the app pins, and is not pinned yet
+        run: |
+          set -euo pipefail
+          tag=$(sed -n "s/^export const PACK_TAG = '\(translate-v[0-9][0-9]*\)';$/\1/p" bff/src/lib/translate/pin.ts)
+          [ -n "$tag" ] || { echo "::error::no PACK_TAG in pin.ts"; exit 1; }
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "$tag" ]; then
+            echo "::error::pushed $GITHUB_REF_NAME but pin.ts names $tag"; exit 1
+          fi
+          # Fail in seconds rather than after the build: the publish job would refuse anyway.
+          if ! grep -A3 "'${{ matrix.platform }}': {" bff/src/lib/translate/pin.ts | grep -q "sha256: '0\{64\}'"; then
+            echo "::error::$tag is already pinned for ${{ matrix.platform }} at this commit; a published pack is never replaced (a new pack is a new translate-v* tag)"; exit 1
+          fi
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+      - name: Build llama-server (Alpine, musl)
+        run: docker run --rm -v "$PWD:/w" -w /w alpine:3.24 sh scripts/translate-pack/build-llama.sh /w/llama-out
+      - name: Assemble the pack
+        run: docker run --rm -v "$PWD:/w" -w /w node:24-alpine node scripts/translate-pack/pack.mjs --platform ${{ matrix.platform }} --llama llama-out --out pack-out --tag "$TAG"
+      - name: Boot it in node:24-alpine on ${{ matrix.platform }}
+        run: docker run --rm -v "$PWD:/w" -w /w node:24-alpine node scripts/translate-pack/check.mjs pack-out/translate-pack-${{ matrix.platform }}.tar.gz
+      - uses: actions/upload-artifact@v7
+        with:
+          name: translate-pack-${{ matrix.platform }}
+          path: |
+            pack-out/translate-pack-${{ matrix.platform }}.tar.gz
+            pack-out/translate-pack-${{ matrix.platform }}.tar.gz.sha256
+            pack-out/translate-pack-${{ matrix.platform }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to the translate prerelease
+    needs: pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # The only job that writes.
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: translate-pack-*
+          path: packs
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag=$(sed -n "s/^export const PACK_TAG = '\(translate-v[0-9][0-9]*\)';$/\1/p" bff/src/lib/translate/pin.ts)
+          cd packs
+          ls -la
+          for p in linux-x64 linux-arm64; do
+            [ -s "translate-pack-$p.tar.gz" ] || { echo "::error::translate-pack-$p.tar.gz is missing"; exit 1; }
+            sha256sum -c "translate-pack-$p.tar.gz.sha256"
+            # ⚠️ Never replace a pinned pack (see the header). Reintroduce by deleting this check: a re-run after the pin
+            # landed clobbers the file every installed app version checks its download against.
+            if ! grep -A3 "'$p': {" ../bff/src/lib/translate/pin.ts | grep -q "sha256: '0\{64\}'"; then
+              echo "::error::pin.ts already pins $p at this commit. A published pack is never replaced; a new pack needs a new translate-v* tag."; exit 1
+            fi
+          done
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --prerelease
+          else
+            gh release create "$tag" --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "Translation engine ($tag)" \
+              --notes "The translation engine Uchiyomi downloads when an admin turns on Translate pages (Admin → Settings): llama-server, the OCR models and the fonts, one pack per Linux architecture. Not an app release, and not something to download by hand: the app fetches the pack for its platform and checks it against the SHA-256 pinned in that app version. The translation model comes from Hugging Face. Built by .github/workflows/translate-pack.yml from $GITHUB_SHA; what is inside and under which licence is in NOTICE.md and licenses/ in each pack."
+          fi
+          gh release upload "$tag" --clobber \
+            translate-pack-linux-x64.tar.gz translate-pack-linux-arm64.tar.gz \
+            translate-pack-linux-x64.tar.gz.sha256 translate-pack-linux-arm64.tar.gz.sha256 \
+            translate-pack-linux-x64.json translate-pack-linux-arm64.json
+          [ "$(gh release view "$tag" --json isPrerelease --jq .isPrerelease)" = true ] \
+            || { echo "::error::$tag is not a prerelease"; exit 1; }
+          {
+            echo "### Published $tag"
+            echo
+            echo '| pack | bytes | sha256 |'
+            echo '|---|---|---|'
+            for p in linux-x64 linux-arm64; do
+              echo "| translate-pack-$p.tar.gz | $(jq -r .bytes "translate-pack-$p.json") | \`$(cut -d' ' -f1 "translate-pack-$p.tar.gz.sha256")\` |"
+            done
+            echo
+            echo "Next: write each pack's sha256 and bytes into PACKS in bff/src/lib/translate/pin.ts, commit, then tag the app release."
+          } >> "$GITHUB_STEP_SUMMARY"
