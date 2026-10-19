@@ -461,9 +461,9 @@ async function main() {
   // and nothing pictured it.
   if (want('admin-libraries')) { await adminTab('Library'); await adminShot('admin-libraries', 'Libraries'); }
   if (want('admin-members')) { await adminTab('Members'); await adminShot('admin-members'); }
-  // By address rather than by tab button: `?tab=` is the tab's URL since v0.39.0, and the shot doubles as a
-  // check that the deep link opens the rebuilt Settings tab (Server first, then the other three sections).
-  if (want('admin-settings')) { await go('/admin/?tab=Settings', 1000); await adminShot('admin-settings'); }
+  // By address rather than by tab button: `?tab=` is the tab's URL since v0.39.0, and `&cat=` its category since
+  // v0.86.0; the shot doubles as a check that the deep link opens Settings on Server.
+  if (want('admin-settings')) { await go('/admin/?tab=Settings&cat=server', 1000); await adminShot('admin-settings'); }
   // The reviewable import (v0.35.0) is its own route, reached from Admin → Sources' Add sources. Its intake card is
   // the shot: what the docs describe first, and the one state a capture-only account can always reach (a
   // batch in review needs titles this instance's sources answer for).
@@ -826,9 +826,8 @@ async function main() {
   };
   if (want('phone-settings')) {
     await phoneCard('phone-settings', '/admin/?tab=Settings', () => {
-      // By the section's id (components/settings.tsx Section): the admin menu's own "Server" group label comes first by
-      // text, and it is in no card -- the first run of this capture found nothing to clip.
-      const card = document.querySelector('section#server');
+      // The categories as a phone lists them (v0.86.0, components/SettingsLayout.tsx): the list is the card to clip.
+      const card = document.querySelector('[data-settings-categories]');
       card?.setAttribute('data-shot-from', ''); card?.setAttribute('data-shot-to', '');
       return !!card;
     });

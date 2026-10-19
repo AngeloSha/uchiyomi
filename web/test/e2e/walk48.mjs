@@ -202,7 +202,8 @@ try {
   let s = await api('/api/settings');
   check('a theme change pins the look to the title, not the direction',
     s.readerSeries?.[PLAIN]?.theme === 'sepia' && !('pagedDirection' in (s.readerSeries?.[PLAIN] ?? {})), JSON.stringify(s.readerSeries?.[PLAIN]));
-  await page.goto(`${BASE}/profile/?tab=Settings`, { waitUntil: 'networkidle2', timeout: 60000 });
+  // v0.86.0: Reading → More options; the row's own address opens the fold.
+  await page.goto(`${BASE}/profile/?tab=Settings&section=reading-direction`, { waitUntil: 'networkidle2', timeout: 60000 });
   await sleep(2500);
   check('Profile → Settings offers Right to left once', (await clickText('Right to left')) === 1);
   await sleep(2600);

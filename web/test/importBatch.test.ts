@@ -692,21 +692,23 @@ test('the i18n rig visits the v0.39.0 consoles by their ?tab= address and looks 
   // correctly translated /profile counted one leak before a single real one -- and the profile tab row
   // no longer says "Reading" at all, so a rig still looking for it would be measuring nothing there.
   // Reintroduce by putting 'Badges' or 'Reading' back in the /profile list, or by dropping the
-  // `?tab=Settings` entries.
+  // `?tab=Settings` entries. Since v0.86.0 each names its category (`&cat=`), so a phone sees the rows and not only the
+  // list of categories.
   const rig = read('test/e2e/i18n.mjs');
   assert.match(rig, /\['\/profile', \['Connections', 'Account', 'Settings', 'Reading studio', 'Lists', 'Sign out'\]\]/, 'the /profile word list is not the v0.39.0 one');
   assert.doesNotMatch(rig, /\['\/profile', \[[^\]]*'(?:Badges|Reading|Moments)'/, 'the /profile list has a word that is the same in French, or the retired Reading tab');
-  assert.match(rig, /\['\/profile\/\?tab=Settings', \[[^\]]*'Repeated pages'/, 'the rig does not visit the profile Settings tab');
-  assert.match(rig, /\['\/admin\/\?tab=Settings', \[[^\]]*'Backup time'/, 'the rig does not visit the admin Settings tab');
+  assert.match(rig, /\['\/profile\/\?tab=Settings&cat=reading', \[[^\]]*'Repeated pages'/, 'the rig does not visit the profile Settings tab');
+  assert.match(rig, /\['\/admin\/\?tab=Settings&cat=server', \[[^\]]*'Open registration'/, 'the rig does not visit the admin Settings tab');
   // GroupChips renders its labels as CSS-uppercase eyebrows, so innerText reads DEFAULT PRIORITY and a
   // case-sensitive \bDefault priority\b can never match -- the same trap the import page's 'From your tracker'
   // eyebrow set (above). Reintroduce by listing 'Default priority' for /admin/?tab=Settings.
-  assert.doesNotMatch(rig, /\['\/admin\/\?tab=Settings', \[[^\]]*'(?:Default priority|Blocked groups|Patience)/, 'the admin Settings list looks for an uppercase eyebrow');
+  assert.doesNotMatch(rig, /\['\/admin\/\?tab=Settings[^']*', \[[^\]]*'(?:Default priority|Blocked groups|Patience)/, 'the admin Settings list looks for an uppercase eyebrow');
   // The words the rig relies on for the profile are ones the locale files translate today (the other two
   // lists lean on strings other v0.39.0 builders add, which test 14 of settingsConsole.test.ts covers).
   for (const f of ['es.json', 'de.json', 'fr.json']) {
     const d = JSON.parse(read(`public/locales/${f}`));
-    for (const w of ['Account', 'Settings', 'Reading studio', 'Lists', 'Sign out', 'Weekly goal', 'Language', 'Accent', 'Offline downloads']) {
+    for (const w of ['Account', 'Settings', 'Reading studio', 'Lists', 'Sign out', 'Repeated pages', 'Wide pages', 'Pick the mode for each series', 'More options', 'Reading',
+      'Open registration', 'Check for updates', 'Updates and privacy', 'When someone signs up', 'Server name']) {
       assert.ok(d[w] && d[w] !== w, `${f}: "${w}" is missing or the same as the English, so the rig would count it as a leak`);
     }
   }

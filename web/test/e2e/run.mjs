@@ -1148,7 +1148,7 @@ try {
         bar: [...document.querySelectorAll('meta[name="theme-color"]')].map((m) => m.getAttribute('content')).join(),
       }));
       const want = (w, tone, rgb, bar) => w.tone === tone && w.body === rgb && w.html === rgb && w.bar === bar;
-      await page.goto(`${BASE}/profile/?tab=Settings`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+      await page.goto(`${BASE}/profile/?tab=Settings&cat=appearance`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
       await sleep(2500);
       if (!(await page.$('[data-tone-choice="midnight"]'))) bad('Appearance has no Midnight tone');
       else {
@@ -1166,7 +1166,7 @@ try {
         await sleep(2500);
         const n = await look();
         want(n, 'midnight', 'rgb(9, 13, 24)', '#090d18') ? ok('and a click to Home') : bad(`after a click to Home: ${JSON.stringify(n)}`);
-        await page.goto(`${BASE}/profile/?tab=Settings`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+        await page.goto(`${BASE}/profile/?tab=Settings&cat=appearance`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
         await sleep(2500);
         await page.click('[data-tone-choice="oled"]');
         await sleep(1500);

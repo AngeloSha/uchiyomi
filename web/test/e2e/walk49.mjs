@@ -788,7 +788,7 @@ async function archive(width) {
     const row = await waitFor(() => page.$('[data-downloads-section="attention"] [data-attention="archive"]'), 20_000);
     const said = row ? await row.evaluate((el) => el.textContent ?? '') : '';
     check(`${tag}: out of disk space, the archive waits under Needs attention and says why`, /Waiting for free disk space/.test(said), said);
-    check(`${tag}: ...with the admin's way to the setting`, !!(row && (await row.$('a[href="/admin/?tab=Settings"]'))));
+    check(`${tag}: ...with the admin's way to the setting`, !!(row && (await row.$('a[href="/admin/?tab=Settings&section=archive-free-space"]'))));
     await shot(`${tag}-2b-needs-attention`);
     if (row) await dialogsCoverScreen('[data-attention="archive"]', 'the Needs attention row', '2c');
     await floor(1);
@@ -897,19 +897,19 @@ async function archive(width) {
     await api(`/api/sources/archive/${encodeURIComponent(gap.id)}`, { method: 'DELETE', body: '{}' });
   }
 
-  // 4. Admin -> Settings -> Downloads, with the window's rows open.
-  await go('/admin/?tab=Settings', 3000);
-  const section = await waitFor(() => page.$('section#downloads'), 10_000);
-  check(`${tag}: Settings has the Downloads section`, !!section);
-  await section?.evaluate((el) => el.scrollIntoView({ block: 'start' }));
-  await page.click('section#downloads [role="switch"][aria-label="Only during set hours"]').catch(() => {});
+  // 4. Admin -> Settings -> Downloads -> Slow archive (its editor since v0.86.0), with the window's rows open. The row's
+  // own address opens the editor.
+  await go('/admin/?tab=Settings&section=archive-window', 3000);
+  const section = await waitFor(() => page.$('[data-editor-sheet]'), 10_000);
+  check(`${tag}: Settings opens the slow archive's editor`, !!section);
+  await page.click('[data-editor-sheet] [role="switch"][aria-label="Only during set hours"]').catch(() => {});
   const rows = await waitFor(async () => /From \(hour, 0–23\)/.test(await text()), 10_000);
   check(`${tag}: "Only during set hours" opens From and Until`, !!rows);
-  await (await page.$('section#downloads'))?.evaluate((el) => el.scrollIntoView({ block: 'start' }));
   await sleep(500);
   await shot(`${tag}-8-settings`);
-  await page.click('section#downloads [role="switch"][aria-label="Only during set hours"]').catch(() => {});
+  await page.click('[data-editor-sheet] [role="switch"][aria-label="Only during set hours"]').catch(() => {});
   await sleep(800);
+  await page.keyboard.press('Escape');
 
   if (wide) {
     // 5. The add dialog at a desktop width, for a Latest-N pick: newest first, and nothing added. On Walk Tale: Next,

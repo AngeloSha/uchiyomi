@@ -324,7 +324,7 @@ try {
   // click hung until the protocol timed out (three minutes, then "Runtime.callFunctionOn timed out").
   const flipReduce = async (on) => {
     await page.bringToFront();
-    await visit('/profile/?tab=Settings');
+    await visit('/profile/?tab=Settings&cat=appearance');
     await page.waitForSelector(SWITCH, { timeout: 20_000 });
     const now = await page.$eval(SWITCH, (b) => b.getAttribute('aria-checked') === 'true');
     if (now !== on) {
@@ -610,7 +610,7 @@ try {
   // ---- 4. notification targets (#70) -----------------------------------------------------------------
   phase = 'notify';
   const notifySection = async () => {
-    await visit('/admin/?tab=Settings');
+    await visit('/admin/?tab=Settings&cat=notifications');
     const section = await waitFor(async () => (await page.evaluateHandle(() => [...document.querySelectorAll('section')]
       .find((s) => s.querySelector('h2')?.textContent?.trim() === 'Notifications') || null)).asElement(), 20_000);
     if (!section) throw new Error('no Notifications section under Admin → Settings');

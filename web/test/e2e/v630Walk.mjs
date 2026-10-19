@@ -173,7 +173,7 @@ try {
   check(!/Change password/.test(account) && !(await p2.$('#two-factor')), 'the profile has no password and no two-factor to manage');
   check(/You can sign in with Authentik\./.test(account), 'and says the account signs in with Authentik');
   await shot(p2, 'profile');
-  await p2.goto(`${BASE}/admin/?tab=Settings`, { waitUntil: 'networkidle2' });
+  await p2.goto(`${BASE}/admin/?tab=Settings&cat=server`, { waitUntil: 'networkidle2' });
   await waitFor(async () => /Server name/.test(await text(p2)), 15_000);
   check(!/Open registration/.test(await text(p2)), 'Admin → Settings offers no Open registration');
   // Someone new: an account at their first sign-in.

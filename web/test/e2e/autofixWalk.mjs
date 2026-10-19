@@ -647,7 +647,8 @@ export async function autofixWalk({ page, go, shot: snap, check, waitFor, sleep,
     for (const [w, l] of [[390, 'ar'], [390, 'en'], [1280, 'en']]) {
       if (l !== lang) await setLang(l);
       await page.setViewport({ width: w, height: w < 1024 ? 844 : 900 });
-      await visit('/admin/?tab=Settings', 3500);
+      // v0.86.0: Maintenance, one control -- Off, Safe repair, Fix everything.
+      await visit('/admin/?tab=Settings&cat=maintenance', 3500);
       const row = await waitFor(() => page.$('[data-nightly-mode]'), 20_000, 300);
       if (row) await page.$eval('[data-nightly-mode]', (e) => e.scrollIntoView({ block: 'center' }));
       check(`autofix @${w}${l === 'ar' ? ' ar' : ''}: Settings has the nightly's choice, Safe repair by default`,
@@ -656,17 +657,17 @@ export async function autofixWalk({ page, go, shot: snap, check, waitFor, sleep,
       await shot(`autofix-${w}${l === 'ar' ? 'ar' : ''}-5-settings`);
     }
     const pick = (i) => page.evaluate((i) => { const r = document.querySelectorAll('[data-nightly-mode] [role="radio"]')[i]; r?.click(); return !!r; }, i);
-    await pick(1);
+    await pick(2);
     const saved = await waitFor(async () => ((await get('/api/admin/settings')).nightlyMode === 'autofix' ? true : null), 10_000, 300);
     check('autofix @1280: picking Fix everything saves it', !!saved);
     await page.reload({ waitUntil: 'networkidle2' }).catch(() => {});
     await sleep(2500);
     const kept = await waitFor(() => page.$eval('[data-nightly-mode]', (e) => (e.getAttribute('data-nightly-mode') === 'autofix'
-      && e.querySelectorAll('[role="radio"]')[1]?.getAttribute('aria-checked') === 'true' ? true : null)).catch(() => null), 15_000, 300);
+      && e.querySelectorAll('[role="radio"]')[2]?.getAttribute('aria-checked') === 'true' ? true : null)).catch(() => null), 15_000, 300);
     check('autofix @1280: ...and it survives a reload', !!kept);
     await page.$eval('[data-nightly-mode]', (e) => e.scrollIntoView({ block: 'center' })).catch(() => {});
     await shot('autofix-1280-5b-settings-fix-everything');
-    await pick(0);
+    await pick(1);
     const back = await waitFor(async () => ((await get('/api/admin/settings')).nightlyMode === 'repair' ? true : null), 10_000, 300);
     check('autofix @1280: ...and Safe repair puts it back', !!back);
 

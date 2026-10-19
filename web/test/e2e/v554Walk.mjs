@@ -126,7 +126,7 @@ export async function findWalk(ctx) {
         };
         const notice = await palette('/library/', 'notice');
         check(`find @${t}: Ctrl+K "notice" lists Notice chapters first, under Pages and settings`,
-          notice?.[0] === 'settings-notice' && await page.evaluate((h) => [...document.querySelectorAll('[role="dialog"] p')].some((p) => p.textContent.trim() === h), say('Pages and settings')),
+          notice?.[0] === 'admin-notice-chapters' && await page.evaluate((h) => [...document.querySelectorAll('[role="dialog"] p')].some((p) => p.textContent.trim() === h), say('Pages and settings')),
           JSON.stringify(notice));
         await shot(`find-${t}-5-palette-notice`);
         await page.keyboard.press('Enter');
@@ -144,12 +144,12 @@ export async function findWalk(ctx) {
         await shot(`find-${t}-7-arrived-rescan`);
       } else {
         await visit('/search/?q=notice', 3000);
-        const place = await waitFor(() => textOf(page, '[data-search-places] [data-palette-place="settings-notice"]'), 15_000, 300);
+        const place = await waitFor(() => textOf(page, '[data-search-places] [data-palette-place="admin-notice-chapters"]'), 15_000, 300);
         check(`find @${t}: the phone's search lists ${say('Notice chapters')} under Pages and settings`,
           !!place && place.includes(say('Notice chapters')) && (await textOf(page, '[data-search-places]'))?.includes(say('Pages and settings')), JSON.stringify(place));
         check(`find @${t}: the search page has no sideways scroll`, await noSideScroll());
         await shot(`find-${t}-5-search-notice`);
-        await page.click('[data-search-places] [data-palette-place="settings-notice"]');
+        await page.click('[data-search-places] [data-palette-place="admin-notice-chapters"]');
         const atNotice = await waitFor(async () => { const a = await landedAt(page, 'notice-chapters'); return inView(a) && !a.search.includes('section=') ? a : null; }, 20_000, 300);
         check(`find @${t}: a tap opens Admin → Settings on the Notice chapters card`, !!atNotice && atNotice.path === '/admin/' && /tab=Settings/.test(atNotice.search),
           JSON.stringify(atNotice ?? await landedAt(page, 'notice-chapters')));

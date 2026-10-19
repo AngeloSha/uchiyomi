@@ -432,18 +432,26 @@ export async function readerEdgesWalk(ctx) {
       await reader();
       check(`readeredges @${t}: the reader has both cover-colour edges, by default`, (await edges()) === 'bottom,top', await edges());
       await shot(`readeredges-${t}-1-edges-on`);
-      // Off from Profile -> Settings -> Reading.
-      await visit('/profile/?tab=Settings', 3500);
-      const there = await waitFor(() => switchOf(name), 15_000, 300);
-      check(`readeredges @${t}: Profile → Settings → Reading has "${name}", on`, there === 'true', String(there));
-      await switchOf(name, 'body', true);
-      const off = await waitFor(async () => ((await switchOf(name)) === 'false' ? true : null), 10_000, 200);
+      // Off from the reader's own sheet: since v0.86.0 the setting lives there only (the owner's yes to cut B), and
+      // Profile → Settings → Reading says so instead of offering it.
+      await visit('/profile/?tab=Settings&cat=reading', 3500);
+      check(`readeredges @${t}: Profile → Settings → Reading leaves "${name}" to the reader`, (await switchOf(name)) === null);
+      check(`readeredges @${t}: Settings has no sideways scroll`, await noSideScroll());
+      await reader();
+      await page.mouse.click(Math.round(w / 2), Math.round((w < 1024 ? 844 : 900) / 2));
+      await sleep(900);
+      if (!(await page.$('[data-reader-settings]'))) { await page.mouse.click(Math.round(w / 2), Math.round((w < 1024 ? 844 : 900) / 2)); await sleep(900); }
+      await tap(page, '[data-reader-settings]');
+      const there = await waitFor(() => switchOf(name, '[role="dialog"]'), 10_000, 200);
+      check(`readeredges @${t}: the reader's sheet has "${name}", on`, there === 'true', String(there));
+      await switchOf(name, '[role="dialog"]', true);
+      const off = await waitFor(async () => ((await switchOf(name, '[role="dialog"]')) === 'false' ? true : null), 10_000, 200);
       check(`readeredges @${t}: switched off`, !!off);
+      await page.keyboard.press('Escape');
       // Reader settings reach the account 1.5 s after the last change (lib/readerPrefs.ts queueSync), and a page loaded
       // before then adopts the account's older value: a person who reloads at once loses the change -- as every reader
       // setting does, not this one only. The walk waits it out.
       await sleep(2500);
-      check(`readeredges @${t}: Settings has no sideways scroll`, await noSideScroll());
       await shot(`readeredges-${t}-2-setting-off`);
       await reader();
       check(`readeredges @${t}: off, the reader has neither edge`, (await edges()) === '', await edges());

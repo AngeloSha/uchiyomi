@@ -143,7 +143,7 @@ try {
 
   // ---- 3. The switch ----
   phase = 'settings';
-  await page.goto(`${BASE}/admin/?tab=Settings`, { waitUntil: 'networkidle2', timeout: 60_000 });
+  await page.goto(`${BASE}/admin/?tab=Settings&cat=series`, { waitUntil: 'networkidle2', timeout: 60_000 });
   const hasSwitch = await waitFor(async () => (await page.evaluate(() => document.body.innerText || '')).includes('Match Discover titles online'), 15_000);
   check(!!hasSwitch, 'Admin → Settings offers "Match Discover titles online"');
 

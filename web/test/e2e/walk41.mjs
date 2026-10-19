@@ -534,13 +534,14 @@ try {
   check(!!(await page.$('a[href="/admin/?tab=Health#repairs"]')), 'the one-off fix links to Health\'s Recent repairs', 'no link to Recent repairs from Tasks');
   await shot('tasks-repair');
 
-  await page.goto(`${BASE}/admin/?tab=Settings`, { waitUntil: 'networkidle2', timeout: 60_000 });
-  const switchOff = await waitFor(() => page.$('[role=switch][aria-label="Repair the library nightly"]'), 20_000);
-  check(!!switchOff, 'Library housekeeping has the nightly switch', 'the nightly repair switch is not on the Settings tab');
-  if (switchOff) {
-    check(await switchOff.evaluate((el) => el.getAttribute('aria-checked') === 'true'), 'the nightly repair is on by default', 'the nightly repair was not on');
-    await switchOff.evaluate((node) => node.scrollIntoView({ block: 'center' }));
-    await switchOff.click();
+  // v0.86.0: Maintenance, and the nightly is one control -- Off, Safe repair, Fix everything.
+  await page.goto(`${BASE}/admin/?tab=Settings&cat=maintenance`, { waitUntil: 'networkidle2', timeout: 60_000 });
+  const nightly = await waitFor(() => page.$('[data-nightly-mode]'), 20_000);
+  check(!!nightly, 'Maintenance has the nightly repair', 'the nightly repair is not on the Settings tab');
+  if (nightly) {
+    check(await nightly.evaluate((el) => el.getAttribute('data-nightly-mode') === 'repair'), 'the nightly repair is on by default', 'the nightly repair was not on');
+    await nightly.evaluate((node) => node.scrollIntoView({ block: 'center' }));
+    await nightly.evaluate((node) => node.querySelectorAll('[role="radio"]')[0]?.click());
     await waitFor(async () => (await api('/api/admin/settings')).repair_enabled === false, 15_000);
   }
   await shot('settings-switch');

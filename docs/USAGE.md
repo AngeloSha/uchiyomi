@@ -251,6 +251,13 @@ for it to reveal) and **Reduce effects**, the same switches as **Profile → Set
 one there moves the other here. **Profile** and **Profile settings** in the panel go to the page; **Sign out** is there
 too, except in the desktop app. **Esc**, a tap outside or tabbing away closes it.
 
+**Your settings** (**Profile → Settings**, in four categories since v0.86.0): **General** (the language, how series
+pages list chapters, shortcuts and Incognito reading), **Appearance** (the background, the accent colour, your avatar and
+Reduce effects), **Reading** (the reader's defaults, below) and **This device** (offline downloads, new-chapter alerts
+and installing the app; not in the desktop app). The box above them finds any setting by name and opens it. On a phone
+the categories are a list: tap one to open it. A row marked *This device* is kept by this browser only; every other
+setting follows your account.
+
 ### What counts as a chapter
 
 Point `LIBRARY_PATH` at what you already have. A chapter can be any of:

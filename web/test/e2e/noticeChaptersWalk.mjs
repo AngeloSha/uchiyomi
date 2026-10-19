@@ -83,7 +83,8 @@ export async function noticeChaptersWalk(ctx) {
 
     /** Settings -> Notice chapters: flip Manhwa's switch through the page, and wait for the server to hold it. */
     const flip = async (to, t) => {
-      await visit('/admin/?tab=Settings', 3500);
+      // v0.86.0: the switches are in Notice chapters' editor, which a row inside it opens on arrival.
+      await visit('/admin/?tab=Settings&section=notice-short-only', 3500);
       const sw = await waitFor(() => page.evaluate((i) => {
         const b = document.querySelectorAll('[data-notice-types] [role="switch"]')[i];
         if (!b) return null;
@@ -101,7 +102,8 @@ export async function noticeChaptersWalk(ctx) {
     };
     /** v0.55.3 (#147): Settings -> Notice chapters -> "Only hide short ones", flipped through the page. */
     const flipShort = async (to, t) => {
-      await visit('/admin/?tab=Settings', 3500);
+      // v0.86.0: the switches are in Notice chapters' editor, which a row inside it opens on arrival.
+      await visit('/admin/?tab=Settings&section=notice-short-only', 3500);
       const sw = await waitFor(() => page.evaluate(() => {
         const b = document.querySelector('[data-notice-short-only] [role="switch"]');
         if (!b) return null;
@@ -109,7 +111,7 @@ export async function noticeChaptersWalk(ctx) {
         return b.getAttribute('aria-checked');
       }), 15_000, 300);
       check(`noticechapters @${t}: Settings has "${say('Only hide short ones (3 pages or fewer)')}", ${to ? 'off' : 'on'}`, sw === String(!to), String(sw));
-      const help = await page.evaluate(() => document.querySelector('[data-notice-short-only]')?.closest('section')?.textContent ?? '');
+      const help = await page.evaluate(() => document.querySelector('[data-notice-short-only]')?.closest('[data-editor-sheet]')?.textContent ?? '');
       check(`noticechapters @${t}: ...its help says what switching it off hides`,
         help.includes(say('Off hides every chapter numbered like 12.5 of the types switched on, including real chapters a site split into parts.')), help.slice(0, 300));
       await page.evaluate(() => document.querySelector('[data-notice-short-only] [role="switch"]')?.click());

@@ -99,7 +99,7 @@ await page.evaluate((p) => {
 }, PREFS);
 
 console.log('1. Admin -> Settings: the engine is ready, and one switch turns it on');
-await page.goto(`${BASE}/admin/?tab=Settings`);
+await page.goto(`${BASE}/admin/?tab=Settings&cat=server`);
 const row = page.locator('[data-translate-engine="ready"]');
 await row.waitFor({ timeout: 30_000 });
 await row.scrollIntoViewIfNeeded();

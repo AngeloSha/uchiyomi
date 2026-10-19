@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.86.0 — 2026-10-19
+
+**Settings are a few short categories with a search, instead of one long page.**
+
+### Settings, easier to find
+
+- **A few categories instead of one long page.** **Profile → Settings** is **General**, **Appearance**, **Reading** and
+  **This device**; **Admin → Settings** is **Server**, **Series & chapters**, **Downloads**, **Maintenance** and
+  **Notifications**. One category is on screen at a time, with at most eight rows, and its line in the list says what is
+  set in it. On a phone the categories are a list: tap one to open it, and Back returns to the list.
+- **Search every setting.** The box above the categories finds a setting by what it says, in your language or in
+  English, by the words people type for it (*discord*, *backup*, *rtl*), by a section's old name (*Scanlators*,
+  *Updates & schedules*) and by its help. Picking one opens its category and highlights the row. Ctrl+K (⌘K) and the
+  Search tab find every setting too, and go straight to it.
+- **Pictures for the choices you see.** The reader's mode and theme, what a wide page becomes, repeated pages and the
+  background are picture cards. Long lists (the language, the update interval, the backup time) are menus, and two or
+  three options are square toggles. No pills.
+- **Big settings are one row.** The scanlation groups (*Scanlators* until now), the source order, the slow archive, the
+  18+ filter, notice chapters and your avatar each say what is set and open their own editor. Rows few people change fold
+  under **More options**, and long help folds to two lines with **More** to read the rest.
+- **A few settings moved or became one:**
+  - The weekly goal is the ring at the top of your profile, no longer also a row in Settings.
+  - Brightness, the page gap, auto-scroll and the cover colour at the edges are set in the reader's own settings, while
+    you look at a page.
+  - The nightly backup is one menu: *Off*, or the time it runs. The nightly repair is one choice: *Off*, *Safe repair* or
+    *Fix everything*, with what each does under it.
+  - The space offline downloads use, **Protect downloads** and the way to the Offline downloads page are one row.
+  - **Compact chapter list** and **Type anywhere to search** are shown only where there is a mouse or a trackpad, where
+    they do something.
+- **Connections and Account** have square keys instead of pills.
+
+### Upgrading
+
+- Nothing to do. Links to the old sections (`?section=schedules`, `?section=housekeeping`, …) open where those settings
+  are now.
+
 ## v0.85.0 — 2026-10-19
 
 **Read raw chapters in your own language: translated pages, an optional download that runs on your server.**

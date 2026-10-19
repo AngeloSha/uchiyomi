@@ -136,10 +136,11 @@ for (const code of LOCALES) {
     // v0.54.0: Providers and Extensions are one Sources tab, whose views and Test all are visited by its address.
     ['/admin', ['Overview', 'Members', 'Settings', 'Server', 'People', 'Content', 'Sources']],
     ['/admin/?tab=Sources', ['Your sources', 'Add sources', 'Test all', 'Built-in']],
-    ['/admin/?tab=Settings', ['Open registration', 'Check for updates', 'Delete read chapters', 'Library housekeeping', 'Backup time']],
+    // v0.86.0: a category each (`&cat=`), so a phone sees the rows and not only the list of categories.
+    ['/admin/?tab=Settings&cat=server', ['Open registration', 'Check for updates', 'Updates and privacy', 'When someone signs up', 'Server name']],
     ['/admin/import', ['review matches', 'matches each title', 'Start matching', 'backup stays on your server', 'nothing lands in your library', 'bring your list over']],
     ['/profile', ['Connections', 'Account', 'Settings', 'Reading studio', 'Lists', 'Sign out']],
-    ['/profile/?tab=Settings', ['Appearance', 'Weekly goal', 'Repeated pages', 'Language', 'Accent', 'Offline downloads']],
+    ['/profile/?tab=Settings&cat=reading', ['Repeated pages', 'Wide pages', 'Pick the mode for each series', 'More options', 'Reading']],
     // Library -> Downloads (v0.49.0): its empty state on a quiet instance, its section names on a busy one.
     ['/library/?view=downloads', ['Library', 'Nothing is being fetched', 'as they come in', 'Came in today', 'Needs attention', 'Server tasks', 'Queued']],
   ];
