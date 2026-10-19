@@ -31,7 +31,7 @@ import { REFETCH_BAK } from './fsAtomic';
 import { logAudit } from './audit';
 import { carries, standingsOf } from './sourceStanding';
 import { followGuard } from './seriesLang';
-import { MAX_FOLLOWERS } from './autoFollow';
+import { followerLimit } from './followLimit';
 import { removeMergeDuplicates } from './extraCopies';
 
 export interface SeriesRow {
@@ -194,6 +194,7 @@ export async function mergeSeries(
   // of unrelated merges cannot occupy every pool client and then deadlock waiting for another one. Core source facts
   // are compared again under the row locks below before this candidate may be carried.
   const carryCandidate = await carryable(fromId, intoId).catch(() => null);
+  const limit = await followerLimit();
   return tx(async (qq) => {
     if (fromId === intoId) throw new MergeConflictError({ refused: 'same_series' });
     // Stable lock order prevents two opposite/crossing merges from deadlocking. More importantly, the visibility and
@@ -345,7 +346,7 @@ export async function mergeSeries(
           WHERE (SELECT count(*) FROM series_sources WHERE series_id = $1 AND source_id <> $2) < $5::int
          ON CONFLICT (series_id, source_id) DO NOTHING
          RETURNING source_id`,
-        [intoId, carry.sourceId, carry.ref, carry.title, MAX_FOLLOWERS]);
+        [intoId, carry.sourceId, carry.ref, carry.title, limit]);
       carried = got[0]?.source_id ?? null;
     }
 

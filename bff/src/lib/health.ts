@@ -432,7 +432,7 @@ function rangeText(gaps: Array<{ lo: number; hi: number }>): string {
  * them and a search would have been wasted requests.
  *
  * ⚠️ Each sentence has to describe the verdict it is printed under, and two of them once described the
- * other one's. `cap` is sourceHunt's "this series already follows MAX_FOLLOWERS sources" -- a permanent
+ * other one's. `cap` is sourceHunt's "this series already follows as many sources as it may" -- a lasting
  * fact about the series, nothing to do with the night's budget -- and it was rendered "the nightly ran out
  * of searches", which invites the admin to wait for tomorrow's run for an answer that will never change.
  * `cooldown` is the 24 h stamp on this one series, and it is NOT the spent-budget case: the gap step stops

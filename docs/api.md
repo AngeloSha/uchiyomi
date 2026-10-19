@@ -341,7 +341,8 @@ must agree **both ways** — at least 90% of the primary's numbers listed by the
 of the candidate's listed by the primary — else `numbering_differs`, so a sequel that continues past the
 primary ("Tokyo Ghoul:re" 1..60 for "Tokyo Ghoul" 1..20) is refused although it lists every number, while
 "(Official)" 1..22 for 1..20 (20 of 22 = 0.91) follows. The `coverage` reported for a two-way judgement is
-the lower of the two shares. At most `MAX_FOLLOWED_SOURCES` (default three since v0.80.0) sources are followed per series, in the order
+the lower of the two shares. At most as many sources as **Other sources per series** allows (`maxFollowedSources` on PATCH
+/api/admin/settings since v0.89.0, 1 to 10; before it `MAX_FOLLOWED_SOURCES`, three by default) are followed per series, in the order
 given; a follower this path wrote has no author and reads `auto: true` on the series' sources. The results are not in the
 add's answer: they land on the series' job card (below), which a `none` add gets minted for the purpose.
 

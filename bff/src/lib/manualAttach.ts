@@ -34,7 +34,8 @@ import { one, q, tx } from './db';
 import { getSource } from './sources';
 import { logAudit } from './audit';
 import { seriesVisible, sourceAllowedFor, ADULT_RATING, type ViewCtx } from './visibility';
-import { MAX_FOLLOWERS, bounded, followJudged, titleMatch } from './autoFollow';
+import { bounded, followJudged, titleMatch } from './autoFollow';
+import { followerLimit } from './followLimit';
 import { altTitlesFor } from './altTitles';
 import { runsInside } from './updater';
 import { renumberRunning } from './numbering';
@@ -153,7 +154,7 @@ export async function attachManual(seriesId: string, pick: AttachPick, as: 'foll
   if (as === 'follower' && pre.source_id) {
     const r = await followJudged(seriesId, { source: pick.source, name: src.name, sourceSeriesId: pick.sourceSeriesId, theirTitle, coverage: null }, { addedBy: opts.userId });
     if (r === 'gone') return no('not_found');
-    if (r === 'cap') return no('cap', say('attach.cap', { n: MAX_FOLLOWERS }));
+    if (r === 'cap') return no('cap', say('attach.cap', { n: await followerLimit() }));
     await rate();
     await audit({ as: 'follower' });
     return { ok: true, as: 'follower', theirTitle };

@@ -65,6 +65,7 @@ import { writePreflight } from '../lib/fsGuard';
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, applyAdultSources, rateSourceAdult, MAX_ADULT_SOURCES, browsableIds, nameableIds, viewCtxFor, hideAdult, ADULT_RATING } from '../lib/visibility';
 import { cleanSourceOrder, invalidateSourcePrefs } from '../lib/sourcePrefs';
 import { keepRestricted, memberDefaults, memberDefaultsShape, permsShape, saveMemberDefaults } from '../lib/memberDefaults';
+import { FOLLOW_LIMIT_MAX, followerLimit, forgetFollowerLimit } from '../lib/followLimit';
 import { borrowNamesFor, clearBorrowedNames } from '../lib/borrowNames';
 import { clearAutoDetails, fillDetailsFromSources, fillDetailsOn } from '../lib/autoDetails';
 import { lookupsChanged } from '../lib/discoverIdentity';
@@ -662,6 +663,10 @@ export default async function adminRoutes(app: FastifyInstance) {
       // #208, item 6: what an account the server makes by itself starts with (lib/memberDefaults.ts), in the shape PATCH
       // takes it -- Admin → Members → When someone signs up.
       newMemberDefaults: await memberDefaults(),
+      // v0.89.0 (#305): how many other sources a series may follow -- the admin's choice, else MAX_FOLLOWED_SOURCES, else 3
+      // (lib/followLimit.ts) -- and the most the menu offers.
+      followerLimit: await followerLimit(),
+      followerLimitMax: FOLLOW_LIMIT_MAX,
     };
   };
   /**
@@ -802,6 +807,13 @@ export default async function adminRoutes(app: FastifyInstance) {
        */
       finishDownloads: z.boolean().optional(),
       /**
+       * v0.89.0 (#305): Other sources per series -- how many sources besides its main one a series may follow, by hand, by
+       * Find other sources and on its own (lib/followLimit.ts), 1 to 10. Each one is one more chapter list asked for at
+       * every library update. Lowering it unfollows nothing: a series over the new number keeps its sources and follows
+       * no more.
+       */
+      maxFollowedSources: z.number().int().min(1).max(FOLLOW_LIMIT_MAX).optional(),
+      /**
        * MangaDex in other languages (v0.52.0, #123): the languages besides English that are on, replaced whole, as
        * app codes from lib/lang.ts MANGADEX_LANGS ("es-419", "pt-BR"; MangaDex's own "es-la" is read as es-419).
        * Applied live: each language turned on becomes its own source, each turned off goes. English is always on,
@@ -860,6 +872,10 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (b.updateSmart !== undefined) await q('UPDATE server_settings SET update_smart = $1, updated_at = now() WHERE id = 1', [b.updateSmart]);
     if (b.finishDownloads !== undefined) await q('UPDATE server_settings SET finish_downloads = $1, updated_at = now() WHERE id = 1', [b.finishDownloads]);
     if (b.autoFollowOnFailure !== undefined) await q('UPDATE server_settings SET auto_follow_on_failure = $1, updated_at = now() WHERE id = 1', [b.autoFollowOnFailure]);
+    if (b.maxFollowedSources !== undefined) {
+      await q('UPDATE server_settings SET max_followed_sources = $1, updated_at = now() WHERE id = 1', [b.maxFollowedSources]);
+      forgetFollowerLimit();
+    }
     if (b.installPing !== undefined) await setInstallPing(b.installPing);
     const nextGlobalSources = b.sourcePrefs === undefined
       ? undefined

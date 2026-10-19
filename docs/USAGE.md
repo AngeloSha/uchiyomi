@@ -729,8 +729,14 @@ sources it already follows are kept but not asked, and a new follow is refused w
   from the series it continues — *Tokyo Ghoul:re* lists every chapter of *Tokyo Ghoul* and forty more, and
   a same-named work three hundred chapters long covers a five-chapter listing entirely; both read
   *numbering differs*, with the lower of the two shares as the percentage shown, while *(Official)* at 22
-  chapters for 20 still follows. Up to two sources are followed per series. Nothing is searched for this;
-  only the sources the dialog already found are asked, each for its page and chapter list.
+  chapters for 20 still follows. Sources are followed up to the series' limit (*How many*, below). Nothing is
+  searched for this; only the sources the dialog already found are asked, each for its page and chapter list.
+
+**How many** (since v0.89.0, #305). A series follows up to three sources besides its main one. An admin can allow
+more, up to ten, or fewer, in **Admin → Settings → Downloads → More options → Other sources per series**; the number
+counts the sources you follow and the ones Uchiyomi finds on its own alike. Each one is one more chapter list asked for
+at every library update, so more sources per series make each update longer. Lowering it unfollows nothing: a series
+that follows more keeps its sources, and follows no new one while it is over the number.
 
 **In the series' language only** (since v0.52.0). A series follows sources in its own language: the add dialog's
 check, the hunt for a missing chapter and Find other sources never follow a source in another, and Find missing
@@ -795,7 +801,7 @@ once, calmly. The idea is @TIGamingTV's ([#119](https://github.com/AngeloSha/uch
   extensions do), as Discover and **Follow** on a series page do. A series with no other names stored is first given
   the ones its source's description lists. A candidate must pass the same check as any second source
   (*Following a second source*): its title, then its chapter numbers. A series follows at most three other sources
-  (two before v0.80.0; the server can set `MAX_FOLLOWED_SOURCES`), the run stops looking once the series is full, and it gives each
+  unless an admin allows more (*How many*, under *Following a second source*), the run stops looking once the series is full, and it gives each
   series at most 90 seconds. A series numbered by posting order is skipped: it follows no other source.
 - **Afterwards**, each series that gained a source has its chapter list read again, 1.5 seconds apart, so the next
   scheduled check fetches its new chapters without a burst, and Health checks itself again.
@@ -865,7 +871,7 @@ after ten chapters in a row came down whole at it — a site that kept refusing 
 ten minutes later. Two sources whose pages come from the same image server share one pace (Natomanga and
 Mangakakalot do), and **Admin → Health** says *Downloading slowly: the site asked for fewer requests* on the
 source's row under *Source health* while it lasts. If a normal failure still wins, Uchiyomi
-tries the same chapter on at most three sources the series already follows (up to four with `MAX_FOLLOWED_SOURCES`);
+tries the same chapter on at most three sources the series already follows (up to four when an admin allows more);
 the download card says which source it switched from and to. It does not switch a version you explicitly picked, and a 403 or 429 is a
 refusal: the source cools down, no partial is saved and no new source is hunted. If the series already
 follows another source with the chapter, that copy may keep the queue moving.

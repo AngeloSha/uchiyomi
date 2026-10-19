@@ -216,8 +216,8 @@ test('a broken follower does not hold the series at its limit, and is kept', { s
       await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, $2, $3)`, [SER, b, `${b}-series`]);
       await breakIt(b);
     }
-    const { MAX_FOLLOWERS } = await import('../src/lib/autoFollow');
-    assert.equal(MAX_FOLLOWERS, 3, 'PREMISE: three by default (lib/followLimit.ts)');
+    const { followerLimit } = await import('../src/lib/followLimit');
+    assert.equal(await followerLimit(), 3, 'PREMISE: three by default (lib/followLimit.ts)');
     const out = await sc.runScout(SER);
     // Reintroduce by counting every follower (runScout's check, or followJudged's `notCounted`): `cap`.
     assert.equal(out.verdict, 'followed', JSON.stringify(out));

@@ -11,7 +11,7 @@
 //     crash mid-hunt never re-hunts the same series every sweep;
 //   - at most HUNT_MAX_PER_SWEEP hunts per sweep (the caller's `budget`), HUNT_MAX_SOURCES searched per
 //     hunt, under the fill scan's concurrency slots and a HUNT_WALL_MS wall;
-//   - never past MAX_FOLLOWERS, never a source the series already follows, never one that is disabled,
+//   - never past the follower limit (lib/followLimit.ts), never a source the series already follows, never one that is disabled,
 //     in a cooldown, or outside the caller's `allowed` rule -- for the sweep, that rule is "no adult source
 //     on a clean series": a server-initiated follow must not attach one where no person would have.
 //
@@ -34,7 +34,8 @@ import { SOLVER_CONCURRENCY } from './sources/flaresolverr';
 import { healthAll } from './sourceHealth';
 import { scanOrder } from './scanOrder';
 import { pickBest } from './titleMatch';
-import { judgeCandidate, followJudged, bounded, MAX_FOLLOWERS, MIN_TRY_MS, type PrimaryFacts, type Judgement } from './autoFollow';
+import { judgeCandidate, followJudged, bounded, MIN_TRY_MS, type PrimaryFacts, type Judgement } from './autoFollow';
+import { followerLimit } from './followLimit';
 import { chooseReleases, type ReleasePrefs } from './releases';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { MIN_HAVE } from './fill';
@@ -121,7 +122,7 @@ export interface HuntResult {
   why:
     | 'off'          // the admin switch is off
     | 'cooldown'     // hunted within HUNT_COOLDOWN_MS, or the sweep's budget is spent (nothing searched)
-    | 'cap'          // the series already follows MAX_FOLLOWERS sources
+    | 'cap'          // the series already follows as many sources as it may (lib/followLimit.ts)
     | 'no_candidate' // nothing to search, or no searched source both carries the title and is this series
     | 'no_copy'      // followed, but the new source does not list the wanted number
     | 'posting_order' // numbered by posting order (#116): no other source's numbers line up, so none is searched
@@ -253,7 +254,7 @@ export async function huntCandidates(
   // The same count followHunted applies under its lock; checked here so a capped series costs no search. A follower
   // that cannot carry the series now (v0.80.0: failing, switched off, not loaded) is not counted.
   const notCounted = new Set(await notCarrying(followers).catch(() => [] as string[]));
-  if (followers.filter((id) => id !== s.source_id && !notCounted.has(id)).length >= MAX_FOLLOWERS) return none('cap');
+  if (followers.filter((id) => id !== s.source_id && !notCounted.has(id)).length >= await followerLimit()) return none('cap');
   const numbers = (await q<{ number: number }>('SELECT DISTINCT number FROM series_listing WHERE series_id = $1', [seriesId]).catch(() => []))
     .map((r) => Number(r.number)).filter((n) => Number.isFinite(n));
   if (numbers.length < MIN_HAVE) return none('no_candidate');

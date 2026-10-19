@@ -1051,8 +1051,8 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
         const bySource = new Map<string, ListingCopy>();
         for (const c of ranked) if (!bySource.has(c.source)) bySource.set(c.source, c);
         const copies = [...bySource.values()].slice(0, REPAIR_SHORT_COPIES);
-        // A copy we chose not to ask has said nothing, and silence is never a proof. With MAX_FOLLOWERS
-        // this is rare (a series follows at most three sources), but "rare" is not "cannot", and the
+        // A copy we chose not to ask has said nothing, and silence is never a proof. With the follower limit
+        // this is rare (a series follows three sources unless an admin allows more), but "rare" is not "cannot", and the
         // chapter being left for tomorrow is the harmless end of that.
         const unasked = bySource.size - copies.length;
 

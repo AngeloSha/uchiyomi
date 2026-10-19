@@ -74,7 +74,7 @@ import type { SourceSeries } from './sources/types';
 import { healthAll, isDisabled } from './sourceHealth';
 import { scanOrder } from './scanOrder';
 import {
-  judgeCandidate, followJudged, bounded, titleMatch, MAX_FOLLOWERS, MIN_TRY_MS, type Judgement, type PrimaryFacts,
+  judgeCandidate, followJudged, bounded, titleMatch, MIN_TRY_MS, type Judgement, type PrimaryFacts,
 } from './autoFollow';
 import { chooseReleases, type ReleasePrefs } from './releases';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
@@ -107,6 +107,7 @@ import { deadFollowers, rankFollowers, replaceCounts, replaceFacts, type RankedF
 import { MIN_COVERAGE } from './fill';
 import { carries, standingsOf, type Standing } from './sourceStanding';
 import { wantQuiet } from './finishDownloads';
+import { followerLimit } from './followLimit';
 
 /** How long one series may spend searching and judging before what is left of it is `not_tried`. */
 export const FIND_SERIES_WALL_MS = 90_000;
@@ -135,7 +136,7 @@ export type FindStatus = 'running' | 'done' | 'stopped' | 'failed' | 'interrupte
 /**
  * Why a series gained no source, each for exactly what happened (the web words every code):
  * - `posting_order`: numbered by posting order, so no follower is ever merged (not searched);
- * - `full`: it already follows MAX_FOLLOWERS sources (not searched), or a hunt filled the last slot meanwhile;
+ * - `full`: it already follows as many sources as a series may (lib/followLimit.ts; not searched), or a hunt filled the last slot meanwhile;
  * - `too_few`: it lists under MIN_HAVE chapter numbers, which no candidate can be measured against (not searched);
  * - `no_source`: no other source could be asked -- every one disabled, cooling down, beyond the starting admin's
  *   age cap, in another language than the series (v0.52.0), or one it already follows (not searched; the server log
@@ -613,7 +614,7 @@ async function findFor(
   // reads full for the series whose two followers are switched off.
   const dead = new Set((replacing?.dead ?? []).map((d) => d.sourceId));
   const live = [...followers].filter((id) => !dead.has(id));
-  const free = MAX_FOLLOWERS - live.length;
+  const free = (await followerLimit()) - live.length;
   if (free <= 0) return end('full', false);
   const numbers = await numbersOf(s.id);
   // judgeCandidate refuses every candidate of a series listing under MIN_HAVE numbers before asking anything, so
@@ -799,7 +800,7 @@ async function makeRoom(
   seriesId: string, dead: ReadonlyArray<{ sourceId: string; name: string }>, dropped: Array<{ sourceId: string; name: string }>,
 ): Promise<void> {
   const [{ n }] = await q<{ n: number }>('SELECT count(*)::int AS n FROM series_sources WHERE series_id = $1', [seriesId]);
-  let over = Number(n) - MAX_FOLLOWERS + 1;
+  let over = Number(n) - (await followerLimit()) + 1;
   let made = 0;
   for (const d of dead) {
     if (over <= 0) break;

@@ -459,14 +459,16 @@ rarely needed:
   `AUTOFIX_MAX_MINUTES` is spent, and the next run continues down the list. `0` switches its extensions phase off. A
   package that carries none of the series it was searched for is removed again at once, and is not tried for those
   series again for a month.
-- `MAX_FOLLOWED_SOURCES` (default `3`, 1 to 6): how many sources besides the main one a series may follow, by hand or
-  automatically. Each one is another chapter list read on every update. A source that is broken, switched off or no
-  longer installed does not count toward it for the sources Uchiyomi adds on its own.
+- `MAX_FOLLOWED_SOURCES` (default `3`, 1 to 10): how many sources besides the main one a series may follow, by hand or
+  automatically, until an admin picks a number. Since v0.89.0 that is a menu in the app, **Admin → Settings → Downloads
+  → More options → Other sources per series** (1 to 10), and this is only its starting value. Each one is another
+  chapter list read on every update. A source that is broken, switched off or no longer installed does not count
+  toward it for the sources Uchiyomi adds on its own.
 - `MIN_FREE_GB` (default `10`): refuse to start a download when the download disk has less than this free.
   `0` disables the floor. Fails open if free space cannot be measured.
 
-An ordinary chapter failure may continue from up to `MAX_FOLLOWED_SOURCES` (default three, at most four) of the sources
-already followed for that series. A copy explicitly picked by a person never switches. A 403/429 never becomes a
+An ordinary chapter failure may continue from as many of the sources already followed for that series as a series may
+follow (**Other sources per series**, three by default), at most four. A copy explicitly picked by a person never switches. A 403/429 never becomes a
 partial chapter; the refusing source cools down, while an already-followed copy can keep the queue moving. With
 **Admin → Settings → Downloads → Finish downloads on their own** on (the default), Uchiyomi also finds and
 follows a new source for a series its sources cannot serve. Title and 90%-chapter matching apply, and a clean series

@@ -129,7 +129,7 @@ export function autoFollowWhy(why: FollowWhy | string): string {
     case 'unreachable': return tr('could not be reached');
     case 'too_few_listed': return tr('lists too few chapters');
     case 'not_tried': return tr('not checked — it took too long');
-    case 'cap': return tr('already following two');
+    case 'cap': return tr('already following as many as it may');
     case 'unavailable': return tr('not available');
     // #116: nothing is judged -- no other source's numbers line up with posts numbered 1..K.
     case 'posting_order': return tr('this series is numbered by posting order');
@@ -865,7 +865,8 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
 
           {/* Only for an admin, and only when the dialog holds other sources for this title (a trending
               search, a wall fold). The helper leads with why anyone would: the benefit is the reason #49
-              was filed. It names no limit: how many a series may follow is the server's (MAX_FOLLOWED_SOURCES, two by default). */}
+              was filed. It names no limit: how many a series may follow is the server's (Admin → Settings → Other sources per
+              series, three by default). */}
           {mayFollow && others.length > 0 && view?.posting && (
             <p className="mt-3 text-[11px] text-fog-500" data-also-follow="posting_order">
               {tr('Other sources are not followed for a series numbered by posting order: their chapter numbers do not line up.')}

@@ -1974,6 +1974,10 @@ CREATE TABLE IF NOT EXISTS chapter_reactions (
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (book_id, user_id)
 );
+
+-- v0.89.0 (#305): how many other sources a series may follow, the admin's choice (lib/followLimit.ts), 1 to 10. NULL until
+-- one is picked, and then MAX_FOLLOWED_SOURCES (or three) is the limit, as it was. Additive: v0.88.x reads the env alone.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS max_followed_sources int;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

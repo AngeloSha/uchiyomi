@@ -41,7 +41,7 @@ import { one, tx } from './db';
 import { getSource } from './sources';
 import { logAudit } from './audit';
 import { seriesVisible, sourceAllowedFor, type ViewCtx } from './visibility';
-import { MAX_FOLLOWERS } from './autoFollow';
+import { followerLimit } from './followLimit';
 import { renumberRunning } from './numbering';
 import { runsInside } from './updater';
 import { effectiveLang, followGuard, sourceLanguage } from './seriesLang';
@@ -152,6 +152,8 @@ export async function switchMainSource(seriesId: string, to: string, opts: Switc
   const from = pre.source_id;
   const keepOld = !!from && !!pre.source_series_id
     && (opts.old === 'keep' || (opts.old !== 'drop' && carries(standingOf(from, standing.get(from)))));
+  // Read before the transaction, as every pool read here is: one taken inside it could wait on a pool the switches hold.
+  const limit = await followerLimit();
 
   // ---- the switch, under the series row's lock ----
   type Done = { r: MainSwitched; promoted: { coverage: number | null; added_by: string | null }; failuresMoved: number };
@@ -194,7 +196,7 @@ export async function switchMainSource(seriesId: string, to: string, opts: Switc
          SELECT $1::text, $2::text, $3::text, $4::text, NULL, $5::uuid
           WHERE (SELECT count(*) FROM series_sources WHERE series_id = $1 AND source_id <> $2) < $6::int
          RETURNING source_id`,
-        [seriesId, from, pre.source_series_id, row.title, opts.userId, MAX_FOLLOWERS]);
+        [seriesId, from, pre.source_series_id, row.title, opts.userId, limit]);
       kept = ins.length > 0;
     }
     let listingDropped = 0;

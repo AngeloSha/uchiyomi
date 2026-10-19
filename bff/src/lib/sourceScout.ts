@@ -33,7 +33,8 @@ import { q, one } from './db';
 import { getSource, listSources, SW_PREFIX } from './sources';
 import { healthAll } from './sourceHealth';
 import { scanOrder, scanRank, type Orderable } from './scanOrder';
-import { judgeCandidate, bounded, MAX_FOLLOWERS, MIN_TRY_MS, type Judgement, type PrimaryFacts } from './autoFollow';
+import { judgeCandidate, bounded, MIN_TRY_MS, type Judgement, type PrimaryFacts } from './autoFollow';
+import { followerLimit } from './followLimit';
 import { searchByNames, takeHuntSlot, releaseHuntSlot, seriesIsAdult, sweepAllowedFor, followHunted, rememberJudgement } from './sourceHunt';
 import { standingsOf, carries, type Standing } from './sourceStanding';
 import { rateKeyOf } from './pace';
@@ -317,7 +318,7 @@ export async function runScout(seriesId: string, ask: ScoutAsk = {}): Promise<Sc
   // The follower limit counts only followers that can carry the series (lib/sourceStanding.ts): a broken one is kept,
   // and not counted. Reintroduce by counting them all: "a broken follower does not hold the series at its limit"
   // in sourceScout.int.test.ts reads cap.
-  if (followers.filter((id) => carries(standing.get(id) ?? 'usable')).length >= MAX_FOLLOWERS) return done('cap', SCOUT_BACKOFF.cap);
+  if (followers.filter((id) => carries(standing.get(id) ?? 'usable')).length >= await followerLimit()) return done('cap', SCOUT_BACKOFF.cap);
 
   const floor = s.chapter_floor != null && s.chapter_floor !== '' ? Number(s.chapter_floor) : null;
   const need = await needOf(seriesId, Number.isFinite(floor as number) ? floor : null, mine, standing, ask.numbers ?? []);

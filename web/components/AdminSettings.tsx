@@ -567,6 +567,14 @@ function SchedulesSection({ data, save }: { data: any; save: Save }) {
         {/* Which languages MangaDex is a source in lives with the sources (components/MangadexCard.tsx); this row goes there, unfolded (`?card=mangadex`, v0.52.0). */}
         <SummaryRow id="mangadex-languages" label={tr('MangaDex languages')} href="/admin/?tab=Sources&card=mangadex" />
         <MoreOptions id="downloads-more">
+          {/* v0.89.0 (#305): how many other sources a series may follow (bff lib/followLimit.ts), here since the env's
+              MAX_FOLLOWED_SOURCES alone set it -- that number is what the menu shows until one is picked. The help says the
+              cost: each one is a chapter list asked for at every update. */}
+          <SelectRow id="sources-per-series" label={tr('Other sources per series')}
+            help={tr('How many sources besides its main one a series may follow, whether you add them or Uchiyomi finds them. 3 by default. Each one is one more chapter list to ask for at every library update.')}
+            value={String(data.followerLimit ?? 3)}
+            options={Array.from({ length: data.followerLimitMax ?? 10 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }))}
+            onChange={(v) => save({ maxFollowedSources: Number(v) })} />
           {/* v0.61.0, the release radar's other half (bff lib/releaseRadar.ts isDue): the scheduled sweep asks a long-quiet
               series less often and a due one as usual. Off by default, and `=== true` reads a server that does not send the
               key as off; the help says the limit and that Check now is never kept waiting. */}
