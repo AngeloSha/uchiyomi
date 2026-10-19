@@ -60,6 +60,7 @@ export function ReaderSettings({
   autoApplied,
   padConnected = false,
   rtlTrack = false,
+  spreadChoices = [],
   onClose,
   libraryName,
   onLibraryDefault,
@@ -87,6 +88,11 @@ export function ReaderSettings({
   padConnected?: boolean;
   /** Whether the paged track runs right to left now: its left edge then turns ON (the tap sketches say so). */
   rtlTrack?: boolean;
+  /**
+   * v0.89.0 (#262): what may be done about the page being read -- merge it with the page on its left or right, take a
+   * pair apart, give a pair back to the detector (lib/spreadMarks.ts). Empty where nothing may: the reader decides.
+   */
+  spreadChoices?: ReadonlyArray<{ key: string; label: string; onSelect: () => void }>;
   onClose: () => void;
   /** The library the series is in, named for the admin's key (#235). Absent for a member: only an admin is told it. */
   libraryName?: string;
@@ -274,6 +280,24 @@ export function ReaderSettings({
             <p className="mt-1 text-[11px] leading-snug text-fog-500">
               {tr('Shows two pages that a source cut from one double-page spread as that spread, in Paged mode. The server looks for them when a chapter is first opened, so they join a moment later. On a screen held upright, Wide pages applies to them.')}
             </p>
+            {/* v0.89.0 (#262): the page being read, by hand. The keys sit as the pages do -- the left one on the left in
+                any language, so the grid is laid out left to right and each label keeps its own direction. */}
+            {spreadChoices.length > 0 && (
+              <div className="mt-3 rounded-2xl border border-ink-700/70 bg-ink-850/60 p-3" data-spread-choices>
+                <p className="text-xs font-medium text-fog-300">{tr('This page')}</p>
+                <div dir="ltr" className={`mt-2 grid gap-2 ${spreadChoices.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                  {spreadChoices.map((o) => (
+                    <button key={o.key} type="button" onClick={o.onSelect} data-spread-choice={o.key}
+                      className="rounded-xl border border-ink-700 px-2 py-2.5 text-sm text-fog-200 transition hover:border-accent hover:text-accent">
+                      <span dir="auto">{o.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2 text-[11px] leading-snug text-fog-500">
+                  {tr('For when the server joined two pages that are not one picture, or missed two that are. Saved for your account only.')}
+                </p>
+              </div>
+            )}
           </div>
         )}
 

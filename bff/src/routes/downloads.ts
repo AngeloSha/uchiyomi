@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { junkPagesFor } from '../lib/junkPages';
 import { storedJoins } from '../lib/spreadMeasure';
+import { marksFor } from '../lib/spreadMarks';
 import { z } from 'zod';
 import { q } from '../lib/db';
 import { content } from '../lib/backend';
@@ -53,6 +54,9 @@ export default async function downloadRoutes(app: FastifyInstance) {
     // #229: the spreads already found ride along for the same reason, so a downloaded chapter joins them offline as it
     // does online. Read only: a download never queues a measure, which is the reader's to ask for (?spreads=1).
     const joins = await storedJoins(id, (pages ?? []).length).catch(() => new Map<number, 'rtl' | 'ltr'>());
+    // v0.89.0 (#262): and this account's own marks on them (lib/spreadMarks.ts), which the offline reader applies over the
+    // joins as the online one does. The manifest is per account already: it is fetched by the account that saves it.
+    const marks = await marksFor(userIdOf(req), id, (pages ?? []).length).catch(() => new Map<number, 'join' | 'split'>());
 
     let totalBytes = 0;
     const mapped = (pages ?? []).map((p: any) => {
@@ -70,6 +74,7 @@ export default async function downloadRoutes(app: FastifyInstance) {
         // download. The placeholder's bytes download like any page.
         missing: p.missing || undefined,
         join: joins.get(p.number),
+        mark: marks.get(p.number),
       };
     });
 

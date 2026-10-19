@@ -54,7 +54,7 @@ export interface OfflineChapter {
    * `missing` (v0.40.0) likewise: the placeholder bytes download like any page, and the caption over them
    * is drawn from this flag, so a chapter saved short still explains itself with no network.
    */
-  pages: { number: number; width: number | null; height: number | null; junk?: boolean; missing?: true; join?: 'rtl' | 'ltr' }[];
+  pages: { number: number; width: number | null; height: number | null; junk?: boolean; missing?: true; join?: 'rtl' | 'ltr'; mark?: 'join' | 'split' }[];
 }
 
 /**
@@ -220,6 +220,21 @@ export async function setOfflinePageJunk(bookId: string, pageNumber: number, jun
 }
 
 /**
+ * Carry a reader's own merges and splits (v0.89.0, #262, lib/spreadMarks.ts) into the downloaded copy, for the reason
+ * setOfflinePageJunk does: the reader reads a downloaded chapter's pages from here, before the server. `marks` is the
+ * chapter's whole set as the server answered it, so the copy ends up holding exactly that.
+ */
+export async function setOfflineSpreadMarks(bookId: string, marks: ReadonlyMap<number, 'join' | 'split'>): Promise<void> {
+  try {
+    const d = await db();
+    const key = chapterKey(bookId);
+    const rec = (await d.get('chapters', key)) as OfflineChapter | undefined;
+    if (!rec) return;
+    await d.put('chapters', { ...rec, pages: rec.pages.map((p) => ({ ...p, mark: marks.get(p.number) })) });
+  } catch { /* the server still has them; this is the local mirror */ }
+}
+
+/**
  * The chapters of one series that are actually on this device, in reading order.
  *
  * This is what lets the reader move between chapters offline. `number` is a string off the manifest, so the
@@ -296,7 +311,8 @@ export async function downloadChapter(
     // consults BEFORE the server for a downloaded chapter, so a flag that only lives in the manifest is a
     // flag the reader never sees. Reintroduce by dropping `missing` here: a chapter saved short, downloaded,
     // shows a blank grey page offline where online it shows the caption.
-    pages: manifest.pages.map((p) => ({ number: p.number, width: p.width, height: p.height, junk: p.junk, missing: p.missing, join: p.join })),
+    // v0.89.0 (#262): the account's own merges and splits (`mark`) ride along for the same reason.
+    pages: manifest.pages.map((p) => ({ number: p.number, width: p.width, height: p.height, junk: p.junk, missing: p.missing, join: p.join, mark: p.mark })),
   };
   await d.put('chapters', meta);
   invalidateDownloadedSeries();

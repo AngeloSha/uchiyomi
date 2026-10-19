@@ -1556,6 +1556,16 @@ not to you: an e-ink tablet wants E-ink, the phone beside it does not.
   applies to a joined spread as to one scanned in one piece: *Whole* shows it across the screen, *Split* shows its two
   pages one after the other, *Rotate* turns it on its side. The pages themselves are never changed: the counter, your
   progress, OPDS and your trackers still see two. A chapter downloaded after its spreads were found joins them offline.
+- **Merging and splitting double pages by hand** (account, since v0.89.0; #262): the joining above is good, not perfect --
+  it can join two pages that are not one picture, or miss two that are. In paged mode, **This page** under *Join split
+  double pages* in the reader's settings (and the reader's right-click menu) offers what fits the page you are on:
+  **Merge with the page on the left** or **on the right** (the sides of your screen, so on a right-to-left read the next
+  page is the one on the left), **Show as two pages** for a pair the server joined, **Undo the merge** for one you
+  joined, and **Join these two pages again** to give a pair you split back to the server's answer. A page is in one
+  spread only, wide pages and the ends of a chapter offer nothing, and a merge you made shows even with *Join split
+  double pages* off. It is saved for your account only -- nobody else's reader changes -- follows you to your other
+  devices and into chapters you download, and the server looking at the chapter again leaves it alone; a chapter whose file is replaced by one with
+  another page count starts afresh.
 - **Column width** (this device, since v0.74.0): in webtoon scroll, narrows the column of pages to between 30 % and
   100 % of what *Fit width* or *Original* gives (steps of 5 %). A phone wants 100 %, a wide monitor a narrower strip. Like
   the other *this device* settings it is kept in this browser only, so your other screens are unaffected.

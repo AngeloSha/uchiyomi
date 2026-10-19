@@ -571,8 +571,9 @@ const BOOK_KEYED_USER_TABLES = ['read_progress', 'reading_events', 'bookmarks', 
  * comments and reactions, which have no series id to re-point -- they follow the chapter row wherever it goes -- and so
  * are not in the list above.
  */
-// v0.85.0: page_translations (lib/translate/pages.ts) cascades from lib_books; named for the same count.
-const BOOK_KEYED_TABLES = [...BOOK_KEYED_USER_TABLES, 'book_overrides', 'page_hashes', 'page_translations', 'chapter_comments', 'chapter_reactions'] as const;
+// v0.85.0: page_translations (lib/translate/pages.ts) cascades from lib_books; named for the same count. So, since v0.89.0,
+// does spread_marks (lib/spreadMarks.ts), a reader's own merges and splits of a chapter's pages.
+const BOOK_KEYED_TABLES = [...BOOK_KEYED_USER_TABLES, 'book_overrides', 'page_hashes', 'page_translations', 'chapter_comments', 'chapter_reactions', 'spread_marks'] as const;
 /** Every table keyed on the series id. lib_books and lib_series themselves come last, on their own. */
 const SERIES_KEYED_TABLES = [
   'favorites', 'collection_items', 'ratings', 'series_colors', 'series_art', 'series_seen', 'series_trackers',

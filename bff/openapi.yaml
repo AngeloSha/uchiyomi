@@ -2779,10 +2779,74 @@ paths:
                       description: >-
                         With `spreads=1`: this page and the next are one spread cut in two; which side the next page
                         sits on (`rtl` on its left).
+                    mark:
+                      type: string
+                      enum: [join, split]
+                      description: >-
+                        Since v0.89.0 (#262), the caller's own word on this page and the next (PUT
+                        /api/books/{id}/pages/{n}/spread): `join` shows them as one spread, `split` shows a pair the
+                        detector joined as two pages. Per account; never sent for a mark made on another file of the
+                        chapter (another page count).
         "401":
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+  /api/books/{id}/pages/{n}/spread:
+    put:
+      tags:
+        - library
+      summary: Merge two pages into one spread, or take a spread apart, for the caller only.
+      description: >-
+        Since v0.89.0 (#262). `n` is the first page of the pair (1 to the page count minus 1). `join` shows the pair as
+        one double-page spread where the detector found none, `split` shows a pair the detector joined as two pages,
+        and `null` removes the caller's mark, so the detector's answer stands again. Per account: no other account's
+        reader changes. A page is in one spread only, so a `join` removes the caller's join on either neighbouring
+        pair. Answers the caller's marks on the chapter after the change.
+      operationId: putApiBooksIdPagesNSpread
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: n
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mark]
+              properties:
+                mark:
+                  type: [string, "null"]
+                  enum: [join, split, null]
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The caller's marks on the chapter, by the first page of each pair.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  marks:
+                    type: object
+                    additionalProperties:
+                      type: string
+                      enum: [join, split]
+        "400":
+          description: Not a mark, or a page that starts no pair (the last page, or past it)
+        "401":
+          description: Not authenticated
+        "404":
+          description: No such chapter, or one the caller may not see
   /api/books/{id}/pages/{n}/junk:
     put:
       tags:
@@ -6603,6 +6667,8 @@ paths:
                         mediaType: { type: [string, "null"] }
                         junk: { type: boolean }
                         missing: { type: boolean, description: True only for a repair placeholder. }
+                        join: { type: string, enum: [rtl, ltr], description: "v0.77.0 (#229): a spread already found, as on the page list." }
+                        mark: { type: string, enum: [join, split], description: "v0.89.0 (#262): the account's own word on this page and the next, as on the page list." }
         "401":
           description: Not authenticated
         "404":

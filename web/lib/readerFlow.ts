@@ -30,6 +30,8 @@ export interface FlowPage {
   missing?: boolean;
   /** #229: this page and the next are one spread a source served as two files; the side the next is on. Carried, as `junk`. */
   join?: 'rtl' | 'ltr';
+  /** v0.89.0 (#262): the reader's own word on this page and the next (lib/spreadMarks.ts). Carried; applyMarks applies it. */
+  mark?: 'join' | 'split';
 }
 
 export interface FlowChapter {
@@ -53,6 +55,8 @@ export interface FlowItem {
   collapsed?: boolean;
   /** From the page list: this page and the next are one spread (lib/readerSpread.ts pairs them when joining is on). */
   join?: 'rtl' | 'ltr';
+  /** From the page list: the reader's own merge or split of this page and the next (lib/spreadMarks.ts). */
+  mark?: 'join' | 'split';
 }
 
 /**
@@ -98,6 +102,7 @@ export function buildFlow(
         firstOfChapter: false,
         junk: p.junk,
         join: p.join,
+        mark: p.mark,
         // ⚠️ Passed through untouched and never a reason to collapse or drop the page. The flow's job is
         // to keep "flat index" and "page number" the same thing, and a missing page is still a page --
         // the archive holds a real placeholder at that index, the server counts it, progress lands on it.

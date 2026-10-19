@@ -1978,6 +1978,22 @@ CREATE TABLE IF NOT EXISTS chapter_reactions (
 -- v0.89.0 (#305): how many other sources a series may follow, the admin's choice (lib/followLimit.ts), 1 to 10. NULL until
 -- one is picked, and then MAX_FOLLOWED_SOURCES (or three) is the limit, as it was. Additive: v0.88.x reads the env alone.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS max_followed_sources int;
+
+-- v0.89.0 (#262): a reader's own say on where a double-page spread is (lib/spreadMarks.ts). join shows the pair (page,
+-- page + 1) as one spread where the detector found none; split shows a pair it joined as two pages. One account's, for
+-- its own reader only, and never in lib_books.spreads, so a re-measure cannot erase it. pages: the chapter's page count
+-- when it was made -- a mark on another file of the chapter points at other pages, and is not applied. Goes with its
+-- chapter row and its account. Additive: v0.88.x ignores the table.
+CREATE TABLE IF NOT EXISTS spread_marks (
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  book_id    text NOT NULL REFERENCES lib_books(id) ON DELETE CASCADE,
+  page       int  NOT NULL CHECK (page >= 1),
+  mark       text NOT NULL CHECK (mark IN ('join', 'split')),
+  pages      int  NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, book_id, page)
+);
+CREATE INDEX IF NOT EXISTS idx_spread_marks_book ON spread_marks (book_id);
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

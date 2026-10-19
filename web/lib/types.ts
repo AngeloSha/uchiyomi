@@ -550,6 +550,11 @@ export interface PageInfo {
    * side of the spread the next page is on (bff lib/spreadJoin.ts joinDirection).
    */
   join?: 'rtl' | 'ltr';
+  /**
+   * v0.89.0 (#262): this account's own word on this page and the next (lib/spreadMarks.ts): `join` shows them as one
+   * spread, `split` takes the detector's join apart. Sent whether or not ?spreads=1 was asked.
+   */
+  mark?: 'join' | 'split';
   fileName: string;
   mediaType: string;
   width?: number;
@@ -796,7 +801,7 @@ export interface DownloadManifest {
   coverUrl: string;
   totalBytes: number;
   /** `missing` rides along like `junk`: the placeholder bytes download like any page, and the caption is drawn offline too. */
-  pages: { number: number; url: string; width: number | null; height: number | null; bytes: number | null; junk?: boolean; missing?: true; join?: 'rtl' | 'ltr' }[];
+  pages: { number: number; url: string; width: number | null; height: number | null; bytes: number | null; junk?: boolean; missing?: true; join?: 'rtl' | 'ltr'; mark?: 'join' | 'split' }[];
 }
 
 export function isWebtoon(dir?: string): boolean {

@@ -1121,6 +1121,7 @@ GET    /api/books/:id             POST   /api/books/:id/refetch
 GET    /api/books/:id/pages
 GET    /api/books/:id/next        PUT    /api/books/:id/progress
 PUT    /api/books/:id/pages/:n/junk
+PUT    /api/books/:id/pages/:n/spread
 GET    /api/offline/plan             GET    /api/series/:id/listing
 GET    /api/series/:id/groups        GET    /api/series/:id/versions
 GET    /api/series/:id/gaps

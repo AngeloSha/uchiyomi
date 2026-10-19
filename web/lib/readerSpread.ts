@@ -15,7 +15,7 @@
  *     image is already two pages wide; putting it beside a portrait page halves it. Giving the page before it
  *     its own slide is what keeps the rest of the chapter paired the way it was drawn -- without that, every
  *     pair after the first spread is off by one, which is the whole reason this rule exists.
- *  4b. **A joined pair is one slide** (#229, Join split double pages, `joinSplit`): two portrait pages the server found
+ *  4b. **A joined pair is one slide** (#229, Join split double pages, `joinSplit`, or the reader's own merge, `forced`, #262): two portrait pages the server found
  *     to be the halves of one spread a source served as two files (bff lib/spreadJoin.ts), next to each other in one
  *     chapter. Out of spread mode too -- they are one drawing -- and even as page 1 of a chapter; and the page before
  *     them is solo, for the reason a wide page's neighbour is. A pair is a wide page in all but its files: with Wide
@@ -38,6 +38,11 @@ export interface SpreadItem {
   join?: 'rtl' | 'ltr' | null;
   /** A placeholder for a page the source never served: never half of a joined pair. */
   missing?: boolean;
+  /**
+   * v0.89.0 (#262): the join is the reader's own (lib/spreadMarks.ts applyMarks): it holds with `joinSplit` off, since
+   * they asked for this one. Everything else about a join applies to it.
+   */
+  forced?: boolean;
 }
 
 /** A page wider than it is tall. Unknown or nonsensical dimensions are portrait -- see rule 5. */
@@ -73,7 +78,7 @@ export function pairSlides(
   // Never under Split, which shows a spread's halves one by one: for a joined pair those halves are its two pages.
   const joinAt = (i: number): boolean => {
     const a = items[i], b = items[i + 1];
-    if (!opts.joinSplit || (opts.split && !spread) || !a?.join || !b || b.ci !== a.ci) return false;
+    if ((!opts.joinSplit && !a?.forced) || (opts.split && !spread) || !a?.join || !b || b.ci !== a.ci) return false;
     if (a.number !== undefined && b.number !== undefined && b.number !== a.number + 1) return false;
     return !a.missing && !b.missing && !isWide(a) && !isWide(b);
   };

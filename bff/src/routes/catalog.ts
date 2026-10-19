@@ -4,6 +4,7 @@ import { q, one } from '../lib/db';
 import { cleanLibraryReader } from '../lib/libraryReader';
 import { junkPagesFor, setPageOverride } from '../lib/junkPages';
 import { spreadsFor } from '../lib/spreadMeasure';
+import { marksFor, marksJson, setMark } from '../lib/spreadMarks';
 import { komgaImage } from '../lib/komga';
 import { content as komga, NATIVE_PROGRESS, OWNED } from '../lib/backend';
 import { UnsupportedFilter, owned } from '../lib/ownedCatalog';
@@ -1014,8 +1015,11 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // download manifest -- which both read this route -- get it without either knowing the feature exists.
     // A chapter whose pages have not been hashed yet simply comes back with nothing flagged.
     const junk = await junkPagesFor(id).catch(() => new Set<number>());
-    const listed = junk.size && Array.isArray(pages)
-      ? pages.map((p: any) => (junk.has(p.number) ? { ...p, junk: true } : p))
+    // v0.89.0 (#262): the caller's own marks ride along the same way, `mark` on the first page of a pair (lib/spreadMarks.ts):
+    // this account's word on where its spreads are, which the reader applies over the detector's joins below.
+    const marks = Array.isArray(pages) ? await marksFor(userIdOf(req), id, pages.length).catch(() => new Map()) : new Map();
+    const listed = (junk.size || marks.size) && Array.isArray(pages)
+      ? pages.map((p: any) => ({ ...p, ...(junk.has(p.number) ? { junk: true } : {}), ...(marks.has(p.number) ? { mark: marks.get(p.number) } : {}) }))
       : pages;
     // #229, opt-in: a reader who turned Join split double pages on asks with ?spreads=1, and the pages a source cut from
     // one spread come back with `join` (which side the next page is on). Only READ here: a chapter not measured yet is
@@ -1047,6 +1051,22 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const v = body.junk === null || body.junk === undefined ? null : !!body.junk;
     await setPageOverride(id, page, v);
     return { ok: true };
+  });
+
+  // v0.89.0 (#262): this account's word on the pair (n, n + 1) -- `join` shows it as one spread, `split` takes the
+  // detector's join apart, null lets the detector's answer stand (lib/spreadMarks.ts). Unlike the flag above it changes
+  // nothing for anyone else, and it is still resolved through the page list's visibility gate, which also bounds `n`: it
+  // must start a pair. Answers the chapter's marks as they now are. Reintroduce by writing from :id unchecked: "a chapter
+  // the account may not open" in spreadMarks.int.test.ts saves a mark on it.
+  app.put('/api/books/:id/pages/:n/spread', async (req, reply) => {
+    const { id, n } = req.params as { id: string; n: string };
+    const page = Number(n);
+    const body = z.object({ mark: z.enum(['join', 'split']).nullable() }).safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: 'bad_mark' });
+    const pages = await komga.bookPages(vc(req), id);
+    if (!Array.isArray(pages) || !pages.length) return reply.code(404).send({ error: 'not_found' });
+    if (!Number.isInteger(page) || page < 1 || page >= pages.length) return reply.code(400).send({ error: 'bad_page' });
+    return { marks: marksJson(await setMark(userIdOf(req), id, page, body.data.mark, pages.length)) };
   });
 
   // Smart-offline plan: the next N unread chapters of each favorite the user should keep offline.

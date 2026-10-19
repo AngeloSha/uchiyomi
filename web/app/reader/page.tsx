@@ -26,7 +26,8 @@ import { numLabel } from '@/lib/numbering';
 import { useToast } from '@/components/Toast';
 import { deviceId } from '@/lib/device';
 import { ReaderEndLabel, ReaderEndRadar } from '@/components/ReaderEndRadar';
-import { getOfflineChapter, getPageBlob, queueProgress, noteOfflineProgress, listSeriesDownloads, setOfflinePageJunk } from '@/lib/downloads';
+import { getOfflineChapter, getPageBlob, queueProgress, noteOfflineProgress, listSeriesDownloads, setOfflinePageJunk, setOfflineSpreadMarks } from '@/lib/downloads';
+import { applyMarks, markOf, saveMark, spreadOptions, withMark, type SpreadMark, type SpreadOption } from '@/lib/spreadMarks';
 import { applyCover, clearCover } from '@/lib/theme';
 import { COLOR_FILTER, glide, loadDevicePrefs, saveDevicePrefs, type DevicePrefs } from '@/lib/readerDevice';
 import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER, loadSourcePrefs, saveSourcePrefs, clearSourcePrefs, globalPrefsChange, seriesPinChange, titleLook, mergePulled, rememberSeriesSource, seriesSourceOf, rememberSeriesType, seriesTypeOf, rememberLibraryLook, libraryLookOf, type LibraryLook } from '@/lib/readerPrefs';
@@ -50,7 +51,7 @@ import { useContextMenu, type MenuItem } from '@/components/ContextMenu';
 import { ReaderShortcuts, useHasKeyboard } from '@/components/ReaderShortcuts';
 import { capLabel } from '@/components/ReaderKeys';
 
-interface PageDim { number: number; width: number | null; height: number | null; junk?: boolean; missing?: boolean; join?: 'rtl' | 'ltr' }
+interface PageDim { number: number; width: number | null; height: number | null; junk?: boolean; missing?: boolean; join?: 'rtl' | 'ltr'; mark?: SpreadMark }
 /**
  * `sourceId`: the adapter the copy came from, for naming it on a missing page's caption. Unknown for a downloaded copy.
  * `spreads` (#229, Join split double pages): what the server said of the chapter's spreads when asked (`x-spreads`):
@@ -59,7 +60,7 @@ interface PageDim { number: number; width: number | null; height: number | null;
  */
 interface Chapter { id: string; seriesId: string; seriesTitle: string; title: string; pages: PageDim[]; offline: boolean; readingDirection?: string | null; pruned?: boolean; sourceId?: string | null; spreads?: 'done' | 'pending' | 'none' }
 interface ChapterRef { id: string; label: string }
-interface FlatItem { ci: number; number: number; width: number | null; height: number | null; key: string; firstOfChapter: boolean; junk?: boolean; join?: 'rtl' | 'ltr'; missing?: boolean; collapsed?: boolean }
+interface FlatItem { ci: number; number: number; width: number | null; height: number | null; key: string; firstOfChapter: boolean; junk?: boolean; join?: 'rtl' | 'ltr'; mark?: SpreadMark; forced?: boolean; missing?: boolean; collapsed?: boolean }
 
 /**
  * #229: when to ask again for a chapter whose spreads the server is still measuring, after each `pending`: then the
@@ -129,7 +130,7 @@ async function pageList(bookId: string, spreads: boolean): Promise<{ pages: Page
   const { data, headers } = await apiWithHeaders<PageInfo[]>(`/api/books/${bookId}/pages${spreads ? '?spreads=1' : ''}`);
   const said = headers.get('x-spreads');
   return {
-    pages: data.map((p) => ({ number: p.number, width: p.width ?? null, height: p.height ?? null, junk: p.junk, missing: p.missing, join: p.join })),
+    pages: data.map((p) => ({ number: p.number, width: p.width ?? null, height: p.height ?? null, junk: p.junk, missing: p.missing, join: p.join, mark: p.mark })),
     spreads: spreads ? (said === 'done' || said === 'pending' ? said : 'none') : undefined,
   };
 }
@@ -563,9 +564,13 @@ function ReaderInner() {
   // removed: removing would give the two modes different flows, and switching mode mid-chapter would then land
   // on a different page, because nothing re-anchors `current` when the flow is rebuilt.
   const flowJunk = prefs.mode === 'paged' && prefs.junkPages === 'collapse' ? 'show' : prefs.junkPages;
+  // v0.89.0 (#262): the reader's own merges and splits (`mark` on a page, lib/spreadMarks.ts) applied over the detector's
+  // joins, so what pairs is decided in one place. A merge is drawn the way a spread reads: from the right on a
+  // right-to-left track, or for a right-to-left series read either way, as Wide pages -> Split orders a spread's halves.
+  const markDir = rtl || pagedRtl ? 'rtl' : 'ltr';
   const flat: FlatItem[] = useMemo(
-    () => buildFlow(chapters, flowJunk, expanded) as FlatItem[],
-    [chapters, flowJunk, expanded],
+    () => applyMarks(buildFlow(chapters, flowJunk, expanded) as FlatItem[], markDir),
+    [chapters, flowJunk, expanded, markDir],
   );
   /** Vertical + `collapse`: a repeated page is drawn as a band of itself instead of being removed. */
   const collapsing = prefs.junkPages === 'collapse';
@@ -1062,9 +1067,21 @@ function ReaderInner() {
     const el = scrollRef.current;
     if (!el || !didInitScroll.current || prefs.mode !== 'paged' || laidOutJoins.current === joinedAt) return;
     laidOutJoins.current = joinedAt;
-    placeTrack(el, slideOf[current] ?? current);
+    // v0.89.0 (#262): a joined pair on screen taken apart -- Undo the merge, Show as two pages, or joining switched off on
+    // it -- shows the page it began with, the one being read: `current` is a slide's LAST page (completion fires on it),
+    // and the pair's second page was a page on. Anything else keeps the page being read, as before. Reintroduce by
+    // anchoring on `current` alone: "a pair taken apart shows its first page" in spreadMarks.test.ts fails.
+    const was = shownSlides.current[pagedSlide.current];
+    const apart = !!was && was.length === 2 && shownJoined.current[pagedSlide.current] && slideOf[was[0]] !== slideOf[was[1]];
+    const anchor = apart ? was[0] : current;
+    placeTrack(el, slideOf[anchor] ?? anchor);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [joinedAt]);
+  // The slides on screen until this render's layout is done: what the joins effect above compares with. A passive effect,
+  // so the layout effect still reads the previous render's.
+  const shownSlides = useRef<number[][]>([]);
+  const shownJoined = useRef<boolean[]>([]);
+  useEffect(() => { shownSlides.current = slides; shownJoined.current = joined; });
 
   // ---- track current page on scroll ----
   // A resize that raises no scroll event (the offset still fits) leaves the track between two pages: snap it back too.
@@ -1321,6 +1338,40 @@ function ReaderInner() {
   const { data: activeTalk } = useChapterTalk(talkOn ? activeChapter?.id : null);
   /** On a chapter's last page (the last page of a slide, paged): where a paged track shows the chapter's talk. */
   const atChapterEnd = !!flat[current] && (current === flat.length - 1 || flat[current + 1]?.ci !== flat[current].ci);
+
+  // ---- v0.89.0 (#262): merge two pages into one spread, or take one apart, for this account (lib/spreadMarks.ts) ----
+  // What the page being read allows, from what is on screen: a joined pair offers its way apart, a page on its own the
+  // neighbours it may join, on the sides of the screen they are on. Paged mode only -- the webtoon column has no pairs --
+  // and never under Wide pages -> Split, which shows a spread's halves one by one. The reader settings sheet and the
+  // right-click menu both offer these.
+  const spreadChoices = useMemo((): SpreadOption[] => {
+    if (prefs.mode !== 'paged' || splitTrack || !flat[current]) return [];
+    const s = slideOf[current] ?? -1;
+    return spreadOptions(flat, current, { slide: slides[s] ?? [], joined: !!joined[s], nextIsLeft: pagedRtl, detector: prefs.joinSplit });
+  }, [prefs.mode, prefs.joinSplit, splitTrack, flat, current, slides, slideOf, joined, pagedRtl]);
+  const spreadLabel = (o: SpreadOption): string =>
+    o.kind === 'merge' ? (o.side === 'left' ? tr('Merge with the page on the left') : tr('Merge with the page on the right'))
+    : o.kind === 'split' ? tr('Show as two pages')
+    : o.kind === 'unmerge' ? tr('Undo the merge')
+    : tr('Join these two pages again');
+  /**
+   * Shown at once, saved on the account, and put back if the server refuses. The chapter's pages carry the marks, so the
+   * flow is built again and the joins effect above keeps the page being read in place; a downloaded copy is given the
+   * server's answer too (setOfflineSpreadMarks), as it reads its own pages first.
+   */
+  const applySpread = (o: SpreadOption) => {
+    const ch = chapters[flat[current]?.ci ?? -1];
+    if (!ch) return;
+    const mark = markOf(o);
+    const before = new Map(ch.pages.flatMap((p): Array<[number, SpreadMark]> => (p.mark ? [[p.number, p.mark]] : [])));
+    const put = (marks: ReadonlyMap<number, SpreadMark>) => setChapters((cs) => cs.map((c) => (c.id === ch.id
+      ? { ...c, pages: c.pages.map((p) => (p.mark === marks.get(p.number) ? p : { ...p, mark: marks.get(p.number) })) }
+      : c)));
+    put(withMark(before, o.first, mark));
+    saveMark(ch.id, o.first, mark)
+      .then((marks) => { put(marks); void setOfflineSpreadMarks(ch.id, marks); })
+      .catch(() => { put(before); toast(tr('Could not save'), 'error'); });
+  };
 
   // One place that knows how to move to a page, shared by the scrubber and the page grid. The initial-scroll
   // effect above deliberately does not use it: that one must also seed `lastSent` and run exactly once.
@@ -1889,6 +1940,8 @@ function ReaderInner() {
     if (talkOn && activeChapter) items.push({ label: tr('Comments'), onSelect: () => setTalkFor(activeChapter.id) });
     if (prefs.mode === 'paged') {
       items.push({ label: prefs.spread ? tr('Read in single pages') : tr('Read in double spreads'), onSelect: () => setPref({ spread: !prefs.spread }), divider: true });
+      // v0.89.0 (#262): this page's merge or split, as the reader settings sheet offers it.
+      for (const o of spreadChoices) items.push({ label: spreadLabel(o), onSelect: () => applySpread(o) });
     }
     items.push(
       { label: tr('Full screen'), onSelect: () => toggleFullscreen(), divider: prefs.mode !== 'paged' },
@@ -2362,6 +2415,7 @@ function ReaderInner() {
             autoApplied={autoApplied}
             padConnected={padConnected}
             rtlTrack={pagedRtl}
+            spreadChoices={spreadChoices.map((o) => ({ key: `${o.kind}:${o.first}`, label: spreadLabel(o), onSelect: () => { setShowSettings(false); applySpread(o); } }))}
             onClose={() => setShowSettings(false)}
             // The series' own source, by name. With no name there is no row at all: a raw source id is
             // never shown (an extension's is nineteen digits).
