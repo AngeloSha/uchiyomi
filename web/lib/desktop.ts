@@ -140,10 +140,8 @@ export async function untilReachable<R extends { kind: string }>(
  * surface left showing here would be a button that fails. Everything else is the same app.
  */
 export const DESKTOP_HIDDEN = {
-  /** Other people (Members: accounts, roles, age caps) and everyone's sessions. */
-  adminTabs: ['Members', 'Sessions'],
-  /** Password, 2FA, sessions, sign out: the app signs itself in. */
-  profileTabs: ['Account'],
+  // The consoles' pages for other people (Members, Sessions) and for signing in (Account) are hidden by their registries'
+  // `web` condition (lib/settingsIndex*.ts, v0.88.0).
   /** "Save offline" copies files that are already on this disk into the window's storage. */
   navHrefs: ['/downloads'],
   paletteKeys: ['downloads'],
@@ -152,18 +150,4 @@ export const DESKTOP_HIDDEN = {
 /** Is `item` in one of the lists above, on desktop? Always false on the server build. */
 export function hiddenOnDesktop(list: readonly string[], item: string): boolean {
   return isDesktop() && list.includes(item);
-}
-
-/**
- * The console groups with the hidden tabs taken out, and a group left empty dropped. The caller keeps its
- * own constant untouched (the tab lists are pinned and read by `useTabParam`); only what the rail gets is
- * filtered.
- */
-export function visibleGroups<T extends string>(
-  groups: ReadonlyArray<{ id: string; label: string; tabs: readonly T[] }>,
-  hidden: readonly string[],
-): { id: string; label: string; tabs: T[] }[] {
-  return groups
-    .map((g) => ({ id: g.id, label: g.label, tabs: g.tabs.filter((t) => !hidden.includes(t)) }))
-    .filter((g) => g.tabs.length > 0);
 }

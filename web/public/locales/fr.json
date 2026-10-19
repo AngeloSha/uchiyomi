@@ -4135,5 +4135,15 @@
   "Post": "Publier",
   "You, {a} and 1 other reacted": "Vous, {a} et 1 autre personne avez réagi",
   "{a}, {b} and 1 other reacted": "{a}, {b} et 1 autre personne ont réagi",
-  "Get a push notification when one of your favorites gets a new chapter, or when someone comments on a chapter you commented on.": "Recevez une notification quand l'un de vos favoris a un nouveau chapitre, ou quand quelqu'un commente un chapitre que vous avez commenté."
+  "Get a push notification when one of your favorites gets a new chapter, or when someone comments on a chapter you commented on.": "Recevez une notification quand l'un de vos favoris a un nouveau chapitre, ou quand quelqu'un commente un chapitre que vous avez commenté.",
+  "What needs a look, and who is reading": "Ce qui demande votre attention, et qui lit",
+  "Folders, age ratings and who can open them": "Dossiers, classifications par âge et qui peut les ouvrir",
+  "Sites and extensions": "Sites et extensions",
+  "Covers and banners": "Couvertures et bannières",
+  "Who is signed in, on which device": "Qui est connecté, et sur quel appareil",
+  "Sign-ins and changes": "Connexions et modifications",
+  "Your week, badges and lists": "Votre semaine, vos badges et vos listes",
+  "What your reading adds up to": "Ce que votre lecture représente",
+  "Trackers, reading apps and API tokens": "Trackers, applis de lecture et jetons d’API",
+  "Password, two-factor and sessions": "Mot de passe, double authentification et sessions"
 }

@@ -11,7 +11,6 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { DESTINATIONS, arrival, findDestinations, fold, whereText } from '../lib/destinations';
-import { DESKTOP_HIDDEN } from '../lib/desktop';
 import { CHECK_TITLES } from '../lib/healthCopy';
 import { PROFILE_SETTINGS } from '../lib/settingsIndex.profile';
 import { ADMIN_SETTINGS } from '../lib/settingsIndex.admin';
@@ -127,8 +126,11 @@ test('admins only where the page is theirs, and nothing Uchiyomi Desktop does no
     assert.equal(!!d.admin, d.href.startsWith('/admin/'), `${d.key}: admin-only is wrong for ${d.href}`);
     const u = new URL(d.href, 'http://x');
     const tab = u.searchParams.get('tab') ?? '';
-    const hiddenTabs: readonly string[] = u.pathname === '/admin/' ? DESKTOP_HIDDEN.adminTabs : u.pathname === '/profile/' ? DESKTOP_HIDDEN.profileTabs : [];
-    if (hiddenTabs.includes(tab)) assert.ok(d.desktopHidden, `${d.key}: ${tab} is not on Desktop, and neither may its destination be`);
+    // The pages Desktop has none of: their registry's `web` (lib/settingsIndex*.ts).
+    const index = u.pathname === '/admin/' ? ADMIN_SETTINGS : u.pathname === '/profile/' ? PROFILE_SETTINGS : null;
+    if (index?.categories.find((c) => c.id === tab)?.when?.includes('web')) {
+      assert.ok(d.desktopHidden, `${d.key}: ${tab} is not on Desktop, and neither may its destination be`);
+    }
   }
   // Desktop hides these settings and cards too (lib/desktop.ts, ProfileSettings, ProfileConnections, AdminSettings).
   for (const key of ['admin-registration', 'admin-mihon-missing', 'admin-install-count', 'admin-translate', 'profile-downloads', 'profile-cat-device',

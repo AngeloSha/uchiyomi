@@ -69,29 +69,21 @@ test('the desktop app is recognised in one place only', () => {
   assert.equal((code(read('app/reader/page.tsx')).match(/serverReachableHint\(\)/g) ?? []).length, 2, 'the reader has two offline checks');
 });
 
-test('the admin and profile consoles hide tabs by filtering what the rail receives, and keep their pinned lines', () => {
-  // The tab lists are pinned (settingsConsole.test.ts, importBatch.test.ts) and `useTabParam` reads them, so
-  // they stay whole; only ConsoleNav's copy is filtered, and a deep link to a hidden tab falls back to the
-  // first one with the panel withheld meanwhile. Reintroduce by passing `groups={GROUPS}` again: "the admin
-  // rail still lists Members and Sessions on desktop" fails; by dropping `{hiddenTab ? null : panel}`: "a
-  // hidden tab's panel renders" fails.
-  assert.deepEqual([...DESKTOP_HIDDEN.adminTabs], ['Members', 'Sessions']);
-  assert.deepEqual([...DESKTOP_HIDDEN.profileTabs], ['Account']);
+test('the admin and profile consoles hide Desktop\'s missing pages by their registries, and a link to one opens the first', () => {
+  // v0.88.0: one list each (components/ConsoleLayout.tsx), drawn from the registry's pages that are `shown` under the
+  // console's conditions, and `?tab=` read only among those -- so a link to Members on Desktop opens Overview. Reintroduce
+  // by passing `web: true` from either page: "the admin console lists Members and Sessions on desktop" fails; by reading
+  // `?tab=` among every page: "a link to a hidden page opens it" fails.
   const admin = code(read('app/admin/page.tsx'));
-  assert.match(admin, /const \[tab, setTab\] = useTabParam<Tab>\(TABS, 'Overview', SOURCES_TAB_ALIASES\);/, 'the pinned admin useTabParam line changed');
-  assert.match(admin, /keys\('Members', 'Sessions', 'Activity'\)/, 'GROUPS itself was edited rather than filtered');
-  assert.match(admin, /<ConsoleNav groups=\{isDesktop\(\) \? visibleGroups\(GROUPS, DESKTOP_HIDDEN\.adminTabs\) : GROUPS\}/, 'the admin rail still lists Members and Sessions on desktop');
-  assert.match(admin, /const hiddenTab = hiddenOnDesktop\(DESKTOP_HIDDEN\.adminTabs, tab\);\s*useEffect\(\(\) => \{ if \(hiddenTab\) setTab\('Overview'\); \}, \[hiddenTab\]\);/, 'a deep link to a hidden admin tab does not fall back to Overview');
-  assert.match(admin, /\{hiddenTab \? null : panel\}/, 'a hidden tab\'s panel renders');
+  assert.match(admin, /conds=\{\{ web: !desktop,/, 'the admin console lists Members and Sessions on desktop');
   const profile = code(read('app/profile/page.tsx'));
-  assert.match(profile, /const \[tab, setTab\] = useTabParam<Tab>\(PROFILE_TABS, 'You'\);/, 'the pinned profile useTabParam line changed');
-  assert.match(profile, /keys\('You', 'Insights', 'Settings', 'Connections', 'Account'\)/, 'the pinned profile tab literal changed');
-  assert.match(profile, /<ConsoleNav groups=\{isDesktop\(\) \? visibleGroups\(PROFILE_GROUPS, DESKTOP_HIDDEN\.profileTabs\) : PROFILE_GROUPS\}/, 'the profile rail still lists Account on desktop');
-  assert.match(profile, /useEffect\(\(\) => \{ if \(hiddenTab\) setTab\('You'\); \}, \[hiddenTab\]\);/, 'a deep link to Account does not fall back to You');
-  assert.match(profile, /\{hiddenTab \? null : panel\}/, 'the Account panel renders on desktop');
-  // Sign out: the rail's button, gated; the Account tab's own row goes with the tab.
-  const rail = slice(profile, 'function RailActions(', 'function GoalModal(');
-  assert.match(rail, /\{!isDesktop\(\) && \(\s*<button onClick=\{logout\}/, 'the rail offers Sign out on desktop');
+  assert.match(profile, /conds=\{\{ web: !desktop,/, 'the profile console lists Account and This device on desktop');
+  const layout = code(read('components/ConsoleLayout.tsx'));
+  assert.match(layout, /const pages = useMemo\(\(\) => index\.categories\.filter\(\(c\) => shown\(c\.when, conds\) && views\[c\.id\]\)/, 'the console lists a page its conditions hide');
+  assert.match(layout, /const fromUrl = readPage\(index, params\.get\('tab'\), params\.get\('cat'\), ids\);/, 'a link to a hidden page opens it');
+  // Sign out: the profile's foot row, gated; the Account page's own row goes with the page.
+  const foot = slice(profile, 'function FootRows(', 'function GoalModal(');
+  assert.match(foot, /\{!isDesktop\(\) && <ConsoleFootRow onClick=\{logout\}/, 'the profile offers Sign out on desktop');
 });
 
 test('the Overview does not ask for sessions on desktop, and the hero does not count members', () => {

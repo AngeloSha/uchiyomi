@@ -1,11 +1,13 @@
-// The settings registry (v0.86.0): every row of Profile → Settings and Admin → Settings, the category it is in, and the
-// words it is found by.
+// The console registry (v0.86.0, every page since v0.88.0): every page of Profile and Admin, the group it is listed under,
+// and every row of their settings pages with the words it is found by.
+//
+// v0.88.0 (the owner, after v0.86.0: "I still have to go to a tab under a tab"): Profile and Admin are each ONE grouped
+// list (components/ConsoleLayout.tsx) -- their pages, the settings categories among them, no tab rows inside tabs.
 //
 // The owner, 2026-10-19: "a million toggle in setting and a million section … easier to find, understand what it does".
-// The two pages became a few categories with a search over every row (components/SettingsLayout.tsx). This is what
-// that search reads, what a `?section=` arrival resolves through (the category to open, the More options or editor to
+// The two settings pages became a few categories with a search over every row (v0.86.0). This is what that search reads, what a `?section=` arrival resolves through (the category to open, the More options or editor to
 // unfold, the row to flash), and what the search palette's settings destinations are generated from
-// (lib/destinations.ts settingsDestinations), so a setting added here is findable everywhere at once.
+// (lib/destinations.ts consoleDestinations), so a setting added here is findable everywhere at once.
 //
 // Each entry's `id` is its row's DOM id and its `label` is the row's own English label, the key its `tr()` shows, so the
 // search matches what the screen says, in the reader's language. test/settingsIndex.test.ts holds every id to a row in
@@ -26,10 +28,16 @@ export type SettingsCondition =
   | 'pointer';
 
 export interface SettingsCategory {
-  /** `?cat=`. */
+  /** The page's `?tab=` (lower case; an older capitalised tab name is read case-blind). */
   id: string;
   /** Its name, an English key shown through tr(). */
   label: string;
+  /** The heading it is listed under, an English key; none for the first rows. */
+  group?: string;
+  /** A settings page: its groups are laid out in the pane's columns, and its rows are entries below. */
+  settings?: boolean;
+  /** English words someone might type for the page besides its name. */
+  keywords?: readonly string[];
   when?: readonly SettingsCondition[];
 }
 
@@ -65,6 +73,11 @@ export interface SettingsIndex {
   legacy: Readonly<Record<string, { cat: string; row?: string }>>;
   /** A section's or a row's name before v0.86.0 → the name it has now: searching the old name finds where it went. */
   aliases?: Readonly<Record<string, string>>;
+  /**
+   * `?tab=` values from before v0.88.0 that name no page any more → the page (`settings`: the `?cat=` beside it, else
+   * this). Matched case-blind, as every tab is.
+   */
+  tabAliases?: Readonly<Record<string, string>>;
 }
 
 /** Where an arrival lands: the category, and the row with whatever folds it (More options, an editor). */
@@ -96,6 +109,25 @@ export const readCat = (v: string | null, cats: readonly SettingsCategory[]): st
   typeof v === 'string' && cats.some((c) => c.id === v) ? v : null;
 
 /**
+ * The page an address names (v0.88.0): `?tab=` case-blind -- `Health` and `health` are one page -- then a tab from
+ * before v0.88.0 by `tabAliases` (`Tasks` is Maintenance; `Settings` is the category its `?cat=` named, or the first
+ * settings page), or null for none of this page's (`shownIds`: the pages drawn here).
+ */
+export function readPage(index: SettingsIndex, tab: string | null, cat: string | null, shownIds: readonly string[]): string | null {
+  if (!tab) return null;
+  const t = tab.toLowerCase();
+  const direct = shownIds.find((id) => id === t);
+  if (direct) return direct;
+  const alias = Object.entries(index.tabAliases ?? {}).find(([from]) => from.toLowerCase() === t)?.[1];
+  if (!alias) return null;
+  if (alias === 'settings') {
+    const c = cat ? cat.toLowerCase() : null;
+    return (c && shownIds.find((id) => id === c)) || shownIds.find((id) => index.categories.find((x) => x.id === id)?.settings) || null;
+  }
+  return shownIds.includes(alias) ? alias : null;
+}
+
+/**
  * `href` with its `cat` set (or dropped, for null), every other parameter untouched -- the tab beside it above all. Path +
  * query + hash, for `history.replaceState` (lib/tabParam.ts withTab says why).
  */
@@ -103,6 +135,18 @@ export function withCat(href: string, cat: string | null): string {
   const u = new URL(href, 'http://localhost');
   u.searchParams.delete('cat');
   if (cat) u.searchParams.append('cat', cat);
+  return `${u.pathname}${u.search}${u.hash}`;
+}
+
+/**
+ * `href` on page `id` (or on none, for the list): `?tab=` set or dropped, and the `?cat=` of the v0.86.0 settings tab
+ * dropped with it, every other parameter untouched. Path + query + hash, for `history.pushState` / `replaceState`.
+ */
+export function withPage(href: string, id: string | null): string {
+  const u = new URL(href, 'http://localhost');
+  u.searchParams.delete('tab');
+  u.searchParams.delete('cat');
+  if (id) u.searchParams.set('tab', id);
   return `${u.pathname}${u.search}${u.hash}`;
 }
 
@@ -143,6 +187,21 @@ export function rankMatch(query: string, names: readonly string[], keywords: rea
  * help. `label` is tr(), passed in so a test can
  * read another language.
  */
+/** A page found by the console's search: its own name, the words it is known by. */
+export function searchPages(index: SettingsIndex, query: string, conds: Readonly<Record<SettingsCondition, boolean>>,
+  label: (k: string) => string, drawn: (id: string) => boolean): SettingsCategory[] {
+  return index.categories
+    .filter((c) => shown(c.when, conds) && drawn(c.id))
+    .map((c, i) => {
+      const was = Object.entries(index.aliases ?? {}).filter(([, to]) => to === c.label).map(([from]) => from);
+      return { c, i, r: rankMatch(query, [label(c.label), c.label], [...(c.keywords ?? []), ...was]) };
+    })
+    .filter((x) => x.r >= 0 && x.r <= 4)
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+    .slice(0, 3)
+    .map((x) => x.c);
+}
+
 export function searchSettings(index: SettingsIndex, query: string, conds: Readonly<Record<SettingsCondition, boolean>>,
   label: (k: string) => string, limit = 8): SettingsEntry[] {
   const cats = new Map(index.categories.map((c) => [c.id, c]));

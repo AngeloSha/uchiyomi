@@ -1,24 +1,36 @@
-// Profile → Settings in the settings registry (lib/settingsIndex.ts): its categories, and every row by its DOM id
-// (components/ProfileSettings.tsx), in the order the page draws them.
+// Profile in the console registry (lib/settingsIndex.ts): its pages in the order its list shows them (v0.88.0), and every
+// row of its settings pages by its DOM id (components/ProfileSettings.tsx), in the order the page draws them.
 import { keys } from './i18n';
 import { INCOGNITO_TEXT } from './incognito';
 import type { SettingsIndex } from './settingsIndex';
 
 /** The categories' names and the groups' titles, declared for the translation extractor (lib/i18n.ts `keys`). */
 export const PROFILE_SETTINGS_WORDS = keys(
+  'You', 'Insights', 'Settings', 'Connections', 'Account',
   'General', 'Appearance', 'Reading', 'This device',
   'Series pages', 'Shortcuts', 'Privacy', 'Reader', 'Pages', 'Paged mode', 'Offline downloads', 'Alerts and app',
 );
 
 export const PROFILE_SETTINGS: SettingsIndex = {
   page: 'profile',
+  // v0.88.0: one list. You and Insights first (the person), then everything that is a setting -- Connections and Account
+  // among them, where they were tabs beside Settings that "were not under anything".
   categories: [
-    { id: 'general', label: 'General' },
-    { id: 'appearance', label: 'Appearance' },
-    { id: 'reading', label: 'Reading' },
+    { id: 'you', label: 'You', keywords: ['profile', 'me', 'my stats', 'badges', 'reading studio', 'lists', 'weekly goal'] },
+    { id: 'insights', label: 'Insights', keywords: ['my stats', 'backlog', 'unread', 'best day', 'genres', 'finish date', 'dropped'] },
+    { id: 'general', label: 'General', group: 'Settings', settings: true },
+    { id: 'appearance', label: 'Appearance', group: 'Settings', settings: true },
+    { id: 'reading', label: 'Reading', group: 'Settings', settings: true },
     // Uchiyomi Desktop: no offline copies (the chapters are on this disk already), no push service, nothing to install.
-    { id: 'device', label: 'This device', when: ['web'] },
+    { id: 'device', label: 'This device', group: 'Settings', settings: true, when: ['web'] },
+    { id: 'connections', label: 'Connections', group: 'Settings',
+      keywords: ['integrations', 'anilist', 'myanimelist', 'kitsu', 'mangaupdates', 'trackers', 'opds', 'api tokens', 'mihon'] },
+    // Uchiyomi Desktop has no password, two-factor or other sessions: the app signs itself in.
+    { id: 'account', label: 'Account', group: 'Settings', when: ['web'],
+      keywords: ['security', 'password', '2fa', 'two-factor', 'sessions', 'sign out', 'log out'] },
   ],
+  // The profile's tabs before v0.88.0: Settings was the tab the four settings pages sat in.
+  tabAliases: { Settings: 'settings' },
   entries: [
     // ---- General ----
     { id: 'language', cat: 'general', label: 'Language', keywords: ['translation', 'locale', 'english', 'arabic', 'interface'],

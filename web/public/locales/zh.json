@@ -4135,5 +4135,15 @@
   "Post": "发表",
   "You, {a} and 1 other reacted": "你、{a} 和另外 1 人回应了",
   "{a}, {b} and 1 other reacted": "{a}、{b} 和另外 1 人回应了",
-  "Get a push notification when one of your favorites gets a new chapter, or when someone comments on a chapter you commented on.": "当你收藏的作品更新章节，或有人评论你评论过的章节时，收到推送通知。"
+  "Get a push notification when one of your favorites gets a new chapter, or when someone comments on a chapter you commented on.": "当你收藏的作品更新章节，或有人评论你评论过的章节时，收到推送通知。",
+  "What needs a look, and who is reading": "需要关注的事项，以及谁在阅读",
+  "Folders, age ratings and who can open them": "文件夹、年龄分级，以及谁能打开",
+  "Sites and extensions": "站点和扩展",
+  "Covers and banners": "封面和横幅",
+  "Who is signed in, on which device": "谁已登录，在哪台设备上",
+  "Sign-ins and changes": "登录和更改",
+  "Your week, badges and lists": "你的本周、徽章和列表",
+  "What your reading adds up to": "你的阅读汇总",
+  "Trackers, reading apps and API tokens": "追踪器、阅读应用和 API 令牌",
+  "Password, two-factor and sessions": "密码、两步验证和会话"
 }

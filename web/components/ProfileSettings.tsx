@@ -23,18 +23,17 @@ import {
   ChoiceRow, EditorSheet, MoreOptions, Row, RowBlock, RowGroup, RowSubgroup, SegmentedRow, SelectRow, SummaryRow, SwitchRow,
   useAutosave, useEditor,
 } from '@/components/settings';
-import { SettingsLayout, type CategoryView } from '@/components/SettingsLayout';
+import type { PageView } from '@/components/ConsoleLayout';
 import { ModeArt, RepeatedArt, ThemeArt, ToneArt, WideArt } from '@/components/settingsArt';
 import { inDesktopWindow, isDesktop } from '@/lib/desktop';
 import { useIncognito } from '@/components/IncognitoBanner';
 import { INCOGNITO_TEXT } from '@/lib/incognito';
 import { TONES, toneOf, type Tone } from '@/lib/tone';
 import { useReduceEffects } from '@/lib/useReduceEffects';
-import { PROFILE_SETTINGS } from '@/lib/settingsIndex.profile';
 
 /**
- * The profile's Settings tab (v0.86.0): General · Appearance · Reading · This device, one at a time, with a search over
- * every row (components/SettingsLayout.tsx).
+ * The profile's settings pages: General · Appearance · Reading · This device (v0.86.0), rows of the profile's one list
+ * since v0.88.0 (components/ConsoleLayout.tsx), which app/profile/page.tsx draws with its other pages.
  *
  * Before v0.39.0 these lived as eleven cards across two tabs, and every card saved its own way; v0.39.0 made every row
  * save the moment it changes and say so beside the control (`SaveState`). Until v0.86.0 they were four cards of 31 rows
@@ -42,7 +41,7 @@ import { PROFILE_SETTINGS } from '@/lib/settingsIndex.profile';
  * weekly goal and Incognito under Reading. Now each row is where its name says, a row's help folds to two lines, and a
  * category's line in the list says what is set in it.
  */
-export function ProfileSettings() {
+export function useProfileSettingsViews(): { views: Record<string, PageView>; pointer: boolean } {
   // Uchiyomi Desktop (lib/desktop.ts): no This device -- no offline copies (the chapters are already on this disk;
   // copying them into the window's storage would store every one twice), no push service, and the app is installed.
   const desktop = isDesktop();
@@ -65,7 +64,7 @@ export function ProfileSettings() {
   useEffect(() => { if (!desktop) storageEstimate().then(setUsage); }, [desktop]);
 
   const so = (user?.settings?.smartOffline ?? {}) as { enabled?: boolean };
-  const views: Record<string, CategoryView> = {
+  const views: Record<string, PageView> = {
     general: {
       icon: <IcSliders width={18} height={18} />, tint: 'bg-slate-400/15 text-slate-200',
       summary: [LOCALES.find((l) => l.code === lang)?.name ?? lang, incognito.on ? tr(INCOGNITO_TEXT[0]) : null].filter(Boolean).join(' · '),
@@ -88,10 +87,7 @@ export function ProfileSettings() {
       pane: <DevicePane usage={usage} />,
     },
   };
-  return (
-    <SettingsLayout index={PROFILE_SETTINGS} label={tr('Settings')} views={views}
-      conds={{ web: !desktop, 'local-accounts': true, extensions: true, pointer }} />
-  );
+  return { views, pointer };
 }
 
 /**

@@ -157,3 +157,13 @@ export const IcWifiOff = (p: P) => (
 export const IcComment = (p: P) => (
   <svg {...base(p)}><path d="M5 4.5h14A2.5 2.5 0 0 1 21.5 7v8a2.5 2.5 0 0 1-2.5 2.5h-7.5L7 21v-3.5H5A2.5 2.5 0 0 1 2.5 15V7A2.5 2.5 0 0 1 5 4.5Z" /><path d="M7.5 9.5h9M7.5 13h6" /></svg>
 );
+// The consoles' lists (v0.88.0): Insights' bars, Connections' link, Account's key.
+export const IcChart = (p: P) => (
+  <svg {...base(p)}><path d="M4 20h16" /><rect x="5.5" y="11" width="3" height="6" rx="1" /><rect x="10.5" y="6" width="3" height="11" rx="1" /><rect x="15.5" y="9" width="3" height="8" rx="1" /></svg>
+);
+export const IcLink = (p: P) => (
+  <svg {...base(p)}><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1" /><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1" /></svg>
+);
+export const IcKey = (p: P) => (
+  <svg {...base(p)}><circle cx="8" cy="15" r="4" /><path d="m10.8 12.2 8.2-8.2" /><path d="m16 7 2.5 2.5" /><path d="m13.5 9.5 2 2" /></svg>
+);

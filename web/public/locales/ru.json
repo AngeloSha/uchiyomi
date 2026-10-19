@@ -4135,5 +4135,15 @@
   "Post": "Отправить",
   "You, {a} and 1 other reacted": "Вы, {a} и ещё 1 отреагировали",
   "{a}, {b} and 1 other reacted": "Реакции от {a}, {b} и ещё 1",
-  "Get a push notification when one of your favorites gets a new chapter, or when someone comments on a chapter you commented on.": "Получайте уведомление, когда у одного из избранного выходит новая глава или кто-то комментирует главу, которую вы комментировали."
+  "Get a push notification when one of your favorites gets a new chapter, or when someone comments on a chapter you commented on.": "Получайте уведомление, когда у одного из избранного выходит новая глава или кто-то комментирует главу, которую вы комментировали.",
+  "What needs a look, and who is reading": "Что требует внимания и кто читает",
+  "Folders, age ratings and who can open them": "Папки, возрастные рейтинги и кто может их открыть",
+  "Sites and extensions": "Сайты и расширения",
+  "Covers and banners": "Обложки и баннеры",
+  "Who is signed in, on which device": "Кто вошёл и на каком устройстве",
+  "Sign-ins and changes": "Входы и изменения",
+  "Your week, badges and lists": "Ваша неделя, значки и списки",
+  "What your reading adds up to": "Итоги вашего чтения",
+  "Trackers, reading apps and API tokens": "Трекеры, приложения для чтения и токены API",
+  "Password, two-factor and sessions": "Пароль, двухфакторная защита и сеансы"
 }

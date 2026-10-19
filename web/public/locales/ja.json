@@ -4135,5 +4135,15 @@
   "Post": "投稿",
   "You, {a} and 1 other reacted": "あなた、{a}ほか1人がリアクションしました",
   "{a}, {b} and 1 other reacted": "{a}、{b}ほか1人がリアクションしました",
-  "Get a push notification when one of your favorites gets a new chapter, or when someone comments on a chapter you commented on.": "お気に入りに新しい話が来たときや、あなたがコメントした話に誰かがコメントしたときに通知を受け取れます。"
+  "Get a push notification when one of your favorites gets a new chapter, or when someone comments on a chapter you commented on.": "お気に入りに新しい話が来たときや、あなたがコメントした話に誰かがコメントしたときに通知を受け取れます。",
+  "What needs a look, and who is reading": "確認が必要なことと、読んでいる人",
+  "Folders, age ratings and who can open them": "フォルダー、年齢制限、開ける人",
+  "Sites and extensions": "サイトと拡張機能",
+  "Covers and banners": "表紙とバナー",
+  "Who is signed in, on which device": "サインイン中の人とその端末",
+  "Sign-ins and changes": "サインインと変更",
+  "Your week, badges and lists": "今週の記録、バッジ、リスト",
+  "What your reading adds up to": "読書のまとめ",
+  "Trackers, reading apps and API tokens": "トラッカー、読書アプリ、API トークン",
+  "Password, two-factor and sessions": "パスワード、2段階認証、セッション"
 }

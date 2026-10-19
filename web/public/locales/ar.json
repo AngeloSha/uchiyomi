@@ -4135,5 +4135,15 @@
   "Post": "نشر",
   "You, {a} and 1 other reacted": "تفاعلت أنت و{a} وشخص آخر",
   "{a}, {b} and 1 other reacted": "تفاعل من {a} و{b} وشخص آخر",
-  "Get a push notification when one of your favorites gets a new chapter, or when someone comments on a chapter you commented on.": "احصل على إشعار عندما يصدر فصل جديد لأحد مفضلاتك، أو عندما يعلّق أحد على فصل علّقت عليه."
+  "Get a push notification when one of your favorites gets a new chapter, or when someone comments on a chapter you commented on.": "احصل على إشعار عندما يصدر فصل جديد لأحد مفضلاتك، أو عندما يعلّق أحد على فصل علّقت عليه.",
+  "What needs a look, and who is reading": "ما يحتاج إلى انتباه، ومن يقرأ",
+  "Folders, age ratings and who can open them": "المجلدات والتصنيفات العمرية ومن يمكنه فتحها",
+  "Sites and extensions": "المواقع والإضافات",
+  "Covers and banners": "الأغلفة واللافتات",
+  "Who is signed in, on which device": "من سجّل الدخول، وعلى أي جهاز",
+  "Sign-ins and changes": "تسجيلات الدخول والتغييرات",
+  "Your week, badges and lists": "أسبوعك وأوسمتك وقوائمك",
+  "What your reading adds up to": "حصيلة قراءتك",
+  "Trackers, reading apps and API tokens": "المتتبّعات وتطبيقات القراءة ورموز الواجهة البرمجية",
+  "Password, two-factor and sessions": "كلمة المرور والمصادقة الثنائية والجلسات"
 }

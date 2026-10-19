@@ -1,8 +1,8 @@
 'use client';
 import { Suspense, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { useTabParam } from '@/lib/useTabParam';
-import { AdminSettings } from '@/components/AdminSettings';
+import { useAdminSettingsViews } from '@/components/AdminSettings';
+import { ConsoleLayout, type PageView } from '@/components/ConsoleLayout';
+import { ADMIN_SETTINGS } from '@/lib/settingsIndex.admin';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, img } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -13,7 +13,7 @@ import { shownDeviceName } from '@/lib/device';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
-import { IcChevronLeft, IcChevronRight, IcTrash, IcPlus, IcRefresh, IcX } from '@/components/icons';
+import { IcChevronRight, IcTrash, IcPlus, IcRefresh, IcX, IcGrid, IcShield, IcRows, IcGlobe, IcSparkle, IcUsers, IcUser, IcClock } from '@/components/icons';
 import { LibraryFolders } from '@/components/LibraryFolders';
 import { addFolder, foldersOf, heldByOthers, heldByText, previewQuery, previewText, sameFolders, toggleFolder, typedFolder } from '@/lib/libraryFolders';
 import { CardProgress, HealthCardActions, HealthRow, hasCardActions, scanState, scanWorking } from '@/components/HealthActions';
@@ -31,14 +31,12 @@ import { keysFor } from '@/lib/healthKeys';
 import type { ActionState } from '@/lib/actionState';
 import { Backdrop, Img, OnBody } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
-import { ConsoleNav } from '@/components/ConsoleNav';
 import { motion, useReducedMotion } from 'framer-motion';
-import { t as tr, keys } from '@/lib/i18n';
+import { t as tr } from '@/lib/i18n';
 import { bustCover } from '@/lib/coverBust';
 import type { HealthCheck, Series } from '@/lib/types';
-import { bridge, hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN, type UpdateStatus } from '@/lib/desktop';
+import { bridge, isDesktop, type UpdateStatus } from '@/lib/desktop';
 import { SourcesPanel } from '@/components/SourcesPanel';
-import { OVERVIEW_KEY, OVERVIEW_URL, SOURCES_TAB_ALIASES, splitSources, type SourcesOverview } from '@/lib/sourcesPanel';
 import { StatusEdge, StatusMark } from '@/components/StatusMark';
 import { TONE_SURFACE, healthMark } from '@/lib/status';
 import Link from 'next/link';
@@ -56,34 +54,19 @@ import { joinsOnTheirOwn, memberDefaultsOf, type MemberDefaults } from '@/lib/me
 const iso = (s: string): string => `\u2068${s}\u2069`;
 
 /**
- * Ten panels, grouped by what an admin is actually doing rather than by what the code is called.
+ * The admin console (v0.88.0): ONE grouped list -- Overview and Health; Library (Libraries, Sources, Art); People
+ * (Members, Sessions, Activity); Settings (Server, Series & chapters, Downloads, Maintenance, Notifications) -- beside
+ * the page on screen, or before it on a phone (components/ConsoleLayout.tsx). The server's state and the scan are the
+ * card at the top of that list.
  *
- * The previous shell put all ten in one horizontally scrolling pill row, which is a list rather than an
- * information architecture: "Overview" and "Sessions" were peers, and on a laptop the last three scrolled off
- * the edge where nobody found them. Extensions had no entry at all -- it rendered inside Providers, which is
- * why nobody found that either. Since v0.54.0 the two are one Sources tab.
- */
-const GROUPS = [
-  // `keys()` is the identity function; it exists so these reach the translation extractor. ConsoleNav
-  // renders them as `tr(g.label)` and `tr(tab)`, which a scan for inline tr() calls cannot see, and that blind
-  // spot has now shipped an English sidebar twice. See lib/i18n.ts.
-  { id: 'server',  label: 'Server',  tabs: keys('Overview', 'Tasks', 'Settings') },
-  { id: 'people',  label: 'People',  tabs: keys('Members', 'Sessions', 'Activity') },
-  { id: 'content', label: 'Content', tabs: keys('Library', 'Health', 'Art') },
-  // v0.54.0: ONE tab for every source, where Providers and Extensions were two halves of one list (SourcesPanel.tsx).
-  // Their old names and links land on it (lib/sourcesPanel.ts SOURCES_TAB_ALIASES).
-  { id: 'sources', label: 'Sources', tabs: keys('Sources') },
-] as const;
-// The group labels themselves, for the same reason.
-const _GROUP_LABELS = keys('Server', 'People', 'Content', 'Sources');
-
-const TABS = GROUPS.flatMap((g) => g.tabs);
-type Tab = (typeof TABS)[number];
-
-/**
- * The tab lives in the URL (`?tab=Settings`), read through `useSearchParams`, which a statically exported
- * page may only call under a Suspense boundary -- the build fails without one. The fallback keeps the
- * page's height so the shell does not jump when the boundary resolves.
+ * Before it, ten tabs in four groups under a hero that took the top of every tab, and Settings five more pages inside
+ * one of them: on a phone a group menu, a row of tabs and a list of categories before the first switch -- "a tab under a
+ * tab" (the owner, 2026-10-19). The Tasks tab is Maintenance's Run now: the nightly backup and repair are set and run in
+ * one place.
+ *
+ * The page lives in the URL (`?tab=`), read through `useSearchParams`, which a statically exported page may only call
+ * under a Suspense boundary -- the build fails without one. The fallback keeps the page's height so the shell does not
+ * jump when the boundary resolves.
  */
 export default function AdminPage() {
   return (
@@ -95,64 +78,72 @@ export default function AdminPage() {
 
 function AdminInner() {
   const { isAdmin } = useAuth();
-  const router = useRouter();
-  // In the URL rather than in state: a refresh, the back button and every deep link used to land on
-  // Overview, and `/admin/?tab=Settings` is the address the docs can now give (lib/useTabParam.ts).
-  const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview', SOURCES_TAB_ALIASES);
-  // Uchiyomi Desktop has no Members or Sessions (lib/desktop.ts). The rail never lists them, and a deep link
-  // or an old bookmark to one lands on Overview rather than on a panel whose every request answers 404.
-  // `GROUPS` and the line above stay as they are: only what ConsoleNav receives is filtered.
-  const hiddenTab = hiddenOnDesktop(DESKTOP_HIDDEN.adminTabs, tab);
-  useEffect(() => { if (hiddenTab) setTab('Overview'); }, [hiddenTab]); // eslint-disable-line react-hooks/exhaustive-deps
-  // v0.55.4: `?section=` -- a setting found by the search palette lands on its card, once it has loaded.
+  // v0.55.4: `?section=` -- a card found by the search palette lands, once it has loaded. A row of the console's own is
+  // the console's to land on (components/ConsoleLayout.tsx); this answers the rest.
   useSectionArrival();
+  const desktop = isDesktop();
+  // Maintenance's Run now, after its settings: what was the Tasks tab (v0.88.0).
+  const settings = useAdminSettingsViews({
+    maintenance: (
+      <section id="tasks" className="col-span-full min-w-0 scroll-mt-4 lg:scroll-mt-20" aria-labelledby="tasks-title">
+        <h3 id="tasks-title" className="mb-1.5 px-1 text-[13px] font-semibold text-fog-300">{tr('Tasks')}</h3>
+        <Tasks />
+      </section>
+    ),
+  });
+  const { data: stats } = useQuery({ queryKey: ['admin-stats'], queryFn: () => api<any>('/api/admin/stats'), enabled: isAdmin });
+  const { data: health } = useQuery({ ...healthQuery, enabled: isAdmin });
 
   if (!isAdmin) return <div className="flex min-h-screen-d items-center justify-center text-fog-400">{tr('Admins only.')}</div>;
 
-  const panel = (
-    <>
-      {tab === 'Overview' && <Overview onTab={setTab} />}
-      {tab === 'Members' && <Members />}
-      {tab === 'Sources' && <SourcesPanel />}
-      {tab === 'Art' && <ArtReview />}
-      {tab === 'Health' && <Health />}
-      {tab === 'Library' && <LibraryPanel />}
-      {tab === 'Tasks' && <Tasks />}
-      {tab === 'Activity' && <Activity />}
-      {tab === 'Sessions' && <Sessions />}
-      {tab === 'Settings' && <AdminSettings />}
-    </>
-  );
+  const bad = health ? health.checks.filter((c) => c.status !== 'ok').length : null;
+  // Each row's line says what is in it, or -- where one number decides whether to open it -- that number.
+  const views: Record<string, PageView> = {
+    overview: { icon: <IcGrid width={18} height={18} />, tint: 'bg-violet-500/15 text-violet-300',
+      summary: tr('What needs a look, and who is reading'), pane: <Overview /> },
+    health: { icon: <IcShield width={18} height={18} />, tint: bad ? 'bg-amber-500/15 text-amber-300' : 'bg-emerald-500/15 text-emerald-300',
+      summary: verdictOf(health, bad), pane: <Health /> },
+    library: { icon: <IcRows width={18} height={18} />, tint: 'bg-indigo-500/15 text-indigo-300',
+      summary: tr('Folders, age ratings and who can open them'), pane: <LibraryPanel /> },
+    sources: { icon: <IcGlobe width={18} height={18} />, tint: 'bg-cyan-500/15 text-cyan-300',
+      summary: tr('Sites and extensions'), pane: <SourcesPanel /> },
+    art: { icon: <IcSparkle width={18} height={18} />, tint: 'bg-pink-500/15 text-pink-300',
+      summary: tr('Covers and banners'), pane: <ArtReview /> },
+    members: { icon: <IcUsers width={18} height={18} />, tint: 'bg-teal-500/15 text-teal-300',
+      summary: stats ? (stats.members === 1 ? tr('1 member') : tr('{n} members', { n: stats.members })) : undefined, pane: <Members /> },
+    sessions: { icon: <IcUser width={18} height={18} />, tint: 'bg-blue-500/15 text-blue-300',
+      summary: tr('Who is signed in, on which device'), pane: <Sessions /> },
+    activity: { icon: <IcClock width={18} height={18} />, tint: 'bg-orange-500/15 text-orange-300',
+      summary: tr('Sign-ins and changes'), pane: <Activity /> },
+    ...settings.views,
+  };
 
   return (
-    <div className="min-h-screen-d px-4 lg:px-0">
-      <AdminHero onBack={() => router.back()} compact={tab !== 'Overview'} />
-
-      {/* The foot of the rail says which Uchiyomi this is (v0.55.4, #150): the place people looked for it. */}
-      <ConsoleNav groups={isDesktop() ? visibleGroups(GROUPS, DESKTOP_HIDDEN.adminTabs) : GROUPS} tab={tab} onTab={setTab} ariaLabel={tr('Admin')}
-        footer={<VersionLine />}>
-        {hiddenTab ? null : panel}
-      </ConsoleNav>
+    <div className="min-h-screen-d px-4 pt-[max(0.9rem,calc(env(safe-area-inset-top)+0.5rem))] lg:px-0 lg:pt-6" data-admin-console>
+      {/* The foot of the list says which Uchiyomi this is (v0.55.4, #150): the place people looked for it. */}
+      <ConsoleLayout index={ADMIN_SETTINGS} label={tr('Admin')} views={views} home="overview"
+        conds={{ web: !desktop, 'local-accounts': !settings.sso, extensions: settings.extensions, pointer: true }}
+        card={<AdminHero />} footer={<VersionLine />} />
     </div>
   );
 }
 
+/** The verdict on the server: Health's row says it, and so does the console's card. */
+const verdictOf = (health: { checks: HealthCheck[] } | undefined, bad: number | null): string =>
+  !health ? tr('Checking your library…')
+    : bad === 1 ? tr('1 check found something')
+    : bad ? tr('{n} checks found something', { n: bad })
+    : tr('Everything looks healthy');
+
 /**
- * The header.
+ * The server's card, at the top of the admin list (v0.88.0; the hero above every tab until then).
  *
- * Two things it is trying to fix. The panel had no visual identity at all -- flat cards on flat black, in an
- * app whose every other surface is composed over ambient art -- and the health of the server, which is the
- * question an admin arrives with, was reachable only by opening a tab and waiting for it to load.
- *
- * So the backdrop is real art from THIS library (a random series, the same `Backdrop` the series page uses,
- * blurred and drowned under a gradient), and the headline is the verdict rather than a row of numbers. The
- * counts are still there, just demoted to the line that supports it.
+ * The question an admin arrives with is whether the server is well, so the card's headline is the verdict, washed in
+ * its colour -- amber the moment a check fails -- over real art from THIS library (a random series, the same `Backdrop`
+ * the series page uses, blurred and drowned), with the counts demoted to the line under it and the scan beside them.
+ * In the rail on a computer, at the top of the list on a phone: always in view of every page, never above one.
  */
-/**
- * `compact` (UI refresh): every tab but Overview. The verdict and its facts stay -- an admin opening Settings still sees
- * at a glance that a check failed -- but in a band, not the ~480 px that pushed Settings and Members below the fold.
- */
-function AdminHero({ onBack, compact = false }: { onBack: () => void; onScan?: undefined; compact?: boolean }) {
+function AdminHero() {
   const qc = useQueryClient();
   const { data: stats } = useQuery({ queryKey: ['admin-stats'], queryFn: () => api<any>('/api/admin/stats') });
   const { data: health } = useQuery(healthQuery);
@@ -165,10 +156,7 @@ function AdminHero({ onBack, compact = false }: { onBack: () => void; onScan?: u
   });
 
   const bad = health ? health.checks.filter((c) => c.status !== 'ok').length : null;
-  const verdict = !health ? tr('Checking your library…')
-    : bad === 1 ? tr('1 check found something')
-    : bad ? tr('{n} checks found something', { n: bad })
-    : tr('Everything looks healthy');
+  const verdict = verdictOf(health, bad);
 
   // The scan's answer, under the button (v0.49.0): it used to be dropped, so a scan refused because one ran a
   // minute ago looked exactly like one that found nothing. Then Health is checked again, and its header mark.
@@ -204,57 +192,25 @@ function AdminHero({ onBack, compact = false }: { onBack: () => void; onScan?: u
         : tr('{n} chapters behind across {m} series', { n: stats.backlog.chapters, m: stats.backlog.series })
       : null,
   ].filter(Boolean) as string[];
-  // v0.55.4 (#150): which Uchiyomi this is. A desktop says it at the foot of the rail (VersionLine); a phone has no
-  // rail -- its group sheet holds the same line, a tap away -- so it is the last of these facts there.
-  const running: string | null = bridge()?.version || stats?.version || null;
 
   return (
-    <div data-admin-hero={compact ? 'compact' : 'full'} className={`bleed relative isolate overflow-hidden lg:mt-2 lg:rounded-b-3xl ${compact ? 'mb-4' : 'mb-6'}`}>
-      {rnd?.seriesId && <Backdrop seriesId={rnd.seriesId} className="absolute inset-0" />}
+    <div data-admin-hero className="card grad-border relative isolate overflow-hidden rounded-2xl p-4">
+      {rnd?.seriesId && <Backdrop seriesId={rnd.seriesId} className="absolute inset-0 -z-10" />}
       {/* Drowned deliberately: this is a wash to sit text on, not a picture to look at. */}
-      <div className="absolute inset-0 bg-linear-to-t from-ink-950 via-ink-950/90 to-ink-950/70" />
-      {/* The bloom takes the verdict's colour, so the whole top of the page goes amber the moment a check
-          fails. One ternary, no assets, and every pixel of it is data. */}
-      <div aria-hidden className="pointer-events-none absolute inset-0"
-        style={{ background: `radial-gradient(75% 120% at var(--start) 0%, ${bad ? 'rgba(245,158,11,0.20)' : 'rgb(var(--accent) / 0.22)'}, transparent 60%)` }} />
-
-      <div className={`bleed-pad relative pt-[max(0.9rem,calc(env(safe-area-inset-top)+0.5rem))] ${compact ? 'pb-4 lg:pb-5 lg:pt-5' : 'pb-6 lg:pb-8 lg:pt-8'}`}>
-        <div className={`flex items-center gap-2 ${compact ? 'mb-3' : 'mb-5'}`}>
-          <button onClick={onBack} aria-label={tr('Back')}
-            className="grid h-10 w-10 place-items-center rounded-full bg-black/40 text-fog-100 backdrop-blur">
-            <IcChevronLeft width={22} height={22} className="rtl:-scale-x-100" />
-          </button>
-          <span className="text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Admin')}</span>
-        </div>
-
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, ease: [0.22, 0.61, 0.36, 1] }}>
-          <div className="flex items-center gap-2.5">
-            <span aria-hidden className={`size-2.5 shrink-0 rounded-full ${
-              !health ? 'bg-fog-600' : bad ? 'bg-amber-400' : 'bg-emerald-400'
-            } ${!health ? 'animate-pulse' : ''}`} />
-            <h1 className={`font-display font-bold leading-tight text-fog-50 ${compact ? 'text-xl lg:text-2xl' : 'text-2xl lg:text-4xl'}`}>{verdict}</h1>
-          </div>
-          {(facts.length > 0 || running) && (
-            <p className="mt-2 text-sm text-fog-400">
-              {facts.join(' · ')}
-              {running && (
-                <span data-hero-version className="lg:hidden">
-                  {facts.length > 0 && ' · '}<VersionFacts running={running} update={updateState(health?.checks)} />
-                </span>
-              )}
-            </p>
-          )}
-        </motion.div>
-
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.08, ease: [0.22, 0.61, 0.36, 1] }} className={compact ? 'mt-3' : 'mt-5'}>
-          <button onClick={scan} disabled={scanned?.kind === 'working'} data-hero-scan className={`btn-accent disabled:opacity-60 ${compact ? 'px-4 py-2 text-xs' : 'px-5 py-2.5 text-sm'}`}>
-            <IcRefresh width={16} height={16} />{scanned?.kind === 'working' ? tr('Scanning library…') : tr('Scan library now')}
-          </button>
-          {scanned && scanned.kind !== 'working' && <div data-hero-scan-result className="max-w-xl"><ActionStatus state={scanned} /></div>}
-        </motion.div>
+      <div aria-hidden className="absolute inset-0 -z-10 bg-linear-to-t from-ink-950 via-ink-950/90 to-ink-950/70" />
+      {/* The bloom takes the verdict's colour, so the card goes amber the moment a check fails. */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10"
+        style={{ background: `radial-gradient(90% 130% at var(--start) 0%, ${bad ? 'rgba(245,158,11,0.22)' : 'rgb(var(--accent) / 0.24)'}, transparent 65%)` }} />
+      <p className="text-[11px] font-semibold text-fog-500">{tr('Admin')}</p>
+      <div className="mt-1 flex items-center gap-2">
+        <span aria-hidden className={`size-2.5 shrink-0 rounded-full ${!health ? 'bg-fog-600' : bad ? 'bg-amber-400' : 'bg-emerald-400'} ${!health ? 'animate-pulse' : ''}`} />
+        <h1 className="font-display text-lg font-bold leading-tight text-fog-50">{verdict}</h1>
       </div>
+      {facts.length > 0 && <p className="mt-1.5 text-[12px] leading-relaxed text-fog-400">{facts.join(' · ')}</p>}
+      <button onClick={scan} disabled={scanned?.kind === 'working'} data-hero-scan className="btn-accent mt-3 px-4 py-2 text-xs disabled:opacity-60">
+        <IcRefresh width={16} height={16} />{scanned?.kind === 'working' ? tr('Scanning library…') : tr('Scan library now')}
+      </button>
+      {scanned && scanned.kind !== 'working' && <div data-hero-scan-result><ActionStatus state={scanned} /></div>}
     </div>
   );
 }
@@ -302,15 +258,14 @@ function VersionFacts({ running, update }: { running: string; update: UpdateStat
 /**
  * The overview.
  *
- * Four bands, in the order an admin wants the answers: what is wrong, who is reading, what they are
- * reading, and where to go next. Severity takes width -- a failing check spans the whole board and a clean
- * bill of health is one small tile -- so the panel reports the server's state by its shape before a word of
- * it is read.
+ * Three bands, in the order an admin wants the answers: what is wrong, who is reading, and what they are reading.
+ * Where to go next is the console's own list, beside this page or one Back away (v0.88.0): the four tiles that led
+ * to Tasks, Sessions, Sources and Activity were a second menu inside the first.
  *
- * The four stat tiles and the scan button that used to lead this panel live in the hero, where they are
- * read before anything is clicked. Repeating them here would be the same numbers twice on one screen.
+ * The counts and the scan live in the server's card at the top of that list, where they are read before anything is
+ * clicked. Repeating them here would be the same numbers twice on one screen.
  */
-function Overview({ onTab }: { onTab: (t: Tab) => void }) {
+function Overview() {
   const still = useReducedMotion();
   const { data: stats } = useQuery({ queryKey: ['admin-stats'], queryFn: () => api<any>('/api/admin/stats') });
   const { data: health } = useQuery(healthQuery);
@@ -322,23 +277,14 @@ function Overview({ onTab }: { onTab: (t: Tab) => void }) {
     queryFn: () => api<{ content: Series[] }>('/api/trending'),
     staleTime: 5 * 60_000,
   });
-  const { data: audit } = useQuery({ queryKey: ['admin-audit', 8], queryFn: () => api<{ content: any[] }>('/api/admin/audit?limit=8') });
-  const { data: tasks } = useQuery({ queryKey: ['admin-tasks'], queryFn: () => api<{ content: any[] }>('/api/admin/tasks') });
-  // Not asked on desktop, where the route answers 404: there is no Sessions tab for the tile to open.
-  const desktop = isDesktop();
-  const { data: sessions } = useQuery({ queryKey: ['admin-sessions'], queryFn: () => api<{ content: any[] }>('/api/admin/sessions'), enabled: !desktop });
-  const { data: sources } = useQuery({ queryKey: OVERVIEW_KEY, queryFn: () => api<SourcesOverview>(OVERVIEW_URL) });
 
-  const failing = (health?.checks ?? []).filter((c) => c.status !== 'ok');
   const activity: any[] = stats?.activity ?? [];
   const rail = trending?.content ?? [];
-  const latest = audit?.content?.[0];
-  const lastRun = Math.max(0, ...(tasks?.content ?? []).map((t: any) => t.lastRun || 0));
 
   return (
     <div className="board">
-      {/* Severity takes width: a problem is the widest thing on screen, "all good" is a small tile. */}
-      <NeedsAttention health={health} className={failing.length ? 'full' : ''} />
+      {/* The whole width either way: nothing sits beside it now, and a healthy server's card is one line high. */}
+      <NeedsAttention health={health} className="full" />
 
       {/* Band A -- the house: one card per member, washed in the cover of what they last read. */}
       {activity.length > 0 && (
@@ -388,20 +334,6 @@ function Overview({ onTab }: { onTab: (t: Tab) => void }) {
         </div>
       )}
 
-      {/* Band C -- where to go next, each tile carrying the one number that decides whether to go there. */}
-      <TabTile label={tr('Tasks')} value={String(tasks?.content?.length ?? 0)}
-        sub={lastRun ? relativeTime(new Date(lastRun).toISOString()) : undefined} onClick={() => onTab('Tasks')} />
-      {!desktop && (
-        <TabTile label={tr('Sessions')} value={String(sessions?.content?.length ?? 0)}
-          sub={sessions?.content?.[0] ? relativeTime(sessions.content[0].last_seen) : undefined} onClick={() => onTab('Sessions')} />
-      )}
-      {/* The sources that are on, as Admin → Sources' "Your sources" counts them. */}
-      <TabTile label={tr('Sources')} value={String(sources ? splitSources(sources.sources).on.length : 0)} onClick={() => onTab('Sources')} />
-      {/* Activity's headline is a time rather than a count: "how long since anything happened" is the
-          question, and eight rows of audit cannot answer "how many". */}
-      <TabTile label={tr('Activity')} value={latest ? relativeTime(latest.at) : '0'}
-        sub={latest ? `${latest.event.replace(/[._]/g, ' ')}${latest.username ? ` · ${latest.username}` : ''}` : tr('No activity yet.')}
-        onClick={() => onTab('Activity')} />
     </div>
   );
 }
@@ -409,8 +341,8 @@ function Overview({ onTab }: { onTab: (t: Tab) => void }) {
 /**
  * Whether anything is wrong, and what.
  *
- * Sized by severity rather than by convention: the caller hands it `full` when something is failing, so the
- * same component is a quiet tile on a healthy server and the widest thing on the board on a broken one.
+ * The whole width of the overview, and its height says the rest: one line on a healthy server, a tile for every check
+ * that found something on a broken one.
  */
 function NeedsAttention({ health, className = '' }: {
   health?: { generatedAt: string; checks: HealthCheck[] };
@@ -447,17 +379,6 @@ function NeedsAttention({ health, className = '' }: {
         </div>
       )}
     </div>
-  );
-}
-
-/** A navigational tile: the one number that decides whether the tab behind it is worth opening. */
-function TabTile({ label, value, sub, onClick }: { label: string; value: string; sub?: string; onClick: () => void }) {
-  return (
-    <button onClick={onClick} className="card grad-border p-4 text-start transition hover:border-accent/40">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-fog-500">{label}</p>
-      <p className="mt-1 font-display text-3xl font-bold tabular-nums text-fog-50">{value}</p>
-      {sub && <p className="mt-0.5 truncate text-[11px] text-fog-500">{sub}</p>}
-    </button>
   );
 }
 

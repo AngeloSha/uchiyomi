@@ -29,7 +29,7 @@ import {
   Disclosure, EditorSheet, MoreOptions, NumberRow, Row, RowBlock, RowGroup, SaveState, Segmented, SelectRow, SummaryRow,
   SwitchRow, TextRow, useAutosave, useEditor,
 } from '@/components/settings';
-import { SettingsLayout, type CategoryView } from '@/components/SettingsLayout';
+import type { PageView } from '@/components/ConsoleLayout';
 import { nightlyModeOf, type NightlyMode } from '@/lib/autofix';
 import { t as tr } from '@/lib/i18n';
 import type { KnownGroup, SeriesType, StoredPrefs } from '@/lib/types';
@@ -47,12 +47,21 @@ import { discoverSources } from '@/lib/sourceGroups';
 import { memberDefaultsOf } from '@/lib/memberDefaults';
 import { joinSentences } from '@/lib/jobs';
 import { clockText, hoursText, intervalChoices } from '@/lib/settingsChoices';
-import { ADMIN_SETTINGS } from '@/lib/settingsIndex.admin';
 
 /** One PATCH. Resolves once the server has answered, so the row that called it can show its tick. */
 type Save = (body: Record<string, unknown>) => Promise<unknown>;
 
-export function AdminSettings() {
+/**
+ * Admin's settings pages: Server · Series & chapters · Downloads · Maintenance · Notifications (v0.86.0), rows of the
+ * console's one list since v0.88.0 (components/ConsoleLayout.tsx), which app/admin/page.tsx draws with its other pages.
+ * `extra` adds a page's own groups after its settings: Maintenance's Run now (the Tasks tab until v0.88.0) lives in the
+ * admin page, beside the rest of the console.
+ */
+export function useAdminSettingsViews(extra: Partial<Record<string, ReactNode>> = {}): {
+  views: Record<string, PageView>;
+  sso: boolean;
+  extensions: boolean;
+} {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ['admin-settings'], queryFn: () => api<any>('/api/admin/settings') });
   // SSO-only mode (v0.63.0, #208) has no sign-up route at all, so Open registration would be a switch that does nothing.
@@ -69,10 +78,9 @@ export function AdminSettings() {
       for (const k of ['series-listing', 'series-versions', 'series-groups', 'series-scanlators']) void qc.invalidateQueries({ queryKey: [k] });
     }
   };
-  if (!data) {
-    return <div className="card grad-border p-6 text-center text-sm text-fog-500">{tr('Loading…')}</div>;
-  }
-  const desktop = isDesktop();
+  // Until the settings have answered, each settings page says so where its groups will be.
+  const loading = <div className="card grad-border p-6 text-center text-sm text-fog-500">{tr('Loading…')}</div>;
+  const ready = (pane: ReactNode, id: string) => (data ? <>{pane}{extra[id]}</> : <>{loading}{extra[id]}</>);
   // What each category holds, said once: the line under its name in the list and the sentence under its title.
   const about = {
     server: tr('Its name, who may join, updates, and translation.'),
@@ -81,24 +89,21 @@ export function AdminSettings() {
     maintenance: tr('Backups and repairs, every night.'),
     notifications: tr('New chapters and problems, sent to your phone, Home Assistant or Discord.'),
   };
-  const views: Record<string, CategoryView> = {
+  const views: Record<string, PageView> = {
     server: { icon: <IcSettings width={18} height={18} />, tint: 'bg-slate-400/15 text-slate-200', summary: about.server, description: about.server,
-      pane: <ServerSection data={data} save={save} /> },
+      pane: ready(data && <ServerSection data={data} save={save} />, 'server') },
     series: { icon: <IcFilter width={18} height={18} />, tint: 'bg-emerald-500/15 text-emerald-300', summary: about.series, description: about.series,
-      pane: <SeriesSection data={data} save={save} /> },
+      pane: ready(data && <SeriesSection data={data} save={save} />, 'series') },
     downloads: { icon: <IcDownload width={18} height={18} />, tint: 'bg-sky-500/15 text-sky-300', summary: about.downloads, description: about.downloads,
-      pane: <SchedulesSection data={data} save={save} /> },
+      pane: ready(data && <SchedulesSection data={data} save={save} />, 'downloads') },
     maintenance: { icon: <IcRefresh width={18} height={18} />, tint: 'bg-amber-500/15 text-amber-300', summary: about.maintenance, description: about.maintenance,
-      pane: <MaintenanceSection data={data} save={save} /> },
+      pane: ready(data && <MaintenanceSection data={data} save={save} />, 'maintenance') },
     // v0.43.0 (#70): webhook, Home Assistant, ntfy and Discord targets. Its rows and its one dialog live in their own
     // file; it reads its own endpoint.
     notifications: { icon: <IcBell width={18} height={18} />, tint: 'bg-rose-500/15 text-rose-300', summary: about.notifications, description: about.notifications,
-      pane: <NotificationsSection /> },
+      pane: <><NotificationsSection />{extra.notifications}</> },
   };
-  return (
-    <SettingsLayout index={ADMIN_SETTINGS} label={tr('Settings')} views={views}
-      conds={{ web: !desktop, 'local-accounts': !ssoOnly(authConfig), extensions: !!data.extensions_configured, pointer: true }} />
-  );
+  return { views, sso: ssoOnly(authConfig), extensions: !!data?.extensions_configured };
 }
 
 /**

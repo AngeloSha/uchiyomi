@@ -115,7 +115,7 @@ test('offline is still offline on a phone, and the hidden-surface helpers are in
   assert.equal(desk.serverReachableHint(), true);
   setOnLine(undefined);
   assert.equal(desk.serverReachableHint(), true, 'a browser that does not say is not offline');
-  assert.equal(desk.hiddenOnDesktop(desk.DESKTOP_HIDDEN.adminTabs, 'Members'), false, 'Members is hidden on the server build');
+  assert.equal(desk.hiddenOnDesktop(desk.DESKTOP_HIDDEN.paletteKeys, 'downloads'), false, 'Offline downloads is hidden on the server build');
 });
 
 test('the server\'s word alone marks the page as desktop, and it sticks', async () => {
@@ -227,21 +227,20 @@ test('no Wi-Fi is not no server on desktop', () => {
   shell(true);
   setOnLine(false);
   assert.equal(desk.serverReachableHint(), true, 'no Wi-Fi was read as no server on desktop');
-  assert.equal(desk.hiddenOnDesktop(desk.DESKTOP_HIDDEN.adminTabs, 'Members'), true);
-  assert.equal(desk.hiddenOnDesktop(desk.DESKTOP_HIDDEN.adminTabs, 'Activity'), false, 'Activity is hidden on desktop');
+  assert.equal(desk.hiddenOnDesktop(desk.DESKTOP_HIDDEN.paletteKeys, 'downloads'), true);
+  assert.equal(desk.hiddenOnDesktop(desk.DESKTOP_HIDDEN.navHrefs, '/library'), false, 'the Library is hidden on desktop');
   setOnLine(undefined);
 });
 
-test('the console rail loses exactly the hidden tabs, and a group left empty', () => {
-  // Pure. Reintroduce by dropping `.filter((g) => g.tabs.length > 0)`: an empty "People" eyebrow would sit
-  // over nothing if both its tabs were hidden.
-  const groups = [
-    { id: 'server', label: 'Server', tabs: ['Overview', 'Tasks'] },
-    { id: 'people', label: 'People', tabs: ['Members', 'Sessions'] },
-    { id: 'more', label: 'More', tabs: ['Members', 'Activity'] },
-  ] as const;
-  assert.deepEqual(desk.visibleGroups(groups, desk.DESKTOP_HIDDEN.adminTabs), [
-    { id: 'server', label: 'Server', tabs: ['Overview', 'Tasks'] },
-    { id: 'more', label: 'More', tabs: ['Activity'] },
-  ], 'the rail kept a hidden tab or an empty group');
+test('the consoles lose exactly the pages Desktop has none of', async () => {
+  // v0.88.0: the registries' `web` condition hides them (lib/settingsIndex*.ts), and the console lists only the pages
+  // shown, so a group with none left has no heading (components/ConsoleLayout.tsx). Reintroduce by dropping `when:
+  // ['web']` from Sessions or Account: named here.
+  const { shown } = await import('../lib/settingsIndex');
+  const { ADMIN_SETTINGS } = await import('../lib/settingsIndex.admin');
+  const { PROFILE_SETTINGS } = await import('../lib/settingsIndex.profile');
+  const gone = (index: typeof ADMIN_SETTINGS) => index.categories
+    .filter((c) => !shown(c.when, { web: false, 'local-accounts': true, extensions: true, pointer: true })).map((c) => c.id);
+  assert.deepEqual(gone(ADMIN_SETTINGS), ['members', 'sessions'], 'Desktop lists a page for other people, or loses one it has');
+  assert.deepEqual(gone(PROFILE_SETTINGS), ['device', 'account'], 'Desktop lists This device or Account, or loses another page');
 });

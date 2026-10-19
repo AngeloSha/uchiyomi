@@ -1,10 +1,12 @@
-// Admin → Settings in the settings registry (lib/settingsIndex.ts): its categories, every row by its DOM id
-// (components/AdminSettings.tsx and the files it mounts), and the card ids it had before v0.86.0.
+// Admin in the console registry (lib/settingsIndex.ts): its pages in the order its list shows them (v0.88.0), every row
+// of its settings pages by its DOM id (components/AdminSettings.tsx and the files it mounts), and the card ids and tab
+// names it had before.
 import { keys } from './i18n';
 import type { SettingsIndex } from './settingsIndex';
 
 /** The categories' names and the groups' titles, declared for the translation extractor (lib/i18n.ts `keys`). */
 export const ADMIN_SETTINGS_WORDS = keys(
+  'Overview', 'Health', 'Libraries', 'Sources', 'Art', 'Members', 'Sessions', 'Activity', 'Library', 'People', 'Settings',
   'Server', 'Series & chapters', 'Downloads', 'Maintenance', 'Notifications',
   'Updates and privacy', 'Shown to members', 'From the internet', 'Getting chapters', 'Disk space', 'Backups', 'Repair', 'Extensions',
 );
@@ -21,14 +23,29 @@ export const SETTINGS_NAME_ALIASES: Readonly<Record<string, string>> = {
 
 export const ADMIN_SETTINGS: SettingsIndex = {
   page: 'admin',
-  // Server first: test/e2e/run.mjs reads the first 4000 characters of the page for the install count's payload.
+  // v0.88.0: one list. Overview and Health first (what is wrong, what is happening), then the library, the people, and
+  // the settings pages -- Maintenance with every Run now that was the Tasks tab.
   categories: [
-    { id: 'server', label: 'Server' },
-    { id: 'series', label: 'Series & chapters' },
-    { id: 'downloads', label: 'Downloads' },
-    { id: 'maintenance', label: 'Maintenance' },
-    { id: 'notifications', label: 'Notifications' },
+    { id: 'overview', label: 'Overview', keywords: ['admin', 'dashboard', 'stats', 'needs attention', 'top 10'] },
+    { id: 'health', label: 'Health', keywords: ['problems', 'errors', 'fix everything', 'checks', 'missing chapters', 'gaps'] },
+    { id: 'library', label: 'Libraries', group: 'Library',
+      keywords: ['library', 'folders', 'hidden series', 'removed series', 'restore', 'age rating'] },
+    { id: 'sources', label: 'Sources', group: 'Library', keywords: ['providers', 'extensions', 'mangadex', 'sites', 'add a site', 'repositories'] },
+    { id: 'art', label: 'Art', group: 'Library', keywords: ['covers', 'artwork', 'banners', 'images'] },
+    // Uchiyomi Desktop is one person: no other accounts, no other sessions (lib/desktop.ts).
+    { id: 'members', label: 'Members', group: 'People', when: ['web'], keywords: ['users', 'accounts', 'people', 'roles', 'age limit', 'reset password'] },
+    { id: 'sessions', label: 'Sessions', group: 'People', when: ['web'], keywords: ['devices', 'signed in', 'logins'] },
+    { id: 'activity', label: 'Activity', group: 'People', keywords: ['audit', 'log', 'events'] },
+    { id: 'server', label: 'Server', group: 'Settings', settings: true, keywords: ['server settings', 'configuration', 'config'] },
+    { id: 'series', label: 'Series & chapters', group: 'Settings', settings: true },
+    { id: 'downloads', label: 'Downloads', group: 'Settings', settings: true },
+    { id: 'maintenance', label: 'Maintenance', group: 'Settings', settings: true,
+      keywords: ['tasks', 'jobs', 'run now', 'scheduled', 'backup', 'repair', 'scan'] },
+    { id: 'notifications', label: 'Notifications', group: 'Settings', settings: true },
   ],
+  // The console's tabs before v0.88.0: Tasks is Maintenance's Run now; Settings was the tab the settings pages sat in;
+  // Providers and Extensions were Sources before v0.54.0.
+  tabAliases: { Tasks: 'maintenance', Settings: 'settings', Providers: 'sources', Extensions: 'sources' },
   entries: [
     // ---- Server ----
     { id: 'server-name', cat: 'server', label: 'Server name', keywords: ['name', 'title'] },

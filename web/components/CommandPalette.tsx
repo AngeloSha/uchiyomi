@@ -16,7 +16,7 @@ import { t as tr } from '@/lib/i18n';
 import { hiddenOnDesktop, isDesktop, DESKTOP_HIDDEN } from '@/lib/desktop';
 import { effectsReduced } from '@/lib/effects';
 import { arrival, findDestinations, whereText, type Destination } from '@/lib/destinations';
-import { settingsGoTo, settingsKnow } from '@/components/SettingsLayout';
+import { openInConsole } from '@/lib/consoleOnScreen';
 import { isTypingTarget, seedFor, typeToSearchKey, typeToSearchOn } from '@/lib/typeToSearch';
 import { useLayer } from '@/lib/layers';
 import { canDownload, useAuth } from '@/lib/auth';
@@ -89,20 +89,19 @@ export function CommandPalette({ open, seed = '', onClose }: { open: boolean; se
   }, [q, open]);
 
   const go = useCallback((href: string) => { onClose(); router.push(href); }, [onClose, router]);
-  // A page or a setting (v0.55.4). Another page is a client-side push, and it reads its tab and its `?section=` as it
-  // mounts; a card already on this page is scrolled to; this console on another tab is a whole page load, because the
-  // console reads `?tab=` once (lib/destinations.ts `arrival`, lib/useTabParam.ts).
+  // A page or a setting (v0.55.4). A page or a row of the Profile or Admin console on screen is opened in place
+  // (lib/consoleOnScreen.ts); another page is a client-side push, and it reads its page and its `?section=` as it mounts; a
+  // card already on this page is scrolled to.
   const goTo = useCallback((href: string) => {
     onClose();
-    // A setting whose page is open is the settings layout's to open (v0.86.0): its category may not be the one on screen.
-    const how = arrival(href, window.location, (id) => settingsKnow(id) || !!document.getElementById(id));
+    if (openInConsole(href)) return;
+    const how = arrival(href, window.location, (id) => !!document.getElementById(id));
     if (how === 'push') router.push(href);
     else if (how === 'load') window.location.assign(href);
     else if (how === 'scroll') {
       const id = new URL(href, window.location.href).searchParams.get('section');
       const still = effectsReduced() || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      if (id && settingsKnow(id)) settingsGoTo(id);
-      else if (id) document.getElementById(id)?.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' });
+      if (id) document.getElementById(id)?.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' });
     }
   }, [onClose, router]);
 

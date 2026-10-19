@@ -21,6 +21,7 @@ import { OnBody, Sheet, useRtl } from './ui';
 import { IcCheck, IcChevronRight } from './icons';
 import { useReduceEffects } from '@/lib/effects';
 import { arrival } from '@/lib/destinations';
+import { openInConsole } from '@/lib/consoleOnScreen';
 import { t as tr } from '@/lib/i18n';
 
 export type SaveStatus = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved' } | { kind: 'error'; message: string };
@@ -695,12 +696,12 @@ export function Disclosure({ label, open, defaultOpen, onOpenChange, id, childre
 //
 // The owner, 2026-10-19: "a million toggle in setting and a million section a million pill … organized, look cooler,
 // more user friendly … easier to find, understand what it does". Profile → Settings and Admin → Settings became a few
-// categories with search (components/SettingsLayout.tsx), each a short page of titled groups. The pieces below are what
+// categories with search (components/SettingsLayout.tsx; the console's pages since v0.88.0, components/ConsoleLayout.tsx), each a short page of titled groups. The pieces below are what
 // those groups are made of: the inset group itself, pictures for choices that are easier seen than named, the
 // platform's own menu for long lists, one summary row for a setting too big for a row (it opens an editor), and a fold
 // for the rows few people change. Every one saves the way the rows above do -- at once, with the tick at its end.
 
-/** Where search or `?section=` asked the settings to go (components/SettingsLayout.tsx): a row, and the More options or
+/** Where search or `?section=` asked the settings to go (components/ConsoleLayout.tsx): a row, and the More options or
  *  editor that holds it, which open themselves for it. `seq` makes the same row asked for twice two arrivals. */
 export interface SettingsTarget { row: string; more?: string; editor?: string; seq: number }
 export const SettingsGo = createContext<SettingsTarget | null>(null);
@@ -1007,6 +1008,9 @@ export function SummaryRow({ id, label, value, help, href, onClick, ref, device 
   if (href) {
     const go = (e: MouseEvent<HTMLAnchorElement>) => {
       if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      // Another page of the console on screen (Server's "When someone signs up" is on Members): opened in place, the row
+      // with it (lib/consoleOnScreen.ts).
+      if (openInConsole(href)) { e.preventDefault(); return; }
       const how = arrival(href, window.location, (s) => !!document.getElementById(s));
       if (how === 'push') return; // Link's own client-side navigation
       e.preventDefault();

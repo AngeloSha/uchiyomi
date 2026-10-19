@@ -1,5 +1,5 @@
 'use client';
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { motion, useReducedMotion } from 'framer-motion';
@@ -7,44 +7,38 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { relativeTime } from '@/lib/format';
-import { useTabParam } from '@/lib/useTabParam';
 import { useSectionArrival } from '@/lib/useSectionArrival';
 import { Avatar } from '@/components/Avatar';
-import { ConsoleNav } from '@/components/ConsoleNav';
+import { ConsoleFootRow, ConsoleLayout, type PageView } from '@/components/ConsoleLayout';
 import { HouseBoard } from '@/components/HouseBoard';
 import { SpineWall } from '@/components/SpineWall';
 import { TraceStrip } from '@/components/TraceStrip';
 import { Modal, msgOf } from '@/components/ConfirmDialog';
 import { Backdrop } from '@/components/ui';
 import { useToast } from '@/components/Toast';
-import { IcSparkle, IcPlay, IcRefresh, IcSettings, IcLogOut, IcMoments } from '@/components/icons';
+import { IcSparkle, IcPlay, IcRefresh, IcSettings, IcLogOut, IcMoments, IcUser, IcChart, IcLink, IcKey, IcPlus } from '@/components/icons';
 import { BadgesCard, ListsCard, StudioCard, type Stats } from '@/components/ProfileYou';
 import { ProfileInsights } from '@/components/ProfileInsights';
-import { ProfileSettings } from '@/components/ProfileSettings';
+import { useProfileSettingsViews } from '@/components/ProfileSettings';
 import { ProfileConnections } from '@/components/ProfileConnections';
 import { ProfileAccount } from '@/components/ProfileAccount';
-import { t as tr, keys } from '@/lib/i18n';
-import { hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN } from '@/lib/desktop';
+import { PROFILE_SETTINGS } from '@/lib/settingsIndex.profile';
+import { t as tr } from '@/lib/i18n';
+import { isDesktop } from '@/lib/desktop';
 
 /**
- * One group, four entries, so `flat` drops the group eyebrow and the phone group sheet: profile has an index,
- * not an information architecture. The seventeen sections underneath used to be one 5000px column.
+ * The profile console (v0.88.0): ONE grouped list -- your card, then You and Insights, then Settings: General,
+ * Appearance, Reading, This device, Connections and Account -- beside the page on screen, or before it on a phone
+ * (components/ConsoleLayout.tsx). Admin, Support and Sign out are its foot.
  *
- * You is the person (badges, the reading studio, lists); Insights is what their reading adds up to (v0.75.0, from #249:
- * the backlog, the series begun, this month's mix, finish dates, their best day and week); Settings is how the app behaves for them
- * (appearance, reader defaults, downloads, this device); Connections is everything that talks to another
- * service (trackers, OPDS readers, API tokens); Account is who they are here (password, 2FA, sessions,
- * sign out). Until v0.39.0 the second tab was "Reading" and held device settings plus one chart, Settings
- * held two cards, and Account held eight -- the same identity shown three times and the secrets behind
- * three identical "Manage" chips.
+ * You is the person (the household's week, badges, the reading studio, lists); Insights is what their reading adds up to
+ * (v0.75.0, from #249); the Settings group is how the app behaves for them, Connections everything that talks to another
+ * service (trackers, OPDS readers, API tokens), and Account who they are here (password, 2FA, sessions, sign out).
+ *
+ * Until v0.88.0 these were five tabs under a hero that took the top of every one of them, and Settings four categories
+ * under its tab: "a tab under a tab", with Connections "not under anything" (the owner, 2026-10-19). The hero is You's
+ * own now, and the person's name, weekly goal and counts are the card at the top of the list.
  */
-const PROFILE_GROUPS = [
-  // `keys()` is the identity function; it exists so these reach the translation extractor. ConsoleNav
-  // renders them as `tr(tab)`, which a scan for inline tr() calls cannot see. See lib/i18n.ts.
-  { id: 'you', label: 'You', tabs: keys('You', 'Insights', 'Settings', 'Connections', 'Account') },
-] as const;
-const PROFILE_TABS = PROFILE_GROUPS[0].tabs;
-type Tab = (typeof PROFILE_TABS)[number];
 
 /** 12.3k rather than 12345: six digits overflow a stat pill, and nobody reads the last three anyway. */
 const compact = (n: number): string =>
@@ -75,13 +69,10 @@ function GoalRing({ value, goal, size = 64 }: { value: number; goal: number; siz
 }
 
 /**
- * `useSearchParams` needs a Suspense boundary above it in a statically exported app (the import page does
- * the same), so the page proper is one level down. `?tab=Connections` opens that tab, and `&card=tracking`
- * scrolls its Progress tracking section into view: the import page's tracker line sends people to that
- * section -- without the query every link to "Profile" landed on You, a tab away from the thing it pointed
- * at, and with the tab alone the section could sit below the fold at phone width, under the hero and the
- * rail. `?tab=` alone still just opens the tab, and every tab tap writes it back (lib/useTabParam.ts), so
- * a refresh, the back button and a language change all keep the tab.
+ * `useSearchParams` needs a Suspense boundary above it in a statically exported app (the import page does the same), so
+ * the page proper is one level down. `?tab=connections` opens that page, and `&card=tracking` scrolls its Progress
+ * tracking section into view: the import page's tracker line sends people to that section. Older addresses
+ * (`?tab=Connections`, `?tab=Settings&cat=reading`) open the same pages (lib/settingsIndex.ts `readPage`).
  */
 export default function ProfilePage() {
   return (
@@ -92,33 +83,66 @@ export default function ProfilePage() {
 }
 
 function ProfileInner() {
-  const { user, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
-  const still = useReducedMotion();
   const params = useSearchParams();
-  const [tab, setTab] = useTabParam<Tab>(PROFILE_TABS, 'You');
-  // Uchiyomi Desktop has no Account tab: no password, no 2FA, no other sessions, and the app signs itself in
-  // (lib/desktop.ts). The rail never lists it; `?tab=Account` lands on You. PROFILE_GROUPS stays as it is.
-  const hiddenTab = hiddenOnDesktop(DESKTOP_HIDDEN.profileTabs, tab);
-  useEffect(() => { if (hiddenTab) setTab('You'); }, [hiddenTab]); // eslint-disable-line react-hooks/exhaustive-deps
-  // v0.55.4: `?section=` -- a card found by the search palette (Appearance, API tokens…) is scrolled to once it is drawn.
+  // v0.55.4: `?section=` -- a card found by the search palette (Appearance, API tokens…) is landed on once it is drawn;
+  // a row of the console's own pages is the console's to land on (components/ConsoleLayout.tsx).
   useSectionArrival();
-  // Read once: the card is scrolled to on arrival, never again on a re-render or a tab change.
+  // Read once: the card is scrolled to on arrival, never again on a re-render or a page change.
   const [focusTracking] = useState<boolean>(() => params.get('card') === 'tracking');
   const [goalOpen, setGoalOpen] = useState(false);
-
-  const year = new Date().getFullYear();
+  const desktop = isDesktop();
+  const settings = useProfileSettingsViews();
   const { data: stats } = useQuery({ queryKey: ['stats'], queryFn: () => api<Stats>('/api/stats') });
-  const { data: lb } = useQuery({ queryKey: ['leaderboard'], queryFn: () => api<{ content: LeaderRow[] }>('/api/leaderboard') });
-  const { data: home } = useQuery({ queryKey: ['home'], queryFn: () => api<HomePayload>('/api/home') });
-  const { data: history } = useQuery({ queryKey: ['history', 60], queryFn: () => api<{ content: HistoryRow[] }>('/api/history?limit=60') });
-  const { data: wrapped } = useQuery({ queryKey: ['wrapped', year], queryFn: () => api<Wrapped>(`/api/wrapped?year=${year}`), staleTime: 30 * 60_000 });
-  // Last-resort hero art, so a library with series but no reading still opens washed in its own covers.
-  const { data: rnd } = useQuery({ queryKey: ['profile-hero-art'], queryFn: () => api<{ seriesId: string | null }>('/api/random'), staleTime: 30 * 60_000 });
 
-  // The single worst string on the old page was an <h1> reading "Your reading". A person's own name, or the
-  // handle they log in with -- never a label describing the page they are already looking at.
+  const saveGoal = async (n: number) => {
+    if (!n || n < 1) return;
+    setGoalOpen(false);
+    try {
+      await api('/api/settings', { method: 'PUT', json: { weeklyGoal: n } });
+      qc.invalidateQueries({ queryKey: ['stats'] });
+    } catch (e: any) { toast(msgOf(e, tr('Could not change that')), 'error'); }
+  };
+
+  // Each row's line says what is on the page; the settings pages' say what is set (components/ProfileSettings.tsx).
+  const views: Record<string, PageView> = {
+    you: { icon: <IcUser width={18} height={18} />, tint: 'bg-accent/15 text-accent',
+      summary: tr('Your week, badges and lists'), ownHeader: true, pane: <YouPage stats={stats} /> },
+    insights: { icon: <IcChart width={18} height={18} />, tint: 'bg-emerald-500/15 text-emerald-300',
+      summary: tr('What your reading adds up to'), pane: <ProfileInsights /> },
+    ...settings.views,
+    connections: { icon: <IcLink width={18} height={18} />, tint: 'bg-cyan-500/15 text-cyan-300',
+      summary: tr('Trackers, reading apps and API tokens'), pane: <ProfileConnections focusTracking={focusTracking} /> },
+    // Uchiyomi Desktop has no Account page (the registry's `web`): no password, no 2FA, no other sessions, and the app
+    // signs itself in (lib/desktop.ts). `?tab=account` there opens You.
+    account: { icon: <IcKey width={18} height={18} />, tint: 'bg-rose-500/15 text-rose-300',
+      summary: tr('Password, two-factor and sessions'), pane: <ProfileAccount /> },
+  };
+
+  return (
+    <div className="min-h-screen-d px-4 pt-[max(0.9rem,calc(env(safe-area-inset-top)+0.5rem))] lg:px-0 lg:pt-6" data-profile-console>
+      <ConsoleLayout index={PROFILE_SETTINGS} label={tr('Profile')} views={views} home="you"
+        conds={{ web: !desktop, 'local-accounts': true, extensions: false, pointer: settings.pointer }}
+        card={<ProfileCard stats={stats} onGoal={() => setGoalOpen(true)} />}
+        footer={<FootRows isAdmin={isAdmin} />} />
+      {goalOpen && (
+        <GoalModal current={stats?.weeklyGoal ?? 0} onClose={() => setGoalOpen(false)} onSave={saveGoal} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The person, at the top of the list: who is signed in, this week against the goal, and what it all adds up to. In the
+ * rail on a computer, the first thing on a phone. The weekly goal's one home (v0.86.0; the palette's Weekly goal lands
+ * on it): the ring opens its dialog, and with no goal yet a plus says there is one to set.
+ */
+function ProfileCard({ stats, onGoal }: { stats?: Stats; onGoal: () => void }) {
+  const { user } = useAuth();
+  // A person's own name, or the handle they log in with -- never a label describing the page they are already looking
+  // at (the old page's <h1> read "Your reading").
   const name = user
     ? user.displayName && user.displayName !== 'me'
       ? user.displayName
@@ -126,6 +150,69 @@ function ProfileInner() {
         ? `@${user.username}`
         : user.displayName
     : '';
+  const streak = stats?.currentStreak ?? 0;
+  const line = streak > 0 ? tr('{n} day streak', { n: streak })
+    : stats?.last_read_at ? tr('Last read {when}', { when: relativeTime(stats.last_read_at) })
+    : '';
+  const cell = 'flex min-w-0 flex-col items-center gap-1 rounded-xl px-1 py-2 text-center';
+  return (
+    <div data-profile-card className="card grad-border relative isolate overflow-hidden rounded-2xl p-4">
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10"
+        style={{ background: 'radial-gradient(90% 120% at var(--start) 0%, rgb(var(--accent) / 0.22), transparent 65%)' }} />
+      <div className="flex items-center gap-3">
+        <Avatar avatar={user?.avatar} size={44} />
+        <div className="min-w-0">
+          <h1 className="truncate font-display text-lg font-bold leading-tight text-fog-50">{name}</h1>
+          {line && <p className="truncate text-[12px] text-fog-400">{line}</p>}
+        </div>
+      </div>
+      {/* <div>s inside the <dl>, never <span>s: a <dl> may only hold <div> and dt/dd groups. */}
+      <dl className="mt-3 grid grid-cols-3 gap-1">
+        <div>
+          <dt className="sr-only">{tr('Weekly goal')}</dt>
+          <dd>
+            <button id="weekly-goal" type="button" onClick={onGoal} aria-label={tr('Weekly goal')}
+              className={`${cell} w-full transition hover:bg-ink-800/60`}>
+              {!stats ? <span className="skeleton size-9 rounded-full" />
+                : stats.weeklyGoal > 0 ? <GoalRing value={stats.weekChapters} goal={stats.weeklyGoal} size={36} />
+                : <span className="grid size-9 place-items-center rounded-full border-2 border-dashed border-fog-600 text-fog-400"><IcPlus width={16} height={16} /></span>}
+              <span aria-hidden className="text-[11px] text-fog-500">
+                {stats && stats.weeklyGoal > 0 ? `${stats.weekChapters}/${stats.weeklyGoal}` : tr('Weekly goal')}
+              </span>
+            </button>
+          </dd>
+        </div>
+        {[
+          { label: tr('Chapters'), value: stats?.chapters_completed },
+          { label: tr('Series'), value: stats?.series_touched },
+        ].map((f) => (
+          <div key={f.label} className={cell}>
+            <dd className="grid h-9 place-items-center font-display text-xl font-bold tabular-nums text-fog-50">
+              {typeof f.value === 'number' ? compact(f.value) : <span className="skeleton h-6 w-10 rounded-md" />}
+            </dd>
+            <dt className="text-[11px] text-fog-500">{f.label}</dt>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+/**
+ * You: the hero -- what to do next, over the art of what you read most this year -- and the household's week, your
+ * badges, the reading studio and your lists under it. The hero is this page's own since v0.88.0: it used to sit above
+ * every tab, so on a phone each of them opened on a screen of it.
+ */
+function YouPage({ stats }: { stats?: Stats }) {
+  const { user } = useAuth();
+  const still = useReducedMotion();
+  const year = new Date().getFullYear();
+  const { data: lb } = useQuery({ queryKey: ['leaderboard'], queryFn: () => api<{ content: LeaderRow[] }>('/api/leaderboard') });
+  const { data: home } = useQuery({ queryKey: ['home'], queryFn: () => api<HomePayload>('/api/home') });
+  const { data: history } = useQuery({ queryKey: ['history', 60], queryFn: () => api<{ content: HistoryRow[] }>('/api/history?limit=60') });
+  const { data: wrapped } = useQuery({ queryKey: ['wrapped', year], queryFn: () => api<Wrapped>(`/api/wrapped?year=${year}`), staleTime: 30 * 60_000 });
+  // Last-resort hero art, so a library with series but no reading still opens washed in its own covers.
+  const { data: rnd } = useQuery({ queryKey: ['profile-hero-art'], queryFn: () => api<{ seriesId: string | null }>('/api/random'), staleTime: 30 * 60_000 });
 
   const streak = stats?.currentStreak ?? 0;
   const best = stats?.longestStreak ?? 0;
@@ -180,220 +267,94 @@ function ProfileInner() {
   const anchorId = wrapped?.topSeries?.[0]?.id ?? home?.onDeck?.[0]?.seriesId ?? rnd?.seriesId ?? undefined;
   const onDeckBook = home?.onDeck?.[0]?.id;
 
-  const saveGoal = async (n: number) => {
-    if (!n || n < 1) return;
-    setGoalOpen(false);
-    try {
-      await api('/api/settings', { method: 'PUT', json: { weeklyGoal: n } });
-      qc.invalidateQueries({ queryKey: ['stats'] });
-    } catch (e: any) { toast(msgOf(e, tr('Could not change that')), 'error'); }
-  };
-
-  // Only You is a `.board` of cards (every row is wide + 1, so the auto-fill columns pair up). The other
-  // three are settings and render their own SETTINGS_GRID: a board of `null`-returning cards reflowed per
-  // install, and its `align-items: start` left ragged heights beside each other.
-  const panel = tab === 'You' ? (
-    <div className="board">
-      <HouseBoard span="wide" members={lb?.content ?? []} youId={user?.id ?? ''} weekCovers={week.ids} weekTitles={week.titles} />
-      <BadgesCard stats={stats} />
-      <StudioCard span="wide" />
-      <ListsCard />
-    </div>
-  ) : tab === 'Insights' ? (
-    <ProfileInsights />
-  ) : tab === 'Settings' ? (
-    <ProfileSettings />
-  ) : tab === 'Connections' ? (
-    <ProfileConnections focusTracking={focusTracking && tab === 'Connections'} />
-  ) : (
-    <ProfileAccount />
-  );
-
   return (
-    <div className="min-h-screen-d px-4 lg:px-0">
-      {/* ---------------------------------- HERO ---------------------------------- */}
-      <header className="bleed relative isolate mb-6 overflow-hidden lg:mt-2 lg:rounded-3xl">
-        {/* Taller than the spec's 46vh on a phone: the identity ladder, the fact pills and four verbs do not
-            fit 388px, and the block is bottom-aligned, so anything that does not fit is clipped off the top. */}
-        <div className="relative h-[56vh] min-h-[360px] lg:h-[min(420px,52vh)] xl:h-[min(460px,56vh)]">
-          {anchorId && (
-            <motion.div className="absolute inset-0"
-              initial={still ? false : { opacity: 0, scale: 1.06 }} animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}>
-              <Backdrop seriesId={anchorId} hero className="absolute inset-0" />
-            </motion.div>
-          )}
-          {/* the `via` stop at 72% was here and never rendered -- v3's opacity scale is multiples of 5, so it matched
-              nothing. v4 would honour it and darken this scrim; keeping the two stops that always applied
-              keeps the page looking the way it has shipped. */}
-          <div aria-hidden className="absolute inset-0 bg-linear-to-t from-ink-950 to-ink-950/30" />
-          <div aria-hidden className="absolute inset-0 bg-linear-to-r from-ink-950/85 via-ink-950/30 to-transparent rtl:bg-linear-to-l" />
-          {/* A CSS radial has no logical direction keyword, so the anchor comes from --start, which flips to
-              100% under dir="rtl". Tailwind's rtl: variant cannot mirror a gradient position. */}
-          <div aria-hidden className="pointer-events-none absolute inset-0"
-            style={{ background: 'radial-gradient(70% 110% at var(--start) 100%, rgb(var(--accent) / 0.26), transparent 62%)' }} />
+    <>
+      <header data-profile-hero className="relative isolate mb-6 overflow-hidden rounded-3xl">
+        {anchorId && (
+          <motion.div className="absolute inset-0 -z-10"
+            initial={still ? false : { opacity: 0, scale: 1.06 }} animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}>
+            <Backdrop seriesId={anchorId} hero className="absolute inset-0" />
+          </motion.div>
+        )}
+        <div aria-hidden className="absolute inset-0 -z-10 bg-linear-to-t from-ink-950 to-ink-950/30" />
+        <div aria-hidden className="absolute inset-0 -z-10 bg-linear-to-r from-ink-950/85 via-ink-950/30 to-transparent rtl:bg-linear-to-l" />
+        {/* A CSS radial has no logical direction keyword, so the anchor comes from --start, which flips to
+            100% under dir="rtl". Tailwind's rtl: variant cannot mirror a gradient position. */}
+        <div aria-hidden className="pointer-events-none absolute inset-0 -z-10"
+          style={{ background: 'radial-gradient(70% 110% at var(--start) 100%, rgb(var(--accent) / 0.26), transparent 62%)' }} />
 
-          <div className="absolute inset-0 flex flex-col justify-end">
-            <div className="bleed-pad pb-4 lg:pb-6">
-              <div className="lg:flex lg:items-end lg:justify-between lg:gap-10">
-                <motion.div className="min-w-0 lg:max-w-2xl"
-                  initial={still ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, ease: [0.22, 0.61, 0.36, 1] }}>
-                  <div className="flex items-center gap-3">
-                    <Avatar avatar={user?.avatar} size={44} />
-                    <p className="truncate font-display text-sm font-semibold text-fog-100">{name}</p>
-                  </div>
-                  <h1 className="mt-2 font-display text-3xl font-bold leading-tight text-fog-50 [text-shadow:0_2px_16px_rgba(0,0,0,0.6)] lg:text-5xl">{headline}</h1>
-                  {sub && <p className="mt-1 text-xs text-fog-400">{sub}</p>}
-
-                  <motion.dl className="mt-4 flex flex-wrap items-center gap-2"
-                    initial={still ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.5, delay: still ? 0 : 0.08, ease: [0.22, 0.61, 0.36, 1] }}>
-                    {!stats ? (
-                      // <div>, not <span>: a <dl> may only hold <div> and dt/dd groups.
-                      <>
-                        <div className="skeleton h-10 w-24 rounded-lg" />
-                        <div className="skeleton h-10 w-24 rounded-lg" />
-                        <div className="skeleton h-10 w-24 rounded-lg" />
-                      </>
-                    ) : stats.weeklyGoal > 0 ? (
-                      // `id`: the weekly goal's one home since v0.86.0 (search's Weekly goal lands here, lib/destinations.ts).
-                      <div id="weekly-goal" className="glass relative inline-flex items-center gap-2 rounded-full px-3 py-1.5 lg:px-3.5 lg:py-2">
-                        {/* The whole pill opens the goal dialog. The button stretches over the pill with an
-                            ::after rather than wrapping it, so <dt>/<dd> stay direct children of a <div> in
-                            the <dl> instead of being buried in a <button>. */}
-                        <button onClick={() => setGoalOpen(true)} aria-label={tr('Weekly goal')}
-                          className="after:absolute after:inset-0 after:rounded-full">
-                          <GoalRing value={stats.weekChapters} goal={stats.weeklyGoal} size={40} />
-                        </button>
-                        <dt className="text-[11px] uppercase tracking-wider text-fog-400">{tr('Weekly goal')}</dt>
-                        <dd className="sr-only">{stats.weekChapters}/{stats.weeklyGoal}</dd>
-                      </div>
-                    ) : (
-                      <div id="weekly-goal" className="glass inline-flex flex-wrap items-center gap-2 rounded-full px-3 py-1.5 lg:px-3.5 lg:py-2">
-                        <dt className="text-[11px] uppercase tracking-wider text-fog-400">{tr('Weekly goal')}</dt>
-                        {/* flex-wrap, because three chips at their 98px min-content are what tipped a 390px
-                            phone into horizontal overflow. */}
-                        <dd className="flex flex-wrap gap-1.5">
-                          {[5, 10, 20].map((n) => (
-                            <button key={n} onClick={() => saveGoal(n)} className="chip px-2.5 py-1 text-xs">{n}</button>
-                          ))}
-                        </dd>
-                      </div>
-                    )}
-                    {stats && (
-                      <>
-                        <div className="glass inline-flex items-baseline gap-2 rounded-full px-3 py-1.5 lg:px-3.5 lg:py-2">
-                          <dd className="font-display text-lg font-bold tabular-nums text-fog-50">{compact(stats.chapters_completed)}</dd>
-                          <dt className="text-[11px] uppercase tracking-wider text-fog-400">{tr('Chapters')}</dt>
-                        </div>
-                        <div className="glass inline-flex items-baseline gap-2 rounded-full px-3 py-1.5 lg:px-3.5 lg:py-2">
-                          <dd className="font-display text-lg font-bold tabular-nums text-fog-50">{compact(stats.series_touched)}</dd>
-                          <dt className="text-[11px] uppercase tracking-wider text-fog-400">{tr('Series')}</dt>
-                        </div>
-                      </>
-                    )}
-                  </motion.dl>
-
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {onDeckBook ? (
-                      <Link href={`/reader/?book=${encodeURIComponent(onDeckBook)}`} className="btn-accent px-5 py-2.5 text-sm">
-                        <IcPlay width={16} height={16} />{tr('Keep reading')}
-                      </Link>
-                    ) : (
-                      <Link href="/library/" className="btn-accent px-5 py-2.5 text-sm">
-                        <IcPlay width={16} height={16} />{tr('Browse library')}
-                      </Link>
-                    )}
-                    <Link href="/history/" className="btn-ghost px-5 py-2.5 text-sm">
-                      <IcRefresh width={16} height={16} />{tr('Reading history')}
-                    </Link>
-                    <Link href="/moments" className="btn-ghost px-5 py-2.5 text-sm">
-                      <IcMoments width={16} height={16} />{tr('Moments')}
-                    </Link>
-                    <Link href="/wrapped/" className="btn-ghost px-5 py-2.5 text-sm">
-                      <IcSparkle width={16} height={16} />{tr('Your Uchiyomi Wrapped')}
-                    </Link>
-                  </div>
-                </motion.div>
-
-                {/* Desktop only. A 96px shelf plus its label cannot share a phone hero with the name, the
-                    headline, three pills and three verbs without the top being clipped away.
-                    `min-w-0` and NOT `shrink-0`: twelve overlapped 96px spines are 888px of max-content that
-                    cannot shrink, and beside a `min-w-0` text column the flex algorithm hands the shelf all
-                    of it. That left the text column 32px wide at 1024, and because this whole block is
-                    `absolute inset-0 justify-end` inside an `overflow-hidden` header, the overflow is
-                    clipped off the TOP: the avatar, the name, the headline and the pills all disappeared,
-                    with no document overflow for a test to catch. It only becomes a shelf again at xl. */}
-                <div className="hidden min-w-0 xl:block xl:max-w-[46%]">
-                  <SpineWall ids={shelf.ids} titles={shelf.titles} label={shelf.label} />
-                </div>
+        {/* In the flow, over a floor of art: the hero is as tall as what it holds, and never shorter than enough of the
+            art to read as a picture. Absolutely placed and bottom-aligned, as it was, anything that did not fit was
+            clipped off its top -- the name and the headline went first. */}
+        <div className="flex min-h-[min(22rem,52vh)] flex-col justify-end pt-24">
+          <div className="flex items-end justify-between gap-10 px-4 pb-4 lg:px-8 lg:pb-6">
+            <motion.div className="min-w-0 max-w-2xl"
+              initial={still ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, ease: [0.22, 0.61, 0.36, 1] }}>
+              <p className="font-display text-3xl font-bold leading-tight text-fog-50 [text-shadow:0_2px_16px_rgba(0,0,0,0.6)] @min-[48rem]/pane:text-4xl">{headline}</p>
+              {sub && <p className="mt-1 text-xs text-fog-400">{sub}</p>}
+              <div className="mt-4 flex flex-wrap gap-2">
+                {onDeckBook ? (
+                  <Link href={`/reader/?book=${encodeURIComponent(onDeckBook)}`} className="btn-accent px-5 py-2.5 text-sm">
+                    <IcPlay width={16} height={16} />{tr('Keep reading')}
+                  </Link>
+                ) : (
+                  <Link href="/library/" className="btn-accent px-5 py-2.5 text-sm">
+                    <IcPlay width={16} height={16} />{tr('Browse library')}
+                  </Link>
+                )}
+                <Link href="/history/" className="btn-ghost px-5 py-2.5 text-sm">
+                  <IcRefresh width={16} height={16} />{tr('Reading history')}
+                </Link>
+                <Link href="/moments" className="btn-ghost px-5 py-2.5 text-sm">
+                  <IcMoments width={16} height={16} />{tr('Moments')}
+                </Link>
+                <Link href="/wrapped/" className="btn-ghost px-5 py-2.5 text-sm">
+                  <IcSparkle width={16} height={16} />{tr('Your Uchiyomi Wrapped')}
+                </Link>
               </div>
+            </motion.div>
+
+            {/* Only where the page is wide enough. `min-w-0` and NOT `shrink-0`: twelve overlapped 96px spines are 888px
+                of max-content that cannot shrink, and beside a `min-w-0` text column the flex algorithm hands the shelf
+                all of it -- the text column was once 32px wide. The pane's width decides, never the window's: the list
+                beside it takes 19rem of a computer's screen. */}
+            <div className="hidden min-w-0 @min-[56rem]/pane:block @min-[56rem]/pane:max-w-[46%]">
+              <SpineWall ids={shelf.ids} titles={shelf.titles} label={shelf.label} />
             </div>
-            {/* The floor: 90 days, full width. Renders an empty box while stats load, so nothing shifts.
-                `shrink-0` because it is a flex item: without it the trace is the first thing the column
-                crushes when the content above it grows, and it measured exactly 0px tall between 1024 and
-                1280 -- gone, silently, with nothing overflowing for a test to notice. Any locale that adds
-                a line to the headline would do the same at any width. */}
-            <TraceStrip days={stats?.byDay ?? []} className="shrink-0" />
           </div>
+          {/* The floor: 90 days, full width. Renders an empty box while stats load, so nothing shifts. */}
+          <TraceStrip days={stats?.byDay ?? []} className="shrink-0" />
         </div>
       </header>
 
-      {/* ------------------------------ INDEX + PANEL ------------------------------ */}
-      {/* The two things people actually come to this page to do were both at the bottom of the Account tab,
-          behind a board of eight cards. They belong to the person, not to a panel, so they live on the rail.
-          The nav is labelled "Profile", not "You": that was the first tab's name doubling as the name of the
-          whole list, which read as "You › You" to a screen reader and in the phone sheet's heading. */}
-      <ConsoleNav groups={isDesktop() ? visibleGroups(PROFILE_GROUPS, DESKTOP_HIDDEN.profileTabs) : PROFILE_GROUPS} tab={tab} onTab={setTab} ariaLabel={tr('Profile')} flat strip
-        footer={<RailActions isAdmin={isAdmin} />}>
-        {hiddenTab ? null : panel}
-      </ConsoleNav>
-
-      {goalOpen && (
-        <GoalModal current={stats?.weeklyGoal ?? 0} onClose={() => setGoalOpen(false)} onSave={saveGoal} />
-      )}
-    </div>
+      {/* Every row is wide + 1, so the auto-fill columns pair up. */}
+      <div className="board">
+        <HouseBoard span="wide" members={lb?.content ?? []} youId={user?.id ?? ''} weekCovers={week.ids} weekTitles={week.titles} />
+        <BadgesCard stats={stats} />
+        <StudioCard span="wide" />
+        <ListsCard />
+      </div>
+    </>
   );
 }
 
 /**
- * Admin, Support and Sign out, pinned to the console rail.
- *
- * Sign out also has a row on the Account tab; Admin has no other door on this page since v0.39.0 (the art
- * card it used to have on Account said the same thing this rail item says, one tab away). Styled as rail
- * items rather than as buttons so the column still reads as one list, with Sign out in the app's
- * destructive red and set apart from the link above it.
+ * Admin, Support and Sign out: the foot of the list, rows like the pages above them in a card of their own. Admin has no
+ * other door on this page; Support is asking for something rather than offering something, so it stays quiet -- no
+ * accent, the cup carries the colour on its own; Sign out is the app's destructive red (and also a row on Account).
  */
-function RailActions({ isAdmin }: { isAdmin: boolean }) {
+function FootRows({ isAdmin }: { isAdmin: boolean }) {
   const { logout } = useAuth();
-  // Keys (UI refresh): at the end of the tab row on a desktop, under it on a phone, where they wrap rather than stacking
-  // three full-width bars above the content. They were rail rows with a chevron, and pills on a phone.
-  const row = 'btn-key h-9 gap-2 text-sm';
   return (
-    <>
-      {isAdmin && (
-        <Link href="/admin/" className={`${row} text-fog-400 hover:bg-ink-800/60 hover:text-fog-100`}>
-          <IcSettings width={16} height={16} className="shrink-0" />
-          <span className="min-w-0 truncate">{tr('Admin')}</span>
-        </Link>
-      )}
-      {/* Promoted out of the bottom of the Account tab, where it sat behind eight cards and a scroll. It is
-          asking for something rather than offering something, so it stays quiet: the same row as its
-          neighbours, no accent fill, and the cup carries the colour on its own. */}
-      <a href="https://ko-fi.com/angeloshaheen" target="_blank" rel="noopener noreferrer"
-        className={`${row} text-fog-400 hover:bg-ink-800/60 hover:text-fog-100`}>
-        <span aria-hidden className="shrink-0 text-base leading-none">☕</span>
-        <span className="min-w-0 truncate">{tr('Support Uchiyomi')}</span>
-      </a>
+    <div className="card grad-border overflow-hidden rounded-2xl p-1.5" data-console-foot>
+      {isAdmin && <ConsoleFootRow href="/admin/" icon={<IcSettings width={18} height={18} />} label={tr('Admin')} />}
+      <ConsoleFootRow href="https://ko-fi.com/angeloshaheen" external
+        icon={<span className="text-base leading-none">☕</span>} label={tr('Support Uchiyomi')} />
       {/* Not on desktop: the app signs itself back in at once, so "Sign out" there would do nothing visible. */}
-      {!isDesktop() && (
-        <button onClick={logout} className={`${row} text-red-300/90 hover:bg-red-500/10 hover:text-red-300`}>
-          <IcLogOut width={16} height={16} className="shrink-0" />
-          <span className="min-w-0 truncate">{tr('Sign out')}</span>
-        </button>
-      )}
-    </>
+      {!isDesktop() && <ConsoleFootRow onClick={logout} icon={<IcLogOut width={18} height={18} />} label={tr('Sign out')} tone="danger" />}
+    </div>
   );
 }
 
@@ -414,8 +375,8 @@ function GoalModal({ current, onClose, onSave }: { current: number; onClose: () 
             className={`chip text-xs ${n === q ? 'chip-active' : ''}`}>{q}</button>
         ))}
       </div>
-      <label className="mt-3 block text-xs text-fog-400" htmlFor="weekly-goal">{tr('Chapters')}</label>
-      <input id="weekly-goal" type="number" inputMode="numeric" min={1} value={value}
+      <label className="mt-3 block text-xs text-fog-400" htmlFor="weekly-goal-input">{tr('Chapters')}</label>
+      <input id="weekly-goal-input" type="number" inputMode="numeric" min={1} value={value}
         onChange={(e) => setValue(e.target.value)} className="field mt-1" />
       <div className="mt-4 flex gap-2">
         <button onClick={onClose} className="btn-ghost flex-1 py-2 text-sm">{tr('Cancel')}</button>

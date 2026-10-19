@@ -4135,5 +4135,15 @@
   "Post": "Posten",
   "You, {a} and 1 other reacted": "Du, {a} und 1 weitere Person habt reagiert",
   "{a}, {b} and 1 other reacted": "{a}, {b} und 1 weitere Person haben reagiert",
-  "Get a push notification when one of your favorites gets a new chapter, or when someone comments on a chapter you commented on.": "Erhalte eine Benachrichtigung, wenn einer deiner Favoriten ein neues Kapitel bekommt oder jemand ein Kapitel kommentiert, das du kommentiert hast."
+  "Get a push notification when one of your favorites gets a new chapter, or when someone comments on a chapter you commented on.": "Erhalte eine Benachrichtigung, wenn einer deiner Favoriten ein neues Kapitel bekommt oder jemand ein Kapitel kommentiert, das du kommentiert hast.",
+  "What needs a look, and who is reading": "Was Aufmerksamkeit braucht und wer liest",
+  "Folders, age ratings and who can open them": "Ordner, Altersfreigaben und wer sie öffnen darf",
+  "Sites and extensions": "Websites und Erweiterungen",
+  "Covers and banners": "Cover und Banner",
+  "Who is signed in, on which device": "Wer angemeldet ist, auf welchem Gerät",
+  "Sign-ins and changes": "Anmeldungen und Änderungen",
+  "Your week, badges and lists": "Deine Woche, Abzeichen und Listen",
+  "What your reading adds up to": "Was dein Lesen ergibt",
+  "Trackers, reading apps and API tokens": "Tracker, Lese-Apps und API-Tokens",
+  "Password, two-factor and sessions": "Passwort, Zwei-Faktor und Sitzungen"
 }

@@ -57,8 +57,8 @@ export function useSectionArrival(): void {
       const el = document.getElementById(id);
       if (!el) return;
       finish();
-      // A row of the settings pages (v0.86.0) is the settings layout's to land on: it opens the row's category and
-      // whatever folds it, then brings it into view and flashes it (components/SettingsLayout.tsx). Two scrolls would fight.
+      // Anything in the Profile or Admin console is the console's to land on (v0.88.0): it opens the page and whatever folds
+      // the row, then brings it into view and flashes it (components/ConsoleLayout.tsx). Two scrolls would fight.
       if (el.closest('[data-settings-layout]')) return;
       el.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' });
     };

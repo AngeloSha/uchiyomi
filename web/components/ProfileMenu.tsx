@@ -8,6 +8,7 @@ import { INCOGNITO_TEXT } from '@/lib/incognito';
 import { adultShown, setAdultShown } from '@/lib/adult';
 import { isDesktop } from '@/lib/desktop';
 import { arrival } from '@/lib/destinations';
+import { openInConsole } from '@/lib/consoleOnScreen';
 import { useReduceEffects } from '@/lib/useReduceEffects';
 import { Avatar } from './Avatar';
 import { useIncognito } from './IncognitoBanner';
@@ -34,15 +35,15 @@ export function QuickSettings({ onClose }: { onClose: () => void }) {
   const link = 'rounded-lg px-2 py-1.5 text-sm text-fog-200 hover:bg-ink-800/70 hover:text-fog-50';
   const router = useRouter();
   /**
-   * Profile and Profile settings arrive as the search palette's destinations do (lib/destinations.ts arrival): a push
-   * from another page, a whole load from the profile's other tab, nothing where it already is. ⚠️ The profile reads
-   * `?tab=` once (lib/useTabParam.ts), so a client push from /profile to ?tab=Settings changed the address and nothing on
-   * the screen. Still real links, so a middle click or Ctrl+click opens a tab.
+   * Profile and Profile settings arrive as the search palette's destinations do: opened in place when the profile is on
+   * screen (lib/consoleOnScreen.ts), a push from another page (lib/destinations.ts arrival). Still real links, so a middle
+   * click or Ctrl+click opens a tab.
    */
   const go = (href: string) => (e: MouseEvent<HTMLAnchorElement>) => {
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     e.preventDefault();
     onClose();
+    if (openInConsole(href)) return;
     const how = arrival(href, window.location, () => false);
     if (how === 'push') router.push(href);
     else if (how === 'load') window.location.assign(href);
@@ -65,7 +66,7 @@ export function QuickSettings({ onClose }: { onClose: () => void }) {
         <SwitchRow label={tr('Reduce effects')} on={reduceEffects} onChange={saveReduceEffects} />
       </div>
       <div className="mt-2 flex items-center justify-between gap-2 border-t border-ink-800/70 pt-3">
-        <a href="/profile/?tab=Settings" onClick={go('/profile/?tab=Settings')} data-profile-settings-link className={link}>{tr('Profile settings')}</a>
+        <a href="/profile/?tab=general" onClick={go('/profile/?tab=general')} data-profile-settings-link className={link}>{tr('Profile settings')}</a>
         {/* Not on desktop: the app signs itself back in at once, so "Sign out" there would do nothing visible (as on the profile rail). */}
         {!isDesktop() && <button type="button" onClick={() => { onClose(); void logout(); }} className="rounded-lg px-2 py-1.5 text-sm text-red-300 hover:bg-red-500/10">{tr('Sign out')}</button>}
       </div>
