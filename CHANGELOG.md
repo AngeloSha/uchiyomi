@@ -25,6 +25,20 @@
 - Old addresses and bookmarks still work: `?tab=Tasks` opens Maintenance, `?tab=Settings` the first settings page, and
   `?tab=Health` is `?tab=health`.
 
+### One copy of each chapter
+
+- **Health finds a chapter a series holds twice, and keeps one.** Two files of one chapter in one series, such as an
+  older Suwayomi library's `Ch. 12 - Chapter 12.cbz` beside `Chapter 12.cbz` or a re-upload beside the first, were listed
+  twice and nothing showed them. "The same chapter saved twice" now lists each such series with **Keep one of each**,
+  and the card has **Keep one of each everywhere**. The first file saved stays unless it is incomplete. The other is
+  deleted from the download folder, or set aside where Uchiyomi may not delete. Reading progress moves to the copy
+  that stays, and a bookmarked copy is kept. Parts and extras filed under their chapter's number (`17e`, `1053a`)
+  are never offered. **Ignore** keeps both. Nothing runs on its own.
+- **A chapter a site numbers below zero is no longer downloaded.** A site's −1 means "number unknown". Natomanga listed
+  chapter 1 again as −1, which was saved as `Chapter -1.cbz` and read back as a second chapter 1.
+- **One chapter, one file, whatever the spelling of its number.** A site's 84.29999999999998 is the 84.3 the library
+  holds: it is not counted missing, and not downloaded a second time.
+
 ### Upgrading
 
 - Nothing to do.
