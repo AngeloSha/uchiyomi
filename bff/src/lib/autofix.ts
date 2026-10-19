@@ -1566,7 +1566,8 @@ function summarise(a: Run, report: HealthReport): AutofixSummary {
   const oddN = odd.reduce((k, i) => k + (i.bookIds?.length ?? 1), 0);
   needAfter(['files'], 'outliers', odd.length ? oddN : 0, say('autofix.needs.outliers', { n: oddN }));
   const twice = findings(by.get('saved-twice'));
-  const twiceN = twice.reduce((k, i) => k + (i.bookIds?.length ?? 1), 0);
+  // A Keep one of each row counts every chapter its series holds twice (`pairs`): its bookIds are capped.
+  const twiceN = twice.reduce((k, i) => k + (i.pairs ?? i.bookIds?.length ?? 1), 0);
   needAfter(['files'], 'saved-twice', twice.length ? twiceN : 0, say('autofix.needs.twice', { n: twiceN }));
 
   // Short chapters: tried again tomorrow when a source was silent or still cooling; partial ones are the sweep's; the

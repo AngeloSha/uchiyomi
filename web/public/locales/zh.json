@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4077
+    "strings": 4089
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4080,5 +4080,17 @@
   "Translate the speech bubbles of any chapter into each reader’s language. Needs a one-time download of {size}, and {memory} of memory while it translates.": "将任意章节的对话气泡翻译成每位读者的语言。需要一次性下载 {size}，翻译时占用 {memory} 内存。",
   "The translation engine could not be downloaded.": "无法下载翻译引擎。",
   "Not enough free space: {free} free where it goes.": "可用空间不足：存放位置仅剩 {free}。",
-  "Download ({size})": "下载（{size}）"
+  "Download ({size})": "下载（{size}）",
+  "Nothing was held twice": "没有保存了两次的内容",
+  "Keep one of each": "每章保留一份",
+  "Keep one of each in this series?": "在这部作品中每章保留一份？",
+  "Keep one of each in these {n} series?": "在这 {n} 部作品中每章保留一份？",
+  "Keeps one file of each chapter this series holds twice: the first one saved, unless it is incomplete. The other is deleted from the download folder, or set aside where Uchiyomi may not delete; reading progress moves to the copy that stays, and a bookmarked copy is kept.": "这部作品中有两份的每一章各保留一个文件：保留最先保存的那份，除非它不完整。另一份会从下载文件夹中删除；在 Uchiyomi 无权删除的位置则移到一旁。阅读进度会转移到保留的那一份，有书签的副本也会保留。",
+  "Keep one of each everywhere": "所有作品每章保留一份",
+  "Does Keep one of each for every series on this card that nobody chose to ignore. You see the list first.": "对这张卡片上没有人选择忽略的每部作品执行“每章保留一份”。会先显示列表。",
+  "1 series holds the same chapter in two files": "1 部作品的同一章节存在两个文件中",
+  "{n} series hold the same chapter in two files": "{n} 部作品的同一章节存在两个文件中",
+  "1 chapter is here twice: {numbers}": "1 个章节在这里有两份：{numbers}",
+  "{n} chapters are here twice: {numbers}": "{n} 个章节在这里有两份：{numbers}",
+  "A series that holds two files of one chapter offers \"Keep one of each\": the first file saved stays, unless it is incomplete. The other is deleted from the download folder, or set aside where Uchiyomi may not delete; reading progress moves to the copy that stays, and a bookmarked copy is kept. A part or an extra filed under its chapter's number (17e, 1053a) is never offered.": "同一章节有两个文件的作品会显示“每章保留一份”：保留最先保存的文件，除非它不完整。另一份会从下载文件夹中删除；在 Uchiyomi 无权删除的位置则移到一旁。阅读进度会转移到保留的那一份，有书签的副本也会保留。按所属章节编号保存的分段或番外（17e、1053a）永远不会被列入。"
 }

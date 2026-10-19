@@ -595,7 +595,10 @@ export type HealthAction =
   | 'free_slot'
   // v0.72.0, Chapter files: Fetch again for the row's `bookIds` (POST /api/admin/series/:id/chapters/refetch), the
   // series page's own route: each old file is kept until its new copy lands.
-  | 'refetch';
+  | 'refetch'
+  // The same chapter saved twice, two files of one chapter in one series: Keep one of each for the row's series
+  // (POST /api/admin/series/:id/chapters/keep-once), confirmed first.
+  | 'keep_one';
 
 /** One step of the nightly repair (`bff/src/lib/repair.ts`), as `POST /api/admin/tasks/repair/run` takes it. */
 export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups' | 'names' | 'directions' | 'details';
@@ -623,6 +626,8 @@ export interface HealthItem {
   bookIds?: string[];
   number?: number;
   numbers?: number[];
+  /** A `keep_one` row: how many chapters the series holds twice (bookIds and numbers are capped). */
+  pairs?: number;
   sourceId?: string;
   /**
    * The duplicate pair's suggested survivor: the id inside `seriesIds` a merge should keep. Since v0.57.0 the copy whose

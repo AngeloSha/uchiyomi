@@ -68,6 +68,7 @@ const ACTIONS: { action: string; labels: string[]; wants: RegExp }[] = [
   { action: 'fix_short', labels: ["tr('Fix')"], wants: /const b = itemBody\(a, item\); if \(b\) void rr\.start\(slotKey, a, b\);/ },
   { action: 'confirm_short', labels: ["tr('Not fine')", "tr('It’s fine')"], wants: /\/api\/admin\/books\/\$\{encodeURIComponent\(item\.bookId \|\| ''\)\}\/confirm-short[\s\S]*json: \{ confirmed: !confirmed \}/ },
   { action: 'delete', labels: ["tr('Delete chapter')", "tr('Delete chapters')"], wants: /setAsking\('delete'\)/ },
+  { action: 'keep_one', labels: ["tr('Keep one of each')"], wants: /setAsking\('keep_one'\)/ },
   { action: 'fill', labels: ["tr('Fill now')"], wants: /const b = itemBody\(a, item\); if \(b\) void rr\.start\(slotKey, a, b\);/ },
   { action: 'retry', labels: ["tr('Retry now')"], wants: /const b = itemBody\(a, item\); if \(b\) void rr\.start\(slotKey, a, b\);/ },
   { action: 'test', labels: ["tr('Test')"], wants: /\/api\/admin\/sources\/\$\{encodeURIComponent\(item\.sourceId \|\| ''\)\}\/test/ },
@@ -215,7 +216,7 @@ test('every dialog a Health card opens is on <body>, out of the card', () => {
   // its overflow-hidden cuts the dialog off. Reintroduce by rendering a ConfirmDialog in place: this names it.
   const src = code(read(KEYS));
   const opens = [...src.matchAll(/<ConfirmDialog\b/g)].map((m) => m.index!);
-  assert.equal(opens.length, 6, 'the Health confirmations moved -- update this count');
+  assert.equal(opens.length, 8, 'the Health confirmations moved -- update this count');
   for (const at of opens) {
     const before = src.slice(0, at);
     assert.ok(before.lastIndexOf('<OnBody>') > before.lastIndexOf('</OnBody>'), `a Health confirmation is rendered inside its card: ${src.slice(at, at + 90)}`);
@@ -390,6 +391,26 @@ test('Merge all lists every pair, marks the copy that survives, and says the mer
   assert.match(block, /if \(failed\) toast\(failed === 1 \? tr\('One pair could not be merged'\)/, 'pairs that failed to merge are folded into the success line');
 });
 
+test('Keep one of each everywhere runs each row\'s own Keep one of each, one at a time, after a list, and never Delete', () => {
+  // A series holding two files of one chapter (bff lib/heldTwice.ts). The card's press runs each such row's own route,
+  // after showing the series -- never Delete chapters, whose tombstone is still listed, and never on a row somebody
+  // ignored. Reintroduce by letting Delete's Fix all take every row with files (drop its `includes('delete')`): the
+  // saved-twice test below fails, its Fix all reaching a Keep one of each row.
+  const src = code(read(KEYS));
+  const block = src.slice(src.indexOf('export function HealthCardActions'), src.indexOf('export function CardProgress'));
+  assert.match(src, /check\.id === 'saved-twice' \? check\.items\.filter\(\(it\) => !it\.ignored && !it\.info && !!it\.seriesId && !!it\.actions\?\.includes\('keep_one'\)\) : \[\]/,
+    'Keep one of each everywhere reaches an ignored row, or a row of another kind');
+  assert.match(block, /'data-health-keep-all': check\.id/, 'the row is not tagged for the walk-through');
+  assert.match(block, /onRun: \(\) => setAskingKeep\(true\)/, 'Keep one of each everywhere runs without a confirmation');
+  const fn = block.slice(block.indexOf('const keepOneEverywhere'), block.indexOf('const mergeAll'));
+  assert.match(fn, /for \(const it of held\) \{[\s\S]*await api<KeepOnceAnswer>\(`\/api\/admin\/series\/\$\{encodeURIComponent\(it\.seriesId!\)\}\/chapters\/keep-once`, \{ method: 'POST' \}\)/,
+    "does not run each row's own Keep one of each, one at a time");
+  assert.doesNotMatch(fn, /chapters\/delete/, 'goes through Delete chapters');
+  const dialog = block.slice(block.indexOf('{askingKeep && ('));
+  assert.match(dialog, /danger/, 'the confirmation is not marked destructive');
+  assert.match(dialog, /\{held\.map\(\(it\) => \(/, 'the dialog does not list the series');
+});
+
 test('v0.50.0: Fix all on "The same chapter saved twice" deletes each row\'s later files through Delete chapters, after a list', () => {
   // The check never deletes by itself (bff lib/health.ts savedTwice); its Fix all is the one press that does, so it
   // shows what it deletes first, and sends each row's own later files -- the only ids the server put on the row --
@@ -400,8 +421,8 @@ test('v0.50.0: Fix all on "The same chapter saved twice" deletes each row\'s lat
   const block = src.slice(src.indexOf('export function HealthCardActions'), src.indexOf('export function CardProgress'));
   assert.match(block, /'data-health-delete-all': check\.id/, 'the Fix all row is not tagged for the walk-through');
   assert.match(block, /onRun: \(\) => setAskingPurge\(true\)/, 'Fix all deletes without a confirmation');
-  assert.match(src, /check\.id === 'saved-twice' \? check\.items\.filter\(\(it\) => !it\.ignored && !!it\.seriesId && \(it\.bookIds\?\.length \?\? 0\) > 0\) : \[\]/,
-    'Fix all reaches rows of another check, or an ignored row');
+  assert.match(src, /check\.id === 'saved-twice' \? check\.items\.filter\(\(it\) => !it\.ignored && !!it\.seriesId && \(it\.bookIds\?\.length \?\? 0\) > 0 && !!it\.actions\?\.includes\('delete'\)\) : \[\]/,
+    'Fix all reaches rows of another check, an ignored row, or a row that offers Keep one of each');
   const fn = block.slice(block.indexOf('const deleteAll'), block.indexOf('const mergeAll'));
   assert.match(fn, /\/api\/admin\/series\/\$\{encodeURIComponent\(it\.seriesId!\)\}\/chapters\/delete`, \{ method: 'POST', json: \{ bookIds: it\.bookIds \} \}/,
     'does not send each row\'s later files through the existing route');

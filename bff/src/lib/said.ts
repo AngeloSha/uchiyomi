@@ -317,6 +317,15 @@ const EN = {
     'reading history, and updates do not fetch them back.',
   'twice.detail': ({ n, numbers, more, source }: { n: number; numbers: number[]; more: number; source: string }) =>
     `${n} file${s(n, '', 's')} from ${source} saved again in another split: ${numbers.join(', ')}${more > 0 ? ` and ${more} more` : ''}`,
+  // Two files of one chapter in one series (lib/heldTwice.ts), the rows Keep one of each acts on.
+  'twice.heldLive': ({ n }: { n: number }) => `${n} series ${s(n, 'holds', 'hold')} the same chapter in two files`,
+  'twice.held': ({ n, numbers, more }: { n: number; numbers: number[]; more: number }) =>
+    `${n} chapter${s(n, ' is', 's are')} here twice: ${numbers.join(', ')}${more > 0 ? ` and ${more} more` : ''}`,
+  'twice.heldNote': () =>
+    'A series that holds two files of one chapter offers "Keep one of each": the first file saved stays, unless it is ' +
+    'incomplete. The other is deleted from the download folder, or set aside where Uchiyomi may not delete; reading ' +
+    'progress moves to the copy that stays, and a bookmarked copy is kept. A part or an extra filed under its chapter\'s ' +
+    'number (17e, 1053a) is never offered.',
 
   // ---- Cloudflare solver. ⚠️ On desktop the helper's address carries its access token: no `url` is sent there.
   'solver.down': ({ url, error }: { url?: string; error: string | null }) =>

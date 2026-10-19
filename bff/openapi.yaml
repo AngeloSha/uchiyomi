@@ -10077,6 +10077,71 @@ paths:
           description: Not found, or not visible to this account
         "409":
           description: "`refused`: the download directory is not writable; `message` and `fix` say what to do"
+  /api/admin/series/{id}/chapters/keep-once:
+    post:
+      tags:
+        - admin
+      summary: Keep one of each chapter this series holds twice.
+      operationId: postApiAdminSeriesIdChaptersKeepOnce
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The rows Health's
+        "The same chapter saved twice" offers Keep one of each on (action `keep_one`): every number the series holds
+        exactly twice, in two files neither of whose names marks a part or an extra (`17e`, `1053a`, `47-5`) or names
+        another chapter. The copy that stays is the downloader's own file in the download directory, else the first one
+        saved, unless it is incomplete or its file is gone. The other copy leaves the chapter list: reading progress
+        moves to the copy that stays (completed when either was), notes and reading history follow it, and its file is
+        deleted when it is in the download directory and set aside anywhere else (it stays on disk and the scan skips
+        it). A copy somebody has a bookmark in is kept (`left.bookmarked`), and so is a pair whose folder cannot be
+        reached (`left.unreachable`). Acts on the series' pairs as they are when it runs; no body.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, removed, deleted, bytes, setAside, left]
+                properties:
+                  ok:
+                    type: boolean
+                  removed:
+                    type: integer
+                    description: Copies taken off the chapter list.
+                  deleted:
+                    type: integer
+                    description: Of those, the files deleted from the download directory.
+                  bytes:
+                    type: integer
+                    description: The bytes those files held.
+                  setAside:
+                    type: integer
+                    description: Of those, the files left on disk and set aside.
+                  left:
+                    type: object
+                    description: Chapters still held twice, by why.
+                    properties:
+                      bookmarked:
+                        type: integer
+                      unreachable:
+                        type: integer
+                      busy:
+                        type: integer
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found
+        "409":
+          description: "`busy`: another task is changing that series; `gone`: it was deleted or merged into another"
   /api/admin/series/{id}/chapters/hide:
     post:
       tags:

@@ -757,9 +757,11 @@ source is searched — or `archiving`, below.
 `fix_short`, `fill`, `retry` and `solver_reset` are `POST /api/admin/tasks/repair/run`
 with the matching `only` and target; `confirm_short` is `POST /api/admin/books/:id/confirm-short`, and on a
 row that already carries `fixed` it is the withdrawal (`{confirmed: false}`); `delete` is `POST
-/api/admin/series/:id/chapters/delete`, `merge` is `POST /api/admin/series/:id/merge`, and `test`/`unblock`/
-`disable` are the existing `POST /api/admin/sources/:id/...` routes. Nothing on this page acts on its own:
-the two destructive ones, `delete` and `merge`, are the two the nightly repair never does.
+/api/admin/series/:id/chapters/delete`, `merge` is `POST /api/admin/series/:id/merge`, `keep_one` is `POST
+/api/admin/series/:id/chapters/keep-once` (no body: the series' chapters held twice, paired as they are when it runs;
+the row's `pairs` is how many), and `test`/`unblock`/`disable` are the existing `POST /api/admin/sources/:id/...`
+routes. Nothing on this page acts on its own: the destructive ones, `delete`, `merge` and `keep_one`, are the ones the
+nightly repair never does.
 
 **Source health and the extension engine** (since v0.49.0). The `sources` check reads the per-stage evidence
 (#115): each of its items adds `evidence` (one line per stage, `search`, `chapters`, `pages`, `images`, each
@@ -1806,6 +1808,7 @@ POST   /api/admin/series/:id/delete-files
 POST   /api/admin/series/:id/forget
 POST   /api/admin/series/:id/rename-folder
 POST   /api/admin/series/:id/chapters/delete POST   /api/admin/series/:id/chapters/refetch
+POST   /api/admin/series/:id/chapters/keep-once
 POST   /api/admin/series/:id/chapters/hide POST   /api/admin/series/:id/chapters/unhide
 GET    /api/admin/series/:id/chapters/hidden
 GET    /api/admin/series/:id/copy-pages

@@ -217,6 +217,13 @@ export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
     how: () => tr('A series that already follows a working source switches to it at once, without a search. The others are searched for one at a time, under their titles and other names, and switch only to a match whose title and chapter numbers line up. A series numbered by posting order keeps its main source. Nothing is downloaded and no file moves.'),
     eta: () => tr('Moments for series that already follow a working source; up to a minute and a half for each one searched for'),
   },
+  // The same chapter saved twice, a series holding two files of one chapter (bff lib/heldTwice.ts): one copy of each
+  // stays, as a merge keeps one.
+  keep_one: {
+    label: () => tr('Keep one of each'),
+    what: () => tr('Keeps one file of each chapter this series holds twice: the first one saved, unless it is incomplete. The other is deleted from the download folder, or set aside where Uchiyomi may not delete; reading progress moves to the copy that stays, and a bookmarked copy is kept.'),
+    eta: moment,
+  },
   merge: {
     label: () => tr('Merge'),
     what: () => tr('Makes the two copies one series. Progress, bookmarks, ratings and tracker links move to the kept copy; it cannot be undone.'),
@@ -316,6 +323,12 @@ export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
   delete_all: {
     label: () => tr('Delete the later copies'),
     what: () => tr('Deletes the files every row on this card names, the copies that arrived later, as Delete chapters does: a bookmarked chapter is skipped and everyone keeps their reading history. You see the list first; there is no undo.'),
+    eta: moment,
+  },
+  // The same chapter saved twice: every row's Keep one of each, row by row.
+  keep_all: {
+    label: () => tr('Keep one of each everywhere'),
+    what: () => tr('Does Keep one of each for every series on this card that nobody chose to ignore. You see the list first.'),
     eta: moment,
   },
   merge_all: {

@@ -253,6 +253,8 @@ const IRREGULAR_PAIRS: Record<string, string> = {
     'the library still marks these {n} deleted, and no scan has read the files since',
   // v0.50.0, The same chapter saved twice: the Fix all confirmation, "this series" against "these {n} series".
   'Delete the later copies in this series?': 'Delete the later copies in these {n} series?',
+  // The same chapter saved twice, Keep one of each: one series' confirmation and the card's, the same way.
+  'Keep one of each in this series?': 'Keep one of each in these {n} series?',
   // v0.53.0, Source health's Turn off all: what it asks first, "this source" against "these {n} sources". It names no
   // place (v0.54.0): it is asked on Admin → Sources itself as well as on Health.
   'Turn off this source? No series uses it. You can turn it back on any time.':

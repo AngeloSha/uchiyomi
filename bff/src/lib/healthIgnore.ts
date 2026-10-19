@@ -19,6 +19,8 @@ export const IGNORABLE_CHECKS = [
   'chapter-gaps', 'chapter-failures', 'sources', 'frozen-series', 'duplicates', 'outliers', 'downloads-missing',
   // v0.72.0: Disk space and folders, Tracker sync, Chapter files (lib/healthDisk.ts, healthTrackers.ts, healthFiles.ts).
   'disk', 'trackers', 'files',
+  // The same chapter saved twice: a series holding two files of one chapter (lib/heldTwice.ts), its Keep one of each rows.
+  'saved-twice',
 ] as const;
 export type IgnorableCheck = (typeof IGNORABLE_CHECKS)[number];
 
