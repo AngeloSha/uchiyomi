@@ -36,6 +36,7 @@ import { hasGroup, normGroup, reorder, withoutGroup } from '@/lib/scanlators';
 import { suggestGroups } from '@/lib/groupSuggest';
 import { NotificationsSection } from '@/components/AdminNotifications';
 import { DownloadsSection } from '@/components/ArchiveSettings';
+import { TranslateRow } from '@/components/TranslateSettings';
 import { isDesktop } from '@/lib/desktop';
 import { ssoOnly, useAuthConfig } from '@/lib/authConfig';
 import { adultShown } from '@/lib/adult';
@@ -426,6 +427,9 @@ function ServerSection({ data, save }: { data: any; save: Save }) {
             </ul>
           </Disclosure>
         )} />}
+      {/* v0.85.0: the opt-in translation engine -- a download, then one switch. Not on desktop (the engine's processes do
+          not run inside the app); the row hides itself where the server says it cannot run. */}
+      {!desktop && <TranslateRow />}
     </Section>
   );
 }

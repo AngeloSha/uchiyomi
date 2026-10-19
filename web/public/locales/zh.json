@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4063
+    "strings": 4077
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4066,5 +4066,19 @@
   "On by default. Uchiyomi keeps downloading until every chapter is here: when a site is slow, blocked or missing chapters, it uses the series’ other sources, and finds a new one when none of them can help. Off, chapters come only with the library update, from the sources you picked.": "默认开启。Uchiyomi 会持续下载，直到所有章节都到齐：网站缓慢、被屏蔽或缺少章节时，会使用该系列的其他来源；都无法提供时，会找一个新来源。关闭后，章节只随媒体库更新到来，并且只来自你选择的来源。",
   "{done}/{total} pages": "{done}/{total} 页",
   "about {n} s left": "约剩 {n} 秒",
-  "about {n} min left": "约剩 {n} 分钟"
+  "about {n} min left": "约剩 {n} 分钟",
+  "Translate pages": "翻译页面",
+  "The server reads the speech bubbles and writes them in {language}, a page every few seconds from the one you are on. Remembered for this title.": "服务器会读取对话气泡并用{language}重写，从你当前所在的页面开始，每隔几秒一页。会为此作品记住。",
+  "Translating… {done}/{total}": "正在翻译… {done}/{total}",
+  "Runs on this server: pages never leave it.": "在本服务器上运行：页面绝不会离开它。",
+  "Readers turn it on for a series in the reader’s settings, and pages are translated into their language as they read.": "读者在阅读器设置中为某部作品开启后，页面会在阅读时翻译成他们的语言。",
+  "Translation stopped.": "翻译已停止。",
+  "Remove the translation engine": "移除翻译引擎",
+  "Remove the translation engine?": "移除翻译引擎？",
+  "Its files are deleted and translating stops. Pages already translated come back if you download it again.": "它的文件会被删除，翻译也会停止。已翻译的页面会在你再次下载后恢复。",
+  "Downloading the translation engine…": "正在下载翻译引擎…",
+  "Translate the speech bubbles of any chapter into each reader’s language. Needs a one-time download of {size}, and {memory} of memory while it translates.": "将任意章节的对话气泡翻译成每位读者的语言。需要一次性下载 {size}，翻译时占用 {memory} 内存。",
+  "The translation engine could not be downloaded.": "无法下载翻译引擎。",
+  "Not enough free space: {free} free where it goes.": "可用空间不足：存放位置仅剩 {free}。",
+  "Download ({size})": "下载（{size}）"
 }

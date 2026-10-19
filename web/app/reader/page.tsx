@@ -31,6 +31,7 @@ import { applyCover, clearCover } from '@/lib/theme';
 import { COLOR_FILTER, glide, loadDevicePrefs, saveDevicePrefs, type DevicePrefs } from '@/lib/readerDevice';
 import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER, loadSourcePrefs, saveSourcePrefs, clearSourcePrefs, globalPrefsChange, seriesPinChange, titleLook, mergePulled, rememberSeriesSource, seriesSourceOf, rememberSeriesType, seriesTypeOf, rememberLibraryLook, libraryLookOf, type LibraryLook } from '@/lib/readerPrefs';
 import { guessMode, type AutoGuess } from '@/lib/readerAuto';
+import { translatedSrc, translating, type TranslateStatus } from '@/lib/readerTranslate';
 import { ReaderSettings } from '@/components/ReaderSettings';
 import { SectionTitle, useImgRetry, useRtl } from '@/components/ui';
 import { PageGrid } from '@/components/PageGrid';
@@ -208,6 +209,17 @@ function ReaderInner() {
   const [zoom, setZoom] = useState(1);
   // Shift pairs by one page, the title's memory like the zoom (lib/readerSpread.ts pairSlides `shift`).
   const [spreadShift, setSpreadShift] = useState(false);
+  // Translated pages (v0.85.0, lib/readerTranslate.ts): the title's memory like the shift, offered only while the server
+  // has the engine and the switch on. Each chapter's translated pages and their stamps, as the server last said.
+  const [translate, setTranslate] = useState(false);
+  const { data: trOffer } = useQuery({
+    queryKey: ['translate-available'],
+    queryFn: () => api<{ available: boolean }>('/api/translate'),
+    staleTime: 5 * 60_000,
+  });
+  const trOn = translate && !!trOffer?.available;
+  const trLang = activeLocale();
+  const [trStatus, setTrStatus] = useState<Record<string, TranslateStatus>>({});
   /**
    * One page of the pair on screen brought into frame (#232 by a tap, #261 by the `focus` key): the slide then shows that
    * page alone. Only ever a view of a slide that holds two pages, so nothing that counts pages -- progress, the counter,
@@ -334,6 +346,10 @@ function ReaderInner() {
   const applyShift = (v: boolean) => {
     setSpreadShift(v);
     if (seriesId0) saveSeriesPrefs(seriesId0, { spreadShift: v });
+  };
+  const applyTranslate = (v: boolean) => {
+    setTranslate(v);
+    if (seriesId0) saveSeriesPrefs(seriesId0, { translate: v });
   };
   const applyZoom = (z: number) => {
     const clamped = Math.max(1, Math.min(3, z));
@@ -496,6 +512,7 @@ function ReaderInner() {
       setAutoApplied(look.autoApplied);
       setZoom(memory.zoom && memory.zoom >= 1 ? memory.zoom : 1);
       setSpreadShift(memory.spreadShift === true);
+      setTranslate(memory.translate === true);
       titleOpen.current = true;
       setReady(true);
     })();
@@ -866,9 +883,14 @@ function ReaderInner() {
     fitAsked.current.set(key, w);
     return w;
   };
-  /** An online page's address: as scanned -- the reader as it always was -- or under Fit pages to my screen, as wide as it is drawn. */
-  const onlineSrc = (ch: Chapter, i: number): string =>
-    (device.fitPages ? img.pageFit(ch.id, flat[i].number, fitFor(i)) : img.page(ch.id, flat[i].number));
+  /**
+   * An online page's address: as scanned -- the reader as it always was -- or under Fit pages to my screen, as wide as it
+   * is drawn; translated once the server has the page in the reader's language (v0.85.0), the original until then.
+   */
+  const onlineSrc = (ch: Chapter, i: number): string => {
+    const src = (device.fitPages ? img.pageFit(ch.id, flat[i].number, fitFor(i)) : img.page(ch.id, flat[i].number));
+    return translatedSrc(src, trLang, trOn ? trStatus[ch.id]?.pages[flat[i].number] : undefined);
+  };
 
   // ---- the webtoon column fetches ahead of its window, as bytes (v0.61.0) ----
   // The pages after the window are fetched and dropped: the server serves a page `private, max-age=31536000,
@@ -1753,6 +1775,44 @@ function ReaderInner() {
   const total = flat.length;
   const pageInChapter = activeChapter ? (flat[current]?.number ?? 0) : 0;
 
+  // ---- translated pages (v0.85.0) ----
+  // The chapter being read is asked for from the page it is on, and the next one once it is done: the server does one
+  // page at a time, the latest ask first. While it still has pages of a chapter to do, the reader asks again every 5 s
+  // (only while the tab is in view) for the pages done since, and a done page's address changes to the translated one.
+  const trAsked = useRef<Set<string>>(new Set());
+  const askTranslation = (id: string, from: number) => {
+    if (trAsked.current.has(id)) return;
+    trAsked.current.add(id);
+    api<TranslateStatus>(`/api/books/${encodeURIComponent(id)}/translations`, { method: 'POST', json: { lang: trLang, from } })
+      .then((st) => setTrStatus((cur) => ({ ...cur, [id]: st })))
+      .catch(() => { trAsked.current.delete(id); });
+  };
+  useEffect(() => {
+    if (!trOn || !activeChapter || activeChapter.offline) return;
+    askTranslation(activeChapter.id, Math.max(1, pageInChapter));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trOn, activeChapter?.id]);
+  const trHere = activeChapter ? trStatus[activeChapter.id] : undefined;
+  useEffect(() => {
+    if (!trOn || !nextId || !trHere || trHere.pending > 0) return;
+    askTranslation(nextId, 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trOn, nextId, trHere?.pending]);
+  const trPendingIds = trOn ? Object.keys(trStatus).filter((id) => trStatus[id].pending > 0).join(' ') : '';
+  useEffect(() => {
+    if (!trPendingIds) return;
+    const t = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      for (const id of trPendingIds.split(' ')) {
+        api<TranslateStatus>(`/api/books/${encodeURIComponent(id)}/translations?lang=${encodeURIComponent(trLang)}`)
+          .then((st) => setTrStatus((cur) => ({ ...cur, [id]: st })))
+          .catch(() => {});
+      }
+    }, 5000);
+    return () => clearInterval(t);
+  }, [trPendingIds, trLang]);
+  const trLine = trOn && activeChapter ? translating(trHere, activeChapter.pages.length) : null;
+
   // ---- bookmarks ----
   // A bookmark is a note about a page, not a pointer to bytes, so it is keyed on (book, page) and survives
   // anything that happens to the file -- the same reasoning that keeps reading progress when a series' files
@@ -1830,7 +1890,10 @@ function ReaderInner() {
         <span className="truncate">{activeChapter?.seriesTitle || tr('Reading')}</span>
         {seriesHref && <IcChevronRight width={14} height={14} className="shrink-0 text-fog-500 transition group-hover:text-accent" />}
       </p>
-      <p className="truncate text-[11px] text-fog-400">{activeChapter?.title}</p>
+      <p className="truncate text-[11px] text-fog-400">
+        {activeChapter?.title}
+        {trLine && <span data-translating>{` · ${tr('Translating… {done}/{total}', trLine)}`}</span>}
+      </p>
     </>
   );
 
@@ -2232,6 +2295,8 @@ function ReaderInner() {
             set={setPref}
             spreadShift={spreadShift}
             onSpreadShift={applyShift}
+            translate={translate}
+            onTranslate={trOffer?.available ? applyTranslate : undefined}
             device={device}
             setDevice={setDevice}
             autoApplied={autoApplied}

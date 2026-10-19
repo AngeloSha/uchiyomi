@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.84.1
+  version: 0.85.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -6225,6 +6225,120 @@ paths:
           description: Malformed body or parameter
         "401":
           description: Not authenticated
+  /api/translate:
+    get:
+      tags:
+        - library
+      summary: Whether the reader offers Translate pages (since v0.85.0).
+      operationId: getApiTranslate
+      description: >-
+        True when an admin has downloaded the translation engine and turned Translate pages on (Admin -> Settings).
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  available:
+                    type: boolean
+        "401":
+          description: Not authenticated
+  /api/books/{id}/translations:
+    get:
+      tags:
+        - library
+      summary: Which pages of a chapter are translated into a language (since v0.85.0).
+      operationId: getApiBooksIdTranslations
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: lang
+          in: query
+          required: true
+          description: The reader's language, e.g. `en` or `pt-BR`.
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: >-
+            `pages` maps each translated page (1-based) to its stamp, the `tv` of its image URL; `failed` lists pages
+            the engine could not translate; `pending` is how many pages of this request still wait. `problem` says why
+            the queue stopped (not enough free memory, say). `available` false: translated pages are off.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  available:
+                    type: boolean
+                  problem:
+                    type: [string, "null"]
+                  pages:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  failed:
+                    type: array
+                    items:
+                      type: integer
+                  pending:
+                    type: integer
+        "400":
+          description: lang is not a language code
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+    post:
+      tags:
+        - library
+      summary: Translate a chapter into a language, from a page on (since v0.85.0).
+      operationId: postApiBooksIdTranslations
+      description: >-
+        Queues the chapter's pages from `from` to the end, ahead of anything asked before: the server translates one
+        page at a time, the most recent request first. Pages already translated are not done again.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lang]
+              properties:
+                lang:
+                  type: string
+                from:
+                  type: integer
+                  minimum: 1
+                  default: 1
+      security:
+        - bearer: []
+      responses:
+        "202":
+          description: Queued; the body is the chapter's status, as GET answers it.
+        "400":
+          description: Bad lang or from
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+        "409":
+          description: Translated pages are off (translate_off)
   /api/books/{id}/download-manifest:
     get:
       tags:
@@ -6420,6 +6534,22 @@ paths:
             it is when it is already that narrow, animated, unreadable, or no smaller re-encoded. Ignored beside `w`.
           schema:
             type: integer
+        - name: tl
+          in: query
+          required: false
+          description: >-
+            Since v0.85.0: the page translated into this language (the reader's language, e.g. `en`, `pt-BR`), drawn
+            from its stored translation and cached like any page. A page with no translation by the installed engine,
+            or with translated pages off, is the original, `Cache-Control: no-store`. Ignored beside `w`; works with
+            `fit`. Owned library only.
+          schema:
+            type: string
+        - name: tv
+          in: query
+          required: false
+          description: The translation's stamp from GET /api/books/{id}/translations. Only a cache-buster; the server ignores it.
+          schema:
+            type: string
       security:
         - imgCookie: []
         - bearer: []
@@ -6608,6 +6738,22 @@ paths:
             it is when it is already that narrow, animated, unreadable, or no smaller re-encoded. Ignored beside `w`.
           schema:
             type: integer
+        - name: tl
+          in: query
+          required: false
+          description: >-
+            Since v0.85.0: the page translated into this language (the reader's language, e.g. `en`, `pt-BR`), drawn
+            from its stored translation and cached like any page. A page with no translation by the installed engine,
+            or with translated pages off, is the original, `Cache-Control: no-store`. Ignored beside `w`; works with
+            `fit`. Owned library only.
+          schema:
+            type: string
+        - name: tv
+          in: query
+          required: false
+          description: The translation's stamp from GET /api/books/{id}/translations. Only a cache-buster; the server ignores it.
+          schema:
+            type: string
       security:
         - imgCookie: []
         - bearer: []
@@ -7165,6 +7311,136 @@ paths:
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/translate:
+    get:
+      tags:
+        - admin
+      summary: The translation engine and the Translate pages switch (since v0.85.0).
+      operationId: getApiAdminTranslate
+      description: >-
+        `state`: unsupported (this install cannot run it: the desktop app, or a platform with no pack), missing,
+        downloading (`done` of `total` bytes), ready or failed (`error`). `pick` is the model size Download chooses
+        here (large on machines with 28 GB of memory or more), `need` the bytes it fetches and `free` the bytes free
+        where they go (TRANSLATE_DIR). `running`: the engine's processes are up.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                properties:
+                  enabled:
+                    type: boolean
+                  state:
+                    type: string
+                    enum: [unsupported, missing, downloading, ready, failed]
+                  size:
+                    type: [string, "null"]
+                    enum: [large, small, null]
+                  pick:
+                    type: string
+                    enum: [large, small]
+                  done:
+                    type: integer
+                  total:
+                    type: integer
+                  need:
+                    type: integer
+                  free:
+                    type: integer
+                  memGiB:
+                    type: integer
+                  running:
+                    type: boolean
+                  external:
+                    type: boolean
+                  error:
+                    type: string
+                  problem:
+                    type: [string, "null"]
+        "401":
+          description: Not authenticated
+        "403":
+          description: Not an admin
+    put:
+      tags:
+        - admin
+      summary: Turn Translate pages on or off (since v0.85.0).
+      operationId: putApiAdminTranslate
+      description: Off stops the engine and forgets the pages waiting. Translations already made are kept.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled:
+                  type: boolean
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The status, as GET answers it.
+        "400":
+          description: enabled is not a boolean
+        "401":
+          description: Not authenticated
+        "403":
+          description: Not an admin
+    delete:
+      tags:
+        - admin
+      summary: Remove the translation engine's files (since v0.85.0).
+      operationId: deleteApiAdminTranslate
+      description: Stops a download or the running engine and deletes everything under TRANSLATE_DIR.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The status, as GET answers it.
+        "401":
+          description: Not authenticated
+        "403":
+          description: Not an admin
+  /api/admin/translate/download:
+    post:
+      tags:
+        - admin
+      summary: Download the translation engine (since v0.85.0).
+      operationId: postApiAdminTranslateDownload
+      description: >-
+        Starts the download in the background: the engine pack from this project's GitHub release `translate-v1`
+        and the model from Hugging Face, each file checked against its pinned SHA-256. A partial download resumes.
+        `size` overrides the model size this machine would pick.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                size:
+                  type: string
+                  enum: [large, small]
+      security:
+        - bearer: []
+      responses:
+        "202":
+          description: Started; the status, as GET /api/admin/translate answers it.
+        "400":
+          description: size is not large or small
+        "401":
+          description: Not authenticated
+        "403":
+          description: Not an admin
+        "409":
+          description: This install cannot run the engine (unsupported)
   /api/admin/settings:
     get:
       tags:

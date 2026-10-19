@@ -26,6 +26,7 @@
 #   KEEP=1 E2E_EMPTY_LIBRARY=1 E2E_NO_WALK=1 bash web/test/e2e/up.sh   # walk49's find: a new server, nothing in its library
 #   KEEP=1 E2E_ANILIST=1 E2E_NO_WALK=1 bash web/test/e2e/up.sh   # walk49's matches: a fake AniList (fakeAniList.mjs) as
 #     ANILIST_API_URL, so nothing on the instance asks the real AniList
+#   KEEP=1 E2E_TRANSLATE_DIR=<an installed translation engine> E2E_NO_WALK=1 bash web/test/e2e/up.sh   # walkTranslate's
 #
 # The embedded leg is the proof that the one-container layout behaves like the two-container one, in the
 # only place both are actually driven end to end. CI runs both.
@@ -135,6 +136,9 @@ if [ -n "${E2E_MIN_FREE_GB:-}" ]; then APP_ENV+=(-e "MIN_FREE_GB=$E2E_MIN_FREE_G
 # under a limit of two: the two packages Fix everything keeps fit, one at a time beside each it tries and removes, and a
 # third used source is then the one over it (Free a slot). Unset: the app's own default.
 if [ -n "${E2E_MAX_SOURCES:-}" ]; then APP_ENV+=(-e "SUWAYOMI_MAX_SOURCES=$E2E_MAX_SOURCES"); fi
+# E2E_TRANSLATE_DIR: a folder holding an installed translation engine (v0.85.0, walkTranslate.mjs), mounted at /translate
+# as the app's TRANSLATE_DIR. Unset: no engine, as on every server that never pressed Download.
+if [ -n "${E2E_TRANSLATE_DIR:-}" ]; then APP_ENV+=(-e "TRANSLATE_DIR=/translate" -v "$E2E_TRANSLATE_DIR:/translate"); fi
 # After ENGINE_ENV on the app's command line, so these win over the engine's stand-in solver address.
 if [ "$SOLVERS" = "1" ]; then
   APP_ENV+=(-e "FLARESOLVERR_URL=http://$SOLVER_MAIN:8191" -e "FLARESOLVERR_FALLBACK_URL=http://$SOLVER_BACKUP:8191" -e "FAKE_SOURCE_CLOUDFLARE=fake-b")

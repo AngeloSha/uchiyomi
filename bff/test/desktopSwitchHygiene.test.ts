@@ -69,6 +69,8 @@ const IS_DESKTOP_ALLOWED = new Set([
   // v0.82.0: a PC's engine keeps fewer backup extensions installed at once (BACKUP_EXTENSIONS_MAX 3, not 5). A number,
   // so not forDesktop, whose server arms are the words a Docker admin reads (desktopCopy.test.ts).
   'lib/backupExtensions.ts',
+  // v0.85.0: translated pages are Docker only for now: the engine's processes do not run inside the desktop app.
+  'lib/translate/engine.ts',
 ]);
 
 test('UCHIYOMI_DESKTOP is read in lib/desktop.ts and nowhere else', () => {

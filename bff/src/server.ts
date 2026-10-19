@@ -68,6 +68,8 @@ import sourceRoutes, { jobBusy } from './routes/sources';
 import opdsRoutes from './routes/opds';
 import komgaCompatRoutes from './routes/komgaCompat';
 import notifyRoutes from './routes/notify';
+import translateRoutes from './routes/translate';
+import { stopEngine } from './lib/translate/engine';
 import { isDesktop } from './lib/desktop';
 import { installDesktopGuards } from './lib/desktopGuard';
 import { ensureDesktopUser } from './lib/desktopUser';
@@ -232,6 +234,9 @@ async function main() {
   await app.register(recommendationRoutes);
   await app.register(downloadRoutes);
   await app.register(sourceRoutes);
+  // Translated pages (v0.85.0): answers "off" until an admin downloads the engine and turns it on. Not on desktop, whose
+  // server runs inside the app, where the engine's processes cannot (docs/DESKTOP.md).
+  if (!isDesktop()) await app.register(translateRoutes);
   // Neither OPDS nor the Komga-compatible API exists on desktop: both are for OTHER devices reading this
   // library, and the desktop server is reachable from this PC only (they return with "Share with my phone").
   if (!isDesktop()) await app.register(opdsRoutes);
@@ -876,6 +881,8 @@ async function main() {
     process.once(sig, () => {
       runtime.stopping = true;
       app.log.info(`${sig}: finishing the current chapter, then stopping`);
+      // The translation engine's processes (lib/translate/engine.ts), if running: nothing of theirs is worth waiting for.
+      stopEngine();
       // The download log's last lines first: a chapter that finished a moment ago is written down, not lost. A Find
       // other sources run (v0.49.1) closes its own row meanwhile -- `interrupted`, with every series it never reached
       // listed as not tried, and its audit line -- given FIND_SHUTDOWN_MS at most; what it does not finish,

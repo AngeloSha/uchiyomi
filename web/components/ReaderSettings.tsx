@@ -10,7 +10,8 @@ import { Disclosure } from './settings';
 import { ReaderKeys } from './ReaderKeys';
 import { IcX } from './icons';
 import { Switch } from './Switch';
-import { t as tr } from '@/lib/i18n';
+import { LOCALES, t as tr } from '@/lib/i18n';
+import { activeLocale } from '@/lib/format';
 import { useLayer } from '@/lib/layers';
 import { INCOGNITO_TEXT } from '@/lib/incognito';
 import { useIncognito } from './IncognitoBanner';
@@ -52,6 +53,8 @@ export function ReaderSettings({
   set,
   spreadShift = false,
   onSpreadShift,
+  translate = false,
+  onTranslate,
   device,
   setDevice,
   autoApplied,
@@ -69,6 +72,12 @@ export function ReaderSettings({
   /** double spreads shifted by one page for this title, and how to change it (remembered per title). */
   spreadShift?: boolean;
   onSpreadShift?: (v: boolean) => void;
+  /**
+   * Translated pages (v0.85.0) for this title, and how to change it (remembered per title). Absent while the server does
+   * not offer it: an admin has not downloaded the engine, or it is off.
+   */
+  translate?: boolean;
+  onTranslate?: (v: boolean) => void;
   /** This device's own settings (v0.61.0, lib/readerDevice.ts): kept in this browser, never synced. */
   device: DevicePrefs;
   setDevice: (p: Partial<DevicePrefs>) => void;
@@ -150,6 +159,20 @@ export function ReaderSettings({
               return tr('Picked for this series: {mode} · {type}', { mode, type: tr(seriesTypeKey(autoApplied.reason)) });
             })()}
           </p>
+        )}
+
+        {/* v0.85.0: only on a server whose admin downloaded the translation engine and turned it on. This title only. */}
+        {onTranslate && (
+          <div className="py-3" data-reader-translate>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-medium text-fog-200">{tr('Translate pages')}</span>
+              <Switch on={translate} onChange={onTranslate} label={tr('Translate pages')} />
+            </div>
+            <p className="mt-1 text-[11px] leading-snug text-fog-500">
+              {tr('The server reads the speech bubbles and writes them in {language}, a page every few seconds from the one you are on. Remembered for this title.',
+                { language: LOCALES.find((l) => l.code === activeLocale())?.name ?? 'English' })}
+            </p>
+          </div>
         )}
 
         <Row label={tr('Theme')}>

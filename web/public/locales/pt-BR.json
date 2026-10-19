@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4063
+    "strings": 4077
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -4066,5 +4066,19 @@
   "On by default. Uchiyomi keeps downloading until every chapter is here: when a site is slow, blocked or missing chapters, it uses the series’ other sources, and finds a new one when none of them can help. Off, chapters come only with the library update, from the sources you picked.": "Ativado por padrão. O Uchiyomi continua baixando até ter todos os capítulos: quando um site está lento, bloqueado ou sem capítulos, ele usa as outras fontes da série e encontra uma nova quando nenhuma delas pode ajudar. Desativado, os capítulos chegam só com a atualização da biblioteca, das fontes que você escolheu.",
   "{done}/{total} pages": "{done}/{total} páginas",
   "about {n} s left": "faltam cerca de {n} s",
-  "about {n} min left": "faltam cerca de {n} min"
+  "about {n} min left": "faltam cerca de {n} min",
+  "Translate pages": "Traduzir páginas",
+  "The server reads the speech bubbles and writes them in {language}, a page every few seconds from the one you are on. Remembered for this title.": "O servidor lê os balões de fala e os escreve em {language}, uma página a cada poucos segundos a partir daquela em que você está. Lembrado para este título.",
+  "Translating… {done}/{total}": "Traduzindo… {done}/{total}",
+  "Runs on this server: pages never leave it.": "Roda neste servidor: as páginas nunca saem dele.",
+  "Readers turn it on for a series in the reader’s settings, and pages are translated into their language as they read.": "Cada leitor ativa para uma série nas configurações do leitor, e as páginas são traduzidas para o idioma dele durante a leitura.",
+  "Translation stopped.": "A tradução parou.",
+  "Remove the translation engine": "Remover o motor de tradução",
+  "Remove the translation engine?": "Remover o motor de tradução?",
+  "Its files are deleted and translating stops. Pages already translated come back if you download it again.": "Os arquivos dele são apagados e a tradução para. As páginas já traduzidas voltam se você baixá-lo de novo.",
+  "Downloading the translation engine…": "Baixando o motor de tradução…",
+  "Translate the speech bubbles of any chapter into each reader’s language. Needs a one-time download of {size}, and {memory} of memory while it translates.": "Traduz os balões de fala de qualquer capítulo para o idioma de cada leitor. Precisa de um download único de {size} e de {memory} de memória enquanto traduz.",
+  "The translation engine could not be downloaded.": "Não foi possível baixar o motor de tradução.",
+  "Not enough free space: {free} free where it goes.": "Espaço livre insuficiente: {free} livres no local de destino.",
+  "Download ({size})": "Baixar ({size})"
 }

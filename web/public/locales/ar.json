@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4063
+    "strings": 4077
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -4066,5 +4066,19 @@
   "On by default. Uchiyomi keeps downloading until every chapter is here: when a site is slow, blocked or missing chapters, it uses the series’ other sources, and finds a new one when none of them can help. Off, chapters come only with the library update, from the sources you picked.": "مفعَّل افتراضيًا. يواصل Uchiyomi التنزيل حتى تكتمل كل الفصول: إذا كان موقع بطيئًا أو محظورًا أو تنقصه فصول، يستخدم مصادر السلسلة الأخرى، ويجد مصدرًا جديدًا إذا لم يستطع أي منها المساعدة. عند الإيقاف، تأتي الفصول مع تحديث المكتبة فقط، ومن المصادر التي اخترتها.",
   "{done}/{total} pages": "{done}/{total} صفحة",
   "about {n} s left": "يتبقى نحو {n} ث",
-  "about {n} min left": "يتبقى نحو {n} د"
+  "about {n} min left": "يتبقى نحو {n} د",
+  "Translate pages": "ترجمة الصفحات",
+  "The server reads the speech bubbles and writes them in {language}, a page every few seconds from the one you are on. Remembered for this title.": "يقرأ الخادم فقاعات الكلام ويكتبها بلغتك ({language})، صفحةً كل بضع ثوانٍ بدءًا من الصفحة التي أنت عليها. يُحفظ لهذا العنوان.",
+  "Translating… {done}/{total}": "جارٍ الترجمة… {done}/{total}",
+  "Runs on this server: pages never leave it.": "يعمل على هذا الخادم: لا تغادره الصفحات أبدًا.",
+  "Readers turn it on for a series in the reader’s settings, and pages are translated into their language as they read.": "يفعّلها القرّاء لكل سلسلة من إعدادات القارئ، فتُترجم الصفحات إلى لغتهم أثناء القراءة.",
+  "Translation stopped.": "توقفت الترجمة.",
+  "Remove the translation engine": "إزالة محرّك الترجمة",
+  "Remove the translation engine?": "إزالة محرّك الترجمة؟",
+  "Its files are deleted and translating stops. Pages already translated come back if you download it again.": "تُحذف ملفاته وتتوقف الترجمة. تعود الصفحات المترجمة سابقًا إن نزّلته مجددًا.",
+  "Downloading the translation engine…": "جارٍ تنزيل محرّك الترجمة…",
+  "Translate the speech bubbles of any chapter into each reader’s language. Needs a one-time download of {size}, and {memory} of memory while it translates.": "يترجم فقاعات الكلام في أي فصل إلى لغة كل قارئ. يحتاج إلى تنزيل لمرة واحدة بحجم {size}، و{memory} من الذاكرة أثناء الترجمة.",
+  "The translation engine could not be downloaded.": "تعذّر تنزيل محرّك الترجمة.",
+  "Not enough free space: {free} free where it goes.": "لا توجد مساحة كافية: المتاح {free} في مكان الحفظ.",
+  "Download ({size})": "تنزيل ({size})"
 }

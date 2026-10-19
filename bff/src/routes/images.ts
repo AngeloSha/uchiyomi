@@ -3,6 +3,9 @@ import sharp from 'sharp';
 import { IMG_COOKIE, API_TOKEN_PREFIX, resolveApiToken, resolveOpdsBasic, accountActive } from '../lib/auth';
 import { komga, komgaImage } from '../lib/komga';
 import { serveImage, getOrFetch } from '../lib/imageCache';
+import { doneTranslation, drawPage, readerLang } from '../lib/translate/pages';
+import { RENDER_VERSION } from '../lib/translate/render';
+import { engineKey, translateOn } from '../lib/translate/queue';
 import { dominantHex } from '../lib/color';
 import { fetchAniListArt } from '../lib/anilist';
 import { learnDirectionWith, directionFromAniListMatch } from '../lib/readingDirection';
@@ -794,10 +797,31 @@ export const serveLibBookThumb = async (req: FastifyRequest, reply: FastifyReply
 /**
  * One page of a chapter, 1-based. `w` in 64..2000 answers a webp downscale; `fit` in 64..2000 the page for a screen that
  * shows it that wide (pageForScreen, #234); anything else the original bytes.
+ *
+ * `tl` (v0.85.0): the page translated into that language, drawn from its stored translation (lib/translate/pages.ts) and
+ * cached like any page -- the reader adds it, with the translation's stamp as `tv`, only for a page that is done. A page
+ * with no translation by the installed engine, or with the feature off, is the original, `no-store`: the URL is the
+ * translated page's, and must not keep the original once the translation is there.
  */
-export const serveLibBookPage = async (req: FastifyRequest, reply: FastifyReply, id: string, pageNo: number, w: number, fit = 0) => {
+export const serveLibBookPage = async (req: FastifyRequest, reply: FastifyReply, id: string, pageNo: number, w: number, fit = 0, tl: string | null = null) => {
   const abs = await bookFileAbs(id, vc(req));
   if (!abs) return reply.code(404).send({ error: 'no_book' });
+  if (tl && !w) {
+    const engine = (await translateOn()) ? await engineKey() : null;
+    const done = engine ? await doneTranslation(id, pageNo, tl, engine) : null;
+    if (done && engine) {
+      return serveImage(req, reply, `lib-page:${id}:${pageNo}:tl${tl}:${engine}:r${RENDER_VERSION}:${done.at}${fit ? `:fit${fit}` : ''}`, async () => {
+        const page = await pageOrGone(abs, pageNo - 1);
+        if (!page) throw Object.assign(new Error('no page'), { statusCode: 404 });
+        const drawn = await drawPage(page.bytes, done.regions, tl);
+        return fit ? pageForScreen(drawn.buffer, drawn.contentType, fit) : drawn;
+      });
+    }
+    const page = await pageOrGone(abs, pageNo - 1);
+    if (!page) return reply.code(404).send({ error: 'no_page' });
+    const out = fit ? await pageForScreen(page.bytes, libCt(page.name), fit) : { buffer: page.bytes, contentType: libCt(page.name) };
+    return reply.header('content-type', out.contentType).header('cache-control', 'private, no-store').send(out.buffer);
+  }
   if (fit && !w) {
     return serveImage(req, reply, `lib-page:${id}:${pageNo}:fit${fit}`, async () => {
       const page = await pageOrGone(abs, pageNo - 1);
@@ -932,7 +956,7 @@ export default async function imageRoutes(app: FastifyInstance) {
     if (!Number.isInteger(pageNo) || pageNo < 1) return reply.code(400).send({ error: 'bad_page' });
     const w = Number((req.query as Record<string, string>).w);
     const fit = fitOf((req.query as Record<string, string>).fit);
-    if (id.startsWith('b_')) return serveLibBookPage(req, reply, id, pageNo, w, fit);
+    if (id.startsWith('b_')) return serveLibBookPage(req, reply, id, pageNo, w, fit, readerLang((req.query as Record<string, string>).tl));
 
     if (fit && !w) {
       return serveImage(req, reply, `page:${id}:${pageNo}:fit${fit}`, async () => {
@@ -996,7 +1020,7 @@ export default async function imageRoutes(app: FastifyInstance) {
     const pageNo = Number(n);
     if (!Number.isInteger(pageNo) || pageNo < 1) return reply.code(400).send({ error: 'bad_page' });
     const query = req.query as Record<string, string>;
-    return serveLibBookPage(req, reply, id, pageNo, Number(query.w), fitOf(query.fit));
+    return serveLibBookPage(req, reply, id, pageNo, Number(query.w), fitOf(query.fit), readerLang(query.tl));
   });
 
   // Proxy a remote source cover (for search results); handles Cloudflare sites via FlareSolverr cookies.

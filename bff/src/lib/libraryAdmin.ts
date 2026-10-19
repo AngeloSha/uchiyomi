@@ -566,7 +566,8 @@ export async function deleteChapterFiles(
 /** Every table with a per-user row keyed on a book, and so re-pointed to the book's current series first. */
 const BOOK_KEYED_USER_TABLES = ['read_progress', 'reading_events', 'bookmarks', 'notes', 'offline_downloads'] as const;
 /** Every table with a per-book row, deleted strictly by the ids of the books this series owns. */
-const BOOK_KEYED_TABLES = [...BOOK_KEYED_USER_TABLES, 'book_overrides', 'page_hashes'] as const;
+// v0.85.0: page_translations (lib/translate/pages.ts) cascades from lib_books; named for the same count.
+const BOOK_KEYED_TABLES = [...BOOK_KEYED_USER_TABLES, 'book_overrides', 'page_hashes', 'page_translations'] as const;
 /** Every table keyed on the series id. lib_books and lib_series themselves come last, on their own. */
 const SERIES_KEYED_TABLES = [
   'favorites', 'collection_items', 'ratings', 'series_colors', 'series_art', 'series_seen', 'series_trackers',
@@ -597,6 +598,8 @@ const SERIES_KEYED_TABLES = [
   'backup_links',
   // v0.83.0: the repository extensions the scout tried for it in vain (lib/backupExtensions.ts recordMiss). Cascades too.
   'backup_misses',
+  // v0.85.0: the names its translated pages keep (lib/translate/pages.ts). Cascades too; named for the same count.
+  'translate_names',
 ] as const;
 
 export interface ForgetRefusal {

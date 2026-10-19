@@ -1002,6 +1002,25 @@ For a series that hides them, every notice is left out of everything:
 Nothing is deleted, and the listing keeps every number. Turning a switch off applies on the next request, and
 the next check downloads what it no longer hides.
 
+## Translated pages
+
+Since v0.85.0, opt-in. Nothing here runs until an admin downloads the translation engine and turns *Translate pages*
+on (Admin → Settings). The engine runs on the server itself, and pages never leave it.
+
+- **Admin.** `GET /api/admin/translate` is the engine and the switch: `enabled`, `state` (`unsupported`, `missing`,
+  `downloading` with `done` of `total` bytes, `ready`, `failed` with `error`), `pick` (the model size Download would
+  choose here: `large` with 28 GB of memory or more, else `small`), `need` and `free` (bytes). `POST
+  /api/admin/translate/download` `{size?}` starts the download in the background; `PUT /api/admin/translate
+  {enabled}` is the switch; `DELETE /api/admin/translate` removes the engine's files.
+- **Reading.** `GET /api/translate` answers `{available}`: whether the reader offers the switch. `POST
+  /api/books/:id/translations {lang, from}` asks for a chapter's pages from `from` on, in the reader's language;
+  the newest request goes first, one page at a time. `GET /api/books/:id/translations?lang=` answers `{available,
+  problem, pages, failed, pending}`, where `pages` maps each translated page to its stamp. Both are **404** for a
+  chapter the account cannot open; the POST is **409** `translate_off` while the feature is off.
+- **The pictures.** `GET /img/lib/books/:id/page/:n?tl=<lang>&tv=<stamp>` (and `/img/books/...`) is the page drawn in
+  that language, cached like any page. A page that is not translated yet is the original with `Cache-Control:
+  no-store`.
+
 ## Rate limiting
 
 The API isn't rate-limited for authenticated users, but for the two Test routes that ask someone else's service
@@ -1104,6 +1123,8 @@ GET    /api/series/:id/groups        GET    /api/series/:id/versions
 GET    /api/series/:id/gaps
 POST   /api/series/:id/listing-progress
 DELETE /api/series/:id/listing-progress
+GET    /api/translate             GET    /api/books/:id/translations
+POST   /api/books/:id/translations
 ```
 
 **Related works and More like this** (since v0.61.0). `GET /api/series/:id/related` answers `{lookups, content:
@@ -1724,6 +1745,8 @@ GET    /api/admin/health/summary  POST   /api/admin/health/ignore
 POST   /api/admin/health/autofix  GET    /api/admin/health/autofix
 GET    /api/admin/health/autofix/:runId POST /api/admin/health/autofix/stop
 GET    /api/admin/settings        PATCH  /api/admin/settings
+GET    /api/admin/translate       PUT    /api/admin/translate
+DELETE /api/admin/translate       POST   /api/admin/translate/download
 GET    /api/admin/notify-targets  POST   /api/admin/notify-targets
 PATCH  /api/admin/notify-targets/:id DELETE /api/admin/notify-targets/:id
 POST   /api/admin/notify-targets/:id/test

@@ -1924,6 +1924,32 @@ CREATE TABLE IF NOT EXISTS backup_misses (
   at        timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_backup_misses ON backup_misses (pkg_name, COALESCE(series_id, ''), COALESCE(lang, ''));
+-- Translated pages (v0.85.0, lib/translate/): off until an admin downloads the engine and turns this on.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS translate_pages boolean NOT NULL DEFAULT false;
+-- One page in one language: the bubbles the engine read and what it wrote in each (regions), never the picture -- that
+-- is drawn from the regions when asked for. engine: the model size and pipeline version it was made with, so a new
+-- engine translates afresh rather than serve an old one's work. status: done, or failed (error says why).
+CREATE TABLE IF NOT EXISTS page_translations (
+  book_id    text NOT NULL REFERENCES lib_books(id) ON DELETE CASCADE,
+  page       int NOT NULL,
+  lang       text NOT NULL,
+  engine     text NOT NULL,
+  status     text NOT NULL,
+  regions    jsonb,
+  error      text,
+  ms         int,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (book_id, page, lang, engine)
+);
+-- The spelling each name was first given in a series and language: the next pages are told to keep it.
+CREATE TABLE IF NOT EXISTS translate_names (
+  series_id text NOT NULL REFERENCES lib_series(id) ON DELETE CASCADE,
+  lang      text NOT NULL,
+  source    text NOT NULL,
+  target    text NOT NULL,
+  at        timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (series_id, lang, source)
+);
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:
