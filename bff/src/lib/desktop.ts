@@ -86,7 +86,8 @@ export function firstRunFloor(serverMs: number, key: DesktopFloor): number {
  * one-person PC app: first-run setup and password sign-in (the shell signs the window in, routes/auth.ts
  * `POST /auth/desktop`), OIDC, password/2FA/sessions, creating or changing members (the LIST stays: the
  * Library tab and the notification-target dialog read it), everyone's sessions, OPDS and API tokens, web push
- * (Electron has no push service), and the install-count preview (desktop installs are not counted).
+ * (Electron has no push service), the install-count preview (desktop installs are not counted), and translated pages
+ * (v0.85.0: the engine's processes do not run inside the app yet).
  *
  * ⚠️ A renamed route would silently escape this list, so desktopRoutes.test.ts asserts every entry is a real
  * route of the server build.
@@ -120,6 +121,14 @@ export const DESKTOP_HIDDEN_ROUTES: readonly string[] = Object.freeze([
   'POST /api/push/subscribe',
   'POST /api/push/unsubscribe',
   'GET /api/admin/install-ping/preview',
+  // v0.85.0: translated pages are Docker only for now (lib/translate/engine.ts says why).
+  'GET /api/translate',
+  'GET /api/books/:id/translations',
+  'POST /api/books/:id/translations',
+  'GET /api/admin/translate',
+  'PUT /api/admin/translate',
+  'DELETE /api/admin/translate',
+  'POST /api/admin/translate/download',
 ]);
 
 /** What `desktopPlan` works out from the shell's environment. */

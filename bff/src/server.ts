@@ -234,9 +234,9 @@ async function main() {
   await app.register(recommendationRoutes);
   await app.register(downloadRoutes);
   await app.register(sourceRoutes);
-  // Translated pages (v0.85.0): answers "off" until an admin downloads the engine and turns it on. Not on desktop, whose
-  // server runs inside the app, where the engine's processes cannot (docs/DESKTOP.md).
-  if (!isDesktop()) await app.register(translateRoutes);
+  // Translated pages (v0.85.0): answers "off" until an admin downloads the engine and turns it on. Hidden on desktop
+  // (DESKTOP_HIDDEN_ROUTES), whose server runs inside the app, where the engine's processes cannot (docs/DESKTOP.md).
+  await app.register(translateRoutes);
   // Neither OPDS nor the Komga-compatible API exists on desktop: both are for OTHER devices reading this
   // library, and the desktop server is reachable from this PC only (they return with "Share with my phone").
   if (!isDesktop()) await app.register(opdsRoutes);
