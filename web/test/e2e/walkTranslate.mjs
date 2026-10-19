@@ -81,6 +81,9 @@ await api('/api/settings', { method: 'PUT', body: JSON.stringify({ reader: PREFS
 
 const browser = await pw[ENGINE].launch();
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, serviceWorkers: 'block' });
+// ⚠️ Headless WebKit on a Linux host can report `navigator.onLine === false`, and the app then treats the server as gone
+// (lib/auth.tsx) and sends every page but the reader to the Offline screen (AppShell): Admin -> Settings never draws.
+await ctx.addInitScript(() => Object.defineProperty(Navigator.prototype, 'onLine', { get: () => true, configurable: true }));
 const page = await ctx.newPage();
 await page.goto(BASE, { waitUntil: 'networkidle', timeout: 60000 });
 await page.waitForSelector('input[type=password]', { timeout: 30000 });
