@@ -13,6 +13,17 @@ test('heldBy: a book holds its number, and a range every number from its start t
   assert.equal(heldBy([{ number: '1', end: '7' }]).has(5), true);
 });
 
+test("a source's long spelling of a number is the chapter held", () => {
+  // Natomanga's 84.29999999999998 is the database's 84.3 (a `real`, read back as its shortest spelling): compared
+  // exactly, the sweep counted Standard of Reincarnation's 84.3 missing every night. By the number's key, both ways.
+  assert.equal(heldBy([{ number: 84.3 }]).has(84.29999999999998), true);
+  assert.equal(heldBy([{ number: '84.3' }]).has(84.29999999999998), true);
+  assert.equal(heldBy([{ number: 84.29999999999998 }]).has(84.3), true);
+  // The extension's float32 chains: 7.0200005 is 7.02.
+  assert.equal(heldBy([{ number: 7.02 }]).has(7.0200005), true);
+  for (const n of [84.2, 84.31, 84.4]) assert.equal(heldBy([{ number: 84.3 }]).has(n), false, `${n} is another chapter`);
+});
+
 test('heldBy: an end not above the number, or past MAX_RANGE, is no range', () => {
   // What a v0.55.1 scan leaves after a rollback: the number rewritten, the end untouched (lib/chapterRanges.ts).
   // Reintroduce by trusting every end: 500 is held by a "range" a thousand and one wide.

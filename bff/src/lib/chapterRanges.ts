@@ -18,6 +18,7 @@
 // ⚠️ The ONE definition. Every query that needs the rule interpolates a fragment from here, as lib/visibility.ts's
 // are. No fragment binds a parameter. Pure: no database (chapterRanges.test.ts imports it).
 import { MAX_RANGE } from './naming';
+import { numKey } from './postingOrder';
 
 /** Is book `b` a range, as its file reads? Never NULL, so `NOT isRange(b)` keeps every single chapter. */
 export const isRange = (b: string): string =>
@@ -53,17 +54,22 @@ export interface HeldBook {
 /**
  * The numbers some books hold, as a test: `n` is held when a book is numbered `n` or `n` lies inside a book's range.
  * The JS twin of `holds`, for have-sets read into memory (the sweep, the add, the fetch route).
+ *
+ * By the number's key (lib/postingOrder.ts numKey), both sides: a book's number comes back from a `real` column as its
+ * shortest spelling, a source's as it sent it, and Natomanga's 84.29999999999998 is the database's 84.3. Compared
+ * exactly, the sweep counted that chapter missing every night, and Standard of Reincarnation got it twice. Reintroduce
+ * by testing the raw number: "a source's long spelling of a number is the chapter held" in chapterRanges.test.ts fails.
  */
 export function heldBy(rows: Iterable<HeldBook>): { has(n: number): boolean } {
   const exact = new Set<number>();
   const ranges: Array<[number, number]> = [];
   for (const r of rows) {
     const n = Number(r.number);
-    exact.add(n);
+    exact.add(numKey(n));
     const e = r.end == null ? NaN : Number(r.end);
     if (e > n && e - n <= MAX_RANGE) ranges.push([n, e]);
   }
-  return { has: (n: number) => exact.has(n) || ranges.some(([a, z]) => n >= a && n <= z) };
+  return { has: (n: number) => exact.has(numKey(n)) || ranges.some(([a, z]) => n >= a && n <= z) };
 }
 
 /** A book's number as it is read out: `12`, or `1–7` for a range. */
