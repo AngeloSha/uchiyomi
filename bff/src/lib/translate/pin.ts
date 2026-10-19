@@ -29,14 +29,14 @@ export const PACKS: Record<string, PinnedFile> = {
   'linux-x64': {
     name: 'translate-pack-linux-x64.tar.gz',
     url: `https://github.com/AngeloSha/uchiyomi/releases/download/${PACK_TAG}/translate-pack-linux-x64.tar.gz`,
-    sha256: '0000000000000000000000000000000000000000000000000000000000000000',
-    bytes: 0,
+    sha256: '9fcc16a81c51c0425ae9c3b811fd87102031e4ef37678c9fecac6402b68c7d7c',
+    bytes: 69447114,
   },
   'linux-arm64': {
     name: 'translate-pack-linux-arm64.tar.gz',
     url: `https://github.com/AngeloSha/uchiyomi/releases/download/${PACK_TAG}/translate-pack-linux-arm64.tar.gz`,
-    sha256: '0000000000000000000000000000000000000000000000000000000000000000',
-    bytes: 0,
+    sha256: '74cae220948e8c01a2e7f5cb997841a7bbc89eda6ac69367e62bc89d3f4a574e',
+    bytes: 64710756,
   },
 };
 
