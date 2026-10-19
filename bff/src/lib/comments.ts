@@ -13,10 +13,9 @@
 // - Incognito reading is read-only here: posting or reacting would tell the household what was read.
 // - One reaction a member a chapter, from REACTIONS. A comment is plain text; its author edits or deletes it, an admin
 //   may remove it.
-// - Off where there is nobody to talk to: Uchiyomi Desktop, a server with one enabled member, and the Komga backend,
-//   whose chapters are not rows of this database (talkOn).
+// - Off where there is nobody to talk to: Uchiyomi Desktop (its routes are hidden, lib/desktop.ts), a server with one
+//   enabled member, and the Komga backend, whose chapters are not rows of this database (talkOn).
 import { q, one } from './db';
-import { isDesktop } from './desktop';
 import { viewCtxFor, seriesVisible } from './visibility';
 
 /** The six reactions, in the order every surface shows them. Stored as these exact strings (emoji presentation). */
@@ -61,12 +60,13 @@ let onCache: { at: number; on: boolean } | null = null;
 export function resetTalkOn(): void { onCache = null; }
 
 /**
- * Whether this server has a household to talk to: the owned library, not Uchiyomi Desktop, and two or more enabled
- * members. Asked on every answer the web reads it from, so cached for a minute. Reintroduce by answering true on a
- * one-member server: "a server with one member has nobody to talk to" in chapterComments.int.test.ts reads `on`.
+ * Whether this server has a household to talk to: the owned library and two or more enabled members. Uchiyomi Desktop
+ * never gets this far -- every route that asks answers 404 there (lib/desktop.ts DESKTOP_HIDDEN_ROUTES). Asked on every
+ * answer the web reads it from, so cached for a minute. Reintroduce by answering true on a one-member server: "a server
+ * with one member has nobody to talk to" in chapterComments.int.test.ts reads `on`.
  */
 export async function talkOn(now = Date.now()): Promise<boolean> {
-  if (!OWNED() || isDesktop()) return false;
+  if (!OWNED()) return false;
   if (onCache && now - onCache.at < ON_TTL_MS) return onCache.on;
   const r = await one<{ n: number }>('SELECT count(*)::int AS n FROM users WHERE NOT disabled');
   const on = Number(r?.n ?? 0) >= 2;
