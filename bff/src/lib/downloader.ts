@@ -3,7 +3,7 @@
 // session cookies for the binary image fetches (FlareSolverr itself can't return binaries).
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const AdmZip = require('adm-zip');
-import { mkdir, stat, statfs } from 'fs/promises';
+import { mkdir, readdir, stat, statfs } from 'fs/promises';
 import { join, dirname, posix } from 'path';
 import sharp from 'sharp';
 import { getSource, SourceAdapter, SourceChapter, SourceSeries } from './sources';
@@ -22,6 +22,7 @@ import { adultContentRating } from './ageRating';
 import { MAX_PAGE_BYTES } from './archiveCaps';
 import { fetchFollowingPublic, readCapped } from './safeFetch';
 import { isSwAdapterId } from './sources/suwayomi/sources';
+import { numKey } from './postingOrder';
 import { onEngineOrigin } from './sources/suwayomi/client';
 
 /**
@@ -302,6 +303,27 @@ export function freeBytes(): Promise<number | null> {
  */
 export const chapterFileRel = (seriesFolder: string, number: number): string => posix.join(seriesFolder, `Chapter ${number}.cbz`);
 
+/** The downloader's own file name, and the number it spells: `Chapter 84.3.cbz`, `Chapter -1.cbz`. */
+const OWN_NAME = /^Chapter (-?\d+(?:\.\d+)?)\.cbz$/;
+
+/**
+ * Is chapter `number` already in the folder of `abs` under another spelling of its number: `Chapter
+ * 84.29999999999998.cbz` for 84.3. A source and the database spell some numbers differently (lib/chapterRanges.ts
+ * heldBy), so a task holding one spelling looked for a file named by it and missed the one another task had just
+ * written under the other: Standard of Reincarnation got chapter 84.3 twice, 49 s apart, before a scan had indexed the
+ * first. The file NAME is left alone (lib/repair.ts and the refetch routes recognise a file of ours by exactly it).
+ * Reintroduce by checking the one path alone: "a chapter saved under another spelling of its number is not fetched
+ * again" in chapterSpellings.test.ts finds 84.3 going on to be fetched.
+ */
+async function spelledOtherwise(abs: string, number: number): Promise<boolean> {
+  const key = numKey(number);
+  const names = await readdir(dirname(abs)).catch(() => [] as string[]);
+  return names.some((f) => {
+    const m = OWN_NAME.exec(f);
+    return !!m && numKey(parseFloat(m[1])) === key;
+  });
+}
+
 /**
  * The per-source chapter gate every download path runs under: at most DL_CONCURRENCY chapters at once and
  * a gap between their starts that doubles per pace level (1200 → 2400 → 4800 ms), so a source that has
@@ -342,8 +364,9 @@ export async function downloadChapter(
   await mkdir(DL_ROOT, { recursive: true });
   const abs = await realContainedPath(DL_ROOT, rel);
   if (!abs) throw new Error('unsafe download path outside the library root');
-  // A PATH check under DL_ROOT, and nothing more: is the file this very call would write already there.
-  // It is free, so it runs before queueing for a slot, and it catches the same chapter twice in one run.
+  // A PATH check under DL_ROOT, and nothing more: is the file this very call would write already there, under
+  // this spelling of its number or another (spelledOtherwise). It is cheap, so it runs before queueing for a
+  // slot, and it catches the same chapter twice in one run.
   //
   // ⚠️ It is not, and cannot be, the library's have-set. It sees one root and one filename convention, so
   // a chapter the scanner indexed under the READ-ONLY library root, or under any other name, is invisible
@@ -352,7 +375,7 @@ export async function downloadChapter(
   // `lib_books` across both roots: see the have-set in routes/sources.ts (addSeriesFromSource). Leaving
   // this here is deliberate; `replace` is what the admin refetch and the completion pass (lib/partial.ts)
   // use to write over a file they know to be stale or partial, and those paths never consult the have-set.
-  if (!opts.replace && await stat(abs).then(() => true).catch(() => false)) return null;
+  if (!opts.replace && (await stat(abs).then(() => true).catch(() => false) || await spelledOtherwise(abs, input.chapter.number))) return null;
   await assertFreeSpace();
 
   // Recorded HERE, the one function every download path ends in, so the downloads view sees all of them --

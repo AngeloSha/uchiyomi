@@ -4,7 +4,7 @@
 // install with no sources mounted is the legal, scraper-free default.
 import { readdirSync } from 'fs';
 import { join } from 'path';
-import type { SourceAdapter, SourceHost } from './types';
+import type { SourceAdapter, SourceChapter, SourceHost } from './types';
 import { cfGet, cfPost, cfSession } from './flaresolverr';
 import { learnImageHosts } from './imageHosts';
 
@@ -19,13 +19,38 @@ function isAdapter(x: any): x is SourceAdapter {
     ['search', 'getSeries', 'listChapters', 'getPageUrls'].every((m) => typeof x[m] === 'function');
 }
 
+/**
+ * A chapter list without the chapters a source numbers below zero: -1 is a source's "number unknown" (Mihon's
+ * convention). The library files a chapter by its number, and `Chapter -1.cbz` is read back as chapter 1
+ * (lib/naming.ts), so Natomanga, whose list carried chapter 1 a second time as -1 at the same address, gave ten series
+ * chapter 1 twice. The extension adapter has always dropped these (lib/sources/suwayomi/sources.ts toChapter); this is
+ * that rule for every other source. Reintroduce by returning the list as it came: "a chapter a source numbers below
+ * zero is never listed" in chapterSpellings.test.ts finds the -1.
+ */
+export const fileableChapters = (list: SourceChapter[]): SourceChapter[] =>
+  Array.isArray(list) ? list.filter((c) => !(Number(c?.number) < 0)) : list;
+
+/** The adapters whose listChapters already goes through fileableChapters: a re-registered one is not wrapped twice. */
+const fileable = new WeakSet<SourceAdapter>();
+
+function fileableOnly(a: SourceAdapter): void {
+  if (fileable.has(a)) return;
+  const list = a.listChapters;
+  try {
+    a.listChapters = async function (this: SourceAdapter, seriesId: string) { return fileableChapters(await list.call(this, seriesId)); };
+    fileable.add(a);
+  } catch { /* a frozen adapter keeps its own list */ }
+}
+
 /** Register one adapter into the live registry. First write for an id wins (a duplicate is logged + skipped). */
 export function registerAdapter(a: SourceAdapter): boolean {
   if (!isAdapter(a)) return false;
   if (registry.has(a.id)) { console.warn(`[sources] duplicate id '${a.id}' ignored`); return false; }
   // Every source enters here, so this is where the cover hosts it serves are learned -- the only hosts the
-  // Cloudflare solver may open for a caller-supplied cover URL (see imageHosts.ts).
+  // Cloudflare solver may open for a caller-supplied cover URL (see imageHosts.ts) -- and where its chapter list
+  // loses the numbers the library cannot file.
   learnImageHosts(a);
+  fileableOnly(a);
   registry.set(a.id, a);
   return true;
 }
