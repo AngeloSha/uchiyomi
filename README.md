@@ -92,6 +92,9 @@ sites' terms and your local law.
   chapters the series is missing.
 - **Skips the pages that are not the story** — the scanlator credit page that opens every chapter is found
   by repetition and collapsed into a band you can tap open (or hide entirely, or show everything).
+- **Translated pages (opt-in)** — read a raw chapter in your own language: the server reads each speech bubble, translates
+  the page with the lines before and the series' names, and writes it back into the bubble. Runs on your server, as an
+  optional download; nothing changes until an admin turns it on.
 - **True-black OLED interface**, or a softer *Graphite* or *Midnight* if you prefer, built for a phone and installable
   as a PWA.
 - **Offline downloads** — save chapters to the device and read them with no connection at all; with *Keep favorites

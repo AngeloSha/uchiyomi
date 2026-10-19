@@ -543,6 +543,7 @@ Its server answers *not found* for each of these, so they are gone, not just out
 | Push notifications, *Install app* | The window has no push service. Notification targets — a webhook, Home Assistant, ntfy, Discord — still work, and are the way to hear about new chapters on a phone. |
 | **Save offline**, *Save all offline*, the Offline tab, the *Offline downloads* settings | They copy chapters into the browser's storage, and on this computer the chapters are already on the disk. What the app fetched from your sources is under **Library → Downloads**, where a link to the Offline tab also leads. |
 | The anonymous install count | Never sent from the desktop app, whatever a restored database says. |
+| Translated pages, for now | The translation engine runs as processes beside a server, and this one runs inside the app. Connected to a server that has it, you read translated pages as usual. |
 
 In the admin that means no Members or Sessions tabs (a link to either opens Overview), no Sessions tile and no
 member count; on the profile, no Account tab; under Settings no Offline downloads or This device sections; under

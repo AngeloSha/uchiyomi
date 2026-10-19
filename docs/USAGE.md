@@ -1607,6 +1607,41 @@ chapter that has not been processed yet simply skips nothing. One limit worth kn
 downloaded *before* its pages were fingerprinted keeps the flags it was saved with until you download it
 again.
 
+### Translated pages
+
+Since v0.85.0. For a chapter in a language you don't read: a raw chapter the day it comes out, or an English chapter in
+your own language. It is optional, and nothing changes until an admin turns it on.
+
+**Turning it on (admin).** **Admin → Settings → Server → Translate pages → Download.** The download is the translation
+engine: a reader for the text in the pages, a translation model and the fonts it writes with. It is about 19 GB on a
+server with 28 GB of memory or more (the large model, which can also look at the page when its text is hard to read),
+and about 3 GB elsewhere. The row says what it will take, in disk and in memory, before you press it. It goes in
+`TRANSLATE_DIR` (see [CONFIGURATION](CONFIGURATION.md#translated-pages): on a small system disk, point it at a big one).
+Then turn **Translate pages** on. **Remove the translation engine** deletes it again.
+
+**Reading.** In the reader's settings, turn on **Translate pages** for the series you are reading; it is remembered for
+that series. Pages are translated into your language (the one Uchiyomi is in for you), one at a time, from the page you
+are on. A page shows translated once it is done, and as it was until then, so you can start reading straight away.
+While it works, the top bar says *Translating… 12/40*. The next chapter follows when this one is done.
+
+**How it works.** The server reads the text of each speech bubble, then translates the page's bubbles together, told the
+lines before them and the names it has met in the series, so a character keeps one name. It writes each translation
+into its bubble, in the bubble's own shape and colour. Sound effects drawn on the art are left as they are. A page is
+translated once per language and kept, so reading it again costs nothing.
+
+**What to expect.**
+
+- **Speed.** On a 6-core CPU with no graphics card: about 10–15 seconds a page for Japanese and Chinese. A page whose
+  text is hard to read (most Korean pages) takes up to a minute, because the model then looks at the page itself. The
+  first pages of a chapter are ready long before the last.
+- **The server's resources.** While it translates, the engine takes the memory the row showed and half the CPU, at low
+  priority, so reading and downloads stay quick. It stops after 10 minutes without a page.
+- **Quality.** It is a machine translation of machine-read text: names, jokes and stylised lettering sometimes come out
+  wrong.
+- **Privacy.** Pages, text and names never leave your server. Only the download comes from the internet (GitHub and
+  Hugging Face).
+- Not in Uchiyomi Desktop yet. Chapters downloaded for offline reading show the original pages.
+
 ---
 
 ## 6. Discover & add new series

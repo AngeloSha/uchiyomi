@@ -39,6 +39,8 @@ The ones worth knowing:
   database*), and moving between the two is a dump and a restore, written down in both directions in
   [MIGRATING.md](MIGRATING.md). How to open a `psql` shell on either, and how to restore, is in
   [USAGE §12](USAGE.md#12-backups--restore).
+- `TRANSLATE_DIR`: where the optional translation engine goes when an admin downloads it (default
+  `<CONFIG_DIR>/translate`). See [Translated pages](#translated-pages).
 
 
 ## What leaves your server
@@ -90,6 +92,11 @@ to anything.
 
 Set `UCHIYOMI_PING_URL` to point the count somewhere else — at your own collector if you run a fork — or to
 an empty string to make sure it can never send anything regardless of the setting.
+
+**Translate pages** — *off, and nothing downloaded, until an admin presses Download* (Admin → Settings → Server).
+Download fetches the translation engine once: the pack from this project's GitHub releases (`translate-v1`) and the
+model from Hugging Face, each file checked against a SHA-256 pinned in the app. Translating runs on your server: pages,
+their text and the names it learns never leave it. See [Translated pages](#translated-pages).
 
 ### Progress trackers
 
@@ -629,3 +636,43 @@ defaulting to `off` ever since, so on a default install a renamed folder has alw
 opt-in because getting a rematch wrong merges two series, and the guards that prevent that (a minimum book
 count, a minimum overlap, exactly one candidate, and every book fingerprinted) are worth understanding
 before you turn it on. Start with `report`.
+
+## Translated pages
+
+The optional translation engine (since v0.85.0; how readers use it is in
+[USAGE §5](USAGE.md#translated-pages)). Nothing below exists until an admin presses **Download** under
+**Admin → Settings → Server → Translate pages**.
+
+**What Download fetches**, each file checked against its pinned SHA-256 and resumed if it stops part-way:
+
+- The engine pack for your server's architecture (amd64 or arm64), about 100 MB: llama.cpp's `llama-server`, the OCR
+  models (PaddleOCR) and their runtime, and the fonts.
+- One translation model, picked by the server's memory: **Qwen3.6 35B-A3B** (18 GB, plus 0.9 GB to look at pages) on
+  a machine with 28 GB of memory or more, **Qwen3 4B** (2.5 GB) elsewhere. Both are Apache-2.0.
+
+**Where it goes:** `TRANSLATE_DIR`, by default `translate/` in the config folder (`/config/translate`). The download
+refuses to start without room for it plus 1 GB. On a small system disk, mount a folder on a big disk and point the
+variable at it. The folder must be writable by the user the app runs as (`PUID`):
+
+```yaml
+services:
+  uchiyomi:
+    environment:
+      TRANSLATE_DIR: /translate
+    volumes:
+      - /mnt/big-disk/uchiyomi-translate:/translate
+```
+
+**While it translates,** the engine runs as two processes beside the app (the model, and the OCR), at low priority. The
+model takes about its own size in memory, so 20 GB for the large model and 4 GB for the small one. The engine won't
+start a model that does not fit in the memory free at that moment, and says so under Translate pages. Both processes
+stop after 10 minutes without a page.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `TRANSLATE_DIR` | `<CONFIG_DIR>/translate` | Where the engine is downloaded to. |
+| `TRANSLATE_THREADS` | half the CPUs | CPU threads the model uses. The OCR uses at most 4. |
+| `TRANSLATE_MODEL` | by memory | `large` or `small`, to pick the model yourself. |
+| `TRANSLATE_ENGINE_URL` | none | Translate with a llama.cpp server you already run (a machine with a graphics card, say) instead of downloading a model. Download then fetches only the engine pack, for the OCR and the fonts. |
+
+Not in Uchiyomi Desktop yet: its server runs inside the app, where the engine's processes cannot.
