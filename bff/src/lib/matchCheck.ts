@@ -6,7 +6,7 @@
 // every series_art cover and banner served from AniList's or MangaDex's servers. Their names are needed, so it asks
 // AniList (and MangaDex) by id -- the network, so never inside the migration's transaction: in the background a
 // couple of minutes after boot, then every six hours for whatever is still unchecked (a link an edition copied from
-// another, rows an older version wrote after a rollback), and on Admin → Tasks → Run now for everything again.
+// another, rows an older version wrote after a rollback), and on Admin → Settings → Maintenance → Run now for everything again.
 //
 // What it removes, by the one rule (lib/onlineMatch.ts namesMatch, against every name the series goes by here,
 // lib/altTitles.ts namesOfMany):

@@ -81,7 +81,9 @@ export function useAdminSettingsViews(extra: Partial<Record<string, ReactNode>> 
   // Until the settings have answered, each settings page says so where its groups will be.
   const loading = <div className="card grad-border p-6 text-center text-sm text-fog-500">{tr('Loading…')}</div>;
   const ready = (pane: ReactNode, id: string) => (data ? <>{pane}{extra[id]}</> : <>{loading}{extra[id]}</>);
-  // What each category holds, said once: the line under its name in the list and the sentence under its title.
+  // What each page holds, said once: the sentence under its title, and without its full stop the line under its name in
+  // the list, where every other page's line is a phrase.
+  const phrase = (sentence: string) => sentence.replace(/[.。]\s*$/u, '');
   const about = {
     server: tr('Its name, who may join, updates, and translation.'),
     series: tr('What members see, and what is looked up online.'),
@@ -90,18 +92,18 @@ export function useAdminSettingsViews(extra: Partial<Record<string, ReactNode>> 
     notifications: tr('New chapters and problems, sent to your phone, Home Assistant or Discord.'),
   };
   const views: Record<string, PageView> = {
-    server: { icon: <IcSettings width={18} height={18} />, tint: 'bg-slate-400/15 text-slate-200', summary: about.server, description: about.server,
+    server: { icon: <IcSettings width={18} height={18} />, tint: 'bg-slate-400/15 text-slate-200', summary: phrase(about.server), description: about.server,
       pane: ready(data && <ServerSection data={data} save={save} />, 'server') },
-    series: { icon: <IcFilter width={18} height={18} />, tint: 'bg-emerald-500/15 text-emerald-300', summary: about.series, description: about.series,
+    series: { icon: <IcFilter width={18} height={18} />, tint: 'bg-emerald-500/15 text-emerald-300', summary: phrase(about.series), description: about.series,
       pane: ready(data && <SeriesSection data={data} save={save} />, 'series') },
-    downloads: { icon: <IcDownload width={18} height={18} />, tint: 'bg-sky-500/15 text-sky-300', summary: about.downloads, description: about.downloads,
+    downloads: { icon: <IcDownload width={18} height={18} />, tint: 'bg-sky-500/15 text-sky-300', summary: phrase(about.downloads), description: about.downloads,
       pane: ready(data && <SchedulesSection data={data} save={save} />, 'downloads') },
-    maintenance: { icon: <IcRefresh width={18} height={18} />, tint: 'bg-amber-500/15 text-amber-300', summary: about.maintenance, description: about.maintenance,
+    maintenance: { icon: <IcRefresh width={18} height={18} />, tint: 'bg-amber-500/15 text-amber-300', summary: phrase(about.maintenance), description: about.maintenance,
       pane: ready(data && <MaintenanceSection data={data} save={save} />, 'maintenance') },
     // v0.43.0 (#70): webhook, Home Assistant, ntfy and Discord targets. Its rows and its one dialog live in their own
     // file; it reads its own endpoint.
-    notifications: { icon: <IcBell width={18} height={18} />, tint: 'bg-rose-500/15 text-rose-300', summary: about.notifications, description: about.notifications,
-      pane: <><NotificationsSection />{extra.notifications}</> },
+    notifications: { icon: <IcBell width={18} height={18} />, tint: 'bg-rose-500/15 text-rose-300', summary: phrase(about.notifications), description: about.notifications,
+      pane: <NotificationsSection /> },
   };
   return { views, sso: ssoOnly(authConfig), extensions: !!data?.extensions_configured };
 }

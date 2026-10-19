@@ -86,17 +86,16 @@ test('the admin and profile consoles hide Desktop\'s missing pages by their regi
   assert.match(foot, /\{!isDesktop\(\) && <ConsoleFootRow onClick=\{logout\}/, 'the profile offers Sign out on desktop');
 });
 
-test('the Overview does not ask for sessions on desktop, and the hero does not count members', () => {
-  // `GET /api/admin/sessions` is a 404 on desktop; the Overview asked for it on every visit and showed a
-  // Sessions tile that opened a tab that is not there. Reintroduce by dropping `enabled: !desktop` from the
-  // sessions query: "the Overview asks for sessions on desktop" fails.
+test('the Overview asks nothing Desktop does not answer, and the server card does not count members there', () => {
+  // `GET /api/admin/sessions` is a 404 on desktop; the Overview asked for it on every visit, for a Sessions tile that
+  // opened a tab that is not there. v0.88.0: the tiles are gone -- the list is the way to every page -- and with them
+  // every question the Overview asked for one. Reintroduce a sessions query on the Overview: "the Overview asks for
+  // sessions" fails; drop `!isDesktop()` from the card's facts: "the server card counts members on desktop" fails.
   const admin = code(read('app/admin/page.tsx'));
   const overview = slice(admin, 'function Overview(', 'function NeedsAttention(');
-  assert.match(overview, /queryKey: \['admin-sessions'\], queryFn: \(\) => api<\{ content: any\[\] \}>\('\/api\/admin\/sessions'\), enabled: !desktop \}/, 'the Overview asks for sessions on desktop');
-  assert.match(overview, /const desktop = isDesktop\(\);/, 'the Overview does not decide from lib/desktop');
-  assert.match(overview, /\{!desktop && \(\s*<TabTile label=\{tr\('Sessions'\)\}/, 'the Sessions tile shows on desktop');
-  const hero = slice(admin, 'function AdminHero(', 'function Overview(');
-  assert.match(hero, /stats && !isDesktop\(\) \? \(stats\.members === 1/, 'the hero counts members on desktop');
+  assert.doesNotMatch(overview, /\/api\/admin\/sessions/, 'the Overview asks for sessions');
+  const card = slice(admin, 'function AdminHero(', 'function VersionLine(');
+  assert.match(card, /stats && !isDesktop\(\) \? \(stats\.members === 1/, 'the server card counts members on desktop');
 });
 
 test('per-person library access is hidden on desktop, and Extensions becomes the engine download', () => {
@@ -156,7 +155,7 @@ test('the profile settings and connections hide what only other devices use', ()
   const settings = code(read('components/ProfileSettings.tsx'));
   const device0 = PROFILE_SETTINGS.categories.find((c) => c.id === 'device');
   assert.deepEqual(device0?.when, ['web'], 'This device shows on desktop');
-  assert.match(settings, /conds=\{\{ web: !desktop, /, 'the page does not say it is on desktop');
+  assert.match(code(read('app/profile/page.tsx')), /conds=\{\{ web: !desktop, /, 'the page does not say it is on desktop');
   assert.match(settings, /<DownloadsSection usage=\{usage\} \/>\s*<DeviceSection \/>/, 'the This device category lost a group');
   assert.match(settings, /function DeviceSection\(/, 'DeviceSection was deleted rather than gated');
   // v0.45.0: the desktop app's server mode is a plain window onto the server, so the server's own settings

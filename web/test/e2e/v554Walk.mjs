@@ -74,17 +74,13 @@ export async function findWalk(ctx) {
       if (l !== lang()) await setLang(l);
       await page.setViewport({ width: w, height: w < 1024 ? 844 : 900 });
 
-      // 1. The version where admins look: the foot of the admin menu on a desktop, the header's facts on a phone.
-      await visit('/admin/?tab=Settings', 3500);
-      if (w >= 1024) {
-        const line = await waitFor(() => textOf(page, '[data-admin-version]'), 15_000, 300);
-        check(`find @${t}: the foot of the admin menu says ${running}`, !!line && line.startsWith(running), JSON.stringify(line));
-        await page.evaluate(() => document.querySelector('[data-admin-version]')?.scrollIntoView({ block: 'center' }));
-      } else {
-        const hero = await waitFor(() => textOf(page, '[data-hero-version]'), 15_000, 300);
-        check(`find @${t}: the phone's admin header says ${running}`, !!hero && hero.includes(running), JSON.stringify(hero));
-      }
-      check(`find @${t}: Admin → Settings has no sideways scroll`, await noSideScroll());
+      // 1. The version where admins look: the foot of the admin list (v0.88.0), beside the page on a desktop and the first
+      //    screen on a phone.
+      await visit('/admin/', 3500);
+      const line = await waitFor(() => textOf(page, '[data-admin-version]'), 15_000, 300);
+      check(`find @${t}: the foot of the admin list says ${running}`, !!line && line.startsWith(running), JSON.stringify(line));
+      await page.evaluate(() => document.querySelector('[data-admin-version]')?.scrollIntoView({ block: 'center' }));
+      check(`find @${t}: Admin has no sideways scroll`, await noSideScroll());
       await shot(`find-${t}-1-version`);
 
       // 2. The empty Library: "Import your library" first, with its line, and it opens the import page.

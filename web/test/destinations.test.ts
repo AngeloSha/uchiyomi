@@ -26,97 +26,97 @@ const slice = (src: string, from: string, to: string): string => {
   assert.ok(a >= 0 && b > a, `${from} … ${to} is not where this test looks`);
   return src.slice(a, b);
 };
-const keysOf = (src: string): string[] => [...src.matchAll(/tabs: keys\(([^)]*)\)/g)].flatMap((m) => [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]));
-const ADMIN_TABS = keysOf(read('app/admin/page.tsx'));
-const PROFILE_TABS = keysOf(read('app/profile/page.tsx'));
-/** Where each console tab's cards are drawn: the files whose `id="…"` a `?section=` on that tab may name. */
-const TAB_FILES: Record<string, string[]> = {
-  '/admin/ Settings': ['components/AdminSettings.tsx', 'components/AdminNotifications.tsx', 'components/ArchiveSettings.tsx', 'components/TranslateSettings.tsx'],
-  // The hero's weekly goal is drawn by the page itself (v0.86.0: its one home).
-  '/profile/ You': ['components/ProfileYou.tsx', 'app/profile/page.tsx'],
-  '/profile/ Insights': ['components/ProfileInsights.tsx'],
-  '/profile/ Settings': ['components/ProfileSettings.tsx'],
-  '/profile/ Connections': ['components/ProfileConnections.tsx'],
-  '/profile/ Account': ['components/ProfileAccount.tsx'],
+/** Each console's pages, in its list's order (v0.88.0: one list each, from its registry, lib/settingsIndex*.ts). */
+const PAGES_OF: Record<string, readonly string[]> = {
+  '/admin/': ADMIN_SETTINGS.categories.map((c) => c.id),
+  '/profile/': PROFILE_SETTINGS.categories.map((c) => c.id),
+};
+/** A console's settings rows, by page: the registry's, which settingsIndex.test.ts holds to the rows in the source. */
+const ROWS_OF: Record<string, Set<string>> = Object.fromEntries([ADMIN_SETTINGS, PROFILE_SETTINGS].flatMap((index) =>
+  index.categories.map((c) => [`/${index.page}/ ${c.id}`, new Set(index.entries.filter((e) => e.cat === c.id).map((e) => e.id))])));
+/** Where the other pages' cards are drawn: the files whose `id="…"` a `?section=` on that page may name. */
+const PAGE_FILES: Record<string, string[]> = {
+  // Maintenance's Run now, under its settings (what was the Tasks tab).
+  '/admin/ maintenance': ['app/admin/page.tsx'],
+  // The card's weekly goal is drawn by the page itself (v0.86.0: its one home).
+  '/profile/ you': ['components/ProfileYou.tsx', 'app/profile/page.tsx'],
+  '/profile/ connections': ['components/ProfileConnections.tsx'],
+  '/profile/ account': ['components/ProfileAccount.tsx'],
 };
 const sectionIds = (files: string[]): Set<string> =>
   new Set(files.flatMap((f) => [...code(read(f)).matchAll(/\bid="([a-z0-9-]+)"/g)].map((m) => m[1])));
 const viewer = { admin: true, desktop: false, label: (k: string) => k };
-/** A settings page's categories, which its `?section=` may name too: the settings layout opens the category (v0.86.0). */
-const CATEGORIES: Record<string, Set<string>> = {
-  '/admin/ Settings': new Set(ADMIN_SETTINGS.categories.map((c) => c.id)),
-  '/profile/ Settings': new Set(PROFILE_SETTINGS.categories.map((c) => c.id)),
-};
-/** The ids of the tasks the server lists on Admin → Tasks (bff routes/admin.ts GET /api/admin/tasks). */
+/** The ids of the tasks the server lists on Admin → Maintenance (bff routes/admin.ts GET /api/admin/tasks). */
 const TASK_IDS = (() => {
   const route = readFileSync(join(ROOT, '../bff/src/routes/admin.ts'), 'utf8');
   return [...slice(route, "app.get('/api/admin/tasks',", "app.post('/api/admin/tasks/:id/run'").matchAll(/\bid: '([a-z]+)'/g)].map((m) => m[1]);
 })();
 
-test('every destination lands where it says: a real page, one of its tabs, and a card that tab draws', () => {
-  // Reintroduce a section without its id (drop `id="notice-chapters"` from AdminSettings.tsx), or a tab that is gone
-  // (`?tab=Providers`): the destination is named here by its key.
-  assert.ok(ADMIN_TABS.length === 10 && PROFILE_TABS.length === 5, 'the console tab lists were not read');
+test('every destination lands where it says: a real page, one of its pages, and a card that page draws', () => {
+  // Reintroduce a section without its id (drop `id="notice-chapters"` from AdminSettings.tsx), or a page that is gone
+  // (`?tab=providers`): the destination is named here by its key.
+  assert.ok(PAGES_OF['/admin/'].length === 13 && PAGES_OF['/profile/'].length === 8, 'the consoles\' pages were not read');
   for (const d of DESTINATIONS) {
     const u = new URL(d.href, 'http://x');
     assert.ok(['/admin/', '/profile/', '/admin/import/'].includes(u.pathname), `${d.key}: ${u.pathname} is not a page this lists`);
     assert.ok(existsSync(join(ROOT, `app${u.pathname}page.tsx`)), `${d.key}: no page at ${u.pathname}`);
     const tab = u.searchParams.get('tab');
-    const tabs = u.pathname === '/admin/' ? ADMIN_TABS : u.pathname === '/profile/' ? PROFILE_TABS : [];
-    if (tab) assert.ok(tabs.includes(tab), `${d.key}: ?tab=${tab} is not a tab of ${u.pathname}`);
+    const pages = PAGES_OF[u.pathname] ?? [];
+    if (tab) assert.ok(pages.includes(tab), `${d.key}: ?tab=${tab} is not a page of ${u.pathname}`);
     const section = u.searchParams.get('section');
     if (!section) continue;
-    const at = `${u.pathname} ${tab ?? tabs[0]}`;
-    if (at === '/admin/ Health') {
+    const at = `${u.pathname} ${tab ?? pages[0]}`;
+    if (at === '/admin/ health') {
       // Health's cards are `check-<the check's id>`, a check the server sends (the web's own list of them).
       assert.match(section, /^check-/, `${d.key}: a Health card is not addressed by its check`);
       assert.ok(section.slice(6) in CHECK_TITLES, `${d.key}: there is no ${section.slice(6)} check`);
       continue;
     }
-    if (at === '/admin/ Tasks') {
-      // Tasks' rows are `task-<the task's id>`, a task the server lists (v0.55.4: Rescan everything, the palette's).
-      assert.match(section, /^task-/, `${d.key}: a Tasks row is not addressed by its task`);
+    if (at === '/admin/ maintenance' && section.startsWith('task-')) {
+      // Maintenance's tasks are `task-<the task's id>`, a task the server lists (v0.55.4: Rescan everything, the palette's).
       assert.ok(TASK_IDS.includes(section.slice(5)), `${d.key}: the server lists no ${section.slice(5)} task (it has ${TASK_IDS.join(', ')})`);
       continue;
     }
-    if (CATEGORIES[at]?.has(section)) continue;
-    assert.ok(TAB_FILES[at], `${d.key}: nothing says where ${at} draws its cards`);
-    assert.ok(sectionIds(TAB_FILES[at]).has(section), `${d.key}: no card with id="${section}" on ${at}`);
+    if (ROWS_OF[at]?.has(section)) continue;
+    assert.ok(PAGE_FILES[at], `${d.key}: nothing says where ${at} draws its cards`);
+    assert.ok(sectionIds(PAGE_FILES[at]).has(section), `${d.key}: no card with id="${section}" on ${at}`);
   }
   assert.match(code(read('app/admin/page.tsx')), /<div key=\{c\.id\} id=\{`check-\$\{c\.id\}`\} data-health-check=\{c\.id\}/, 'Health\'s cards have no id to land on');
-  // Reintroduce a Tasks row without its id: "Tasks' rows have no id to land on".
+  // Reintroduce a task row without its id: "the tasks have no id to land on".
   assert.ok(TASK_IDS.length >= 9 && TASK_IDS.includes('rescan'), `the server's task list was not read: ${TASK_IDS.join(', ')}`);
-  assert.match(code(read('app/admin/page.tsx')), /<div key=\{t\.id\} id=\{`task-\$\{t\.id\}`\} className="grid scroll-mt-4 /, 'Tasks\' rows have no id to land on');
+  assert.match(code(read('app/admin/page.tsx')), /<div key=\{t\.id\} id=\{`task-\$\{t\.id\}`\} className="grid scroll-mt-4 /, 'the tasks have no id to land on');
   assert.equal(new Set(DESTINATIONS.map((d) => d.key)).size, DESTINATIONS.length, 'two destinations share a key');
 });
 
-test('it covers every admin tab, every setting of both settings pages, the profile, the import and the names people use', () => {
-  // v0.86.0: every row and every category of Admin → Settings and Profile → Settings is a destination, generated from the
-  // settings registry (lib/settingsIndex*.ts; settingsIndex.test.ts holds the registry to the rows). Reintroduce by
-  // dropping the registry's destinations from DESTINATIONS: "a setting is not a destination" fails, by name.
-  for (const tab of ADMIN_TABS) {
-    assert.ok(DESTINATIONS.some((d) => d.href === (tab === 'Overview' ? '/admin/' : `/admin/?tab=${tab}`)), `the admin tab ${tab} is not a destination`);
-  }
-  for (const tab of PROFILE_TABS) {
-    assert.ok(DESTINATIONS.some((d) => d.href === (tab === 'You' ? '/profile/' : `/profile/?tab=${tab}`)), `the profile tab ${tab} is not a destination`);
-  }
-  for (const [index, base] of [[ADMIN_SETTINGS, '/admin/?tab=Settings'], [PROFILE_SETTINGS, '/profile/?tab=Settings']] as const) {
-    for (const id of [...index.categories.map((c) => c.id), ...index.entries.map((e) => e.id)]) {
-      assert.ok(DESTINATIONS.some((d) => d.href === `${base}&section=${id}`), `a setting is not a destination: ${base} ${id}`);
+test('it covers every page of both consoles, every setting, the profile\'s cards, the import and the names people use', () => {
+  // v0.86.0: every row of the settings pages is a destination; v0.88.0 every page of the two lists too, all generated from
+  // the registry (lib/settingsIndex*.ts; settingsIndex.test.ts holds the registry to the rows). The first page is the
+  // console's bare address. Reintroduce by dropping the registry's destinations from DESTINATIONS: "a page is not a
+  // destination" and "a setting is not a destination" fail, by name.
+  for (const [index, path] of [[ADMIN_SETTINGS, '/admin/'], [PROFILE_SETTINGS, '/profile/']] as const) {
+    const first = index.categories[0].id;
+    for (const c of index.categories) {
+      assert.ok(DESTINATIONS.some((d) => d.href === (c.id === first ? path : `${path}?tab=${c.id}`)), `a page is not a destination: ${path} ${c.id}`);
+    }
+    for (const e of index.entries) {
+      assert.ok(DESTINATIONS.some((d) => d.href === `${path}?tab=${e.cat}&section=${e.id}`), `a setting is not a destination: ${path} ${e.id}`);
     }
   }
   assert.ok(DESTINATIONS.some((d) => d.href === '/admin/import/' && d.label === 'Import a list'), 'the import page is not a destination');
   for (const name of ['Check for updates', 'Notice chapters', '18+ filter', 'Source order', 'Slow archive', 'Nightly backup', 'Delete read chapters',
-    'Scanlation groups', 'Cloudflare solver', 'Version', 'Rescan everything', 'Weekly goal', 'Translate pages']) {
+    'Scanlation groups', 'Cloudflare solver', 'Version', 'Rescan everything', 'Weekly goal', 'Translate pages', 'Tasks', 'Settings']) {
     assert.ok(DESTINATIONS.some((d) => d.label === name), `"${name}" is not found by name`);
   }
-  // The names a section had before v0.86.0 still find where it went (lib/settingsIndex.admin.ts SETTINGS_NAME_ALIASES).
-  // Reintroduce by dropping the aliases from the keywords: "an old name finds nothing" fails.
+  // The names a section had before v0.86.0 still find where it went (lib/settingsIndex.admin.ts SETTINGS_NAME_ALIASES), and
+  // the tab names before v0.88.0 the page they became. Reintroduce by dropping the aliases from the keywords: "an old name
+  // finds nothing" fails.
   const keys = (q: string) => findDestinations(q, { ...viewer, limit: 50 }).map((d) => d.key);
   assert.ok(keys('scanlators').includes('admin-scanlators'), 'an old name finds nothing: Scanlators');
   assert.ok(keys('updates & schedules').includes('admin-cat-downloads'), 'an old name finds nothing: Updates & schedules');
   assert.ok(keys('library housekeeping').includes('admin-cat-maintenance'), 'an old name finds nothing: Library housekeeping');
   assert.ok(keys('backup time').includes('admin-nightly-backup'), 'the backup time is not found by its old name');
+  const tasks = keys('tasks').slice(0, 2);
+  assert.ok(tasks.includes('admin-cat-maintenance') && tasks.includes('admin-tasks'), `Tasks does not find Maintenance and its tasks first: ${tasks.join(', ')}`);
 });
 
 test('admins only where the page is theirs, and nothing Uchiyomi Desktop does not have', () => {
@@ -220,11 +220,11 @@ test('the palette lists them after the series under their own heading, and goes 
   assert.match(pal, /\{rows\[i - 1\]\?\.kind !== 'action' && <p [^>]*>\{tr\('Actions'\)\}<\/p>\}/, 'the Actions heading is placed by the series count alone');
   assert.match(pal, /else if \(r\.kind === 'place'\) goTo\(r\.place\.href\);/, 'a destination is not opened');
   const goTo = slice(pal, 'const goTo = useCallback(', '}, [onClose, router]);');
-  // A setting whose page is open is opened in place by the settings layout (v0.86.0): its category may not be on screen.
-  // Reintroduce the plain `!!document.getElementById(id)`: a setting in another category is a whole page load again.
-  assert.match(goTo, /const how = arrival\(href, window\.location, \(id\) => settingsKnow\(id\) \|\| !!document\.getElementById\(id\)\);/);
-  assert.match(goTo, /if \(id && settingsKnow\(id\)\) settingsGoTo\(id\);/, 'a setting on this page is scrolled to, not opened');
-  assert.match(goTo, /if \(how === 'push'\) router\.push\(href\);\s*else if \(how === 'load'\) window\.location\.assign\(href\);/, 'another tab of this page is pushed, which does nothing');
+  // A page or a row of the console on screen is opened in place (v0.88.0, lib/consoleOnScreen.ts), first: its page may not
+  // be the one on screen. Reintroduce the arrival alone: a setting on another page is a whole page load again.
+  assert.match(goTo, /onClose\(\);\s*if \(openInConsole\(href\)\) return;\s*const how = arrival\(href, window\.location, \(id\) => !!document\.getElementById\(id\)\);/,
+    'a page or a setting of the console on screen is not opened in place');
+  assert.match(goTo, /if \(how === 'push'\) router\.push\(href\);\s*else if \(how === 'load'\) window\.location\.assign\(href\);/, 'another page of this console is pushed before it is drawn');
   // "No series match" in the reader's language, the query isolated inside it.
   assert.match(pal, /\{tr\('No series match “\{query\}”\.', \{ query: `\\u2068\$\{q\.trim\(\)\}\\u2069` \}\)\}/, '"No series match" is English in every language');
   assert.doesNotMatch(pal, /\{r\.series\.booksCount\} chapters/, 'a series row says "chapters" in English');
@@ -240,9 +240,9 @@ test('the phone search page lists the same destinations under its series', () =>
   assert.match(page, /\{tr\('No series match “\{query\}”\.', \{ query: `\\u2068\$\{debounced\}\\u2069` \}\)\}/);
 });
 
-test('a destination\'s card is scrolled to once it has loaded, on both consoles, without touching the tab hook', () => {
-  // Reintroduce the scroll on mount (no wait for the card): the "Loading…" of Admin → Settings has no card yet, so it
-  // never lands -- "the arrival does not wait for its card" fails. useTabParam stays as settingsConsole.test.ts pins it.
+test('a destination\'s card is scrolled to once it has loaded, on both consoles', () => {
+  // Reintroduce the scroll on mount (no wait for the card): the "Loading…" of a settings page has no card yet, so it
+  // never lands -- "the arrival does not wait for its card" fails.
   const hook = code(read('lib/useSectionArrival.ts'));
   assert.match(hook, /const \[id\] = useState<string \| null>\(\(\) => params\.get\('section'\)\);/, 'the section is not read once, on arrival');
   assert.match(hook, /const mo = new MutationObserver|mo = new MutationObserver\(settle\);/, 'the arrival does not wait for its card');

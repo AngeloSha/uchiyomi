@@ -25,14 +25,14 @@ const code = (src: string): string =>
 const PANEL = 'components/AdminNotifications.tsx';
 
 test('Notifications is mounted once, as the last category, and Server stays first', () => {
-  // run.mjs reads the first 4000 characters of the Settings tab for the install-count payload, so Server must stay the
-  // category shown first (v0.86.0, lib/settingsIndex.admin.ts). Reintroduce by moving `notifications` to the top of the
-  // registry's categories: "Server is not first" fails.
+  // run.mjs reads the first 4000 characters of Server for the install-count payload, and the old `?tab=Settings` opens
+  // the first settings page, so Server stays the first of them (lib/settingsIndex.admin.ts). Reintroduce by moving
+  // `notifications` above it in the registry: "Server is not first" fails.
   const src = code(read('components/AdminSettings.tsx'));
   assert.match(src, /import \{ NotificationsSection \} from '@\/components\/AdminNotifications';/);
   assert.equal((src.match(/<NotificationsSection\b/g) ?? []).length, 1, 'the section is mounted more than once, or not at all');
   assert.match(src, /notifications: \{[^\n]*\n\s*pane: <NotificationsSection \/> \}/, 'Notifications is not the notifications category\'s pane');
-  const ids = ADMIN_SETTINGS.categories.map((c) => c.id);
+  const ids = ADMIN_SETTINGS.categories.filter((c) => c.settings).map((c) => c.id);
   assert.equal(ids[0], 'server', 'Server is not first');
   assert.equal(ids[ids.length - 1], 'notifications', 'Notifications is not the last category');
 });

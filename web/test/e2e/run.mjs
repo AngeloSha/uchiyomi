@@ -673,7 +673,9 @@ try {
 
   await page.goto(`${BASE}/admin`, { waitUntil: 'networkidle2', timeout: 60000 });
   await sleep(1500);
-  (await clickText('Library')) ? ok('opened the Library tab') : bad('no Library tab in the admin panel');
+  // v0.88.0: Libraries is a row of the admin list (its group is Library).
+  (await page.evaluate(() => { const b = document.querySelector('[data-console-page="library"]'); b?.click(); return !!b; }))
+    ? ok('opened Libraries') : bad('no Libraries page in the admin list');
   await sleep(1500);
 
   if (!(await clickText('New library'))) bad('no way to create a library');
@@ -947,12 +949,13 @@ try {
   }
   {
     const opened = await page.evaluate(() => {
-      const b = [...document.querySelectorAll('button')].find((x) => (x.textContent || '').trim() === 'Settings');
+      // v0.88.0: Server, the first settings page, is a row of the admin list.
+      const b = document.querySelector('[data-console-page="server"]');
       if (!b) return false;
       b.click();
       return true;
     });
-    if (!opened) bad('admin: no Settings tab');
+    if (!opened) bad('admin: no Server page in the admin list');
     else {
       await sleep(2500);
       // Since v0.39.0 the payload sits in a disclosure under the install-count switch, closed until the

@@ -425,10 +425,10 @@ under **Admin → Settings → Maintenance → Nightly backup**, 03:00 by defaul
 - A failed run counts as a run: it is not retried in a loop.
 
 **Nightly backup** and **Backups to keep** sit beside the hour (since v0.61.1): switched off, nothing runs at night and
-nothing catches up, while **Run now** under Tasks still makes one; the oldest runs beyond the number kept (14 by default)
+nothing catches up, while **Run now** among Maintenance's tasks still makes one; the oldest runs beyond the number kept (14 by default)
 are deleted after each backup. The `before-restore-…` safety copies below are never counted or deleted.
 
-**Admin → Tasks** has **Open backups folder** and **Restore a backup…**; the icon's menu has **Restore a
+**Admin → Settings → Maintenance** has **Open backups folder** and **Restore a backup…**; the icon's menu has **Restore a
 backup…** too. Restoring:
 
 1. Pick the `db.sql.gz` inside the backup folder you want, and confirm.
@@ -545,9 +545,9 @@ Its server answers *not found* for each of these, so they are gone, not just out
 | The anonymous install count | Never sent from the desktop app, whatever a restored database says. |
 | Translated pages, for now | The translation engine runs as processes beside a server, and this one runs inside the app. Connected to a server that has it, you read translated pages as usual. |
 
-In the admin that means no Members or Sessions tabs (a link to either opens Overview), no Sessions tile and no
-member count; on the profile, no Account tab; under Settings no Offline downloads or This device sections; under
-Connections no OPDS or API tokens (progress tracking with AniList, MyAnimeList and Kitsu stays).
+In the admin that means no Members or Sessions pages (a link to either opens Overview) and no member count; on the
+profile, no Account or This device page; under Connections no OPDS or API tokens (progress tracking with AniList,
+MyAnimeList and Kitsu stays).
 
 If you want any of these — other people in your household, reading on a phone, OPDS readers — that is what a
 server is for: run the [Docker install](INSTALL.md) on a machine that stays on, and use this app's **Connect to

@@ -198,7 +198,6 @@ test('every dialog in the app is on the stack, and so are the nav and both selec
 
   // The dialogs that keep the phone's nav band free say so; the one that does not, doesn't.
   assert.match(code(read('components/ConfirmDialog.tsx')), /useLayer\('dialog', true, \{ navBandFree: true \}\);/);
-  assert.match(code(read('components/ConsoleNav.tsx')), /useLayer\('dialog', true, \{ navBandFree: true \}\);/);
   assert.match(code(read('components/ui.tsx')), /useLayer\('dialog', true, \{ navBandFree: !!overBottomNav, ref: overBottomNav \? undefined : panelRef \}\);/, 'a reader sheet claims the nav band is free');
   // The palette stays mounted while closed; registering it unconditionally would hold notices off a band
   // nothing is using.

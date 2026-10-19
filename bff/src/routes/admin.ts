@@ -2072,7 +2072,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   // The library page's "Remove from library" over a selection: the single DELETE above, once per id, and
   // nothing more. ⚠️ Hide ONLY -- never the files. Deleting files is the irreversible step, it walks the
   // person's own read library too (libraryAdmin.ts), and it stays behind the per-title typed confirm on
-  // Content → Library; a bulk that did both would let "Select all" plus one tap wipe hand-curated folders
+  // Admin → Libraries; a bulk that did both would let "Select all" plus one tap wipe hand-curated folders
   // with no undo. A series that cannot be hidden is SKIPPED with the reason the single route would have
   // answered, rather than failing the whole batch: the rest of the selection is still what the person
   // asked for. One `series.delete` audit row per series, with its title, exactly as the single route

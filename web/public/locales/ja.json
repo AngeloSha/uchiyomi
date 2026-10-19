@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4132
+    "strings": 4142
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -3911,7 +3911,7 @@
   "New downloads stop when the downloads disk has less than {floor} GB free.": "ダウンロード用ディスクの空きが {floor} GB を下回ると、新しいダウンロードを始めません。",
   "Downloads are never stopped for free space here (MIN_FREE_GB is 0).": "ここでは空き容量を理由にダウンロードを止めることはありません（MIN_FREE_GB が 0）。",
   "The slow archive waits below {floor} GB (Admin → Settings → Downloads).": "ゆっくりアーカイブは空きが {floor} GB を下回ると待機します（管理 → 設定 → ダウンロード）。",
-  "A library or download folder that cannot be read, or that is empty while the library records chapters in it, is usually a share that is not mounted; nothing is marked missing because of it. Only the top of each folder is read here: Verify chapter files (Admin → Tasks) checks every file.": "読み込めないライブラリやダウンロードのフォルダー、またはライブラリに話が記録されているのに空のフォルダーは、たいていマウントされていない共有フォルダーです。それを理由に欠落扱いにすることはありません。ここで読むのは各フォルダーの最上位だけです。すべてのファイルは「話のファイルを検証」（管理 → タスク）で確認できます。",
+  "A library or download folder that cannot be read, or that is empty while the library records chapters in it, is usually a share that is not mounted; nothing is marked missing because of it. Only the top of each folder is read here: Verify chapter files (Admin → Settings → Maintenance) checks every file.": "読み込めないライブラリやダウンロードのフォルダー、またはライブラリに話が記録されているのに空のフォルダーは、たいていマウントされていない共有フォルダーです。それを理由に欠落扱いにすることはありません。ここで読むのは各フォルダーの最上位だけです。すべてのファイルは「話のファイルを検証」（管理 → 設定 → メンテナンス）で確認できます。",
   "The tracker refused the saved sign-in": "トラッカーが保存済みのサインインを拒否しました",
   "The last sync failed: {error}": "前回の同期に失敗しました：{error}",
   "The sign-in ended {date}": "サインインは {date} に期限切れになりました",

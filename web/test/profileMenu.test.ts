@@ -50,20 +50,23 @@ test('the phone opens the same body in a sheet from Home\'s avatar', () => {
 });
 
 test('Profile and Profile settings arrive as the palette\'s destinations do', () => {
-  // ⚠️ The profile reads ?tab= once (lib/useTabParam.ts): a client push from /profile to ?tab=Settings changed the address
-  // and nothing on the screen, and from the Settings tab back to /profile the same. Reintroduce `<Link href=…>` for either:
-  // the links lose `go(…)` and this fails.
+  // v0.88.0: the profile on screen opens its own pages in place (lib/consoleOnScreen.ts); from another page it is a push,
+  // and the profile reads its page from the address as it mounts. Reintroduce `<Link href=…>` for either: the links lose
+  // `go(…)` and this fails; drop `openInConsole` first: "the profile on screen is navigated away from" fails.
   const menu = code(read('components/ProfileMenu.tsx'));
   assert.match(menu, /<a href="\/profile\/" onClick=\{go\('\/profile\/'\)\}/);
-  assert.match(menu, /<a href="\/profile\/\?tab=Settings" onClick=\{go\('\/profile\/\?tab=Settings'\)\}/);
-  assert.match(menu, /const how = arrival\(href, window\.location, \(\) => false\);\s*if \(how === 'push'\) router\.push\(href\);\s*else if \(how === 'load'\) window\.location\.assign\(href\);/);
+  assert.match(menu, /<a href="\/profile\/\?tab=general" onClick=\{go\('\/profile\/\?tab=general'\)\}/);
+  assert.match(menu, /onClose\(\);\s*if \(openInConsole\(href\)\) return;\s*const how = arrival\(href, window\.location, \(\) => false\);\s*if \(how === 'push'\) router\.push\(href\);\s*else if \(how === 'load'\) window\.location\.assign\(href\);/,
+    'the profile on screen is navigated away from');
   assert.match(menu, /if \(e\.button !== 0 \|\| e\.metaKey \|\| e\.ctrlKey \|\| e\.shiftKey \|\| e\.altKey\) return;/, 'a new-tab click stays the browser\'s');
-  // What arrival says for the four places the panel is opened from.
+  // What arrival says when the profile is not on screen to open it in place: a push from another page, nothing where it
+  // already is, and a whole load for another of its pages (the console may not be drawn yet to open it).
   const at = (pathname: string, search = '') => ({ pathname, search });
-  assert.equal(arrival('/profile/?tab=Settings', at('/library/'), () => false), 'push');
-  assert.equal(arrival('/profile/?tab=Settings', at('/profile/'), () => false), 'load', 'from You to Settings');
-  assert.equal(arrival('/profile/', at('/profile/', '?tab=Settings'), () => false), 'load', 'from Settings to You');
+  assert.equal(arrival('/profile/?tab=general', at('/library/'), () => false), 'push');
+  assert.equal(arrival('/profile/?tab=general', at('/profile/'), () => false), 'load', 'from You to General');
+  assert.equal(arrival('/profile/', at('/profile/', '?tab=general'), () => false), 'load', 'from General to You');
   assert.equal(arrival('/profile/', at('/profile'), () => false), 'none', 'already there');
+  assert.equal(arrival('/profile/?tab=You', at('/profile/'), () => false), 'none', 'You by its old capitalised name is another page');
 });
 
 test('a refused save says so in the panel, as in Settings', () => {

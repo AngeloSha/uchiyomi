@@ -24,17 +24,17 @@ const norm = (s: string) => s.toLowerCase().replace(/&/g, 'and').replace(/\s*\(.
   .replace(/^[^a-z0-9]+/, '').replace(/[:…]+$/, '').replace(/\s+/g, ' ').trim();
 
 /**
- * Names a person can see on the two consoles: tabs (`keys('A', 'B')`), groups (`label: 'X'`), card titles and
+ * Names a person can see on the two consoles: pages and groups (`keys('A', 'B')`, `label: 'X'`), card titles and
  * any other translated string (`tr('X')`), static button/heading text (`>Run now<`), the untranslated ternary
  * labels the admin console still has (`? 'Reloading…' : '↻ Reload sources'`), and the task names the server
- * hands the Tasks tab (`name: '…'` in routes/admin.ts).
+ * hands Maintenance's tasks (`name: '…'` in routes/admin.ts).
  */
 function consoleNames(): Set<string> {
   const files = [
     'web/app/profile/page.tsx',
     'web/app/admin/page.tsx',
     'bff/src/routes/admin.ts',
-    // v0.86.0: the settings pages' categories, groups and rows are named in the settings registry.
+    // v0.86.0: the settings pages' categories, groups and rows are named in the settings registry; v0.88.0 every page.
     'web/lib/settingsIndex.profile.ts',
     'web/lib/settingsIndex.admin.ts',
     ...readdirSync(join(REPO, 'web/components')).filter((f) => f.endsWith('.tsx')).map((f) => `web/components/${f}`),
@@ -69,24 +69,22 @@ function settingsAliases(names: Set<string>): string[] {
 }
 
 /**
- * The names an admin tab went by before a redesign merged it, which still land on it: v0.54.0 made Providers and
- * Extensions one Sources tab, and `?tab=Providers` / `?tab=Extensions` open Sources (web/lib/tabParam.ts readTab, with
- * the map in web/lib/sourcesPanel.ts). So an older CHANGELOG entry's "Admin → Providers" still leads somewhere and keeps
- * its historical words. An alias counts only while the admin page hands its map to the tab parameter and the tab it
- * lands on is itself on screen: a map nothing reads, or one pointing at a tab that is gone, is no place.
+ * The names an admin page went by before a redesign, which still land on it: v0.54.0 made Providers and Extensions one
+ * Sources tab, and v0.88.0 made Tasks part of Maintenance and the Settings tab the group of settings pages, each console
+ * one list. `?tab=Providers`, `?tab=Tasks` and `?tab=Settings` open those pages (web/lib/settingsIndex.ts readPage, with
+ * each registry's `tabAliases`). So an older CHANGELOG entry's "Admin → Providers" still leads somewhere and keeps its
+ * historical words. An alias counts only while readPage reads the maps and the page it lands on is itself on screen: a
+ * map nothing reads, or one pointing at a page that is gone, is no place.
  *
- * Reintroduce by dropping the `SOURCES_TAB_ALIASES` argument from the admin page's `useTabParam`: "Admin → Providers
- * and Admin → Extensions no longer land on Sources", and past that line the CHANGELOG's seven "Admin → Providers" are
- * named as leading nowhere.
+ * Reintroduce by dropping `index.tabAliases` from readPage: "Admin → Providers and Admin → Extensions no longer land on
+ * Sources", and past that line the CHANGELOG's seven "Admin → Providers" are named as leading nowhere.
  */
 function tabAliases(names: Set<string>): string[] {
-  const admin = read('web/app/admin/page.tsx');
+  if (!/Object\.entries\(index\.tabAliases \?\? \{\}\)/.test(read('web/lib/settingsIndex.ts'))) return [];
   const out: string[] = [];
-  for (const f of readdirSync(join(REPO, 'web/lib')).filter((f) => f.endsWith('.ts'))) {
-    for (const m of read(`web/lib/${f}`).matchAll(/export const (\w+_TAB_ALIASES) = \{([^}]*)\}/g)) {
-      if (!new RegExp(`useTabParam<\\w+>\\([^)]*\\b${m[1]}\\)`).test(admin)) continue;
-      for (const [, from, to] of m[2].matchAll(/(\w+): '([^']+)'/g)) if (names.has(norm(to))) out.push(norm(from));
-    }
+  for (const f of ['web/lib/settingsIndex.admin.ts', 'web/lib/settingsIndex.profile.ts']) {
+    const map = /tabAliases: \{([^}]*)\}/.exec(read(f))?.[1] ?? '';
+    for (const [, from, to] of map.matchAll(/(\w+): '([^']+)'/g)) if (names.has(norm(to))) out.push(norm(from));
   }
   return out;
 }
@@ -122,8 +120,10 @@ function documentedPaths(): Array<{ file: string; line: number; text: string; se
 test('every console path the docs name exists in the UI', () => {
   const names = consoleNames();
   assert.ok(names.has('account') && names.has('api tokens') && names.has('sources'), 'the name scan lost the console itself');
-  // v0.54.0: the tab's old names are places only because they still land on it (tabAliases above).
+  // v0.54.0: the tab's old names are places only because they still land on it (tabAliases above); v0.88.0 the same for
+  // the Tasks tab, which is Maintenance's.
   assert.ok(names.has('providers') && names.has('extensions'), 'Admin → Providers and Admin → Extensions no longer land on Sources');
+  assert.ok(names.has('tasks'), 'Admin → Tasks no longer lands on Maintenance');
   assert.ok(!names.has('security'), 'the profile has no Security tab; if it grew one, the docs may say so again');
 
   const paths = documentedPaths();

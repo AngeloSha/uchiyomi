@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.88.0 — 2026-10-19
+
+**Profile and Admin are one list each: no more tabs inside tabs.**
+
+### Profile and Admin, one list each
+
+- **One list, under the hero.** Your profile opens under its hero, as before, then **You** and **Insights** as two
+  pictures (your latest covers, your last four weeks), then **Settings**: **General**, **Appearance**, **Reading**,
+  **This device**, **Connections** and **Account**, with **Admin**, **Support Uchiyomi** and **Sign out** at the foot.
+  Admin opens under the server's hero (whether every check passes, the counts and **Scan library now**), then
+  **Overview** and **Health**, **Library** (Libraries, Sources, Art), **People** (Members, Sessions, Activity) and
+  **Settings** (Server, Series & chapters, Downloads, Maintenance, Notifications).
+- **On a phone the hero and the list are the first screen.** Tap a row to open its page, under a band of the same art
+  with the page's title; the key at the top, or the phone's own Back, returns you to the row you came from. On a
+  computer the list stays beside the page, and scrolls on its own when it is taller than the window.
+- **Tasks are on Maintenance**, under the nightly backup and repair, each with **Run now**.
+- **The hero is in full above You and Overview**, and a slimmer band of the same art above every other page on a
+  computer, so a settings page starts near the top.
+- **Overview** is what needs a look, each member's week and the top 10 in your library. Its four shortcut tiles are
+  gone: the list does that job.
+- **The search box finds pages too** (*tasks* finds Maintenance), and Ctrl+K (⌘K) opens a page or a setting of the
+  console you are on in place, without reloading it.
+- Old addresses and bookmarks still work: `?tab=Tasks` opens Maintenance, `?tab=Settings` the first settings page, and
+  `?tab=Health` is `?tab=health`.
+
+### Upgrading
+
+- Nothing to do.
+
 ## v0.87.0 — 2026-10-19
 
 **React to a chapter, and talk about it with your household.**
@@ -28,6 +57,7 @@
 ### Upgrading
 
 - Nothing to do. Two new tables hold the comments and reactions; v0.86.x runs on the upgraded database unchanged.
+
 ## v0.86.0 — 2026-10-19
 
 **Settings are a few short categories with a search, instead of one long page.**

@@ -15,7 +15,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { PROFILE_SETTINGS } from '../lib/settingsIndex.profile';
 import { ADMIN_SETTINGS, SETTINGS_NAME_ALIASES } from '../lib/settingsIndex.admin';
-import { rankMatch, readCat, resolveSection, searchSettings, withCat, type SettingsCondition, type SettingsIndex } from '../lib/settingsIndex';
+import { rankMatch, readPage, resolveSection, searchPages, searchSettings, withPage, type SettingsCondition, type SettingsIndex } from '../lib/settingsIndex';
 import { ChoiceCards, SelectRow, SummaryRow, radioKey } from '../components/settings';
 import { INTERVAL_HOURS, clockText, hoursText, intervalChoices } from '../lib/settingsChoices';
 
@@ -137,15 +137,22 @@ test('search finds a row by its words, in the reader\'s language, by its old nam
   assert.deepEqual(find(ADMIN_SETTINGS, 'b'), [], 'one character searches');
 });
 
-test('the category is in the address the way the tab is: read once, written beside everything else', () => {
-  // Reintroduce `withCat` dropping the other parameters: "the tab is lost" fails.
-  const cats = ADMIN_SETTINGS.categories;
-  assert.equal(readCat('downloads', cats), 'downloads');
-  assert.equal(readCat('Downloads', cats), null);
-  assert.equal(readCat(null, cats), null);
-  assert.equal(withCat('/admin/?tab=Settings', 'maintenance'), '/admin/?tab=Settings&cat=maintenance', 'the tab is lost');
-  assert.equal(withCat('/admin/?tab=Settings&cat=server#x', null), '/admin/?tab=Settings#x');
-  assert.equal(withCat('/profile/?cat=general&tab=Settings', 'reading'), '/profile/?tab=Settings&cat=reading');
+test('the page is in the address, beside everything else, and the search finds pages by name and by what they hold', () => {
+  // v0.88.0. Reintroduce `withPage` dropping the other parameters: "the card is lost" fails; readPage taking a page this
+  // console does not draw: "a hidden page opens" fails; searchPages without the keywords: "Tasks does not find
+  // Maintenance" fails.
+  const ids = ADMIN_SETTINGS.categories.map((c) => c.id);
+  assert.equal(readPage(ADMIN_SETTINGS, 'downloads', null, ids), 'downloads');
+  assert.equal(readPage(ADMIN_SETTINGS, 'Downloads', null, ids), 'downloads', 'a capitalised name is not read');
+  assert.equal(readPage(ADMIN_SETTINGS, null, 'downloads', ids), null, 'a cat= alone opens a page');
+  assert.equal(readPage(ADMIN_SETTINGS, 'sessions', null, ids.filter((id) => id !== 'sessions')), null, 'a hidden page opens');
+  assert.equal(withPage('/profile/?tab=connections&card=tracking', 'account'), '/profile/?card=tracking&tab=account', 'the card is lost');
+  assert.equal(withPage('/admin/?tab=Settings&cat=server#x', null), '/admin/#x');
+  const pages = (q: string, conds = ALL) => searchPages(ADMIN_SETTINGS, q, conds, (k) => k, () => true).map((c) => c.id);
+  assert.equal(pages('Tasks')[0], 'maintenance', 'Tasks does not find Maintenance');
+  assert.equal(pages('heal')[0], 'health');
+  assert.ok(!pages('sessions', { ...ALL, web: false }).includes('sessions'), 'Desktop is offered Sessions');
+  assert.deepEqual(searchPages(PROFILE_SETTINGS, 'anilist', ALL, (k) => k, () => true).map((c) => c.id), ['connections'], 'a tracker does not find Connections');
 });
 
 test('picture cards are one radio group: one tab stop, the stored value checked, the card\'s own attributes on it', () => {
@@ -216,17 +223,17 @@ test('menus name hours and times in the reader\'s language, and keep a stored va
   assert.match(clockText(3), /^(?:3:00\s?AM|03:00)$/);
 });
 
-test('the settings layout never caps the page, keeps its queries to its own container, and lands on a row once', () => {
-  // ⚠️ The layout's container is NAMED: the pane is a container too, and an unnamed query inside it measured the pane
-  // (the phone's Back key showed beside a 736 px pane at 1440). Reintroduce `@min-[52.5rem]:hidden` on the Back key:
-  // "a query is not the layout's own" fails.
-  const src = code(read('components/SettingsLayout.tsx'));
-  assert.match(src, /className="@container\/settings" data-settings-layout/);
-  assert.doesNotMatch(src, /@(?:min|max)-\[52\.5rem\]:/, 'a query is not the layout\'s own');
-  assert.match(src, /className="btn-key mb-4 gap-1 @min-\[52\.5rem\]\/settings:hidden" data-settings-back/);
-  // `?cat=` is written with replaceState, never pushed: Back leaves the page, as it does from a tab (lib/useTabParam.ts).
-  assert.match(src, /window\.history\.replaceState\(null, '', withCat\(window\.location\.href, c\)\);/);
-  assert.doesNotMatch(src, /pushState/);
-  // The page's own arrival leaves settings rows to the layout, or two scrolls would fight (lib/useSectionArrival.ts).
+test('the console never caps the page, keeps its queries to its own container, and lands on a row once', () => {
+  // ⚠️ The console's container is NAMED: the pane is a container too, and an unnamed query inside it measured the pane
+  // (v0.86.0's phone Back key showed beside a 736 px pane at 1440). Reintroduce `@min-[52.5rem]:hidden` on the Back key:
+  // "a query is not the console's own" fails.
+  const src = code(read('components/ConsoleLayout.tsx'));
+  assert.match(src, /className="@container\/console" data-console data-settings-layout/);
+  assert.doesNotMatch(src, /@(?:min|max)-\[[\d.]+rem\]:/, 'a query is not the console\'s own');
+  assert.match(src, /className="btn-key mb-4 gap-1 [^"]*@min-\[52\.5rem\]\/console:hidden" data-console-back/);
+  assert.match(src, /@container\/pane/, 'the pane is not a container of its own');
+  // The page's own arrival leaves the console's rows to it, or two scrolls would fight (lib/useSectionArrival.ts).
   assert.match(code(read('lib/useSectionArrival.ts')), /if \(el\.closest\('\[data-settings-layout\]'\)\) return;/);
+  // A row is landed on once per arrival: the target's sequence, not the page, starts the effect.
+  assert.match(src, /\}, \[target\]\); \/\/ eslint-disable-line react-hooks\/exhaustive-deps -- once per arrival/);
 });

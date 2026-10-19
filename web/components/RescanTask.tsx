@@ -1,6 +1,6 @@
 'use client';
 /**
- * Admin → Tasks → Rescan everything (v0.55.4, discussion #150): the panel under its row. Start runs a preview on the
+ * Admin → Settings → Maintenance → Rescan everything (v0.55.4, discussion #150): the panel under its row. Start runs a preview on the
  * server (a scan, then a look for every chapter's own file) and changes nothing; this panel shows it running, then
  * what Apply would do -- the four counts, the series with nothing left with a link to each, and the optional
  * renumbering by the newer file-name rules -- then Apply, and what it did.

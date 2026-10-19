@@ -1,5 +1,5 @@
 /**
- * Admin → Tasks → Rescan everything (v0.55.4, discussion #150), the React-free half: the server's shapes, and every
+ * Admin → Settings → Maintenance → Rescan everything (v0.55.4, discussion #150), the React-free half: the server's shapes, and every
  * sentence the panel says about a preview, a run and an Apply, so a test can hold each one without a browser.
  *
  * The server (bff lib/rescan.ts) previews first and changes nothing: it scans, looks for every chapter's own file,

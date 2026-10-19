@@ -9,10 +9,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
-// Pure, so it is called rather than pinned (builder A's tab-address test below).
-import { readTab, withTab } from '../lib/tabParam';
-import { SOURCES_TAB_ALIASES } from '../lib/sourcesPanel';
+// Pure, so they are called rather than pinned (the address tests below).
+import { readPage, withPage } from '../lib/settingsIndex';
 import { ADMIN_SETTINGS } from '../lib/settingsIndex.admin';
+import { PROFILE_SETTINGS } from '../lib/settingsIndex.profile';
 
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -122,9 +122,9 @@ test('the settings grid never caps the page', () => {
   assert.doesNotMatch(m[1], /max-w/, 'SETTINGS_GRID caps the page');
   // A share of a row (`max-w-[45%]`, a summary row's value) is no page cap: it shrinks with the row.
   assert.doesNotMatch(src, /max-w-(?:xs|sm|lg|xl|\dxl|screen|\[(?!\d+%\]))/, 'a cap wider than max-w-prose/max-w-md somewhere in settings.tsx');
-  // v0.86.0: the settings layout holds the panes, and answers width with columns too (layout.mjs measures it).
-  // Reintroduce by `max-w-5xl` on the pane: "the settings layout caps the page" fails.
-  assert.doesNotMatch(code(read('components/SettingsLayout.tsx')), /max-w-(?:xs|sm|md|lg|xl|\dxl|screen|\[)/, 'the settings layout caps the page');
+  // v0.88.0: the console holds every page of Profile and Admin, and answers width with columns too (layout.mjs measures
+  // it). Reintroduce by `max-w-5xl` on the pane: "the console caps the page" fails.
+  assert.doesNotMatch(code(read('components/ConsoleLayout.tsx')), /max-w-(?:xs|sm|md|lg|xl|\dxl|screen|\[)/, 'the console caps the page');
 });
 
 // ---- builder C: ProfileSettings (Appearance · Reading · Downloads · This device) and ProfileAccount ----
@@ -242,7 +242,8 @@ test('the tracking card keeps its anchor for the import page\'s deep link', () =
   assert.match(card, /if \(!all\.length\) return null;/, 'an empty provider list no longer hides the section');
   assert.match(src, /tr\('Sync your reading to \{name\}', \{ name: label \}\)/, 'the not-connected row no longer reads "Sync your reading to {name}"');
   assert.match(src, /title=\{tr\('API tokens'\)\}/, 'the tokens section is no longer titled "API tokens"');
-  assert.match(code(read('app/profile/page.tsx')), /<ProfileConnections focusTracking=\{focusTracking && tab === 'Connections'\} \/>/, 'the page does not hand the Connections tab its focus');
+  // The page is drawn only while it is the one on screen (components/ConsoleLayout.tsx), so the flag needs no tab check.
+  assert.match(code(read('app/profile/page.tsx')), /<ProfileConnections focusTracking=\{focusTracking\} \/>/, 'the page does not hand Connections its focus');
 });
 
 test('the once-only secrets on the Connections tab are never behind a fold, and the token form is inline', () => {
@@ -265,57 +266,54 @@ test('the once-only secrets on the Connections tab are never behind a fold, and 
 
 // ---- builder A: the tab address, the profile's four tabs, the import page's pointer ----
 
-test('/admin and /profile read and write ?tab=, without a history entry or a snap-back', () => {
-  // Until v0.39.0 the admin tab was `useState<Tab>('Overview')`: a refresh, the back button and every deep
-  // link landed on Overview, and a language change -- which remounts the whole subtree, lib/I18nProvider.tsx
-  // -- snapped the profile back to You from the very tab holding the language picker. Both pages now take
-  // the tab from `useTabParam`, which reads the query ONCE in a lazy `useState` and writes it back with
-  // `history.replaceState`: never `pushState` (Back would walk through the tabs instead of leaving the page),
-  // never `router.replace` (a route navigation re-runs the Suspense fallback for a cosmetic change), never
-  // an effect re-reading the params (it would fire against its own write and snap the tab back). The pure
-  // `withTab` keeps every other parameter -- the import page arrives with `card=tracking` beside the tab --
-  // and drops `tab` when it names the first tab, so `/admin/` and `/admin/?tab=Overview` stay one address.
-  // Reintroduce by `useState<Tab>('Overview')` on the admin page: "the admin tab is not read from the
-  // query" fails; by `pushState` in the hook: "the hook pushes a history entry" fails; by appending
-  // `tab=Overview` for the fallback: "the first tab is written into the URL" fails.
-  const admin = code(read('app/admin/page.tsx'));
-  assert.match(admin, /<Suspense fallback=\{<div className="min-h-screen-d" \/>\}>/, 'the admin page has no Suspense boundary for useSearchParams');
-  assert.match(admin, /const \[tab, setTab\] = useTabParam<Tab>\(TABS, 'Overview', SOURCES_TAB_ALIASES\);/, 'the admin tab is not read from the query');
-  const profile = code(read('app/profile/page.tsx'));
-  assert.match(profile, /const \[tab, setTab\] = useTabParam<Tab>\(PROFILE_TABS, 'You'\);/, 'the profile tab is not read from the query');
-  const hook = code(read('lib/useTabParam.ts'));
-  assert.match(hook, /history\.replaceState\(/, 'the hook does not write the tab back to the URL');
-  assert.doesNotMatch(hook, /pushState|useEffect\(|router\.replace/, 'the hook pushes a history entry, re-reads the query in an effect, or navigates');
-  // The pure half, called rather than pinned.
-  assert.ok(withTab('http://x/admin/?tab=Overview&foo=1', 'Settings', 'Overview').endsWith('?foo=1&tab=Settings'), 'withTab drops the other params or does not replace the tab');
-  assert.doesNotMatch(withTab('http://x/admin/?tab=Settings', 'Overview', 'Overview'), /tab=/, 'the first tab is written into the URL');
-  assert.equal(withTab('http://x/profile/?tab=Connections&card=tracking', 'Settings', 'You'), '/profile/?card=tracking&tab=Settings', 'withTab loses card=');
-  assert.equal(withTab('http://x/profile/', 'Connections', 'You'), '/profile/?tab=Connections', 'withTab does not add the tab to a bare address');
+test('/admin and /profile take their page from ?tab= on every render, and write it without Next\'s history state', () => {
+  // v0.88.0: one list each (components/ConsoleLayout.tsx). The page is the address's on every render -- Back, a refresh,
+  // a language change (which remounts everything, lib/I18nProvider.tsx) and a saved link all land on it -- read through
+  // the registry's readPage, which knows the tab names from before too. A wide console REPLACES the address on a click
+  // (clicking down a rail is not a trail anyone wants to walk back through); a narrow one PUSHES the page, so a phone's
+  // own Back returns to the list. ⚠️ Never with `window.history.state` as the first argument: it carries Next's marker,
+  // and Next then leaves its router -- and useSearchParams, which the page is read from -- where it was. Reintroduce by
+  // `pushState(window.history.state, …)`: "the console hands Next its own history state" fails; by reading the page in a
+  // lazy `useState`: "the page is read once" fails.
+  for (const f of ['app/admin/page.tsx', 'app/profile/page.tsx']) {
+    assert.match(code(read(f)), /<Suspense fallback=\{<div className="min-h-screen-d" \/>\}>/, `${f} has no Suspense boundary for useSearchParams`);
+  }
+  const layout = code(read('components/ConsoleLayout.tsx'));
+  assert.match(layout, /const fromUrl = readPage\(index, params\.get\('tab'\), params\.get\('cat'\), ids\);/, 'the page is not read from the address');
+  assert.doesNotMatch(layout, /useState[^;\n]*readPage\(index, params/, 'the page is read once');
+  assert.match(layout, /window\.history\.replaceState\(null, '', withPage\(window\.location\.href, id\)\);/, 'a wide console does not replace the address');
+  assert.match(layout, /window\.history\.pushState\(\{ consolePage: id \}, '', withPage\(window\.location\.href, id\)\);/, 'a narrow console does not push the page');
+  assert.doesNotMatch(layout, /(?:pushState|replaceState)\(window\.history\.state/, 'the console hands Next its own history state');
+  assert.doesNotMatch(layout, /router\.(?:push|replace)\(/, 'a page change is a route navigation');
+  // The pure half, called rather than pinned: every other parameter kept (the import page's card=tracking), v0.86.0's
+  // `cat` dropped with the old tab, and no page for the list.
+  assert.equal(withPage('http://x/profile/?tab=Connections&card=tracking', 'connections'), '/profile/?card=tracking&tab=connections', 'withPage loses card=');
+  assert.equal(withPage('http://x/admin/?tab=Settings&cat=downloads', 'downloads'), '/admin/?tab=downloads', 'withPage keeps the old cat=');
+  assert.equal(withPage('http://x/admin/?tab=health#repairs', null), '/admin/#repairs', 'the list keeps a page in the address');
 });
 
-test('the profile has five tabs and no leftover cards', () => {
-  // You · Insights · Settings · Connections · Account (Insights since v0.75.0, from #249). The old second tab, Reading, was device settings plus one chart
-  // plus one integration; the old Account tab held eight cards including the admin door and a sign-out card
-  // that repeated the rail. Everything that is a setting now lives in its tab's component; the page keeps
-  // the hero, the rail and the You board. Reintroduce by adding 'Reading' to `keys(...)`: "the profile
-  // still has a Reading tab" fails; by importing `SecurityPanel` on the page: "a retired card is back on
-  // the page" fails.
+test('the profile is one list -- You, Insights and its Settings group -- with no leftover cards', () => {
+  // v0.88.0: You · Insights, then Settings: General · Appearance · Reading · This device · Connections · Account (the
+  // owner: Connections "is not under anything"). The page keeps the person's card, the You page and its board; every
+  // setting lives in its page's component. Reintroduce by moving Connections out of the group: "the profile's list
+  // changed" fails; by importing `SecurityPanel` on the page: "a retired card is back on the page" fails.
+  assert.deepEqual(PROFILE_SETTINGS.categories.map((c) => `${c.group ?? ''}/${c.id}`),
+    ['/you', '/insights', 'Settings/general', 'Settings/appearance', 'Settings/reading', 'Settings/device', 'Settings/connections', 'Settings/account'],
+    'the profile\'s list changed');
   const src = code(read('app/profile/page.tsx'));
-  assert.match(src, /keys\('You', 'Insights', 'Settings', 'Connections', 'Account'\)/, 'the profile tabs are not You · Insights · Settings · Connections · Account');
-  assert.doesNotMatch(src, /keys\([^)]*'Reading'/, 'the profile still has a Reading tab');
   assert.doesNotMatch(src, /AdminCard|SignOutCard|SettingsCard|SecurityPanel/, 'a retired card is back on the page');
-  // The two files behind the Manage layer are gone, not merely unimported: a file nobody imports still
-  // compiles, still ships in the repo and still tempts the next builder to "reuse" its three identical
-  // chips. Reintroduce by restoring the file: "SettingsCard.tsx is back" fails.
+  // The two files behind the Manage layer are gone, not merely unimported: a file nobody imports still compiles, still
+  // ships in the repo and still tempts the next builder to "reuse" its three identical chips. Reintroduce by restoring
+  // the file: "SettingsCard.tsx is back" fails.
   assert.equal(existsSync(join(ROOT, 'components/SettingsCard.tsx')), false, 'SettingsCard.tsx is back');
   assert.equal(existsSync(join(ROOT, 'components/SecurityPanel.tsx')), false, 'SecurityPanel.tsx is back');
-  // The three settings tabs render their own grid; only You is a board of cards.
-  assert.match(src, /<ProfileSettings \/>/, 'the Settings tab is not ProfileSettings');
-  assert.match(src, /<ProfileConnections focusTracking=\{focusTracking && tab === 'Connections'\} \/>/, 'the Connections tab is not ProfileConnections');
-  assert.match(src, /<ProfileAccount \/>/, 'the Account tab is not ProfileAccount');
-  assert.equal((src.match(/className="board"/g) || []).length, 1, 'the .board wrapper is not the You tab alone');
-  // The nav is labelled for the whole page, not with the first tab's name ("You › You" to a screen reader).
-  assert.match(src, /ariaLabel=\{tr\('Profile'\)\}/, 'the console nav is still labelled with the first tab\'s name');
+  // The settings pages are ProfileSettings', Connections and Account their own components; only You is a board of cards.
+  assert.match(src, /const settings = useProfileSettingsViews\(\);/, 'the settings pages are not ProfileSettings\'');
+  assert.match(src, /<ProfileConnections focusTracking=\{focusTracking\} \/>/, 'Connections is not ProfileConnections');
+  assert.match(src, /<ProfileAccount \/>/, 'Account is not ProfileAccount');
+  assert.equal((src.match(/className="board"/g) || []).length, 1, 'the .board wrapper is not the You page alone');
+  // The list is labelled for the whole page, not with the first page's name ("You › You" to a screen reader).
+  assert.match(src, /<ConsoleLayout index=\{PROFILE_SETTINGS\} label=\{tr\('Profile'\)\}/, 'the list is not labelled Profile');
   // The You cards moved out verbatim and are imported, not redefined.
   assert.match(src, /import \{ BadgesCard, ListsCard, StudioCard, type Stats \} from '@\/components\/ProfileYou';/, 'the You cards are not imported from ProfileYou');
   assert.doesNotMatch(src, /function (?:BadgesCard|ListsCard|StudioCard)\(/, 'a You card is defined on the page again');
@@ -333,47 +331,51 @@ test('the import page sends people to the tracking card under Connections', () =
 
 // ---- builder E: the admin shell and Admin → Settings ----
 
-test('the sources are ONE tab, mounting one panel, where Providers and Extensions were two', () => {
+test('the sources are ONE page, mounting one panel, where Providers and Extensions were two', () => {
   // v0.53.0 rendered `<Extensions span="full" />` on its own tab with a door to it in Providers; the owner: "why do we
-  // have 2 when they are basically the same". Since v0.54.0 the Sources group is one tab, Sources, mounting
-  // components/SourcesPanel.tsx once; the catalogue is part of it (Add sources), mounted there once. Reintroduce a
-  // Providers or Extensions tab: "the Sources group has more than its one tab" fails; mount the old panel: the
-  // count fails.
+  // have 2 when they are basically the same". Since v0.54.0 Sources is one page, mounting components/SourcesPanel.tsx
+  // once; the catalogue is part of it (Add sources), mounted there once. Reintroduce a Providers or Extensions page:
+  // "the Library group has more than its three pages" fails; mount the old panel: the count fails.
+  assert.deepEqual(ADMIN_SETTINGS.categories.filter((c) => c.group === 'Library').map((c) => c.id), ['library', 'sources', 'art'],
+    'the Library group has more than its three pages');
   const src = code(read('app/admin/page.tsx'));
-  assert.match(src, /\{ id: 'sources', label: 'Sources', tabs: keys\('Sources'\) \}/, 'the Sources group has more than its one tab');
-  assert.doesNotMatch(src, /keys\([^)]*'(Providers|Extensions)'/, 'Providers or Extensions is a tab again');
   assert.doesNotMatch(src, /function (Providers|ExtensionsLink|Extensions)\(/, 'the old Providers, its door or the Extensions card is back in the admin page');
-  const panel = src.slice(src.indexOf('const panel = ('), src.indexOf('<ConsoleNav'));
-  assert.match(panel, /\{tab === 'Sources' && <SourcesPanel \/>\}/, 'the Sources tab does not mount the panel');
+  assert.match(src, /summary: tr\('Sites and extensions'\), pane: <SourcesPanel \/> \}/, 'the Sources page does not mount the panel');
   assert.equal((src.match(/<SourcesPanel\b/g) ?? []).length, 1, 'the Sources panel is mounted from more than one place');
   assert.doesNotMatch(src, /<ExtensionsPanel\b|ExtensionsPanel'/, 'the old Extensions panel is mounted again');
   const sources = code(read('components/SourcesPanel.tsx'));
   assert.equal((sources.match(/<BrowseView\b/g) ?? []).length, 1, 'the catalogue is mounted from more than one place');
-  // The Overview's tile counts the sources switched on, from the same answer the tab reads, and opens the tab.
-  assert.match(src, /<TabTile label=\{tr\('Sources'\)\} value=\{String\(sources \? splitSources\(sources\.sources\)\.on\.length : 0\)\} onClick=\{\(\) => onTab\('Sources'\)\} \/>/,
-    'the Overview has no Sources tile');
-  assert.doesNotMatch(src, /onTab\('(Providers|Extensions)'\)/, 'a tile opens a tab that is gone');
+  // v0.88.0: the Overview's tiles to Tasks, Sessions, Sources and Activity were a second menu inside the first; the list
+  // is the way to each. Reintroduce a tile: "the Overview leads to pages again" fails.
+  assert.doesNotMatch(src, /function TabTile\(|onTab\(/, 'the Overview leads to pages again');
 });
 
-test('the old Providers and Extensions addresses land on Sources', () => {
-  // Bookmarks, the docs, Health's links and the add dialog's "Turn on more MangaDex languages" said `?tab=Providers`
-  // or `?tab=Extensions` until v0.54.0. Reintroduce readTab without its aliases (or drop them from the admin page): an
-  // old address lands on Overview, and these fail.
-  const TABS = ['Overview', 'Tasks', 'Settings', 'Members', 'Sessions', 'Activity', 'Library', 'Health', 'Art', 'Sources'] as const;
-  assert.equal(readTab('Providers', TABS, 'Overview', SOURCES_TAB_ALIASES), 'Sources', '?tab=Providers lands somewhere else');
-  assert.equal(readTab('Extensions', TABS, 'Overview', SOURCES_TAB_ALIASES), 'Sources', '?tab=Extensions lands somewhere else');
-  assert.equal(readTab('Sources', TABS, 'Overview', SOURCES_TAB_ALIASES), 'Sources');
-  assert.equal(readTab('Health', TABS, 'Overview', SOURCES_TAB_ALIASES), 'Health', 'an alias map hides a real tab');
-  // Not a way in for anything else: an unknown name, or one of Object's own, still falls back.
-  assert.equal(readTab('Bogus', TABS, 'Overview', SOURCES_TAB_ALIASES), 'Overview');
-  assert.equal(readTab('constructor', TABS, 'Overview', SOURCES_TAB_ALIASES), 'Overview', 'a name Object has lands on its function');
-  assert.equal(readTab('toString', TABS, 'Overview', SOURCES_TAB_ALIASES), 'Overview');
-  assert.equal(readTab(null, TABS, 'Overview', SOURCES_TAB_ALIASES), 'Overview');
-  // Every other console reads its tabs as before.
-  assert.equal(readTab('Providers', TABS, 'Overview'), 'Overview');
-  // The old tabs' parameters keep working on the new one: lib/sourcesPanel.ts initialView / settingsTarget hold them
-  // (sourcesPanel.test.ts); here, that the hook hands the aliases to readTab.
-  assert.match(code(read('lib/useTabParam.ts')), /useState<T>\(\(\) => readTab\(params\.get\('tab'\), tabs, fallback, aliases\)\)/, 'the hook drops the aliases');
+test('the old tab names land on their pages: Providers and Extensions on Sources, Tasks on Maintenance, Settings on its first page', () => {
+  // Bookmarks, the docs, Health's links and the add dialog's "Turn on more MangaDex languages" said `?tab=Providers` or
+  // `?tab=Extensions` until v0.54.0; until v0.88.0 Admin had a Tasks tab and both consoles a Settings tab, its page in
+  // `?cat=`. Reintroduce readPage without the registry's tabAliases: an old address lands on the first page, and these
+  // fail.
+  const ids = ADMIN_SETTINGS.categories.map((c) => c.id);
+  const at = (tab: string | null, cat: string | null = null) => readPage(ADMIN_SETTINGS, tab, cat, ids);
+  assert.equal(at('Providers'), 'sources', '?tab=Providers lands somewhere else');
+  assert.equal(at('Extensions'), 'sources', '?tab=Extensions lands somewhere else');
+  assert.equal(at('Tasks'), 'maintenance', '?tab=Tasks lands somewhere else');
+  assert.equal(at('Settings'), 'server', '?tab=Settings does not open the first settings page');
+  assert.equal(at('Settings', 'downloads'), 'downloads', '?tab=Settings&cat=downloads loses its page');
+  assert.equal(at('Settings', 'members'), 'members', 'a cat= naming another page is not read');
+  assert.equal(at('Health'), 'health', 'the old capitalised names are not read');
+  assert.equal(at('sources'), 'sources');
+  // Not a way in for anything else: an unknown name, one of Object's own, or a page this console does not draw.
+  assert.equal(at('Bogus'), null);
+  assert.equal(at('constructor'), null, 'a name Object has lands on its function');
+  assert.equal(at('toString'), null);
+  assert.equal(at(null), null);
+  assert.equal(readPage(ADMIN_SETTINGS, 'Members', null, ids.filter((id) => id !== 'members')), null, 'a page Desktop does not draw opens');
+  // The profile's Settings tab opens General, and its old cat= the page it named.
+  const pids = PROFILE_SETTINGS.categories.map((c) => c.id);
+  assert.equal(readPage(PROFILE_SETTINGS, 'Settings', null, pids), 'general');
+  assert.equal(readPage(PROFILE_SETTINGS, 'Settings', 'reading', pids), 'reading');
+  assert.equal(readPage(PROFILE_SETTINGS, 'Connections', null, pids), 'connections');
 });
 
 test('read-chapter cleanup still asks first and carries the day count', () => {
@@ -424,11 +426,11 @@ test('the install-count disclosure opens with the switch and is open while count
   const drawer = section.slice(section.indexOf("<Disclosure key={on ? 'counting'"), section.indexOf('</Disclosure>', section.indexOf("<Disclosure key={on ? 'counting'")));
   assert.match(drawer, /<code>\{`POST \$\{preview\.url\}\\n\$\{JSON\.stringify\(preview\.payload, null, 2\)\}`\}<\/code>/, 'the payload is described rather than shown');
   assert.equal((drawer.match(/<li>\{tr\('/g) ?? []).length, 3, 'the three promises are not all inside the disclosure');
-  // Server is the category shown first (v0.86.0: the layout opens the first one when the address names none), so its rows
-  // are in the first 4000 characters of body text run.mjs reads for the payload. Reintroduce by moving Downloads first in
-  // the registry: "Server is not the category shown first" fails.
-  assert.equal(ADMIN_SETTINGS.categories[0].id, 'server', 'Server is not the category shown first');
-  assert.match(src, /server: \{[^\n]*\n\s*pane: <ServerSection data=\{data\} save=\{save\} \/> \}/, 'Server does not draw ServerSection');
+  // Server is the first of the settings pages (the old `?tab=Settings` opens it, readPage), and run.mjs reads the
+  // payload from the first 4000 characters of its body text. Reintroduce by moving Downloads first in the registry:
+  // "Server is not the first settings page" fails.
+  assert.equal(ADMIN_SETTINGS.categories.find((c) => c.settings)?.id, 'server', 'Server is not the first settings page');
+  assert.match(src, /server: \{[^\n]*\n\s*pane: ready\(data && <ServerSection data=\{data\} save=\{save\} \/>, 'server'\) \}/, 'Server does not draw ServerSection');
 });
 
 // ---- fixer X2 (review R1/R2): keyboard focus on Connections, the dialogs, the phone pills, 2FA state ----
@@ -471,44 +473,45 @@ test('focus never drops to <body> on the Connections tab', () => {
   assert.doesNotMatch(src, /text-fog-600">\s*\{tr\('The token carries access/, 'the token-scope sentence is fog-600');
 });
 
-test('a dialog and the phone group sheet give focus back to what opened them', () => {
-  // Escape or Cancel on the "Delete read chapters" confirm left focus on <body>; Enter on the admin group
-  // button opened a sheet that neither took focus nor answered Escape. Both read `document.activeElement`
-  // before they take focus and re-focus it in the cleanup; the sheet lands on the current tab's chip.
-  // Reintroduce by dropping `opener?.focus()` from the Modal's cleanup: "the Modal does not return focus"
-  // fails; by removing the sheet's keydown listener: "the sheet ignores Escape" fails.
+test('a dialog gives focus back to what opened it, and a phone\'s page gives it back to its row', () => {
+  // Escape or Cancel on the "Delete read chapters" confirm left focus on <body>. The Modal reads `document.activeElement`
+  // before it takes focus and re-focuses it in the cleanup. v0.88.0: on a phone a row opens its page with the focus on
+  // the page's title, and Back -- the page's key or the phone's own -- puts it on the row again, scrolled into view
+  // (components/ConsoleLayout.tsx). Reintroduce by dropping `opener?.focus()` from the Modal's cleanup: "the Modal does
+  // not return focus" fails; by dropping the row's focus from the return: "Back drops the focus" fails.
   const modal = code(read('components/ConfirmDialog.tsx'));
   const effect = modal.slice(modal.indexOf('useEffect(() => {'), modal.indexOf('}, []);'));
   assert.match(effect, /const opener = document\.activeElement as HTMLElement \| null;/, 'the Modal does not remember what opened it');
   assert.match(effect, /return \(\) => \{ document\.removeEventListener\('keydown', onKey\); opener\?\.focus\(\); \};/, 'the Modal does not return focus');
   // `opener` is read BEFORE the first field takes focus, or it would remember the dialog's own ✕.
   assert.ok(effect.indexOf('const opener') < effect.indexOf('first?.focus()'), 'the opener is read after the dialog took focus');
-  const nav = code(read('components/ConsoleNav.tsx'));
-  const sheet = nav.slice(nav.indexOf('function GroupSheet<'));
-  assert.ok(sheet.length > 0, 'no GroupSheet');
-  assert.match(sheet, /const onKey = \(e: KeyboardEvent\) => \{ if \(e\.key === 'Escape'\) closeRef\.current\(\); \};\s*document\.addEventListener\('keydown', onKey\);/, 'the sheet ignores Escape');
-  assert.match(sheet, /querySelector<HTMLElement>\('button\.chip-active'\) \?\? ref\.current\?\.querySelector<HTMLElement>\('button\.chip'\);\s*first\?\.focus\(\);/, 'the sheet does not move focus onto a chip');
-  assert.match(sheet, /return \(\) => \{ document\.removeEventListener\('keydown', onKey\); opener\?\.focus\(\); \};/, 'the sheet does not return focus to the group button');
-  assert.match(sheet, /<div ref=\{ref\} className="glass[^"]*"\s*role="dialog" aria-modal="true"/, 'the ref is not on the dialog panel');
+  const layout = code(read('components/ConsoleLayout.tsx'));
+  // Once the screen has changed (the address first, the page after it): into a page its title takes the focus; Back --
+  // the key or the phone's own -- returns it to the row the page was opened from, in view. A focus moved in `open`
+  // itself landed on the page before, already hidden (con-flow found it).
+  const moves = layout.slice(layout.indexOf('const was = useRef(page);'), layout.indexOf('const go = (e: SettingsEntry) => {'));
+  assert.match(moves, /if \(wide \|\| from === page\) return;/, 'the focus moves on a computer, or on no change');
+  assert.match(moves, /if \(page\) \{\s*heading\.current\?\.focus\(\{ preventScroll: true \}\);/, 'a phone\'s page does not take the focus');
+  assert.match(moves, /row\?\.scrollIntoView\(\{ block: 'center' \}\);\s*row\?\.focus\(\{ preventScroll: true \}\);/, 'Back drops the focus, or leaves its row off screen');
+  assert.match(moves, /\}, \[page\]\);/, 'the focus does not follow the page');
+  assert.doesNotMatch(layout.slice(layout.indexOf('const open = (id: string) => {'), layout.indexOf('const back = () => {')), /focus\(/, 'the focus moves before the page is drawn');
+  assert.match(layout, /<h2 ref=\{heading\} id=\{`console-\$\{shownPage\.id\}-title`\} tabIndex=\{-1\}/, 'the page\'s title cannot take the focus');
 });
 
-test('the underlined tab row marks the current tab, Profile is one strip of tabs with keys, and See all mirrors', () => {
-  // On a phone the tab row is the only tab navigation (and on Profile, a strip at every width since the UI refresh);
-  // the underline alone says nothing to a screen reader. Profile's Admin / Support / Sign out are keys at the row's
-  // end, not rail rows with a chevron. And the You tab's "See all" kept a right-pointing chevron in Arabic while
-  // every LinkRow mirrored its own.
-  // Reintroduce by dropping `aria-current` from the tab: "the active tab is not announced" fails; by dropping the
-  // underline: "the active tab is not underlined" fails; by taking `strip` off Profile's ConsoleNav: "Profile is not
-  // a tab strip" fails; by dropping `rtl:-scale-x-100` from See all: "the See all chevron does not mirror" fails.
-  const nav = code(read('components/ConsoleNav.tsx'));
-  const tabs = nav.slice(nav.indexOf('{group.tabs.map((t) => ('), nav.indexOf('{footer && flat &&'));
-  assert.ok(tabs.length > 0, 'the tab row is not where this test looks');
-  assert.match(tabs, /<button key=\{t\} onClick=\{\(\) => onTab\(t\)\}\s*aria-current=\{tab === t \? 'page' : undefined\}/, 'the active tab is not announced');
-  assert.match(tabs, /\{tab === t && <span aria-hidden className="absolute inset-x-0 -bottom-px h-0\.5 [^"]*bg-accent" \/>\}/, 'the active tab is not underlined');
-  assert.doesNotMatch(tabs, /rounded-full/, 'the tabs are pills again');
+test('the list marks the page on screen, its rows are rows and not pills, and every chevron mirrors', () => {
+  // v0.88.0: the list beside the page says which one is on screen, to a screen reader as well as by its colour; on a
+  // phone, where the list is a screen of its own, no row is current. Admin, Support and Sign out are rows at the foot,
+  // in a card of their own. And the You page's "See all" kept a right-pointing chevron in Arabic while every LinkRow
+  // mirrored its own. Reintroduce by dropping `aria-current`: "the page on screen is not announced" fails; by dropping
+  // `rtl:-scale-x-100` from See all: "the See all chevron does not mirror" fails.
+  const layout = code(read('components/ConsoleLayout.tsx'));
+  // Both kinds of entry -- the profile's picture tiles and the rows -- say it.
+  assert.equal((layout.match(/aria-current=\{on && wide \? 'page' : undefined\}/g) ?? []).length, 2, 'the page on screen is not announced, as a tile or as a row');
+  assert.doesNotMatch(layout, /rounded-full/, 'the list\'s rows are pills');
+  for (const m of layout.matchAll(/<IcChevron(?:Right|Left)[^>]*>/g)) assert.match(m[0], /rtl:-scale-x-100/, `a chevron does not mirror: ${m[0]}`);
   const profile = code(read('app/profile/page.tsx'));
-  assert.match(profile, /<ConsoleNav [^>]*\bflat strip\b/, 'Profile is not a tab strip');
-  assert.match(profile, /const row = 'btn-key h-9 gap-2 text-sm';/, 'the Profile actions are not keys');
+  const foot = profile.slice(profile.indexOf('function FootRows('), profile.indexOf('function GoalModal('));
+  assert.equal((foot.match(/<ConsoleFootRow\b/g) ?? []).length, 3, 'Admin, Support and Sign out are not the list\'s foot rows');
   const you = code(read('components/ProfileYou.tsx'));
   assert.match(you, /\{tr\('See all'\)\}<IcChevronRight width=\{14\} height=\{14\} aria-hidden className="rtl:-scale-x-100" \/>/, 'the See all chevron does not mirror');
 });
@@ -680,16 +683,70 @@ test('Admin → Settings → Downloads → Slow archive is one row with its edit
   for (const f of localeFiles()) assert.deepEqual(missingIn(f, trKeys(['components/ArchiveSettings.tsx'])), [], `${f} lacks a slow archive string`);
 });
 
-test('Admin → Settings draws every category the registry names, and nothing else', () => {
-  // v0.86.0: the nine cards and their row of keys became five categories (lib/settingsIndex.admin.ts), drawn by
-  // components/SettingsLayout.tsx from the views AdminSettings gives it. A view the registry does not name is never
-  // drawn, and a category with no view is skipped: both would be settings nobody can reach. Reintroduce by dropping
-  // `maintenance:` from the views: "a category has no view" fails.
-  const admin = code(read('components/AdminSettings.tsx'));
-  const views = admin.slice(admin.indexOf('const views: Record<string, CategoryView> = {'), admin.indexOf('  };', admin.indexOf('const views: Record<string, CategoryView> = {')));
-  const drawn = [...views.matchAll(/^\s{4}(\w+): \{/gm)].map((m) => m[1]);
-  const named = ADMIN_SETTINGS.categories.map((c) => c.id);
-  for (const c of named) assert.ok(drawn.includes(c), `a category has no view: ${c}`);
-  for (const v of drawn) assert.ok(named.includes(v), `a view no category names: ${v}`);
-  assert.match(admin, /<SettingsLayout index=\{ADMIN_SETTINGS\} label=\{tr\('Settings'\)\} views=\{views\}/, 'Admin → Settings is not drawn by the settings layout');
+test('every page the registries name has a view, and every view a page', () => {
+  // v0.88.0: each console draws the registry's pages (lib/settingsIndex*.ts) from the views its page and its settings
+  // component give it (components/ConsoleLayout.tsx). A view the registry does not name is never drawn, and a page with
+  // no view is skipped: both would be something nobody can reach. Reintroduce by dropping `maintenance:` from the admin
+  // settings' views: "a page has no view" fails.
+  const keysOf = (file: string, from: string): string[] => {
+    const src = code(read(file));
+    const a = src.indexOf(from);
+    assert.notEqual(a, -1, `${file}: ${from} is gone`);
+    const body = src.slice(a, src.indexOf('\n  };', a));
+    return [...body.matchAll(/^\s{4}(\w+): \{/gm)].map((m) => m[1]);
+  };
+  const admin = [...keysOf('app/admin/page.tsx', 'const views: Record<string, PageView> = {'),
+    ...keysOf('components/AdminSettings.tsx', 'const views: Record<string, PageView> = {')];
+  const profile = [...keysOf('app/profile/page.tsx', 'const views: Record<string, PageView> = {'),
+    ...keysOf('components/ProfileSettings.tsx', 'const views: Record<string, PageView> = {')];
+  for (const [index, drawn] of [[ADMIN_SETTINGS, admin], [PROFILE_SETTINGS, profile]] as const) {
+    const named = index.categories.map((c) => c.id);
+    for (const c of named) assert.ok(drawn.includes(c), `a page has no view: ${index.page} ${c}`);
+    for (const v of drawn) assert.ok(named.includes(v), `a view no page names: ${index.page} ${v}`);
+    assert.equal(new Set(drawn).size, drawn.length, `a page has two views: ${index.page}`);
+  }
+  assert.match(code(read('app/admin/page.tsx')), /\.\.\.settings\.views,/, 'the admin console leaves out its settings pages');
+  assert.match(code(read('app/profile/page.tsx')), /\.\.\.settings\.views,/, 'the profile leaves out its settings pages');
+});
+
+test('the consoles open under their cinematic heroes: in full above the first page, a band above the rest, a phone\'s page under its own band', () => {
+  // v0.88.0. A first cut of the one list put each hero in a small card in the list; the owner: "it was cinematic and
+  // nicer before with a hero section". The hero is the console's, above the list and the page (components/ConsoleLayout.tsx):
+  // in full above Overview and You and above a phone's list, a band above every other page on a computer, and not above
+  // a page a phone opened -- that page opens under a band of the same art with its own title and Back key. The profile's
+  // You and Insights lead its list as pictures. Reintroduce the hero above a phone's page (drop `narrowList` from its
+  // wrapper): "the hero is drawn above a phone's page" fails; a full hero everywhere: "every page gets the full hero"
+  // fails; a picture page among the rows too: "a tile is a row as well" fails; the band without the goal's pill:
+  // "the band has no weekly goal" fails.
+  const layout = code(read('components/ConsoleLayout.tsx'));
+  assert.match(layout, /\{hero && <div className=\{narrowList\} data-console-hero=\{heroMode\}><HeroFrame reduced=\{reduced\}>\{hero\(heroMode\)\}<\/HeroFrame><\/div>\}/, 'the hero is drawn above a phone\'s page');
+  // From full to band and back, its height is eased, never jumped: the list under it would leap from under the pointer.
+  const frame = layout.slice(layout.indexOf('function HeroFrame('), layout.indexOf('function ConsoleSearch('));
+  assert.match(frame, /transition: reduced \|\| height === null \? undefined : 'height 0\.45s /, 'the hero jumps between full and band');
+  assert.match(frame, /className="overflow-y-clip"/, 'the frame clips the hero\'s bleed, or nothing');
+  // Beside the page the list scrolls on its own only once it has stuck: with the hero in view a wheel over it scrolls the
+  // page. Reintroduce `overflow-y-auto` for good: "the list takes the wheel while the hero is in view" fails.
+  assert.match(layout, /\$\{stuck \? '@min-\[52\.5rem\]\/console:overflow-y-auto' : '@min-\[52\.5rem\]\/console:overflow-y-hidden'\}/, 'the list takes the wheel while the hero is in view');
+  assert.match(layout, /data-lenis-prevent=\{stuck \? '' : undefined\}/, 'the list keeps Lenis off the page while the hero is in view');
+  assert.doesNotMatch(layout, /overscroll-contain/, 'the stuck list never hands the wheel back to the page at its ends');
+  assert.match(layout, /const heroMode = wide && shownPage\.id !== home \? 'band' : 'full';/, 'every page gets the full hero');
+  assert.match(layout, /const tiles = pages\.filter\(\(c\) => views\[c\.id\]\?\.tile\);/, 'the pictures are not the pages that pass one');
+  assert.match(layout, /for \(const c of pages\.filter\(\(p\) => !views\[p\.id\]\?\.tile\)\)/, 'a tile is a row as well');
+  // A phone's page: the art layer (hidden beside the list), the Back key, one title.
+  const header = layout.slice(layout.indexOf('<header data-console-header'), layout.indexOf('</header>'));
+  assert.match(header, /<div aria-hidden className="absolute inset-0 -z-10 @min-\[52\.5rem\]\/console:hidden" data-console-header-art>\s*\{art\}/, 'a phone\'s page has no art over its title');
+  assert.match(header, /data-console-back>/, 'a phone\'s page has no Back key');
+  assert.equal((header.match(/<h2 /g) ?? []).length, 1, 'a page has two titles');
+  // The two heroes, and the art each hands the phone's pages.
+  const profile = code(read('app/profile/page.tsx'));
+  assert.match(profile, /hero=\{\(mode\) => \(\s*<ProfileHero mode=\{mode\}/, 'the profile has no hero');
+  assert.match(profile, /art=\{anchorId \? <Backdrop seriesId=\{anchorId\} hero className="absolute inset-0" \/> : null\}/, 'the profile\'s pages open under no art');
+  const hero = profile.slice(profile.indexOf('function ProfileHero('), profile.indexOf('function CoverFan('));
+  assert.equal((hero.match(/\{pills\}/g) ?? []).length, 2, 'the band has no weekly goal');
+  assert.equal((hero.match(/id="weekly-goal"/g) ?? []).length, 2, 'the weekly goal\'s pill lost its id (search lands on it)');
+  assert.match(profile, /tile: <CoverFan ids=\{shelf\.ids\} fallback=\{anchorId\} \/>/, 'You is not a picture of your covers');
+  assert.match(profile, /tile: <ActivityBars days=\{stats\?\.byDay \?\? \[\]\} \/>/, 'Insights is not a picture of your weeks');
+  const admin = code(read('app/admin/page.tsx'));
+  assert.match(admin, /hero=\{\(mode\) => <AdminHero mode=\{mode\} onBack=\{\(\) => \(window\.history\.length > 1 \? router\.back\(\) : router\.push\('\/profile\/'\)\)\} \/>\}/, 'the admin console has no hero, or its Back leads nowhere when opened directly');
+  assert.match(admin, /const compact = mode === 'band';/, 'the admin band is not the compact hero');
 });

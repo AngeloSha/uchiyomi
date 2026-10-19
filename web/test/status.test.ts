@@ -140,7 +140,7 @@ test('Overview\'s Needs attention tiles: the tint from this vocabulary, the star
   const src = readFileSync(join(ROOT, 'app/admin/page.tsx'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
   const a = src.indexOf('function NeedsAttention(');
-  const b = src.indexOf('function TabTile(', a);
+  const b = src.indexOf('const roleText = ', a);
   assert.ok(a >= 0 && b > a, 'function NeedsAttention moved');
   const tiles = src.slice(a, b);
   assert.match(tiles, /const m = healthMark\(c\.status\);/, 'the tile does not read the check through healthMark');

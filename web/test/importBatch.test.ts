@@ -15,7 +15,8 @@ import {
   linkedCount, linkedLine, truncatedWords, sameSourcePair, alreadyImported,
   type ImportCandidate, type ImportBatchSummary,
 } from '../lib/importBatch';
-import { readTab } from '../lib/tabParam';
+import { readPage } from '../lib/settingsIndex';
+import { PROFILE_SETTINGS } from '../lib/settingsIndex.profile';
 
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -485,26 +486,21 @@ test('the tracker intake is a nested box, and the intake card still ends on its 
   assert.match(src, /body\.error === 'not_connected'\) \{ qc\.invalidateQueries\(\{ queryKey: \['trackers'\] \}\); toast\(NOT_CONNECTED\(\), 'info'\); \}/, 'not_connected does not fall back to the dim line');
 });
 
-test('the profile page opens the tab named in ?tab=, under Suspense', () => {
-  // `useSearchParams` needs a Suspense boundary in a static export (the build fails without one), and the
-  // import page's tracker line points at `/profile/?tab=Connections` -- without this the link landed on
-  // You, a tab away from Progress tracking. Since v0.39.0 the tab comes from `useTabParam` (lib/useTabParam.ts),
-  // which reads the query ONCE in a lazy `useState` and never in an effect: an effect re-reading the params
-  // would snap a person back to the URL's tab on the render after they tapped the rail. Reintroduce by
-  // initialising `tab` with `useState<Tab>('You')` again: "the tab is not read from the query" fails; by
-  // adding a `useEffect` to the hook that re-reads `params`: "the hook re-reads the query in an effect"
-  // fails; or by dropping the Suspense wrapper: "no Suspense boundary" fails.
+test('the profile page opens the page named in ?tab=, under Suspense', () => {
+  // `useSearchParams` needs a Suspense boundary in a static export (the build fails without one), and the import page's
+  // tracker line points at `/profile/?tab=Connections` -- without this the link landed on You, a page away from Progress
+  // tracking. Since v0.88.0 the page comes from the address on every render (components/ConsoleLayout.tsx readPage), its
+  // name in any case: the import page's capitalised `Connections` is the page `connections`. Reintroduce by dropping the
+  // Suspense wrapper: "no Suspense boundary" fails; readPage without the case folding: "the import page's address lands
+  // on You" fails.
   const src = code(read('app/profile/page.tsx'));
   assert.match(src, /<Suspense fallback=\{<div className="min-h-screen-d" \/>\}>\s*<ProfileInner \/>\s*<\/Suspense>/, 'no Suspense boundary');
-  assert.match(src, /const PROFILE_TABS = PROFILE_GROUPS\[0\]\.tabs;/, 'the tab list is not the first group\'s tabs');
-  assert.match(src, /const \[tab, setTab\] = useTabParam<Tab>\(PROFILE_TABS, 'You'\);/, 'the tab is not read from the query');
-  const hook = code(read('lib/useTabParam.ts'));
-  assert.match(hook, /useState<T>\(\(\) => readTab\(params\.get\('tab'\), tabs, fallback, aliases\)\)/, 'the hook does not read the query once, lazily');
-  assert.doesNotMatch(hook, /useEffect\(/, 'the hook re-reads the query in an effect');
-  // The pure half, called: an arbitrary ?tab= value falls back rather than rendering an empty panel.
-  assert.equal(readTab('Bogus', ['You', 'Settings'], 'You'), 'You', 'an arbitrary ?tab= value is not rejected');
-  assert.equal(readTab('Settings', ['You', 'Settings'], 'You'), 'Settings', 'a real tab is not honoured');
-  assert.equal(readTab(null, ['You', 'Settings'], 'You'), 'You', 'no ?tab= does not fall back');
+  assert.match(src, /<ConsoleLayout index=\{PROFILE_SETTINGS\}/, 'the profile is not drawn by the console');
+  // The pure half, called: an arbitrary ?tab= value opens no page (the list, or You beside it), a real one opens.
+  const ids = PROFILE_SETTINGS.categories.map((c) => c.id);
+  assert.equal(readPage(PROFILE_SETTINGS, 'Connections', null, ids), 'connections', 'the import page\'s address lands on You');
+  assert.equal(readPage(PROFILE_SETTINGS, 'Bogus', null, ids), null, 'an arbitrary ?tab= value is not rejected');
+  assert.equal(readPage(PROFILE_SETTINGS, null, null, ids), null, 'no ?tab= names a page');
 });
 
 test('the pointer lands ON the Progress tracking card: ?card=tracking scrolls it into view once the trackers are known', () => {
@@ -521,7 +517,8 @@ test('the pointer lands ON the Progress tracking card: ?card=tracking scrolls it
   // does not wait for the trackers" fails.
   const src = code(read('app/profile/page.tsx'));
   assert.match(src, /const \[focusTracking\] = useState<boolean>\(\(\) => params\.get\('card'\) === 'tracking'\);/, 'card=tracking is not read from the query');
-  assert.match(src, /<ProfileConnections focusTracking=\{focusTracking && tab === 'Connections'\} \/>/, 'the Connections tab does not hand the section its focus');
+  // The page is drawn only while it is on screen (components/ConsoleLayout.tsx), so the flag needs no page check.
+  assert.match(src, /<ProfileConnections focusTracking=\{focusTracking\} \/>/, 'the Connections page does not hand the section its focus');
   const conn = code(read('components/ProfileConnections.tsx'));
   const from = conn.indexOf('function TrackerSection(');
   const to = conn.indexOf('function TrackerRow(');
@@ -685,29 +682,27 @@ test('the i18n rig leak word for the tracker box is a sentence word, not the eye
   assert.doesNotMatch(rig, /\['\/admin\/import', \[[^\]]*'From your tracker'/, 'the rig looks for the eyebrow');
 });
 
-test('the i18n rig visits the v0.39.0 consoles by their ?tab= address and looks for words that really translate', () => {
-  // The rig's tab-row check only ever saw each console's first tab, so the rebuilt admin Settings tab and
-  // the profile's Settings tab are visited by URL. And every word it looks for must have an es/de/fr
-  // translation that differs from the English: "Badges" is "Badges" in French, so with it in the list a
-  // correctly translated /profile counted one leak before a single real one -- and the profile tab row
-  // no longer says "Reading" at all, so a rig still looking for it would be measuring nothing there.
-  // Reintroduce by putting 'Badges' or 'Reading' back in the /profile list, or by dropping the
-  // `?tab=Settings` entries. Since v0.86.0 each names its category (`&cat=`), so a phone sees the rows and not only the
-  // list of categories.
+test('the i18n rig visits the consoles\' pages by their ?tab= address and looks for words that really translate', () => {
+  // The rig's tab-row check only ever saw each console's first page, so the settings pages are visited by URL. And every
+  // word it looks for must have an es/de/fr translation that differs from the English: "Badges" is "Badges" in French,
+  // so with it in the list a correctly translated /profile counted one leak before a single real one. Reintroduce by
+  // putting 'Badges' or 'Reading' back in the /profile list, or by dropping the settings pages' entries. v0.88.0: each
+  // console is one list, so its words are the list's, and each settings page has its own `?tab=`.
   const rig = read('test/e2e/i18n.mjs');
-  assert.match(rig, /\['\/profile', \['Connections', 'Account', 'Settings', 'Reading studio', 'Lists', 'Sign out'\]\]/, 'the /profile word list is not the v0.39.0 one');
+  assert.match(rig, /\['\/profile', \['Connections', 'Account', 'Settings', 'Appearance', 'Insights', 'Sign out'\]\]/, 'the /profile word list is not the list\'s');
+  assert.match(rig, /\['\/admin', \['Overview', 'Members', 'Settings', 'People', 'Libraries', 'Activity'\]\]/, 'the /admin word list is not the list\'s');
   assert.doesNotMatch(rig, /\['\/profile', \[[^\]]*'(?:Badges|Reading|Moments)'/, 'the /profile list has a word that is the same in French, or the retired Reading tab');
-  assert.match(rig, /\['\/profile\/\?tab=Settings&cat=reading', \[[^\]]*'Repeated pages'/, 'the rig does not visit the profile Settings tab');
-  assert.match(rig, /\['\/admin\/\?tab=Settings&cat=server', \[[^\]]*'Open registration'/, 'the rig does not visit the admin Settings tab');
-  // GroupChips renders its labels as CSS-uppercase eyebrows, so innerText reads DEFAULT PRIORITY and a
-  // case-sensitive \bDefault priority\b can never match -- the same trap the import page's 'From your tracker'
-  // eyebrow set (above). Reintroduce by listing 'Default priority' for /admin/?tab=Settings.
-  assert.doesNotMatch(rig, /\['\/admin\/\?tab=Settings[^']*', \[[^\]]*'(?:Default priority|Blocked groups|Patience)/, 'the admin Settings list looks for an uppercase eyebrow');
-  // The words the rig relies on for the profile are ones the locale files translate today (the other two
-  // lists lean on strings other v0.39.0 builders add, which test 14 of settingsConsole.test.ts covers).
+  assert.match(rig, /\['\/profile\/\?tab=reading', \[[^\]]*'Repeated pages'/, 'the rig does not visit the profile\'s Reading page');
+  assert.match(rig, /\['\/admin\/\?tab=server', \[[^\]]*'Open registration'/, 'the rig does not visit the admin\'s Server page');
+  // GroupChips renders its labels as CSS-uppercase eyebrows, so innerText reads DEFAULT PRIORITY and a case-sensitive
+  // \bDefault priority\b can never match -- the same trap the import page's 'From your tracker' eyebrow set (above).
+  // Reintroduce by listing 'Default priority' for a settings page.
+  assert.doesNotMatch(rig, /\['\/admin\/\?tab=[^']*', \[[^\]]*'(?:Default priority|Blocked groups|Patience)/, 'an admin page\'s list looks for an uppercase eyebrow');
+  // The words the rig relies on are ones the locale files translate today.
   for (const f of ['es.json', 'de.json', 'fr.json']) {
     const d = JSON.parse(read(`public/locales/${f}`));
-    for (const w of ['Account', 'Settings', 'Reading studio', 'Lists', 'Sign out', 'Repeated pages', 'Wide pages', 'Pick the mode for each series', 'More options', 'Reading',
+    for (const w of ['Account', 'Settings', 'Appearance', 'Insights', 'Sign out', 'Repeated pages', 'Wide pages', 'Pick the mode for each series', 'More options', 'Reading',
+      'Overview', 'Members', 'People', 'Libraries', 'Activity',
       'Open registration', 'Check for updates', 'Updates and privacy', 'When someone signs up', 'Server name']) {
       assert.ok(d[w] && d[w] !== w, `${f}: "${w}" is missing or the same as the English, so the rig would count it as a leak`);
     }

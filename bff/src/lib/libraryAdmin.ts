@@ -682,7 +682,7 @@ export async function forgetSeries(id: string): Promise<ForgetResult | ForgetRef
         ok: false,
         refused: 'live',
         message: 'Remove the series first. Forgetting it is a third, separate step.',
-        fix: 'Content → Library → Remove, then Delete files, then Forget.',
+        fix: 'Admin → Libraries → Remove, then Delete files, then Forget.',
       };
     }
 

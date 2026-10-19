@@ -132,15 +132,16 @@ for (const code of LOCALES) {
   // from the English: a word that is the same in French ("Badges", "Moments") reads as a leak on a
   // correctly translated page, and three of those would fail a page that is fine. ("Server" in the older
   // /admin list is German too; it sits alone under the >= 3 threshold.)
+  // v0.88.0: each console is one list (its pages by name, in groups), and every page has its own `?tab=`.
   const CONSOLES = [
-    // v0.54.0: Providers and Extensions are one Sources tab, whose views and Test all are visited by its address.
-    ['/admin', ['Overview', 'Members', 'Settings', 'Server', 'People', 'Content', 'Sources']],
-    ['/admin/?tab=Sources', ['Your sources', 'Add sources', 'Test all', 'Built-in']],
-    // v0.86.0: a category each (`&cat=`), so a phone sees the rows and not only the list of categories.
-    ['/admin/?tab=Settings&cat=server', ['Open registration', 'Check for updates', 'Updates and privacy', 'When someone signs up', 'Server name']],
+    ['/admin', ['Overview', 'Members', 'Settings', 'People', 'Libraries', 'Activity']],
+    // v0.54.0: Providers and Extensions are one Sources page, whose views and Test all are visited by its address.
+    ['/admin/?tab=sources', ['Your sources', 'Add sources', 'Test all', 'Built-in']],
+    // A settings page each, so a phone sees the rows and not only the list.
+    ['/admin/?tab=server', ['Open registration', 'Check for updates', 'Updates and privacy', 'When someone signs up', 'Server name']],
     ['/admin/import', ['review matches', 'matches each title', 'Start matching', 'backup stays on your server', 'nothing lands in your library', 'bring your list over']],
-    ['/profile', ['Connections', 'Account', 'Settings', 'Reading studio', 'Lists', 'Sign out']],
-    ['/profile/?tab=Settings&cat=reading', ['Repeated pages', 'Wide pages', 'Pick the mode for each series', 'More options', 'Reading']],
+    ['/profile', ['Connections', 'Account', 'Settings', 'Appearance', 'Insights', 'Sign out']],
+    ['/profile/?tab=reading', ['Repeated pages', 'Wide pages', 'Pick the mode for each series', 'More options', 'Reading']],
     // Library -> Downloads (v0.49.0): its empty state on a quiet instance, its section names on a busy one.
     ['/library/?view=downloads', ['Library', 'Nothing is being fetched', 'as they come in', 'Came in today', 'Needs attention', 'Server tasks', 'Queued']],
   ];

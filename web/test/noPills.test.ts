@@ -147,7 +147,7 @@ const SURFACES = [
   // notification targets, the translate row -- and Profile's Connections and Account, whose chips became keys.
   // ⚠️ components/Switch.tsx is never listed: a switch's track is a capsule by design, and it is the one.
   'components/settings.tsx',
-  'components/SettingsLayout.tsx',
+  'components/ConsoleLayout.tsx',
   'components/settingsArt.tsx',
   'components/ProfileSettings.tsx',
   'components/AdminSettings.tsx',
@@ -178,7 +178,7 @@ const SURFACES = [
  * Health()'s own capsules belong to the Health step, which adds its slice when it redesigns them.
  */
 const SLICES: [string, string, string, string][] = [
-  ['app/admin/page.tsx', 'Overview: Needs attention', 'function NeedsAttention(', 'function TabTile('],
+  ['app/admin/page.tsx', 'Overview: Needs attention', 'function NeedsAttention(', 'const roleText = '],
   // Step 5: the Library's Series | Downloads switch (its count is a squared tag), and the header's two counts
   // side by side on a desktop -- the downloads ring's and the Updates bell's, a capsule at "9+" until v0.49.0.
   ['app/library/page.tsx', 'Library: the Series | Downloads switch', 'function ViewSwitch(', 'function MoveToLibrary('],

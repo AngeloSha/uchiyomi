@@ -32,7 +32,7 @@ test('Admin → Settings: Finish downloads on their own in Downloads, the one sw
   assert.doesNotMatch(schedules, /Use other sources on their own/, 'a second switch for the same thing');
   // Search lands on the row itself since v0.86.0 (lib/settingsIndex.admin.ts generates it).
   const d = DESTINATIONS.find((x) => x.key === 'admin-finish-downloads');
-  assert.equal(d?.href, '/admin/?tab=Settings&section=finish-downloads');
+  assert.equal(d?.href, '/admin/?tab=downloads&section=finish-downloads');
   assert.equal(d?.admin, true);
   assert.ok(d?.keywords?.includes('rate limit'), 'searching "rate limit" does not find it');
 });

@@ -1020,7 +1020,7 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'disk.noteFloor': (p) => tr('New downloads stop when the downloads disk has less than {floor} GB free.', { floor: numText(num(p, 'floor')) }),
   'disk.noteNoFloor': () => tr('Downloads are never stopped for free space here (MIN_FREE_GB is 0).'),
   'disk.noteArchive': (p) => tr('The slow archive waits below {floor} GB (Admin → Settings → Downloads).', { floor: numText(num(p, 'floor')) }),
-  'disk.noteFolders': () => tr('A library or download folder that cannot be read, or that is empty while the library records chapters in it, is usually a share that is not mounted; nothing is marked missing because of it. Only the top of each folder is read here: Verify chapter files (Admin → Tasks) checks every file.'),
+  'disk.noteFolders': () => tr('A library or download folder that cannot be read, or that is empty while the library records chapters in it, is usually a share that is not mounted; nothing is marked missing because of it. Only the top of each folder is read here: Verify chapter files (Admin → Settings → Maintenance) checks every file.'),
 
   // ---- Tracker sync (v0.72.0, bff lib/healthTrackers.ts, @Squeaks72's card from #253). `error` is the tracker's own.
   'trackers.refused': () => tr('The tracker refused the saved sign-in'),

@@ -104,10 +104,6 @@ export function resolveSection(index: SettingsIndex, id: string | null): Setting
   return null;
 }
 
-/** The category `?cat=` names, or null for anything that is not one drawn here. */
-export const readCat = (v: string | null, cats: readonly SettingsCategory[]): string | null =>
-  typeof v === 'string' && cats.some((c) => c.id === v) ? v : null;
-
 /**
  * The page an address names (v0.88.0): `?tab=` case-blind -- `Health` and `health` are one page -- then a tab from
  * before v0.88.0 by `tabAliases` (`Tasks` is Maintenance; `Settings` is the category its `?cat=` named, or the first
@@ -125,17 +121,6 @@ export function readPage(index: SettingsIndex, tab: string | null, cat: string |
     return (c && shownIds.find((id) => id === c)) || shownIds.find((id) => index.categories.find((x) => x.id === id)?.settings) || null;
   }
   return shownIds.includes(alias) ? alias : null;
-}
-
-/**
- * `href` with its `cat` set (or dropped, for null), every other parameter untouched -- the tab beside it above all. Path +
- * query + hash, for `history.replaceState` (lib/tabParam.ts withTab says why).
- */
-export function withCat(href: string, cat: string | null): string {
-  const u = new URL(href, 'http://localhost');
-  u.searchParams.delete('cat');
-  if (cat) u.searchParams.append('cat', cat);
-  return `${u.pathname}${u.search}${u.hash}`;
 }
 
 /**
@@ -181,12 +166,6 @@ export function rankMatch(query: string, names: readonly string[], keywords: rea
   return -1;
 }
 
-/**
- * The rows a query finds on this page, best first, among those drawn here (`conds`): by the row's label in the reader's
- * language and in English, its keywords, the name it or its category had before v0.86.0, its category's name, then its
- * help. `label` is tr(), passed in so a test can
- * read another language.
- */
 /** A page found by the console's search: its own name, the words it is known by. */
 export function searchPages(index: SettingsIndex, query: string, conds: Readonly<Record<SettingsCondition, boolean>>,
   label: (k: string) => string, drawn: (id: string) => boolean): SettingsCategory[] {
@@ -202,6 +181,11 @@ export function searchPages(index: SettingsIndex, query: string, conds: Readonly
     .map((x) => x.c);
 }
 
+/**
+ * The rows a query finds on this page, best first, among those drawn here (`conds`): by the row's label in the reader's
+ * language and in English, its keywords, the name it or its category had before v0.86.0, its category's name, then its
+ * help. `label` is tr(), passed in so a test can read another language.
+ */
 export function searchSettings(index: SettingsIndex, query: string, conds: Readonly<Record<SettingsCondition, boolean>>,
   label: (k: string) => string, limit = 8): SettingsEntry[] {
   const cats = new Map(index.categories.map((c) => [c.id, c]));

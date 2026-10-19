@@ -825,9 +825,9 @@ async function main() {
     console.log(`  ✓ ${name}`);
   };
   if (want('phone-settings')) {
-    await phoneCard('phone-settings', '/admin/?tab=Settings', () => {
-      // The categories as a phone lists them (v0.86.0, components/SettingsLayout.tsx): the list is the card to clip.
-      const card = document.querySelector('[data-settings-categories]');
+    await phoneCard('phone-settings', '/admin/', () => {
+      // The settings pages as a phone lists them (v0.88.0, components/ConsoleLayout.tsx): their group is the card to clip.
+      const card = document.querySelector('[data-console-group="Settings"]');
       card?.setAttribute('data-shot-from', ''); card?.setAttribute('data-shot-to', '');
       return !!card;
     });

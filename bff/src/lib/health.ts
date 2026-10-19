@@ -2049,7 +2049,7 @@ function downloadsNoteParts(
   return [
     say('missing.compared', { root: c.root, fs: c.fsType ?? null }),
     // v0.49.0: the card has its own Scan now. Reintroduce the Tasks route: "the downloads check points at its own
-    // Scan now" in healthNotes.test.ts reads Admin → Tasks.
+    // Scan now" in healthNotes.test.ts reads Admin → Settings → Maintenance.
     ...(c.noScan ? [say('missing.noScan')] : []),
     ...(c.scanCapped ? [say('missing.capped')] : []),
     ...(c.pending ? [say('missing.pending', { n: c.pending })] : []),

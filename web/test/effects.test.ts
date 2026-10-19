@@ -296,11 +296,25 @@ test('every consumer honours the switch', () => {
     'covers still sharpen in under Reduce effects (or lost the sharpen-in by default)');
   // The notices (v0.49.0) slide up from the bottom edge; under the switch a card simply appears. Reintroduce
   // `initial={{ opacity: 0, y: 16 }}` on NoticeCard: "components/Toast.tsx still animates in" fails.
-  for (const f of ['components/PageTransition.tsx', 'components/ConsoleNav.tsx', 'components/Toast.tsx']) {
+  for (const f of ['components/PageTransition.tsx', 'components/ConsoleLayout.tsx', 'components/Toast.tsx']) {
     const src = code(read(f));
     assert.match(src, /initial=\{reduced \? false : \{ opacity: 0, y: \d+ \}\}/, `${f} still animates in under Reduce effects`);
     assert.match(src, /transition=\{reduced \? \{ duration: 0 \} : \{ duration: 0\.2\d/, `${f} still animates in under Reduce effects`);
   }
+  // v0.88.0: the consoles' heroes and pictures read both settings, as Toast.tsx does -- and the console sets aside the
+  // page transition's `initial={false}`, which otherwise held every entrance in it still after a direct load (a
+  // refresh, a link, a language change). Reintroduce the plain `useReducedMotion()` in a hero: its name fails here.
+  const both = /const plain = useReduceEffects\(\);\s*const still = useReducedMotion\(\);\s*const reduced = plain \|\| !!still;/;
+  const profilePage = code(read('app/profile/page.tsx'));
+  for (const [name, from, to] of [['ProfileHero', 'function ProfileHero(', 'function CoverFan('], ['ActivityBars', 'function ActivityBars(', 'function YouBoard(']] as const) {
+    assert.match(profilePage.slice(profilePage.indexOf(from), profilePage.indexOf(to)), both, `${name} reads the motion settings conditionally, or only one of them`);
+  }
+  const adminPage = code(read('app/admin/page.tsx'));
+  assert.match(adminPage.slice(adminPage.indexOf('function AdminHero('), adminPage.indexOf('function VersionLine(')), both, 'AdminHero reads the motion settings conditionally, or only one of them');
+  assert.match(code(read('components/ConsoleLayout.tsx')), /<PresenceContext\.Provider value=\{null\}>/, 'the console\'s entrance is held still after a direct load');
+  // The console's tiles, groups and page all come in under the same rule: nothing in it animates unconditionally.
+  // Reintroduce `initial={{ opacity: 0, y: 6 }}` on the page: "the console animates in under Reduce effects" fails.
+  assert.doesNotMatch(code(read('components/ConsoleLayout.tsx')), /initial=\{\{/, 'the console animates in under Reduce effects');
   const page = code(read('components/PageTransition.tsx'));
   assert.match(page, /mode=\{reduced \? 'sync' : 'wait'\}/,
     'PageTransition still waits for a zero-duration exit under Reduce effects');

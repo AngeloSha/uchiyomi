@@ -203,7 +203,7 @@ this standing choice alone; the sheet marks a language you hid here *Hidden in e
 **Only 25 extension sources can be switched on at once** (`SUWAYOMI_MAX_SOURCES`, 25 by default), because every
 one of them is searched together. The engine's strip counts them (*v2.4.2366 · 12 of 25 sources on*); when more are
 switched on than that, the count turns amber, a line under the strip says how many were left out and how to get under
-the limit, and **Content → Health** lists them under *Extension source limit*. Hiding languages is the cheap way under it. On a Docker install, raising `SUWAYOMI_MAX_SOURCES` is the other;
+the limit, and **Admin → Health** lists them under *Extension source limit*. Hiding languages is the cheap way under it. On a Docker install, raising `SUWAYOMI_MAX_SOURCES` is the other;
 the desktop app has no setting for it. Since v0.55.0 the sources your series read through (as their main source or one
 they follow) take their places first, so switching another source on never pushes one your library depends on out.
 
@@ -258,7 +258,7 @@ numbers.
 Uchiyomi checks your repositories **every 6 hours** and installs new versions of the extensions you have
 installed. You do not have to press anything.
 
-The check is a task like any other: **Admin → Server → Tasks** shows when it last ran, what it did, and a
+The check is a task like any other: **Admin → Settings → Maintenance** shows when it last ran, what it did, and a
 **Run now** button. You get a notification when extensions are updated, and a separate one when an update
 fails — an extension whose download 404s stays on its old version, and that is worth knowing rather than
 silently living with.

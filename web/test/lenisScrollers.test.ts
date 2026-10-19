@@ -30,7 +30,7 @@ const OVERLAYS = [
   'components/ui.tsx',                 // Sheet — the shared bottom sheet
   'components/ReaderSettings.tsx',     // the reader's own sheet, which is not the shared one
   'components/ConfirmDialog.tsx',
-  'components/ConsoleNav.tsx',
+  'components/ConsoleLayout.tsx',     // the Profile and Admin list beside the page, which scrolls on its own (v0.88.0)
   'components/CommandPalette.tsx',
   'components/SeriesEditor.tsx',       // Edit details (v0.53.0): its tabs' one scroller, and the tab row on a phone
 ];

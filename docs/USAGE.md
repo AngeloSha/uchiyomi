@@ -203,12 +203,12 @@ General → Type anywhere to search** switches the typing, and the **/** shortcu
 **Ctrl+K** keeps working.
 
 **Search finds pages and settings too** (since v0.55.4). Type two letters or more and, under the series, **Pages and
-settings** lists what the words name: every admin tab, every setting on **Admin → Settings** and **Profile → Settings**
-(since v0.86.0), the profile's tabs and cards, the import, the *Cloudflare solver* and the *Version* on Health, and
-*Rescan everything* on Tasks. A name works in your language and in English, and so do a few words people type instead
-(*flaresolverr*, *mihon*, *2fa*, *discord*), and a section's old name still finds where it went (*Scanlators*,
-*Updates & schedules*). Each row says where it is (*Admin → Settings → Downloads*), and choosing it opens that page,
-that category and the row itself, highlighted once it has loaded. Admin pages are listed for admins only, and what the desktop app does not have is not listed there. On a phone,
+settings** lists what the words name: every page of **Admin** and of your **Profile**, every setting on them (since
+v0.86.0), the profile's cards, the import, the *Cloudflare solver* and the *Version* on Health, and *Rescan everything*
+on Maintenance. A name works in your language and in English, and so do a few words people type instead
+(*flaresolverr*, *mihon*, *2fa*, *discord*), and an old name still finds where it went (*Scanlators*, *Updates &
+schedules*, *Tasks*). Each row says where it is (*Admin → Settings → Downloads*), and choosing it opens that page and
+the row itself, highlighted once it has loaded. Admin pages are listed for admins only, and what the desktop app does not have is not listed there. On a phone,
 the **Search** tab lists the same ones under the series it finds.
 
 ### Your reading: time, Wrapped and Incognito
@@ -251,12 +251,17 @@ for it to reveal) and **Reduce effects**, the same switches as **Profile → Set
 one there moves the other here. **Profile** and **Profile settings** in the panel go to the page; **Sign out** is there
 too, except in the desktop app. **Esc**, a tap outside or tabbing away closes it.
 
-**Your settings** (**Profile → Settings**, in four categories since v0.86.0): **General** (the language, how series
-pages list chapters, shortcuts and Incognito reading), **Appearance** (the background, the accent colour, your avatar and
-Reduce effects), **Reading** (the reader's defaults, below) and **This device** (offline downloads, new-chapter alerts
-and installing the app; not in the desktop app). The box above them finds any setting by name and opens it. On a phone
-the categories are a list: tap one to open it. A row marked *This device* is kept by this browser only; every other
-setting follows your account.
+**Your profile** opens under its hero — your name, how your reading is going, the weekly goal (tap its ring to set
+it), your chapters and series, and what to read next — and then one list (since v0.88.0): **You** and **Insights** as
+two pictures (your latest covers, your last four weeks), then **Settings**: **General** (the language, how series pages
+list chapters, shortcuts and Incognito reading), **Appearance** (the background, the accent colour, your avatar and
+Reduce effects), **Reading** (the reader's defaults, below), **This device** (offline downloads, new-chapter alerts and
+installing the app; not in the desktop app), **Connections** (trackers, reading apps and API tokens) and **Account**
+(password, two-factor and sessions; not in the desktop app). **Admin**, **Support Uchiyomi** and **Sign out** are at its
+foot. The box above the list finds any page or setting by name and opens it. On a computer the list stays beside the
+page, under the hero — in full above You, a slimmer band above the rest; on a phone the hero and the list are the first
+screen: tap a row to open its page, under a band of the same art, and Back returns to the list. A row marked *This
+device* is kept by this browser only; every other setting follows your account.
 
 ### What counts as a chapter
 
@@ -299,7 +304,7 @@ The files Uchiyomi downloads itself are named `Chapter 12.cbz` and read exactly 
 **Chapters already in your library keep their numbers.** A chapter scanned before v0.55.2 goes on being read the
 old way, by the first number in its name, so nothing is renumbered behind your back and what your trackers were told
 stays true. A renamed file is a new file to the scanner and is read by the rules above. **Edit a chapter** (section
-4) fixes any number by hand, old or new, and since v0.55.4 **Admin → Tasks → Rescan everything** reads a whole series
+4) fixes any number by hand, old or new, and since v0.55.4 **Admin → Settings → Maintenance → Rescan everything** reads a whole series
 again by these rules when you tick it (*Numbering hand-named files again*, section 8).
 
 A file holding a range is one chapter row, and one file in the series' chapter count. Everything about *which*
@@ -413,7 +418,7 @@ says how many are in hand. The chips:
   is the series page's **More → Remove from library** over a selection, nothing more; a series that was merged into another, or is
   already hidden, is skipped and counted (*Removed 11 series · 1 skipped*). A selection that hid nothing
   says *Nothing removed · 1 skipped* and keeps the selection so it can be corrected. Deleting files stays a
-  separate, per-title step on **Content → Library** — see section 8.
+  separate, per-title step on **Admin → Libraries** — see section 8.
 - **Find other sources** (since v0.49.1) — admins only, behind **More**. It searches the other sources for every
   selected series and follows the ones whose title and chapter numbers match (section 4, *Find other sources*); the
   message says where to watch it, *Library → Downloads*.
@@ -433,7 +438,7 @@ says how many are in hand. The chips:
   **Stop after this series** requests cancellation between series, never while a file is being removed. A series that
   is hidden, merged or busy when its turn arrives is skipped and named; a server restart marks the unfinished run
   interrupted. This is not *Delete files*, which takes a series' whole folder and stays a per-title step on
-  **Content → Library**.
+  **Admin → Libraries**.
 - **Cancel** leaves select mode. It stays live during a *Fetch newest* run: tapping it stops watching the
   run and leaves select mode, and the fetch itself finishes on the server.
 
@@ -510,14 +515,14 @@ title you set in *Edit details*, its *Other names* (below), with case, accents, 
 aside, and a leading *The*, *A* or *An* ignored when at least six letters remain. A name that merely contains the
 series' name is another work: *Morgan Lost: Dark Novels* is not *Morgan Lost*.
 The same rule picks the AniList entry a series is linked to for tracker sync (section 10), and the art backfill under
-**Admin → Content → Art** follows it too. What was matched before v0.55.7 is checked again in the background
-(**Admin → Tasks → Check online matches**, section 8): a link to another work is removed, and a cover or banner that
+**Admin → Art** follows it too. What was matched before v0.55.7 is checked again in the background
+(**Admin → Settings → Maintenance → Check online matches**, section 8): a link to another work is removed, and a cover or banner that
 came from another work is cleared, so the series shows its source's cover or its own first page.
 
 In **Edit details** (the art column, or the *Art* tab on a phone) the cover has **Upload**, **From a link** and **⋯**:
 
 - **Use the first page** makes the series' own first page its cover for good: nothing found online replaces it, and
-  unless you set a banner yourself, its banner is made from its pages too. **Admin → Content → Art** offers it as well.
+  unless you set a banner yourself, its banner is made from its pages too. **Admin → Art** offers it as well.
 - **Reset to automatic** goes back to the automatic cover described above.
 
 The line under the cover says which it is.
@@ -1639,7 +1644,7 @@ the same picture twice. It only ever compares chapters within a single series.
   filed under several chapter numbers, so every page really does repeat — the arithmetic is right and the
   answer is useless. A page you marked by hand is never subject to that limit.
 
-Pages are fingerprinted by a background job, listed with the other library jobs under **Admin → Tasks**. A
+Pages are fingerprinted by a background job, listed with the other library jobs under **Admin → Settings → Maintenance**. A
 chapter that has not been processed yet simply skips nothing. One limit worth knowing: a chapter you
 downloaded *before* its pages were fingerprinted keeps the flags it was saved with until you download it
 again.
@@ -2135,29 +2140,34 @@ work against this too; it was not tested here. The full list of what is and is n
 
 ## 8. The admin panel
 
-Reachable from **Admin** on the profile rail, or directly at `/admin/` (admins only). Panels are grouped by
-what you are doing rather than by what the code is called: **Server** (Overview, Tasks, Settings), **People**
-(Members, Sessions, Activity), **Content** (Library, Health, Art) and **Sources** (one tab since v0.54.0, where
-Providers and Extensions were two; `?tab=Providers` and `?tab=Extensions` lead there).
-Every tab has an address — `/admin/?tab=Settings`, `/admin/?tab=Health` and so on — so a refresh, the Back
-button, a bookmark or a language change keeps you on the tab you were on. The first tab, Overview, is plain
-`/admin/`. The same is true of the profile: `/profile/?tab=Settings`, `/profile/?tab=Connections`,
-`/profile/?tab=Account`. A card can be named too, `/admin/?tab=Settings&section=notice-chapters`: the page scrolls to
-it once it has loaded (that is how search's settings land on theirs).
+Reachable from **Admin** at the foot of your profile's list, or directly at `/admin/` (admins only). It opens under
+the server's hero — whether every check passes, the counts and **Scan library now**, in full above Overview and as a
+band above the other pages — and then one list (since v0.88.0), grouped by what you are doing: **Overview** and
+**Health**; **Library** (Libraries, Sources, Art); **People** (Members, Sessions, Activity); and **Settings** (Server,
+Series & chapters, Downloads, Maintenance, Notifications). The tasks that were a tab of their own are on
+**Maintenance**, under the nightly backup and repair, each with *Run now*. On a computer the list stays beside the page;
+on a phone the hero and the list are the first screen, and a tap opens the page with a key back to the list.
+Every page has an address — `/admin/?tab=health`, `/admin/?tab=maintenance` and so on — so a refresh, the Back
+button, a bookmark or a language change keeps you where you were. Overview is plain `/admin/`. The same is true of the
+profile: `/profile/?tab=general`, `/profile/?tab=connections`, `/profile/?tab=account`. Addresses from before still
+work: `?tab=Tasks` opens Maintenance, `?tab=Settings` the first settings page, and `?tab=Providers` and
+`?tab=Extensions` (one Sources page since v0.54.0) open Sources. A card can be named too,
+`/admin/?tab=series&section=notice-chapters`: the page scrolls to it once it has loaded (that is how search's settings
+land on theirs).
 
 **Which version is running** (since v0.55.4, [#150](https://github.com/AngeloSha/uchiyomi/issues/150)) is the foot of
-the admin menu: *Uchiyomi v0.55.4 · up to date*, or *· update available (v0.55.5)*, which links to that release. On a
-phone it ends the line of facts under the header, and the menu's sheet says it too. Whether a newer one is out is
+the admin list: *Uchiyomi v0.55.4 · up to date*, or *· update available (v0.55.5)*, which links to that release — on a
+phone too, where the list is the first screen. Whether a newer one is out is
 Health's **Version** check, the same answer: with **Check for updates** off, or GitHub not answering, the line says the
 version alone. In the desktop app it is the app's own version.
 
-**Server → Overview:** library stats + recent member activity.
+**Overview:** what needs a look, each member's week, and the top 10 in your library.
 
 ![Members](shots/admin-members.webp)
 
 ### Health
 
-**Content → Health** audits your library and tells you what is wrong before you run into it: series with missing
+**Admin → Health** audits your library and tells you what is wrong before you run into it: series with missing
 chapters, chapters that downloaded as one or two images, the same title sitting in the library twice, chapter
 numbers that can't be real, series waiting for a renumbering review, any source that is failing or blocked, and the
 extension engine. Each check says what it found and what it cannot see. Hit **Re-check** to run them again. Since
@@ -2255,7 +2265,7 @@ another tab.
 - **Recent repairs**, at the bottom, lists the last ten runs, nightly and pressed alike: what, who, when, how long,
   what it did, and anything it passed over and why (*Skipped: its folder is busy with another download. Try again
   when that finishes.*). The server keeps the newest 50 runs and every run of the last 90 days. A fix on one row
-  no longer replaces the nightly's line under **Admin → Tasks** (below), which links here instead.
+  no longer replaces the nightly's line under **Admin → Settings → Maintenance** (below), which links here instead.
 
 **You don't have to go and look** (since v0.48.0). While the last report found something, **Admin** in an admin's
 sidebar wears a warning mark — amber, or red for a problem — and the open sidebar names the worst check under it,
@@ -2289,7 +2299,7 @@ starts, and before this the only sign was each download's error. It turns amber 
 names a library or download folder that cannot be opened, or that is empty while the library still records
 chapters in it — almost always a network share that is not mounted. Nothing is marked missing because of it, and
 only the first entry of each folder is read: a look at a whole folder would wake every disk of an Unraid array
-every few hours. **Verify chapter files** (Admin → Tasks) is the thorough check once the share is back. Ignoring a
+every few hours. **Verify chapter files** (Admin → Settings → Maintenance) is the thorough check once the share is back. Ignoring a
 warning here does not silence a later problem: an ignore records how bad it was.
 
 **Tracker sync** (since v0.72.0, @Squeaks72's card from #253) lists every member's tracker connection with
@@ -2314,7 +2324,7 @@ confirmation that names them. Only the series on the screen can be ticked. A fin
 source, a folder, the solver — and a duplicate pair stay in the By check view. Each device remembers the view.
 
 **What fixes itself.** Once a day — **Admin → Settings → Maintenance → Repair the library nightly**,
-on by default, and **Admin → Tasks → Repair library** with a *Run now* — Uchiyomi does the six things that
+on by default, and **Admin → Settings → Maintenance → Repair library** with a *Run now* — Uchiyomi does the six things that
 are reversible or provable on their own, and three more only when you switch them on, in this order. Since v0.55.0,
 **Every night**, just under that switch, chooses what runs: this **Safe repair** (the default), or a whole **Fix
 everything**, which does what its key on Health does and can merge, delete and install extensions without asking.
@@ -2507,7 +2517,7 @@ also links to that extension's own settings (**Source settings**).
 
 ![Library health](shots/admin-health.webp)
 
-**Content → Library** also lists every series you have removed, with **Put back** to restore one exactly as
+**Admin → Libraries** also lists every series you have removed, with **Put back** to restore one exactly as
 it was. Removing happens on the series page itself (section 4) or over a selection on the Library page
 (section 3); this is where hidden series go and how you get them back. A row whose files you have since
 deleted says so — its caption leads with *files deleted*, and a second line under it reads: *The chapter
@@ -2538,7 +2548,7 @@ is marked unread and nothing is re-downloaded. It refuses outright unless *every
 is writable: a series often spans your library and Uchiyomi's own downloads folder, and renaming only one of
 them would leave the old name in place for the next scan to pick up as a second, half-read copy.
 
-**Delete files** is on **Content → Library**, and only for a series you have already removed. The reversible
+**Delete files** is on **Admin → Libraries**, and only for a series you have already removed. The reversible
 step always comes first, and the irreversible one asks you to type the title. It deletes the chapter files
 and keeps every chapter row and every progress row, so the record of having read something survives the
 files: each row whose file it removed is marked *deleted from the server*, the same mark the chapter-level
@@ -2567,7 +2577,7 @@ on a LAN it does not, and the button is then hidden rather than broken).
 
 ### Library maintenance: Scan, Verify chapter files and Rescan everything
 
-Three tasks on **Admin → Tasks** look at your chapter files, and each does one thing:
+Three tasks on **Admin → Settings → Maintenance** look at your chapter files, and each does one thing:
 
 | | What it does | What it never does |
 |---|---|---|
@@ -2601,7 +2611,7 @@ nothing left*.
   anywhere could be it. Two copies with the same name and time, a file that was already there beside it (two folders
   unpacked at the same moment), or a file renamed as well as moved, are not guessed at: the chapter is listed as gone,
   as before.
-  Admin → Tasks → **Fingerprint library files** says what its last pass did, including files left for the next pass
+  Admin → Settings → Maintenance → **Fingerprint library files** says what its last pass did, including files left for the next pass
   because they were still being written.
 - **In the download folder**: chapters Uchiyomi downloaded are *Verify chapter files*' to mark, so that the sweep
   fetches them again; here they are only counted.
@@ -2685,7 +2695,7 @@ That same comparison is why the first run takes fewer chapters than you might ex
 that was copied without its modification times — every file then looks newer than the reads of it, and the
 job fails toward keeping. It corrects itself as chapters are read again.
 
-**Admin → Tasks → Delete read chapters** shows the last run, how much it freed, and how many chapters are
+**Admin → Settings → Maintenance → Delete read chapters** shows the last run, how much it freed, and how many chapters are
 waiting. **Run now** is there if you would rather not wait for the hour.
 
 **Show missing chapters in Mihon** (**Admin → Settings → Series & chapters → More options**, off by default, since
@@ -2733,7 +2743,7 @@ don't have as read*), and with this switch on the marks reach Mihon:
 With the switch off, the Komga API answers exactly as it did in v0.42.0, and marks are neither read nor
 written there.
 
-**Merging duplicates** is on **Content → Health**, attached to the duplicate check that finds them: where it
+**Merging duplicates** is on **Admin → Health**, attached to the duplicate check that finds them: where it
 reports the same title sitting in your library twice, **Merge** folds one into the other. Every chapter and
 every progress row moves to the survivor. Chapters that look like duplicates are **kept**, not removed --
 dropping one would mean folding two progress rows into one, and getting that wrong marks chapters unread and
@@ -2749,7 +2759,7 @@ survivor) and in the batch importer (a backup or tracker entry with that spellin
 library* rather than being re-added via another source).
 
 **Libraries:** split one collection into several, then choose per member which ones they can open. This lives
-on **Content → Library**.
+on **Admin → Libraries**.
 
 A library is **one or more folders, plus any series you file into it by hand**. Give it its folders by
 ticking them as you browse your library root, or by typing a path and pressing **Add**; each chosen folder has
@@ -3212,7 +3222,7 @@ In **Profile → Account** (`/profile/?tab=Account`; every user has this):
   After that, logins ask for the 6-digit code. Disable it anytime by confirming your password.
 - **Active sessions:** see every device you're signed in on (with IP + last-active), revoke any one, or
   **Log out others** in a single click.
-- **Sign out:** this device only; other devices stay signed in. The same button sits on the profile rail.
+- **Sign out:** this device only; other devices stay signed in. The same row is at the foot of your profile's list.
 
 API tokens, progress trackers and the OPDS link are not here any more: they are on **Profile → Connections**.
 
@@ -3503,7 +3513,7 @@ keeps its own separate storage. Private / Incognito windows keep nothing at all 
 
 Uchiyomi backs itself up. Every night (03:00 by default) it writes a compressed dump of the database plus an
 archive of your config to `/backups`, keeping the most recent 14 runs. You can also run it on demand from
-**Admin → Tasks → Backup database & config → Run now**, which shows the last run time and size. Whether it runs at
+**Admin → Settings → Maintenance → Backup database & config → Run now**, which shows the last run time and size. Whether it runs at
 night, the hour and how many runs to keep are under **Admin → Settings → Maintenance** (below).
 
 > Worth doing once, on any install: confirm the image can actually dump, rather than trusting the panel.
@@ -3625,7 +3635,7 @@ config archive, any admin-uploaded cover art will be missing even though the dat
 the chapter files. A database restored onto a disk that does not have them all — a new disk, or one that lost
 a folder — comes up with every chapter row intact and no bytes behind some of them, and nothing repairs that
 by itself: the updater trusts the rows, so every such chapter reads *up to date* forever while the reader
-cannot open it. Run **Admin → Tasks → Verify chapter files**. It starts in the background — the toast says
+cannot open it. Run **Admin → Settings → Maintenance → Verify chapter files**. It starts in the background — the toast says
 so — and the Tasks line shows what it found when it is done (and keeps it across restarts): *one folder
 looked unmounted and was left alone: /library-dl, 4000 checked, 312 missing, marked for the next sweep, 7
 missing in a library you built by hand, not marked*. It looks for every chapter's file and marks the ones Uchiyomi
@@ -3659,7 +3669,7 @@ delete in the app is deliberately smaller than it sounds, so here is exactly wha
 
 - **Delete on the series page, and *Remove from library* on the Library page** hide the series. Nothing is
   erased: the chapter rows, the files, everyone's progress, favourites and ratings stay, the series sits in
-  the Removed list on **Content → Library**, and *Put back* restores it exactly as it was. Adding the same
+  the Removed list on **Admin → Libraries**, and *Put back* restores it exactly as it was. Adding the same
   title again from a source revives the same series rather than making a second one — history and all —
   and since v0.42.0 it fetches only the chapters that are genuinely missing, never the ones still on disk.
 - ***Delete from server* on a chapter, the read-chapter cleanup, and *Delete files* on a removed series**
@@ -3677,7 +3687,7 @@ delete in the app is deliberately smaller than it sounds, so here is exactly wha
   Since v0.38.0 a merge also carries bookmarks and the tracker floor to the survivor.
 - **Forget** (since v0.38.0) is the third step, after Remove and Delete files, and the only thing in
   Uchiyomi that erases a series from the database for good. It is offered on a Removed row on
-  **Content → Library** once no chapter row claims a file any more, asks for the title, and it takes
+  **Admin → Libraries** once no chapter row claims a file any more, asks for the title, and it takes
   everyone's history on that title with it: reading progress, reading events, bookmarks, notes, ratings,
   favourites, collection entries and tracker floors, for every member. Stats, streaks, the leaderboard and
   Wrapped change retroactively — a day whose only reads were on that series disappears from a streak. There

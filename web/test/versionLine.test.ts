@@ -51,14 +51,13 @@ test('the link goes to the release the check named, and never to a path of the t
   assert.equal(shownVersion('v0.55.4'), 'v0.55.4', 'the v is doubled');
 });
 
-test('the admin rail ends with the version, and a phone says it among the header\'s facts', () => {
-  // Reintroduce the ConsoleNav without `footer={<VersionLine />}`: "the admin rail has no version" fails; drop the hero's
-  // `data-hero-version` span: "a phone cannot find the version" fails; ask anything but the cached Health answer for the
+test('the admin list ends with the version, on a computer and on a phone alike', () => {
+  // v0.88.0: the list is beside the page on a computer and the first screen on a phone (components/ConsoleLayout.tsx), so
+  // its foot is where both find the version; the server card does not say it again. Reintroduce the console without
+  // `footer={<VersionLine />}`: "the admin list has no version" fails; ask anything but the cached Health answer for the
   // update half: "the version line asks for an update of its own" fails.
   const admin = code(read('app/admin/page.tsx'));
-  // The pinned prefix (desktopSurfaces.test.ts) stays as it was; the footer is added after it.
-  assert.match(admin, /<ConsoleNav groups=\{isDesktop\(\) \? visibleGroups\(GROUPS, DESKTOP_HIDDEN\.adminTabs\) : GROUPS\} tab=\{tab\} onTab=\{setTab\} ariaLabel=\{tr\('Admin'\)\}\s*footer=\{<VersionLine \/>\}>/,
-    'the admin rail has no version');
+  assert.match(admin, /<ConsoleLayout index=\{ADMIN_SETTINGS\} label=\{tr\('Admin'\)\}[\s\S]*?\bfooter=\{<VersionLine \/>\} \/>/, 'the admin list has no version');
   const line = slice(admin, 'function VersionLine(', 'function VersionFacts(');
   assert.match(line, /queryKey: \['admin-stats'\], queryFn: \(\) => api<any>\('\/api\/admin\/stats'\)/, 'the version is not the server\'s');
   // v0.72.0: the one query every reader of the report on Admin shares (lib/healthBySeries.ts healthQuery).
@@ -73,13 +72,8 @@ test('the admin rail ends with the version, and a phone says it among the header
   assert.match(facts, /\{update\?\.kind === 'current' && <>\{' · '\}<bdi className="inline-block">\{tr\('up to date'\)\}<\/bdi><\/>\}/);
   // The update is one block when the line wraps: the rail broke "update available" from its "(v0.55.5)".
   assert.match(facts, /className="inline-block text-accent hover:underline"><bdi>\{tr\('update available/, 'the update breaks inside itself');
-  // A phone: the same facts at the end of the header's line, hidden where the rail shows them.
-  const hero = slice(admin, 'function AdminHero(', 'function VersionLine(');
-  assert.match(hero, /<span data-hero-version className="lg:hidden">\s*\{facts\.length > 0 && ' · '\}<VersionFacts running=\{running\} update=\{updateState\(health\?\.checks\)\} \/>/,
-    'a phone cannot find the version');
-  assert.match(hero, /const running: string \| null = bridge\(\)\?\.version \|\| stats\?\.version \|\| null;/);
-  // The rail's footer is drawn on a desktop, and in the phone's group sheet (ConsoleNav).
-  const nav = code(read('components/ConsoleNav.tsx'));
-  assert.match(nav, /\{footer && \(\s*<div className="space-y-1 border-t border-ink-800\/80 pt-4">\{footer\}<\/div>/, 'the rail no longer draws its footer');
-  assert.match(nav, /\{footer && <div className="space-y-1 border-t border-ink-800\/80 pt-4">\{footer\}<\/div>\}/, 'the group sheet no longer draws the footer');
+  // Once: the card at the top of the same list does not repeat it.
+  assert.doesNotMatch(slice(admin, 'function AdminHero(', 'function VersionLine('), /VersionFacts/, 'the server card says the version again');
+  // The list draws its footer last, on every width.
+  assert.match(code(read('components/ConsoleLayout.tsx')), /\{footer\}\s*<\/nav>/, 'the list does not end with its footer');
 });

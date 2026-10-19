@@ -775,7 +775,7 @@ const EN = {
   'disk.noteFolders': () =>
     'A library or download folder that cannot be read, or that is empty while the library records chapters in it, is ' +
     'usually a share that is not mounted; nothing is marked missing because of it. Only the top of each folder is read ' +
-    'here: Verify chapter files (Admin → Tasks) checks every file.',
+    'here: Verify chapter files (Admin → Settings → Maintenance) checks every file.',
 
   // ---- Tracker sync (v0.72.0, lib/healthTrackers.ts, @Squeaks72's card from #253). `error` is the tracker's own.
   'trackers.refused': () => 'The tracker refused the saved sign-in',

@@ -80,6 +80,6 @@ test('Admin → Settings: Smart update checks under the update interval, saved a
   assert.match(schedules, /Check now always asks at once/, 'the help does not say Check now is never kept waiting');
   // And the search palette finds it by name, where it is.
   const d = DESTINATIONS.find((x) => x.label === 'Smart update checks');
-  assert.equal(d?.href, '/admin/?tab=Settings&section=smart-checks');
+  assert.equal(d?.href, '/admin/?tab=downloads&section=smart-checks');
   assert.equal(d?.admin, true);
 });

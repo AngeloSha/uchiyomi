@@ -3,6 +3,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useAdminSettingsViews } from '@/components/AdminSettings';
 import { ConsoleLayout, type PageView } from '@/components/ConsoleLayout';
 import { ADMIN_SETTINGS } from '@/lib/settingsIndex.admin';
+import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, img } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -13,7 +14,7 @@ import { shownDeviceName } from '@/lib/device';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
-import { IcChevronRight, IcTrash, IcPlus, IcRefresh, IcX, IcGrid, IcShield, IcRows, IcGlobe, IcSparkle, IcUsers, IcUser, IcClock } from '@/components/icons';
+import { IcChevronLeft, IcChevronRight, IcTrash, IcPlus, IcRefresh, IcX, IcGrid, IcShield, IcRows, IcGlobe, IcSparkle, IcUsers, IcUser, IcClock } from '@/components/icons';
 import { LibraryFolders } from '@/components/LibraryFolders';
 import { addFolder, foldersOf, heldByOthers, heldByText, previewQuery, previewText, sameFolders, toggleFolder, typedFolder } from '@/lib/libraryFolders';
 import { CardProgress, HealthCardActions, HealthRow, hasCardActions, scanState, scanWorking } from '@/components/HealthActions';
@@ -48,6 +49,7 @@ import { Segmented } from '@/components/settings';
 import { healthQuery, healthView, setHealthView, type HealthView } from '@/lib/healthBySeries';
 import { releaseHref, shownVersion, updateState, type UpdateState } from '@/lib/versionLine';
 import { useSectionArrival } from '@/lib/useSectionArrival';
+import { useReduceEffects } from '@/lib/effects';
 import { joinsOnTheirOwn, memberDefaultsOf, type MemberDefaults } from '@/lib/memberDefaults';
 
 /** A name or a title inside a sentence, isolated: in Arabic a Latin one otherwise takes the sentence's order. */
@@ -56,8 +58,8 @@ const iso = (s: string): string => `\u2068${s}\u2069`;
 /**
  * The admin console (v0.88.0): ONE grouped list -- Overview and Health; Library (Libraries, Sources, Art); People
  * (Members, Sessions, Activity); Settings (Server, Series & chapters, Downloads, Maintenance, Notifications) -- beside
- * the page on screen, or before it on a phone (components/ConsoleLayout.tsx). The server's state and the scan are the
- * card at the top of that list.
+ * the page on screen, or before it on a phone (components/ConsoleLayout.tsx), under the server's cinematic hero: its
+ * verdict, its counts and the scan.
  *
  * Before it, ten tabs in four groups under a hero that took the top of every tab, and Settings five more pages inside
  * one of them: on a phone a group menu, a row of tabs and a list of categories before the first switch -- "a tab under a
@@ -91,16 +93,19 @@ function AdminInner() {
       </section>
     ),
   });
+  const router = useRouter();
   const { data: stats } = useQuery({ queryKey: ['admin-stats'], queryFn: () => api<any>('/api/admin/stats'), enabled: isAdmin });
   const { data: health } = useQuery({ ...healthQuery, enabled: isAdmin });
+  const { data: art } = useQuery({ ...HERO_ART, enabled: isAdmin });
 
   if (!isAdmin) return <div className="flex min-h-screen-d items-center justify-center text-fog-400">{tr('Admins only.')}</div>;
 
   const bad = health ? health.checks.filter((c) => c.status !== 'ok').length : null;
   // Each row's line says what is in it, or -- where one number decides whether to open it -- that number.
   const views: Record<string, PageView> = {
+    // The hero above Overview says what it is on a computer, as it did before v0.88.0: no second title under it.
     overview: { icon: <IcGrid width={18} height={18} />, tint: 'bg-violet-500/15 text-violet-300',
-      summary: tr('What needs a look, and who is reading'), pane: <Overview /> },
+      summary: tr('What needs a look, and who is reading'), ownHeader: true, pane: <Overview /> },
     health: { icon: <IcShield width={18} height={18} />, tint: bad ? 'bg-amber-500/15 text-amber-300' : 'bg-emerald-500/15 text-emerald-300',
       summary: verdictOf(health, bad), pane: <Health /> },
     library: { icon: <IcRows width={18} height={18} />, tint: 'bg-indigo-500/15 text-indigo-300',
@@ -119,11 +124,13 @@ function AdminInner() {
   };
 
   return (
-    <div className="min-h-screen-d px-4 pt-[max(0.9rem,calc(env(safe-area-inset-top)+0.5rem))] lg:px-0 lg:pt-6" data-admin-console>
+    <div className="min-h-screen-d px-4 lg:px-0" data-admin-console>
       {/* The foot of the list says which Uchiyomi this is (v0.55.4, #150): the place people looked for it. */}
       <ConsoleLayout index={ADMIN_SETTINGS} label={tr('Admin')} views={views} home="overview"
         conds={{ web: !desktop, 'local-accounts': !settings.sso, extensions: settings.extensions, pointer: true }}
-        card={<AdminHero />} footer={<VersionLine />} />
+        hero={(mode) => <AdminHero mode={mode} onBack={() => (window.history.length > 1 ? router.back() : router.push('/profile/'))} />}
+        art={art?.seriesId ? <Backdrop seriesId={art.seriesId} className="absolute inset-0" /> : null}
+        footer={<VersionLine />} />
     </div>
   );
 }
@@ -136,24 +143,39 @@ const verdictOf = (health: { checks: HealthCheck[] } | undefined, bad: number | 
     : tr('Everything looks healthy');
 
 /**
- * The server's card, at the top of the admin list (v0.88.0; the hero above every tab until then).
+ * The header.
  *
- * The question an admin arrives with is whether the server is well, so the card's headline is the verdict, washed in
- * its colour -- amber the moment a check fails -- over real art from THIS library (a random series, the same `Backdrop`
- * the series page uses, blurred and drowned), with the counts demoted to the line under it and the scan beside them.
- * In the rail on a computer, at the top of the list on a phone: always in view of every page, never above one.
+ * Two things it is trying to fix. The panel had no visual identity at all -- flat cards on flat black, in an
+ * app whose every other surface is composed over ambient art -- and the health of the server, which is the
+ * question an admin arrives with, was reachable only by opening a tab and waiting for it to load.
+ *
+ * So the backdrop is real art from THIS library (a random series, the same `Backdrop` the series page uses,
+ * blurred and drowned under a gradient), and the headline is the verdict rather than a row of numbers. The
+ * counts are still there, just demoted to the line that supports it.
+ *
+ * `band` (the UI refresh's `compact`): above every page but Overview on a computer. The verdict and its facts stay -- an
+ * admin opening Settings still sees at a glance that a check failed -- but in a band, not the ~480 px that pushed
+ * Settings and Members below the fold. v0.88.0 put it in a card in the list for a day; the owner: "it was cinematic and
+ * nicer before with a hero section". Which version runs is the list's foot, on a phone too, where the list is the
+ * first screen (components/ConsoleLayout.tsx).
  */
-function AdminHero() {
+function AdminHero({ mode, onBack }: { mode: 'full' | 'band'; onBack: () => void }) {
+  const compact = mode === 'band';
+  // Both settings, both hooks on every render (components/Toast.tsx says why): the verdict rises in, unless either says not.
+  const plain = useReduceEffects();
+  const still = useReducedMotion();
+  const reduced = plain || !!still;
+  const rise = (delay = 0) => ({
+    initial: reduced ? false as const : { opacity: 0, y: 12 },
+    animate: { opacity: 1, y: 0 },
+    transition: reduced ? { duration: 0 } : { duration: 0.5, delay, ease: [0.22, 0.61, 0.36, 1] as const },
+  });
   const qc = useQueryClient();
   const { data: stats } = useQuery({ queryKey: ['admin-stats'], queryFn: () => api<any>('/api/admin/stats') });
   const { data: health } = useQuery(healthQuery);
   // One random series for the wash. `keepPreviousData` is deliberately off: a different backdrop on each
   // visit is the point, and it is the cheapest way to make the panel feel like part of the library.
-  const { data: rnd } = useQuery({
-    queryKey: ['admin-hero-art'],
-    queryFn: () => api<{ seriesId: string | null }>('/api/random'),
-    staleTime: 5 * 60_000,
-  });
+  const { data: rnd } = useQuery(HERO_ART);
 
   const bad = health ? health.checks.filter((c) => c.status !== 'ok').length : null;
   const verdict = verdictOf(health, bad);
@@ -194,26 +216,51 @@ function AdminHero() {
   ].filter(Boolean) as string[];
 
   return (
-    <div data-admin-hero className="card grad-border relative isolate overflow-hidden rounded-2xl p-4">
-      {rnd?.seriesId && <Backdrop seriesId={rnd.seriesId} className="absolute inset-0 -z-10" />}
+    <div data-admin-hero={compact ? 'compact' : 'full'} className={`bleed relative isolate overflow-hidden lg:mt-2 lg:rounded-b-3xl ${compact ? 'mb-4' : 'mb-6'}`}>
+      {rnd?.seriesId && <Backdrop seriesId={rnd.seriesId} className="absolute inset-0" />}
       {/* Drowned deliberately: this is a wash to sit text on, not a picture to look at. */}
-      <div aria-hidden className="absolute inset-0 -z-10 bg-linear-to-t from-ink-950 via-ink-950/90 to-ink-950/70" />
-      {/* The bloom takes the verdict's colour, so the card goes amber the moment a check fails. */}
-      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10"
-        style={{ background: `radial-gradient(90% 130% at var(--start) 0%, ${bad ? 'rgba(245,158,11,0.22)' : 'rgb(var(--accent) / 0.24)'}, transparent 65%)` }} />
-      <p className="text-[11px] font-semibold text-fog-500">{tr('Admin')}</p>
-      <div className="mt-1 flex items-center gap-2">
-        <span aria-hidden className={`size-2.5 shrink-0 rounded-full ${!health ? 'bg-fog-600' : bad ? 'bg-amber-400' : 'bg-emerald-400'} ${!health ? 'animate-pulse' : ''}`} />
-        <h1 className="font-display text-lg font-bold leading-tight text-fog-50">{verdict}</h1>
+      <div className="absolute inset-0 bg-linear-to-t from-ink-950 via-ink-950/90 to-ink-950/70" />
+      {/* The bloom takes the verdict's colour, so the whole top of the page goes amber the moment a check
+          fails. One ternary, no assets, and every pixel of it is data. */}
+      <div aria-hidden className="pointer-events-none absolute inset-0"
+        style={{ background: `radial-gradient(75% 120% at var(--start) 0%, ${bad ? 'rgba(245,158,11,0.20)' : 'rgb(var(--accent) / 0.22)'}, transparent 60%)` }} />
+
+      <div className={`bleed-pad relative pt-[max(0.9rem,calc(env(safe-area-inset-top)+0.5rem))] ${compact ? 'pb-4 lg:pb-5 lg:pt-5' : 'pb-6 lg:pb-8 lg:pt-8'}`}>
+        <div className={`flex items-center gap-2 ${compact ? 'mb-3' : 'mb-5'}`}>
+          <button onClick={onBack} aria-label={tr('Back')}
+            className="grid h-10 w-10 place-items-center rounded-full bg-black/40 text-fog-100 backdrop-blur">
+            <IcChevronLeft width={22} height={22} className="rtl:-scale-x-100" />
+          </button>
+          <span className="text-xs font-semibold uppercase tracking-wider text-fog-500 rtl:tracking-normal">{tr('Admin')}</span>
+        </div>
+
+        <motion.div {...rise()}>
+          <div className="flex items-center gap-2.5">
+            <span aria-hidden className={`size-2.5 shrink-0 rounded-full ${
+              !health ? 'bg-fog-600' : bad ? 'bg-amber-400' : 'bg-emerald-400'
+            } ${!health ? 'animate-pulse' : ''}`} />
+            <h1 className={`font-display font-bold leading-tight text-fog-50 ${compact ? 'text-xl lg:text-2xl' : 'text-2xl lg:text-4xl'}`}>{verdict}</h1>
+          </div>
+          {facts.length > 0 && <p className="mt-2 text-sm text-fog-400">{facts.join(' · ')}</p>}
+        </motion.div>
+
+        <motion.div {...rise(0.08)} className={compact ? 'mt-3' : 'mt-5'}>
+          <button onClick={scan} disabled={scanned?.kind === 'working'} data-hero-scan className={`btn-accent disabled:opacity-60 ${compact ? 'px-4 py-2 text-xs' : 'px-5 py-2.5 text-sm'}`}>
+            <IcRefresh width={16} height={16} />{scanned?.kind === 'working' ? tr('Scanning library…') : tr('Scan library now')}
+          </button>
+          {scanned && scanned.kind !== 'working' && <div data-hero-scan-result className="max-w-xl"><ActionStatus state={scanned} /></div>}
+        </motion.div>
       </div>
-      {facts.length > 0 && <p className="mt-1.5 text-[12px] leading-relaxed text-fog-400">{facts.join(' · ')}</p>}
-      <button onClick={scan} disabled={scanned?.kind === 'working'} data-hero-scan className="btn-accent mt-3 px-4 py-2 text-xs disabled:opacity-60">
-        <IcRefresh width={16} height={16} />{scanned?.kind === 'working' ? tr('Scanning library…') : tr('Scan library now')}
-      </button>
-      {scanned && scanned.kind !== 'working' && <div data-hero-scan-result><ActionStatus state={scanned} /></div>}
     </div>
   );
 }
+
+/** The hero's art, one random series of this library: a phone's pages open under the same wash. */
+const HERO_ART = {
+  queryKey: ['admin-hero-art'],
+  queryFn: () => api<{ seriesId: string | null }>('/api/random'),
+  staleTime: 5 * 60_000,
+};
 
 /**
  * Which Uchiyomi this is, at the foot of the admin menu (v0.55.4, #150).
@@ -231,7 +278,7 @@ function VersionLine() {
   const running: string | null = bridge()?.version || stats?.version || null;
   if (!running) return null;
   return (
-    <p data-admin-version className="text-[11px] leading-relaxed text-fog-500 lg:px-3">
+    <p data-admin-version className="px-1 text-[11px] leading-relaxed text-fog-500">
       <VersionFacts running={running} update={updateState(health?.checks)} />
     </p>
   );
@@ -262,8 +309,8 @@ function VersionFacts({ running, update }: { running: string; update: UpdateStat
  * Where to go next is the console's own list, beside this page or one Back away (v0.88.0): the four tiles that led
  * to Tasks, Sessions, Sources and Activity were a second menu inside the first.
  *
- * The counts and the scan live in the server's card at the top of that list, where they are read before anything is
- * clicked. Repeating them here would be the same numbers twice on one screen.
+ * The counts and the scan live in the server's hero above it, where they are read before anything is clicked.
+ * Repeating them here would be the same numbers twice on one screen.
  */
 function Overview() {
   const still = useReducedMotion();

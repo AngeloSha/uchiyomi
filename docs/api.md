@@ -628,7 +628,7 @@ into one outbound fetch. A failed lookup is never cached, so an immediate retry 
 curl -H "Authorization: Bearer $TOK" https://your-server/api/admin/health
 ```
 
-Returns the same checks as the admin Health tab: chapter gaps (since v0.55.0 counted between plausible numbers only:
+Returns the same checks as the admin Health page: chapter gaps (since v0.55.0 counted between plausible numbers only:
 a chapter numbered far beyond the rest is the impossible-number check's, never a gap of thousands -- the repair's gap
 step counts the same way), truncated downloads, duplicate series, impossible chapter numbers, failing sources, the last library scan (`library-scan`: folders it could not index,
 and since v0.48.2 folders it could not look into at all), and since v0.48.2 `downloads-missing`: every chapter
@@ -712,7 +712,7 @@ from before). What a run keeps of the packages it searched in vain, for the next
 was searched for), is in no route's answer.
 
 `GET /api/admin/health/summary` (since v0.48.0) is the cheap question the app's header asks: the last report
-boiled down to `{at, worst, count, headline, key, checks}`, answered from what the Health tab or the server's
+boiled down to `{at, worst, count, headline, key, checks}`, answered from what the Health page or the server's
 own six-hourly run stored, never by running the checks. `key` changes only when *which* checks found something
 changes, so an alert dismissed for one problem comes back for a new one. Since v0.49.1 each of `checks` (worst
 first) carries `summarySaid`: `headline` is `checks[0]`'s title and summary in English, and a client words it from
@@ -1854,7 +1854,7 @@ series, as each series' `booksCount` counts them), `members`, `cacheBytes`, `las
 `database` (`embedded` or `external`) and each
 member's recent reading (`activity`). Since v0.55.4 ([#150](https://github.com/AngeloSha/uchiyomi/issues/150)) it also
 answers `version`, the running version as the server's own package.json says it, or null when that cannot be read; the
-foot of the admin menu prints it. Whether a newer one exists is Health's `update` check (`GET /api/admin/health`), which
+foot of the admin list prints it. Whether a newer one exists is Health's `update` check (`GET /api/admin/health`), which
 the page reads from its own copy of that answer: this route asks GitHub nothing.
 
 **Libraries.** A library is declared on one or more folders under the library root (since v0.55.1, #148): `POST
@@ -1933,7 +1933,7 @@ of sources and series that do not say which they are in (English by default, `un
 followed for a series automatically only when both are in the same language. Any one language is accepted and
 normalised (`pt-br` is `pt-BR`); `all`, `other` or an empty string is a **400** `unknown_language`. Each field is
 written on its own, an out-of-range value is a **400** and nothing is written, and
-the audit row `settings.update` carries the body. The admin console's Settings tab sends one
+the audit row `settings.update` carries the body. The admin console's settings pages send one
 row per PATCH as each row is changed (the read-chapter confirmation carries the day count with the switch).
 
 **New-member defaults** ([#208](https://github.com/AngeloSha/uchiyomi/issues/208); **Admin → Members → When someone
@@ -2290,7 +2290,7 @@ table is re-pointed to the chapter's current series first, deletes are keyed on 
 actually owns, and if a progress row or bookmark on another series' chapter is still filed here after that
 the whole transaction rolls back — **409** `refused` `stranded`, nothing changed. It refuses, **409**
 `refused` `{message, fix}`, in exactly four other cases: `live`, while the series is still in the library
-(*Remove the series first. Forgetting it is a third, separate step.*, fix *Content → Library → Remove, then
+(*Remove the series first. Forgetting it is a third, separate step.*, fix *Admin → Libraries → Remove, then
 Delete files, then Forget.*); `live_books`, while any chapter row still claims a file (*N chapter row(s)
 still claim(s) a file on disk. Delete the files first, or the next scan brings the series back under a new
 id with none of its history.*, fix *Delete files, then Forget.*); `missing_files`, only for a root that
@@ -2429,7 +2429,7 @@ false, error: 'busy'}`. `GET /api/admin/tasks` lists it as `{id: 'matches', name
 the links and pictures removed (up to 50 named).
 
 **Repair the library.** `POST /api/admin/tasks/repair/run` (since v0.41.0; the Tasks panel's *Repair
-library*, and the *Fix* / *Fill now* / *Retry now* keys and the *Reset the solver* action on the Health tab —
+library*, and the *Fix* / *Fill now* / *Retry now* keys and the *Reset the solver* action on the Health page —
 *It's fine* is the separate `confirm-short` route below) runs the nightly repair now. It is **detached**, like `update` and `verify`, and answers **200**
 `{ok: true, started: true}` (since v0.49.0 with the run's id, below); a full run's counts land on `GET
 /api/admin/tasks` as the `repair` entry's `lastResult`.
@@ -2990,7 +2990,7 @@ leading *The*, *A* or *An* is ignored only when at least six letters remain; oth
 containment, because a spin-off's name contains its parent's. An answer that is another work is stored as the miss a "no
 match" is, so it is not asked again on every view. `/img/series/:id/thumb` is an admin's cover, else the source's
 cover or a checked AniList one, else the series' first page. What was stored before v0.55.7 is held to the same rule
-by **Check online matches** (Admin → Tasks, above); Health's *Duplicate series* groups only links a person made or
+by **Check online matches** (Admin → Settings → Maintenance, above); Health's *Duplicate series* groups only links a person made or
 that were checked. `PUT /api/admin/series/:id/art {kind: 'cover', mode: 'first_page'}` makes the series' own first page
 its cover for good: the series payload's `overrides.cover` reads `'first_page'` (beside `'upload'` and a pasted URL),
 nothing found online is shown or looked up for it -- its banner is made from its pages unless an admin set one -- and

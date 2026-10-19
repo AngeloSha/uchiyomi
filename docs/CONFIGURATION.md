@@ -131,7 +131,7 @@ a request AniList asks to wait waits. Of the knobs below, only `ANILIST_API_URL`
 moves them (AniList's, since v0.55.7); the other two point only the token-bearing tracker calls elsewhere.
 
 Since v0.55.8 ([discussion #168](https://github.com/AngeloSha/uchiyomi/discussions/168)), each library — the default
-one included — has **Look up art and metadata on AniList automatically** under Admin → Content → Libraries. Switch it
+one included — has **Look up art and metadata on AniList automatically** under Admin → Libraries. Switch it
 off to prevent automatic art lookup, title/id matching, reading-direction/type repair, startup match checks and
 scheduled enrichment for series currently in that library. Uchiyomi creates no negative lookup cache entry while it
 is off, clears none of the art, links, type or direction it already learned, and applies the destination library's
@@ -507,7 +507,7 @@ break and the scheduler's one-minute look, so a test can watch a chapter land. L
 ## The nightly repair
 
 On by default, under **Admin → Settings → Maintenance → Repair the library nightly**, and listed as
-**Admin → Tasks → Repair library**. Once every `REPAIR_HOURS` it does the six things that are reversible or
+**Admin → Settings → Maintenance → Repair library**. Once every `REPAIR_HOURS` it does the six things that are reversible or
 provable on their own, and two more only when you switch them on, in this order:
 
 1. **Cloudflare state.** If the solver answers *and* sources are blaming it, the remembered sessions and
@@ -581,7 +581,7 @@ only a deliberate `0` turns the pause off.
 
 **Runs are kept** (since v0.49.0): every run, nightly or pressed on the Health page, is a row the Health page lists
 under *Recent repairs* — the newest 50 and everything from the last 90 days are kept. Only a **full** run (the
-nightly, or *Run now* on Tasks) is the Tasks line and sets when the next nightly is due, so a fix pressed on one
+nightly, or *Run now* on Maintenance) is the task's line and sets when the next nightly is due, so a fix pressed on one
 Health row neither replaces that line nor moves the schedule. *Fill now* on one series looks at it even while its
 automatic updates are off, and fetches the gap chapters a source it already follows lists (up to 20) instead of
 leaving them to the sweep; the nightly's rule above is unchanged.

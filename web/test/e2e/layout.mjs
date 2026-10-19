@@ -22,7 +22,7 @@ const PASS = process.env.E2E_PASS || 'e2e-passw0rd-123';
 // Profile → Insights (v0.75.0) is a board like You: its cards must fill a wide window and fit 390.
 // Admin → Sources (v0.54.0; Admin → Extensions' strip, Installed | Browse since v0.53.0): its strip, Your sources |
 // Add sources and their rows at every width -- each view by its own address, since the tab opens on one of them only.
-const PAGES = (process.env.PAGES || '/,/updates,/history,/library,/library/?view=downloads,/collections,/discover,/profile,/admin,/admin/import,/moments,/profile/?tab=Insights,/profile/?tab=Settings,/profile/?tab=Settings&cat=reading,/profile/?tab=Connections,/profile/?tab=Account,/admin/?tab=Settings,/admin/?tab=Settings&cat=downloads,/admin/?tab=Sources&view=yours,/admin/?tab=Sources&view=add').split(',');
+const PAGES = (process.env.PAGES || '/,/updates,/history,/library,/library/?view=downloads,/collections,/discover,/profile,/admin,/admin/import,/moments,/profile/?tab=insights,/profile/?tab=general,/profile/?tab=reading,/profile/?tab=connections,/profile/?tab=account,/admin/?tab=server,/admin/?tab=downloads,/admin/?tab=maintenance,/admin/?tab=sources&view=yours,/admin/?tab=sources&view=add').split(',');
 
 // How much of a wide viewport the content must actually occupy. Not 100%: a settings form SHOULD have
 // margins, and prose that runs 1900px wide is unreadable. But a page using less than this is a column
@@ -253,6 +253,56 @@ try {
   else if (!overRail) bad('wheel @1366 /: the pointer never crossed a rail -- the check proves nothing');
   else if (wheeled < Math.min(wheelSetup.max, 2000) - 40) bad(`wheel @1366 /: the page stopped at ${wheeled} px of ${wheelSetup.max} with the pointer over a rail`);
   else ok(`wheel @1366 /: a steady wheel carries the page past ${wheelSetup.rails} rail(s) to ${wheeled} px of ${wheelSetup.max}`);
+  await page.evaluate(() => window.scrollTo(0, 0));
+
+  // v0.88.0, the consoles (components/ConsoleLayout.tsx): each opens under its cinematic hero, which reaches both edges --
+  // in full above its first page, a band above the rest; a phone opens a page under a band of the hero's art, the hero
+  // itself hidden; and with the hero still in view, a wheel over the list beside the page scrolls the page (the list
+  // scrolls on its own only once it has stuck under the top bar).
+  console.log('\n  consoles');
+  await page.setViewport({ width: 1440, height: 900 });
+  for (const [path, sel, mode] of [['/profile/', '[data-profile-hero]', 'full'], ['/profile/?tab=appearance', '[data-profile-hero]', 'band'],
+    ['/admin/', '[data-admin-hero]', 'full'], ['/admin/?tab=maintenance', '[data-admin-hero]', 'band']]) {
+    await page.goto(BASE + path, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+    await sleep(2200);
+    const hero = await page.evaluate((q) => {
+      const el = document.querySelector(q);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { left: Math.round(r.left), right: Math.round(r.right), h: Math.round(r.height), vw: document.documentElement.clientWidth,
+        mode: document.querySelector('[data-console-hero]')?.getAttribute('data-console-hero') ?? null };
+    }, sel);
+    if (!hero) bad(`${path} @1440: no hero`);
+    else if (hero.mode !== mode) bad(`${path} @1440: the hero is "${hero.mode}", expected "${mode}"`);
+    else if (hero.left > 1 || hero.right < hero.vw - 1) bad(`${path} @1440: the hero spans ${hero.left}..${hero.right} of ${hero.vw}`);
+    else if (mode === 'band' && hero.h > 280) bad(`${path} @1440: the band is ${hero.h} px tall`);
+    else ok(`${path} @1440: the ${mode} hero reaches both edges (${hero.h} px)`);
+  }
+  await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+  for (const path of ['/profile/?tab=appearance', '/admin/?tab=health']) {
+    await page.goto(BASE + path, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+    await sleep(2200);
+    const r = await page.evaluate(() => {
+      const shown = (q) => { const el = document.querySelector(q); return !!el && el.getBoundingClientRect().height > 0 && getComputedStyle(el).display !== 'none'; };
+      return { hero: shown('[data-console-hero]'), back: shown('[data-console-back]'), art: shown('[data-console-header-art]'), list: shown('[data-console-nav]') };
+    });
+    if (r.hero || r.list) bad(`${path} @390: the hero or the list is drawn above a page (${JSON.stringify(r)})`);
+    else if (!r.back || !r.art) bad(`${path} @390: the page has no Back key or no art band (${JSON.stringify(r)})`);
+    else ok(`${path} @390: the page opens under its own band, with Back`);
+  }
+  await page.setViewport({ width: 1366, height: 768 });
+  await page.goto(BASE + '/admin/', { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+  await sleep(2200);
+  const navAt = await page.evaluate(() => { window.scrollTo(0, 0); const r = document.querySelector('[data-console-nav]')?.getBoundingClientRect(); return r ? { x: Math.round(r.left + r.width / 2), y: Math.round(Math.min(r.top + 60, innerHeight - 40)) } : null; });
+  if (!navAt) bad('wheel @1366 /admin/: no list to wheel over');
+  else {
+    await page.mouse.move(navAt.x, navAt.y);
+    for (let i = 0; i < 8; i++) { await page.mouse.wheel({ deltaY: 100 }); await sleep(60); }
+    await sleep(1200);
+    const y = await page.evaluate(() => Math.round(scrollY));
+    if (y < 250) bad(`wheel @1366 /admin/: the page moved ${y} px with the pointer over the list -- the list kept the wheel`);
+    else ok(`wheel @1366 /admin/: a wheel over the list scrolls the page (${y} px)`);
+  }
   await page.evaluate(() => window.scrollTo(0, 0));
 
   for (const w of [2560, 1920, 1280, 1024, 390]) {

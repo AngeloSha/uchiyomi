@@ -1,5 +1,5 @@
 /**
- * A library's folders (v0.55.1, #148) -- the part of Admin → Content → Library with no React in it, so a test can hold
+ * A library's folders (v0.55.1, #148) -- the part of Admin → Libraries with no React in it, so a test can hold
  * the rules and the words.
  *
  * A library was one folder. @Kedryn: "i want 'Uchiyomi manga' to have all those listed folders BUT '18 porn comics' and

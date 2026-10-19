@@ -80,9 +80,9 @@ test('the admin console lists every source, including the ones Discover hides', 
   for (const src of [admin, panel, dialog, lib]) {
     assert.doesNotMatch(src, /\/api\/admin\/sources\/overview\?|adultShown\(\)/, 'the overview is asked for with a parameter it does not read');
   }
-  // Its own key, under ['sources'] so every change that asks the source lists again asks this too: the tab and its tile.
+  // Its own key, under ['sources'] so every change that asks the source lists again asks this too. Its page reads it;
+  // the Overview's count tile that read it too went with the tiles (v0.88.0).
   assert.match(lib, /export const OVERVIEW_KEY = \['sources', 'overview'\] as const;/);
-  assert.equal((admin.match(/queryKey: OVERVIEW_KEY, queryFn: \(\) => api<SourcesOverview>\(OVERVIEW_URL\)/g) ?? []).length, 1, 'the tile does not read the overview');
   assert.equal((panel.match(/queryKey: OVERVIEW_KEY, queryFn: \(\) => api<SourcesOverview>\(OVERVIEW_URL\)/g) ?? []).length, 1, 'the tab does not read the overview');
   assert.doesNotMatch(admin, /queryKey: \['sources'\], queryFn: \(\) => api<\{ content: any\[\] \}>\('\/api\/sources'\)/,
     'an admin source query is back on the shared browsing key');

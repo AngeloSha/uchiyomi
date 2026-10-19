@@ -123,11 +123,12 @@ test('the cards, drawn from one answer: finish dates, bests, the mix, the series
 
 const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
 
-test('Insights is its own tab, from one request keyed on Show 18+, and the Studio\'s heatmap writes no numbers', () => {
+test('Insights is its own page, from one request keyed on Show 18+, and the Studio\'s heatmap writes no numbers', () => {
   const page = read('app/profile/page.tsx');
-  assert.match(page, /tab === 'Insights' \? \(\s*<ProfileInsights \/>/, 'the Insights tab does not draw the insights');
-  const board = page.slice(page.indexOf("tab === 'You' ? ("), page.indexOf("tab === 'Insights'"));
-  assert.doesNotMatch(board, /Insight/, 'the insights are on the You tab, which they made twice as long');
+  assert.match(page, /summary: tr\('What your reading adds up to'\), tile: <ActivityBars days=\{stats\?\.byDay \?\? \[\]\} \/>, pane: <ProfileInsights \/> \}/, 'the Insights page does not draw the insights');
+  const board = page.slice(page.indexOf('function YouBoard('), page.indexOf('function FootRows('));
+  assert.ok(board.length > 100, 'YouBoard is not where this test looks');
+  assert.doesNotMatch(board, /Insight/, 'the insights are on the You page, which they made twice as long');
   const src = read('components/ProfileInsights.tsx');
   assert.match(src, /queryKey: \['stats-insights', shown\]/, 'the answer is not keyed on Show 18+, whose series it names');
   assert.match(src, /api<InsightsPayload>\('\/api\/stats\/insights'\)/);
