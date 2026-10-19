@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.85.0 — 2026-10-19
+
+**Read raw chapters in your own language: translated pages, an optional download that runs on your server.**
+
+### Translated pages
+
+- **Turned on once, for the whole server.** **Admin → Settings → Server → Translate pages → Download** fetches the
+  translation engine: a reader for the text in the pages, a translation model and the fonts it writes with. It is about
+  19 GB on a server with 28 GB of memory or more and about 3 GB elsewhere, and the row says what it will take before you
+  press it. Then one switch. Nothing changes for anyone until then, and **Remove the translation engine** takes it away.
+- **Each reader turns it on per series.** **Translate pages** in the reader's settings translates into the language
+  Uchiyomi is in for you, a page at a time from the page you are on. Each page switches to its translation as soon as it
+  is done, and the next chapter follows.
+- **It translates the scene, not single words.** A page's bubbles are translated together, with the lines before them
+  and the names already met in the series, so a character keeps one name. When the text is hard to read, the large
+  model looks at the page itself. The translation is written into each bubble in its own shape and colour, and sound
+  effects drawn on the art are left alone.
+- **Your pages stay home.** Everything runs on your server, at low priority, and stops when nobody is reading. Only the
+  download comes from the internet (GitHub and Hugging Face), each file checked against a checksum pinned in the app.
+- **Speed:** on a 6-core CPU with no graphics card, 10–15 seconds a page for Japanese and Chinese, and up to a minute for
+  a page whose text is hard to read (most Korean pages). See [USAGE](docs/USAGE.md#translated-pages) and
+  [CONFIGURATION](docs/CONFIGURATION.md#translated-pages).
+
+### Upgrading
+
+- Nothing to do: the database gains three things, empty until Translate pages is used. If your config folder is on a
+  small disk, set `TRANSLATE_DIR` to a folder on a big one before pressing Download
+  ([CONFIGURATION](docs/CONFIGURATION.md#translated-pages)).
+- Not in Uchiyomi Desktop yet.
+
 ## v0.84.1 — 2026-10-18
 
 **Reading on into the next chapter no longer reloads the reader.**
