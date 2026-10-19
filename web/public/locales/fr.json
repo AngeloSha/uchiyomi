@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4154
+    "strings": 4175
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -4157,5 +4157,26 @@
   "{n} series hold the same chapter in two files": "{n} séries ont le même chapitre dans deux fichiers",
   "1 chapter is here twice: {numbers}": "1 chapitre est ici en double : {numbers}",
   "{n} chapters are here twice: {numbers}": "{n} chapitres sont ici en double : {numbers}",
-  "A series that holds two files of one chapter offers \"Keep one of each\": the first file saved stays, unless it is incomplete. The other is deleted from the download folder, or set aside where Uchiyomi may not delete; reading progress moves to the copy that stays, and a bookmarked copy is kept. A part or an extra filed under its chapter's number (17e, 1053a) is never offered.": "Une série qui a un chapitre dans deux fichiers propose « En garder une de chaque » : le premier fichier enregistré reste, sauf s’il est incomplet. L’autre est supprimé du dossier de téléchargement, ou mis de côté là où Uchiyomi n’a pas le droit de supprimer ; la progression de lecture passe sur la copie qui reste, et une copie marquée d’un signet est conservée. Une partie ou un extra rangé sous le numéro de son chapitre (17e, 1053a) n’est jamais proposé."
+  "A series that holds two files of one chapter offers \"Keep one of each\": the first file saved stays, unless it is incomplete. The other is deleted from the download folder, or set aside where Uchiyomi may not delete; reading progress moves to the copy that stays, and a bookmarked copy is kept. A part or an extra filed under its chapter's number (17e, 1053a) is never offered.": "Une série qui a un chapitre dans deux fichiers propose « En garder une de chaque » : le premier fichier enregistré reste, sauf s’il est incomplet. L’autre est supprimé du dossier de téléchargement, ou mis de côté là où Uchiyomi n’a pas le droit de supprimer ; la progression de lecture passe sur la copie qui reste, et une copie marquée d’un signet est conservée. Une partie ou un extra rangé sous le numéro de son chapitre (17e, 1053a) n’est jamais proposé.",
+  "Merge with the page on the left": "Réunir avec la page de gauche",
+  "Merge with the page on the right": "Réunir avec la page de droite",
+  "Show as two pages": "Afficher en deux pages",
+  "Undo the merge": "Annuler la réunion des pages",
+  "Join these two pages again": "Réunir de nouveau ces deux pages",
+  "already following as many as it may": "autant de sources que permis sont déjà suivies",
+  "Other sources per series": "Autres sources par série",
+  "How many sources besides its main one a series may follow, whether you add them or Uchiyomi finds them. 3 by default. Each one is one more chapter list to ask for at every library update.": "Le nombre de sources, en plus de la principale, qu’une série peut suivre, que vous les ajoutiez ou qu’Uchiyomi les trouve. 3 par défaut. Chacune est une liste de chapitres de plus à demander à chaque mise à jour de la bibliothèque.",
+  "Each badge you earn unlocks a frame. Everyone in your household sees the one you wear.": "Chaque badge obtenu débloque un cadre. Tout le foyer voit celui que vous portez.",
+  "Unlocked with {badge}": "Débloqué avec « {badge} »",
+  "Unlocks with {badge}": "Se débloque avec « {badge} »",
+  "Frame": "Cadre",
+  "Badges unlock frames for your avatar": "Les badges débloquent des cadres pour votre avatar",
+  "This page": "Cette page",
+  "For when the server joined two pages that are not one picture, or missed two that are. Saved for your account only.": "Pour les cas où le serveur a réuni deux pages qui ne forment pas une seule image, ou en a manqué deux qui en forment une. Enregistré pour votre compte uniquement.",
+  "Bronze": "Bronze",
+  "Silver": "Argent",
+  "Ember": "Braise",
+  "Gold": "Or",
+  "Moonlight": "Clair de lune",
+  "Aurora": "Aurore"
 }

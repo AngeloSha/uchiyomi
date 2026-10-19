@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4154
+    "strings": 4175
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4157,5 +4157,26 @@
   "{n} series hold the same chapter in two files": "{n} 部作品的同一章节存在两个文件中",
   "1 chapter is here twice: {numbers}": "1 个章节在这里有两份：{numbers}",
   "{n} chapters are here twice: {numbers}": "{n} 个章节在这里有两份：{numbers}",
-  "A series that holds two files of one chapter offers \"Keep one of each\": the first file saved stays, unless it is incomplete. The other is deleted from the download folder, or set aside where Uchiyomi may not delete; reading progress moves to the copy that stays, and a bookmarked copy is kept. A part or an extra filed under its chapter's number (17e, 1053a) is never offered.": "同一章节有两个文件的作品会显示“每章保留一份”：保留最先保存的文件，除非它不完整。另一份会从下载文件夹中删除；在 Uchiyomi 无权删除的位置则移到一旁。阅读进度会转移到保留的那一份，有书签的副本也会保留。按所属章节编号保存的分段或番外（17e、1053a）永远不会被列入。"
+  "A series that holds two files of one chapter offers \"Keep one of each\": the first file saved stays, unless it is incomplete. The other is deleted from the download folder, or set aside where Uchiyomi may not delete; reading progress moves to the copy that stays, and a bookmarked copy is kept. A part or an extra filed under its chapter's number (17e, 1053a) is never offered.": "同一章节有两个文件的作品会显示“每章保留一份”：保留最先保存的文件，除非它不完整。另一份会从下载文件夹中删除；在 Uchiyomi 无权删除的位置则移到一旁。阅读进度会转移到保留的那一份，有书签的副本也会保留。按所属章节编号保存的分段或番外（17e、1053a）永远不会被列入。",
+  "Merge with the page on the left": "与左边的页面合并",
+  "Merge with the page on the right": "与右边的页面合并",
+  "Show as two pages": "显示为两页",
+  "Undo the merge": "撤销合并",
+  "Join these two pages again": "重新合并这两页",
+  "already following as many as it may": "已追踪到上限",
+  "Other sources per series": "每个系列的其他来源数",
+  "How many sources besides its main one a series may follow, whether you add them or Uchiyomi finds them. 3 by default. Each one is one more chapter list to ask for at every library update.": "一个系列除主来源外最多可追踪多少个来源，无论是你添加的还是 Uchiyomi 找到的。默认为 3。每多一个来源，每次书库更新都要多请求一份章节列表。",
+  "Each badge you earn unlocks a frame. Everyone in your household sees the one you wear.": "每获得一枚徽章就会解锁一个头像框。家人都能看到你戴的那个。",
+  "Unlocked with {badge}": "已通过“{badge}”解锁",
+  "Unlocks with {badge}": "获得“{badge}”后解锁",
+  "Frame": "头像框",
+  "Badges unlock frames for your avatar": "徽章可解锁头像框",
+  "This page": "本页",
+  "For when the server joined two pages that are not one picture, or missed two that are. Saved for your account only.": "用于服务器把不属于同一幅画面的两页合并了，或漏掉了本是一幅画面的两页的情况。仅为你的账号保存。",
+  "Bronze": "青铜",
+  "Silver": "白银",
+  "Ember": "余烬",
+  "Gold": "黄金",
+  "Moonlight": "月光",
+  "Aurora": "极光"
 }
