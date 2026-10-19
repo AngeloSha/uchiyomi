@@ -19,7 +19,7 @@
   effects drawn on the art are left alone.
 - **Your pages stay home.** Everything runs on your server, at low priority, and stops when nobody is reading. Only the
   download comes from the internet (GitHub and Hugging Face), each file checked against a checksum pinned in the app.
-- **Speed:** on a 6-core CPU with no graphics card, 10–15 seconds a page for Japanese and Chinese, and up to a minute for
+- **Speed:** on a 6-core CPU with no graphics card, 15–20 seconds a page for Japanese and Chinese, and up to a minute for
   a page whose text is hard to read (most Korean pages). See [USAGE](docs/USAGE.md#translated-pages) and
   [CONFIGURATION](docs/CONFIGURATION.md#translated-pages).
 

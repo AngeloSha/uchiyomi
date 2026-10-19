@@ -1631,9 +1631,10 @@ translated once per language and kept, so reading it again costs nothing.
 
 **What to expect.**
 
-- **Speed.** On a 6-core CPU with no graphics card: about 10–15 seconds a page for Japanese and Chinese. A page whose
-  text is hard to read (most Korean pages) takes up to a minute, because the model then looks at the page itself. The
-  first pages of a chapter are ready long before the last.
+- **Speed.** On a 6-core CPU with no graphics card: about 15–20 seconds a page for Japanese and Chinese (a 10-page
+  chapter took 3½ minutes). A page whose text is hard to read (most Korean pages) takes up to a minute, because the
+  model then looks at the page itself. The first page waits for the model to load, up to a minute or two from a hard
+  disk; the first pages of a chapter are ready long before the last.
 - **The server's resources.** While it translates, the engine takes the memory the row showed and half the CPU, at low
   priority, so reading and downloads stay quick. It stops after 10 minutes without a page.
 - **Quality.** It is a machine translation of machine-read text: names, jokes and stylised lettering sometimes come out
