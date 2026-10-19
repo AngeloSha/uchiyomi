@@ -131,6 +131,6 @@ test('the reader runs every key through the map, Escape first, and stops a bound
   // Reintroduce the chain of `e.key === …` tests in the reader: these fail.
   const src = readFileSync(join(__dirname, '..', 'app/reader/page.tsx'), 'utf8');
   assert.match(src, /const keyMap = useMemo\(\(\) => keyMapFor\(prefs\.mode, device\.keys\), \[prefs\.mode, device\.keys\]\);/);
-  assert.match(src, /if \(e\.key === 'Escape'\) \{ if \(!e\.repeat\) back\(\); return; \}\s*[\s\S]{0,600}const action = actionForKey\(e, keyMap, \{ owned \}\);\s*if \(!action\) return;[\s\S]{0,200}e\.preventDefault\(\);\s*performRef\.current\(action\);/);
+  assert.match(src, /if \(e\.key === 'Escape'\) \{ if \(!e\.repeat && !escFoundDialog\.current\) back\(\); return; \}\s*[\s\S]{0,600}const action = actionForKey\(e, keyMap, \{ owned \}\);\s*if \(!action\) return;[\s\S]{0,200}e\.preventDefault\(\);\s*performRef\.current\(action\);/);
   assert.doesNotMatch(src, /e\.key === 'ArrowRight'|e\.key === 'PageDown'|e\.key === '\['/, 'a key is tested by hand again, past the map');
 });

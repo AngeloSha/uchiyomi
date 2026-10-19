@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.87.0 — 2026-10-19
+
+**React to a chapter, and talk about it with your household.**
+
+### Chapter comments
+
+- **Where a chapter ends.** The reader runs one chapter into the next, so a chapter's talk sits at its end. In the
+  webtoon scroll, the line between two chapters now shows who reacted, how many comments there are, and the six
+  reactions, one tap each. Reading page by page, a small key sits on each chapter's last page, and the end card after
+  the last chapter has the same.
+- **A comments key in the top bar** opens the comments of the chapter on screen, with how many there are.
+- **Reactions:** ❤️ 😂 😭 😱 🔥 🤯, one each a chapter. Tap yours again to take it back, or tap another to change it.
+- **Comments** are plain text. One written in the reader remembers its page, and *p. 41* on it goes there. You edit or
+  delete your own, and an admin can remove anyone's.
+- **On the series page**, chapters people talked about show their top reactions and comment count, and a chapter's
+  **⋯** menu has **Comments**.
+- **Who sees it:** only members who can open the series. Faces show who reacted or commented, never who read. With
+  **Incognito reading** on, you can read comments but not post or react.
+- **Alerts:** a new comment sends a push only to the members who already commented on that chapter.
+- Nothing shows on a server with one account, or in Uchiyomi Desktop.
+
+### Fixed
+
+- **Escape** on the reader's chapter list or page grid closes it, and no longer leaves the reader as well.
+
+### Upgrading
+
+- Nothing to do. Two new tables hold the comments and reactions; v0.86.x runs on the upgraded database unchanged.
 ## v0.86.0 — 2026-10-19
 
 **Settings are a few short categories with a search, instead of one long page.**

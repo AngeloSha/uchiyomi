@@ -1584,6 +1584,35 @@ quietly, and adds the next chapter six screens before the end. A double-tap zoom
 keeps your place in it, opening a title whose source default is Paged no longer starts on the wrong page, and
 switching between Webtoon and Paged mid-chapter keeps the page you were on.
 
+### Comments and reactions
+
+The household can react to a chapter and talk about it (since v0.87.0). The reader runs one chapter into the next, so
+a chapter's talk sits where the chapter ends:
+
+- **Between two chapters**, in the webtoon scroll, the line before the next chapter shows who reacted, how many
+  comments there are, and the six reactions. Tap a reaction to add yours, or tap the line with the faces to open the
+  comments.
+- **Reading page by page**, a small key sits at the foot of each chapter's last page while the controls are hidden.
+- **The comments key** in the top bar opens the comments of the chapter on screen. Its number is how many comments
+  that chapter has.
+- **After the last chapter**, the end card has the same reactions and comments.
+- **On the series page**, a chapter people talked about shows its top reactions and how many comments, and its **⋯**
+  menu has **Comments**.
+
+**Reactions** are ❤️ 😂 😭 😱 🔥 🤯, one each a chapter: tap yours again to take it back, or tap another to change it.
+**Comments** are plain text, up to 2,000 characters. One written in the reader remembers the page you were on: tap
+*p. 41* on it to go to that page. You can edit or delete your own comments, and an admin can remove anyone's (it is
+recorded in the audit log).
+
+- **Who sees it:** only members who can open the series, so library access and age limits apply. A face is someone
+  who reacted or commented, never someone who only read the chapter, and looking at the comments records nothing.
+- **Incognito reading:** while it is on you can read comments, but you can't post or react, since that would tell the
+  household what you read.
+- **Alerts:** a new comment sends a push notification to the members who already commented on that chapter, on
+  devices where alerts are on. Nobody else is notified.
+- On a server with only one account there is nobody to talk to, so none of this shows. Uchiyomi Desktop doesn't have
+  it either.
+
 ### Skipping the pages that are not the story
 
 Most scanlated chapters open with the same credit page, and some carry an advert or a "read the rest at…"

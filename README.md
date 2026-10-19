@@ -186,6 +186,9 @@ sites' terms and your local law.
 **Household**
 
 - **Multi-user** — accounts, per-user progress and favourites, streaks and a leaderboard.
+- **Chapter comments** — react to a chapter with one tap or say something about it, right where the chapter ends in
+  the reader, and see which chapters the household talked about on the series page. Only members who can open the
+  series see it.
 - **Age ratings and an 18+ library** that stays off the home screen, the grid and search until somebody asks
   for it, with a per-member rating cap, a whole source rated *Adult only* when its extension does not say so, and a
   per-member permission to add series at all.
@@ -197,7 +200,8 @@ sites' terms and your local law.
 
 **Beyond the browser**
 
-- **Push notifications** when a followed series gets a new chapter, and one digest per library update to a
+- **Push notifications** when a followed series gets a new chapter or someone adds to a chapter's comments you are in,
+  and one digest per library update to a
   **webhook, Home Assistant, ntfy or Discord**.
 - **OPDS** — read from Panels, Chunky or KOReader, page by page over OPDS-PSE.
 - **A Mihon / Tachimanga extension** — read your library from Mihon, any Tachiyomi fork, Tachimanga (iOS)

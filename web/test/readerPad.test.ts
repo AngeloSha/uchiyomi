@@ -85,5 +85,5 @@ test('the reader polls a controller only while one is connected, and only on a s
   assert.match(hook, /if \(!p \|\| document\.visibilityState !== 'visible'\) \{ prev = \[\]; state = PAD_IDLE; return; \}/, 'the loop keeps running with no pad, or in a hidden tab');
   assert.match(hook, /window\.addEventListener\('gamepadconnected', start\);/);
   // The reader turns its presses through the same `perform` as a key.
-  assert.match(readFileSync(join(__dirname, '..', 'app/reader/page.tsx'), 'utf8'), /useGamepad\(\(a\) => performRef\.current\(a\), padMap, showSettings \|\| showPages \|\| showChapters \|\| showKeys\)/);
+  assert.match(readFileSync(join(__dirname, '..', 'app/reader/page.tsx'), 'utf8'), /useGamepad\(\(a\) => performRef\.current\(a\), padMap, showSettings \|\| showPages \|\| showChapters \|\| showKeys \|\| !!talkFor\)/);
 });

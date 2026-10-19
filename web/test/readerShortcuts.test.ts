@@ -9,8 +9,8 @@ const list = readFileSync(join(__dirname, '..', 'components/ReaderShortcuts.tsx'
 
 test('? opens the list, and while it is open ? and Escape close it and no other key reaches the pages', () => {
   assert.match(page, /e\.key === '\?' && !e\.repeat && !\/\^\(INPUT\|TEXTAREA\|SELECT\)\$\/\.test\(t\?\.tagName \?\? ''\) && !t\?\.isContentEditable[\s\S]{0,120}setShowKeys\(true\)/);
-  assert.match(page, /if \(showSettings \|\| showPages \|\| showChapters \|\| showKeys\) \{[\s\S]{0,300}setShowKeys\(false\)[\s\S]{0,200}return;/);
-  assert.match(page, /showSettings \|\| showPages \|\| showChapters \|\| showKeys\);/, 'a game controller waits while it is open');
+  assert.match(page, /if \(showSettings \|\| showPages \|\| showChapters \|\| showKeys \|\| talkFor\) \{[\s\S]{0,300}setShowKeys\(false\)[\s\S]{0,200}return;/);
+  assert.match(page, /showSettings \|\| showPages \|\| showChapters \|\| showKeys \|\| !!talkFor\);/, 'a game controller waits while it is open');
 });
 
 test('the list reads the keys in force, not a copy of the defaults', () => {
