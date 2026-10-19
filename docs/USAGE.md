@@ -1613,9 +1613,9 @@ Since v0.85.0. For a chapter in a language you don't read: a raw chapter the day
 your own language. It is optional, and nothing changes until an admin turns it on.
 
 **Turning it on (admin).** **Admin → Settings → Server → Translate pages → Download**. The download is the translation
-engine: a reader for the text in the pages, a translation model and the fonts it writes with. It is about 19 GB on a
+engine: a reader for the text in the pages, a translation model and the fonts it writes with. It is about 18 GB on a
 server with 28 GB of memory or more (the large model, which can also look at the page when its text is hard to read),
-and about 3 GB elsewhere. The row says what it will take, in disk and in memory, before you press it. It goes in
+and about 2.4 GB elsewhere. The row says what it will take, in disk and in memory, before you press it. It goes in
 `TRANSLATE_DIR` (see [CONFIGURATION](CONFIGURATION.md#translated-pages): on a small system disk, point it at a big one).
 Then turn **Translate pages** on. **Remove the translation engine** deletes it again.
 

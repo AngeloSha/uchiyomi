@@ -647,8 +647,8 @@ The optional translation engine (since v0.85.0; how readers use it is in
 
 - The engine pack for your server's architecture (amd64 or arm64), about 100 MB: llama.cpp's `llama-server`, the OCR
   models (PaddleOCR) and their runtime, and the fonts.
-- One translation model, picked by the server's memory: **Qwen3.6 35B-A3B** (18 GB, plus 0.9 GB to look at pages) on
-  a machine with 28 GB of memory or more, **Qwen3 4B** (2.5 GB) elsewhere. Both are Apache-2.0.
+- One translation model, picked by the server's memory: **Qwen3.6 35B-A3B** (17 GB, and 0.8 GB more that lets it look
+  at pages) on a machine with 28 GB of memory or more, **Qwen3 4B** (2.3 GB) elsewhere. Both are Apache-2.0.
 
 **Where it goes:** `TRANSLATE_DIR`, by default `translate/` in the config folder (`/config/translate`). The download
 refuses to start without room for it plus 1 GB. On a small system disk, mount a folder on a big disk and point the
@@ -664,7 +664,7 @@ services:
 ```
 
 **While it translates,** the engine runs as two processes beside the app (the model, and the OCR), at low priority. The
-model takes about its own size in memory, so 20 GB for the large model and 4 GB for the small one. The engine won't
+model takes about its own size in memory, so 19 GB for the large model and 3.3 GB for the small one. The engine won't
 start a model that does not fit in the memory free at that moment, and says so under Translate pages. Both processes
 stop after 10 minutes without a page.
 

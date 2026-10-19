@@ -8,8 +8,8 @@
 
 - **Turned on once, for the whole server.** **Admin → Settings → Server → Translate pages → Download** fetches the
   translation engine: a reader for the text in the pages, a translation model and the fonts it writes with. It is about
-  19 GB on a server with 28 GB of memory or more and about 3 GB elsewhere, and the row says what it will take before you
-  press it. Then one switch. Nothing changes for anyone until then, and **Remove the translation engine** takes it away.
+  18 GB on a server with 28 GB of memory or more and about 2.4 GB elsewhere, and the row says what it will take before
+  you press it. Then one switch. Nothing changes for anyone until then, and **Remove the translation engine** takes it away.
 - **Each reader turns it on per series.** **Translate pages** in the reader's settings translates into the language
   Uchiyomi is in for you, a page at a time from the page you are on. Each page switches to its translation as soon as it
   is done, and the next chapter follows.
