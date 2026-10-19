@@ -1,5 +1,54 @@
 # Changelog
 
+## v0.89.0 — 2026-10-20
+
+**Badges unlock frames for your avatar, you can merge or split double pages yourself, and a series can follow up to ten
+sources.** The frames are part three of **CheetahDoesStuff**'s badges idea
+([#267](https://github.com/AngeloSha/uchiyomi/issues/267)), merging and splitting by hand began as **@Squeaks72**'s pull
+request ([#262](https://github.com/AngeloSha/uchiyomi/pull/262)), rebuilt on v0.77.0's joining, and more sources per
+series is **TIGamingTV**'s request ([#305](https://github.com/AngeloSha/uchiyomi/issues/305)). Thank you all three.
+
+### Badges unlock avatar frames
+
+- **Each badge unlocks a frame**, cast in the badge's own metal: *Bronze* for Reader, *Silver* for Bookworm, *Ember* for
+  On a roll (a flame for each day of the streak), *Gold* for Centurion (with a laurel), *Moonlight* for Devoted (a
+  crescent and stars) and *Aurora* for Legend (a crown and a slow halo).
+- **Pick one** in **Profile → Settings → Appearance → Avatar → Frame**, or from **Badges unlock frames for your avatar**
+  under the badges. A frame you have not earned yet is greyed: tap it to see what it takes. **None** takes yours off.
+- **Everyone sees it.** The frame goes wherever your avatar shows: the corner, the household board, comments and shared
+  lists. The server checks it is yours to wear, with the same rules the badges use.
+- **It moves a little.** A sheen passes over the metal now and then, the embers flicker and Legend's ring turns.
+  **Reduce effects** or your system's reduced motion keeps them still. Small avatars, in comments for example, show the
+  ring alone.
+
+### Merge and split double pages yourself
+
+- **When the joining gets it wrong.** *Join split double pages* can join two pages that are not one picture, or miss two
+  that are. Reading page by page, **This page** in the reader's settings (and the right-click menu) now offers what fits
+  the page you are on:
+  - **Merge with the page on the left** or **on the right**. Left and right are your screen's, so on a right-to-left
+    read the next page is the one on the left.
+  - **Show as two pages** for a pair the server joined, and **Join these two pages again** to give it back.
+  - **Undo the merge** for a pair you joined.
+- **Yours alone.** It is saved on your account, so it follows you to your other devices and into chapters you download,
+  and nobody else's reader changes. A merge you made shows even with *Join split double pages* off.
+- A page is in one spread only, and wide pages and the ends of a chapter offer nothing. If a chapter's file is replaced
+  by one with another page count, it starts afresh.
+
+### More sources per series
+
+- **Other sources per series**, in **Admin → Settings → Downloads → More options**: how many sources besides its main
+  one a series may follow, from 1 to 10. It is 3 by default, as before. It counts the sources you add and the ones
+  Uchiyomi finds on its own alike.
+- Each extra source is one more chapter list to ask for at every library update, which the menu says. Lowering the number
+  unfollows nothing: a series that follows more keeps its sources, and follows no new one.
+- It replaces the server setting `MAX_FOLLOWED_SOURCES`, which is now only the starting value until the menu is used.
+- The add dialog no longer says *already following two* when a series has as many sources as it may.
+
+### Upgrading
+
+- Nothing to do. If your server sets `MAX_FOLLOWED_SOURCES`, the menu shows that number until you pick another.
+
 ## v0.88.0 — 2026-10-19
 
 **Profile and Admin are one list each: no more tabs inside tabs.**
