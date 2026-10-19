@@ -207,7 +207,6 @@
   "Generate a new link": "إنشاء رابط جديد",
   "Generating again replaces the previous token.": "الإنشاء مرة أخرى يستبدل الرمز السابق.",
   "Genres": "التصنيفات",
-  "Get a push notification when one of your favorites gets a new chapter.": "احصل على إشعار عندما يصدر فصل جديد لأحد مفضلاتك.",
   "Grabbing many chapters at once can get you rate-limited. It pauses on its own and you can resume later.": "سحب فصول كثيرة دفعة واحدة قد يؤدي إلى تقييد السرعة. يتوقف مؤقتًا من تلقاء نفسه ويمكنك المتابعة لاحقًا.",
   "Health": "الحالة",
   "Home": "الرئيسية",
@@ -4135,5 +4134,6 @@
   "{n} comments": "{n} تعليقات",
   "Post": "نشر",
   "You, {a} and 1 other reacted": "تفاعلت أنت و{a} وشخص آخر",
-  "{a}, {b} and 1 other reacted": "تفاعل من {a} و{b} وشخص آخر"
+  "{a}, {b} and 1 other reacted": "تفاعل من {a} و{b} وشخص آخر",
+  "Get a push notification when one of your favorites gets a new chapter, or when someone comments on a chapter you commented on.": "احصل على إشعار عندما يصدر فصل جديد لأحد مفضلاتك، أو عندما يعلّق أحد على فصل علّقت عليه."
 }

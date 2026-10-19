@@ -207,7 +207,6 @@
   "Generate a new link": "Создать новую ссылку",
   "Generating again replaces the previous token.": "Повторное создание заменяет предыдущий токен.",
   "Genres": "Жанры",
-  "Get a push notification when one of your favorites gets a new chapter.": "Получайте уведомление, когда у одного из избранного выходит новая глава.",
   "Grabbing many chapters at once can get you rate-limited. It pauses on its own and you can resume later.": "Скачивание многих глав сразу может привести к ограничению скорости. Оно само встанет на паузу, и вы сможете продолжить позже.",
   "Health": "Состояние",
   "Home": "Главная",
@@ -4135,5 +4134,6 @@
   "{n} comments": "Комментариев: {n}",
   "Post": "Отправить",
   "You, {a} and 1 other reacted": "Вы, {a} и ещё 1 отреагировали",
-  "{a}, {b} and 1 other reacted": "Реакции от {a}, {b} и ещё 1"
+  "{a}, {b} and 1 other reacted": "Реакции от {a}, {b} и ещё 1",
+  "Get a push notification when one of your favorites gets a new chapter, or when someone comments on a chapter you commented on.": "Получайте уведомление, когда у одного из избранного выходит новая глава или кто-то комментирует главу, которую вы комментировали."
 }

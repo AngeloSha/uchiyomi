@@ -207,7 +207,6 @@
   "Generate a new link": "生成新链接",
   "Generating again replaces the previous token.": "再次生成会替换掉之前的令牌。",
   "Genres": "类型",
-  "Get a push notification when one of your favorites gets a new chapter.": "当你收藏的作品更新章节时收到推送通知。",
   "Grabbing many chapters at once can get you rate-limited. It pauses on its own and you can resume later.": "一次抓取太多章节可能会被限速。它会自动暂停，你可以稍后继续。",
   "Health": "健康检查",
   "Home": "首页",
@@ -4135,5 +4134,6 @@
   "{n} comments": "{n} 条评论",
   "Post": "发表",
   "You, {a} and 1 other reacted": "你、{a} 和另外 1 人回应了",
-  "{a}, {b} and 1 other reacted": "{a}、{b} 和另外 1 人回应了"
+  "{a}, {b} and 1 other reacted": "{a}、{b} 和另外 1 人回应了",
+  "Get a push notification when one of your favorites gets a new chapter, or when someone comments on a chapter you commented on.": "当你收藏的作品更新章节，或有人评论你评论过的章节时，收到推送通知。"
 }

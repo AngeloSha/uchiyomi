@@ -54,7 +54,7 @@ export const PROFILE_SETTINGS: SettingsIndex = {
     { id: 'downloads', cat: 'device', label: 'Offline downloads', when: ['web'], keywords: ['offline', 'downloaded chapters'] },
     { id: 'keep-offline', cat: 'device', label: 'Keep favorites offline', when: ['web'], keywords: ['auto download', 'offline', 'favourites'] },
     { id: 'storage', cat: 'device', label: 'Storage used', when: ['web'], keywords: ['space', 'quota', 'eviction', 'protect downloads', 'persist'] },
-    { id: 'chapter-alerts', cat: 'device', label: 'New-chapter alerts', when: ['web'], keywords: ['push', 'notifications', 'alerts'] },
+    { id: 'chapter-alerts', cat: 'device', label: 'New-chapter alerts', when: ['web'], keywords: ['push', 'notifications', 'alerts', 'comments', 'replies'] },
     { id: 'install', cat: 'device', label: 'Install Uchiyomi', when: ['web'], keywords: ['install app', 'pwa', 'home screen', 'add to home screen'] },
   ],
   legacy: {},

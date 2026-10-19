@@ -585,7 +585,7 @@ function DeviceSection() {
         </Row>
       ) : (
         <SwitchRow id="chapter-alerts" device label={tr('New-chapter alerts')}
-          help={supported ? tr('Get a push notification when one of your favorites gets a new chapter.') : tr('Not supported on this browser.')}
+          help={supported ? tr('Get a push notification when one of your favorites gets a new chapter, or when someone comments on a chapter you commented on.') : tr('Not supported on this browser.')}
           on={on} disabled={!supported} onChange={toggle} />
       ))}
       {/* Already installed: the row is about installing, so it unmounts rather than congratulating you. */}

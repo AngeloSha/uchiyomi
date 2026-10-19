@@ -181,7 +181,7 @@ test('the profile settings and connections hide what only other devices use', ()
   assert.match(device, /const \[supported\] = useState\(\(\) => !inApp && typeof window !== 'undefined'/, 'push counts as supported inside the desktop app');
   assert.match(device, /\{enabledSrv && \(inApp \? \(\s*<Row id="chapter-alerts" stacked label=\{tr\('New-chapter alerts'\)\}>\s*<p[^>]*>\{tr\('The desktop app cannot receive push notifications\./, 'the push switch is offered inside the desktop app');
   // The server's own row is unchanged in a browser.
-  assert.match(device, /\) : \(\s*<SwitchRow id="chapter-alerts" device label=\{tr\('New-chapter alerts'\)\}\s*help=\{supported \? tr\('Get a push notification when one of your favorites gets a new chapter\.'\) : tr\('Not supported on this browser\.'\)\}\s*on=\{on\} disabled=\{!supported\} onChange=\{toggle\} \/>/, 'the browser\'s push switch changed');
+  assert.match(device, /\) : \(\s*<SwitchRow id="chapter-alerts" device label=\{tr\('New-chapter alerts'\)\}\s*help=\{supported \? tr\('Get a push notification when one of your favorites gets a new chapter, or when someone comments on a chapter you commented on\.'\) : tr\('Not supported on this browser\.'\)\}\s*on=\{on\} disabled=\{!supported\} onChange=\{toggle\} \/>/, 'the browser\'s push switch changed');
   const conn = code(read('components/ProfileConnections.tsx'));
   assert.match(conn, /<TrackerSection focus=\{focusTracking\} \/>\s*\{!desktop && <OpdsSection \/>\}\s*\{!desktop && <TokensSection \/>\}/, 'OPDS or API tokens show on desktop, or the trackers moved');
   for (const [f, src] of [['ProfileSettings', settings], ['ProfileConnections', conn]] as const) {

@@ -207,7 +207,6 @@
   "Generate a new link": "Neuen Link erzeugen",
   "Generating again replaces the previous token.": "Ein neuer ersetzt den vorherigen Token.",
   "Genres": "Genres",
-  "Get a push notification when one of your favorites gets a new chapter.": "Erhalte eine Benachrichtigung, wenn einer deiner Favoriten ein neues Kapitel bekommt.",
   "Grabbing many chapters at once can get you rate-limited. It pauses on its own and you can resume later.": "Viele Kapitel auf einmal zu holen kann dich ausbremsen. Es pausiert von selbst und du kannst später weitermachen.",
   "Health": "Zustand",
   "Home": "Start",
@@ -4135,5 +4134,6 @@
   "{n} comments": "{n} Kommentare",
   "Post": "Posten",
   "You, {a} and 1 other reacted": "Du, {a} und 1 weitere Person habt reagiert",
-  "{a}, {b} and 1 other reacted": "{a}, {b} und 1 weitere Person haben reagiert"
+  "{a}, {b} and 1 other reacted": "{a}, {b} und 1 weitere Person haben reagiert",
+  "Get a push notification when one of your favorites gets a new chapter, or when someone comments on a chapter you commented on.": "Erhalte eine Benachrichtigung, wenn einer deiner Favoriten ein neues Kapitel bekommt oder jemand ein Kapitel kommentiert, das du kommentiert hast."
 }

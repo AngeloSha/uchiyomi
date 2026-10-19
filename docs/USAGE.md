@@ -1609,7 +1609,7 @@ recorded in the audit log).
 - **Incognito reading:** while it is on you can read comments, but you can't post or react, since that would tell the
   household what you read.
 - **Alerts:** a new comment sends a push notification to the members who already commented on that chapter, on
-  devices where alerts are on. Nobody else is notified.
+  devices where **New-chapter alerts** is on (Profile → Settings → This device). Nobody else is notified.
 - On a server with only one account there is nobody to talk to, so none of this shows. Uchiyomi Desktop doesn't have
   it either.
 
