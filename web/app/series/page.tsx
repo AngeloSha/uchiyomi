@@ -29,7 +29,7 @@ import { normGroup } from '@/lib/scanlators';
 import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, countsAsBehind, MARK_CHUNK, heldBy, lastOf, wholesHeld, prunedWords, deliberatelyDeleted, ghostOfDeleted, type Row } from '@/lib/chapterRows';
 import { chParam, landingNumber } from '@/lib/healthLinks';
 import { effectsReduced } from '@/lib/effects';
-import { clampPage, pageCount, pageLabel, pageOf, pageSizeFor, pageSlice } from '@/lib/chapterPages';
+import { clampPage, numberingSpan, pageCount, pageLabel, pageOf, pageSizeFor, pageSlice } from '@/lib/chapterPages';
 import { openRuns, showAllChaptersOn } from '@/lib/showAllChapters';
 import { buttonsClass, compactChaptersOn, dotHide, rowClass, thumbHide } from '@/lib/compactChapters';
 import { chapterRowsClass, chapterViewOn, setChapterView, type ChapterView } from '@/lib/chapterView';
@@ -677,9 +677,13 @@ function readShowGhosts(): boolean {
 /**
  * Prev / a range picker / Next for the chapter list. The picker names each page by the first and last chapter
  * numbers it shows ("901–1000", or "1193–1094" newest first), which is what a reader hunting for a chapter
- * number actually scans for; `total` is chapters, not rows.
+ * number actually scans for.
+ *
+ * ⚠️ No count beside it: "86–129 of 149" counted FILES (149, half chapters included) next to chapter numbers, and read as
+ * chapters 130–149 missing (the owner, 10-19). The header says how many chapters there are, and their numbers when those
+ * differ (numberingSpan). Reintroduce by putting `of {n}` back: chapterPages.test.ts finds it.
  */
-function ChapterPager({ page, pages, rows, asc, total, onPage }: { page: number; pages: number; rows: readonly Row[]; asc: boolean; total: number; onPage: (p: number) => void }) {
+function ChapterPager({ page, pages, rows, asc, onPage }: { page: number; pages: number; rows: readonly Row[]; asc: boolean; onPage: (p: number) => void }) {
   const range = (p: number) => pageLabel(rows, p, asc);
   return (
     <nav aria-label={tr('Chapter pages')} data-chapter-pager className="my-2 flex items-center justify-center gap-2 text-xs">
@@ -689,7 +693,6 @@ function ChapterPager({ page, pages, rows, asc, total, onPage }: { page: number;
         className="h-8 rounded-lg border border-ink-700 bg-ink-850 px-2.5 text-fog-100">
         {Array.from({ length: pages }, (_, p) => <option key={p} value={p}>{range(p)}</option>)}
       </select>
-      <span className="text-fog-500">{tr('of {n}', { n: total })}</span>
       <button type="button" onClick={() => onPage(page + 1)} disabled={page >= pages - 1} className="btn-key">{tr('Next')}</button>
       <button type="button" onClick={() => onPage(pages - 1)} disabled={page >= pages - 1} className="btn-key px-2.5" aria-label={tr('Last page')}>»</button>
     </nav>
@@ -1705,10 +1708,13 @@ function SeriesInner() {
     </div>
   );
 
+  const span = series && books && !mostlyVolumes ? numberingSpan(books.content, series.booksCount) : null;
   const metaBits: ReactNode[] = [
     author ? <span className="text-fog-300">{tr('by {author}', { author: `\u2068${author}\u2069` })}</span> : null,
     meta?.status ? <span className="capitalize">{statusText(meta.status)}</span> : null,
     series ? <>{bookCountText(series.booksCount, mostlyVolumes)}</> : null,
+    // Their numbers, when they do not run 1 to the count (half chapters, a chapter 0, gaps): "149 chapters · Ch. 0–129".
+    span ? <>{tr('Ch. {a}–{b}', span)}</> : null,
     (series?.yomi?.unread ?? series?.booksUnreadCount ?? 0) > 0 ? <span className="text-accent">{tr('{n} unread', { n: series!.yomi?.unread ?? series!.booksUnreadCount })}</span> : null,
     // "{n} behind" used to sit here; the supply line under the title carries that count now ("4 not here
     // yet"), with the source and the groups beside it, and one line saying it is enough.
@@ -1795,7 +1801,7 @@ function SeriesInner() {
           {tr('{n} of {m} chapters match', { n: filteredBooks.length + filteredGhosts.length, m: rowBooks.length + visibleGhosts.length })}
         </p>
       )}
-      {pages > 1 && <ChapterPager page={shownPage} pages={pages} rows={rows} asc={asc} total={filteredBooks.length + filteredGhosts.length} onPage={(p) => goPage(p, false)} />}
+      {pages > 1 && <ChapterPager page={shownPage} pages={pages} rows={rows} asc={asc} onPage={(p) => goPage(p, false)} />}
       <div className={chapterRowsClass(view)} data-chapter-rows={view}>
         {pageRows.map((r) => {
           if (r.kind === 'book') {
@@ -1878,7 +1884,7 @@ function SeriesInner() {
         })}
         {!books && Array.from({ length: 8 }).map((_, i) => <div key={i} className="skeleton my-3 h-6 rounded" />)}
       </div>
-      {pages > 1 && <ChapterPager page={shownPage} pages={pages} rows={rows} asc={asc} total={filteredBooks.length + filteredGhosts.length} onPage={(p) => goPage(p, true)} />}
+      {pages > 1 && <ChapterPager page={shownPage} pages={pages} rows={rows} asc={asc} onPage={(p) => goPage(p, true)} />}
     </div>
   );
 

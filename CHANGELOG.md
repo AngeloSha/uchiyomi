@@ -23,6 +23,12 @@
   a page whose text is hard to read (most Korean pages). See [USAGE](docs/USAGE.md#translated-pages) and
   [CONFIGURATION](docs/CONFIGURATION.md#translated-pages).
 
+### Also
+
+- **A series' chapter list no longer looks short.** Its page picker said "86–129 of 149": 149 counted files, half
+  chapters like 12.5 included, next to chapter numbers, so a series numbered 0–129 looked twenty chapters short. The
+  count is gone from the picker, and the header says "149 chapters · Ch. 0–129" when the numbers and the count differ.
+
 ### Upgrading
 
 - Nothing to do: the database gains three things, empty until Translate pages is used. If your config folder is on a

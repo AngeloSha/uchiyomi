@@ -65,3 +65,22 @@ export function pageLabel(rows: readonly Row[], page: number, asc: boolean, size
   const [a, b] = [nums[0], nums[nums.length - 1]];
   return a === b ? fmtNumber(a) : `${fmtNumber(a)}–${fmtNumber(b)}`;
 }
+
+/**
+ * The numbers a series' chapters run from and to, for the header ("149 chapters · Ch. 0–129"), when they do not simply
+ * run 1 to the count: half chapters (12.5), a chapter 0, extras or a gap make the count and the last number differ, and
+ * "86–129 of 149" read as twenty chapters missing that were never there (10-19). Null when they agree, or with fewer
+ * than two chapters. A file holding a range counts to its end.
+ */
+export function numberingSpan(books: ReadonlyArray<{ number: number; numberEnd?: number | null }>, count: number): { a: string; b: string } | null {
+  if (count < 2 || !books.length) return null;
+  let lo = Infinity, hi = -Infinity;
+  for (const b of books) {
+    lo = Math.min(lo, b.number);
+    hi = Math.max(hi, b.numberEnd != null && b.numberEnd > b.number ? b.numberEnd : b.number);
+  }
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return null;
+  if (lo === 1 && hi === count) return null;
+  return { a: fmtNumber(lo), b: fmtNumber(hi) };
+}
+

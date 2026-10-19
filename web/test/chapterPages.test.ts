@@ -1,7 +1,9 @@
 // The chapter list pages over its merged rows and opens on the page holding "Continue".
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pageCount, pageOf, pageSlice, clampPage, pageLabel, rowNumbers } from '../lib/chapterPages';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { pageCount, pageOf, pageSlice, clampPage, pageLabel, rowNumbers, numberingSpan } from '../lib/chapterPages';
 import type { Row } from '../lib/chapterRows';
 
 const rows = Array.from({ length: 1193 }, (_, i) => i + 1); // One Piece, chapters 1..1193
@@ -64,3 +66,28 @@ test('a range file stands for its start and its end in a page\'s name (v0.55.2)'
   assert.equal(pageLabel([...range(1, 94).map(book), rangeBook], 0, true, 100), '1–100');
   assert.equal(pageLabel([rangeBook, ...range(1, 94).map(book).reverse()], 0, false, 100), '100–1');
 });
+
+test('the header names the chapters\' numbers when they do not run 1 to the count', () => {
+  const nums = (...n: number[]) => n.map((number) => ({ number }));
+  // The owner's series (10-19): 149 files numbered 0-129, 19 of them half chapters.
+  const broken = [...range(0, 129).map((number) => ({ number })), ...range(1, 19).map((i) => ({ number: i * 6 + 0.5 }))];
+  assert.equal(broken.length, 149);
+  assert.deepEqual(numberingSpan(broken, 149), { a: '0', b: '129' });
+  // A plain series says nothing more than its count.
+  assert.equal(numberingSpan(range(1, 50).map((number) => ({ number })), 50), null);
+  // Gaps, a range file's end, float noise, too few chapters.
+  assert.deepEqual(numberingSpan(nums(1, 2, 40), 3), { a: '1', b: '40' });
+  assert.deepEqual(numberingSpan([{ number: 1 }, { number: 2, numberEnd: 9 }], 2), { a: '1', b: '9' });
+  assert.deepEqual(numberingSpan(nums(1.100000381, 3), 2), { a: '1.1', b: '3' });
+  assert.equal(numberingSpan(nums(5), 1), null);
+  assert.equal(numberingSpan([], 10), null);
+});
+
+test('the chapter pager shows no count beside the chapter numbers', () => {
+  const page = readFileSync(join(__dirname, '..', 'app', 'series', 'page.tsx'), 'utf8');
+  const pager = page.slice(page.indexOf('function ChapterPager('), page.indexOf('function EditionChips('));
+  // Reintroduce `of {n}` (files, not chapters): "86–129 of 149" reads as chapters 130–149 missing.
+  assert.doesNotMatch(pager, /of \{n\}/);
+  assert.match(page, /span \? <>\{tr\('Ch\. \{a\}–\{b\}', span\)\}<\/> : null,/);
+});
+
