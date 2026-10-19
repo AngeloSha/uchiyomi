@@ -4,8 +4,9 @@
 // The badges are drawn in the browser (web/lib/badges.ts BADGES, components/BadgeEmblem.tsx) from GET /api/stats'
 // `chapters_completed` and `longestStreak`. A frame is worn where the whole household sees it -- the corner, the board,
 // a chapter's comments -- so the server says who may wear one: the same goals, measured the same way, here. The two
-// lists are held together by test/badges.test.ts, which reads the web's. A badge, once earned, stays: both measures
-// only grow (a chapter finished counts once, #264; the longest streak is the longest there ever was).
+// lists are held together by test/badges.test.ts, which reads the web's. Both measures grow as an account reads (a
+// chapter finished counts once, #264; the longest streak is the longest there ever was), but they can shrink: forgetting
+// a series takes its reading with it. So the frame already worn is never measured again (routes/personal.ts).
 import { q, one } from './db';
 
 /** A frame is cast in its badge's metal (web/components/BadgeEmblem.tsx METALS): its name is the metal's. */

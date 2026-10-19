@@ -2826,6 +2826,12 @@ paths:
                 mark:
                   type: [string, "null"]
                   enum: [join, split, null]
+                pages:
+                  type: integer
+                  minimum: 1
+                  description: >-
+                    The page count the caller is showing. When it differs from the chapter's file (a downloaded copy
+                    of an older file), the mark is refused with 409 `pages_changed`.
       security:
         - bearer: []
       responses:
@@ -2847,6 +2853,8 @@ paths:
           description: Not authenticated
         "404":
           description: No such chapter, or one the caller may not see
+        "409":
+          description: "`pages_changed`: the caller's page count is not the chapter file's."
   /api/books/{id}/pages/{n}/junk:
     put:
       tags:

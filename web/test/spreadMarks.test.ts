@@ -137,8 +137,32 @@ test('a pair taken apart shows its first page, the one being read; any other cha
   // `current` is a two-page slide's LAST page (completion fires on it), so re-anchoring on it put Undo the merge on the
   // pair's second page. Found by the v0.89.0 browser walk. Reintroduce by anchoring on `current` alone: this fails.
   const reader = code(read('app/reader/page.tsx'));
-  assert.match(reader, /const apart = !!was && was\.length === 2 && shownJoined\.current\[pagedSlide\.current\] && slideOf\[was\[0\]\] !== slideOf\[was\[1\]\];\s*const anchor = apart \? was\[0\] : current;\s*placeTrack\(el, slideOf\[anchor\] \?\? anchor\);/);
-  // What the effect compares with is the slides on screen before this render: kept by a passive effect, after the layout one.
-  assert.match(reader, /useEffect\(\(\) => \{ shownSlides\.current = slides; shownJoined\.current = joined; \}\);/);
+  assert.match(reader, /const was = shownSlides\.current\[shownAt\.current\];\s*const apart = !!was && was\.length === 2 && !!shownJoined\.current\[shownAt\.current\] && slideOf\[was\[0\]\] !== slideOf\[was\[1\]\];\s*const anchor = apart \? was\[0\] : current;/);
+  // `current` follows the placing: the first page keeps the pair's slide index, so no scroll event says so. Reintroduce by
+  // dropping the setCurrent: the counter, the bookmark and the options stay on the pair's second page (the final review).
+  assert.match(reader, /placeTrack\(el, s\);\s*if \(apart\) \{ const on = slides\[s\]; setCurrent\(on \? on\[on\.length - 1\] : anchor\); \}/);
+  // What the effect compares with is the slides on screen before this render, and WHICH was on screen -- one generation:
+  // the Wide pages and pairs effects may already have moved pagedSlide onto the new slides. Kept by a passive effect.
+  assert.match(reader, /useEffect\(\(\) => \{ shownSlides\.current = slides; shownJoined\.current = joined; shownAt\.current = pagedSlide\.current; \}\);/);
+});
+
+test('Double spread offers the pair on screen, as a pair: not "left" or "right" of a page nobody can tell is current', () => {
+  // The final review: a right-to-left series read left to right draws its pairs swapped, so "the page on the left" of the
+  // slide's last page was the page on the right. Reintroduce the sides for an unjoined pair: this fails.
+  assert.deepEqual(optionsAt(ch(6), 3, { spread: true }), [{ kind: 'pair', first: 2 }]);
+  assert.deepEqual(optionsAt(ch(6), 2, { spread: true }), [{ kind: 'pair', first: 2 }], 'from either page of it');
+  assert.equal(markOf({ kind: 'pair', first: 2 }), 'join');
+  // A pair the reader split is given back to the detector rather than merged by hand; joining off, it is merged.
+  assert.deepEqual(optionsAt(ch(6, { 2: { join: 'rtl', mark: 'split' } }), 3, { spread: true }), [{ kind: 'restore', first: 2 }]);
+  assert.deepEqual(optionsAt(ch(6, { 2: { join: 'rtl', mark: 'split' } }), 3, { spread: true, detector: false }), [{ kind: 'pair', first: 2 }]);
+  // A page alone on its slide (the cover) still merges by side, the next page being on the next slide.
+  assert.deepEqual(optionsAt(ch(6), 1, { spread: true }), [{ kind: 'merge', side: 'right', first: 1 }]);
+});
+
+test('the sheet lays the keys out as the pages sit: a key with no side takes the row, a merge its side\'s column', () => {
+  // The final review: Join these two pages again before the two merges put the left one in the right column.
+  const sheet = code(read('components/ReaderSettings.tsx'));
+  assert.match(sheet, /o\.side === 'right' \? 'col-start-2' : o\.side === 'left' \? 'col-start-1' : 'col-span-2'/);
+  assert.match(code(read('app/reader/page.tsx')), /side: o\.kind === 'merge' \? o\.side : undefined/);
 });
 

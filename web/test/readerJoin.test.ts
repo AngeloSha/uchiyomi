@@ -131,7 +131,7 @@ test('the page list asks for spreads only with joining on, and a join found late
   const eff = src.slice(src.indexOf('laidOutJoins.current === joinedAt'), src.indexOf('}, [joinedAt]);'));
   assert.ok(eff.length > 0, 'the joins effect is gone');
   // v0.89.0: on the page being read, or on the first page of a pair just taken apart (spreadMarks.test.ts).
-  assert.match(eff, /const anchor = apart \? was\[0\] : current;\s*placeTrack\(el, slideOf\[anchor\] \?\? anchor\)/);
+  assert.match(eff, /const anchor = apart \? was\[0\] : current;\s*const s = slideOf\[anchor\] \?\? anchor;\s*placeTrack\(el, s\);/);
 });
 
 test('one page in frame is said with a squared key, never a capsule', () => {

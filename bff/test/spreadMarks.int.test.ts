@@ -120,3 +120,30 @@ test('the marks go with their chapter and with their account', { skip }, async (
   await q('DELETE FROM lib_books WHERE id = $1', [BOOK]);
   assert.equal((await q('SELECT count(*)::int AS n FROM spread_marks WHERE book_id = $1', [BOOK]))[0].n, 0);
 });
+
+test('a mark from a copy of another file of the chapter is refused, and two joins sent at once leave one', { skip }, async () => {
+  const B2 = 'b_sm_two';
+  await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages, page_dims) VALUES ($1,$2,'T!sm',$3,2,'Chapter 2',8,$4)`,
+    [B2, OPEN, `T!sm/${OPEN}/ch2.cbz`, dims(8)]);
+  try {
+    // A downloaded copy of 7 pages, the file now 8: its page numbers are not this file's. Reintroduce by ignoring `pages`.
+    const stale = await app.inject({ method: 'PUT', url: `/api/books/${B2}/pages/3/spread`, headers: H[B], payload: { mark: 'join', pages: 7 } });
+    assert.equal(stale.statusCode, 409, stale.body);
+    assert.equal(stale.json().error, 'pages_changed');
+    assert.equal((await q('SELECT count(*)::int AS n FROM spread_marks WHERE book_id = $1', [B2]))[0].n, 0, 'nothing written');
+    assert.equal((await app.inject({ method: 'PUT', url: `/api/books/${B2}/pages/3/spread`, headers: H[B], payload: { mark: 'join', pages: 8 } })).statusCode, 200);
+    await put(B, 3, null, B2);
+    // Two neighbouring joins at once, many times: a page is never left in two. Reintroduce by dropping setMark's lock.
+    const uid = (await q('SELECT id FROM users WHERE username = $1', [B]))[0].id;
+    const { setMark } = await import('../src/lib/spreadMarks');
+    for (let i = 0; i < 25; i++) {
+      await q('DELETE FROM spread_marks WHERE book_id = $1', [B2]);
+      await Promise.all([setMark(uid, B2, 4, 'join', 8), setMark(uid, B2, 5, 'join', 8)]);
+      const joins = (await q(`SELECT page FROM spread_marks WHERE book_id = $1 AND mark = 'join' ORDER BY page`, [B2])).map((r: any) => Number(r.page));
+      assert.equal(joins.length, 1, `round ${i}: joins on ${joins.join(' and ')}`);
+    }
+  } finally {
+    await q('DELETE FROM lib_books WHERE id = $1', [B2]);
+  }
+});
+

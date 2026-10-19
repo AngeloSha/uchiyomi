@@ -873,8 +873,14 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (b.finishDownloads !== undefined) await q('UPDATE server_settings SET finish_downloads = $1, updated_at = now() WHERE id = 1', [b.finishDownloads]);
     if (b.autoFollowOnFailure !== undefined) await q('UPDATE server_settings SET auto_follow_on_failure = $1, updated_at = now() WHERE id = 1', [b.autoFollowOnFailure]);
     if (b.maxFollowedSources !== undefined) {
+      const was = await followerLimit();
       await q('UPDATE server_settings SET max_followed_sources = $1, updated_at = now() WHERE id = 1', [b.maxFollowedSources]);
       forgetFollowerLimit();
+      // Raised: a series the scout set aside for a day as full (lib/sourceScout.ts SCOUT_BACKOFF.cap) has room now, so it
+      // is looked at again on the scout's next round instead of tomorrow.
+      if (b.maxFollowedSources > was) {
+        await q(`UPDATE series_scout SET next_at = now() WHERE verdict = 'cap' AND next_at > now()`).catch(() => {});
+      }
     }
     if (b.installPing !== undefined) await setInstallPing(b.installPing);
     const nextGlobalSources = b.sourcePrefs === undefined

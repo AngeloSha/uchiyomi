@@ -42,9 +42,10 @@ export function applyMarks<T extends Markable>(items: T[], dir: 'rtl' | 'ltr'): 
  * - `unmerge`: the reader joined it; take it apart again.
  * - `restore`: the reader split a pair the detector joined; join it again.
  * - `merge`: join this page with its neighbour on that side of the screen.
+ * - `pair`: Double spread shows two pages side by side; make them one spread.
  */
 export type SpreadOption =
-  | { kind: 'split' | 'unmerge' | 'restore'; first: number }
+  | { kind: 'split' | 'unmerge' | 'restore' | 'pair'; first: number }
   | { kind: 'merge'; side: 'left' | 'right'; first: number };
 
 interface Page extends Markable { width?: number | null; height?: number | null; missing?: boolean }
@@ -66,9 +67,16 @@ export function spreadOptions(
 ): SpreadOption[] {
   const me = flat[at];
   if (!me) return [];
-  if (view.joined && view.slide.length === 2) {
-    const a = flat[view.slide[0]];
-    return a ? [{ kind: a.forced ? 'unmerge' : 'split', first: a.number }] : [];
+  if (view.slide.length === 2) {
+    const a = flat[view.slide[0]], b = flat[view.slide[1]];
+    if (!a || !b) return [];
+    if (view.joined) return [{ kind: a.forced ? 'unmerge' : 'split', first: a.number }];
+    // Double spread's two pages side by side, not joined: the pair on screen is the one to make one spread (or to give
+    // back to the detector, when the reader split it). Not "left" or "right" of one of them: which of the two is "the
+    // page being read" is nothing a reader can see. Reintroduce the sides here: "Double spread offers the pair on
+    // screen" in spreadMarks.test.ts fails.
+    if (a.ci !== b.ci || b.number !== a.number + 1 || wide(a) || wide(b) || a.missing || b.missing) return [];
+    return [view.detector && a.mark === 'split' ? { kind: 'restore', first: a.number } : { kind: 'pair', first: a.number }];
   }
   if (wide(me) || me.missing) return [];
   const out: SpreadOption[] = [];
@@ -86,7 +94,7 @@ export function spreadOptions(
 }
 
 /** The mark an option writes: null clears the reader's mark, and the detector's answer stands. */
-export const markOf = (o: SpreadOption): SpreadMark | null => (o.kind === 'split' ? 'split' : o.kind === 'merge' ? 'join' : null);
+export const markOf = (o: SpreadOption): SpreadMark | null => (o.kind === 'split' ? 'split' : o.kind === 'merge' || o.kind === 'pair' ? 'join' : null);
 
 /**
  * The chapter's marks after setting `first`'s, as the server keeps them (bff lib/spreadMarks.ts setMark): a join takes
@@ -102,9 +110,13 @@ export function withMark(marks: ReadonlyMap<number, SpreadMark>, first: number, 
   return next;
 }
 
-/** Saves the reader's mark on the pair starting at page `first`; answers the chapter's marks as the server now has them. */
-export async function saveMark(bookId: string, first: number, mark: SpreadMark | null): Promise<Map<number, SpreadMark>> {
+/**
+ * Saves the reader's mark on the pair starting at page `first`; answers the chapter's marks as the server now has them.
+ * `pages` is the page count the reader is showing: a downloaded copy of an older file of the chapter is refused (409)
+ * rather than marked on another file's pages.
+ */
+export async function saveMark(bookId: string, first: number, mark: SpreadMark | null, pages: number): Promise<Map<number, SpreadMark>> {
   const r = await api<{ marks: Record<string, SpreadMark> }>(
-    `/api/books/${encodeURIComponent(bookId)}/pages/${first}/spread`, { method: 'PUT', json: { mark } });
+    `/api/books/${encodeURIComponent(bookId)}/pages/${first}/spread`, { method: 'PUT', json: { mark, pages } });
   return new Map(Object.entries(r.marks ?? {}).map(([k, v]) => [Number(k), v]));
 }

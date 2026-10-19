@@ -1071,17 +1071,23 @@ function ReaderInner() {
     // it -- shows the page it began with, the one being read: `current` is a slide's LAST page (completion fires on it),
     // and the pair's second page was a page on. Anything else keeps the page being read, as before. Reintroduce by
     // anchoring on `current` alone: "a pair taken apart shows its first page" in spreadMarks.test.ts fails.
-    const was = shownSlides.current[pagedSlide.current];
-    const apart = !!was && was.length === 2 && shownJoined.current[pagedSlide.current] && slideOf[was[0]] !== slideOf[was[1]];
+    // The slide on screen is read from the same render's slides (`shownAt`), never `pagedSlide`, which the Wide pages and
+    // pairs effects above may already have moved onto the new slides in this commit. And `current` follows the placing:
+    // the first page keeps the pair's slide index, so no scroll event comes to say so.
+    const was = shownSlides.current[shownAt.current];
+    const apart = !!was && was.length === 2 && !!shownJoined.current[shownAt.current] && slideOf[was[0]] !== slideOf[was[1]];
     const anchor = apart ? was[0] : current;
-    placeTrack(el, slideOf[anchor] ?? anchor);
+    const s = slideOf[anchor] ?? anchor;
+    placeTrack(el, s);
+    if (apart) { const on = slides[s]; setCurrent(on ? on[on.length - 1] : anchor); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [joinedAt]);
-  // The slides on screen until this render's layout is done: what the joins effect above compares with. A passive effect,
-  // so the layout effect still reads the previous render's.
+  // The slides on screen until this render's layout is done, and which of them was on screen: what the joins effect above
+  // compares with. A passive effect, so the layout effect still reads the previous render's.
   const shownSlides = useRef<number[][]>([]);
   const shownJoined = useRef<boolean[]>([]);
-  useEffect(() => { shownSlides.current = slides; shownJoined.current = joined; });
+  const shownAt = useRef(0);
+  useEffect(() => { shownSlides.current = slides; shownJoined.current = joined; shownAt.current = pagedSlide.current; });
 
   // ---- track current page on scroll ----
   // A resize that raises no scroll event (the offset still fits) leaves the track between two pages: snap it back too.
@@ -1353,6 +1359,7 @@ function ReaderInner() {
     o.kind === 'merge' ? (o.side === 'left' ? tr('Merge with the page on the left') : tr('Merge with the page on the right'))
     : o.kind === 'split' ? tr('Show as two pages')
     : o.kind === 'unmerge' ? tr('Undo the merge')
+    : o.kind === 'pair' ? tr('Merge these two pages')
     : tr('Join these two pages again');
   /**
    * Shown at once, saved on the account, and put back if the server refuses. The chapter's pages carry the marks, so the
@@ -1368,7 +1375,7 @@ function ReaderInner() {
       ? { ...c, pages: c.pages.map((p) => (p.mark === marks.get(p.number) ? p : { ...p, mark: marks.get(p.number) })) }
       : c)));
     put(withMark(before, o.first, mark));
-    saveMark(ch.id, o.first, mark)
+    saveMark(ch.id, o.first, mark, ch.pages.length)
       .then((marks) => { put(marks); void setOfflineSpreadMarks(ch.id, marks); })
       .catch(() => { put(before); toast(tr('Could not save'), 'error'); });
   };
@@ -2415,7 +2422,7 @@ function ReaderInner() {
             autoApplied={autoApplied}
             padConnected={padConnected}
             rtlTrack={pagedRtl}
-            spreadChoices={spreadChoices.map((o) => ({ key: `${o.kind}:${o.first}`, label: spreadLabel(o), onSelect: () => { setShowSettings(false); applySpread(o); } }))}
+            spreadChoices={spreadChoices.map((o) => ({ key: `${o.kind}:${o.first}`, label: spreadLabel(o), side: o.kind === 'merge' ? o.side : undefined, onSelect: () => { setShowSettings(false); applySpread(o); } }))}
             onClose={() => setShowSettings(false)}
             // The series' own source, by name. With no name there is no row at all: a raw source id is
             // never shown (an extension's is nineteen digits).

@@ -1058,15 +1058,24 @@ export default async function catalogRoutes(app: FastifyInstance) {
   // nothing for anyone else, and it is still resolved through the page list's visibility gate, which also bounds `n`: it
   // must start a pair. Answers the chapter's marks as they now are. Reintroduce by writing from :id unchecked: "a chapter
   // the account may not open" in spreadMarks.int.test.ts saves a mark on it.
+  // `pages`, when sent, is the page count the reader is looking at: a downloaded copy can be an older file of the chapter,
+  // whose page numbers are not this file's, so a mark made on it is refused (409) rather than put on other pages.
   app.put('/api/books/:id/pages/:n/spread', async (req, reply) => {
     const { id, n } = req.params as { id: string; n: string };
     const page = Number(n);
-    const body = z.object({ mark: z.enum(['join', 'split']).nullable() }).safeParse(req.body ?? {});
+    const body = z.object({ mark: z.enum(['join', 'split']).nullable(), pages: z.number().int().min(1).optional() }).safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ error: 'bad_mark' });
     const pages = await komga.bookPages(vc(req), id);
     if (!Array.isArray(pages) || !pages.length) return reply.code(404).send({ error: 'not_found' });
     if (!Number.isInteger(page) || page < 1 || page >= pages.length) return reply.code(400).send({ error: 'bad_page' });
-    return { marks: marksJson(await setMark(userIdOf(req), id, page, body.data.mark, pages.length)) };
+    if (body.data.pages !== undefined && body.data.pages !== pages.length) return reply.code(409).send({ error: 'pages_changed' });
+    try {
+      return { marks: marksJson(await setMark(userIdOf(req), id, page, body.data.mark, pages.length)) };
+    } catch (e) {
+      // A chapter with no library row of its own (a Komga-backed server): nothing to keep a mark against.
+      if ((e as { code?: string })?.code === '23503') return reply.code(404).send({ error: 'not_found' });
+      throw e;
+    }
   });
 
   // Smart-offline plan: the next N unread chapters of each favorite the user should keep offline.

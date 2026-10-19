@@ -12,7 +12,7 @@
 // on the old file is not applied to the new one -- the way the detector's answer is not, after a page-count mismatch.
 // The marks ride on the page list (GET /api/books/:id/pages) and in the offline download's manifest, as `mark` on the
 // first page of the pair, so the reader and a downloaded copy see them without asking for them.
-import { q } from './db';
+import { q, tx } from './db';
 
 export type SpreadMark = 'join' | 'split';
 
@@ -37,19 +37,28 @@ export const marksJson = (m: Map<number, SpreadMark>): Record<string, SpreadMark
  * earlier file of the chapter (another page count) are dropped with any change, as they no longer point at these pages.
  * Reintroduce by keying the row on the chapter alone: "a mark is the account's own" in spreadMarks.int.test.ts shows the
  * admin's merge to the member.
+ *
+ * One transaction, one account's chapter at a time (an advisory lock on the pair): two marks sent at once -- two tabs, two
+ * devices, a second tap before the first answers -- could otherwise both pass the neighbour's delete and leave a page in
+ * two joins. Reintroduce by dropping the lock: "two joins sent at once leave one" in spreadMarks.int.test.ts finds both.
  */
 export async function setMark(userId: string, bookId: string, page: number, mark: SpreadMark | null, count: number): Promise<Map<number, SpreadMark>> {
-  await q('DELETE FROM spread_marks WHERE user_id = $1 AND book_id = $2 AND pages <> $3', [userId, bookId, count]);
-  if (mark === null) {
-    await q('DELETE FROM spread_marks WHERE user_id = $1 AND book_id = $2 AND page = $3', [userId, bookId, page]);
-  } else {
-    if (mark === 'join') {
-      await q(`DELETE FROM spread_marks WHERE user_id = $1 AND book_id = $2 AND mark = 'join' AND page IN ($3, $4)`, [userId, bookId, page - 1, page + 1]);
+  return tx(async (qq) => {
+    await qq('SELECT pg_advisory_xact_lock(hashtext($1))', [`spread_marks:${userId}:${bookId}`]);
+    await qq('DELETE FROM spread_marks WHERE user_id = $1 AND book_id = $2 AND pages <> $3', [userId, bookId, count]);
+    if (mark === null) {
+      await qq('DELETE FROM spread_marks WHERE user_id = $1 AND book_id = $2 AND page = $3', [userId, bookId, page]);
+    } else {
+      if (mark === 'join') {
+        await qq(`DELETE FROM spread_marks WHERE user_id = $1 AND book_id = $2 AND mark = 'join' AND page IN ($3, $4)`, [userId, bookId, page - 1, page + 1]);
+      }
+      await qq(
+        `INSERT INTO spread_marks (user_id, book_id, page, mark, pages) VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (user_id, book_id, page) DO UPDATE SET mark = EXCLUDED.mark, pages = EXCLUDED.pages, updated_at = now()`,
+        [userId, bookId, page, mark, count]);
     }
-    await q(
-      `INSERT INTO spread_marks (user_id, book_id, page, mark, pages) VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (user_id, book_id, page) DO UPDATE SET mark = EXCLUDED.mark, pages = EXCLUDED.pages, updated_at = now()`,
-      [userId, bookId, page, mark, count]);
-  }
-  return marksFor(userId, bookId, count);
+    const rows = await qq<{ page: number; mark: SpreadMark }>(
+      'SELECT page, mark FROM spread_marks WHERE user_id = $1 AND book_id = $2 AND pages = $3 ORDER BY page', [userId, bookId, count]);
+    return new Map(rows.map((r) => [Number(r.page), r.mark]));
+  });
 }

@@ -99,7 +99,12 @@ test('the admin picks how many other sources a series may follow, 1 to 10; lower
   }
   assert.equal((await patch({ maxFollowedSources: 10 }, MEMBER)).statusCode, 403);
   assert.equal((await settings()).followerLimit, 2, 'nothing refused was written');
+  // The scout set the series aside for a day as full: raising the number brings it forward at once. Reintroduce by
+  // dropping that: its next look stays tomorrow.
+  await q(`INSERT INTO series_scout (series_id, reason, next_at, verdict) VALUES ($1, 'behind', now() + interval '1 day', 'cap')
+           ON CONFLICT (series_id) DO UPDATE SET next_at = EXCLUDED.next_at, verdict = 'cap'`, [SER]);
   assert.equal((await patch({ maxFollowedSources: 10 })).statusCode, 200);
+  assert.ok((await q('SELECT next_at <= now() AS due FROM series_scout WHERE series_id = $1', [SER]))[0].due, 'a full series is looked at again');
   for (let i = 6; i <= 10; i++) assert.equal(await follow(i), 'inserted');
   assert.equal(await follow(11), 'cap', 'ten is the most');
 });

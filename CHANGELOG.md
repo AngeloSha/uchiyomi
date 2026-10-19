@@ -30,6 +30,7 @@ series is **TIGamingTV**'s request ([#305](https://github.com/AngeloSha/uchiyomi
     read the next page is the one on the left.
   - **Show as two pages** for a pair the server joined, and **Join these two pages again** to give it back.
   - **Undo the merge** for a pair you joined.
+  - In *Double spread*, two pages side by side: **Merge these two pages**.
 - **Yours alone.** It is saved on your account, so it follows you to your other devices and into chapters you download,
   and nobody else's reader changes. A merge you made shows even with *Join split double pages* off.
 - A page is in one spread only, and wide pages and the ends of a chapter offer nothing. If a chapter's file is replaced

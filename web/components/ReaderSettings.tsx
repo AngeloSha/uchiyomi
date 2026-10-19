@@ -92,7 +92,7 @@ export function ReaderSettings({
    * v0.89.0 (#262): what may be done about the page being read -- merge it with the page on its left or right, take a
    * pair apart, give a pair back to the detector (lib/spreadMarks.ts). Empty where nothing may: the reader decides.
    */
-  spreadChoices?: ReadonlyArray<{ key: string; label: string; onSelect: () => void }>;
+  spreadChoices?: ReadonlyArray<{ key: string; label: string; side?: 'left' | 'right'; onSelect: () => void }>;
   onClose: () => void;
   /** The library the series is in, named for the admin's key (#235). Absent for a member: only an admin is told it. */
   libraryName?: string;
@@ -285,10 +285,12 @@ export function ReaderSettings({
             {spreadChoices.length > 0 && (
               <div className="mt-3 rounded-2xl border border-ink-700/70 bg-ink-850/60 p-3" data-spread-choices>
                 <p className="text-xs font-medium text-fog-300">{tr('This page')}</p>
-                <div dir="ltr" className={`mt-2 grid gap-2 ${spreadChoices.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                {/* A key with no side takes the whole row; a merge takes the column of its side, alone or not. */}
+                <div dir="ltr" className="mt-2 grid grid-cols-2 gap-2">
                   {spreadChoices.map((o) => (
-                    <button key={o.key} type="button" onClick={o.onSelect} data-spread-choice={o.key}
-                      className="rounded-xl border border-ink-700 px-2 py-2.5 text-sm text-fog-200 transition hover:border-accent hover:text-accent">
+                    <button key={o.key} type="button" onClick={o.onSelect} data-spread-choice={o.key} data-side={o.side}
+                      className={`rounded-xl border border-ink-700 px-2 py-2.5 text-sm text-fog-200 transition hover:border-accent hover:text-accent ${
+                        o.side === 'right' ? 'col-start-2' : o.side === 'left' ? 'col-start-1' : 'col-span-2'}`}>
                       <span dir="auto">{o.label}</span>
                     </button>
                   ))}

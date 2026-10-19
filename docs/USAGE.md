@@ -237,7 +237,7 @@ laurel), *Moonlight* (Devoted, a crescent and stars) and *Aurora* (Legend, a cro
 A frame you have not earned yet is shown greyed: tap it to see what it takes. Everyone in your household sees the frame
 you wear, wherever your avatar shows -- the corner, the household board, comments, lists -- and the server checks it is
 yours to wear. A frame shines now and then and Legend's turns; **Reduce effects** or your system's reduced motion keeps
-them still. A badge, once earned, stays, so does the frame; *None* takes it off.
+them still. The frame you wear stays on until you pick another; *None* takes it off.
 
 **Insights** (since v0.75.0, **Profile → Insights**). What your reading adds up to, beside what the Reading studio and
 Wrapped already show: **At this pace**, when you would finish each series you are reading at your pace through it over
@@ -1570,7 +1570,8 @@ not to you: an e-ink tablet wants E-ink, the phone beside it does not.
   double pages* in the reader's settings (and the reader's right-click menu) offers what fits the page you are on:
   **Merge with the page on the left** or **on the right** (the sides of your screen, so on a right-to-left read the next
   page is the one on the left), **Show as two pages** for a pair the server joined, **Undo the merge** for one you
-  joined, and **Join these two pages again** to give a pair you split back to the server's answer. A page is in one
+  joined, and **Join these two pages again** to give a pair you split back to the server's answer. In *Double spread*,
+  two pages side by side offer **Merge these two pages**. A page is in one
   spread only, wide pages and the ends of a chapter offer nothing, and a merge you made shows even with *Join split
   double pages* off. It is saved for your account only -- nobody else's reader changes -- follows you to your other
   devices and into chapters you download, and the server looking at the chapter again leaves it alone; a chapter whose file is replaced by one with
