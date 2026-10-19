@@ -1,7 +1,7 @@
 'use client';
 import { useId, type ReactNode } from 'react';
 import { t as tr } from '@/lib/i18n';
-import type { Badge, BadgeMetal } from '@/lib/badges';
+import { BADGE_METALS, type Badge } from '@/lib/badges';
 
 /**
  * A badge's emblem (v0.75.0, the owner's approved design): drawn in code, so it is sharp at any size and needs nothing
@@ -18,15 +18,8 @@ import type { Badge, BadgeMetal } from '@/lib/badges';
  * useId, so two emblems on a page never paint with each other's gradients.
  */
 
-// light, mid, dark, edge, glow
-const METALS: Record<BadgeMetal, [string, string, string, string, string]> = {
-  bronze: ['#ffd9b0', '#cf8a52', '#7a4322', '#3a1d0e', 'rgba(207,138,82,.35)'],
-  silver: ['#ffffff', '#c6ccda', '#6d7489', '#2c3040', 'rgba(198,204,218,.30)'],
-  gold: ['#fff5c4', '#f2c14e', '#a06a12', '#4a2f05', 'rgba(242,193,78,.38)'],
-  ember: ['#ffe3a8', '#ff8a3d', '#c6361b', '#4a1206', 'rgba(255,138,61,.38)'],
-  moon: ['#eef1ff', '#9aa8ff', '#5361d6', '#1b2160', 'rgba(154,168,255,.35)'],
-  aurora: ['#f1ecff', '#9b7dff', '#5b3fd9', '#1d1257', 'rgba(155,125,255,.45)'],
-};
+// light, mid, dark, edge, glow: lib/badges.ts, shared with the avatar frames (v0.89.0).
+const METALS = BADGE_METALS;
 const LOCK = ['#5d5d6c', '#30303b', '#1c1c24', '#2b2b35'];
 /** The reader's accent, never a colour of its own: progress is the app's accent wherever the reader set it. */
 const ACCENT = 'var(--color-accent)';

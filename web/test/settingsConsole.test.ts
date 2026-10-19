@@ -615,7 +615,8 @@ test('the avatar dots keep the focus ring, and a refused avatar or accent is put
   const src = code(read('components/ProfileSettings.tsx'));
   assert.doesNotMatch(src, /outline:/, 'a dot sets outline inline');
   assert.match(src, /aria-pressed=\{av\.color === c\}\s*className=\{`h-7 w-7 rounded-full \$\{av\.color === c \? 'ring-2 ring-white ring-offset-2 ring-offset-ink-850' : ''\}`\}/, 'the chosen dot is not marked with a ring');
-  assert.match(src, /const ok = await avatarSave\.run\(\(\) => api\('\/api\/settings', \{ method: 'PUT', json: \{ avatar: merged \} \}\)\);\s*if \(!ok\) setAvatar\(av\);/, 'a refused avatar stays');
+  // v0.89.0: the save is the avatar's or the frame's (`saver`, each row its own Saved), and both are put back alike.
+  assert.match(src, /const ok = await saver\.run\(\(\) => api\('\/api\/settings', \{ method: 'PUT', json: \{ avatar: merged \} \}\)\);\s*if \(!ok\) setAvatar\(av\);/, 'a refused avatar stays');
   assert.match(src, /const prev = accent;[\s\S]{0,400}?\.then\(\(ok\) => \{ if \(!ok\) \{ setAccent\(prev\); setSettings\(\{ accent: prev \}\); \} \}\);/, 'a refused accent stays applied');
 });
 

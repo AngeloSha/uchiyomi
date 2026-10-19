@@ -230,6 +230,15 @@ line under the badges says, for example, *Bookworm · Read 50 chapters · you ha
 about the next badge. **Show locked** lists the badges you have not earned yet, nearest first; it is off until you turn
 it on. Chapters count once each, however many times you read them.
 
+**Avatar frames** (since v0.89.0). Each badge unlocks a frame for your avatar, cast in its badge's metal: *Bronze*
+(Reader), *Silver* (Bookworm), *Ember* (On a roll, with a flame for each day of the streak), *Gold* (Centurion, with a
+laurel), *Moonlight* (Devoted, a crescent and stars) and *Aurora* (Legend, a crown and a slow halo). Pick one in
+**Profile → Settings → Appearance → Avatar → Frame**, or from **Badges unlock frames for your avatar** under the badges.
+A frame you have not earned yet is shown greyed: tap it to see what it takes. Everyone in your household sees the frame
+you wear, wherever your avatar shows -- the corner, the household board, comments, lists -- and the server checks it is
+yours to wear. A frame shines now and then and Legend's turns; **Reduce effects** or your system's reduced motion keeps
+them still. A badge, once earned, stays, so does the frame; *None* takes it off.
+
 **Insights** (since v0.75.0, **Profile → Insights**). What your reading adds up to, beside what the Reading studio and
 Wrapped already show: **At this pace**, when you would finish each series you are reading at your pace through it over
 the last four weeks; **Your best** day and week; the **genre and source mix** of this month's chapters against last

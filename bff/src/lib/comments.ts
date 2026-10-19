@@ -17,6 +17,7 @@
 //   enabled member, and the Komga backend, whose chapters are not rows of this database (talkOn).
 import { q, one } from './db';
 import { viewCtxFor, seriesVisible } from './visibility';
+import { isFrame, type AvatarFrame } from './badges';
 
 /** The six reactions, in the order every surface shows them. Stored as these exact strings (emoji presentation). */
 export const REACTIONS = ['❤️', '😂', '😭', '😱', '🔥', '🤯'] as const;
@@ -29,7 +30,7 @@ export const COMMENT_MAX = 2000;
 const COMMENTS_LIMIT = 500;
 
 /** Who said it, as /api/leaderboard already shows every member: the name and the avatar, nothing else. */
-export interface TalkPerson { id: string; name: string; avatar: { emoji?: string; color?: string } }
+export interface TalkPerson { id: string; name: string; avatar: { emoji?: string; color?: string; frame?: AvatarFrame } }
 export interface CommentOut {
   id: string;
   user: TalkPerson;
@@ -44,14 +45,24 @@ export interface ReactionOut { user: TalkPerson; emoji: Reaction; mine: boolean 
 /** One chapter of a series that has talk, for the series page's rows. `top`: its most used reactions, at most two. */
 export interface ChapterTalkCount { bookId: string; comments: number; reactions: number; top: Reaction[] }
 
-const person = (r: { uid: string; display_name: string | null; username?: string | null; avatar: unknown }): TalkPerson => {
-  const a = (r.avatar && typeof r.avatar === 'object' ? r.avatar : {}) as { emoji?: unknown; color?: unknown };
+/**
+ * A member's avatar as other members are shown it: its emoji, its colour and, since v0.89.0 (#267), the badge frame
+ * round it (lib/badges.ts) -- each only when it is one, never anything else that was stored.
+ */
+export const publicAvatar = (raw: unknown): TalkPerson['avatar'] => {
+  const a = (raw && typeof raw === 'object' ? raw : {}) as { emoji?: unknown; color?: unknown; frame?: unknown };
   return {
-    id: r.uid,
-    name: r.display_name || r.username || '',
-    avatar: { ...(typeof a.emoji === 'string' ? { emoji: a.emoji } : {}), ...(typeof a.color === 'string' ? { color: a.color } : {}) },
+    ...(typeof a.emoji === 'string' && a.emoji ? { emoji: a.emoji } : {}),
+    ...(typeof a.color === 'string' && a.color ? { color: a.color } : {}),
+    ...(isFrame(a.frame) ? { frame: a.frame } : {}),
   };
 };
+
+const person = (r: { uid: string; display_name: string | null; username?: string | null; avatar: unknown }): TalkPerson => ({
+  id: r.uid,
+  name: r.display_name || r.username || '',
+  avatar: publicAvatar(r.avatar),
+});
 
 const OWNED = () => process.env.LIBRARY_BACKEND !== 'komga';
 const ON_TTL_MS = 60_000;

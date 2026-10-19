@@ -6483,7 +6483,10 @@ paths:
         `homeCollections` and `showAllChapters` (since v0.60.0 also `librarySortDir`, since v0.61.0 `incognito`, a
         boolean, and since v0.68.0 `trackerPlanOnAdd`, a boolean). Unknown keys remain accepted and retained for compatibility -- since v0.66.0 the web app's `homeRails`
         (`{order, hidden}`, Home's rails as the reader arranged them; null is the default order) and `tone` (`oled`,
-        `graphite` or `midnight`, the background) among them.
+        `graphite` or `midnight`, the background) among them. `avatar` is `{emoji, color, frame}` (since v0.69.1 a hex
+        colour; since v0.89.0 `frame`, one of `bronze`, `silver`, `ember`, `gold`, `moon` or `aurora`, the frame a badge
+        unlocks). A frame the caller has not earned is refused with 403 `frame_locked`, unless it is the one already worn;
+        leaving `frame` out takes it off.
       operationId: putApiSettings
       requestBody:
         required: false
@@ -6503,6 +6506,8 @@ paths:
           description: Malformed body or parameter
         "401":
           description: Not authenticated
+        "403":
+          description: "`frame_locked`: the avatar's frame comes with a badge the caller has not earned."
   /api/translate:
     get:
       tags:

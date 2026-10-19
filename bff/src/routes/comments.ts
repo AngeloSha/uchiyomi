@@ -14,7 +14,7 @@ import { viewCtxFor, type ViewCtx } from '../lib/visibility';
 import { authenticate, userIdOf, roleOf, actsAsAdmin } from '../lib/auth';
 import { incognitoOn } from '../lib/incognito';
 import { logAudit } from '../lib/audit';
-import { COMMENT_MAX, chapterTalk, isReaction, seriesTalk, talkOn, type CommentOut } from '../lib/comments';
+import { COMMENT_MAX, chapterTalk, isReaction, publicAvatar, seriesTalk, talkOn, type CommentOut } from '../lib/comments';
 import { notifyConversation } from '../lib/push';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -81,10 +81,9 @@ export default async function commentRoutes(app: FastifyInstance) {
       bookId: id, authorId: uid, author, seriesId: book.seriesId, seriesTitle: book.seriesTitle || '',
       chapter: String(book.metadata?.number ?? book.number ?? ''), body,
     }).catch(() => {});
-    const a = (row.avatar && typeof row.avatar === 'object' ? row.avatar : {}) as { emoji?: string; color?: string };
     const out: CommentOut = {
       id: row.id,
-      user: { id: uid, name: author, avatar: { ...(a.emoji ? { emoji: a.emoji } : {}), ...(a.color ? { color: a.color } : {}) } },
+      user: { id: uid, name: author, avatar: publicAvatar(row.avatar) },
       body,
       page: b.data.page ?? null,
       createdAt: new Date(row.created_at).toISOString(),

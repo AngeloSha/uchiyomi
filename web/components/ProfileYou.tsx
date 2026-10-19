@@ -16,6 +16,10 @@ import { shownDeviceName } from '@/lib/device';
 import { BADGES, badgeCaption, badgeEarned, badgeHave, lockedBadges } from '@/lib/badges';
 import { useReduceEffects } from '@/lib/effects';
 import { BadgeEmblem } from '@/components/BadgeEmblem';
+import { openInConsole } from '@/lib/consoleOnScreen';
+
+/** Where the frames the badges unlock are worn (v0.89.0, #267): the avatar editor, opened on its Frame row. */
+const FRAMES_HREF = '/profile/?tab=appearance&section=avatar-frame';
 
 /**
  * The You tab of the profile: what you have earned, what you have read, and your lists.
@@ -130,6 +134,12 @@ export function BadgesCard({ stats, span = '' }: { stats?: Stats; span?: string 
         })}
       </div>
       <p data-badge-caption className="mt-3.5 text-xs text-fog-400">{caption}</p>
+      {/* v0.89.0 (#267 part 3): what a badge is for besides the shelf. A plain click opens the avatar editor in the console
+          on screen; any other opens the link as links open. */}
+      <a href={FRAMES_HREF} data-badges-frames className="btn-key mt-3 h-8 px-3 text-xs"
+        onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && openInConsole(FRAMES_HREF)) e.preventDefault(); }}>
+        {tr('Badges unlock frames for your avatar')}<IcChevronRight width={14} height={14} aria-hidden className="rtl:-scale-x-100" />
+      </a>
     </div>
   );
 }

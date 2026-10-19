@@ -14,6 +14,19 @@ const LABELS = keys('Reader', 'Bookworm', 'On a roll', 'Centurion', 'Devoted', '
 
 /** What a badge's emblem is cast in (components/BadgeEmblem.tsx): chapter badges climb through metals, streaks burn. */
 export type BadgeMetal = 'bronze' | 'silver' | 'gold' | 'ember' | 'moon' | 'aurora';
+
+/**
+ * Each metal's light, mid, dark, edge and glow: the emblems' palette (the owner's approved design, v0.75.0), and since
+ * v0.89.0 the avatar frames' (components/AvatarFrame.tsx), so a frame is cast in its badge's metal.
+ */
+export const BADGE_METALS: Record<BadgeMetal, [string, string, string, string, string]> = {
+  bronze: ['#ffd9b0', '#cf8a52', '#7a4322', '#3a1d0e', 'rgba(207,138,82,.35)'],
+  silver: ['#ffffff', '#c6ccda', '#6d7489', '#2c3040', 'rgba(198,204,218,.30)'],
+  gold: ['#fff5c4', '#f2c14e', '#a06a12', '#4a2f05', 'rgba(242,193,78,.38)'],
+  ember: ['#ffe3a8', '#ff8a3d', '#c6361b', '#4a1206', 'rgba(255,138,61,.38)'],
+  moon: ['#eef1ff', '#9aa8ff', '#5361d6', '#1b2160', 'rgba(154,168,255,.35)'],
+  aurora: ['#f1ecff', '#9b7dff', '#5b3fd9', '#1d1257', 'rgba(155,125,255,.45)'],
+};
 /** What is drawn on its plate. */
 export type BadgeGlyph = 'book' | 'worm' | 'flame' | 'laurel' | 'moon' | 'crown';
 
@@ -28,6 +41,19 @@ export const BADGES: readonly Badge[] = [
   { label: LABELS[4], kind: 'streak', goal: 30, metal: 'moon', glyph: 'moon' },
   { label: LABELS[5], kind: 'chapters', goal: 500, metal: 'aurora', glyph: 'crown' },
 ];
+
+/**
+ * v0.89.0 (#267 part 3, CheetahDoesStuff): each badge unlocks a frame for the avatar, cast in its metal and named after
+ * it. The server holds the same rules (bff lib/badges.ts, held together by bff test/badges.test.ts) and refuses a frame
+ * whose badge is not earned.
+ */
+export type AvatarFrame = BadgeMetal;
+export const FRAMES: readonly AvatarFrame[] = BADGES.map((b) => b.metal);
+export const isFrame = (v: unknown): v is AvatarFrame => typeof v === 'string' && (FRAMES as readonly string[]).includes(v);
+/** The frames' names, in the badges' order: rendered as `tr(name)`, so declared. */
+const FRAME_NAMES = keys('Bronze', 'Silver', 'Ember', 'Gold', 'Moonlight', 'Aurora');
+export const frameName = (f: AvatarFrame): string => tr(FRAME_NAMES[FRAMES.indexOf(f)]);
+export const badgeOfFrame = (f: AvatarFrame): Badge => BADGES.find((b) => b.metal === f)!;
 
 /** Where the reader stands on a badge's measure. */
 export const badgeHave = (b: Badge, s: BadgeStats): number => (b.kind === 'chapters' ? s.chapters_completed : s.longestStreak);

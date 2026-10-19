@@ -143,12 +143,15 @@ test('prefers-reduced-motion does exactly what it did before the switch existed'
   // under the media query): "the reduced-motion block changed" fails. (v0.75.0: the phone hero's drift, a CSS
   // animation since then, stops here as the mesh's does -- the same "no drift", not a Reduce effects rule -- and so do the
   // badge emblems' sheen and Legend's halo, v0.75.0. v0.86.0: a settings row search lands on is lit still instead of
-  // fading -- a fade cut to nothing by the last rule would never show where the row is; the same "no motion".)
+  // fading -- a fade cut to nothing by the last rule would never show where the row is; the same "no motion". v0.89.0:
+  // the avatar frames the badges unlock -- their sheen, Legend's turning ring and halo, the embers' flicker -- as the
+  // badges' own do.)
   const inPrm = CSS().filter((r) => r.ctx.join('|') === '@media (prefers-reduced-motion: reduce)');
   assert.deepEqual(inPrm.map((r) => `${r.sel} { ${flat(r.body)} }`), [
     '.fx-mesh { animation: none; }',
     '.hero-drift { animation: none; }',
     '.badge-sheen, .badge-halo { animation: none; }',
+    '.frame-sheen, .frame-spin, .frame-halo, .frame-flicker { animation: none; }',
     '.settings-flash { animation: none; background-color: rgb(var(--accent) / 0.14); }',
     '*, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }',
   ], 'the reduced-motion block changed');

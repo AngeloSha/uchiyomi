@@ -440,6 +440,16 @@ html.lenis-scrolling .fx-grain { display: none; }
 .badge-sheen { animation: badge-sheen 6.5s cubic-bezier(.45, 0, .2, 1) infinite; }
 @keyframes badge-halo { to { transform: rotate(360deg); } }
 .badge-halo { animation: badge-halo 14s linear infinite; }
+/* The avatar frames (v0.89.0, #267, components/AvatarFrame.tsx), from the badges they come with: a sheen across the metal
+   now and then, Legend's ring and halo turning, On a roll's flames. The sheen's slant is in its transform, so it waits
+   slanted, off the ring, between passes and under both motion switches below. */
+@keyframes frame-sheen { 0% { transform: rotate(20deg) translateX(0); } 24%, 100% { transform: rotate(20deg) translateX(250px); } }
+.frame-sheen { transform-origin: 60px 60px; transform: rotate(20deg); animation: frame-sheen 7.5s cubic-bezier(.45, 0, .2, 1) infinite; }
+@keyframes frame-spin { to { transform: rotate(360deg); } }
+.frame-spin { animation: frame-spin 9s linear infinite; }
+.frame-halo { animation: frame-spin 14s linear infinite; }
+@keyframes frame-flicker { 0%, 100% { transform: scale(1, 1); } 35% { transform: scale(.9, 1.14); } 70% { transform: scale(1.06, .9); } }
+.frame-flicker { animation: frame-flicker 1.3s ease-in-out infinite; }
 
 /* A settings row that search or a link has just landed on (components/SettingsLayout.tsx, v0.86.0): lit in the accent,
    then fading back. Still -- lit for the two seconds the class stays, then gone -- under reduced motion and Reduce
@@ -452,6 +462,7 @@ html.reduce-effects .settings-flash { animation: none; background-color: rgb(var
   .fx-mesh { animation: none; }
   .hero-drift { animation: none; }
   .badge-sheen, .badge-halo { animation: none; }
+  .frame-sheen, .frame-spin, .frame-halo, .frame-flicker { animation: none; }
   .settings-flash { animation: none; background-color: rgb(var(--accent) / 0.14); }
   *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
@@ -536,7 +547,11 @@ html.reduce-effects .glass-strong { background: var(--color-ink-900); }
 html.reduce-effects .skeleton::after { animation: none; display: none; }
 html.reduce-effects .hero-drift { animation: none; }
 html.reduce-effects .badge-sheen,
-html.reduce-effects .badge-halo { animation: none; }
+html.reduce-effects .badge-halo,
+html.reduce-effects .frame-sheen,
+html.reduce-effects .frame-spin,
+html.reduce-effects .frame-halo,
+html.reduce-effects .frame-flicker { animation: none; }
 /* The accent hairline is a two-layer mask with `mask-composite: exclude`, on every tile in the grid. Chrome
    barely notices it; Firefox does: with everything above already off, the 200-tile library at 1440 still
    scrolled at 32 fps in headless Firefox, and at 59.5 with only these rings gone. Every element wearing one

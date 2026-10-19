@@ -24,31 +24,13 @@ import { devicesOf, hourIn, lastDays, loadTimeline, summarize, validTz, yearRang
 import { listFor, ownListFor, listsFor, listItems, kindOf, ownerOf, type ListRow } from '../lib/lists';
 import { smartQuery, parseQuery } from '../lib/smartLists';
 import { insightsFor } from '../lib/readingInsights';
+import { FRAMES, badgeOfFrame, computeStreaks, earnedFrames, finishedDays } from '../lib/badges';
 
 /** A colour a member stores that other members' browsers paint (avatar, list accent): hex only (v0.69.1). */
 const HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 
 /** The most days `/api/stats?days=all` answers: about ten years, the "All time" heatmap's longest strip (#265). */
 const ALL_TIME_MAX_DAYS = 3660;
-
-function computeStreaks(days: string[]): { current: number; longest: number } {
-  if (!days.length) return { current: 0, longest: 0 };
-  const set = new Set(days);
-  const fmt = (d: Date) => d.toISOString().slice(0, 10);
-  let current = 0;
-  const cur = new Date();
-  if (!set.has(fmt(cur))) cur.setDate(cur.getDate() - 1); // allow today or yesterday to anchor
-  while (set.has(fmt(cur))) { current++; cur.setDate(cur.getDate() - 1); }
-  let longest = 0, run = 0;
-  let prev: Date | null = null;
-  for (const ds of [...days].sort()) {
-    const d = new Date(ds + 'T00:00:00Z');
-    run = prev && Math.round((d.getTime() - prev.getTime()) / 86400000) === 1 ? run + 1 : 1;
-    longest = Math.max(longest, run);
-    prev = d;
-  }
-  return { current, longest };
-}
 
 /**
  * What a list's sort orders need that a series DTO does not carry (#164), for the series of one list: when this reader
@@ -637,13 +619,8 @@ export default async function personalRoutes(app: FastifyInstance) {
         ORDER BY 1`,
       [uid, windowDays],
     );
-    const days = (
-      await q<{ d: string }>(
-        `SELECT DISTINCT to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS d FROM reading_events WHERE user_id = $1 AND completed = true`,
-        [uid],
-      )
-    ).map((r) => r.d);
-    const streaks = computeStreaks(days);
+    // The badges' measure too (lib/badges.ts): what the server checks a frame against is what the profile shows.
+    const streaks = computeStreaks(await finishedDays(uid));
     // The week's chapters (the weekly goal) and the window's (the Studio's count over its heatmap): each finished chapter
     // once, as the household board counts its week (#264). The window's is not the sum of byDay, where a chapter read
     // again on another day counts on both days. Reintroduce count(*): "a read-through counts once" in
@@ -1124,9 +1101,20 @@ export default async function personalRoutes(app: FastifyInstance) {
     // where a stored `url(https://…)` made every viewer's browser fetch a URL the member chose. A hex colour and a short
     // emoji, or nothing. Reintroduce by accepting any object: "an avatar colour must be a hex colour" in
     // settingsV558.int.test.ts saves a url().
+    // v0.89.0 (#267 part 3, CheetahDoesStuff): a frame round the avatar, a badge's reward (lib/badges.ts), and only one this
+    // account has earned -- everyone in the household sees it. The frame already worn is kept on any other change, so an
+    // emoji can be changed under it without its badge being measured again. Leaving `frame` out takes it off. Reintroduce
+    // by accepting any frame: "only an earned frame can be worn" in avatarFrames.int.test.ts saves Legend's on day one.
     if ('avatar' in data && data.avatar !== null) {
-      const av = z.object({ emoji: z.string().max(16).optional(), color: z.string().regex(HEX_COLOR).optional() }).safeParse(data.avatar); // unknown keys are dropped
+      const av = z.object({ emoji: z.string().max(16).optional(), color: z.string().regex(HEX_COLOR).optional(), frame: z.enum(FRAMES).optional() }).safeParse(data.avatar); // unknown keys are dropped
       if (!av.success) return reply.code(400).send({ error: 'bad_settings', message: 'An avatar is an emoji and a colour.' });
+      const frame = av.data.frame;
+      if (frame) {
+        const worn = (await one<{ f: string | null }>(`SELECT avatar->>'frame' AS f FROM users WHERE id = $1`, [uid]))?.f;
+        if (frame !== worn && !(await earnedFrames(uid)).has(frame)) {
+          return reply.code(403).send({ error: 'frame_locked', message: `Earn the ${badgeOfFrame(frame).name} badge first.` });
+        }
+      }
       data.avatar = av.data;
     }
     if ('accent' in data && data.accent !== null && !(typeof data.accent === 'string' && HEX_COLOR.test(data.accent))) {

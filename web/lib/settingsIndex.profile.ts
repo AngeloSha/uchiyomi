@@ -47,6 +47,7 @@ export const PROFILE_SETTINGS: SettingsIndex = {
     { id: 'background', cat: 'appearance', label: 'Background', keywords: ['tone', 'oled', 'black', 'graphite', 'midnight', 'dark', 'theme'] },
     { id: 'accent', cat: 'appearance', label: 'Accent', keywords: ['colour', 'color', 'theme colour'] },
     { id: 'avatar', cat: 'appearance', label: 'Avatar', keywords: ['emoji', 'profile picture', 'face'] },
+    { id: 'avatar-frame', cat: 'appearance', label: 'Frame', editor: 'avatar', keywords: ['avatar frame', 'badge frame', 'ring', 'border', 'decoration', 'reward', 'badges'] },
     { id: 'reduce-effects', cat: 'appearance', label: 'Reduce effects', keywords: ['motion', 'animations', 'blur', 'performance', 'slow', 'battery'],
       help: 'Turns off the animated background, blur, smooth scrolling and transitions. Try it if scrolling feels slow.' },
 

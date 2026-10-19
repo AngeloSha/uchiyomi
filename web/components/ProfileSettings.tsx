@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { requestPersist, storageEstimate } from '@/lib/downloads';
@@ -13,10 +13,12 @@ import { compactChaptersOn, setCompactChaptersOn } from '@/lib/compactChapters';
 import { showAllChaptersOn } from '@/lib/showAllChapters';
 import { contextMenusOn, setContextMenusOn } from '@/lib/contextMenus';
 import { ReaderPrefs, loadPrefs, savePrefs, syncPrefsFromServer } from '@/lib/readerPrefs';
-import { Avatar, AVATAR_EMOJIS, AVATAR_COLORS } from '@/components/Avatar';
+import { Avatar, AVATAR_EMOJIS, AVATAR_COLORS, type AvatarData } from '@/components/Avatar';
+import { FRAMES, badgeCaption, badgeEarned, badgeOfFrame, frameName, type AvatarFrame } from '@/lib/badges';
+import type { Stats } from '@/components/ProfileYou';
 import { ProgressBar } from '@/components/ui';
 import { useToast } from '@/components/Toast';
-import { IcCheck, IcChevronRight, IcDownload, IcMoments, IcSliders, IcSparkle } from '@/components/icons';
+import { IcCheck, IcChevronRight, IcDownload, IcLock, IcMoments, IcSliders, IcSparkle } from '@/components/icons';
 import { t as tr, LOCALES, keys, type Locale } from '@/lib/i18n';
 import { useT } from '@/lib/I18nProvider';
 import {
@@ -219,20 +221,36 @@ function AppearanceSection() {
   const { user, setAvatar, setSettings } = useAuth();
   const qc = useQueryClient();
   const avatarSave = useAutosave();
+  const frameSave = useAutosave();
   const accentSave = useAutosave();
   const avatarEditor = useEditor('avatar');
 
-  const av = user?.avatar ?? {};
-  const saveAvatar = async (next: { emoji?: string; color?: string }) => {
+  const av: AvatarData = user?.avatar ?? {};
+  const saveAvatar = async (next: Partial<AvatarData>, saver = avatarSave) => {
     const merged = { ...av, ...next };
     // Optimistic: the avatar in the corner changes as you tap, and goes back to what it was (`av` is the
     // pre-tap value) when the PUT is refused -- the row says "Could not save", and a face the server never
     // accepted must not stay pressed beside that sentence. The leaderboard is refetched either way so it
-    // never shows a stale face.
+    // never shows a stale face. The whole avatar is sent: the frame worn rides along with a new emoji, and a
+    // frame left out (None) is taken off.
     setAvatar(merged);
-    const ok = await avatarSave.run(() => api('/api/settings', { method: 'PUT', json: { avatar: merged } }));
+    const ok = await saver.run(() => api('/api/settings', { method: 'PUT', json: { avatar: merged } }));
     if (!ok) setAvatar(av);
     qc.invalidateQueries({ queryKey: ['leaderboard'] });
+  };
+
+  // v0.89.0 (#267 part 3, CheetahDoesStuff): the frames the badges unlock (lib/badges.ts), measured on the profile's own
+  // numbers -- the You tab's request, shared. A frame not earned yet is shown greyed with what it takes; the server
+  // refuses it too (bff lib/badges.ts), and keeps the one already worn.
+  const { data: stats } = useQuery({ queryKey: ['stats'], queryFn: () => api<Stats>('/api/stats'), enabled: avatarEditor.open });
+  const [aboutFrame, setAboutFrame] = useState<AvatarFrame | null>(null);
+  const mayWear = (fr: AvatarFrame) => av.frame === fr || (!!stats && badgeEarned(badgeOfFrame(fr), stats));
+  const frameCaption = (fr: AvatarFrame | null): string => {
+    if (!fr) return tr('Each badge you earn unlocks a frame. Everyone in your household sees the one you wear.');
+    const badge = badgeOfFrame(fr);
+    return mayWear(fr)
+      ? `${frameName(fr)} · ${tr('Unlocked with {badge}', { badge: tr(badge.label) })}`
+      : `${frameName(fr)} · ${tr('Unlocks with {badge}', { badge: tr(badge.label) })}${stats ? ` · ${badgeCaption(badge, stats)}` : ''}`;
   };
 
   const [accent, setAccent] = useState<string>(user?.settings?.accent || '#7c5cff');
@@ -318,6 +336,35 @@ function AppearanceSection() {
               </button>
             ))}
           </div>
+        </Row>
+        {/* The frames, each on this face: None, then the badges' order. A locked one is a key too -- tapping it says
+            what it takes, as a badge on the You tab does -- but it saves nothing. */}
+        <Row id="avatar-frame" stacked label={tr('Frame')} status={frameSave.status}>
+          <div className="grid grid-cols-4 gap-2 sm:grid-cols-7"
+            onMouseLeave={() => setAboutFrame(null)}
+            onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setAboutFrame(null); }}>
+            <button type="button" aria-pressed={!av.frame} data-frame-choice="none" onClick={() => saveAvatar({ frame: undefined }, frameSave)}
+              className={`grid justify-items-center gap-1.5 rounded-2xl border px-1 pb-2 pt-3 text-[11px] ${!av.frame ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300 hover:border-ink-600'}`}>
+              <Avatar avatar={{ ...av, frame: undefined }} size={40} />
+              <span>{tr('None')}</span>
+            </button>
+            {FRAMES.map((fr) => {
+              const ok = mayWear(fr);
+              const on = av.frame === fr;
+              return (
+                <button key={fr} type="button" aria-pressed={on} aria-disabled={!ok || undefined} data-frame-choice={fr}
+                  title={frameCaption(fr)}
+                  onMouseEnter={() => setAboutFrame(fr)} onFocus={() => setAboutFrame(fr)}
+                  onClick={() => { setAboutFrame(fr); if (ok && !on) void saveAvatar({ frame: fr }, frameSave); }}
+                  className={`relative grid justify-items-center gap-1.5 rounded-2xl border px-1 pb-2 pt-3 text-[11px] ${on ? 'border-accent bg-accent-soft text-accent' : ok ? 'border-ink-700 text-fog-200 hover:border-ink-600' : 'border-ink-800 text-fog-500'}`}>
+                  <Avatar avatar={{ ...av, frame: fr }} size={40} frameLocked={!ok} />
+                  <span className="truncate">{frameName(fr)}</span>
+                  {!ok && <IcLock width={12} height={12} aria-hidden className="absolute end-1.5 top-1.5 text-fog-500" />}
+                </button>
+              );
+            })}
+          </div>
+          <p data-frame-caption className="mt-2.5 text-xs text-fog-400">{frameCaption(aboutFrame)}</p>
         </Row>
       </EditorSheet>
     </>

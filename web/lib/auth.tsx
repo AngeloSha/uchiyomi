@@ -9,8 +9,10 @@ import { applyReduceEffects, restoreReduceEffects } from './effects';
 import { applyTone, restoreTone } from './tone';
 import { isDesktop, serverReachableHint, untilReachable } from './desktop';
 import { t as tr } from './i18n';
+import type { AvatarFrame } from './badges';
 
-export interface Avatar { emoji?: string; color?: string }
+/** `frame` since v0.89.0 (#267): the frame one of the account's badges unlocked (lib/badges.ts). */
+export interface Avatar { emoji?: string; color?: string; frame?: AvatarFrame }
 interface User {
   id: string;
   username: string | null;
