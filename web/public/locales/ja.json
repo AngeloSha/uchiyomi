@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4104
+    "strings": 4132
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -4107,5 +4107,33 @@
   "Shortcuts": "ショートカット",
   "Shown to members": "メンバーに見えるもの",
   "Updates and privacy": "アップデートとプライバシー",
-  "What members see, and what is looked up online.": "メンバーに見えるものと、オンラインで調べるもの。"
+  "What members see, and what is looked up online.": "メンバーに見えるものと、オンラインで調べるもの。",
+  "Comments": "コメント",
+  "1 reaction": "リアクション1件",
+  "{n} reactions": "リアクション{n}件",
+  "Incognito reading is on, so you can read comments but not post or react.": "シークレット読書がオンのため、コメントは読めますが、投稿やリアクションはできません。",
+  "Reactions": "リアクション",
+  "Comment": "コメントする",
+  "React or comment": "リアクションやコメントをする",
+  "Comment actions": "コメントの操作",
+  "edited": "編集済み",
+  "Say something about this chapter…": "この章の感想を書く…",
+  "Your comment": "あなたのコメント",
+  "{n} left": "残り{n}文字",
+  "Comments need a connection.": "コメントには接続が必要です。",
+  "No comments yet. Say what you thought of this chapter.": "まだコメントはありません。この章の感想を書いてみましょう。",
+  "Delete your comment?": "コメントを削除しますか？",
+  "Remove {name}'s comment?": "{name}のコメントを削除しますか？",
+  "It is gone for everyone.": "全員の画面から消えます。",
+  "You reacted": "あなたがリアクションしました",
+  "You and {name} reacted": "あなたと{name}がリアクションしました",
+  "You, {a} and {n} others reacted": "あなた、{a}ほか{n}人がリアクションしました",
+  "{name} reacted": "{name}がリアクションしました",
+  "{a} and {b} reacted": "{a}と{b}がリアクションしました",
+  "{a}, {b} and {n} others reacted": "{a}、{b}ほか{n}人がリアクションしました",
+  "1 comment": "コメント1件",
+  "{n} comments": "コメント{n}件",
+  "Post": "投稿",
+  "You, {a} and 1 other reacted": "あなた、{a}ほか1人がリアクションしました",
+  "{a}, {b} and 1 other reacted": "{a}、{b}ほか1人がリアクションしました"
 }

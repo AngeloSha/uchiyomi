@@ -5,6 +5,7 @@ import { q } from './db';
 import { env } from '../env';
 import { viewCtxFor, seriesVisible } from './visibility';
 import { assertPublicHost, BlockedAddress } from './ssrfGuard';
+import { conversationRecipients, conversationPush } from './comments';
 // A cycle, and a safe one: notify/index.ts calls notifyAdmins back when it switches a failing target off, and
 // both sides only ever touch the other inside a function body, never while the modules load.
 import { notifyTargetsOfHealth } from './notify';
@@ -95,6 +96,19 @@ export async function notifyNewChapter(seriesId: string, title: string, addedCou
     tag: `series-${seriesId}`,
   };
   await Promise.all(users.map((u) => sendToUser(u.user_id, payload)));
+}
+
+/**
+ * A new comment on a chapter (v0.87.0), to the members already in that chapter's conversation and nobody else -- the
+ * owner's ruling. Who they are, and that each may still open the series, is lib/comments.ts conversationRecipients's
+ * call; this only sends. Fire-and-forget from the comment route: a push is never what a comment waits on.
+ */
+export async function notifyConversation(o: { bookId: string; authorId: string; author: string; seriesId: string; seriesTitle: string; chapter: string; body: string }): Promise<void> {
+  if (!enabled) return;
+  const users = await conversationRecipients(o.bookId, o.authorId);
+  if (!users.length) return;
+  const payload = conversationPush(o);
+  await Promise.all(users.map((u) => sendToUser(u, payload)));
 }
 
 /**

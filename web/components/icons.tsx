@@ -153,3 +153,7 @@ export const IcEyeOff = (p: P) => (
 export const IcWifiOff = (p: P) => (
   <svg {...base(p)}><path d="M2 4l20 20M8.5 16.5a5 5 0 0 1 7 0M5 12.5a10 10 0 0 1 4-2.6M2 9a15 15 0 0 1 4-2.5M19 12.5q.8.6 1.5 1.3M22 9a15 15 0 0 0-7-4" /><circle cx="12" cy="20" r="0.6" fill="currentColor" /></svg>
 );
+/** v0.87.0: a chapter's comments -- a speech bubble with two lines of talk in it. */
+export const IcComment = (p: P) => (
+  <svg {...base(p)}><path d="M5 4.5h14A2.5 2.5 0 0 1 21.5 7v8a2.5 2.5 0 0 1-2.5 2.5h-7.5L7 21v-3.5H5A2.5 2.5 0 0 1 2.5 15V7A2.5 2.5 0 0 1 5 4.5Z" /><path d="M7.5 9.5h9M7.5 13h6" /></svg>
+);

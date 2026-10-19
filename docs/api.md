@@ -1557,6 +1557,25 @@ GET    /api/push/key              POST   /api/push/subscribe
 POST   /api/push/unsubscribe
 ```
 
+### Chapter comments
+```
+GET    /api/books/:id/comments    POST   /api/books/:id/comments
+PATCH  /api/comments/:id          DELETE /api/comments/:id
+PUT    /api/books/:id/reaction    DELETE /api/books/:id/reaction
+GET    /api/series/:id/comments
+```
+
+A chapter's talk (v0.87.0), for the members who may open its series: a chapter in a series the caller may not open
+answers **404**, as a missing one does. `GET /api/books/:id/comments` answers `{on, comments, reactions}`: comments oldest
+first as `{id, user: {id, name, avatar}, body, page, createdAt, editedAt, mine}`, reactions as `{user, emoji, mine}`.
+`on` is false where there is nobody to talk to (one enabled member, or the Komga backend). A comment is plain text, 1 to
+2000 characters; `page` is the page it was written on in the reader. Each member has one reaction a chapter, one of
+❤️ 😂 😭 😱 🔥 🤯: `PUT` sets or changes it, `DELETE` takes it back. While the account's Incognito reading is on, a
+comment or a reaction is refused with **403** `{ "error": "incognito" }`. Only its author edits a comment; its author
+or an admin deletes it (an admin's removal is audited). A new comment sends a push to the members who commented on that
+chapter before and may still open the series. `GET /api/series/:id/comments` lists the chapters with talk as
+`{bookId, comments, reactions, top}`. None of these exist on Uchiyomi Desktop.
+
 **Account settings.** `GET /api/settings` answers the caller's whole forwards-compatible object; `PUT /api/settings`
 takes top-level keys directly and merges them into that object (an object value is replaced whole). Unknown keys stay
 accepted and retained for compatibility. v0.55.8 validates three public keys, and v0.60.0 a fourth:

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4104
+    "strings": 4132
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4107,5 +4107,33 @@
   "Shortcuts": "快捷方式",
   "Shown to members": "成员看到的内容",
   "Updates and privacy": "更新与隐私",
-  "What members see, and what is looked up online.": "成员看到的内容，以及在网上查询的内容。"
+  "What members see, and what is looked up online.": "成员看到的内容，以及在网上查询的内容。",
+  "Comments": "评论",
+  "1 reaction": "1 个表情回应",
+  "{n} reactions": "{n} 个表情回应",
+  "Incognito reading is on, so you can read comments but not post or react.": "无痕阅读已开启：你可以看评论，但不能发表评论或添加表情回应。",
+  "Reactions": "表情回应",
+  "Comment": "写评论",
+  "React or comment": "表情回应或评论",
+  "Comment actions": "评论操作",
+  "edited": "已编辑",
+  "Say something about this chapter…": "说说你对这一章的看法…",
+  "Your comment": "你的评论",
+  "{n} left": "还剩 {n} 字",
+  "Comments need a connection.": "评论需要网络连接。",
+  "No comments yet. Say what you thought of this chapter.": "还没有评论。说说你对这一章的看法吧。",
+  "Delete your comment?": "删除你的评论？",
+  "Remove {name}'s comment?": "移除 {name} 的评论？",
+  "It is gone for everyone.": "所有人都将看不到它。",
+  "You reacted": "你回应了",
+  "You and {name} reacted": "你和 {name} 回应了",
+  "You, {a} and {n} others reacted": "你、{a} 和另外 {n} 人回应了",
+  "{name} reacted": "{name} 回应了",
+  "{a} and {b} reacted": "{a} 和 {b} 回应了",
+  "{a}, {b} and {n} others reacted": "{a}、{b} 和另外 {n} 人回应了",
+  "1 comment": "1 条评论",
+  "{n} comments": "{n} 条评论",
+  "Post": "发表",
+  "You, {a} and 1 other reacted": "你、{a} 和另外 1 人回应了",
+  "{a}, {b} and 1 other reacted": "{a}、{b} 和另外 1 人回应了"
 }

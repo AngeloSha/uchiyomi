@@ -32,6 +32,8 @@ tags:
     description: "Sources: find, browse and add series"
   - name: personal
     description: "Per-account data: favourites, collections, notes, tokens, trackers"
+  - name: comments
+    description: "A chapter's comments and reactions, for the members who may open its series (v0.87.0; not on Uchiyomi Desktop)"
   - name: downloads
     description: Offline downloads
   - name: images
@@ -5483,6 +5485,218 @@ paths:
       responses:
         "200":
           description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/books/{id}/comments:
+    get:
+      tags:
+        - comments
+      summary: A chapter's comments, oldest first, and its reactions.
+      description: >-
+        `on` is false where there is nobody to talk to (one enabled member, the Komga backend): the web then shows
+        nothing. Each comment and reaction names its member as `{id, name, avatar}` and says whether it is the
+        caller's own (`mine`). A chapter in a series the caller may not open answers 404, as a missing one does.
+      operationId: getApiBooksIdComments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "{on, comments: [{id, user, body, page, createdAt, editedAt, mine}], reactions: [{user, emoji, mine}]}"
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+    post:
+      tags:
+        - comments
+      summary: Comment on a chapter.
+      description: >-
+        Plain text, 1 to 2000 characters after trimming. `page` is the page it was written on, when written in the
+        reader. Refused with 403 `incognito` while the account's Incognito reading is on. Members who commented on
+        the chapter before, and may still open the series, get a push on devices with alerts on. Twenty a minute
+        per account.
+      operationId: postApiBooksIdComments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - body
+              properties:
+                body:
+                  type: string
+                page:
+                  type: integer
+                  nullable: true
+      security:
+        - bearer: []
+      responses:
+        "201":
+          description: The comment, as GET lists it
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "`incognito`: Incognito reading is on"
+        "404":
+          description: Not found, or not visible to this account
+        "429":
+          description: Too many comments in a minute
+  /api/books/{id}/reaction:
+    put:
+      tags:
+        - comments
+      summary: React to a chapter, or change the reaction.
+      description: >-
+        One reaction a member a chapter, one of the six the app offers. Refused with 403 `incognito` while the
+        account's Incognito reading is on.
+      operationId: putApiBooksIdReaction
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - emoji
+              properties:
+                emoji:
+                  type: string
+                  enum: ["❤️", "😂", "😭", "😱", "🔥", "🤯"]
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "`incognito`: Incognito reading is on"
+        "404":
+          description: Not found, or not visible to this account
+        "429":
+          description: Too many reactions in a minute
+    delete:
+      tags:
+        - comments
+      summary: Take your reaction to a chapter back.
+      operationId: deleteApiBooksIdReaction
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/comments/{id}:
+    patch:
+      tags:
+        - comments
+      summary: Edit your own comment.
+      description: Its author only; anyone else's comment answers 404. The comment then shows as edited.
+      operationId: patchApiCommentsId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - body
+              properties:
+                body:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "{id, body, editedAt}"
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, not visible to this account, or not yours
+    delete:
+      tags:
+        - comments
+      summary: Delete your own comment, or, as an admin, remove anyone's.
+      description: An admin removing someone else's comment is recorded in the audit log.
+      operationId: deleteApiCommentsId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, not visible to this account, or not yours
+  /api/series/{id}/comments:
+    get:
+      tags:
+        - comments
+      summary: The chapters of a series that have comments or reactions, with their counts.
+      description: >-
+        For the series page's chapter rows. `top` is a chapter's most used reactions, at most two. `on` as for a
+        chapter's comments.
+      operationId: getApiSeriesIdComments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "{on, content: [{bookId, comments, reactions, top}]}"
         "401":
           description: Not authenticated
         "404":

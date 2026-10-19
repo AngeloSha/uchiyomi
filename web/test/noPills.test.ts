@@ -160,6 +160,10 @@ const SURFACES = [
   'lib/settingsIndex.profile.ts',
   'lib/settingsIndex.admin.ts',
   'lib/settingsChoices.ts',
+  // v0.87.0: a chapter's comments and reactions -- the strip where two chapters meet, the paged key, the sheet, their
+  // reaction keys and count tags -- and their words.
+  'components/ChapterTalk.tsx',
+  'lib/comments.ts',
 ];
 
 /**

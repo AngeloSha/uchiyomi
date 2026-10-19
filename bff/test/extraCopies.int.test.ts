@@ -185,6 +185,36 @@ test("a merge keeps the kept series' copy of a chapter both had, and what was re
   assert.equal(audit[0].detail.removed, 3);
 });
 
+test("a dropped copy's comments and reactions follow the chapter", { skip }, async () => {
+  // v0.87.0: what the household said about a chapter is about the chapter, not the file. The copy that goes takes its
+  // row with it (CASCADE), so removeCopy carries the talk first: comments onto the kept copy, a page scaled as progress
+  // is; a reaction only where its member has none there (one each a chapter). Reintroduce by dropping the two statements
+  // in removeCopy: the comments and the reaction are gone with xc_g2.
+  await q(`DELETE FROM users WHERE username = 'xc_friend'`);
+  const friend = (await q(`INSERT INTO users (username, display_name, password_hash, role, auth_kind)
+                            VALUES ('xc_friend', 'xc_friend', 'x', 'user', 'password') RETURNING id`))[0].id;
+  try {
+    await series(KEEP, 'Keep Tale', KEEP_DIR);
+    await series(GONE, 'Gone Tale', GONE_DIR);
+    await book('xc_k2', KEEP, DL, KEEP_DIR, 'Chapter 2.cbz', 2, { pages: 8 });
+    await book('xc_g2', GONE, DL, GONE_DIR, 'Chapter 2.cbz', 2, { pages: 160 });
+    await q(`INSERT INTO chapter_comments (book_id, user_id, body, page) VALUES ('xc_g2', $1, 'that panel', 80), ('xc_g2', $2, 'agreed', NULL)`, [user, friend]);
+    await q(`INSERT INTO chapter_reactions (book_id, user_id, emoji) VALUES ('xc_g2', $1, '😂'), ('xc_g2', $2, '🔥'), ('xc_k2', $2, '❤️')`, [user, friend]);
+    const r = await admin.mergeSeries(GONE, KEEP, { keepOnce: { userId: user } });
+    assert.equal(r.duplicates, 1, 'the other copy of 2 is taken off the list');
+    assert.deepEqual(await rowsAt(2), ['xc_k2']);
+    const said = await q(`SELECT book_id, body, page FROM chapter_comments WHERE user_id = ANY($1) ORDER BY body DESC`, [[user, friend]]);
+    assert.deepEqual(said.map((c: any) => [c.book_id, c.body, c.page]), [['xc_k2', 'that panel', 4], ['xc_k2', 'agreed', null]],
+      'both comments follow, and page 80 of 160 is page 4 of the kept copy\'s 8');
+    const felt = await q(`SELECT user_id, emoji FROM chapter_reactions WHERE book_id = 'xc_k2' ORDER BY emoji`);
+    assert.deepEqual(felt.map((x: any) => [x.user_id === user ? 'reader' : 'friend', x.emoji]).sort(), [['friend', '❤️'], ['reader', '😂']],
+      "a reaction moves where its member had none; the friend's own on the kept copy stays theirs");
+    assert.equal((await q(`SELECT count(*)::int AS n FROM chapter_reactions WHERE book_id = 'xc_g2'`))[0].n, 0);
+  } finally {
+    await q(`DELETE FROM users WHERE id = $1`, [friend]);
+  }
+});
+
 test('a merge that does not ask keeps both copies (Rescan everything\'s merges)', { skip }, async () => {
   await series(KEEP, 'Keep Tale', KEEP_DIR);
   await series(GONE, 'Gone Tale', GONE_DIR);

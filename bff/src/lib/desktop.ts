@@ -86,8 +86,9 @@ export function firstRunFloor(serverMs: number, key: DesktopFloor): number {
  * one-person PC app: first-run setup and password sign-in (the shell signs the window in, routes/auth.ts
  * `POST /auth/desktop`), OIDC, password/2FA/sessions, creating or changing members (the LIST stays: the
  * Library tab and the notification-target dialog read it), everyone's sessions, OPDS and API tokens, web push
- * (Electron has no push service), the install-count preview (desktop installs are not counted), and translated pages
- * (v0.85.0: the engine's processes do not run inside the app yet).
+ * (Electron has no push service), the install-count preview (desktop installs are not counted), translated pages
+ * (v0.85.0: the engine's processes do not run inside the app yet), and a chapter's comments and reactions (v0.87.0:
+ * talk between the members of a household).
  *
  * ⚠️ A renamed route would silently escape this list, so desktopRoutes.test.ts asserts every entry is a real
  * route of the server build.
@@ -129,6 +130,14 @@ export const DESKTOP_HIDDEN_ROUTES: readonly string[] = Object.freeze([
   'PUT /api/admin/translate',
   'DELETE /api/admin/translate',
   'POST /api/admin/translate/download',
+  // Chapter comments and reactions (v0.87.0, routes/comments.ts): a household's talk, and the desktop app is one person.
+  'GET /api/books/:id/comments',
+  'POST /api/books/:id/comments',
+  'PATCH /api/comments/:id',
+  'DELETE /api/comments/:id',
+  'PUT /api/books/:id/reaction',
+  'DELETE /api/books/:id/reaction',
+  'GET /api/series/:id/comments',
 ]);
 
 /** What `desktopPlan` works out from the shell's environment. */

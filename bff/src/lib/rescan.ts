@@ -1092,8 +1092,10 @@ const EXT = /\.(cbz|cbr|zip|rar|pdf|epub)$/i;
 
 /**
  * Anything of anyone's on a chapter row (FOLLOW, the header): reading progress, reading events, a bookmark, a note, an
- * offline copy, a number or title set by hand, a page marked by hand. Page hashes the nightly job measured are not --
- * they are of the same bytes as the old row's, and go with the row (ON DELETE CASCADE).
+ * offline copy, a number or title set by hand, a page marked by hand, a comment or a reaction (v0.87.0). Page hashes the
+ * nightly job measured are not -- they are of the same bytes as the old row's, and go with the row (ON DELETE CASCADE).
+ * Reintroduce by dropping the comments arm: "a renamed file someone commented on since the scan is kept beside its old
+ * chapter" in rescan.int.test.ts finds the comment gone with the new row.
  */
 const HOLDS = `SELECT book_id AS id FROM read_progress WHERE book_id = ANY($1)
   UNION SELECT book_id FROM reading_events WHERE book_id = ANY($1)
@@ -1101,7 +1103,9 @@ const HOLDS = `SELECT book_id AS id FROM read_progress WHERE book_id = ANY($1)
   UNION SELECT book_id FROM notes WHERE book_id = ANY($1)
   UNION SELECT book_id FROM offline_downloads WHERE book_id = ANY($1)
   UNION SELECT book_id FROM book_overrides WHERE book_id = ANY($1)
-  UNION SELECT book_id FROM page_hashes WHERE book_id = ANY($1) AND override IS NOT NULL`;
+  UNION SELECT book_id FROM page_hashes WHERE book_id = ANY($1) AND override IS NOT NULL
+  UNION SELECT book_id FROM chapter_comments WHERE book_id = ANY($1)
+  UNION SELECT book_id FROM chapter_reactions WHERE book_id = ANY($1)`;
 
 interface PairRow {
   id: string; series_id: string; root: string; file: string; pruned_at: string | null; fingerprint: string | null;

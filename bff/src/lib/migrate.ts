@@ -1950,6 +1950,30 @@ CREATE TABLE IF NOT EXISTS translate_names (
   at        timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (series_id, lang, source)
 );
+
+-- v0.87.0: what the household says about a chapter (lib/comments.ts). Keyed on the chapter row, which keeps its id when
+-- its file moves, its series merges or a rescan follows a renamed file; the few places that delete a chapter row carry
+-- these first (extraCopies.ts removeCopy, rescan.ts HOLDS) or count them as gone (libraryAdmin.ts Forget). A member's
+-- words go with their account. page: the page the comment was written on, when it was written in the reader.
+-- Additive: v0.86.x ignores both tables.
+CREATE TABLE IF NOT EXISTS chapter_comments (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  book_id    text NOT NULL REFERENCES lib_books(id) ON DELETE CASCADE,
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  body       text NOT NULL,
+  page       integer,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  edited_at  timestamptz
+);
+CREATE INDEX IF NOT EXISTS idx_chapter_comments_book ON chapter_comments (book_id, created_at);
+-- One reaction a member a chapter: tapping another emoji changes it.
+CREATE TABLE IF NOT EXISTS chapter_reactions (
+  book_id    text NOT NULL REFERENCES lib_books(id) ON DELETE CASCADE,
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  emoji      text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (book_id, user_id)
+);
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

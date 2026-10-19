@@ -38,7 +38,9 @@ import { PageGrid } from '@/components/PageGrid';
 import { ChapterSheet } from '@/components/ChapterSheet';
 import { SeriesCard } from '@/components/cards';
 import { NextInStory } from '@/components/RelatedRail';
-import { IcChevronLeft, IcChevronRight, IcSliders, IcGrid } from '@/components/icons';
+import { IcChevronLeft, IcChevronRight, IcSliders, IcGrid, IcComment } from '@/components/icons';
+import { SEAM_H, useChapterTalk, useTalkOn } from '@/lib/comments';
+import { ChapterTalkSheet, TalkKey, TalkStrip } from '@/components/ChapterTalk';
 import { ReaderImg, MissingCaption, ReaderPageRow, SlidePending, SlideRegion, SlideTurned, SlideTurnedPair, DIVIDER_H, measurePage } from '@/components/ReaderPage';
 import { CHAPTER_SAMPLE, LEFT_HALF, RIGHT_HALF, WHOLE, chapterSideCrop, halfCrop, pairCrop, type Region } from '@/lib/readerCrop';
 import { t as tr } from '@/lib/i18n';
@@ -259,6 +261,9 @@ function ReaderInner() {
   /** Whether the right-click menu is open (it is made further down): the keys are its while it is, Escape included. */
   const menuOpen = useRef(false);
   const [showKeys, setShowKeys] = useState(false);
+  /** The chapter whose talk is open in its sheet (v0.87.0, components/ChapterTalk.tsx), by id; null while none is. */
+  const [talkFor, setTalkFor] = useState<string | null>(null);
+  const openTalk = useCallback((id: string) => setTalkFor(id), []);
   const hasKeyboard = useHasKeyboard();
   const [current, setCurrent] = useState(0);
   const { user } = useAuth();
@@ -732,6 +737,13 @@ function ReaderInner() {
   // wrong page from then on, with no symptom until the page counter disagrees with the screen.
   // Reintroduce by dropping `expanded` from the deps: expand a strip, then scroll -- the counter is off by
   // however much the page grew.
+  // v0.87.0: whether the household has talk to show (lib/comments.ts useTalkOn), asked with the chapter on screen. While it
+  // does, the line between two chapters is the strip where they meet, SEAM_H tall instead of DIVIDER_H -- in the model
+  // below as in the row that draws it (components/ReaderPage.tsx). Reintroduce by reserving DIVIDER_H whatever talkOn
+  // says: "the reader reserves the strip it draws" in comments.test.ts fails, and every page below a strip reads as
+  // another one.
+  const talkOn = useTalkOn(chapters[flat[current]?.ci ?? 0]?.id);
+  const dividerH = talkOn ? SEAM_H : DIVIDER_H;
   const { heights, tops } = useMemo(() => {
     // `buildFlow` owns the collapse decision. In particular, `missing` outranks a stale/manual `junk` flag:
     // a placeholder must keep its full page box so its explanation is never squeezed into a strip.
@@ -749,13 +761,13 @@ function ReaderInner() {
     const ts: number[] = [];
     let acc = 0;
     flat.forEach((p, i) => {
-      if (p.firstOfChapter && p.ci > 0) acc += DIVIDER_H;
+      if (p.firstOfChapter && p.ci > 0) acc += dividerH;
       ts.push(acc);
       acc += hs[i] + prefs.gap;
     });
     return { heights: hs, tops: ts };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flat, colW, prefs.gap, collapsing, expanded, wideMode, prefs.cropBorders, sideVersion]);
+  }, [flat, colW, prefs.gap, collapsing, expanded, wideMode, prefs.cropBorders, sideVersion, dividerH]);
 
   /** Each page's place in the flow, by key (v0.61.0): the anchor, the downloaded pages' images and the page grid look
    *  a page up here. They used to scan the flow for it, once per page -- per blob, per grid tile, per page turn. */
@@ -1306,6 +1318,9 @@ function ReaderInner() {
     staleTime: 5 * 60 * 1000,
   });
   const activeChapter = chapters[flat[current]?.ci ?? 0];
+  const { data: activeTalk } = useChapterTalk(talkOn ? activeChapter?.id : null);
+  /** On a chapter's last page (the last page of a slide, paged): where a paged track shows the chapter's talk. */
+  const atChapterEnd = !!flat[current] && (current === flat.length - 1 || flat[current + 1]?.ci !== flat[current].ci);
 
   // One place that knows how to move to a page, shared by the scrubber and the page grid. The initial-scroll
   // effect above deliberately does not use it: that one must also seed `lastSent` and run exactly once.
@@ -1531,6 +1546,20 @@ function ReaderInner() {
   // ---- keyboard (desktop) ----
   // The keys in force: this mode's defaults with this device's own bindings (lib/readerKeys.ts reproduces v0.60's).
   const keyMap = useMemo(() => keyMapFor(prefs.mode, device.keys), [prefs.mode, device.keys]);
+  /**
+   * Whether the Escape being handled found a dialog open when it was pressed (v0.87.0). ⚠️ A sheet closes itself on
+   * Escape (components/ui.tsx Sheet listens on the document), and React renders that close between the document's
+   * listeners and the window's -- so the handler below, on the window, read every sheet as already shut and left the
+   * reader: Escape on the chapter list or a chapter's comments sent the reader back to the series. Noted in the capture
+   * phase, before anything has closed. Reintroduce by dropping the check in the Escape line: walkComments "Escape closes
+   * the comments, not the reader" ends on the series page.
+   */
+  const escFoundDialog = useRef(false);
+  useEffect(() => {
+    const note = (e: KeyboardEvent) => { if (e.key === 'Escape') escFoundDialog.current = !!document.querySelector('[role="dialog"]'); };
+    window.addEventListener('keydown', note, true);
+    return () => window.removeEventListener('keydown', note, true);
+  }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Alt+← is the browser's Back and Ctrl/Cmd+F its Find: a key with a modifier is never the reader's.
@@ -1541,8 +1570,8 @@ function ReaderInner() {
       // An open sheet (settings, page grid, chapter list, the key list) is what the keys are for: turning pages
       // underneath it, or leaving the reader on Escape, acted on the thing the reader was not looking at. None of
       // them listens for Escape itself, so it is handled here, and it closes the sheet.
-      if (showSettings || showPages || showChapters || showKeys) {
-        if (e.key === 'Escape') { setShowSettings(false); setShowPages(false); setShowChapters(false); setShowKeys(false); }
+      if (showSettings || showPages || showChapters || showKeys || talkFor) {
+        if (e.key === 'Escape') { setShowSettings(false); setShowPages(false); setShowChapters(false); setShowKeys(false); setTalkFor(null); }
         else if (e.key === '?' && showKeys && !e.repeat) setShowKeys(false);
         return;
       }
@@ -1552,8 +1581,8 @@ function ReaderInner() {
       if (e.key === '?' && !e.repeat && !/^(INPUT|TEXTAREA|SELECT)$/.test(t?.tagName ?? '') && !t?.isContentEditable
         && !READER_ACTIONS.some((a) => keyMap[a].includes('?'))) { e.preventDefault(); setShowKeys(true); return; }
       // Escape is reserved, never bound: it leaves the reader. ⚠️ Once a press -- Escape repeating called
-      // history.back() until it left the reader for wherever came before.
-      if (e.key === 'Escape') { if (!e.repeat) back(); return; }
+      // history.back() until it left the reader for wherever came before. And never the press that closed a sheet.
+      if (e.key === 'Escape') { if (!e.repeat && !escFoundDialog.current) back(); return; }
       // A focused control owns its keys: the page slider its arrows, a button or link its Space and Enter
       // (turning the page instead swallowed the click), a text field everything.
       const owned = !!t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable
@@ -1567,12 +1596,12 @@ function ReaderInner() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keyMap, seriesId, showSettings, showPages, showChapters, showKeys]);
+  }, [keyMap, seriesId, showSettings, showPages, showChapters, showKeys, talkFor]);
 
   // ---- a game controller (v0.61.0, lib/readerPad.ts) ----
   // Polled only while one is connected and the tab is visible; still while a sheet is open over the pages.
   const padMap = useMemo(() => padMapFor(device.pad), [device.pad]);
-  const padConnected = useGamepad((a) => performRef.current(a), padMap, showSettings || showPages || showChapters || showKeys);
+  const padConnected = useGamepad((a) => performRef.current(a), padMap, showSettings || showPages || showChapters || showKeys || !!talkFor);
 
   // ---- tap / double-tap / pinch (no overlay -> native scroll works) ----
   const onPointerDown = (e: React.PointerEvent) => {
@@ -1857,6 +1886,7 @@ function ReaderInner() {
       { label: tr('Previous chapter'), onSelect: () => goChapter(prevId, true), disabled: !prevId },
     ];
     if (chapterRefs.length > 0) items.push({ label: tr('Chapters'), onSelect: () => setShowChapters(true) });
+    if (talkOn && activeChapter) items.push({ label: tr('Comments'), onSelect: () => setTalkFor(activeChapter.id) });
     if (prefs.mode === 'paged') {
       items.push({ label: prefs.spread ? tr('Read in single pages') : tr('Read in double spreads'), onSelect: () => setPref({ spread: !prefs.spread }), divider: true });
     }
@@ -1949,6 +1979,12 @@ function ReaderInner() {
       </p>
       <h2 className="mt-1.5 font-display text-2xl font-bold text-white">{activeChapter?.seriesTitle || tr('This series')}</h2>
       {!offlineEnd && <ReaderEndRadar seriesId={activeSeriesId} />}
+      {/* v0.87.0: no strip follows the last chapter, so its talk is here. */}
+      {talkOn && !offlineEnd && chapters.length > 0 && (
+        <div className="mt-5 flex flex-col items-center gap-2.5" data-talk-last>
+          <TalkStrip bookId={chapters[chapters.length - 1].id} seriesId={chapters[chapters.length - 1].seriesId} onOpen={openTalk} />
+        </div>
+      )}
       {offlineEnd && (
         <p className="mx-auto mt-2 max-w-sm text-sm text-fog-400">
           {tr('This is the last chapter you have offline. Reconnect to keep reading.')}
@@ -2002,6 +2038,10 @@ function ReaderInner() {
             {flat.map((p, i) => (
               <ReaderPageRow key={p.key} item={p} height={heights[i]} gap={prefs.gap}
                 divider={p.firstOfChapter && p.ci > 0 ? (chapters[p.ci]?.title || tr('Next chapter')) : null}
+                seam={talkOn && p.firstOfChapter && p.ci > 0 ? chapters[p.ci - 1]?.id ?? null : null}
+                seamLabel={p.firstOfChapter && p.ci > 0 ? chapters[p.ci - 1]?.title ?? null : null}
+                seamSeries={p.firstOfChapter && p.ci > 0 ? chapters[p.ci - 1]?.seriesId ?? null : null}
+                seamActive={activeSet.has(i) || activeSet.has(i - 1)} onSeam={openTalk}
                 src={activeSet.has(i) ? srcFor(i) : null}
                 stripSrc={p.collapsed ? stripSrc(i) : null}
                 recollapsible={collapsing && !!p.junk && !p.missing && expanded.has(p.key)}
@@ -2135,6 +2175,14 @@ function ReaderInner() {
         </div>
       )}
 
+      {/* v0.87.0: on a paged track, the chapter's talk on its last page -- the strip between chapters has no place there.
+          The focus label's spot, while the bars are away; the top bar's key does the same while they show. */}
+      {prefs.mode === 'paged' && talkOn && !chrome && !focus && atChapterEnd && activeChapter && !talkFor && (
+        <div dir={uiDir} className="pointer-events-none absolute inset-x-0 bottom-[max(0.9rem,calc(env(safe-area-inset-bottom)+0.4rem))] z-30 flex justify-center" data-talk-end>
+          <TalkKey bookId={activeChapter.id} onOpen={openTalk} />
+        </div>
+      )}
+
       {/* CHROME */}
       {/* ⚠️ Each bar's dark pane runs on past the screen edge (the `before:` above the top bar, the `after:` below the
           bottom one). The bars come in on framer's default spring for `y`, which overshoots by about 8 px around 170 ms,
@@ -2181,6 +2229,18 @@ function ReaderInner() {
                   <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z" />
                 </svg>
               </button>
+              {/* v0.87.0: the talk of the chapter on screen. A circle like its neighbours; the count is a squared tag. */}
+              {talkOn && activeChapter && (
+                <button onClick={() => setTalkFor(activeChapter.id)} aria-label={tr('Comments')} data-talk-open
+                  className="relative grid h-10 w-10 shrink-0 place-items-center rounded-full bg-black/45 text-white backdrop-blur">
+                  <IcComment width={20} height={20} />
+                  {!!activeTalk?.comments.length && (
+                    <span aria-hidden className="absolute -end-0.5 -top-0.5 rounded-[4px] bg-accent px-1 text-[10px] font-bold leading-4 text-black tabular-nums">
+                      {activeTalk.comments.length}
+                    </span>
+                  )}
+                </button>
+              )}
               {hasKeyboard && (
                 <button onClick={() => setShowKeys(true)} aria-label={tr('Keyboard shortcuts')} title={tr('Keyboard shortcuts')}
                   className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-black/45 text-white backdrop-blur">
@@ -2352,6 +2412,20 @@ function ReaderInner() {
             </div>
           )} />
       )}
+
+      {talkFor && (() => {
+        const ch = chapters.find((c) => c.id === talkFor);
+        return (
+          <ChapterTalkSheet bookId={talkFor} seriesId={ch?.seriesId} title={ch?.title || tr('Comments')} subtitle={ch?.seriesTitle}
+            page={talkFor === activeChapter?.id ? pageInChapter || null : null}
+            onPage={(n) => {
+              const ci = chapters.findIndex((c) => c.id === talkFor);
+              setTalkFor(null);
+              if (ci >= 0) jumpTo(indexOfKey.get(`${talkFor}:${n}`) ?? startIndex(flat, ci, n));
+            }}
+            onClose={() => setTalkFor(null)} />
+        );
+      })()}
 
       {!ready && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-ink-950">

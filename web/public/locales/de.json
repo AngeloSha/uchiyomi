@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4104
+    "strings": 4132
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -4107,5 +4107,33 @@
   "Shortcuts": "Tastenkürzel",
   "Shown to members": "Was Mitglieder sehen",
   "Updates and privacy": "Updates und Privatsphäre",
-  "What members see, and what is looked up online.": "Was Mitglieder sehen und was online nachgeschlagen wird."
+  "What members see, and what is looked up online.": "Was Mitglieder sehen und was online nachgeschlagen wird.",
+  "Comments": "Kommentare",
+  "1 reaction": "1 Reaktion",
+  "{n} reactions": "{n} Reaktionen",
+  "Incognito reading is on, so you can read comments but not post or react.": "Inkognito lesen ist an: Du kannst Kommentare lesen, aber nichts posten und nicht reagieren.",
+  "Reactions": "Reaktionen",
+  "Comment": "Kommentieren",
+  "React or comment": "Reagieren oder kommentieren",
+  "Comment actions": "Aktionen für den Kommentar",
+  "edited": "bearbeitet",
+  "Say something about this chapter…": "Sag etwas zu diesem Kapitel…",
+  "Your comment": "Dein Kommentar",
+  "{n} left": "noch {n}",
+  "Comments need a connection.": "Kommentare brauchen eine Verbindung.",
+  "No comments yet. Say what you thought of this chapter.": "Noch keine Kommentare. Sag, wie du dieses Kapitel fandest.",
+  "Delete your comment?": "Deinen Kommentar löschen?",
+  "Remove {name}'s comment?": "Kommentar von {name} entfernen?",
+  "It is gone for everyone.": "Er ist dann für alle weg.",
+  "You reacted": "Du hast reagiert",
+  "You and {name} reacted": "Du und {name} habt reagiert",
+  "You, {a} and {n} others reacted": "Du, {a} und {n} weitere habt reagiert",
+  "{name} reacted": "{name} hat reagiert",
+  "{a} and {b} reacted": "{a} und {b} haben reagiert",
+  "{a}, {b} and {n} others reacted": "{a}, {b} und {n} weitere haben reagiert",
+  "1 comment": "1 Kommentar",
+  "{n} comments": "{n} Kommentare",
+  "Post": "Posten",
+  "You, {a} and 1 other reacted": "Du, {a} und 1 weitere Person habt reagiert",
+  "{a}, {b} and 1 other reacted": "{a}, {b} und 1 weitere Person haben reagiert"
 }

@@ -70,6 +70,7 @@ import komgaCompatRoutes from './routes/komgaCompat';
 import notifyRoutes from './routes/notify';
 import translateRoutes from './routes/translate';
 import { stopEngine } from './lib/translate/engine';
+import commentRoutes from './routes/comments';
 import { isDesktop } from './lib/desktop';
 import { installDesktopGuards } from './lib/desktopGuard';
 import { ensureDesktopUser } from './lib/desktopUser';
@@ -237,6 +238,8 @@ async function main() {
   // Translated pages (v0.85.0): answers "off" until an admin downloads the engine and turns it on. Hidden on desktop
   // (DESKTOP_HIDDEN_ROUTES), whose server runs inside the app, where the engine's processes cannot (docs/DESKTOP.md).
   await app.register(translateRoutes);
+  // Chapter comments and reactions (v0.87.0): everywhere, as every plugin is; desktop answers 404 for them (lib/desktop.ts).
+  await app.register(commentRoutes);
   // Neither OPDS nor the Komga-compatible API exists on desktop: both are for OTHER devices reading this
   // library, and the desktop server is reachable from this PC only (they return with "Share with my phone").
   if (!isDesktop()) await app.register(opdsRoutes);

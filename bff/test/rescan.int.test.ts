@@ -485,6 +485,29 @@ test('a renamed file someone opened since the scan is kept beside its old chapte
   assert.deepEqual([r.followed, r.twins], [0, 1], JSON.stringify(r));
 });
 
+test('a renamed file someone commented on, or reacted to, since the scan is kept beside its old chapter', { skip }, async () => {
+  // v0.87.0: a comment or a reaction is something of someone's on the row, like a bookmark. Reintroduce by dropping the
+  // chapter_comments arm of HOLDS: Chapter 01 goes, and the comment with it (CASCADE); the chapter_reactions arm: Chapter
+  // 02 goes, and the reaction with it.
+  await seed();
+  await runFingerprintBackfill();
+  await rename(join(ROOT, SRC, 'Kept', 'Chapter 1.cbz'), join(ROOT, SRC, 'Kept', 'Chapter 01.cbz'));
+  await rename(join(ROOT, SRC, 'Kept', 'Chapter 2.cbz'), join(ROOT, SRC, 'Kept', 'Chapter 02.cbz'));
+  const plan = await preview();
+  const said = await rowOf(ROOT, `${SRC}/Kept/Chapter 01.cbz`);
+  const felt = await rowOf(ROOT, `${SRC}/Kept/Chapter 02.cbz`);
+  const uid = await aReader();
+  await q(`INSERT INTO chapter_comments (book_id, user_id, body) VALUES ($1, $2, 'read this one twice')`, [said.id, uid]);
+  await q(`INSERT INTO chapter_reactions (book_id, user_id, emoji) VALUES ($1, $2, '🔥')`, [felt.id, uid]);
+
+  const r = await apply(plan);
+  assert.equal((await q(`SELECT 1 FROM lib_books WHERE id = $1`, [said.id])).length, 1, 'the new row with a comment on it was removed');
+  assert.equal((await q(`SELECT 1 FROM lib_books WHERE id = $1`, [felt.id])).length, 1, 'the new row with a reaction on it was removed');
+  assert.equal((await q(`SELECT count(*)::int AS n FROM chapter_comments WHERE user_id = $1`, [uid]))[0].n, 1);
+  assert.equal((await q(`SELECT count(*)::int AS n FROM chapter_reactions WHERE user_id = $1`, [uid]))[0].n, 1);
+  assert.deepEqual([r.followed, r.twins], [0, 2], JSON.stringify(r));
+});
+
 test('a renamed chapter that was the cover stays the cover, and Apply asks each pair again', { skip }, async () => {
   // The cover moves to the old row, the same chapter on the same file. Between the preview and the press, an old file
   // came back (two copies now: both kept) and a new file was renamed again (not the file the preview paired).

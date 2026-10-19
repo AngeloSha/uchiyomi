@@ -565,9 +565,13 @@ export async function deleteChapterFiles(
 
 /** Every table with a per-user row keyed on a book, and so re-pointed to the book's current series first. */
 const BOOK_KEYED_USER_TABLES = ['read_progress', 'reading_events', 'bookmarks', 'notes', 'offline_downloads'] as const;
-/** Every table with a per-book row, deleted strictly by the ids of the books this series owns. */
+/**
+ * Every table with a per-book row, deleted strictly by the ids of the books this series owns. v0.87.0: a chapter's
+ * comments and reactions, which have no series id to re-point -- they follow the chapter row wherever it goes -- and so
+ * are not in the list above.
+ */
 // v0.85.0: page_translations (lib/translate/pages.ts) cascades from lib_books; named for the same count.
-const BOOK_KEYED_TABLES = [...BOOK_KEYED_USER_TABLES, 'book_overrides', 'page_hashes', 'page_translations'] as const;
+const BOOK_KEYED_TABLES = [...BOOK_KEYED_USER_TABLES, 'book_overrides', 'page_hashes', 'page_translations', 'chapter_comments', 'chapter_reactions'] as const;
 /** Every table keyed on the series id. lib_books and lib_series themselves come last, on their own. */
 const SERIES_KEYED_TABLES = [
   'favorites', 'collection_items', 'ratings', 'series_colors', 'series_art', 'series_seen', 'series_trackers',
@@ -790,7 +794,9 @@ export async function forgetSeries(id: string): Promise<ForgetResult | ForgetRef
     // lose history, not a NEW badge or a carried tracker floor" in forgetSeries.int.test.ts reads 1 too many.
     // A read mark on a chapter the server never held (#69) IS history -- "I read chapter 57" -- and goes with
     // the series. Reintroduce by dropping its arm: "forget deletes read marks and counts their owner" in
-    // forgetSeries.int.test.ts reads 0 members.
+    // forgetSeries.int.test.ts reads 0 members. So is a comment or a reaction on one of its chapters (v0.87.0): a
+    // member's own words. Reintroduce by dropping those arms: "forget deletes a chapter's comments and counts their
+    // authors" in forgetSeries.int.test.ts reads 0 members.
     const [{ n: users }] = await qq<{ n: number }>(
       `SELECT count(DISTINCT user_id)::int AS n FROM (
          SELECT user_id FROM read_progress     WHERE book_id = ANY($2)
@@ -802,6 +808,8 @@ export async function forgetSeries(id: string): Promise<ForgetResult | ForgetRef
          UNION SELECT user_id FROM ratings          WHERE series_id = ANY($1)
          UNION SELECT user_id FROM tracker_progress WHERE series_id = ANY($3)
          UNION SELECT user_id FROM listing_progress WHERE series_id = ANY($1)
+         UNION SELECT user_id FROM chapter_comments  WHERE book_id = ANY($2)
+         UNION SELECT user_id FROM chapter_reactions WHERE book_id = ANY($2)
          UNION SELECT c.user_id FROM collection_items ci JOIN collections c ON c.id = ci.collection_id
                 WHERE ci.series_id = ANY($1)
        ) u`,

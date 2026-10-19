@@ -495,6 +495,21 @@ test('forget deletes read marks and counts their owner', { skip }, async () => {
   assert.equal(await rowsFor('listing_progress', 'series_id', [S]), 0);
 });
 
+test("forget deletes a chapter's comments and counts their authors", { skip }, async () => {
+  // v0.87.0: a comment or a reaction is a member's own words about the chapter, and goes with it. Reintroduce by
+  // dropping the chapter_comments and chapter_reactions arms of the users count: 0 members.
+  await series(S, 'Talked about', { deleted: true });
+  await book('b_fg_1', S, 1, { pruned: 'deleted' });
+  await q(`INSERT INTO chapter_comments (book_id, user_id, body) VALUES ('b_fg_1', $1, 'what an ending')`, [users[1]]);
+  await q(`INSERT INTO chapter_reactions (book_id, user_id, emoji) VALUES ('b_fg_1', $1, '😭')`, [users[2]]);
+  const r = await admin.forgetSeries(S);
+  assert.equal(r.ok, true, r.ok ? '' : (r as any).message);
+  assert.equal(r.users, 2, 'the member who commented and the one who reacted');
+  assert.equal(r.rowsByTable.chapter_comments, 1);
+  assert.equal(r.rowsByTable.chapter_reactions, 1);
+  assert.equal(await rowsFor('chapter_comments', 'book_id', ['b_fg_1']), 0);
+});
+
 test('forget keeps a bookmark and progress on a chapter that moved to the survivor', { skip }, async () => {
   // The rows an OLDER merge left behind, or an offline outbox replayed: a bookmark and a progress row that
   // still carry the absorbed series_id while their chapter belongs to the survivor. Forgetting the absorbed

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4104
+    "strings": 4132
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -4107,5 +4107,33 @@
   "Shortcuts": "الاختصارات",
   "Shown to members": "ما يراه الأعضاء",
   "Updates and privacy": "التحديثات والخصوصية",
-  "What members see, and what is looked up online.": "ما يراه الأعضاء، وما يُبحث عنه على الإنترنت."
+  "What members see, and what is looked up online.": "ما يراه الأعضاء، وما يُبحث عنه على الإنترنت.",
+  "Comments": "التعليقات",
+  "1 reaction": "تفاعل واحد",
+  "{n} reactions": "{n} تفاعلات",
+  "Incognito reading is on, so you can read comments but not post or react.": "القراءة الخفية مفعّلة، لذا يمكنك قراءة التعليقات، لكن لا يمكنك النشر أو التفاعل.",
+  "Reactions": "التفاعلات",
+  "Comment": "علّق",
+  "React or comment": "تفاعل أو علّق",
+  "Comment actions": "إجراءات التعليق",
+  "edited": "معدَّل",
+  "Say something about this chapter…": "قل شيئًا عن هذا الفصل…",
+  "Your comment": "تعليقك",
+  "{n} left": "المتبقي: {n}",
+  "Comments need a connection.": "التعليقات تحتاج إلى اتصال.",
+  "No comments yet. Say what you thought of this chapter.": "لا توجد تعليقات بعد. قل رأيك في هذا الفصل.",
+  "Delete your comment?": "حذف تعليقك؟",
+  "Remove {name}'s comment?": "إزالة تعليق {name}؟",
+  "It is gone for everyone.": "سيختفي عند الجميع.",
+  "You reacted": "أنت تفاعلت",
+  "You and {name} reacted": "تفاعلت أنت و{name}",
+  "You, {a} and {n} others reacted": "تفاعلت أنت و{a} و{n} آخرون",
+  "{name} reacted": "تفاعل من {name}",
+  "{a} and {b} reacted": "تفاعل من {a} و{b}",
+  "{a}, {b} and {n} others reacted": "تفاعل من {a} و{b} و{n} آخرين",
+  "1 comment": "تعليق واحد",
+  "{n} comments": "{n} تعليقات",
+  "Post": "نشر",
+  "You, {a} and 1 other reacted": "تفاعلت أنت و{a} وشخص آخر",
+  "{a}, {b} and 1 other reacted": "تفاعل من {a} و{b} وشخص آخر"
 }

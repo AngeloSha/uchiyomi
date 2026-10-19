@@ -131,7 +131,8 @@ export function chooseCopy(pair: CopyPair, kept: FileState, other: FileState): {
 /**
  * Take one copy off the list, the copy that stays inheriting what was filed under it. In one transaction: progress
  * (completed when either was; the newer page, scaled to the kept copy's page count when both are known -- two sites cut
- * one chapter into different pages), reading history and notes re-pointed, the dropped copy's offline-download rows
+ * one chapter into different pages), reading history, notes and the chapter's comments and reactions re-pointed (v0.87.0),
+ * the dropped copy's offline-download rows
  * dropped (a device's saved pages are of the other copy), its file named in set_aside_files when it is still on disk,
  * and its row deleted (book_overrides and page_hashes go with it). Refused -- nothing changes -- when a bookmark points
  * into it. The file itself is dealt with after the commit (removeExtraCopies), so a crash in between leaves a set-aside
@@ -155,6 +156,19 @@ async function removeCopy(keep: Copy, drop: Copy, dropFile: FileState): Promise<
     await qq('DELETE FROM read_progress WHERE book_id = $1', [drop.id]);
     await qq('UPDATE reading_events SET book_id = $2, series_id = $3 WHERE book_id = $1', [drop.id, keep.id, keep.seriesId]);
     await qq('UPDATE notes SET book_id = $2 WHERE book_id = $1', [drop.id, keep.id]);
+    // v0.87.0: what the household said about the chapter goes with it to the copy that stays -- a comment's page scaled
+    // as progress is above; a reaction only where its member has none on the kept copy (one each a chapter), the rest
+    // dropped with the row. Reintroduce by dropping these: "a dropped copy's comments and reactions follow the chapter"
+    // in extraCopies.int.test.ts finds them gone with the row.
+    await qq(
+      `UPDATE chapter_comments SET book_id = $2,
+              page = CASE WHEN page IS NOT NULL AND $3::int > 0 AND $4::int > 0 THEN GREATEST(1, LEAST($4::int, (page * $4::int) / $3::int)) ELSE page END
+        WHERE book_id = $1`,
+      [drop.id, keep.id, drop.pages, keep.pages]);
+    await qq(
+      `UPDATE chapter_reactions r SET book_id = $2 WHERE r.book_id = $1
+          AND NOT EXISTS (SELECT 1 FROM chapter_reactions k WHERE k.book_id = $2 AND k.user_id = r.user_id)`,
+      [drop.id, keep.id]);
     await qq('DELETE FROM offline_downloads WHERE book_id = $1', [drop.id]);
     if (dropFile.kind === 'present') {
       await qq(

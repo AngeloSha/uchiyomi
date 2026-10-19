@@ -5,6 +5,7 @@ import { IcRefresh } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
 import { LEFT_HALF, RIGHT_HALF, contentBox, cropStyle, fitBox, type Region } from '@/lib/readerCrop';
 import type { Half, WidePages } from '@/lib/readerSpread';
+import { ChapterSeam } from '@/components/ChapterTalk';
 
 /**
  * One page of the reader, in its two renderers' shared parts (v0.61.0).
@@ -40,14 +41,25 @@ export interface RowItem {
  * a split page's right half on top. `crop` is the chapter's trim of both sides (Reader → Crop page borders, v0.61.0),
  * null when nothing is trimmed, and `onLoaded` is handed the page's image once it has loaded, so its margins can be
  * measured -- only while Crop page borders is on.
+ *
+ * v0.87.0: while the household has talk (lib/comments.ts), the divider is the strip where the two chapters meet --
+ * `seam`, the chapter that just ended, with its name in `seamLabel`: who reacted, how much was said, the six reactions,
+ * then the next chapter's line (components/ChapterTalk.tsx ChapterSeam), SEAM_H tall where the divider was DIVIDER_H.
+ * `seamActive`: the strip is near the screen, so its chapter's talk is worth asking for.
  */
 export const ReaderPageRow = memo(function ReaderPageRow({
-  item, height, gap, divider, src, stripSrc, recollapsible, missingSource, wide, rightFirst, crop, imgFilter, onLoaded, onExpand, onCollapse,
+  item, height, gap, divider, seam, seamLabel, seamSeries, seamActive, onSeam, src, stripSrc, recollapsible, missingSource, wide, rightFirst, crop,
+  imgFilter, onLoaded, onExpand, onCollapse,
 }: {
   item: RowItem;
   height: number;
   gap: number;
   divider: string | null;
+  seam?: string | null;
+  seamLabel?: string | null;
+  seamSeries?: string | null;
+  seamActive?: boolean;
+  onSeam?: (bookId: string) => void;
   src: string | null;
   stripSrc: string | null;
   recollapsible: boolean;
@@ -66,7 +78,9 @@ export const ReaderPageRow = memo(function ReaderPageRow({
   const loaded = useCallback((img: HTMLImageElement) => onLoaded?.(item.key, img), [onLoaded, item.key]);
   return (
     <div>
-      {divider != null && (
+      {divider != null && seam && onSeam ? (
+        <ChapterSeam bookId={seam} seriesId={seamSeries} label={seamLabel ?? ''} next={divider} active={!!seamActive} onOpen={onSeam} />
+      ) : divider != null && (
         <div style={{ height: DIVIDER_H }} className="flex items-center justify-center gap-3 text-xs text-fog-500">
           <span className="h-px w-8 bg-ink-700" />
           <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-fog-600">{tr('Up Next')}</span>
