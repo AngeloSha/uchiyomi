@@ -15,6 +15,7 @@ import { persistScan, libraryIdFor, libraryRows, LIBRARY_ROOT, DL_ROOT, setBookD
 import { applyMoves, heldElsewhere, lockLibrarySaves, previewMoves, setFolders, storedFolders, underSql, LIBRARY_MAX_FOLDERS } from '../lib/libraryFolders';
 import { containedPath, allWritable, realContainedPath } from '../lib/fsGuard';
 import { deleteSeries, restoreSeries, mergeSeries, mergeRefusal, MergeConflictError, getSeriesRow, deleteSeriesFiles, renameSeriesFolder, forgetSeries, diskSpelling, deleteChapterFiles } from '../lib/libraryAdmin';
+import { keepOneOfEach } from '../lib/heldTwice';
 import { editionFollowing, linkEdition, linkPair, unlinkEdition, workRows } from '../lib/editions';
 import { toStoredRel, trimTrailingSlashes } from '../lib/relPath';
 import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fingerprintJob';
@@ -2622,6 +2623,26 @@ export default async function adminRoutes(app: FastifyInstance) {
       const r = await deleteChapterFiles(id, b.data.bookIds, { userId: userIdOf(req), req });
       if ('refused' in r) return reply.code(409).send({ error: 'refused', message: r.refused.reason, fix: r.refused.fix });
       return { ok: true, applied: r.applied, bytes: r.bytes, skipped: r.skipped };
+    } finally { claim.release(); }
+  });
+
+  /**
+   * Keep one of each: every chapter this series holds twice -- two files of one chapter, neither a part nor an extra
+   * (lib/heldTwice.ts) -- kept once, the rows Health's "The same chapter saved twice" lists. The series' pairs as they
+   * are now, by lib/extraCopies.ts's rules, as a merge runs them: reading progress moves to the copy that stays, a
+   * bookmarked copy stays, and a file is deleted only in the download folder (set aside anywhere else). A series merged
+   * away or deleted is refused: its chapters are another series' now, or nobody's.
+   */
+  app.post('/api/admin/series/:id/chapters/keep-once', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const row = await getSeriesRow(id);
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    if (row.deleted_at || row.merged_into) return reply.code(409).send({ error: 'gone', message: 'That series was deleted or merged into another.' });
+    const claim = claimSeriesWriter([id], [row.folder]);
+    if (!claim) return reply.code(409).send({ error: 'busy', message: 'Another task is changing that series.' });
+    try {
+      const r = await keepOneOfEach(id, { userId: userIdOf(req), req });
+      return { ok: true, removed: r.removed, deleted: r.deleted, bytes: r.bytes, setAside: r.setAside, left: r.left };
     } finally { claim.release(); }
   });
 

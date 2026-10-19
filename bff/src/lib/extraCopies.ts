@@ -246,9 +246,10 @@ export async function removeExtraCopies(
 
 /**
  * The series a copy count is not safe to read numbers in: numbered by posting order (two posts may share a number on
- * purpose), or half-way through a renumbering. Hidden or merged-away series are not touched either.
+ * purpose), or half-way through a renumbering. Hidden or merged-away series are not touched either. Also the rule for a
+ * chapter held twice inside one series (lib/heldTwice.ts).
  */
-async function numbersSettled(seriesId: string): Promise<boolean> {
+export async function numbersSettled(seriesId: string): Promise<boolean> {
   const s = await one<{ ok: boolean }>(
     `SELECT (${visibleToAll('s')} AND s.numbering IS DISTINCT FROM 'posting_order'
              AND s.numbering_pending IS NULL AND s.renumber_plan IS NULL) AS ok

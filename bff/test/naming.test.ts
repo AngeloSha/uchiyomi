@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { numFromName, naturalCmp, chapterName, chapterFromName, numberByRule, NAME_RULE, MAX_RANGE } from '../src/lib/naming';
+import { numFromName, naturalCmp, chapterName, chapterFromName, numberByRule, NAME_RULE, MAX_RANGE, nameSaysMore } from '../src/lib/naming';
 import { heroFit, aspectDistance } from '../src/lib/heroFrame';
 
 test('numFromName reads the first number, including decimals', () => {
@@ -142,6 +142,31 @@ test('numberByRule: a row is read by the rule it carries, and the new rule is 2'
 test('a range is never wider than MAX_RANGE', () => {
   assert.deepEqual(chapterFromName(`Title 1-${1 + MAX_RANGE}.cbz`), { number: 1, end: 1 + MAX_RANGE });
   assert.deepEqual(chapterFromName(`Title 1-${2 + MAX_RANGE}.cbz`), { number: 1, end: null });
+});
+
+test('nameSaysMore: one chapter saved twice, or two files that share a number', () => {
+  // Every pair below is from the owner's library (19 Oct 2026). The same chapter, named twice: nothing else said.
+  const same: Array<[string, number]> = [
+    ['Ch. 1 - 1-eng-li.cbz', 1], ['Chapter 1.cbz', 1], ['Ch. 3 - Chapter 3.cbz', 3], ['Ch. 124 - Ch. 124.cbz', 124],
+    ['Ch. 1 - chapter 1.cbz', 1], ['Ch. 6 - Chapter6.cbz', 6], ['Chapter 3197-fixed.cbz', 3197],
+    ['Chapter 32.reaper_version.cbz', 32], ['Chapter 75 RESUMED.cbz', 75], ['Chapter 55 {S2 Start}.cbz', 55],
+    ['Chapter 142 The Veteran Becomes a Fortress Lord.cbz', 142], ['Ch. 68 - Chapter 68Captive and the Freed (4).cbz', 68],
+    // The downloader's own names: `Chapter -1` is read as 1 (chapterFromName), and a long spelling is its number's key.
+    ['Chapter -1.cbz', 1], ['Chapter 84.29999999999998.cbz', 84.3], ['Chapter 84.3.cbz', 84.3],
+  ];
+  for (const [name, n] of same) assert.equal(nameSaysMore(name, n), null, name);
+  // A part or an extra, filed under its whole chapter: other pages.
+  const parts: Array<[string, number]> = [
+    ['Chapter 17e.cbz', 17], ['Chapter 1053a - Road to Laughtale 1.cbz', 1053], ['Chapter 140b.cbz', 140],
+    ['Chapter 1080a - The Legendary Hero (Colored Version).cbz', 1080], ['Chapter 47-5.cbz', 47],
+    ['Chapter 175.8.1 - Side Story - Jasmine Wind-Borne - Ep. 1.cbz', 175.8],
+  ];
+  for (const [name, n] of parts) assert.equal(nameSaysMore(name, n), 'part', name);
+  // Another chapter named, a number an admin gave, or no chapter word at all: too little to say it is this one.
+  assert.equal(nameSaysMore('Ch. 6 - Chapter 86.cbz', 6), 'other');
+  assert.equal(nameSaysMore('Ch. 228 - Chapter 238.cbz', 228), 'other');
+  assert.equal(nameSaysMore('Chapter 12.cbz', 13), 'other');
+  assert.equal(nameSaysMore('One Piece 012.cbz', 12), 'other');
 });
 
 test('naturalCmp orders chapters numerically, not lexically', () => {

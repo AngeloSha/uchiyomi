@@ -2383,6 +2383,14 @@ the files that arrived later and offers **Delete chapters** for exactly those; i
 every row, after a confirmation that lists them. A part another site supplied under the first site's own
 numbers, which that site lists too, is not a second copy and is not listed. Deleted files stay listed as deleted
 chapters, everyone keeps their reading history, and updates do not fetch them back.
+The same card lists a series that holds **two files of one chapter**: a second copy under another file name, as an
+older Suwayomi library can hold (`Ch. 12 - Chapter 12.cbz` beside `Chapter 12.cbz`, a re-upload beside the first).
+Those rows offer **Keep one of each**, and the card **Keep one of each everywhere**, each after a confirmation. The
+first file saved stays, unless it is incomplete, and the other leaves the list as a merge's duplicate does: its file
+is deleted from the download folder or set aside in a library folder the server does not delete from, its reading
+progress moves to the copy that stays, and a copy someone bookmarked is kept. A part or an extra filed under its
+chapter's number (`17e`, `1053a`, `47-5`) and a file whose name says another chapter are never offered. **Ignore**
+keeps both, until another chapter of that series is held twice. Fix everything leaves these rows to you.
 
 **What the nightly never does.** The safe repair never deletes a chapter, never marks one as gone, never merges
 two series and never renumbers anything; with **Every night** set to *Fix everything* the nightly is Fix

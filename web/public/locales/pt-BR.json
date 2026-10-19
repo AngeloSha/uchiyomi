@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4142
+    "strings": 4154
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -4145,5 +4145,17 @@
   "Your week, badges and lists": "Sua semana, emblemas e listas",
   "What your reading adds up to": "O resultado da sua leitura",
   "Trackers, reading apps and API tokens": "Trackers, apps de leitura e tokens de API",
-  "Password, two-factor and sessions": "Senha, duas etapas e sessões"
+  "Password, two-factor and sessions": "Senha, duas etapas e sessões",
+  "Nothing was held twice": "Nada estava salvo duas vezes",
+  "Keep one of each": "Manter uma de cada",
+  "Keep one of each in this series?": "Manter uma de cada nesta série?",
+  "Keep one of each in these {n} series?": "Manter uma de cada nestas {n} séries?",
+  "Keeps one file of each chapter this series holds twice: the first one saved, unless it is incomplete. The other is deleted from the download folder, or set aside where Uchiyomi may not delete; reading progress moves to the copy that stays, and a bookmarked copy is kept.": "Mantém um arquivo de cada capítulo que esta série tem duas vezes: o primeiro salvo, a menos que esteja incompleto. O outro é excluído da pasta de downloads, ou posto de lado onde o Uchiyomi não pode excluir; o progresso de leitura passa para a cópia que fica, e uma cópia com marcador é mantida.",
+  "Keep one of each everywhere": "Manter uma de cada em todas",
+  "Does Keep one of each for every series on this card that nobody chose to ignore. You see the list first.": "Faz “Manter uma de cada” em toda série deste cartão que ninguém escolheu ignorar. Você vê a lista antes.",
+  "1 series holds the same chapter in two files": "1 série tem o mesmo capítulo em dois arquivos",
+  "{n} series hold the same chapter in two files": "{n} séries têm o mesmo capítulo em dois arquivos",
+  "1 chapter is here twice: {numbers}": "1 capítulo está aqui duas vezes: {numbers}",
+  "{n} chapters are here twice: {numbers}": "{n} capítulos estão aqui duas vezes: {numbers}",
+  "A series that holds two files of one chapter offers \"Keep one of each\": the first file saved stays, unless it is incomplete. The other is deleted from the download folder, or set aside where Uchiyomi may not delete; reading progress moves to the copy that stays, and a bookmarked copy is kept. A part or an extra filed under its chapter's number (17e, 1053a) is never offered.": "Uma série que tem um capítulo em dois arquivos oferece “Manter uma de cada”: o primeiro arquivo salvo fica, a menos que esteja incompleto. O outro é excluído da pasta de downloads, ou posto de lado onde o Uchiyomi não pode excluir; o progresso de leitura passa para a cópia que fica, e uma cópia com marcador é mantida. Uma parte ou um extra guardado com o número do seu capítulo (17e, 1053a) nunca é oferecido."
 }

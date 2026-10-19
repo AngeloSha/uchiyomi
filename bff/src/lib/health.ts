@@ -49,6 +49,7 @@ import { detailOf, joined, noteOf, own, say, saidOf, summaryOf, type Part, type 
 import { mainSourceCounts } from './findScope';
 import { carries, EXTENSION_OFF, EXTENSION_OFF_BY, standingOf, standingRows, type Standing, type StandingRow } from './sourceStanding';
 import { numKey } from './postingOrder';
+import { heldTwiceSeries } from './heldTwice';
 import type { ListingCopy } from './seriesListing';
 import { ALL_ROWS, DAY_MS, MAX_BOOK_IDS, MAX_ITEMS, allRows, hiddenPart, ignoredPart, truncate, verdict, withAll } from './healthKit';
 import { diskAndFolders } from './healthDisk';
@@ -94,7 +95,10 @@ export type HealthAction =
   // v0.72.0, the Chapter files card (lib/healthFiles.ts): Fetch again for the row's `bookIds` -- the series page's own
   // route (POST /api/admin/series/{id}/chapters/refetch), which sets each old file aside until the new copy lands and
   // puts it back when it does not. Only on files Uchiyomi downloaded and named itself.
-  | 'refetch';
+  | 'refetch'
+  // The same chapter saved twice, two files of one chapter in one series (lib/heldTwice.ts): Keep one of each, for the
+  // row's series (POST /api/admin/series/{id}/chapters/keep-once). Like a merge's keep-once, never run by itself.
+  | 'keep_one';
 
 export interface HealthItem {
   seriesId?: string;
@@ -125,6 +129,8 @@ export interface HealthItem {
   number?: number;
   /** The missing chapter numbers (gaps), capped -- the payload must stay a page, not a library. */
   numbers?: number[];
+  /** A `keep_one` row: how many chapters the series holds twice, all of them (`bookIds` and `numbers` are capped). */
+  pairs?: number;
   /** The source this item is about, so Test / Clear block / Turn off / Retry need no parsing of `title`. */
   sourceId?: string;
   /**
@@ -1701,7 +1707,7 @@ export async function savedTwiceGroups(): Promise<Array<{ seriesId: string; titl
   return out;
 }
 
-async function savedTwice(): Promise<HealthCheck> {
+async function savedTwice(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const items: HealthItem[] = [];
   for (const { seriesId, title, groups } of await savedTwiceGroups()) {
     const twice = groups
@@ -1720,12 +1726,42 @@ async function savedTwice(): Promise<HealthCheck> {
       actions: ['delete'],
     });
   }
+  const split = items.length;
+  // Two files of one chapter in one series (lib/heldTwice.ts), one row per series: Keep one of each, which an admin
+  // presses. Ignorable while the copies that would go are these ones, as the split rows above are not: a series may hold
+  // two versions somebody wants to keep. Reintroduce by leaving them out: "Health lists a chapter held twice, and never a
+  // part, another chapter or a posting-order series" in heldTwice.int.test.ts finds no row.
+  const held: Array<HealthItem & { members?: string[] }> = [];
+  let heldFailed = false;
+  for (const t of await heldTwiceSeries().catch(() => { heldFailed = true; return []; })) {
+    const n = t.pairs.length;
+    held.push({
+      seriesId: t.seriesId,
+      title: t.title,
+      ...detailOf([say('twice.held', { n, numbers: t.pairs.slice(0, 5).map((p) => numKey(p.number)), more: Math.max(0, n - 5) })]),
+      bookIds: t.pairs.slice(0, MAX_BOOK_IDS).map((p) => p.other.id),
+      numbers: t.pairs.slice(0, MAX_BOOK_IDS).map((p) => numKey(p.number)),
+      pairs: n,
+      actions: ['keep_one'],
+      key: `series:${t.seriesId}`,
+      members: t.pairs.map((p) => p.other.id).sort(),
+    });
+  }
+  const ignored = applyIgnores('saved-twice', held, ctx, !heldFailed);
+  const heldLive = held.filter((i) => !i.info).length;
+  items.push(...held);
+  items.sort((a, b) => Number(!!a.info) - Number(!!b.info));
   return withAll({
     id: 'saved-twice',
     title: 'The same chapter saved twice',
     status: verdict(items),
-    ...summaryOf([items.length ? say('twice.live', { n: items.length }) : say('twice.none')]),
-    ...noteOf([say('twice.note'), hiddenPart(items.length - MAX_ITEMS)]),
+    ...summaryOf([
+      split ? say('twice.live', { n: split }) : null,
+      heldLive ? say('twice.heldLive', { n: heldLive }) : null,
+      split || heldLive ? null : say('twice.none'),
+      ignoredPart(ignored),
+    ]),
+    ...noteOf([say('twice.note'), say('twice.heldNote'), hiddenPart(items.length - MAX_ITEMS)]),
     items: items.slice(0, MAX_ITEMS),
   }, items);
 }
@@ -2183,7 +2219,7 @@ export async function runHealthChecks(opts: { bySeries?: boolean } = {}): Promis
     numberingCheck(),
     shortChapters(),
     outlierChapters(held, ctx),
-    savedTwice(),
+    savedTwice(ctx),
     duplicateSeries(ctx),
     sourceTrouble(ctx),
     chapterFailures(ctx),
@@ -2261,6 +2297,7 @@ export async function findingOf(check: IgnorableCheck, key: string): Promise<Fin
     case 'sources': await sourceTrouble(ctx); break;
     case 'frozen-series': await frozenSeries(ctx); break;
     case 'duplicates': await duplicateSeries(ctx); break;
+    case 'saved-twice': await savedTwice(ctx); break;
     case 'downloads-missing': await downloadsMissing(ctx); break;
     case 'disk': await diskAndFolders(ctx); break;
     case 'trackers': await trackerSync(ctx); break;

@@ -86,6 +86,23 @@ const keptIndex = (it: HealthItem): number => {
  */
 type MergeAnswer = { moved: number; duplicates?: number; keptBoth?: number };
 
+/** What Keep one of each did (POST /api/admin/series/:id/chapters/keep-once): bff lib/extraCopies.ts ExtraCopiesResult. */
+type KeepOnceAnswer = { removed: number; deleted: number; setAside: number; left?: { bookmarked?: number; unreachable?: number; busy?: number } };
+
+/**
+ * Keep one of each's line: the extra copies it removed, in a merge's words, and the chapters a bookmark kept twice.
+ * Nothing at all to remove reads as that, not as "0 removed".
+ */
+export const keptOnceText = (r: KeepOnceAnswer): string => {
+  const d = r.removed || 0;
+  const k = r.left?.bookmarked || 0;
+  if (!d && !k) return tr('Nothing was held twice');
+  return [
+    d > 0 ? (d === 1 ? tr('1 duplicate copy removed') : tr('{n} duplicate copies removed', { n: d })) : '',
+    k > 0 ? (k === 1 ? tr('1 chapter kept twice: bookmarked in the other copy') : tr('{n} chapters kept twice: bookmarked in the other copy', { n: k })) : '',
+  ].filter(Boolean).join(' · ');
+};
+
 /**
  * What a merge did beyond moving chapters (v0.57.0), after the count on its line: the extra copies it removed, the
  * chapters a bookmark kept twice. None of either -- or an older server -- adds nothing, and the line reads as before.
@@ -224,7 +241,7 @@ export function HealthRow({ check, item, rowKey, links, children, compact }: {
   const slot = slots[slotKey];
   // Answers-at-once actions keep their own state: pressed, asked, re-checked, then what they said.
   const [sync, setSync] = useState<{ action: HealthAction; state: ActionState; at: number } | null>(null);
-  const [asking, setAsking] = useState<'delete' | 'disable' | 'merge' | 'link' | 'find' | 'replace' | null>(null);
+  const [asking, setAsking] = useState<'delete' | 'disable' | 'merge' | 'link' | 'find' | 'replace' | 'keep_one' | null>(null);
   // #116: the renumbering plan a numbering key opened, and which key opened it (its row state is that key's).
   const [plan, setPlan] = useState<{ action: HealthAction; mode: PlanMode } | null>(null);
   const [keepFirst, setKeepFirst] = useState(() => keptIndex(item) === 0);
@@ -335,6 +352,19 @@ export function HealthRow({ check, item, rowKey, links, children, compact }: {
     return { text: [deletedText(res.applied), ...lines.map((l) => l.text)].join(' · ') };
   };
 
+  /**
+   * Keep one of each for the row's series: the route pairs its chapters held twice afresh and keeps one copy of each.
+   * The row goes when Health answers, taking this line with it: said in a notice too. Nothing removed while a bookmark
+   * kept a pair is not a success.
+   */
+  const doKeepOne = async (): Promise<ActOutcome> => {
+    setAsking(null);
+    const r = await api<KeepOnceAnswer>(`/api/admin/series/${encodeURIComponent(item.seriesId || '')}/chapters/keep-once`, { method: 'POST' });
+    const text = keptOnceText(r);
+    if (r.removed > 0) toast(text, 'success');
+    return r.removed > 0 || !r.left?.bookmarked ? { text } : { text, ok: false };
+  };
+
   const doMerge = async (): Promise<{ text: string } | null> => {
     setAsking(null);
     const ids = item.seriesIds || [];
@@ -397,6 +427,8 @@ export function HealthRow({ check, item, rowKey, links, children, compact }: {
         };
       case 'delete':
         return { ...base, danger: true, label: bookIds.length === 1 ? tr('Delete chapter') : tr('Delete chapters'), onRun: () => setAsking('delete') };
+      case 'keep_one':
+        return { ...base, danger: true, label: tr('Keep one of each'), onRun: () => setAsking('keep_one') };
       // v0.72.0, Chapter files: the series page's Fetch again for the files the row names, which are only ones Uchiyomi
       // downloaded itself (bff lib/healthFiles.ts). The route keeps each old file until its new copy lands, so there is
       // nothing to confirm. The chapters leave the card while they download -- the route marks them -- and the row goes
@@ -544,6 +576,19 @@ export function HealthRow({ check, item, rowKey, links, children, compact }: {
               </>
             }
             onConfirm={() => act('delete', doDelete)}
+            onClose={() => setAsking(null)}
+          />
+        </OnBody>
+      )}
+
+      {asking === 'keep_one' && (
+        <OnBody>
+          <ConfirmDialog
+            title={tr('Keep one of each in this series?')}
+            confirmLabel={tr('Keep one of each')}
+            danger
+            body={<p>{ACTION_COPY.keep_one.what(ctx)}</p>}
+            onConfirm={() => act('keep_one', doKeepOne)}
             onClose={() => setAsking(null)}
           />
         </OnBody>
@@ -738,7 +783,8 @@ export function hasCardActions(check: HealthCheck): boolean {
   const step = CARD_STEP[check.id];
   return (!!step && stepFindings(check, step).length > 0) || SCAN_CHECKS.includes(check.id) || solverDown(check)
     || (check.id === 'duplicates' && check.items.some((it) => !it.info && (it.seriesIds || []).length === 2 && !!it.actions?.includes('merge')))
-    || laterCopies(check).length > 0;
+    || laterCopies(check).length > 0
+    || heldTwiceRows(check).length > 0;
 }
 
 /**
@@ -746,7 +792,15 @@ export function hasCardActions(check: HealthCheck): boolean {
  * later files and that nobody chose to ignore.
  */
 const laterCopies = (check: HealthCheck): HealthItem[] =>
-  check.id === 'saved-twice' ? check.items.filter((it) => !it.ignored && !!it.seriesId && (it.bookIds?.length ?? 0) > 0) : [];
+  check.id === 'saved-twice' ? check.items.filter((it) => !it.ignored && !!it.seriesId && (it.bookIds?.length ?? 0) > 0 && !!it.actions?.includes('delete')) : [];
+
+/**
+ * The same chapter saved twice, the rows of a series holding two files of one chapter: what the card's Keep one of each
+ * everywhere runs, row by row -- every one offering it that nobody chose to ignore. Never through Delete: those copies
+ * leave the list, as a merge's do (bff lib/heldTwice.ts).
+ */
+const heldTwiceRows = (check: HealthCheck): HealthItem[] =>
+  check.id === 'saved-twice' ? check.items.filter((it) => !it.ignored && !it.info && !!it.seriesId && !!it.actions?.includes('keep_one')) : [];
 
 /**
  * A card's body opens with this: one legend row per kind of action its findings carry (what, how, usually how
@@ -766,11 +820,14 @@ export function HealthCardActions({ check, className = 'border-b border-ink-800/
   const [scan, setScan] = useState<ActionState>(IDLE);
   const [purge, setPurge] = useState<ActionState>(IDLE);
   const [askingPurge, setAskingPurge] = useState(false);
+  const [keepAll, setKeepAll] = useState<ActionState>(IDLE);
+  const [askingKeep, setAskingKeep] = useState(false);
   const ctx: CopyCtx = { limits: status?.limits, check };
   const findings = check.items.filter((it) => !it.info);
   // A pair in two languages is linked, never merged (v0.52.0): Merge all takes only the rows offering a merge.
   const pairs = check.id === 'duplicates' ? findings.filter((it) => (it.seriesIds || []).length === 2 && !!it.actions?.includes('merge')) : [];
   const later = laterCopies(check);
+  const held = heldTwiceRows(check);
 
   const rows: ActionSpec[] = [];
   // The legend: every kind of action a finding here offers, once, with no button of its own (the keys are on
@@ -824,6 +881,14 @@ export function HealthCardActions({ check, className = 'border-b border-ink-800/
       onRun: () => setAskingPurge(true), buttonProps: { 'data-health-delete-all': check.id } as ActionSpec['buttonProps'],
     });
   }
+  if (held.length) {
+    // Like Delete the later copies: never part of the safe repair, and nothing goes without its own yes.
+    const copy = ACTION_COPY.keep_all;
+    rows.push({
+      id: 'keep_all', label: copy.label(ctx), what: copy.what(ctx), eta: copy.eta(ctx), state: keepAll, runLabel: tr('Fix all'), danger: true,
+      onRun: () => setAskingKeep(true), buttonProps: { 'data-health-keep-all': check.id } as ActionSpec['buttonProps'],
+    });
+  }
   if (SCAN_CHECKS.includes(check.id)) {
     const copy = ACTION_COPY.scan;
     rows.push({
@@ -868,6 +933,31 @@ export function HealthCardActions({ check, className = 'border-b border-ink-800/
     setPurge(deleted === 0 && kept
       ? { kind: 'failed', finishedAt: Date.now(), reason: line }
       : { kind: 'done', finishedAt: Date.now(), tookMs: Date.now() - at, outcome: line, partial: kept > 0 });
+  };
+
+  // Each row through its own series' Keep one of each, one after another. A row whose request failed removed nothing.
+  const keepOneEverywhere = async () => {
+    const at = Date.now();
+    setAskingKeep(false);
+    setKeepAll({ kind: 'working', startedAt: at, step: tr('Working…') });
+    let removed = 0;
+    let bookmarked = 0;
+    let failed = 0;
+    for (const it of held) {
+      try {
+        const r = await api<KeepOnceAnswer>(`/api/admin/series/${encodeURIComponent(it.seriesId!)}/chapters/keep-once`, { method: 'POST' });
+        removed += r.removed || 0;
+        bookmarked += r.left?.bookmarked || 0;
+      } catch { failed++; }
+    }
+    const line = keptOnceText({ removed, deleted: 0, setAside: 0, left: { bookmarked } });
+    if (removed) toast(line, 'success');
+    setKeepAll({ kind: 'working', startedAt: at, step: tr('Checking the result…') });
+    await rr.recheck().catch(() => {});
+    const short = failed > 0 || bookmarked > 0;
+    setKeepAll(removed === 0 && short
+      ? { kind: 'failed', finishedAt: Date.now(), reason: line }
+      : { kind: 'done', finishedAt: Date.now(), tookMs: Date.now() - at, outcome: line, partial: short });
   };
 
   const mergeAll = async () => {
@@ -961,6 +1051,30 @@ export function HealthCardActions({ check, className = 'border-b border-ink-800/
             }
             onConfirm={() => { void deleteAll(); }}
             onClose={() => setAskingPurge(false)}
+          />
+        </OnBody>
+      )}
+      {askingKeep && (
+        <OnBody>
+          <ConfirmDialog
+            title={held.length === 1 ? tr('Keep one of each in this series?') : tr('Keep one of each in these {n} series?', { n: held.length })}
+            confirmLabel={tr('Keep one of each')}
+            danger
+            body={
+              <>
+                <p>{ACTION_COPY.keep_one.what(ctx)}</p>
+                <ul className="mt-3 space-y-2">
+                  {held.map((it) => (
+                    <li key={it.seriesId} className="min-w-0 rounded-lg border border-ink-700 px-3 py-2 text-sm">
+                      <p className="truncate text-fog-100">{it.title}</p>
+                      <p dir="auto" className="mt-0.5 text-xs text-fog-400">{itemDetail(it)}</p>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            }
+            onConfirm={() => { void keepOneEverywhere(); }}
+            onClose={() => setAskingKeep(false)}
           />
         </OnBody>
       )}

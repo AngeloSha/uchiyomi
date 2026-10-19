@@ -145,6 +145,35 @@ export function chapterFromName(name: string): NameNumber {
   return { number: 0, end: null };
 }
 
+// Every chapter word and its number in a name, where MARKED finds the first.
+const MARKED_ALL = new RegExp(MARKED.source, 'giu');
+// Right after the chapter's number, a part or an extra: one letter standing alone (`17e`, `1053a - Road…`), or another
+// number joined by a dash or a dot (`47-5`, `175.8.1`).
+const PART_MARK = /^(?:\p{L}(?!\p{L})|[-–—.]\d)/u;
+
+/**
+ * What a file name says besides chapter `number`, for telling one chapter saved twice from two files that share a
+ * number (lib/heldTwice.ts). `part` when a letter or a further number is joined to the number: the scanner files a part
+ * or an extra under its whole chapter (`Chapter 17e`, `Chapter 1053a - Road to Laughtale 1`, `Chapter 47-5`, `Chapter
+ * 175.8.1 - Side Story`), and those are other pages. `other` when the name names another chapter too (`Ch. 6 - Chapter
+ * 86`, a chapter filed under the wrong number), or names none, or its chapter word reads another number than the
+ * row's (an admin's number): too little to go on. Null when it names this chapter and nothing else -- `Ch. 3 - Chapter
+ * 3`, `Ch. 1 - 1-eng-li`, `Chapter 3197-fixed`, `Chapter 75 RESUMED`, and the downloader's `Chapter -1` (read as 1).
+ * By the number's key, so `Chapter 84.29999999999998` names 84.3. Reintroduce by answering null for every name:
+ * "nameSaysMore: one chapter saved twice, or two files that share a number" in naming.test.ts fails, and Keep one of
+ * each offers `Chapter 17e` against `Chapter 17` (heldTwice.int.test.ts).
+ */
+export function nameSaysMore(name: string, number: number): 'part' | 'other' | null {
+  const key = (n: number) => Math.round(n * 1000) / 1000; // lib/postingOrder.ts numKey, which imports this file
+  const stem = name.replace(ARCHIVE_EXT, '');
+  const marks = [...stem.matchAll(MARKED_ALL)];
+  if (!marks.length) return 'other';
+  const first = marks[0];
+  const digitsAt = first.index! + first[0].length - first[1].length;
+  if (PART_MARK.test(stem.slice(digitsAt + first[1].length))) return 'part';
+  return marks.every((m) => key(parseFloat(m[1])) === key(number)) ? null : 'other';
+}
+
 /**
  * lib_books.chapter_name_source of a chapter name the LISTING healed onto a book that had none (lib/seriesListing.ts):
  * the name of whichever copy the listing chose for the number when the heal ran, not the file's own (#116). Every

@@ -475,6 +475,16 @@ const WORDS: Record<string, (p: P) => string | null> = {
       ? tr('1 file from {source} saved again in another split: {numbers}', { source: str(p, 'source'), numbers })
       : tr('{n} files from {source} saved again in another split: {numbers}', { n: num(p, 'n'), source: str(p, 'source'), numbers });
   },
+  // Two files of one chapter in one series, the rows Keep one of each acts on.
+  'twice.heldLive': (p) => (num(p, 'n') === 1 ? tr('1 series holds the same chapter in two files') : tr('{n} series hold the same chapter in two files', { n: num(p, 'n') })),
+  'twice.held': (p) => {
+    const more = num(p, 'more');
+    const numbers = strs(p, 'numbers').join(listSep()) + (more > 0 ? ` ${tr('and {n} more', { n: more })}` : '');
+    return num(p, 'n') === 1
+      ? tr('1 chapter is here twice: {numbers}', { numbers })
+      : tr('{n} chapters are here twice: {numbers}', { n: num(p, 'n'), numbers });
+  },
+  'twice.heldNote': () => tr('A series that holds two files of one chapter offers "Keep one of each": the first file saved stays, unless it is incomplete. The other is deleted from the download folder, or set aside where Uchiyomi may not delete; reading progress moves to the copy that stays, and a bookmarked copy is kept. A part or an extra filed under its chapter\'s number (17e, 1053a) is never offered.'),
 
   // ---- Cloudflare solver. On desktop no address is sent: it carries the helper's token.
   'solver.down': (p) => {
