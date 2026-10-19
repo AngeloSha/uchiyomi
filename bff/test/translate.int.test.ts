@@ -262,8 +262,13 @@ test('a page that fails is kept as failed; an engine that cannot run stops the q
   // Opened again, the chapter's failed pages are tried again, and a page done is not done twice.
   await q(`UPDATE page_translations SET status = 'done', regions = '[]', error = NULL WHERE book_id = $1 AND page = 2`, [B]);
   read.length = 0;
+  // Held on the OCR, so the page cannot be done before the answer is read: the fakes answer at once (CI read 0).
+  let release!: () => void;
+  ocrGate = new Promise<void>((r) => { release = r; });
   const again = await ask(B, 1);
   assert.equal(again.json().pending, 1, 'only page 1 waits');
+  ocrGate = null;
+  release();
   await queue._queueSettled();
   // Reintroduce by queueing every page from `from`: page 2 is read again.
   assert.deepEqual(read, [widthOf(2, 1)]);

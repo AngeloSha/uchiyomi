@@ -66,11 +66,13 @@ async function run(): Promise<void> {
     if (!w) break;
     const page = w.pages.shift();
     if (page == null) { wants.delete(`${w.bookId}:${w.lang}`); continue; }
-    const have = await one(`SELECT 1 FROM page_translations WHERE book_id = $1 AND page = $2 AND lang = $3 AND engine = $4 AND status = 'done'`,
-      [w.bookId, page, w.lang, key]);
-    if (have) continue;
+    // Counted as waiting from the moment it leaves the list, the check below included: a reader asking in between was
+    // told "nothing waits" and stopped asking with this page still to come.
     working = `${w.bookId}:${w.lang}`;
     try {
+      const have = await one(`SELECT 1 FROM page_translations WHERE book_id = $1 AND page = $2 AND lang = $3 AND engine = $4 AND status = 'done'`,
+        [w.bookId, page, w.lang, key]);
+      if (have) continue;
       await translatePage(w.bookId, page, w.lang, key);
     } catch (e) {
       const msg = (e as Error).message;
