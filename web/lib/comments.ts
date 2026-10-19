@@ -119,5 +119,5 @@ export function commentsLine(n: number): string {
   return n === 1 ? tr('1 comment') : tr('{n} comments', { n });
 }
 
-/** The page reference on a comment written in the reader. */
-export const pageRef = (n: number): string => tr('p. {n}', { n });
+/** The page reference on a comment written in the reader: the page grid's own chip words (components/PageTile.tsx). */
+export const pageRef = (n: number): string => tr('p.{n}', { n });
