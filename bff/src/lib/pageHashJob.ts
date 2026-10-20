@@ -1,6 +1,7 @@
 import { join } from 'path';
 import { pool, q } from './db';
 import { cbzPageAt, LIBRARY_ROOT } from './library';
+import { catalogRootUnavailable } from './catalogRootGuard';
 import { pageHash } from './pageHash';
 
 /**
@@ -132,13 +133,28 @@ export async function runPageHashBackfill(opts: { max?: number } = {}): Promise<
   const limit = opts.max ?? Infinity;
 
   try {
+    // ⚠️ NOT FROM A ROOT THAT IS NOT THERE. Every chapter gets the page-0 mark, read or not (see hashChapter), and a
+    // marked chapter is never looked at again: a pass over a root that cannot be opened, holds nothing, or holds only
+    // what a sweep wrote onto a bare mount point (a network share or removable drive that isn't mounted) would retire
+    // every waiting chapter of it from the advert-page check for good. Its chapters wait for a pass that finds it
+    // there (lib/catalogRootGuard.ts). Reintroduce by passing every root: "the page-hash pass with the library root
+    // missing" in libraryRootGone.int.test.ts finds them marked.
+    const down: string[] = [];
+    for (const { root } of await q<{ root: string }>(
+      `SELECT DISTINCT COALESCE(b.root, $1) AS root FROM lib_books b
+        WHERE b.pruned_at IS NULL AND NOT EXISTS (SELECT 1 FROM page_hashes p WHERE p.book_id = b.id AND p.page = 0)`, [LIBRARY_ROOT],
+    )) {
+      const why = await catalogRootUnavailable(root, LIBRARY_ROOT);
+      if (why) { down.push(root); console.warn(`[pagehash] ${root} cannot be read (${why}) -- is the volume mounted? Its chapters were left for a later pass`); }
+    }
     for (;;) {
       const batch = await q<Row>(
         `SELECT b.id, b.root, b.file FROM lib_books b
           WHERE b.pruned_at IS NULL
             AND NOT EXISTS (SELECT 1 FROM page_hashes p WHERE p.book_id = b.id AND p.page = 0)
+            AND COALESCE(b.root, $2) <> ALL($3::text[])
           ORDER BY b.id LIMIT $1`,
-        [Math.min(BATCH, Math.max(0, limit - phState.chapters))],
+        [Math.min(BATCH, Math.max(0, limit - phState.chapters)), LIBRARY_ROOT, down],
       );
       if (!batch.length) break;
 

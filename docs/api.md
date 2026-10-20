@@ -2356,9 +2356,12 @@ Fetch newest — download those chapters again onto the same rows and the scan c
 series' `chapter_floor` is outside the sweep's want-list and comes back through `chapters/refetch` only. A
 row the cleanup already marked keeps its reason. It never runs at boot or on a schedule. `GET /api/admin/tasks`
 always lists it: `{id: 'verify', name: 'Verify chapter files', schedule: 'on demand · after a database-only
-restore', lastRun: number | null, lastResult: {ok: true, checked, missing, readLibraryMissing, unmounted:
-string[], roots, ms, stopped?: 'shutdown'} | null, running}` — `checked` is rows whose file was looked for
-under roots that were not skipped (both roots), `missing` the download-root rows marked this run. `lastRun`
+restore', lastRun: number | null, lastResult: {ok: true, checked, missing, readLibraryMissing, unchecked,
+unmounted: string[], roots, ms, stopped?: 'shutdown'} | null, running}` — `checked` is rows whose file was looked for
+under roots that were not skipped (both roots), `missing` the download-root rows marked this run, `unchecked` the
+rows whose file could not be looked at (a stat that failed with anything but ENOENT/ENOTDIR, such as EACCES or an
+I/O error: never marked, never counted as checked, and a root where every row was such is reported in
+`unmounted`). `lastRun`
 and `lastResult` are persisted in `server_settings.verify_last_run` / `verify_last_result`, so a restart does
 not turn the last run into "not run yet"; a run that threw stores a NULL result, so no stale healthy line
 comes back. A shutdown stops it between batches; what it had marked stays marked, because it was true.

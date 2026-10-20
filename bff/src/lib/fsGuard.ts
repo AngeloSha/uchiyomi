@@ -4,7 +4,7 @@
 // errno is the worst possible outcome: a failed rename is indistinguishable from "nothing happened". The
 // library is the harder case, because the answer is usually "set PUID", not "chown this" -- a library belongs
 // to the user, and telling them to give it away to uid 10002 is what PUID exists to avoid.
-import { lstat, mkdtemp, realpath, rmdir, stat } from 'fs/promises';
+import { lstat, mkdtemp, opendir, realpath, rmdir, stat } from 'fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'path';
 import { forDesktop } from './desktop';
 
@@ -55,6 +55,32 @@ export async function writePreflight(dir: string): Promise<Writability> {
             `chown -R ${me}:${me} <your library path>`
           : `Set PUID and PGID to the owner of your library, then restart.`,
     }, { ok: false, reason: `Uchiyomi can't write to ${dir}.`, fix: DESKTOP_FIX });
+  }
+}
+
+/**
+ * Why a library root cannot answer for its files right now, or null when it can.
+ *
+ * An error code: the root cannot be opened (a network share or removable drive that isn't mounted, a path that is
+ * gone, mode bits). `empty`: it opens and holds nothing -- a bare mount point, which is what an unmounted share leaves
+ * behind and what Docker creates for a bind-mount source that is missing. A job that would WRITE what it sees into
+ * the catalog (a "checked" stamp, a mark) must not do so from either: every file would read as unreadable or gone.
+ *
+ * One entry is read, never the listing: a top-level readdir of a library is tens of thousands of names and wakes
+ * every disk behind it (the same read as firstEntry in lib/healthDisk.ts). This alone is not enough for a job: a
+ * sweep that ran while the share was down can leave real files on the bare mount point, so the jobs ask
+ * catalogRootUnavailable (lib/catalogRootGuard.ts), which starts here.
+ */
+export async function rootUnavailable(root: string): Promise<string | null> {
+  try {
+    const d = await opendir(root, { bufferSize: 1 });
+    try {
+      return (await d.read()) ? null : 'empty';
+    } finally {
+      await d.close().catch(() => {});
+    }
+  } catch (e) {
+    return (e as NodeJS.ErrnoException)?.code || 'unreadable';
   }
 }
 

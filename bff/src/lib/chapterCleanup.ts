@@ -58,8 +58,9 @@
 import { rm, stat } from 'fs/promises';
 import { dirname, resolve } from 'path';
 import { q, one } from './db';
-import { DL_ROOT } from './library';
-import { allWritable, containedPath } from './fsGuard';
+import { DL_ROOT, LIBRARY_ROOT } from './library';
+import { allWritable, containedPath, rootUnavailable } from './fsGuard';
+import { catalogFileCounts, looksUnmounted } from './catalogRootGuard';
 import { REFETCH_BAK } from './fsAtomic';
 import { runtime, type CleanupResult } from './runtime';
 import { atHiddenNumber, hiddenNumbersActive } from './noticeChapters';
@@ -218,6 +219,17 @@ export async function unpruneRestored(root: string, files: string[]): Promise<nu
 }
 
 /**
+ * Is the download share there, judged by every live chapter row under DL_ROOT -- Verify's two whole-root rules
+ * (lib/verifyFiles.ts, shared through lib/catalogRootGuard.ts), asked before this job marks any row whose file it
+ * did not find. Only a file the catalog knows is proof, and one in ten is not enough. Null when the share answers for
+ * its files, or what was seen when it does not.
+ */
+async function shareMissing(): Promise<{ missing: number; of: number } | null> {
+  const c = await catalogFileCounts(DL_ROOT, LIBRARY_ROOT);
+  return looksUnmounted(c) ? { missing: c.missing, of: c.present + c.missing } : null;
+}
+
+/**
  * One pass. Returns what it did; never throws for a file it could not remove.
  *
  * The order per chapter is delete-then-mark, deliberately. Marking first and then failing to unlink would
@@ -255,12 +267,25 @@ export async function runCleanupOnce(): Promise<CleanupResult> {
   // take the whole download directory with it. One comparison against the entire library is a cheap guard.
   // Reintroduce by dropping the `abs === root` check: "the download root itself is never the file" in
   // chapterCleanup.int.test.ts finds the directory gone.
+  //
+  // ⚠️ Only "not there" (ENOENT, ENOTDIR) is a file already gone. A folder the server may not read answers EACCES, a
+  // dropped share or a NAS an I/O error: the file may well be there, and marking it 'deleted' hides a chapter that
+  // sits on disk -- so such a row is left as it is (`unchecked`), counted in `failed`, and tried again next run. And a
+  // folder is proof of a mount only when it holds something: the downloader mkdir -p's a series folder before it
+  // writes, so a sweep that ran while the share was down leaves EMPTY folders on the bare mount point (Verify says the
+  // same). Reintroduce `stat(...).catch(() => null)` for both: "the read-chapter cleanup leaves a chapter it may not
+  // look at" and "... on a bare mount point with an empty folder a sweep left" in libraryRootGone.int.test.ts find
+  // the chapters tombstoned.
   const looked = await Promise.all(due.map(async (b) => {
     const abs = containedPath(b.root, b.file);
-    if (!abs || abs === root) return { b, abs: null, st: null, folder: true };
-    const st = await stat(abs).catch(() => null);
-    const folder = st ? true : !!(await stat(dirname(abs)).catch(() => null));
-    return { b, abs, st, folder };
+    if (!abs || abs === root) return { b, abs: null, st: null, folder: true, unchecked: false };
+    let unchecked = false;
+    const st = await stat(abs).catch((e: NodeJS.ErrnoException) => {
+      if (e?.code !== 'ENOENT' && e?.code !== 'ENOTDIR') unchecked = true;
+      return null;
+    });
+    const folder = st || unchecked ? true : !(await rootUnavailable(dirname(abs)));
+    return { b, abs, st, folder, unchecked };
   }));
   // ⚠️ WHEN EVERY DUE CHAPTER'S FOLDER IS MISSING, THE VOLUME IS NOT THERE. A NAS share that is not mounted
   // right now leaves an empty, writable mount point behind, so the preflight above passes and every stat
@@ -275,12 +300,26 @@ export async function runCleanupOnce(): Promise<CleanupResult> {
   // folder stops the run instead of marking chapters deleted" in chapterCleanup.int.test.ts finds pruned_at
   // set; drop the "every" and make it per-row again: "a removed series does not wedge the cleanup" finds
   // the live series' chapter still on disk.
+  // ⚠️ AND A FOLDER THAT HOLDS SOMETHING IS NOT PROOF EITHER, when what it holds is what a sweep fetched onto the bare
+  // mount point while the share was down: a new chapter of a known series fills that series' folder, the check above
+  // passes, and every other due chapter -- on the share, intact -- would be tombstoned 'deleted', which is held, so
+  // the sweep never fetches it back. So before any row is marked without its file, the whole download root answers
+  // (shareMissing above): no catalogued file present, or more than nine in ten missing, is the share not being there,
+  // and nothing is marked or deleted. Only such a run pays for the walk (one stat per live row); an ordinary run
+  // finds every due file and never asks. A series removed by hand is a few rows in many and is still marked.
+  // Reintroduce by dropping the shareMissing() call: "... a sweep wrote a new chapter of a KNOWN series into marks
+  // nothing" in cleanupBareMount.int.test.ts finds four chapters tombstoned; drop the 90 % rule and "... after a
+  // scan indexed the new chapter" does.
+  let share: { missing: number; of: number } | null = null;
   if (looked.every((x) => x.abs && !x.st && !x.folder)) {
     stopped = 'unmounted';
+  } else if (looked.some((x) => x.abs && !x.st && !x.unchecked) && (share = await shareMissing())) {
+    stopped = 'unmounted';
   } else {
-    for (const { b, abs, st } of looked) {
+    for (const { b, abs, st, unchecked } of looked) {
       if (runtime.stopping) break; // between files, never mid-unlink
       if (!abs) continue;
+      if (unchecked) { failed++; continue; }
       if (st) {
         try {
           await rm(abs, { recursive: true, force: true });
@@ -313,7 +352,7 @@ export async function runCleanupOnce(): Promise<CleanupResult> {
   // Warm the panel's memo with what the run just measured, so the badge is right on the next poll instead
   // of showing the pre-run backlog for another half minute.
   cached = { days: clampDays(days), at: Date.now(), n: remaining };
-  return { deleted, bytes, remaining, failed, ms: Date.now() - t0, days, ...(stopped ? { stopped } : {}) };
+  return { deleted, bytes, remaining, failed, ms: Date.now() - t0, days, ...(stopped ? { stopped } : {}), ...(share ? { share } : {}) };
 }
 
 /**
@@ -342,7 +381,8 @@ export function runChapterCleanup(log?: { info: (m: string) => void; warn: (m: s
         ).catch(() => {});
         log?.info(summarise(r));
       }
-      if (r.stopped === 'unmounted') log?.warn(`cleanup: every due chapter's folder under ${DL_ROOT} is missing -- is the volume mounted? Nothing was marked; ${r.remaining} chapter(s) wait for the next run`);
+      if (r.stopped === 'unmounted' && r.share) log?.warn(`cleanup: ${r.share.missing} of ${r.share.of} chapter files under ${DL_ROOT} are missing -- is the volume mounted? Nothing was marked or deleted; ${r.remaining} chapter(s) wait for the next run`);
+      else if (r.stopped === 'unmounted') log?.warn(`cleanup: every due chapter's folder under ${DL_ROOT} is missing -- is the volume mounted? Nothing was marked; ${r.remaining} chapter(s) wait for the next run`);
       else if (r.failed) log?.warn(`cleanup: ${r.failed} chapter file(s) could not be deleted; they will be retried`);
       return r;
     } catch (e) {
@@ -366,4 +406,5 @@ const summarise = (r: CleanupResult): string =>
       : `cleanup: ${r.deleted} read chapter(s) deleted, ${r.bytes} bytes freed`
         + (r.remaining ? `, ${r.remaining} still due` : '')
         + (r.failed ? `, ${r.failed} failed` : '')
-        + (r.stopped === 'unmounted' ? ' (stopped: every due chapter\'s folder is missing, is the volume mounted?)' : '');
+        + (r.stopped === 'unmounted' && r.share ? ` (stopped: ${r.share.missing} of ${r.share.of} chapter files are missing, is the volume mounted?)`
+          : r.stopped === 'unmounted' ? ' (stopped: every due chapter\'s folder is missing, is the volume mounted?)' : '');

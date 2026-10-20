@@ -11,6 +11,9 @@
 // Skipped automatically unless TEST_DATABASE_URL is set (CI provides a throwaway Postgres service).
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const DSN = process.env.TEST_DATABASE_URL;
 if (DSN) {
@@ -23,12 +26,18 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 const SERIES = 's_phj';
 const BOOK = 'b_phj_missing';
+const PROOF = 'b_phj_present';
 
 let q: typeof import('../src/lib/db').q;
+// The chapter's root is a folder that is THERE and holds another catalogued chapter: the job leaves a root that is
+// missing, empty, or holds no catalogued file for a later pass (lib/catalogRootGuard.ts), and what is tested here is
+// one missing file on a mounted library.
+const ROOT = DSN ? mkdtempSync(join(tmpdir(), 'uchiyomi-phj-')) : '';
+if (DSN) writeFileSync(join(ROOT, 'another chapter.cbz'), 'x');
 
 const clean = async () => {
-  await q('DELETE FROM page_hashes WHERE book_id = $1', [BOOK]).catch(() => {});
-  await q('DELETE FROM lib_books WHERE id = $1', [BOOK]).catch(() => {});
+  await q('DELETE FROM page_hashes WHERE book_id = ANY($1)', [[BOOK, PROOF]]).catch(() => {});
+  await q('DELETE FROM lib_books WHERE id = ANY($1)', [[BOOK, PROOF]]).catch(() => {});
   await q('DELETE FROM lib_series WHERE id = $1', [SERIES]).catch(() => {});
 };
 
@@ -40,13 +49,17 @@ before(async () => {
   await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ($1,'T!phj','PH Job','/phj')`, [SERIES]);
   // Points at a file that is not there: the chapter can never yield a page.
   await q(
-    `INSERT INTO lib_books (id, series_id, source, file, number, pages)
-     VALUES ($1, $2, 'T!phj', '/phj/does-not-exist.cbz', 1, 3)`,
-    [BOOK, SERIES],
+    `INSERT INTO lib_books (id, series_id, source, file, number, pages, root)
+     VALUES ($1, $2, 'T!phj', 'phj/does-not-exist.cbz', 1, 3, $3)`,
+    [BOOK, SERIES, ROOT],
   );
+  await q(`INSERT INTO lib_books (id, series_id, source, file, number, pages, root)
+           VALUES ($1,$2,'T!phj','another chapter.cbz',2,0,$3)`, [PROOF, SERIES, ROOT]);
+  // Proof of the mounted root, already processed, must not add a second queued chapter to these assertions.
+  await q('INSERT INTO page_hashes (book_id,page,hash,checked_at) VALUES ($1,0,NULL,now())', [PROOF]);
 });
 
-after(async () => { if (DSN) await clean(); });
+after(async () => { if (DSN) { await clean(); rmSync(ROOT, { recursive: true, force: true }); } });
 
 test('a chapter that yields no pages is not asked again forever', { skip }, async () => {
   const job = await import('../src/lib/pageHashJob');

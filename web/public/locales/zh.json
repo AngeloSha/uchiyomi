@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4195
+    "strings": 4196
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -2500,6 +2500,7 @@
   "1 confirmed": "确认 1 个",
   "{n} confirmed": "确认 {n} 个",
   "stopped: every chapter due for deletion is missing its folder; is the download volume mounted?": "已停止：所有待删除章节的文件夹都不见了；下载卷挂载了吗？",
+  "stopped: {missing} of {total} chapter files in the download folder are missing; is the download volume mounted?": "已停止：下载文件夹中 {total} 个章节文件里有 {missing} 个不见了；下载卷挂载了吗？",
   "stopped: free space on the download disk is below the minimum": "已停止：下载磁盘的可用空间低于下限",
   "waiting for the chapter sweep to end": "等待章节巡检结束",
   "1 checked": "已检查 1 个",
