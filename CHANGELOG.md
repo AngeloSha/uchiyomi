@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.91.1 — 2026-10-20
+
+**Open site: what you type reaches the site, and the page keeps up with you.** v0.91.0's Open site could not fill in a
+sign-in form, and on a home server's connection what happened on the page showed up about twenty seconds late.
+
+### Typing on Open site, without the lag
+
+- **Typing reaches the site.** In v0.91.0 a click on the page moved the browser's focus away from the field that carries
+  your keys, so nothing you typed arrived. A click or a tap now keeps it there, and on a phone a tap on the page brings up
+  the keyboard.
+- **A phone's keyboard types as you meant it.** Corrections, Backspace and words the keyboard is still composing reach
+  the site as typed.
+- **The page keeps up.** Each picture of the page is a JPEG about a tenth of the size it was, and the next is sent only
+  once the last has arrived, so a slow connection shows the newest page a moment late instead of every page later and
+  later. What you type is sent at once, never queued behind mouse moves.
+
+### Upgrading
+
+- Nothing to do.
+
 ## v0.91.0 — 2026-10-20
 
 **Open site: sign in on an extension's site, the way Mihon's *Open in WebView* does.** BatCave now shows *Sign in to keep

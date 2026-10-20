@@ -14,7 +14,7 @@ services:
       PROXY_AUTH_BLACKLIST: "/api/setup,/api/setup/*"
 
   server:
-    image: ghcr.io/angelosha/uchiyomi:v0.90.0@sha256:e5b4f6bc66adb98e0273c6843cca9110016049b96d7aa162bda0b5df3e298d43
+    image: ghcr.io/angelosha/uchiyomi:v0.91.0@sha256:8e63792f3d0c6432cef5c429da96357c08e56937fd49e78bf4ceb513b231ab70
     restart: on-failure
     # The app finishes the chapter it is writing on stop, then the embedded Postgres checkpoints.
     stop_grace_period: 40s
