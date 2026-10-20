@@ -12,6 +12,7 @@ import { env } from '../../../env';
 import { visibleToAll } from '../../visibility';
 import { registerAdapter } from '../loader';
 import { listRemoteSources, makeSuwayomiAdapter, SW_PREFIX, type RemoteSource } from './sources';
+import { setSitesOpened } from './siteSessions';
 import { EngineRefusedError, suwayomiConfigured } from './client';
 
 export interface EnabledRow {
@@ -273,6 +274,10 @@ async function load(list: () => Promise<RemoteSource[]>, quiet: boolean, beforeR
   // installs. Reintroduce by registering backups after every other source: "a backup a series uses keeps its
   // place under the source limit" in backupExtensions.int.test.ts finds it left out.
   const backups = await backupSourceIds();
+  // v0.91.0 (#314): the sources whose site an admin has opened, for their quiet visits (siteSessions.ts). A database that
+  // does not answer keeps the last list, as backupSourceIds above keeps going without its own.
+  const openedRows = await q<{ source_id: string }>('SELECT source_id FROM suwayomi_sources WHERE site_opened_at IS NOT NULL').catch(() => null);
+  if (openedRows) setSitesOpened(openedRows.map((r) => r.source_id));
   const live = on.filter((s) => !isOff(s));
   const wanted = [
     ...live.filter((s) => used.has(String(s.id))), ...live.filter((s) => !used.has(String(s.id))), ...on.filter(isOff),

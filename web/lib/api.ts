@@ -182,6 +182,16 @@ export async function apiWithHeaders<T = any>(path: string, opts: Opts = {}): Pr
   return { data: (ct.includes('application/json') ? await res.json() : await res.text()) as T, headers: res.headers };
 }
 
+/**
+ * `api`'s request, answered as the Response itself, for a route that streams: Open site's live page (v0.91.0,
+ * lib/siteBrowser.ts) reads it line by line. Signed in and refreshed exactly like `api`.
+ */
+export async function apiResponse(path: string, opts: Opts = {}): Promise<Response> {
+  const res = await raw(path, opts, true);
+  if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => ''));
+  return res;
+}
+
 // ---- image URLs (authorized by the httpOnly yomi_img cookie) ----
 export const img = {
   // ?v bump = one-time cache-bust so clients pinned to the old immutable panel thumbnails refetch the real covers

@@ -64,8 +64,11 @@ export const OPS = {
   aboutServer: op('aboutServer', '{ aboutServer { name version buildType } }'),
 
   // ---- sources and their series (sources.ts)
-  /** `contentWarning` replaced `isNsfw`; `baseUrl` was selected and never read. */
-  sources: op('sources', '{ sources { totalCount nodes { id name displayName lang iconUrl contentWarning supportsLatest extension { pkgName name } } } }'),
+  /**
+   * `contentWarning` replaced `isNsfw`. `homeUrl` since v0.91.0: the page Open site and the quiet check visit open
+   * (siteSessions.ts). Not `baseUrl`, which every supported engine marks deprecated ("replace with homeUrl").
+   */
+  sources: op('sources', '{ sources { totalCount nodes { id name displayName lang iconUrl homeUrl contentWarning supportsLatest extension { pkgName name } } } }'),
   fetchSourceManga: op('fetchSourceManga', `mutation($source:LongString!,$type:FetchSourceMangaType!,$query:String,$page:Int!){
   fetchSourceManga(input:{source:$source,type:$type,query:$query,page:$page}){ mangas { ${MANGA_FIELDS} } }
 }`),

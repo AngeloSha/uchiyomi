@@ -1994,6 +1994,12 @@ CREATE TABLE IF NOT EXISTS spread_marks (
   PRIMARY KEY (user_id, book_id, page)
 );
 CREATE INDEX IF NOT EXISTS idx_spread_marks_book ON spread_marks (book_id);
+
+-- v0.91.0 (#314): when an admin last left an extension source's site after Open site (lib/sources/suwayomi/siteSessions.ts).
+-- A source whose site wanted that -- a sign-in, a check the engine's background browser cannot pass -- gets a quiet visit
+-- of its home page whenever it fails, at most once in half an hour: BatCave's guard pass lasts a day, and it fails with a
+-- plain 404 when it runs out. NULL for every other source. Additive: v0.90.x ignores the column.
+ALTER TABLE suwayomi_sources ADD COLUMN IF NOT EXISTS site_opened_at timestamptz;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

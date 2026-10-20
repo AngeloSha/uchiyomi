@@ -9,6 +9,7 @@
 import { UNNUMBERED, type SourceAdapter, type SourceSeries, type SourceChapter } from '../types';
 import { gql as defaultGql, suwayomiUrl, suwayomiImageHeaders, onEngineOrigin, type Gql } from './client';
 import { OPS } from './operations';
+import { needsBrowserCheck, passSiteCheck, siteWasOpened } from './siteSessions';
 import { env } from '../../../env';
 
 export const SW_PREFIX = 'sw:';
@@ -23,6 +24,8 @@ export interface RemoteSource {
   displayName?: string | null;
   lang?: string | null;
   iconUrl?: string | null;
+  /** The site's home page, as the engine names it: what Open site and the quiet check visit open (v0.91.0). */
+  homeUrl?: string | null;
   /** Adult or not, read from `contentWarning` by listRemoteSources (adultOf): the one flag the rest of the app reads. */
   isNsfw?: boolean | null;
   /** The engine's own word: SAFE, MIXED or NSFW. */
@@ -200,8 +203,22 @@ function galleryChapters(rows: RemoteChapter[]): SourceChapter[] {
  * applying the one-at-a-time quarter-second gap that scraped sites need. The downloader never asks whether
  * an id starts with `sw:`; it reads these two fields.
  */
-export function makeSuwayomiAdapter(remote: RemoteSource, run: Gql = defaultGql): SourceAdapter {
+export function makeSuwayomiAdapter(remote: RemoteSource, gqlRun: Gql = defaultGql): SourceAdapter {
   const adapterId = swAdapterId(remote.id);
+  // v0.91.0 (#314): an extension that answers "Open in WebView…" -- its own background browser could not pass the site's
+  // check -- or ANY failure of a source whose site an admin has opened (siteWasOpened: BatCave's guard, its day-long pass
+  // run out, answers a plain 404) gets the site's home page opened in the engine's browser for a few seconds
+  // (siteSessions.ts passSiteCheck), and the call is tried once more. Reintroduce by calling gqlRun straight: "an Open in
+  // WebView answer gets one quiet visit and one more try" in siteSessions.test.ts fails.
+  const run: Gql = async <T,>(doc: string, vars?: Record<string, unknown>, timeoutMs?: number): Promise<T> => {
+    try {
+      return await gqlRun<T>(doc, vars, timeoutMs);
+    } catch (e) {
+      const home = remote.homeUrl?.trim();
+      if (!home || !(needsBrowserCheck(e) || siteWasOpened(remote.id)) || !(await passSiteCheck(remote.id, home))) throw e;
+      return gqlRun<T>(doc, vars, timeoutMs);
+    }
+  };
 
   const fetchList = async (type: 'SEARCH' | 'LATEST' | 'POPULAR', query: string | null, page: number): Promise<SourceSeries[]> => {
     const d = await run<{ fetchSourceManga: { mangas: RemoteManga[] } }>(OPS.fetchSourceManga.doc, {

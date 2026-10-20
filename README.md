@@ -151,7 +151,8 @@ sites' terms and your local law.
 
 - **Mihon / Tachiyomi extensions**, the whole catalogue of a repository you add, plus generic engines for common
   site families (paste a URL) and MangaDex. Nothing is enabled until you choose it, and each extension's own settings
-  are one click away, as in Mihon.
+  are one click away, as in Mihon. A site that wants you signed in opens in the engine's own browser (**Open site**,
+  Mihon's *Open in WebView*), and the sign-in is kept.
 - **Discover** — what your sources just published, **one card per series** with each source's icon, leaving
   out what you already own, from every source at once; and a search that **answers progressively**: results
   appear as each source replies instead of waiting for the slowest, and every source says whether it answered,

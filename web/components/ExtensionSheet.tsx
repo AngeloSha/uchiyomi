@@ -32,10 +32,12 @@ import { useToast } from '@/components/Toast';
 import { msgOf } from '@/components/ConfirmDialog';
 import { ProgressRing } from '@/components/ProgressRing';
 import { StatusMark } from '@/components/StatusMark';
-import { IcChevronRight } from '@/components/icons';
+import { IcChevronRight, IcGlobe } from '@/components/icons';
 import { ExtensionSettingsBody } from '@/components/ExtensionSettings';
 import { Busy, busyKey } from '@/components/ExtensionBits';
 import type { ExtActions } from '@/components/ExtensionsPanel';
+import { SiteBrowserSheet } from '@/components/SiteBrowserSheet';
+import { SITE_TEXT } from '@/lib/siteBrowser';
 
 /** The amber key, for an update waiting: the one amber action of the sheet. */
 const AMBER_KEY = 'border-amber-500/35 bg-amber-500/10 text-amber-300 hover:border-amber-400/70 hover:text-amber-200';
@@ -93,6 +95,8 @@ export function ExtensionSection({ ext, status, hiddenLangs, actions, onLanguage
     ?? (ext.sources.find((s) => s.enabled) ?? ext.sources[0])?.id ?? null;
   // Closed until asked for: an extension's settings are the rarest thing done here.
   const [settingsOpen, setSettingsOpen] = useState(!!openFirst);
+  // v0.91.0 (#314): the site of the source the sheet is about, in the engine's own browser (components/SiteBrowserSheet).
+  const [siteOpen, setSiteOpen] = useState(false);
   const busy = actions.busy[ext.pkgName];
   const off = needsTurningOn(ext);
   const over = overLimitText(status.skipped, status.cap);
@@ -168,6 +172,20 @@ export function ExtensionSection({ ext, status, hiddenLangs, actions, onLanguage
           </p>
         )}
       </section>
+
+      {/* v0.91.0 (#314): Mihon's "Open in WebView" -- sign in on the site, or pass its check, in the engine's own browser. */}
+      {settingsOf && (
+        <section aria-labelledby="ext-sheet-site" className="flex items-start gap-3 border-t border-ink-800/70 pt-3.5" data-ext-site>
+          <div className="min-w-0 flex-1">
+            <h3 id="ext-sheet-site" className="text-sm text-fog-200">{tr('Sign in on the site')}</h3>
+            <p className="mt-1 text-[12px] leading-relaxed text-fog-400">{tr(SITE_TEXT[1])}</p>
+          </div>
+          <button type="button" className="btn-key shrink-0" onClick={() => setSiteOpen(true)} data-ext-open-site>
+            <IcGlobe width={14} height={14} aria-hidden />{tr(SITE_TEXT[0])}
+          </button>
+          {siteOpen && <SiteBrowserSheet sourceId={settingsOf} name={ext.name} onClose={() => setSiteOpen(false)} />}
+        </section>
+      )}
 
       {settingsOf && (
         <section aria-labelledby="ext-sheet-settings" className="border-t border-ink-800/70">

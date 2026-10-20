@@ -361,7 +361,8 @@ test('the admin console\'s status badges are marks and its actions keys: the sli
   assert.equal(keys(tools), 2, 'Languages and Check for extension updates are not both keys');
   assert.equal(keys(browse), 6, 'Browse\'s keys are not all keys');
   assert.doesNotMatch(panel, /\bchip(-active)?\b/, 'a chip is back in the extension catalogue');
-  assert.equal(keys(code(read('components/ExtensionSheet.tsx'))), 5, 'the sheet\'s Update, Turn on its sources, Remove extension, Remove and Cancel are not keys');
+  // v0.91.0 (#314): and Open site, the site in the engine's own browser.
+  assert.equal(keys(code(read('components/ExtensionSheet.tsx'))), 6, 'the sheet\'s Update, Turn on its sources, Open site, Remove extension, Remove and Cancel are not keys');
   // v0.54.0, Admin → Sources: a source's state is a mark; every key of its sheet goes through one helper that makes a
   // .btn-key; and the one filled key of the panel and of the sheet is Replace (Start, in the Replace dialog).
   const sheet = code(read('components/SourceSheet.tsx'));

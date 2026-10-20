@@ -2130,6 +2130,20 @@ and on the series page links an admin straight to the settings of the extension 
 settings**), and so does its row under Health's *Chapter numbering*. The details are in
 [extensions.md](extensions.md#an-extensions-own-settings).
 
+**Signing in on a site: Open site** (since v0.91.0, [#314](https://github.com/AngeloSha/uchiyomi/issues/314)). Some sites
+want you signed in, or a browser check passed, before an extension can read them: BatCave shows *Sign in to keep
+reading* to anyone not signed in. In Mihon that is the **Open in WebView** button; in Uchiyomi it is **Open site** in the
+same sheet. It opens the site in the extension engine's own browser, live and over the whole screen: click, scroll and
+type as on the site (on a phone, a tap is a click, a swipe scrolls, and **Keyboard** brings up the keyboard), sign in,
+and press **Done**. The engine keeps the sign-in for that extension, and the sheet says whether the source answers now.
+**Start over** opens the site's home page again.
+
+- Admins only, one site at a time, and it closes itself after ten minutes without input (what you did is kept).
+- A source you have done this for gets a quiet visit of its home page whenever it fails, at most once in half an hour,
+  and Uchiyomi tries again. BatCave's check lasts a day, so this is what keeps it working. An extension that answers
+  "Open in WebView…" gets the same visit.
+- It needs the bundled extension engine, or your own Suwayomi from v2.4 on.
+
 ### The other direction: Uchiyomi *inside* Mihon or Tachimanga
 
 If you would rather keep reading in Mihon (Android), a Tachiyomi fork, Tachimanga (iOS) or Suwayomi, there

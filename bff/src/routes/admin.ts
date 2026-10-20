@@ -37,6 +37,7 @@ import { markRemoved, forgetVerdict } from '../lib/scoutMemory';
 import { namesOf, recordAltTitles } from '../lib/altTitles';
 import { healthAllWithEvidence, setDisabled, clearBlock, pruneOrphanedHealth, isDisabled, blockedNow } from '../lib/sourceHealth';
 import { smokeTest } from '../lib/sourceProbe';
+import { SiteBusyError, noteSiteOpened, sendInput, siteOpen, startSite, stopSite, subscribe, type SiteLine } from '../lib/sources/suwayomi/siteSessions';
 import { startSourceCheck, checkRunning, checkProgress } from '../lib/sourceWatchdog';
 import { testSource } from '../lib/sourceCheck';
 import { currentFailures, stageLines } from '../lib/sourceEvidence';
@@ -3631,6 +3632,119 @@ export default async function adminRoutes(app: FastifyInstance) {
       if (adapter) smoke = await smokeTest(adapter);
     }
     return { ok: true, smoke };
+  });
+
+  // ---- Open site (v0.91.0, #314): an extension's site in the engine's own browser, live in an admin's sheet ----
+  // Mihon's "Open in WebView". A source whose site wants a sign-in -- BatCave's "members only" -- or a check the engine's
+  // background browser cannot pass: the admin signs in with their own clicks and keys, and Done leaves the page, which is
+  // when the engine saves the cookies its extensions send (lib/sources/suwayomi/siteSessions.ts). Admin only, like every
+  // route here: it is a browser on the server. It opens on the source's own home page; where it goes from there is the
+  // admin's. Plain HTTP both ways -- a stream of lines down, posts up -- so it works through any reverse proxy without a
+  // websocket setting.
+  const SITE_SIZE = { width: z.number().int().min(200).max(4000), height: z.number().int().min(200).max(4000) };
+  app.post('/api/admin/extensions/sources/:id/site', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object(SITE_SIZE).safeParse(req.body ?? {});
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    if (needExt(reply)) return;
+    const remote = await listRemoteSources().catch(() => null);
+    if (!remote) return reply.code(503).send({ error: 'engine_unreachable', message: 'The extension engine is not answering.' });
+    const s = remote.find((x) => String(x.id) === id);
+    if (!s) return reply.code(404).send({ error: 'not_found' });
+    const home = s.homeUrl?.trim() ?? '';
+    let site: URL | null = null;
+    try { site = new URL(home); } catch { /* below */ }
+    if (!site || !/^https?:$/.test(site.protocol)) {
+      return reply.code(422).send({ error: 'no_site', message: 'This source does not say which site it reads.' });
+    }
+    const uid = userIdOf(req);
+    let session: string;
+    try {
+      session = (await startSite({ uid, sourceId: id, home, ...b.data })).id;
+    } catch (e) {
+      if (e instanceof SiteBusyError) return reply.code(409).send({ error: 'site_busy', message: e.message });
+      return reply.code(502).send({ error: 'no_browser', message: 'The extension engine could not open its browser. Open site needs the bundled engine, or Suwayomi v2.4 or newer.' });
+    }
+    const name = s.displayName?.trim() || s.name;
+    await logAudit('source.site_open', { userId: uid, detail: { id, name, site: site.host }, req });
+    return { session, name, site: site.host };
+  });
+
+  /**
+   * The page, live: one JSON object a line -- `frame` (a PNG, base64, at most five a second), `address`, `load`, `ping`
+   * every 15 s so a proxy keeps the line open, and `closed` last. Read with fetch, not EventSource, so it carries the
+   * admin's bearer token like every other call. `x-accel-buffering: no` asks nginx (and Nginx Proxy Manager) not to hold
+   * it back.
+   */
+  app.get('/api/admin/extensions/site/:session/stream', async (req, reply) => {
+    const { session } = req.params as { session: string };
+    const uid = userIdOf(req);
+    if (!siteOpen(session, uid)) return reply.code(404).send({ error: 'not_found' });
+    reply.hijack();
+    const res = reply.raw;
+    res.writeHead(200, { 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'no-store', 'x-accel-buffering': 'no' });
+    let off: (() => void) | null = null;
+    let ping: NodeJS.Timeout | null = null;
+    const end = () => {
+      if (ping) clearInterval(ping);
+      ping = null;
+      off?.();
+      off = null;
+      if (!res.writableEnded) res.end();
+    };
+    const write = (l: SiteLine) => {
+      if (res.writableEnded) return;
+      res.write(`${JSON.stringify(l)}\n`);
+      if (l.type === 'closed') end();
+    };
+    off = subscribe(session, uid, write);
+    if (!off) return write({ type: 'closed', reason: 'engine' });
+    ping = setInterval(() => write({ type: 'ping' }), 15_000);
+    req.raw.on('close', end);
+  });
+
+  const siteInput = z.array(z.discriminatedUnion('type', [
+    z.object({
+      type: z.literal('event'),
+      eventType: z.enum(['mousedown', 'mouseup', 'mousemove', 'wheel', 'keydown', 'keyup']),
+      clickX: z.number().finite(),
+      clickY: z.number().finite(),
+      button: z.number().int().min(0).max(4).optional(),
+      ctrlKey: z.boolean().optional(),
+      shiftKey: z.boolean().optional(),
+      altKey: z.boolean().optional(),
+      metaKey: z.boolean().optional(),
+      key: z.string().max(32).optional(),
+      clientX: z.number().finite().optional(),
+      clientY: z.number().finite().optional(),
+      deltaY: z.number().finite().optional(),
+    }).strict(),
+    z.object({ type: z.literal('paste'), data: z.string().max(4000) }).strict(),
+    z.object({ type: z.literal('resize'), ...SITE_SIZE }).strict(),
+    z.object({ type: z.literal('home') }).strict(),
+  ])).min(1).max(100);
+  /** The admin's input for the page, in order: clicks, keys, wheel, paste, a new size, or back to the source's home page. */
+  app.post('/api/admin/extensions/site/:session/input', async (req, reply) => {
+    const { session } = req.params as { session: string };
+    const b = z.object({ input: siteInput }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!sendInput(session, userIdOf(req), b.data.input)) return reply.code(404).send({ error: 'not_found' });
+    return { ok: true };
+  });
+
+  /** Done: leave the page -- the engine saves its cookies then -- and try the source, so the sheet can say whether it took. */
+  app.delete('/api/admin/extensions/site/:session', async (req, reply) => {
+    const { session } = req.params as { session: string };
+    const uid = userIdOf(req);
+    const sourceId = await stopSite(session, uid);
+    if (!sourceId) return reply.code(404).send({ error: 'not_found' });
+    // Its site wanted this, so from now on any failure of the source earns a quiet visit (siteSessions.ts siteWasOpened).
+    await q('UPDATE suwayomi_sources SET site_opened_at = now() WHERE source_id = $1', [sourceId]);
+    noteSiteOpened(sourceId);
+    await logAudit('source.site_close', { userId: uid, detail: { id: sourceId }, req });
+    const adapter = getSource(swAdapterId(sourceId));
+    const test = adapter ? await smokeTest(adapter).catch(() => null) : null;
+    return { saved: true, test };
   });
 
   // ---- the extension catalogue ----
