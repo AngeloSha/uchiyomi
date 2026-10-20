@@ -1748,8 +1748,8 @@ translated once per language and kept, so reading it again costs nothing.
   browse that source alone; the chip
   then shows its favicon and name, and its × goes back to all of them. Flipping *Newest*/*Popular* keeps it chosen
   when it has that listing. A source that leaves the list (turning **Show 18+** off hides the adult ones) is let go,
-  and its covers leave the wall and its *{done} of {total} sources* count; turning it back on brings them back as they
-  were. Browsing a source that is in a
+  and its covers leave the wall and its *{done} of {total} sources* count; turning it back on brings its covers and its
+  count back, but not the choice. Browsing a source that is in a
   cooldown shows its reason and *back in ~12 min* in place of an empty wall, not *Nothing new from these
   sources right now*. The (i) in the sheet's header is the same five-line explainer as on the series page.
 - **Search:** type a title once and Uchiyomi searches **all your sources at the same time**. Results are

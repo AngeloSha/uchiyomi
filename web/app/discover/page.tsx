@@ -813,7 +813,9 @@ function DiscoverInner() {
               : budget.length === 0 ? (isAdmin ? tr('No sources are set up yet. Add one in Admin \u2192 Sources.') : tr('No sources are set up yet. Ask whoever runs this server.'))
               // One source alone: its reason, amber, before any sentence about the wall as a whole.
               : alone ? alone.text
-              : Object.values(states).every((s) => s === 'blocked')
+              // The sources asked now, as the wall and its count read them (#319): a source hidden since, or the other
+              // listing's, says nothing about whether these could be reached.
+              : budget.every((s) => states[kOf(s.id)] === 'blocked')
                 ? tr('No source could be reached right now.')
                 : tr('Nothing new from these sources right now.')}
           </p>

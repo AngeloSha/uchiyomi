@@ -40,3 +40,10 @@ test('flipping Newest/Popular keeps the source chosen where the other listing ha
     'a mode change drops the chosen source');
   assert.doesNotMatch(onMode, /setSelected\(null\)/, 'a mode change drops the chosen source');
 });
+
+test('the empty wall says "could not be reached" of the sources asked now', () => {
+  // Reintroduce `Object.values(states).every((s) => s === 'blocked')`: with Show 18+ off, or after a flip, a source no
+  // longer asked decides whether the sources asked now "could not be reached".
+  assert.match(code, /: budget\.every\(\(s\) => states\[kOf\(s\.id\)\] === 'blocked'\)\s*\? tr\('No source could be reached right now\.'\)/);
+  assert.doesNotMatch(code, /Object\.values\(states\)\.every/, 'every source that ever answered, in either listing');
+});
