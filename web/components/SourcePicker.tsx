@@ -96,8 +96,9 @@ export function SourcePicker({ sources, states, settled, total, count, selected,
   // sheet lights, not by whether a sentence exists: the two used to differ (a failure without a server note
   // had the dot and no sentence), so the chip said "2 with issues" over three amber rows.
   const troubled = sources.filter((s) => noteFor(s, stateOf(s.id)).dot === 'warn').length;
-  // `selected` always names a budgeted source (the parent clears it on a mode change and the budget only
-  // grows), but the × must stay reachable even if it ever did not, or the wall could not be un-filtered.
+  // `selected` always names a budgeted source (the parent keeps it across a mode change only where the new listing
+  // has it, and lets it go when it leaves the list), but the × must stay reachable even if it ever did not, or the
+  // wall could not be un-filtered.
   const current = selected ? sources.find((s) => s.id === selected) ?? { id: selected, name: selected } : null;
   // Which sheet is up. The explainer REPLACES the list rather than stacking on it: both are `Sheet`s at the
   // same z-index, each with its own Escape listener, so stacked they would close together on one key and

@@ -297,8 +297,10 @@ function DiscoverInner() {
   }, []);
 
   // How many sources have answered at all: the heading's "{done} of {total} sources", the picker's hairline and the
-  // skeletons. Counted within the current listing only, or switching modes would look already-finished.
-  const settled = order.filter((k) => k.startsWith(`${listMode}:`)).length;
+  // skeletons. Counted within the current listing only, or switching modes would look already-finished -- and among the
+  // sources asked NOW: one that has left the list (Show 18+ turned off hides every adult one) answered once and stays in
+  // `order`, and counting it read "done" while sources still on the list had not answered.
+  const settled = budget.filter((s) => order.includes(kOf(s.id))).length;
   // The concurrency gate. Four at a time; each settle releases the next -- on every page. Counted by the page being
   // fetched (v0.58.0): `settled` counts a source once, so from page 2 on it opened the gate to every source at once,
   // and with every source asked that would have been a burst of all of them.
@@ -427,9 +429,13 @@ function DiscoverInner() {
     if (mode === 'search') return { items: searchHits, groups: searchProviders };
     const seen = new Set<string>();
     const out: SourceItem[] = [];
+    // Only the sources asked now. Everything loaded stays loaded (nothing is cleared, as above), but a source that has
+    // left the list -- Show 18+ turned off hides every adult one -- kept its covers on the wall under a chip counting
+    // fewer sources than it showed. Turning it back on shows them again from what is already loaded.
+    const asked = new Set(budget.map((s) => kOf(s.id)));
     // Strict arrival order. Interleaving by rank would push already-read tiles down as a slow source lands.
     for (const key of order) {
-      if (!key.startsWith(`${listMode}:`)) continue;
+      if (!asked.has(key)) continue;
       // Filtering is display-only: everything stays loaded, this just decides what is shown. That is why
       // tapping a chip is instant and why it cannot strand the wall the way restarting it used to.
       if (selected && key !== `${listMode}:${selected}`) continue;
@@ -445,7 +451,7 @@ function DiscoverInner() {
     // ones only join its provider list, so its icons grow and the add dialog offers a choice without anything
     // on screen moving.
     return foldByWork(out, nameOf, rankOf, wallAdded);
-  }, [mode, listMode, selected, searchHits, searchProviders, order, rows, nameOf, rankOf, wallAdded]);
+  }, [mode, listMode, selected, searchHits, searchProviders, order, rows, nameOf, rankOf, wallAdded, budget, kOf]);
   // What this visit added, in the keys of the view on screen: each view follows the works through its own answers.
   const shownAdded = mode === 'search' ? searchAdded : wallAdded;
   // Each card's icons: every provider behind it, with the extension it came out of, so MangaDex's languages are one
@@ -463,8 +469,9 @@ function DiscoverInner() {
 
   // The empty card for ONE source browsed alone says that source's own reason and wait, the way its sheet
   // row does -- "Rate-limited … · back in ~12 min", not the wall's "nothing new". `selected` names a
-  // budgeted source (the picker clears it on a mode change), but the row is looked up defensively for the
-  // same reason the picker's × is: a missing row must degrade to a sentence, not a crash.
+  // budgeted source (a mode change keeps it only where the new listing has it, and one that leaves the list is let
+  // go), but the row is looked up defensively for the same reason the picker's × is: a missing row must degrade to a
+  // sentence, not a crash.
   const alone = mode === 'newest' && selected
     ? aloneEmpty(budget.find((s) => s.id === selected) ?? { id: selected, name: selected, lang: null }, states[kOf(selected)] ?? 'idle')
     : null;
@@ -498,6 +505,13 @@ function DiscoverInner() {
   // `term` is kept: the query is disabled by the mode, and keeping its observer keeps the answer cached, so
   // searching the same title again after browsing is instant.
   const backToNewest = () => { setQ(''); setMode('newest'); writeQ(''); };
+  // A chosen source that has left the list -- Show 18+ turned off hides every adult one -- is let go. It stayed
+  // chosen: the chip read its raw id, the wall stayed empty, and a search asked only it and said "No results across
+  // your sources". Only once the list has answered, so nothing is let go before there is a list to look in.
+  useEffect(() => {
+    if (!sourcesData || !selected || budget.some((s) => s.id === selected)) return;
+    setSelected(null);
+  }, [sourcesData, budget, selected]);
 
   const open = (it: SourceItem) => {
     const key = workKey(it);
@@ -677,7 +691,12 @@ function DiscoverInner() {
         count={pool.length}
         selected={selected} onSelect={setSelected}
         mode={listMode}
-        onMode={(m) => { setListMode(m); setSelected(null); setPage(1); if (mode === 'search') backToNewest(); }}
+        // The source shown alone stays chosen when the other listing has it: flipping dropped it, so one source's Newest
+        // flipped to every source's Popular.
+        onMode={(m) => {
+          setListMode(m); setSelected(selected && budgetForMode(sources, m, Infinity).some((s) => s.id === selected) ? selected : null);
+          setPage(1); if (mode === 'search') backToNewest();
+        }}
       />
 
       {/* One mounted child per source asked -- every one in the pool -- and `enabled` only while the gate lets it
