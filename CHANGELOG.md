@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.91.0 — 2026-10-20
+
+**Open site: sign in on an extension's site, the way Mihon's *Open in WebView* does.** BatCave now shows *Sign in to keep
+reading* to anyone not signed in, so in Uchiyomi it listed nothing
+([#314](https://github.com/AngeloSha/uchiyomi/issues/314), reported by **langwire**); in Mihon you sign in once in its
+WebView. Uchiyomi had no such page until now.
+
+### Open site
+
+- In **Admin → Sources**, an extension's sheet has **Open site**: the site in the extension engine's own browser, live
+  and over the whole screen. Click, scroll and type as on the site: on a phone a tap is a click, a swipe scrolls, and
+  **Keyboard** brings up the keyboard. Sign in, or pass the site's check, and press **Done**: the engine keeps the
+  sign-in for that extension, and the sheet says whether the source answers now. **Start over** opens the home page
+  again.
+- **Kept working by itself.** A source you have done this for gets a quiet visit of its home page whenever it fails, at
+  most once in half an hour, and the call is tried again. BatCave's check lasts a day, so this keeps it going. An
+  extension that answers "Open in WebView…" gets the same visit.
+- Admins only, one site at a time, closed after ten minutes without input. It runs over ordinary HTTP, so a reverse proxy
+  needs no websocket setting for it. It needs the bundled extension engine, or your own Suwayomi from v2.4 on.
+
+### Upgrading
+
+- Nothing to do.
+
 ## v0.90.0 — 2026-10-20
 
 **Comments and reactions can be switched off, each for themselves, and the Komga extension's WebView opens the series or
