@@ -7,7 +7,7 @@
 import test, { after, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import { createServer as createTcpServer, type AddressInfo } from 'node:net';
 
 process.env.DATABASE_URL = process.env.DATABASE_URL || process.env.TEST_DATABASE_URL || 'postgres://x:x@127.0.0.1:1/x';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-at-least-16-chars';
@@ -15,15 +15,16 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-at-least-16-char
 const load = () => import('../src/lib/sources/flaresolverr');
 
 /**
- * A solver that cannot be reached at all: a port that was listened on and closed, so the connection is refused (port 1
- * would not do: fetch refuses it as a "bad port" before connecting, which is not what a stopped container does).
+ * A solver transport that always fails: keep the port reserved and reset every accepted socket. A closed ephemeral
+ * port could be reclaimed by a later fake solver, turning "unreachable" into a successful answer. Port 1 would not
+ * do either: fetch refuses that as a "bad port" before attempting the transport.
  */
 let NOWHERE = '';
+let unreachableServer: ReturnType<typeof createTcpServer>;
 before(async () => {
-  const srv = createServer();
+  const srv = unreachableServer = createTcpServer((socket) => socket.destroy());
   await new Promise<void>((go) => srv.listen(0, '127.0.0.1', go));
   NOWHERE = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
-  await new Promise<void>((go) => srv.close(() => go()));
 });
 
 type Reply = { status?: number; json?: unknown; raw?: string; hang?: boolean };
@@ -49,6 +50,7 @@ async function fakeSolver(name: string): Promise<Fake> {
   fake.url = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
   fake.close = () => new Promise<void>((go) => { for (const h of held) h(); srv.close(() => go()); });
   fakes.push(fake);
+  assert.notEqual(fake.url, NOWHERE, 'a fake solver must never claim the transport-failure endpoint');
   return fake;
 }
 
@@ -74,6 +76,7 @@ beforeEach(async () => {
 });
 after(async () => {
   for (const f of fakes) await f.close();
+  await new Promise<void>((go) => unreachableServer.close(() => go()));
   delete process.env.FLARESOLVERR_FALLBACK_URL;
 });
 
