@@ -60,6 +60,9 @@
  * number is no longer in it -- a takedown, a deleted post, a source that dropped it -- is a file nothing could
  * replace, so it stays. For a file holding a range (lib/chapterRanges.ts) that is every whole number it holds, not
  * only its start. A series with no listing at all says nothing either way and is judged as before.
+ *     Listed means fetchable (FETCHABLE): a number listed only from blocked groups or in another language, or only
+ *     as an external link -- MangaDex keeps a licensed chapter as a zero-page link to the publisher -- could not be
+ *     downloaded again either, so it counts as not listed.
  */
 import { rm, stat } from 'fs/promises';
 import { dirname, resolve } from 'path';
@@ -70,6 +73,13 @@ import { REFETCH_BAK } from './fsAtomic';
 import { runtime, type CleanupResult } from './runtime';
 import { atHiddenNumber, hiddenNumbersActive } from './noticeChapters';
 import { rangeEnd } from './chapterRanges';
+
+/**
+ * A listing row the sweep could fetch again (see the header): not `blocked` -- every copy from a blocked group or in
+ * another language (lib/releases.ts) -- and not a zero-page external link, which cannot be downloaded (repair.ts skips
+ * them for the same reason). A row whose page count is unknown counts as fetchable, as before.
+ */
+const FETCHABLE = `sl.status <> 'blocked' AND (sl.chosen->>'pages') IS DISTINCT FROM '0'`;
 
 /**
  * Most chapters one run will delete. Not a performance limit -- unlink is cheap -- but a blast radius:
@@ -131,10 +141,12 @@ export function dueSql(limit: number | null): string {
              -- the file gone.
              AND NOT (EXISTS (SELECT 1 FROM series_listing sl WHERE sl.series_id = b.series_id)
                       AND (NOT EXISTS (SELECT 1 FROM series_listing sl
-                                        WHERE sl.series_id = b.series_id AND sl.number = COALESCE(ov.number, b.number))
+                                        WHERE sl.series_id = b.series_id AND sl.number = COALESCE(ov.number, b.number)
+                                          AND ${FETCHABLE})
                            OR EXISTS (SELECT 1 FROM generate_series(floor(b.number)::numeric + 1, floor(${rangeEnd('b', 'ov')})::numeric) held(n)
                                        WHERE NOT EXISTS (SELECT 1 FROM series_listing sl
-                                                          WHERE sl.series_id = b.series_id AND sl.number = held.n::real))))${hiddenNumbersActive() ? `
+                                                          WHERE sl.series_id = b.series_id AND sl.number = held.n::real
+                                                            AND ${FETCHABLE}))))${hiddenNumbersActive() ? `
              -- a chapter at a number an admin hid (#240) is left exactly as it is: Restore brings back what was there
              AND NOT ${atHiddenNumber('b')}` : ''}
            ORDER BY done.done_at ASC` + (limit === null ? '' : `\n           LIMIT ${limit}`);

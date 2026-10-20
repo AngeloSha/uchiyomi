@@ -53,8 +53,9 @@ before(async () => {
   ({ q } = (await import('../src/lib/db')) as any);
   ({ dueSql, runCleanupOnce } = (await import('../src/lib/chapterCleanup')) as any);
   await migrate();
-  await q('DELETE FROM lib_series WHERE id = $1', [S]);
-  await q('DELETE FROM users WHERE username = $1', [USER]);
+  // What `after` removes, in its order: a run killed before its `after` leaves books with reads behind, which would
+  // otherwise refuse the series' delete.
+  await clean();
   const [u] = await q<{ id: string }>(
     `INSERT INTO users (username, display_name, password_hash, role, auth_kind) VALUES ($1, $1, 'x', 'user', 'password') RETURNING id`, [USER]);
   await mkdir(join(DL, FOLDER), { recursive: true });
@@ -72,14 +73,19 @@ before(async () => {
   }
 });
 
-after(async () => {
-  if (!DSN) return;
+/** Everything this file wrote, children first. */
+async function clean() {
   await q('DELETE FROM series_listing WHERE series_id = $1', [S]).catch(() => {});
   await q('DELETE FROM read_progress WHERE series_id = $1', [S]).catch(() => {});
   await q('UPDATE lib_series SET cover_book_id = NULL WHERE id = $1', [S]).catch(() => {});
   await q('DELETE FROM lib_books WHERE series_id = $1', [S]).catch(() => {});
   await q('DELETE FROM lib_series WHERE id = $1', [S]).catch(() => {});
   await q('DELETE FROM users WHERE username = $1', [USER]).catch(() => {});
+}
+
+after(async () => {
+  if (!DSN) return;
+  await clean();
   await q('UPDATE server_settings SET cleanup_read = false, cleanup_read_days = 30, cleanup_read_last_run = NULL, cleanup_read_last_result = NULL WHERE id = 1').catch(() => {});
   await rm(DL, { recursive: true, force: true }).catch(() => {});
 });
@@ -97,6 +103,17 @@ test('every finished chapter still listed is due, as before', { skip }, async ()
 test('a chapter the sources no longer list is not due: the file is the last copy', { skip }, async () => {
   await listing([1, 3, 4]);
   assert.deepEqual(await due(), [3, 4]);
+});
+
+test('a number listed only from a blocked group, or only as an external link, could not be fetched again: kept', { skip }, async () => {
+  // MangaDex keeps a licensed chapter as a zero-page link to the publisher; a group the admin blocked is no source
+  // either. Reintroduce by dropping FETCHABLE from the clause: 2 and 3 are due.
+  await listing([1, 2, 3, 4]);
+  await q(`UPDATE series_listing SET status = 'blocked' WHERE series_id = $1 AND number = 2`, [S]);
+  await q(`UPDATE series_listing SET chosen = '{"pages": 0}'::jsonb WHERE series_id = $1 AND number = 3`, [S]);
+  assert.deepEqual(await due(), [4], 'chapter 2 only from a blocked group, 3 only as a link: both are last copies');
+  await q(`UPDATE series_listing SET chosen = '{"pages": 24}'::jsonb WHERE series_id = $1 AND number = 3`, [S]);
+  assert.deepEqual(await due(), [3, 4], 'a copy with pages can be fetched again');
 });
 
 test('a range file is kept when any chapter it holds is no longer listed, not only its start', { skip }, async () => {
