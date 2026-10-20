@@ -2387,7 +2387,10 @@ everything**, which does what its key on Health does and can merge, delete and i
   the "could not be solved" marks and those sources' cooldowns; and it forgets any cooldown that lapsed more than
   a day ago. No site is contacted;
 * **counts the pages** of chapter files nobody has opened (2,000 a night), which is what makes the
-  short-chapter check see them at all; since v0.72.0 a file it finds no page in is listed under *Chapter files*;
+  short-chapter check see them at all; since v0.72.0 a file it finds no page in is listed under *Chapter files*.
+  A folder that looks unmounted is not counted at all — one that is not there, holds nothing, or where no chapter file
+  the library knows is there (or more than nine in ten are missing) — and neither is a file the server may not read:
+  they wait for a night they can be read, instead of being listed as broken once the share is back;
 * **gives chapters that ran out of retries another chance** a week later, when the site has had time to
   calm down (100 a night);
 * **replaces a one- or two-page chapter when another source has a longer copy** (20 a night; one copy from
@@ -2677,7 +2680,10 @@ nothing left*.
   unpacked at the same moment), or a file renamed as well as moved, are not guessed at: the chapter is listed as gone,
   as before.
   Admin → Settings → Maintenance → **Fingerprint library files** says what its last pass did, including files left for the next pass
-  because they were still being written.
+  because they were still being written. A library folder that looks unmounted — not there, empty, or with no
+  chapter file the library knows there (or more than nine in ten missing), as a network share or removable drive that
+  isn't mounted leaves it — is skipped by this pass and by the page-fingerprint pass, and its files wait for a pass
+  that finds them, rather than being stamped unreadable for good.
 - **In the download folder**: chapters Uchiyomi downloaded are *Verify chapter files*' to mark, so that the sweep
   fetches them again; here they are only counted.
 - **Series with nothing left**: every chapter's file is gone. Each one is a link, and nothing is hidden or removed:
@@ -2756,9 +2762,14 @@ file on disk, so old reading history never condemns a fresh download.
 
 If the downloads folder is not there when the job runs — a network share that is not mounted right now, so
 every chapter it was about to look at is missing along with its folder — the run stops and says so in the
-task's result instead of marking every chapter it could not find as deleted. A single series whose files
-you removed by hand is different: with the rest of the folder present, its chapters are marked as gone and
-the run carries on. A series you have hidden is never examined at all — *Delete files* is the way to drop
+task's result instead of marking every chapter it could not find as deleted. The same goes for a bare mount
+point a chapter sweep has written new downloads onto while the share was down: before it marks any chapter
+whose file it did not find, the job looks for every chapter file in the downloads folder, and when none is
+there or more than nine in ten are missing it stops, marks and deletes nothing, and says how many (*stopped:
+26 of 27 chapter files in the download folder are missing; is the download volume mounted?*). A single
+series whose files you removed by hand is different: with the rest of the folder present, its chapters are
+marked as gone and the run carries on. A chapter whose file the server may not look at (a folder it has no
+permission to read, an I/O error) is never marked: it is counted as failed and tried again on the next run. A series you have hidden is never examined at all — *Delete files* is the way to drop
 its chapters.
 
 That same comparison is why the first run takes fewer chapters than you might expect on a downloads folder
@@ -3725,6 +3736,9 @@ downloaded that are gone as *deleted from the server* — the row and everyone's
   share is down, and one stray download on a bare mount must not turn "unmounted" into "mark everything
   else". Check the mount and run it again. If the disk really is empty, add the series again from a source,
   or use *Fetch again* on the series page.
+- Only a file that is not there counts as missing. One the server may not look at — a folder it has no
+  permission to read, an I/O error from the NAS — is left as it is, and a folder where nothing could be looked
+  at is reported as *looked unmounted*. Fix the permissions (or the share) and run it again.
 - Chapters the read-chapter cleanup, *Delete from server* or *Delete files* removed are not touched by this:
   they were let go on purpose and are not fetched back.
 - A chapter below a series' *latest N* floor — one you fetched through the fill dialog's *older* — comes back

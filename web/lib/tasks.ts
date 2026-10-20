@@ -237,7 +237,10 @@ export function taskResult(r: any): string {
     // volume not being mounted; the chapters it left are the ones still due. Without this line the result
     // reads as a quiet "0 chapters deleted" when the only fix is to mount the share, after which the next
     // run takes them. ("Due" alone, due for what, was the translators' guess: it is spelled out.)
-    if (r.stopped === 'unmounted') bits.push(tr('stopped: every chapter due for deletion is missing its folder; is the download volume mounted?'));
+    // A run that asked the whole download folder (`share`) says how much of it was missing, since its folders may
+    // well hold files: a sweep that ran while the share was down writes new chapters onto the mount point.
+    if (r.stopped === 'unmounted' && r.share) bits.push(tr('stopped: {missing} of {total} chapter files in the download folder are missing; is the download volume mounted?', { missing: r.share.missing, total: r.share.of }));
+    else if (r.stopped === 'unmounted') bits.push(tr('stopped: every chapter due for deletion is missing its folder; is the download volume mounted?'));
     return ` \u00b7 ${bits.join(', ')}`;
   }
   if (typeof r.added === 'number') {

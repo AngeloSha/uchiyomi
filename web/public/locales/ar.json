@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4196
+    "strings": 4197
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -2500,6 +2500,7 @@
   "1 confirmed": "أُكّد فصل واحد",
   "{n} confirmed": "أُكّد {n}",
   "stopped: every chapter due for deletion is missing its folder; is the download volume mounted?": "توقف: كل فصل حان حذفه مجلده مفقود؛ هل وحدة تخزين التنزيلات موصولة؟",
+  "stopped: {missing} of {total} chapter files in the download folder are missing; is the download volume mounted?": "توقف: {missing} من {total} ملفات الفصول في مجلد التنزيلات مفقودة؛ هل وحدة تخزين التنزيلات موصولة؟",
   "stopped: free space on the download disk is below the minimum": "توقف: المساحة الحرة على قرص التنزيلات أقل من الحد الأدنى",
   "waiting for the chapter sweep to end": "بانتظار انتهاء جولة فحص الفصول",
   "1 checked": "فُحص ملف واحد",

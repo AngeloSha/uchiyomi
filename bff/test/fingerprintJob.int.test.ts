@@ -241,6 +241,9 @@ test('a scan that meets new files arms a pass a few minutes on, and one that mee
   // line in scheduleFingerprintBackfill (or the hook call at the end of persistScan): no pass runs.
   const { persistScan } = await import('../src/lib/library');
   // The hand-made rows above are not a scan's: their files go, so the scan meets only the folder below.
+  // Their catalog rows go too: rows whose files are almost all gone are what a share that isn't mounted looks like
+  // (lib/catalogRootGuard.ts), and this test needs a healthy root to test the scan's scheduling hook.
+  await q('DELETE FROM lib_books WHERE series_id = $1', [SERIES]);
   await rm(join(ROOT, 'FpJob'), { recursive: true, force: true });
   await rm(join(ROOT, '_dl', 'FpJob'), { recursive: true, force: true });
   let passes = 0;

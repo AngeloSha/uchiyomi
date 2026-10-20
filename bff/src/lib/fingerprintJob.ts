@@ -21,6 +21,7 @@ import { stat } from 'fs/promises';
 import { q, pool } from './db';
 import { fingerprintChapter } from './fingerprint';
 import { LIBRARY_ROOT, onUnprintedFiles } from './library';
+import { catalogRootUnavailable } from './catalogRootGuard';
 
 // Separate from MIGRATE_LOCK, and taken with try_ rather than blocking: if another replica is already
 // doing this, the loser should decline, not queue up behind it.
@@ -136,13 +137,27 @@ export async function runFingerprintBackfill(opts: { max?: number; skipYoung?: b
   const limit = opts.max ?? Infinity;
 
   try {
+    // ⚠️ NOT FROM A ROOT THAT IS NOT THERE. fp_at is stamped for a failed read and never tried again, so a pass over a
+    // root that cannot be opened, holds nothing, or holds only what a sweep wrote onto a bare mount point (a network
+    // share or removable drive that isn't mounted) would stamp every waiting file of it unreadable for good -- and a
+    // file never fingerprinted cannot be recognised after a move (lib/rescan.ts). Its rows wait for a pass that finds
+    // it there (lib/catalogRootGuard.ts). Reintroduce by passing every root: "the fingerprint pass with the library
+    // root missing" in libraryRootGone.int.test.ts finds them stamped.
+    const down: string[] = [];
+    for (const { root } of await q<{ root: string }>(
+      'SELECT DISTINCT COALESCE(root, $1) AS root FROM lib_books WHERE fp_at IS NULL AND pruned_at IS NULL', [LIBRARY_ROOT],
+    )) {
+      const why = await catalogRootUnavailable(root, LIBRARY_ROOT);
+      if (why) { down.push(root); console.warn(`[fingerprint] ${root} cannot be read (${why}) -- is the volume mounted? Its files were left for a later pass`); }
+    }
     // Keyset, not "the first rows still NULL": a young file is left NULL on purpose, and would be the first row of
     // every batch again -- a pass that never ends.
     let after = '';
     for (;;) {
       const batch = await q<Row>(
-        `SELECT id, root, file FROM lib_books WHERE fp_at IS NULL AND pruned_at IS NULL AND id > $2 ORDER BY id LIMIT $1`,
-        [Math.min(BATCH, Math.max(0, limit - fpState.done - fpState.failed)), after],
+        `SELECT id, root, file FROM lib_books WHERE fp_at IS NULL AND pruned_at IS NULL AND id > $2
+            AND COALESCE(root, $3) <> ALL($4::text[]) ORDER BY id LIMIT $1`,
+        [Math.min(BATCH, Math.max(0, limit - fpState.done - fpState.failed)), after, LIBRARY_ROOT, down],
       );
       if (!batch.length) break;
       after = batch[batch.length - 1].id;

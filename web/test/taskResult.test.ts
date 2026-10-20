@@ -64,6 +64,15 @@ test('a cleanup that stopped at a missing folder says the volume is missing, not
   assert.doesNotMatch(taskResult({ deleted: 2, bytes: 9, failed: 0 }), /mounted/, 'a run that did not stop says nothing about volumes');
 });
 
+test('a cleanup that found the download folder\'s files missing says how many, not that every folder is gone', () => {
+  // The whole-root stop. The folders may hold files a sweep wrote onto the bare mount point, so "every chapter ...
+  // is missing its folder" would send the admin looking at folders that are there.
+  const r = taskResult({ deleted: 0, bytes: 0, failed: 0, stopped: 'unmounted', share: { missing: 26, of: 27 } });
+  assert.match(r, /26 of 27 chapter files in the download folder are missing/);
+  assert.match(r, /volume mounted/);
+  assert.doesNotMatch(r, /missing its folder/);
+});
+
 test('a verify run that skipped an unmounted folder says so, first, instead of reading as none missing', () => {
   // Every chapter under a skipped root is still claiming bytes, and "0 missing" is exactly what the admin
   // would conclude the task had found. Reintroduce by dropping the `unmounted` line: the first result below

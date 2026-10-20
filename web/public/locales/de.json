@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4196
+    "strings": 4197
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -2500,6 +2500,7 @@
   "1 confirmed": "1 bestätigt",
   "{n} confirmed": "{n} bestätigt",
   "stopped: every chapter due for deletion is missing its folder; is the download volume mounted?": "gestoppt: Bei jedem zum Löschen anstehenden Kapitel fehlt der Ordner; ist das Download-Volume eingehängt?",
+  "stopped: {missing} of {total} chapter files in the download folder are missing; is the download volume mounted?": "gestoppt: {missing} von {total} Kapiteldateien im Download-Ordner fehlen; ist das Download-Volume eingehängt?",
   "stopped: free space on the download disk is below the minimum": "gestoppt: Der freie Speicher auf dem Download-Datenträger liegt unter dem Minimum",
   "waiting for the chapter sweep to end": "wartet, bis der Kapiteldurchlauf fertig ist",
   "1 checked": "1 geprüft",

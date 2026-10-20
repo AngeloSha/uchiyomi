@@ -43,11 +43,13 @@
  * and a one-row Fix pressed at 23:00 used to replace the first and move the second (v0.49.0).
  */
 import { join } from 'path';
+import { stat } from 'fs/promises';
 import { randomUUID } from 'crypto';
 import { q, one } from './db';
 import { runtime } from './runtime';
 import { logAudit } from './audit';
 import { containedPath } from './fsGuard';
+import { catalogRootUnavailable } from './catalogRootGuard';
 import { countPages } from './pageCount';
 import { haveNumbers } from './libraryNumbers';
 import { atHiddenNumber } from './noticeChapters';
@@ -653,12 +655,29 @@ async function stepCount(r: RepairResult, opts: RepairOpts, log?: Log): Promise<
   );
   planned('count', rows.length);
   const cur = here({ kind: 'files', phase: 'counting', done: 0, of: rows.length })!;
+  // ⚠️ NOT FROM A ROOT THAT IS NOT THERE. The stamp is for good (only a changed mtime clears it), and `pages = 0` with
+  // a stamp is what Health's Chapter files card lists as a file nobody can open. A root that cannot be opened, holds
+  // nothing, or holds only what a sweep wrote onto a bare mount point -- a network share or removable drive that isn't
+  // mounted -- would have every chapter in the queue stamped 0 and listed as broken once it is back. Its rows are left
+  // for a night the root is there (lib/catalogRootGuard.ts), and said. Reintroduce by counting every row: "the nightly
+  // page count with the library root missing" in libraryRootGone.int.test.ts finds the library's chapters stamped.
+  const down = new Map<string, string>();
+  for (const root of new Set(rows.map((b) => b.root))) {
+    const why = await catalogRootUnavailable(root);
+    if (why) down.set(root, why);
+  }
+  for (const [root, why] of down) log?.warn(`repair: ${root} cannot be read (${why}) -- is the volume mounted? Its chapter files were not counted`);
   await mapLimit(rows, COUNT_CONCURRENCY, async (b) => {
     if (halted()) return;
     // A path that escapes its root is not a chapter to count; it is something for the health page. Left
     // unstamped as well as uncounted, exactly as the verify task leaves it out of `checked`.
     const abs = containedPath(b.root, b.file);
-    if (!abs) { cur.done!++; return; }
+    if (!abs || down.has(b.root)) { cur.done!++; return; }
+    // A file that is not there is still stamped 0 (lib/pageCount.ts); one the server may not look at (EACCES, an I/O
+    // error) says nothing about its pages, and is left for a night it can be read. Reintroduce by counting it: "the
+    // nightly page count does not stamp a chapter in a folder it may not read" in libraryRootGone.int.test.ts.
+    const why = await stat(abs).then(() => null, (e: NodeJS.ErrnoException) => e?.code ?? 'error');
+    if (why && why !== 'ENOENT' && why !== 'ENOTDIR') { cur.done!++; return; }
     const pages = await countPages(abs);
     const done = await q(
       'UPDATE lib_books SET pages = $1, pages_checked_at = now() WHERE id = $2 AND pages = 0 RETURNING id',

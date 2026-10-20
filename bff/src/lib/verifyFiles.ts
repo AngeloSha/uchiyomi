@@ -76,6 +76,8 @@ export interface VerifyResult {
    * the engine's or the admin's to put back, and a re-fetch could not land on the same row anyway.
    */
   readLibraryMissing: number;
+  /** Rows whose file could not be looked at (EACCES, an I/O error): never marked, never counted as checked. */
+  unchecked: number;
   /**
    * Roots skipped by the whole-batch rule. A bare path means no file at all was found under it (or it could
    * not be read); a path followed by `(N % of M chapter files missing)` is the 90 % rule. Nothing under a
@@ -106,15 +108,22 @@ const PAGE = 2000;
 const REFUSE_ABOVE = 0.9;
 
 interface Row { id: string; series_id: string; file: string }
-interface Looked { row: Row; present: boolean; folder: boolean }
+interface Looked { row: Row; present: boolean; folder: boolean; unchecked?: boolean }
 
 async function look(root: string, row: Row): Promise<Looked | null> {
   const abs = containedPath(root, row.file);
   // A path that escapes its root is not a missing chapter; it is something for the health page. Left out
   // of `checked` as well, so the count means what it says.
   if (!abs) return null;
-  const st = await stat(abs).catch(() => null);
+  let code: string | undefined;
+  const st = await stat(abs).catch((e: NodeJS.ErrnoException) => { code = e?.code; return null; });
   if (st) return { row, present: true, folder: true };
+  // ⚠️ Only "not there" is missing, as Rescan everything has it (lib/rescan.ts look). A folder the server may not
+  // read (EACCES), a NAS's I/O error or a dropped share's stale handle says nothing about whether the file is there,
+  // and marking it 'missing' has the sweep fetch over a file that is fine. Such a row is `unchecked`: left out of
+  // both whole-root rules and never marked. Reintroduce by reading every failed stat as missing: "Verify does not
+  // mark the chapters of a download folder it may not read" in libraryRootGone.int.test.ts.
+  if (code !== 'ENOENT' && code !== 'ENOTDIR') return { row, present: false, folder: true, unchecked: true };
   const folder = !!(await stat(dirname(abs)).catch(() => null));
   return { row, present: false, folder };
 }
@@ -143,6 +152,7 @@ export async function verifyChapterFiles(opts: { beforeMark?: () => Promise<void
   let checked = 0;
   let missing = 0;
   let readLibraryMissing = 0;
+  let unchecked = 0;
   let roots = 0;
   let stopped: VerifyResult['stopped'];
 
@@ -159,6 +169,7 @@ export async function verifyChapterFiles(opts: { beforeMark?: () => Promise<void
     // whole batch. Paged reads keep the query bounded; the ids of what is missing are what stays in memory.
     const gone: Looked[] = [];
     let seen = 0;
+    let uncheckedHere = 0;
     let anyPresent = false;
     let after = '';
     for (;;) {
@@ -177,7 +188,9 @@ export async function verifyChapterFiles(opts: { beforeMark?: () => Promise<void
       );
       if (!page.length) break;
       after = page[page.length - 1].id;
-      const looked = (await mapLimit(page, CONCURRENCY, (r) => look(root, r))).filter((x): x is Looked => !!x);
+      const all = (await mapLimit(page, CONCURRENCY, (r) => look(root, r))).filter((x): x is Looked => !!x);
+      const looked = all.filter((l) => !l.unchecked);
+      uncheckedHere += all.length - looked.length;
       seen += looked.length;
       for (const l of looked) {
         // ⚠️ A present FILE, never a folder: the downloader leaves empty series folders on a bare mount
@@ -203,7 +216,9 @@ export async function verifyChapterFiles(opts: { beforeMark?: () => Promise<void
     const moved = gone.length - still.size;
     const missingHere = gone.filter((l) => still.has(l.row.id));
     seen -= moved;
-    if (!seen) continue;
+    unchecked += uncheckedHere;
+    // A root where no file could be checked at all is not a root with nothing missing: it reads as not mounted.
+    if (!seen) { if (uncheckedHere) unmounted.push(root); continue; }
     // ⚠️ The whole-batch decision (see the header): no file present is a volume that is not there, or a
     // disk with nothing on it, and neither is evidence about any single chapter.
     if (!anyPresent) { unmounted.push(root); continue; }
@@ -234,7 +249,7 @@ export async function verifyChapterFiles(opts: { beforeMark?: () => Promise<void
        ) WHERE id = $1`, [sid]).catch(() => {});
   }
 
-  return { ok: true, checked, missing, readLibraryMissing, unmounted, roots, ms: Date.now() - t0, ...(stopped ? { stopped } : {}) };
+  return { ok: true, checked, missing, readLibraryMissing, unchecked, unmounted, roots, ms: Date.now() - t0, ...(stopped ? { stopped } : {}) };
 }
 
 type Log = { info: (m: string) => void; warn: (m: string) => void; error?: (e: any) => void };
