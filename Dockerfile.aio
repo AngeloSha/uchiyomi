@@ -15,10 +15,24 @@
 #
 #   docker build -f Dockerfile.aio -t uchiyomi:aio .
 
+# ---------- pkgs: the package files, minus the release number ----------
+# A release bumps "version" in all four package files and touches nothing else in them, and that alone
+# changes the files every install below starts from -- so all three npm installs ran again on every release,
+# from nothing, and each left another full copy of node_modules in the build cache. npm never reads the root
+# version to install, so it is pinned to 0.0.0 here, and the installs stay cached until a dependency really
+# changes. The real files still land on top (COPY web/ ./, COPY bff/ ./, and the runtime's own COPY after
+# its install), so the app still reports the right version. buildCache.test.ts holds the line.
+FROM node:24-alpine AS pkgs
+WORKDIR /p
+COPY web/package.json web/package-lock.json* web/
+COPY bff/package.json bff/package-lock.json* bff/
+RUN node -e 'const fs = require("fs"); for (const f of process.argv.slice(1)) { if (!fs.existsSync(f)) continue; const j = JSON.parse(fs.readFileSync(f, "utf8")); j.version = "0.0.0"; if (j.packages && j.packages[""]) j.packages[""].version = "0.0.0"; fs.writeFileSync(f, JSON.stringify(j, null, 2) + "\n"); }' \
+      web/package.json web/package-lock.json bff/package.json bff/package-lock.json
+
 # ---------- web: the static export ----------
 FROM node:24-alpine AS web
 WORKDIR /w
-COPY web/package.json web/package-lock.json* ./
+COPY --from=pkgs /p/web/ ./
 RUN npm ci --no-audit --no-fund 2>/dev/null || npm install --no-audit --no-fund
 COPY web/ ./
 RUN npm run build
@@ -26,7 +40,7 @@ RUN npm run build
 # ---------- api: compile ----------
 FROM node:24-alpine AS api
 WORKDIR /app
-COPY bff/package.json bff/package-lock.json* ./
+COPY --from=pkgs /p/bff/ ./
 RUN npm ci --no-audit --no-fund 2>/dev/null || npm install --no-audit --no-fund
 COPY bff/ ./
 RUN npm run build
@@ -61,9 +75,11 @@ RUN apk add --no-cache su-exec tini postgresql16 postgresql16-client nss_wrapper
  && mkdir -p /cache /backups /config /library-dl /library /sources /data /run/postgresql \
  && chown -R yomi:yomi /cache /backups /config /library-dl /app /data /run/postgresql
 
-COPY bff/package.json bff/package-lock.json* ./
+COPY --from=pkgs /p/bff/ ./
 RUN npm ci --omit=dev --no-audit --no-fund 2>/dev/null || npm install --omit=dev --no-audit --no-fund \
  && npm cache clean --force
+# The real files, release number included: lib/appVersion.ts reads package.json at runtime.
+COPY bff/package.json bff/package-lock.json* ./
 
 COPY --from=api /app/dist ./dist
 # The API reference the server serves at /api/docs. Next to dist/, where lib/apiDocs.ts resolves it.
