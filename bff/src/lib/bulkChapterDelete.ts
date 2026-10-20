@@ -4,12 +4,12 @@ import { rm, stat } from 'fs/promises';
 import { dirname } from 'path';
 import { q, tx } from './db';
 import { DL_ROOT } from './library';
-import { deleteChapterFiles, type ChapterDeleteJournalItem } from './libraryAdmin';
+import { deleteChapterFiles, statOrGone, type ChapterDeleteJournalItem } from './libraryAdmin';
 import { busyFolders } from './bulkNewest';
 import { runsInside } from './updater';
 import { logAudit } from './audit';
 import { runtime } from './runtime';
-import { realContainedPath } from './fsGuard';
+import { containedPath, realContainedPath } from './fsGuard';
 import { tombstoneBooks } from './chapterCleanup';
 import { REFETCH_BAK } from './fsAtomic';
 
@@ -164,9 +164,22 @@ async function reconcileIntent(row: JournalRow): Promise<void> {
     return settleJournal(row.run_id, row.book_id, 'applied', null);
   }
   if (row.root !== DL_ROOT) return settleJournal(row.run_id, row.book_id, 'unresolved', 'not_owned');
+  // A file the server may not look at (EACCES from a folder's mode bits, an I/O error) is not proof of deletion any more
+  // than an unmounted share is: the row stays live, and the result says why. Asked before realContainedPath, which
+  // answers null for it too (its lstat fails) and settled it as `outside_root`. Reintroduce `stat(...).catch(() =>
+  // null)`: "the bulk delete's crash recovery leaves a chapter in a folder it may not read live" in
+  // deleteUnreadable.int.test.ts finds the wrong reason.
+  const lexical = containedPath(row.root, row.file);
+  const looked = lexical ? await statOrGone(lexical) : null;
+  if (typeof looked === 'string') {
+    console.warn(`[bulk-delete] recovery: ${row.file} could not be looked at (${looked}) -- left live`);
+    return settleJournal(row.run_id, row.book_id, 'unresolved', 'interrupted_unreadable');
+  }
   const abs = await realContainedPath(row.root, row.file);
   if (!abs) return settleJournal(row.run_id, row.book_id, 'unresolved', 'outside_root');
-  if (await stat(abs).catch(() => null)) {
+  const st = await statOrGone(abs);
+  if (typeof st === 'string') return settleJournal(row.run_id, row.book_id, 'unresolved', 'interrupted_unreadable');
+  if (st) {
     // The intent committed but unlink never completed. Recovery never retries destructive filesystem work.
     return settleJournal(row.run_id, row.book_id, 'skipped', 'interrupted_before_unlink');
   }

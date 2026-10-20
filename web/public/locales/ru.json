@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4195
+    "strings": 4196
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -4198,5 +4198,6 @@
   "Opening the site…": "Открываем сайт…",
   "Start over": "Начать заново",
   "The site, live": "Сайт в реальном времени",
-  "Type on the site": "Ввод на сайте"
+  "Type on the site": "Ввод на сайте",
+  "Check the folder's permissions.": "Проверьте права доступа к папке."
 }
