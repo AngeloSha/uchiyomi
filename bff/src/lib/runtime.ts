@@ -14,7 +14,10 @@ export interface CleanupResult {
   bytes: number;
   /** Eligible chapters left for the next run because this one hit its cap. */
   remaining: number;
-  /** Files that were due but could not be removed; the rows are left unmarked so the next run retries. */
+  /**
+   * Files that were due but could not be removed, or could not be looked at (EACCES, an I/O error); the rows are left
+   * unmarked so the next run retries.
+   */
   failed: number;
   ms: number;
   /** Why nothing was done, when nothing was done. Absent on a run that actually looked. */
@@ -25,6 +28,11 @@ export interface CleanupResult {
    * it (lib/chapterCleanup.ts); it and the chapters after it are counted in `failed`.
    */
   stopped?: 'unmounted';
+  /**
+   * Set with `unmounted` when the whole download root was asked (lib/chapterCleanup.ts): `missing` of the `of` live
+   * chapter rows under it had no file, which reads as the share not being there.
+   */
+  share?: { missing: number; of: number };
   /** The grace period this run applied, so the panel reports the setting the run actually used. */
   days?: number;
 }

@@ -8202,12 +8202,14 @@ paths:
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since
         v0.37.0 the list always carries `verify` ("Verify chapter files", schedule "on demand · after a
         database-only restore") with `lastRun` (epoch ms or null) and `lastResult` {ok, checked, missing,
-        readLibraryMissing, unmounted: string[], roots, ms, stopped?: 'shutdown'} or null -- it never runs by
+        readLibraryMissing, unchecked, unmounted: string[], roots, ms, stopped?: 'shutdown'} or null -- it never runs by
         itself, so it is listed even when it never has. Its run is detached (see the run route), so this
         entry is where the counts appear: `checked` is rows whose file was looked for under roots that were
         not skipped (both roots), `missing` the download-root rows marked this run, `readLibraryMissing` the
-        read-library rows whose file is gone (counted, never marked), `unmounted` the roots left alone (a
-        bare path: no file at all under it; "<root> (95 % of 20 chapter files missing)": the 90 % rule).
+        read-library rows whose file is gone (counted, never marked), `unchecked` the rows whose file could not
+        be looked at (EACCES, an I/O error: never marked, never counted as checked), `unmounted` the roots left
+        alone (a bare path: no file at all under it, or none that could be looked at; "<root> (95 % of 20
+        chapter files missing)": the 90 % rule).
         Both are persisted in server_settings (verify_last_run / verify_last_result) and survive a restart;
         a run that threw stores a null result rather than an older healthy one.
         Since v0.41.0 the list also always carries `repair` ("Repair library"), the nightly library repair,
