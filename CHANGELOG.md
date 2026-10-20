@@ -1,5 +1,51 @@
 # Changelog
 
+## v0.92.0 — 2026-10-21
+
+**Nothing you could not get back is deleted, Discover keeps up with the sources it asks, and Find other sources can say
+why it found nothing.** Most of this is **globalteddy**'s work ([#317](https://github.com/AngeloSha/uchiyomi/pull/317),
+[#319](https://github.com/AngeloSha/uchiyomi/pull/319), [#320](https://github.com/AngeloSha/uchiyomi/pull/320),
+[#321](https://github.com/AngeloSha/uchiyomi/pull/321), [#322](https://github.com/AngeloSha/uchiyomi/pull/322)), and the
+log setting is **TIGamingTV**'s idea ([#316](https://github.com/AngeloSha/uchiyomi/issues/316)). Thank you both.
+
+### Nothing you could not get back is deleted
+
+- **The read-chapter cleanup keeps the last copy.** A chapter the sources no longer list (taken down, deleted, dropped
+  by the site) could not be downloaded again, so its file stays even when everyone has read it. So does one listed only
+  from a group you blocked, or only as a link to the publisher, which is how MangaDex keeps a licensed chapter. A file
+  holding several chapters is kept if any one of them is missing.
+- **A file the server may not read is not a file already gone.** When the server lost permission to a series' folder,
+  Delete files marked its chapters deleted and said "Deleted 0 files", and Forget could then erase everyone's reading
+  history while the files were still there. Now those chapters are left as they are, and the message says how many could
+  not be checked: fix the permissions and run it again. The hourly read-chapter cleanup follows the same rule.
+
+### Discover follows the sources it asks
+
+- With **Show 18+** turned off, or a source switched off, the wall kept that source's covers and counted it, and a
+  source chosen alone stayed chosen and searched for nothing. The wall, its *{done} of {total} sources* count and the
+  chosen source now follow the sources asked. Flipping *Newest*/*Popular* keeps a source chosen when the other listing
+  has it, and an empty wall says no source could be reached only when none of the sources asked now could be.
+
+### Why a series found nothing
+
+- **`LOG_LEVEL`** sets how much the server log says: `info` by default (a line for every request, as before), `warn`
+  for problems only, or `debug`.
+- **At `debug`, a Find other sources run explains itself.** For each series the log says the names it searched each
+  source under, what each source answered (the first few titles), which result it took, and why a match was refused:
+  its own title was not this series', or its chapter numbers did not line up, with how many it compared. The lines
+  start with `[find]`. Set it back when you are done; the log is long at debug.
+
+### Building the image yourself
+
+- A new version no longer makes `Dockerfile.aio` reinstall all its packages from nothing. They stay cached until a
+  dependency really changes, which saves time and over a gigabyte of build cache per release on a machine that builds
+  its own. The published images are the same as before.
+
+### Upgrading
+
+- Nothing to do. For a run's details, add `LOG_LEVEL=debug` to `.env` and restart. The deploy compose files pass it
+  through from this version on.
+
 ## v0.91.1 — 2026-10-20
 
 **Open site: what you type reaches the site, and the page keeps up with you.** v0.91.0's Open site could not fill in a
