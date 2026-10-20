@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4178
+    "strings": 4195
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -4181,5 +4181,22 @@
   "Aurora": "Aurora",
   "Merge these two pages": "Unir estas dos páginas",
   "Comments and reactions": "Comentarios y reacciones",
-  "Your household’s comments and reactions, at the end of each chapter and on the series page. Off hides them, and their alerts, on all your devices. It changes nothing for anyone else.": "Los comentarios y reacciones de tu hogar, al final de cada capítulo y en la página de la serie. Desactivado los oculta, junto con sus avisos, en todos tus dispositivos. No cambia nada para nadie más."
+  "Your household’s comments and reactions, at the end of each chapter and on the series page. Off hides them, and their alerts, on all your devices. It changes nothing for anyone else.": "Los comentarios y reacciones de tu hogar, al final de cada capítulo y en la página de la serie. Desactivado los oculta, junto con sus avisos, en todos tus dispositivos. No cambia nada para nadie más.",
+  "Open site": "Abrir el sitio",
+  "Some sites want you signed in, or a check passed, before an extension can read them. Open the site in the extension engine’s own browser, do that there, then press Done: the engine keeps the sign-in.": "Algunos sitios piden que inicies sesión, o que superes una comprobación, antes de que una extensión pueda leerlos. Abre el sitio en el navegador propio del motor de extensiones, hazlo allí y pulsa Listo: el motor guarda la sesión.",
+  "Sign in or pass the site’s check, then press Done.": "Inicia sesión o supera la comprobación del sitio y pulsa Listo.",
+  "Sign in on the site": "Iniciar sesión en el sitio",
+  "The page was closed after ten minutes without input. What you did there is kept.": "La página se cerró tras diez minutos sin actividad. Lo que hiciste allí se conserva.",
+  "The site was opened somewhere else, so this page closed.": "El sitio se abrió en otro lugar, así que esta página se cerró.",
+  "The extension engine closed the page.": "El motor de extensiones cerró la página.",
+  "The page is no longer open.": "La página ya no está abierta.",
+  "Could not open the site": "No se pudo abrir el sitio",
+  "Saved. {name} answers now.": "Guardado. {name} ya responde.",
+  "Saved, but {name} still does not answer. Open the site again to check what it shows.": "Guardado, pero {name} sigue sin responder. Abre el sitio otra vez para ver qué muestra.",
+  "Saved.": "Guardado.",
+  "Could not save the sign-in": "No se pudo guardar la sesión",
+  "Opening the site…": "Abriendo el sitio…",
+  "Start over": "Volver a empezar",
+  "The site, live": "El sitio, en directo",
+  "Type on the site": "Escribir en el sitio"
 }

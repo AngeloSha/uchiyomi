@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4178
+    "strings": 4195
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -4181,5 +4181,22 @@
   "Aurora": "شفق قطبي",
   "Merge these two pages": "ضمّ هاتين الصفحتين",
   "Comments and reactions": "التعليقات والتفاعلات",
-  "Your household’s comments and reactions, at the end of each chapter and on the series page. Off hides them, and their alerts, on all your devices. It changes nothing for anyone else.": "تعليقات أهل البيت وتفاعلاتهم، في نهاية كل فصل وفي صفحة السلسلة. إيقافه يخفيها هي وتنبيهاتها على كل أجهزتك، ولا يغيّر شيئًا لأحد غيرك."
+  "Your household’s comments and reactions, at the end of each chapter and on the series page. Off hides them, and their alerts, on all your devices. It changes nothing for anyone else.": "تعليقات أهل البيت وتفاعلاتهم، في نهاية كل فصل وفي صفحة السلسلة. إيقافه يخفيها هي وتنبيهاتها على كل أجهزتك، ولا يغيّر شيئًا لأحد غيرك.",
+  "Open site": "فتح الموقع",
+  "Some sites want you signed in, or a check passed, before an extension can read them. Open the site in the extension engine’s own browser, do that there, then press Done: the engine keeps the sign-in.": "بعض المواقع تطلب تسجيل الدخول أو اجتياز فحص قبل أن تتمكن الإضافة من قراءتها. افتح الموقع في متصفح محرّك الإضافات نفسه، وأنجز ذلك هناك، ثم اضغط «تم»: يحتفظ المحرّك بتسجيل الدخول.",
+  "Sign in or pass the site’s check, then press Done.": "سجّل الدخول أو اجتز فحص الموقع، ثم اضغط «تم».",
+  "Sign in on the site": "تسجيل الدخول في الموقع",
+  "The page was closed after ten minutes without input. What you did there is kept.": "أُغلقت الصفحة بعد عشر دقائق دون أي إدخال. ما فعلته هناك محفوظ.",
+  "The site was opened somewhere else, so this page closed.": "فُتح الموقع في مكان آخر، فأُغلقت هذه الصفحة.",
+  "The extension engine closed the page.": "أغلق محرّك الإضافات الصفحة.",
+  "The page is no longer open.": "لم تعد الصفحة مفتوحة.",
+  "Could not open the site": "تعذّر فتح الموقع",
+  "Saved. {name} answers now.": "حُفظ. أصبح {name} يستجيب الآن.",
+  "Saved, but {name} still does not answer. Open the site again to check what it shows.": "حُفظ، لكن {name} ما زال لا يستجيب. افتح الموقع مجددًا لترى ما يعرضه.",
+  "Saved.": "حُفظ.",
+  "Could not save the sign-in": "تعذّر حفظ تسجيل الدخول",
+  "Opening the site…": "يجري فتح الموقع…",
+  "Start over": "البدء من جديد",
+  "The site, live": "الموقع مباشرةً",
+  "Type on the site": "اكتب في الموقع"
 }

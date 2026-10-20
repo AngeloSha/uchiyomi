@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4178
+    "strings": 4195
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -4181,5 +4181,22 @@
   "Aurora": "Polarlicht",
   "Merge these two pages": "Diese zwei Seiten zusammenfügen",
   "Comments and reactions": "Kommentare und Reaktionen",
-  "Your household’s comments and reactions, at the end of each chapter and on the series page. Off hides them, and their alerts, on all your devices. It changes nothing for anyone else.": "Die Kommentare und Reaktionen deines Haushalts, am Ende jedes Kapitels und auf der Serienseite. Aus blendet sie samt ihren Hinweisen auf all deinen Geräten aus. Für alle anderen ändert sich nichts."
+  "Your household’s comments and reactions, at the end of each chapter and on the series page. Off hides them, and their alerts, on all your devices. It changes nothing for anyone else.": "Die Kommentare und Reaktionen deines Haushalts, am Ende jedes Kapitels und auf der Serienseite. Aus blendet sie samt ihren Hinweisen auf all deinen Geräten aus. Für alle anderen ändert sich nichts.",
+  "Open site": "Seite öffnen",
+  "Some sites want you signed in, or a check passed, before an extension can read them. Open the site in the extension engine’s own browser, do that there, then press Done: the engine keeps the sign-in.": "Manche Seiten wollen, dass du angemeldet bist oder eine Prüfung bestehst, bevor eine Erweiterung sie lesen kann. Öffne die Seite im eigenen Browser der Erweiterungs-Engine, erledige das dort und tippe dann auf „Fertig“: Die Engine behält die Anmeldung.",
+  "Sign in or pass the site’s check, then press Done.": "Melde dich an oder bestehe die Prüfung der Seite und tippe dann auf „Fertig“.",
+  "Sign in on the site": "Auf der Seite anmelden",
+  "The page was closed after ten minutes without input. What you did there is kept.": "Die Seite wurde nach zehn Minuten ohne Eingabe geschlossen. Was du dort getan hast, bleibt erhalten.",
+  "The site was opened somewhere else, so this page closed.": "Die Seite wurde anderswo geöffnet, deshalb wurde diese hier geschlossen.",
+  "The extension engine closed the page.": "Die Erweiterungs-Engine hat die Seite geschlossen.",
+  "The page is no longer open.": "Die Seite ist nicht mehr geöffnet.",
+  "Could not open the site": "Die Seite konnte nicht geöffnet werden",
+  "Saved. {name} answers now.": "Gespeichert. {name} antwortet jetzt.",
+  "Saved, but {name} still does not answer. Open the site again to check what it shows.": "Gespeichert, aber {name} antwortet noch nicht. Öffne die Seite erneut und sieh nach, was sie anzeigt.",
+  "Saved.": "Gespeichert.",
+  "Could not save the sign-in": "Die Anmeldung konnte nicht gespeichert werden",
+  "Opening the site…": "Seite wird geöffnet…",
+  "Start over": "Von vorn",
+  "The site, live": "Die Seite, live",
+  "Type on the site": "Auf der Seite tippen"
 }

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4178
+    "strings": 4195
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4181,5 +4181,22 @@
   "Aurora": "极光",
   "Merge these two pages": "合并这两页",
   "Comments and reactions": "评论和表情回应",
-  "Your household’s comments and reactions, at the end of each chapter and on the series page. Off hides them, and their alerts, on all your devices. It changes nothing for anyone else.": "家人的评论和表情回应，显示在每章末尾和系列页面。关闭后，你所有设备上都不再显示它们及相关提醒。对其他人没有任何影响。"
+  "Your household’s comments and reactions, at the end of each chapter and on the series page. Off hides them, and their alerts, on all your devices. It changes nothing for anyone else.": "家人的评论和表情回应，显示在每章末尾和系列页面。关闭后，你所有设备上都不再显示它们及相关提醒。对其他人没有任何影响。",
+  "Open site": "打开网站",
+  "Some sites want you signed in, or a check passed, before an extension can read them. Open the site in the extension engine’s own browser, do that there, then press Done: the engine keeps the sign-in.": "有些网站要求先登录或通过验证，扩展才能读取。在扩展引擎自带的浏览器中打开该网站，在那里完成，然后点“完成”：引擎会保留登录状态。",
+  "Sign in or pass the site’s check, then press Done.": "登录或通过网站的验证，然后点“完成”。",
+  "Sign in on the site": "在网站上登录",
+  "The page was closed after ten minutes without input. What you did there is kept.": "页面在十分钟无操作后已关闭。你在那里所做的已保留。",
+  "The site was opened somewhere else, so this page closed.": "该网站已在别处打开，因此此页面已关闭。",
+  "The extension engine closed the page.": "扩展引擎关闭了页面。",
+  "The page is no longer open.": "页面已不再打开。",
+  "Could not open the site": "无法打开网站",
+  "Saved. {name} answers now.": "已保存。{name} 现在有响应了。",
+  "Saved, but {name} still does not answer. Open the site again to check what it shows.": "已保存，但 {name} 仍然没有响应。请再次打开网站，看看它显示了什么。",
+  "Saved.": "已保存。",
+  "Could not save the sign-in": "无法保存登录状态",
+  "Opening the site…": "正在打开网站…",
+  "Start over": "重新开始",
+  "The site, live": "网站实时画面",
+  "Type on the site": "在网站上输入"
 }
