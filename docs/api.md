@@ -2864,10 +2864,12 @@ DELETE /api/admin/extensions/site/:session
 **Open site (v0.91.0, #314).** Mihon's "Open in WebView", for a source whose site wants a sign-in or a check the engine's
 background browser cannot pass. `POST /api/admin/extensions/sources/:id/site` with `{ width, height }` opens the source's
 home page (its `homeUrl`) in the extension engine's own browser (Suwayomi's WebView) and answers `{ session, name, site }`.
-`GET …/site/:session/stream` is the page live, one JSON object a line (`application/x-ndjson`): `frame` (a base64 PNG, at
-most five a second, the newest), `address`, `load`, `ping` every 15 s, and `closed` last. Read it with `fetch` and the
-bearer token. `POST …/site/:session/input` takes `{ input: [...] }`, 1 to 100 of `event` (mouse buttons, moves, wheel and
-keys, in the page's pixels), `paste`, `resize` or `home`. `DELETE …/site/:session` is Done: the page is left, which is
+`GET …/site/:session/stream` is the page live, one JSON object a line (`application/x-ndjson`): `frame` (a base64 JPEG
+since v0.91.1, a PNG before; at most five a second, the newest), `address`, `load`, `ping` every 15 s, and `closed` last.
+Read it with `fetch` and the bearer token. `POST …/site/:session/input` takes `{ input: [...] }`, 1 to 100 of `event`
+(mouse buttons, moves, wheel and keys, in the page's pixels), `paste`, `resize`, `home` or `seen` (since v0.91.1: `{ type:
+'seen', seq }` says frame `seq` arrived; the next frame goes out only then, or three seconds on, so a slow connection gets
+the newest picture rather than a growing queue). `DELETE …/site/:session` is Done: the page is left, which is
 when the engine saves its cookies for its extensions, and the answer is `{ saved, test }`, the source's smoke test after.
 Admins only, one page at a time (409 `site_busy` while another admin's is in use), closed after ten minutes without
 input. A source an admin has done this for, and any source whose extension answers "Open in WebView…", gets a quiet

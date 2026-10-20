@@ -3722,8 +3722,13 @@ export default async function adminRoutes(app: FastifyInstance) {
     z.object({ type: z.literal('paste'), data: z.string().max(4000) }).strict(),
     z.object({ type: z.literal('resize'), ...SITE_SIZE }).strict(),
     z.object({ type: z.literal('home') }).strict(),
+    // Which picture the sheet has (v0.91.1): the next one goes out when it has the last (siteSessions.ts).
+    z.object({ type: z.literal('seen'), seq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER) }).strict(),
   ])).min(1).max(100);
-  /** The admin's input for the page, in order: clicks, keys, wheel, paste, a new size, or back to the source's home page. */
+  /**
+   * The admin's input for the page, in order: clicks, keys, wheel, paste, a new size, or back to the source's home page;
+   * and which picture the sheet has.
+   */
   app.post('/api/admin/extensions/site/:session/input', async (req, reply) => {
     const { session } = req.params as { session: string };
     const b = z.object({ input: siteInput }).safeParse(req.body);

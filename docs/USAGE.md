@@ -2134,9 +2134,9 @@ settings**), and so does its row under Health's *Chapter numbering*. The details
 want you signed in, or a browser check passed, before an extension can read them: BatCave shows *Sign in to keep
 reading* to anyone not signed in. In Mihon that is the **Open in WebView** button; in Uchiyomi it is **Open site** in the
 same sheet. It opens the site in the extension engine's own browser, live and over the whole screen: click, scroll and
-type as on the site (on a phone, a tap is a click, a swipe scrolls, and **Keyboard** brings up the keyboard), sign in,
-and press **Done**. The engine keeps the sign-in for that extension, and the sheet says whether the source answers now.
-**Start over** opens the site's home page again.
+type as on the site (on a phone, a tap is a click and brings up the keyboard, a swipe scrolls, and **Keyboard** brings
+the keyboard back), sign in, and press **Done**. The engine keeps the sign-in for that extension, and the sheet says
+whether the source answers now. **Start over** opens the site's home page again.
 
 - Admins only, one site at a time, and it closes itself after ten minutes without input (what you did is kept).
 - A source you have done this for gets a quiet visit of its home page whenever it fails, at most once in half an hour,

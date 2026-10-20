@@ -4,7 +4,8 @@
 // What this holds to:
 // - admins only: it is a browser on the server;
 // - it opens the source's own home page, as the engine names it, and refuses a source with no site or none at all;
-// - input is the page's own and nothing else: an unknown kind, an extra field or a page that is not theirs is refused;
+// - input is the page's own and nothing else: an unknown kind, an extra field or a page that is not theirs is refused
+//   (`seen`, since v0.91.1, paces the pictures and never reaches the page);
 // - the live stream says what the page shows and ends when Done leaves it, which is when the engine saves its cookies;
 // - opening and Done are audited.
 //
@@ -102,11 +103,15 @@ test('Open site, as the sheet drives it', { skip }, async (t) => {
         { type: 'event', eventType: 'keydown', clickX: 0, clickY: 0, key: 'a' },
         { type: 'paste', data: 'reader@example.org' },
         { type: 'home' },
+        { type: 'seen', seq: 0 },
       ] });
       assert.equal(ok.statusCode, 200, ok.body);
-      assert.deepEqual(page.sent.slice(1).map((m) => m.type === 'event' ? m.eventType : m.type), ['mousedown', 'keydown', 'paste', 'loadUrl']);
+      assert.deepEqual(page.sent.slice(1).map((m) => m.type === 'event' ? m.eventType : m.type), ['mousedown', 'keydown', 'paste', 'loadUrl'],
+        '`seen` paces the pictures and never reaches the page');
       for (const bad of [
         { input: [{ type: 'loadUrl', url: 'http://yomi-db:5432/' }] },
+        { input: [{ type: 'seen', seq: -1 }] },
+        { input: [{ type: 'seen', seq: 1, url: 'http://yomi-db:5432/' }] },
         { input: [{ type: 'event', eventType: 'mousedown', clickX: 1, clickY: 1, script: 'x' }] },
         { input: [{ type: 'event', eventType: 'click', clickX: 1, clickY: 1 }] },
         { input: [] },
@@ -127,8 +132,9 @@ test('Open site, as the sheet drives it', { skip }, async (t) => {
       page.events.address?.('https://www.webtoons.com/en/', 'WEBTOON');
       const streaming = app.inject({ method: 'GET', url: `/api/admin/extensions/site/${session}/stream`, headers: as('site-admin') });
       await new Promise((r) => setTimeout(r, 50));
-      page.events.frame?.(Buffer.from([137, 80, 78, 71]));
-      await new Promise((r) => setTimeout(r, 300));
+      const sharp = (await import('sharp')).default;
+      page.events.frame?.(await sharp({ create: { width: 8, height: 6, channels: 3, background: '#2a6' } }).png().toBuffer());
+      await new Promise((r) => setTimeout(r, 400));
       page.events.load?.({ url: 'https://www.webtoons.com/en/', title: 'WEBTOON', status: 200 });
       const bye = await done('site-admin', session);
       assert.equal(bye.statusCode, 200);
@@ -140,7 +146,7 @@ test('Open site, as the sheet drives it', { skip }, async (t) => {
       assert.equal(r.headers['x-accel-buffering'], 'no', 'a proxy is asked not to hold the stream back');
       const lines = r.body.trim().split('\n').map((l) => JSON.parse(l));
       assert.deepEqual(lines.map((l) => l.type), ['address', 'frame', 'load', 'closed']);
-      assert.equal(lines[1].png, Buffer.from([137, 80, 78, 71]).toString('base64'));
+      assert.equal(Buffer.from(lines[1].jpeg, 'base64').subarray(0, 3).toString('hex'), 'ffd8ff', 'the page as a JPEG, not the engine\'s PNG (v0.91.1)');
       assert.equal(lines[3].reason, 'done');
       const audit = await q(`SELECT 1 FROM audit_log WHERE event = 'source.site_close' AND user_id = $1`, [ids['site-admin']]);
       assert.equal(audit.length > 0, true, 'Done is audited');

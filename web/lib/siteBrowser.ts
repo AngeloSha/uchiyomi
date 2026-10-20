@@ -9,7 +9,7 @@ import { keys } from './i18n';
 export interface SiteOpened { session: string; name: string; site: string }
 
 export type SiteLine =
-  | { type: 'frame'; seq: number; png: string }
+  | { type: 'frame'; seq: number; jpeg: string }
   | { type: 'address'; url: string; title: string }
   | { type: 'load'; url: string; title: string; status: number; error?: string | null }
   | { type: 'closed'; reason: 'done' | 'idle' | 'replaced' | 'engine' }
@@ -33,7 +33,9 @@ export type SiteInput =
     }
   | { type: 'paste'; data: string }
   | { type: 'resize'; width: number; height: number }
-  | { type: 'home' };
+  | { type: 'home' }
+  /** The stream's picture `seq` arrived: the server sends the next only then (v0.91.1). */
+  | { type: 'seen'; seq: number };
 
 /** What the sheet says, said alike in Admin → Sources' extension sheet and in the sheet itself. */
 export const SITE_TEXT = keys(
@@ -80,35 +82,78 @@ export function splitLines(buf: string, onLine: (l: SiteLine) => void): string {
 }
 
 /**
- * The admin's input, sent in order and in small batches: everything within 40 ms goes in one post, and a post waits for
- * the one before it, so a click never overtakes the keys typed before it. `gone` is called once if the page is no more.
+ * The admin's input, sent in order: one post at a time, and everything that came while it was on its way goes in the
+ * next, so a click never overtakes the keys typed before it and a slow connection gets fewer, fuller posts rather than a
+ * queue of them. (v0.91.0 started a post every 40 ms, each waiting for the one before: over a home server's connection
+ * the keys ended up twenty seconds behind the mouse moves queued ahead of them.) `gone` is called once if the page is no
+ * more.
  */
 export function siteSender(session: string, gone: () => void) {
   let queue: SiteInput[] = [];
   let timer: ReturnType<typeof setTimeout> | null = null;
-  let sending: Promise<void> = Promise.resolve();
+  let posting = false;
   let dead = false;
   const flush = () => {
     timer = null;
-    if (dead || !queue.length) return;
+    if (dead || posting || !queue.length) return;
     const input = queue.splice(0, 100);
-    sending = sending.then(() =>
-      api(`/api/admin/extensions/site/${enc(session)}/input`, { json: { input } }).then(() => undefined, () => {
-        if (!dead) { dead = true; gone(); }
-      }));
-    if (queue.length) timer = setTimeout(flush, 0);
+    posting = true;
+    api(`/api/admin/extensions/site/${enc(session)}/input`, { json: { input } }).then(() => {
+      posting = false;
+      if (queue.length && !timer) timer = setTimeout(flush, 0);
+    }, () => {
+      if (!dead) { dead = true; gone(); }
+    });
   };
   return {
     send(i: SiteInput) {
       if (dead) return;
-      // Pointer moves only matter as the latest: one waiting is replaced, not queued behind.
+      // Pointer moves only matter as the latest: one waiting is replaced, not queued behind. So does which picture the
+      // sheet has.
       const last = queue[queue.length - 1];
       if (i.type === 'event' && i.eventType === 'mousemove' && last?.type === 'event' && last.eventType === 'mousemove') queue[queue.length - 1] = i;
+      else if (i.type === 'seen') queue = [...queue.filter((q) => q.type !== 'seen'), i];
       else queue.push(i);
-      if (!timer) timer = setTimeout(flush, 40);
+      if (!timer && !posting) timer = setTimeout(flush, 40);
     },
     stop() { dead = true; if (timer) clearTimeout(timer); queue = []; },
   };
+}
+
+/**
+ * What the sheet's typing field starts with: something for a phone's Backspace to take. An empty field gives a phone's
+ * Backspace nothing to delete, so the page would never hear it.
+ */
+export const TYPER_FILL = '_'.repeat(32);
+
+/**
+ * What a phone's keyboard did to the typing field, as the Backspaces and then the text that make the same change on the
+ * page. A phone types through the field rather than with keys (v0.91.1), and its keyboard may change a word it typed
+ * already -- a correction, a word finished -- which arrives here as Backspaces and the new letters. Counted in
+ * characters, not UTF-16 units. Pure.
+ */
+export function typedDiff(before: string, after: string): { back: number; text: string } {
+  const a = Array.from(before);
+  const b = Array.from(after);
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  return { back: a.length - i, text: b.slice(i).join('') };
+}
+
+/** Typed text as the page takes it: a line break is Enter, a tab is Tab, the rest is text. Pure. */
+export function typedInput(back: number, text: string): SiteInput[] {
+  const out: SiteInput[] = [];
+  const key = (k: string) => out.push(
+    { type: 'event', eventType: 'keydown', clickX: 0, clickY: 0, key: k },
+    { type: 'event', eventType: 'keyup', clickX: 0, clickY: 0, key: k },
+  );
+  for (let i = 0; i < back; i++) key('Backspace');
+  for (const part of text.split(/(\r?\n|\t)/)) {
+    if (part === '\n' || part === '\r\n') key('Enter');
+    else if (part === '\t') key('Tab');
+    else if (part) out.push({ type: 'paste', data: part });
+  }
+  return out;
 }
 
 /**

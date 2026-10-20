@@ -9,20 +9,25 @@
 // ⚠️ The engine has ONE browser and a second client closes the first, so both go through `current`: a quiet visit never
 // starts while an admin has the page, and an admin's page is never closed by one.
 import { randomBytes } from 'crypto';
+import sharp from 'sharp';
 import { openEngineBrowser, type BrowserInput, type BrowserOpener, type EngineBrowser } from './engineBrowser';
 
 /** A line of the live stream a page's sheet reads (routes/admin.ts). */
 export type SiteLine =
-  | { type: 'frame'; seq: number; png: string }
+  | { type: 'frame'; seq: number; jpeg: string }
   | { type: 'address'; url: string; title: string }
   | { type: 'load'; url: string; title: string; status: number; error?: string | null }
   | { type: 'closed'; reason: 'done' | 'idle' | 'replaced' | 'engine' }
   | { type: 'ping' };
 
-/** What an admin's sheet may send: the page's own input, a new size, or back to the source's home page. */
+/**
+ * What an admin's sheet may send: the page's own input, a new size, back to the source's home page, or which picture it
+ * has now (`seen`, which paces the pictures: see scheduleFrame).
+ */
 export type SiteInput =
   | Extract<BrowserInput, { type: 'event' } | { type: 'paste' } | { type: 'resize' }>
-  | { type: 'home' };
+  | { type: 'home' }
+  | { type: 'seen'; seq: number };
 
 interface Session {
   id: string;
@@ -33,10 +38,17 @@ interface Session {
   size: { width: number; height: number };
   browser: EngineBrowser | null;
   lastInput: number;
-  frame: { seq: number; png: string } | null;
+  frame: { seq: number; jpeg: string } | null;
+  /** The newest picture the sheet says it has. */
+  seen: number;
   address: { url: string; title: string } | null;
   listeners: Set<(l: SiteLine) => void>;
+  /** The engine's newest picture not sent yet, as its PNG. */
   pending: Buffer | null;
+  /** A picture is being made into a JPEG. */
+  encoding: boolean;
+  /** The page was left: nothing more is sent or scheduled. */
+  ended: boolean;
   lastEmit: number;
   frameTimer: NodeJS.Timeout | null;
   idleTimer: NodeJS.Timeout | null;
@@ -50,6 +62,11 @@ export const SITE_IDLE_MS = 10 * 60_000;
 export const SITE_MAX_MS = 30 * 60_000;
 /** At most five pictures a second reach the sheet; a newer one replaces one not sent yet. */
 export const FRAME_GAP_MS = 200;
+/**
+ * `seenWaitMs`: a sheet that has not said it has the last picture gets the next one this long after it anyway -- a `seen`
+ * lost on the way, or a sheet from before v0.91.1, which never says. Mutable for the tests alone (siteSessions.test.ts).
+ */
+export const frameTiming = { seenWaitMs: 3_000 };
 /** Another admin's page counts as in use while it had input in the last minute. */
 const BUSY_MS = 60_000;
 
@@ -72,19 +89,55 @@ function emit(s: Session, line: SiteLine): void {
   }
 }
 
-function flushFrame(s: Session): void {
+/**
+ * A picture as the sheet gets it: the engine's PNG as a JPEG, a tenth of the size (BatCave's sign-in at 1280x740: 633 KB
+ * as a PNG, 62 KB here), at 4:4:4 so coloured text stays sharp. v0.91.1: sent as PNGs, a page outran a home server's
+ * upload, and the sheet showed what was typed twenty seconds late.
+ */
+const toJpeg = (png: Buffer): Promise<Buffer> => sharp(png).jpeg({ quality: 80, chromaSubsampling: '4:4:4' }).toBuffer();
+
+/**
+ * The newest picture goes out when it may: five a second at most, and only once the sheet has the one before it (or
+ * frameTiming.seenWaitMs after it). On a slow connection the sheet then gets the newest picture a little late, instead
+ * of every picture, later and later. Nothing is made for a page nobody watches, as on a quiet visit.
+ */
+function scheduleFrame(s: Session): void {
+  if (s.ended || s.frameTimer || s.encoding || !s.pending || !s.listeners.size) return;
+  const unseen = s.frame && s.seen < s.frame.seq ? s.lastEmit + frameTiming.seenWaitMs : 0;
+  const at = Math.max(s.lastEmit + FRAME_GAP_MS, unseen);
+  s.frameTimer = setTimeout(() => void flushFrame(s), Math.max(0, at - Date.now()));
+}
+
+async function flushFrame(s: Session): Promise<void> {
   s.frameTimer = null;
-  if (!s.pending) return;
-  s.frame = { seq: (s.frame?.seq ?? 0) + 1, png: s.pending.toString('base64') };
+  const png = s.pending;
+  if (s.ended || !png) return;
   s.pending = null;
-  s.lastEmit = Date.now();
-  emit(s, { type: 'frame', ...s.frame });
+  s.encoding = true;
+  // A picture the encoder cannot read is skipped; the next one is not far behind.
+  const jpeg = await toJpeg(png).catch(() => null);
+  s.encoding = false;
+  if (s.ended) return;
+  if (jpeg) {
+    s.frame = { seq: (s.frame?.seq ?? 0) + 1, jpeg: jpeg.toString('base64') };
+    s.lastEmit = Date.now();
+    emit(s, { type: 'frame', ...s.frame });
+  }
+  scheduleFrame(s);
 }
 
 function queueFrame(s: Session, png: Buffer): void {
   s.pending = png;
-  if (s.frameTimer) return;
-  s.frameTimer = setTimeout(() => flushFrame(s), Math.max(0, s.lastEmit + FRAME_GAP_MS - Date.now()));
+  scheduleFrame(s);
+}
+
+/** The sheet has picture `seq`: the next need not wait for frameTiming.seenWaitMs. */
+function noteSeen(s: Session, seq: number): void {
+  if (seq <= s.seen || seq > (s.frame?.seq ?? 0)) return;
+  s.seen = seq;
+  if (s.frameTimer) clearTimeout(s.frameTimer);
+  s.frameTimer = null;
+  scheduleFrame(s);
 }
 
 function armIdle(s: Session): void {
@@ -95,6 +148,7 @@ function armIdle(s: Session): void {
 
 async function endSession(s: Session, reason: 'done' | 'idle' | 'replaced' | 'engine'): Promise<void> {
   if (current === s) current = null;
+  s.ended = true;
   for (const t of [s.frameTimer, s.idleTimer, s.maxTimer]) if (t) clearTimeout(t);
   s.frameTimer = s.idleTimer = s.maxTimer = null;
   emit(s, { type: 'closed', reason });
@@ -122,8 +176,8 @@ async function open(s: Session): Promise<void> {
 
 const blank = (uid: string, sourceId: string, home: string, size: { width: number; height: number }): Session => ({
   id: randomBytes(18).toString('base64url'), uid, sourceId, home, size, browser: null, lastInput: Date.now(), frame: null,
-  address: null, listeners: new Set(), pending: null, lastEmit: 0, frameTimer: null, idleTimer: null, maxTimer: null,
-  onActivity: null,
+  seen: 0, address: null, listeners: new Set(), pending: null, encoding: false, ended: false, lastEmit: 0, frameTimer: null,
+  idleTimer: null, maxTimer: null, onActivity: null,
 });
 
 const clampSize = (w: number, h: number) => ({
@@ -161,22 +215,33 @@ export function subscribe(id: string, uid: string, listener: (l: SiteLine) => vo
   s.listeners.add(listener);
   if (s.address) listener({ type: 'address', ...s.address });
   if (s.frame) listener({ type: 'frame', ...s.frame });
+  // A picture that waited for someone to watch it.
+  scheduleFrame(s);
   return () => { s.listeners.delete(listener); };
 }
 
-/** The admin's clicks, keys, wheel, paste or a new size, for the page; `home` opens the source's home page again. */
+/**
+ * The admin's clicks, keys, wheel, paste or a new size, for the page; `home` opens the source's home page again, and
+ * `seen` says which picture the sheet has.
+ */
 export function sendInput(id: string, uid: string, input: SiteInput[]): boolean {
   const s = own(id, uid);
   if (!s?.browser) return false;
+  let acted = false;
   for (const m of input) {
+    if (m.type === 'seen') { noteSeen(s, m.seq); continue; }
+    acted = true;
     if (m.type === 'home') s.browser.send({ type: 'loadUrl', url: s.home, ...s.size });
     else if (m.type === 'resize') {
       s.size = clampSize(m.width, m.height);
       s.browser.send({ type: 'resize', ...s.size });
     } else s.browser.send(m);
   }
-  s.lastInput = Date.now();
-  armIdle(s);
+  // Only the admin's own input keeps the page open: a sheet saying it has a picture is no one at work.
+  if (acted) {
+    s.lastInput = Date.now();
+    armIdle(s);
+  }
   return true;
 }
 

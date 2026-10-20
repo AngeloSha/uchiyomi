@@ -4,7 +4,8 @@
 // - one page at a time, because the engine has one browser and a second client closes the first: another admin's page
 //   in use refuses, the same admin's earlier page is left for the new one, and a quiet visit never takes an admin's page;
 // - a page is its admin's alone: another admin's id names nothing;
-// - the sheet gets at most five pictures a second, the newest one;
+// - the sheet gets at most five pictures a second, the newest one, as a JPEG (v0.91.1), and the next only once it says it
+//   has the last (`seen`), or frameTiming.seenWaitMs on: a slow connection gets the newest picture, not a queue of them;
 // - Done leaves the page (the engine saves its cookies then) and says which source it was for;
 // - an extension's "Open in WebView…" answer gets one quiet visit and one more try; callers at the same moment share the
 //   visit, and a source is visited at most once in half an hour.
@@ -42,6 +43,19 @@ function fakeOpener(opts: { refuse?: boolean } = {}) {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** A real PNG, as the engine sends: a small picture of one shade of red. */
+async function png(shade: number): Promise<Buffer> {
+  const sharp = (await import('sharp')).default;
+  return sharp({ create: { width: 8, height: 6, channels: 3, background: { r: shade, g: 0, b: 0 } } }).png().toBuffer();
+}
+/** The shade of red a frame's JPEG shows, and that it is a JPEG at all. */
+async function shadeOf(jpeg: string): Promise<number> {
+  const sharp = (await import('sharp')).default;
+  const bytes = Buffer.from(jpeg, 'base64');
+  assert.equal(bytes.subarray(0, 3).toString('hex'), 'ffd8ff', 'a JPEG, not the engine\'s PNG');
+  return (await sharp(bytes).raw().toBuffer())[0];
+}
+
 test('Open site: one page at a time, its admin\'s alone', async (t) => {
   const site = await import('../src/lib/sources/suwayomi/siteSessions');
   const { opener, opened } = fakeOpener();
@@ -76,22 +90,49 @@ test('Open site: one page at a time, its admin\'s alone', async (t) => {
     await t.test('the sheet gets the newest picture, at most five a second, and what the page shows when it joins', async () => {
       const { id } = await site.startSite({ uid: 'alice', sourceId: '42', home: 'https://batcave.biz', width: 800, height: 600 });
       const page = opened.at(-1)!;
-      const got: Array<{ type: string; seq?: number; png?: string; url?: string }> = [];
+      const got: Array<{ type: string; seq?: number; jpeg?: string; url?: string }> = [];
       page.events.address?.('https://batcave.biz/', 'BatCave');
-      for (let i = 1; i <= 5; i++) page.events.frame?.(Buffer.from([i]));
+      for (let i = 1; i <= 5; i++) page.events.frame?.(await png(i * 40));
       site.subscribe(id, 'alice', (l) => got.push(l as never));
       assert.deepEqual(got.map((l) => l.type), ['address'], 'the address at once; no picture has been sent yet');
-      await sleep(260);
-      const frames = got.filter((l) => l.type === 'frame');
-      assert.equal(frames.length, 1, 'five pictures inside 200 ms are one');
-      assert.equal(frames[0].png, Buffer.from([5]).toString('base64'), 'the newest');
-      page.events.frame?.(Buffer.from([6]));
-      await sleep(260);
-      assert.equal(got.filter((l) => l.type === 'frame').length, 2);
+      await sleep(300);
+      const frames = () => got.filter((l) => l.type === 'frame');
+      assert.equal(frames().length, 1, 'five pictures inside 200 ms are one');
+      assert.ok(Math.abs((await shadeOf(frames()[0].jpeg!)) - 200) <= 4, 'the newest, as a JPEG');
+      page.events.frame?.(await png(60));
+      await sleep(300);
+      assert.equal(frames().length, 1, 'the sheet has not said it has the last picture: the next one waits, not queued behind');
+      page.events.frame?.(await png(80));
+      assert.equal(site.sendInput(id, 'alice', [{ type: 'seen', seq: frames()[0].seq! }]), true);
+      await sleep(300);
+      assert.equal(frames().length, 2, 'until it does');
+      assert.ok(Math.abs((await shadeOf(frames()[1].jpeg!)) - 80) <= 4, 'and then the newest, not the one that waited longest');
+      assert.equal(page.sent.length, 1, '`seen` never reaches the page: only the opening loadUrl did');
       const late: string[] = [];
       site.subscribe(id, 'alice', (l) => late.push(l.type));
       assert.deepEqual(late, ['address', 'frame'], 'a sheet that joins late sees the page at once');
       await site.stopSite(id, 'alice');
+    });
+
+    await t.test('a sheet that never says it has a picture still gets the next, frameTiming.seenWaitMs on', async () => {
+      const saved = site.frameTiming.seenWaitMs;
+      site.frameTiming.seenWaitMs = 600;
+      try {
+        const { id } = await site.startSite({ uid: 'alice', sourceId: '42', home: 'https://batcave.biz', width: 800, height: 600 });
+        const page = opened.at(-1)!;
+        const frames: number[] = [];
+        site.subscribe(id, 'alice', (l) => { if (l.type === 'frame') frames.push(l.seq); });
+        page.events.frame?.(await png(100));
+        await sleep(250);
+        page.events.frame?.(await png(120));
+        await sleep(250);
+        assert.deepEqual(frames, [1], 'waiting for the sheet');
+        await sleep(600);
+        assert.deepEqual(frames, [1, 2], 'a `seen` lost on the way, or a sheet from before v0.91.1, holds nothing up for long');
+        await site.stopSite(id, 'alice');
+      } finally {
+        site.frameTiming.seenWaitMs = saved;
+      }
     });
 
     await t.test('input reaches the page; `home` opens the source\'s home page again; a new size is kept within limits', async () => {

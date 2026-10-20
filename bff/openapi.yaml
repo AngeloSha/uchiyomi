@@ -11556,7 +11556,8 @@ paths:
       operationId: getApiAdminExtensionsSiteSessionStream
       description: >-
         Requires an admin account and a token carrying the admin scope, and the page must be the caller's. `application/x-ndjson`:
-        `{type: 'frame', seq, png}` (base64 PNG, at most five a second, the newest), `{type: 'address', url, title}`,
+        `{type: 'frame', seq, jpeg}` (base64 JPEG since v0.91.1, a PNG before; at most five a second, the newest, and the next
+        only once the input route has `{type: 'seen', seq}` for this one, or three seconds on), `{type: 'address', url, title}`,
         `{type: 'load', url, title, status, error}`, `{type: 'ping'}` every 15 s, and `{type: 'closed', reason}` (`done`,
         `idle` after ten minutes without input, `replaced`, `engine`) last. Sent with `x-accel-buffering: no`.
       parameters:
@@ -11586,8 +11587,9 @@ paths:
         Requires an admin account and a token carrying the admin scope, and the page must be the caller's. `input` is 1 to 100
         of: `{type: 'event', eventType: mousedown | mouseup | mousemove | wheel | keydown | keyup, clickX, clickY, button?,
         ctrlKey?, shiftKey?, altKey?, metaKey?, key?, clientX?, clientY?, deltaY?}` in the page's pixels, `{type: 'paste',
-        data}` (up to 4000 characters), `{type: 'resize', width, height}`, or `{type: 'home'}` (the source's home page
-        again). Nothing else reaches the page: an unknown kind or field is 400.
+        data}` (up to 4000 characters), `{type: 'resize', width, height}`, `{type: 'home'}` (the source's home page
+        again), or `{type: 'seen', seq}` (since v0.91.1: the stream's picture `seq` has arrived, so the next may be sent; it
+        is not input, and does not keep the page open). Nothing else reaches the page: an unknown kind or field is 400.
       parameters:
         - name: session
           in: path
