@@ -10,8 +10,9 @@
  * the same two whole-root rules as Verify chapter files (lib/verifyFiles.ts) and the read-chapter cleanup
  * (lib/chapterCleanup.ts) -- no catalogued file present, or more than 90 % of them missing, is a root that is not there.
  *
- * Every live row under the root is asked, including the ones the job has already processed: the queue alone is
- * usually a handful of new files, and a handful missing says nothing about the root. Rows a renumber is moving are
+ * Every live row under the root may be asked, including the ones the job has already processed: the queue alone is
+ * usually a handful of new files, and a handful missing says nothing about the root. A root that is there stops early,
+ * though (ENOUGH_PRESENT): the rows are asked in a random order, and once enough are found the rule is passed. Rows a renumber is moving are
  * left out, as Verify leaves them. A stat that fails with anything but ENOENT/ENOTDIR (EACCES, an I/O error) says
  * nothing about whether the file is there, and is left out of both counts.
  */
@@ -24,6 +25,15 @@ import { containedPath, rootUnavailable } from './fsGuard';
 const CONCURRENCY = 16;
 /** More than this share of a root's catalogued files missing reads as the root not being there (Verify's 90 % rule). */
 const REFUSE_ABOVE = 0.9;
+/**
+ * Enough proof that a root is there: this many of its catalogued files present, with no more than nine missing for
+ * each (the 90 % rule, passed), in a random sample of its rows. A root that is there then costs a few dozen stats
+ * rather than one per chapter -- 18,000 on the owner's download folder, asked by several passes a day, and on a NAS
+ * each stat is a network round trip that can wake a sleeping disk. A root that is not there never gets here, and still
+ * walks every row, so what the cleanup says it found ("26 of 27 missing") is exact. Reintroduce by walking every row:
+ * "a root that is there is judged on a sample" in catalogRootGuard.int.test.ts counts every file.
+ */
+const ENOUGH_PRESENT = 32;
 
 export interface CatalogFileCounts { present: number; missing: number; unchecked: number }
 
@@ -34,7 +44,8 @@ export interface CatalogFileCounts { present: number; missing: number; unchecked
 export async function catalogFileCounts(root: string, defaultRoot = root): Promise<CatalogFileCounts> {
   const rows = await q<{ file: string }>(
     `SELECT b.file FROM lib_books b WHERE COALESCE(b.root, $2) = $1 AND b.pruned_at IS NULL
-      AND NOT EXISTS (SELECT 1 FROM lib_series s WHERE s.id = b.series_id AND s.renumber_plan IS NOT NULL)`,
+      AND NOT EXISTS (SELECT 1 FROM lib_series s WHERE s.id = b.series_id AND s.renumber_plan IS NOT NULL)
+      ORDER BY random()`,
     [root, defaultRoot],
   );
   const base = resolve(root);
@@ -42,8 +53,9 @@ export async function catalogFileCounts(root: string, defaultRoot = root): Promi
   let missing = 0;
   let unchecked = 0;
   let next = 0;
+  const proven = () => present >= ENOUGH_PRESENT && missing <= present * 9;
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, rows.length) }, async () => {
-    while (next < rows.length) {
+    while (next < rows.length && !proven()) {
       const abs = containedPath(root, rows[next++].file);
       // A path that escapes its root, or the root itself, is no chapter file and no evidence either way.
       if (!abs || abs === base) continue;

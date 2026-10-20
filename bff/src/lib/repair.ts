@@ -648,25 +648,31 @@ async function stepSolver(r: RepairResult, log?: Log): Promise<void> {
  * unknown size and take out every layout decision the reader makes.
  */
 async function stepCount(r: RepairResult, opts: RepairOpts, log?: Log): Promise<void> {
-  const rows = await q<{ id: string; root: string; file: string }>(
-    `SELECT id, root, file FROM lib_books
-      WHERE pages = 0 AND pages_checked_at IS NULL AND pruned_at IS NULL
-      ORDER BY mtime DESC LIMIT $1`, [opts.autofix ? AUTOFIX_COUNT_MAX : REPAIR_COUNT_MAX],
-  );
-  planned('count', rows.length);
-  const cur = here({ kind: 'files', phase: 'counting', done: 0, of: rows.length })!;
   // ⚠️ NOT FROM A ROOT THAT IS NOT THERE. The stamp is for good (only a changed mtime clears it), and `pages = 0` with
   // a stamp is what Health's Chapter files card lists as a file nobody can open. A root that cannot be opened, holds
   // nothing, or holds only what a sweep wrote onto a bare mount point -- a network share or removable drive that isn't
   // mounted -- would have every chapter in the queue stamped 0 and listed as broken once it is back. Its rows are left
   // for a night the root is there (lib/catalogRootGuard.ts), and said. Reintroduce by counting every row: "the nightly
   // page count with the library root missing" in libraryRootGone.int.test.ts finds the library's chapters stamped.
+  // The roots are asked BEFORE the batch is picked, and a root that is not there is left out of the batch itself, as
+  // the fingerprint and page-hash passes leave it: picked from the newest rows first, a root that is down with that
+  // many waiting would fill every night's batch and starve the root that is there. Reintroduce by choosing the batch
+  // first: "a root that is not there does not starve the one that is" in catalogRootGuard.int.test.ts counts nothing.
   const down = new Map<string, string>();
-  for (const root of new Set(rows.map((b) => b.root))) {
+  const waiting = await q<{ root: string }>(
+    'SELECT DISTINCT root FROM lib_books WHERE pages = 0 AND pages_checked_at IS NULL AND pruned_at IS NULL');
+  for (const { root } of waiting) {
     const why = await catalogRootUnavailable(root);
     if (why) down.set(root, why);
   }
   for (const [root, why] of down) log?.warn(`repair: ${root} cannot be read (${why}) -- is the volume mounted? Its chapter files were not counted`);
+  const rows = await q<{ id: string; root: string; file: string }>(
+    `SELECT id, root, file FROM lib_books
+      WHERE pages = 0 AND pages_checked_at IS NULL AND pruned_at IS NULL AND root <> ALL($2::text[])
+      ORDER BY mtime DESC LIMIT $1`, [opts.autofix ? AUTOFIX_COUNT_MAX : REPAIR_COUNT_MAX, [...down.keys()]],
+  );
+  planned('count', rows.length);
+  const cur = here({ kind: 'files', phase: 'counting', done: 0, of: rows.length })!;
   await mapLimit(rows, COUNT_CONCURRENCY, async (b) => {
     if (halted()) return;
     // A path that escapes its root is not a chapter to count; it is something for the health page. Left
