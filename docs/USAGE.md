@@ -2161,7 +2161,9 @@ field over username/password: the key is sent on every request, so changing it m
 whereas the extension only presents the password after a 401, so a changed password is not noticed while the
 previous cookie is valid (up to 7 days) — revoke the old token instead. Reads synced from the phone
 do not count towards streaks or Wrapped. Tachimanga's *enhanced tracking* is reported by a contributor to
-work against this too; it was not tested here. The full list of what is and is not carried is in
+work against this too; it was not tested here. The extension's **WebView** opens Uchiyomi itself: on the source, the
+library; on a series, its series page; on a chapter, the reader at that chapter (since v0.90.0, #312; before, all three
+opened the library). Sign in once inside the WebView. The full list of what is and is not carried is in
 [docs/extensions.md](extensions.md#komga-compatible-api).
 
 ## 8. The admin panel

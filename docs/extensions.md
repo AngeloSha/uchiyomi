@@ -647,6 +647,11 @@ Uchiyomi (or on any other device) are marked read in Mihon on its next refresh o
 (iOS) runs the same Komga extension and its *enhanced tracking* is reported by a contributor to sync against
 this API as well; it is closed source and was not tested here — a report either way is welcome.
 
+The extension's **WebView** opens Uchiyomi itself, signed in once inside it: from the source, the library; from a
+series, its series page; from a chapter, the reader at that chapter. The extension opens Komga's own web addresses
+(`/series/<id>`, `/book/<id>`), and since v0.90.0 (#312, reported by TIGamingTV) Uchiyomi sends those to its own pages;
+before, all three opened the library.
+
 ### What the sync is, and is not
 
 - **It is continuous progress, forward only.** The protocol carries one number per series: the highest

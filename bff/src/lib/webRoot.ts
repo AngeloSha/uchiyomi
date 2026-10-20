@@ -49,6 +49,24 @@ export function webRootConfigured(): boolean {
 }
 
 /**
+ * Komga's own web addresses, as Uchiyomi's pages (v0.90.0, #312 by TIGamingTV). The Komga extension in Mihon, Tachimanga
+ * and the like opens a series' or a chapter's web view at Komga's web paths: its getMangaUrl and getChapterUrl take
+ * `/api/v1` out of the API address, which gives `/series/<id>` and `/book/<id>` (`/books/<id>` for a book listed as a
+ * series). Uchiyomi's pages are `/series/?id=` and `/reader/?book=`, so both fell through to the shell and opened the
+ * library. The ids are the ones the Komga-compatible API hands out, which are Uchiyomi's own. Komga's `/book/<id>/read`
+ * opens the reader too. Relative, like every other answer here, so the port is never rebuilt; nginx.conf has the same
+ * two rules. Reintroduce by returning null: "Komga's web addresses open the series and the chapter" in
+ * webRoot.int.test.ts lands on the shell.
+ */
+export function komgaWebPath(path: string): string | null {
+  const series = /^\/series\/([A-Za-z0-9_-]{1,64})\/?$/.exec(path);
+  if (series) return `/series/?id=${encodeURIComponent(series[1])}`;
+  const book = /^\/books?\/([A-Za-z0-9_-]{1,64})(?:\/read)?\/?$/.exec(path);
+  if (book) return `/reader/?book=${encodeURIComponent(book[1])}`;
+  return null;
+}
+
+/**
  * Mount the static export.
  *
  * Registered LAST, so every API route wins on a path collision. That ordering is the one thing that could
@@ -97,6 +115,8 @@ export async function registerWebRoot(app: FastifyInstance): Promise<void> {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       return reply.code(404).send({ error: 'not_found' });
     }
+    const komga = komgaWebPath(p);
+    if (komga) return reply.redirect(komga);
 
     const clean = p.replace(/\/+$/, '');
     for (const candidate of [`${clean}/index.html`, `${clean}.html`]) {

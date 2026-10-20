@@ -17,7 +17,7 @@
 // Pure unit tests: no database, no network.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -189,9 +189,38 @@ test('the web app served from the API process', async (t) => {
       assert.equal(a.statusCode, 200);
       assert.match(a.body, /<title>about<\/title>/);
 
-      const client = await app.inject({ method: 'GET', url: '/series/some-client-side-route' });
+      const client = await app.inject({ method: 'GET', url: '/some/client-side-route' });
       assert.equal(client.statusCode, 200, 'client-side routes must reach the shell');
       assert.match(client.body, /<title>shell<\/title>/);
+    });
+
+    await t.test("Komga's web addresses open the series and the chapter (#312)", async () => {
+      // What the Komga extension's web view opens: its API address with /api/v1 taken out.
+      const go = async (url: string) => {
+        const r = await app.inject({ method: 'GET', url });
+        return { code: r.statusCode, to: r.headers.location };
+      };
+      assert.deepEqual(await go('/series/s_0123456789abcdef0123'), { code: 302, to: '/series/?id=s_0123456789abcdef0123' });
+      assert.deepEqual(await go('/series/s_0123456789abcdef0123/'), { code: 302, to: '/series/?id=s_0123456789abcdef0123' });
+      assert.deepEqual(await go('/book/b_0123456789abcdef0123'), { code: 302, to: '/reader/?book=b_0123456789abcdef0123' });
+      assert.deepEqual(await go('/book/b_0123456789abcdef0123/read'), { code: 302, to: '/reader/?book=b_0123456789abcdef0123' });
+      assert.deepEqual(await go('/books/b_0123456789abcdef0123'), { code: 302, to: '/reader/?book=b_0123456789abcdef0123' });
+      // Uchiyomi's own pages, and anything that is not one id, are untouched.
+      for (const url of ['/series/', '/series', '/reader/', '/series/a/b', '/series/x.html', '/book/']) {
+        assert.equal((await go(url)).to, undefined, `${url} must not be redirected`);
+      }
+      assert.equal((await app.inject({ method: 'POST', url: '/series/s_0123456789abcdef0123' })).statusCode, 404,
+        'a write is never answered with a redirect');
+    });
+
+    await t.test('nginx.conf sends the same two addresses to the same pages', async () => {
+      // The two-container setup's nginx serves the web, so it needs the rules as well; held to komgaWebPath's.
+      const conf = await readFile(join(__dirname, '../../web/nginx.conf'), 'utf8');
+      assert.match(conf, /location ~ "\^\/series\/\(\[A-Za-z0-9_-\]\{1,64\}\)\/\?\$" \{ return 302 \/series\/\?id=\$1; \}/);
+      assert.match(conf, /location ~ "\^\/books\?\/\(\[A-Za-z0-9_-\]\{1,64\}\)\(\/read\)\?\/\?\$" \{ return 302 \/reader\/\?book=\$1; \}/);
+      const mod = await import('../src/lib/webRoot');
+      assert.equal(mod.komgaWebPath('/books/b_1/read'), '/reader/?book=b_1');
+      assert.equal(mod.komgaWebPath('/series/s_1'), '/series/?id=s_1');
     });
 
     await t.test('cache headers match what nginx sent, rule for rule', async () => {
