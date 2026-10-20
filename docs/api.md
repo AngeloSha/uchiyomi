@@ -2157,7 +2157,9 @@ the cover moves to the
 lowest live chapter. A chapter somebody has a bookmark in is skipped (`bookmarked`), as the cleanup skips
 it: a bookmark names a page inside the file. A chapter whose file *and* folder are missing is skipped
 (`unlink_failed`) rather than marked — that is the download volume not being mounted, not a deleted
-chapter. It answers `{ok, applied, bytes, skipped: [{id, reason}]}` with `reason` one of `not_found`,
+chapter — and so is one the server may not look at (EACCES, an I/O error), whose file may well be on disk.
+The bulk delete's crash recovery leaves such a chapter live as well (`interrupted_unreadable` in its
+`chapterSkips`). It answers `{ok, applied, bytes, skipped: [{id, reason}]}` with `reason` one of `not_found`,
 `not_owned`, `already_pruned`, `bookmarked`, `outside_root`, `unlink_failed`, or **409** `refused` (with
 `message` and `fix`) when the download directory is not writable.
 
@@ -2264,7 +2266,7 @@ pruned with `pruned_reason = 'deleted'` — the same tombstone `chapters/delete`
 restore afterwards lists those chapters as `pruned` (*Deleted from the server*, where `chapters/refetch`
 brings one back onto the same row — for the rows under the download folder; a read-library row is
 `not_owned` there and its file is the admin's to put back) instead of as openable chapters that 404, the updater's have-set keeps
-counting them as held, and `files` in the answer `{ok, files, bytes}` counts real unlinks, not rows (a
+counting them as held, and `files` in the answer `{ok, files, bytes, unchecked}` counts real unlinks, not rows (a
 second call reports 0). A row whose file is already absent is reconciled only when the root is provably
 mounted — `stat(root)` works, at least one chapter file of any series is present under it (a present folder
 is not proof: the downloader `mkdir -p`s series folders on a bare mount point), and no more than 90 % of
@@ -2274,7 +2276,10 @@ stat'ed when none of this series' own is present. Under that proof a live row wi
 is left as it was, so an unmounted share leaves live rows, which Forget refuses on. `files` still counts
 unlinks only, so a series whose folder was removed by hand answers `files: 0` and its Removed row then
 offers Forget (`live_books` 0). Delete files on a merge survivor also removes the folders of the rows
-merged into it, and every folder is resolved on every root before anything is unlinked. It refuses,
+merged into it, and every folder is resolved on every root before anything is unlinked. Only a file that is
+not there (ENOENT) is absent: one the server may not look at (EACCES from a folder's mode bits, an I/O error)
+is neither removed nor marked, its row stays live, the answer counts it in `unchecked`, and a root holding
+one keeps the series folder. It refuses,
 **409** `refused` `{message, fix}`, rather than half-applying: the series is not hidden yet, it has no
 chapter rows on any root (*That series has no files on disk.*), a folder resolves outside the library, or a
 root is not writable (`PUID`/`PGID` unset; `fix` names it). Nothing here deletes a series row or a chapter

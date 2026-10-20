@@ -377,8 +377,12 @@ test('the favourite button and the save notices are in the reader\'s words (v0.5
   // since v0.53.0. Reintroduce `'Check for new chapters now'` without tr(): "the check key is English in every
   // language" fails.
   assert.match(code(read('components/SeriesEditor.tsx')), /\{checking \? tr\('Checking…'\) : tr\('Check for new chapters now'\)\}/, 'the check key is English in every language');
-  assert.match(code(read('app/admin/page.tsx')), /res\.files === 1 \? tr\('Deleted 1 file, \{size\}', \{ size \}\) : tr\('Deleted \{n\} files, \{size\}', \{ n: res\.files, size \}\)/,
+  assert.match(code(read('lib/deleteFiles.ts')), /res\.files === 1 \? tr\('Deleted 1 file, \{size\}', \{ size \}\) : tr\('Deleted \{n\} files, \{size\}', \{ n: res\.files, size \}\)/,
     'Delete files says "file(s)" again');
+  // A delete that left files it could not look at says so (lib/deleteFiles.ts). Reintroduce the plain success toast in
+  // app/admin/page.tsx: "Delete files does not say what it left" fails, and the admin reads a clean delete.
+  assert.match(code(read('app/admin/page.tsx')), /const notice = deleteFilesNotice\(res\);\s*toast\(notice\.message, notice\.type\)/,
+    'Delete files does not say what it left');
 });
 
 test('a work in two languages switches edition under the title, on the phone and over the banner (v0.52.0)', () => {

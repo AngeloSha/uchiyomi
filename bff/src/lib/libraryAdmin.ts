@@ -15,6 +15,7 @@
 // -- completed stays completed, nothing is ever marked unread. Rescan everything's merges do not ask.
 import type { FastifyRequest } from 'fastify';
 import { rm, rename, realpath, stat, readdir } from 'fs/promises';
+import type { Stats } from 'fs';
 import { q, one, tx } from './db';
 import { artFile } from './seriesArt';
 import { allWritable, containedPath, realContainedPath } from './fsGuard';
@@ -392,6 +393,21 @@ export type DeletedChapters =
   | { applied: number; bytes: number; skipped: Array<{ id: string; reason: string }> }
   | { refused: { reason: string; fix?: string } };
 
+/**
+ * Stat a chapter file for a delete, telling "not there" from "may not look". Resolves to the stats, to `null` for a
+ * path that is not there (ENOENT, ENOTDIR), or to the error code of any other failure -- EACCES from a folder whose mode
+ * bits slipped, EPERM, an I/O error, a dropped share's ENOTCONN -- which says nothing about the file: it may well be on
+ * disk, and a row marked deleted on that evidence hides a chapter whose bytes are still there.
+ */
+export async function statOrGone(abs: string): Promise<Stats | null | string> {
+  try {
+    return await stat(abs);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException)?.code;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? null : code || 'error';
+  }
+}
+
 /** Durable progress hooks used by the detached bulk job. Direct/admin-autofix deletes do not need a journal. */
 export type ChapterDeleteJournalItem = {
   id: string;
@@ -475,6 +491,16 @@ export async function deleteChapterFiles(
   let applied = 0;
   let bytes = 0;
   for (const t of todo) {
+    // ⚠️ A file the server may not look at (EACCES, an I/O error) is neither removed nor marked. Asked first, because
+    // realContainedPath below answers null for it too (its lstat fails) and the skip read `outside_root`: the file is
+    // inside the download folder, and simply was not removed. Reintroduce `stat(...).catch(() => null)`: "deleting
+    // chosen chapters in a folder the server may not read ..." in deleteUnreadable.int.test.ts finds the wrong reason.
+    const looked = await statOrGone(t.abs);
+    if (typeof looked === 'string') {
+      console.warn(`[delete] ${t.rel} could not be looked at (${looked}) -- left as it is`);
+      await recordSkip(t.id, 'unlink_failed', t.position, { root: DL_ROOT, file: t.rel });
+      continue;
+    }
     // Re-resolve at the destructive boundary. A lexically contained row can still walk through an
     // intermediate (or final) symlink to an unrelated file; an absent final file is safe only when its
     // nearest existing parent resolves under the real download root.
@@ -482,7 +508,7 @@ export async function deleteChapterFiles(
       await recordSkip(t.id, 'outside_root', t.position, { root: DL_ROOT, file: t.rel });
       continue;
     }
-    const st = await stat(t.abs).catch(() => null);
+    const st = looked;
     const item: ChapterDeleteJournalItem = {
       id: t.id, root: DL_ROOT, file: t.rel, position: t.position, bytes: st?.size ?? 0,
     };
@@ -956,6 +982,8 @@ export async function deleteSeriesFiles(id: string): Promise<{
   ok: true;
   files: number;
   bytes: number;
+  /** Chapter files that could not be looked at (EACCES, an I/O error): left live and on disk, not removed. */
+  unchecked: number;
   /** Exact rows this invocation deliberately made (or reclassified as) tombstones; for the audit, not the API. */
   deletedBookIds: string[];
 } | FileOpRefusal> {
@@ -1001,6 +1029,7 @@ export async function deleteSeriesFiles(id: string): Promise<{
 
   let files = 0;
   let bytes = 0;
+  let unchecked = 0;
   const removed: string[] = [];
   const reconciled: string[] = [];
   const reclassified: string[] = [];
@@ -1010,11 +1039,19 @@ export async function deleteSeriesFiles(id: string): Promise<{
     );
     let present = 0;
     let absent = 0;
+    let unreadable = 0;
+    let why: string | undefined;
     const absentLive: string[] = [];
     for (const b of rows) {
       const abs = containedPath(root, b.file);
       if (!abs) continue;
-      const st = await stat(abs).catch(() => null);
+      // ⚠️ Only "not there" (ENOENT, ENOTDIR) is absent. A file the server may not look at (EACCES from a folder's mode
+      // bits, an I/O error) is on disk as far as anyone knows: reconciled as removed by hand, it became a tombstone
+      // whose bytes stay, and Forget then erased everyone's history of it. Such a row is left live, counted in
+      // `unchecked` and logged. Reintroduce `stat(...).catch(() => null)`: "Delete files leaves the chapters of a
+      // folder it may not read ..." in deleteUnreadable.int.test.ts finds them marked deleted.
+      const st = await statOrGone(abs);
+      if (typeof st === 'string') { unreadable++; why ??= st; continue; }
       if (!st) {
         absent++;
         if (!b.pruned_at) absentLive.push(b.id);
@@ -1028,7 +1065,10 @@ export async function deleteSeriesFiles(id: string): Promise<{
       files++;
       removed.push(b.id);
     }
-    for (const t of targets) if (t.root === root) await rm(t.abs, { recursive: true, force: true }).catch(() => {});
+    // A folder holding a file nobody could look at is not taken: whatever the rm reached would go with no row marked.
+    unchecked += unreadable;
+    if (unreadable) console.warn(`[delete-files] ${root}: ${unreadable} chapter file(s) could not be looked at (${why}) -- left as they are, and the series folder kept`);
+    if (!unreadable) for (const t of targets) if (t.root === root) await rm(t.abs, { recursive: true, force: true }).catch(() => {});
 
     // The reconciliation, under the proof (the header). Nothing to reconcile is the common case and costs
     // no extra stat.
@@ -1056,7 +1096,7 @@ export async function deleteSeriesFiles(id: string): Promise<{
          SELECT id FROM lib_books WHERE series_id = $1 ORDER BY (pruned_at IS NOT NULL), number ASC, file ASC LIMIT 1
        ) WHERE id = $1`, [id]);
   }
-  return { ok: true, files, bytes, deletedBookIds: [...new Set([...removed, ...reconciled, ...reclassified])] };
+  return { ok: true, files, bytes, unchecked, deletedBookIds: [...new Set([...removed, ...reconciled, ...reclassified])] };
 }
 
 /** How many live rows of OTHER series are stat'ed for the mount proof when none of this series' own is present. */

@@ -51,6 +51,7 @@ import { releaseHref, shownVersion, updateState, type UpdateState } from '@/lib/
 import { useSectionArrival } from '@/lib/useSectionArrival';
 import { useReduceEffects } from '@/lib/effects';
 import { joinsOnTheirOwn, memberDefaultsOf, type MemberDefaults } from '@/lib/memberDefaults';
+import { deleteFilesNotice, type DeleteFilesResult } from '@/lib/deleteFiles';
 
 /** A name or a title inside a sentence, isolated: in Arabic a Latin one otherwise takes the sentence's order. */
 const iso = (s: string): string => `\u2068${s}\u2069`;
@@ -1672,11 +1673,11 @@ function LibraryPanel() {
   const deleteFiles = async (r: DeletedRow) => {
     setPurging(true);
     try {
-      const res = await api<{ files: number; bytes: number }>(`/api/admin/series/${r.id}/delete-files`,
+      const res = await api<DeleteFilesResult>(`/api/admin/series/${r.id}/delete-files`,
         { method: 'POST', json: { confirm: r.title } });
-      // Counted in pairs and translated (v0.52.0): "Deleted 1 file(s)" was the one English toast left on this panel.
-      const size = `${(res.bytes / 1048576).toFixed(1)} MB`;
-      toast(res.files === 1 ? tr('Deleted 1 file, {size}', { size }) : tr('Deleted {n} files, {size}', { n: res.files, size }), 'success');
+      // Files the server could not look at are left on disk and said, with what to check (lib/deleteFiles.ts).
+      const notice = deleteFilesNotice(res);
+      toast(notice.message, notice.type);
       setPurge(null);
       qc.invalidateQueries({ queryKey: ['admin-deleted'] });
     } catch (e: any) {

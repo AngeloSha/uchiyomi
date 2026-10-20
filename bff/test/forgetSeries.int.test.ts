@@ -726,7 +726,7 @@ test('route: a deliberate read-library Delete files tombstone survives the next 
     method: 'POST', url: `/api/admin/series/${S}/delete-files`, headers: auth, payload: { confirm: 'Reboot proof' },
   });
   assert.equal(res.statusCode, 200, res.body);
-  assert.deepEqual(res.json(), { ok: true, files: 1, bytes: 5 }, 'internal proof leaked into the public response');
+  assert.deepEqual(res.json(), { ok: true, files: 1, bytes: 5, unchecked: 0 }, 'internal proof leaked into the public response');
   const audit = (await q<{ detail: { bookIds: string[]; applied: number; files: number } }>(
     `SELECT detail FROM audit_log WHERE event = 'series.delete_files' AND detail->>'id' = $1 ORDER BY id DESC LIMIT 1`, [S]))[0];
   assert.deepEqual(audit?.detail.bookIds, ['b_fg_1'], 'the audit cannot prove which row this invocation deleted');

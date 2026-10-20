@@ -10232,7 +10232,7 @@ paths:
         - bearer: []
       responses:
         "200":
-          description: "{ ok: true, files, bytes } -- files actually unlinked this call (0 for a series whose files were removed by hand; its absent rows are marked when the root is provably mounted)."
+          description: "{ ok: true, files, bytes, unchecked } -- files actually unlinked this call (0 for a series whose files were removed by hand; its absent rows are marked when the root is provably mounted). `unchecked` counts chapter files the server could not look at (EACCES, an I/O error): only a file that is not there (ENOENT) is absent, so those rows stay live, and a root holding one keeps its series folder."
         "400":
           description: "bad_request, or confirm_mismatch when `confirm` is not the series' title."
         "401":
@@ -10315,7 +10315,8 @@ paths:
         DL_ROOT only: a chapter the scanner found in the read library is skipped (`not_owned`), on the same
         footing as the read-chapter cleanup, and so is one somebody has a bookmark in (`bookmarked`) -- a
         bookmark names a page inside the file. A chapter whose file AND folder are missing is skipped
-        (`unlink_failed`) rather than marked: that is the download volume not being mounted. The row survives
+        (`unlink_failed`) rather than marked: that is the download volume not being mounted. So is one the
+        server may not look at (EACCES, an I/O error): its file may well be on disk. The row survives
         with `pruned` set so reading progress and the updater's have-set do; the cover moves to the lowest
         live chapter. No typed confirmation -- the client confirms with the count.
       parameters:

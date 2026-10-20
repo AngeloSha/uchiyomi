@@ -2613,7 +2613,10 @@ provably mounted — the same proof the *Verify chapter files* task in section 1
 file of any series is present under it (a folder is not proof) and no more than nine in ten of the files
 looked at are absent. That is what lets a series whose folder you removed by hand on the NAS be forgotten:
 the toast says *Deleted 0 file(s)*, and the row offers *Forget*. On a share that is not mounted every file looks gone,
-nothing is marked, and every row stays as it was. Deleting a merge survivor's files also removes the
+nothing is marked, and every row stays as it was. A file the server is not allowed to look at (a folder whose
+permissions slipped, a disk error) is not taken for gone either: it is left on disk, its chapter is not marked,
+the series folder on that root stays, and the toast says how many files could not be checked and asks you to
+check the folder's permissions. Deleting a merge survivor's files also removes the
 folders of the series merged into it. There is no bulk form of this on purpose: *Select all* plus one tap
 must never be able to wipe a hand-curated folder.
 
