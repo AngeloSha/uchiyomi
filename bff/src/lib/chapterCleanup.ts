@@ -54,6 +54,12 @@
  *     page of that chapter when there is no artwork to fetch, so pruning it takes the art off the series,
  *     the library grid and the home rails. It is one chapter per series, and it is always the lowest number
  *     -- so this costs almost nothing and cannot drift, because persistScan recomputes it the same way.
+ *
+ * AND NEVER THE LAST COPY. "We could fetch it again" is a claim about the sources, and their last listing
+ * (series_listing, lib/seriesListing.ts) is where it can be checked. Once a series has a listing, a chapter whose
+ * number is no longer in it -- a takedown, a deleted post, a source that dropped it -- is a file nothing could
+ * replace, so it stays. For a file holding a range (lib/chapterRanges.ts) that is every whole number it holds, not
+ * only its start. A series with no listing at all says nothing either way and is judged as before.
  */
 import { rm, stat } from 'fs/promises';
 import { dirname, resolve } from 'path';
@@ -63,6 +69,7 @@ import { allWritable, containedPath } from './fsGuard';
 import { REFETCH_BAK } from './fsAtomic';
 import { runtime, type CleanupResult } from './runtime';
 import { atHiddenNumber, hiddenNumbersActive } from './noticeChapters';
+import { rangeEnd } from './chapterRanges';
 
 /**
  * Most chapters one run will delete. Not a performance limit -- unlink is cheap -- but a blast radius:
@@ -107,6 +114,7 @@ export function dueSql(limit: number | null): string {
               HAVING bool_and(rp.completed AND (lb.pages <= 1 OR rp.page >= lb.pages - 1))
                  AND max(rp.updated_at) <= now() - make_interval(days => $2)
             ) done ON done.book_id = b.id
+            LEFT JOIN book_overrides ov ON ov.book_id = b.id
            WHERE b.root = $1
              AND b.pruned_at IS NULL
              -- a series the admin has hidden is not this job's business: its files go through Delete files,
@@ -115,7 +123,18 @@ export function dueSql(limit: number | null): string {
              -- the last reader finished the copy that is on disk now, not the one this file replaced
              AND done.done_at >= to_timestamp(b.mtime / 1000.0)
              AND NOT EXISTS (SELECT 1 FROM bookmarks bm WHERE bm.book_id = b.id)
-             AND NOT EXISTS (SELECT 1 FROM lib_series s WHERE s.cover_book_id = b.id)${hiddenNumbersActive() ? `
+             AND NOT EXISTS (SELECT 1 FROM lib_series s WHERE s.cover_book_id = b.id)
+             -- never the last copy (see the header): once the series has a listing, every number the file holds is
+             -- in it. The number is override-aware, as the listing's are under posting order; an admin's number
+             -- cancels a range (rangeEnd is NULL, and generate_series gives nothing). Reintroduce by dropping the
+             -- clause: "a chapter the sources no longer list is never deleted" in lastCopyGuard.int.test.ts finds
+             -- the file gone.
+             AND NOT (EXISTS (SELECT 1 FROM series_listing sl WHERE sl.series_id = b.series_id)
+                      AND (NOT EXISTS (SELECT 1 FROM series_listing sl
+                                        WHERE sl.series_id = b.series_id AND sl.number = COALESCE(ov.number, b.number))
+                           OR EXISTS (SELECT 1 FROM generate_series(floor(b.number)::numeric + 1, floor(${rangeEnd('b', 'ov')})::numeric) held(n)
+                                       WHERE NOT EXISTS (SELECT 1 FROM series_listing sl
+                                                          WHERE sl.series_id = b.series_id AND sl.number = held.n::real))))${hiddenNumbersActive() ? `
              -- a chapter at a number an admin hid (#240) is left exactly as it is: Restore brings back what was there
              AND NOT ${atHiddenNumber('b')}` : ''}
            ORDER BY done.done_at ASC` + (limit === null ? '' : `\n           LIMIT ${limit}`);

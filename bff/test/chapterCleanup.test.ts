@@ -87,6 +87,17 @@ test("the chapter a series draws its artwork from is never pruned", () => {
   assert.match(dueSql(null), /NOT EXISTS \(SELECT 1 FROM lib_series s WHERE s\.cover_book_id = b\.id\)/);
 });
 
+test('a chapter the sources no longer list is never pruned', () => {
+  // "We could fetch it again" is what makes the delete defensible, and a number missing from the series' listing
+  // cannot be fetched again: that file is the last copy. A series with no listing at all is judged as before.
+  // Reintroduce by dropping the clause from dueSql: "a chapter the sources no longer list is never deleted" in
+  // lastCopyGuard.int.test.ts finds the file gone.
+  const sql = dueSql(null);
+  assert.match(sql, /AND NOT \(EXISTS \(SELECT 1 FROM series_listing sl WHERE sl\.series_id = b\.series_id\)/);
+  assert.match(sql, /sl\.number = COALESCE\(ov\.number, b\.number\)/, 'the number checked is the override-aware one');
+  assert.match(sql, /generate_series\(floor\(b\.number\)::numeric \+ 1/, 'and every whole number a range file holds');
+});
+
 test('the limit is applied only when one is asked for', () => {
   assert.doesNotMatch(dueSql(null), /LIMIT/, 'the counting form must see the whole backlog');
   assert.match(dueSql(500), /LIMIT 500/);

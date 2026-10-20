@@ -2734,6 +2734,10 @@ What it will not touch:
 * a chapter **nobody has read**;
 * a chapter anyone has **bookmarked** (a bookmark points at a page inside the file);
 * the chapter a series draws its **cover** from;
+* a chapter **the sources no longer list**: once a series' sources have been checked, a number missing from what
+  they list (taken down, deleted, dropped by the site) could not be downloaded again, so the file here is the last
+  copy. A file holding several chapters is kept if any one of them is missing. A series never checked against a
+  source has no list to go by and is judged by the rest of these rules;
 * anything in a library you assembled yourself. Only Uchiyomi's own downloads folder is ever pruned. Your
   files are yours, and this job does not get an opinion about them.
 
