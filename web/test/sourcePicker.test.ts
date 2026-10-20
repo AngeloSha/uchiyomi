@@ -310,7 +310,8 @@ test('one source browsed alone says its own reason, not "nothing new"', () => {
 
   const page = readFileSync(join(__dirname, '..', 'app', 'discover', 'page.tsx'), 'utf8');
   assert.match(page, /aloneEmpty\(budget\.find\(\(s\) => s\.id === selected\)/, 'the page no longer asks aloneEmpty about the selected source');
-  assert.match(page, /: alone \? alone\.text\s*\n?\s*: Object\.values\(states\)\.every/,
+  // The wall's sentence after it reads the sources asked now (#319's follow-up), comments between the two allowed.
+  assert.match(page, /: alone \? alone\.text\s*(?:\/\/[^\n]*\n\s*)*: budget\.every\(/,
     'the empty card no longer puts the selected source\'s own sentence before the sentence about the whole wall');
   assert.match(page, /alone\?\.warn \? 'text-amber-300'/, 'the selected source\'s reason is not painted amber');
 });
