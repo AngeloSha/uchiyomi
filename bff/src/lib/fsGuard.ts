@@ -5,6 +5,7 @@
 // library is the harder case, because the answer is usually "set PUID", not "chown this" -- a library belongs
 // to the user, and telling them to give it away to uid 10002 is what PUID exists to avoid.
 import { lstat, mkdtemp, realpath, rmdir, stat } from 'fs/promises';
+import type { Stats } from 'fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'path';
 import { forDesktop } from './desktop';
 
@@ -128,4 +129,20 @@ export async function realContainedPath(root: string, rel: string): Promise<stri
     if (!target || !inside(base, target)) return null;
   }
   return full;
+}
+
+/**
+ * Stat a chapter file for a delete, telling "not there" from "may not look". Resolves to the stats, to `null` for a
+ * path that is not there (ENOENT, ENOTDIR), or to the error code of any other failure -- EACCES from a folder whose mode
+ * bits slipped, EPERM, an I/O error, a dropped share's ENOTCONN -- which says nothing about the file: it may well be on
+ * disk, and a row marked deleted on that evidence hides a chapter whose bytes are still there. Here, beside the other
+ * path guards, so the read-chapter cleanup uses it too (libraryAdmin imports chapterCleanup, never the other way).
+ */
+export async function statOrGone(abs: string): Promise<Stats | null | string> {
+  try {
+    return await stat(abs);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException)?.code;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? null : code || 'error';
+  }
 }

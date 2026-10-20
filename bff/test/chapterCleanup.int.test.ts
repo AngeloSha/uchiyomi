@@ -471,6 +471,22 @@ test('a file that alone is gone, its folder still there, is marked', { skip }, a
   assert.ok((await q('SELECT pruned_at FROM lib_books WHERE id = $1', [IDS.two]))[0].pruned_at);
 });
 
+test('a chapter in a folder the server may not look into is left unmarked, and counted as not removed', { skip: skip || (asRoot && 'root ignores mode bits') }, async () => {
+  // The folder's mode bits slipped (or a share dropped): stat on the file fails with EACCES, but the file is on disk.
+  // Marked deleted, it would vanish from every reader, and its deleted record would stop the sweep fetching it back.
+  // Reintroduce `stat(abs).catch(() => null)` in runCleanupOnce: the row reads pruned.
+  await enable(0);
+  await progress('cc-alice', IDS.two, true, 1);
+  const folder = join(DL, FOLDER);
+  await chmod(folder, 0o000);
+  let r;
+  try { r = await runCleanupOnce(); } finally { await chmod(folder, 0o755); }
+  assert.equal(r.deleted, 0);
+  assert.equal(r.failed, 1, 'counted as not removed, so the result says something was left');
+  assert.equal((await q('SELECT pruned_at FROM lib_books WHERE id = $1', [IDS.two]))[0].pruned_at, null, 'and its row is not marked deleted');
+  assert.ok(await stat(join(DL, FOLDER, 'ch2.cbz')), 'the file is still there');
+});
+
 test('the download root itself is never the file', { skip }, async () => {
   // containedPath accepts the root (it is "inside" trivially) and the rm is recursive: a row whose file
   // resolves to `.` -- a hand-edited row, nothing in the product writes one -- would take the whole download

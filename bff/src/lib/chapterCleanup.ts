@@ -68,7 +68,7 @@ import { rm, stat } from 'fs/promises';
 import { dirname, resolve } from 'path';
 import { q, one } from './db';
 import { DL_ROOT } from './library';
-import { allWritable, containedPath } from './fsGuard';
+import { allWritable, containedPath, statOrGone } from './fsGuard';
 import { REFETCH_BAK } from './fsAtomic';
 import { runtime, type CleanupResult } from './runtime';
 import { atHiddenNumber, hiddenNumbersActive } from './noticeChapters';
@@ -286,12 +286,18 @@ export async function runCleanupOnce(): Promise<CleanupResult> {
   // take the whole download directory with it. One comparison against the entire library is a cheap guard.
   // Reintroduce by dropping the `abs === root` check: "the download root itself is never the file" in
   // chapterCleanup.int.test.ts finds the directory gone.
+  // A file it may not look at (EACCES from a folder whose mode bits slipped, a dropped share's ENOTCONN) is NOT a
+  // file already gone (statOrGone, #321's rule): it is left, row and all, and counted as not removed. Marked on that
+  // evidence it would vanish from every reader while its bytes sit on disk, and its deleted record would stop the
+  // sweep from fetching it back. Reintroduce `stat(abs).catch(() => null)`: "a chapter in a folder the server may not
+  // look into is left unmarked" in chapterCleanup.int.test.ts finds it marked.
   const looked = await Promise.all(due.map(async (b) => {
     const abs = containedPath(b.root, b.file);
-    if (!abs || abs === root) return { b, abs: null, st: null, folder: true };
-    const st = await stat(abs).catch(() => null);
-    const folder = st ? true : !!(await stat(dirname(abs)).catch(() => null));
-    return { b, abs, st, folder };
+    if (!abs || abs === root) return { b, abs: null, st: null, folder: true, unreadable: null };
+    const seen = await statOrGone(abs);
+    if (typeof seen === 'string') return { b, abs, st: null, folder: true, unreadable: seen };
+    const folder = seen ? true : !!(await stat(dirname(abs)).catch(() => null));
+    return { b, abs, st: seen, folder, unreadable: null };
   }));
   // ⚠️ WHEN EVERY DUE CHAPTER'S FOLDER IS MISSING, THE VOLUME IS NOT THERE. A NAS share that is not mounted
   // right now leaves an empty, writable mount point behind, so the preflight above passes and every stat
@@ -309,9 +315,14 @@ export async function runCleanupOnce(): Promise<CleanupResult> {
   if (looked.every((x) => x.abs && !x.st && !x.folder)) {
     stopped = 'unmounted';
   } else {
-    for (const { b, abs, st } of looked) {
+    for (const { b, abs, st, unreadable } of looked) {
       if (runtime.stopping) break; // between files, never mid-unlink
       if (!abs) continue;
+      if (unreadable) {
+        console.warn(`[cleanup] ${b.file} could not be looked at (${unreadable}) -- left as it is`);
+        failed++;
+        continue;
+      }
       if (st) {
         try {
           await rm(abs, { recursive: true, force: true });

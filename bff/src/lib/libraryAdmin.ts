@@ -18,7 +18,8 @@ import { rm, rename, realpath, stat, readdir } from 'fs/promises';
 import type { Stats } from 'fs';
 import { q, one, tx } from './db';
 import { artFile } from './seriesArt';
-import { allWritable, containedPath, realContainedPath } from './fsGuard';
+import { allWritable, containedPath, realContainedPath, statOrGone } from './fsGuard';
+export { statOrGone } from './fsGuard';
 import { tombstoneBooks } from './chapterCleanup';
 import { LIBRARY_ROOT, DL_ROOT, listChapters } from './library';
 import { reconcileListingProgress } from './listingProgress';
@@ -392,21 +393,6 @@ export async function mergeSeries(
 export type DeletedChapters =
   | { applied: number; bytes: number; skipped: Array<{ id: string; reason: string }> }
   | { refused: { reason: string; fix?: string } };
-
-/**
- * Stat a chapter file for a delete, telling "not there" from "may not look". Resolves to the stats, to `null` for a
- * path that is not there (ENOENT, ENOTDIR), or to the error code of any other failure -- EACCES from a folder whose mode
- * bits slipped, EPERM, an I/O error, a dropped share's ENOTCONN -- which says nothing about the file: it may well be on
- * disk, and a row marked deleted on that evidence hides a chapter whose bytes are still there.
- */
-export async function statOrGone(abs: string): Promise<Stats | null | string> {
-  try {
-    return await stat(abs);
-  } catch (e) {
-    const code = (e as NodeJS.ErrnoException)?.code;
-    return code === 'ENOENT' || code === 'ENOTDIR' ? null : code || 'error';
-  }
-}
 
 /** Durable progress hooks used by the detached bulk job. Direct/admin-autofix deletes do not need a journal. */
 export type ChapterDeleteJournalItem = {
