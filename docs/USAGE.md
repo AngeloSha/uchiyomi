@@ -826,6 +826,12 @@ once, calmly. The idea is @TIGamingTV's ([#119](https://github.com/AngeloSha/uch
   tried*: the search was stopped, ran out of time or was interrupted by a restart before it got there (or the series
   was removed or merged meanwhile) — never *not found* — with **Search the {n} series not tried**. *Earlier searches* lists the runs before it; the server
   keeps the last 20.
+- **Why a series found nothing, in detail** (since v0.92.0, [#316](https://github.com/AngeloSha/uchiyomi/issues/316)).
+  Set `LOG_LEVEL=debug` in `.env` and restart, and the server log (`docker logs uchiyomi`) says for each series what
+  the run did: the names it searched each source under, what each source answered (the first few titles), which
+  result it took, and why a match was refused — its own title was not this series', or its chapter numbers did not
+  line up, with how many of yours it lists and how many of its yours does. The lines start `[find]`. Set it back
+  when you are done: the log is long at debug.
 - **A restart** stops a run the way **Stop** does: what it followed stays followed, and the series it never reached
   are listed as not tried.
 

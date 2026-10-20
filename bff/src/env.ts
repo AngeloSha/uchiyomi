@@ -91,8 +91,27 @@ const envFlag = (def: boolean) =>
  */
 export const engineSwitchOn = (v: string | undefined): boolean => !/^(0|off|false|no)$/i.test((v ?? '').trim());
 
+/** The levels LOG_LEVEL takes, quietest first. */
+const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace'] as const;
+export type LogLevel = (typeof LOG_LEVELS)[number];
+
+/**
+ * LOG_LEVEL (v0.92.0, #316): how much the server log says -- `info` by default in production (every request), `warn`
+ * for errors and warnings only, `debug` for more: what a Find other sources run asked each source, what each answered
+ * and why a match was refused. `warning` is `warn`, as FlareSolverr spells it beside it in the compose files. A value
+ * it does not know means the default: like the engine switch above, a stray value must never stop the server at boot.
+ * Pure.
+ */
+export const logLevelOf = (v: string | undefined, nodeEnv: string): LogLevel => {
+  const raw = (v ?? '').trim().toLowerCase();
+  const l = raw === 'warning' ? 'warn' : raw;
+  return (LOG_LEVELS as readonly string[]).includes(l) ? (l as LogLevel) : nodeEnv === 'production' ? 'info' : 'debug';
+};
+
 const schema = z.object({
   NODE_ENV: z.string().default('production'),
+  // How much the server log says: logLevel below.
+  LOG_LEVEL: z.string().optional(),
   PORT: z.coerce.number().default(3000),
   DATABASE_URL: z.string().min(1),
   KOMGA_BASE_URL: z.string().url().default('http://komga:25600'),
@@ -197,3 +216,6 @@ export const env: Env = (() => {
     : '';
   return { ...parsed.data, initialUserPasswordHash };
 })();
+
+/** The server log's level, from LOG_LEVEL (logLevelOf). */
+export const logLevel: LogLevel = logLevelOf(env.LOG_LEVEL, env.NODE_ENV);

@@ -52,6 +52,8 @@ services:
       PUID: ${PUID:-}
       PGID: ${PGID:-}
       NODE_ENV: production
+      # How much the log says (v0.92.0): info, warn, or debug for what Find other sources searched and why.
+      LOG_LEVEL: ${LOG_LEVEL:-}
       PORT: "3000"
       DATABASE_URL: postgres://yomi:${DB_PASSWORD:-uchiyomi}@uchiyomi-db:5432/yomi
       LIBRARY_BACKEND: ${LIBRARY_BACKEND:-owned}

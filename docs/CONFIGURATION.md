@@ -29,6 +29,11 @@ The ones worth knowing:
   `TRUST_PROXY` to your proxy's own address, so only it can say who a visitor is (`TRUST_PROXY=172.18.0.5`), or to
   `false` when there is no proxy at all. Since v0.78.1 sign-in counts wrong passwords per address and name, so the
   address the app sees is worth getting right.
+- `LOG_LEVEL` (since v0.92.0): how much the server log says (`docker logs uchiyomi`). `info` by default, a line for
+  every request; `warn` keeps only warnings and errors. `debug` adds, for each series a *Find other sources* run
+  looks at, the names it searched each source under, what each source answered, which result it took, and why a
+  match was refused, with the chapter numbers it compared: lines that start `[find]`. A value it does not know means
+  the default.
 - **Database** — `DATABASE_URL`, on the app container. **Unset** (the shipped one-container file leaves it
   unset on purpose): the container runs its own Postgres 16 in `/data/pg` (the `uchiyomi_data` volume), on a
   unix socket only — no network listener, no password — and the nightly task dumps it into `/backups` like

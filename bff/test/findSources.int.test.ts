@@ -443,6 +443,47 @@ test('series decided without a search are not paced; series that searched are', 
   assert.ok(stamps[0] >= 300, `two searched series took ${stamps[0]} ms, under one pause`);
 });
 
+test('LOG_LEVEL=debug: the log says what each source answered and why a match was refused (#316)', { skip }, async () => {
+  // An admin's run found nothing for six series other sources list under the same names, and the log said nothing
+  // about why. At debug it says, for each series, the names it searched each source under, what each answered, the hit
+  // it took, the verdict with its numbers, and how the series ended.
+  await series('e', 'Epsilon Nothing');
+  await series('f', 'Zeta Wrong');
+  const lines: string[] = [];
+  const log = console.log;
+  console.log = (...a: unknown[]) => { const l = a.map(String).join(' '); if (l.startsWith('[find] ')) lines.push(l); else log(...a); };
+  fsLib.findLog.on = true;
+  try {
+    assert.equal((await post({ seriesIds: [S('e'), S('f')] })).statusCode, 202);
+    await fsLib.findSettled();
+  } finally {
+    fsLib.findLog.on = false;
+    console.log = log;
+  }
+  const said = (re: RegExp) => assert.ok(lines.some((l) => re.test(l)), `${re}\n${lines.join('\n')}`);
+  said(/^\[find\] "Zeta Wrong": asking \d+ sources under "Zeta Wrong" -- 12 chapter numbers of ours to line up$/);
+  // F: what each carrier answered under the name, the hit, and why its numbers were refused, in numbers.
+  said(/^\[find\] "Zeta Wrong" · Name fs-c: "Zeta Wrong": 1 result \("Zeta Wrong"\), took "Zeta Wrong"$/);
+  said(/^\[find\] "Zeta Wrong" · Name fs-c: "Zeta Wrong" refused: its chapter numbers do not line up with ours -- ours \d+ of 12 found there, theirs \d+ of \d+ found here/);
+  said(/^\[find\] "Zeta Wrong": refused$/);
+  // E: every source asked answered, and none listed it.
+  said(/^\[find\] "Epsilon Nothing" · Name fs-a: "Epsilon Nothing": no results$/);
+  said(/^\[find\] "Epsilon Nothing": no_match$/);
+  // A source that throws said so, rather than nothing.
+  said(/^\[find\] "Epsilon Nothing" · Name fs-throws: "Epsilon Nothing": no answer$/);
+  // Off, which every install is unless it asks: not a line.
+  lines.length = 0;
+  console.log = (...a: unknown[]) => { const l = a.map(String).join(' '); if (l.startsWith('[find] ')) lines.push(l); else log(...a); };
+  try {
+    await series('g', 'Gamma Saga');
+    assert.equal((await post({ seriesIds: [S('g')] })).statusCode, 202);
+    await fsLib.findSettled();
+  } finally {
+    console.log = log;
+  }
+  assert.deepEqual(lines, [], 'nothing at the default level');
+});
+
 test('each series says why it gained nothing: too few numbers, a source it follows already, no answer, no source to ask', { skip }, async () => {
   // Two numbers: nothing to measure a candidate against, so nothing is searched -- `too_few`, not a refusal.
   await series('t', 'Theta Few');

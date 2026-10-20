@@ -197,6 +197,18 @@ test('every documented extension knob is passed through by every deploy file', (
 });
 
 /**
+ * LOG_LEVEL (v0.92.0, #316) reaches the app in every deploy file. They enumerate the app's environment (no env_file),
+ * so a variable left out of one is a setting that does nothing there -- the trap the knob test above was written for.
+ * Reintroduce by deleting the `LOG_LEVEL:` line from one: the assertion names the file.
+ */
+test('LOG_LEVEL reaches the app in every deploy file', () => {
+  for (const file of ['deploy/docker-compose.yml', 'deploy/docker-compose.external-db.yml', 'deploy/docker-compose.split.yml']) {
+    const src = instructions(readFileSync(join(REPO, file), 'utf8'));
+    assert.match(src, /^\s+LOG_LEVEL: \$\{LOG_LEVEL:-\}$/m, `${file} passes LOG_LEVEL`);
+  }
+});
+
+/**
  * Issue #54: Mangaball via a keiyoushi extension failed every search with `java.io.IOException: Cloudflare
  * bypass currently disabled`, while a manual curl through the bundled FlareSolverr worked. Suwayomi-Server
  * has no browser of its own; its CloudflareInterceptor needs a FlareSolverr and ships with that integration

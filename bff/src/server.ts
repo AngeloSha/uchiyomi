@@ -9,7 +9,7 @@ import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
 import rateLimit from '@fastify/rate-limit';
 import compress from '@fastify/compress';
-import { env } from './env';
+import { env, logLevel } from './env';
 import { pool, q, one } from './lib/db';
 import { runtime } from './lib/runtime';
 import { reapStaleTemp } from './lib/fsAtomic';
@@ -129,7 +129,8 @@ async function main() {
   console.log(`[sources] ${listSources().length} source(s) available (${bi} built-in, ${ls.loaded} pack, ${cs} custom${swNote})`);
 
   const app = Fastify({
-    logger: { level: env.NODE_ENV === 'production' ? 'info' : 'debug' },
+    // LOG_LEVEL (env.ts logLevelOf): `info` in production unless the operator says otherwise.
+    logger: { level: logLevel },
     // Desktop: nothing sits in front of the app, so a forwarded-for header is only ever something a local
     // process made up. Elsewhere only the peers TRUST_PROXY names may set it (env.ts): trusting every peer let a client
     // on the app port choose its own address for the rate limits. Reintroduce `true`: trustProxy.test.ts sees 14

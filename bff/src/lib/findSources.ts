@@ -90,6 +90,7 @@ import { runtime } from './runtime';
 import { checkRunning } from './sourceWatchdog';
 import { beginRun, endRun, stopRequested, type RunCard } from './downloadJobs';
 import { say, type Part } from './said';
+import { logLevel } from '../env';
 import { updateSeries } from './updater';
 import { PACE_MS } from './bulkNewest';
 import { scheduleHealthSummaryRefresh } from './healthSummary';
@@ -113,6 +114,39 @@ import { followerLimit } from './followLimit';
 export const FIND_SERIES_WALL_MS = 90_000;
 /** Sources that carry the title before a series stops asking more: the fill scan's SCAN_ENOUGH. */
 export const FIND_CARRIERS = 3;
+
+/**
+ * LOG_LEVEL=debug (#316): each series' run in the server log, one line a step -- the names it searched each source
+ * under, what each answered, the hit it took, the verdict with its numbers, and how the series ended -- for an admin
+ * asking why a run found nothing for a series another source plainly lists. Mutable for the tests alone.
+ */
+export const findLog = { on: logLevel === 'debug' || logLevel === 'trace' };
+const trace = (line: string) => { if (findLog.on) console.log(`[find] ${line}`); };
+const quoted = (t: string) => JSON.stringify(t);
+
+/** What a source's search brought back, in a log line: how many, the first few titles, and the hit taken. */
+function heardLine(term: string, results: readonly SourceSeries[] | null, hit: SourceSeries | null): string {
+  if (!results) return `${quoted(term)}: no answer`;
+  if (!results.length) return `${quoted(term)}: no results`;
+  const titles = results.slice(0, 5).map((r) => quoted(r.title)).join(', ') + (results.length > 5 ? ', …' : '');
+  return `${quoted(term)}: ${results.length} result${results.length === 1 ? '' : 's'} (${titles}), `
+    + (hit ? `took ${quoted(hit.title)}` : 'none of them is this title');
+}
+
+/** A candidate's verdict, in a log line, with the numbers it was judged by. */
+function judgementLine(j: Judgement, primary: PrimaryFacts, prefs: ReleasePrefs): string {
+  const theirs = quoted(j.theirTitle ?? '?');
+  const cover = j.coverage !== null ? `, coverage ${Math.round(j.coverage * 100)}%` : '';
+  if (j.why === 'ok') return `${theirs} lines up${cover}`;
+  if (j.why === 'title_differs') return `${theirs} refused: its own title is not ours (${quoted(primary.title)}) or one of its other names`;
+  if (j.why === 'numbering_differs') {
+    const nums = chooseReleases(j.chapters ?? [], prefs).releases.map((c) => c.number);
+    const whole = (xs: number[]) => new Set(xs.map((n) => Math.floor(n))).size;
+    return `${theirs} refused: its chapter numbers do not line up with ours -- ours ${assess(primary.numbers, nums).matched}`
+      + ` of ${whole(primary.numbers)} found there, theirs ${assess(nums, primary.numbers).matched} of ${whole(nums)} found here${cover}`;
+  }
+  return `${theirs} could not be judged: ${j.why}`;
+}
 /** How often a run waiting on a sweep, a repair or the daily check looks again. */
 export const FIND_QUIET_POLL_MS = 5_000;
 /** How long a series' main source may take to give its description, for the other names it lists. */
@@ -599,8 +633,10 @@ async function findFor(
   s: { id: string; title: string }, a: ActiveRun, progress: FoundSource[],
   replacing?: { dead: ReadonlyArray<{ sourceId: string; name: string }>; dropped: Array<{ sourceId: string; name: string }> },
 ): Promise<{ result: FindResult; asked: boolean }> {
-  const end = (why: FindWhy | undefined, asked: boolean) =>
-    ({ result: { seriesId: s.id, title: s.title, followed: [...progress], ...(why && !progress.length ? { why } : {}) }, asked });
+  const end = (why: FindWhy | undefined, asked: boolean) => {
+    trace(`${quoted(s.title)}: ${progress.length ? `followed ${progress.map((p) => p.name).join(', ')}` : why ?? 'nothing found'}`);
+    return { result: { seriesId: s.id, title: s.title, followed: [...progress], ...(why && !progress.length ? { why } : {}) }, asked };
+  };
   const row = await one<{ title: string; source_id: string | null; source_series_id: string | null; summary: string | null; numbering: string | null }>(
     `SELECT s.title, s.source_id, s.source_series_id, s.summary, s.numbering FROM lib_series s WHERE s.id = $1 AND ${visibleToAll('s')}`, [s.id]);
   // Hidden or merged away since the run started: nothing to follow onto, and nothing asked.
@@ -681,6 +717,8 @@ async function findFor(
   }
 
   const primary: PrimaryFacts = { title: row.title, altTitles: names, numbers, lang: lang.lang, exactLang: lang.sameBaseSibling };
+  trace(`${quoted(row.title)}: asking ${order.length} source${order.length === 1 ? '' : 's'} under ${[row.title, ...names].map(quoted).join(', ')}`
+    + ` -- ${new Set(numbers.map((n) => Math.floor(n))).size} chapter numbers of ours to line up`);
   const prefs = await effectivePrefsFor(await readSeriesPrefs(s.id), 0);
   const deadline = Date.now() + wallMs;
   const left = () => deadline - Date.now();
@@ -699,7 +737,8 @@ async function findFor(
       if (!src) return;
       if (left() < MIN_TRY_MS) { cut = true; return; }
       asked = true;
-      const found = await searchByNames(src, row.title, names, left);
+      const found = await searchByNames(src, row.title, names, left, undefined, undefined,
+        findLog.on ? (term, results, hit) => trace(`${quoted(row.title)} · ${src.name}: ${heardLine(term, results, hit)}`) : undefined);
       if (found.answered) answered++;
       // v0.80.0: what it said is kept for the scout and the hunt (lib/scoutMemory.ts), as theirs is.
       if (found.answered && !found.hit) void recordVerdict(s.id, id, 'no_hit', { ourCount: numbers.length });
@@ -710,6 +749,7 @@ async function findFor(
       const j = await bounded(judgeCandidate(primary, { source: id, sourceId: found.hit.sourceId }, { prefs, health }), left())
         .catch(() => null);
       if (!j) { cut = true; return; }
+      trace(`${quoted(row.title)} · ${j.name}: ${judgementLine(j, primary, prefs)}`);
       judged[i] = j;
       hits[i] = found.hit;
       void rememberJudgement(s.id, j, numbers.length);

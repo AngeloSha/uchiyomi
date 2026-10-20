@@ -96,6 +96,9 @@ export async function searchByNames(
   left: () => number,
   searchMs = HUNT_SEARCH_MS,
   admit?: () => Promise<boolean>,
+  // What each name brought back -- null when the source did not answer -- and the hit taken from it: Find other
+  // sources' log at LOG_LEVEL=debug (#316).
+  heard?: (term: string, results: readonly SourceSeries[] | null, hit: SourceSeries | null) => void,
 ): Promise<{ hit: SourceSeries | null; answered: boolean; paused: boolean }> {
   let answered = false;
   for (const [i, term] of [title, ...names].entries()) {
@@ -106,9 +109,10 @@ export async function searchByNames(
     if (admit && !(await admit().catch(() => false))) return { hit: null, answered, paused: true };
     const results = await bounded(src.search(term), Math.min(budgetFor(src, searchMs), ms)).catch(() => null);
     // A throw on one name is a throw on the next: the site, the solver or the extension is down for all of them.
-    if (!results) break;
+    if (!results) { heard?.(term, null, null); break; }
     answered = true;
     const hit = i === 0 ? pickBest(results, term) : exactHit(results, term);
+    heard?.(term, results, hit?.sourceId ? hit : null);
     if (hit?.sourceId) return { hit, answered, paused: false };
   }
   return { hit: null, answered, paused: false };

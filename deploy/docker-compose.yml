@@ -35,6 +35,8 @@ services:
       PUID: ${PUID:-}
       PGID: ${PGID:-}
       NODE_ENV: production
+      # How much the log says (v0.92.0): info, warn, or debug for what Find other sources searched and why.
+      LOG_LEVEL: ${LOG_LEVEL:-}
       PORT: "3000"
       # No DATABASE_URL: that is the switch. Set one here and the embedded database is not started.
       LIBRARY_BACKEND: ${LIBRARY_BACKEND:-owned}
