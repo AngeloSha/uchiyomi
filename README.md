@@ -188,7 +188,7 @@ sites' terms and your local law.
 - **Multi-user** — accounts, per-user progress and favourites, streaks and a leaderboard.
 - **Chapter comments** — react to a chapter with one tap or say something about it, right where the chapter ends in
   the reader, and see which chapters the household talked about on the series page. Only members who can open the
-  series see it.
+  series see it, and anyone can switch it off for themselves.
 - **Age ratings and an 18+ library** that stays off the home screen, the grid and search until somebody asks
   for it, with a per-member rating cap, a whole source rated *Adult only* when its extension does not say so, and a
   per-member permission to add series at all.

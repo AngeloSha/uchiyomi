@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.90.0 — 2026-10-20
+
+**Comments and reactions can be switched off, each for themselves, and the Komga extension's WebView opens the series or
+the chapter you were on.** The WebView fix is **TIGamingTV**'s report
+([#312](https://github.com/AngeloSha/uchiyomi/issues/312)). Thank you.
+
+### Switch comments and reactions off
+
+- In **Profile → Settings → Reading → Comments and reactions**, off hides the household's comments, reactions and their
+  counts for you everywhere: the line between two chapters, the key on a chapter's last page, the comments key in the
+  top bar, the end card and the series page. You get no comment alerts either.
+- **It's yours alone.** It is saved to your account, so every device you sign in on follows it. Everyone else still sees
+  the household's talk, including what you wrote before.
+- It is offered only where there is talk: a server with one account, or Uchiyomi Desktop, has nothing to switch off.
+
+### The Komga extension's WebView opens the right page
+
+- In Mihon, Tachimanga and other apps reading Uchiyomi through the **Komga** extension, **WebView** on a series or on a
+  chapter opened Uchiyomi's library. The extension opens Komga's own web addresses (`/series/<id>`, `/book/<id>`), and
+  Uchiyomi now sends them to its series page and its reader. WebView on the source still opens the library.
+- Both ways of running Uchiyomi do it: the single container, and the two-container setup's nginx.
+
+### Upgrading
+
+- Nothing to do. If you run the two-container setup with a copy of `web/nginx.conf` of your own, add its two new
+  `location ~` lines for the WebView fix.
+
 ## v0.89.0 — 2026-10-20
 
 **Badges unlock frames for your avatar, you can merge or split double pages yourself, and a series can follow up to ten
