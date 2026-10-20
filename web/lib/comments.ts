@@ -5,12 +5,14 @@
 //
 // The rules are the server's (bff lib/comments.ts): only members who may open the series see its talk; a face is
 // someone who reacted or commented, never someone who read; Incognito reading reads the talk but cannot add to it; and
-// there is none on Uchiyomi Desktop or on a server with one member (`on`).
+// there is none on Uchiyomi Desktop or on a server with one member (`on`), nor, since v0.90.0, for an account that
+// switched Comments and reactions off.
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from './api';
+import { useAuth } from './auth';
 import { isDesktop } from './desktop';
-import { t as tr } from './i18n';
+import { keys, t as tr } from './i18n';
 
 /** The six reactions, in the order every surface shows them. The server takes exactly these strings. */
 export const REACTIONS = ['❤️', '😂', '😭', '😱', '🔥', '🤯'] as const;
@@ -57,24 +59,42 @@ export function useChapterTalk(bookId: string | null | undefined, enabled = true
   });
 }
 
+/**
+ * The switch (v0.90.0, the owner's "a toggle in settings if someone wants to disable it"): its name and what it does, on
+ * Profile → Settings → Reading, offered where the household has talk (`talk` on /auth/me). The account's, app_settings
+ * `comments`, read by the server too (bff lib/comments.ts talkOnFor): off answers this account `on: false` everywhere
+ * and sends it no alert about a conversation. Nobody else's talk changes, and what it wrote stays.
+ */
+export const COMMENTS_TEXT = keys(
+  'Comments and reactions',
+  'Your household’s comments and reactions, at the end of each chapter and on the series page. Off hides them, and their alerts, on all your devices. It changes nothing for anyone else.',
+);
+
+/** Whether the account wants the household's talk, as its settings say: on unless it is exactly `false`. */
+export const talkWantedOf = (settings: Record<string, unknown> | null | undefined): boolean => settings?.comments !== false;
+
 const ON_KEY = 'uchiyomi.talkOn';
 /**
  * Whether this server has talk to show, as this browser last heard: the reader lays out its strips from the first
  * render with it, and the first answer (`probe`, the chapter on screen) confirms or corrects it. Read after mount -- the
- * static export renders without storage. Off on Uchiyomi Desktop whatever was heard.
+ * static export renders without storage. Off on Uchiyomi Desktop whatever was heard, and from the first render for an
+ * account that switched Comments and reactions off, which asks nothing at all. Reintroduce by dropping `wanted`: the
+ * "a switched-off account" pin in comments.test.ts fails.
  */
 export function useTalkOn(probe: string | null | undefined): boolean {
+  const { user } = useAuth();
+  const wanted = talkWantedOf(user?.settings);
   const [on, setOn] = useState(false);
   useEffect(() => {
     try { setOn(localStorage.getItem(ON_KEY) === '1'); } catch { /* private mode: wait for the answer */ }
   }, []);
-  const { data } = useChapterTalk(probe);
+  const { data } = useChapterTalk(probe, wanted);
   useEffect(() => {
     if (!data) return;
     setOn(data.on);
     try { localStorage.setItem(ON_KEY, data.on ? '1' : '0'); } catch { /* nothing to remember it in */ }
   }, [data]);
-  return on && !isDesktop();
+  return on && wanted && !isDesktop();
 }
 
 /** Each of the six with how many chose it and whether you did, in the six's order. */

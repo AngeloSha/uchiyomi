@@ -265,6 +265,12 @@ components:
             connected tracker it is linked to as Plan to Read (AniList PLANNING, MyAnimeList plan_to_read, Kitsu
             planned), only where the account's list has no entry for it yet -- an existing entry is never changed --
             and never under Incognito reading.
+        comments:
+          type: boolean
+          description: >-
+            Since v0.90.0, Comments and reactions, on unless exactly false: false hides the household's chapter talk
+            for this account alone (the comments routes answer it `on: false`) and sends it no alert about a
+            conversation. What it already wrote stays.
         reader:
           type: object
           additionalProperties: true
@@ -1391,7 +1397,7 @@ paths:
     get:
       tags:
         - auth
-      summary: "The calling account: id, username, role, permissions."
+      summary: "The calling account: id, username, role, permissions, settings and, since v0.90.0, `talk`: whether this server has chapter comments."
       operationId: getAuthMe
       security:
         - bearer: []
@@ -5567,8 +5573,8 @@ paths:
         - comments
       summary: A chapter's comments, oldest first, and its reactions.
       description: >-
-        `on` is false where there is nobody to talk to (one enabled member, the Komga backend): the web then shows
-        nothing. Each comment and reaction names its member as `{id, name, avatar}` and says whether it is the
+        `on` is false where there is nobody to talk to (one enabled member, the Komga backend), or, since v0.90.0, when
+        the caller switched Comments and reactions off (settings `comments: false`): the web then shows nothing. Each comment and reaction names its member as `{id, name, avatar}` and says whether it is the
         caller's own (`mine`). A chapter in a series the caller may not open answers 404, as a missing one does.
       operationId: getApiBooksIdComments
       parameters:
@@ -5593,7 +5599,8 @@ paths:
       description: >-
         Plain text, 1 to 2000 characters after trimming. `page` is the page it was written on, when written in the
         reader. Refused with 403 `incognito` while the account's Incognito reading is on. Members who commented on
-        the chapter before, and may still open the series, get a push on devices with alerts on. Twenty a minute
+        the chapter before, and may still open the series, get a push on devices with alerts on (since v0.90.0, not
+        those who switched Comments and reactions off). Twenty a minute
         per account.
       operationId: postApiBooksIdComments
       parameters:

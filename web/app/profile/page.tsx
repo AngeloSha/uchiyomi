@@ -85,7 +85,7 @@ export default function ProfilePage() {
 }
 
 function ProfileInner() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
   const params = useSearchParams();
@@ -156,7 +156,7 @@ function ProfileInner() {
   return (
     <div className="min-h-screen-d px-4 lg:px-0" data-profile-console>
       <ConsoleLayout index={PROFILE_SETTINGS} label={tr('Profile')} views={views} home="you"
-        conds={{ web: !desktop, 'local-accounts': true, extensions: false, pointer: settings.pointer }}
+        conds={{ web: !desktop, 'local-accounts': true, extensions: false, pointer: settings.pointer, talk: !desktop && !!user?.talk }}
         hero={(mode) => (
           <ProfileHero mode={mode} stats={stats} anchorId={anchorId} onDeckBook={home?.onDeck?.[0]?.id} shelf={shelf}
             onGoal={() => setGoalOpen(true)} onQuickGoal={saveGoal} />

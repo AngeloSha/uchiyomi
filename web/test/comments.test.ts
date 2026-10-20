@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REACTIONS, commentsLine, myReaction, reactedLine, reactionCounts, type TalkReaction } from '../lib/comments';
+import { REACTIONS, commentsLine, myReaction, reactedLine, reactionCounts, talkWantedOf, type TalkReaction } from '../lib/comments';
 
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -68,4 +68,31 @@ test('the reader reserves the strip it draws', () => {
   const talk = read('components/ChapterTalk.tsx');
   const seam = talk.slice(talk.indexOf('export function ChapterSeam'));
   assert.match(seam, /style=\{\{ height: SEAM_H \}\}/, 'and the strip is exactly SEAM_H tall');
+});
+
+test('Comments and reactions off: nothing asked, nothing drawn, for this account alone (v0.90.0)', () => {
+  // The owner's "a toggle in settings if someone wants to disable it". On unless exactly false.
+  assert.equal(talkWantedOf(undefined), true, 'an account that never chose has talk');
+  assert.equal(talkWantedOf({}), true);
+  assert.equal(talkWantedOf({ comments: true }), true);
+  assert.equal(talkWantedOf({ comments: false }), false);
+  // a switched-off account: the reader asks nothing and draws nothing from the first render, whatever this browser
+  // heard last. Reintroduce by dropping `wanted` from useTalkOn: these fail.
+  const lib = read('lib/comments.ts');
+  const hook = lib.slice(lib.indexOf('export function useTalkOn'));
+  assert.match(hook, /const wanted = talkWantedOf\(user\?\.settings\);/);
+  assert.match(hook, /useChapterTalk\(probe, wanted\)/, 'nothing is asked while it is off');
+  assert.match(hook, /return on && wanted && !isDesktop\(\);/, 'and nothing is drawn, before the first answer too');
+  // the series page likewise: no counts, no sheet from a push's link, and no request.
+  const series = read('app/series/page.tsx');
+  assert.match(series, /enabled: !!id && !isDesktop\(\) && talkWanted,/);
+  assert.match(series, /const talkOn = !!talkData\?\.on && talkWanted;/);
+  // The switch: in Reading, only where the household has talk, saved to the account, and every talk asked again.
+  const settings = read('components/ProfileSettings.tsx');
+  assert.match(settings, /\{!isDesktop\(\) && user\?\.talk && \(\s*<SwitchRow id="comments" label=\{tr\(COMMENTS_TEXT\[0\]\)\} help=\{tr\(COMMENTS_TEXT\[1\]\)\} on=\{talkWanted\} onChange=\{saveTalk\} \/>/);
+  assert.match(settings, /api\('\/api\/settings', \{ method: 'PUT', json: \{ comments: next \} \}\)/);
+  assert.match(settings, /invalidateQueries\(\{ queryKey: \['comments'\] \}\)/);
+  assert.match(settings, /invalidateQueries\(\{ queryKey: \['series-comments'\] \}\)/);
+  const profile = read('app/profile/page.tsx');
+  assert.match(profile, /talk: !desktop && !!user\?\.talk/, 'the row and its search entry follow the household');
 });

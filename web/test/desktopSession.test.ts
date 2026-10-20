@@ -240,7 +240,7 @@ test('the consoles lose exactly the pages Desktop has none of', async () => {
   const { ADMIN_SETTINGS } = await import('../lib/settingsIndex.admin');
   const { PROFILE_SETTINGS } = await import('../lib/settingsIndex.profile');
   const gone = (index: typeof ADMIN_SETTINGS) => index.categories
-    .filter((c) => !shown(c.when, { web: false, 'local-accounts': true, extensions: true, pointer: true })).map((c) => c.id);
+    .filter((c) => !shown(c.when, { web: false, 'local-accounts': true, extensions: true, pointer: true, talk: false })).map((c) => c.id);
   assert.deepEqual(gone(ADMIN_SETTINGS), ['members', 'sessions'], 'Desktop lists a page for other people, or loses one it has');
   assert.deepEqual(gone(PROFILE_SETTINGS), ['device', 'account'], 'Desktop lists This device or Account, or loses another page');
 });

@@ -31,7 +31,7 @@ const PAGES: Array<[SettingsIndex, string[]]> = [
   [PROFILE_SETTINGS, ['components/ProfileSettings.tsx']],
   [ADMIN_SETTINGS, ['components/AdminSettings.tsx', 'components/ArchiveSettings.tsx', 'components/AdminNotifications.tsx', 'components/TranslateSettings.tsx']],
 ];
-const ALL: Record<SettingsCondition, boolean> = { web: true, 'local-accounts': true, extensions: true, pointer: true };
+const ALL: Record<SettingsCondition, boolean> = { web: true, 'local-accounts': true, extensions: true, pointer: true, talk: true };
 const en = (k: string) => k;
 const ids = (files: string[]) => new Set(files.flatMap((f) => [...code(read(f)).matchAll(/\bid="([a-z0-9-]+)"/g)].map((m) => m[1])));
 /** An id on these pages that is no row: an input's own id, which its label points at. */

@@ -19,7 +19,7 @@ import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
 import { IcChevronLeft, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcHourglass, IcGrid, IcRows, IcComment } from '@/components/icons';
-import { commentsLine, seriesTalkKey, type ChapterTalkCount } from '@/lib/comments';
+import { commentsLine, seriesTalkKey, talkWantedOf, type ChapterTalkCount } from '@/lib/comments';
 import { ChapterTalkSheet } from '@/components/ChapterTalk';
 import { t as tr } from '@/lib/i18n';
 import { statusText } from '@/lib/activity';
@@ -833,14 +833,16 @@ function SeriesInner() {
   const { data: series } = useQuery({ ...seriesQuery(id), enabled: !!id });
   const { data: books } = useQuery({ ...seriesBooksQuery(id), enabled: !!id });
   // v0.87.0: which chapters have talk, and how much (GET /api/series/:id/comments); nothing while `on` is false, and never
-  // asked on Uchiyomi Desktop, where the route does not exist.
+  // asked on Uchiyomi Desktop, where the route does not exist. v0.90.0: nor by an account that switched Comments and
+  // reactions off (lib/comments.ts talkWantedOf).
+  const talkWanted = talkWantedOf(user?.settings);
   const { data: talkData } = useQuery({
     queryKey: seriesTalkKey(id),
     queryFn: () => api<{ on: boolean; content: ChapterTalkCount[] }>(`/api/series/${id}/comments`),
-    enabled: !!id && !isDesktop(),
+    enabled: !!id && !isDesktop() && talkWanted,
     staleTime: 60_000,
   });
-  const talkOn = !!talkData?.on;
+  const talkOn = !!talkData?.on && talkWanted;
   const talkOf = useMemo(() => new Map((talkData?.content ?? []).map((x) => [x.bookId, x])), [talkData]);
   const [talkFor, setTalkFor] = useState<string | null>(null);
   const talkedOf = useRef<string | null>(null);

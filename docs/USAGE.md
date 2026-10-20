@@ -1641,8 +1641,11 @@ recorded in the audit log).
   household what you read.
 - **Alerts:** a new comment sends a push notification to the members who already commented on that chapter, on
   devices where **New-chapter alerts** is on (Profile → Settings → This device). Nobody else is notified.
-- On a server with only one account there is nobody to talk to, so none of this shows. Uchiyomi Desktop doesn't have
-  it either.
+- **Turning it off** (since v0.90.0): **Profile → Settings → Reading → Comments and reactions**. Off hides the
+  comments, the reactions and their counts everywhere for you, and you get no comment alerts, on every device you
+  sign in on. It's yours alone: everyone else still sees the household's talk, including what you wrote before.
+- On a server with only one account there is nobody to talk to, so none of this shows, the switch included. Uchiyomi
+  Desktop doesn't have it either.
 
 ### Skipping the pages that are not the story
 

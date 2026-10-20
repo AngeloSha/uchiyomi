@@ -8,7 +8,8 @@
 // - only its author edits a comment; its author or an admin deletes it, and an admin's removal is audited;
 // - Incognito reading reads the talk but cannot add to it;
 // - a server with one member has nobody to talk to (`on`);
-// - a new comment reaches only the members already in that chapter's conversation.
+// - a new comment reaches only the members already in that chapter's conversation;
+// - a member who switched Comments and reactions off (v0.90.0) is told there is none, and hears of no conversation.
 //
 // Skipped unless TEST_DATABASE_URL is set.
 import test from 'node:test';
@@ -258,6 +259,29 @@ test('chapter comments and reactions', { skip }, async (t) => {
       assert.ok(push.body.startsWith('Alice: a b '), 'one line');
       assert.ok(push.body.length <= 'Alice: '.length + 140, 'cut to fit a notification');
       assert.equal(push.url, `/series/?id=${OPEN}&comments=${BOOK}`);
+    });
+
+    await t.test('a member who switched comments off is told there is none, and hears of no conversation', async () => {
+      // v0.90.0, Profile → Settings → Reading → Comments and reactions: app_settings `comments: false`, Bob's alone.
+      const setComments = (u: string, v: boolean | null) => (v === null
+        ? q(`UPDATE app_settings SET data = data - 'comments' WHERE user_id = $1`, [ids[u]])
+        : q(`INSERT INTO app_settings (user_id, data) VALUES ($1, jsonb_build_object('comments', $2::boolean))
+             ON CONFLICT (user_id) DO UPDATE SET data = app_settings.data || EXCLUDED.data`, [ids[u], v]));
+      comments.resetTalkOn();
+      assert.ok((await comments.conversationRecipients(BOOK, ids['cmt-alice'])).includes(ids['cmt-bob']), 'Bob is in the conversation');
+      await setComments('cmt-bob', false);
+      try {
+        assert.equal((await talk('cmt-bob', BOOK)).json().on, false, 'his answer says there is none');
+        const series = await app.inject({ method: 'GET', url: `/api/series/${OPEN}/comments`, headers: as('cmt-bob') });
+        assert.equal(series.json().on, false, 'nor on the series page');
+        assert.equal((await talk('cmt-alice', BOOK)).json().on, true, 'it changes nothing for anyone else');
+        assert.ok(!(await comments.conversationRecipients(BOOK, ids['cmt-alice'])).includes(ids['cmt-bob']), 'and he is sent no alert');
+        await setComments('cmt-bob', true);
+        assert.equal((await talk('cmt-bob', BOOK)).json().on, true, 'on again');
+      } finally {
+        await setComments('cmt-bob', null);
+      }
+      assert.equal((await talk('cmt-bob', BOOK)).json().on, true, 'on unless it is false');
     });
 
     await t.test("a member's words go with their account", async () => {

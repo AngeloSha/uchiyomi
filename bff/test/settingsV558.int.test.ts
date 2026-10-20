@@ -75,6 +75,9 @@ test('v0.55.8 personal settings contracts', { skip }, async () => {
       { avatar: { emoji: '🦊', color: 'url(https://attacker.example/beacon.png)' } },
       { avatar: { color: '#fff; background-image: url(x)' } },
       { accent: 'url(https://attacker.example/x)' },
+      // v0.90.0: Comments and reactions is read by the server on every answer about talk, so only a real boolean.
+      // Reintroduce by accepting anything: this saves with 200.
+      { comments: 'no' },
     ]) {
       const bad = await put(payload);
       assert.equal(bad.statusCode, 400, `${JSON.stringify(payload)}: ${bad.body}`);
@@ -82,6 +85,9 @@ test('v0.55.8 personal settings contracts', { skip }, async () => {
     }
     const avatar = await put({ avatar: { emoji: '🦊', color: '#7c5cff' } });
     assert.equal(avatar.statusCode, 200, avatar.body);
+    const quiet = await put({ comments: false });
+    assert.equal(quiet.statusCode, 200, quiet.body);
+    assert.equal(quiet.json().comments, false, 'v0.90.0: Comments and reactions off is saved');
   } finally {
     await app.close();
     await q("DELETE FROM users WHERE username IN ('v558-settings-a','v558-settings-b')").catch(() => {});

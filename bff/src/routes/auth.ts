@@ -38,6 +38,7 @@ import { desktopFailAudit, desktopSecretMatches, isDesktop, isLoopback } from '.
 import { desktopUserId, ensureDesktopUser } from '../lib/desktopUser';
 import { authMode, bootstrapSub, mayBootstrap, rescueAdmin, ssoOnly } from '../lib/authMode';
 import { applyMemberDefaults } from '../lib/memberDefaults';
+import { talkOn } from '../lib/comments';
 import { verifyLoginPassword } from '../lib/loginPassword';
 
 const loginBody = z.object({
@@ -93,6 +94,9 @@ async function userPayload(userId: string) {
     sso: !!user?.sso,
     perms: user?.perms ?? {},
     settings: settings?.data ?? {},
+    // v0.90.0: whether this server has chapter comments at all (lib/comments.ts talkOn: the owned library and two or more
+    // members), so Profile → Settings → Reading offers Comments and reactions only where there is talk to switch off.
+    talk: await talkOn(),
   };
 }
 

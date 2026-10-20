@@ -85,6 +85,27 @@ export async function talkOn(now = Date.now()): Promise<boolean> {
   return on;
 }
 
+/**
+ * Whether this account wants the household's talk (v0.90.0, the owner's "a toggle in settings if someone wants to
+ * disable it"): Profile → Settings → Reading → Comments and reactions, app_settings `comments`, on unless it is `false`.
+ * Off is for this account alone. Every surface hides because the routes answer it `on: false`, and it hears of no
+ * conversation (conversationRecipients). What it already wrote stays for everyone else.
+ */
+export async function talkWanted(uid: string): Promise<boolean> {
+  const r = await one<{ off: boolean }>(`SELECT data->'comments' = 'false'::jsonb AS off FROM app_settings WHERE user_id = $1`, [uid]);
+  return !r?.off;
+}
+
+/**
+ * `on` as one member is told it: the household has talk (talkOn) and this account has not switched it off (talkWanted).
+ * Reintroduce by answering talkOn() alone: "a member who switched comments off is told there is none" in
+ * chapterComments.int.test.ts still sees `on`.
+ */
+export async function talkOnFor(uid: string): Promise<boolean> {
+  const [household, wanted] = await Promise.all([talkOn(), talkWanted(uid)]);
+  return household && wanted;
+}
+
 /** A chapter's comments, oldest first, and its reactions, for the viewer `uid`. The caller has checked the chapter is theirs to see. */
 export async function chapterTalk(bookId: string, uid: string): Promise<{ comments: CommentOut[]; reactions: ReactionOut[] }> {
   const [comments, reactions] = await Promise.all([
@@ -171,9 +192,12 @@ export async function seriesTalk(seriesId: string): Promise<ChapterTalkCount[]> 
 export async function conversationRecipients(bookId: string, authorId: string): Promise<string[]> {
   const book = await one<{ series_id: string }>('SELECT series_id FROM lib_books WHERE id = $1', [bookId]);
   if (!book) return [];
+  // v0.90.0: nor a member who switched comments off (talkWanted). Reintroduce by dropping the NOT EXISTS: "a member who
+  // switched comments off is told there is none" in chapterComments.int.test.ts still alerts them.
   const people = await q<{ user_id: string; role: string }>(
     `SELECT DISTINCT c.user_id, u.role FROM chapter_comments c JOIN users u ON u.id = c.user_id
-      WHERE c.book_id = $1 AND c.user_id <> $2 AND NOT u.disabled`,
+      WHERE c.book_id = $1 AND c.user_id <> $2 AND NOT u.disabled
+        AND NOT EXISTS (SELECT 1 FROM app_settings s WHERE s.user_id = c.user_id AND s.data->'comments' = 'false'::jsonb)`,
     [bookId, authorId],
   );
   const out: string[] = [];

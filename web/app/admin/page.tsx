@@ -127,7 +127,7 @@ function AdminInner() {
     <div className="min-h-screen-d px-4 lg:px-0" data-admin-console>
       {/* The foot of the list says which Uchiyomi this is (v0.55.4, #150): the place people looked for it. */}
       <ConsoleLayout index={ADMIN_SETTINGS} label={tr('Admin')} views={views} home="overview"
-        conds={{ web: !desktop, 'local-accounts': !settings.sso, extensions: settings.extensions, pointer: true }}
+        conds={{ web: !desktop, 'local-accounts': !settings.sso, extensions: settings.extensions, pointer: true, talk: false }}
         hero={(mode) => <AdminHero mode={mode} onBack={() => (window.history.length > 1 ? router.back() : router.push('/profile/'))} />}
         art={art?.seriesId ? <Backdrop seriesId={art.seriesId} className="absolute inset-0" /> : null}
         footer={<VersionLine />} />

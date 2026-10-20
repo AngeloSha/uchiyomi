@@ -1135,6 +1135,12 @@ export default async function personalRoutes(app: FastifyInstance) {
     if ('trackerPlanOnAdd' in data && typeof data.trackerPlanOnAdd !== 'boolean') {
       return reply.code(400).send({ error: 'bad_settings', message: 'Plan to read on add must be on or off.' });
     }
+    // v0.90.0: Comments and reactions (lib/comments.ts talkWanted), read by the server on every answer about talk and every
+    // comment's alerts, so only a real boolean. Reintroduce by accepting anything: `{ comments: 'no' }` in
+    // settingsV558.int.test.ts saves with 200.
+    if ('comments' in data && typeof data.comments !== 'boolean') {
+      return reply.code(400).send({ error: 'bad_settings', message: 'Comments and reactions must be on or off.' });
+    }
     if ('homeCollections' in data) {
       const parsed = z.array(z.string().min(1).max(64)).max(30).safeParse(data.homeCollections);
       if (!parsed.success) return reply.code(400).send({ error: 'bad_settings', message: 'Choose up to three lists for Home.' });

@@ -24,6 +24,8 @@ interface User {
   perms?: Record<string, boolean>;
   avatar?: Avatar;
   settings: Record<string, any>;
+  /** v0.90.0: whether this server has chapter comments at all (bff lib/comments.ts talkOn), for Comments and reactions. */
+  talk?: boolean;
 }
 /**
  * ⚠️ `offline` is a distinct state, not `authed` with a flag beside it.

@@ -14,7 +14,7 @@ import { viewCtxFor, type ViewCtx } from '../lib/visibility';
 import { authenticate, userIdOf, roleOf, actsAsAdmin } from '../lib/auth';
 import { incognitoOn } from '../lib/incognito';
 import { logAudit } from '../lib/audit';
-import { COMMENT_MAX, chapterTalk, isReaction, publicAvatar, seriesTalk, talkOn, type CommentOut } from '../lib/comments';
+import { COMMENT_MAX, chapterTalk, isReaction, publicAvatar, seriesTalk, talkOnFor, type CommentOut } from '../lib/comments';
 import { notifyConversation } from '../lib/push';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -53,7 +53,8 @@ export default async function commentRoutes(app: FastifyInstance) {
   app.get('/api/books/:id/comments', async (req, reply) => {
     const { id } = req.params as { id: string };
     if (!(await chapterOf(req, id))) return reply.code(404).send(NOT_FOUND);
-    const [on, talk] = await Promise.all([talkOn(), chapterTalk(id, userIdOf(req))]);
+    // v0.90.0: `on` is this member's (talkOnFor): off when the household has none, or when they switched it off.
+    const [on, talk] = await Promise.all([talkOnFor(userIdOf(req)), chapterTalk(id, userIdOf(req))]);
     return { on, ...talk };
   });
 
@@ -156,7 +157,7 @@ export default async function commentRoutes(app: FastifyInstance) {
   app.get('/api/series/:id/comments', async (req, reply) => {
     const { id } = req.params as { id: string };
     try { await komga.series(vc(req), id); } catch { return reply.code(404).send(NOT_FOUND); }
-    const [on, content] = await Promise.all([talkOn(), seriesTalk(id)]);
+    const [on, content] = await Promise.all([talkOnFor(userIdOf(req)), seriesTalk(id)]);
     return { on, content };
   });
 }

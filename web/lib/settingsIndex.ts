@@ -25,7 +25,9 @@ export type SettingsCondition =
   /** An extension engine is configured (the extension rows). */
   | 'extensions'
   /** A pointer that can hover: a computer, not a phone or tablet held alone (the rows that do nothing on touch). */
-  | 'pointer';
+  | 'pointer'
+  /** v0.90.0: the household has chapter comments -- two or more members on the owned library, not Uchiyomi Desktop. */
+  | 'talk';
 
 export interface SettingsCategory {
   /** The page's `?tab=` (lower case; an older capitalised tab name is read case-blind). */

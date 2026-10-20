@@ -30,6 +30,7 @@ import { ModeArt, RepeatedArt, ThemeArt, ToneArt, WideArt } from '@/components/s
 import { inDesktopWindow, isDesktop } from '@/lib/desktop';
 import { useIncognito } from '@/components/IncognitoBanner';
 import { INCOGNITO_TEXT } from '@/lib/incognito';
+import { COMMENTS_TEXT, talkWantedOf } from '@/lib/comments';
 import { TONES, toneOf, type Tone } from '@/lib/tone';
 import { useReduceEffects } from '@/lib/useReduceEffects';
 
@@ -386,6 +387,20 @@ function AppearanceSection() {
  * page, and the group says so.
  */
 function ReadingSection({ prefs, set }: { prefs: ReaderPrefs; set: (p: Partial<ReaderPrefs>) => void }) {
+  // v0.90.0: Comments and reactions (lib/comments.ts COMMENTS_TEXT), the account's like Show all chapters at once --
+  // optimistic, put back when the server refuses -- and only where the household has talk (`talk` on /auth/me). The
+  // talk already asked for is asked again, so a reader or a series page in another tab follows.
+  const { user, setSettings } = useAuth();
+  const qc = useQueryClient();
+  const talkWanted = talkWantedOf(user?.settings);
+  const saveTalk = async (next: boolean) => {
+    setSettings({ comments: next });
+    try { await api('/api/settings', { method: 'PUT', json: { comments: next } }); }
+    catch (e) { setSettings({ comments: !next }); throw e; }
+    // Every chapter's talk and every series' counts (lib/comments.ts talkKey, seriesTalkKey).
+    void qc.invalidateQueries({ queryKey: ['comments'] });
+    void qc.invalidateQueries({ queryKey: ['series-comments'] });
+  };
   return (
     <>
       <RowGroup title={tr('Reader')}>
@@ -400,6 +415,9 @@ function ReadingSection({ prefs, set }: { prefs: ReaderPrefs; set: (p: Partial<R
           on={prefs.autoMode} onChange={(autoMode) => set({ autoMode })} />
         <ChoiceRow id="reader-theme" label={tr('Theme')} value={prefs.theme} onChange={(theme) => set({ theme })}
           options={(['amoled', 'sepia', 'gray'] as const).map((t) => ({ value: t, label: tr(THEME_LABEL[t]), art: <ThemeArt theme={t} /> }))} />
+        {!isDesktop() && user?.talk && (
+          <SwitchRow id="comments" label={tr(COMMENTS_TEXT[0])} help={tr(COMMENTS_TEXT[1])} on={talkWanted} onChange={saveTalk} />
+        )}
       </RowGroup>
 
       <RowGroup title={tr('Pages')}

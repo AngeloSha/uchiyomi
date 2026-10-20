@@ -55,6 +55,7 @@ export const PROFILE_SETTINGS: SettingsIndex = {
     { id: 'reader-mode', cat: 'reading', label: 'Mode', keywords: ['webtoon', 'paged', 'scroll', 'swipe', 'reading mode', 'reader'] },
     { id: 'auto-mode', cat: 'reading', label: 'Pick the mode for each series', keywords: ['automatic', 'long strip', 'manga'] },
     { id: 'reader-theme', cat: 'reading', label: 'Theme', keywords: ['amoled', 'sepia', 'gray', 'grey', 'page colour'] },
+    { id: 'comments', cat: 'reading', label: 'Comments and reactions', when: ['web', 'talk'], keywords: ['comments', 'reactions', 'emoji', 'talk', 'discussion', 'household', 'hide comments', 'turn off comments'] },
     { id: 'fit', cat: 'reading', label: 'Fit', keywords: ['fit width', 'original size', 'zoom'] },
     { id: 'wide-pages', cat: 'reading', label: 'Wide pages', keywords: ['double page', 'spread', 'landscape', 'rotate', 'split'] },
     { id: 'repeated-pages', cat: 'reading', label: 'Repeated pages', keywords: ['credits', 'ads', 'adverts', 'junk pages', 'recruitment'] },
