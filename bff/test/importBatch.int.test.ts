@@ -58,6 +58,8 @@ const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
 /** Set by the busy-guard and discard tests to widen the race window; every other test leaves this at 0. */
 let searchDelayMs = 0;
+/** Hold the fake resolver at an explicit boundary when asserting its in-flight state. */
+let searchGate: Promise<void> | undefined;
 /** Slows every add (getSeries) so a GET or a DELETE can land while /run is mid-loop. */
 let seriesDelayMs = 0;
 /** Counts every getPageUrls call across all adapters -- chapterFrom:'none' must never make one. */
@@ -95,6 +97,7 @@ function fakeAdapter() {
     id: FAKE, name: 'Fake Source', preferredOrder: 0,
     async search(term: string) {
       searchCalls++;
+      if (searchGate) await searchGate;
       if (searchDelayMs) await sleep(searchDelayMs);
       const t = term.toLowerCase();
       const hit = Object.keys(FAKE_TITLES).find((k) => t === k) ?? Object.keys(FAKE_TITLES).find((k) => t.includes(k));
@@ -244,6 +247,8 @@ test('a batch resolves each title on its own, offers the pick, and only /run add
   let batchId = '';
   let fakeCandidateId = '';
   let unknownCandidateId = '';
+  let releaseSearch = () => {};
+  searchGate = new Promise<void>((resolve) => { releaseSearch = resolve; });
 
   try {
     await t.test('POST /batches parses the titles and starts resolving immediately', async () => {
@@ -259,7 +264,13 @@ test('a batch resolves each title on its own, offers the pick, and only /run add
 
     await t.test('nothing is added while it resolves', async () => {
       // Reintroduce by calling addSeriesFromSource from the resolve loop as soon as a row matches.
-      assert.equal((await q(`SELECT count(*)::int AS n FROM lib_series WHERE source_series_id = 'fm-1'`))[0].n, 0);
+      try {
+        await waitUntil(() => searchCalls > 0, 'the gated resolver to enter search');
+        assert.equal((await q(`SELECT count(*)::int AS n FROM lib_series WHERE source_series_id = 'fm-1'`))[0].n, 0);
+      } finally {
+        searchGate = undefined;
+        releaseSearch();
+      }
     });
 
     await t.test('the resolve pass finds the real match and leaves the unmatched title alone', async () => {
@@ -333,6 +344,8 @@ test('a batch resolves each title on its own, offers the pick, and only /run add
       assert.equal(r.json().error, 'nothing_to_import');
     });
   } finally {
+    searchGate = undefined;
+    releaseSearch();
     if (batchId) await q('DELETE FROM import_batches WHERE id = $1', [batchId]);
     // This test's /run step actually adds "Fake Manga" to the library (that is what it proves) -- clean it
     // up so a later test in the same run does not find it already owned and default it to skipped.
