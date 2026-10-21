@@ -3,6 +3,7 @@ import Fastify, { type FastifyReply, type FastifyRequest, type FastifyServerOpti
 import { q, one } from './db';
 import { env } from '../env';
 import { isDesktop } from './desktop';
+import { clientZone, type Zone } from './clientAddr';
 
 export const REFRESH_COOKIE = 'yomi_rt';
 // Stateless JWT cookie that authorizes <img> requests to /img/* (which can't send a Bearer header).
@@ -145,11 +146,15 @@ export async function resolveOpdsBasic(authHeader?: string): Promise<OpdsIdentit
 export const refreshExpiresAt = () => Date.now() + env.REFRESH_TTL_DAYS * 24 * 60 * 60 * 1000;
 
 /**
- * How a session was entered (refresh_tokens.via), written once at sign-in and carried through every rotation. Each of
- * these carries a credential; a session entered without one -- a profile that opens without a password -- will be held
- * to the local network, which is why the way in is kept at all.
+ * How a session was entered (refresh_tokens.via), written once at sign-in and carried through every rotation. All but
+ * `switch` carry a credential. A `switch` session was opened without one, from another account's session, into a
+ * profile that opens at home: it is good only from the local network (clientZone),
+ * on every request, and it creates no credential (requireCredentialSession).
  */
-export type SessionVia = 'password' | 'oidc' | 'desktop' | 'register' | 'setup';
+export type SessionVia = 'password' | 'oidc' | 'desktop' | 'register' | 'setup' | 'switch';
+
+/** A session entered without a credential: held to the local network. A row from before the column (null) had one. */
+export const withoutCredential = (via: string | null | undefined): boolean => via === 'switch';
 
 /**
  * Issue a fresh opaque refresh token for a new sign-in and persist its hash. Returns the raw token.
@@ -177,17 +182,24 @@ export async function issueRefreshToken(
   return token;
 }
 
+/** A live refresh token's session: who, which device, which session, how it was entered and until when. */
+export interface LiveSession {
+  userId: string; id: string; deviceId: string | null; deviceName: string | null;
+  sessionId: string; via: string | null; expiresAt: Date;
+}
+
 /** Validate a refresh token; returns the owning user id + device info, or null. */
-export async function validateRefreshToken(
-  token: string,
-): Promise<{ userId: string; id: string; deviceId: string | null; deviceName: string | null } | null> {
-  const row = await one<{ id: string; user_id: string; device_id: string | null; device_name: string | null }>(
-    `SELECT id, user_id, device_id, device_name FROM refresh_tokens
+export async function validateRefreshToken(token: string): Promise<LiveSession | null> {
+  const row = await one<{ id: string; user_id: string; device_id: string | null; device_name: string | null; session_id: string; via: string | null; expires_at: Date }>(
+    `SELECT id, user_id, device_id, device_name, COALESCE(session_id, id) AS session_id, via, expires_at FROM refresh_tokens
      WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
      LIMIT 1`,
     [sha256(token)],
   );
-  return row ? { userId: row.user_id, id: row.id, deviceId: row.device_id, deviceName: row.device_name } : null;
+  return row ? {
+    userId: row.user_id, id: row.id, deviceId: row.device_id, deviceName: row.device_name,
+    sessionId: row.session_id, via: row.via, expiresAt: row.expires_at,
+  } : null;
 }
 
 /**
@@ -227,7 +239,7 @@ export const REFRESH_RECOVER_MS = 24 * 3600_000;
 
 interface PresentedToken {
   id: string; user_id: string; device_id: string | null; device_name: string | null; expires_at: Date;
-  replaced_by: string | null; revoked: boolean; used: boolean; in_grace: boolean;
+  replaced_by: string | null; revoked: boolean; used: boolean; in_grace: boolean; via: string | null;
 }
 interface ChainLink {
   id: string; replaced_by: string | null; device_id: string | null; device_name: string | null; expires_at: Date;
@@ -272,7 +284,7 @@ export type RefreshPlan =
  */
 export async function planRefresh(token: string, graceMs: number = REFRESH_GRACE_MS, recoverMs: number = REFRESH_RECOVER_MS): Promise<RefreshPlan> {
   const row = await one<PresentedToken>(
-    `SELECT id, user_id, device_id, device_name, expires_at, replaced_by,
+    `SELECT id, user_id, device_id, device_name, expires_at, replaced_by, via,
             revoked_at IS NOT NULL AS revoked, used_at IS NOT NULL AS used,
             COALESCE(revoked_at > now() - make_interval(secs => $2), false) AS in_grace
        FROM refresh_tokens
@@ -346,11 +358,13 @@ async function supersede(
   return row ? token : null;
 }
 
+/** `local`: the session was entered without a credential and holds only at home, so what is minted for it says so. */
 export type RefreshExchange =
   | { kind: 'refused' }
   | { kind: 'disabled' }
-  | { kind: 'grace'; userId: string; role: string; expiresAt: number }
-  | { kind: 'rotated' | 'recovered'; userId: string; role: string; token: string; expiresAt: number };
+  | { kind: 'remote' }
+  | { kind: 'grace'; userId: string; role: string; expiresAt: number; local: boolean }
+  | { kind: 'rotated' | 'recovered'; userId: string; role: string; token: string; expiresAt: number; local: boolean };
 
 /**
  * The refresh endpoint's whole decision: plan (`planRefresh`), then carry the plan out.
@@ -360,10 +374,14 @@ export type RefreshExchange =
  * lifetime only for a real rotation. ⚠️ `grace` reports the presented token's OWN expiry: answering it with
  * `refreshExpiresAt()` would hand the device a full fresh TTL every time two tabs raced -- an offline grace
  * that renews itself without a single token ever being issued.
+ *
+ * `remote`: a session entered without a credential, presented from outside the local network. Nothing is rotated or
+ * ended -- back home the same cookie works again -- and the caller answers 401 `local_only`. Reintroduce by dropping
+ * the check: "outside, a session entered without a password refreshes nothing" in profileZone.int.test.ts gets a 200.
  */
 export async function exchangeRefreshToken(
   token: string,
-  meta: { ip: string | null; userAgent: string | null },
+  { zone, ...meta }: { ip: string | null; userAgent: string | null; zone: Zone },
 ): Promise<RefreshExchange> {
   for (let attempt = 0; ; attempt++) {
     const plan = await planRefresh(token);
@@ -378,6 +396,8 @@ export async function exchangeRefreshToken(
       return { kind: 'refused' };
     }
     const t = plan.token;
+    const local = withoutCredential(t.via);
+    if (local && zone !== 'local') return { kind: 'remote' };
     const user = await one<{ disabled: boolean; role: string }>('SELECT disabled, role FROM users WHERE id = $1', [t.user_id]);
     if (user?.disabled) {
       await revokeAllSessions(t.user_id);
@@ -385,16 +405,18 @@ export async function exchangeRefreshToken(
     }
     const role = user?.role ?? 'user';
     // Three lost races in a row: every plan said this token is good, so answer without touching the cookie.
-    if (plan.kind === 'grace' || attempt >= 3) return { kind: 'grace', userId: t.user_id, role, expiresAt: t.expires_at.getTime() };
+    if (plan.kind === 'grace' || attempt >= 3) return { kind: 'grace', userId: t.user_id, role, expiresAt: t.expires_at.getTime(), local };
 
     if (plan.kind === 'rotate') {
-      const expiresAt = new Date(refreshExpiresAt());
+      // A session opened from another one lives no longer than it was given: a rotation keeps its expiry rather than
+      // starting a fresh REFRESH_TTL_DAYS the session it came from may not have.
+      const expiresAt = t.via === 'switch' ? t.expires_at : new Date(refreshExpiresAt());
       const next = await supersede(t.id, { used: true, expiresAt, deviceId: t.device_id, deviceName: t.device_name, ...meta });
-      if (next) return { kind: 'rotated', userId: t.user_id, role, token: next, expiresAt: expiresAt.getTime() };
+      if (next) return { kind: 'rotated', userId: t.user_id, role, token: next, expiresAt: expiresAt.getTime(), local };
     } else if (plan.kind === 'recover') {
       const h = plan.head;
       const next = await supersede(h.id, { used: false, expiresAt: h.expires_at, deviceId: h.device_id, deviceName: h.device_name, ...meta });
-      if (next) return { kind: 'recovered', userId: t.user_id, role, token: next, expiresAt: h.expires_at.getTime() };
+      if (next) return { kind: 'recovered', userId: t.user_id, role, token: next, expiresAt: h.expires_at.getTime(), local };
     }
     // Another request moved this session on between the plan and the write. Plan again from where it left it.
   }
@@ -809,4 +831,22 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
   const current = await one<{ role: string }>('SELECT role FROM users WHERE id = $1 AND NOT disabled', [subject]);
   if (!current) return reply.code(401).send({ error: 'unauthorized' });
   (request.user as { role: string }).role = current.role;
+  // A session entered without a credential (`loc`, signAccess in routes/auth.ts) is good at home only, on every request
+  // and not just the next refresh: a phone that leaves the house stops at its next call. Reintroduce by dropping it:
+  // "outside, a session entered without a password opens nothing" in profileZone.int.test.ts sees 200.
+  if ((request.user as { loc?: unknown }).loc === true && clientZone(request) !== 'local') {
+    return reply.code(401).send({ error: 'local_only' });
+  }
+}
+
+/**
+ * Route guard, after `authenticate`: 403 for a session entered without a credential. Such a session must not make one
+ * -- an API or OPDS token, a password, a second factor, a link to the sign-on provider -- or a profile opened at home
+ * would leave with something that works from anywhere. Reintroduce by dropping it from a route: its line in
+ * profileZone.int.test.ts sees the credential made.
+ */
+export async function requireCredentialSession(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  if ((request.user as { loc?: unknown } | undefined)?.loc === true) {
+    return reply.code(403).send({ error: 'credential_required', message: 'Sign in with a password to do this.' });
+  }
 }

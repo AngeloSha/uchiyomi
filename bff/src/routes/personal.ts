@@ -12,7 +12,7 @@ import { startBulkNewest, bulkNewestState } from '../lib/bulkNewest';
 // routes/admin.ts imports it from there too.
 import { jobBusy } from './sources';
 import { BlockedAddress } from '../lib/ssrfGuard';
-import { authenticate, userIdOf, roleOf, actsAsAdmin, issueOpdsToken, issueApiToken, listApiTokens, revokeApiToken, API_SCOPES, revokeOpdsToken, opdsTokenStatus, setOpdsShowAdult, OPDS_TOKEN_DAYS } from '../lib/auth';
+import { authenticate, requireCredentialSession, userIdOf, roleOf, actsAsAdmin, issueOpdsToken, issueApiToken, listApiTokens, revokeApiToken, API_SCOPES, revokeOpdsToken, opdsTokenStatus, setOpdsShowAdult, OPDS_TOKEN_DAYS } from '../lib/auth';
 import { enrichSeries, seenCounts } from '../lib/enrich';
 import { env } from '../env';
 import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription } from '../lib/push';
@@ -86,7 +86,8 @@ export default async function personalRoutes(app: FastifyInstance) {
   const vc = (req: any): ViewCtx => req.viewCtx as ViewCtx;
 
   // issue/rotate the caller's OPDS token (shown once); used as the HTTP Basic password in an external reader
-  app.post('/api/opds/token', async (req) => {
+  // Not from a session entered without a password: the token would open the library from anywhere.
+  app.post('/api/opds/token', { preHandler: requireCredentialSession }, async (req) => {
     const token = await issueOpdsToken(userIdOf(req));
     return { token, url: `${env.PUBLIC_ORIGIN.replace(/\/$/, '')}/opds`, expiresInDays: OPDS_TOKEN_DAYS };
   });
@@ -114,7 +115,7 @@ export default async function personalRoutes(app: FastifyInstance) {
   // create call and never again, because only its hash is stored.
   app.get('/api/tokens', async (req) => ({ content: await listApiTokens(userIdOf(req)) }));
 
-  app.post('/api/tokens', async (req, reply) => {
+  app.post('/api/tokens', { preHandler: requireCredentialSession }, async (req, reply) => {
     const b = z
       .object({
         name: z.string().trim().min(1).max(60),

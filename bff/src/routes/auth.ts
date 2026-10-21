@@ -11,6 +11,8 @@ import {
   IMG_COOKIE_TTL,
   REFRESH_COOKIE,
   authenticate,
+  requireCredentialSession,
+  withoutCredential,
   clientIp,
   cookieOptions,
   imgCookieOptions,
@@ -41,6 +43,7 @@ import { applyMemberDefaults } from '../lib/memberDefaults';
 import { talkOn } from '../lib/comments';
 import { verifyLoginPassword } from '../lib/loginPassword';
 import { profileKind, type ProfileRow } from '../lib/profiles';
+import { clientZone } from '../lib/clientAddr';
 
 const loginBody = z.object({
   username: z.string().max(64).optional(),
@@ -66,17 +69,22 @@ interface FullUser {
 const USER_AUTH_COLS =
   'id, username, display_name, role, password_hash, disabled, locked_until, totp_enabled, totp_secret, recovery_codes, password_login';
 
-function signAccess(app: FastifyInstance, userId: string, role: string): { accessToken: string; expiresIn: number; desktop?: true } {
+/**
+ * `local`: the session was entered without a credential (lib/auth.ts withoutCredential), so the token says `loc: true`
+ * and is good at home only (authenticate). Every other token is byte-for-byte what it was.
+ */
+function signAccess(app: FastifyInstance, userId: string, role: string, local = false): { accessToken: string; expiresIn: number; desktop?: true } {
   // `desktop: true` tells the web app it is inside Uchiyomi Desktop (web/lib/desktop.ts). Spread in only when
   // on, so every server response is byte-for-byte what it was.
   return {
-    accessToken: app.jwt.sign({ sub: userId, role }, { expiresIn: env.ACCESS_TTL_SECONDS }),
+    accessToken: app.jwt.sign({ sub: userId, role, ...(local ? { loc: true } : {}) }, { expiresIn: env.ACCESS_TTL_SECONDS }),
     expiresIn: env.ACCESS_TTL_SECONDS,
     ...(isDesktop() ? { desktop: true as const } : {}),
   };
 }
-function setImgCookie(app: FastifyInstance, reply: any, userId: string) {
-  reply.setCookie(IMG_COOKIE, app.jwt.sign({ sub: userId, typ: 'img' }, { expiresIn: IMG_COOKIE_TTL }), imgCookieOptions());
+/** The image cookie of a session entered without a credential carries `loc` too (routes/images.ts): it lasts a week. */
+function setImgCookie(app: FastifyInstance, reply: any, userId: string, local = false) {
+  reply.setCookie(IMG_COOKIE, app.jwt.sign({ sub: userId, typ: 'img', ...(local ? { loc: true } : {}) }, { expiresIn: IMG_COOKIE_TTL }), imgCookieOptions());
 }
 
 async function userPayload(userId: string) {
@@ -432,6 +440,9 @@ export default async function authRoutes(app: FastifyInstance) {
     const token = req.cookies?.[REFRESH_COOKIE];
     const cur = token ? await validateRefreshToken(token) : null;
     if (!cur) return reply.redirect(`${env.PUBLIC_ORIGIN.replace(/\/$/, '')}/login`);
+    // A profile entered without a credential does not get one from the provider either: a link would let it in from
+    // anywhere (lib/auth.ts requireCredentialSession, which this cookie-only route cannot use).
+    if (withoutCredential(cur.via)) return reply.redirect(`${env.PUBLIC_ORIGIN.replace(/\/$/, '')}/profile/?tab=Account&sso_link=failed`);
     return toProvider(reply, cur.userId);
   });
 
@@ -689,11 +700,16 @@ export default async function authRoutes(app: FastifyInstance) {
     const token = req.cookies?.[REFRESH_COOKIE];
     if (!token) return reply.code(401).send({ error: 'no_refresh' });
     // The decision and its reasons live in planRefresh (lib/auth.ts).
-    const r = await exchangeRefreshToken(token, { ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null });
+    const r = await exchangeRefreshToken(token, {
+      ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null, zone: clientZone(req),
+    });
     if (r.kind === 'refused') {
       reply.clearCookie(REFRESH_COOKIE, { path: '/' });
       return reply.code(401).send({ error: 'invalid_refresh' });
     }
+    // A session entered without a password, outside the home network. The cookie is left alone: back home it works
+    // again, and it opens nothing out here (lib/auth.ts exchangeRefreshToken).
+    if (r.kind === 'remote') return reply.code(401).send({ error: 'local_only' });
     if (r.kind === 'disabled') {
       reply.clearCookie(REFRESH_COOKIE, { path: '/' });
       return reply.code(403).send({ error: 'disabled' });
@@ -706,8 +722,8 @@ export default async function authRoutes(app: FastifyInstance) {
     if (r.kind !== 'grace') {
       reply.setCookie(REFRESH_COOKIE, r.token, { ...cookieOptions(), maxAge: Math.max(1, Math.floor((r.expiresAt - Date.now()) / 1000)) });
     }
-    setImgCookie(app, reply, r.userId);
-    return reply.send({ ...signAccess(app, r.userId, r.role), user: await userPayload(r.userId), refreshExpiresAt: r.expiresAt });
+    setImgCookie(app, reply, r.userId, r.local);
+    return reply.send({ ...signAccess(app, r.userId, r.role, r.local), user: await userPayload(r.userId), refreshExpiresAt: r.expiresAt });
   });
 
   app.post('/auth/logout', async (req, reply) => {
@@ -751,7 +767,7 @@ export default async function authRoutes(app: FastifyInstance) {
   });
 
   // ---- change own password ----
-  if (local) app.post('/auth/password', { preHandler: [authenticate], config: SIGN_IN_LIMIT }, async (req, reply) => {
+  if (local) app.post('/auth/password', { preHandler: [authenticate, requireCredentialSession], config: SIGN_IN_LIMIT }, async (req, reply) => {
     const body = z.object({ current: z.string(), next: z.string() }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'bad_request' });
     const uid = userIdOf(req);
@@ -768,7 +784,7 @@ export default async function authRoutes(app: FastifyInstance) {
   });
 
   // ---- TOTP 2FA ----
-  if (local) app.post('/auth/totp/setup', { preHandler: [authenticate] }, async (req, reply) => {
+  if (local) app.post('/auth/totp/setup', { preHandler: [authenticate, requireCredentialSession] }, async (req, reply) => {
     const uid = userIdOf(req);
     const u = await one<{ username: string | null; totp_enabled: boolean }>('SELECT username, totp_enabled FROM users WHERE id = $1', [uid]);
     // ⚠️ Setup is for an account WITHOUT a second step. With 2FA on, the secret in the row is the one the
@@ -790,7 +806,7 @@ export default async function authRoutes(app: FastifyInstance) {
     return { secret, otpauth: uri, qr };
   });
 
-  if (local) app.post('/auth/totp/enable', { preHandler: [authenticate], config: SIGN_IN_LIMIT }, async (req, reply) => {
+  if (local) app.post('/auth/totp/enable', { preHandler: [authenticate, requireCredentialSession], config: SIGN_IN_LIMIT }, async (req, reply) => {
     const body = z.object({ code: z.string(), password: z.string() }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'bad_request' });
     const uid = userIdOf(req);
@@ -816,7 +832,7 @@ export default async function authRoutes(app: FastifyInstance) {
     return reply.send({ ok: true, recoveryCodes: codes });
   });
 
-  if (local) app.post('/auth/totp/disable', { preHandler: [authenticate], config: SIGN_IN_LIMIT }, async (req, reply) => {
+  if (local) app.post('/auth/totp/disable', { preHandler: [authenticate, requireCredentialSession], config: SIGN_IN_LIMIT }, async (req, reply) => {
     const body = z.object({ password: z.string() }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'bad_request' });
     const uid = userIdOf(req);
