@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.94.0 — 2026-10-21
+
+**Open site opens the sign-in link a site emails you, so BatCave's email sign-in works**
+([#314](https://github.com/AngeloSha/uchiyomi/issues/314)).
+
+### Open a link
+
+- **Sites that sign you in with a link they email you** (BatCave's *Email me a link*) sign in whichever browser opens
+  that link. Opened from your email, it signed in your own browser, not the extension engine's.
+- **Open site now has Open a link.** Ask the site for the link inside Open site, copy the link from the email without
+  opening it, press **Open a link**, paste it and press **Open**: the engine's browser opens it and is signed in. Then
+  press **Done**.
+- Only links on the extension's own site open there; anything else is refused, since the engine's browser sits inside
+  your server's network. The link is never logged.
+
+### Upgrading
+
+- Nothing to do.
+
 ## v0.93.0 — 2026-10-21
 
 **A library or download disk that isn't connected is no longer taken for one that lost its chapters.** This is
