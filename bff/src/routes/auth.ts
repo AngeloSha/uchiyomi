@@ -27,6 +27,7 @@ import {
   revokeRefreshToken,
   revokeSessionForUser,
   resumeHead,
+  parentHeadOf,
   spendTotpStep,
   touchSession,
   userIdOf,
@@ -370,17 +371,24 @@ export default async function authRoutes(app: FastifyInstance) {
       const b = z.object({ deviceId: z.string().max(128).optional() }).safeParse(req.body ?? {});
       const userId = (await desktopUserId()) ?? (await ensureDesktopUser());
       const user = await one<{ role: string; username: string | null }>('SELECT role, username FROM users WHERE id = $1', [userId]);
-      const refresh = await issueRefreshToken(userId, {
-        deviceId: b.success ? b.data.deviceId : undefined,
-        deviceName: 'This PC',
-        via: 'desktop',
-        ip: clientIp(req),
-        userAgent: (req.headers['user-agent'] as string) || null,
+      const meta = { ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null };
+      // Back from a profile switched to on this PC: the owner's own session,
+      // the one the profile was opened from, is taken up again and the profile's is ended -- rather than a new owner
+      // session each time, and the old ones left live with no cookie anywhere. Reintroduce a fresh session here:
+      // "back to the owner takes up the session the profile came from" in desktopProfiles.int.test.ts counts two.
+      const held = req.cookies?.[REFRESH_COOKIE];
+      const cur = held ? await validateRefreshToken(held) : null;
+      const from = cur && withoutCredential(cur.via) ? await parentHeadOf(cur.sessionId, userId) : null;
+      if (cur && withoutCredential(cur.via)) await revokeRefreshToken(held!);
+      const resumed = from ? await resumeHead(from, meta) : null;
+      const refresh = resumed ?? await issueRefreshToken(userId, {
+        deviceId: b.success ? b.data.deviceId : undefined, deviceName: 'This PC', via: 'desktop', ...meta,
       });
-      reply.setCookie(REFRESH_COOKIE, refresh, cookieOptions());
+      const expires = resumed ? from!.expiresAt.getTime() : refreshExpiresAt();
+      reply.setCookie(REFRESH_COOKIE, refresh, { ...cookieOptions(), maxAge: Math.max(1, Math.floor((expires - Date.now()) / 1000)) });
       setImgCookie(app, reply, userId);
-      await logAudit('login.desktop', { userId, username: user?.username ?? undefined, req });
-      return reply.send({ ...signAccess(app, userId, user?.role ?? 'admin'), user: await userPayload(userId), refreshExpiresAt: refreshExpiresAt() });
+      await logAudit('login.desktop', { userId, username: user?.username ?? undefined, ...(resumed ? { detail: { from: cur!.userId } } : {}), req });
+      return reply.send({ ...signAccess(app, userId, user?.role ?? 'admin'), user: await userPayload(userId), refreshExpiresAt: expires });
     });
   }
 

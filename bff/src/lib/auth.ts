@@ -373,6 +373,20 @@ export async function resumeHead(
   return supersede(head.id, { used: true, expiresAt: head.expiresAt, deviceId: head.deviceId, deviceName: head.deviceName, ...meta });
 }
 
+/**
+ * The live token of the session a session was opened from (`parent_session`), when that session belongs to `userId`:
+ * what Uchiyomi Desktop's owner goes back to from a profile switched to on this PC (POST /auth/desktop).
+ */
+export async function parentHeadOf(sessionId: string, userId: string): Promise<{ id: string; expiresAt: Date; deviceId: string | null; deviceName: string | null } | null> {
+  const row = await one<{ id: string; expires_at: Date; device_id: string | null; device_name: string | null }>(
+    `SELECT h.id, h.expires_at, h.device_id, h.device_name
+       FROM refresh_tokens c JOIN refresh_tokens h ON h.session_id = c.parent_session
+      WHERE c.session_id = $1 AND h.user_id = $2 AND h.revoked_at IS NULL AND h.expires_at > now()
+      ORDER BY h.created_at DESC LIMIT 1`,
+    [sessionId, userId]);
+  return row ? { id: row.id, expiresAt: row.expires_at, deviceId: row.device_id, deviceName: row.device_name } : null;
+}
+
 /** `local`: the session was entered without a credential and holds only at home, so what is minted for it says so. */
 export type RefreshExchange =
   | { kind: 'refused' }

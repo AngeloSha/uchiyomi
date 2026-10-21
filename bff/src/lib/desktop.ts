@@ -107,6 +107,13 @@ export const DESKTOP_HIDDEN_ROUTES: readonly string[] = Object.freeze([
   'GET /auth/sessions',
   'DELETE /auth/sessions/:id',
   'POST /auth/logout-all',
+  // The device keyring and the sign-in screen's "who is reading?": ways in, and on
+  // desktop the shell is the only one. Switching to a profile stays: that is how this PC's people take turns.
+  'GET /auth/ring',
+  'POST /auth/resume',
+  'POST /auth/leave',
+  'GET /auth/pick',
+  'POST /auth/profile-login',
   'POST /api/admin/users',
   'PATCH /api/admin/users/:id',
   'DELETE /api/admin/users/:id',
