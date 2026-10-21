@@ -43,6 +43,7 @@ import { isDesktop } from '@/lib/desktop';
 import { ssoOnly, useAuthConfig } from '@/lib/authConfig';
 import { adultShown } from '@/lib/adult';
 import { addable, moveIn, orderRows } from '@/lib/sourceOrder';
+import { moveTo, useDragReorder } from '@/lib/dragReorder';
 import { discoverSources } from '@/lib/sourceGroups';
 import { memberDefaultsOf } from '@/lib/memberDefaults';
 import { joinSentences } from '@/lib/jobs';
@@ -296,6 +297,8 @@ function SourceOrderSection({ data, save }: { data: any; save: Save }) {
     setOrder(next);
     save({ sourcePrefs: { priority: next } }).catch(() => { setOrder(was); toast(tr('Could not save'), 'error'); });
   };
+  // Drag a row to where it belongs; the arrows do the same a step at a time.
+  const drag = useDragReorder({ count: rows.length, layout: 'column', onMove: (from, to) => commit(moveTo(order, from, to)) });
 
   return (
     <>
@@ -312,7 +315,7 @@ function SourceOrderSection({ data, save }: { data: any; save: Save }) {
           {rows.length > 0 && (
             <ol className="mt-3 space-y-1">
               {rows.map((r, i) => (
-                <li key={r.id} className="flex items-center gap-2 rounded-lg bg-ink-900/60 px-3 py-2">
+                <li key={r.id} {...drag.item(i)} className="flex items-center gap-2 rounded-lg bg-ink-900/60 px-3 py-2">
                   <span className="w-5 shrink-0 text-[11px] tabular-nums text-fog-500">{i + 1}</span>
                   {r.name
                     ? <span className="truncate text-sm text-fog-200">{r.name}</span>
@@ -804,6 +807,8 @@ function GroupChips({ label, hint, value, ordered, onChange, suggestions }: {
 }) {
   const [draft, setDraft] = useState('');
   const toast = useToast();
+  // A ranking can also be rearranged by dragging a tag to where it belongs; the arrows stay for the keyboard.
+  const drag = useDragReorder({ count: value.length, layout: 'flow', enabled: !!ordered, onMove: (from, to) => onChange(moveTo(value, from, to)) });
   const add = (raw: string) => {
     const t = raw.trim().replace(/,$/, '').trim();
     setDraft('');
@@ -825,7 +830,7 @@ function GroupChips({ label, hint, value, ordered, onChange, suggestions }: {
       <p className="mb-1.5 text-sm text-fog-100">{label}</p>
       <div className="flex flex-wrap gap-1.5 rounded-xl border border-ink-700 bg-ink-850 p-2">
         {value.map((g, i) => (
-          <span key={g} className="inline-flex items-center gap-1 rounded-lg bg-ink-800 px-2.5 py-1 text-xs text-fog-200">
+          <span key={g} {...drag.item(i)} className="inline-flex items-center gap-1 rounded-lg bg-ink-800 px-2.5 py-1 text-xs text-fog-200">
             {ordered && <span className="text-fog-500">{i + 1}.</span>}
             {g}
             {ordered && (

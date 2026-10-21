@@ -25,6 +25,7 @@ import { ActivityDots } from '@/components/ActivityDots';
 import { SourceIcon } from '@/components/SourcePicker';
 import { IcInfo } from '@/components/icons';
 import { hasGroup, normGroup, reorder, withoutGroup } from '@/lib/scanlators';
+import { moveTo, useDragReorder } from '@/lib/dragReorder';
 import { cadenceLine, cadenceText } from '@/lib/cadence';
 import { activityStatus, weeksOf } from '@/lib/activity';
 import { namesGroups } from '@/lib/supplyLine';
@@ -436,7 +437,7 @@ export function SourceRow({ s, onUnfollow, unfollowing, makeMain }: {
  * controls when there are any. The same renderer for both audiences, so the member's view is exactly the
  * admin's minus the buttons.
  */
-function GroupRow({ g, blocked, serverBlocked, haveNumbers, seriesStatus, controls, onJump }: {
+function GroupRow({ g, blocked, serverBlocked, haveNumbers, seriesStatus, controls, onJump, dragProps }: {
   g: GroupStat;
   blocked: boolean;
   serverBlocked: boolean;
@@ -446,6 +447,8 @@ function GroupRow({ g, blocked, serverBlocked, haveNumbers, seriesStatus, contro
   controls?: React.ReactNode;
   /** Close the sheet and scroll the page to that chapter's row. */
   onJump: (n: number) => void;
+  /** A ranked group's handle for drag to reorder (lib/dragReorder.ts): spread onto the row. */
+  dragProps?: object;
 }) {
   const [showChapters, setShowChapters] = useState(false);
   const weeks = weeksOf(g);
@@ -456,7 +459,7 @@ function GroupRow({ g, blocked, serverBlocked, haveNumbers, seriesStatus, contro
   const fallback = cadenceLine(g.cadence, g.lastReleaseAt).filter((p) => /last release|quiet/.test(p.key));
   const struck = blocked || serverBlocked;
   return (
-    <div className="border-t border-ink-800/70 py-2 first:border-t-0">
+    <div {...dragProps} className="border-t border-ink-800/70 py-2 first:border-t-0">
       {/* The name block keeps at least 14rem; when the controls do not fit beside that (a phone) they wrap
           under it as one group, rather than squeezing the statistics into a two-line column beside them. */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
@@ -635,6 +638,12 @@ export function SourcesSheet({ id, title: seriesTitle, series, groups, admin, er
     ? { ...stored, blocked: withoutGroup(stored.blocked, name) }
     : { blocked: [...stored.blocked, name], priority: withoutGroup(stored.priority, name) });
   const move = (name: string, dir: -1 | 1) => apply({ ...stored, priority: reorder(stored.priority, rankIn(stored.priority, name), dir) });
+  // The ranked groups come first, in rank order, so a ranked row's place in the list is its rank: dragging one to
+  // where another sits is a move in the ranking. The groups under them are not draggable.
+  const drag = useDragReorder({
+    count: stored.priority.length, layout: 'column', enabled: !!admin && !busy,
+    onMove: (from, to) => { void apply({ ...stored, priority: moveTo(stored.priority, from, to) }); },
+  });
   const savePatience = () => {
     const n = patienceDays();
     if (n === false) return;
@@ -929,7 +938,8 @@ export function SourcesSheet({ id, title: seriesTitle, series, groups, admin, er
           );
           return (
             <GroupRow key={normGroup(g.name) || g.name} g={g} blocked={blocked} serverBlocked={serverBlocked} haveNumbers={haveNumbers}
-              seriesStatus={series?.metadata?.status} controls={controls || undefined} onJump={jump} />
+              seriesStatus={series?.metadata?.status} controls={controls || undefined} onJump={jump}
+              dragProps={rank >= 0 ? drag.item(rank) : undefined} />
           );
         })}
       </section>
