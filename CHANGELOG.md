@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.95.0 — 2026-10-21
+
+**A series whose files you deleted yourself can be forgotten, and Find other sources proposes a series a site lists under
+a name of its own** ([#328](https://github.com/AngeloSha/uchiyomi/issues/328),
+[#316](https://github.com/AngeloSha/uchiyomi/issues/316)). Thank you, **Keddyan** and **TIGamingTV**.
+
+### Forget what you deleted yourself
+
+- **A removed series whose folder you deleted yourself could not be forgotten.** On a library Uchiyomi may only read
+  (the default, with `PUID` unset), Delete files refused "not writable" before it looked, though nothing was left to
+  delete. On a library with little else in it, it could not be sure the files were really gone and said "Deleted 0
+  files". Either way the row stayed in **Admin → Libraries** and **Forget** was never offered.
+- **Delete files now needs write access only for files that are still there.** Files already gone are marked deleted,
+  and the row offers **Forget**.
+- **When Uchiyomi can't tell a folder you deleted from a drive that isn't connected,** it asks: *24 chapter files are
+  not on disk*. If you deleted or moved them yourself, press **Mark them gone**, and Forget is offered. A library folder
+  that is empty or can't be opened is refused: that is what a drive that isn't mounted looks like.
+- After **Forget**, putting the files back adds the series again as a new one.
+
+### A site's own name for a series
+
+- **Some sites list a series under a name it doesn't have here.** *Revenge of the Iron-Blooded Sword Hound* is *Revenge
+  of the Baskerville Bloodhound* on Atsumaru, Manga Ball and MangaFire, and Find other sources found nothing.
+- **Let me review each match first now proposes it**, in amber with its cover: a series a site gave first when searched
+  under two or more of the series' names, whose chapter numbers line up both ways. Follow it if the covers match.
+  Following it keeps that name as one of the series' other names, so later searches find it on other sites too.
+- **An automatic run never follows one.** Two series with the same number of chapters number them alike, so only a
+  person can say it is the same series.
+
+### Upgrading
+
+- Nothing to do.
+
 ## v0.94.0 — 2026-10-21
 
 **Open site opens the sign-in link a site emails you, so BatCave's email sign-in works**
