@@ -163,7 +163,8 @@ test('at debug a run says why it keeps what it keeps, and deletes exactly what i
 });
 
 test('the lines are written at debug only, and an off switch is said at debug', { skip }, async () => {
-  // Reintroduce the lines at every level (drop `cleanupLog.on` in runCleanupOnce): the first run below writes them.
+  // Reintroduce the lines at every level (trace() without its `cleanupLog.on`, and explainRun called whatever the
+  // level): the first run below writes them; drop the off switch's trace: the second reads nothing.
   await q('UPDATE server_settings SET cleanup_read = true, cleanup_read_days = 2 WHERE id = 1');
   assert.deepEqual(await linesOf(() => cc.runCleanupOnce()), [], 'lines at the default level');
   await q('UPDATE server_settings SET cleanup_read = false WHERE id = 1');
