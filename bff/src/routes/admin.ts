@@ -628,7 +628,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   }));
 
   // ---- server settings ----
-  const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
+  const SETTINGS_COLS = 'server_name, allow_registration, local_pick, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, backup_enabled, auto_follow_on_failure, '
     + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, fill_details, discover_lookups, '
     + 'mangadex_langs, unstated_lang, hide_notice_types, deleted_as_ghosts, update_smart, finish_downloads, '
@@ -723,6 +723,8 @@ export default async function adminRoutes(app: FastifyInstance) {
     const b = z.object({
       serverName: z.string().min(1).max(64).optional(),
       allowRegistration: z.boolean().optional(),
+      // The sign-in screen's "who is reading?" at home (routes/auth.ts /auth/pick).
+      localPick: z.boolean().optional(),
       updaterHours: z.number().int().min(1).max(168).optional(),
       extensionHours: z.number().int().min(1).max(168).optional(),
       extensionAutoUpdate: z.boolean().optional(),
@@ -868,6 +870,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     }
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
+    if (b.localPick !== undefined) await q('UPDATE server_settings SET local_pick = $1, updated_at = now() WHERE id = 1', [b.localPick]);
     if (b.updaterHours !== undefined) await q('UPDATE server_settings SET updater_hours = $1, updated_at = now() WHERE id = 1', [b.updaterHours]);
     if (b.extensionHours !== undefined) await q('UPDATE server_settings SET extension_hours = $1, updated_at = now() WHERE id = 1', [b.extensionHours]);
     if (b.extensionAutoUpdate !== undefined) await q('UPDATE server_settings SET extension_auto_update = $1, updated_at = now() WHERE id = 1', [b.extensionAutoUpdate]);

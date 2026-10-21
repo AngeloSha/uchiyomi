@@ -1079,6 +1079,7 @@ GET    /auth/oidc/start             GET    /auth/oidc/callback
 GET    /auth/oidc/link
 GET    /auth/profiles             POST   /auth/switch
 GET    /auth/ring                 POST   /auth/resume
+GET    /auth/pick                 POST   /auth/profile-login
 POST   /auth/leave
 ```
 

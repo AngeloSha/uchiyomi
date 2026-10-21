@@ -2053,6 +2053,8 @@ CREATE TABLE IF NOT EXISTS device_ring (
   PRIMARY KEY (device_hash, user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_device_ring_user ON device_ring (user_id);
+-- The sign-in screen's "who is reading?" at home (routes/auth.ts /auth/pick): off unless an admin turns it on.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS local_pick boolean NOT NULL DEFAULT false;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

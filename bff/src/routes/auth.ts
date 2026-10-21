@@ -736,9 +736,66 @@ export default async function authRoutes(app: FastifyInstance) {
     // long as it does: a recovered token keeps the lifetime of the one it replaces.
     if (r.kind !== 'grace') {
       reply.setCookie(REFRESH_COOKIE, r.token, { ...cookieOptions(), maxAge: Math.max(1, Math.floor((r.expiresAt - Date.now()) / 1000)) });
+      // A session refreshed from another network than its last (lib/clientAddr.ts sameNetwork): said in the activity log,
+      // once a day per session at most, and never acted on -- Wi-Fi to mobile data looks the same from here as a copied
+      // cookie does. Reintroduce a sign-out here and every phone that leaves
+      // the house is signed out.
+      if (r.kind === 'rotated' && r.moved && !(await one(
+        `SELECT 1 FROM audit_log WHERE event = 'session.ip_change' AND detail->>'session' = $1 AND at > now() - interval '1 day'`,
+        [r.moved.session]))) {
+        await logAudit('session.ip_change', { userId: r.userId, detail: { session: r.moved.session, from: r.moved.from }, req });
+      }
     }
     setImgCookie(app, reply, r.userId, r.local);
     return reply.send({ ...signAccess(app, r.userId, r.role, r.local), user: await userPayload(r.userId), refreshExpiresAt: r.expiresAt });
+  });
+
+  // ---- "who is reading?" at home ----
+
+  /** Whether an admin turned the sign-in screen's "who is reading?" on (Admin -> Settings -> Server). Never on desktop. */
+  const localPickOn = async () => !isDesktop()
+    && !!(await one<{ on: boolean }>('SELECT local_pick AS on FROM server_settings WHERE id = 1'))?.on;
+
+  /**
+   * The profiles the sign-in screen offers at home without a password, when an admin turned it on: the enabled ones that
+   * open at home. Outside the home network, or with it off, none -- the same answer either way, so it says nothing
+   * about which.
+   */
+  app.get('/auth/pick', async (req) => {
+    if (clientZone(req) !== 'local' || !(await localPickOn())) return { content: [] };
+    const rows = await q<{ id: string; display_name: string; avatar: unknown }>(
+      `SELECT id, display_name, avatar FROM users WHERE local_open AND NOT disabled AND role <> 'admin' ORDER BY lower(display_name), id`);
+    return { content: rows.map((r) => ({ id: r.id, displayName: r.display_name, avatar: r.avatar ?? {} })) };
+  });
+
+  /**
+   * Sign in as one of those profiles from the sign-in screen, at home, without a password: a session of its own
+   * (`via: 'local-pick'`), held to home on every request and making no credential, as a switched-to one is. Every
+   * refusal is one answer -- off, outside, no such profile -- written down at most once a minute: the route answers
+   * anyone at home. Reintroduce any check by dropping it: its case in profileLocalPick.int.test.ts signs in.
+   */
+  app.post('/auth/profile-login', { config: SIGN_IN_LIMIT }, async (req, reply) => {
+    const b = z.object({ profileId: z.string().uuid(), deviceId: z.string().max(128).optional(), deviceName: z.string().max(128).optional() })
+      .safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const target = clientZone(req) === 'local' && (await localPickOn())
+      ? await one<{ id: string; role: string; username: string | null }>(
+        `SELECT id, role, username FROM users WHERE id = $1 AND local_open AND NOT disabled AND role <> 'admin'`, [b.data.profileId])
+      : null;
+    if (!target) {
+      const attempts = auditEvery('login.fail:local_pick');
+      if (attempts !== null) await logAudit('login.fail', { detail: { reason: 'local_pick', attempts }, req });
+      return reply.code(401).send({ error: 'invalid_credentials' });
+    }
+    const refresh = await issueRefreshToken(target.id, {
+      via: 'local-pick', deviceId: b.data.deviceId, deviceName: b.data.deviceName,
+      ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null,
+    });
+    reply.setCookie(REFRESH_COOKIE, refresh, cookieOptions());
+    setImgCookie(app, reply, target.id, true);
+    reply.clearCookie(KOMGA_SESSION_COOKIE, { path: '/' });
+    await logAudit('login.ok', { userId: target.id, username: target.username ?? undefined, detail: { via: 'local-pick' }, req });
+    return reply.send({ ...signAccess(app, target.id, target.role, true), user: await userPayload(target.id), refreshExpiresAt: refreshExpiresAt() });
   });
 
   // ---- the device keyring (lib/deviceRing.ts) ----

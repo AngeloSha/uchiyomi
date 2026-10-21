@@ -1367,6 +1367,52 @@ paths:
           description: Not authenticated
         "403":
           description: The account has been disabled; every session was revoked
+  /auth/pick:
+    get:
+      tags:
+        - auth
+      summary: The profiles the sign-in screen offers at home without a password.
+      operationId: getAuthPick
+      description: >-
+        When an admin turned it on (`localPick` on PATCH /api/admin/settings) and the caller is inside LOCAL_NETWORKS:
+        the enabled profiles that open at home, as `{id, displayName, avatar}`. Otherwise, and on desktop, none.
+      security: []
+      responses:
+        "200":
+          description: "`{content: [{id, displayName, avatar}]}`"
+  /auth/profile-login:
+    post:
+      tags:
+        - auth
+      summary: Sign in from the sign-in screen as a profile that opens at home, without a password.
+      operationId: postAuthProfileLogin
+      description: >-
+        Under the same conditions as GET /auth/pick. The session holds at home only (401 `local_only` from outside on
+        every request) and makes no credential (403 `credential_required`). Every refusal is 401 `invalid_credentials`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [profileId]
+              properties:
+                profileId:
+                  type: string
+                deviceId:
+                  type: string
+                deviceName:
+                  type: string
+      responses:
+        "200":
+          description: Signed in as the profile
+        "400":
+          description: Malformed body
+        "401":
+          description: "`invalid_credentials`"
+        "429":
+          description: Too many attempts
   /auth/ring:
     get:
       tags:

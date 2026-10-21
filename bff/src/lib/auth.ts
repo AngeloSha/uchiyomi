@@ -3,7 +3,7 @@ import Fastify, { type FastifyReply, type FastifyRequest, type FastifyServerOpti
 import { q, one } from './db';
 import { env } from '../env';
 import { isDesktop } from './desktop';
-import { clientZone, type Zone } from './clientAddr';
+import { clientZone, sameNetwork, type Zone } from './clientAddr';
 
 export const REFRESH_COOKIE = 'yomi_rt';
 // Stateless JWT cookie that authorizes <img> requests to /img/* (which can't send a Bearer header).
@@ -147,14 +147,15 @@ export const refreshExpiresAt = () => Date.now() + env.REFRESH_TTL_DAYS * 24 * 6
 
 /**
  * How a session was entered (refresh_tokens.via), written once at sign-in and carried through every rotation. All but
- * `switch` carry a credential. A `switch` session was opened without one, from another account's session, into a
- * profile that opens at home: it is good only from the local network (clientZone),
- * on every request, and it creates no credential (requireCredentialSession).
+ * two carry a credential. `switch` was opened without one from another account's session, `local-pick` from the
+ * sign-in screen's "who is reading?" at home, both into a profile that opens at home:
+ * each is good only from the local network (clientZone), on every request, and creates no credential
+ * (requireCredentialSession).
  */
-export type SessionVia = 'password' | 'oidc' | 'desktop' | 'register' | 'setup' | 'switch';
+export type SessionVia = 'password' | 'oidc' | 'desktop' | 'register' | 'setup' | 'switch' | 'local-pick';
 
 /** A session entered without a credential: held to the local network. A row from before the column (null) had one. */
-export const withoutCredential = (via: string | null | undefined): boolean => via === 'switch';
+export const withoutCredential = (via: string | null | undefined): boolean => via === 'switch' || via === 'local-pick';
 
 /**
  * Issue a fresh opaque refresh token for a new sign-in and persist its hash. Returns the raw token.
@@ -242,6 +243,7 @@ export const REFRESH_RECOVER_MS = 24 * 3600_000;
 interface PresentedToken {
   id: string; user_id: string; device_id: string | null; device_name: string | null; expires_at: Date;
   replaced_by: string | null; revoked: boolean; used: boolean; in_grace: boolean; via: string | null;
+  ip: string | null; session_id: string;
 }
 interface ChainLink {
   id: string; replaced_by: string | null; device_id: string | null; device_name: string | null; expires_at: Date;
@@ -286,7 +288,7 @@ export type RefreshPlan =
  */
 export async function planRefresh(token: string, graceMs: number = REFRESH_GRACE_MS, recoverMs: number = REFRESH_RECOVER_MS): Promise<RefreshPlan> {
   const row = await one<PresentedToken>(
-    `SELECT id, user_id, device_id, device_name, expires_at, replaced_by, via,
+    `SELECT id, user_id, device_id, device_name, expires_at, replaced_by, via, ip, COALESCE(session_id, id) AS session_id,
             revoked_at IS NOT NULL AS revoked, used_at IS NOT NULL AS used,
             COALESCE(revoked_at > now() - make_interval(secs => $2), false) AS in_grace
        FROM refresh_tokens
@@ -377,7 +379,11 @@ export type RefreshExchange =
   | { kind: 'disabled' }
   | { kind: 'remote' }
   | { kind: 'grace'; userId: string; role: string; expiresAt: number; local: boolean }
-  | { kind: 'rotated' | 'recovered'; userId: string; role: string; token: string; expiresAt: number; local: boolean };
+  | {
+    kind: 'rotated' | 'recovered'; userId: string; role: string; token: string; expiresAt: number; local: boolean;
+    /** The session refreshed from another network than its last (sameNetwork): what the soft audit line says. */
+    moved?: { session: string; from: string | null };
+  };
 
 /**
  * The refresh endpoint's whole decision: plan (`planRefresh`), then carry the plan out.
@@ -425,7 +431,8 @@ export async function exchangeRefreshToken(
       // starting a fresh REFRESH_TTL_DAYS the session it came from may not have.
       const expiresAt = t.via === 'switch' ? t.expires_at : new Date(refreshExpiresAt());
       const next = await supersede(t.id, { used: true, expiresAt, deviceId: t.device_id, deviceName: t.device_name, ...meta });
-      if (next) return { kind: 'rotated', userId: t.user_id, role, token: next, expiresAt: expiresAt.getTime(), local };
+      const moved = t.ip && meta.ip && !sameNetwork(t.ip, meta.ip) ? { session: t.session_id, from: t.ip } : undefined;
+      if (next) return { kind: 'rotated', userId: t.user_id, role, token: next, expiresAt: expiresAt.getTime(), local, moved };
     } else if (plan.kind === 'recover') {
       const h = plan.head;
       const next = await supersede(h.id, { used: false, expiresAt: h.expires_at, deviceId: h.device_id, deviceName: h.device_name, ...meta });

@@ -97,6 +97,23 @@ export function zoneOf(req: FastifyRequest, home: BlockList): Zone {
   return v && home.check(ip!, v === 6 ? 'ipv6' : 'ipv4') ? 'local' : 'remote';
 }
 
+/**
+ * Whether two addresses are on one network: the same /24 of IPv4, the same /48 of IPv6 (an IPv4-mapped address is its
+ * IPv4 one). What the soft audit line on a session that moves reads (routes/auth.ts /auth/refresh): a phone going from
+ * Wi-Fi to mobile data, or a copied cookie used from elsewhere, looks the same from here, so it is said, never acted on.
+ */
+export function sameNetwork(a: string, b: string): boolean {
+  const plain = (x: string) => (x.startsWith('::ffff:') && isIP(x.slice(7)) === 4 ? x.slice(7) : x);
+  const x = plain(a);
+  const y = plain(b);
+  const v = isIP(x);
+  if (!v || v !== isIP(y)) return false;
+  if (v === 4) return x.split('.').slice(0, 3).join('.') === y.split('.').slice(0, 3).join('.');
+  const net = new BlockList();
+  net.addSubnet(x, 48, 'ipv6');
+  return net.check(y, 'ipv6');
+}
+
 let home: BlockList | null = null;
 
 /** zoneOf against LOCAL_NETWORKS. The desktop app's server is this computer's alone: always at home. */

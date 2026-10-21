@@ -107,3 +107,14 @@ test('with no home declared, nobody is at home', async () => {
     await app.close();
   }
 });
+
+test('one network: the same /24 of IPv4, the same /48 of IPv6', async () => {
+  const { sameNetwork } = await import('../src/lib/clientAddr');
+  assert.equal(sameNetwork('198.51.100.20', '198.51.100.99'), true);
+  assert.equal(sameNetwork('198.51.100.20', '198.51.101.20'), false);
+  assert.equal(sameNetwork('::ffff:198.51.100.20', '198.51.100.7'), true, 'an IPv4-mapped address is its IPv4 one');
+  assert.equal(sameNetwork('2001:db8:1:2::5', '2001:db8:1:ffff::9'), true);
+  assert.equal(sameNetwork('2001:db8:1::5', '2001:db8:2::5'), false);
+  assert.equal(sameNetwork('198.51.100.20', '2001:db8::1'), false);
+  assert.equal(sameNetwork('not an address', '198.51.100.20'), false);
+});
