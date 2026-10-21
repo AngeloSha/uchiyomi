@@ -95,7 +95,10 @@ test('Members makes and converts profiles that open at home, never an admin, and
   assert.match(page, /role: open \? 'user' : role, \.\.\.\(open \? \{ localOpen: true, managedBy: managedBy \|\| undefined \} : \{\}\)/);
   assert.match(page, /\{localOpen \? \(\s*<>\s*<select value=\{managedBy\}/, 'no choice of who manages it');
   assert.match(page, /<HomeNetwork \/>/);
-  assert.match(page, /function HomeNetwork\(\) \{[\s\S]*?'\/api\/admin\/network'/);
+  assert.match(page, /function HomeNetwork\(\) \{\s*const \{ data \} = useNetwork\(\);/);
+  // The line and the settings page say it in one sentence, from one answer (components/NetworkSettings.tsx).
+  const network = code(read('components/NetworkSettings.tsx'));
+  assert.match(network, /queryFn: \(\) => api<NetworkState>\('\/api\/admin\/network'\)/);
   assert.match(page, /\{!u\.local_open && <button onClick=\{\(\) => patch\(u, \{ role:/, 'Make admin is offered on a profile that opens at home');
   assert.match(page, /u\.local_open && u\.password_login && !ssoOnly && <button onClick=\{\(\) => patch\(u, \{ removePassword: true \}/);
   assert.match(page, /canManageProfiles: !u\.perms\?\.canManageProfiles/);

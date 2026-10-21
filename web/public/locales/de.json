@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4239
+    "strings": 4257
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -4226,7 +4226,6 @@
   "Remove password": "Passwort entfernen",
   "Password removed": "Passwort entfernt",
   "Can make profiles": "Darf Profile anlegen",
-  "No home network is set (LOCAL_NETWORKS), so profiles without a password open only in the desktop app.": "Kein Heimnetz festgelegt (LOCAL_NETWORKS): Profile ohne Passwort öffnen sich nur in der Desktop-App.",
   "The server sees you at {ip}, at home.": "Der Server sieht dich unter {ip}, zu Hause.",
   "The server sees you at {ip}, outside your home network.": "Der Server sieht dich unter {ip}, außerhalb deines Heimnetzes.",
   "Profile added": "Profil hinzugefügt",
@@ -4242,5 +4241,24 @@
   "Back to my account": "Zurück zu meinem Konto",
   "New profile": "Neues Profil",
   "Accounts come from {name}, but a profile without a password can be made here: it opens on the home network only.": "Konten kommen von {name}, aber hier lässt sich ein Profil ohne Passwort anlegen: Es öffnet sich nur im Heimnetz.",
-  "Create profile": "Profil anlegen"
+  "Create profile": "Profil anlegen",
+  "Home network": "Heimnetz",
+  "No network is home, so profiles without a password open only in the desktop app.": "Kein Netz ist das Heimnetz, daher öffnen sich Profile ohne Passwort nur in der Desktop-App.",
+  "Set by {name} in the environment: change it there.": "Durch {name} in der Umgebung festgelegt: Ändere es dort.",
+  "Profiles without a password open only from the home network. From anywhere else, an account needs its password.": "Profile ohne Passwort öffnen sich nur aus dem Heimnetz. Von überall sonst braucht ein Konto sein Passwort.",
+  "How the server sees you": "Wie der Server dich sieht",
+  "Every private address: 192.168.x, 10.x and 172.16–31.x, as a home router or Docker hands them out.": "Jede private Adresse: 192.168.x, 10.x und 172.16–31.x, wie ein Heimrouter oder Docker sie vergibt.",
+  "Private networks": "Private Netze",
+  "These networks": "Diese Netze",
+  "Networks": "Netze",
+  "Addresses and ranges, separated by commas, e.g. 192.168.1.0/24.": "Adressen und Bereiche, durch Kommas getrennt, z. B. 192.168.1.0/24.",
+  "Use {network}": "{network} verwenden",
+  "Trusted proxies": "Vertrauenswürdige Proxys",
+  "The reverse proxies allowed to say who is connecting (X-Forwarded-For). Empty: this computer, Docker and the private networks.": "Die Reverse-Proxys, die sagen dürfen, wer sich verbindet (X-Forwarded-For). Leer: dieser Computer, Docker und die privaten Netze.",
+  "Every peer is trusted as a proxy (TRUST_PROXY=true), so anyone can say any address: nobody counts as at home.": "Jedem Gegenüber wird als Proxy vertraut (TRUST_PROXY=true), also kann jeder jede Adresse angeben: Niemand gilt als zu Hause.",
+  "The proxy {ip} is inside the home network: a request it forwards without X-Forwarded-For counts as at home.": "Der Proxy {ip} liegt im Heimnetz: Eine Anfrage, die er ohne X-Forwarded-For weiterleitet, gilt als von zu Hause.",
+  "Signed-in devices": "Angemeldete Geräte",
+  "The address the server sees for each, and whether that is at home. If a phone on mobile data reads at home, a proxy or Docker is hiding who is connecting: write your network above.": "Die Adresse, die der Server für jedes Gerät sieht, und ob sie zu Hause ist. Erscheint ein Handy im Mobilfunknetz als zu Hause, verbirgt ein Proxy oder Docker, wer sich verbindet: Trag oben dein Netz ein.",
+  "at home": "zu Hause",
+  "outside": "außerhalb"
 }

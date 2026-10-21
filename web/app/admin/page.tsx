@@ -2,6 +2,7 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useAdminSettingsViews } from '@/components/AdminSettings';
 import { ConsoleLayout, type PageView } from '@/components/ConsoleLayout';
+import { seenText, useNetwork } from '@/components/NetworkSettings';
 import { ADMIN_SETTINGS } from '@/lib/settingsIndex.admin';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -647,21 +648,18 @@ function Members() {
 }
 
 /**
- * How the server sees the admin asking (bff GET /api/admin/network), beside a profile that opens at home: whether a home
- * network is set at all, and whether the admin is in it -- a reverse proxy that hides every visitor behind its own
- * address shows up here before anyone relies on it.
+ * How the server sees the admin asking (bff GET /api/admin/network), beside a profile that opens at home: whether the
+ * admin is at home, and the way to the page that says which networks are (components/NetworkSettings.tsx).
  */
 function HomeNetwork() {
-  const { data } = useQuery({
-    queryKey: ['admin-network'],
-    queryFn: () => api<{ ip: string | null; zone: 'local' | 'remote'; localNetworks: string[] }>('/api/admin/network'),
-  });
+  const { data } = useNetwork();
   if (!data) return null;
-  const ip = iso(data.ip ?? '?');
   return (
     <p className="text-[11px] leading-relaxed text-fog-500" data-home-network>
-      {!data.localNetworks.length ? tr('No home network is set (LOCAL_NETWORKS), so profiles without a password open only in the desktop app.')
-        : data.zone === 'local' ? tr('The server sees you at {ip}, at home.', { ip }) : tr('The server sees you at {ip}, outside your home network.', { ip })}
+      {seenText(data)}{' '}
+      <a href="/admin/?tab=server&section=local-networks" className="underline decoration-dotted underline-offset-2 hover:text-fog-300">
+        {tr('Home network')}
+      </a>
     </p>
   );
 }

@@ -58,8 +58,8 @@ import { registerApiDocs } from './lib/apiDocs';
 import { appVersion } from './lib/appVersion';
 import { buildPayload, installFacts, sendPing } from './lib/installPing';
 import authRoutes from './routes/auth';
-import { trustProxyProblems, trustProxySetting, trustProxyWarnings } from './lib/auth';
-import { localNetworksProblems, localNetworksWarnings } from './lib/clientAddr';
+import { trustProxyProblems, trustProxyWarnings } from './lib/auth';
+import { loadNetworkSettings, localNetworksProblems, localNetworksWarnings, networkConfig, trustsPeer } from './lib/clientAddr';
 import adminRoutes, { sweepImportBatches } from './routes/admin';
 import catalogRoutes from './routes/catalog';
 import imageRoutes, { authorizeImageRequest } from './routes/images';
@@ -90,13 +90,19 @@ async function main() {
       for (const p of netProblems) console.error(`[net] ${p}`);
       process.exit(1);
     }
-    for (const w of [...trustProxyWarnings(env.TRUST_PROXY), ...localNetworksWarnings(env.LOCAL_NETWORKS, env.TRUST_PROXY)]) {
-      console.warn(`[net] ${w}`);
-    }
   } else if (env.LOCAL_NETWORKS.trim()) {
     console.warn('[net] Uchiyomi Desktop is reached from this computer alone: LOCAL_NETWORKS is ignored.');
   }
   await migrate();
+  // What Admin -> Settings -> Server -> Home network saved, where the environment does not say (lib/clientAddr.ts),
+  // before any request is judged by it; then what is in force, said once.
+  if (!isDesktop()) {
+    await loadNetworkSettings();
+    const net = networkConfig();
+    for (const w of [...trustProxyWarnings(net.trustedProxies.value), ...localNetworksWarnings(net.localNetworks.value, net.trustedProxies.value)]) {
+      console.warn(`[net] ${w}`);
+    }
+  }
   // v0.63.0 (#208, lib/authMode.ts): a sign-in mode that cannot work stops the server here and says why, before any
   // route exists -- a typo in AUTH_MODE must never leave the password routes open behind an operator who thinks them
   // closed -- and SSO-only mode says what it changes at every start.
@@ -150,10 +156,11 @@ async function main() {
     // LOG_LEVEL (env.ts logLevelOf): `info` in production unless the operator says otherwise.
     logger: { level: logLevel },
     // Desktop: nothing sits in front of the app, so a forwarded-for header is only ever something a local
-    // process made up. Elsewhere only the peers TRUST_PROXY names may set it (env.ts): trusting every peer let a client
-    // on the app port choose its own address for the rate limits. Reintroduce `true`: trustProxy.test.ts sees 14
-    // sign-ins with rotating X-Forwarded-For all answered 401, none 429.
-    trustProxy: isDesktop() ? false : trustProxySetting(env.TRUST_PROXY),
+    // process made up. Elsewhere only the trusted proxies may set it (TRUST_PROXY, or Admin -> Settings): trusting every
+    // peer let a client on the app port choose its own address for the rate limits. Reintroduce `true`:
+    // trustProxy.test.ts sees 14 sign-ins with rotating X-Forwarded-For all answered 401, none 429. A function rather
+    // than the list, so a save on the settings page is in force at the next request (lib/clientAddr.ts trustsPeer).
+    trustProxy: isDesktop() ? false : trustsPeer,
     bodyLimit: 2 * 1024 * 1024,
   });
 

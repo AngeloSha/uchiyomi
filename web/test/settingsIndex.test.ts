@@ -29,7 +29,8 @@ const code = (src: string): string =>
   src.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
 const PAGES: Array<[SettingsIndex, string[]]> = [
   [PROFILE_SETTINGS, ['components/ProfileSettings.tsx']],
-  [ADMIN_SETTINGS, ['components/AdminSettings.tsx', 'components/ArchiveSettings.tsx', 'components/AdminNotifications.tsx', 'components/TranslateSettings.tsx']],
+  [ADMIN_SETTINGS, ['components/AdminSettings.tsx', 'components/ArchiveSettings.tsx', 'components/AdminNotifications.tsx', 'components/TranslateSettings.tsx',
+    'components/NetworkSettings.tsx']],
 ];
 const ALL: Record<SettingsCondition, boolean> = { web: true, 'local-accounts': true, extensions: true, pointer: true, talk: true };
 const en = (k: string) => k;

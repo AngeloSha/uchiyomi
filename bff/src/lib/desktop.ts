@@ -114,6 +114,8 @@ export const DESKTOP_HIDDEN_ROUTES: readonly string[] = Object.freeze([
   'POST /auth/leave',
   'GET /auth/pick',
   'POST /auth/profile-login',
+  // The home network and the trusted proxies: the desktop app is reached from its own computer alone, always at home.
+  'PATCH /api/admin/network',
   'POST /api/admin/users',
   'PATCH /api/admin/users/:id',
   'DELETE /api/admin/users/:id',

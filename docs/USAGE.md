@@ -95,8 +95,11 @@ photo, then **Switch profile**: the profiles you manage are a tap away, and **Si
 back to this screen. They open from your home network only. From anywhere else, on mobile data or a friend's Wi-Fi,
 only an account with a password (or single sign-on) gets in, and a profile without one stops at its next request
 until you are home again: the sign-in screen then says *This profile opens from home only*. Signing out of the account
-you switched from closes the profiles opened from it on that device. Which networks are home is the server's setting
-(`LOCAL_NETWORKS`, [Configuration](CONFIGURATION.md)); until it is set, these profiles open in the desktop app only.
+you switched from closes the profiles opened from it on that device. Which networks are home is set in **Admin →
+Settings → Server → Home network**: by default the private networks your router hands out (192.168.x, 10.x, 172.16–31.x),
+or the networks you write there, or none. The same place names the reverse proxies allowed to say who is connecting, and
+lists the address the server sees for each signed-in device, at home or outside, so a proxy that hides everyone behind
+its own address shows. `LOCAL_NETWORKS` and `TRUST_PROXY` in the environment outrank the page ([Configuration](CONFIGURATION.md)).
 An admin can also turn on **Admin → Settings → Server → Choose a profile at home**: at home, the sign-in screen then
 lists those profiles under *Who is reading?*, a tap each, with nobody else signed in first. From outside it lists
 nothing.

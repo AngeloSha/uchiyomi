@@ -93,18 +93,126 @@ test('with no trusted proxy at all, any forwarding means outside', async () => {
   }
 });
 
-test('with no home declared, nobody is at home', async () => {
-  const { zoneOf, localNetworks } = await import('../src/lib/clientAddr');
+test('with `none` as the home, nobody is at home', async () => {
+  const { zoneOf, localNetworks, localNetworksProblems } = await import('../src/lib/clientAddr');
   const Fastify = (await import('fastify')).default;
   const app = Fastify();
-  const home = localNetworks('');
-  app.get('/', async (req) => ({ zone: zoneOf(req, home) }));
+  const homes = [localNetworks('none'), localNetworks('NONE'), localNetworks('')];
+  app.get('/', async (req) => ({ zones: homes.map((h) => zoneOf(req, h)) }));
   try {
     for (const ra of ['127.0.0.1', '192.168.1.20', '10.0.0.2']) {
-      assert.equal((await app.inject({ url: '/', remoteAddress: ra })).json().zone, 'remote', ra);
+      assert.deepEqual((await app.inject({ url: '/', remoteAddress: ra })).json().zones, ['remote', 'remote', 'remote'], ra);
     }
+    assert.deepEqual(localNetworksProblems('none', 'true'), [], '`none` declares no home, so it has nothing to protect');
   } finally {
     await app.close();
+  }
+});
+
+// ---- where the home and the trusted proxies come from (Admin -> Settings -> Server -> Home network) ----
+
+/** An app judged by the settings in force, as server.ts builds it: `trustProxy` is trustsPeer. */
+async function liveApp() {
+  const { trustsPeer, clientZone, clientIp } = await import('../src/lib/clientAddr');
+  const Fastify = (await import('fastify')).default;
+  const app = Fastify({ trustProxy: trustsPeer });
+  app.get('/', async (req) => ({ zone: clientZone(req), ip: clientIp(req) }));
+  await app.ready();
+  const ask = async (remoteAddress: string, xff?: string) =>
+    (await app.inject({ url: '/', remoteAddress, headers: xff ? { 'x-forwarded-for': xff } : {} })).json();
+  return { app, zone: async (ra: string, xff?: string) => (await ask(ra, xff)).zone as string, ask };
+}
+
+test('nothing set anywhere: the private networks are home, and private peers are trusted proxies', async () => {
+  // Like Sonarr's "local addresses". Reintroduce the empty default: every case below that reads local reads remote.
+  const { networkConfig, useNetworkSettings, atHome } = await import('../src/lib/clientAddr');
+  useNetworkSettings({ localNetworks: null, trustedProxies: null });
+  const c = networkConfig();
+  assert.deepEqual([c.localNetworks.source, c.trustedProxies.source], ['default', 'default']);
+  for (const ip of ['192.168.1.20', '10.1.2.3', '172.20.0.5', '127.0.0.1', '169.254.3.4', '::1', 'fd00::1', 'fe80::1', '::ffff:192.168.1.20']) {
+    assert.ok(atHome(ip), `${ip} is private: at home`);
+  }
+  for (const ip of ['203.0.113.5', '172.32.0.1', '11.0.0.1', '2001:db8::1', '::ffff:203.0.113.5']) assert.ok(!atHome(ip), `${ip} is public`);
+  const { app, zone, ask } = await liveApp();
+  try {
+    assert.equal(await zone('192.168.1.20'), 'local');
+    assert.equal(await zone('203.0.113.5'), 'remote');
+    assert.equal(await zone('172.18.0.5', '203.0.113.5'), 'remote', 'Nginx Proxy Manager in Docker, forwarding a visitor from outside');
+    assert.deepEqual(await ask('172.18.0.5', '192.168.1.30'), { zone: 'local', ip: '192.168.1.30' });
+  } finally {
+    await app.close();
+  }
+});
+
+test('what the settings page saves is in force at the next request, the trusted proxies included', async () => {
+  // Reintroduce a cache that outlives a save (useNetworkSettings): each change below answers as the one before.
+  const { useNetworkSettings, networkConfig } = await import('../src/lib/clientAddr');
+  const { app, zone, ask } = await liveApp();
+  try {
+    useNetworkSettings({ localNetworks: '192.168.1.0/24', trustedProxies: '172.18.0.5' });
+    assert.equal(networkConfig().localNetworks.source, 'settings');
+    assert.equal(await zone('192.168.1.20'), 'local');
+    assert.equal(await zone('10.0.0.5'), 'remote', 'private, but not the home that was saved');
+    assert.deepEqual(await ask('172.18.0.5', '192.168.1.30'), { zone: 'local', ip: '192.168.1.30' }, 'the saved proxy says who it forwards');
+    assert.equal(await zone('172.18.0.9', '192.168.1.30'), 'remote', 'a proxy nobody named, forwarding');
+    assert.equal((await ask('172.18.0.9', '192.168.1.30')).ip, '172.18.0.9', 'and its header is not read');
+
+    useNetworkSettings({ localNetworks: 'none', trustedProxies: '172.18.0.5' });
+    assert.equal(await zone('192.168.1.20'), 'remote', '`none`: nobody is at home');
+
+    useNetworkSettings({ localNetworks: null, trustedProxies: null });
+    assert.equal(await zone('10.0.0.5'), 'local', 'back to the default');
+  } finally {
+    useNetworkSettings({ localNetworks: null, trustedProxies: null });
+    await app.close();
+  }
+});
+
+test('with every peer trusted as a proxy, nobody is at home', async () => {
+  // TRUST_PROXY=true lets anyone say any address: a home would be anyone's. Reintroduce by dropping the check in
+  // clientZone: the visitor below, claiming a home address from outside, reads local.
+  const { useNetworkSettings, networkWarnings } = await import('../src/lib/clientAddr');
+  const { app, zone } = await liveApp();
+  try {
+    useNetworkSettings({ localNetworks: null, trustedProxies: 'true' });
+    assert.equal(await zone('203.0.113.5', '192.168.1.20'), 'remote');
+    assert.equal(await zone('192.168.1.20'), 'remote');
+    assert.deepEqual(networkWarnings(), [{ code: 'trust_all' }]);
+  } finally {
+    useNetworkSettings({ localNetworks: null, trustedProxies: null });
+    await app.close();
+  }
+});
+
+test('the settings page refuses what boot refuses, and a proxy list that is not addresses', async () => {
+  const { networkSettingProblem, tidyNetworkSetting } = await import('../src/lib/clientAddr');
+  for (const ok of ['192.168.1.0/24', '192.168.1.0/24, 10.8.0.0/24', 'none', 'fd12:3456::/64']) {
+    assert.equal(networkSettingProblem('localNetworks', ok), null, ok);
+  }
+  for (const bad of ['uniquelocal', '0.0.0.0/0', '192.168.1.0/33', 'home']) {
+    assert.ok(networkSettingProblem('localNetworks', bad), bad);
+  }
+  for (const ok of ['loopback, linklocal, uniquelocal', '172.18.0.5', '172.18.0.0/16, 10.0.0.2']) {
+    assert.equal(networkSettingProblem('trustedProxies', ok), null, ok);
+  }
+  // `true` would trust everyone, `false` and `none` nobody, a number the address 0.0.0.1: none of them is a proxy.
+  for (const bad of ['true', 'false', 'none', '1', 'loopback, 2', 'loopbak', '10.0.0.0/33']) {
+    assert.ok(networkSettingProblem('trustedProxies', bad), bad);
+  }
+  assert.equal(tidyNetworkSetting(' 192.168.1.0/24, ,10.8.0.0/24 ,'), '192.168.1.0/24, 10.8.0.0/24');
+  assert.equal(tidyNetworkSetting(' , '), null, 'empty is the default');
+  assert.equal(tidyNetworkSetting('NONE'), 'none');
+});
+
+test('a proxy named by address inside the home is said on the settings page', async () => {
+  const { useNetworkSettings, networkWarnings } = await import('../src/lib/clientAddr');
+  try {
+    useNetworkSettings({ localNetworks: '192.168.1.0/24', trustedProxies: 'loopback, 192.168.1.2' });
+    assert.deepEqual(networkWarnings(), [{ code: 'proxy_at_home', ip: '192.168.1.2' }]);
+    useNetworkSettings({ localNetworks: null, trustedProxies: null });
+    assert.deepEqual(networkWarnings(), [], 'the defaults name no proxy by address');
+  } finally {
+    useNetworkSettings({ localNetworks: null, trustedProxies: null });
   }
 });
 

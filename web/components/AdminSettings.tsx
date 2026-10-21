@@ -37,6 +37,7 @@ import { SERIES_TYPES, seriesTypeKey } from '@/lib/seriesTypes';
 import { hasGroup, normGroup, reorder, withoutGroup } from '@/lib/scanlators';
 import { suggestGroups } from '@/lib/groupSuggest';
 import { NotificationsSection } from '@/components/AdminNotifications';
+import { NetworkSettings } from '@/components/NetworkSettings';
 import { SlowArchiveRow } from '@/components/ArchiveSettings';
 import { TranslateRow } from '@/components/TranslateSettings';
 import { isDesktop } from '@/lib/desktop';
@@ -442,6 +443,10 @@ function ServerSection({ data, save }: { data: any; save: Save }) {
             value={defaults.perms.canDownload !== false ? tr('Can download') : tr('No downloads')} />
         )}
       </RowGroup>
+
+      {/* Where profiles without a password open, and the proxies that may say who is connecting (bff /api/admin/network).
+          Not on desktop: its server is reached from its own computer alone, always at home. */}
+      {!desktop && <NetworkSettings />}
 
       <RowGroup title={tr('Updates and privacy')}>
         <SwitchWithMore id="update-check" label={tr('Check for updates')} help={tr('Asks GitHub once a day; nothing about this server is sent.')}

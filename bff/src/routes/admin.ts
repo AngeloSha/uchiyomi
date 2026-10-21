@@ -1,4 +1,5 @@
 import { hash } from '@node-rs/argon2';
+import { isIP } from 'node:net';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { q, one, tx } from '../lib/db';
@@ -32,7 +33,10 @@ import { runRepair, repairState, repairLiveSnapshot, REPAIR_HOURS, REPAIR_LIMITS
 import { listRunRecords, runDigest, type RunTarget } from '../lib/repairRuns';
 import { worstCase } from '../lib/repairEstimate';
 import { authenticate, requireAdmin, userIdOf, roleOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
-import { clientIp, clientZone } from '../lib/clientAddr';
+import {
+  DEFAULT_TRUSTED_PROXIES, PRIVATE_NETWORKS, atHome, clientIp, clientZone, localNetworks, networkConfig, networkSettingProblem,
+  networkWarnings, saveNetworkSettings, tidyNetworkSetting,
+} from '../lib/clientAddr';
 import { logAudit, recentAudit } from '../lib/audit';
 import { markRemoved, forgetVerdict } from '../lib/scoutMemory';
 import { namesOf, recordAltTitles } from '../lib/altTitles';
@@ -5096,18 +5100,71 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
 
   /**
-   * How this server sees the admin asking (lib/clientAddr.ts): the address it resolved, whether that came through a
-   * proxy TRUST_PROXY names, and whether it is at home. What Members shows beside the profiles that open without a
-   * password, so an operator writing LOCAL_NETWORKS sees the address to put in it -- and sees a misconfigured proxy (every
-   * visitor arriving as the proxy itself) before it matters.
+   * The home network and the trusted proxies in force (lib/clientAddr.ts), where each comes from -- the environment,
+   * this page, or the default -- and how this server sees the admin asking: the address it resolved, whether that came
+   * through a trusted proxy, whether it is at home. With them the address of every live session and its zone: a proxy
+   * or a NAT that hides who is connecting makes everyone look the same, and at home, which this list shows before it
+   * matters. `suggestion` is the admin's own /24 when it is a private one: "Use my network".
    */
-  app.get('/api/admin/network', async (req) => ({
-    ip: clientIp(req),
-    peer: req.socket.remoteAddress ?? null,
-    viaProxy: (req.ips?.length ?? 1) > 1,
-    zone: clientZone(req),
-    localNetworks: env.LOCAL_NETWORKS.split(',').map((e) => e.trim()).filter(Boolean),
-  }));
+  const networkState = async (req: FastifyRequest) => {
+    const c = networkConfig();
+    const ip = clientIp(req);
+    const plain = ip?.startsWith('::ffff:') && isIP(ip.slice(7)) === 4 ? ip.slice(7) : ip;
+    const ownNet = plain && isIP(plain) === 4 && !plain.startsWith('127.') ? `${plain.split('.').slice(0, 3).join('.')}.0/24` : null;
+    const recent = await q<{ ip: string; last_seen: Date; display_name: string }>(
+      `SELECT * FROM (
+         SELECT DISTINCT ON (r.ip) r.ip, r.last_seen, u.display_name
+           FROM refresh_tokens r JOIN users u ON u.id = r.user_id
+          WHERE r.revoked_at IS NULL AND r.expires_at > now() AND r.ip IS NOT NULL
+          ORDER BY r.ip, r.last_seen DESC) s
+        ORDER BY last_seen DESC LIMIT 10`);
+    return {
+      ip,
+      peer: req.socket.remoteAddress ?? null,
+      viaProxy: (req.ips?.length ?? 1) > 1,
+      zone: clientZone(req),
+      localNetworks: c.localNetworks,
+      trustedProxies: c.trustedProxies,
+      defaults: { localNetworks: PRIVATE_NETWORKS, trustedProxies: DEFAULT_TRUSTED_PROXIES },
+      suggestion: ownNet && localNetworks(PRIVATE_NETWORKS).check(plain!, 'ipv4') ? ownNet : null,
+      warnings: networkWarnings(c),
+      recent: recent.map((r) => ({ ip: r.ip, lastSeen: r.last_seen, name: r.display_name, zone: atHome(r.ip) ? 'local' : 'remote' })),
+    };
+  };
+  app.get('/api/admin/network', async (req) => networkState(req));
+
+  /**
+   * Admin -> Settings -> Server -> Home network: the home (`null` the private networks, `none` no network, or a list)
+   * and the trusted proxies (`null` the default, or a list). In force at the next request. A value the environment sets
+   * is not this page's to change (409 `set_by_env`), and what boot would refuse in the environment is refused here; so
+   * are `true`, `false` and bare numbers for the proxies, which say something other than an address. Reintroduce any
+   * check by dropping it: its case in networkSettings.int.test.ts saves.
+   */
+  app.patch('/api/admin/network', async (req, reply) => {
+    const b = z.object({
+      localNetworks: z.string().max(2000).nullable().optional(),
+      trustedProxies: z.string().max(2000).nullable().optional(),
+    }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const c = networkConfig();
+    for (const [key, name] of [['localNetworks', 'LOCAL_NETWORKS'], ['trustedProxies', 'TRUST_PROXY']] as const) {
+      if (b.data[key] !== undefined && c[key].source === 'env') {
+        return reply.code(409).send({ error: 'set_by_env', setting: name, message: `${name} is set in the environment.` });
+      }
+    }
+    const home = tidyNetworkSetting(b.data.localNetworks);
+    const proxies = tidyNetworkSetting(b.data.trustedProxies);
+    const homeProblem = home ? networkSettingProblem('localNetworks', home) : null;
+    if (homeProblem) return reply.code(400).send({ error: 'bad_network', message: homeProblem });
+    const proxyProblem = proxies ? networkSettingProblem('trustedProxies', proxies) : null;
+    if (proxyProblem) return reply.code(400).send({ error: 'bad_proxy', message: proxyProblem });
+    await saveNetworkSettings({
+      ...(home !== undefined ? { localNetworks: home } : {}),
+      ...(proxies !== undefined ? { trustedProxies: proxies } : {}),
+    });
+    await logAudit('settings.network', { userId: userIdOf(req), detail: { localNetworks: home, trustedProxies: proxies }, req });
+    return networkState(req);
+  });
 
   /** May this account manage profiles that open at home: enabled, and signing in with a credential of its own. */
   const mayManage = async (managerId: string) => !!(await one(

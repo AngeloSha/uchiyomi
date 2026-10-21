@@ -2055,6 +2055,11 @@ CREATE TABLE IF NOT EXISTS device_ring (
 CREATE INDEX IF NOT EXISTS idx_device_ring_user ON device_ring (user_id);
 -- The sign-in screen's "who is reading?" at home (routes/auth.ts /auth/pick): off unless an admin turns it on.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS local_pick boolean NOT NULL DEFAULT false;
+-- The home network and the trusted proxies as Admin -> Settings -> Server -> Home network sets them (lib/clientAddr.ts):
+-- NULL is the default (the private networks; loopback, link-local and private proxies). LOCAL_NETWORKS and TRUST_PROXY
+-- in the environment outrank both. Additive: an older release never reads them.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS local_networks  text;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS trusted_proxies text;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import Fastify, { type FastifyReply, type FastifyRequest, type FastifyServerOptions } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { q, one } from './db';
 import { env } from '../env';
 import { isDesktop } from './desktop';
@@ -548,67 +548,9 @@ async function revokeDerived(ended: Array<{ s: string }>): Promise<void> {
   );
 }
 
-// The client's address is read in one place, lib/clientAddr.ts, beside the zone it decides. Exported here as well
-// because every caller has always imported it from this file.
-export { clientIp } from './clientAddr';
-
-/** TRUST_PROXY's comma list, each entry trimmed, empty ones dropped. */
-const trustProxyEntries = (raw: string): string[] => raw.split(',').map((e) => e.trim()).filter(Boolean);
-
-/**
- * env.TRUST_PROXY as Fastify's `trustProxy` option: true, false, or the address list.
- *
- * A stray comma ("loopback, , 10.0.0.2", or one at the end) is an empty entry, which Fastify's parser refuses as an
- * address and stopped the server over. It names nothing, so it is dropped. Reintroduce by passing the list as written:
- * "a stray comma is not an entry" in trustProxyConfig.test.ts sees the empty one.
- */
-export function trustProxySetting(raw: string): FastifyServerOptions['trustProxy'] {
-  const v = raw.trim().toLowerCase();
-  if (v === 'true') return true;
-  if (v === 'false' || v === '') return false;
-  const list = trustProxyEntries(raw);
-  return list.length ? list.join(', ') : false;
-}
-
-/**
- * Why the server cannot start with this TRUST_PROXY, one sentence each; empty when it can. Boot stops on any of them
- * (server.ts), before the migrations.
- *
- * An entry Fastify cannot read stopped the server anyway -- it throws while the app is built -- but only after the
- * migrations, in proxy-addr's words ("invalid IP address: loopbak"), with nothing naming the setting. Each entry is put
- * to Fastify itself, so this can never refuse a value the server would take, nor take one it would refuse: a parser of
- * our own (ipaddr.js reads more spellings of an address than node:net does) would one day stop an install that works.
- */
-export function trustProxyProblems(raw: string): string[] {
-  if (typeof trustProxySetting(raw) !== 'string') return [];
-  const out: string[] = [];
-  for (const entry of trustProxyEntries(raw)) {
-    try {
-      Fastify({ trustProxy: entry });
-    } catch {
-      out.push(`TRUST_PROXY: "${entry}" is not an address, a CIDR range or one of loopback, linklocal, uniquelocal.`);
-    }
-  }
-  return out;
-}
-
-/**
- * What TRUST_PROXY tells the operator at every start (server.ts), one line each: settings that work, but not as
- * whoever wrote them is likely to think.
- *
- *  - `true` believes X-Forwarded-For from every peer, the setting v0.69.1 stopped being the default for.
- *  - A bare number is not a count of proxies (Express's spelling): the parser reads `1` as the address 0.0.0.1, so it
- *    trusts no proxy at all, silently, and the activity log shows the proxy's own address for everyone.
- */
-export function trustProxyWarnings(raw: string): string[] {
-  if (trustProxySetting(raw) === true) {
-    return ['TRUST_PROXY=true believes X-Forwarded-For from every peer: anyone who can reach the app\'s port directly '
-      + 'chooses the address the sign-in limits and the activity log see. Name your proxy\'s address or network instead.'];
-  }
-  return trustProxyEntries(raw).filter((e) => /^\d+$/.test(e)).map((e) =>
-    `TRUST_PROXY: "${e}" is read as an address, not as a number of proxies, so it trusts no proxy. Name your proxy's `
-    + 'address or network instead.');
-}
+// The client's address, and which proxies may say what it is, are read in one place, lib/clientAddr.ts, beside the zone
+// they decide. Exported here as well because every caller has always imported them from this file.
+export { clientIp, trustProxySetting, trustProxyProblems, trustProxyWarnings } from './clientAddr';
 
 /**
  * Sign-out: end the session this token belongs to, not just the token.

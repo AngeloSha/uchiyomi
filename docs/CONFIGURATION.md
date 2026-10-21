@@ -32,17 +32,22 @@ The ones worth knowing:
   `10.0.0.0/33`) stops it at start, with a `[net]` line in `docker logs uchiyomi` naming the entry; a stray comma is
   ignored. Two values that work but rarely mean what was meant are said in the same log at every start: `true`, and a
   bare number. Some guides spell "trust one proxy" as `TRUST_PROXY=1`, but here `1` is read as the address 0.0.0.1
-  and trusts no proxy at all.
+  and trusts no proxy at all. Unset, it can be changed in Admin -> Settings -> Server -> Home network instead (see below).
 - `LOCAL_NETWORKS`: your home network, as addresses or CIDR ranges (`LOCAL_NETWORKS=192.168.1.0/24`, an IPv6 range
-  beside it if your devices use one). Profiles without a password open from these networks only: from anywhere else,
-  only an account with a password (or single sign-on) gets in, and a profile without one stops working on the next
-  request once a phone leaves home. Empty by default, which means nobody is at home and such a profile opens in the
-  desktop app alone. There is no default of "every private network" on purpose: a reverse proxy that forwards a visitor
-  without `X-Forwarded-For` makes every visitor look like the proxy's own private address, and the whole internet would
-  be at home. `GET /api/admin/network`, as an admin, answers with the address the server sees you at and whether that
-  is at home, so you can check before you rely on it. Write the network, not a name (`uniquelocal` is refused), never `0.0.0.0/0`, and leave
-  your proxy's own address out of it; the app stops at start on a value it cannot read, and refuses
-  `LOCAL_NETWORKS` together with `TRUST_PROXY=true`, which would let anyone claim a home address.
+  beside it if your devices use one), or `none`. Profiles without a password open from these networks only: from
+  anywhere else, only an account with a password (or single sign-on) gets in, and a profile without one stops working
+  on the next request once a phone leaves home. Unset, the home network is set in Admin -> Settings -> Server -> Home
+  network, and its default is the private networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, loopback,
+  link-local and their IPv6 kin), as Sonarr and Radarr read "local addresses". One thing that default cannot see: a
+  proxy or a NAT that hands the app every visitor as its own private address -- a reverse proxy that does not send
+  `X-Forwarded-For`, Docker Desktop's port forwarding -- puts the whole internet at home. The same page lists the
+  address the server sees for you and for every signed-in device, each marked at home or outside: if a phone on mobile
+  data reads "at home", write your real network there, or `none`. Write the network, not a name (`uniquelocal` is
+  refused), never `0.0.0.0/0`; the app stops at start on a value it cannot read, and refuses `LOCAL_NETWORKS` together
+  with `TRUST_PROXY=true`, which would let anyone claim a home address (with `TRUST_PROXY=true` and no `LOCAL_NETWORKS`,
+  nobody is at home).
+- **Set in the environment, either one wins**: the settings page shows its value and cannot change it, so what your
+  compose file says is what runs. Saved on the page, a change is in force at the next request, with no restart.
 - `LOG_LEVEL` (since v0.92.0): how much the server log says (`docker logs uchiyomi`). `info` by default, a line for
   every request; `warn` keeps only warnings and errors. `debug` adds, for each series a *Find other sources* run
   looks at, the names it searched each source under, what each source answered, which result it took, and why a

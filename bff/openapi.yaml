@@ -7852,13 +7852,18 @@ paths:
     get:
       tags:
         - admin
-      summary: How this server sees the caller -- address, proxy, and whether it is at home.
+      summary: The home network and the trusted proxies in force, and how this server sees the caller.
       operationId: getApiAdminNetwork
       description: >-
-        `ip` is the address the server resolved under TRUST_PROXY, `peer` the address that connected, `viaProxy` whether
-        that came through a proxy TRUST_PROXY names, `zone` `local` when `ip` is inside LOCAL_NETWORKS (where profiles
-        without a password open) and `remote` otherwise, and `localNetworks` the networks declared. Requires an admin
-        account and a token carrying the admin scope.
+        `ip` is the address the server resolved under the trusted proxies, `peer` the address that connected, `viaProxy`
+        whether that came through a trusted proxy, `zone` `local` when `ip` is in the home network (where profiles
+        without a password open) and `remote` otherwise. `localNetworks` and `trustedProxies` are `{value, source}`, the
+        source being `env` (LOCAL_NETWORKS / TRUST_PROXY, which the settings page cannot change), `settings` or
+        `default` (the private networks; loopback, link-local and private proxies); `defaults` names both defaults.
+        `suggestion` is the caller's own /24 when it is a private address, else null. `warnings` are codes: `trust_all`
+        (every peer trusted, so nobody is at home) and `proxy_at_home` with `ip`. `recent` is the address of up to ten
+        live sessions, newest first, with `lastSeen`, the account's `name` and its `zone`. Requires an admin account and a
+        token carrying the admin scope.
       security:
         - bearer: []
       responses:
@@ -7868,6 +7873,41 @@ paths:
           description: Not authenticated
         "403":
           description: Not an admin
+    patch:
+      tags:
+        - admin
+      summary: Save the home network or the trusted proxies (Admin -> Settings -> Server -> Home network).
+      operationId: patchApiAdminNetwork
+      description: >-
+        Either or both. `localNetworks`: null (or blank) for the default, the private networks; `none` for no network;
+        or a comma list of addresses and CIDR ranges. `trustedProxies`: null (or blank) for the default, or a comma list
+        of addresses, CIDR ranges and loopback / linklocal / uniquelocal -- never true, false, none or a bare number. In
+        force at the next request, no restart. A value LOCAL_NETWORKS or TRUST_PROXY sets in the environment is a 409
+        set_by_env naming it; a value boot would refuse is a 400 bad_network or bad_proxy with a sentence. The answer is
+        the GET's. Audit row settings.network. Not on the desktop app (404). Requires an admin account and a token
+        carrying the admin scope.
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                localNetworks: { type: [string, "null"], maxLength: 2000 }
+                trustedProxies: { type: [string, "null"], maxLength: 2000 }
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: bad_network or bad_proxy
+        "401":
+          description: Not authenticated
+        "403":
+          description: Not an admin
+        "409":
+          description: set_by_env
   /api/admin/users:
     get:
       tags:
