@@ -40,6 +40,7 @@ import { authMode, bootstrapSub, mayBootstrap, rescueAdmin, ssoOnly } from '../l
 import { applyMemberDefaults } from '../lib/memberDefaults';
 import { talkOn } from '../lib/comments';
 import { verifyLoginPassword } from '../lib/loginPassword';
+import { profileKind, type ProfileRow } from '../lib/profiles';
 
 const loginBody = z.object({
   username: z.string().max(64).optional(),
@@ -60,9 +61,10 @@ interface FullUser {
   totp_enabled: boolean;
   totp_secret: string | null;
   recovery_codes: string[];
+  password_login: boolean;
 }
 const USER_AUTH_COLS =
-  'id, username, display_name, role, password_hash, disabled, locked_until, totp_enabled, totp_secret, recovery_codes';
+  'id, username, display_name, role, password_hash, disabled, locked_until, totp_enabled, totp_secret, recovery_codes, password_login';
 
 function signAccess(app: FastifyInstance, userId: string, role: string): { accessToken: string; expiresIn: number; desktop?: true } {
   // `desktop: true` tells the web app it is inside Uchiyomi Desktop (web/lib/desktop.ts). Spread in only when
@@ -78,8 +80,10 @@ function setImgCookie(app: FastifyInstance, reply: any, userId: string) {
 }
 
 async function userPayload(userId: string) {
-  const user = await one<{ id: string; username: string | null; display_name: string; role: string; avatar: unknown; totp_enabled: boolean; perms: unknown; sso: boolean }>(
-    'SELECT id, username, display_name, role, avatar, totp_enabled, perms, oidc_sub IS NOT NULL AS sso FROM users WHERE id = $1',
+  const user = await one<{ id: string; username: string | null; display_name: string; role: string; avatar: unknown; totp_enabled: boolean; perms: unknown; sso: boolean } & ProfileRow>(
+    `SELECT id, username, display_name, role, avatar, totp_enabled, perms, oidc_sub IS NOT NULL AS sso,
+            password_login, local_open, oidc_sub, auth_kind
+       FROM users WHERE id = $1`,
     [userId],
   );
   const settings = await one<{ data: unknown }>('SELECT data FROM app_settings WHERE user_id = $1', [userId]);
@@ -92,6 +96,8 @@ async function userPayload(userId: string) {
     totpEnabled: !!user?.totp_enabled,
     // Linked to an identity at the OIDC provider (v0.63.0): Profile → Account offers Link to … until it is.
     sso: !!user?.sso,
+    // What kind of profile this is (lib/profiles.ts): every account before profiles is `password`.
+    kind: user ? profileKind(user, isDesktop()) : 'password',
     perms: user?.perms ?? {},
     settings: settings?.data ?? {},
     // v0.90.0: whether this server has chapter comments at all (lib/comments.ts talkOn: the owned library and two or more
@@ -195,7 +201,7 @@ export default async function authRoutes(app: FastifyInstance) {
     });
     if (!row) return closed();
     await logAudit('setup.complete', { userId: row.id, username: b.data.username, req });
-    const refresh = await issueRefreshToken(row.id, { ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null });
+    const refresh = await issueRefreshToken(row.id, { ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null, via: 'setup' });
     reply.setCookie(REFRESH_COOKIE, refresh, cookieOptions());
     setImgCookie(app, reply, row.id);
     return reply.send({ ...signAccess(app, row.id, 'admin'), user: await userPayload(row.id), refreshExpiresAt: refreshExpiresAt() });
@@ -220,7 +226,11 @@ export default async function authRoutes(app: FastifyInstance) {
     // rescue opens one admin's password sign-in and nobody else's" in ssoRescue.int.test.ts signs a member in.
     const rescue = local ? null : rescueAdmin();
     const user = await one<FullUser>(`SELECT ${USER_AUTH_COLS} FROM users WHERE username = $1`, [username]);
-    const refusal = !local && (username !== rescue || user?.role !== 'admin') ? 'sso_only' : !user ? 'no_user' : null;
+    // A profile without a password (password_login false) is refused here like a name nobody has: its placeholder hash
+    // matches nothing anyway, and the answer must not say which names are such profiles. Reintroduce by dropping the
+    // case: uniformPasswordRefusal.int.test.ts signs its profile without a password in with the hash's own password.
+    const refusal = !local && (username !== rescue || user?.role !== 'admin') ? 'sso_only'
+      : !user ? 'no_user' : !user.password_login ? 'no_password' : null;
     // Before a password is accepted every refusal is one answer, after one verification each (lib/loginPassword.ts): a
     // name nobody has, a name SSO-only mode does not let in, and a wrong password. A disabled or locked account is
     // checked against its own password, and only the right password is told why it cannot sign in -- someone who has
@@ -273,7 +283,7 @@ export default async function authRoutes(app: FastifyInstance) {
     }
 
     await resetFailedLogins(user.id);
-    const refresh = await issueRefreshToken(user.id, { deviceId, deviceName, ip, userAgent: ua });
+    const refresh = await issueRefreshToken(user.id, { deviceId, deviceName, ip, userAgent: ua, via: 'password' });
     reply.setCookie(REFRESH_COOKIE, refresh, cookieOptions());
     setImgCookie(app, reply, user.id);
     // A rescue sign-in is said in the log as well as written down: it is the door SSO-only mode exists to keep shut.
@@ -344,6 +354,7 @@ export default async function authRoutes(app: FastifyInstance) {
       const refresh = await issueRefreshToken(userId, {
         deviceId: b.success ? b.data.deviceId : undefined,
         deviceName: 'This PC',
+        via: 'desktop',
         ip: clientIp(req),
         userAgent: (req.headers['user-agent'] as string) || null,
       });
@@ -496,7 +507,7 @@ export default async function authRoutes(app: FastifyInstance) {
     if (!row || row.disabled) return fail('disabled', undefined, true);
 
     const refresh = await issueRefreshToken(userId, {
-      deviceName: 'SSO', ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null,
+      deviceName: 'SSO', ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null, via: 'oidc',
     });
     reply.setCookie(REFRESH_COOKIE, refresh, cookieOptions());
     setImgCookie(app, reply, userId);
@@ -668,7 +679,7 @@ export default async function authRoutes(app: FastifyInstance) {
     }
     if (!row) return taken();
     await logAudit('user.register', { userId: row.id, username, req });
-    const refresh = await issueRefreshToken(row.id, { deviceId, deviceName, ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null });
+    const refresh = await issueRefreshToken(row.id, { deviceId, deviceName, ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null, via: 'register' });
     reply.setCookie(REFRESH_COOKIE, refresh, cookieOptions());
     setImgCookie(app, reply, row.id);
     return reply.send({ ...signAccess(app, row.id, 'user'), user: await userPayload(row.id), refreshExpiresAt: refreshExpiresAt() });

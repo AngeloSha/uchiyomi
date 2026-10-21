@@ -1397,7 +1397,7 @@ paths:
     get:
       tags:
         - auth
-      summary: "The calling account: id, username, role, permissions, settings and, since v0.90.0, `talk`: whether this server has chapter comments."
+      summary: "The calling account: id, username, role, permissions, settings, `talk` (since v0.90.0: whether this server has chapter comments) and `kind`: `password` for every account until profiles that open without a password exist (`open`, `hybrid`), `desktop-owner` for the desktop app's own account."
       operationId: getAuthMe
       security:
         - bearer: []

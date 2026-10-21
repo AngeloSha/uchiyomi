@@ -144,17 +144,35 @@ export async function resolveOpdsBasic(authHeader?: string): Promise<OpdsIdentit
  */
 export const refreshExpiresAt = () => Date.now() + env.REFRESH_TTL_DAYS * 24 * 60 * 60 * 1000;
 
-/** Issue a fresh opaque refresh token for a new sign-in and persist its hash. Returns the raw token. */
+/**
+ * How a session was entered (refresh_tokens.via), written once at sign-in and carried through every rotation. Each of
+ * these carries a credential; a session entered without one -- a profile that opens without a password -- will be held
+ * to the local network, which is why the way in is kept at all.
+ */
+export type SessionVia = 'password' | 'oidc' | 'desktop' | 'register' | 'setup';
+
+/**
+ * Issue a fresh opaque refresh token for a new sign-in and persist its hash. Returns the raw token.
+ *
+ * The row starts a session: its id is also its `session_id`, the name the session keeps through every rotation
+ * (supersede). `parentSession` names the session this one was opened from, and ending that one ends this one too
+ * (revokeDerived).
+ */
 export async function issueRefreshToken(
   userId: string,
-  opts: { deviceId?: string; deviceName?: string; ip?: string | null; userAgent?: string | null } = {},
+  opts: {
+    deviceId?: string; deviceName?: string; ip?: string | null; userAgent?: string | null;
+    via?: SessionVia; parentSession?: string;
+  } = {},
 ): Promise<string> {
   const token = randomBytes(48).toString('hex');
   const expires = new Date(refreshExpiresAt());
+  const id = randomUUID();
   await q(
-    `INSERT INTO refresh_tokens (user_id, token_hash, device_id, device_name, expires_at, ip, user_agent, last_seen)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
-    [userId, sha256(token), opts.deviceId ?? null, opts.deviceName ?? null, expires, opts.ip ?? null, (opts.userAgent ?? null)?.slice(0, 200) ?? null],
+    `INSERT INTO refresh_tokens (id, session_id, user_id, token_hash, device_id, device_name, expires_at, ip, user_agent, last_seen, via, parent_session)
+     VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8, now(), $9, $10)`,
+    [id, userId, sha256(token), opts.deviceId ?? null, opts.deviceName ?? null, expires, opts.ip ?? null,
+      (opts.userAgent ?? null)?.slice(0, 200) ?? null, opts.via ?? null, opts.parentSession ?? null],
   );
   return token;
 }
@@ -302,6 +320,10 @@ export async function planRefresh(token: string, graceMs: number = REFRESH_GRACE
  * Supersede the live token `oldId` with a new one, in ONE statement: the new row exists only if the old one
  * was still live when this ran. Two requests racing on one token therefore cannot both succeed, where the
  * old insert-then-revoke let both insert and left two live tokens for one device. Null when it lost.
+ *
+ * The new token is the same session: it takes the old one's `session_id` (its own id for a row from before the
+ * column), `parent_session` and `via`. Reintroduce by leaving them out: "a session keeps its name, its parent and its
+ * way in through every rotation" in sessionLineage.int.test.ts sees a rotated child outlive its parent.
  */
 async function supersede(
   oldId: string,
@@ -313,10 +335,11 @@ async function supersede(
        UPDATE refresh_tokens
           SET revoked_at = now(), replaced_by = $1, used_at = CASE WHEN $2 THEN now() ELSE used_at END
         WHERE id = $3 AND revoked_at IS NULL
-        RETURNING user_id
+        RETURNING user_id, COALESCE(session_id, id) AS session_id, parent_session, via
      )
-     INSERT INTO refresh_tokens (id, user_id, token_hash, device_id, device_name, expires_at, ip, user_agent, last_seen)
-     SELECT $1, user_id, $4, $5, $6, $7, $8, $9, now() FROM old
+     INSERT INTO refresh_tokens (id, user_id, token_hash, device_id, device_name, expires_at, ip, user_agent, last_seen,
+                                 session_id, parent_session, via)
+     SELECT $1, user_id, $4, $5, $6, $7, $8, $9, now(), session_id, parent_session, via FROM old
      RETURNING id`,
     [randomUUID(), o.used, oldId, sha256(token), o.deviceId, o.deviceName, o.expiresAt, o.ip, o.userAgent?.slice(0, 200) ?? null],
   );
@@ -347,7 +370,11 @@ export async function exchangeRefreshToken(
     if (plan.kind === 'refuse') {
       // Step 3. The jar that presented this is cleared by the 401 either way, so ending the session costs the
       // device nothing it was not already losing; what it takes away is the OTHER holder's token.
-      if (plan.endSession) await q('UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL', [plan.endSession]);
+      if (plan.endSession) {
+        await revokeDerived(await q<{ s: string }>(
+          'UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL RETURNING COALESCE(session_id, id) AS s',
+          [plan.endSession]));
+      }
       return { kind: 'refused' };
     }
     const t = plan.token;
@@ -431,11 +458,39 @@ export const touchSession = (id: string, ip?: string | null, ua?: string | null)
 export const listSessions = (userId: string) =>
   q(`SELECT id, device_name, device_id, ip, user_agent, created_at, last_seen FROM refresh_tokens
      WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now() ORDER BY last_seen DESC`, [userId]);
-export const revokeSessionForUser = (userId: string, id: string) =>
-  q('UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL', [id, userId]);
-export const revokeAllSessions = (userId: string, exceptId?: string) =>
-  q(`UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL${exceptId ? ' AND id <> $2' : ''}`,
-    exceptId ? [userId, exceptId] : [userId]);
+export async function revokeSessionForUser(userId: string, id: string): Promise<void> {
+  await revokeDerived(await q<{ s: string }>(
+    `UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
+     RETURNING COALESCE(session_id, id) AS s`, [id, userId]));
+}
+export async function revokeAllSessions(userId: string, exceptId?: string): Promise<void> {
+  await revokeDerived(await q<{ s: string }>(
+    `UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL${exceptId ? ' AND id <> $2' : ''}
+     RETURNING COALESCE(session_id, id) AS s`,
+    exceptId ? [userId, exceptId] : [userId]));
+}
+
+/**
+ * End every session opened from one that has just ended (refresh_tokens.parent_session), and every one opened from
+ * those: a profile entered from another account's session lasts no longer than it.
+ * Each way a session ends calls this with what it ended -- sign-out, a revoke, sign-out-everywhere, a password change,
+ * a disable, step 3 of planRefresh. A rotation (supersede) ends a token, not a session, and does not. UNION, not
+ * UNION ALL, so a cycle cannot loop. Reintroduce by dropping a call: its case in sessionLineage.int.test.ts sees the
+ * child refresh.
+ */
+async function revokeDerived(ended: Array<{ s: string }>): Promise<void> {
+  if (!ended.length) return;
+  await q(
+    `WITH RECURSIVE kids AS (
+       SELECT session_id AS s FROM refresh_tokens WHERE parent_session = ANY($1::uuid[])
+       UNION
+       SELECT r.session_id FROM refresh_tokens r JOIN kids k ON r.parent_session = k.s
+     )
+     UPDATE refresh_tokens SET revoked_at = now()
+      WHERE revoked_at IS NULL AND session_id IN (SELECT s FROM kids)`,
+    [[...new Set(ended.map((e) => e.s))]],
+  );
+}
 
 /**
  * Client IP, as Fastify resolved it under `trustProxy` (server.ts, env.TRUST_PROXY).
@@ -516,7 +571,7 @@ export function trustProxyWarnings(raw: string): string[] {
  * is what makes the end final (step 1).
  */
 export async function revokeRefreshToken(token: string): Promise<void> {
-  await q(
+  await revokeDerived(await q<{ s: string }>(
     `WITH RECURSIVE chain AS (
        SELECT id, replaced_by, 1 AS depth FROM refresh_tokens WHERE token_hash = $1
        UNION ALL
@@ -525,13 +580,15 @@ export async function revokeRefreshToken(token: string): Promise<void> {
         WHERE c.depth < $2
      )
      UPDATE refresh_tokens SET revoked_at = now()
-      WHERE id IN (SELECT id FROM chain) AND revoked_at IS NULL`,
+      WHERE id IN (SELECT id FROM chain) AND revoked_at IS NULL
+     RETURNING COALESCE(session_id, id) AS s`,
     [sha256(token), CHAIN_MAX],
-  );
+  ));
 }
 
 export async function revokeRefreshTokenById(id: string): Promise<void> {
-  await q(`UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1`, [id]);
+  await revokeDerived(await q<{ s: string }>(
+    `UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1 RETURNING COALESCE(session_id, id) AS s`, [id]));
 }
 
 /** Pull the authenticated user id out of a verified JWT. */

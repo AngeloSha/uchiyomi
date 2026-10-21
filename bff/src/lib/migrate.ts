@@ -2013,6 +2013,32 @@ CREATE TABLE IF NOT EXISTS anilist_trending (
   items       jsonb NOT NULL DEFAULT '[]'::jsonb,
   fetched_at  timestamptz NOT NULL DEFAULT now()
 );
+
+-- Profiles that open without a password, from the local network only. These
+-- columns come first and nothing writes them yet. password_login: /auth/login accepts the row (false for a profile
+-- with no password). local_open: it opens without a password from the local network. managed_by: the account that
+-- manages it; deleting that account leaves the profile to the admin rather than deleting its reading too. Every row
+-- an older release wrote reads as it did (true, false, NULL), and a rollback has none of them to write.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_login boolean NOT NULL DEFAULT true;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS local_open     boolean NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS managed_by     uuid REFERENCES users(id) ON DELETE SET NULL;
+-- A profile anyone at home can open never runs the server. The desktop app's own account is the exception it already
+-- is (lib/desktopUser.ts): its window is the only way in.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_local_open_not_admin') THEN
+    ALTER TABLE users ADD CONSTRAINT users_local_open_not_admin
+      CHECK (NOT local_open OR role <> 'admin' OR auth_kind = 'desktop');
+  END IF;
+END $$;
+-- A session's name through its rotations (session_id; NULL on a row from before it, which is then its own id), the
+-- session it was opened from (parent_session: ending that one ends this one, lib/auth.ts revokeDerived), and how it
+-- was entered (via). lib/auth.ts supersede carries all three to the next token.
+ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS session_id     uuid;
+ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS parent_session uuid;
+ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS via            text;
+CREATE INDEX IF NOT EXISTS idx_rt_parent  ON refresh_tokens (parent_session) WHERE parent_session IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_rt_session ON refresh_tokens (session_id) WHERE session_id IS NOT NULL;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:
