@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.96.0 — 2026-10-21
+
+**Drag things into place, a search on one source keeps going as you scroll, and the read-chapter cleanup says why it
+keeps what it keeps.** Drag to reorder is **Squeaks72**'s work ([#330](https://github.com/AngeloSha/uchiyomi/pull/330));
+the other two answer [#331](https://github.com/AngeloSha/uchiyomi/issues/331) and
+[#332](https://github.com/AngeloSha/uchiyomi/issues/332). Thank you.
+
+### Drag to reorder
+
+- **Every list you put in order can be dragged now**, beside its arrows:
+  - Home's rows in **Customize Home**;
+  - a list's series while you **Edit** it;
+  - the **Source order**;
+  - the **Default priority** of scanlation groups;
+  - a series' own ranked groups in *Sources & translations*.
+- **With a mouse,** press an item and move it; a bar in the accent colour shows where it will land.
+- **On a phone,** hold the item a moment until it lifts, then drag. A quick swipe still scrolls the page.
+- **Escape** cancels a drag. The arrows stay, for keyboards and screen readers.
+
+### Search past the first page
+
+- **A site answers its search a page at a time.** BatCave gives ten at a time and has 209 results for *Star Trek*, and
+  Discover showed only the first page.
+- **A search on one source now keeps going as you scroll.** Pick the source in the source chip (or have only one) and
+  search. The next page loads as you near the end of the wall, up to 30 pages. Every extension's search does this.
+- A search across all your sources still shows each source's first page.
+
+### Why a read chapter is still there
+
+- **Delete read chapters keeps a chapter for good reasons:** someone part-way through, a bookmark, the cover chapter,
+  the last copy the sources no longer list, and a few more. Nothing said which one was keeping yours.
+- **With `LOG_LEVEL=debug`, every run now says so.** Lines starting `[cleanup]` give how many read chapters are in the
+  download folder and how many are due, then how many each rule keeps, with a few by title.
+
+### Upgrading
+
+- Nothing to do.
+
 ## v0.95.0 — 2026-10-21
 
 **A series whose files you deleted yourself can be forgotten, and Find other sources proposes a series a site lists under
