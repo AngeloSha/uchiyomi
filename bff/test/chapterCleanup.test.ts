@@ -81,10 +81,11 @@ test('a bookmarked chapter is never pruned', () => {
   assert.match(dueSql(null), /NOT EXISTS \(SELECT 1 FROM bookmarks bm WHERE bm\.book_id = b\.id\)/);
 });
 
-test("the chapter a series draws its artwork from is never pruned", () => {
-  // Every cover, thumbnail and backdrop falls back to the first page of cover_book_id. Prune it and the
-  // series loses its art in the grid, the rails and its own page -- for one chapter's worth of disk.
-  assert.match(dueSql(null), /NOT EXISTS \(SELECT 1 FROM lib_series s WHERE s\.cover_book_id = b\.id\)/);
+test("the chapter a series draws its artwork from is due like any other (v0.97.0, #332)", () => {
+  // It was vetoed outright, whatever the cover was, and every series kept its lowest chapter for ever. Its page is kept
+  // instead, where the cover is that page (cleanupCoverPage.int.test.ts). Reintroduce the veto: the rule names
+  // cover_book_id again.
+  assert.doesNotMatch(dueSql(null), /cover_book_id/);
 });
 
 test('a chapter the sources no longer list is never pruned', () => {

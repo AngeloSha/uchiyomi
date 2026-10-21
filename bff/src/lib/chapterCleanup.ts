@@ -47,13 +47,19 @@
  *
  * ZERO DAYS IS A REAL SETTING and means "at the next run", not "off". `cleanup_read` is the off switch.
  *
- * TWO VETOES, both for things that point INTO the file rather than at the chapter:
- *   - a bookmark names a page number inside it, so deleting the pages turns it into a pointer at nothing.
- *     Progress survives a prune (it is a count); a bookmark does not.
- *   - the series' cover_book_id. Every cover, thumbnail and backdrop in the product falls back to the first
- *     page of that chapter when there is no artwork to fetch, so pruning it takes the art off the series,
- *     the library grid and the home rails. It is one chapter per series, and it is always the lowest number
- *     -- so this costs almost nothing and cannot drift, because persistScan recomputes it the same way.
+ * ONE VETO, for a thing that points INTO the file rather than at the chapter: a bookmark names a page number inside
+ * it, so deleting the pages turns it into a pointer at nothing. Progress survives a prune (it is a count); a bookmark
+ * does not.
+ *
+ * THE COVER'S CHAPTER GOES TOO, AND ITS PAGE STAYS (v0.97.0, #332). A series with no cover picture of its own -- or
+ * whose admin chose Use the first page -- shows its first page as its cover, its tile and its backdrop. That chapter
+ * (cover_book_id) used to be vetoed outright, whatever the cover was, so every series kept its lowest chapter for ever:
+ * @TIGamingTV's 30 of 34 read chapters, on series whose cover comes from their source and not from that chapter at all.
+ * Now the job keeps the page itself before the chapter goes, once per series and only where the cover IS that page
+ * (lib/seriesArt.ts coverPageBooks, keepCoverPage), and the cover route reads it ahead of any chapter. A page that
+ * cannot be read is no cover to keep, and the chapter goes; one that cannot be written leaves the chapter for the next
+ * run. Reintroduce the veto: "the cover's chapter goes, and its page stays the cover" in cleanupCoverPage.int.test.ts
+ * finds the chapter still there; drop the keep and the same test finds no page.
  *
  * AND NEVER THE LAST COPY. "We could fetch it again" is a claim about the sources, and their last listing
  * (series_listing, lib/seriesListing.ts) is where it can be checked. Once a series has a listing, a chapter whose
@@ -67,7 +73,7 @@
 import { rm } from 'fs/promises';
 import { dirname, resolve } from 'path';
 import { q, one } from './db';
-import { DL_ROOT, LIBRARY_ROOT } from './library';
+import { DL_ROOT, LIBRARY_ROOT, cbzPageAt } from './library';
 import { allWritable, containedPath, rootUnavailable, statOrGone } from './fsGuard';
 import { catalogFileCounts, looksUnmounted } from './catalogRootGuard';
 import { REFETCH_BAK } from './fsAtomic';
@@ -75,6 +81,7 @@ import { runtime, type CleanupResult } from './runtime';
 import { atHiddenNumber, hiddenNumbersActive } from './noticeChapters';
 import { rangeEnd } from './chapterRanges';
 import { logLevel } from '../env';
+import { coverPageBooks, keepCoverPage } from './seriesArt';
 
 /**
  * A listing row the sweep could fetch again (see the header): not `blocked` -- every copy from a blocked group or in
@@ -149,7 +156,6 @@ export function dueSql(limit: number | null): string {
              -- the last reader finished the copy that is on disk now, not the one this file replaced
              AND done.done_at >= to_timestamp(b.mtime / 1000.0)
              AND NOT EXISTS (SELECT 1 FROM bookmarks bm WHERE bm.book_id = b.id)
-             AND NOT EXISTS (SELECT 1 FROM lib_series s WHERE s.cover_book_id = b.id)
              -- never the last copy (see the header): once the series has a listing, every number the file holds is
              -- in it. The number is override-aware, as the listing's are under posting order; an admin's number
              -- cancels a range (rangeEnd is NULL, and generate_series gives nothing). Reintroduce by dropping the
@@ -197,7 +203,7 @@ export const cleanupLog = { on: logLevel === 'debug' || logLevel === 'trace' };
 const trace = (line: string) => { if (cleanupLog.on) console.log(`[cleanup] ${line}`); };
 
 /** Why a read chapter on the download disk stays this run: the first rule that holds it, in dueSql's order. */
-export type KeptWhy = 'reading' | 'recent' | 'changed' | 'removed' | 'bookmarked' | 'cover' | 'last_copy' | 'hidden';
+export type KeptWhy = 'reading' | 'recent' | 'changed' | 'removed' | 'bookmarked' | 'last_copy' | 'hidden';
 
 export interface KeptReasons {
   /** Chapters on the download disk somebody opened, not deleted yet. */
@@ -215,7 +221,7 @@ export interface KeptReasons {
  * kept for a reason" in cleanupWhy.int.test.ts finds a chapter in neither.
  */
 export async function keptReasons(days: number): Promise<KeptReasons> {
-  const rows = await q<{ why: KeptWhy | null; title: string; number: number }>(
+  const rows = await q<{ why: KeptWhy | null; title: string; number: string }>(
     `WITH done AS (
        SELECT rp.book_id, max(rp.updated_at) AS done_at,
               bool_and(rp.completed AND (lb.pages <= 1 OR rp.page >= lb.pages - 1)) AS finished
@@ -230,11 +236,10 @@ export async function keptReasons(days: number): Promise<KeptReasons> {
               WHEN done.done_at < to_timestamp(b.mtime / 1000.0) THEN 'changed'
               WHEN s.deleted_at IS NOT NULL THEN 'removed'
               WHEN EXISTS (SELECT 1 FROM bookmarks bm WHERE bm.book_id = b.id) THEN 'bookmarked'
-              WHEN EXISTS (SELECT 1 FROM lib_series cs WHERE cs.cover_book_id = b.id) THEN 'cover'
               WHEN ${lastCopy} THEN 'last_copy'
               WHEN ${atHiddenNumber('b')} THEN 'hidden'
             END AS why,
-            s.title, COALESCE(ov.number, b.number)::float8 AS number
+            s.title, COALESCE(ov.number, b.number)::text AS number
        FROM lib_books b
        JOIN done ON done.book_id = b.id
        JOIN lib_series s ON s.id = b.series_id
@@ -249,7 +254,8 @@ export async function keptReasons(days: number): Promise<KeptReasons> {
     if (!r.why) { due++; continue; }
     const k = kept.get(r.why) ?? { why: r.why, n: 0, examples: [] };
     k.n++;
-    if (k.examples.length < 3) k.examples.push(`${JSON.stringify(r.title)} ${Number(r.number)}`);
+    // As stored, as text: a real cast to float8 read 202.2 as 202.1999969482422 (#332's first lines).
+    if (k.examples.length < 3) k.examples.push(`${JSON.stringify(r.title)} ${r.number}`);
     kept.set(r.why, k);
   }
   return { read: rows.length, due, kept: [...kept.values()].sort((a, b) => b.n - a.n) };
@@ -262,7 +268,6 @@ const KEPT_LINE: Record<KeptWhy, (days: number) => string> = {
   changed: () => 'the file on disk is newer than the last read of it (fetched again since)',
   removed: () => 'its series is removed (Delete files is for those)',
   bookmarked: () => 'it has a bookmark',
-  cover: () => "it is the series' cover chapter",
   last_copy: () => 'the sources no longer list it as one they could fetch again, so it is the last copy',
   hidden: () => 'its number is hidden by hand',
 };
@@ -444,6 +449,8 @@ export async function runCleanupOnce(): Promise<CleanupResult> {
   } else if (looked.some((x) => x.abs && !x.st && !x.unreadable) && (share = await shareMissing())) {
     stopped = 'unmounted';
   } else {
+    // Which of these chapters a series' cover is drawn from (the header): asked once, before any file goes.
+    const coverOf = await coverPageBooks(looked.map((x) => x.b.id));
     for (const { b, abs, st, unreadable } of looked) {
       if (runtime.stopping) break; // between files, never mid-unlink
       if (!abs) continue;
@@ -453,6 +460,19 @@ export async function runCleanupOnce(): Promise<CleanupResult> {
         continue;
       }
       if (st) {
+        // The cover's page first. A chapter with no page to read gives none and still goes; a page that cannot be
+        // written keeps the chapter until the next run, as a failed delete does.
+        const series = coverOf.get(b.id);
+        if (series) {
+          try {
+            const kept = await keepCoverPage(series, () => cbzPageAt(abs, 0).then((p) => p?.bytes ?? null, () => null));
+            if (kept === 'kept') trace(`kept the first page of ${b.file} as its series' cover`);
+          } catch (e) {
+            console.warn(`[cleanup] ${b.file} holds its series' cover, and the page could not be kept (${(e as Error)?.message || e}) -- left for the next run`);
+            failed++;
+            continue;
+          }
+        }
         try {
           await rm(abs, { recursive: true, force: true });
         } catch {

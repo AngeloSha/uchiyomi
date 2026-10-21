@@ -40,7 +40,7 @@ let app: any, adminTok: string;
 
 const S = 's_cc_series';
 const FOLDER = 'T!cc/Berserk';
-/** Chapter 1 is the series cover and is therefore never eligible; the tests use 2 and 3. */
+/** Chapter 1 is the series' cover chapter (cleanupCoverPage.int.test.ts is about that); the tests use 2 and 3. */
 const IDS = { cover: 'b_cc_1', two: 'b_cc_2', three: 'b_cc_3', lib: 'b_cc_lib' };
 const USERS = ['cc-alice', 'cc-bob'];
 const ADMIN = 'cc-admin';
@@ -246,11 +246,15 @@ test('a file in the read library is never touched, however thoroughly it was rea
   assert.equal(await exists(join(ROOT, FOLDER, 'own.cbz')), true);
 });
 
-test('the chapter the series draws its artwork from is left alone', { skip }, async () => {
+test('the chapter the series draws its artwork from goes like any other', { skip }, async () => {
+  // v0.97.0 (#332): it was left alone, so every series kept its lowest chapter for ever. Its page is kept where it is the
+  // cover (cleanupCoverPage.int.test.ts); this file is no archive, so there is no page, and it still goes.
+  // ⚠️ Read a day ago, after the file landed: this test read it a year ago, before the file's mtime, so the chapter was
+  // never due (`done_at >= mtime`) and its "left alone" passed with the cover veto dropped too.
   await enable(0);
-  await progress('cc-alice', IDS.cover, true, 365);
-  assert.equal((await runCleanupOnce()).deleted, 0);
-  assert.equal(await exists(join(DL, FOLDER, 'ch1.cbz')), true);
+  await progress('cc-alice', IDS.cover, true, 1);
+  assert.equal((await runCleanupOnce()).deleted, 1);
+  assert.equal(await exists(join(DL, FOLDER, 'ch1.cbz')), false);
 });
 
 test('a bookmarked chapter is left alone', { skip }, async () => {

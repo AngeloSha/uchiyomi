@@ -530,7 +530,8 @@ limits apply as everywhere else.
 When nobody chose a picture, a series is shown with:
 
 - **its cover**: the cover of the source it was added from; else AniList's, when AniList's entry carries the series'
-  name; else its own first page.
+  name; else its own first page. When the read-chapter cleanup (section 8) deletes the chapter that page is in, it keeps
+  a copy of the page first, so the cover stays.
 - **its banner**: AniList's (or its anime adaptation's) on the same condition; else one made from the series' own
   pages (*New banner* in *Edit details* picks another).
 
@@ -2782,7 +2783,6 @@ What it will not touch:
 * a chapter **somebody is partway through** -- one unfinished reader keeps it for everybody;
 * a chapter **nobody has read**;
 * a chapter anyone has **bookmarked** (a bookmark points at a page inside the file);
-* the chapter a series draws its **cover** from;
 * a chapter **the sources no longer list**, or list only in a way that cannot be downloaded (only from a group you
   blocked, or only as a link to the publisher, as MangaDex keeps a licensed chapter): the file here is the last copy.
   A file holding several chapters is kept if any one of them is missing. The list is the one from the last check that
@@ -2790,6 +2790,11 @@ What it will not touch:
   altogether keeps its old list, so this rule does not cover it;
 * anything in a library you assembled yourself. Only Uchiyomi's own downloads folder is ever pruned. Your
   files are yours, and this job does not get an opinion about them.
+
+The chapter a series' **cover** comes from goes like the rest (since v0.97.0,
+[#332](https://github.com/AngeloSha/uchiyomi/issues/332); it used to be kept for good, one chapter in every series).
+When the cover really is that chapter's first page — the series has no cover picture of its own, or you chose *Use the
+first page* — the job keeps a copy of the page first, so the cover stays the same.
 
 What survives: the chapter itself, and everyone's reading history. The chapter stays listed on the series
 page, marked *Deleted from the server* (the same mark an admin's *Delete from server* leaves — the row does

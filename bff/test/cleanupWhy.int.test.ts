@@ -2,9 +2,11 @@
 //
 // His read chapters stopped going, and the log said only "0 read chapter(s) deleted". Every rule that keeps a file is
 // right on its own -- somebody part-way through, the grace period, a file fetched again since it was read, a bookmark,
-// the cover chapter, the last copy the sources no longer list, a number hidden by hand, a removed series -- and none of
-// them said it was the one. At LOG_LEVEL=debug each run now writes `[cleanup]` lines: how many read chapters, how many
-// are due, and how many each rule keeps, with a few of them by title.
+// the last copy the sources no longer list, a number hidden by hand, a removed series -- and none of them said it was the
+// one. At LOG_LEVEL=debug each run now writes `[cleanup]` lines: how many read chapters, how many are due, and how many
+// each rule keeps, with a few of them by title.
+// His lines then named the rule: the cover chapter, kept for ever whatever the cover was. It is no rule since v0.97.0:
+// the cover's chapter is due like any other, and its page is kept where it is the cover (cleanupCoverPage.int.test.ts).
 //
 // What is asserted: one chapter per rule is attributed to exactly that rule, the due count is the job's own (dueCount,
 // and the run deletes exactly that chapter), the lines appear only at debug, and an off switch is said at debug too.
@@ -84,7 +86,7 @@ beforeEach(async () => {
 
   await q(`INSERT INTO lib_series (id, source, title, folder, books_count, hidden_numbers) VALUES ($1,'T!cw','Hound',$2,9,'{8}')`, [S, FOLDER]);
   await q(`INSERT INTO lib_series (id, source, title, folder, books_count, deleted_at) VALUES ($1,'T!cw','Gone',$2,1, now())`, [GONE, 'T!cw/Gone']);
-  ids.cover = await chapter(S, 1);
+  ids.cover = await chapter(S, 1); // the cover chapter, due like any other (v0.97.0); its file is no archive, so no page
   ids.due = await chapter(S, 2);
   ids.reading = await chapter(S, 3);
   await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed) VALUES ($1,$2,$3,4,false)`, [await uid('cw-bob'), ids.reading, S]);
@@ -133,10 +135,11 @@ test('every read chapter is either due or kept for a reason, each by the rule th
   // and `due` no longer equals the job's own dueCount.
   const r = await cc.keptReasons(2);
   assert.equal(r.read, 9, 'every chapter somebody opened on the download disk, the removed series too, not the unread one');
-  assert.equal(r.due, 1);
+  // Reintroduce the cover chapter's veto (v0.96.0's): one fewer due, and a `cover` count below.
+  assert.equal(r.due, 2, 'chapter 2, and chapter 1 though it is the cover chapter');
   assert.equal(r.due, await cc.dueCount(2), "the explanation's due count is the job's own");
   const by = Object.fromEntries(r.kept.map((k) => [k.why, k.n]));
-  assert.deepEqual(by, { reading: 1, recent: 1, changed: 1, removed: 1, bookmarked: 1, cover: 1, last_copy: 1, hidden: 1 });
+  assert.deepEqual(by, { reading: 1, recent: 1, changed: 1, removed: 1, bookmarked: 1, last_copy: 1, hidden: 1 });
   const lastCopy = r.kept.find((k) => k.why === 'last_copy')!;
   assert.deepEqual(lastCopy.examples, ['"Hound" 7'], 'examples name the series and the number');
 });
@@ -147,15 +150,17 @@ test('at debug a run says why it keeps what it keeps, and deletes exactly what i
   try {
     let result: any;
     const lines = await linesOf(async () => { result = await cc.runCleanupOnce(); });
-    assert.equal(lines[0], `[cleanup] on, after 2 days: 9 read chapters under ${DL}, 1 due now`);
+    assert.equal(lines[0], `[cleanup] on, after 2 days: 9 read chapters under ${DL}, 2 due now`);
     for (const said of [
       'kept: someone who opened it has not finished it', 'kept: finished less than 2 days ago',
       'kept: the file on disk is newer than the last read of it', 'kept: its series is removed', 'kept: it has a bookmark',
-      "kept: it is the series' cover chapter", 'kept: the sources no longer list it as one they could fetch again, so it is the last copy',
+      'kept: the sources no longer list it as one they could fetch again, so it is the last copy',
       'kept: its number is hidden by hand',
     ]) assert.ok(lines.some((l) => l.includes(said)), `no line says "${said}": ${lines.join(' | ')}`);
-    assert.equal(result.deleted, 1);
+    assert.ok(!lines.some((l) => l.includes('cover')), `a line still keeps a chapter for the cover: ${lines.join(' | ')}`);
+    assert.equal(result.deleted, 2);
     assert.equal(await exists(join(DL, FOLDER, 'ch2.cbz')), false, 'the due chapter was not deleted');
+    assert.equal(await exists(join(DL, FOLDER, 'ch1.cbz')), false, 'the cover chapter was not deleted');
     assert.equal(await exists(join(DL, FOLDER, 'ch7.cbz')), true, 'a kept chapter was deleted');
   } finally {
     cc.cleanupLog.on = false;

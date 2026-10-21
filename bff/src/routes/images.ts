@@ -11,7 +11,6 @@ import { fetchAniListArt } from '../lib/anilist';
 import { learnDirectionWith, directionFromAniListMatch } from '../lib/readingDirection';
 import { learnTypeFromAniListWith } from '../lib/seriesType';
 import { automaticAniListAllowed, withAniListMutation } from '../lib/anilistPolicy';
-import { noticeBook, noticeShown } from '../lib/noticeChapters';
 import { linkSeriesWith } from '../lib/trackers';
 import { LIBRARY_ROOT, cbzPageAt } from '../lib/library';
 import { cfSession, withSolverDeadline } from '../lib/sources/flaresolverr';
@@ -29,7 +28,7 @@ import { join } from 'path';
 import { readFile } from 'fs/promises';
 import { q, one } from '../lib/db';
 import { viewCtxFor, visibleBookFile, seriesVisible, sourceAllowedFor, SYSTEM_CTX, type ViewCtx } from '../lib/visibility';
-import { artFile, FIRST_PAGE } from '../lib/seriesArt';
+import { artFile, firstPageBookOf, FIRST_PAGE } from '../lib/seriesArt';
 import { namesOf } from '../lib/altTitles';
 import { HERO_FRAMES, backdropLook, heroFit, type HeroAr } from '../lib/heroFrame';
 import { heroServable, heroFrame, heroVariant, queueHero, type AutoHeroAr } from '../lib/autoHero';
@@ -313,18 +312,19 @@ const bookFileAbs = async (id: string, ctx: ViewCtx): Promise<string | null> => 
 };
 // Bytes of a series' first downloaded page — the universal fallback when a remote cover/backdrop URL can't be
 // fetched (hotlink-protected CDN, dead link, timeout, unparsed cover). Guarantees art for any downloaded series.
-// The cover chapter's, unless that is a notice chapter the admin hides (lib/noticeChapters.ts), which has no pages to
-// give anyone: then the lowest chapter that is shown, picked the way the scan picks the cover (lib/library.ts, live
+// The page the read-chapter cleanup kept before deleting its chapter comes first (v0.97.0, #332, lib/seriesArt.ts
+// keepCoverPage): it is the cover as it was, whichever chapter is lowest now. Reintroduce by reading the chapters
+// first: "the cover's chapter goes, and its page stays the cover" in cleanupCoverPage.int.test.ts sees the next
+// chapter's page.
+// Else the cover chapter's, unless that is a notice chapter the admin hides (lib/noticeChapters.ts), which has no pages
+// to give anyone: then the lowest chapter that is shown, picked the way the scan picks the cover (lib/library.ts, live
 // first). Reintroduce by reading cover_book_id alone: "a hidden notice as the cover chapter" in
 // noticeSurfaces.int.test.ts finds the series' cover a 404.
 const firstPageInput = async (id: string, ctx: ViewCtx): Promise<Buffer> => {
+  const kept = await readFile(artFile(id, 'page')).catch(() => null);
+  if (kept) return kept;
   const s = await one<{ cover_book_id: string }>(
-    `SELECT CASE WHEN ${noticeBook('s.cover_book_id')} THEN (
-              SELECT b.id FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
-               WHERE b.series_id = s.id AND ${noticeShown('s', 'b', 'ov')}
-               ORDER BY (b.pruned_at IS NOT NULL), b.number ASC, b.file ASC LIMIT 1)
-            ELSE s.cover_book_id END AS cover_book_id
-       FROM lib_series s WHERE s.id = $1`, [id]);
+    `SELECT ${firstPageBookOf('s')} AS cover_book_id FROM lib_series s WHERE s.id = $1`, [id]);
   const abs = s?.cover_book_id ? await bookFileAbs(s.cover_book_id, ctx) : null;
   if (!abs) throw Object.assign(new Error('no cover'), { statusCode: 404 });
   // A cover chapter whose file is gone -- deleted or moved by hand, which is what Rescan everything finds (v0.55.4), or a

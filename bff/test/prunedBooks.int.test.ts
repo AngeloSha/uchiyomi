@@ -272,8 +272,9 @@ test('the book DTO says whether Uchiyomi downloaded it', { skip }, async () => {
 });
 
 test('the cover moves to the next live chapter', { skip }, async () => {
-  // Every thumbnail falls back to the cover chapter's first page. The cleanup vetoes the cover chapter, but
-  // an admin's manual delete does not, so the scan's cover pick has to prefer a live chapter.
+  // Every thumbnail falls back to the cover chapter's first page. Neither the cleanup (since v0.97.0, which keeps the
+  // page itself where it is the cover) nor an admin's manual delete spares the cover chapter, so the scan's cover pick
+  // has to prefer a live chapter.
   // Reintroduce by dropping `(pruned_at IS NOT NULL),` from the ORDER BY in persistScan's cover UPDATE in
   // lib/library.ts: the cover stays on chapter 1, whose first page no longer exists.
   await rm(join(DL, FOLDER, 'ch1.cbz'));

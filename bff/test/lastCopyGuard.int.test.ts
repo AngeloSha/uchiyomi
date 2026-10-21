@@ -65,7 +65,7 @@ before(async () => {
     await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, root, mtime, pages)
              VALUES ($1, $2, 'T!lcg', $3, $4, $5, $6, $7, 10)`, [`b_lcg_${n}`, S, `${FOLDER}/ch${n}.cbz`, n, `Chapter ${n}`, DL, LANDED_AT]);
   }
-  // Chapter 1 is the series' cover, which the cleanup never takes; 2, 3 and 4 were read to the end a day ago.
+  // Chapter 1 is the series' cover chapter, which nobody read; 2, 3 and 4 were read to the end a day ago.
   await q('UPDATE lib_series SET cover_book_id = $2 WHERE id = $1', [S, 'b_lcg_1']);
   for (const n of [2, 3, 4]) {
     await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed, updated_at)

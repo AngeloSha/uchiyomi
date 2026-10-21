@@ -107,8 +107,8 @@ async function wipe(): Promise<void> {
 
 /**
  * Two downloaded series of three chapters each and a longer one nobody has read, indexed by a real scan, and chapters 2
- * and 3 of the first two finished a day ago: four chapters due for the cleanup at 0 days (chapter 1 is each series'
- * cover, never due).
+ * and 3 of the first two finished a day ago: four chapters due for the cleanup at 0 days (chapter 1, each series'
+ * cover chapter, nobody read).
  */
 async function seed(): Promise<void> {
   await mkdir(ROOT, { recursive: true });

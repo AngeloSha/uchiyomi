@@ -2,8 +2,9 @@
 
 ## v0.97.0 — 2026-10-21
 
-**Your favorites in your own order, and chapters that failed every night on Natomanga and Mangakakalot now come from the
-image server the site itself uses.**
+**Your favorites in your own order, chapters that failed every night on Natomanga and Mangakakalot now come from the
+image server the site itself uses, and the read-chapter cleanup no longer keeps a chapter of every series for its
+cover.** The last answers [#332](https://github.com/AngeloSha/uchiyomi/issues/332). Thank you.
 
 ### Your favorites, in your order
 
@@ -20,6 +21,14 @@ image server the site itself uses.**
   for a busy site and tried again every night, up to twelve times, for weeks.
 - **The site's own reader takes those pages from another server listed on the same page.** Uchiyomi now reads that
   list first, so the next check asks the server that has the files. Chapters that already downloaded are unaffected.
+
+### Read chapters go, covers stay
+
+- **Delete read chapters kept one chapter of every series for good:** the one its cover could be drawn from. The
+  `[cleanup]` lines from v0.96.0 showed it holding most of what was left, on series whose cover comes from their source
+  and not from that chapter at all.
+- **Now that chapter is deleted like the rest.** When a series' cover really is its first page (no cover picture of its
+  own, or *Use the first page* chosen), Uchiyomi keeps a copy of that page first, so the cover doesn't change.
 
 ### Upgrading
 

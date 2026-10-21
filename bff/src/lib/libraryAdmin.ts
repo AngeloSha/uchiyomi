@@ -47,11 +47,11 @@ export interface SeriesRow {
 export const getSeriesRow = (id: string) =>
   one<SeriesRow>(`SELECT id, title, folder, deleted_at, merged_into FROM lib_series WHERE id = $1`, [id]);
 
-/** Remove the derived, per-series art: the DB row and the two files nothing else ever sweeps. */
+/** Remove the derived, per-series art: the DB rows and the three files nothing else ever sweeps (the page the cleanup kept too). */
 async function dropArt(id: string): Promise<void> {
   await q(`DELETE FROM series_art WHERE series_id = $1`, [id]).catch(() => {});
   await q(`DELETE FROM series_overrides WHERE series_id = $1`, [id]).catch(() => {});
-  for (const kind of ['cover', 'banner'] as const) {
+  for (const kind of ['cover', 'banner', 'page'] as const) {
     await rm(artFile(id, kind), { force: true }).catch(() => {});
   }
 }
