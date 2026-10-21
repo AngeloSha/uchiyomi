@@ -571,8 +571,12 @@ export default async function authRoutes(app: FastifyInstance) {
       // identity whose email or cleaned name happened to match (v0.69.1). Reintroduce by looking up `wanted`:
       // oidcLinkByUsername.int.test.ts adopts 'admin' for an identity that reports no username at all.
       const reported = claims.username;
+      // Never a profile without a password, nor one another account manages: a provider that reports `bob` does not
+      // take over the reading of the child's profile called bob. Reintroduce by
+      // dropping the clause: "a managed profile is never adopted" in oidcLinkByUsername.int.test.ts links it.
       const local = reported
-        ? await one<{ id: string; oidc_sub: string | null }>('SELECT id, oidc_sub FROM users WHERE username = $1', [reported])
+        ? await one<{ id: string; oidc_sub: string | null }>(
+          'SELECT id, oidc_sub FROM users WHERE username = $1 AND managed_by IS NULL AND password_login', [reported])
         : null;
       // Never steal an account already bound to a different SSO identity.
       if (local && !local.oidc_sub) {

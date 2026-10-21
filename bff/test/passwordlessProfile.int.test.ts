@@ -99,6 +99,27 @@ test('profiles that open at home, from Admin -> Members', { skip }, async (t) =>
         'a profile that no longer opens at home kept the sessions it had');
     });
 
+    await t.test('SSO-only mode: Members makes a profile without a password, and the start-up warning does not count it', async () => {
+      // The one account SSO-only mode lets Members make, since it has no password and opens through a guardian the
+      // provider signed in; and it is no account that "cannot sign in" for want of a link.
+      const { authModeWarnings } = await import('../src/lib/authMode');
+      const before = process.env.AUTH_MODE;
+      process.env.AUTH_MODE = 'oidc-only';
+      try {
+        // The warning names ten at most, and this database is shared: the count is what is compared.
+        const unlinked = async () => Number((await authModeWarnings()).join(' ').match(/(\d+) accounts? ha(?:s|ve) no/)?.[1] ?? 0);
+        const count = await unlinked();
+        assert.ok(count >= 1, 'precondition: pp-admin has no link');
+        assert.equal((await make({ username: 'pp-sso-pw', password: PASSWORD })).statusCode, 403);
+        assert.equal((await make({ username: 'pp-sso-hybrid', password: PASSWORD, localOpen: true })).statusCode, 403);
+        const open = await make({ username: 'pp-sso-kid', localOpen: true });
+        assert.equal(open.statusCode, 200, open.body);
+        assert.equal(await unlinked(), count, 'a profile without a password was counted as an account that cannot sign in');
+      } finally {
+        if (before === undefined) delete process.env.AUTH_MODE; else process.env.AUTH_MODE = before;
+      }
+    });
+
     await t.test('a profile is managed by an account that signs in with a credential of its own', async () => {
       const kid = (await make({ username: 'pp-kid3', localOpen: true })).json().id;
       const r = await make({ username: 'pp-kid4', localOpen: true, managedBy: kid });
