@@ -74,6 +74,7 @@ import { REFETCH_BAK } from './fsAtomic';
 import { runtime, type CleanupResult } from './runtime';
 import { atHiddenNumber, hiddenNumbersActive } from './noticeChapters';
 import { rangeEnd } from './chapterRanges';
+import { logLevel } from '../env';
 
 /**
  * A listing row the sweep could fetch again (see the header): not `blocked` -- every copy from a blocked group or in
@@ -81,6 +82,20 @@ import { rangeEnd } from './chapterRanges';
  * them for the same reason). A row whose page count is unknown counts as fetchable, as before.
  */
 const FETCHABLE = `sl.status <> 'blocked' AND (sl.chosen->>'pages') IS DISTINCT FROM '0'`;
+
+/**
+ * "Never the last copy" (the header) over the lib_books row `b` and its LEFT JOINed book_overrides row `ov`: true when the
+ * series has a listing and some number the file holds is not in it as a row the sweep could fetch again. One fragment
+ * for the job (dueSql) and for its explanation (keptReasons), so the two cannot drift.
+ */
+const lastCopy = `(EXISTS (SELECT 1 FROM series_listing sl WHERE sl.series_id = b.series_id)
+                      AND (NOT EXISTS (SELECT 1 FROM series_listing sl
+                                        WHERE sl.series_id = b.series_id AND sl.number = COALESCE(ov.number, b.number)
+                                          AND ${FETCHABLE})
+                           OR EXISTS (SELECT 1 FROM generate_series(floor(b.number)::numeric + 1, floor(${rangeEnd('b', 'ov')})::numeric) held(n)
+                                       WHERE NOT EXISTS (SELECT 1 FROM series_listing sl
+                                                          WHERE sl.series_id = b.series_id AND sl.number = held.n::real
+                                                            AND ${FETCHABLE}))))`;
 
 /**
  * Most chapters one run will delete. Not a performance limit -- unlink is cheap -- but a blast radius:
@@ -140,14 +155,7 @@ export function dueSql(limit: number | null): string {
              -- cancels a range (rangeEnd is NULL, and generate_series gives nothing). Reintroduce by dropping the
              -- clause: "a chapter the sources no longer list is never deleted" in lastCopyGuard.int.test.ts finds
              -- the file gone.
-             AND NOT (EXISTS (SELECT 1 FROM series_listing sl WHERE sl.series_id = b.series_id)
-                      AND (NOT EXISTS (SELECT 1 FROM series_listing sl
-                                        WHERE sl.series_id = b.series_id AND sl.number = COALESCE(ov.number, b.number)
-                                          AND ${FETCHABLE})
-                           OR EXISTS (SELECT 1 FROM generate_series(floor(b.number)::numeric + 1, floor(${rangeEnd('b', 'ov')})::numeric) held(n)
-                                       WHERE NOT EXISTS (SELECT 1 FROM series_listing sl
-                                                          WHERE sl.series_id = b.series_id AND sl.number = held.n::real
-                                                            AND ${FETCHABLE}))))${hiddenNumbersActive() ? `
+             AND NOT ${lastCopy}${hiddenNumbersActive() ? `
              -- a chapter at a number an admin hid (#240) is left exactly as it is: Restore brings back what was there
              AND NOT ${atHiddenNumber('b')}` : ''}
            ORDER BY done.done_at ASC` + (limit === null ? '' : `\n           LIMIT ${limit}`);
@@ -178,6 +186,96 @@ export async function dueCountCached(days: number): Promise<number> {
   const n = await dueCount(d);
   cached = { days: d, at: Date.now(), n };
   return n;
+}
+
+/**
+ * LOG_LEVEL=debug (#332): `[cleanup]` lines in the server log on every run, saying why each read chapter on the download
+ * disk stays. @TIGamingTV's read chapters stopped going and the log said only "0 read chapter(s) deleted": each rule
+ * above that keeps a file is right on its own, and nothing said which one was holding his. Mutable for the tests.
+ */
+export const cleanupLog = { on: logLevel === 'debug' || logLevel === 'trace' };
+const trace = (line: string) => { if (cleanupLog.on) console.log(`[cleanup] ${line}`); };
+
+/** Why a read chapter on the download disk stays this run: the first rule that holds it, in dueSql's order. */
+export type KeptWhy = 'reading' | 'recent' | 'changed' | 'removed' | 'bookmarked' | 'cover' | 'last_copy' | 'hidden';
+
+export interface KeptReasons {
+  /** Chapters on the download disk somebody opened, not deleted yet. */
+  read: number;
+  /** Of them, the ones the job would delete now: dueSql's count, by the same rules. */
+  due: number;
+  /** The rest, by the first rule that keeps each, with a few of them by series title and number. */
+  kept: Array<{ why: KeptWhy; n: number; examples: string[] }>;
+}
+
+/**
+ * What keeps each read chapter on the download disk: the first rule that applies, as dueSql applies them. A chapter
+ * nobody opened is not this job's business and is not counted. The last-copy rule is dueSql's own fragment; the rest
+ * are its clauses turned round. Reintroduce a rule dueSql has and this lacks: "every read chapter is either due or
+ * kept for a reason" in cleanupWhy.int.test.ts finds a chapter in neither.
+ */
+export async function keptReasons(days: number): Promise<KeptReasons> {
+  const rows = await q<{ why: KeptWhy | null; title: string; number: number }>(
+    `WITH done AS (
+       SELECT rp.book_id, max(rp.updated_at) AS done_at,
+              bool_and(rp.completed AND (lb.pages <= 1 OR rp.page >= lb.pages - 1)) AS finished
+         FROM read_progress rp
+         JOIN lib_books lb ON lb.id = rp.book_id
+        WHERE lb.root = $1 AND lb.pruned_at IS NULL
+        GROUP BY rp.book_id
+     )
+     SELECT CASE
+              WHEN NOT COALESCE(done.finished, false) THEN 'reading'
+              WHEN done.done_at > now() - make_interval(days => $2) THEN 'recent'
+              WHEN done.done_at < to_timestamp(b.mtime / 1000.0) THEN 'changed'
+              WHEN s.deleted_at IS NOT NULL THEN 'removed'
+              WHEN EXISTS (SELECT 1 FROM bookmarks bm WHERE bm.book_id = b.id) THEN 'bookmarked'
+              WHEN EXISTS (SELECT 1 FROM lib_series cs WHERE cs.cover_book_id = b.id) THEN 'cover'
+              WHEN ${lastCopy} THEN 'last_copy'
+              WHEN ${atHiddenNumber('b')} THEN 'hidden'
+            END AS why,
+            s.title, COALESCE(ov.number, b.number)::float8 AS number
+       FROM lib_books b
+       JOIN done ON done.book_id = b.id
+       JOIN lib_series s ON s.id = b.series_id
+       LEFT JOIN book_overrides ov ON ov.book_id = b.id
+      WHERE b.root = $1 AND b.pruned_at IS NULL
+      ORDER BY done.done_at ASC`,
+    [DL_ROOT, clampDays(days)],
+  );
+  const kept = new Map<KeptWhy, { why: KeptWhy; n: number; examples: string[] }>();
+  let due = 0;
+  for (const r of rows) {
+    if (!r.why) { due++; continue; }
+    const k = kept.get(r.why) ?? { why: r.why, n: 0, examples: [] };
+    k.n++;
+    if (k.examples.length < 3) k.examples.push(`${JSON.stringify(r.title)} ${Number(r.number)}`);
+    kept.set(r.why, k);
+  }
+  return { read: rows.length, due, kept: [...kept.values()].sort((a, b) => b.n - a.n) };
+}
+
+/** Each rule in words, for the `[cleanup]` lines. */
+const KEPT_LINE: Record<KeptWhy, (days: number) => string> = {
+  reading: () => 'someone who opened it has not finished it',
+  recent: (days) => `finished less than ${days} day${days === 1 ? '' : 's'} ago`,
+  changed: () => 'the file on disk is newer than the last read of it (fetched again since)',
+  removed: () => 'its series is removed (Delete files is for those)',
+  bookmarked: () => 'it has a bookmark',
+  cover: () => "it is the series' cover chapter",
+  last_copy: () => 'the sources no longer list it as one they could fetch again, so it is the last copy',
+  hidden: () => 'its number is hidden by hand',
+};
+
+/** The `[cleanup]` lines for one run, before it looks at any file. Best effort: never fails the run. */
+async function explainRun(days: number): Promise<void> {
+  try {
+    const r = await keptReasons(days);
+    trace(`on, after ${days} day${days === 1 ? '' : 's'}: ${r.read} read chapter${r.read === 1 ? '' : 's'} under ${DL_ROOT}, ${r.due} due now`);
+    for (const k of r.kept) trace(`${k.n} kept: ${KEPT_LINE[k.why](days)} -- e.g. ${k.examples.join(', ')}`);
+  } catch (e) {
+    trace(`could not say why chapters are kept: ${(e as Error)?.message || e}`);
+  }
 }
 
 /**
@@ -275,8 +373,10 @@ export async function runCleanupOnce(): Promise<CleanupResult> {
   const { on, days } = await cleanupSettings();
   // Consent is re-read here rather than passed in, so the off switch stops a run that is about to start as
   // well as one that is scheduled -- and so the manual button cannot route around it.
-  if (!on) return empty('disabled');
+  // At debug the off switch is said too: a disabled tick records nothing anywhere else (runChapterCleanup).
+  if (!on) { trace('switched off (Admin → Settings → Downloads → Delete read chapters): nothing is looked at'); return empty('disabled'); }
   if (runtime.stopping) return empty('shutdown', days);
+  if (cleanupLog.on) await explainRun(days);
 
   const due = await q<Due>(dueSql(MAX_PER_RUN), [DL_ROOT, days]);
   if (!due.length) return empty(undefined, days);

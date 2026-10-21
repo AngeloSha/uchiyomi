@@ -2798,6 +2798,13 @@ job fails toward keeping. It corrects itself as chapters are read again.
 **Admin → Settings → Maintenance → Delete read chapters** shows the last run, how much it freed, and how many chapters are
 waiting. **Run now** is there if you would rather not wait for the hour.
 
+**Why a read chapter is still there** (since v0.96.0, [#332](https://github.com/AngeloSha/uchiyomi/issues/332)): with
+`LOG_LEVEL=debug` in `.env` (and a restart), every run writes lines starting `[cleanup]` to the server log
+(`docker logs uchiyomi`). They give the day count, how many read chapters are in the downloads folder and how many are
+due, and then, for the rest, how many each rule above keeps, with a few of them by title and number: *12 kept: the
+sources no longer list it as one they could fetch again, so it is the last copy -- e.g. "Hound" 7, …*. With the switch
+off, the line says that instead.
+
 **Show missing chapters in Mihon** (**Admin → Settings → Series & chapters → More options**, off by default, since
 v0.42.0) is for libraries that deliberately hold less than the sources list. Mihon works out how many
 chapters a series has from the list Uchiyomi hands its Komga extension, so it counts what is on disk: turn
