@@ -2,10 +2,11 @@
 
 ## v0.96.0 — 2026-10-21
 
-**Drag things into place, a search on one source keeps going as you scroll, and the read-chapter cleanup says why it
-keeps what it keeps.** Drag to reorder is **Squeaks72**'s work ([#330](https://github.com/AngeloSha/uchiyomi/pull/330));
-the other two answer [#331](https://github.com/AngeloSha/uchiyomi/issues/331) and
-[#332](https://github.com/AngeloSha/uchiyomi/issues/332). Thank you.
+**Drag things into place, a search on one source keeps going as you scroll, Shift picks a run of series, and the
+read-chapter cleanup says why it keeps what it keeps.** Drag to reorder is **Squeaks72**'s work
+([#330](https://github.com/AngeloSha/uchiyomi/pull/330)); the rest answers
+[#331](https://github.com/AngeloSha/uchiyomi/issues/331), [#332](https://github.com/AngeloSha/uchiyomi/issues/332) and
+[#333](https://github.com/AngeloSha/uchiyomi/issues/333). Thank you.
 
 ### Drag to reorder
 
@@ -33,6 +34,11 @@ the other two answer [#331](https://github.com/AngeloSha/uchiyomi/issues/331) an
   the last copy the sources no longer list, and a few more. Nothing said which one was keeping yours.
 - **With `LOG_LEVEL=debug`, every run now says so.** Lines starting `[cleanup]` give how many read chapters are in the
   download folder and how many are due, then how many each rule keeps, with a few by title.
+
+### Pick a run with Shift
+
+- **In the Library's select mode, Shift-click picks every series** between the last one you clicked and this one.
+  Shift-clicking a picked series unpicks the run instead.
 
 ### Upgrading
 

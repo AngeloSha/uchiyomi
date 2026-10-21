@@ -399,7 +399,9 @@ Progress, favorites, and history are **per-user**, so each account has its own.
 removable tags above the grid, and they live in the URL, so you can share a filtered view.
 
 **Doing something to many series at once.** Hit **Select** on the Library page, tap the ones you want, and the
-bar at the bottom shows what can be done with them. **Select all**, beside *Done*, takes every series loaded
+bar at the bottom shows what can be done with them. With a keyboard, **Shift**-click picks every series between the
+last one you clicked and this one (since v0.96.0, [#333](https://github.com/AngeloSha/uchiyomi/issues/333)); on a
+picked one it unpicks the run instead. **Select all**, beside *Done*, takes every series loaded
 so far — the grid loads as you scroll, so scroll further and tap it again for more; the count on the bar
 says how many are in hand. The chips:
 

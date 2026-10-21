@@ -42,6 +42,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { LibraryStart } from '@/components/LibraryStart';
 import { ART } from '@/lib/art';
 import { BulkChapterDeleteRunDialog } from '@/components/BulkChapterDeleteRun';
+import { pickWith } from '@/lib/libraryPick';
 import {
   BULK_CHAPTER_DELETE_POLL_MS,
   bulkChapterDeleteFinished,
@@ -108,6 +109,8 @@ function LibraryInner() {
   // made from and act on series the user can no longer see.
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  // The series last clicked in select mode: where a Shift-click's run starts (v0.96.0, #333, lib/libraryPick.ts).
+  const anchor = useRef<string | null>(null);
   const [acting, setActing] = useState(false);
   const [moving, setMoving] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -137,9 +140,13 @@ function LibraryInner() {
   // the page, so a value read once would not follow it. Downloads only for a viewer who may download.
   const mayDownload = authStatus === 'authed' && canDownload(user);
   const view: LibraryView = readView(params.get('view'), mayDownload);
-  useEffect(() => { setSelecting(false); setPicked(new Set()); }, [read, status, genres.join(','), sortKey, dir, lib, src, anysrc, q, view]);
-  const togglePick = (id: string) =>
-    setPicked((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  useEffect(() => { setSelecting(false); setPicked(new Set()); anchor.current = null; }, [read, status, genres.join(','), sortKey, dir, lib, src, anysrc, q, view]);
+  // Shift with a click picks the run between the last series clicked and this one (v0.96.0, #333, lib/libraryPick.ts).
+  const togglePick = (id: string, e?: React.MouseEvent) => {
+    const shift = !!e?.shiftKey;
+    setPicked((p) => pickWith(p, items.map((s) => s.id), id, anchor.current, shift));
+    anchor.current = id;
+  };
   // ⚠️ `lib` counts. It used to be left out because it lived in its own tab rail rather than in the sheet,
   // so selecting a library filtered the grid while the badge said nothing was filtered and the "· filtered"
   // hint stayed dark. Now that every way to narrow the shelf is in one panel, every one of them counts.
@@ -612,7 +619,7 @@ function LibraryInner() {
           active={active} dir={dir} onSort={(k) => setParam('sort', k)} onDir={(d) => setParam('dir', d)} onSortSheet={() => setSortSheet(true)}
           layout={layout} onLayout={(v) => { setLayout(v); setLibraryLayout(v); }}
           filterCount={activeCount} onFilters={() => setSheet(true)}
-          selecting={selecting} onSelecting={() => { setSelecting((v) => !v); setPicked(new Set()); }}
+          selecting={selecting} onSelecting={() => { setSelecting((v) => !v); setPicked(new Set()); anchor.current = null; }}
           onSelectAll={() => setPicked(new Set(items.map((s) => s.id)))}
           onSurprise={surprise}
           adult={<AdultToggle alsoWhen={adultFilter} />}
@@ -719,11 +726,11 @@ function LibraryInner() {
             ))
           : items.map((s, i) => (layout === 'list'
             ? <SeriesRow key={s.id} series={s} eager={i < 12} note={sortValue(s, active.key)}
-                selectable={selecting} selected={picked.has(s.id)} onToggle={() => togglePick(s.id)} />
+                selectable={selecting} selected={picked.has(s.id)} onToggle={(e) => togglePick(s.id, e)} />
             // v0.58.0: under the title, the value the shelf is sorted by ("★ 84", "312K readers", "★ 4/5"), for the five
             // orders whose answer is not on the card already; nothing for the four older ones.
             : <SeriesTile key={s.id} series={s} eager={i < 12} note={sortValue(s, active.key)} compact={layout === 'compact'}
-                selectable={selecting} selected={picked.has(s.id)} onToggle={() => togglePick(s.id)} />
+                selectable={selecting} selected={picked.has(s.id)} onToggle={(e) => togglePick(s.id, e)} />
             ))}
       </div>
 

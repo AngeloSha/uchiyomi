@@ -265,7 +265,7 @@ test('Comfortable is exactly the grid that shipped; Compact has more columns at 
   assert.match(gridClass('list'), /^grid grid-cols-1 /);
   const src = page();
   assert.match(src, /<div data-library-grid data-layout=\{layout\} aria-busy=\{refreshing \|\| undefined\} className=\{`relative isolate \$\{gridClass\(layout\)\}`\}>/);
-  assert.match(src, /\(layout === 'list'\s*\? <SeriesRow key=\{s\.id\} series=\{s\} eager=\{i < 12\} note=\{sortValue\(s, active\.key\)\}\s*selectable=\{selecting\} selected=\{picked\.has\(s\.id\)\} onToggle=\{\(\) => togglePick\(s\.id\)\} \/>/,
+  assert.match(src, /\(layout === 'list'\s*\? <SeriesRow key=\{s\.id\} series=\{s\} eager=\{i < 12\} note=\{sortValue\(s, active\.key\)\}\s*selectable=\{selecting\} selected=\{picked\.has\(s\.id\)\} onToggle=\{\(e\) => togglePick\(s\.id, e\)\} \/>/,
     'a list row is not the same link, select toggle and value line as a tile');
   assert.match(src, /compact=\{layout === 'compact'\}/);
 });
