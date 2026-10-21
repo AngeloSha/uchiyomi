@@ -3070,6 +3070,9 @@ paths:
         Since v0.42.0 an adult source answers `{ content: [] }` without being asked while the 18+ reveal is
         off — an empty page, deliberately not a 403, because the hide is a preference and the same account
         with `adult=1` gets the results. A source above the caller's age cap is still refused with 403.
+        Since v0.96.0 (#331) `page` (1-based, clamped to 30) asks a later page of the same search, as the site
+        pages it; a source whose `searchPages` is false (GET /api/sources) answers a later page with
+        `{ content: [] }`, never its first page again.
       parameters:
         - name: source
           in: query

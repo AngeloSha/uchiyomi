@@ -270,6 +270,11 @@ export function makeSuwayomiAdapter(remote: RemoteSource, gqlRun: Gql = defaultG
       return fetchList('SEARCH', query, 1);
     },
 
+    // Every extension pages its search the way its site does (#331): the engine asks the page it is given.
+    async searchPage(query, page) {
+      return fetchList('SEARCH', query, page);
+    },
+
     async getSeries(id) {
       const d = await run<{ fetchMangaAndChapters: { manga: RemoteManga | null } }>(OPS.fetchManga.doc, { id: Number(id) });
       const m = d?.fetchMangaAndChapters?.manga;

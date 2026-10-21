@@ -165,8 +165,12 @@ which also answers `chapters: 0`.
 
 `GET /api/sources` lists what you can reach: each entry carries `id`, `name`, `lang` (null when the source
 declares no single language, which means it belongs to every language group), `latest` (whether it can be
-browsed without a query), `popular` (whether it can offer its own popularity ranking), `used` (how many
-series in the library came from it), its health `status`, and `note`. Since v0.82.0 a backup extension's source (one
+browsed without a query), `popular` (whether it can offer its own popularity ranking), `searchPages` (since v0.96.0,
+whether a search on it goes on past the first page: every extension's does), `used` (how many
+series in the library came from it), its health `status`, and `note`. `GET /api/sources/search?source=&q=&page=`
+searches one source; since v0.96.0 ([#331](https://github.com/AngeloSha/uchiyomi/issues/331)) `page` (1-based, at most
+30) asks a later page of the same search, as the site pages it, and a source without `searchPages` answers a later
+page with `{ content: [] }`, never its first page again. Since v0.82.0 a backup extension's source (one
 Uchiyomi installed by itself to finish downloads, removed again when unused) carries `backup: true`: it is listed so a
 chapter's source can be named, and left out of every route Discover uses -- `search-all`, `search`, `latest`,
 `popular`, `find` and `edition-candidates` never ask it.

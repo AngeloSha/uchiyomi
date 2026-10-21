@@ -23,6 +23,8 @@ export interface Src {
   latest?: boolean;
   /** Whether this source can answer "what is popular" as well as "what is new". */
   popular?: boolean;
+  /** Whether a search on it goes on past the first page (v0.96.0, #331): Discover loads more of a search on it alone. */
+  searchPages?: boolean;
   /**
    * `quiet` is the server saying "this answers without error and returns nothing". It used to be
    * unrepresentable: a source whose listing had drifted threw nothing, so it never earned a cooldown, kept

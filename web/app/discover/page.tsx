@@ -27,6 +27,7 @@ import { IcChevronLeft, IcSearch, IcSparkle, IcX } from '@/components/icons';
 import { forStrip } from '@/lib/jobs';
 import { downloadsHref, stripHref } from '@/lib/libraryView';
 import { useServerDownloads } from '@/lib/useServerDownloads';
+import { canSearchMore, freshCards, noMore, soloSource, type SearchMore } from '@/lib/searchMore';
 /**
  * One search card. Since v0.52.0 (#72) `inLibrary` means held in every provider's language, `libraryLangs` the
  * languages the library holds the title in, and each provider carries its own `lang` and `inLibrary`. Since v0.55.4
@@ -395,6 +396,15 @@ function DiscoverInner() {
   // How many sources the search is still waiting on, from the latest answer; zero in every other mode and
   // on an older server that does not report it.
   const stillAsking = mode === 'search' ? (searchQ.data?.pending ?? 0) : 0;
+  // More of a search on one source (v0.96.0, #331, lib/searchMore.ts): a site pages its search -- BatCave answers ten
+  // at a time -- so a search on the chosen source, or on the only one there is, loads its next page as the wall is
+  // scrolled (below, under "more"). Keyed on the search, so another term, source or filter starts over.
+  const solo = mode === 'search' ? soloSource(selected, searchQ.data?.sources) : null;
+  const moreKey = solo ? [term, solo, ratingAsked, adultOn ? 'adult' : 'safe'].join('\u0000') : '';
+  const [moreState, setMore] = useState<SearchMore>(noMore());
+  const more = moreState.key === moreKey ? moreState : noMore(moreKey);
+  const [moreBusy, setMoreBusy] = useState(false);
+  const moreCards = useMemo(() => freshCards(searchHits, more.items), [searchHits, more.items]);
   /**
    * "3 of 8 sources answered · still asking MangaDex, Aqua Manga, Bato and 2 more": the wall is usable
    * from the first answer, and this is what says the rest is coming and who is slow. Three names, then a
@@ -426,7 +436,7 @@ function DiscoverInner() {
 
   const wall = useMemo(() => {
     // Search arrives already folded: the server grouped it, and searchGroups merges what it has placed since.
-    if (mode === 'search') return { items: searchHits, groups: searchProviders };
+    if (mode === 'search') return { items: moreCards.length ? [...searchHits, ...moreCards] : searchHits, groups: searchProviders };
     const seen = new Set<string>();
     const out: SourceItem[] = [];
     // Only the sources asked now. Everything loaded stays loaded (nothing is cleared, as above), but a source that has
@@ -451,7 +461,7 @@ function DiscoverInner() {
     // ones only join its provider list, so its icons grow and the add dialog offers a choice without anything
     // on screen moving.
     return foldByWork(out, nameOf, rankOf, wallAdded);
-  }, [mode, listMode, selected, searchHits, searchProviders, order, rows, nameOf, rankOf, wallAdded, budget, kOf]);
+  }, [mode, listMode, selected, searchHits, moreCards, searchProviders, order, rows, nameOf, rankOf, wallAdded, budget, kOf]);
   // What this visit added, in the keys of the view on screen: each view follows the works through its own answers.
   const shownAdded = mode === 'search' ? searchAdded : wallAdded;
   // Each card's icons: every provider behind it, with the extension it came out of, so MangaDex's languages are one
@@ -546,6 +556,34 @@ function DiscoverInner() {
     io.observe(el);
     return () => io.disconnect();
   }, [canPage]);
+  // A search on one source, its next page (#331): asked when the end of the wall comes near, one page at a time, until a
+  // page brings nothing new. A failure ends it too: a search typed again starts over.
+  const canMore = canSearchMore({
+    solo, pages: !!sources.find((s) => s.id === solo)?.searchPages, rating: ratingAsked,
+    pending: stillAsking, firstPage: searchHits.length, more, busy: moreBusy,
+  });
+  const loadMore = useCallback(async () => {
+    if (!solo) return;
+    const key = moreKey, next = more.page + 1, shown = [...searchHits, ...more.items];
+    setMoreBusy(true);
+    let fresh: SourceItem[] = [];
+    try {
+      const r = await api<{ content: SourceItem[] }>(`/api/sources/search?source=${encodeURIComponent(solo)}&q=${encodeURIComponent(term)}&page=${next}`);
+      fresh = freshCards(shown, r.content ?? []);
+    } catch { /* the end, as an empty page is */ }
+    setMore((m) => {
+      const base = m.key === key ? m : noMore(key);
+      return { key, items: [...base.items, ...fresh], page: next, done: fresh.length === 0 };
+    });
+    setMoreBusy(false);
+  }, [solo, moreKey, more, searchHits, term]);
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || !canMore) return;
+    const io = new IntersectionObserver((e) => { if (e[0].isIntersecting) void loadMore(); }, { rootMargin: '800px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [canMore, loadMore]);
 
   // ---------------------------------------------------------------- jobs
   // The shared jobs answer, read from the cache AppShell's one poller keeps fresh (lib/useServerDownloads.ts):
@@ -797,6 +835,10 @@ function DiscoverInner() {
         ))}
         {!wall.items.length && Array.from({ length: Math.min(18, pending * 6) }).map((_, i) => (
           <div key={`sk${i}`} className="skeleton aspect-[2/3] rounded-2xl" />
+        ))}
+        {/* The next page of a search on one source on its way (#331). */}
+        {mode === 'search' && moreBusy && Array.from({ length: 3 }).map((_, i) => (
+          <div key={`mk${i}`} className="skeleton aspect-[2/3] rounded-2xl" data-search-more />
         ))}
         {/* The last tile while any source asked has not answered (v0.58.0): who, so the end of the wall says more is
             coming. Gone once every one has. */}

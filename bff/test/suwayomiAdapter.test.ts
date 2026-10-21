@@ -177,6 +177,16 @@ test('search and latest ask for the right thing', async () => {
   assert.ok(seen[1].includes('"page":3'), seen[1]);
 });
 
+test('a later page of a search asks the engine for that page (#331)', async () => {
+  // A site pages its search -- BatCave answers ten at a time -- and the engine pages it the same way. Reintroduce
+  // `fetchList('SEARCH', query, 1)` in searchPage: Discover scrolling a BatCave search reads its first ten again.
+  const { makeSuwayomiAdapter } = await load();
+  const seen: string[] = [];
+  const a = makeSuwayomiAdapter(LOCAL, fakeGql({ fetchSourceManga: { fetchSourceManga: { mangas: [] } } }, seen));
+  await a.searchPage!('star trek', 4);
+  assert.ok(seen[0].includes('"type":"SEARCH"') && seen[0].includes('"query":"star trek"') && seen[0].includes('"page":4'), seen[0]);
+});
+
 test('listRemoteSources tolerates a shapeless answer', async () => {
   const { listRemoteSources } = await load();
   assert.deepEqual(await listRemoteSources((async () => ({})) as never), []);

@@ -34,6 +34,8 @@ const SCAN_SEARCH_MS = Number(process.env.SCAN_SEARCH_MS) || 45_000;
 const SCAN_FIRST_ANSWER_MS = Number(process.env.SCAN_FIRST_ANSWER_MS) || 2500;
 /** Scans one person may have running at once. */
 const FILL_SCANS_PER_PERSON = 3;
+/** The last page a search on one source may be asked for (#331): thirty of BatCave's tens is every "Star Trek". */
+export const SEARCH_MAX_PAGE = 30;
 
 /** A Find missing chapters scan in progress, or finished and still readable (see the fill/scan route). */
 interface FillScan {
@@ -2526,6 +2528,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
           // Reported from the method's presence, exactly as `latest` is. A source without it simply
           // drops out of the wall while Popular is selected, the same way one without `latest` does.
           popular: typeof s.popular === 'function',
+          // v0.96.0 (#331): whether a search on it goes on past the first page (types.ts searchPage), so Discover
+          // loads more of a search on this source alone only where there is more to load.
+          searchPages: typeof s.searchPage === 'function',
           // What the reader has actually used. Health-then-alphabetical put "18 Porn Comic" and "1Manga.co"
           // at the front of this install's English group while Aqua Manga -- 176 of its 214 series, answering
           // in 2.5s -- was never in the first six fetched.
@@ -2557,16 +2562,21 @@ export default async function sourceRoutes(app: FastifyInstance) {
   // called this one. Deleted rather than gated, because a second door to the same room is what went wrong.
 
   app.get('/api/sources/search', async (req, reply) => {
-    const { source, q: query } = req.query as { source?: string; q?: string };
+    const { source, q: query, page } = req.query as { source?: string; q?: string; page?: string };
     const src = source ? getSource(source) : null;
     if (!src || !query?.trim()) return { content: [] };
+    // `page` (v0.96.0, #331): a later page of the same search, for Discover scrolling a search on this source alone.
+    // Only a source that pages its search has one (types.ts searchPage); every other answers a later page with nothing,
+    // never its first page again. Clamped like the listings' paging.
+    const p = Math.min(SEARCH_MAX_PAGE, Math.max(1, parseInt(page || '1', 10) || 1));
+    if (p > 1 && typeof src.searchPage !== 'function') return { content: [] };
     if (!sourceAllowedFor(src, vc(req).maxAgeRating)) return denySource(reply);
     // Reachable but not surfaceable: the chip is off and this source is adult. An empty page, NOT
     // `denySource` -- 403 is the permission answer and this is not a permission (the same account with
     // `?adult=1` gets the results), and `{ content: [] }` is already what this route answers for a source
     // that has nothing. The source is never even asked, so hiding it costs nothing outbound either.
     if (!discoverable(req).some((s) => s.id === src.id)) return { content: [] };
-    const raw = await src.search(query.trim()).catch(() => []);
+    const raw = await (p > 1 ? src.searchPage!(query.trim(), p) : src.search(query.trim())).catch(() => []);
     // dedupe by sourceId (duplicate ids collide on the React key → wrong cover/title on a card)
     const seen = new Set<string>();
     const results = ratedForViewer(req, raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true))).slice(0, 24);

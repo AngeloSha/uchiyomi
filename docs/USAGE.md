@@ -1770,6 +1770,11 @@ translated once per language and kept, so reading it again costs nothing.
   With one source chosen in the chip, a search asks **only that source** and the chip stays on screen while
   the results are up, so you can see the search is narrowed and clear it with its × (which searches every
   source again). Switching the toggle to *Newest* or *Popular* goes back to browsing.
+  A search on one source (the one chosen, or the only one you have) **keeps going as you scroll** (since v0.96.0,
+  [#331](https://github.com/AngeloSha/uchiyomi/issues/331)): a site answers its search a page at a time (BatCave ten
+  at a time, 209 for *Star Trek*), and the next page loads as you near the end of the wall, up to 30 pages. Every
+  extension's search does this; a built-in source's search is its first page. With **Hide 18+** or **18+ only**
+  chosen, the search stays on its first page. A search across every source shows each source's first page.
 - **One card per series, nothing you have (v0.56.0):**
   - A series several sources carry is one card under any of the names they give it. The card's corner shows each
     source's icon (MangaDex once, whatever its languages).

@@ -103,6 +103,12 @@ export interface SourceAdapter {
   id: string; // 'mangadex'
   name: string; // 'MangaDex'
   search(query: string): Promise<SourceSeries[]>;
+  /**
+   * optional (v0.96.0, #331): page `page` (1-based) of a search. A site pages its search -- BatCave answers ten at a
+   * time, and "Star Trek" is 209 of them -- so `search` is only its first page. An adapter without this answers the
+   * first page alone, and GET /api/sources reports which can go further (`searchPages`).
+   */
+  searchPage?(query: string, page: number): Promise<SourceSeries[]>;
   getSeries(id: string): Promise<SourceSeries | null>;
   listChapters(seriesId: string): Promise<SourceChapter[]>;
   getPageUrls(chapterId: string): Promise<string[]>;
