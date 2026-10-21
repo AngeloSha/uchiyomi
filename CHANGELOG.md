@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.97.0 — 2026-10-21
+
+**Your favorites in your own order, and chapters that failed every night on Natomanga and Mangakakalot now come from the
+image server the site itself uses.**
+
+### Your favorites, in your order
+
+- **Manage on Home's *Your favorites* row opens your favorites as a list.** Drag one into place (on a phone, hold it a
+  moment first), move it a step with its arrows, or take it off with ×.
+- **Home shows them in that order**, and so do your other devices and the OPDS feed. A series you favorite later comes
+  first until you move it.
+- Until you move one, nothing changes: they stay newest first, as before.
+
+### Chapters that failed every night
+
+- **On Natomanga and Mangakakalot, some chapters pointed their pages at an image server that doesn't have the files.**
+  It answers "File with such name does not exist", with some "slow down" replies among them. Uchiyomi took the failure
+  for a busy site and tried again every night, up to twelve times, for weeks.
+- **The site's own reader takes those pages from another server listed on the same page.** Uchiyomi now reads that
+  list first, so the next check asks the server that has the files. Chapters that already downloaded are unaffected.
+
+### Upgrading
+
+- Nothing to do.
+
 ## v0.96.0 — 2026-10-21
 
 **Drag things into place, a search on one source keeps going as you scroll, Shift picks a run of series, and the
