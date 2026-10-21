@@ -44,6 +44,7 @@ import { runExtensionMonitor } from './lib/extensionMonitor';
 import { startEngineCacheKeeper } from './lib/sources/suwayomi/cache';
 import { startSweeper } from './lib/imageCache';
 import { pruneAudit } from './lib/audit';
+import { pruneRing } from './lib/deviceRing';
 import { startActivityLog, flushActivityLog } from './lib/activityLog';
 import { runBackup, backupDelay, backupSettings, stampDelay } from './lib/backup';
 import { firstRunFloor, DESKTOP_FLOORS } from './lib/desktop';
@@ -277,7 +278,11 @@ async function main() {
   startSweeper();
   // v0.69.1: the refusal rows an outside caller can write stay bounded (lib/audit.ts pruneAudit, refusals only -- the
   // rest of audit_log is evidence other code reads back). Shortly after boot, then once a day.
-  const pruneRefusals = () => { pruneAudit().catch((e) => app.log.warn({ err: e }, 'audit prune failed')); };
+  const pruneRefusals = () => {
+    pruneAudit().catch((e) => app.log.warn({ err: e }, 'audit prune failed'));
+    // And the device keyring's entries whose session has ended (lib/deviceRing.ts): they open nothing meanwhile.
+    pruneRing().catch((e) => app.log.warn({ err: e }, 'device ring prune failed'));
+  };
   setTimeout(pruneRefusals, 10 * 60_000).unref();
   setInterval(pruneRefusals, 24 * 60 * 60_000).unref();
 

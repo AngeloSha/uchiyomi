@@ -1367,6 +1367,63 @@ paths:
           description: Not authenticated
         "403":
           description: The account has been disabled; every session was revoked
+  /auth/ring:
+    get:
+      tags:
+        - auth
+      summary: The accounts this device remembers (Remember on this device).
+      operationId: getAuthRing
+      security: []
+      description: >-
+        By the device's own `yomi_dev` cookie, set by a sign-in with `remember: true`; no session needed. Each entry
+        whose session is still live, as `{id, displayName, avatar}`. A session entered without a password is listed from
+        the home network only (LOCAL_NETWORKS). Empty on desktop.
+      responses:
+        "200":
+          description: "`{content: [{id, displayName, avatar}]}`"
+  /auth/resume:
+    post:
+      tags:
+        - auth
+      summary: Take up an account this device remembers, without its password.
+      operationId: postAuthResume
+      security: []
+      description: >-
+        Answers like a sign-in and sets the account's cookies. `reauth` when the account is an admin remembered for more
+        than twelve hours (the entry is forgotten); `local_only` for a session entered without a password, from outside.
+        A session the device held and did not remember is ended.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [profileId]
+              properties:
+                profileId:
+                  type: string
+      responses:
+        "200":
+          description: Signed in as the remembered account
+        "400":
+          description: Malformed body
+        "401":
+          description: "`not_remembered`, `reauth` or `local_only`"
+        "429":
+          description: Too many attempts
+  /auth/leave:
+    post:
+      tags:
+        - auth
+      summary: Sign in as someone else, keeping this account remembered on this device.
+      operationId: postAuthLeave
+      security: []
+      description: >-
+        Clears the session cookies. A session this device remembers stays live for POST /auth/resume
+        (`remembered: true`); any other is ended, as POST /auth/logout ends it.
+      responses:
+        "200":
+          description: "`{ok, remembered}`"
   /auth/logout:
     post:
       tags:

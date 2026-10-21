@@ -2039,6 +2039,20 @@ ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS parent_session uuid;
 ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS via            text;
 CREATE INDEX IF NOT EXISTS idx_rt_parent  ON refresh_tokens (parent_session) WHERE parent_session IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_rt_session ON refresh_tokens (session_id) WHERE session_id IS NOT NULL;
+
+-- The accounts a device remembers (lib/deviceRing.ts): a sign-in that ticked Remember on this device, by device -- the
+-- hash of its yomi_dev cookie, never the cookie -- and the session it can take up again. No key to refresh_tokens:
+-- sessions are revoked, not deleted, and an entry opens only while its session is live; the daily prune drops the rest.
+-- Additive: an older release never reads it.
+CREATE TABLE IF NOT EXISTS device_ring (
+  device_hash text        NOT NULL,
+  user_id     uuid        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  session_id  uuid        NOT NULL,
+  added_at    timestamptz NOT NULL DEFAULT now(),
+  last_used   timestamptz,
+  PRIMARY KEY (device_hash, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_device_ring_user ON device_ring (user_id);
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

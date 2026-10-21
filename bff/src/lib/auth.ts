@@ -360,6 +360,17 @@ async function supersede(
   return row ? token : null;
 }
 
+/**
+ * Take up a remembered session on its device (lib/deviceRing.ts, POST /auth/resume): its live token is superseded by a
+ * new one, as a refresh supersedes it, and the session keeps the expiry it has. Null when the token moved on meanwhile.
+ */
+export async function resumeHead(
+  head: { id: string; expiresAt: Date; deviceId: string | null; deviceName: string | null },
+  meta: { ip: string | null; userAgent: string | null },
+): Promise<string | null> {
+  return supersede(head.id, { used: true, expiresAt: head.expiresAt, deviceId: head.deviceId, deviceName: head.deviceName, ...meta });
+}
+
 /** `local`: the session was entered without a credential and holds only at home, so what is minted for it says so. */
 export type RefreshExchange =
   | { kind: 'refused' }

@@ -26,6 +26,7 @@ import {
   revokeAllSessions,
   revokeRefreshToken,
   revokeSessionForUser,
+  resumeHead,
   spendTotpStep,
   touchSession,
   userIdOf,
@@ -45,6 +46,9 @@ import { talkOn } from '../lib/comments';
 import { verifyLoginPassword } from '../lib/loginPassword';
 import { profileKind, type ProfileRow } from '../lib/profiles';
 import { clientZone } from '../lib/clientAddr';
+import {
+  ADMIN_RESUME_HOURS, deviceKeyOf, ensureDeviceKey, forgetRemembered, isRemembered, noteResumed, rememberSession, ringOf,
+} from '../lib/deviceRing';
 
 const loginBody = z.object({
   username: z.string().max(64).optional(),
@@ -52,6 +56,8 @@ const loginBody = z.object({
   code: z.string().max(32).optional(), // TOTP or recovery code (xxxxx-xxxxx-xxxxx-xxxxx is 23)
   deviceId: z.string().max(128).optional(),
   deviceName: z.string().max(128).optional(),
+  // Remember on this device (lib/deviceRing.ts): this session can be taken up again here later without the password.
+  remember: z.boolean().optional(),
 });
 
 interface FullUser {
@@ -295,6 +301,10 @@ export default async function authRoutes(app: FastifyInstance) {
     const refresh = await issueRefreshToken(user.id, { deviceId, deviceName, ip, userAgent: ua, via: 'password' });
     reply.setCookie(REFRESH_COOKIE, refresh, cookieOptions());
     setImgCookie(app, reply, user.id);
+    if (parsed.data.remember && !isDesktop()) {
+      const live = await validateRefreshToken(refresh);
+      if (live) await rememberSession(ensureDeviceKey(req, reply), user.id, live.sessionId);
+    }
     // A rescue sign-in is said in the log as well as written down: it is the door SSO-only mode exists to keep shut.
     if (rescue) app.log.warn(`[auth] rescue sign-in by the admin "${username}" (AUTH_RESCUE_ADMIN)`);
     await logAudit(rescue ? 'login.rescue' : 'login.ok', { userId: user.id, username, req });
@@ -729,6 +739,77 @@ export default async function authRoutes(app: FastifyInstance) {
     }
     setImgCookie(app, reply, r.userId, r.local);
     return reply.send({ ...signAccess(app, r.userId, r.role, r.local), user: await userPayload(r.userId), refreshExpiresAt: r.expiresAt });
+  });
+
+  // ---- the device keyring (lib/deviceRing.ts) ----
+
+  /**
+   * The accounts this device remembers, for the sign-in screen and the profile photo: no session needed, the device's
+   * own cookie is the key, as the refresh cookie is. A session entered without a password is listed at home only, where
+   * it opens.
+   */
+  app.get('/auth/ring', async (req) => {
+    const key = deviceKeyOf(req);
+    if (!key || isDesktop()) return { content: [] };
+    const home = clientZone(req) === 'local';
+    return {
+      content: (await ringOf(key)).filter((r) => home || !withoutCredential(r.via))
+        .map((r) => ({ id: r.userId, displayName: r.displayName, avatar: r.avatar ?? {} })),
+    };
+  });
+
+  /**
+   * Take up a session this device remembers, without its password: its token is superseded as a refresh would, and the
+   * device's cookie becomes it. An admin remembered longer than ADMIN_RESUME_HOURS signs in again (`reauth`, and the
+   * entry is forgotten); a session entered without a password does so at home only. A session the device held and did
+   * not remember is ended rather than left live with no cookie anywhere. The sign-in limit applies: the route answers
+   * without a session. Reintroduce any check by dropping it: its case in deviceRing.int.test.ts resumes.
+   */
+  app.post('/auth/resume', { config: SIGN_IN_LIMIT }, async (req, reply) => {
+    const b = z.object({ profileId: z.string().uuid() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const key = deviceKeyOf(req);
+    const [r] = key && !isDesktop() ? await ringOf(key, b.data.profileId) : [];
+    if (!key || !r) {
+      // Anyone can ask this, with no session: written down at most once a minute, as "who is reading?" is, and against
+      // nobody -- the id is the caller's word, not an account that tried to sign in.
+      const attempts = auditEvery('login.fail:not_remembered');
+      if (attempts !== null) await logAudit('login.fail', { detail: { reason: 'not_remembered', attempts }, req });
+      return reply.code(401).send({ error: 'not_remembered' });
+    }
+    const local = withoutCredential(r.via);
+    if (local && clientZone(req) !== 'local') return reply.code(401).send({ error: 'local_only' });
+    if (r.role === 'admin' && (!r.startedAt || r.startedAt.getTime() < Date.now() - ADMIN_RESUME_HOURS * 3600_000)) {
+      await forgetRemembered(key, r.userId);
+      return reply.code(401).send({ error: 'reauth' });
+    }
+    const held = req.cookies?.[REFRESH_COOKIE];
+    const cur = held ? await validateRefreshToken(held) : null;
+    const token = await resumeHead(r.head, { ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null });
+    if (!token) return reply.code(401).send({ error: 'not_remembered' });
+    if (cur && cur.userId !== r.userId && !(await isRemembered(key, cur.sessionId))) await revokeRefreshToken(held!);
+    await noteResumed(key, r.userId);
+    reply.setCookie(REFRESH_COOKIE, token, { ...cookieOptions(), maxAge: Math.max(1, Math.floor((r.head.expiresAt.getTime() - Date.now()) / 1000)) });
+    setImgCookie(app, reply, r.userId, local);
+    reply.clearCookie(KOMGA_SESSION_COOKIE, { path: '/' });
+    await logAudit('login.switch', { userId: r.userId, detail: { from: cur?.userId ?? null, via: 'ring' }, req });
+    return reply.send({ ...signAccess(app, r.userId, r.role, local), user: await userPayload(r.userId), refreshExpiresAt: r.head.expiresAt.getTime() });
+  });
+
+  /**
+   * Sign in as someone else without forgetting who was here: a session this device remembers is put aside -- the cookies
+   * go, the session stays live for /auth/resume -- and any other is ended, exactly as /auth/logout ends it.
+   */
+  app.post('/auth/leave', async (req, reply) => {
+    const token = req.cookies?.[REFRESH_COOKIE];
+    const cur = token ? await validateRefreshToken(token) : null;
+    const key = deviceKeyOf(req);
+    const kept = !!(cur && key && (await isRemembered(key, cur.sessionId)));
+    if (token && !kept) await revokeRefreshToken(token);
+    reply.clearCookie(REFRESH_COOKIE, { path: '/' });
+    reply.clearCookie(IMG_COOKIE, { path: '/' });
+    reply.clearCookie(KOMGA_SESSION_COOKIE, { path: '/' });
+    return reply.send({ ok: true, remembered: kept });
   });
 
   app.post('/auth/logout', async (req, reply) => {

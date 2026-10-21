@@ -1078,6 +1078,8 @@ POST   /auth/totp/disable
 GET    /auth/oidc/start             GET    /auth/oidc/callback
 GET    /auth/oidc/link
 GET    /auth/profiles             POST   /auth/switch
+GET    /auth/ring                 POST   /auth/resume
+POST   /auth/leave
 ```
 
 **SSO-only mode** (since v0.63.0, `AUTH_MODE=oidc-only`): `/api/setup`, `/auth/login`, `/auth/register`,
