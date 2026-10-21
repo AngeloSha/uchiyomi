@@ -28,7 +28,11 @@ The ones worth knowing:
   app's port directly, around your proxy (another device on the LAN, another container on its Docker network), set
   `TRUST_PROXY` to your proxy's own address, so only it can say who a visitor is (`TRUST_PROXY=172.18.0.5`), or to
   `false` when there is no proxy at all. Since v0.78.1 sign-in counts wrong passwords per address and name, so the
-  address the app sees is worth getting right.
+  address the app sees is worth getting right. An entry the app cannot read (a typo like `loopbak`, a range like
+  `10.0.0.0/33`) stops it at start, with a `[net]` line in `docker logs uchiyomi` naming the entry; a stray comma is
+  ignored. Two values that work but rarely mean what was meant are said in the same log at every start: `true`, and a
+  bare number. Some guides spell "trust one proxy" as `TRUST_PROXY=1`, but here `1` is read as the address 0.0.0.1
+  and trusts no proxy at all.
 - `LOG_LEVEL` (since v0.92.0): how much the server log says (`docker logs uchiyomi`). `info` by default, a line for
   every request; `warn` keeps only warnings and errors. `debug` adds, for each series a *Find other sources* run
   looks at, the names it searched each source under, what each source answered, which result it took, and why a

@@ -57,7 +57,7 @@ import { registerApiDocs } from './lib/apiDocs';
 import { appVersion } from './lib/appVersion';
 import { buildPayload, installFacts, sendPing } from './lib/installPing';
 import authRoutes from './routes/auth';
-import { trustProxySetting } from './lib/auth';
+import { trustProxyProblems, trustProxySetting, trustProxyWarnings } from './lib/auth';
 import adminRoutes, { sweepImportBatches } from './routes/admin';
 import catalogRoutes from './routes/catalog';
 import imageRoutes, { authorizeImageRequest } from './routes/images';
@@ -78,6 +78,17 @@ import { initialiseBulkChapterDeleteRuns } from './lib/bulkChapterDelete';
 import { authFacts, authModeProblems, authModeWarnings } from './lib/authMode';
 
 async function main() {
+  // A TRUST_PROXY entry Fastify cannot read stops the server here, naming the entry, before the migrations run; one that
+  // works but not as its author likely thinks is said at every start (lib/auth.ts trustProxyProblems, trustProxyWarnings).
+  // Not on desktop, which trusts no proxy whatever is set (`trustProxy` below).
+  if (!isDesktop()) {
+    const netProblems = trustProxyProblems(env.TRUST_PROXY);
+    if (netProblems.length) {
+      for (const p of netProblems) console.error(`[net] ${p}`);
+      process.exit(1);
+    }
+    for (const w of trustProxyWarnings(env.TRUST_PROXY)) console.warn(`[net] ${w}`);
+  }
   await migrate();
   // v0.63.0 (#208, lib/authMode.ts): a sign-in mode that cannot work stops the server here and says why, before any
   // route exists -- a typo in AUTH_MODE must never leave the password routes open behind an operator who thinks them
