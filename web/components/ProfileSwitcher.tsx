@@ -18,7 +18,7 @@ interface Switchable { id: string; displayName: string; avatar: AvatarShape }
  * password and says why, and so it is said here.
  */
 export function ProfileSwitcher({ onClose }: { onClose: () => void }) {
-  const { user, switchProfile, resumeProfile, leave } = useAuth();
+  const { user, switchProfile, resumeProfile, leave, backToOwner, desktop } = useAuth();
   const router = useRouter();
   const { data } = useQuery({
     queryKey: ['switchable-profiles'],
@@ -54,7 +54,14 @@ export function ProfileSwitcher({ onClose }: { onClose: () => void }) {
         ))}
         {data?.zone === 'remote' && <p className="text-xs leading-relaxed text-fog-500">{tr('Profiles without a password open from home only.')}</p>}
         {err && <p role="alert" className="text-xs text-red-300">{err}</p>}
-        <button type="button" onClick={() => { onClose(); void leave(); }} className="btn-key w-full">{tr('Sign in with another account')}</button>
+        {/* Uchiyomi Desktop has no sign-in screen: from a profile, back to the PC's owner instead. */}
+        {desktop ? (
+          user?.kind !== 'desktop-owner' && (
+            <button type="button" onClick={async () => { if (!(await backToOwner())) setErr(tr('Could not switch profile')); }} className="btn-key w-full">{tr('Back to my account')}</button>
+          )
+        ) : (
+          <button type="button" onClick={() => { onClose(); void leave(); }} className="btn-key w-full">{tr('Sign in with another account')}</button>
+        )}
       </div>
     </Sheet>
   );

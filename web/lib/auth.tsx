@@ -23,6 +23,8 @@ interface User {
   totpEnabled?: boolean;
   /** Linked to an identity at the OIDC provider (v0.63.0): Profile → Account offers Link to … until it is. */
   sso?: boolean;
+  /** What kind of profile this is (bff lib/profiles.ts): `desktop-owner` is Uchiyomi Desktop's own account. */
+  kind?: string;
   perms?: Record<string, boolean>;
   avatar?: Avatar;
   settings: Record<string, any>;
@@ -70,6 +72,8 @@ interface AuthCtx {
   pickProfile: (profileId: string) => Promise<{ ok: boolean; error?: string }>;
   /** Sign in as someone else, keeping this account remembered on this device when it is (bff POST /auth/leave). */
   leave: () => Promise<void>;
+  /** Uchiyomi Desktop: from a profile switched to on this PC back to its owner (the shell's POST /auth/desktop). */
+  backToOwner: () => Promise<boolean>;
   /** Why the server last signed this device out, by its code: `local_only` is a profile that opens at home, from outside. */
   signedOutWhy: string | null;
 }
@@ -427,6 +431,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const resumeProfile = (profileId: string) => changeProfile('/auth/resume', profileId);
   const pickProfile = (profileId: string) => changeProfile('/auth/profile-login', profileId);
 
+  /**
+   * Uchiyomi Desktop: back to the owner from a profile switched to on this PC. The shell's own handshake signs the owner
+   * in again (POST /auth/desktop, the header added below the page; lib/api.ts desktopExchange), taking up the session the
+   * profile was opened from; then the app starts over as the owner, as after a switch in another tab. Queued reading
+   * goes first, while the profile's session still answers.
+   */
+  const backToOwner = async (): Promise<boolean> => {
+    await flushOutbox().catch(() => 0);
+    const r = await fetch('/auth/desktop', { method: 'POST', credentials: 'include' }).catch(() => null);
+    if (!r?.ok) return false;
+    await forgetAccountData();
+    setAdultShown(false);
+    window.location.reload();
+    return true;
+  };
+
   /** Sign in as someone else: an account this device remembers is put aside rather than ended (bff POST /auth/leave). */
   const leave = async () => {
     try { await api('/auth/leave', { method: 'POST' }); } catch {}
@@ -471,7 +491,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <Ctx.Provider value={{ status, user, isAdmin: user?.role === 'admin', login, firstRunSetup, register, logout, setSettings, setAvatar, setTotpEnabled, switchProfile, resumeProfile, pickProfile, leave, signedOutWhy, desktop: isDesktop(), reconnect }}>
+    <Ctx.Provider value={{ status, user, isAdmin: user?.role === 'admin', login, firstRunSetup, register, logout, setSettings, setAvatar, setTotpEnabled, switchProfile, resumeProfile, pickProfile, leave, backToOwner, signedOutWhy, desktop: isDesktop(), reconnect }}>
       {children}
     </Ctx.Provider>
   );

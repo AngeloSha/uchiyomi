@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4235
+    "strings": 4236
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4238,5 +4238,6 @@
   "Sign in again: an admin stays remembered for 12 hours.": "请重新登录：管理员只会被记住 12 小时。",
   "Who is reading?": "谁在阅读？",
   "Choose a profile at home": "在家中选择个人资料",
-  "At home, the sign-in screen lists the profiles that open without a password.": "在家中，登录界面会列出无需密码即可打开的个人资料。"
+  "At home, the sign-in screen lists the profiles that open without a password.": "在家中，登录界面会列出无需密码即可打开的个人资料。",
+  "Back to my account": "返回我的账户"
 }

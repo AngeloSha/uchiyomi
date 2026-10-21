@@ -27,11 +27,12 @@ export function ProfileAccount() {
   // routes behind them are not there. Reintroduce either and "the profile manages no password and no 2FA in SSO-only
   // mode" in web/test/ssoOnly.test.ts fails.
   const { data: config, isFetched } = useAuthConfig();
-  const { user } = useAuth();
+  const { user, desktop } = useAuth();
   return (
     <div className={SETTINGS_GRID}>
       <IdentitySection config={config} ready={isFetched} />
-      {user?.perms?.canManageProfiles && <ProfilesSection />}
+      {/* A member an admin let make profiles, and Uchiyomi Desktop's owner, who has no Members to make them in. */}
+      {(user?.perms?.canManageProfiles || (desktop && user?.kind === 'desktop-owner')) && <ProfilesSection />}
       {!ssoOnly(config) && <TwoFactorSection />}
       <SessionsSection />
       <SignOutSection />

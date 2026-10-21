@@ -100,6 +100,9 @@ you switched from closes the profiles opened from it on that device. Which netwo
 An admin can also turn on **Admin → Settings → Server → Choose a profile at home**: at home, the sign-in screen then
 lists those profiles under *Who is reading?*, a tap each, with nobody else signed in first. From outside it lists
 nothing.
+> 💻 **In the desktop app** the computer's owner adds these profiles under **Profile → Account → Profiles** and switches
+> to one with **Switch profile**; **Back to my account** returns to the owner. The desktop app is home, so they always open
+> there.
 
 **Remember on this device.** Tick it under the password when you sign in, and this device keeps you: the sign-in
 screen lists you under *On this device*, and the others signed in here find you under **Switch profile**, a tap away

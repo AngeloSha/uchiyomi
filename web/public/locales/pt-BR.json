@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4235
+    "strings": 4236
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -4238,5 +4238,6 @@
   "Sign in again: an admin stays remembered for 12 hours.": "Entre novamente: um administrador fica lembrado por 12 horas.",
   "Who is reading?": "Quem está lendo?",
   "Choose a profile at home": "Escolher um perfil em casa",
-  "At home, the sign-in screen lists the profiles that open without a password.": "Em casa, a tela de entrada mostra os perfis que abrem sem senha."
+  "At home, the sign-in screen lists the profiles that open without a password.": "Em casa, a tela de entrada mostra os perfis que abrem sem senha.",
+  "Back to my account": "Voltar para minha conta"
 }
