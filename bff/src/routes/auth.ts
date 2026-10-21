@@ -10,6 +10,7 @@ import {
   IMG_COOKIE,
   IMG_COOKIE_TTL,
   REFRESH_COOKIE,
+  actsAsAdmin,
   authenticate,
   requireCredentialSession,
   withoutCredential,
@@ -742,6 +743,60 @@ export default async function authRoutes(app: FastifyInstance) {
   });
 
   app.get('/auth/me', { preHandler: [authenticate] }, async (req) => userPayload(userIdOf(req)));
+
+  // ---- switching to a profile that opens at home ----
+
+  /**
+   * The profiles this session may switch to: the ones that open at home and this account manages -- every one, for an
+   * admin. From home only, where switching to them works; outside the list is empty and says why (`zone`), and so is
+   * it for a session that was itself entered without a password, which switches nowhere.
+   */
+  app.get('/auth/profiles', { preHandler: [authenticate] }, async (req) => {
+    const zone = clientZone(req);
+    if (zone !== 'local' || (req.user as { loc?: unknown }).loc === true) return { zone, content: [] };
+    const me = userIdOf(req);
+    const rows = await q<{ id: string; display_name: string; avatar: unknown }>(
+      `SELECT id, display_name, avatar FROM users
+        WHERE local_open AND NOT disabled AND id <> $1 AND (managed_by = $1 OR $2)
+        ORDER BY lower(display_name), id`, [me, actsAsAdmin(req)]);
+    return { zone, content: rows.map((r) => ({ id: r.id, displayName: r.display_name, avatar: r.avatar ?? {} })) };
+  });
+
+  /**
+   * Switch this device to a profile that opens at home, without its password. The caller is a session
+   * entered with a credential -- the device's own, by its refresh cookie, not just an access token a script could hold
+   * -- of the account that manages the profile, or of an admin, at home. The profile's session is opened FROM it
+   * (`parent_session`): it ends when that one ends (lib/auth.ts revokeDerived), lasts no longer than it would, holds at
+   * home only, and makes no credential (`via: 'switch'`). The answer is a sign-in's, and the device's cookie becomes
+   * the profile's. Reintroduce any check by dropping it: its case in profileSwitch.int.test.ts switches.
+   */
+  app.post('/auth/switch', { preHandler: [authenticate, requireCredentialSession], config: SIGN_IN_LIMIT }, async (req, reply) => {
+    const b = z.object({ profileId: z.string().uuid() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const me = userIdOf(req);
+    const token = req.cookies?.[REFRESH_COOKIE];
+    const cur = token ? await validateRefreshToken(token) : null;
+    if (!cur || cur.userId !== me) return reply.code(401).send({ error: 'no_session' });
+    if (withoutCredential(cur.via)) return reply.code(403).send({ error: 'credential_required' });
+    if (clientZone(req) !== 'local') return reply.code(401).send({ error: 'local_only' });
+    const target = await one<{ id: string; role: string; username: string | null; disabled: boolean; local_open: boolean; managed_by: string | null }>(
+      'SELECT id, role, username, disabled, local_open, managed_by FROM users WHERE id = $1', [b.data.profileId]);
+    if (!target || target.disabled || !target.local_open || target.id === me || (target.managed_by !== me && !actsAsAdmin(req))) {
+      await logAudit('login.fail', { userId: me, detail: { reason: 'switch_denied', profile: b.data.profileId }, req });
+      return reply.code(403).send({ error: 'switch_denied' });
+    }
+    const refresh = await issueRefreshToken(target.id, {
+      via: 'switch', parentSession: cur.sessionId, expiresAt: cur.expiresAt,
+      deviceId: cur.deviceId ?? undefined, deviceName: cur.deviceName ?? undefined,
+      ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null,
+    });
+    reply.setCookie(REFRESH_COOKIE, refresh, { ...cookieOptions(), maxAge: Math.max(1, Math.floor((cur.expiresAt.getTime() - Date.now()) / 1000)) });
+    setImgCookie(app, reply, target.id, true);
+    // As at sign-out: a Komga session cookie a browser picked up belongs to the account it leaves.
+    reply.clearCookie(KOMGA_SESSION_COOKIE, { path: '/' });
+    await logAudit('login.switch', { userId: target.id, username: target.username ?? undefined, detail: { from: me, via: 'guardian' }, req });
+    return reply.send({ ...signAccess(app, target.id, target.role, true), user: await userPayload(target.id), refreshExpiresAt: cur.expiresAt.getTime() });
+  });
 
   // ---- sessions / devices ----
   app.get('/auth/sessions', { preHandler: [authenticate] }, async (req) => {

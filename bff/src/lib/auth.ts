@@ -168,10 +168,12 @@ export async function issueRefreshToken(
   opts: {
     deviceId?: string; deviceName?: string; ip?: string | null; userAgent?: string | null;
     via?: SessionVia; parentSession?: string;
+    /** Sooner than REFRESH_TTL_DAYS: a session opened from another ends no later than it would. */
+    expiresAt?: Date;
   } = {},
 ): Promise<string> {
   const token = randomBytes(48).toString('hex');
-  const expires = new Date(refreshExpiresAt());
+  const expires = opts.expiresAt ?? new Date(refreshExpiresAt());
   const id = randomUUID();
   await q(
     `INSERT INTO refresh_tokens (id, session_id, user_id, token_hash, device_id, device_name, expires_at, ip, user_agent, last_seen, via, parent_session)
