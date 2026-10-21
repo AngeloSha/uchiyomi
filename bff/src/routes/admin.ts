@@ -4916,7 +4916,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     // The audit line is written when the sweep ends, long after this answer, and req.ip reads the socket, which
     // may be gone by then: the two things logAudit reads of a request, its IP and user agent, are taken now.
     const h = req.headers;
-    const from = { ip: req.ip, headers: { 'x-forwarded-for': h['x-forwarded-for'], 'user-agent': h['user-agent'] } } as unknown as FastifyRequest;
+    const from = { ip: req.ip, headers: { 'user-agent': h['user-agent'] } } as unknown as FastifyRequest;
     const started = !checkRunning() && startSourceCheck({ by: 'admin' }, (r) => logAudit('source.check', {
       userId,
       detail: { checked: r.sources.length, attention: r.needsAttention.length, inconclusive: r.inconclusive.length },
