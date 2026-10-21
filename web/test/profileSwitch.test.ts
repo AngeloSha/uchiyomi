@@ -92,7 +92,7 @@ test('the switcher: from the profile photo, outside the popover it would close',
 
 test('Members makes and converts profiles that open at home, never an admin, and shows how the server sees you', () => {
   const page = code(read('app/admin/page.tsx'));
-  assert.match(page, /role: localOpen \? 'user' : role, \.\.\.\(localOpen \? \{ localOpen: true, managedBy: managedBy \|\| undefined \} : \{\}\)/);
+  assert.match(page, /role: open \? 'user' : role, \.\.\.\(open \? \{ localOpen: true, managedBy: managedBy \|\| undefined \} : \{\}\)/);
   assert.match(page, /\{localOpen \? \(\s*<>\s*<select value=\{managedBy\}/, 'no choice of who manages it');
   assert.match(page, /<HomeNetwork \/>/);
   assert.match(page, /function HomeNetwork\(\) \{[\s\S]*?'\/api\/admin\/network'/);

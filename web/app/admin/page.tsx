@@ -450,7 +450,8 @@ function Members() {
   });
   // SSO-only mode (v0.63.0, #208): accounts come from the provider. No New account, no password to reset -- the server
   // refuses both -- and a card that says where accounts come from instead. Reintroduce the form and "Members offers no
-  // New account and no password in SSO-only mode" in web/test/ssoOnly.test.ts fails.
+  // New account and no password in SSO-only mode" in web/test/ssoOnly.test.ts fails. The one account Members still
+  // makes there is a profile with no password, which opens at home (New profile, below).
   const ssoOnly = data?.auth?.mode === 'oidc-only';
   const provider = data?.auth?.sso ?? '';
   const [username, setUsername] = useState('');
@@ -472,12 +473,14 @@ function Members() {
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim() || (!password && !localOpen) || busy) return;
+    // In SSO-only mode the server makes a profile with no password and nothing else (403 sso_only): New profile sends that.
+    const open = localOpen || ssoOnly;
+    if (!username.trim() || (!password && !open) || busy) return;
     setBusy(true);
     try {
       await api('/api/admin/users', { json: {
-        username: username.trim(), password: password || undefined, displayName: displayName.trim() || undefined,
-        role: localOpen ? 'user' : role, ...(localOpen ? { localOpen: true, managedBy: managedBy || undefined } : {}),
+        username: username.trim(), password: ssoOnly ? undefined : password || undefined, displayName: displayName.trim() || undefined,
+        role: open ? 'user' : role, ...(open ? { localOpen: true, managedBy: managedBy || undefined } : {}),
       } });
       toast(tr('Account {name} created', { name: iso(`@${username.trim()}`) }), 'success');
       setUsername(''); setPassword(''); setDisplayName(''); setRole('user'); setLocalOpen(false); setManagedBy(''); inval();
@@ -537,6 +540,24 @@ function Members() {
         </div>
         <button type="submit" disabled={busy || !username.trim() || (localOpen ? password.length > 0 && password.length < 8 : password.length < 8)} className="btn-accent mt-3 w-full disabled:opacity-50"><IcPlus width={18} height={18} /> {busy ? tr('Creating…') : tr('Create account')}</button>
       </form>
+      )}
+      {/* SSO-only mode's one way to make an account here: a profile with no
+          password, which opens on the home network only, through a session the provider signed in or Who is reading?. */}
+      {ssoOnly && data && (
+        <form onSubmit={create} className="card grad-border p-4" data-sso-profile>
+          <h2 className="mb-1 font-display text-base font-semibold">{tr('New profile')}</h2>
+          <p className="mb-3 text-sm leading-relaxed text-fog-300">{tr('Accounts come from {name}, but a profile without a password can be made here: it opens on the home network only.', { name: iso(provider) })}</p>
+          <div className="space-y-2">
+            <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder={tr('username')} autoCapitalize="none" autoCorrect="off" className="field" />
+            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder={tr('display name (optional)')} className="field" />
+            <select value={managedBy} onChange={(e) => setManagedBy(e.target.value)} className="field">
+              <option value="">{tr('Managed by an admin')}</option>
+              {managers.map((m: any) => <option key={m.id} value={m.id}>{m.display_name}</option>)}
+            </select>
+            <HomeNetwork />
+          </div>
+          <button type="submit" disabled={busy || !username.trim()} className="btn-accent mt-3 w-full disabled:opacity-50"><IcPlus width={18} height={18} /> {busy ? tr('Creating…') : tr('Create profile')}</button>
+        </form>
       )}
       {/* #208, item 6: what a member who signs up starts with. A card of its own beside New account, which is an admin
           choosing and is left alone by it. After the users list has answered, which says whether the provider makes
