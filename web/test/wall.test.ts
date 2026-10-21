@@ -275,7 +275,8 @@ test('the Discover page folds its wall and opens a card from the fold', () => {
   const src = readFileSync(join(ROOT, 'app/discover/page.tsx'), 'utf8');
   assert.match(src, /return foldByWork\(out, nameOf, rankOf, wallAdded\);/, 'the wall is not folded, or not without what was added');
   assert.match(src, /const key = workKey\(it\);[\s\S]{0,1200}?const providers = wall\.groups\[key\];/, "open() does not read the wall's groups by work");
-  assert.match(src, /if \(mode === 'search'\) return \{ items: searchHits, groups: searchProviders \};/, "search's groups are not the wall's");
+  // v0.96.0 (#331): a search on one source adds its later pages' cards after the first page's; the groups stay the search's.
+  assert.match(src, /if \(mode === 'search'\) return \{ items: moreCards\.length \? \[\.\.\.searchHits, \.\.\.moreCards\] : searchHits, groups: searchProviders \};/, "search's groups are not the wall's");
   // The two local copies this replaced (the server keeps its own `norm` in bff/src/routes/sources.ts).
   for (const f of ['app/discover/page.tsx', 'components/AddSeriesDialog.tsx']) {
     assert.doesNotMatch(readFileSync(join(ROOT, f), 'utf8'), /const norm = /, `${f} grew its own copy of the title rule again`);

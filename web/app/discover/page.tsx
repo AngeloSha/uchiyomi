@@ -833,12 +833,13 @@ function DiscoverInner() {
             providers={stackOf(it)}
             onAdd={() => open(it)} eager={i < 12} />
         ))}
-        {!wall.items.length && Array.from({ length: Math.min(18, pending * 6) }).map((_, i) => (
-          <div key={`sk${i}`} className="skeleton aspect-[2/3] rounded-2xl" />
-        ))}
-        {/* The next page of a search on one source on its way (#331). */}
+        {/* The next page of a search on one source on its way (#331), after the cards: it is asked only once every source
+            has answered, so the still-loading card below is never beside it. */}
         {mode === 'search' && moreBusy && Array.from({ length: 3 }).map((_, i) => (
           <div key={`mk${i}`} className="skeleton aspect-[2/3] rounded-2xl" data-search-more />
+        ))}
+        {!wall.items.length && Array.from({ length: Math.min(18, pending * 6) }).map((_, i) => (
+          <div key={`sk${i}`} className="skeleton aspect-[2/3] rounded-2xl" />
         ))}
         {/* The last tile while any source asked has not answered (v0.58.0): who, so the end of the wall says more is
             coming. Gone once every one has. */}
