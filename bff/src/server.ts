@@ -58,6 +58,7 @@ import { appVersion } from './lib/appVersion';
 import { buildPayload, installFacts, sendPing } from './lib/installPing';
 import authRoutes from './routes/auth';
 import { trustProxyProblems, trustProxySetting, trustProxyWarnings } from './lib/auth';
+import { localNetworksProblems, localNetworksWarnings } from './lib/clientAddr';
 import adminRoutes, { sweepImportBatches } from './routes/admin';
 import catalogRoutes from './routes/catalog';
 import imageRoutes, { authorizeImageRequest } from './routes/images';
@@ -81,13 +82,18 @@ async function main() {
   // A TRUST_PROXY entry Fastify cannot read stops the server here, naming the entry, before the migrations run; one that
   // works but not as its author likely thinks is said at every start (lib/auth.ts trustProxyProblems, trustProxyWarnings).
   // Not on desktop, which trusts no proxy whatever is set (`trustProxy` below).
+  // LOCAL_NETWORKS likewise (lib/clientAddr.ts): it decides who is at home, where a profile without a password opens.
   if (!isDesktop()) {
-    const netProblems = trustProxyProblems(env.TRUST_PROXY);
+    const netProblems = [...trustProxyProblems(env.TRUST_PROXY), ...localNetworksProblems(env.LOCAL_NETWORKS, env.TRUST_PROXY)];
     if (netProblems.length) {
       for (const p of netProblems) console.error(`[net] ${p}`);
       process.exit(1);
     }
-    for (const w of trustProxyWarnings(env.TRUST_PROXY)) console.warn(`[net] ${w}`);
+    for (const w of [...trustProxyWarnings(env.TRUST_PROXY), ...localNetworksWarnings(env.LOCAL_NETWORKS, env.TRUST_PROXY)]) {
+      console.warn(`[net] ${w}`);
+    }
+  } else if (env.LOCAL_NETWORKS.trim()) {
+    console.warn('[net] Uchiyomi Desktop is reached from this computer alone: LOCAL_NETWORKS is ignored.');
   }
   await migrate();
   // v0.63.0 (#208, lib/authMode.ts): a sign-in mode that cannot work stops the server here and says why, before any

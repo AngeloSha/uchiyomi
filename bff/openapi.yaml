@@ -7580,6 +7580,26 @@ paths:
           description: "Conflict: `busy` -- a sweep or a library repair is running"
         "500":
           description: The sweep itself failed; the server log has the details
+  /api/admin/network:
+    get:
+      tags:
+        - admin
+      summary: How this server sees the caller -- address, proxy, and whether it is at home.
+      operationId: getApiAdminNetwork
+      description: >-
+        `ip` is the address the server resolved under TRUST_PROXY, `peer` the address that connected, `viaProxy` whether
+        that came through a proxy TRUST_PROXY names, `zone` `local` when `ip` is inside LOCAL_NETWORKS (where profiles
+        without a password open) and `remote` otherwise, and `localNetworks` the networks declared. Requires an admin
+        account and a token carrying the admin scope.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: Not an admin
   /api/admin/users:
     get:
       tags:

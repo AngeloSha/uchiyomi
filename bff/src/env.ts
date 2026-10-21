@@ -127,6 +127,11 @@ const schema = z.object({
   // Umbrel app proxy, nginx or Nginx Proxy Manager on the LAN). `true` trusts every peer as before; `false` none; or a
   // comma list of addresses and CIDR ranges (for a proxy on a public address).
   TRUST_PROXY: z.string().default('loopback, linklocal, uniquelocal'),
+  // The networks that are home (lib/clientAddr.ts): a profile without a password opens from these only, and a visitor
+  // from anywhere else needs a credential. A comma list of addresses and CIDR ranges, e.g. 192.168.1.0/24. Empty by
+  // default -- nobody is at home, and such a profile opens in the desktop app alone -- because a proxy that drops
+  // X-Forwarded-For would make "every private network" mean the whole internet.
+  LOCAL_NETWORKS: z.string().default(''),
   CACHE_DIR: z.string().default('/cache'),
   CONFIG_DIR: z.string().default('/config'),
   // Optional OIDC / SSO. Everything stays off unless an issuer and client id are set, so an install that

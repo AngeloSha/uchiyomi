@@ -71,6 +71,9 @@ const IS_DESKTOP_ALLOWED = new Set([
   'lib/backupExtensions.ts',
   // v0.85.0: translated pages are Docker only for now: the engine's processes do not run inside the desktop app.
   'lib/translate/engine.ts',
+  // Profiles that open at home: the desktop server is this computer's alone, so every
+  // request to it is at home.
+  'lib/clientAddr.ts',
 ]);
 
 test('UCHIYOMI_DESKTOP is read in lib/desktop.ts and nowhere else', () => {

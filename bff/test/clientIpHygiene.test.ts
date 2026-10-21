@@ -1,4 +1,4 @@
-// Who a visitor is, decided in one place (lib/auth.ts clientIp, which reads `req.ip` as Fastify resolved it under
+// Who a visitor is, decided in one place (lib/clientAddr.ts clientIp, which reads `req.ip` as Fastify resolved it under
 // TRUST_PROXY; trustProxy.test.ts).
 //
 // Every sign-in limit, the lockout budget per address and name, and the activity log rest on that address. A reader of
@@ -15,6 +15,15 @@ const SRC = join(__dirname, '..', 'src');
 // A header NAME, quoted whole as a lookup or a key takes it -- not a sentence that mentions one (lib/auth.ts says
 // "X-Forwarded-For" to the operator in trustProxyWarnings).
 const HEADER = /['"`](x-forwarded-[a-z]+|x-real-ip|cf-connecting-ip|true-client-ip|forwarded)['"`]|headers\.forwarded\b/i;
+/**
+ * The places that may name one, each with why. Each is matched as the line's code, so a second use in the same file
+ * still fails.
+ */
+const ALLOWED: Record<string, string> = {
+  // zoneOf: whether the header is there at all, never what it says -- forwarded by a peer TRUST_PROXY does not name
+  // means the address seen is not the visitor's, so the request is not at home.
+  "lib/clientAddr.ts: if (req.headers['x-forwarded-for'] !== undefined && (req.ips?.length ?? 1) <= 1) return 'remote';": 'presence only',
+};
 
 test('no source file reads a forwarding header of its own', () => {
   const files = (readdirSync(SRC, { recursive: true }) as string[]).filter((f) => f.endsWith('.ts'));
@@ -24,8 +33,10 @@ test('no source file reads a forwarding header of its own', () => {
     readFileSync(join(SRC, f), 'utf8').split('\n').forEach((line, i) => {
       const code = line.trimStart();
       if (code.startsWith('//') || code.startsWith('*') || code.startsWith('/*')) return;
-      if (HEADER.test(code.replace(/\/\/.*$/, ''))) found.push(`src/${f.replace(/\\/g, '/')}:${i + 1}: ${code.slice(0, 120)}`);
+      const file = f.replace(/\\/g, '/');
+      if (!HEADER.test(code.replace(/\/\/.*$/, '')) || `${file}: ${code}` in ALLOWED) return;
+      found.push(`src/${file}:${i + 1}: ${code.slice(0, 120)}`);
     });
   }
-  assert.deepEqual(found, [], 'read the address with clientIp (lib/auth.ts), never a header');
+  assert.deepEqual(found, [], 'read the address with clientIp (lib/clientAddr.ts), never a header');
 });

@@ -1786,6 +1786,7 @@ GET    /api/admin/notify-targets  POST   /api/admin/notify-targets
 PATCH  /api/admin/notify-targets/:id DELETE /api/admin/notify-targets/:id
 POST   /api/admin/notify-targets/:id/test
 GET    /api/admin/install-ping/preview
+GET    /api/admin/network
 GET    /api/admin/users           POST   /api/admin/users
 PATCH  /api/admin/users/:id       DELETE /api/admin/users/:id
 GET    /api/admin/sessions        DELETE /api/admin/sessions/:id

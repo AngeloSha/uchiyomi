@@ -492,16 +492,9 @@ async function revokeDerived(ended: Array<{ s: string }>): Promise<void> {
   );
 }
 
-/**
- * Client IP, as Fastify resolved it under `trustProxy` (server.ts, env.TRUST_PROXY).
- *
- * This used to read the first X-Forwarded-For entry whatever `trustProxy` said, and the first entry is the one a
- * client writes itself -- a proxy appends to the header, it does not replace it. `req.ip` walks the chain from the
- * socket back through the trusted proxies only, so it is the address the nearest untrusted hop connected from.
- */
-export function clientIp(req: FastifyRequest): string | null {
-  return (req.ip || '').slice(0, 64) || null;
-}
+// The client's address is read in one place, lib/clientAddr.ts, beside the zone it decides. Exported here as well
+// because every caller has always imported it from this file.
+export { clientIp } from './clientAddr';
 
 /** TRUST_PROXY's comma list, each entry trimmed, empty ones dropped. */
 const trustProxyEntries = (raw: string): string[] => raw.split(',').map((e) => e.trim()).filter(Boolean);

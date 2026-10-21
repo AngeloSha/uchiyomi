@@ -1,9 +1,9 @@
 // Append-only activity/audit log: logins, admin actions, downloads, blocks. Best-effort (never throws).
 import type { FastifyRequest } from 'fastify';
 import { q } from './db';
-// The one reading of the client's address (lib/auth.ts): this file kept a copy of it, and two copies of the rule that
-// decides who a visitor is can drift apart. clientIpHygiene.test.ts holds every other reader to it.
-import { clientIp } from './auth';
+// The one reading of the client's address (lib/clientAddr.ts): this file kept a copy of it, and two copies of the rule
+// that decides who a visitor is can drift apart. clientIpHygiene.test.ts holds every other reader to it.
+import { clientIp } from './clientAddr';
 
 export async function logAudit(
   event: string,

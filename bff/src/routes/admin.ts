@@ -32,6 +32,7 @@ import { runRepair, repairState, repairLiveSnapshot, REPAIR_HOURS, REPAIR_LIMITS
 import { listRunRecords, runDigest, type RunTarget } from '../lib/repairRuns';
 import { worstCase } from '../lib/repairEstimate';
 import { authenticate, requireAdmin, userIdOf, roleOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
+import { clientIp, clientZone } from '../lib/clientAddr';
 import { logAudit, recentAudit } from '../lib/audit';
 import { markRemoved, forgetVerdict } from '../lib/scoutMemory';
 import { namesOf, recordAltTitles } from '../lib/altTitles';
@@ -5088,6 +5089,20 @@ export default async function adminRoutes(app: FastifyInstance) {
       version: appVersion(),
     };
   });
+
+  /**
+   * How this server sees the admin asking (lib/clientAddr.ts): the address it resolved, whether that came through a
+   * proxy TRUST_PROXY names, and whether it is at home. What Members shows beside the profiles that open without a
+   * password, so an operator writing LOCAL_NETWORKS sees the address to put in it -- and sees a misconfigured proxy (every
+   * visitor arriving as the proxy itself) before it matters.
+   */
+  app.get('/api/admin/network', async (req) => ({
+    ip: clientIp(req),
+    peer: req.socket.remoteAddress ?? null,
+    viaProxy: (req.ips?.length ?? 1) > 1,
+    zone: clientZone(req),
+    localNetworks: env.LOCAL_NETWORKS.split(',').map((e) => e.trim()).filter(Boolean),
+  }));
 
   /** SSO-only mode's answer to an account made or a password set here (v0.63.0, #208): accounts come from the provider. */
   const ssoOnlyRefusal = (reply: any) =>
