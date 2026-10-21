@@ -50,6 +50,8 @@ export const ADMIN_SETTINGS: SettingsIndex = {
     // ---- Server ----
     { id: 'server-name', cat: 'server', label: 'Server name', keywords: ['name', 'title'] },
     { id: 'registration', cat: 'server', label: 'Open registration', when: ['web', 'local-accounts'], keywords: ['sign up', 'signup', 'register', 'new accounts'] },
+    { id: 'local-pick', cat: 'server', label: 'Choose a profile at home', when: ['web'],
+      keywords: ['profiles', 'who is reading', 'no password', 'children', 'family', 'home network'] },
     { id: 'member-defaults-link', cat: 'server', label: 'When someone signs up', when: ['web'],
       keywords: ['new member defaults', 'permissions', 'age limit', 'libraries', 'can download'] },
     { id: 'update-check', cat: 'server', label: 'Check for updates', keywords: ['updates', 'new version', 'release', 'github'] },

@@ -66,6 +66,8 @@ interface AuthCtx {
   switchProfile: (profileId: string) => Promise<{ ok: boolean; error?: string }>;
   /** Take up an account this device remembers, without its password (bff POST /auth/resume). */
   resumeProfile: (profileId: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Sign in from the sign-in screen as a profile that opens at home, when an admin offers it (POST /auth/profile-login). */
+  pickProfile: (profileId: string) => Promise<{ ok: boolean; error?: string }>;
   /** Sign in as someone else, keeping this account remembered on this device when it is (bff POST /auth/leave). */
   leave: () => Promise<void>;
   /** Why the server last signed this device out, by its code: `local_only` is a profile that opens at home, from outside. */
@@ -399,7 +401,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * the screen as it was; the 18+ reveal, the browser's and not the account's (lib/adult.ts), is put away, so a child
    * does not inherit it; and the other tabs are told. Reintroduce a step out of order: web/test/profileSwitch.test.ts.
    */
-  const changeProfile = async (path: '/auth/switch' | '/auth/resume', profileId: string): Promise<{ ok: boolean; error?: string }> => {
+  const changeProfile = async (path: '/auth/switch' | '/auth/resume' | '/auth/profile-login', profileId: string): Promise<{ ok: boolean; error?: string }> => {
     await flushOutbox().catch(() => 0);
     let res: { accessToken: string; user: User; refreshExpiresAt?: number };
     try {
@@ -423,6 +425,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
   const switchProfile = (profileId: string) => changeProfile('/auth/switch', profileId);
   const resumeProfile = (profileId: string) => changeProfile('/auth/resume', profileId);
+  const pickProfile = (profileId: string) => changeProfile('/auth/profile-login', profileId);
 
   /** Sign in as someone else: an account this device remembers is put aside rather than ended (bff POST /auth/leave). */
   const leave = async () => {
@@ -468,7 +471,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <Ctx.Provider value={{ status, user, isAdmin: user?.role === 'admin', login, firstRunSetup, register, logout, setSettings, setAvatar, setTotpEnabled, switchProfile, resumeProfile, leave, signedOutWhy, desktop: isDesktop(), reconnect }}>
+    <Ctx.Provider value={{ status, user, isAdmin: user?.role === 'admin', login, firstRunSetup, register, logout, setSettings, setAvatar, setTotpEnabled, switchProfile, resumeProfile, pickProfile, leave, signedOutWhy, desktop: isDesktop(), reconnect }}>
       {children}
     </Ctx.Provider>
   );

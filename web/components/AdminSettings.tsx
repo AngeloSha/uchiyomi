@@ -432,6 +432,11 @@ function ServerSection({ data, save }: { data: any; save: Save }) {
           <SwitchRow id="registration" label={tr('Open registration')} help={tr('Let anyone create their own account')}
             on={!!data.allow_registration} onChange={(next) => save({ allowRegistration: next })} />
         )}
+        {/* "Who is reading?" on the sign-in screen (bff /auth/pick): at home only. */}
+        {!desktop && (
+          <SwitchRow id="local-pick" label={tr('Choose a profile at home')} help={tr('At home, the sign-in screen lists the profiles that open without a password.')}
+            on={!!data.local_pick} onChange={(next) => save({ localPick: next })} />
+        )}
         {!desktop && (
           <SummaryRow id="member-defaults-link" label={tr('When someone signs up')} href="/admin/?tab=Members&section=member-defaults"
             value={defaults.perms.canDownload !== false ? tr('Can download') : tr('No downloads')} />

@@ -97,6 +97,9 @@ only an account with a password (or single sign-on) gets in, and a profile witho
 until you are home again: the sign-in screen then says *This profile opens from home only*. Signing out of the account
 you switched from closes the profiles opened from it on that device. Which networks are home is the server's setting
 (`LOCAL_NETWORKS`, [Configuration](CONFIGURATION.md)); until it is set, these profiles open in the desktop app only.
+An admin can also turn on **Admin → Settings → Server → Choose a profile at home**: at home, the sign-in screen then
+lists those profiles under *Who is reading?*, a tap each, with nobody else signed in first. From outside it lists
+nothing.
 
 **Remember on this device.** Tick it under the password when you sign in, and this device keeps you: the sign-in
 screen lists you under *On this device*, and the others signed in here find you under **Switch profile**, a tap away

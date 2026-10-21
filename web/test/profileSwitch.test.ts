@@ -49,7 +49,8 @@ test('a switch sends queued reading first, clears the caches only once the serve
   // Both ways of changing person take the same steps.
   assert.match(auth, /const switchProfile = \(profileId: string\) => changeProfile\('\/auth\/switch', profileId\);/);
   assert.match(auth, /const resumeProfile = \(profileId: string\) => changeProfile\('\/auth\/resume', profileId\);/);
-  assert.match(auth, /switchProfile, resumeProfile, leave, signedOutWhy, desktop: isDesktop\(\), reconnect \}\}>/);
+  assert.match(auth, /const pickProfile = \(profileId: string\) => changeProfile\('\/auth\/profile-login', profileId\);/);
+  assert.match(auth, /switchProfile, resumeProfile, pickProfile, leave, signedOutWhy, desktop: isDesktop\(\), reconnect \}\}>/);
 });
 
 test('a profile switched in another tab starts this one over', () => {
@@ -118,6 +119,11 @@ test('the sign-in screen remembers on request, and offers who this device rememb
   assert.match(login, /const r = await login\(username\.trim\(\) \|\| 'admin', pw, needTotp \? code\.trim\(\) : undefined, remember\);/);
   assert.match(login, /<input type="checkbox" checked=\{remember\}/);
   assert.match(login, /api<\{ content: typeof ring \}>\('\/auth\/ring'\)/);
-  assert.match(login, /\{ring\.length > 0 && !needTotp && \(/);
-  assert.match(login, /const r = await resumeProfile\(id\);/);
+  assert.match(login, /return list\.length > 0 && !needTotp && \(/);
+  assert.match(login, /const r = how === 'ring' \? await resumeProfile\(id\) : await pickProfile\(id\);/);
+  // "Who is reading?": what the server offers at home, less who the device already remembers.
+  assert.match(login, /api<\{ content: typeof ring \}>\('\/auth\/pick'\)/);
+  assert.match(login, /readers\.filter\(\(p\) => !ring\.some\(\(r\) => r\.id === p\.id\)\)/);
+  const settings = code(read('components/AdminSettings.tsx'));
+  assert.match(settings, /\{!desktop && \(\s*<SwitchRow id="local-pick"[\s\S]*?save\(\{ localPick: next \}\)/);
 });

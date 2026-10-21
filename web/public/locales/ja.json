@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4232
+    "strings": 4235
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -4235,5 +4235,8 @@
   "Profiles": "プロフィール",
   "Remember on this device": "このデバイスで記憶する",
   "On this device": "このデバイス",
-  "Sign in again: an admin stays remembered for 12 hours.": "もう一度サインインしてください。管理者が記憶されるのは12時間です。"
+  "Sign in again: an admin stays remembered for 12 hours.": "もう一度サインインしてください。管理者が記憶されるのは12時間です。",
+  "Who is reading?": "誰が読みますか？",
+  "Choose a profile at home": "自宅でプロフィールを選ぶ",
+  "At home, the sign-in screen lists the profiles that open without a password.": "自宅では、サインイン画面にパスワードなしで開くプロフィールが表示されます。"
 }
