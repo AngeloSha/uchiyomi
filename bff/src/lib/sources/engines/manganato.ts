@@ -103,6 +103,32 @@ export function parseListing(h: string, sourceId: string): SourceSeries[] {
   return [];
 }
 
+/**
+ * A chapter's pages as the site's own reader builds them: `var cdns = [...]` (its image servers) and
+ * `var chapterImages = [...]` (each page's path), joined as its server keys join them (`cdns[n] + path`). Empty when
+ * the page does not carry them.
+ *
+ * Why it comes before the <img> tags: the tags can name a server that does not have the files. On natomanga and
+ * mangakakalot in October 2026 some chapters' tags all pointed at imgs-2.2xstorage.com, which answers 404 "File with such
+ * name does not exist" (and 429 among them, so the failure read as rate limiting), while the page's own list named
+ * img-r2.2xstorage.com. Every night's check asked the dead server again, twelve times over, and nothing ever changed.
+ * Where both agree -- the chapters that downloaded -- this changes nothing. The first server is the one the reader
+ * shows first. Reintroduce by reading only the tags: "the page's own image list wins over tags that name another
+ * server" in manganatoPages.test.ts reads the dead server.
+ */
+export function scriptPages(h: string): string[] {
+  const array = (name: string): unknown[] | null => {
+    const m = h.match(new RegExp(`var\\s+${name}\\s*=\\s*(\\[[\\s\\S]*?\\])\\s*;`));
+    if (!m) return null;
+    try { const v = JSON.parse(m[1]); return Array.isArray(v) ? v : null; } catch { return null; }
+  };
+  const cdn = (array('cdns') ?? []).find((c): c is string => typeof c === 'string' && /^https?:\/\//i.test(c.trim()));
+  const paths = (array('chapterImages') ?? []).filter((p): p is string => typeof p === 'string' && !!p.trim());
+  if (!cdn || !paths.length) return [];
+  const root = cdn.trim().replace(/\/+$/, '');
+  return paths.map((p) => `${root}/${p.trim().replace(/^\/+/, '')}`);
+}
+
 export function makeManganato(cfg: { id: string; name: string; base: string; order?: number; lang?: string }): SourceAdapter {
   const base = cfg.base.replace(/\/$/, '');
   const mangaUrl = (id: string) => (id.startsWith('http') ? rebase(id, base) : `${base}/manga/${id}`);
@@ -321,6 +347,9 @@ export function makeManganato(cfg: { id: string; name: string; base: string; ord
      */
     async getPageUrls(chapterId) {
       const h = await cfGet(chapterId);
+      // The site's own list first (scriptPages): what its reader and its image-server keys build pages from.
+      const listed = scriptPages(h);
+      if (listed.length) return listed;
       const block = (h.match(/class="[^"]*container-chapter-reader[^"]*"[^>]*>([\s\S]*?)(?:<div class="container|<\/body)/i) || [])[1] || h;
       const urls: string[] = [];
       for (const m of block.matchAll(/<img[^>]+src="(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp)[^"?]*)/gi)) urls.push(norm(m[1]));

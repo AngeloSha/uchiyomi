@@ -68,3 +68,31 @@ test('pages stay in document order, not sorted', async () => {
   const urls = await makeManganato(cfg as any).getPageUrls(`${BASE}/manga/a-series/chapter-35`);
   assert.deepEqual(urls, [`${CDN}/0.webp`, `${CDN}/10.webp`, `${CDN}/2.webp`]);
 });
+
+/**
+ * The night that never changed (v0.97.0): on natomanga and mangakakalot some chapters' <img> tags all named
+ * imgs-2.2xstorage.com, which answers 404 "File with such name does not exist" (and 429 among them, so the failure read
+ * as rate limiting), while the page's own script -- what its reader and its image-server keys build pages from -- named
+ * img-r2.2xstorage.com. Shapes as the site serves them, slashes escaped. Reintroduce by reading the tags alone: the
+ * first assertion reads the dead server.
+ */
+const script = (cdns: string, images: string[]) =>
+  `<script> var cdns = ${cdns}; var backupImage = []; var chapterImages = ${JSON.stringify(images).replace(/\//g, '\\/')}; </script>`;
+const LIVE = 'https://img-r2.cdn.test/';
+
+test("the page's own image list wins over tags that name another server", async () => {
+  stubSolver(`<html><body>
+    <div class="container-chapter-reader">${[0, 1, 2].map(page).join('')}</div>
+    ${script(JSON.stringify([LIVE]).replace(/\//g, '\\/'), ['a-series/35/0.webp', 'a-series/35/1.webp', 'a-series/35/2.webp'])}
+  </body></html>`);
+  const urls = await makeManganato(cfg as any).getPageUrls(`${BASE}/manga/a-series/chapter-35`);
+  assert.deepEqual(urls, [0, 1, 2].map((n) => `${LIVE}a-series/35/${n}.webp`));
+});
+
+test('a page without its own list, or with an empty one, is read from its tags as before', async () => {
+  for (const extra of ['', script('[]', ['a-series/35/0.webp']), script(JSON.stringify([LIVE]), [])]) {
+    stubSolver(`<html><body><div class="container-chapter-reader">${[0, 1].map(page).join('')}</div>${extra}</body></html>`);
+    const urls = await makeManganato(cfg as any).getPageUrls(`${BASE}/manga/a-series/chapter-35`);
+    assert.deepEqual(urls, [0, 1].map((n) => `${CDN}/${n}.webp`), extra || 'no script');
+  }
+});
