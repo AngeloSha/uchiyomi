@@ -32,7 +32,7 @@ const ssoError = (reason: string): string => {
 };
 
 export function LoginScreen() {
-  const { login, firstRunSetup, register } = useAuth();
+  const { login, firstRunSetup, register, signedOutWhy } = useAuth();
   // `desktop`: this port is Uchiyomi Desktop's, reached from a browser tab -- see the effect below. `register` (v0.61.0):
   // signing up, reached only from `login` by "Create an account" while Open registration is on. `sso` (v0.63.0): the
   // server signs in through its provider only (lib/authConfig.ts providerOnly), so the screen is that button alone.
@@ -91,6 +91,9 @@ export function LoginScreen() {
       setErrMsg(ssoError(reason));
       window.history.replaceState({}, '', window.location.pathname);
     }
+    // A profile that opens at home, used from outside it (bff lib/auth.ts authenticate): nothing was ended, and back home
+    // it opens again. Said, so the sign-in form does not read as a sign-out nobody asked for.
+    if (signedOutWhy === 'local_only') setErrMsg(tr('This profile opens from home only. Sign in with a password, or try again from home.'));
   }, []);
 
   const submit = async (e: React.FormEvent) => {

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4208
+    "strings": 4229
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -4211,5 +4211,26 @@
   "Uchiyomi can't tell a file you deleted from one on a drive that isn't connected right now, so it left them as they were. If you deleted or moved them yourself, mark them gone. Then you can forget the series.": "Uchiyomi не может отличить удалённый вами файл от файла на диске, который сейчас не подключён, поэтому оставил их как есть. Если вы сами удалили или переместили их, отметьте их как пропавшие. После этого серию можно забыть.",
   "Mark them gone": "Отметить как пропавшие",
   "Amber: this source lists it under its own name, which came up first for two of this series’ names. Check the covers before you follow it. Following it keeps the name.": "Жёлтое: этот источник называет её по-своему, и это название было первым в поиске по двум названиям этой серии. Сравните обложки, прежде чем отслеживать. При отслеживании это название сохранится.",
-  "Home shows your favorites in this order. Drag one into place, or move it with its arrows.": "На главной ваше избранное показывается в этом порядке. Перетащите серию на нужное место или двигайте её стрелками."
+  "Home shows your favorites in this order. Drag one into place, or move it with its arrows.": "На главной ваше избранное показывается в этом порядке. Перетащите серию на нужное место или двигайте её стрелками.",
+  "Switch profile": "Сменить профиль",
+  "Sign in with another account": "Войти с другой учётной записью",
+  "Profiles without a password open from home only.": "Профили без пароля открываются только из дома.",
+  "Could not switch profile": "Не удалось сменить профиль",
+  "This profile opens from home only. Sign in with a password, or try again from home.": "Этот профиль открывается только из дома. Войдите с паролем или попробуйте снова из дома.",
+  "Opens at home without a password": "Открывается дома без пароля",
+  "password (optional: for outside home)": "пароль (необязательно: для входа вне дома)",
+  "Managed by an admin": "Управляет администратор",
+  "no password, opens at home": "без пароля, открывается дома",
+  "no password at home": "дома без пароля",
+  "managed by {name}": "управляет {name}",
+  "Remove password": "Удалить пароль",
+  "Password removed": "Пароль удалён",
+  "Can make profiles": "Может создавать профили",
+  "No home network is set (LOCAL_NETWORKS), so profiles without a password open only in the desktop app.": "Домашняя сеть не задана (LOCAL_NETWORKS), поэтому профили без пароля открываются только в настольном приложении.",
+  "The server sees you at {ip}, at home.": "Сервер видит вас по адресу {ip}, дома.",
+  "The server sees you at {ip}, outside your home network.": "Сервер видит вас по адресу {ip}, вне домашней сети.",
+  "Profile added": "Профиль добавлен",
+  "That is as many profiles as one account can have.": "У одной учётной записи не может быть больше профилей.",
+  "They open without a password on your home network: switch to one from your profile photo.": "Они открываются без пароля в вашей домашней сети: переключитесь на один из них через фото профиля.",
+  "Profiles": "Профили"
 }

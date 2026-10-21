@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4208
+    "strings": 4229
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -4211,5 +4211,26 @@
   "Uchiyomi can't tell a file you deleted from one on a drive that isn't connected right now, so it left them as they were. If you deleted or moved them yourself, mark them gone. Then you can forget the series.": "Uchiyomi ne peut pas distinguer un fichier que vous avez supprimé d’un fichier sur un disque qui n’est pas connecté en ce moment, il les a donc laissés tels quels. Si vous les avez supprimés ou déplacés vous-même, marquez-les comme disparus. Vous pourrez ensuite oublier la série.",
   "Mark them gone": "Les marquer comme disparus",
   "Amber: this source lists it under its own name, which came up first for two of this series’ names. Check the covers before you follow it. Following it keeps the name.": "Ambre : cette source la répertorie sous son propre nom, arrivé en premier pour deux des noms de cette série. Comparez les couvertures avant de la suivre. La suivre conserve ce nom.",
-  "Home shows your favorites in this order. Drag one into place, or move it with its arrows.": "L’accueil affiche vos favoris dans cet ordre. Faites-en glisser un à sa place, ou déplacez-le avec ses flèches."
+  "Home shows your favorites in this order. Drag one into place, or move it with its arrows.": "L’accueil affiche vos favoris dans cet ordre. Faites-en glisser un à sa place, ou déplacez-le avec ses flèches.",
+  "Switch profile": "Changer de profil",
+  "Sign in with another account": "Se connecter avec un autre compte",
+  "Profiles without a password open from home only.": "Les profils sans mot de passe ne s’ouvrent que depuis la maison.",
+  "Could not switch profile": "Impossible de changer de profil",
+  "This profile opens from home only. Sign in with a password, or try again from home.": "Ce profil ne s’ouvre que depuis la maison. Connectez-vous avec un mot de passe, ou réessayez depuis chez vous.",
+  "Opens at home without a password": "S’ouvre à la maison sans mot de passe",
+  "password (optional: for outside home)": "mot de passe (facultatif : pour l’extérieur)",
+  "Managed by an admin": "Géré par un administrateur",
+  "no password, opens at home": "sans mot de passe, s’ouvre à la maison",
+  "no password at home": "sans mot de passe à la maison",
+  "managed by {name}": "géré par {name}",
+  "Remove password": "Retirer le mot de passe",
+  "Password removed": "Mot de passe retiré",
+  "Can make profiles": "Peut créer des profils",
+  "No home network is set (LOCAL_NETWORKS), so profiles without a password open only in the desktop app.": "Aucun réseau domestique n’est défini (LOCAL_NETWORKS) : les profils sans mot de passe ne s’ouvrent que dans l’application de bureau.",
+  "The server sees you at {ip}, at home.": "Le serveur vous voit à {ip}, à la maison.",
+  "The server sees you at {ip}, outside your home network.": "Le serveur vous voit à {ip}, en dehors de votre réseau domestique.",
+  "Profile added": "Profil ajouté",
+  "That is as many profiles as one account can have.": "Un compte ne peut pas avoir plus de profils.",
+  "They open without a password on your home network: switch to one from your profile photo.": "Ils s’ouvrent sans mot de passe sur votre réseau domestique : passez à l’un d’eux depuis votre photo de profil.",
+  "Profiles": "Profils"
 }

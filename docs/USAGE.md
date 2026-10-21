@@ -89,6 +89,15 @@ libraries, an age limit, downloads) is the admin's choice, under **Admin → Mem
 switch off there is no such link, and accounts come from the admin (**Admin → Members**). The desktop app never offers
 it.
 
+**Profiles without a password.** A household can give the children, or anyone who reads on the family tablet, a
+profile of their own that opens without a password, with its own progress, favourites and history. Tap your profile
+photo, then **Switch profile**: the profiles you manage are a tap away, and **Sign in with another account** takes you
+back to this screen. They open from your home network only. From anywhere else, on mobile data or a friend's Wi-Fi,
+only an account with a password (or single sign-on) gets in, and a profile without one stops at its next request
+until you are home again: the sign-in screen then says *This profile opens from home only*. Signing out of the account
+you switched from closes the profiles opened from it on that device. Which networks are home is the server's setting
+(`LOCAL_NETWORKS`, [Configuration](CONFIGURATION.md)); until it is set, these profiles open in the desktop app only.
+
 ---
 
 ## 3. Your library
@@ -3007,7 +3016,12 @@ Once you have more than one, the Library page grows a row of tabs to switch betw
 
 **Members:** create accounts (user or admin), reset passwords, and per-user controls: make admin/member,
 disable, or allow/deny downloads. Each row shows whether the member has 2FA on, and the provider's name on an account
-linked to single sign-on. On a server that signs in through its provider only (since v0.63.0), Members makes no
+linked to single sign-on. **Opens at home without a password**, on *New account* or on a member's card, makes a
+profile that opens from your home network with no password (§2): never an admin, and with a password as well it signs
+in with it from anywhere else. Choose who manages it, the account that switches to it from its profile photo; under
+the switch, Members says the address the server sees you at and whether that is at home. **Remove password** leaves
+such a profile opening at home alone. **Can make profiles** lets a member add up to six of their own, under
+**Profile → Account → Profiles**; each starts with no more than that member may see. On a server that signs in through its provider only (since v0.63.0), Members makes no
 account and resets no password: a card says where accounts come from instead, the provider's sign-in, and whether
 it makes new ones (`OIDC_ALLOW_SIGNUP`). Everything else here works as before.
 

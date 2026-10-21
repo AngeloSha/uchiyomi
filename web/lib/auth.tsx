@@ -7,6 +7,8 @@ import { deviceId, deviceName } from './device';
 import { clearShownOnce } from './shownOnce';
 import { applyReduceEffects, restoreReduceEffects } from './effects';
 import { applyTone, restoreTone } from './tone';
+import { flushOutbox } from './downloads';
+import { setAdultShown } from './adult';
 import { isDesktop, serverReachableHint, untilReachable } from './desktop';
 import { t as tr } from './i18n';
 import type { AvatarFrame } from './badges';
@@ -59,6 +61,10 @@ interface AuthCtx {
   desktop: boolean;
   /** Try the session again -- DesktopReconnect's button. True when it came back. */
   reconnect: () => Promise<boolean>;
+  /** Switch this device to a profile that opens at home, without its password (bff POST /auth/switch). */
+  switchProfile: (profileId: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Why the server last signed this device out, by its code: `local_only` is a profile that opens at home, from outside. */
+  signedOutWhy: string | null;
 }
 
 const Ctx = createContext<AuthCtx>(null as any);
@@ -126,6 +132,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status>('loading');
   const [user, setUser] = useState<User | null>(null);
   const timer = useRef<any>(null);
+  const [signedOutWhy, setSignedOutWhy] = useState<string | null>(null);
+  // Who this tab shows, compared at every refresh: the refresh cookie is the browser's, and another tab may have switched
+  // it to another profile (switchProfile). Not `user`, which the effect below holds as it was at mount, and not
+  // getCurrentUser(), which refreshSession has already set to whoever answered.
+  const shownUser = useRef<string | null>(null);
+  const channel = useRef<BroadcastChannel | null>(null);
   // Read from the context rather than with useQueryClient, which throws without a provider: tests mount AuthProvider
   // alone, and a provider-less AuthProvider simply has no query cache to clear.
   const qc = useContext(QueryClientContext);
@@ -150,6 +162,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    */
   const adoptAuthed = (u: User, exp?: number) => {
     setCurrentUser(u.id);
+    shownUser.current = u.id;
     void tellWorkerUser(u.id);
     writeOfflineIdentity(u, exp);
     setUser(u);
@@ -166,6 +179,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   /** No server, but this device remembers an unexpired session. Open the downloads rather than the sign-in. */
   const adoptOffline = (saved: OfflineIdentity) => {
     setCurrentUser(saved.id);
+    shownUser.current = saved.id;
     // ⚠️ Not optional. The worker starts each launch with no idea who is signed in, and its background flush
     // skips every event stamped with an owner while that is true -- so without this line, reading queued
     // offline would be dropped silently by the one flush that runs after the app is closed.
@@ -193,6 +207,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearLocalSession = async () => {
     setAccessToken(null);
     setCurrentUser(null);
+    shownUser.current = null;
     clearOfflineIdentity();
     // The sign-in screen belongs to nobody, so it gets the app's default look -- and the mirror goes with the
     // saved identity it exists to serve, or the next person's offline launch would inherit this one's choice.
@@ -224,10 +239,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
      * foreground -- which happens far more often than it is launched. It only ever promotes or ejects.
      */
     const revalidate = async () => {
+      const before = shownUser.current;
       const r = await refreshSession();
       if (!alive) return;
+      // Another tab switched this browser to another profile: nothing this tab holds is the new one's, so it starts over
+      // as it. Reintroduce by adopting in place: "a profile switched in another tab starts this one over" in
+      // web/test/profileSwitch.test.ts fails.
+      if (r.kind === 'authed' && before && r.user.id !== before) {
+        await forgetAccountData();
+        window.location.reload();
+        return;
+      }
       if (r.kind === 'authed') adoptAuthed(r.user, r.refreshExpiresAt);
-      else if (r.kind === 'rejected') await clearLocalSession();
+      else if (r.kind === 'rejected') { setSignedOutWhy(r.reason ?? null); await clearLocalSession(); }
       // 'unreachable': stay exactly as we are. A flaky network is not a sign-out.
     };
 
@@ -251,7 +275,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const r = await untilReachable(refreshSession, () => alive);
       if (!alive) return;
       if (r.kind === 'authed') adoptAuthed(r.user, r.refreshExpiresAt);
-      else if (r.kind === 'rejected') await clearLocalSession();
+      else if (r.kind === 'rejected') { setSignedOutWhy(r.reason ?? null); await clearLocalSession(); }
       else if (saved) adoptOffline(saved);
       else { setCurrentUser(null); setStatus('anon'); }
     })();
@@ -261,8 +285,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const onVisible = () => { if (document.visibilityState === 'visible') void revalidate(); };
     window.addEventListener('online', revalidate);
     document.addEventListener('visibilitychange', onVisible);
+    // A switch in another tab of this browser says so at once, rather than at this tab's next refresh.
+    if (typeof BroadcastChannel !== 'undefined') {
+      channel.current = new BroadcastChannel('yomi-auth');
+      channel.current.onmessage = (e) => {
+        if (e.data?.type === 'switched' && e.data.userId !== shownUser.current) window.location.reload();
+      };
+    }
     return () => {
       alive = false;
+      channel.current?.close();
+      channel.current = null;
       clearInterval(timer.current);
       window.removeEventListener('online', revalidate);
       document.removeEventListener('visibilitychange', onVisible);
@@ -352,6 +385,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  /**
+   * Switch this device to a profile that opens at home, without its password (bff POST /auth/switch).
+   * A sign-in like `login`, step for step, with what a change of person needs on top:
+   * reading queued offline is sent first, while the session it was read in still answers (lib/downloads.ts flushOutbox
+   * files it against whoever is signed in); the caches go only once the server has said yes, so a refused switch leaves
+   * the screen as it was; the 18+ reveal, the browser's and not the account's (lib/adult.ts), is put away, so a child
+   * does not inherit it; and the other tabs are told. Reintroduce a step out of order: web/test/profileSwitch.test.ts.
+   */
+  const switchProfile = async (profileId: string): Promise<{ ok: boolean; error?: string }> => {
+    await flushOutbox().catch(() => 0);
+    let res: { accessToken: string; user: User; refreshExpiresAt?: number };
+    try {
+      res = await api('/auth/switch', { json: { profileId } });
+    } catch (e: any) {
+      let body: any = {};
+      try { body = JSON.parse(e?.body || '{}'); } catch {}
+      return { ok: false, error: body.error === 'local_only' ? tr('Profiles without a password open from home only.') : tr('Could not switch profile') };
+    }
+    await forgetAccountData();
+    setAdultShown(false);
+    setAccessToken(res.accessToken);
+    adoptAuthed(res.user, res.refreshExpiresAt);
+    channel.current?.postMessage({ type: 'switched', userId: res.user.id });
+    return { ok: true };
+  };
+
   const logout = async () => {
     try {
       await api('/auth/logout', { method: 'POST' });
@@ -390,7 +449,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <Ctx.Provider value={{ status, user, isAdmin: user?.role === 'admin', login, firstRunSetup, register, logout, setSettings, setAvatar, setTotpEnabled, desktop: isDesktop(), reconnect }}>
+    <Ctx.Provider value={{ status, user, isAdmin: user?.role === 'admin', login, firstRunSetup, register, logout, setSettings, setAvatar, setTotpEnabled, switchProfile, signedOutWhy, desktop: isDesktop(), reconnect }}>
       {children}
     </Ctx.Provider>
   );
