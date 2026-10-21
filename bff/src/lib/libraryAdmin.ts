@@ -226,8 +226,8 @@ export async function mergeSeries(
 
     // (user_id, series_id) — union, keeping whatever the survivor already had
     const favs = await qq<{ user_id: string }>(
-      `INSERT INTO favorites (user_id, series_id, created_at)
-       SELECT user_id, $2, created_at FROM favorites WHERE series_id = $1
+      `INSERT INTO favorites (user_id, series_id, created_at, position)
+       SELECT user_id, $2, created_at, position FROM favorites WHERE series_id = $1
        ON CONFLICT (user_id, series_id) DO NOTHING RETURNING user_id`,
       [fromId, intoId],
     );

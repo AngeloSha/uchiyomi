@@ -5047,6 +5047,40 @@ paths:
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+  /api/favorites/order:
+    put:
+      tags:
+        - personal
+      summary: Put your favourites in an order (since v0.97.0).
+      operationId: putApiFavoritesOrder
+      description: >-
+        Home's Favourites sheet. `seriesIds` go first, in the order given; every other favourite of yours follows in the
+        order it was listed in, so one the page could not show keeps its place. An id that is not your favourite is
+        ignored. Every list of your favourites -- Home's rail, GET /api/favorites, the OPDS feed -- reads this order;
+        a favourite made since you last ordered them comes first, newest first, until it is moved.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [seriesIds]
+              additionalProperties: false
+              properties:
+                seriesIds:
+                  type: array
+                  maxItems: 5000
+                  items:
+                    type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "{ ok: true, placed } -- how many of your favourites now have a place."
+        "400":
+          description: bad_request
+        "401":
+          description: Not authenticated
   /api/collections:
     get:
       tags:

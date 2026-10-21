@@ -37,6 +37,9 @@ CREATE TABLE IF NOT EXISTS favorites (
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, series_id)
 );
+-- v0.97.0: the place a person gave a favourite in their own order (lib/favorites.ts), NULL until they move one. Every list
+-- of their favourites reads position first, then created_at, so nothing moves for anyone until they reorder.
+ALTER TABLE favorites ADD COLUMN IF NOT EXISTS position int;
 
 CREATE TABLE IF NOT EXISTS collections (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),

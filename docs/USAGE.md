@@ -143,6 +143,11 @@ Home follows at once, and the arrangement is saved to your account, so your othe
 puts the original order back. Your lists move together as one rail, and which lists those are is still chosen on
 **Lists** (the sheet's **Choose lists** goes there). A hidden rail isn't fetched at all.
 
+**Your favorites in your order** (since v0.97.0): **Manage** at the end of the *Your favorites* row opens your favourites
+as a list. Drag one into place (on a phone, hold it a moment first), move it a step with its arrows, or take it off with
+its ×. Home shows them in that order, and so does every other device and the OPDS feed. A series you favourite later
+comes first until you move it.
+
 **Background** (since v0.66.0, **Profile → Settings → Appearance**): **OLED black**, the default and true black, or
 **Graphite**, a soft charcoal, or **Midnight**, a deep blue, for screens where true black is harsh. The whole app follows,
 the page, cards, sheets, the sidebar and a phone browser's own bar included, and nothing else about the look changes.

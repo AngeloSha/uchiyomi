@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4207
+    "strings": 4208
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4210,5 +4210,6 @@
   "{n} chapter files are not on disk": "有 {n} 个章节文件不在磁盘上",
   "Uchiyomi can't tell a file you deleted from one on a drive that isn't connected right now, so it left them as they were. If you deleted or moved them yourself, mark them gone. Then you can forget the series.": "Uchiyomi 无法区分你删除的文件和当前未连接的硬盘上的文件，所以保留了原样。如果是你自己删除或移走的，请将它们标记为已不存在。之后即可彻底遗忘该系列。",
   "Mark them gone": "标记为已不存在",
-  "Amber: this source lists it under its own name, which came up first for two of this series’ names. Check the covers before you follow it. Following it keeps the name.": "黄色：此来源用它自己的名称收录这部作品，用此作品的两个名称搜索时它都排在第一。关注前请对比封面。关注后会保留这个名称。"
+  "Amber: this source lists it under its own name, which came up first for two of this series’ names. Check the covers before you follow it. Following it keeps the name.": "黄色：此来源用它自己的名称收录这部作品，用此作品的两个名称搜索时它都排在第一。关注前请对比封面。关注后会保留这个名称。",
+  "Home shows your favorites in this order. Drag one into place, or move it with its arrows.": "首页按这个顺序显示你的收藏。把一项拖到合适的位置，或用箭头移动它。"
 }

@@ -22,6 +22,7 @@ import { editionLabels } from '../lib/editions';
 import { noticeShown, visibleBookCount } from '../lib/noticeChapters';
 import { onDeckPicks } from '../lib/onDeck';
 import { listFor, listsFor, listItems, ownerOf } from '../lib/lists';
+import { favoriteOrder } from '../lib/favorites';
 const AdmZip = require('adm-zip');
 
 const IMG = /\.(jpe?g|png|webp|gif|avif)$/i;
@@ -405,7 +406,7 @@ export default async function opdsRoutes(app: FastifyInstance) {
       `SELECT sv.id, sv.title, sv.summary, sv.author, sv.books_count, sv.latest_mtime, sv.created_at
          FROM favorites f JOIN ${src} ON sv.id = f.series_id
         WHERE f.user_id = ${pp.add(uidOf(req))}
-        ORDER BY f.created_at DESC, sv.title ASC LIMIT ${PAGE_SIZE} OFFSET ${page * PAGE_SIZE}`,
+        ORDER BY ${favoriteOrder('f')}, sv.title ASC LIMIT ${PAGE_SIZE} OFFSET ${page * PAGE_SIZE}`,
       pp.values as any[],
     );
     const labels = await editionLabels(rows.map((r) => r.id), vc(req));

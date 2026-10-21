@@ -45,6 +45,7 @@ import { noticeBook, noticeListed, noticesShortOnly } from '../lib/noticeChapter
 import { noticeTypes, hiddenCount } from '../lib/noticeSettings';
 import { heldRecs, relatedFor } from '../lib/anilistRelated';
 import { seriesGaps } from '../lib/seriesGaps';
+import { favoriteOrder } from '../lib/favorites';
 import { join } from 'node:path';
 
 
@@ -401,7 +402,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // Home's own favourites rail. Ids from another table again, so it inherits nothing and needs the same
     // filter as every other id-gathering surface -- and the same over-fetch, because the LIMIT ran first.
     const favAll = (
-      await q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1 ORDER BY created_at DESC LIMIT 60', [uid])
+      await q<{ series_id: string }>(`SELECT series_id FROM favorites WHERE user_id = $1 ORDER BY ${favoriteOrder()} LIMIT 60`, [uid])
     ).map((r) => r.series_id);
     const favShown = await browsableIds(favAll, vc(req));
     const favIds = favAll.filter((id) => favShown.has(id)).slice(0, 20);

@@ -28,6 +28,7 @@ import { homeIdsOf, type ListRow } from '@/lib/lists';
 import { useListsAll } from '@/components/SaveListDialog';
 import { HOME_RAIL_KEYS, shownRails, type HomeRailKey } from '@/lib/homeRails';
 import { HomeCustomize } from '@/components/HomeCustomize';
+import { FavoritesManage } from '@/components/FavoritesSheet';
 import { safeColor } from '@/lib/safeColor';
 
 type CollectionRow = ListRow;
@@ -184,7 +185,8 @@ export default function HomePage() {
         // Favorites
         return (data?.favorites?.length ?? 0) > 0 && (
           <section className="pt-8">
-            <SectionTitle action={<Link href="/profile" className="text-xs text-accent">{tr('Manage')}</Link>}>{tr('Your favorites')}</SectionTitle>
+            {/* Manage opens the order and the list (v0.97.0, components/FavoritesSheet.tsx); it went to Profile, which had nothing for them. */}
+            <SectionTitle action={<FavoritesManage />}>{tr('Your favorites')}</SectionTitle>
             <ScrollRail label={tr('Your favorites')} className={CARD_RAIL}>
               {data!.favorites.map((s) => <SeriesCard key={s.id} series={s} />)}
             </ScrollRail>

@@ -25,6 +25,7 @@ import { listFor, ownListFor, listsFor, listItems, kindOf, ownerOf, type ListRow
 import { smartQuery, parseQuery } from '../lib/smartLists';
 import { insightsFor } from '../lib/readingInsights';
 import { FRAMES, badgeOfFrame, computeStreaks, earnedFrames, finishedDays } from '../lib/badges';
+import { favoriteOrder, orderFavorites } from '../lib/favorites';
 
 /** A colour a member stores that other members' browsers paint (avatar, list accent): hex only (v0.69.1). */
 const HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
@@ -176,7 +177,7 @@ export default async function personalRoutes(app: FastifyInstance) {
     const uid = userIdOf(req);
     const ids = (
       await q<{ series_id: string }>(
-        'SELECT series_id FROM favorites WHERE user_id = $1 ORDER BY created_at DESC',
+        `SELECT series_id FROM favorites WHERE user_id = $1 ORDER BY ${favoriteOrder()}`,
         [uid],
       )
     ).map((r) => r.series_id);
@@ -203,6 +204,13 @@ export default async function personalRoutes(app: FastifyInstance) {
       );
     }
     return reply.send({ ok: true, favorite: true });
+  });
+
+  // Home's Favourites sheet (v0.97.0): the order the person put them in, every one at once (lib/favorites.ts).
+  app.put('/api/favorites/order', async (req, reply) => {
+    const b = z.object({ seriesIds: z.array(z.string().min(1).max(200)).max(5000) }).strict().safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    return { ok: true, placed: await orderFavorites(userIdOf(req), b.data.seriesIds) };
   });
 
   app.delete('/api/favorites/:seriesId', async (req) => {
