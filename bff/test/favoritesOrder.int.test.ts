@@ -22,7 +22,7 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 const IDS = ['s_fo_a', 's_fo_b', 's_fo_c', 's_fo_d', 's_fo_e'];
 const USERS = ['fo-ana', 'fo-bo'];
-let app: any, q: any;
+let app: any, q: any, opdsToken = '';
 const auth: Record<string, Record<string, string>> = {};
 const uids: Record<string, string> = {};
 
@@ -33,6 +33,12 @@ const sheet = async (who: string) =>
   (await app.inject({ method: 'GET', url: '/api/favorites', headers: auth[who] })).json().content.map((s: any) => s.id);
 const home = async (who: string) =>
   (await app.inject({ method: 'GET', url: '/api/home', headers: auth[who] })).json().favorites.map((s: any) => s.id);
+/** The OPDS feed of Ana's favourites, as a reader app signed in with her OPDS token reads it. */
+const opds = async () => {
+  const r = await app.inject({ method: 'GET', url: '/opds/favorites', headers: { authorization: 'Basic ' + Buffer.from(`fo-ana:${opdsToken}`).toString('base64') } });
+  assert.equal(r.statusCode, 200, r.body);
+  return [...r.payload.matchAll(/<id>yomi:series:([^<]+)<\/id>/g)].map((m: RegExpMatchArray) => m[1]);
+};
 const order = (who: string, seriesIds: unknown) =>
   app.inject({ method: 'PUT', url: '/api/favorites/order', headers: auth[who], payload: { seriesIds } });
 
@@ -53,11 +59,13 @@ before(async () => {
   await app.register(jwt, { secret: process.env.JWT_SECRET! });
   await app.register((await import('../src/routes/catalog')).default);
   await app.register((await import('../src/routes/personal')).default);
+  await app.register((await import('../src/routes/opds')).default);
   await app.ready();
   for (const name of USERS) {
     uids[name] = (await q(`INSERT INTO users (username, display_name, password_hash, role, auth_kind) VALUES ($1,$1,'x','user','password') RETURNING id`, [name]))[0].id;
     auth[name] = { authorization: `Bearer ${app.jwt.sign({ sub: uids[name], role: 'user' })}` };
   }
+  opdsToken = await (await import('../src/lib/auth')).issueOpdsToken(uids['fo-ana']);
   // Ana: a, b, c, d favourited in that order (a oldest); Bo: c, d.
   await fav('fo-ana', 's_fo_a', 40); await fav('fo-ana', 's_fo_b', 30); await fav('fo-ana', 's_fo_c', 20); await fav('fo-ana', 's_fo_d', 10);
   await fav('fo-bo', 's_fo_c', 20); await fav('fo-bo', 's_fo_d', 10);
@@ -83,6 +91,8 @@ test('an order put is the order the sheet and Home read, and it is that person\'
   assert.deepEqual(r.json(), { ok: true, placed: 4 });
   assert.deepEqual(await sheet('fo-ana'), ['s_fo_b', 's_fo_d', 's_fo_a', 's_fo_c']);
   assert.deepEqual(await home('fo-ana'), ['s_fo_b', 's_fo_d', 's_fo_a', 's_fo_c']);
+  // Reintroduce `f.created_at DESC` in the OPDS feed: a reader app lists them newest first.
+  assert.deepEqual(await opds(), ['s_fo_b', 's_fo_d', 's_fo_a', 's_fo_c'], 'the OPDS feed reads another order');
   assert.deepEqual(await sheet('fo-bo'), ['s_fo_d', 's_fo_c'], "another person's favourites moved");
 });
 
