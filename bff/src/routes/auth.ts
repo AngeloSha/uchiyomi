@@ -90,7 +90,7 @@ function setImgCookie(app: FastifyInstance, reply: any, userId: string, local = 
 async function userPayload(userId: string) {
   const user = await one<{ id: string; username: string | null; display_name: string; role: string; avatar: unknown; totp_enabled: boolean; perms: unknown; sso: boolean } & ProfileRow>(
     `SELECT id, username, display_name, role, avatar, totp_enabled, perms, oidc_sub IS NOT NULL AS sso,
-            password_login, local_open, oidc_sub, auth_kind
+            password_login, local_open, auth_kind
        FROM users WHERE id = $1`,
     [userId],
   );
@@ -105,7 +105,7 @@ async function userPayload(userId: string) {
     // Linked to an identity at the OIDC provider (v0.63.0): Profile → Account offers Link to … until it is.
     sso: !!user?.sso,
     // What kind of profile this is (lib/profiles.ts): every account before profiles is `password`.
-    kind: user ? profileKind(user, isDesktop()) : 'password',
+    kind: user ? profileKind(user) : 'password',
     perms: user?.perms ?? {},
     settings: settings?.data ?? {},
     // v0.90.0: whether this server has chapter comments at all (lib/comments.ts talkOn: the owned library and two or more

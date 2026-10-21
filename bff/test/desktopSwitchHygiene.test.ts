@@ -74,6 +74,8 @@ const IS_DESKTOP_ALLOWED = new Set([
   // Profiles that open at home: the desktop server is this computer's alone, so every
   // request to it is at home.
   'lib/clientAddr.ts',
+  // And the desktop app's own account is the desktop owner there, an ordinary account anywhere else.
+  'lib/profiles.ts',
 ]);
 
 test('UCHIYOMI_DESKTOP is read in lib/desktop.ts and nowhere else', () => {

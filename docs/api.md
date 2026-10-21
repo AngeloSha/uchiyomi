@@ -1559,6 +1559,8 @@ GET    /api/tokens                POST   /api/tokens
 GET    /api/bookmarks             PUT    /api/bookmarks/:bookId/:page
 DELETE /api/bookmarks/:bookId/:page
 DELETE /api/tokens/:id            POST   /api/opds/token
+GET    /api/profiles              POST   /api/profiles
+PATCH  /api/profiles/:id          DELETE /api/profiles/:id
 GET    /api/opds/token            DELETE /api/opds/token
 PATCH  /api/opds/token
 GET    /api/trackers              POST   /api/trackers/anilist

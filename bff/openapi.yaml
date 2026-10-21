@@ -4701,6 +4701,120 @@ paths:
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+  /api/profiles:
+    get:
+      tags:
+        - personal
+      summary: The profiles this account manages -- profiles that open at home without a password.
+      operationId: getApiProfiles
+      description: >-
+        Each with `kind` (`open`: no password, opens from LOCAL_NETWORKS only; `hybrid`: no password at home, its password
+        from anywhere else).
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+    post:
+      tags:
+        - personal
+      summary: Make a profile that opens at home, managed by this account.
+      operationId: postApiProfiles
+      description: >-
+        For an admin, or a member whose `perms.canManageProfiles` an admin set. The profile starts with this account's
+        own library access, age limit and download permission, never more, and at most six are managed by one account.
+        With a `password` it is a hybrid. Refused with 403 `credential_required` from a session that was itself entered
+        without a password, and a `password` with 403 `sso_only` in SSO-only mode.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [displayName]
+              properties:
+                displayName:
+                  type: string
+                password:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The profile made
+        "400":
+          description: Malformed body, or `weak_password`
+        "401":
+          description: Not authenticated
+        "403":
+          description: Not allowed to manage profiles, or `credential_required`
+        "409":
+          description: "`too_many_profiles`, or `username_taken`"
+  /api/profiles/{id}:
+    patch:
+      tags:
+        - personal
+      summary: Rename one of this account's profiles, give it a password, or stop it opening at home.
+      operationId: patchApiProfilesId
+      description: >-
+        A password makes it a hybrid; `localOpen: false` needs one (400 `no_way_in` otherwise). Either ends the profile's
+        sessions. Refused with 403 `credential_required` from a session entered without a password.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName:
+                  type: string
+                password:
+                  type: string
+                localOpen:
+                  type: boolean
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The profile as it is now
+        "400":
+          description: Malformed, `no_way_in` or `weak_password`
+        "401":
+          description: Not authenticated
+        "403":
+          description: Not allowed to manage profiles, or `credential_required`
+        "404":
+          description: Not one of this account's profiles
+    delete:
+      tags:
+        - personal
+      summary: Delete one of this account's profiles, with everything it read.
+      operationId: deleteApiProfilesId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: Not allowed to manage profiles, or `credential_required`
+        "404":
+          description: Not one of this account's profiles
   /api/push/key:
     get:
       tags:
@@ -7626,7 +7740,10 @@ paths:
       operationId: postApiAdminUsers
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Refused with 403
-        `sso_only` in SSO-only mode (since v0.63.0): accounts come from the sign-on provider.
+        `sso_only` in SSO-only mode (since v0.63.0): accounts come from the sign-on provider -- except a profile that
+        opens at home with no password (`localOpen: true`, no `password`). `localOpen` makes a profile that opens
+        without a password from LOCAL_NETWORKS (with a `password` too, a hybrid), never an admin (400
+        `local_open_admin`); one with neither is 400 `no_way_in`. `managedBy` names the account that may switch to it.
       requestBody:
         required: false
         content:
@@ -13746,7 +13863,10 @@ paths:
       operationId: patchApiAdminUsersId
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. A body with a
-        `password` is refused whole with 403 `sso_only` in SSO-only mode (since v0.63.0).
+        `password` is refused whole with 403 `sso_only` in SSO-only mode (since v0.63.0). `localOpen`,
+        `removePassword: true` and `managedBy` change how the account gets in: a profile that opens at home is never an
+        admin (400 `local_open_admin`) and an account keeps a way in (400 `no_way_in`); either change ends its sessions.
+        `perms.canManageProfiles` lets a member make profiles of its own (POST /api/profiles).
       parameters:
         - name: id
           in: path

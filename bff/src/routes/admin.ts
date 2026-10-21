@@ -58,6 +58,7 @@ import { engineStatusReport, connectEngineSolver } from '../lib/extensionEngine'
 import { env } from '../env';
 import { oidcEnabled, oidcName } from '../lib/oidc';
 import { authMode, ssoOnly } from '../lib/authMode';
+import { placeholderPasswordHash, profileKind, profileRefusal, type ProfileRow } from '../lib/profiles';
 import { readFile, writeFile, mkdir, rm, rename, stat } from 'fs/promises';
 import { dirname, resolve, sep } from 'path';
 import sharp from 'sharp';
@@ -611,8 +612,9 @@ export default async function adminRoutes(app: FastifyInstance) {
     // v0.63.0 (#208): the sign-in mode and the provider, for Members -- in SSO-only mode it offers no New account and no
     // password, and says where accounts come from -- and per account whether it is linked to the provider (`sso`).
     auth: { mode: authMode(), sso: oidcEnabled() ? oidcName() : null, signup: env.OIDC_ALLOW_SIGNUP },
-    content: await q(`SELECT u.id, u.username, u.display_name, u.role, u.avatar, u.created_at, u.disabled, u.perms, u.totp_enabled,
-        u.max_age_rating, u.oidc_sub IS NOT NULL AS sso,
+    // Each account's `kind` (lib/profiles.ts) and who manages it, for the profiles that open at home.
+    content: (await q<ProfileRow & Record<string, unknown>>(`SELECT u.id, u.username, u.display_name, u.role, u.avatar, u.created_at, u.disabled, u.perms, u.totp_enabled,
+        u.max_age_rating, u.oidc_sub IS NOT NULL AS sso, u.password_login, u.local_open, u.managed_by, u.auth_kind,
         (SELECT max(created_at) FROM reading_events e WHERE e.user_id = u.id) AS last_active,
         -- NULL, not an empty array, when unrestricted: the UI must tell "every library, including ones
         -- added later" apart from "exactly these", and an empty array is a real setting meaning nothing.
@@ -622,7 +624,7 @@ export default async function adminRoutes(app: FastifyInstance) {
                      ELSE coalesce(array_agg(ul.library_id) FILTER (WHERE ul.library_id <> ''), '{}')
                 END
            FROM user_libraries ul WHERE ul.user_id = u.id) AS libraries
-      FROM users u ORDER BY u.created_at`),
+      FROM users u ORDER BY u.created_at`)).map(({ auth_kind, ...u }) => ({ ...u, kind: profileKind({ ...u, auth_kind }) })),
   }));
 
   // ---- server settings ----
@@ -5104,39 +5106,58 @@ export default async function adminRoutes(app: FastifyInstance) {
     localNetworks: env.LOCAL_NETWORKS.split(',').map((e) => e.trim()).filter(Boolean),
   }));
 
+  /** May this account manage profiles that open at home: enabled, and signing in with a credential of its own. */
+  const mayManage = async (managerId: string) => !!(await one(
+    'SELECT 1 FROM users WHERE id = $1 AND NOT disabled AND (password_login OR oidc_sub IS NOT NULL)', [managerId]));
+  const BAD_MANAGER = { error: 'bad_manager', message: 'A profile is managed by an enabled account that signs in with a password.' };
+
   /** SSO-only mode's answer to an account made or a password set here (v0.63.0, #208): accounts come from the provider. */
   const ssoOnlyRefusal = (reply: any) =>
     reply.code(403).send({ error: 'sso_only', message: 'This server signs in through single sign-on only: accounts come from the sign-on provider, with no password here.' });
 
   app.post('/api/admin/users', async (req, reply) => {
     // Reintroduce by dropping it: "Members makes no account and sets no password" in ssoOnly.int.test.ts gets a 200.
-    if (ssoOnly()) return ssoOnlyRefusal(reply);
+    // A profile that opens at home without a password is the one thing SSO-only mode lets Members make: it has no
+    // password, and opens through a guardian the provider signed in.
+    if (ssoOnly() && (req.body as { localOpen?: unknown } | null)?.localOpen !== true) return ssoOnlyRefusal(reply);
     const b = z
       .object({
         username: z.string().min(2).max(64).regex(/^[a-zA-Z0-9._-]+$/, 'letters, numbers, . _ - only'),
-        password: z.string().min(1).max(200),
+        // Absent for a profile that opens at home and has no password (`localOpen`).
+        password: z.string().min(1).max(200).optional(),
         displayName: z.string().max(64).optional(),
         role: z.enum(['admin', 'user']).default('user'),
         perms: permsShape.optional(),
+        // Opens without a password from the local network (lib/clientAddr.ts); with a password too, it is a hybrid.
+        localOpen: z.boolean().default(false),
+        // The account that may switch to it, and manages it.
+        managedBy: z.string().uuid().nullable().optional(),
       })
       .safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request', detail: b.error.flatten().fieldErrors });
-    const { username, password, displayName, role, perms } = b.data;
-    const pwErr = passwordError(password);
-    if (pwErr) return reply.code(400).send({ error: 'weak_password', message: pwErr });
+    const { username, password, displayName, role, perms, localOpen, managedBy } = b.data;
+    if (password && ssoOnly()) return ssoOnlyRefusal(reply);
+    const refused = profileRefusal({ role, localOpen, credential: !!password });
+    if (refused) return reply.code(400).send(refused);
+    if (password) {
+      const pwErr = passwordError(password);
+      if (pwErr) return reply.code(400).send({ error: 'weak_password', message: pwErr });
+    }
+    if (managedBy && !(await mayManage(managedBy))) return reply.code(400).send(BAD_MANAGER);
 
     const exists = await one('SELECT id FROM users WHERE username = $1', [username]);
     if (exists) return reply.code(409).send({ error: 'username_taken' });
 
-    const ph = await hash(password);
+    const ph = password ? await hash(password) : await placeholderPasswordHash();
     const row = await one<{ id: string }>(
-      `INSERT INTO users (display_name, username, role, password_hash, auth_kind, perms)
-       VALUES ($1, $2, $3, $4, 'password', $5)
+      `INSERT INTO users (display_name, username, role, password_hash, auth_kind, perms, password_login, local_open, managed_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING id, username, display_name, role, created_at`,
-      [displayName || username, username, role, ph, JSON.stringify(perms || {})],
+      [displayName || username, username, role, ph, password ? 'password' : 'none', JSON.stringify(perms || {}),
+        !!password, localOpen, managedBy ?? null],
     );
     if (row) await q(`INSERT INTO app_settings (user_id, data) VALUES ($1, '{}'::jsonb) ON CONFLICT (user_id) DO NOTHING`, [row.id]);
-    await logAudit('user.create', { userId: userIdOf(req), detail: { username, role }, req });
+    await logAudit('user.create', { userId: userIdOf(req), detail: { username, role, ...(localOpen ? { localOpen, managedBy: managedBy ?? null } : {}) }, req });
     return reply.send(row);
   });
 
@@ -5154,10 +5175,28 @@ export default async function adminRoutes(app: FastifyInstance) {
         libraries: z.array(z.string()).nullable().optional(),
         // The highest age rating this member may see. null means no cap, matching `libraries`.
         maxAgeRating: z.number().int().min(0).max(18).nullable().optional(),
+        // Opens without a password from the local network.
+        localOpen: z.boolean().optional(),
+        // Take the password away: what is left is the profile opening at home, or the sign-on provider.
+        removePassword: z.literal(true).optional(),
+        managedBy: z.string().uuid().nullable().optional(),
       })
       .parse(req.body);
     // Before anything is written, so a body that also sets a password changes nothing at all.
     if (b.password && ssoOnly()) return ssoOnlyRefusal(reply);
+    if (b.password && b.removePassword) return reply.code(400).send({ error: 'bad_request' });
+    // A profile that opens at home is never an admin, and every account keeps a way in -- judged on the row as it will be.
+    if (b.localOpen !== undefined || b.removePassword || b.role === 'admin') {
+      const t = await one<{ role: string; local_open: boolean; password_login: boolean; sso: boolean }>(
+        'SELECT role, local_open, password_login, oidc_sub IS NOT NULL AS sso FROM users WHERE id = $1', [id]);
+      if (!t) return reply.code(404).send({ error: 'not_found' });
+      const refused = profileRefusal({
+        role: b.role ?? t.role, localOpen: b.localOpen ?? t.local_open,
+        credential: t.sso || (!b.removePassword && (t.password_login || !!b.password)),
+      });
+      if (refused) return reply.code(400).send(refused);
+    }
+    if (b.managedBy && (b.managedBy === id || !(await mayManage(b.managedBy)))) return reply.code(400).send(BAD_MANAGER);
     // safety: never lock yourself out, never remove the last active admin
     if (id === userIdOf(req) && (b.disabled || b.role === 'user')) return reply.code(400).send({ error: 'cannot_demote_self' });
     if (b.disabled || b.role === 'user') {
@@ -5170,9 +5209,17 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (b.password) {
       const pwErr = passwordError(b.password);
       if (pwErr) return reply.code(400).send({ error: 'weak_password', message: pwErr });
-      await q('UPDATE users SET password_hash = $2, password_changed_at = now(), failed_logins = 0, locked_until = NULL WHERE id = $1', [id, await hash(b.password)]);
+      await q('UPDATE users SET password_hash = $2, password_login = true, password_changed_at = now(), failed_logins = 0, locked_until = NULL WHERE id = $1', [id, await hash(b.password)]);
       await revokeAllSessions(id); // force re-login after an admin password reset
     }
+    if (b.removePassword) {
+      // The second factor goes with the password it confirmed.
+      await q(`UPDATE users SET password_hash = $2, password_login = false, password_changed_at = now(), failed_logins = 0, locked_until = NULL,
+                      totp_enabled = false, totp_secret = NULL, recovery_codes = '{}', totp_last_step = NULL WHERE id = $1`,
+        [id, await placeholderPasswordHash()]);
+      await revokeAllSessions(id);
+    }
+    if (b.managedBy !== undefined) await q('UPDATE users SET managed_by = $2 WHERE id = $1', [id, b.managedBy]);
     if (b.displayName) await q('UPDATE users SET display_name = $2 WHERE id = $1', [id, b.displayName]);
     if (b.maxAgeRating !== undefined) {
       await q('UPDATE users SET max_age_rating = $2 WHERE id = $1', [id, b.maxAgeRating]);
@@ -5201,14 +5248,21 @@ export default async function adminRoutes(app: FastifyInstance) {
       });
       await logAudit('user.libraries', { userId: userIdOf(req), detail: { id, libraries: b.libraries }, req });
     }
-    if (b.role) await q('UPDATE users SET role = $2 WHERE id = $1', [id, b.role]);
+    // One statement, so demoting an admin and opening it at home never meet the check (users_local_open_not_admin) halfway.
+    if (b.role || b.localOpen !== undefined) {
+      await q('UPDATE users SET role = COALESCE($2, role), local_open = COALESCE($3, local_open) WHERE id = $1', [id, b.role ?? null, b.localOpen ?? null]);
+      if (b.localOpen !== undefined) await revokeAllSessions(id);
+    }
     if (b.perms) await q('UPDATE users SET perms = $2 WHERE id = $1', [id, JSON.stringify(b.perms)]);
     if (b.disabled !== undefined) {
       await q('UPDATE users SET disabled = $2 WHERE id = $1', [id, b.disabled]);
       if (b.disabled) await revokeAllSessions(id); // kick out a suspended account
     }
-    await logAudit('user.update', { userId: userIdOf(req), detail: { target: id, role: b.role, disabled: b.disabled, perms: b.perms, password: b.password ? '***' : undefined }, req });
-    return one('SELECT id, username, display_name, role, disabled, perms, totp_enabled FROM users WHERE id = $1', [id]);
+    await logAudit('user.update', { userId: userIdOf(req), detail: {
+      target: id, role: b.role, disabled: b.disabled, perms: b.perms, password: b.password ? '***' : undefined,
+      localOpen: b.localOpen, removePassword: b.removePassword, managedBy: b.managedBy,
+    }, req });
+    return one('SELECT id, username, display_name, role, disabled, perms, totp_enabled, password_login, local_open, managed_by FROM users WHERE id = $1', [id]);
   });
 
   app.delete('/api/admin/users/:id', async (req, reply) => {
