@@ -43,12 +43,11 @@
  * and a one-row Fix pressed at 23:00 used to replace the first and move the second (v0.49.0).
  */
 import { join } from 'path';
-import { stat } from 'fs/promises';
 import { randomUUID } from 'crypto';
 import { q, one } from './db';
 import { runtime } from './runtime';
 import { logAudit } from './audit';
-import { containedPath } from './fsGuard';
+import { containedPath, statOrGone } from './fsGuard';
 import { catalogRootUnavailable } from './catalogRootGuard';
 import { countPages } from './pageCount';
 import { haveNumbers } from './libraryNumbers';
@@ -680,10 +679,9 @@ async function stepCount(r: RepairResult, opts: RepairOpts, log?: Log): Promise<
     const abs = containedPath(b.root, b.file);
     if (!abs || down.has(b.root)) { cur.done!++; return; }
     // A file that is not there is still stamped 0 (lib/pageCount.ts); one the server may not look at (EACCES, an I/O
-    // error) says nothing about its pages, and is left for a night it can be read. Reintroduce by counting it: "the
-    // nightly page count does not stamp a chapter in a folder it may not read" in libraryRootGone.int.test.ts.
-    const why = await stat(abs).then(() => null, (e: NodeJS.ErrnoException) => e?.code ?? 'error');
-    if (why && why !== 'ENOENT' && why !== 'ENOTDIR') { cur.done!++; return; }
+    // error: statOrGone) says nothing about its pages, and is left for a night it can be read. Reintroduce by counting
+    // it: "the nightly page count does not stamp a chapter in a folder it may not read" in libraryRootGone.int.test.ts.
+    if (typeof (await statOrGone(abs)) === 'string') { cur.done!++; return; }
     const pages = await countPages(abs);
     const done = await q(
       'UPDATE lib_books SET pages = $1, pages_checked_at = now() WHERE id = $2 AND pages = 0 RETURNING id',

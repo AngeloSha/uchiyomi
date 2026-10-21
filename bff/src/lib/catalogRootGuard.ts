@@ -13,13 +13,12 @@
  * Every live row under the root may be asked, including the ones the job has already processed: the queue alone is
  * usually a handful of new files, and a handful missing says nothing about the root. A root that is there stops early,
  * though (ENOUGH_PRESENT): the rows are asked in a random order, and once enough are found the rule is passed. Rows a renumber is moving are
- * left out, as Verify leaves them. A stat that fails with anything but ENOENT/ENOTDIR (EACCES, an I/O error) says
- * nothing about whether the file is there, and is left out of both counts.
+ * left out, as Verify leaves them. A file statOrGone (lib/fsGuard.ts) may not look at (EACCES, an I/O error) says
+ * nothing about whether it is there, and is left out of both counts.
  */
-import { stat } from 'fs/promises';
 import { resolve } from 'path';
 import { q } from './db';
-import { containedPath, rootUnavailable } from './fsGuard';
+import { containedPath, rootUnavailable, statOrGone } from './fsGuard';
 
 /** How many stats are in flight at once (Verify's figure). */
 const CONCURRENCY = 16;
@@ -59,10 +58,10 @@ export async function catalogFileCounts(root: string, defaultRoot = root): Promi
       const abs = containedPath(root, rows[next++].file);
       // A path that escapes its root, or the root itself, is no chapter file and no evidence either way.
       if (!abs || abs === base) continue;
-      await stat(abs).then(() => { present++; }, (e: NodeJS.ErrnoException) => {
-        if (e?.code === 'ENOENT' || e?.code === 'ENOTDIR') missing++;
-        else unchecked++;
-      });
+      const seen = await statOrGone(abs);
+      if (typeof seen === 'string') unchecked++;
+      else if (seen) present++;
+      else missing++;
     }
   }));
   return { present, missing, unchecked };

@@ -61,7 +61,7 @@ import { stat } from 'fs/promises';
 import { dirname } from 'path';
 import { q } from './db';
 import { DL_ROOT } from './library';
-import { containedPath } from './fsGuard';
+import { containedPath, statOrGone } from './fsGuard';
 import { tombstoneBooks } from './chapterCleanup';
 import { runtime } from './runtime';
 
@@ -115,15 +115,14 @@ async function look(root: string, row: Row): Promise<Looked | null> {
   // A path that escapes its root is not a missing chapter; it is something for the health page. Left out
   // of `checked` as well, so the count means what it says.
   if (!abs) return null;
-  let code: string | undefined;
-  const st = await stat(abs).catch((e: NodeJS.ErrnoException) => { code = e?.code; return null; });
-  if (st) return { row, present: true, folder: true };
-  // ⚠️ Only "not there" is missing, as Rescan everything has it (lib/rescan.ts look). A folder the server may not
-  // read (EACCES), a NAS's I/O error or a dropped share's stale handle says nothing about whether the file is there,
-  // and marking it 'missing' has the sweep fetch over a file that is fine. Such a row is `unchecked`: left out of
-  // both whole-root rules and never marked. Reintroduce by reading every failed stat as missing: "Verify does not
-  // mark the chapters of a download folder it may not read" in libraryRootGone.int.test.ts.
-  if (code !== 'ENOENT' && code !== 'ENOTDIR') return { row, present: false, folder: true, unchecked: true };
+  const seen = await statOrGone(abs);
+  // ⚠️ Only "not there" is missing (statOrGone, as Delete files and the read-chapter cleanup have it). A folder the
+  // server may not read (EACCES), a NAS's I/O error or a dropped share's stale handle says nothing about whether the
+  // file is there, and marking it 'missing' has the sweep fetch over a file that is fine. Such a row is `unchecked`:
+  // left out of both whole-root rules and never marked. Reintroduce by reading every failed stat as missing: "Verify
+  // does not mark the chapters of a download folder it may not read" in libraryRootGone.int.test.ts.
+  if (typeof seen === 'string') return { row, present: false, folder: true, unchecked: true };
+  if (seen) return { row, present: true, folder: true };
   const folder = !!(await stat(dirname(abs)).catch(() => null));
   return { row, present: false, folder };
 }
