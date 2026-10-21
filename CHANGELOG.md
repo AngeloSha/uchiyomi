@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.93.0 — 2026-10-21
+
+**A library or download disk that isn't connected is no longer taken for one that lost its chapters.** This is
+**globalteddy**'s work ([#323](https://github.com/AngeloSha/uchiyomi/pull/323)). Thank you.
+
+### A disk that isn't there
+
+- **When a network share or a removable drive isn't mounted**, the folder Uchiyomi sees is an empty mount point, or one
+  holding only what a download wrote there meanwhile. The nightly page count, the fingerprint and page-hash passes,
+  Verify chapter files and the read-chapter cleanup used to write what they saw back for good: chapters stamped as
+  broken or unreadable, marked missing and downloaded again over files that were fine, or marked deleted and never
+  fetched back.
+- **Now each of them first checks that the folder holds the chapters it is supposed to.** If none of them, or fewer than
+  one in ten, are there, the job leaves everything as it is and tries again once the disk is back. The read-chapter
+  cleanup says so on its Tasks line ("stopped: 26 of 27 chapter files in the download folder are missing; is the
+  download volume mounted?"). A chapter a job may not read (a folder whose permissions slipped) is left for later too, never
+  marked.
+- **The check is cheap on a disk that is there:** a few dozen files looked at, not every chapter, so a NAS is not woken
+  for it. And a disconnected library no longer holds up the nightly page count for the download folder.
+
+### Upgrading
+
+- Nothing to do.
+
 ## v0.92.0 — 2026-10-21
 
 **Nothing you could not get back is deleted, Discover keeps up with the sources it asks, and Find other sources can say
