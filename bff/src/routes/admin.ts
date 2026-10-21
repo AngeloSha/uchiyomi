@@ -37,7 +37,7 @@ import { markRemoved, forgetVerdict } from '../lib/scoutMemory';
 import { namesOf, recordAltTitles } from '../lib/altTitles';
 import { healthAllWithEvidence, setDisabled, clearBlock, pruneOrphanedHealth, isDisabled, blockedNow } from '../lib/sourceHealth';
 import { smokeTest } from '../lib/sourceProbe';
-import { SiteBusyError, noteSiteOpened, sendInput, siteOpen, startSite, stopSite, subscribe, type SiteLine } from '../lib/sources/suwayomi/siteSessions';
+import { SiteBusyError, noteSiteOpened, openLink, sendInput, siteOpen, startSite, stopSite, subscribe, type SiteLine } from '../lib/sources/suwayomi/siteSessions';
 import { startSourceCheck, checkRunning, checkProgress } from '../lib/sourceWatchdog';
 import { testSource } from '../lib/sourceCheck';
 import { currentFailures, stageLines } from '../lib/sourceEvidence';
@@ -3734,6 +3734,22 @@ export default async function adminRoutes(app: FastifyInstance) {
     const b = z.object({ input: siteInput }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     if (!sendInput(session, userIdOf(req), b.data.input)) return reply.code(404).send({ error: 'not_found' });
+    return { ok: true };
+  });
+
+  /**
+   * A link on the page's own site, opened in the page (v0.94.0): the sign-in link a site emailed, which signs in whichever
+   * browser opens it, so it is opened in the engine's. Only the source's own site and its subdomains: the engine's browser
+   * sits inside the server's network, and input never sends the page anywhere else either. The link is not logged or
+   * audited -- a sign-in link is a password for as long as it works.
+   */
+  app.post('/api/admin/extensions/site/:session/open', async (req, reply) => {
+    const { session } = req.params as { session: string };
+    const b = z.object({ url: z.string().trim().min(1).max(4000) }).strict().safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const r = openLink(session, userIdOf(req), b.data.url);
+    if (r === 'gone') return reply.code(404).send({ error: 'not_found' });
+    if (r === 'other') return reply.code(422).send({ error: 'other_site', message: 'Only links on the source’s own site open here.' });
     return { ok: true };
   });
 

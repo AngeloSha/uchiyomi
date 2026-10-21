@@ -11625,6 +11625,48 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: No such page, or not the caller's
+  /api/admin/extensions/site/{session}/open:
+    post:
+      tags:
+        - admin
+      summary: "Open site: open a link on the source's own site in the page, such as the sign-in link it emailed (v0.94.0)."
+      operationId: postApiAdminExtensionsSiteSessionOpen
+      description: >-
+        Requires an admin account and a token carrying the admin scope, and the page must be the caller's. A sign-in link a
+        site emails signs in whichever browser opens it, so it is opened in the extension engine's. `url` must be http(s),
+        with no login in it, on the source's home page's host (a leading www. aside) or a subdomain of it: the engine's
+        browser sits inside the server's network, so no other site is opened. The link is not logged.
+      parameters:
+        - name: session
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              additionalProperties: false
+              properties:
+                url: { type: string, minLength: 1, maxLength: 4000 }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Opened
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: No such page, or not the caller's
+        "422":
+          description: "`other_site`: the link is not on the source's own site."
   /api/admin/extensions/site/{session}:
     delete:
       tags:

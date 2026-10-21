@@ -2147,6 +2147,13 @@ type as on the site (on a phone, a tap is a click and brings up the keyboard, a 
 the keyboard back), sign in, and press **Done**. The engine keeps the sign-in for that extension, and the sheet says
 whether the source answers now. **Start over** opens the site's home page again.
 
+**Signing in with a link the site emails you** (since v0.94.0). A sign-in link signs in whichever browser opens it, so
+opening it from your email signs in your own browser, not the engine's. Ask the site for the link inside **Open site**,
+then copy the link from the email without opening it (long-press it on a phone, right-click it on a computer, and
+**Copy link**), press **Open a link** at the top of Open site, paste it and press **Open**: it opens in the engine's
+browser, which is now signed in. Press **Done**. Only links on the extension's own site open there; anything else is
+refused, since the engine's browser sits inside your server's network.
+
 - Admins only, one site at a time, and it closes itself after ten minutes without input (what you did is kept).
 - A source you have done this for gets a quiet visit of its home page whenever it fails, at most once in half an hour,
   and Uchiyomi tries again. BatCave's check lasts a day, so this is what keeps it working. An extension that answers

@@ -49,6 +49,21 @@ const enc = encodeURIComponent;
 export const openSite = (sourceId: string, width: number, height: number) =>
   api<SiteOpened>(`/api/admin/extensions/sources/${enc(sourceId)}/site`, { json: { width: Math.round(width), height: Math.round(height) } });
 
+/**
+ * A link on the source's own site, opened in the page (v0.94.0): the sign-in link a site emails signs in whichever browser
+ * opens it, so it has to be opened in the engine's. Anything off the site is refused (422 `other_site`).
+ */
+export const openSiteLink = (session: string, url: string) =>
+  api<{ ok: true }>(`/api/admin/extensions/site/${enc(session)}/open`, { json: { url } });
+
+/** The sheet's link row. */
+export const LINK_TEXT = keys(
+  'Open a link',
+  'Paste a link from {site}',
+  'Signing in with a link the site emailed you? Copy the link from the email, without opening it, and paste it here.',
+  'Only links on {site} open here.',
+);
+
 export interface SiteResult { saved: boolean; test: { ok: boolean; state?: string } | null }
 export const closeSite = (session: string) => api<SiteResult>(`/api/admin/extensions/site/${enc(session)}`, { method: 'DELETE' });
 

@@ -153,6 +153,30 @@ test('Open site: one page at a time, its admin\'s alone', async (t) => {
       await site.stopSite(id, 'alice');
     });
 
+    await t.test('a link opens in the page only on the source\'s own site: the sign-in link a site emailed (v0.94.0)', async () => {
+      const home = 'https://batcave.biz';
+      for (const ok of ['https://batcave.biz/login?token=abc', 'https://www.batcave.biz/x', 'https://mail.batcave.biz/c/1', 'http://BATCAVE.biz/']) {
+        assert.equal(site.onSite(ok, home), true, ok);
+      }
+      assert.equal(site.onSite('https://batcave.biz/x', 'https://www.batcave.biz/'), true, 'a home page on www. covers the bare host');
+      for (const no of [
+        'https://batcave.biz.example.com/', 'https://evilbatcave.biz/', 'https://example.com/?u=https://batcave.biz',
+        'https://batcave.biz@example.com/', 'https://user:pw@batcave.biz/', 'javascript:alert(1)', 'file:///etc/passwd',
+        'http://yomi-db:5432/', 'http://127.0.0.1:3000/', 'not a link', '',
+      ]) assert.equal(site.onSite(no, home), false, no);
+      const { id } = await site.startSite({ uid: 'alice', sourceId: '42', home, width: 800, height: 600 });
+      const page = opened.at(-1)!;
+      assert.equal(site.openLink(id, 'alice', 'https://batcave.biz/index.php?do=login&key=abc'), 'ok');
+      assert.deepEqual(page.sent.at(-1), { type: 'loadUrl', url: 'https://batcave.biz/index.php?do=login&key=abc', width: 800, height: 600 },
+        'opened at the page\'s size');
+      const before = page.sent.length;
+      assert.equal(site.openLink(id, 'alice', 'http://yomi-db:5432/'), 'other', 'never somewhere else: the engine\'s browser is inside the server\'s network');
+      assert.equal(site.openLink(id, 'bob', 'https://batcave.biz/'), 'gone', 'another admin\'s page is nothing to them');
+      assert.equal(page.sent.length, before, 'neither reached the page');
+      await site.stopSite(id, 'alice');
+      assert.equal(site.openLink(id, 'alice', 'https://batcave.biz/'), 'gone', 'nor a page that was left');
+    });
+
     await t.test('the engine closing the browser closes the sheet', async () => {
       const { id } = await site.startSite({ uid: 'alice', sourceId: '42', home: 'https://batcave.biz', width: 800, height: 600 });
       const lines: string[] = [];

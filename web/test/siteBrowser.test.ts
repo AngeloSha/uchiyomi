@@ -69,6 +69,21 @@ test('v0.91.1: a press or a tap on the page keeps the keys going to it (v0.91.0 
     'what a phone\'s keyboard does to the field is what is typed');
 });
 
+test('v0.94.0: a link the site emailed opens in the page, from a row of its own', () => {
+  // A sign-in link signs in whichever browser opens it: opened in the admin's own browser it signed in nothing the engine
+  // has (BatCave answered it with "MySQL Error!"), so the sheet takes it and the engine's browser opens it.
+  const sheet = read('components/SiteBrowserSheet.tsx');
+  assert.match(sheet, /onClick=\{\(\) => \{ setLinking\(\(v\) => !v\); setLinkError\(null\); \}\} data-site-link>/);
+  const row = sheet.slice(sheet.indexOf('data-site-link-row'), sheet.indexOf('</form>'));
+  assert.match(row, /onKeyDown=\{\(e\) => \{ e\.stopPropagation\(\); if \(e\.key === 'Escape'\) setLinking\(false\); \}\}/,
+    'keys typed into the link are the field\'s: Escape closes the row, never the sheet under this one');
+  assert.match(row, /type="url"/);
+  assert.match(row, /text-\[16px\]/, 'iOS zooms to a focused field under 16px');
+  assert.match(sheet, /if \(e instanceof ApiError && e\.status === 422\) setLinkError\(tr\(LINK_TEXT\[3\], \{ site \}\)\);/, 'a link off the site says so');
+  const lib = read('lib/siteBrowser.ts');
+  assert.match(lib, /api<\{ ok: true \}>\(`\/api\/admin\/extensions\/site\/\$\{enc\(session\)\}\/open`, \{ json: \{ url \} \}\)/);
+});
+
 test('a phone\'s typing, as the page\'s Backspaces and text', () => {
   assert.deepEqual(typedDiff(TYPER_FILL, `${TYPER_FILL}h`), { back: 0, text: 'h' });
   assert.deepEqual(typedDiff(`${TYPER_FILL}he`, `${TYPER_FILL}h`), { back: 1, text: '' }, 'Backspace');

@@ -12,11 +12,13 @@ import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, typ
 import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import {
-  closeSite, followSite, openSite, pagePoint, siteSender, SITE_TEXT, TYPER_FILL, typedDiff, typedInput, type SiteInput, type SiteLine,
+  closeSite, followSite, LINK_TEXT, openSite, openSiteLink, pagePoint, siteSender, SITE_TEXT, TYPER_FILL, typedDiff, typedInput,
+  type SiteInput, type SiteLine,
 } from '@/lib/siteBrowser';
+import { ApiError } from '@/lib/api';
 import { useToast } from '@/components/Toast';
 import { msgOf } from '@/components/ConfirmDialog';
-import { IcGlobe, IcHome, IcPencil } from '@/components/icons';
+import { IcGlobe, IcHome, IcLink, IcPencil } from '@/components/icons';
 import { Busy } from '@/components/ExtensionBits';
 import { keys, t as tr } from '@/lib/i18n';
 import { useLayer } from '@/lib/layers';
@@ -57,8 +59,14 @@ export function SiteBrowserSheet({ sourceId, name, onClose }: { sourceId: string
   const [state, setState] = useState<State>('opening');
   const [title, setTitle] = useState(name);
   const [address, setAddress] = useState('');
+  /** The source's site, by host: where a link may be opened. */
+  const [site, setSite] = useState('');
   const [frame, setFrame] = useState<string | null>(null);
   const [ended, setEnded] = useState<string | null>(null);
+  /** The link row: open, what is pasted in it, and what went wrong with it. */
+  const [linking, setLinking] = useState(false);
+  const [link, setLink] = useState('');
+  const [linkError, setLinkError] = useState<string | null>(null);
   // On the stack like every dialog, so a notice is placed clear of its buttons (lib/layers.ts).
   useLayer('dialog', true);
 
@@ -88,6 +96,7 @@ export function SiteBrowserSheet({ sourceId, name, onClose }: { sourceId: string
         session.current = o.session;
         setTitle(o.name);
         setAddress(o.site);
+        setSite(o.site);
         sender.current = siteSender(o.session, () => end(tr('The page is no longer open.')));
         setState('open');
         await followSite(o.session, onLine, ac.signal);
@@ -137,6 +146,23 @@ export function SiteBrowserSheet({ sourceId, name, onClose }: { sourceId: string
       toast(msgOf(e, tr('Could not save the sign-in')), 'error');
     }
     onClose();
+  };
+
+  /** The pasted link, opened in the page; the row closes once it is. */
+  const openLink = async () => {
+    const id = session.current;
+    const url = link.trim();
+    if (!id || !url) return;
+    setLinkError(null);
+    try {
+      await openSiteLink(id, url);
+      setLinking(false);
+      setLink('');
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 422) setLinkError(tr(LINK_TEXT[3], { site }));
+      else if (e instanceof ApiError && e.status === 404) end(tr('The page is no longer open.'));
+      else setLinkError(msgOf(e, tr('Could not open the site')));
+    }
   };
 
   /** A pointer on the picture, in the page's pixels; null off the picture. */
@@ -233,6 +259,13 @@ export function SiteBrowserSheet({ sourceId, name, onClose }: { sourceId: string
           <p className="truncate text-[12px] text-fog-500" dir="ltr" data-site-address>{hostOf(address) || tr('Opening the site…')}</p>
         </div>
         {state === 'open' && (
+          <button type="button" className="btn-key" aria-expanded={linking}
+            onClick={() => { setLinking((v) => !v); setLinkError(null); }} data-site-link>
+            <IcLink width={15} height={15} aria-hidden />
+            <span className="max-sm:sr-only">{tr(LINK_TEXT[0])}</span>
+          </button>
+        )}
+        {state === 'open' && (
           <button type="button" className="btn-key" onClick={() => send({ type: 'home' })} data-site-home>
             <IcHome width={15} height={15} aria-hidden />
             <span className="max-sm:sr-only">{tr('Start over')}</span>
@@ -242,6 +275,22 @@ export function SiteBrowserSheet({ sourceId, name, onClose }: { sourceId: string
           {state === 'saving' ? <Busy tone="muted">{tr('Saving…')}</Busy> : tr('Done')}
         </button>
       </header>
+
+      {/* A link the site emailed, opened here rather than in this browser: only here does the sign-in reach the engine. */}
+      {linking && state === 'open' && (
+        <form className="flex flex-wrap items-center gap-2 border-b border-ink-800 px-[max(1rem,env(safe-area-inset-left))] py-2.5 pe-[max(1rem,env(safe-area-inset-right))]"
+          onSubmit={(e) => { e.preventDefault(); void openLink(); }} data-site-link-row>
+          {/* Keys here are the field's, not the page's, and Escape closes the row rather than the sheet under this one. */}
+          <input type="url" inputMode="url" dir="ltr" autoFocus autoCapitalize="off" autoCorrect="off" spellCheck={false}
+            value={link} onChange={(e) => { setLink(e.target.value); setLinkError(null); }}
+            onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Escape') setLinking(false); }}
+            placeholder={tr(LINK_TEXT[1], { site })} aria-label={tr(LINK_TEXT[1], { site })}
+            className="field min-w-0 flex-1 text-[16px] sm:text-sm" data-site-link-field />
+          <button type="submit" className="btn-key btn-key-accent" disabled={!link.trim()}>{tr('Open')}</button>
+          <p className="w-full text-[12px] leading-relaxed text-fog-400">{tr(LINK_TEXT[2])}</p>
+          {linkError && <p role="alert" className="w-full text-[12px] text-rose-300" data-site-link-error>{linkError}</p>}
+        </form>
+      )}
 
       {/* ⚠️ The press's own default would move the focus off the typing field, onto nothing, and every key after it
           would be lost: onMouseDown keeps it where onPointerDown put it, and a tap's end gives it back. */}

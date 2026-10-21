@@ -245,6 +245,35 @@ export function sendInput(id: string, uid: string, input: SiteInput[]): boolean 
   return true;
 }
 
+/**
+ * Whether `url` is on the site a page was opened for: http(s), with no login in it, on the home page's host (a leading
+ * www. aside) or a subdomain of it. Lookalikes (batcave.biz.example.com, evilbatcave.biz) are other sites. Pure.
+ */
+export function onSite(url: string, home: string): boolean {
+  let u: URL;
+  let h: URL;
+  try { u = new URL(url); h = new URL(home); } catch { return false; }
+  if ((u.protocol !== 'https:' && u.protocol !== 'http:') || u.username || u.password) return false;
+  const base = h.hostname.toLowerCase().replace(/^www\./, '');
+  const host = u.hostname.toLowerCase();
+  return host === base || host.endsWith(`.${base}`);
+}
+
+/**
+ * A link on the page's own site, opened in the page (v0.94.0): the sign-in link a site emails, which signs in the browser
+ * that opens it -- so it has to be the engine's, not the admin's own. Never another site's: the engine's browser sits
+ * inside the server's network. 'gone' when the page is not theirs or is closed; 'other' for a link off the site.
+ */
+export function openLink(id: string, uid: string, url: string): 'ok' | 'gone' | 'other' {
+  const s = own(id, uid);
+  if (!s?.browser) return 'gone';
+  if (!onSite(url, s.home)) return 'other';
+  s.browser.send({ type: 'loadUrl', url, ...s.size });
+  s.lastInput = Date.now();
+  armIdle(s);
+  return 'ok';
+}
+
 /** Whether a page is open and the admin's: the stream route asks before it starts streaming. */
 export const siteOpen = (id: string, uid: string): boolean => !!own(id, uid);
 

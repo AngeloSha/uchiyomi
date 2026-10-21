@@ -120,6 +120,19 @@ test('Open site, as the sheet drives it', { skip }, async (t) => {
         assert.equal((await input('site-admin', session, bad)).statusCode, 400, JSON.stringify(bad));
       }
       assert.equal(page.sent.length, 5, 'none of those reached the page');
+      // A link on the source's own site opens in the page; any other is refused, and so is anything else in the body.
+      const link = (who: string, body: unknown) => app.inject({ method: 'POST', url: `/api/admin/extensions/site/${session}/open`, headers: as(who), payload: body as never });
+      const site0 = new URL(String(page.sent[0].url));
+      const okLink = await link('site-admin', { url: `${site0.origin}/sign-in?key=abc` });
+      assert.equal(okLink.statusCode, 200, okLink.body);
+      assert.deepEqual(page.sent.at(-1), { type: 'loadUrl', url: `${site0.origin}/sign-in?key=abc`, width: 390, height: 700 });
+      const other = await link('site-admin', { url: 'http://yomi-db:5432/' });
+      assert.equal(other.statusCode, 422);
+      assert.equal(other.json().error, 'other_site');
+      assert.equal((await link('site-admin', { url: `${site0.origin}/`, extra: 1 })).statusCode, 400);
+      assert.equal((await link('site-admin', {})).statusCode, 400);
+      assert.equal((await link('site-admin2', { url: `${site0.origin}/` })).statusCode, 404, 'another admin\'s page is nothing to them');
+      assert.equal(page.sent.length, 6, 'only the one link reached the page');
       assert.equal((await input('site-admin2', session, { input: [{ type: 'home' }] })).statusCode, 404, 'another admin\'s page is nothing to them');
       assert.equal((await open('site-admin2', SOURCE_IDS.webtoons)).statusCode, 409, 'nor can they take it while it is in use');
       assert.equal((await done('site-admin2', session)).statusCode, 404);
