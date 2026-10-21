@@ -2127,6 +2127,9 @@ export async function addSeriesFromSource(opts: {
             tell(j, finishOn ? say('job.stoppedWillFinish', { source: src.name }) : say('job.stopped', { source: src.name }), savedSoFar(j));
             j.finishedAt = Date.now();
           }
+          // What is left goes on the card with the error, before the finishing hand-off's writes: a poll in between read
+          // an error card with nothing to try again (downloadsView.int.test.ts, on a slower database). As startDownloadJob.
+          noteLeft();
           if (finishOn && seriesId) {
             await backFirst(seriesId);
             await requestScout(seriesId, 'refused', { numbers: leftOf(toFetch, landed, onDisk) });
@@ -2144,6 +2147,7 @@ export async function addSeriesFromSource(opts: {
               : say('job.stoppedRefusing', { source: src.name, status: String(out.err?.blockStatus ?? '') }), savedSoFar(j));
             j.finishedAt = Date.now();
           }
+          noteLeft();
           if (finishOn && seriesId) {
             await backFirst(seriesId);
             await requestScout(seriesId, 'refused', { numbers: leftOf(toFetch, landed, onDisk) });
