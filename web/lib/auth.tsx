@@ -48,7 +48,8 @@ interface AuthCtx {
   status: Status;
   user: User | null;
   isAdmin: boolean;
-  login: (username: string, password: string, code?: string) => Promise<{ ok: boolean; totp?: boolean; error?: string }>;
+  /** `remember`: Remember on this device (bff lib/deviceRing.ts). */
+  login: (username: string, password: string, code?: string, remember?: boolean) => Promise<{ ok: boolean; totp?: boolean; error?: string }>;
   firstRunSetup: (username: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   /** Sign up while Open registration is on (v0.61.0). `closed`: it was switched off meanwhile. */
   register: (username: string, password: string) => Promise<{ ok: boolean; closed?: boolean; error?: string }>;
@@ -63,6 +64,10 @@ interface AuthCtx {
   reconnect: () => Promise<boolean>;
   /** Switch this device to a profile that opens at home, without its password (bff POST /auth/switch). */
   switchProfile: (profileId: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Take up an account this device remembers, without its password (bff POST /auth/resume). */
+  resumeProfile: (profileId: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Sign in as someone else, keeping this account remembered on this device when it is (bff POST /auth/leave). */
+  leave: () => Promise<void>;
   /** Why the server last signed this device out, by its code: `local_only` is a profile that opens at home, from outside. */
   signedOutWhy: string | null;
 }
@@ -302,10 +307,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const login = async (username: string, password: string, code?: string): Promise<{ ok: boolean; totp?: boolean; error?: string }> => {
+  const login = async (username: string, password: string, code?: string, remember?: boolean): Promise<{ ok: boolean; totp?: boolean; error?: string }> => {
     try {
       const res = await api<{ accessToken: string; user: User; refreshExpiresAt?: number }>('/auth/login', {
-        json: { username, password, code, deviceId: deviceId(), deviceName: deviceName() },
+        json: { username, password, code, deviceId: deviceId(), deviceName: deviceName(), ...(remember ? { remember: true } : {}) },
       });
       await forgetAccountData(); // whoever used this device last does not get to answer this account's requests
       setAccessToken(res.accessToken);
@@ -386,22 +391,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   /**
-   * Switch this device to a profile that opens at home, without its password (bff POST /auth/switch).
-   * A sign-in like `login`, step for step, with what a change of person needs on top:
+   * Change the person on this device without a password: to a profile that opens at
+   * home (bff POST /auth/switch), or to an account the device remembers (POST /auth/resume). A sign-in like `login`,
+   * step for step, with what a change of person needs on top:
    * reading queued offline is sent first, while the session it was read in still answers (lib/downloads.ts flushOutbox
    * files it against whoever is signed in); the caches go only once the server has said yes, so a refused switch leaves
    * the screen as it was; the 18+ reveal, the browser's and not the account's (lib/adult.ts), is put away, so a child
    * does not inherit it; and the other tabs are told. Reintroduce a step out of order: web/test/profileSwitch.test.ts.
    */
-  const switchProfile = async (profileId: string): Promise<{ ok: boolean; error?: string }> => {
+  const changeProfile = async (path: '/auth/switch' | '/auth/resume', profileId: string): Promise<{ ok: boolean; error?: string }> => {
     await flushOutbox().catch(() => 0);
     let res: { accessToken: string; user: User; refreshExpiresAt?: number };
     try {
-      res = await api('/auth/switch', { json: { profileId } });
+      res = await api(path, { json: { profileId } });
     } catch (e: any) {
       let body: any = {};
       try { body = JSON.parse(e?.body || '{}'); } catch {}
-      return { ok: false, error: body.error === 'local_only' ? tr('Profiles without a password open from home only.') : tr('Could not switch profile') };
+      return {
+        ok: false,
+        error: body.error === 'local_only' ? tr('Profiles without a password open from home only.')
+          : body.error === 'reauth' ? tr('Sign in again: an admin stays remembered for 12 hours.')
+          : tr('Could not switch profile'),
+      };
     }
     await forgetAccountData();
     setAdultShown(false);
@@ -409,6 +420,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     adoptAuthed(res.user, res.refreshExpiresAt);
     channel.current?.postMessage({ type: 'switched', userId: res.user.id });
     return { ok: true };
+  };
+  const switchProfile = (profileId: string) => changeProfile('/auth/switch', profileId);
+  const resumeProfile = (profileId: string) => changeProfile('/auth/resume', profileId);
+
+  /** Sign in as someone else: an account this device remembers is put aside rather than ended (bff POST /auth/leave). */
+  const leave = async () => {
+    try { await api('/auth/leave', { method: 'POST' }); } catch {}
+    await clearLocalSession();
   };
 
   const logout = async () => {
@@ -449,7 +468,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <Ctx.Provider value={{ status, user, isAdmin: user?.role === 'admin', login, firstRunSetup, register, logout, setSettings, setAvatar, setTotpEnabled, switchProfile, signedOutWhy, desktop: isDesktop(), reconnect }}>
+    <Ctx.Provider value={{ status, user, isAdmin: user?.role === 'admin', login, firstRunSetup, register, logout, setSettings, setAvatar, setTotpEnabled, switchProfile, resumeProfile, leave, signedOutWhy, desktop: isDesktop(), reconnect }}>
       {children}
     </Ctx.Provider>
   );

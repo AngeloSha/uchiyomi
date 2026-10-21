@@ -98,6 +98,12 @@ until you are home again: the sign-in screen then says *This profile opens from 
 you switched from closes the profiles opened from it on that device. Which networks are home is the server's setting
 (`LOCAL_NETWORKS`, [Configuration](CONFIGURATION.md)); until it is set, these profiles open in the desktop app only.
 
+**Remember on this device.** Tick it under the password when you sign in, and this device keeps you: the sign-in
+screen lists you under *On this device*, and the others signed in here find you under **Switch profile**, a tap away
+without your password, for as long as your session lasts. **Sign out** forgets you on this device; **Sign in with
+another account** keeps you remembered. An admin is asked for the password again after 12 hours. Nothing is
+remembered unless you tick it, so a shared tablet keeps nobody by default.
+
 ---
 
 ## 3. Your library

@@ -37,15 +37,19 @@ test('a refresh refused because the profile opens at home only says so; every ot
 
 test('a switch sends queued reading first, clears the caches only once the server said yes, and puts the 18+ reveal away', () => {
   const auth = code(read('lib/auth.tsx'));
-  const body = auth.slice(auth.indexOf('const switchProfile = async'), auth.indexOf('const logout = async'));
-  assert.ok(body.length > 0, 'there is no switchProfile');
-  const at = (s: string) => { const i = body.indexOf(s); assert.ok(i >= 0, `switchProfile does not ${s}`); return i; };
+  const body = auth.slice(auth.indexOf('const changeProfile = async'), auth.indexOf('const switchProfile ='));
+  assert.ok(body.length > 0, 'there is no changeProfile');
+  const at = (s: string) => { const i = body.indexOf(s); assert.ok(i >= 0, `changeProfile does not ${s}`); return i; };
   // Each step after the one before it. Reintroduce the purge ahead of the request: a refused switch blanks the screen.
-  const order = ['await flushOutbox()', "api('/auth/switch'", 'await forgetAccountData()', 'setAdultShown(false)',
+  const order = ['await flushOutbox()', 'api(path,', 'await forgetAccountData()', 'setAdultShown(false)',
     'setAccessToken(res.accessToken)', 'adoptAuthed(res.user', "postMessage({ type: 'switched'"].map(at);
   assert.deepEqual(order, [...order].sort((a, b) => a - b), 'switchProfile does its steps out of order');
-  assert.match(body, /return \{ ok: false, error: body\.error === 'local_only'/, 'a refusal from outside is not said as such');
-  assert.match(auth, /switchProfile, signedOutWhy, desktop: isDesktop\(\), reconnect \}\}>/);
+  assert.match(body, /error: body\.error === 'local_only' \?/, 'a refusal from outside is not said as such');
+  assert.match(body, /: body\.error === 'reauth' \?/, 'an admin remembered too long is not told to sign in again');
+  // Both ways of changing person take the same steps.
+  assert.match(auth, /const switchProfile = \(profileId: string\) => changeProfile\('\/auth\/switch', profileId\);/);
+  assert.match(auth, /const resumeProfile = \(profileId: string\) => changeProfile\('\/auth\/resume', profileId\);/);
+  assert.match(auth, /switchProfile, resumeProfile, leave, signedOutWhy, desktop: isDesktop\(\), reconnect \}\}>/);
 });
 
 test('a profile switched in another tab starts this one over', () => {
@@ -77,9 +81,11 @@ test('the switcher: from the profile photo, never on desktop, outside the popove
   assert.match(menu, /if \(switching\) return <ProfileSwitcher onClose=\{onClose\} \/>;/, 'the phone\'s sheet has no switcher');
   const sw = code(read('components/ProfileSwitcher.tsx'));
   assert.match(sw, /api<\{ zone: 'local' \| 'remote'; content: Switchable\[\] \}>\('\/auth\/profiles'\)/);
-  assert.match(sw, /const r = await switchProfile\(id\);/);
+  assert.match(sw, /const r = how === 'switch' \? await switchProfile\(id\) : await resumeProfile\(id\);/);
+  assert.match(sw, /api<\{ content: Switchable\[\] \}>\('\/auth\/ring'\)/, 'the accounts this device remembers are not offered');
+  assert.match(sw, /p\.id !== user\?\.id && !managed\.some\(\(m\) => m\.id === p\.id\)/);
   assert.match(sw, /\{data\?\.zone === 'remote' && <p/, 'outside, the empty list is not explained');
-  assert.match(sw, /onClick=\{\(\) => \{ onClose\(\); void logout\(\); \}\}/, 'another account is a sign-out first');
+  assert.match(sw, /onClick=\{\(\) => \{ onClose\(\); void leave\(\); \}\}/, 'another account forgets this one even when the device remembers it');
   assert.doesNotMatch(sw, /\b(?:left|right)-\d|\bm[lr]-\d|\bp[lr]-\d|text-(?:left|right)/, 'physical-direction classes break rtl');
 });
 
@@ -102,4 +108,16 @@ test('Profile -> Account lists a member\'s own profiles only when an admin let i
   assert.match(account, /api<\{ content: ManagedProfile\[\] \}>\('\/api\/profiles'\)/);
   assert.match(account, /api\(`\/api\/profiles\/\$\{p\.id\}`, \{ method: 'DELETE' \}\)/);
   assert.match(account, /<ConfirmDialog[\s\S]*?onConfirm=\{\(\) => remove\(removing\)\}/, 'a profile is deleted without asking');
+});
+
+test('the sign-in screen remembers on request, and offers who this device remembers', () => {
+  const auth = code(read('lib/auth.tsx'));
+  assert.match(auth, /\.\.\.\(remember \? \{ remember: true \} : \{\}\)/, 'Remember on this device is not sent');
+  assert.match(auth, /const leave = async \(\) => \{\s*try \{ await api\('\/auth\/leave', \{ method: 'POST' \}\); \} catch \{\}\s*await clearLocalSession\(\);/);
+  const login = code(read('components/LoginScreen.tsx'));
+  assert.match(login, /const r = await login\(username\.trim\(\) \|\| 'admin', pw, needTotp \? code\.trim\(\) : undefined, remember\);/);
+  assert.match(login, /<input type="checkbox" checked=\{remember\}/);
+  assert.match(login, /api<\{ content: typeof ring \}>\('\/auth\/ring'\)/);
+  assert.match(login, /\{ring\.length > 0 && !needTotp && \(/);
+  assert.match(login, /const r = await resumeProfile\(id\);/);
 });
