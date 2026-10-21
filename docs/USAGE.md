@@ -137,7 +137,8 @@ profile; **Check for new chapters** is a key on **Updates**. On a phone the bar 
 **Library**, **Search**, **Discover**, **Offline** and **You**.
 
 **Customize Home** (since v0.66.0): the key at the end of the greeting's line lists Home's rails — *Keep reading*,
-*For you*, *New episodes*, your lists and the rest — each with arrows to move it up or down and a switch to hide it.
+*For you*, *New episodes*, your lists and the rest — each with arrows to move it up or down (or drag a row to where it
+belongs, see *Dragging to reorder* below) and a switch to hide it.
 Home follows at once, and the arrangement is saved to your account, so your other devices open the same Home; **Reset**
 puts the original order back. Your lists move together as one rail, and which lists those are is still chosen on
 **Lists** (the sheet's **Choose lists** goes there). A hidden rail isn't fetched at all.
@@ -155,6 +156,14 @@ the default), **A–Z**, **Z–A**, **Last read** (what you read most recently f
 (the series whose newest chapter came most recently first). Each list remembers its own order, on your account, so it
 opens the same way on your other devices. **Edit** removes series from the list and moves them within your order with
 the arrows; a series added to a list goes to its end.
+
+**Dragging to reorder.** Wherever the app keeps something in an order you choose, you can drag it into place as well as
+use its arrows: Home's rails in **Customize Home**, the series of a list while you **Edit** it, the **Source order**,
+the **Default priority** of scanlation groups in **Admin → Settings → Downloads → Scanlation groups**, and a series' own ranked groups in
+its *Sources & translations* sheet. With a mouse, press an item and move it; a bar in the accent colour shows where it
+would land, and letting go there puts it in place. On a touch screen, **hold** the item for a moment until it lifts,
+then drag (a finger that moves at once scrolls the page, as usual). A key, field or link inside an item keeps its own
+press, **Escape** cancels a drag in progress, and the arrows stay for keyboards and screen readers.
 
 Each List card also has **Show on Home** (v0.55.8, the remaining part of
 [#164](https://github.com/AngeloSha/uchiyomi/discussions/164)). Pick zero to three and arrange their Home positions

@@ -15,6 +15,7 @@ import { isMine, type ListRow } from '@/lib/lists';
 import { ListKeys, ListOwnerLine, ListTags } from '@/components/ListBits';
 import { invalidateLists } from '@/components/SaveListDialog';
 import { safeColor } from '@/lib/safeColor';
+import { moveTo, useDragReorder } from '@/lib/dragReorder';
 
 /** v0.61.0: with its kind, sharing and owner, and `total` -- how many it shows this reader, a smart list being capped. */
 type CollectionDetail = Pick<ListRow, 'id' | 'name' | 'accent' | 'kind' | 'shared' | 'mine' | 'owner' | 'query'> & { items: Series[]; total?: number };
@@ -100,6 +101,20 @@ function CollectionInner() {
     catch { toast(tr('Could not change the order'), 'error'); }
   };
 
+  // Drag a cover to where it belongs (Edit only: it is the list's own order). It is shown in its new place at once and
+  // put back if the server refuses, so the cover does not spring home while the save is on its way.
+  const drag = useDragReorder({
+    count: shown.length, layout: 'flow', enabled: editing && mine,
+    onMove: async (from, to) => {
+      const ids = moveTo(items.map((x) => x.id), from, to);
+      const key = ['collection', id];
+      const was = qc.getQueryData<CollectionDetail>(key);
+      if (was) qc.setQueryData<CollectionDetail>(key, { ...was, items: ids.map((sid) => was.items.find((x) => x.id === sid)!).filter(Boolean) });
+      try { await api(`/api/collections/${id}/items`, { method: 'PUT', json: { seriesIds: ids } }); inval(); }
+      catch { if (was) qc.setQueryData(key, was); toast(tr('Could not change the order'), 'error'); }
+    },
+  });
+
   return (
     <div className="min-h-screen-d">
       <header className="safe-top px-4 pb-2 lg:px-0 lg:pt-6">
@@ -155,7 +170,7 @@ function CollectionInner() {
         // per-reader numbers, and the same right-click menu.
         <div className="grid grid-cols-3 gap-x-3 gap-y-5 px-4 pt-3 sm:grid-cols-4 lg:grid-cols-6 lg:px-0 2xl:grid-cols-8">
           {shown.map((s, i) => editing ? (
-            <div key={s.id} className="relative">
+            <div key={s.id} {...drag.item(i)} className="relative">
               {/* The tile as it reads everywhere, held still: in Edit a press is for the keys over it. */}
               <div inert className="pointer-events-none"><SeriesTile series={s} /></div>
               {/* Over the cover alone (its 2:3 box), not the title under it, and above the tile's own marks (z-10): the

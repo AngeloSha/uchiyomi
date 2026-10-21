@@ -24,6 +24,7 @@ import { useListsAll } from './SaveListDialog';
 import { Switch } from './Switch';
 import { useToast } from './Toast';
 import { Sheet } from './ui';
+import { moveTo, useDragReorder } from '@/lib/dragReorder';
 
 const LABEL = Object.fromEntries(HOME_RAILS.map((r) => [r.key, r.label])) as Record<HomeRailKey, string>;
 
@@ -83,6 +84,8 @@ function CustomizeSheet({ onClose }: { onClose: () => void }) {
     save(v);
   };
   const plain = railsSetting(slots, HOME_RAIL_KEYS) === null;
+  // Drag a row to where it belongs; the arrows move it a place at a time.
+  const drag = useDragReorder({ count: slots.length, layout: 'column', onMove: (from, to) => change(moveTo(slots, from, to)) });
 
   return (
     <Sheet title={tr('Customize Home')} onClose={onClose} overBottomNav
@@ -98,7 +101,7 @@ function CustomizeSheet({ onClose }: { onClose: () => void }) {
       <p className="pb-1 text-xs text-fog-500">{tr('Choose which rows Home shows, and in what order.')}</p>
       <ul data-home-rails>
         {slots.map((s, i) => (
-          <RailRow key={s.key} slot={s} first={i === 0} last={i === slots.length - 1}
+          <RailRow key={s.key} slot={s} first={i === 0} last={i === slots.length - 1} dragProps={drag.item(i)}
             onMove={(by) => change(moveRail(slots, s.key, by))}
             onShow={(show) => change(setRailHidden(slots, s.key, !show))}
             listNames={s.key === LISTS_RAIL ? listNames : undefined} onClose={onClose} />
@@ -108,8 +111,10 @@ function CustomizeSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
-function RailRow({ slot, first, last, onMove, onShow, listNames, onClose }: {
+function RailRow({ slot, first, last, onMove, onShow, listNames, onClose, dragProps }: {
   slot: RailSlot;
+  /** The row's handle for drag to reorder (lib/dragReorder.ts), spread onto the row. */
+  dragProps?: object;
   first: boolean;
   last: boolean;
   onMove: (by: -1 | 1) => void;
@@ -123,7 +128,7 @@ function RailRow({ slot, first, last, onMove, onShow, listNames, onClose }: {
   const label = tr(LABEL[slot.key]);
   const lists = slot.key === LISTS_RAIL;
   return (
-    <li data-home-rail={slot.key} data-hidden={slot.hidden ? '' : undefined}
+    <li {...dragProps} data-home-rail={slot.key} data-hidden={slot.hidden ? '' : undefined}
       className="flex items-center gap-2 border-b border-ink-800/70 py-2.5 last:border-b-0">
       <div className="min-w-0 flex-1">
         <p id={id} className={`text-sm transition-colors ${slot.hidden ? 'text-fog-500' : 'text-fog-100'}`}>{label}</p>

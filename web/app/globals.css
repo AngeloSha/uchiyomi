@@ -597,3 +597,23 @@ html.lenis, html.lenis body { height: auto; }
 [dir='rtl'] .rail-scrim {
   background-image: linear-gradient(to left, rgb(0 0 0 / 0.82), rgb(0 0 0 / 0.55) 55%, rgb(0 0 0 / 0));
 }
+
+/* Drag to reorder (lib/dragReorder.ts). An item in a list that can be dragged is grabbable; the one being dragged is
+   lifted and follows the pointer; the marker is a bar on the side of the item it would land beside, in the accent.
+   A finger holds an item to pick it up, so on a touch screen the item's text is not selected by that hold. */
+[data-reorder] { cursor: grab; }
+[data-reorder][data-reorder-drag] {
+  cursor: grabbing;
+  opacity: 0.92;
+  box-shadow: 0 10px 28px -8px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(var(--accent) / 0.6);
+  transition: none;
+}
+[data-reorder='column'][data-reorder-drop='before'] { box-shadow: 0 -2px 0 0 rgb(var(--accent)); }
+[data-reorder='column'][data-reorder-drop='after'] { box-shadow: 0 2px 0 0 rgb(var(--accent)); }
+[data-reorder='flow'][data-reorder-drop='before'] { box-shadow: -3px 0 0 0 rgb(var(--accent)); }
+[data-reorder='flow'][data-reorder-drop='after'] { box-shadow: 3px 0 0 0 rgb(var(--accent)); }
+[dir='rtl'] [data-reorder='flow'][data-reorder-drop='before'] { box-shadow: 3px 0 0 0 rgb(var(--accent)); }
+[dir='rtl'] [data-reorder='flow'][data-reorder-drop='after'] { box-shadow: -3px 0 0 0 rgb(var(--accent)); }
+@media (pointer: coarse) {
+  [data-reorder] { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+}
