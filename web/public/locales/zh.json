@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4201
+    "strings": 4207
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4204,5 +4204,11 @@
   "Open a link": "打开链接",
   "Paste a link from {site}": "粘贴来自 {site} 的链接",
   "Signing in with a link the site emailed you? Copy the link from the email, without opening it, and paste it here.": "要用网站发到你邮箱的链接登录？请从邮件里复制这个链接（不要打开它），然后粘贴到这里。",
-  "Only links on {site} open here.": "这里只能打开 {site} 的链接。"
+  "Only links on {site} open here.": "这里只能打开 {site} 的链接。",
+  "Its files were already gone. Its chapters are marked deleted.": "它的文件早已不在。它的章节已标记为已删除。",
+  "1 chapter file is not on disk": "有 1 个章节文件不在磁盘上",
+  "{n} chapter files are not on disk": "有 {n} 个章节文件不在磁盘上",
+  "Uchiyomi can't tell a file you deleted from one on a drive that isn't connected right now, so it left them as they were. If you deleted or moved them yourself, mark them gone. Then you can forget the series.": "Uchiyomi 无法区分你删除的文件和当前未连接的硬盘上的文件，所以保留了原样。如果是你自己删除或移走的，请将它们标记为已不存在。之后即可彻底遗忘该系列。",
+  "Mark them gone": "标记为已不存在",
+  "Amber: this source lists it under its own name, which came up first for two of this series’ names. Check the covers before you follow it. Following it keeps the name.": "黄色：此来源用它自己的名称收录这部作品，用此作品的两个名称搜索时它都排在第一。关注前请对比封面。关注后会保留这个名称。"
 }

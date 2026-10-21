@@ -212,8 +212,80 @@ test('Delete files on an empty readable root marks nothing', { skip }, async () 
   const r = await deleteSeriesFiles(S);
   assert.equal(r.ok, true, r.ok ? '' : r.reason);
   assert.equal(r.files, 0);
+  // v0.95.0 (#328): what was left as it was is counted, so the dialog can ask the admin about it.
+  assert.deepEqual([r.gone, r.unproven], [0, 2]);
   const rows = await q<{ id: string; pruned_at: string | null }>('SELECT id, pruned_at FROM lib_books WHERE series_id = $1 ORDER BY id', [S]);
   for (const row of rows) assert.equal(row.pruned_at, null, `${row.id} was marked on a root nothing proves is mounted`);
+});
+
+test('gone marks what the proof could not, on roots that open and hold something (#328)', { skip }, async () => {
+  // The admin's word that they deleted the folder by hand: a small library proves nothing (no other series' file is
+  // present), so its absent rows stay live until somebody who knows says so. Both roots here open and hold a folder.
+  // Reintroduce by ignoring `gone`: both rows below read live, and the series can never reach Forget.
+  await seed(true);
+  await q('UPDATE lib_series SET deleted_at = now() WHERE id = $1', [S]);
+  await rm(join(ROOT, FOLDER, 'ch1.cbz'));
+  await rm(join(DL, FOLDER, 'ch2.cbz'));
+  const r = await deleteSeriesFiles(S, { gone: true });
+  assert.equal(r.ok, true, r.ok ? '' : r.reason);
+  assert.deepEqual([r.files, r.gone, r.unproven], [0, 2, 0]);
+  const rows = await q<{ id: string; pruned_at: string | null; pruned_reason: string | null }>(
+    'SELECT id, pruned_at, pruned_reason FROM lib_books WHERE series_id = $1 ORDER BY id', [S]);
+  assert.deepEqual(rows.map((x) => [x.id, !!x.pruned_at, x.pruned_reason]), [['b_fo_1', true, 'deleted'], ['b_fo_2', true, 'deleted']]);
+});
+
+test('gone does not mark anything on an empty root (#328)', { skip }, async () => {
+  // ⚠️ An empty root is what a share that is not mounted leaves behind, and the image ships /library that way: the
+  // admin's "I deleted them" is no answer for it. Refused with "mount it", nothing marked. Reintroduce by dropping the
+  // rootUnavailable check in deleteSeriesFiles: the row below reads pruned.
+  await seed(false);
+  await q('UPDATE lib_series SET deleted_at = now() WHERE id = $1', [S]);
+  await rm(join(ROOT, 'T!fo'), { recursive: true, force: true });
+  const r = await deleteSeriesFiles(S, { gone: true });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /is empty, which is what a library that is not mounted looks like/);
+  assert.match(r.fix ?? '', /Mount it/);
+  const [row] = await q<{ pruned_at: string | null }>('SELECT pruned_at FROM lib_books WHERE id = $1', ['b_fo_1']);
+  assert.equal(row.pruned_at, null, 'a row on an empty root was marked');
+});
+
+test('Delete files on a read-only library its files have left marks them (#328)', { skip: skip || asRoot }, async () => {
+  // ⚠️ The default install runs with PUID unset, and its library is read-only to Uchiyomi. A series whose folder the
+  // admin deleted by hand has nothing left to unlink there, and the call used to refuse "not writable ... set PUID"
+  // before looking: the rows stayed live and the Removed row never offered Forget. Only a root with a file left to
+  // delete must be writable. Reintroduce by write-checking every root up front: this reads the PUID refusal.
+  await seed(false);
+  await q('UPDATE lib_series SET deleted_at = now() WHERE id = $1', [S]);
+  await neighbour(ROOT, true);
+  await rm(join(ROOT, FOLDER), { recursive: true, force: true });
+  await chmod(ROOT, 0o555);
+  try {
+    const r = await deleteSeriesFiles(S);
+    assert.equal(r.ok, true, r.ok ? '' : `${r.reason} ${r.fix}`);
+    assert.deepEqual([r.files, r.gone, r.unproven], [0, 1, 0]);
+    const [row] = await q<{ pruned_reason: string | null }>('SELECT pruned_reason FROM lib_books WHERE id = $1', ['b_fo_1']);
+    assert.equal(row.pruned_reason, 'deleted');
+    assert.ok(await exists(join(ROOT, 'T!fo/Neighbour/ch1.cbz')), "the neighbour's file was touched");
+  } finally {
+    await chmod(ROOT, 0o755).catch(() => {});
+  }
+});
+
+test('a file still on a read-only root refuses the whole delete, before anything is unlinked', { skip: skip || asRoot }, async () => {
+  // The other half of #328's rule, unchanged: a root holding a file to delete must be writable, and the refusal
+  // comes before the other root's file is touched. Reintroduce by unlinking root by root as each is checked: the
+  // library's file below is gone.
+  await seed(true);
+  await q('UPDATE lib_series SET deleted_at = now() WHERE id = $1', [S]);
+  await chmod(DL, 0o555);
+  try {
+    const r = await deleteSeriesFiles(S);
+    assert.equal(r.ok, false);
+    assert.match(r.fix ?? '', /PUID/, 'the refusal should say how to fix it');
+    assert.ok(await exists(join(ROOT, FOLDER, 'ch1.cbz')), 'the writable root was deleted anyway');
+  } finally {
+    await chmod(DL, 0o755).catch(() => {});
+  }
 });
 
 test('Delete files reconciles absent rows and missing tombstones on a root another series proves mounted', { skip }, async () => {

@@ -726,6 +726,10 @@ test('review first: green and amber in words, and Follow all green follows only 
   assert.equal(amberNote(prop('s1')), null, 'a green match says it is amber');
   assert.match(amberNote(prop('s2', { verdict: 'amber', amber: 'numbering' }))!, /^Amber: a name matches, but the chapter numbers do not line up\./);
   assert.match(amberNote(prop('s4', { verdict: 'amber', amber: 'other_name' }))!, /^Amber: it matched only under another name of this series/);
+  // v0.95.0 (#316): a name only the source gives it, and what following it does. Reintroduce by dropping its case: it
+  // reads as a numbering amber, which says the numbers do not line up when they do.
+  assert.equal(amberNote(prop('s8', { verdict: 'amber', amber: 'their_name' })),
+    'Amber: this source lists it under its own name, which came up first for two of this series’ names. Check the covers before you follow it. Following it keeps the name.');
   // The Sources sheet's line for its own series, and the bulk's.
   assert.deepEqual(seriesOutcome(r, 'b'), { text: '1 match to review' });
   assert.deepEqual(seriesOutcome(r, 'a'), { text: '2 matches to review' });

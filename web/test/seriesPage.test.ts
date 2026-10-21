@@ -380,8 +380,11 @@ test('the favourite button and the save notices are in the reader\'s words (v0.5
   assert.match(code(read('lib/deleteFiles.ts')), /res\.files === 1 \? tr\('Deleted 1 file, \{size\}', \{ size \}\) : tr\('Deleted \{n\} files, \{size\}', \{ n: res\.files, size \}\)/,
     'Delete files says "file(s)" again');
   // A delete that left files it could not look at says so (lib/deleteFiles.ts). Reintroduce the plain success toast in
-  // app/admin/page.tsx: "Delete files does not say what it left" fails, and the admin reads a clean delete.
-  assert.match(code(read('app/admin/page.tsx')), /const notice = deleteFilesNotice\(res\);\s*toast\(notice\.message, notice\.type\)/,
+  // app/admin/page.tsx: "Delete files does not say what it left" fails, and the admin reads a clean delete. Since
+  // v0.95.0 (#328) an answer with nothing deleted and nothing marked, only files it could not prove gone, is said by
+  // the question that follows instead (deleteFiles.test.ts holds that guard).
+  assert.match(code(read('app/admin/page.tsx')),
+    /const notice = deleteFilesNotice\(res\);\s*if \(res\.files \|\| res\.gone \|\| res\.unchecked \|\| !res\.unproven\) toast\(notice\.message, notice\.type\)/,
     'Delete files does not say what it left');
 });
 

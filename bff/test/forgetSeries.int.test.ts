@@ -18,7 +18,7 @@
 // Skipped automatically unless TEST_DATABASE_URL is set (CI provides a throwaway Postgres service).
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, rm, writeFile, stat } from 'fs/promises';
+import { mkdir, rm, writeFile, stat, chmod } from 'fs/promises';
 import { readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -244,6 +244,38 @@ test('a read-library series whose folder was removed by hand can be forgotten af
   assert.equal(await rowsFor('lib_series', 'id', [S]), 0);
   assert.equal(await rowsFor('lib_books', 'series_id', [O]), 1, "the neighbour's row was touched");
   assert.equal(await exists(join(ROOT, SRC, O, 'ch1.cbz')), true, "the neighbour's file was touched");
+});
+
+test("route: #328's library -- read-only, little else in it, the folder deleted by hand -- reaches Forget on the admin's word", { skip: skip || (typeof process.getuid === 'function' && process.getuid() === 0) }, async () => {
+  // Keddyan's four series: removed, their folders deleted by hand, on the default install where Uchiyomi may only read
+  // the library (PUID unset), and nothing else on that root to prove it mounted. Delete files used to refuse "not
+  // writable" before looking, and with that gone it still could not mark anything (no other series' file is there):
+  // the Removed row never offered Forget. Now the first answer counts the rows as `unproven`, the admin's `gone`
+  // marks them, and Forget goes through. Reintroduce by write-checking every root up front: the first call is a 409.
+  await series(S, 'Small Library', { deleted: true });
+  await book('b_fg_1', S, 1);
+  await book('b_fg_2', S, 2);
+  await mkdir(join(ROOT, SRC), { recursive: true });
+  await mkdir(DL, { recursive: true });
+  await chmod(ROOT, 0o555);
+  const del = (payload: unknown) => app.inject({ method: 'POST', url: `/api/admin/series/${S}/delete-files`, headers: auth, payload });
+  try {
+    assert.equal((await del({ confirm: 'Small Library', gone: 'yes' })).statusCode, 400, 'gone is a yes or no');
+    const first = await del({ confirm: 'Small Library' });
+    assert.equal(first.statusCode, 200, first.body);
+    assert.deepEqual(first.json(), { ok: true, files: 0, bytes: 0, unchecked: 0, gone: 0, unproven: 2 });
+    const second = await del({ confirm: 'Small Library', gone: true });
+    assert.equal(second.statusCode, 200, second.body);
+    assert.deepEqual(second.json(), { ok: true, files: 0, bytes: 0, unchecked: 0, gone: 2, unproven: 0 });
+  } finally {
+    await chmod(ROOT, 0o755).catch(() => {});
+  }
+  const audit = (await q<{ detail: { markedGone?: number; bookIds: string[] } }>(
+    `SELECT detail FROM audit_log WHERE event = 'series.delete_files' AND detail->>'id' = $1 ORDER BY id DESC LIMIT 1`, [S]))[0];
+  assert.deepEqual([audit?.detail.markedGone, audit?.detail.bookIds.sort()], [2, ['b_fg_1', 'b_fg_2']], 'the admin\'s word is not in the audit');
+  const r = await app.inject({ method: 'POST', url: `/api/admin/series/${S}/forget`, headers: auth, payload: { confirm: 'Small Library' } });
+  assert.equal(r.statusCode, 200, r.body);
+  assert.equal(await rowsFor('lib_series', 'id', [S]), 0);
 });
 
 test('forget refuses while the folder still holds chapters on any root', { skip }, async () => {
@@ -726,7 +758,8 @@ test('route: a deliberate read-library Delete files tombstone survives the next 
     method: 'POST', url: `/api/admin/series/${S}/delete-files`, headers: auth, payload: { confirm: 'Reboot proof' },
   });
   assert.equal(res.statusCode, 200, res.body);
-  assert.deepEqual(res.json(), { ok: true, files: 1, bytes: 5, unchecked: 0 }, 'internal proof leaked into the public response');
+  // v0.95.0 (#328) adds `gone` and `unproven`, counts the dialog reads; `deletedBookIds` stays the audit's alone.
+  assert.deepEqual(res.json(), { ok: true, files: 1, bytes: 5, unchecked: 0, gone: 0, unproven: 0 }, 'internal proof leaked into the public response');
   const audit = (await q<{ detail: { bookIds: string[]; applied: number; files: number } }>(
     `SELECT detail FROM audit_log WHERE event = 'series.delete_files' AND detail->>'id' = $1 ORDER BY id DESC LIMIT 1`, [S]))[0];
   assert.deepEqual(audit?.detail.bookIds, ['b_fg_1'], 'the audit cannot prove which row this invocation deleted');

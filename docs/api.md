@@ -2257,7 +2257,7 @@ The v0.55.8 database changes behind these contracts are additive: `libraries.ani
 the existing text column and gains the `rescan_missing` provenance value plus the audited legacy backfill described
 above. Rolling the application back does not require dropping any of them; an older build simply does not name them.
 
-`POST /api/admin/series/:id/delete-files {confirm}` — `confirm` is the series' title, compared through the
+`POST /api/admin/series/:id/delete-files {confirm, gone?}` — `confirm` is the series' title, compared through the
 fold described under *Typing a title to confirm* below (**400** `confirm_mismatch` otherwise) — is the
 irreversible step and only ever after the hide: it removes the series'
 chapter files from every root it occupies (the read library included, which is why it takes the typed
@@ -2266,23 +2266,28 @@ pruned with `pruned_reason = 'deleted'` — the same tombstone `chapters/delete`
 restore afterwards lists those chapters as `pruned` (*Deleted from the server*, where `chapters/refetch`
 brings one back onto the same row — for the rows under the download folder; a read-library row is
 `not_owned` there and its file is the admin's to put back) instead of as openable chapters that 404, the updater's have-set keeps
-counting them as held, and `files` in the answer `{ok, files, bytes, unchecked}` counts real unlinks, not rows (a
-second call reports 0). A row whose file is already absent is reconciled only when the root is provably
+counting them as held, and `files` in the answer `{ok, files, bytes, unchecked, gone, unproven}` counts real unlinks,
+not rows (a second call reports 0). A row whose file is already absent is reconciled only when the root is provably
 mounted — `stat(root)` works, at least one chapter file of any series is present under it (a present folder
 is not proof: the downloader `mkdir -p`s series folders on a bare mount point), and no more than 90 % of
 what was looked at is absent, the verify task's own rule; up to 200 other series' live rows on the root are
 stat'ed when none of this series' own is present. Under that proof a live row with no file is marked
 `pruned_reason = 'deleted'` and a `'missing'` tombstone becomes `'deleted'`; on an unproven root every row
 is left as it was, so an unmounted share leaves live rows, which Forget refuses on. `files` still counts
-unlinks only, so a series whose folder was removed by hand answers `files: 0` and its Removed row then
-offers Forget (`live_books` 0). Delete files on a merge survivor also removes the folders of the rows
+unlinks only, so a series whose folder was removed by hand answers `files: 0` with `gone` counting the rows it
+marked, and its Removed row then offers Forget (`live_books` 0). Since v0.95.0 (#328) the rows left live on an
+unproven root are counted in `unproven`, and the same call again with `gone: true` — the admin's word that they
+deleted or moved those files — marks them without the proof, except on a root that cannot be opened or opens
+empty (what a share that is not mounted looks like), which refuses **409** with *Mount it, then try again.* Delete files on a merge survivor also removes the folders of the rows
 merged into it, and every folder is resolved on every root before anything is unlinked. Only a file that is
 not there (ENOENT) is absent: one the server may not look at (EACCES from a folder's mode bits, an I/O error)
 is neither removed nor marked, its row stays live, the answer counts it in `unchecked`, and a root holding
 one keeps the series folder. It refuses,
 **409** `refused` `{message, fix}`, rather than half-applying: the series is not hidden yet, it has no
-chapter rows on any root (*That series has no files on disk.*), a folder resolves outside the library, or a
-root is not writable (`PUID`/`PGID` unset; `fix` names it). Nothing here deletes a series row or a chapter
+chapter rows on any root (*That series has no files on disk.*), a folder resolves outside the library, a root
+is not there at all, or a root that still holds one of its files is not writable (`PUID`/`PGID` unset; `fix` names
+it). A root the files have already left need not be writable (since v0.95.0, #328): nothing is written there, and
+its folder, if one is left, stays. Nothing here deletes a series row or a chapter
 row: `read_progress.book_id` is `ON DELETE RESTRICT` on purpose. The one route that does is the third step
 below.
 

@@ -2552,7 +2552,8 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   app.post('/api/admin/series/:id/delete-files', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const b = z.object({ confirm: z.string() }).safeParse(req.body);
+    // `gone` (#328): the admin says the files the last answer counted as `unproven` were deleted or moved by hand.
+    const b = z.object({ confirm: z.string(), gone: z.boolean().optional() }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const row = await getSeriesRow(id);
     if (!row) return reply.code(404).send({ error: 'not_found' });
@@ -2563,14 +2564,17 @@ export default async function adminRoutes(app: FastifyInstance) {
     const claim = claimSeriesWriter([id], folders);
     if (!claim) return reply.code(409).send({ error: 'busy', message: 'Another task is changing that series.' });
     try {
-      const r = await deleteSeriesFiles(id);
+      const r = await deleteSeriesFiles(id, { gone: b.data.gone === true });
       if (!r.ok) return reply.code(409).send({ error: 'refused', message: r.reason, fix: r.fix });
       const { deletedBookIds, ...answer } = r;
       // Exact identities make the recurring v0.55.8 provenance repair safe on later boots. `files` alone is
       // not enough: Delete files may also reconcile already-absent rows on a demonstrably mounted library.
       await logAudit('series.delete_files', {
         userId: userIdOf(req),
-        detail: { id, files: r.files, bytes: r.bytes, bookIds: deletedBookIds, applied: deletedBookIds.length },
+        detail: {
+          id, files: r.files, bytes: r.bytes, bookIds: deletedBookIds, applied: deletedBookIds.length,
+          ...(b.data.gone ? { markedGone: r.gone } : {}),
+        },
         req,
       });
       return answer;

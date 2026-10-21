@@ -832,6 +832,13 @@ once, calmly. The idea is @TIGamingTV's ([#119](https://github.com/AngeloSha/uch
   result it took, and why a match was refused — its own title was not this series', or its chapter numbers did not
   line up, with how many of yours it lists and how many of its yours does. The lines start `[find]`. Set it back
   when you are done: the log is long at debug.
+- **A site's own name for a series** (since v0.95.0, [#316](https://github.com/AngeloSha/uchiyomi/issues/316)). A site
+  sometimes lists a series under a name it does not have here: *Revenge of the Iron-Blooded Sword Hound* is *Revenge of
+  the Baskerville Bloodhound* on three sites. A run started with **Let me review each match first** proposes such a
+  series, in amber with its cover, when the site gave it first for two or more of the series' names and its chapter
+  numbers line up both ways. Follow it if the covers show the same series: that also keeps the site's name as one of
+  the series' other names, so the next search finds it under that name on other sites too. An automatic run never
+  follows one: chapter numbers alone cannot tell two series of the same length apart.
 - **A restart** stops a run the way **Stop** does: what it followed stays followed, and the series it never reached
   are listed as not tried.
 
@@ -2631,8 +2638,13 @@ A chapter whose file was already gone is marked *deleted from the server* too, b
 provably mounted — the same proof the *Verify chapter files* task in section 12 uses: at least one chapter
 file of any series is present under it (a folder is not proof) and no more than nine in ten of the files
 looked at are absent. That is what lets a series whose folder you removed by hand on the NAS be forgotten:
-the toast says *Deleted 0 file(s)*, and the row offers *Forget*. On a share that is not mounted every file looks gone,
-nothing is marked, and every row stays as it was. A file the server is not allowed to look at (a folder whose
+the toast says *Its files were already gone. Its chapters are marked deleted.*, and the row offers *Forget*. On a share
+that is not mounted every file looks gone, nothing is marked, and every row stays as it was. Since v0.95.0
+([#328](https://github.com/AngeloSha/uchiyomi/issues/328)) the dialog then asks, *24 chapter files are not on disk*,
+because a small library whose folders you deleted yourself looks the same: if you deleted or moved them, **Mark them
+gone** marks them, and the row offers *Forget*. It refuses when the library folder is empty or cannot be opened, which
+is what a share that is not mounted looks like. Only a folder that still holds one of the series' files must be
+writable, so a library Uchiyomi may only read (no `PUID`) no longer stops this. A file the server is not allowed to look at (a folder whose
 permissions slipped, a disk error) is not taken for gone either: it is left on disk, its chapter is not marked,
 the series folder on that root stays, and the toast says how many files could not be checked and asks you to
 check the folder's permissions. Deleting a merge survivor's files also removes the
@@ -3770,7 +3782,7 @@ delete in the app is deliberately smaller than it sounds, so here is exactly wha
   to put back by hand, and a chapter below a series' *latest N* floor comes back through *Fetch again* only,
   never the sweep. *Delete
   files* is admin-only, only after a remove, asks for the title, and refuses rather than half-applying when
-  the folder is not writable (that is `PUID`/`PGID` unset — the refusal names the fix) or when the series has
+  a folder that still holds its files is not writable (that is `PUID`/`PGID` unset — the refusal names the fix) or when the series has
   no chapter rows on any root (*That series has no files on disk*). On a mounted library it also marks
   chapters whose files were removed by hand (section 8), so a series deleted on the NAS can still reach
   *Forget*.

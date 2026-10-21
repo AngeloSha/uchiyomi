@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4201
+    "strings": 4207
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -4204,5 +4204,11 @@
   "Open a link": "فتح رابط",
   "Paste a link from {site}": "الصق رابطًا من {site}",
   "Signing in with a link the site emailed you? Copy the link from the email, without opening it, and paste it here.": "تسجّل الدخول برابط أرسله إليك الموقع بالبريد؟ انسخ الرابط من الرسالة دون أن تفتحه، والصقه هنا.",
-  "Only links on {site} open here.": "لا تُفتح هنا إلا روابط {site}."
+  "Only links on {site} open here.": "لا تُفتح هنا إلا روابط {site}.",
+  "Its files were already gone. Its chapters are marked deleted.": "كانت ملفاتها محذوفة من قبل. فصولها الآن معلَّمة على أنها محذوفة.",
+  "1 chapter file is not on disk": "ملف فصل واحد غير موجود على القرص",
+  "{n} chapter files are not on disk": "ملفات فصول عددها {n} غير موجودة على القرص",
+  "Uchiyomi can't tell a file you deleted from one on a drive that isn't connected right now, so it left them as they were. If you deleted or moved them yourself, mark them gone. Then you can forget the series.": "لا يستطيع Uchiyomi التمييز بين ملف حذفته وملف على قرص غير موصول الآن، لذا تركها كما هي. إن حذفتها أو نقلتها بنفسك، فعلّمها على أنها محذوفة. بعدها يمكنك نسيان السلسلة.",
+  "Mark them gone": "علّمها كمحذوفة",
+  "Amber: this source lists it under its own name, which came up first for two of this series’ names. Check the covers before you follow it. Following it keeps the name.": "كهرماني: يعرضه هذا المصدر باسم خاص به، ظهر أولًا عند البحث باسمين من أسماء هذه السلسلة. تحقّق من الغلافين قبل متابعته. متابعته تحفظ هذا الاسم."
 }

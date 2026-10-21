@@ -79,7 +79,8 @@ export interface FindPromoted {
 /**
  * A match a review-first run kept (bff FindProposal, v0.51.0): green is what an automatic run would have followed,
  * amber is for a person to look at -- the chapter numbers do not line up though a name matches exactly (`numbering`),
- * or it lines up only under another name of the series (`other_name`). `ours` is how many of the series' chapter
+ * it lines up only under another name of the series (`other_name`), or only under a name the source gives it
+ * (`their_name`, v0.95.0, #316). `ours` is how many of the series' chapter
  * numbers it lists, `theirs` how many of its numbers the series lists. `title`, `coverUrl` and `url` are left out for
  * a series the viewer may not list.
  */
@@ -97,9 +98,11 @@ export interface FindProposal {
   verdict: 'green' | 'amber';
   /**
    * v0.54.0, Replace's review adds why a source the series already follows is amber: it is cooling down, it lists too
-   * few of the series' chapters (`coverage`), or it has not answered for the series lately (`stale`).
+   * few of the series' chapters (`coverage`), or it has not answered for the series lately (`stale`). v0.95.0 (#316):
+   * the source lists it under a name the series does not have, and gave it first for two or more of its names
+   * (`their_name`); following it keeps that name.
    */
-  amber?: 'numbering' | 'other_name' | 'cooling' | 'coverage' | 'stale';
+  amber?: 'numbering' | 'other_name' | 'their_name' | 'cooling' | 'coverage' | 'stale';
   state?: 'followed' | 'dismissed' | 'promoted';
   /** v0.54.0, Replace: a source the series follows already (`follower`), or a search's match (`search`). */
   kind?: 'follower' | 'search';
@@ -596,6 +599,8 @@ export function amberNote(p: Pick<FindProposal, 'verdict' | 'amber'>): string | 
   if (p.verdict !== 'amber') return null;
   switch (p.amber) {
     case 'other_name': return tr('Amber: it matched only under another name of this series, not its title. Check the covers before you follow it.');
+    // v0.95.0 (#316): a name only the source gives it. Following it keeps the name (bff findSources.ts decide).
+    case 'their_name': return tr('Amber: this source lists it under its own name, which came up first for two of this series’ names. Check the covers before you follow it. Following it keeps the name.');
     // v0.54.0, Replace's review: a source the series already follows, amber for its own reasons.
     case 'cooling': return tr('Amber: this source is cooling down after refusing requests; it is asked again once that ends.');
     case 'coverage': return tr('Amber: it lists only some of this series’ chapters.');

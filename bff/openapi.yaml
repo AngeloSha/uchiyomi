@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.94.0
+  version: 0.95.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -10208,7 +10208,11 @@ paths:
         live rows, which Forget refuses on). `files` still counts unlinks only, so a series whose folder was
         removed by hand answers `files: 0` and its Removed row then offers Forget (`live_books` 0). Delete
         files on a merge survivor also removes the folders of the rows merged into it, and every folder is
-        resolved on every root before anything is unlinked. Refuses rather than half-applies.
+        resolved on every root before anything is unlinked. Refuses rather than half-applies. Since v0.95.0
+        (#328) only a root that still holds one of the series' files must be writable -- one its files have
+        left is only reconciled, which writes nothing there -- and the rows left live on an unproven root are
+        counted in `unproven`: the same call with `gone: true`, the admin's word that they deleted or moved
+        those files, marks them without the proof, except on a root that cannot be opened or opens empty.
       parameters:
         - name: id
           in: path
@@ -10230,11 +10234,17 @@ paths:
                     compared (docs/api.md, "Typing a title to confirm"): one layer of HTML entities, NFKC,
                     curly quotes and dashes folded to ASCII, invisibles and emoji dropped, every Unicode
                     space collapsed to one, ends trimmed. Case is NOT folded.
+                gone:
+                  type: boolean
+                  description: >-
+                    Since v0.95.0 (#328). The admin says the files the last answer counted as `unproven` were
+                    deleted or moved by hand: their rows are marked deleted without the mounted-root proof. A root
+                    that cannot be opened or opens empty still refuses (409, "Mount it, then try again.").
       security:
         - bearer: []
       responses:
         "200":
-          description: "{ ok: true, files, bytes, unchecked } -- files actually unlinked this call (0 for a series whose files were removed by hand; its absent rows are marked when the root is provably mounted). `unchecked` counts chapter files the server could not look at (EACCES, an I/O error): only a file that is not there (ENOENT) is absent, so those rows stay live, and a root holding one keeps its series folder."
+          description: "{ ok: true, files, bytes, unchecked, gone, unproven } -- files actually unlinked this call (0 for a series whose files were removed by hand; its absent rows are marked when the root is provably mounted, and `gone` counts them). `unproven` (since v0.95.0) counts live rows whose file is absent on a root nothing proves is there, left as they were; the same call with `gone: true` marks them. `unchecked` counts chapter files the server could not look at (EACCES, an I/O error): only a file that is not there (ENOENT) is absent, so those rows stay live, and a root holding one keeps its series folder."
         "400":
           description: "bad_request, or confirm_mismatch when `confirm` is not the series' title."
         "401":
@@ -10244,7 +10254,7 @@ paths:
         "404":
           description: Not found, or not visible to this account
         "409":
-          description: "refused { message, fix }: not hidden yet, no chapter rows on any root, a folder that resolves outside the library, or a root that is not writable (PUID/PGID unset; fix names it)."
+          description: "refused { message, fix }: not hidden yet, no chapter rows on any root, a folder that resolves outside the library, a root that is not there at all, a root that still holds one of its files and is not writable (PUID/PGID unset; fix names it), or -- with `gone` -- a root that cannot be opened or opens empty."
   /api/admin/series/{id}/forget:
     post:
       tags:

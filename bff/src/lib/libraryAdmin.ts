@@ -18,7 +18,7 @@ import { rm, rename, realpath, stat, readdir } from 'fs/promises';
 import type { Stats } from 'fs';
 import { q, one, tx } from './db';
 import { artFile } from './seriesArt';
-import { allWritable, containedPath, realContainedPath, statOrGone } from './fsGuard';
+import { allWritable, containedPath, realContainedPath, rootUnavailable, statOrGone, writePreflight, type Writability } from './fsGuard';
 export { statOrGone } from './fsGuard';
 import { tombstoneBooks } from './chapterCleanup';
 import { LIBRARY_ROOT, DL_ROOT, listChapters } from './library';
@@ -963,13 +963,35 @@ export interface FileOpRefusal { ok: false; reason: string; fix?: string }
  * standing (empty) and Forget refused on them forever with the Delete files chip already hidden (R3's probe
  * P2). Reintroduce by rm'ing `row.folder` only: "delete files removes the folder of a row merged into the
  * series" in fileOps.int.test.ts finds the absorbed directory still there.
+ *
+ * ⚠️ ONLY A ROOT WITH A FILE LEFT TO DELETE MUST BE WRITABLE (#328). Every root used to be write-checked first,
+ * and a library Uchiyomi may only read -- the default, PUID unset -- refused "not writable ... set PUID" for a
+ * series whose folder the admin had already deleted by hand: nothing left to unlink, the rows never reconciled,
+ * and the Removed row never reached Forget. What is on disk is looked at first now; a root holding a present file
+ * must be writable or the whole call refuses, as before, and a root the files have left is only reconciled, which
+ * writes nothing there. Its folder is removed only where the root is writable. A root that is not there at all is
+ * still refused up front. Reintroduce by write-checking every root: "Delete files on a read-only library its files
+ * have left marks them" in fileOps.int.test.ts reads the PUID refusal.
+ *
+ * ⚠️ `gone` IS A PERSON'S WORD FOR WHAT THE PROOF CANNOT SAY (#328). A small library whose folders were deleted by
+ * hand proves nothing -- nine files in ten gone is the unmounted rule -- and its absent rows stayed live forever.
+ * The answer counts them as `unproven`, the dialog asks the admin whether they deleted or moved those files
+ * themselves, and asked again with `gone` they are marked without the proof -- but never on a root that cannot be
+ * opened or opens empty, which is what a share that is not mounted looks like: that refuses, with "mount it". The
+ * person can tell a deleted folder from an unplugged drive; the server cannot. Reintroduce by dropping the
+ * rootUnavailable check: "gone does not mark anything on an empty root" in fileOps.int.test.ts finds the rows
+ * marked.
  */
-export async function deleteSeriesFiles(id: string): Promise<{
+export async function deleteSeriesFiles(id: string, opts: { gone?: boolean } = {}): Promise<{
   ok: true;
   files: number;
   bytes: number;
   /** Chapter files that could not be looked at (EACCES, an I/O error): left live and on disk, not removed. */
   unchecked: number;
+  /** Live rows whose file was already absent, marked deleted now: a folder deleted by hand (#55, #328). */
+  gone: number;
+  /** Live rows whose file is absent on a root nothing proves is there, left as they were: `gone` marks them (#328). */
+  unproven: number;
   /** Exact rows this invocation deliberately made (or reclassified as) tombstones; for the audit, not the API. */
   deletedBookIds: string[];
 } | FileOpRefusal> {
@@ -984,8 +1006,14 @@ export async function deleteSeriesFiles(id: string): Promise<{
   const roots = await rootsOf(id);
   if (!roots.length) return { ok: false, reason: 'That series has no files on disk.' };
 
-  const w = await allWritable(roots);
-  if (!w.ok) return { ok: false, reason: w.reason, fix: w.fix };
+  // Whether each root may be written, asked now and enforced below for the roots that hold something to delete
+  // (#328, the header). A root that is not there at all answers nothing about its files and refuses up front.
+  const writable = new Map<string, Writability>();
+  for (const root of roots) {
+    const w = await writePreflight(root);
+    if (!w.ok && !(await stat(root).catch(() => null))) return { ok: false, reason: w.reason, fix: w.fix };
+    writable.set(root, w);
+  }
 
   // This row's folder and every absorbed row's: the scanner files a merged folder under the survivor, so
   // the survivor's Delete files owns it.
@@ -1013,21 +1041,17 @@ export async function deleteSeriesFiles(id: string): Promise<{
     }
   }
 
-  let files = 0;
-  let bytes = 0;
-  let unchecked = 0;
-  const removed: string[] = [];
-  const reconciled: string[] = [];
-  const reclassified: string[] = [];
+  // What is on disk, root by root, before anything is unlinked or refused for want of writing (#328).
+  type Look = {
+    stale: boolean; present: Array<{ id: string; abs: string; size: number }>; absentLive: string[];
+    absent: number; unreadable: number; why?: string;
+  };
+  const looks = new Map<string, Look>();
   for (const root of roots) {
     const rows = await q<{ id: string; file: string; pruned_at: string | null; pruned_reason: string | null }>(
       'SELECT id, file, pruned_at, pruned_reason FROM lib_books WHERE series_id = $1 AND root = $2', [id, root],
     );
-    let present = 0;
-    let absent = 0;
-    let unreadable = 0;
-    let why: string | undefined;
-    const absentLive: string[] = [];
+    const look: Look = { stale: rows.some((b) => b.pruned_reason === 'missing'), present: [], absentLive: [], absent: 0, unreadable: 0 };
     for (const b of rows) {
       const abs = containedPath(root, b.file);
       if (!abs) continue;
@@ -1037,30 +1061,69 @@ export async function deleteSeriesFiles(id: string): Promise<{
       // `unchecked` and logged. Reintroduce `stat(...).catch(() => null)`: "Delete files leaves the chapters of a
       // folder it may not read ..." in deleteUnreadable.int.test.ts finds them marked deleted.
       const st = await statOrGone(abs);
-      if (typeof st === 'string') { unreadable++; why ??= st; continue; }
+      if (typeof st === 'string') { look.unreadable++; look.why ??= st; continue; }
       if (!st) {
-        absent++;
-        if (!b.pruned_at) absentLive.push(b.id);
+        look.absent++;
+        if (!b.pruned_at) look.absentLive.push(b.id);
         continue;
       }
-      present++;
+      look.present.push({ id: b.id, abs, size: st.size });
+    }
+    looks.set(root, look);
+  }
+  // A file to delete on a root that may not be written refuses the whole call, before anything is unlinked.
+  for (const root of roots) {
+    const w = writable.get(root)!;
+    if (!w.ok && looks.get(root)!.present.length) return { ok: false, reason: w.reason, fix: w.fix };
+  }
+  // A person's word that the absent files are gone is no answer for a root that cannot be opened or opens empty.
+  if (opts.gone) {
+    for (const root of roots) {
+      if (!looks.get(root)!.absentLive.length) continue;
+      const down = await rootUnavailable(root);
+      if (down) {
+        return {
+          ok: false,
+          reason: `${root} ${down === 'empty' ? 'is empty' : `cannot be opened (${down})`}, which is what a library that is not mounted looks like.`,
+          fix: 'Mount it, then try again.',
+        };
+      }
+    }
+  }
+
+  let files = 0;
+  let bytes = 0;
+  let unchecked = 0;
+  let unproven = 0;
+  const removed: string[] = [];
+  const reconciled: string[] = [];
+  const reclassified: string[] = [];
+  for (const root of roots) {
+    const look = looks.get(root)!;
+    for (const p of look.present) {
       // Unlink first, mark second: a row marked for a file that is still on disk is an invisible leak,
       // the same order the read-chapter cleanup keeps.
-      try { await rm(abs, { recursive: true, force: true }); } catch { continue; }
-      bytes += st.size;
+      try { await rm(p.abs, { recursive: true, force: true }); } catch { continue; }
+      bytes += p.size;
       files++;
-      removed.push(b.id);
+      removed.push(p.id);
     }
     // A folder holding a file nobody could look at is not taken: whatever the rm reached would go with no row marked.
-    unchecked += unreadable;
-    if (unreadable) console.warn(`[delete-files] ${root}: ${unreadable} chapter file(s) could not be looked at (${why}) -- left as they are, and the series folder kept`);
-    if (!unreadable) for (const t of targets) if (t.root === root) await rm(t.abs, { recursive: true, force: true }).catch(() => {});
+    // Nor one on a root that may not be written: nothing of the series' was left there to delete.
+    unchecked += look.unreadable;
+    if (look.unreadable) console.warn(`[delete-files] ${root}: ${look.unreadable} chapter file(s) could not be looked at (${look.why}) -- left as they are, and the series folder kept`);
+    if (!look.unreadable && writable.get(root)!.ok) {
+      for (const t of targets) if (t.root === root) await rm(t.abs, { recursive: true, force: true }).catch(() => {});
+    }
 
-    // The reconciliation, under the proof (the header). Nothing to reconcile is the common case and costs
-    // no extra stat.
-    const stale = rows.some((b) => b.pruned_reason === 'missing');
+    // The reconciliation, under the proof (the header) or the person's word. Nothing to reconcile is the common case
+    // and costs no extra stat.
+    const { absentLive, stale } = look;
     if (!absentLive.length && !stale) continue;
-    if (!(await rootProven(root, id, present, absent))) continue;
+    if (!opts.gone && !(await rootProven(root, id, look.present.length, look.absent))) {
+      unproven += absentLive.length;
+      continue;
+    }
     reconciled.push(...absentLive);
     if (stale) {
       const changed = await q<{ id: string }>(
@@ -1082,7 +1145,10 @@ export async function deleteSeriesFiles(id: string): Promise<{
          SELECT id FROM lib_books WHERE series_id = $1 ORDER BY (pruned_at IS NOT NULL), number ASC, file ASC LIMIT 1
        ) WHERE id = $1`, [id]);
   }
-  return { ok: true, files, bytes, unchecked, deletedBookIds: [...new Set([...removed, ...reconciled, ...reclassified])] };
+  return {
+    ok: true, files, bytes, unchecked, gone: reconciled.length, unproven,
+    deletedBookIds: [...new Set([...removed, ...reconciled, ...reclassified])],
+  };
 }
 
 /** How many live rows of OTHER series are stat'ed for the mount proof when none of this series' own is present. */

@@ -51,7 +51,7 @@ import { releaseHref, shownVersion, updateState, type UpdateState } from '@/lib/
 import { useSectionArrival } from '@/lib/useSectionArrival';
 import { useReduceEffects } from '@/lib/effects';
 import { joinsOnTheirOwn, memberDefaultsOf, type MemberDefaults } from '@/lib/memberDefaults';
-import { deleteFilesNotice, type DeleteFilesResult } from '@/lib/deleteFiles';
+import { deleteFilesNotice, notOnDiskTitle, type DeleteFilesResult } from '@/lib/deleteFiles';
 
 /** A name or a title inside a sentence, isolated: in Arabic a Latin one otherwise takes the sentence's order. */
 const iso = (s: string): string => `\u2068${s}\u2069`;
@@ -1669,24 +1669,31 @@ function LibraryPanel() {
   const qc = useQueryClient();
   const [purge, setPurge] = useState<DeletedRow | null>(null);
   const [purging, setPurging] = useState(false);
+  // #328: chapter files the server found gone on a library it cannot prove is there -- a folder deleted by hand looks
+  // exactly like a drive that is not connected. The admin is asked, and their yes is the same call with `gone`.
+  const [notThere, setNotThere] = useState<{ row: DeletedRow; n: number } | null>(null);
+  const [marking, setMarking] = useState(false);
 
-  const deleteFiles = async (r: DeletedRow) => {
-    setPurging(true);
+  const deleteFiles = async (r: DeletedRow, gone = false) => {
+    (gone ? setMarking : setPurging)(true);
     try {
       const res = await api<DeleteFilesResult>(`/api/admin/series/${r.id}/delete-files`,
-        { method: 'POST', json: { confirm: r.title } });
+        { method: 'POST', json: gone ? { confirm: r.title, gone: true } : { confirm: r.title } });
       // Files the server could not look at are left on disk and said, with what to check (lib/deleteFiles.ts).
       const notice = deleteFilesNotice(res);
-      toast(notice.message, notice.type);
+      // Nothing deleted and nothing marked: the question below says why, which a green "Deleted 0 files" would not.
+      if (res.files || res.gone || res.unchecked || !res.unproven) toast(notice.message, notice.type);
       setPurge(null);
+      setNotThere(!gone && res.unproven ? { row: r, n: res.unproven } : null);
       qc.invalidateQueries({ queryKey: ['admin-deleted'] });
     } catch (e: any) {
       // A refusal carries the actual reason and, for a permissions problem, the exact fix.
       let msg = msgOf(e, tr('Could not delete the files'));
       try { const b = JSON.parse(e?.body || '{}'); if (b.fix) msg = `${b.message} ${b.fix}`; } catch {}
       toast(msg, 'error');
+      if (gone) setNotThere(null);
     }
-    setPurging(false);
+    (gone ? setMarking : setPurging)(false);
   };
   const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
@@ -1758,6 +1765,21 @@ function LibraryPanel() {
           busy={purging}
           onConfirm={() => deleteFiles(purge)}
           onClose={() => setPurge(null)}
+        />
+      )}
+      {notThere && (
+        <ConfirmDialog
+          title={notOnDiskTitle(notThere.n)}
+          body={
+            <>
+              <p>{tr("Uchiyomi can't tell a file you deleted from one on a drive that isn't connected right now, so it left them as they were. If you deleted or moved them yourself, mark them gone. Then you can forget the series.")}</p>
+              <p className="mt-2 text-fog-500">{tr('Folder')}: <span dir="ltr">{notThere.row.folder}</span></p>
+            </>
+          }
+          confirmLabel={tr('Mark them gone')}
+          busy={marking}
+          onConfirm={() => deleteFiles(notThere.row, true)}
+          onClose={() => setNotThere(null)}
         />
       )}
       {forget && (

@@ -88,6 +88,14 @@ export function releaseHuntSlot(): void {
  * answer -- never a health event, so a bulk search cannot put a source into a cooldown or mark it failing (#115
  * confirms a failure after three in a row, and a run over many series would be three in a row by itself).
  * `answered` is false when no search on this source answered at all.
+ *
+ * `tied` (#316), only when nothing matched: the one result this source gave FIRST under two or more of the names. A
+ * site often files a series under a name the series does not have here -- TIGamingTV's "Revenge of the Iron-Blooded
+ * Sword Hound" is "Revenge of the Baskerville Bloodhound" on Atsumaru, Manga Ball and MangaFire, each of which
+ * answered with it for the title and for its other names -- and no rule here may guess that it is this series:
+ * Find other sources only PROPOSES it, for a person to check by its cover (lib/findSources.ts findFor). One name's
+ * first result is not enough, ever: a site's first answer for a title it does not carry is an unrelated series (the
+ * header of lib/titleMatch.ts).
  */
 export async function searchByNames(
   src: Pick<SourceAdapter, 'search' | 'requiresCloudflare'>,
@@ -99,23 +107,35 @@ export async function searchByNames(
   // What each name brought back -- null when the source did not answer -- and the hit taken from it: Find other
   // sources' log at LOG_LEVEL=debug (#316).
   heard?: (term: string, results: readonly SourceSeries[] | null, hit: SourceSeries | null) => void,
-): Promise<{ hit: SourceSeries | null; answered: boolean; paused: boolean }> {
+): Promise<{ hit: SourceSeries | null; answered: boolean; paused: boolean; tied: SourceSeries | null }> {
   let answered = false;
+  const firsts: SourceSeries[] = [];
   for (const [i, term] of [title, ...names].entries()) {
     const ms = left();
     if (ms < MIN_TRY_MS) break;
     // Each spelling is a separate provider request. An unattended series can be unmonitored while the
     // preceding spelling is in flight, so admission is deliberately re-read for every one.
-    if (admit && !(await admit().catch(() => false))) return { hit: null, answered, paused: true };
+    if (admit && !(await admit().catch(() => false))) return { hit: null, answered, paused: true, tied: null };
     const results = await bounded(src.search(term), Math.min(budgetFor(src, searchMs), ms)).catch(() => null);
     // A throw on one name is a throw on the next: the site, the solver or the extension is down for all of them.
     if (!results) { heard?.(term, null, null); break; }
     answered = true;
     const hit = i === 0 ? pickBest(results, term) : exactHit(results, term);
     heard?.(term, results, hit?.sourceId ? hit : null);
-    if (hit?.sourceId) return { hit, answered, paused: false };
+    if (hit?.sourceId) return { hit, answered, paused: false, tied: null };
+    if (results[0]?.sourceId) firsts.push(results[0]);
   }
-  return { hit: null, answered, paused: false };
+  return { hit: null, answered, paused: false, tied: tiedFirst(firsts) };
+}
+
+/** The result that came first under two or more names, or null (#316, searchByNames' `tied`). */
+export function tiedFirst(firsts: readonly SourceSeries[]): SourceSeries | null {
+  const seen = new Set<string>();
+  for (const r of firsts) {
+    if (seen.has(r.sourceId)) return r;
+    seen.add(r.sourceId);
+  }
+  return null;
 }
 
 export interface HuntResult {
