@@ -313,18 +313,18 @@ const bookFileAbs = async (id: string, ctx: ViewCtx): Promise<string | null> => 
 // Bytes of a series' first downloaded page — the universal fallback when a remote cover/backdrop URL can't be
 // fetched (hotlink-protected CDN, dead link, timeout, unparsed cover). Guarantees art for any downloaded series.
 // The page the read-chapter cleanup kept before deleting its chapter comes first (v0.97.0, #332, lib/seriesArt.ts
-// keepCoverPage): it is the cover as it was, whichever chapter is lowest now. Reintroduce by reading the chapters
-// first: "the cover's chapter goes, and its page stays the cover" in cleanupCoverPage.int.test.ts sees the next
-// chapter's page.
+// keepCoverPage): it is the cover as it was, whichever chapter is lowest now. Its file is named by the id the database
+// holds, never the request's, as the art routes in admin.ts name theirs. Reintroduce by reading the chapters first:
+// "the cover's chapter goes, and its page stays the cover" in cleanupCoverPage.int.test.ts sees the next chapter's page.
 // Else the cover chapter's, unless that is a notice chapter the admin hides (lib/noticeChapters.ts), which has no pages
 // to give anyone: then the lowest chapter that is shown, picked the way the scan picks the cover (lib/library.ts, live
 // first). Reintroduce by reading cover_book_id alone: "a hidden notice as the cover chapter" in
 // noticeSurfaces.int.test.ts finds the series' cover a 404.
 const firstPageInput = async (id: string, ctx: ViewCtx): Promise<Buffer> => {
-  const kept = await readFile(artFile(id, 'page')).catch(() => null);
+  const s = await one<{ id: string; cover_book_id: string | null }>(
+    `SELECT s.id, ${firstPageBookOf('s')} AS cover_book_id FROM lib_series s WHERE s.id = $1`, [id]);
+  const kept = s ? await readFile(artFile(s.id, 'page')).catch(() => null) : null;
   if (kept) return kept;
-  const s = await one<{ cover_book_id: string }>(
-    `SELECT ${firstPageBookOf('s')} AS cover_book_id FROM lib_series s WHERE s.id = $1`, [id]);
   const abs = s?.cover_book_id ? await bookFileAbs(s.cover_book_id, ctx) : null;
   if (!abs) throw Object.assign(new Error('no cover'), { statusCode: 404 });
   // A cover chapter whose file is gone -- deleted or moved by hand, which is what Rescan everything finds (v0.55.4), or a
