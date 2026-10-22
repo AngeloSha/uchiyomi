@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4247
+    "strings": 4256
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -4250,5 +4250,14 @@
   "Japanese": "Japanese",
   "Only tell me about my next chapter": "Only tell me about my next chapter",
   "A new chapter notifies you only when it is the one the series page would open for you: you are caught up, with nothing older unread or half read. Applies to push alerts and to messages sent to you. Saved to your account.": "A new chapter notifies you only when it is the one the series page would open for you: you are caught up, with nothing older unread or half read. Applies to push alerts and to messages sent to you. Saved to your account.",
-  "Author: {name}": "作者：{name}"
+  "Author: {name}": "作者：{name}",
+  "1 downloaded chapter no other source lists will be deleted from the server, together with everyone's reading progress.": "他のどのソースにも載っていないダウンロード済みの 1 話が、全員の読書進捗とともにサーバーから削除されます。",
+  "{n} downloaded chapters no other source lists will be deleted from the server, together with everyone's reading progress.": "他のどのソースにも載っていないダウンロード済みの {n} 話が、全員の読書進捗とともにサーバーから削除されます。",
+  "No source this series follows lists this chapter. Once it is deleted, it cannot be fetched again.": "このシリーズがフォローしているソースには、この話が載っていません。削除すると再取得できません。",
+  "No source this series follows lists these chapters. Once they are deleted, they cannot be fetched again.": "このシリーズがフォローしているソースには、これらの話が載っていません。削除すると再取得できません。",
+  "No source this series follows lists one of these chapters. Once it is deleted, it cannot be fetched again.": "このシリーズがフォローしているソースには、これらのうち 1 話が載っていません。削除すると再取得できません。",
+  "No source this series follows lists {n} of these chapters. Once they are deleted, they cannot be fetched again.": "このシリーズがフォローしているソースには、これらのうち {n} 話が載っていません。削除すると再取得できません。",
+  "Stop following {name}?": "{name} のフォローをやめますか？",
+  "Stop following and delete": "フォローをやめて削除",
+  "Detach {name}? The next source takes over as main.": "{name} を外しますか？次のソースがメインになります。"
 }

@@ -822,6 +822,18 @@ offers `replace_source`, the source's `standing` is `cooling` (so it still carri
 `frozen-series` cause), and `GET /api/admin/sources` leaves it out of `failing`. The downloader's stored words for a
 refused chapter name the refusal it blamed -- *HTTP 429*, *HTTP 403* -- never a worse page status beside it.
 
+**Removing a source takes the chapters only it lists.** `DELETE /api/admin/series/:id/sources/:sourceId` (a follower,
+or the main source with a follower to take over) deletes every chapter of the series that the source supplied
+(`lib_books.source_id`, in the download folder) and that no remaining source lists (any copy in `series_listing`):
+the file, the row (a tombstone too), its reading progress, bookmarks and offline rows, and the by-number read marks
+and failure entries of every number only that source listed. Afterwards its numbers are free, so the sweep fetches the
+series' real chapters under them. The series' last source keeps its chapters. The answer carries
+`purged {removed, bytes, left[]}` when anything was taken; it is a 409 `busy` while another task changes the series, and a
+409 `refused` when the download folder may not be written. The audit event is `series.source_leftovers`. `GET
+.../sources/:sourceId/leftovers` previews it as `{chapters, numbers, readers, lastSource}`. `POST
+/api/admin/series/:id/chapters/unlisted {bookIds}` answers `{unlisted}`: the chosen chapters no followed source lists,
+which the Delete from server confirmation warns about.
+
 **Failed chapters follow the series** (since v0.55.3). A failed chapter (one row of the ledger Health's
 `chapter-failures` check reads) that is filed under a source its series no longer uses -- neither its main source nor
 one it follows -- is filed under the series' main source, its attempts back to 0, its first failure (`firstAt`) and
@@ -1850,6 +1862,7 @@ GET    /api/admin/series/bulk/chapters/delete
 POST   /api/admin/series/bulk/chapters/delete/cancel
 GET    /api/admin/series/:id/scanlators GET    /api/admin/scanlators
 POST   /api/admin/series/:id/sources DELETE /api/admin/series/:id/sources/:sourceId
+GET    /api/admin/series/:id/sources/:sourceId/leftovers
 POST   /api/admin/series/:id/main-source
 POST   /api/admin/series/:id/attach-source
 GET    /api/admin/series/:id/alt-titles POST   /api/admin/series/:id/alt-titles
@@ -1865,6 +1878,7 @@ POST   /api/admin/series/:id/delete-files
 POST   /api/admin/series/:id/forget
 POST   /api/admin/series/:id/rename-folder
 POST   /api/admin/series/:id/chapters/delete POST   /api/admin/series/:id/chapters/refetch
+POST   /api/admin/series/:id/chapters/unlisted
 POST   /api/admin/series/:id/chapters/keep-once
 POST   /api/admin/series/:id/chapters/hide POST   /api/admin/series/:id/chapters/unhide
 GET    /api/admin/series/:id/chapters/hidden
