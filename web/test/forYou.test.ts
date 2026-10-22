@@ -2,7 +2,7 @@
 // title by any of its names or its AniList entry, and each card saying where it came from.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { anilistIdOf, mergePicks, PICKS_MAX, type ReadPick } from '../lib/forYou';
+import { anilistIdOf, mergePicks, PICKS_MAX, seedsOf, SEEDS_SHOWN, type ReadPick } from '../lib/forYou';
 import type { Recommendation } from '../lib/recommendations';
 
 const rec = (title: string, o: Partial<Recommendation> = {}): Recommendation => ({
@@ -51,4 +51,18 @@ test('the row holds at most forty, and a pick from an older server names the ans
   assert.deepEqual(old[0].from, { kind: 'read', seriesId: 's9', because: 'Vagabond' });
   // With no read named at all, a pick has nothing to say why it is there, and is left out.
   assert.deepEqual(mergePicks([], [{ id: 1, title: 'Old', cover: null, score: null }]), []);
+});
+
+test('the band\'s read series: each once, in the order the picks name them, five at most, and none from a tracker (v0.99.0)', () => {
+  const by = (n: number) => ({ id: `s${n}`, title: `Read ${n}` });
+  const picks = mergePicks([rec('A'), rec('B')], [read('x', null, by(1)), read('y', null, by(2)), read('z', null, by(1)),
+    read('u', null, by(3)), read('v', null, by(4)), read('w', null, by(5)), read('t', null, by(6))]);
+  // Reintroduce the read series without the seen set: Read 1 is two covers beside "Because you read…".
+  assert.deepEqual(seedsOf(picks), [1, 2, 3, 4, 5].map((n) => ({ seriesId: `s${n}`, title: `Read ${n}` })));
+  // Reintroduce no cap: six covers, one past what the band has room for.
+  assert.equal(SEEDS_SHOWN, 5);
+  assert.equal(seedsOf(picks, 2).length, 2);
+  // A tracker's suggestion names a title, not a series here: no cover for it.
+  assert.deepEqual(seedsOf(mergePicks([rec('A'), rec('B')], [])), []);
+  assert.deepEqual(seedsOf([]), []);
 });

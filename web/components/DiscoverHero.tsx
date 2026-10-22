@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { CARD_W, Img, useWideViewport } from '@/components/ui';
 import { sourceCover } from '@/components/cards';
@@ -57,6 +57,18 @@ const HERO_BOX = 'bleed under-topbar relative isolate h-[44vh] min-h-[300px] ove
 
 /** The hero's round-cornered keys over art: glass, so they read on any picture (Home's). */
 const HERO_KEY = 'h-10 w-10 place-items-center rounded-xl border border-white/15 bg-black/40 text-white backdrop-blur transition hover:bg-black/60 active:scale-95';
+
+/**
+ * The small tag over Discover's art: the hero's "Trending now", and since v0.99.0 the For you band's "For you"
+ * (components/ForYouBand.tsx) -- one look for both.
+ */
+export function Eyebrow({ children }: { children: ReactNode }) {
+  return (
+    <span className="mb-2.5 inline-flex w-fit items-center gap-1.5 rounded-md bg-black/45 px-2.5 py-1 text-2xs font-semibold uppercase tracking-wider text-accent backdrop-blur rtl:tracking-normal">
+      <IcSparkle width={12} height={12} />{children}
+    </span>
+  );
+}
 
 /** The scrims over the art: light, matching Home's -- the art is the point, and the type carries its own shadow. */
 function Scrims() {
@@ -130,9 +142,7 @@ export function DiscoverHero({ slides, onPick, waiting = false }: { slides: Tren
         <div className="skeleton absolute inset-0" />
         <Scrims />
         <div className="bleed-pad relative z-10 flex h-full flex-col justify-end pb-5 lg:pb-10">
-          <span className="mb-2.5 inline-flex w-fit items-center gap-1.5 rounded-md bg-black/45 px-2.5 py-1 text-2xs font-semibold uppercase tracking-wider text-accent backdrop-blur rtl:tracking-normal">
-            <IcSparkle width={12} height={12} />{tr('Trending now')}
-          </span>
+          <Eyebrow>{tr('Trending now')}</Eyebrow>
           <span className="block h-7 w-3/4 max-w-md rounded-md bg-white/10 lg:h-12" />
           <span className="mt-2.5 block h-3 w-40 rounded bg-white/10" />
           <span className="mt-4 block h-11 w-40 rounded-xl bg-white/10 lg:h-12" />
@@ -180,9 +190,7 @@ export function DiscoverHero({ slides, onPick, waiting = false }: { slides: Tren
       <Scrims />
 
       <div className="bleed-pad relative z-10 flex h-full flex-col justify-end pb-5 lg:pb-10">
-        <span className="mb-2.5 inline-flex w-fit items-center gap-1.5 rounded-md bg-black/45 px-2.5 py-1 text-2xs font-semibold uppercase tracking-wider text-accent backdrop-blur rtl:tracking-normal">
-          <IcSparkle width={12} height={12} />{tr('Trending now')}
-        </span>
+        <Eyebrow>{tr('Trending now')}</Eyebrow>
         <h2 className="max-w-3xl font-display text-2xl font-bold leading-[1.06] text-white [text-shadow:0_2px_16px_rgba(0,0,0,0.65)] lg:text-5xl xl:text-6xl">
           {cur.title}
         </h2>

@@ -15,6 +15,7 @@ import { ProgressBar, Reveal } from '@/components/ui';
 import { SourceCard, SourceItem, StillLoadingCard } from '@/components/cards';
 import { ScrollRail } from '@/components/ScrollRail';
 import { DiscoverHero, heroPoll, TrendingCard, Trending } from '@/components/DiscoverHero';
+import { ForYouBand } from '@/components/ForYouBand';
 import { pollAfter, type Recommendations } from '@/lib/recommendations';
 import { mergePicks, type Pick, type ReadPick } from '@/lib/forYou';
 import { placeRows, useGridCols, weave } from '@/lib/shelves';
@@ -90,8 +91,8 @@ const HERO_SLIDES = 10;
 const TREND_RAILS = ['KR', 'JP', 'CN'] as const;
 const TREND_LABELS = keys('Trending manhwa', 'Trending manga', 'Trending manhua');
 /**
- * Discover's rows inside the wall (v0.98.0, lib/shelves.ts), in the order they come: the picks for you, then the trending
- * rows. Each only with something on it.
+ * Discover's rows inside the wall (v0.98.0, lib/shelves.ts), in the order they come: the picks for you -- their own band
+ * since v0.99.0 -- then the trending rows. Each only with something on it.
  */
 const ROWS = ['foryou', ...TREND_RAILS] as const;
 type RowKey = (typeof ROWS)[number];
@@ -103,9 +104,9 @@ const WALL_GRID = 'grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-4 md:grid-cols-
 const railKey = (t: { id?: number | null; title: string }): string => (t.id != null ? `al:${t.id}` : `t:${normTitle(t.title)}`);
 
 /**
- * One of Discover's rows (v0.61.0; inside the wall since v0.98.0): the picks for you, and the trending rows. Every one goes
- * through this one ScrollRail -- a strip a mouse can move (rails.test.ts) -- edge to edge, and a card opens the add dialog,
- * which looks the title up on the best-ranked sources.
+ * One of Discover's trending rows (v0.61.0; inside the wall since v0.98.0). Every one goes through this one ScrollRail -- a
+ * strip a mouse can move (rails.test.ts) -- edge to edge, and a card opens the add dialog, which looks the title up on the
+ * best-ranked sources. The picks for you have their own band since v0.99.0 (components/ForYouBand.tsx).
  */
 function AniListRail({ kind, title, children, className = 'pb-3 pt-9' }: {
   kind: string; title: string; children: ReactNode; className?: string;
@@ -731,8 +732,9 @@ function DiscoverInner() {
       providers={stackOf(it)}
       onAdd={() => open(it)} eager={from + k < 12} />
   ));
-  // One of the rows: the picks, each saying why it is there, or a trending row, its first ten ranked. The read a pick came
-  // from is isolated in its sentence, as Home's "Because you read" is: a Latin title inside an Arabic one keeps its order.
+  // One of the rows: the picks in their own band (v0.99.0, components/ForYouBand.tsx), each saying why it is there, or a
+  // trending row, its first ten ranked. The read a pick came from is isolated in its sentence, as Home's "Because you read"
+  // is: a Latin title inside an Arabic one keeps its order.
   const whyOf = (pk: Pick) => {
     const reason = pk.from.because ? tr('Because you read {title}', { title: `\u2068${pk.from.because}\u2069` }) : undefined;
     return pk.from.kind === 'tracker'
@@ -740,13 +742,7 @@ function DiscoverInner() {
       : { reason, art: img.seriesThumb(pk.from.seriesId), tip: reason };
   };
   const rowOf = (key: RowKey) => (key === 'foryou' ? (
-    <AniListRail key={key} kind={key} title={tr('Recommended for you')}>
-      {picks.map((pk, i) => (
-        <Reveal key={railKey(pk)} delay={Math.min(i, 12) * 28}>
-          <TrendingCard t={pk} onPick={pickRail} why={whyOf(pk)} />
-        </Reveal>
-      ))}
-    </AniListRail>
+    <ForYouBand key={key} picks={picks} whyOf={whyOf} onPick={pickRail} />
   ) : (
     <AniListRail key={key} kind={key} title={tr(TREND_LABELS[TREND_RAILS.indexOf(key)])}>
       {trendRails[TREND_RAILS.indexOf(key)].map(({ t, rank }, i) => (

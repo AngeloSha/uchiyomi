@@ -1,14 +1,15 @@
 // Discover's rows inside the wall (v0.98.0). The owner: the picks rows "push down the newest and popular section too much".
-// So the wall starts under the search, and the rows sit inside it: the picks row after the wall's first two rows of covers,
-// then each trending row four rows further on -- where, at the very end of a wall of every source's newest, almost nobody
-// had ever scrolled to them. Pure, so where a row lands is tested without a browser (test/shelves.test.ts).
+// So the wall starts under the search, and the rows sit inside it: the picks after the wall's first row of covers (two
+// until v0.99.0, when the picks became their own band -- "hiding inside, barely noticeable" -- and moved up a row), then
+// each trending row four rows further on -- where, at the very end of a wall of every source's newest, almost nobody had
+// ever scrolled to them. Pure, so where a row lands is tested without a browser (test/shelves.test.ts).
 //
 // The wall's one rule holds: nothing already on screen moves. A row takes its place once and keeps it, and a row whose
 // answer comes after the wall has filled past the places in front takes the next place below the covers already shown.
 import { useEffect, useState } from 'react';
 
 /** Rows of covers before the first of Discover's rows, and between one place and the next. */
-export const FIRST_ROWS = 2;
+export const FIRST_ROWS = 1;
 export const EVERY_ROWS = 4;
 
 /** Where place `j` is: how many covers come before it, in a wall `cols` across. */

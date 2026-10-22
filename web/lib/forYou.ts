@@ -71,3 +71,23 @@ export function mergePicks(recs: Recommendation[], reads: ReadPick[], seed: { id
   }
   return out;
 }
+
+/** The most read series the For you band shows beside "Because you read…". */
+export const SEEDS_SHOWN = 5;
+
+/**
+ * The read series the picks came from (v0.99.0, components/ForYouBand.tsx): each once, in the order the picks name them,
+ * at most `max` -- so every cover beside "Because you read…" belongs to a card in the band. A tracker's suggestion names
+ * a title but no series here, and adds none.
+ */
+export function seedsOf(picks: readonly Pick[], max = SEEDS_SHOWN): Array<{ seriesId: string; title: string }> {
+  const out: Array<{ seriesId: string; title: string }> = [];
+  const seen = new Set<string>();
+  for (const p of picks) {
+    if (out.length >= max) break;
+    if (p.from.kind !== 'read' || seen.has(p.from.seriesId)) continue;
+    seen.add(p.from.seriesId);
+    out.push({ seriesId: p.from.seriesId, title: p.from.because });
+  }
+  return out;
+}

@@ -179,7 +179,7 @@ test('Discover reads ?q= once, inside a Suspense boundary, opens on that search,
   assert.match(inner, /enabled: mode === 'search' && !!term && mayAdd,/);
 });
 
-test('Discover\'s rows sit inside the wall: the picks, then manhwa, manga and manhua, through one rail (v0.98.0)', () => {
+test('Discover\'s rows sit inside the wall: the picks\' band, then manhwa, manga and manhua through one rail (v0.98.0, v0.99.0)', () => {
   const src = code(read('app/discover/page.tsx'));
   // The countries are the server's (bff lib/anilist.ts TREND_COUNTRIES), each with its own words declared for the
   // translators, in the same order.
@@ -214,15 +214,18 @@ test('Discover\'s rows sit inside the wall: the picks, then manhwa, manga and ma
   const header = src.indexOf('</header>');
   const picker = src.indexOf('<SourcePicker');
   const between = src.slice(header, picker);
-  assert.ok(!between.includes('<AniListRail') && !between.includes('rowOf'), 'a row sits above the wall again');
+  assert.ok(!between.includes('<AniListRail') && !between.includes('<ForYouBand') && !between.includes('rowOf'), 'a row sits above the wall again');
   // And a row is drawn in two places only: in its place inside the wall, or waiting after it.
   assert.equal((src.match(/\browOf\b/g) ?? []).length, 3, 'a row is drawn somewhere other than inside the wall or after it');
   // The picks name their read, isolated in the sentence; the trending rows rank their first ten.
   assert.match(src, /tr\('Because you read \{title\}', \{ title: `\\u2068\$\{pk\.from\.because\}\\u2069` \}\)/, 'the title is not isolated');
   assert.match(src, /<TrendingCard t=\{t\} onPick=\{pickRail\} rank=\{rank <= RANKED \? rank : undefined\} \/>/);
-  // Every row is the one AniListRail, and its one ScrollRail (rails.test.ts holds the count).
-  assert.equal((src.match(/<AniListRail\b/g) ?? []).length, 2);
+  // Every trending row is the one AniListRail, and its one ScrollRail (rails.test.ts holds the count); the picks are their
+  // own band since v0.99.0 (components/ForYouBand.tsx, forYouBand.test.ts). Reintroduce the picks through AniListRail: the
+  // owner's "hiding inside, barely noticeable" row of covers is back.
+  assert.equal((src.match(/<AniListRail\b/g) ?? []).length, 1);
   assert.match(src, /function AniListRail\([\s\S]*?<ScrollRail label=\{title\}/);
+  assert.match(src, /key === 'foryou' \? \(\s*<ForYouBand key=\{key\} picks=\{picks\} whyOf=\{whyOf\} onPick=\{pickRail\} \/>/, 'the picks are not their own band');
   // A card opens the add dialog, and an added card leaves its row -- the row it came from, by its AniList entry, and only
   // that one: the ref is forgotten when the dialog closes. Reintroduce the bare setSeed: the card stays.
   assert.match(src, /const pickRail = \(t: \{ id\?: number \| null; title: string \}\) => \{ fromKey\.current = null; fromRail\.current = railKey\(t\); setSeed\(\{ kind: 'trending', title: t\.title \}\); \};/);

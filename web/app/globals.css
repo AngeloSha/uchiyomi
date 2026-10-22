@@ -214,9 +214,12 @@
       width: calc(100% + 4rem + var(--rail-w));
     }
   }
-  /* Text inside a bleed, on the content edge: the phone gutter, and at lg the shell's own padding, rail included. */
-  .bleed-pad { padding-inline: 1rem; }
+  /* Text inside a bleed, on the content edge: the phone gutter, and at lg the shell's own padding, rail included. A
+     snapping rail laid out with it rests its cards on that edge too (v0.99.0): without the matching scroll padding,
+     Discover's rows snapped their first card to the screen's edge on a phone and under the sidebar at lg. */
+  .bleed-pad { padding-inline: 1rem; scroll-padding-inline: 1rem; }
   @media (min-width: 1024px) { .bleed-pad { padding-inline-start: calc(2rem + var(--rail-w)); padding-inline-end: 2rem; } }
+  @media (min-width: 1024px) { .bleed-pad { scroll-padding-inline-start: calc(2rem + var(--rail-w)); scroll-padding-inline-end: 2rem; } }
   /* Art that starts at the top of the window, under the (then transparent) top bar: lib/overArt.ts. */
   @media (min-width: 1024px) { .under-topbar { margin-top: calc(-1 * var(--topbar-h)); } }
   /* The same on a phone, under Home's own sticky header (app/page.tsx), which has no background of its own: its

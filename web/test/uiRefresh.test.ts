@@ -39,6 +39,10 @@ test('the geometry: the rail is in the shell and every bleed from lg up, and now
     assert.match(css, body, `.${cls} does not reach under the rail to the window's edge`);
   }
   assert.match(css, /\.bleed-pad \{ padding-inline-start: calc\(2rem \+ var\(--rail-w\)\); padding-inline-end: 2rem; \}/, 'text in a bleed is not put back on the content edge');
+  // v0.99.0: and a snapping rail laid out with it rests its cards on that edge. Reintroduce the padding alone: Discover's
+  // rows snap their first card to the screen's edge on a phone, and under the sidebar at lg ("1" of the Top 10 cut off).
+  assert.match(css, /\.bleed-pad \{ padding-inline: 1rem; scroll-padding-inline: 1rem; \}/, 'a rail in a bleed snaps its cards to the screen\'s edge');
+  assert.match(css, /\.bleed-pad \{ scroll-padding-inline-start: calc\(2rem \+ var\(--rail-w\)\); scroll-padding-inline-end: 2rem; \}/, 'a rail in a bleed snaps its cards under the sidebar');
   assert.match(css, /\.under-topbar \{ margin-top: calc\(-1 \* var\(--topbar-h\)\); \}/, 'art does not start under the top bar');
   assert.match(css, /\[dir='rtl'\] \.rail-scrim \{\s*background-image: linear-gradient\(to left,/, 'the rail\'s scrim darkens the wrong side in Arabic');
   // The last pill-shaped action classes are squared (noPills.test.ts holds the list).
@@ -147,7 +151,7 @@ test('the new motion is the default look, and steps aside for Reduce effects and
   // Each reads BOTH switches on every render, as Toast.tsx does (effects.test.ts). Reintroduce
   // `const reduced = useReduceEffects() || useReducedMotion();` in one: its assertion fails.
   const both = /const plain = useReduceEffects\(\);\s*const still = useReducedMotion\(\);\s*const reduced = plain \|\| !!still;/;
-  for (const f of ['components/Sidebar.tsx', 'components/MosaicArt.tsx', 'components/HeroCarousel.tsx', 'components/DiscoverHero.tsx', 'app/series/page.tsx']) {
+  for (const f of ['components/Sidebar.tsx', 'components/MosaicArt.tsx', 'components/HeroCarousel.tsx', 'components/DiscoverHero.tsx', 'components/ForYouBand.tsx', 'app/series/page.tsx']) {
     const src = code(read(f));
     assert.match(src, both, `${f} reads the motion settings conditionally, or only one of them`);
     assert.doesNotMatch(src, /useReduceEffects\(\)\s*(\|\||&&|\?)|useReducedMotion\(\)\s*(\|\||&&|\?)/, `${f} reads the motion settings conditionally`);
@@ -158,4 +162,7 @@ test('the new motion is the default look, and steps aside for Reduce effects and
   // v0.98.0: Discover's hero moves as Home's does, under the same rules.
   assert.match(code(read('components/DiscoverHero.tsx')), /style=\{reduced \|\| stopped \? undefined : \{ animation: `hero-progress/, 'Discover\'s slide bar still fills under Reduce effects');
   assert.match(read('app/globals.css'), /@keyframes hero-progress \{/, 'the slide bar\'s keyframes are not emitted');
+  // v0.99.0: the For you band's glow crossfades to the card the pointer rests on; under either setting it simply changes.
+  // Reintroduce the 0.6 s fade whatever the settings: this fails.
+  assert.match(code(read('components/ForYouBand.tsx')), /transition=\{reduced \? \{ duration: 0 \} : \{ duration: 0\.6, ease: EASE \}\}/, 'the For you glow still fades under Reduce effects');
 });
