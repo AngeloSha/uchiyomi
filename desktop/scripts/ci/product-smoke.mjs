@@ -12,7 +12,7 @@
 //
 //   node scripts/ci/product-smoke.mjs            (after engine-fixture.mjs; DESKTOP_DEV=1 runs from source)
 // ⚠️ MangaDex is a real site: its steps are recorded with what MangaDex answered, so a MangaDex outage reads
-// as one, not as an app bug.
+// as one, not as an app bug, and the title added is one whose newest chapter MangaDex hosts (mangadex-pick.mjs).
 //
 // With --server-mode, the OTHER first-launch choice instead (v0.45.0, "Connect to my server"): see serverMode()
 // at the end of this file.
@@ -23,6 +23,7 @@ import { randomBytes } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { OUT, OS_TAG, DESKTOP, WIN, appExe, record, tmpRoot, launch, waitFor, waitHealthy, freePort, snapshot, runAsync, sleep, readJson, hardKill, isAlive, APP_EXTRA, serveFile } from './lib.mjs';
 import { signInState } from './signinState.mjs';
+import { addFirstHosted, newestFeedUrl, newestHosted, titleFeedUrl, titlesOf } from './mangadex-pick.mjs';
 
 const exe = appExe();
 if (process.argv.includes('--server-mode')) {
@@ -109,6 +110,24 @@ async function api(origin, token, path, init = {}) {
   return { status: r.status, json, text: text.slice(0, 500) };
 }
 
+// MangaDex itself, asked only to choose what to add (mangadex-pick.mjs): where the app asks (MANGADEX_API_URL, as
+// bff/src/lib/sources/mangadex.ts reads it), as the app, with a patient timeout -- the 10-19 runner waited over 8 s for
+// an answer -- and half a second between requests, so they never crowd the app's own (about four a second of the five
+// MangaDex allows).
+const MANGADEX = (process.env.MANGADEX_API_URL || 'https://api.mangadex.org').replace(/\/+$/, '');
+let mangadexNext = 0;
+async function mangadex(url) {
+  await sleep(Math.max(0, mangadexNext - Date.now()));
+  mangadexNext = Date.now() + 500;
+  const t0 = Date.now();
+  try {
+    const r = await fetch(url, { headers: { 'user-agent': 'Uchiyomi/1.0 (self-hosted personal reader)' }, signal: AbortSignal.timeout(30_000) });
+    return { status: r.status, json: r.ok ? await r.json().catch(() => null) : null, ms: Date.now() - t0 };
+  } catch (e) {
+    return { status: 0, json: null, ms: Date.now() - t0, error: String(e?.message || e) };
+  }
+}
+
 /**
  * How many times the shell's secret has been exchanged for a session (login.desktop audit rows) -- counted with
  * an exchange of our own, which is one of them. See the relaunch check for why.
@@ -152,42 +171,51 @@ try {
   check('the library starts empty', lib.status === 200 && (lib.json?.totalElements ?? lib.json?.content?.length) === 0, { status: lib.status, total: lib.json?.totalElements });
 
   // ---------------------------------------------------------------- a MangaDex series, one chapter
-  // Candidates from MangaDex's own "latest updates" (a chapter just uploaded is hosted there; the OLDEST
-  // chapter of a popular title is often a licensed external link the bff rightly refuses), then a search.
-  // Each is added with one chapter; a job that ends in an error is dismissed and the next one tried.
-  const candidates = [];
-  const lat = await api(origin, session.token, '/api/sources/latest?source=mangadex&page=1');
-  for (const r of (lat.json?.content || []).slice(0, 6)) candidates.push(r);
-  for (const q of ['Solo Leveling', 'Dandadan']) {
-    const sr = await api(origin, session.token, `/api/sources/search?source=mangadex&q=${encodeURIComponent(q)}`);
-    for (const r of (sr.json?.content || []).slice(0, 2)) candidates.push(r);
-  }
-  const tried = [{ latest: lat.status, candidates: candidates.length }];
-  let job = null;
-  let added = null;
-  const budget = Date.now() + 8 * 60_000;
-  for (const c of candidates) {
-    if (Date.now() > budget) break;
-    const a = await api(origin, session.token, '/api/sources/add', { method: 'POST', body: JSON.stringify({ source: 'mangadex', sourceId: c.sourceId, chapterCount: 1, chapterFrom: 'newest', autoUpdate: false }) });
-    const t = { title: c.title, add: a.status, answer: a.json };
-    tried.push(t);
-    if (!(a.status === 200 && a.json?.ok && a.json.started)) continue;
-    const t0 = Date.now();
-    job = null;
-    while (Date.now() - t0 < 4 * 60_000) {
-      const j = await api(origin, session.token, '/api/sources/jobs');
-      job = (j.json?.content || []).find((x) => x.folder === a.json.folder) || null;
-      if (job && ((job.status === 'done' && job.seriesId) || job.status === 'error')) break;
-      await sleep(3000);
-    }
-    t.job = job && { status: job.status, done: job.done, total: job.total, reason: job.reason, seriesId: job.seriesId, secs: Math.round((Date.now() - t0) / 1000) };
-    if (job?.status === 'done' && job.done >= 1 && job.seriesId) { added = { title: a.json.title, folder: a.json.folder }; break; }
-    await api(origin, session.token, `/api/sources/jobs/${encodeURIComponent(a.json.folder)}`, { method: 'DELETE' }).catch(() => {});
-  }
+  // Titles from the app's own Newest (MangaDex's newest English chapters: one just uploaded is hosted there), each
+  // added with one chapter, its newest, and followed until it lands; a job that ends in an error is dismissed and the
+  // next title tried. Before its add, a title's newest chapter is held to MangaDex's own feed: an add takes the highest
+  // NUMBER, which on a licensed title is a link to the publisher that the bff rightly refuses (mangadex-pick.mjs, the
+  // 10-19 red run). When the app's Newest has nothing to offer -- MangaDex slower than its 8-second listing budget --
+  // MangaDex's newest hosted chapters are asked for directly.
+  const { added, step, tried } = await addFirstHosted({
+    lists: [
+      async () => {
+        const lat = await api(origin, session.token, '/api/sources/latest?source=mangadex&page=1');
+        const titles = Array.isArray(lat.json?.content) ? lat.json.content : [];
+        return { note: { latest: lat.status, candidates: titles.length }, titles };
+      },
+      async () => {
+        const f = await mangadex(newestFeedUrl(MANGADEX));
+        const titles = titlesOf(f.json);
+        return { note: { mangadex: f.status || f.error, candidates: titles.length, ms: f.ms }, titles };
+      },
+    ],
+    hosted: async (t) => {
+      const f = await mangadex(titleFeedUrl(MANGADEX, t.sourceId));
+      return Array.isArray(f.json?.data) ? newestHosted(f.json.data) : { ok: null, why: `MangaDex answered ${f.status || f.error}` };
+    },
+    add: async (c) => {
+      const a = await api(origin, session.token, '/api/sources/add', { method: 'POST', body: JSON.stringify({ source: 'mangadex', sourceId: c.sourceId, chapterCount: 1, chapterFrom: 'newest', autoUpdate: false }) });
+      const s = { add: a.status, answer: a.json };
+      if (!(a.status === 200 && a.json?.ok && a.json.started)) return { step: s, added: null };
+      const t0 = Date.now();
+      let job = null;
+      while (Date.now() - t0 < 4 * 60_000) {
+        const j = await api(origin, session.token, '/api/sources/jobs');
+        job = (j.json?.content || []).find((x) => x.folder === a.json.folder) || null;
+        if (job && ((job.status === 'done' && job.seriesId) || job.status === 'error')) break;
+        await sleep(3000);
+      }
+      s.job = job && { status: job.status, done: job.done, total: job.total, reason: job.reason, seriesId: job.seriesId, secs: Math.round((Date.now() - t0) / 1000) };
+      if (job?.status === 'done' && job.done >= 1 && job.seriesId) return { step: s, added: { title: a.json.title, folder: a.json.folder } };
+      await api(origin, session.token, `/api/sources/jobs/${encodeURIComponent(a.json.folder)}`, { method: 'DELETE' }).catch(() => {});
+      return { step: s, added: null };
+    },
+  });
   check('a MangaDex series is added and its chapter downloads (the window session, the chosen folder)', !!added, { added, tried });
   let book = null;
   if (added) {
-    const books = await api(origin, session.token, `/api/series/${job.seriesId}/books?size=10`);
+    const books = await api(origin, session.token, `/api/series/${step.job.seriesId}/books?size=10`);
     book = books.json?.content?.[0] || null;
     const files = (() => { try { return readdirSync(join(libraryDir, ...added.folder.split('/'))); } catch { return []; } })();
     check('the chapter file is in the library folder chosen on first run', files.length > 0, { dir: join(libraryDir, ...added.folder.split('/')), files });
