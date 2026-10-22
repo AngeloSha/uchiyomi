@@ -1120,6 +1120,20 @@ On the desktop app the archive runs only while Uchiyomi does — its window or t
 computer awake, so a PC that sleeps at night is rarely inside a night-time window; its first look after the app
 starts comes three minutes in. Health does not report the gaps an archive is filling as problems (section 8).
 
+### Downloads & politeness
+
+**Admin → Settings → Downloads → More options → Downloads & politeness** (admins) gathers what keeps the server gentle
+with sites in one place:
+
+- **Limits set by the server** — the numbers that only environment variables set, with the value this server is
+  running on: pages of a chapter fetched at once (`SUWAYOMI_PAGE_CONCURRENCY`), how long a source gets to answer the
+  latest-chapters check and a test (`SOURCE_LATEST_TIMEOUT_MS`, `SOURCE_TEST_TIMEOUT_MS`), library folders scanned
+  at once (`SCAN_CONCURRENCY`), nightly backups kept (`BACKUP_KEEP`) and the image cache's size cap
+  (`CACHE_MAX_BYTES`). They are read-only here; change them in the container's settings and restart. Only these
+  numbers are shown, never a password or key.
+- **Blocked sources** — every source that is refusing requests or cooling down right now, the same list the *Sources*
+  tab shows, with **Unblock** to try it again at once (the same button as on the source's own sheet).
+
 ### Chapters the sources have that you don't
 
 The chapter list also shows, greyed out, every chapter the followed sources list that this server does not

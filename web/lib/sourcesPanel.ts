@@ -334,6 +334,9 @@ export const updatesTitle = (n: number): string =>
 
 // ---- the sheet's keys --------------------------------------------------------------------------------------------
 
+/** A source that is cooling down after refusals, or blocked: the ones with a Clear block key (and Settings → Downloads' list). */
+export const isBlocked = (s: Pick<OverviewSource, 'standing' | 'state'>): boolean => s.standing === 'cooling' || s.state === 'blocked';
+
 export type SheetKey = 'replace' | 'test' | 'keep' | 'unblock' | 'turn-off' | 'turn-on' | 'remove';
 
 /**
@@ -356,7 +359,7 @@ export function sheetKeys(s: OverviewSource, a?: Pick<SourcesAttention, 'replace
   if (loaded) out.push('test');
   // v0.82.0: a backup extension's source can be made the admin's own -- in Discover, and never removed for being unused.
   if (s.backup && s.pkgName) out.push('keep');
-  if (s.standing === 'cooling' || s.state === 'blocked') out.push('unblock');
+  if (isBlocked(s)) out.push('unblock');
   if (s.standing === 'off') out.push('turn-on');
   else if (s.standing !== 'not_loaded') out.push('turn-off');
   if (s.kind === 'site') out.push('remove');

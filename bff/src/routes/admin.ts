@@ -54,6 +54,7 @@ import { getHiddenLangs, setSourcesEnabled, adoptExtensionSources, langOverview,
 import { lastSuwayomiLoad, limitLeftSomethingOut, rememberMissing } from '../lib/sources/suwayomi/register';
 import { EngineRefusedError } from '../lib/sources/suwayomi/client';
 import { engineStatusReport, connectEngineSolver } from '../lib/extensionEngine';
+import { currentLimits } from '../lib/limits';
 import { env } from '../env';
 import { oidcEnabled, oidcName } from '../lib/oidc';
 import { authMode, ssoOnly } from '../lib/authMode';
@@ -716,6 +717,8 @@ export default async function adminRoutes(app: FastifyInstance) {
       sample: !row?.secret,
     };
   });
+  /** The env-only numeric knobs and what they are set to; never a secret (lib/limits.ts). */
+  app.get('/api/admin/limits', async () => currentLimits());
   app.patch('/api/admin/settings', async (req, reply) => {
     const b = z.object({
       serverName: z.string().min(1).max(64).optional(),
