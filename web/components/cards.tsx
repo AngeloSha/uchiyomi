@@ -16,6 +16,11 @@ import { useOfflineSeries } from '@/lib/useOfflineSeries';
 import { effectsReduced, useReduceEffects } from '@/lib/effects';
 import { t as tr } from '@/lib/i18n';
 import { useSeriesMenu } from './SeriesMenu';
+import { useContextMenu } from './ContextMenu';
+import { useQueryClient } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import { useToast } from './Toast';
+import { useAuth } from '@/lib/auth';
 import { publicCoverFallback } from '@/lib/coverFallback';
 import { anilistNumbers, type SortValue } from '@/lib/sortValue';
 import { coverProgress, seriesProgress } from '@/lib/seriesProgress';
@@ -139,7 +144,7 @@ function CoverReadBar({ series }: { series: Series }) {
  * link, never inside it: a button in a link is two targets in one. `className` places it and shows it (`grid`); the tiles
  * hand it a box the size of the cover that moves as the cover does.
  */
-function MoreKey({ menu, title, className }: { menu: ReturnType<typeof useSeriesMenu>; title: string; className: string }) {
+function MoreKey({ menu, title, className }: { menu: ReturnType<typeof useContextMenu>; title: string; className: string }) {
   // The fade is new, so it goes under Reduce effects; reduced motion shortens it to nothing in app/globals.css.
   const plain = useReduceEffects();
   return (
@@ -231,7 +236,26 @@ export function SeriesCard({ series, w = CARD_W, eager = false, note }: {
  * A chapter to go on with: Keep reading's card, and Pick back up's (v0.61.0), whose `note` says when the reading stopped
  * ("Read 3 months ago") where Keep reading names the other device it was on.
  */
-export function ContinueCard({ book, eager = false, note }: { book: Book; eager?: boolean; note?: string }) {
+export function ContinueCard({ book, eager = false, note, keepReading = false }: {
+  book: Book; eager?: boolean; note?: string;
+  /** Keep reading's own card: its menu offers "Remove from Keep reading". Pick back up's card has no menu. */
+  keepReading?: boolean;
+}) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const offline = useAuth().status === 'offline';
+  // Right-click, press-and-hold, Shift+F10 and (on a computer) the ⋯, as every card's menu (components/ContextMenu.tsx).
+  // The series stays in the library and returns to the row when it is read again; the row's Hidden key puts it back sooner.
+  const menu = useContextMenu(() => [{
+    label: tr('Remove from Keep reading'), disabled: offline, hook: 'leave-keep-reading',
+    onSelect: async () => {
+      try {
+        await api(`/api/keep-reading/${encodeURIComponent(book.seriesId)}`, { method: 'PUT', json: { hidden: true } });
+        toast(tr('Removed from Keep reading. Reading it again brings it back.'), 'success');
+        qc.invalidateQueries({ queryKey: ['home'] });
+      } catch { toast(tr('Could not do that'), 'error'); }
+    },
+  }], { label: book.seriesTitle });
   const pct = progressOf(book);
   // Where in the chapter, said as well as drawn (UI refresh): "page 12/40" beside the chapter, the bar along the edge.
   const pages = book.media?.pagesCount || 0;
@@ -243,9 +267,12 @@ export function ContinueCard({ book, eager = false, note }: { book: Book; eager?
   // stored for a platform it did not know, nor a sign-in method ("SSO") as if it were a place.
   const where = elsewhere ? shownDeviceName(elsewhere.name, { device: true }) || tr('another device') : '';
   return (
+    // The ⋯ is a sibling of the card's link, never inside it: a button in a link is two targets in one.
+    <div className="group relative h-44 w-72 shrink-0 transition-transform duration-300 hover:-translate-y-1 [scroll-snap-align:start]">
     <Link
       href={`/reader/?book=${book.id}`}
-      className="group relative h-44 w-72 shrink-0 overflow-hidden rounded-3xl border border-ink-700/60 shadow-lift transition-all duration-300 hover:-translate-y-1 hover:shadow-glow [scroll-snap-align:start]"
+      {...(keepReading ? menu.bind : {})}
+      className="relative block h-full w-full overflow-hidden rounded-3xl border border-ink-700/60 shadow-lift transition-shadow duration-300 group-hover:shadow-glow"
     >
       <Img src={img.bookThumb(book.id)} alt={book.seriesTitle} eager={eager} className="absolute inset-0 h-full w-full transition-transform duration-500 group-hover:scale-105" />
       <div className="absolute inset-0 bg-linear-to-t from-black via-black/45 to-black/10" />
@@ -272,6 +299,9 @@ export function ContinueCard({ book, eager = false, note }: { book: Book; eager?
         <IcPlay width={18} height={18} />
       </span>
     </Link>
+    {keepReading && <MoreKey menu={menu} title={book.seriesTitle} className="absolute start-3 top-3 grid" />}
+    {keepReading && menu.element}
+    </div>
   );
 }
 

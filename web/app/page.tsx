@@ -12,6 +12,7 @@ import { applyCover, clearCover } from '@/lib/theme';
 import { ART } from '@/lib/art';
 import { Img, ProgressBar, RailSkeleton, SectionTitle, Reveal } from '@/components/ui';
 import { SeriesCard, ContinueCard } from '@/components/cards';
+import { KeepReadingHidden } from '@/components/KeepReadingHidden';
 import { HeroCarousel } from '@/components/HeroCarousel';
 import { useArtUnderChrome } from '@/lib/overArt';
 import { AdultToggle, useAdultFilterConfigured } from '@/components/AdultToggle';
@@ -141,12 +142,15 @@ export default function HomePage() {
     switch (key) {
       case 'continue':
         // Keep reading. Every rail says pt-8; the list below gives the first one shown pt-4, whichever it is.
-        return (data?.onDeck?.length ?? 0) > 0 && (
+        // Everything removed from it still draws the title and its Hidden key, which is the way to put one back.
+        return ((data?.onDeck?.length ?? 0) > 0 || (data?.keepReadingHidden ?? 0) > 0) && (
           <section className="pt-8">
-            <SectionTitle>{tr('Keep reading')}</SectionTitle>
-            <ScrollRail label={tr('Keep reading')} className={CARD_RAIL}>
-              {data!.onDeck.map((b, i) => <ContinueCard key={b.id} book={b} eager={i < 4} />)}
-            </ScrollRail>
+            <SectionTitle action={<KeepReadingHidden count={data?.keepReadingHidden ?? 0} />}>{tr('Keep reading')}</SectionTitle>
+            {(data?.onDeck?.length ?? 0) > 0 && (
+              <ScrollRail label={tr('Keep reading')} className={CARD_RAIL}>
+                {data!.onDeck.map((b, i) => <ContinueCard key={b.id} book={b} eager={i < 4} keepReading />)}
+              </ScrollRail>
+            )}
           </section>
         );
       case 'forYou':

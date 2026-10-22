@@ -787,6 +787,8 @@ export interface HomePayload {
    */
   pickUp?: Book[];
   gems?: Series[];
+  /** How many series the reader removed from Keep reading and has not read since (see /api/keep-reading/hidden). */
+  keepReadingHidden?: number;
 }
 
 export interface DownloadManifest {
