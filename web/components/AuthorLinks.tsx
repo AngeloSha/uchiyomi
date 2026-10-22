@@ -36,9 +36,12 @@ export function AuthorLinks({ line }: { line: string }) {
   return (
     <span className="text-fog-300" data-series-authors>
       {before}
+      {/* A computer's title block over the banner is pointer-events-none (app/series/page.tsx): each name takes its clicks
+          back, as the edition chips there do. Reintroduce by dropping `pointer-events-auto`: authorWalk.mjs's click lands
+          on the banner's shade and the page stays where it is. */}
       {joinedParts(names).map((p, i) => (p.name
         ? <Link key={i} href={authorHref(p.value)} data-series-author
-            className="underline decoration-fog-500/40 underline-offset-[3px] transition-colors hover:text-fog-100 hover:decoration-accent focus-visible:text-fog-100 focus-visible:decoration-accent">
+            className="pointer-events-auto underline decoration-fog-500/40 underline-offset-[3px] transition-colors hover:text-fog-100 hover:decoration-accent focus-visible:text-fog-100 focus-visible:decoration-accent">
             <bdi>{p.value}</bdi>
           </Link>
         : <Fragment key={i}>{p.value}</Fragment>))}

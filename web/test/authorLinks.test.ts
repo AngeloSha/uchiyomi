@@ -46,6 +46,9 @@ test('each name is a link to the Library showing that person, the line read in t
   assert.match(html, /<bdi>Chugong \(추공\)<\/bdi><\/a>, <a/, 'joined the reader\'s way');
   assert.match(html, /, and <a[^>]*><bdi>h-goon/);
   assert.equal(authorHref('Chugong (추공)'), '/library/?author=Chugong%20(%EC%B6%94%EA%B3%B5)');
+  // A computer's title block over the banner is pointer-events-none: every name must take its clicks back.
+  const anchors = [...html.matchAll(/<a [^>]*>/g)].map((m) => m[0]);
+  assert.ok(anchors.length === 3 && anchors.every((a) => /class="[^"]*\bpointer-events-auto\b/.test(a)), 'a name over the banner cannot be clicked');
   assert.equal(links(' - , ? '), '', 'a line of punctuation names no one');
 
   setActiveDict({ 'by {author}': '作：{author}' });

@@ -11,6 +11,8 @@
 //   5. no console errors along the way.
 //
 //   KEEP=1 E2E_NET=uchiyomi-e2e-0100 E2E_PORT=18400 E2E_SUBNET=10.222.100.0/24 E2E_NO_WALK=1 bash web/test/e2e/up.sh
+//   python3 web/test/e2e/seed.py <the library up.sh printed> --rtl   # a third series; then Scan library now
+//   (POST /api/admin/library/scan {}: /api/refresh runs once a minute, and up.sh has just used it)
 //   cd web && E2E_NET=uchiyomi-e2e-0100 BASE=http://127.0.0.1:18400 node test/e2e/authorWalk.mjs
 import puppeteer from 'puppeteer';
 import { execFileSync } from 'node:child_process';
@@ -57,9 +59,16 @@ const signIn = async (p) => {
   await waitFor(async () => !(await p.$('input[type=password]')), 20_000);
   return !(await p.$('input[type=password]'));
 };
-/** The author links on a series page: [name, href]. */
+/** The author links on a series page, [name, href], of the line on screen: the page lays its details out twice, the
+ *  phone's and the computer's, and shows one. */
 const authorLinks = (p) => p.evaluate(() => [...document.querySelectorAll('[data-series-authors] a[data-series-author]')]
-  .map((a) => [a.textContent, a.getAttribute('href')]));
+  .filter((a) => a.getClientRects().length > 0).map((a) => [a.textContent, a.getAttribute('href')]));
+/** The first author link on screen. */
+const firstAuthor = async (p) => (await p.evaluateHandle(() => [...document.querySelectorAll('[data-series-authors] a[data-series-author]')]
+  .find((a) => a.getClientRects().length > 0))).asElement();
+/** The author line on screen, as a reader sees it. */
+const lineText = (p) => p.evaluate(() => [...document.querySelectorAll('[data-series-authors]')]
+  .find((el) => el.getClientRects().length > 0)?.textContent ?? '');
 /** The series ids the Library grid shows, in order. */
 const gridIds = (p) => p.evaluate(() => [...document.querySelectorAll('main [data-library-grid] a[href*="/series/"]')]
   .map((a) => new URL(a.getAttribute('href'), location.href).searchParams.get('id')));
@@ -71,8 +80,9 @@ try {
   const idOf = (title) => sql(`SELECT id FROM lib_series WHERE title = ${lit(title)} AND deleted_at IS NULL AND merged_into IS NULL LIMIT 1`);
   const rp = await waitFor(() => idOf('Repeated Pages'), 30_000, 500);
   const mf = await waitFor(() => idOf('Mixed Formats'), 30_000, 500);
-  const other = sql(`SELECT id FROM lib_series WHERE title NOT IN ('Repeated Pages', 'Mixed Formats') AND deleted_at IS NULL
-                     AND merged_into IS NULL ORDER BY title LIMIT 1`);
+  // The plain seed holds two series; `seed.py --rtl` (above) adds the third, which the scan may still be listing.
+  const other = await waitFor(() => sql(`SELECT id FROM lib_series WHERE title NOT IN ('Repeated Pages', 'Mixed Formats')
+                     AND deleted_at IS NULL AND merged_into IS NULL ORDER BY title LIMIT 1`), 30_000, 500);
   check(!!rp && !!mf && !!other, 'three series to name authors on', JSON.stringify({ rp, mf, other }));
   for (const [id, line] of [[rp, 'Chugong (추공), Gi So-Ryeong (기소령)'], [mf, '추공'], [other, 'John Oh']]) {
     sql(`INSERT INTO series_overrides (series_id, author) VALUES (${lit(id)}, ${lit(line)})
@@ -93,13 +103,13 @@ try {
   const links = await waitFor(async () => { const l = await authorLinks(page); return l.length ? l : null; }, 20_000, 300);
   check(JSON.stringify(links?.map(([n]) => n)) === JSON.stringify(['Chugong (추공)', 'Gi So-Ryeong (기소령)']),
     'each name on the author line is its own link', `links ${JSON.stringify(links)}`);
-  const line = plain(await page.evaluate(() => document.querySelector('[data-series-authors]')?.textContent));
+  const line = plain(await lineText(page));
   check(line === 'by Chugong (추공) and Gi So-Ryeong (기소령)', `the line reads "${line}"`, `the line reads "${line}"`);
   await shot('series-authors');
 
   // ---- 2. the Library on one author ----
   phase = 'library';
-  await page.click('[data-series-authors] a[data-series-author]');
+  await (await firstAuthor(page)).click();
   await waitFor(() => page.url().includes('author='), 15_000);
   const chip = await waitFor(async () => plain(await page.evaluate(() => document.querySelector('[data-chip-author]')?.textContent)), 15_000);
   check(chip === 'Author: Chugong (추공) ×', `the Library holds the author as a chip: "${chip}"`, `chip "${chip}" at ${page.url()}`);
@@ -129,13 +139,13 @@ try {
   await phone.goto(`${BASE}/series/?id=${encodeURIComponent(rp)}`, { waitUntil: 'networkidle2', timeout: 60_000 });
   await waitFor(async () => (await authorLinks(phone)).length === 2, 20_000, 300);
   const fits = await phone.evaluate(() => {
-    const el = document.querySelector('[data-series-authors]');
+    const el = [...document.querySelectorAll('[data-series-authors]')].find((x) => x.getClientRects().length > 0);
     const r = el?.getBoundingClientRect();
     return !!r && r.left >= 0 && r.right <= window.innerWidth + 0.5 && document.documentElement.scrollWidth <= window.innerWidth;
   });
   check(fits, 'on a phone the author line stays inside the screen, with no sideways scroll');
   await shot('phone-series', phone);
-  await phone.tap('[data-series-authors] a[data-series-author]');
+  await (await firstAuthor(phone)).tap();
   const phoneChip = await waitFor(async () => phone.$('[data-chip-author]'), 15_000);
   check(!!phoneChip, 'tapping a name on a phone opens the same shelf');
   await waitFor(async () => (await gridIds(phone)).length === 2, 15_000, 300);
@@ -145,7 +155,7 @@ try {
   await phone.goto(`${BASE}/series/?id=${encodeURIComponent(rp)}`, { waitUntil: 'networkidle2', timeout: 60_000 });
   const ar = await waitFor(async () => {
     const l = await authorLinks(phone);
-    const text = plain(await phone.evaluate(() => document.querySelector('[data-series-authors]')?.textContent));
+    const text = plain(await lineText(phone));
     return l.length === 2 && text.startsWith('تأليف') ? { l, text } : null;
   }, 20_000, 300);
   check(!!ar && ar.l[0][0] === 'Chugong (추공)', `in Arabic the line reads "${ar?.text}", each name whole`, `Arabic ${JSON.stringify(ar)}`);
