@@ -54,7 +54,7 @@ test('the Downloads view fetches no grid and shows none of the series controls',
 test('the underline slides only when motion is welcome', () => {
   // Reintroduce with a plain spring: "the underline slides under Reduce effects" fails.
   const src = page();
-  const sw = src.slice(src.indexOf('function ViewSwitch('), src.indexOf('function MoveToLibrary('));
+  const sw = src.slice(src.indexOf('function ViewSwitch('), src.indexOf('export default function LibraryPage('));
   assert.match(sw, /const plain = useReduceEffects\(\);\s*const still = useReducedMotion\(\);/);
   assert.match(sw, /layoutId="libview"/);
   assert.match(sw, /transition=\{plain \|\| still \? \{ duration: 0 \} : \{ type: 'spring'/, 'the underline slides under Reduce effects');
