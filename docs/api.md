@@ -301,6 +301,10 @@ the settings' `adultSources` list (one list, two ways to write it); `GET /api/ad
 loaded now. **400** for anything but 18 or null, **409** `too_many` past 200 rated sources (`messageSaid`
 `rating.tooMany`). Audited `source.age_rating`.
 
+`GET /api/admin/limits` (admin) is read-only: `{limits: [{key, value, unit}], note}` for the knobs that only
+environment variables set (`SUWAYOMI_PAGE_CONCURRENCY`, `SOURCE_LATEST_TIMEOUT_MS`, `SOURCE_TEST_TIMEOUT_MS`,
+`SCAN_CONCURRENCY`, `BACKUP_KEEP`, `CACHE_MAX_BYTES`) with the value in effect. Numbers only; no secret is returned.
+
 `PATCH /api/admin/sources/custom/:id` (admin) changes a custom site's `base` address, its `lang`, or both, and
 nothing else. The source id is derived from its name and the library is keyed on that id, so editing in place is
 the only way to follow a site to a new domain without orphaning every series that came from it. A new `lang`
@@ -1786,6 +1790,7 @@ GET    /api/admin/notify-targets  POST   /api/admin/notify-targets
 PATCH  /api/admin/notify-targets/:id DELETE /api/admin/notify-targets/:id
 POST   /api/admin/notify-targets/:id/test
 GET    /api/admin/install-ping/preview
+GET    /api/admin/limits
 GET    /api/admin/users           POST   /api/admin/users
 PATCH  /api/admin/users/:id       DELETE /api/admin/users/:id
 GET    /api/admin/sessions        DELETE /api/admin/sessions/:id

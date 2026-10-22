@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4208
+    "strings": 4230
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -4211,5 +4211,27 @@
   "Uchiyomi can't tell a file you deleted from one on a drive that isn't connected right now, so it left them as they were. If you deleted or moved them yourself, mark them gone. Then you can forget the series.": "Uchiyomi no puede distinguir un archivo que eliminaste de uno que está en una unidad desconectada ahora mismo, así que los dejó como estaban. Si los eliminaste o moviste tú, márcalos como desaparecidos. Después podrás olvidar la serie.",
   "Mark them gone": "Marcarlos como desaparecidos",
   "Amber: this source lists it under its own name, which came up first for two of this series’ names. Check the covers before you follow it. Following it keeps the name.": "Ámbar: esta fuente la lista con un nombre propio, que salió primero al buscar dos de los nombres de esta serie. Compara las portadas antes de seguirla. Al seguirla, se guarda ese nombre.",
-  "Home shows your favorites in this order. Drag one into place, or move it with its arrows.": "Inicio muestra tus favoritos en este orden. Arrastra uno a su sitio o muévelo con sus flechas."
+  "Home shows your favorites in this order. Drag one into place, or move it with its arrows.": "Inicio muestra tus favoritos en este orden. Arrastra uno a su sitio o muévelo con sus flechas.",
+  "Pages of one chapter fetched at the same time.": "Pages of one chapter fetched at the same time.",
+  "How long a source gets to answer the latest-chapters check.": "How long a source gets to answer the latest-chapters check.",
+  "How long a source gets to answer a test.": "How long a source gets to answer a test.",
+  "Library folders scanned at the same time.": "Library folders scanned at the same time.",
+  "Nightly backups kept before the oldest is deleted.": "Nightly backups kept before the oldest is deleted.",
+  "Size cap for the image cache; 0 means no cap.": "Size cap for the image cache; 0 means no cap.",
+  "1 second": "1 second",
+  "{n} seconds": "{n} seconds",
+  "No cap": "No cap",
+  "{n} GB": "{n} GB",
+  "Could not clear the block": "Could not clear the block",
+  "Downloads & politeness": "Downloads & politeness",
+  "1 source blocked": "1 source blocked",
+  "{n} sources blocked": "{n} sources blocked",
+  "Nothing blocked": "Nothing blocked",
+  "How hard this server leans on sites, and which sources are being left alone right now.": "How hard this server leans on sites, and which sources are being left alone right now.",
+  "Limits set by the server": "Limits set by the server",
+  "Set by environment variables. You can see them here but not change them.": "Set by environment variables. You can see them here but not change them.",
+  "Blocked sources": "Blocked sources",
+  "A source that refuses requests is paused for a while. Unblock tries it again now.": "A source that refuses requests is paused for a while. Unblock tries it again now.",
+  "No sources are blocked right now.": "No sources are blocked right now.",
+  "Unblock": "Unblock"
 }
