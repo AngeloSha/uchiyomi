@@ -5281,6 +5281,13 @@ export default async function adminRoutes(app: FastifyInstance) {
                       totp_enabled = false, totp_secret = NULL, recovery_codes = '{}', totp_last_step = NULL WHERE id = $1`,
         [id, await placeholderPasswordHash()]);
       await revokeAllSessions(id);
+      // And the long-lived credentials it made while it had one: an API or OPDS token opens the library from anywhere,
+      // and an account without a password opens from home only. Kept while the provider still signs it in. Reintroduce
+      // by dropping it: "a password taken away takes its tokens" in passwordlessProfile.int.test.ts reads with the old one.
+      if (!(await one<{ sso: boolean }>('SELECT oidc_sub IS NOT NULL AS sso FROM users WHERE id = $1', [id]))?.sso) {
+        await q('DELETE FROM api_tokens WHERE user_id = $1', [id]);
+        await q('DELETE FROM opds_tokens WHERE user_id = $1', [id]);
+      }
     }
     if (b.managedBy !== undefined) await q('UPDATE users SET managed_by = $2 WHERE id = $1', [id, b.managedBy]);
     if (b.displayName) await q('UPDATE users SET display_name = $2 WHERE id = $1', [id, b.displayName]);

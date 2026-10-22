@@ -441,9 +441,11 @@ export async function exchangeRefreshToken(
     if (plan.kind === 'grace' || attempt >= 3) return { kind: 'grace', userId: t.user_id, role, expiresAt: t.expires_at.getTime(), local };
 
     if (plan.kind === 'rotate') {
-      // A session opened from another one lives no longer than it was given: a rotation keeps its expiry rather than
-      // starting a fresh REFRESH_TTL_DAYS the session it came from may not have.
-      const expiresAt = t.via === 'switch' ? t.expires_at : new Date(refreshExpiresAt());
+      // A session entered without a credential lives no longer than it was given: a rotation keeps its expiry rather
+      // than starting a fresh REFRESH_TTL_DAYS. One opened from another session ends no later than that one would; one
+      // picked on the sign-in screen at home ends REFRESH_TTL_DAYS after the pick, however often the tablet is used.
+      // Reintroduce the fresh lifetime: profileLocalPick.int.test.ts sees a picked session outlive its first expiry.
+      const expiresAt = withoutCredential(t.via) ? t.expires_at : new Date(refreshExpiresAt());
       const next = await supersede(t.id, { used: true, expiresAt, deviceId: t.device_id, deviceName: t.device_name, ...meta });
       const moved = t.ip && meta.ip && !sameNetwork(t.ip, meta.ip) ? { session: t.session_id, from: t.ip } : undefined;
       if (next) return { kind: 'rotated', userId: t.user_id, role, token: next, expiresAt: expiresAt.getTime(), local, moved };

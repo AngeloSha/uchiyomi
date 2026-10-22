@@ -1388,7 +1388,8 @@ paths:
       operationId: postAuthProfileLogin
       description: >-
         Under the same conditions as GET /auth/pick. The session holds at home only (401 `local_only` from outside on
-        every request) and makes no credential (403 `credential_required`). Every refusal is 401 `invalid_credentials`.
+        every request) and makes no credential (403 `credential_required`); it ends REFRESH_TTL_DAYS after the pick, however
+        often it is refreshed. Every refusal is 401 `invalid_credentials`.
       security: []
       requestBody:
         required: true
@@ -14061,6 +14062,7 @@ paths:
         `password` is refused whole with 403 `sso_only` in SSO-only mode (since v0.63.0). `localOpen`,
         `removePassword: true` and `managedBy` change how the account gets in: a profile that opens at home is never an
         admin (400 `local_open_admin`) and an account keeps a way in (400 `no_way_in`); either change ends its sessions.
+        `removePassword` also deletes the account's API and OPDS tokens, unless the sign-on provider still signs it in.
         `perms.canManageProfiles` lets a member make profiles of its own (POST /api/profiles).
       parameters:
         - name: id

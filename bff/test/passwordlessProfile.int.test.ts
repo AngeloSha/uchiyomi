@@ -85,6 +85,23 @@ test('profiles that open at home, from Admin -> Members', { skip }, async (t) =>
       assert.equal((await login('pp-pw')).statusCode, 401, 'the password it had no longer signs in');
     });
 
+    await t.test('a password taken away takes its tokens: an API or OPDS token opens the library from anywhere', async () => {
+      const id = (await make({ username: 'pp-tokens', password: PASSWORD })).json().id;
+      const api = await auth.issueApiToken(id, 'reader', ['read'], null);
+      await auth.issueOpdsToken(id);
+      assert.ok(await auth.resolveApiToken(api.token), 'precondition: the token works');
+      assert.equal((await patch(id, { removePassword: true, localOpen: true })).statusCode, 200);
+      assert.equal(await auth.resolveApiToken(api.token), null, 'the API token outlived the password');
+      assert.equal((await one<{ n: number }>('SELECT count(*)::int AS n FROM opds_tokens WHERE user_id = $1', [id]))!.n, 0,
+        'the OPDS token outlived the password');
+      // Still linked to the provider, the account keeps a credential, and so its tokens.
+      const sso = (await make({ username: 'pp-sso-tokens', password: PASSWORD })).json().id;
+      await q(`UPDATE users SET oidc_issuer = 'https://idp.example', oidc_sub = 'pp-sso-tokens' WHERE id = $1`, [sso]);
+      const kept = await auth.issueApiToken(sso, 'reader', ['read'], null);
+      assert.equal((await patch(sso, { removePassword: true })).statusCode, 200);
+      assert.ok(await auth.resolveApiToken(kept.token), 'a token of an account the provider still signs in');
+    });
+
     await t.test('conversions: open to hybrid to password, each ending the profile\'s sessions', async () => {
       const id = (await make({ username: 'pp-grows', localOpen: true })).json().id;
       const token = await auth.issueRefreshToken(id, { via: 'password' });

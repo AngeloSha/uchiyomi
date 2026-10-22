@@ -69,6 +69,20 @@ test('who is reading, at home', { skip }, async (t) => {
       assert.equal(away.json().error, 'local_only');
     });
 
+    await t.test('a picked session ends when it was going to, however often it is used', async () => {
+      // A tablet at home refreshes every few minutes: with a fresh REFRESH_TTL_DAYS at each rotation, a profile picked
+      // once would stay signed in for good. Its first expiry holds instead, as a switched-to session's does.
+      await turn(true);
+      const r = await pick(kid);
+      assert.equal(r.statusCode, 200, r.body);
+      const rt = r.cookies.find((c: any) => c.name === 'yomi_rt').value;
+      const { createHash } = await import('node:crypto');
+      await q(`UPDATE refresh_tokens SET expires_at = now() + interval '1 day' WHERE token_hash = $1`, [createHash('sha256').update(rt).digest('hex')]);
+      const again = await app.inject({ method: 'POST', url: '/auth/refresh', remoteAddress: home(), cookies: { yomi_rt: rt } });
+      assert.equal(again.statusCode, 200, again.body);
+      assert.ok(again.json().refreshExpiresAt < Date.now() + 2 * 86_400_000, 'the rotation started a fresh lifetime');
+    });
+
     await t.test('one answer for every refusal: outside, a profile with a password only, a disabled one', async () => {
       await turn(true);
       assert.deepEqual(await listed(AWAY), [], 'outside, the list shows who reads here');
