@@ -1124,7 +1124,7 @@ GET    /api/updates/expected
 POST   /api/refresh               GET    /api/refresh
 GET    /api/series/:id            GET    /api/series/:id/books
 GET    /api/series/:id/similar    GET    /api/series/:id/color
-GET    /api/series/:id/related
+GET    /api/series/:id/related    GET    /api/series/:id/other-titles
 POST   /api/series/search         GET    /api/leaderboard
 GET    /api/books/:id             POST   /api/books/:id/refetch
 GET    /api/books/:id/pages
@@ -1151,6 +1151,13 @@ matches, eighteen in all. Both read a copy the server keeps (`anilist_related`, 
 background in the same six-hourly round as the outside ratings: missing entries first, then the most recently read, ten
 per request, a row asked again after a week -- never for a library whose AniList lookups are off, and never when a page
 opens.
+
+**Titles on AniList.** `GET /api/series/:id/other-titles` answers `{titles: {english, romaji, native} | null}`, the
+three titles of the AniList entry the series is linked to (each `null` when AniList has none). `titles` is `null` for
+a series with no checked AniList link, in a library whose AniList lookups are off, or whose entry has no names. The
+answer is kept (`series_other_titles`) and asked again after a month, or after a day when it was empty; a request asks
+AniList only then, and AniList being busy or down answers with what is kept. A series this account may not open is a
+`404`.
 
 **Filtering the library by source** (since v0.49.2; the filters are @TIGamingTV's, PR #124). On the owned
 backend, `POST /api/series/search` accepts two more conditions: `mainSource` (the source a series was added from,
