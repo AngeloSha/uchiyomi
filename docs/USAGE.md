@@ -1466,6 +1466,10 @@ you keep scrolling through a series without interruption.
 - **Tap** the middle to show/hide the chrome (top bar + controls).
 - **Pinch / double-tap** to zoom (width multiplier); with a mouse, **double-click**. A double-click only zooms: it
   never turns the page as well, however slow your computer's double-click setting is (since v0.47.1).
+  On a touch screen the double-tap zooms from the middle of the screen, on the spot of the first tap; two quick taps on a
+  page-turning edge are two page turns. In paged mode, a zoomed page is **dragged** to look around it (it does not turn
+  the page), a press that stops a fling is not a tap, and crossing into another chapter shows its name for a moment.
+  The controls stay up while you drag the page slider.
 - **Themes:** AMOLED black, sepia, or gray, from the reader settings.
 - **Cover colour at the edges:** a soft wash of the series' cover colour across the top and bottom of the screen,
   so a gold cover tints the edges gold. To read with plain black edges, switch **Cover colour at the edges** off in
