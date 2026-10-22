@@ -24,6 +24,7 @@ import { ChapterTalkSheet } from '@/components/ChapterTalk';
 import { t as tr } from '@/lib/i18n';
 import { statusText } from '@/lib/activity';
 import { deletedText, selectedText, skippedBookmarkedText, skippedNotOursText } from '@/lib/counted';
+import { unlistedWarning } from '@/lib/sourceLeftovers';
 import { reasonText, type Said } from '@/lib/said';
 import { offlineOutcome } from '@/lib/notices';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
@@ -778,6 +779,15 @@ function SeriesInner() {
   const [acting, setActing] = useState(false);
   // What a confirm acts on: the select bar's subset, or the one chapter a row's ⋯ names (v0.62.0).
   const [confirming, setConfirming] = useState<null | { what: 'delete' | 'refetch'; books: Book[] }>(null);
+  // The chosen chapters no source this series follows lists (bff lib/sourceLeftovers.ts): the Delete confirmation warns
+  // that nothing can fetch them again. Asked when it opens; a failure warns of nothing rather than block the delete.
+  const deletingIds = confirming?.what === 'delete' ? confirming.books.map((b) => b.id) : [];
+  const { data: unlisted } = useQuery({
+    queryKey: ['chapters-unlisted', id, deletingIds.join(',')],
+    queryFn: () => api<{ unlisted: string[] }>(`/api/admin/series/${encodeURIComponent(id)}/chapters/unlisted`, { json: { bookIds: deletingIds.slice(0, 500) } }),
+    enabled: !!id && deletingIds.length > 0,
+    retry: false,
+  });
   // #240: the chapter numbers a Hide asks about -- a row's ⋯, or the select bar's -- and More's Show hidden chapters.
   const [hiding, setHiding] = useState<number[] | null>(null);
   const [showHidden, setShowHidden] = useState(false);
@@ -2237,6 +2247,10 @@ function SeriesInner() {
                   before the click rather than only in the toast after it. */}
               <p className="mt-2">{tr('A chapter somebody has bookmarked, and a chapter in a library you assembled yourself, is skipped.')}</p>
               <p className="mt-2">{tr('Fetch again brings a chapter back.')}</p>
+              {(() => {
+                const warn = unlistedWarning(confirming.books.length, unlisted?.unlisted.length ?? 0);
+                return warn && <p role="alert" className="mt-2 text-amber-300" data-unlisted-warning>{warn}</p>;
+              })()}
             </>
           }
           onConfirm={() => deleteBooks(confirming.books)}

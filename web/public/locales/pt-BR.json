@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4208
+    "strings": 4217
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -4211,5 +4211,14 @@
   "Uchiyomi can't tell a file you deleted from one on a drive that isn't connected right now, so it left them as they were. If you deleted or moved them yourself, mark them gone. Then you can forget the series.": "O Uchiyomi não consegue diferenciar um arquivo que você excluiu de um que está num disco desconectado agora, então os deixou como estavam. Se você os excluiu ou moveu, marque-os como sumidos. Depois você pode esquecer a série.",
   "Mark them gone": "Marcar como sumidos",
   "Amber: this source lists it under its own name, which came up first for two of this series’ names. Check the covers before you follow it. Following it keeps the name.": "Âmbar: esta fonte a lista com um nome próprio, que apareceu primeiro para dois nomes desta série. Compare as capas antes de seguir. Seguir guarda esse nome.",
-  "Home shows your favorites in this order. Drag one into place, or move it with its arrows.": "O Início mostra seus favoritos nesta ordem. Arraste um para o lugar certo ou mova-o com as setas."
+  "Home shows your favorites in this order. Drag one into place, or move it with its arrows.": "O Início mostra seus favoritos nesta ordem. Arraste um para o lugar certo ou mova-o com as setas.",
+  "1 downloaded chapter no other source lists will be deleted from the server, together with everyone's reading progress.": "1 capítulo baixado que nenhuma outra fonte lista será apagado do servidor, junto com o progresso de leitura de todos.",
+  "{n} downloaded chapters no other source lists will be deleted from the server, together with everyone's reading progress.": "{n} capítulos baixados que nenhuma outra fonte lista serão apagados do servidor, junto com o progresso de leitura de todos.",
+  "No source this series follows lists this chapter. Once it is deleted, it cannot be fetched again.": "Nenhuma fonte que esta série segue lista este capítulo. Depois de apagado, não poderá ser baixado de novo.",
+  "No source this series follows lists these chapters. Once they are deleted, they cannot be fetched again.": "Nenhuma fonte que esta série segue lista estes capítulos. Depois de apagados, não poderão ser baixados de novo.",
+  "No source this series follows lists one of these chapters. Once it is deleted, it cannot be fetched again.": "Nenhuma fonte que esta série segue lista um destes capítulos. Depois de apagado, não poderá ser baixado de novo.",
+  "No source this series follows lists {n} of these chapters. Once they are deleted, they cannot be fetched again.": "Nenhuma fonte que esta série segue lista {n} destes capítulos. Depois de apagados, não poderão ser baixados de novo.",
+  "Stop following {name}?": "Deixar de seguir {name}?",
+  "Stop following and delete": "Deixar de seguir e apagar",
+  "Detach {name}? The next source takes over as main.": "Desvincular {name}? A próxima fonte passa a ser a principal."
 }
