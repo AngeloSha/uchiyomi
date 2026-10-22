@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4208
+    "strings": 4217
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -4211,5 +4211,14 @@
   "Uchiyomi can't tell a file you deleted from one on a drive that isn't connected right now, so it left them as they were. If you deleted or moved them yourself, mark them gone. Then you can forget the series.": "Uchiyomi не может отличить удалённый вами файл от файла на диске, который сейчас не подключён, поэтому оставил их как есть. Если вы сами удалили или переместили их, отметьте их как пропавшие. После этого серию можно забыть.",
   "Mark them gone": "Отметить как пропавшие",
   "Amber: this source lists it under its own name, which came up first for two of this series’ names. Check the covers before you follow it. Following it keeps the name.": "Жёлтое: этот источник называет её по-своему, и это название было первым в поиске по двум названиям этой серии. Сравните обложки, прежде чем отслеживать. При отслеживании это название сохранится.",
-  "Home shows your favorites in this order. Drag one into place, or move it with its arrows.": "На главной ваше избранное показывается в этом порядке. Перетащите серию на нужное место или двигайте её стрелками."
+  "Home shows your favorites in this order. Drag one into place, or move it with its arrows.": "На главной ваше избранное показывается в этом порядке. Перетащите серию на нужное место или двигайте её стрелками.",
+  "1 downloaded chapter no other source lists will be deleted from the server, together with everyone's reading progress.": "1 скачанная глава, которой нет ни в одном другом источнике, будет удалена с сервера вместе с прогрессом чтения всех пользователей.",
+  "{n} downloaded chapters no other source lists will be deleted from the server, together with everyone's reading progress.": "Скачанные главы, которых нет ни в одном другом источнике ({n}), будут удалены с сервера вместе с прогрессом чтения всех пользователей.",
+  "No source this series follows lists this chapter. Once it is deleted, it cannot be fetched again.": "Ни один источник этой серии не содержит эту главу. После удаления её нельзя будет скачать снова.",
+  "No source this series follows lists these chapters. Once they are deleted, they cannot be fetched again.": "Ни один источник этой серии не содержит эти главы. После удаления их нельзя будет скачать снова.",
+  "No source this series follows lists one of these chapters. Once it is deleted, it cannot be fetched again.": "Ни один источник этой серии не содержит одну из этих глав. После удаления её нельзя будет скачать снова.",
+  "No source this series follows lists {n} of these chapters. Once they are deleted, they cannot be fetched again.": "Ни один источник этой серии не содержит некоторые из этих глав ({n}). После удаления их нельзя будет скачать снова.",
+  "Stop following {name}?": "Перестать следить за {name}?",
+  "Stop following and delete": "Перестать следить и удалить",
+  "Detach {name}? The next source takes over as main.": "Отключить {name}? Основным станет следующий источник."
 }

@@ -98,6 +98,7 @@ import { bounded } from '../lib/autoFollow';
 import { budgetFor } from '../lib/sources/budget';
 import { switchMainSource } from '../lib/mainSource';
 import { refileFailures } from '../lib/chapterFailures';
+import { leftoversOf, purgeLeftovers, purgeRefusal, unlistedOf, type PurgeResult } from '../lib/sourceLeftovers';
 import { mainUses, retireSource } from '../lib/retireSource';
 import { sourcesOverview } from '../lib/sourcesOverview';
 import { titlesFromBackup, entriesFromBackup, type BackupEntry } from '../lib/tachibk';
@@ -1986,22 +1987,65 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { ...out, sources: list };
   });
 
+  /**
+   * What removing a source would take with it (lib/sourceLeftovers.ts): the downloaded chapters only it lists, and how
+   * many readers have progress on them. The Sources sheet asks before its ×. 200 `{chapters, numbers, readers,
+   * lastSource}`; 404 when the source is not on the series.
+   */
+  app.get('/api/admin/series/:id/sources/:sourceId/leftovers', async (req, reply) => {
+    const { id, sourceId } = req.params as { id: string; sourceId: string };
+    const on = await one<{ on: boolean }>(
+      `SELECT (s.source_id = $2 OR EXISTS (SELECT 1 FROM series_sources ss WHERE ss.series_id = s.id AND ss.source_id = $2)) AS on
+         FROM lib_series s WHERE s.id = $1`, [id, sourceId]);
+    if (!on?.on) return reply.code(404).send({ error: 'not_found' });
+    const left = await leftoversOf(id, sourceId);
+    return { chapters: left.books.length, numbers: left.numbers, readers: left.readers, lastSource: left.others.length === 0 };
+  });
+
+  /**
+   * Removing a source takes the chapters only it lists with it (lib/sourceLeftovers.ts): their files, rows and everyone's
+   * progress, so its numbers are free for the series' real chapters. Not when it is the series' last source. 409 `busy`
+   * while another task changes the series and there is something to take; 409 `refused` when the download folder may
+   * not be written.
+   */
   app.delete('/api/admin/series/:id/sources/:sourceId', async (req, reply) => {
     const { id, sourceId } = req.params as { id: string; sourceId: string };
-    // The main source (#243): a follower takes over, or the series is left with none (lib/manualAttach.ts detachMain).
-    // Posting order refuses: nothing could attach a new main to that series afterwards.
-    const mainRow = await one<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1', [id]);
-    if (mainRow?.source_id && mainRow.source_id === sourceId) {
-      const out = await detachMain(id, { ctx: await viewCtxFor(userIdOf(req), roleOf(req)), userId: userIdOf(req), req });
-      if ('refused' in out) return refusedAttach(reply, out);
-      await markRemoved(id, sourceId);
-      const list = await seriesSourcesFor(id);
-      void updateSeries(id, 0).catch(() => {});
-      return { ok: true, promoted: out.promoted, sources: list };
+    const mainRow = await one<{ source_id: string | null; folder: string }>('SELECT source_id, folder FROM lib_series WHERE id = $1', [id]);
+    // The leftovers are read before anything changes, and the series' writer claimed for them: a download landing a
+    // chapter of the source mid-purge, or a scan re-listing a file being deleted, would undo it.
+    const left = mainRow ? await leftoversOf(id, sourceId) : null;
+    let claim: ReturnType<typeof claimSeriesWriter> = null;
+    if (left?.books.length || left?.numbers.length) {
+      claim = claimSeriesWriter([id], [mainRow!.folder]);
+      if (!claim) return reply.code(409).send({ error: 'busy', message: 'Another task is changing that series.' });
+      const refusal = await purgeRefusal(left.books).catch((e) => ({ reason: String(e?.message ?? e) }));
+      if (refusal) { claim.release(); return reply.code(409).send({ error: 'refused', message: refusal.reason, fix: (refusal as { fix?: string }).fix }); }
     }
-    const gone = await q<{ source_id: string }>(
-      'DELETE FROM series_sources WHERE series_id = $1 AND source_id = $2 RETURNING source_id', [id, sourceId]);
-    if (!gone.length) return reply.code(404).send({ error: 'not_found' });
+    const purge = async () => (left && claim ? purgeLeftovers(id, sourceId, left, { userId: userIdOf(req), req }) : null);
+    try {
+      // The main source (#243): a follower takes over, or the series is left with none (lib/manualAttach.ts detachMain).
+      // Posting order refuses: nothing could attach a new main to that series afterwards.
+      if (mainRow?.source_id && mainRow.source_id === sourceId) {
+        const out = await detachMain(id, { ctx: await viewCtxFor(userIdOf(req), roleOf(req)), userId: userIdOf(req), req });
+        if ('refused' in out) return refusedAttach(reply, out);
+        await markRemoved(id, sourceId);
+        const purged = await purge();
+        claim?.release();
+        const list = await seriesSourcesFor(id);
+        void updateSeries(id, 0).catch(() => {});
+        return { ok: true, promoted: out.promoted, sources: list, ...(purged ? { purged } : {}) };
+      }
+      const gone = await q<{ source_id: string }>(
+        'DELETE FROM series_sources WHERE series_id = $1 AND source_id = $2 RETURNING source_id', [id, sourceId]);
+      if (!gone.length) return reply.code(404).send({ error: 'not_found' });
+      const purged = await purge();
+      claim?.release();
+      return await unfollowed(id, sourceId, req, purged);
+    } finally { claim?.release(); }
+  });
+
+  /** The rest of a follower's removal, after its row and its leftovers went. */
+  const unfollowed = async (id: string, sourceId: string, req: FastifyRequest, purged: PurgeResult | null) => {
     // v0.80.0: and nothing automatic follows it onto this series again -- not the scout, not the hunt -- until an admin
     // does (lib/scoutMemory.ts). Reintroduce by dropping it: "a source an admin unfollowed is not followed again" in
     // sourceScout.int.test.ts finds it followed.
@@ -2029,8 +2073,8 @@ export default async function adminRoutes(app: FastifyInstance) {
     // already done the part that matters. Not awaited: an unfollow answers at once.
     void updateSeries(id, 0).catch(() => {});
     await logAudit('series.unfollow_source', { userId: userIdOf(req), detail: { id, source: sourceId }, req });
-    return { ok: true, sources: await seriesSourcesFor(id) };
-  });
+    return { ok: true, sources: await seriesSourcesFor(id), ...(purged ? { purged } : {}) };
+  };
 
   // "Check for new chapters" for one series. updateSeries downloads synchronously and can run for minutes,
   // so this starts it and returns; the UI polls the status below rather than holding a request open.
@@ -2651,6 +2695,18 @@ export default async function adminRoutes(app: FastifyInstance) {
       if ('refused' in r) return reply.code(409).send({ error: 'refused', message: r.refused.reason, fix: r.refused.fix });
       return { ok: true, applied: r.applied, bytes: r.bytes, skipped: r.skipped };
     } finally { claim.release(); }
+  });
+
+  /**
+   * Of the chosen chapters, the ones no source the series follows lists (lib/sourceLeftovers.ts unlistedOf): once
+   * deleted, nothing can fetch them again. The Delete from server confirmation warns with it. 200 `{unlisted: ids}`.
+   */
+  app.post('/api/admin/series/:id/chapters/unlisted', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ bookIds: z.array(z.string().min(1).max(64)).min(1).max(500) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!(await getSeriesRow(id))) return reply.code(404).send({ error: 'not_found' });
+    return { unlisted: await unlistedOf(id, b.data.bookIds) };
   });
 
   /**

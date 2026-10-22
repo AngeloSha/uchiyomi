@@ -586,7 +586,7 @@ Tap the line and the **Sources & translations** sheet opens. It has two sections
   followed on its own (see *Following a second source*), *{n} chapters listed* as of the last check, and
   *checked {ago}*. A source that is no longer installed is dimmed and says *not installed*. A series with
   no source says *No source — the chapters were scanned from disk.* Admins also get an × on a followed source
-  to stop following it, and two chips under the list: **Check now**, one for the series since a check
+  to stop following it (see *Removing a source* below), and two chips under the list: **Check now**, one for the series since a check
   visits every followed source, and **Add one from Find missing chapters**, which closes the sheet and
   opens that dialog (see *Following a second source*).
 - **Translated by** — one row per scanlation group, ranked groups first, then the busiest, blocked groups
@@ -1406,7 +1406,9 @@ folder — is ever deleted, and **a chapter anyone has bookmarked is kept**, bec
 inside the file. A chapter in a library you assembled, or one with a bookmark on it, is skipped, and the toast
 says how many were and why (*3 skipped: not downloaded by Uchiyomi*, *1 skipped: bookmarked by a reader*); a
 delete that deleted nothing says so in red rather than reporting *0 deleted* as a success. A deleted chapter
-is not fetched back by the updater; the tombstone is what tells it the chapter is accounted for.
+is not fetched back by the updater; the tombstone is what tells it the chapter is accounted for. When a chosen
+chapter isn't listed by any source the series follows, the confirmation warns that once deleted, it can't be fetched
+again.
 
 **Fetch again** is the replace that the translation rules deliberately never do on their own: it downloads
 the copy those rules choose *now* — the group you ranked since, from whichever followed source carries it —
@@ -2084,8 +2086,28 @@ the source calls it something that is not the series' title or one of its other 
 and offers **Attach anyway**. The other rules stay (the series' language, posting-order numbering, a check running right
 now, a waiting renumber, a source cooling down after errors, the follower limit for an extra source). A series with no
 source takes the pick as its main. The **×** on the main source detaches it, after asking: the next source takes over, or
-the series is left with none; downloaded chapters and your progress stay either way. A series numbered by posting order
-keeps its main source.
+the series is left with none. When another source takes over, the chapters only the detached source listed are deleted,
+as *Removing a source* below explains. When it was the series' only source, its chapters and everyone's progress stay. A
+series numbered by posting order keeps its main source.
+
+#### Removing a source
+
+A source followed by mistake, for example the wrong series on its site, often fetches chapters the real series doesn't
+have yet. Removing it takes those chapters with it, as though they had never been fetched. That covers every chapter
+the source downloaded whose number no remaining source lists: the file, the chapter itself (including one already
+deleted from the server), everyone's reading progress and bookmarks on it, and read marks on numbers only that source
+listed. The numbers are then free, so when the real series reaches them, the next check fetches the real chapters.
+Before, a leftover chapter, even a deleted one, kept its number "held" and the real chapter was never downloaded.
+
+- A chapter another source the series follows also lists stays, even if it was downloaded from the removed source.
+  *Fetch again* replaces it with the chosen copy.
+- Removing the series' **only** source deletes nothing.
+- When something would be deleted, the **×** asks first, under the source's row: *Stop following {name}? {n} downloaded
+  chapters no other source lists will be deleted from the server, together with everyone's reading progress.* When
+  nothing would be deleted, a followed source goes at once, as before.
+- "Lists" means the source lists as of each source's last check. A source followed a moment ago counts once its first
+  check has run.
+- While a download or another task is changing the series, the removal is refused and can be tried again a moment later.
 
 ### MangaDex in other languages
 

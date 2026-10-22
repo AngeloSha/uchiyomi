@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4208
+    "strings": 4217
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -4211,5 +4211,14 @@
   "Uchiyomi can't tell a file you deleted from one on a drive that isn't connected right now, so it left them as they were. If you deleted or moved them yourself, mark them gone. Then you can forget the series.": "لا يستطيع Uchiyomi التمييز بين ملف حذفته وملف على قرص غير موصول الآن، لذا تركها كما هي. إن حذفتها أو نقلتها بنفسك، فعلّمها على أنها محذوفة. بعدها يمكنك نسيان السلسلة.",
   "Mark them gone": "علّمها كمحذوفة",
   "Amber: this source lists it under its own name, which came up first for two of this series’ names. Check the covers before you follow it. Following it keeps the name.": "كهرماني: يعرضه هذا المصدر باسم خاص به، ظهر أولًا عند البحث باسمين من أسماء هذه السلسلة. تحقّق من الغلافين قبل متابعته. متابعته تحفظ هذا الاسم.",
-  "Home shows your favorites in this order. Drag one into place, or move it with its arrows.": "تعرض الصفحة الرئيسية مفضلاتك بهذا الترتيب. اسحب أيًا منها إلى مكانه، أو حرّكه بأسهمه."
+  "Home shows your favorites in this order. Drag one into place, or move it with its arrows.": "تعرض الصفحة الرئيسية مفضلاتك بهذا الترتيب. اسحب أيًا منها إلى مكانه، أو حرّكه بأسهمه.",
+  "1 downloaded chapter no other source lists will be deleted from the server, together with everyone's reading progress.": "سيُحذف من الخادم فصل مُنزّل واحد (1) لا يدرجه أي مصدر آخر، مع تقدّم القراءة لدى الجميع.",
+  "{n} downloaded chapters no other source lists will be deleted from the server, together with everyone's reading progress.": "ستُحذف من الخادم {n} فصول مُنزّلة لا يدرجها أي مصدر آخر، مع تقدّم القراءة لدى الجميع.",
+  "No source this series follows lists this chapter. Once it is deleted, it cannot be fetched again.": "لا يدرج أي مصدر تتابعه هذه السلسلة هذا الفصل. بعد حذفه لا يمكن جلبه مرة أخرى.",
+  "No source this series follows lists these chapters. Once they are deleted, they cannot be fetched again.": "لا يدرج أي مصدر تتابعه هذه السلسلة هذه الفصول. بعد حذفها لا يمكن جلبها مرة أخرى.",
+  "No source this series follows lists one of these chapters. Once it is deleted, it cannot be fetched again.": "لا يدرج أي مصدر تتابعه هذه السلسلة أحد هذه الفصول. بعد حذفه لا يمكن جلبه مرة أخرى.",
+  "No source this series follows lists {n} of these chapters. Once they are deleted, they cannot be fetched again.": "لا يدرج أي مصدر تتابعه هذه السلسلة {n} من هذه الفصول. بعد حذفها لا يمكن جلبها مرة أخرى.",
+  "Stop following {name}?": "إيقاف متابعة {name}؟",
+  "Stop following and delete": "إيقاف المتابعة والحذف",
+  "Detach {name}? The next source takes over as main.": "فصل {name}؟ سيصبح المصدر التالي هو الرئيسي."
 }

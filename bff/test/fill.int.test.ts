@@ -27,6 +27,8 @@ if (DSN) {
   // after SCAN_FIRST_ANSWER_MS with what it has, and a slow machine must not see half a scan).
   process.env.SCAN_FIRST_ANSWER_MS = '60000';
   process.env.DL_ROOT = root;
+  // The free-space floor is not this suite's subject: a CI runner with under 10 GiB free refused every download.
+  process.env.MIN_FREE_GB = '0';
   process.env.DOWNLOAD_MIN_GAP_MS = '0';
   process.env.SCAN_CONCURRENCY = '4'; // the scan-latency test below assumes four slots and
   process.env.SCAN_ENOUGH = '3';      // stops once three sources have the title

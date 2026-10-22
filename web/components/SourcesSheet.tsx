@@ -40,6 +40,8 @@ import { useFindRuns } from '@/lib/useFindRun';
 import { FindModeChoice, SeriesReview, type EditionAsk } from '@/components/FindSources';
 import { makeMainQuestion, mayMakeMain } from '@/lib/mainSource';
 import { MigrateSourceSheet } from '@/components/MigrateSourceSheet';
+import { leftoversText, type SourceLeftovers } from '@/lib/sourceLeftovers';
+import { deletedText } from '@/lib/counted';
 
 // The patience field, and only that: `w-14`, not the page's `w-full` field class, so "Patience [ 2 ] days ·
 // Currently 2" and the two buttons share one row -- on a phone the footer sits under the sheet's cap and
@@ -370,9 +372,11 @@ export function backupText(at: string | null | undefined): string {
  * × that stops following it and (v0.54.0) Make main on a follower that works: it asks first, in one line, what becomes
  * of the main source it replaces (lib/mainSource.ts).
  */
-export function SourceRow({ s, onUnfollow, unfollowing, makeMain }: {
+export function SourceRow({ s, onUnfollow, unfollowing, makeMain, removeAsk }: {
   s: SeriesSource; onUnfollow?: () => void; unfollowing?: boolean;
   makeMain?: { question: string; busy: boolean; refusal: string | null; asking: boolean; onAsk: () => void; onCancel: () => void; onConfirm: () => void };
+  /** Asked before a follower whose removal deletes chapters only it lists goes (bff lib/sourceLeftovers.ts). */
+  removeAsk?: { text: string; busy: boolean; onConfirm: () => void; onCancel: () => void };
 }) {
   // ⚠️ The server names an adapter it no longer loads by its id, and an extension's id is nineteen digits
   // nobody can read (supplyLine.ts applies the same rule to the line under the title).
@@ -427,6 +431,19 @@ export function SourceRow({ s, onUnfollow, unfollowing, makeMain }: {
       </div>
     )}
     {makeMain?.refusal && <p role="alert" className="mb-2 text-[11px] leading-relaxed text-amber-300" data-make-main-refusal>{makeMain.refusal}</p>}
+    {removeAsk && (
+      <div role="alertdialog" aria-labelledby={`remove-q-${s.sourceId}`} className="mb-2 border-s-2 border-rose-400/70 bg-ink-850/80 py-2 pe-2 ps-2.5" data-remove-source-confirm={s.sourceId}>
+        <p id={`remove-q-${s.sourceId}`} className="text-[12px] leading-relaxed text-fog-100">
+          {tr('Stop following {name}?', { name: `\u2068${s.name}\u2069` })} {removeAsk.text}
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button type="button" onClick={removeAsk.onConfirm} disabled={removeAsk.busy} className="btn-key btn-key-danger" data-remove-source-yes>
+            {tr('Stop following and delete')}
+          </button>
+          <button type="button" autoFocus onClick={removeAsk.onCancel} disabled={removeAsk.busy} className="btn-key">{tr('Cancel')}</button>
+        </div>
+      </div>
+    )}
     </>
   );
 }
@@ -681,15 +698,37 @@ export function SourcesSheet({ id, title: seriesTitle, series, groups, admin, er
   const [migrating, setMigrating] = useState(false);
   const [detachAsk, setDetachAsk] = useState(false);
   const [unfollowing, setUnfollowing] = useState<string | null>(null);
+  // Removing a source deletes the downloaded chapters only it lists (bff lib/sourceLeftovers.ts), so the × asks the
+  // server first what would go: nothing, and a follower goes at once as before; something, and it is asked in one line
+  // under the row. The main source's detach question carries the same line.
+  const [removeAsk, setRemoveAsk] = useState<{ sourceId: string; chapters: number } | null>(null);
+  const [detachLeft, setDetachLeft] = useState(0);
   const unfollow = async (s: SeriesSource) => {
     setUnfollowing(s.sourceId);
     try {
-      await api(`/api/admin/series/${id}/sources/${encodeURIComponent(s.sourceId)}`, { method: 'DELETE' });
-      toast(tr('No longer following {s}', { s: s.name }), 'success');
+      const r = await api<{ purged?: { removed: number } }>(`/api/admin/series/${id}/sources/${encodeURIComponent(s.sourceId)}`, { method: 'DELETE' });
+      const removed = r?.purged?.removed ?? 0;
+      toast(removed ? `${tr('No longer following {s}', { s: s.name })} · ${deletedText(removed)}` : tr('No longer following {s}', { s: s.name }), 'success');
       onSaved();
-      qc.invalidateQueries({ queryKey: ['series-listing', id] });
+      for (const k of ['series-listing', 'series-books', 'series-versions', 'series-groups']) qc.invalidateQueries({ queryKey: [k, id] });
     } catch (e) { toast(msgOf(e, tr('Could not remove that')), 'error'); }
+    setRemoveAsk(null);
     setUnfollowing(null);
+  };
+  const askUnfollow = async (s: SeriesSource) => {
+    setUnfollowing(s.sourceId);
+    let left: SourceLeftovers;
+    try {
+      left = await api<SourceLeftovers>(`/api/admin/series/${encodeURIComponent(id)}/sources/${encodeURIComponent(s.sourceId)}/leftovers`);
+    } catch (e) {
+      toast(msgOf(e, tr('Could not remove that')), 'error');
+      setUnfollowing(null);
+      return;
+    }
+    setUnfollowing(null);
+    if (s.primary) { setDetachLeft(left.chapters); setDetachAsk(true); return; }
+    if (left.chapters > 0) { setRemoveAsk({ sourceId: s.sourceId, chapters: left.chapters }); return; }
+    await unfollow(s);
   };
   // Chapter-name borrowing for this series (bff lib/borrowNames.ts, #85). The box shows what APPLIES -- the
   // server's setting included -- and a tap writes this series' own choice: on asks for names at once, off
@@ -802,7 +841,13 @@ export function SourcesSheet({ id, title: seriesTitle, series, groups, admin, er
           ? <div className="divide-y divide-ink-800/70">
               {sources.map((s) => (
                 <SourceRow key={s.sourceId} s={{ ...s, checkedAt: s.checkedAt ?? (s.primary ? checkedAt : null) }}
-                  onUnfollow={isAdmin ? (s.primary ? () => setDetachAsk(true) : () => unfollow(s)) : undefined} unfollowing={unfollowing === s.sourceId}
+                  onUnfollow={isAdmin ? () => void askUnfollow(s) : undefined} unfollowing={unfollowing === s.sourceId}
+                  removeAsk={isAdmin && removeAsk?.sourceId === s.sourceId ? {
+                    text: leftoversText(removeAsk.chapters) ?? '',
+                    busy: unfollowing !== null,
+                    onConfirm: () => void unfollow(s),
+                    onCancel: () => setRemoveAsk(null),
+                  } : undefined}
                   makeMain={adminAccount && mayMakeMain(s) ? {
                     question: makeMainQuestion(s, main?.primary ? main : null),
                     busy: promoting !== null,
@@ -819,7 +864,9 @@ export function SourcesSheet({ id, title: seriesTitle, series, groups, admin, er
           <div role="alertdialog" aria-labelledby={`detach-q-${id}`} className="mt-2 border-s-2 border-rose-400/70 bg-ink-850/80 py-2 pe-2 ps-2.5" data-detach-confirm>
             <p id={`detach-q-${id}`} className="text-[12px] leading-relaxed text-fog-100">
               {sources.length > 1
-                ? tr('Detach {name}? The next source takes over as main. Downloaded chapters and your progress stay.', { name: `\u2068${main.name}\u2069` })
+                ? detachLeft > 0
+                  ? `${tr('Detach {name}? The next source takes over as main.', { name: `\u2068${main.name}\u2069` })} ${leftoversText(detachLeft)}`
+                  : tr('Detach {name}? The next source takes over as main. Downloaded chapters and your progress stay.', { name: `\u2068${main.name}\u2069` })
                 : tr('Detach {name}? The series keeps its chapters and progress but will have no source to update from.', { name: `\u2068${main.name}\u2069` })}
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
