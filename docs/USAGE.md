@@ -1752,10 +1752,20 @@ translated once per language and kept, so reading it again costs nothing.
 
 **Discover** is how you add new series to your library.
 
-- **Trending** rails: popular manhwa, and since v0.61.0 manga and manhua, that you don't already have. Each card shows
-  the description + chapter count.
-- **Because you read …** (since v0.61.0, for accounts that may add series): what AniList's readers recommend after
-  something you read lately, leaving out what you have. A card searches your sources for it.
+- **The hero** at the top: what is trending in manhwa right now, with AniList's art, that you don't already have. **Find
+  and add** looks it up on your sources. It moves on every five seconds; the **Pause** key holds it, and on a phone you
+  swipe between them. Since v0.98.0 the server keeps the trending lists, so the hero is there at once, after a restart
+  too, and while it is on its way its space is held so nothing below it jumps.
+- **The wall comes first** (since v0.98.0): right under the search, with Discover's rows inside it while you browse.
+  - **Recommended for you**, after the first two rows of covers: one row with what your connected trackers suggest (see
+    section 10) and what AniList's readers recommend after the series you read here lately (*Because you read …*,
+    since v0.61.0; since v0.98.0 from your last five, one from each in turn). Each card says why it is there: the
+    service that suggested it, or the cover of the series you read. A title is one card however many of them name it,
+    and what you already have is left out. A card searches your sources for it.
+  - **Trending manhwa**, **Trending manga** and **Trending manhua** (since v0.61.0), every four rows after it: what is
+    trending on AniList that you don't already have, the first ten with their rank, as on Home's Top 10.
+  - A row waits after the wall until the wall has filled that far, so nothing you are looking at moves. A search shows
+    its results alone.
 - A Discover link with `?q=` opens on that search: `/discover/?q=solo%20leveling`. The series page's Related row
   uses it for a work you don't have.
 - **Newest / Popular:** the wall under the heading is what your sources published most recently, or what is
@@ -3508,7 +3518,7 @@ from the start: chapters read to 12 plus a mark on chapter 1000 still send 12, b
 tracker cannot be taken back there. Section 4, *Marking chapters you don't have as read*, has the whole rule.
 
 **Recommended for you** (since v0.71.0, from [#248](https://github.com/AngeloSha/uchiyomi/pull/248)). With AniList or
-MyAnimeList connected, and an account that may add series, **Discover** shows a *Recommended for you* row above the wall. For each of up to eight series from your AniList list and five from your MyAnimeList list it takes the service's
+MyAnimeList connected, and an account that may add series, **Discover** shows a *Recommended for you* row inside the wall, after its first two rows of covers (above the wall before v0.98.0; since v0.98.0 it also holds *Because you read*, section 6). For each of up to eight series from your AniList list and five from your MyAnimeList list it takes the service's
 own readers' "if you liked this" suggestions. A series counts as a seed when you finished it, are reading it or have it
 on hold, rated it 5/10 (three stars) or more, or did not rate it (an unrated one on hold does not count), and have read
 it in earnest: a few chapters of an unfinished series say nothing about taste. Stars you give a series in Uchiyomi count
@@ -3517,7 +3527,7 @@ linked to its entry by a person or a confirmed match. Reading fades, so a series
 last week. A title several of your seeds point at ranks above one seed's pick, and the genres of what you rated high lift
 a suggestion while the genres of what you rated two stars or less pull it down. Every card says which service it came
 from and, under the title, *Because you read …*; a title both services suggest is one card naming both, and no seed
-fills more than five cards. Left out: everything on any of your connected lists under any status (read, reading, on hold,
+fills more than eight cards (five before v0.98.0). Left out: everything on any of your connected lists under any status (read, reading, on hold,
 dropped or planned) and anything the library already holds. Light novels are never suggested, and neither is adult work
 while 18+ is hidden or your account is capped below 18 (a MyAnimeList suggestion whose age rating AniList cannot confirm
 counts as adult), nor, while 18+ is hidden, a title in a genre the admin named as adult. The same goes for the series a

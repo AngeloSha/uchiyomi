@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.97.0
+  version: 0.98.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -3969,10 +3969,13 @@ paths:
       summary: Trending titles from AniList for the Discover page.
       operationId: getApiDiscoverTrending
       description: >-
-        `{content: [{id, title, cover, banner, description, genres, score, chapters, status}]}`, up to 36, never one
-        the server already holds, never 18+ on AniList and never a light novel. Since v0.61.0 by `country` of origin,
-        each cached six hours; while Show 18+ is off, a title carrying a genre the admin named as adult is left out of
-        the answer.
+        `{content: [{id, title, cover, coverXL, banner, description, genres, score, chapters, status}], pending}`, up
+        to 36, never one the server already holds, never 18+ on AniList and never a light novel. Since v0.61.0 by
+        `country` of origin; while Show 18+ is off, a title carrying a genre the admin named as adult is left out of
+        the answer. Since v0.98.0 each country's list is stored and answered from that copy at once (after a restart
+        too), refreshed in the background once six hours old; `coverXL` is the same cover at its largest. `pending:
+        true`, with an empty `content`, only while a server that has never stored a copy is still fetching one: ask
+        again in a few seconds.
       parameters:
         - name: country
           in: query
@@ -3999,11 +4002,12 @@ paths:
       summary: Discover's "Because you read" -- AniList's recommendations after a series the caller read (v0.61.0).
       operationId: getApiDiscoverBecause
       description: >-
-        `{seed: {id, title} | null, content}`: `content` in the trending shape, at most 20. The seed is the caller's most
-        recently read series with a finished chapter, that they may list, in a library whose AniList lookups are on and
-        with a checked AniList link -- the first of five that leaves at least four recommendations once what the server
-        holds (by AniList entry or any name) and what is 18+ for the caller are left out. `seed` null and nothing to show
-        otherwise. Read from the server's stored copy; a request never asks AniList.
+        `{seed, seeds, content}`: `content` in the trending shape plus `because: {id, title}`, at most 30. Since v0.98.0
+        the recommendations after each of the caller's five most recently read series with a finished chapter -- that
+        they may list, in a library whose AniList lookups are on and with a checked AniList link -- one from each in
+        turn, once per AniList entry, less what the server holds (by AniList entry or any name) and what is 18+ for the
+        caller. `because` is the series an item came from, `seeds` those series, `seed` the first of them (null, with
+        nothing to show, when there is none). Read from the server's stored copy; a request never asks AniList.
       security:
         - bearer: []
       responses:

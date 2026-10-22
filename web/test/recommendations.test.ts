@@ -27,13 +27,17 @@ test('the rail polls only while the server is still refreshing, and only a few t
   assert.equal(pollAfter(data(true), POLL_MAX), false);
 });
 
-test('Discover shows the rail while browsing only, and the rail draws nothing without a suggestion', () => {
+test('Discover asks for suggestions while browsing only, draws the row only with a pick, and isolates the read', () => {
+  // v0.98.0: the rail became Discover's one picks row (lib/forYou.ts), asked by the page itself so the wall knows whether
+  // the row has cards.
   const { readFileSync } = require('node:fs') as typeof import('node:fs');
   const page = readFileSync(new URL('../app/discover/page.tsx', import.meta.url), 'utf8');
-  assert.match(page, /\{mode === 'newest' && <RecommendationRail enabled=\{mayAdd\} onPick=\{\(title\) => setSeed\(\{ kind: 'trending', title \}\)\} \/>\}/);
-  const rail = readFileSync(new URL('../components/RecommendationRail.tsx', import.meta.url), 'utf8');
-  assert.match(rail, /enabled,\n/, 'it asks only when the page may add');
-  assert.match(rail, /if \(!items\.length\) return null;/);
-  // The seed's title is isolated in the sentence, as Discover's own rail does it. Reintroduce `{ title: because }`: this fails.
-  assert.match(rail, /tr\('Because you read \{title\}', \{ title: `\\u2068\$\{because\}\\u2069` \}\)/, 'the seed title is not isolated');
+  assert.match(page, /queryKey: \['discover-recommendations'\],\s*queryFn: \(\) => api<Recommendations>\('\/api\/discover\/recommendations'\),\s*enabled: mayAdd && mode === 'newest' && heroSettled,/,
+    'it asks when the page may not add, or while searching');
+  // Reintroduce the poll without its limit: a slow service turns an open tab into a request every few seconds.
+  assert.match(page, /refetchInterval: \(qy\) => pollAfter\(qy\.state\.data, qy\.state\.dataUpdateCount\),/);
+  assert.match(page, /ROWS\.filter\(\(k\) => \(k === 'foryou' \? picks\.length : trendRails\[TREND_RAILS\.indexOf\(k\)\]\.length\) > 0\)/,
+    'a row without a card is drawn');
+  // The read's title is isolated in the sentence, as Home's rail does it. Reintroduce `{ title: pk.from.because }`: this fails.
+  assert.match(page, /tr\('Because you read \{title\}', \{ title: `\\u2068\$\{pk\.from\.because\}\\u2069` \}\)/, 'the read\'s title is not isolated');
 });

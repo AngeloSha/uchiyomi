@@ -393,6 +393,11 @@ export interface TrendingItem {
   id: number | null;
   title: string;
   cover: string | null;
+  /**
+   * The same cover at its largest (v0.98.0): a phone's Discover hero fills its width with the cover, and `cover` (~230 px)
+   * is soft across a 3x screen. Absent from a copy stored before v0.98.0; the hero falls back to `cover`.
+   */
+  coverXL?: string | null;
   banner: string | null;
   description: string;
   genres: string[];
@@ -408,9 +413,13 @@ export interface TrendingItem {
 export const TREND_COUNTRIES = ['KR', 'JP', 'CN'] as const;
 export type TrendCountry = (typeof TREND_COUNTRIES)[number];
 
-/** Globally trending manga from one country of origin, from AniList -- for Discover's hero and its trending rails. */
-export async function fetchTrending(country: TrendCountry, page = 1): Promise<TrendingItem[]> {
-  const r = await anilistFetch(ANILIST, POST({ query: TRENDING, variables: { page, country } }), ASK);
+/**
+ * Globally trending manga from one country of origin, from AniList -- for Discover's hero and its trending rails.
+ * `background` (v0.98.0, lib/trending.ts): nobody is waiting on this pull, so it waits its turn behind a 429 (BATCH) where
+ * a lookup someone waits on is told "busy" (ASK) -- the stored copy answers the page meanwhile.
+ */
+export async function fetchTrending(country: TrendCountry, page = 1, background = false): Promise<TrendingItem[]> {
+  const r = await anilistFetch(ANILIST, POST({ query: TRENDING, variables: { page, country } }), background ? BATCH : ASK);
   if (!r.ok) throw new Error(`anilist ${r.status}`);
   const j: any = await r.json();
   const media: any[] = j?.data?.Page?.media ?? [];
@@ -420,6 +429,7 @@ export async function fetchTrending(country: TrendCountry, page = 1): Promise<Tr
       title: m.title?.english || m.title?.romaji || '',
       // `large` (~230px) is plenty for the rail cards and lighter than extraLarge; loaded direct from AniList's CDN.
       cover: m.coverImage?.large || m.coverImage?.extraLarge || null,
+      coverXL: m.coverImage?.extraLarge || m.coverImage?.large || null,
       banner: m.bannerImage ?? null,
       description: plainText(String(m.description || '').replace(/<br\s*\/?>/gi, ' ')),
       genres: Array.isArray(m.genres) ? m.genres : [],

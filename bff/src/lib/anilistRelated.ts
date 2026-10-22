@@ -281,19 +281,28 @@ const asTrending = (it: RelatedItem): TrendingShape => ({
   status: it.status,
 });
 
-/** The series the rail may be about: the viewer's last five with a finished chapter. */
+/** The series the row may be about: the viewer's last five with a finished chapter. */
 const SEEDS = 5;
-/** The fewest recommendations a seed must leave once what the server holds is out: fewer is not a rail. */
-const MIN_BECAUSE = 4;
-const BECAUSE_MAX = 20;
+/** The most picks it hands Discover, taken from every seed in turn (v0.98.0; one seed's ten at most before). */
+const BECAUSE_MAX = 30;
+
+/** A pick and the read series it came from (v0.98.0): its card says "Because you read {title}" beside that cover. */
+export interface BecausePick extends TrendingShape { because: { id: string; title: string } }
 
 /**
- * Discover's "Because you read {title}" (GET /api/discover/because): what AniList's readers recommend after a series this
+ * Discover's "Because you read" picks (GET /api/discover/because): what AniList's readers recommend after the series this
  * viewer read lately, less what the server already holds (by its entry or by any name, heldEntry) and what is 18+ for
- * them. The seed is the most recently read series with a finished chapter that the viewer may list, in a library that
- * looks things up, with a checked link and a row -- the first of five that leaves at least four to show. Table only.
+ * them. The seeds are the five most recently read series with a finished chapter that the viewer may list, in a library
+ * that looks things up, with a checked link and a row. Table only.
+ *
+ * v0.98.0: every seed adds its picks, one from each in turn, most recent first, and each pick names its own seed. It was
+ * the first seed that left four, alone: AniList keeps ten picks a title and the library holds many of them, so the owner's
+ * row was four cards on a screen that holds fourteen, while the other four seeds' picks were loaded here and thrown away.
+ * `seed` is the first seed the picks name, for a page from before v0.98.0 that heads its rail with one title.
  */
-export async function becauseYouRead(userId: string, ctx: ViewCtx): Promise<{ seed: { id: string; title: string } | null; content: TrendingShape[] }> {
+export async function becauseYouRead(userId: string, ctx: ViewCtx): Promise<{
+  seed: { id: string; title: string } | null; seeds: { id: string; title: string }[]; content: BecausePick[];
+}> {
   const p = new Params();
   const uid = p.add(userId);
   const seeds = await q<{ id: string; title: string; recs: unknown }>(
@@ -304,20 +313,33 @@ export async function becauseYouRead(userId: string, ctx: ViewCtx): Promise<{ se
        JOIN libraries l ON l.id = s.library_id AND l.anilist_lookup
        JOIN series_trackers t ON t.series_id = s.id AND t.provider = 'anilist'
                              AND (t.linked_by IS NOT NULL OR t.checked_at IS NOT NULL)
-       JOIN anilist_related a ON a.anilist_id = t.external_id
+       JOIN anilist_related a ON a.anilist_id = t.external_id AND jsonb_array_length(a.recs) > 0
        LEFT JOIN series_overrides o ON o.series_id = s.id
       WHERE ${browsable('s', ctx, p)}
       ORDER BY rp.at DESC, s.id
       LIMIT ${p.add(SEEDS)}`,
     p.values as any[],
   );
-  if (!seeds.length) return { seed: null, content: [] };
+  if (!seeds.length) return { seed: null, seeds: [], content: [] };
   const idx = await libraryIndex();
-  for (const s of seeds) {
-    // Reintroduce by keeping what is held: "Because you read leaves out what the server holds" in
-    // anilistRelated.int.test.ts finds a held work on the rail.
-    const recs = itemsOf(s.recs).filter((it) => !heldEntry(idx, it).length && adultOk(it, ctx));
-    if (recs.length >= MIN_BECAUSE) return { seed: { id: s.id, title: s.title }, content: recs.slice(0, BECAUSE_MAX).map(asTrending) };
+  // Reintroduce by keeping what is held: "Because you read leaves out what the server holds" in
+  // anilistRelated.int.test.ts finds a held work on the row.
+  const lists = seeds
+    .map((s) => ({ seed: { id: s.id, title: s.title }, recs: itemsOf(s.recs).filter((it) => !heldEntry(idx, it).length && adultOk(it, ctx)) }))
+    .filter((l) => l.recs.length > 0);
+  // One from each seed in turn, so the first cards on screen are not all one series' picks; one card per AniList entry, the
+  // first seed to name it keeping it. Reintroduce the one-seed row: "Because you read draws from every recent read" fails.
+  const content: BecausePick[] = [];
+  const seen = new Set<number>();
+  for (let i = 0; content.length < BECAUSE_MAX && lists.some((l) => i < l.recs.length); i++) {
+    for (const l of lists) {
+      const it = l.recs[i];
+      if (!it || seen.has(it.id)) continue;
+      seen.add(it.id);
+      content.push({ ...asTrending(it), because: l.seed });
+      if (content.length >= BECAUSE_MAX) break;
+    }
   }
-  return { seed: null, content: [] };
+  const named = lists.map((l) => l.seed).filter((sd) => content.some((c) => c.because.id === sd.id));
+  return { seed: named[0] ?? null, seeds: named, content };
 }

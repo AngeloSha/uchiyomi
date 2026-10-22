@@ -96,11 +96,16 @@ const TRENDS: Record<string, any[]> = {
 type Asked = { kind: 'related'; ids: number[] } | { kind: 'trending'; country: string; query: string } | { kind: 'other' };
 const asked: Asked[] = [];
 let failRelated = false;
+/** The trending query answers 500 (v0.98.0): AniList down, or holding the queue. */
+let failTrending = false;
+/** Held until released (v0.98.0): a pull still running when a visit stops waiting for it. */
+let trendGate: Promise<void> | null = null;
 /** Run once, at the first related request: what a library switched off mid-round looks like. */
 let onFirstRelated: (() => Promise<void>) | null = null;
 const realFetch = globalThis.fetch;
 
 let q: any, related: typeof import('../src/lib/anilistRelated'), anilist: typeof import('../src/lib/anilist');
+let trending: typeof import('../src/lib/trending');
 let di: typeof import('../src/lib/discoverIdentity'), visibility: typeof import('../src/lib/visibility');
 let app: any;
 const users = { reader: '', capped: '' };
@@ -129,7 +134,9 @@ before(async () => {
       if (query.includes('TRENDING_DESC')) {
         const country = String(body.variables?.country);
         asked.push({ kind: 'trending', country, query });
-        // Page 2 is asked when page 1 cannot fill the rail: nothing more on it.
+        if (trendGate) await trendGate;
+        if (failTrending) return new Response('down', { status: 500 });
+        // Page 2 is asked on every pull: nothing more on it.
         return json({ data: { Page: { media: body.variables?.page === 2 ? [] : TRENDS[country] ?? [] } } });
       }
       asked.push({ kind: 'other' });
@@ -141,6 +148,7 @@ before(async () => {
   ({ q } = (await import('../src/lib/db')) as any);
   related = await import('../src/lib/anilistRelated');
   anilist = await import('../src/lib/anilist');
+  trending = await import('../src/lib/trending');
   di = await import('../src/lib/discoverIdentity');
   visibility = await import('../src/lib/visibility');
   await migrate();
@@ -162,7 +170,12 @@ beforeEach(async () => {
   if (!DSN) return;
   asked.length = 0;
   failRelated = false;
+  failTrending = false;
+  trendGate = null;
   onFirstRelated = null;
+  // Trending as a fresh server that has never stored a copy (v0.98.0): nothing in memory, nothing in the table.
+  await q('DELETE FROM anilist_trending');
+  trending.resetTrending();
   for (const t of ['read_progress', 'series_trackers', 'series_overrides']) await q(`DELETE FROM ${t} WHERE series_id = ANY($1)`, [IDS]);
   await q('DELETE FROM lib_books WHERE series_id = ANY($1)', [IDS]);
   await q('DELETE FROM lib_series WHERE id = ANY($1)', [IDS]);
@@ -195,6 +208,7 @@ after(async () => {
   await q('DELETE FROM lib_series WHERE id = ANY($1)', [IDS]).catch(() => {});
   await q('DELETE FROM libraries WHERE id = ANY($1)', [LIBS]).catch(() => {});
   await q('DELETE FROM anilist_related').catch(() => {});
+  await q('DELETE FROM anilist_trending').catch(() => {});
   await q(`UPDATE server_settings SET adult_genres = '[]'::jsonb WHERE id = 1`).catch(() => {});
   await q(`DELETE FROM users WHERE username = ANY($1)`, [['rel_reader', 'rel_capped']]).catch(() => {});
   await app?.close();
@@ -270,7 +284,7 @@ test('no page asks AniList: Related, Because you read and More like this read th
   assert.deepEqual(r.json(), { lookups: true, content: [] });
   const b = await get('/api/discover/because');
   assert.equal(b.status, 200, b.body);
-  assert.deepEqual(b.json(), { seed: null, content: [] });
+  assert.deepEqual(b.json(), { seed: null, seeds: [], content: [] });
   const s = await get('/api/series/s_rel_main/similar');
   assert.equal(s.status, 200, s.body);
   assert.deepEqual((s.json().content as any[]).map((x) => x.id), ['s_genre_match'], 'More like this without a row is the genre matches');
@@ -329,29 +343,45 @@ test('Related says nothing for a library whose lookups are off, or a series with
   assert.equal(anyAniList(), 0);
 });
 
-test('Because you read: the latest read that leaves four, less what the server holds and what is 18+', { skip }, async () => {
+test('Because you read draws from every recent read, less what the server holds and what is 18+', { skip }, async () => {
   await store(1001);
   await store(1002);
-  // Rel Sequel was read last, but leaves three once Rec Held By Entry (held) is out: Rel Main is the seed.
+  // Rel Sequel was read last: its picks lead, one from each read in turn. Before v0.98.0 it was skipped for leaving only
+  // three once Rec Held By Entry (held) was out, and the row was Rel Main's four alone.
   await read('s_rel_main', 's_rel_sequel');
   const titles = (body: any) => (body.content as any[]).map((t) => t.title);
   const hiding = await get('/api/discover/because');
   assert.equal(hiding.status, 200, hiding.body);
-  assert.deepEqual(hiding.json().seed, { id: 's_rel_main', title: 'Rel Main' }, 'not the first seed that leaves four');
-  // Reintroduce by keeping what is held: Rec Held By Entry (by its AniList entry) and Rec Named Work (by name) are on it.
-  assert.deepEqual(titles(hiding.json()), ['Rec Five', 'Rec Six', 'Rec Seven', 'Rec Eight'], 'what the server holds, or what is 18+, is on the rail');
-  const card = hiding.json().content[0];
+  const sequel = { id: 's_rel_sequel', title: 'Rel Sequel' }, main = { id: 's_rel_main', title: 'Rel Main' };
+  assert.deepEqual(hiding.json().seed, sequel, 'not the most recent read that adds picks');
+  assert.deepEqual(hiding.json().seeds, [sequel, main]);
+  // Reintroduce the one-seed row (the first read that leaves four, alone): only Rel Main's four are on it. Reintroduce by
+  // keeping what is held: Rec Held By Entry (by its AniList entry) and Rec Named Work (by name) are on it.
+  assert.deepEqual(titles(hiding.json()),
+    ['Rec Few One', 'Rec Five', 'Rec Few Two', 'Rec Six', 'Rec Few Three', 'Rec Seven', 'Rec Eight'],
+    'not every recent read in turn, or what the server holds, or what is 18+, is on the row');
+  // Each pick names the read it came from.
+  assert.deepEqual((hiding.json().content as any[]).map((c) => c.because.id),
+    ['s_rel_sequel', 's_rel_main', 's_rel_sequel', 's_rel_main', 's_rel_sequel', 's_rel_main', 's_rel_main']);
+  const card = hiding.json().content[1];
   assert.deepEqual(card, { id: 2005, title: 'Rec Five', cover: 'https://s4.anilist.co/c/2005.jpg', banner: null, description: '', genres: ['Action'],
-    score: 70, chapters: null, status: 'RELEASING' }, 'not the trending shape');
-  // Showing 18+: the adult one and the one in an adult genre are on it.
+    score: 70, chapters: null, status: 'RELEASING', because: main }, 'not the trending shape and its read');
+  // Showing 18+: the adult one and the one in an adult genre are on it, in Rel Main's turn.
   const showing = await get('/api/discover/because?adult=1');
-  assert.deepEqual(titles(showing.json()), ['Rec Adult', 'Rec Ecchi', 'Rec Five', 'Rec Six', 'Rec Seven', 'Rec Eight']);
-  // The admin's display title names the seed.
+  assert.deepEqual(titles(showing.json()),
+    ['Rec Few One', 'Rec Adult', 'Rec Few Two', 'Rec Ecchi', 'Rec Few Three', 'Rec Five', 'Rec Six', 'Rec Seven', 'Rec Eight']);
+  // A pick two reads share is one card, under the read whose turn reaches it first: Rel Main's first pick, Rel Sequel's
+  // fourth.
+  await q(`UPDATE anilist_related SET recs = recs || (SELECT recs FROM anilist_related WHERE anilist_id = '1001') WHERE anilist_id = '1002'`);
+  const shared = (await get('/api/discover/because')).json().content as any[];
+  assert.equal(shared.filter((c) => c.title === 'Rec Five').length, 1, 'a pick two reads share is two cards');
+  assert.equal(shared.find((c) => c.title === 'Rec Five').because.id, 's_rel_main');
+  // The admin's display title names the read.
   await q(`INSERT INTO series_overrides (series_id, title) VALUES ('s_rel_main', 'Main As Shown')`);
-  assert.deepEqual((await get('/api/discover/because')).json().seed, { id: 's_rel_main', title: 'Main As Shown' });
-  // The seed must be one the viewer may list, in a library that looks things up.
+  assert.deepEqual((await get('/api/discover/because')).json().seeds[1], { id: 's_rel_main', title: 'Main As Shown' });
+  // A read must be one the viewer may list, in a library that looks things up.
   await q(`UPDATE libraries SET anilist_lookup = false WHERE id = $1`, [ON]);
-  assert.deepEqual((await get('/api/discover/because')).json(), { seed: null, content: [] }, 'a library whose lookups are off seeds the rail');
+  assert.deepEqual((await get('/api/discover/because')).json(), { seed: null, seeds: [], content: [] }, 'a library whose lookups are off seeds the row');
   assert.equal(anyAniList(), 0);
 });
 
@@ -401,4 +431,85 @@ test('the trending rails: one cache per country, novels never asked for, adult g
   assert.deepEqual(asked.map((a) => (a.kind === 'trending' ? a.country : a.kind)), ['JP', 'JP', 'KR', 'KR', 'CN', 'CN']);
   assert.equal((await get('/api/discover/trending?country=US')).status, 400);
   assert.equal((await get('/api/discover/trending?country=KR&country=JP')).status, 400);
+});
+
+/** The titles a viewer is shown, and whether the page is told to ask again. */
+const trendOf = async (url: string) => {
+  const r = await get(url);
+  assert.equal(r.status, 200, r.body);
+  return { titles: (r.json().content as any[]).map((t) => t.title), pending: r.json().pending };
+};
+/** Until the background pull has stored what it pulled. */
+const settle = async (country: string, count: number) => {
+  for (let i = 0; i < 100; i++) {
+    const row = (await q(`SELECT jsonb_array_length(items) AS n FROM anilist_trending WHERE country = $1`, [country]))[0];
+    if (row && Number(row.n) === count) return;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  assert.fail(`the ${country} pull never stored ${count} titles`);
+};
+
+test('a stored trending copy answers after a restart without asking AniList (v0.98.0)', { skip }, async () => {
+  assert.deepEqual(await trendOf('/api/discover/trending?country=JP'), { titles: ['Trend Japan'], pending: false });
+  assert.equal(asked.length, 2, 'not one pull of two pages');
+  const row = (await q(`SELECT items FROM anilist_trending WHERE country = 'JP'`))[0];
+  assert.deepEqual(row.items.map((t: any) => t.title), ['Trend Japan', 'Trend Japan Ecchi'], 'the shared copy is filtered, or not stored');
+  // A restart or a deploy: nothing in memory. Reintroduce the memory-only cache: AniList is asked again, and with it busy
+  // (a 429 hold) a phone had no hero at all.
+  trending.resetTrending();
+  asked.length = 0;
+  failTrending = true;
+  assert.deepEqual(await trendOf('/api/discover/trending?country=JP'), { titles: ['Trend Japan'], pending: false });
+  assert.equal(asked.length, 0, `a fresh stored copy was pulled again: ${JSON.stringify(asked)}`);
+  // The biggest cover rides along for a phone's hero; `cover` stays the rail size.
+  const card = (await get('/api/discover/trending?country=JP')).json().content[0];
+  assert.equal(card.cover, 'https://s4.anilist.co/t/4101.jpg');
+  assert.equal(card.coverXL, 'https://s4.anilist.co/t/4101.jpg', 'no coverXL beside the cover');
+});
+
+test('a stale trending copy answers at once, refreshes behind it, and survives a failed refresh (v0.98.0)', { skip }, async () => {
+  await trendOf('/api/discover/trending?country=KR');
+  await q(`UPDATE anilist_trending SET fetched_at = now() - interval '7 hours' WHERE country = 'KR'`);
+  trending.resetTrending();
+  // AniList down: the old copy is still the answer, and it is kept.
+  failTrending = true;
+  asked.length = 0;
+  assert.deepEqual(await trendOf('/api/discover/trending'), { titles: ['Trend Korea'], pending: false });
+  for (let i = 0; i < 100 && asked.length < 1; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(asked.length, 1, 'a stale copy did not start a refresh');
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual((await q(`SELECT items FROM anilist_trending WHERE country = 'KR'`))[0].items.map((t: any) => t.title), ['Trend Korea'],
+    'a failed refresh wiped the stored copy');
+  // Nor is AniList asked again per visit after a failure: ten minutes first.
+  await trendOf('/api/discover/trending');
+  assert.equal(asked.length, 1, 'a failed refresh is retried on every visit');
+  // AniList back: the next pull (a later start) brings the new titles, served from then on.
+  trending.resetTrending();
+  failTrending = false;
+  const before = TRENDS.KR;
+  TRENDS.KR = [...before, { id: 4002, title: { english: 'Trend Korea Two' }, coverImage: { large: 'https://s4.anilist.co/t/4002.jpg' }, genres: ['Action'] }];
+  try {
+    assert.deepEqual((await trendOf('/api/discover/trending')).titles, ['Trend Korea'], 'a visit waited on the refresh');
+    await settle('KR', 2);
+    assert.deepEqual((await trendOf('/api/discover/trending')).titles, ['Trend Korea', 'Trend Korea Two']);
+  } finally {
+    TRENDS.KR = before;
+  }
+});
+
+test('with nothing ever stored a visit waits briefly, then says pending, and the pull lands for the next (v0.98.0)', { skip }, async () => {
+  let release!: () => void;
+  trendGate = new Promise<void>((r) => { release = r; });
+  // Reintroduce the plain empty answer: pending is false, and the page never asks again.
+  assert.deepEqual(await trending.trendingFor('CN', { waitMs: 30 }), { items: null, pending: true });
+  // Another visit joins the same pull rather than starting one.
+  assert.deepEqual(await trending.trendingFor('CN', { waitMs: 30 }), { items: null, pending: true });
+  assert.equal(asked.filter((a) => a.kind === 'trending').length, 1, 'two visits started two pulls');
+  release();
+  trendGate = null;
+  await settle('CN', 1);
+  assert.deepEqual((await trending.trendingFor('CN')).items?.map((t) => t.title), ['Trend China']);
+  // A pull that fails with nothing stored: empty, not pending -- there is nothing coming to ask again for.
+  failTrending = true;
+  assert.deepEqual(await trending.trendingFor('JP', { waitMs: 2000 }), { items: null, pending: false });
 });

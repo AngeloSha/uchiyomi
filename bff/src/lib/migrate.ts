@@ -2003,6 +2003,16 @@ CREATE INDEX IF NOT EXISTS idx_spread_marks_book ON spread_marks (book_id);
 -- of its home page whenever it fails, at most once in half an hour: BatCave's guard pass lasts a day, and it fails with a
 -- plain 404 when it runs out. NULL for every other source. Additive: v0.90.x ignores the column.
 ALTER TABLE suwayomi_sources ADD COLUMN IF NOT EXISTS site_opened_at timestamptz;
+
+-- v0.98.0: Discover's trending titles (lib/trending.ts), one row per country of origin (KR, JP, CN): what AniList last
+-- answered, kept so a restart or a deploy answers the hero and the trending rows from this copy at once instead of
+-- waiting on AniList -- or, with AniList busy, showing no hero at all. Rewritten whole by a pull at most every six hours;
+-- shared by every viewer, and filtered per viewer when it is read, never here. Additive: v0.97.x ignores the table.
+CREATE TABLE IF NOT EXISTS anilist_trending (
+  country     text PRIMARY KEY,
+  items       jsonb NOT NULL DEFAULT '[]'::jsonb,
+  fetched_at  timestamptz NOT NULL DEFAULT now()
+);
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

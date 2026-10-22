@@ -3,8 +3,12 @@
 import { ADAPTERS, normTitle, type Provider, type LibraryEntry, type RecItem } from './trackerProviders';
 
 export const MAX_RESULTS = 40;
-/** No single seed fills the rail: past this many from one "because you read" the rest are left for later. */
-const PER_SEED_CAP = 5;
+/**
+ * No single seed fills the row: past this many from one "because you read" the rest are left for later. Eight since v0.98.0
+ * (five before): the owner's row was half empty, and the services' answers already cached hold twelve a seed, so the
+ * fuller row costs no request.
+ */
+export const PER_SEED_CAP = 8;
 
 /** Where a person's taste is read from: finished, in progress or paused, never dropped or merely planned. */
 const SEEDING = new Set<string>(['reading', 'completed', 'on_hold']);

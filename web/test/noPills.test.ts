@@ -57,6 +57,8 @@ const SURFACES = [
   // v0.49.1, Find other sources: the run's row, its results and Health's card.
   'components/FindSources.tsx',
   'lib/findSources.ts',
+  // v0.98.0, Discover's hero, its stand-in and the cards of its rows: squared keys, segments and badges.
+  'components/DiscoverHero.tsx',
   // v0.53.0, Health → Source health decluttered: its groups, folds, compact rows and Turn off all, and their words.
   'components/SourceHealthBody.tsx',
   'lib/sourceHealth.ts',

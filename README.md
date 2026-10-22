@@ -156,8 +156,9 @@ sites' terms and your local law.
 - **Discover** — what your sources just published, **one card per series** with each source's icon, leaving
   out what you already own, from every source at once; and a search that **answers progressively**: results
   appear as each source replies instead of waiting for the slowest, and every source says whether it answered,
-  failed or timed out. *Because you read* and trending manhwa, manga and manhua rails come from AniList, and any
-  chapter can be **read before you add the series**.
+  failed or timed out. Picks for you (*Recommended for you* and *Because you read*) and trending manhwa, manga and
+  manhua rows, with their Top 10, come from AniList and sit inside the wall, and any chapter can be **read before you
+  add the series**.
 - **Follows a series on more than one source** (three besides its main one, or up to ten if you allow it), and when a
   chapter will not come down it tries the other copies, then other sources, before giving up. When a site dies for good, *Find other sources* and **Replace
   a source** move its series to sources that work, after you have looked at each match.

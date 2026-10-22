@@ -102,7 +102,8 @@ import {
 } from '../lib/numbering';
 import { numKey } from '../lib/postingOrder';
 import { groupStats } from '../lib/groupStats';
-import { fetchAniListArt, fetchTrending, TREND_COUNTRIES, type TrendCountry, TrendingItem } from '../lib/anilist';
+import { fetchAniListArt, TREND_COUNTRIES, type TrendCountry } from '../lib/anilist';
+import { trendingFor } from '../lib/trending';
 import { adultOk, becauseYouRead } from '../lib/anilistRelated';
 import { automaticAniListAllowed, withAniListMutation } from '../lib/anilistPolicy';
 import { learnDirection, learnDirectionWith, directionFromAniListMatch } from '../lib/readingDirection';
@@ -856,11 +857,6 @@ export function startDownloadJob(input: DownloadJobInput, reserved?: DownloadJob
   return { total: chapters.length };
 }
 
-// Trending recommendations are global + slow-moving; cache the AniList pull for a few hours. One entry per country of
-// origin since v0.61.0 (Discover's manhwa, manga and manhua rails), each six hours on its own; `pending` is the pull
-// under way, so two pages opened together ask AniList once.
-const trendingCache = new Map<TrendCountry, { at: number; items: TrendingItem[] }>();
-const trendingPending = new Map<TrendCountry, Promise<TrendingItem[]>>();
 /** Canonical title key used for dedupe, grouping and "already in library" checks. */
 export const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, '');
 
@@ -3676,35 +3672,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  // How many trending titles reach the client. The hero takes the first ten and the rail shows the rest, so
-  // this is both budgets at once. AniList returns 40 in the one query already, so raising it costs nothing.
+  // How many trending titles reach the client: the hero takes its ten from them, and each trending row shows them all
+  // (v0.98.0). AniList returns 40 in the one query already, so raising it costs nothing.
   const TREND_KEEP = 36;
-
-  /** One country's trending titles, from the cache while it is under six hours old; one pull at a time per country. */
-  const trendingFor = async (country: TrendCountry): Promise<TrendingItem[] | null> => {
-    const cached = trendingCache.get(country);
-    if (cached && Date.now() - cached.at <= 6 * 3600_000) return cached.items;
-    let pull = trendingPending.get(country);
-    if (!pull) {
-      pull = (async () => {
-        let items = await fetchTrending(country);
-        // A second page, only when the first cannot fill the wall. On a large library most of page 1 is
-        // already owned: measured on a 215-series install, 40 fetched became 28 after the library filter,
-        // and only 7 of those carried the wide art the hero prefers. The common case still costs one
-        // request per six-hour cache miss, and the page argument has been there unused since this shipped.
-        if (items.length < TREND_KEEP + 8) {
-          const more = await fetchTrending(country, 2).catch(() => [] as typeof items);
-          const seen = new Set(items.map((t) => norm(t.title)));
-          items = items.concat(more.filter((t) => !seen.has(norm(t.title))));
-        }
-        trendingCache.set(country, { at: Date.now(), items });
-        return items;
-      })().finally(() => trendingPending.delete(country));
-      trendingPending.set(country, pull);
-    }
-    // Stale beats empty: an old answer is still what was trending, where nothing reads as "nothing is".
-    return pull.catch(() => trendingCache.get(country)?.items ?? null);
-  };
 
   // Globally trending titles you don't already have, for Discover's hero and rails: `country` KR (manhwa, the default --
   // what this route always answered), JP (manga) or CN (manhua), v0.61.0.
@@ -3713,16 +3683,18 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const asked = (req.query as { country?: unknown }).country;
     const country = (asked === undefined ? 'KR' : typeof asked === 'string' ? asked.toUpperCase() : '') as TrendCountry;
     if (!TREND_COUNTRIES.includes(country)) return reply.code(400).send({ error: 'bad_request', message: 'country is one of KR, JP, CN' });
-    const items = await trendingFor(country);
-    if (!items) return { content: [] };
-    // `isAdult:false` is an argument to the AniList query, so adult titles never arrive. The cache is shared for six
-    // hours, so it is never filtered per viewer -- that would pin one capped account's view for everyone; the ANSWER is
+    // From the stored copy (v0.98.0, lib/trending.ts): at once, after a restart too. `pending` only while a server that
+    // has never stored one is still pulling it -- the page asks again.
+    const { items, pending } = await trendingFor(country);
+    if (!items) return { content: [], pending };
+    // `isAdult:false` is an argument to the AniList query, so adult titles never arrive. The copy is shared by every
+    // viewer, so it is never filtered per viewer -- that would pin one capped account's view for everyone; the ANSWER is
     // (v0.61.0): a viewer hiding 18+ is not shown a title carrying a genre the admin named as adult, as no listing of
     // the library's own shows them one. Reintroduce the unfiltered answer: "a trending title in an adult genre is not
     // shown to a viewer hiding 18+" in anilistRelated.int.test.ts finds it.
     const ctx = vc(req);
     const idx = await libraryIndex().catch(() => noIndex());
-    // Deduped by normalised title, not raw: the hero and its dots are keyed by title, so two spellings of
+    // Deduped by normalised title, not raw: the hero and its slides are keyed by title, so two spellings of
     // the same series would collide on a React key and swap art under the reader. Rare on one page, less so
     // across two. Left out when the library holds it (v0.56.0): by any name the library knows it by, or by its
     // AniList entry -- before, only by the library's own title.
@@ -3733,14 +3705,15 @@ export default async function sourceRoutes(app: FastifyInstance) {
         || (t.id != null && (idx.byWork.get(`al:${t.id}`)?.length ?? 0) > 0);
       return !held && adultOk({ adult: false, genres: t.genres }, ctx) && !seen.has(k) && (seen.add(k), true);
     });
-    return { content: out.slice(0, TREND_KEEP) };
+    return { content: out.slice(0, TREND_KEEP), pending: false };
   });
 
   /**
    * Discover's "Because you read {title}" (v0.61.0, lib/anilistRelated.ts becauseYouRead): what AniList's readers
-   * recommend after a series this viewer read lately, less what the server holds and what is 18+ for them. `seed` is the
-   * series it is about, or null with nothing to show. Behind this file's canDownload hook, as everything on Discover is:
-   * it is a list of things to add. Reads the table only, never AniList.
+   * recommend after the series this viewer read lately, less what the server holds and what is 18+ for them. Since v0.98.0
+   * every recent read adds its picks and each pick names its own (`because`); `seeds` are the series they name, and `seed`
+   * the first of them (null with nothing to show), as a page from before v0.98.0 reads it. Behind this file's canDownload
+   * hook, as everything on Discover is: it is a list of things to add. Reads the table only, never AniList.
    */
   app.get('/api/discover/because', async (req) => becauseYouRead(userIdOf(req), vc(req)));
 

@@ -1,9 +1,9 @@
 'use client';
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, img } from '@/lib/api';
 import { ART } from '@/lib/art';
 import { relativeTime } from '@/lib/format';
 import { useAuth, canDownload } from '@/lib/auth';
@@ -14,8 +14,10 @@ import { EmptyState } from '@/components/EmptyState';
 import { ProgressBar, Reveal } from '@/components/ui';
 import { SourceCard, SourceItem, StillLoadingCard } from '@/components/cards';
 import { ScrollRail } from '@/components/ScrollRail';
-import { DiscoverHero, TrendingCard, Trending } from '@/components/DiscoverHero';
-import { RecommendationRail } from '@/components/RecommendationRail';
+import { DiscoverHero, heroPoll, TrendingCard, Trending } from '@/components/DiscoverHero';
+import { pollAfter, type Recommendations } from '@/lib/recommendations';
+import { mergePicks, type Pick, type ReadPick } from '@/lib/forYou';
+import { placeRows, useGridCols, weave } from '@/lib/shelves';
 import { SourcePicker, SourceLatest, Src, SrcState } from '@/components/SourcePicker';
 import { aloneEmpty, answeredPage, budgetForMode, discoverSources, WALL_IN_FLIGHT, type ListMode, type SrcExtension, type StackSource } from '@/lib/sourceGroups';
 import { normTitle } from '@/lib/normTitle';
@@ -81,35 +83,41 @@ const HERO_FIND_SOURCES = 10;
 const HERO_SLIDES = 10;
 
 /**
- * The trending rails under the wall (v0.61.0), by AniList's country of origin: Korea's (manhwa -- the hero shows its
- * first ten, as it always has, and the rail the rest), then Japan's (manga) and China's (manhua). What each is called,
- * in the same order, declared for the translators: the rails render it through a variable.
+ * The trending rows (v0.61.0), by AniList's country of origin: Korea's (manhwa -- the hero shows ten of them, as it always
+ * has), then Japan's (manga) and China's (manhua). Each row holds its whole list since v0.98.0, the first ten wearing their
+ * rank. What each is called, in the same order, declared for the translators: the rows render it through a variable.
  */
 const TREND_RAILS = ['KR', 'JP', 'CN'] as const;
 const TREND_LABELS = keys('Trending manhwa', 'Trending manga', 'Trending manhua');
-/** An AniList rail's card, as the page remembers what this visit added from it: by its entry, else its title. */
-const railKey = (t: Trending): string => (t.id != null ? `al:${t.id}` : `t:${normTitle(t.title)}`);
+/**
+ * Discover's rows inside the wall (v0.98.0, lib/shelves.ts), in the order they come: the picks for you, then the trending
+ * rows. Each only with something on it.
+ */
+const ROWS = ['foryou', ...TREND_RAILS] as const;
+type RowKey = (typeof ROWS)[number];
+/** How many of a trending row's first cards wear their rank, as Home's Top 10 does. */
+const RANKED = 10;
+/** The wall's grid: every run of it between two rows is one of these, so a row never shifts the columns. */
+const WALL_GRID = 'grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 lg:gap-x-4 xl:grid-cols-8 2xl:grid-cols-9 3xl:grid-cols-10';
+/** An AniList row's card, as the page remembers what this visit added from it: by its entry, else its title. */
+const railKey = (t: { id?: number | null; title: string }): string => (t.id != null ? `al:${t.id}` : `t:${normTitle(t.title)}`);
 
 /**
- * One of Discover's AniList rails (v0.61.0): Because you read above the wall, and the trending rails under it. Every
- * one goes through this one ScrollRail -- a strip a mouse can move (rails.test.ts) -- and a card opens the add dialog,
+ * One of Discover's rows (v0.61.0; inside the wall since v0.98.0): the picks for you, and the trending rows. Every one goes
+ * through this one ScrollRail -- a strip a mouse can move (rails.test.ts) -- edge to edge, and a card opens the add dialog,
  * which looks the title up on the best-ranked sources.
  */
-function AniListRail({ kind, title, items, onPick, className = 'pb-6' }: {
-  kind: string; title: string; items: Trending[]; onPick: (t: Trending) => void; className?: string;
+function AniListRail({ kind, title, children, className = 'pb-3 pt-9' }: {
+  kind: string; title: string; children: ReactNode; className?: string;
 }) {
   return (
     <section className={className} data-anilist-rail={kind}>
-      <h2 className="mb-3 font-display text-lg font-semibold tracking-tight text-fog-50 lg:text-xl">{title}</h2>
+      <h2 className="mb-1 font-display text-lg font-semibold tracking-tight text-fog-50 lg:text-xl">{title}</h2>
       {/* pb-3 rather than pb-1: the global scrollbar is 8px and used to be hidden, so the rail had no
-          room for it and it would have sat on the card captions. */}
+          room for it and it would have sat on the card captions. pt-2: room for a card's hover lift. */}
       <ScrollRail label={title}
-        className="bleed bleed-pad flex gap-3 pb-3 [scroll-snap-type:x_mandatory]">
-        {items.map((t, i) => (
-          <Reveal key={railKey(t)} delay={Math.min(i, 12) * 28}>
-            <TrendingCard t={t} onPick={onPick} />
-          </Reveal>
-        ))}
+        className="bleed bleed-pad flex gap-3 pb-3 pt-2 [scroll-snap-type:x_mandatory]">
+        {children}
       </ScrollRail>
     </section>
   );
@@ -170,38 +178,58 @@ function DiscoverInner() {
   const adultOn = useAdultShown();
   const showAdultChip = adultOn || (sourcesData?.hiddenAdult ?? 0) > 0;
 
-  const { data: trending } = useQuery({
+  const trendQ = useQuery({
     // NOT ['trending'] -- that key belongs to /api/trending, which is what the household is reading and is a
     // Series[]. This is /api/discover/trending, which is AniList and carries genres, banner and score. They
     // shared a key, so arriving here from the home page handed this the wrong shape out of the cache and the
     // hero threw on `genres.slice`. A direct page load was fine, which is why it looked intermittent.
     // v0.61.0: one key per country of origin; this one is Korea's, the hero's and the first rail's.
     queryKey: ['discover-trending', 'KR'],
-    queryFn: () => api<{ content: Trending[] }>('/api/discover/trending?country=KR'),
+    queryFn: () => api<{ content: Trending[]; pending?: boolean }>('/api/discover/trending?country=KR'),
     enabled: mayAdd,
     staleTime: 0,
     refetchOnMount: 'always',
+    // v0.98.0: asked again while a server that has never stored a copy is still pulling one (bff lib/trending.ts).
+    refetchInterval: (qy) => heroPoll(qy.state.data, qy.state.dataUpdateCount),
   });
+  const trending = trendQ.data;
+  /**
+   * Korea's answer is in (v0.98.0): the hero's request goes first, and everything below the fold waits for it -- the picks
+   * and the other trending rows sit inside the wall now, a screen down, and a phone on a slow line has the hero first.
+   */
+  const heroSettled = !trendQ.isPending;
 
   // ---------------------------------------------------------------- the wall
   const [mode, setMode] = useState<'newest' | 'search'>(arrivedQ ? 'search' : 'newest');
-  // v0.61.0: the manga and manhua rails under the wall -- while browsing, each country its own answer and its own key.
+  // v0.61.0: the manga and manhua rows -- while browsing, each country its own answer and its own key; once Korea's is in.
   const moreTrending = useQueries({
     queries: TREND_RAILS.slice(1).map((country) => ({
       queryKey: ['discover-trending', country],
-      queryFn: () => api<{ content: Trending[] }>(`/api/discover/trending?country=${country}`),
-      enabled: mayAdd && mode === 'newest',
+      queryFn: () => api<{ content: Trending[]; pending?: boolean }>(`/api/discover/trending?country=${country}`),
+      enabled: mayAdd && mode === 'newest' && heroSettled,
       staleTime: 0,
       refetchOnMount: 'always' as const,
+      refetchInterval: (qy: { state: { data?: { pending?: boolean }; dataUpdateCount: number } }) => heroPoll(qy.state.data, qy.state.dataUpdateCount),
     })),
   });
-  // v0.61.0: "Because you read {title}" above the wall -- what AniList's readers recommend after something this account
-  // read lately, less what the server holds. The server answers from its stored copy; nothing asks AniList here.
-  const { data: because } = useQuery({
+  // v0.61.0: "Because you read {title}" -- what AniList's readers recommend after the series this account read lately, less
+  // what the server holds; since v0.98.0 from every recent read, each pick naming its own. The server answers from its
+  // stored copy; nothing asks AniList here.
+  const becauseQ = useQuery({
     queryKey: ['discover-because'],
-    queryFn: () => api<{ seed: { id: string; title: string } | null; content: Trending[] }>('/api/discover/because'),
-    enabled: mayAdd && mode === 'newest',
+    queryFn: () => api<{ seed: { id: string; title: string } | null; content: ReadPick[] }>('/api/discover/because'),
+    enabled: mayAdd && mode === 'newest' && heroSettled,
     staleTime: 5 * 60_000,
+  });
+  const because = becauseQ.data;
+  // #248's "Recommended for you": what the trackers this person connected suggest. The server does the caching (a day's old
+  // answer is normal), so this asks once per visit and only polls while a first-time refresh is still running there.
+  const recsQ = useQuery({
+    queryKey: ['discover-recommendations'],
+    queryFn: () => api<Recommendations>('/api/discover/recommendations'),
+    enabled: mayAdd && mode === 'newest' && heroSettled,
+    staleTime: 10 * 60_000,
+    refetchInterval: (qy) => pollAfter(qy.state.data, qy.state.dataUpdateCount),
   });
   /**
    * Which listing the wall shows, and which single source (if any) is shown alone.
@@ -238,7 +266,7 @@ function DiscoverInner() {
   const [railAdded, setRailAdded] = useState<Set<string>>(new Set());
   const fromRail = useRef<string | null>(null);
   useEffect(() => { if (!seed) fromRail.current = null; }, [seed]);
-  const pickRail = (t: Trending) => { fromKey.current = null; fromRail.current = railKey(t); setSeed({ kind: 'trending', title: t.title }); };
+  const pickRail = (t: { id?: number | null; title: string }) => { fromKey.current = null; fromRail.current = railKey(t); setSeed({ kind: 'trending', title: t.title }); };
 
   // Every source that can answer this listing, best first. A source that cannot answer the chosen listing is
   // not in the pool at all, the same way one without `latest` has never been. Popular is universal among
@@ -543,6 +571,19 @@ function DiscoverInner() {
     }
   };
 
+  // ---------------------------------------------------------------- the rows inside the wall
+  // How many covers the wall lays across, read off the wall's own grid (v0.98.0, lib/shelves.ts): where its rows go.
+  const [wallEl, setWallEl] = useState<HTMLDivElement | null>(null);
+  const cols = useGridCols(wallEl);
+  /**
+   * Which place each row holds, kept from one answer to the next (lib/shelves.ts placeRows), and how many covers the wall
+   * had on screen at its last commit: a row that comes late takes a place below them, never among them. Both start again
+   * with the wall itself -- another listing, another source, or back from a search.
+   */
+  const placedRef = useRef<{ key: string; placed: Map<RowKey, number> }>({ key: '', placed: new Map() });
+  const shownRef = useRef(0);
+  useEffect(() => { if (cols >= 1) shownRef.current = wall.items.length; });
+
   // ---------------------------------------------------------------- more
   const sentinel = useRef<HTMLDivElement>(null);
   // The next page once every source has answered this one (v0.58.0: once each had answered at all, so a page could
@@ -611,17 +652,31 @@ function DiscoverInner() {
     const rest = all.filter((t) => !t.banner);
     return [...withArt, ...rest].slice(0, HERO_SLIDES);
   }, [trending]);
-  const rail = useMemo(() => {
-    const lead = new Set(heroSlides.map((s) => s.title));
-    return (trending?.content ?? []).filter((t) => !lead.has(t.title));
-  }, [trending, heroSlides]);
-  // Each AniList rail's cards, less what this visit added from them (v0.61.0): Korea's (what the hero did not take),
-  // Japan's, China's, in TREND_RAILS' order; and Because you read's.
+  /**
+   * The hero's stand-in (v0.98.0): while Korea's answer is on its way, or the server is still pulling a copy it has never
+   * had, the hero's own box holds its place -- the page used to render without it and shove everything down when it came.
+   */
+  const heroWaiting = trendQ.isPending
+    || heroPoll(trending, qc.getQueryState(['discover-trending', 'KR'])?.dataUpdateCount ?? 0) !== false;
+  // Each trending row's cards, with the rank each holds in its country's list, less what this visit added from it (v0.61.0):
+  // Korea's, Japan's, China's, in TREND_RAILS' order. Korea's is its whole list since v0.98.0, not what the hero did not take.
   const jpTrending = moreTrending[0]?.data;
   const cnTrending = moreTrending[1]?.data;
-  const trendRails = useMemo(() => [rail, jpTrending?.content ?? [], cnTrending?.content ?? []]
-    .map((list) => list.filter((t) => !railAdded.has(railKey(t)))), [rail, jpTrending, cnTrending, railAdded]);
-  const becauseRail = useMemo(() => (because?.content ?? []).filter((t) => !railAdded.has(railKey(t))), [because, railAdded]);
+  const trendRails = useMemo(() => [trending?.content ?? [], jpTrending?.content ?? [], cnTrending?.content ?? []]
+    .map((list) => list.map((t, k) => ({ t, rank: k + 1 })).filter(({ t }) => !railAdded.has(railKey(t)))),
+  [trending, jpTrending, cnTrending, railAdded]);
+  // The one picks row (v0.98.0, lib/forYou.ts): the trackers' suggestions and the reads' picks in turn, one card a title,
+  // less what this visit added from it.
+  const picks = useMemo(() => mergePicks(recsQ.data?.content ?? [], because?.content ?? [], because?.seed ?? null)
+    .filter((pk) => !railAdded.has(railKey(pk))), [recsQ.data, because, railAdded]);
+  /**
+   * Which rows the wall carries (v0.98.0): each with something on it, and only once every row's first answer is in -- the
+   * rows take their places in order, and a row arriving late would take one another already stood in.
+   */
+  const rowsReady = heroSettled && !recsQ.isPending && !becauseQ.isPending && moreTrending.every((m) => !m.isPending);
+  const rowKeys: RowKey[] = mode === 'newest' && rowsReady
+    ? ROWS.filter((k) => (k === 'foryou' ? picks.length : trendRails[TREND_RAILS.indexOf(k)].length) > 0)
+    : [];
 
   // ---------------------------------------------------------------- may they be here at all
   // The tab is hidden for this account and every route this page calls now refuses it, so a typed URL would
@@ -664,22 +719,59 @@ function DiscoverInner() {
     );
   }
 
+  // The wall cut where its rows go (v0.98.0): the runs of covers, the rows between them, and the rows still waiting.
+  const wallKey = `${mode}|${listMode}|${selected ?? ''}`;
+  if (placedRef.current.key !== wallKey) { placedRef.current = { key: wallKey, placed: new Map() }; shownRef.current = 0; }
+  placedRef.current.placed = placeRows(placedRef.current.placed, rowKeys, shownRef.current, cols);
+  const { parts: wallParts, after: rowsAfter } = weave(wall.items.length, cols, placedRef.current.placed);
+  const lastPart = wallParts[wallParts.length - 1] as { kind: 'cards'; from: number; to: number };
+  // Every card names its sources, one of them or five, in Newest, Popular and search alike (v0.56.0).
+  const cardsOf = (from: number, to: number) => wall.items.slice(from, to).map((it, k) => (
+    <SourceCard key={`${it.source}:${it.sourceId}`} item={{ ...it, inLibrary: it.inLibrary || shownAdded.has(workKey(it)) }}
+      providers={stackOf(it)}
+      onAdd={() => open(it)} eager={from + k < 12} />
+  ));
+  // One of the rows: the picks, each saying why it is there, or a trending row, its first ten ranked. The read a pick came
+  // from is isolated in its sentence, as Home's "Because you read" is: a Latin title inside an Arabic one keeps its order.
+  const whyOf = (pk: Pick) => {
+    const reason = pk.from.because ? tr('Because you read {title}', { title: `\u2068${pk.from.because}\u2069` }) : undefined;
+    return pk.from.kind === 'tracker'
+      ? { badge: pk.from.badge, reason, tip: pk.from.tip }
+      : { reason, art: img.seriesThumb(pk.from.seriesId), tip: reason };
+  };
+  const rowOf = (key: RowKey) => (key === 'foryou' ? (
+    <AniListRail key={key} kind={key} title={tr('Recommended for you')}>
+      {picks.map((pk, i) => (
+        <Reveal key={railKey(pk)} delay={Math.min(i, 12) * 28}>
+          <TrendingCard t={pk} onPick={pickRail} why={whyOf(pk)} />
+        </Reveal>
+      ))}
+    </AniListRail>
+  ) : (
+    <AniListRail key={key} kind={key} title={tr(TREND_LABELS[TREND_RAILS.indexOf(key)])}>
+      {trendRails[TREND_RAILS.indexOf(key)].map(({ t, rank }, i) => (
+        <Reveal key={railKey(t)} delay={Math.min(i, 12) * 28}>
+          <TrendingCard t={t} onPick={pickRail} rank={rank <= RANKED ? rank : undefined} />
+        </Reveal>
+      ))}
+    </AniListRail>
+  ));
+
   return (
     <div className="min-h-screen-d px-4 lg:px-0">
-      {heroSlides.length > 0 && mode === 'newest' && (
-        <DiscoverHero slides={heroSlides} onPick={(t) => setSeed({ kind: 'trending', title: t.title })} />
+      {/* The hero, or while Korea's answer is on its way its own box holding its place (v0.98.0). */}
+      {mode === 'newest' && (heroSlides.length > 0 || heroWaiting) && (
+        <DiscoverHero slides={heroSlides} waiting={heroWaiting} onPick={(t) => setSeed({ kind: 'trending', title: t.title })} />
       )}
 
       <header className="pt-5 lg:pt-7">
         <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
           <div className="min-w-0">
-            <h1 className="font-display text-2xl font-bold tracking-tight lg:text-3xl">{tr('Discover')}</h1>
-            {/* Follows the listing, or the toggle below says Popular while the page says Newest. */}
-            <div className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
-              <p className="text-sm text-fog-400">{listMode === 'popular' ? tr('Popular on your sources') : tr('Newest from your sources')}</p>
-              {/* In the HEADER and not on the chip row below, deliberately: SourcePicker is mounted only
-                  while `mode === 'newest'`, so a chip anchored there would disappear the moment someone
-                  searched — and search is one of the surfaces the reveal now changes. */}
+            {/* The listing's name is the wall's own heading, a few lines down (v0.98.0: it was said here as well). */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              <h1 className="font-display text-2xl font-bold tracking-tight lg:text-3xl">{tr('Discover')}</h1>
+              {/* In the HEADER and not on the chip row below, deliberately: a chip anchored there would sit among the
+                  wall's own controls -- and search is one of the surfaces the reveal changes. */}
               <AdultToggle alsoWhen={showAdultChip} className="shrink-0 text-xs" />
             </div>
             <p className="mt-1 max-w-prose text-[11px] text-fog-500">
@@ -703,17 +795,6 @@ function DiscoverInner() {
           </form>
         </div>
       </header>
-
-      {mode === 'newest' && <RecommendationRail enabled={mayAdd} onPick={(title) => setSeed({ kind: 'trending', title })} />}
-
-      {/* v0.61.0: "Because you read {title}", above the wall while browsing, only with something on it -- under the
-          header, so the source picker stays beside the wall it narrows. The title is isolated: a Latin title inside an
-          Arabic sentence takes its order, as Home's rail of that name does. */}
-      {mode === 'newest' && because?.seed && becauseRail.length > 0 && (
-        <AniListRail kind="because" className="pt-6"
-          title={tr('Because you read {title}', { title: `\u2068${because.seed.title}\u2069` })}
-          items={becauseRail} onPick={pickRail} />
-      )}
 
       {/*
         In both modes, not just while browsing. The picker is the only place the chosen source is visible or
@@ -826,13 +907,14 @@ function DiscoverInner() {
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 lg:gap-x-4 xl:grid-cols-8 2xl:grid-cols-9 3xl:grid-cols-10">
-        {/* Every card names its sources, one of them or five, in Newest, Popular and search alike (v0.56.0). */}
-        {wall.items.map((it, i) => (
-          <SourceCard key={`${it.source}:${it.sourceId}`} item={{ ...it, inLibrary: it.inLibrary || shownAdded.has(workKey(it)) }}
-            providers={stackOf(it)}
-            onAdd={() => open(it)} eager={i < 12} />
-        ))}
+      {/* Discover's rows inside the wall while browsing (v0.98.0, lib/shelves.ts): the picks after its first two rows of
+          covers, each trending row four rows further on. Each run of covers between two rows is a grid of its own with the
+          wall's classes; the last run, below, holds what is still loading and is the one measured. */}
+      {wallParts.slice(0, -1).map((part, n) => (part.kind === 'row' ? rowOf(part.key) : (
+        <div key={`wall${n}`} className={WALL_GRID} data-wall-part>{cardsOf(part.from, part.to)}</div>
+      )))}
+      <div ref={setWallEl} className={WALL_GRID} data-wall-part>
+        {cardsOf(lastPart.from, lastPart.to)}
         {/* The next page of a search on one source on its way (#331), after the cards: it is asked only once every source
             has answered, so the still-loading card below is never beside it. */}
         {mode === 'search' && moreBusy && Array.from({ length: 3 }).map((_, i) => (
@@ -873,10 +955,8 @@ function DiscoverInner() {
 
       <div ref={sentinel} className="h-16" />
 
-      {/* The trending rails (v0.61.0: manga and manhua beside the manhwa), each only with something on it. */}
-      {mode === 'newest' && TREND_RAILS.map((country, i) => trendRails[i].length > 0 && (
-        <AniListRail key={country} kind={country} title={tr(TREND_LABELS[i])} items={trendRails[i]} onPick={pickRail} />
-      ))}
+      {/* The rows the wall has not reached yet, in order, where they would come anyway (v0.98.0). */}
+      {rowsAfter.map(rowOf)}
 
       {seed && (
         <AddSeriesDialog

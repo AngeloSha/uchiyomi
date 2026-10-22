@@ -134,7 +134,8 @@ test('one seed cannot fill the whole rail', () => {
     { provider: 'anilist', seed: entry('1', 'Big', 'completed', 1, 10), items: many },
     { provider: 'anilist', seed: entry('2', 'Small', 'completed', 1, 7), items: other },
   ], exclusionsFrom(new Map()), open());
-  assert.equal(out.filter((r) => r.sources[0].because === 'Big').length, 5);
+  // Eight since v0.98.0 (five before): the cache holds twelve a seed. Reintroduce five: this reads 5.
+  assert.equal(out.filter((r) => r.sources[0].because === 'Big').length, 8);
   assert.ok(out.some((r) => r.title === 'Other seed pick'));
 });
 

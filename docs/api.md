@@ -532,13 +532,18 @@ Admin settings carry `discover_lookups` (`PATCH` takes `discoverLookups`). It is
 titles online*.
 
 **Trending and Because you read** (since v0.61.0). `GET /api/discover/trending?country=KR|JP|CN` (KR, manhwa, when
-absent; anything else is **400**) answers AniList's trending titles of that country of origin -- never 18+ on AniList,
-never a light novel, never one the server holds -- each country cached six hours; with Show 18+ off, a title carrying a
-genre the admin named as adult is left out of the answer. `GET /api/discover/because` answers `{seed: {id, title} |
-null, content}`, `content` in the trending shape: what AniList's readers recommend after the caller's most recently read
-series with a finished chapter (that they may list, in a library with AniList lookups on and a checked link), less what
-the server holds and what is 18+ for them -- the first of their last five such series that leaves at least four. Both
-sit behind the `canDownload` gate below; neither asks AniList for anything about the library.
+absent; anything else is **400**) answers `{content, pending}`: AniList's trending titles of that country of origin --
+never 18+ on AniList, never a light novel, never one the server holds -- each with `cover` and, since v0.98.0, `coverXL`
+(the same cover at its largest). With Show 18+ off, a title carrying a genre the admin named as adult is left out of the
+answer. Since v0.98.0 each country's list is stored on the server and answered from that copy at once, after a restart
+too, and refreshed in the background once it is six hours old; `pending: true` (with an empty `content`) only while a
+server that has never stored one is still fetching it -- ask again in a few seconds. `GET /api/discover/because`
+answers `{seed, seeds, content}`, `content` in the trending shape plus `because: {id, title}`: what AniList's readers
+recommend after the caller's last five read series with a finished chapter (that they may list, in a library with
+AniList lookups on and a checked link), one from each in turn, at most 30, less what the server holds and what is 18+
+for them. Each item's `because` is the series it came from; `seeds` lists those series and `seed` is the first of them
+(`null` with nothing to show). Before v0.98.0 it was one series' recommendations, `content` without `because`. Both sit
+behind the `canDownload` gate below; neither asks AniList for anything about the library.
 
 **Recommended for you** (since v0.71.0). `GET /api/discover/recommendations` answers `{content, sources, pending}` from
 the trackers the caller has connected (AniList and MyAnimeList seed it; any other connected list only adds to what is

@@ -147,7 +147,7 @@ test('the new motion is the default look, and steps aside for Reduce effects and
   // Each reads BOTH switches on every render, as Toast.tsx does (effects.test.ts). Reintroduce
   // `const reduced = useReduceEffects() || useReducedMotion();` in one: its assertion fails.
   const both = /const plain = useReduceEffects\(\);\s*const still = useReducedMotion\(\);\s*const reduced = plain \|\| !!still;/;
-  for (const f of ['components/Sidebar.tsx', 'components/MosaicArt.tsx', 'components/HeroCarousel.tsx', 'app/series/page.tsx']) {
+  for (const f of ['components/Sidebar.tsx', 'components/MosaicArt.tsx', 'components/HeroCarousel.tsx', 'components/DiscoverHero.tsx', 'app/series/page.tsx']) {
     const src = code(read(f));
     assert.match(src, both, `${f} reads the motion settings conditionally, or only one of them`);
     assert.doesNotMatch(src, /useReduceEffects\(\)\s*(\|\||&&|\?)|useReducedMotion\(\)\s*(\|\||&&|\?)/, `${f} reads the motion settings conditionally`);
@@ -155,5 +155,7 @@ test('the new motion is the default look, and steps aside for Reduce effects and
   assert.match(code(read('components/MosaicArt.tsx')), /initial=\{reduced \? false : \{ opacity: 0, y: 14 \}\}/, 'the tiles still settle in under Reduce effects');
   assert.match(code(read('app/series/page.tsx')), /style=\{\{ opacity: reduced \? 1 : artDim \}\}/, 'the banner still dims under Reduce effects');
   assert.match(code(read('components/HeroCarousel.tsx')), /style=\{reduced \|\| stopped \? undefined : \{ animation: `hero-progress/, 'the slide bar still fills under Reduce effects');
+  // v0.98.0: Discover's hero moves as Home's does, under the same rules.
+  assert.match(code(read('components/DiscoverHero.tsx')), /style=\{reduced \|\| stopped \? undefined : \{ animation: `hero-progress/, 'Discover\'s slide bar still fills under Reduce effects');
   assert.match(read('app/globals.css'), /@keyframes hero-progress \{/, 'the slide bar\'s keyframes are not emitted');
 });
