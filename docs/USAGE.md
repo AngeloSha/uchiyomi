@@ -214,7 +214,8 @@ only when nothing else wants the key: not while you are typing in a field, not w
 Ctrl, Alt or ⌘ held, and never in the reader, which keeps its own keys. Under a Japanese or Chinese
 interface the palette opens empty instead, so the input method composes the whole title. **Profile → Settings →
 General → Type anywhere to search** switches the typing, and the **/** shortcut with it, off on that device;
-**Ctrl+K** keeps working.
+**Ctrl+K** keeps working. A phone has no such keys, so the **Search** tab has a **Search pages, settings and actions**
+button under its box that opens the same palette, with what you have typed already in it.
 
 **Search finds pages and settings too** (since v0.55.4). Type two letters or more and, under the series, **Pages and
 settings** lists what the words name: every page of **Admin** and of your **Profile**, every setting on them (since

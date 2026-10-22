@@ -5,8 +5,9 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Page, Series } from '@/lib/types';
 import { SeriesTile } from '@/components/cards';
-import { IcSearch, IcX } from '@/components/icons';
+import { IcSearch, IcSparkle, IcX } from '@/components/icons';
 import { PlaceRow } from '@/components/CommandPalette';
+import { openPalette } from '@/lib/palette';
 import { t as tr } from '@/lib/i18n';
 import { useAuth } from '@/lib/auth';
 import { isDesktop } from '@/lib/desktop';
@@ -71,6 +72,10 @@ function SearchInner() {
             </button>
           )}
         </div>
+        {/* A phone has no Ctrl+K or "/": this opens the same command palette (pages, settings, actions). The desktop's top bar has its own. */}
+        <button type="button" onClick={() => openPalette(q)} data-search-palette className="btn-key mt-2 h-11 w-full justify-center text-sm lg:hidden">
+          <IcSparkle width={14} height={14} aria-hidden />{tr('Search pages, settings and actions')}
+        </button>
       </header>
 
       {debounced.length < 2 && recent.length > 0 && (

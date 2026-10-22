@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
+import { PALETTE_EVENT } from '@/lib/palette';
 import { runSmartOffline } from '@/lib/offlineSync';
 import { BottomNav } from './BottomNav';
 import { TopNav } from './TopNav';
@@ -102,6 +103,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Where each page was left, for Back and Forward to put back (lib/scrollMemory.ts) -- from the first page on, the reader
   // included, which is not inside the page fade that otherwise installs it.
   useEffect(() => { scrollMemory(); }, []);
+  // The phone's way in: a button (the search page's) asks through lib/palette.ts, since a phone has no hotkey.
+  useEffect(() => {
+    if (status !== 'authed') return;
+    const on = (e: Event) => { setPaletteSeed(String((e as CustomEvent<string>).detail ?? '')); setPalette(true); };
+    window.addEventListener(PALETTE_EVENT, on);
+    return () => window.removeEventListener(PALETTE_EVENT, on);
+  }, [status]);
 
   // smart offline: keep favorites' latest unread chapters downloaded. Never on desktop, where "Save offline"
   // is hidden: it would copy chapters already on this disk into the window's storage (lib/desktop.ts).
