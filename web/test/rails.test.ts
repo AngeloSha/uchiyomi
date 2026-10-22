@@ -36,8 +36,9 @@ test('the rail goes through ScrollRail, and leaves room for the bar', () => {
   // v0.61.0: Discover has four AniList rails -- Because you read above the wall, trending manhwa, manga and manhua
   // under it -- and every one renders through the page's one AniListRail, so there is still exactly one ScrollRail
   // element, and the count below still holds. Updated deliberately: its message names what that one element is, and
-  // the rails are held to going through it.
-  for (const file of ['app/discover/page.tsx']) {
+  // the rails are held to going through it. v0.99.0: the picks for you have their own band (components/ForYouBand.tsx)
+  // with its own one rail, held to the same room for the bar.
+  for (const file of ['app/discover/page.tsx', 'components/ForYouBand.tsx']) {
     const src = read(file);
     assert.ok(src.includes('<ScrollRail'), `${file} has no ScrollRail — is a rail still hand-rolled?`);
     // No raw overflow-x-auto left behind: that is the shape that had the problem.
@@ -54,10 +55,11 @@ test('the rail goes through ScrollRail, and leaves room for the bar', () => {
       );
     }
   }
-  assert.equal(rails, 1, `expected the one ScrollRail every AniList rail on Discover renders through, found ${rails}`);
+  assert.equal(rails, 2, `expected the one ScrollRail every trending row renders through and the For you band's, found ${rails}`);
   const page = read('app/discover/page.tsx');
   assert.match(page, /function AniListRail\([\s\S]*?<ScrollRail label=\{title\}/, 'the one ScrollRail is not the AniList rails\' own');
-  assert.equal((page.match(/<AniListRail\b/g) ?? []).length, 2, 'Because you read and the trending rails do not both go through AniListRail');
+  assert.equal((page.match(/<AniListRail\b/g) ?? []).length, 1, 'the trending rows do not all go through AniListRail');
+  assert.equal((read('components/ForYouBand.tsx').match(/<ScrollRail\b/g) ?? []).length, 1, 'the For you band is not one rail');
 });
 
 test('the arrows exist, are desktop-only, and mirror under RTL', () => {

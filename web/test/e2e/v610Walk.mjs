@@ -9,8 +9,10 @@
 //      Sequel, the two others as AniList's covers leading to Discover; More like this leads with Mixed Formats;
 //   2. tapping "Repeated Pages Two" opens Discover on its search -- the field holds it, the address keeps ?q=, no hero --
 //      and Newest takes ?q= off the address;
-//   3. with a chapter of Repeated Pages finished, Discover shows "Because you read Repeated Pages" above the wall with
-//      the four works the library does not hold, and the trending manhwa, manga and manhua rails under it;
+//   3. with a chapter of Repeated Pages finished, Discover's For you band (v0.99.0) sits inside the wall right after its
+//      first row: "Recommended for you", the top pick big and saying "Because you read Repeated Pages", the other three
+//      works the library does not hold in its row, Repeated Pages' cover beside "Because you read…", the top pick's art
+//      glowing behind it; and the trending manhwa (the whole list, v0.98.0), manga and manhua rails further down;
 //   4. at the end of Repeated Pages' last chapter the reader shows "Next in the story" -- Mixed Formats and "Repeated
 //      Pages Two" -- above Because you finished this;
 //   5. a member who may not add series is shown the outside works as plain cards saying "Not in your library";
@@ -78,7 +80,7 @@ const RECS = [
   item(990302, 'Mixed Formats', { rating: 50 }),
   ...['One', 'Two', 'Three', 'Four'].map((n, i) => item(990360 + i, `Walk Rec ${n}`, { rating: 40 - i * 10 })),
 ];
-/** Eleven manhwa: the hero takes ten and the rail the last; one manga, one manhua. */
+/** Eleven manhwa: the hero shows ten, and since v0.98.0 the rail holds all eleven; one manga, one manhua. */
 const TRENDS = {
   KR: Array.from({ length: 11 }, (_, i) => ({ id: 990410 + i, title: `Walk Trend Manhwa ${i + 1}` })),
   JP: [{ id: 990430, title: 'Walk Trend Manga' }],
@@ -186,29 +188,56 @@ try {
   const left = await waitFor(() => page.evaluate(() => (location.search.includes('q=') ? null : location.pathname)), 10_000);
   check(!!left, 'Newest takes ?q= off the address', 'the address still carries ?q=');
 
-  // ---- 3. Because you read, and the trending rails ----
+  // ---- 3. the For you band, and the trending rails ----
   phase = 'discover-rails';
   const rail = (kind) => page.evaluate((kind) => {
     const plain = (t) => String(t ?? '').replace(/[⁦-⁩]/g, '').replace(/\s+/g, ' ').trim();
     const s = document.querySelector(`[data-anilist-rail="${kind}"]`);
     return s ? { title: plain(s.querySelector('h2')?.textContent), cards: [...s.querySelectorAll('button p')].map((p) => plain(p.textContent)) } : null;
   }, kind);
-  const because = await waitFor(() => rail('because'), 20_000, 500);
-  check(because?.title === 'Because you read Repeated Pages', 'Because you read names the series read', JSON.stringify(because));
-  check(JSON.stringify(because?.cards) === JSON.stringify(['Walk Rec One', 'Walk Rec Two', 'Walk Rec Three', 'Walk Rec Four']),
-    'with the four recommendations the library does not hold -- Mixed Formats left out', JSON.stringify(because?.cards));
-  check(await before(page, '[data-anilist-rail="because"]', 'Newest from your sources'), 'above the wall');
+  const forYou = await waitFor(() => page.evaluate(() => {
+    const plain = (t) => String(t ?? '').replace(/[⁦-⁩]/g, '').replace(/\s+/g, ' ').trim();
+    const s = document.querySelector('[data-foryou-band]');
+    const spot = s?.querySelector('[data-foryou-spotlight]');
+    return s && spot ? {
+      title: plain(s.querySelector('h2')?.textContent),
+      top: plain(spot.querySelector('[dir="auto"]')?.textContent),
+      why: plain(spot.querySelector('[data-pick-why]')?.textContent),
+      row: [...s.querySelectorAll('[role="group"] button p')].map((p) => plain(p.textContent)),
+      seeds: [...s.querySelectorAll('[data-foryou-seeds] [title]')].map((e) => e.getAttribute('title')),
+      glow: !!s.querySelector('[data-foryou-glow] img'),
+    } : null;
+  }), 20_000, 500);
+  check(forYou?.title === 'Recommended for you', 'the For you band, under its own heading', JSON.stringify(forYou));
+  check(forYou?.top === 'Walk Rec One' && forYou.why === 'Because you read Repeated Pages', 'the top pick, big, saying why it is there', JSON.stringify(forYou));
+  check(JSON.stringify(forYou?.row) === JSON.stringify(['Walk Rec Two', 'Walk Rec Three', 'Walk Rec Four']),
+    'the other works the library does not hold in its row -- Mixed Formats left out, the top pick not twice', JSON.stringify(forYou?.row));
+  check(JSON.stringify(forYou?.seeds) === JSON.stringify(['Repeated Pages']), 'the read series\' cover beside "Because you read…"', JSON.stringify(forYou));
+  // The walk's picks have no covers (the fake AniList's items carry none): no broken tile glows behind the band.
+  check(forYou?.glow === false, 'a top pick with no cover lights nothing behind the band', JSON.stringify(forYou));
+  // Right after the wall's first row: the covers before it are one row of the grid (all of them, while the wall is shorter).
+  const placed = await page.evaluate(() => {
+    const band = document.querySelector('[data-foryou-band]');
+    const parts = [...document.querySelectorAll('[data-wall-part]')];
+    const cols = parts[0] ? getComputedStyle(parts[0]).gridTemplateColumns.split(' ').length : 0;
+    const before = parts.filter((p) => p.compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING).reduce((n, p) => n + p.children.length, 0);
+    const total = parts.reduce((n, p) => n + p.children.length, 0);
+    return { cols, before, total };
+  });
+  check(placed.cols > 0 && placed.before === Math.min(placed.cols, placed.total), 'the band comes right after the wall\'s first row', JSON.stringify(placed));
+  check(!(await before(page, '[data-foryou-band]', 'Newest from your sources')), 'inside the wall, not above it');
   const trends = {};
   for (const c of ['KR', 'JP', 'CN']) trends[c] = await waitFor(() => rail(c), 20_000, 500);
-  check(trends.KR?.title === 'Trending manhwa' && trends.KR.cards.join() === 'Walk Trend Manhwa 11', 'the manhwa rail: what the hero did not take', JSON.stringify(trends.KR));
+  check(trends.KR?.title === 'Trending manhwa' && trends.KR.cards.join() === Array.from({ length: 11 }, (_, i) => `Walk Trend Manhwa ${i + 1}`).join(),
+    'the manhwa rail: the whole list', JSON.stringify(trends.KR));
   check(trends.JP?.title === 'Trending manga' && trends.JP.cards.join() === 'Walk Trend Manga', 'a trending manga rail', JSON.stringify(trends.JP));
   check(trends.CN?.title === 'Trending manhua' && trends.CN.cards.join() === 'Walk Trend Manhua', 'a trending manhua rail', JSON.stringify(trends.CN));
   check(!(await before(page, '[data-anilist-rail="JP"]', 'Newest from your sources')), 'the trending rails sit under the wall');
   const askedJP = (await (await fetch(`${ANILIST}/__log`)).json()).filter((r) => r.kind === 'trending').map((r) => r.country);
   check(['KR', 'JP', 'CN'].every((c) => askedJP.includes(c)), 'each country was asked for by name', JSON.stringify(askedJP));
-  await page.$eval('[data-anilist-rail="because"]', (el) => el.scrollIntoView({ block: 'center' }));
+  await page.$eval('[data-foryou-band]', (el) => el.scrollIntoView({ block: 'center' }));
   await sleep(400);
-  await shot('discover-because');
+  await shot('discover-foryou');
   await page.$eval('[data-anilist-rail="CN"]', (el) => el.scrollIntoView({ block: 'center' }));
   await sleep(400);
   await shot('discover-trending');
