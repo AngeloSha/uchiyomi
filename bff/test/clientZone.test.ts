@@ -138,8 +138,48 @@ test('nothing set anywhere: the private networks are home, and private peers are
     assert.equal(await zone('192.168.1.20'), 'local');
     assert.equal(await zone('203.0.113.5'), 'remote');
     assert.equal(await zone('172.18.0.5', '203.0.113.5'), 'remote', 'Nginx Proxy Manager in Docker, forwarding a visitor from outside');
-    assert.deepEqual(await ask('172.18.0.5', '192.168.1.30'), { zone: 'local', ip: '192.168.1.30' });
+    // The proxy is trusted for the address it reports (the activity log reads it), but not for home: only a proxy
+    // written out by address puts anyone behind it at home (the next test).
+    assert.deepEqual(await ask('172.18.0.5', '192.168.1.30'), { zone: 'remote', ip: '192.168.1.30' });
   } finally {
+    await app.close();
+  }
+});
+
+test('through a proxy, home counts only when every proxy on the way is written out by address', async () => {
+  // Docker Desktop, as walked: Nginx in a container reaches the app from 172.28.240.1, and reports every visitor as the
+  // Docker gateway 172.17.0.1, appending it to whatever X-Forwarded-For the visitor sent. With the default names both
+  // hops are private, so both are trusted, and the visitor's own entry is the address read. Reintroduce by dropping
+  // unnamedHop from clientZone: the forged home address below reads local.
+  const { useNetworkSettings, unnamedHop } = await import('../src/lib/clientAddr');
+  const { app, zone, ask } = await liveApp();
+  const Fastify = (await import('fastify')).default;
+  try {
+    useNetworkSettings({ localNetworks: null, trustedProxies: null });
+    assert.deepEqual(await ask('172.28.240.1', '192.168.1.50, 172.17.0.1'), { zone: 'remote', ip: '192.168.1.50' },
+      'a visitor wrote 192.168.1.50 and it was read: so it must not be at home');
+    assert.equal(await zone('172.28.240.1', '172.17.0.1'), 'remote', 'no forging, but the proxy is not named');
+    assert.equal(await zone('192.168.1.20'), 'local', 'straight to the port, no proxy: unchanged');
+
+    useNetworkSettings({ localNetworks: null, trustedProxies: '172.28.240.1' });
+    assert.deepEqual(await ask('172.28.240.1', '192.168.1.50, 172.17.0.1'), { zone: 'local', ip: '172.17.0.1' },
+      'the named proxy is believed for one hop, and the visitor\'s own entry is not read');
+
+    useNetworkSettings({ localNetworks: null, trustedProxies: 'loopback, linklocal, uniquelocal, 172.28.240.1' });
+    assert.equal(await zone('172.28.240.1', '192.168.1.50, 172.17.0.1'), 'remote', 'a second hop trusted only by name');
+    assert.equal(await zone('172.28.240.1', '172.17.0.1'), 'local', 'the named proxy alone on the way');
+
+    // What the settings page names in its warning: the first hop on the way that only a name trusts.
+    useNetworkSettings({ localNetworks: null, trustedProxies: null });
+    const probe = Fastify({ trustProxy: (await import('../src/lib/clientAddr')).trustsPeer });
+    probe.get('/', async (req) => ({ hop: unnamedHop(req) }));
+    const hop = (ra: string, xff?: string) => probe.inject({ url: '/', remoteAddress: ra, headers: xff ? { 'x-forwarded-for': xff } : {} })
+      .then((r) => r.json().hop);
+    assert.equal(await hop('172.28.240.1', '172.17.0.1'), '172.28.240.1');
+    assert.equal(await hop('192.168.1.20'), null, 'no proxy, nothing to name');
+    await probe.close();
+  } finally {
+    useNetworkSettings({ localNetworks: null, trustedProxies: null });
     await app.close();
   }
 });

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4257
+    "strings": 4259
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4260,5 +4260,7 @@
   "Signed-in devices": "已登录的设备",
   "The address the server sees for each, and whether that is at home. If a phone on mobile data reads at home, a proxy or Docker is hiding who is connecting: write your network above.": "服务器为每台设备看到的地址，以及它是否在家。如果使用移动数据的手机显示为在家，说明代理或 Docker 隐藏了连接者：请在上方填写你的网络。",
   "at home": "在家",
-  "outside": "在外"
+  "outside": "在外",
+  "You reach the server through the proxy {ip}, trusted only as part of a private network. Until its address is in Trusted proxies, nobody behind it counts as at home: a visitor could write their own address.": "你通过代理 {ip} 访问服务器，它仅因属于私有网络而被信任。在把它的地址填入“受信任的代理”之前，它后面的任何人都不算在家：访问者可能会自己写入地址。",
+  "Trust only {ip}": "只信任 {ip}"
 }

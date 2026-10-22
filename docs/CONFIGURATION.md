@@ -46,6 +46,13 @@ The ones worth knowing:
   refused), never `0.0.0.0/0`; the app stops at start on a value it cannot read, and refuses `LOCAL_NETWORKS` together
   with `TRUST_PROXY=true`, which would let anyone claim a home address (with `TRUST_PROXY=true` and no `LOCAL_NETWORKS`,
   nobody is at home).
+- **Behind a reverse proxy, name it by address** (`TRUST_PROXY=loopback, 172.18.0.5`, or on the settings page's
+  *Trusted proxies*): a request that comes through a proxy counts as at home only when every proxy on its way is written
+  out by address or range. The default names (`loopback`, `linklocal`, `uniquelocal`) trust every private peer, which is
+  right for the activity log and the sign-in limits, but a chain of private hops -- Docker Desktop's port forwarding, a
+  proxy behind a router -- would then let a visitor write their own `X-Forwarded-For` and pick a home address. Reaching
+  the app's port directly from home needs nothing. The settings page names the proxy you came through when it is not
+  written out, with a key that trusts it alone.
 - **Set in the environment, either one wins**: the settings page shows its value and cannot change it, so what your
   compose file says is what runs. Saved on the page, a change is in force at the next request, with no restart.
 - `LOG_LEVEL` (since v0.92.0): how much the server log says (`docker logs uchiyomi`). `info` by default, a line for

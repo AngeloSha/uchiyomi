@@ -188,6 +188,7 @@ export interface NetworkConfig {
 let saved: { localNetworks: string | null; trustedProxies: string | null } = { localNetworks: null, trustedProxies: null };
 let home: BlockList | null = null;
 let trust: ((addr: string, hop: number) => boolean) | null = null;
+let named: ((addr: string, hop: number) => boolean) | null = null;
 
 /**
  * The home network and the trusted proxies in force, and where each comes from. The environment outranks the settings
@@ -212,6 +213,7 @@ export function useNetworkSettings(next: { localNetworks: string | null; trusted
   saved = next;
   home = null;
   trust = null;
+  named = null;
 }
 
 /** Read Admin -> Settings' values: at boot, after the migrations (server.ts), and after a save. */
@@ -255,6 +257,26 @@ export async function saveNetworkSettings(patch: { localNetworks?: string | null
 export function trustsPeer(addr: string, hop: number): boolean {
   trust ??= compileTrust(networkConfig().trustedProxies.value);
   return trust(addr, hop);
+}
+
+/**
+ * The first proxy this request came through that the trusted proxies cover only by a name -- loopback, linklocal,
+ * uniquelocal -- not by its address or a range written out; null when there is none.
+ *
+ * Those names trust every private peer, and a chain of private hops is what Docker Desktop's port forwarding, or a
+ * proxy behind a router, makes of a visitor from anywhere: each hop is trusted, so the X-Forwarded-For entry the
+ * visitor wrote is the address read, and the visitor chooses to be at home. Fine for the sign-in limits and the
+ * activity log the names were made for (v0.69.1); not for deciding who opens a profile without a password.
+ * (`req.ips` runs from the socket to the visitor: every entry but the last is a proxy the request came through.)
+ */
+export function unnamedHop(req: FastifyRequest): string | null {
+  if (!named) {
+    const s = trustProxySetting(networkConfig().trustedProxies.value);
+    const list = typeof s === 'string' ? trustProxyEntries(s).filter((e) => !ALIASES.has(e.toLowerCase())) : [];
+    named = list.length ? proxyAddr.compile(list) : () => false;
+  }
+  const hops = (req.ips ?? []).slice(0, -1);
+  return hops.find((a, i) => !named!(a, i)) ?? null;
 }
 
 /** What the operator is told about the settings in force: at every start (server.ts) and on the settings page. */
@@ -305,12 +327,15 @@ export function sameNetwork(a: string, b: string): boolean {
 
 /**
  * zoneOf against the home in force. The desktop app's server is this computer's alone: always at home. With every peer
- * trusted as a proxy (TRUST_PROXY=true) anyone can say any address, so nobody is.
+ * trusted as a proxy (TRUST_PROXY=true) anyone can say any address, so nobody is; and through a proxy the trusted
+ * proxies name only by loopback/linklocal/uniquelocal, nobody is either (unnamedHop). Reintroduce by dropping either:
+ * its case in clientZone.test.ts reads a visitor's own header as at home.
  */
 export function clientZone(req: FastifyRequest): Zone {
   if (isDesktop()) return 'local';
   const c = networkConfig();
   if (trustProxySetting(c.trustedProxies.value) === true) return 'remote';
+  if (unnamedHop(req)) return 'remote';
   home ??= localNetworks(c.localNetworks.value);
   return zoneOf(req, home);
 }

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4257
+    "strings": 4259
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -4260,5 +4260,7 @@
   "Signed-in devices": "Appareils connectés",
   "The address the server sees for each, and whether that is at home. If a phone on mobile data reads at home, a proxy or Docker is hiding who is connecting: write your network above.": "L’adresse que le serveur voit pour chacun, et si elle est à la maison. Si un téléphone en données mobiles apparaît à la maison, un proxy ou Docker cache qui se connecte : indiquez votre réseau ci-dessus.",
   "at home": "à la maison",
-  "outside": "à l’extérieur"
+  "outside": "à l’extérieur",
+  "You reach the server through the proxy {ip}, trusted only as part of a private network. Until its address is in Trusted proxies, nobody behind it counts as at home: a visitor could write their own address.": "Vous atteignez le serveur par le proxy {ip}, de confiance seulement parce qu’il est dans un réseau privé. Tant que son adresse n’est pas dans Proxys de confiance, personne derrière lui ne compte comme à la maison : un visiteur pourrait écrire sa propre adresse.",
+  "Trust only {ip}": "Faire confiance seulement à {ip}"
 }

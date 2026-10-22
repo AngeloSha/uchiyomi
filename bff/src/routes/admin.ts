@@ -35,7 +35,7 @@ import { worstCase } from '../lib/repairEstimate';
 import { authenticate, requireAdmin, userIdOf, roleOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
 import {
   DEFAULT_TRUSTED_PROXIES, PRIVATE_NETWORKS, atHome, clientIp, clientZone, localNetworks, networkConfig, networkSettingProblem,
-  networkWarnings, saveNetworkSettings, tidyNetworkSetting,
+  networkWarnings, saveNetworkSettings, tidyNetworkSetting, unnamedHop,
 } from '../lib/clientAddr';
 import { logAudit, recentAudit } from '../lib/audit';
 import { markRemoved, forgetVerdict } from '../lib/scoutMemory';
@@ -5104,10 +5104,13 @@ export default async function adminRoutes(app: FastifyInstance) {
    * this page, or the default -- and how this server sees the admin asking: the address it resolved, whether that came
    * through a trusted proxy, whether it is at home. With them the address of every live session and its zone: a proxy
    * or a NAT that hides who is connecting makes everyone look the same, and at home, which this list shows before it
-   * matters. `suggestion` is the admin's own /24 when it is a private one: "Use my network".
+   * matters. `suggestion` is the admin's own /24 when it is a private one: "Use my network". `proxy_unnamed` names the
+   * proxy this very request came through that is trusted only by loopback/linklocal/uniquelocal: nobody behind it is at
+   * home until it is written out (lib/clientAddr.ts unnamedHop).
    */
   const networkState = async (req: FastifyRequest) => {
     const c = networkConfig();
+    const hop = unnamedHop(req);
     const ip = clientIp(req);
     const plain = ip?.startsWith('::ffff:') && isIP(ip.slice(7)) === 4 ? ip.slice(7) : ip;
     const ownNet = plain && isIP(plain) === 4 && !plain.startsWith('127.') ? `${plain.split('.').slice(0, 3).join('.')}.0/24` : null;
@@ -5127,7 +5130,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       trustedProxies: c.trustedProxies,
       defaults: { localNetworks: PRIVATE_NETWORKS, trustedProxies: DEFAULT_TRUSTED_PROXIES },
       suggestion: ownNet && localNetworks(PRIVATE_NETWORKS).check(plain!, 'ipv4') ? ownNet : null,
-      warnings: networkWarnings(c),
+      warnings: [...networkWarnings(c), ...(hop ? [{ code: 'proxy_unnamed' as const, ip: hop }] : [])],
       recent: recent.map((r) => ({ ip: r.ip, lastSeen: r.last_seen, name: r.display_name, zone: atHome(r.ip) ? 'local' : 'remote' })),
     };
   };

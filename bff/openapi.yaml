@@ -7861,7 +7861,8 @@ paths:
         source being `env` (LOCAL_NETWORKS / TRUST_PROXY, which the settings page cannot change), `settings` or
         `default` (the private networks; loopback, link-local and private proxies); `defaults` names both defaults.
         `suggestion` is the caller's own /24 when it is a private address, else null. `warnings` are codes: `trust_all`
-        (every peer trusted, so nobody is at home) and `proxy_at_home` with `ip`. `recent` is the address of up to ten
+        (every peer trusted, so nobody is at home), `proxy_at_home` with `ip`, and `proxy_unnamed` with `ip`, the
+        proxy this request came through that only loopback/linklocal/uniquelocal trust (nobody behind it is at home). `recent` is the address of up to ten
         live sessions, newest first, with `lastSeen`, the account's `name` and its `zone`. Requires an admin account and a
         token carrying the admin scope.
       security:

@@ -41,6 +41,9 @@ test('what can make everyone look at home is said: the warnings and every signed
   const page = code(read('components/NetworkSettings.tsx'));
   assert.match(page, /w\.code === 'trust_all'/);
   assert.match(page, /tr\('The proxy \{ip\} is inside the home network/);
+  // A proxy trusted only by the default names: nobody behind it is at home, and the page offers to trust it alone.
+  assert.match(page, /w\.code === 'proxy_unnamed'/);
+  assert.match(page, /save\(\{ trustedProxies: w\.ip \}\)/);
   assert.match(page, /data\.recent\.map\(\(r\) =>/);
   assert.match(page, /r\.zone === 'local' \? tr\('at home'\) : tr\('outside'\)/);
 });

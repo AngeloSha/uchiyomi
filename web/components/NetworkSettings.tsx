@@ -21,7 +21,7 @@ export interface NetworkState {
   defaults: { localNetworks: string; trustedProxies: string };
   /** The admin's own /24, when it is a private one: "Use my network". */
   suggestion: string | null;
-  warnings: Array<{ code: 'trust_all' } | { code: 'proxy_at_home'; ip: string }>;
+  warnings: Array<{ code: 'trust_all' } | { code: 'proxy_at_home' | 'proxy_unnamed'; ip: string }>;
   recent: Array<{ ip: string; lastSeen: string; name: string; zone: 'local' | 'remote' }>;
 }
 
@@ -95,12 +95,20 @@ export function NetworkSettings() {
       )}
 
       {data.warnings.map((w) => (
-        <RowBlock key={w.code === 'proxy_at_home' ? w.ip : w.code}>
+        <RowBlock key={w.code === 'trust_all' ? w.code : `${w.code}-${w.ip}`}>
           <p role="note" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-200" data-network-warning={w.code}>
             {w.code === 'trust_all'
               ? tr('Every peer is trusted as a proxy (TRUST_PROXY=true), so anyone can say any address: nobody counts as at home.')
-              : tr('The proxy {ip} is inside the home network: a request it forwards without X-Forwarded-For counts as at home.', { ip: iso(w.ip) })}
+              : w.code === 'proxy_unnamed'
+                ? tr('You reach the server through the proxy {ip}, trusted only as part of a private network. Until its address is in Trusted proxies, nobody behind it counts as at home: a visitor could write their own address.', { ip: iso(w.ip) })
+                : tr('The proxy {ip} is inside the home network: a request it forwards without X-Forwarded-For counts as at home.', { ip: iso(w.ip) })}
           </p>
+          {/* The one proxy this page was reached through, written out: what the warning asks for, a tap away. */}
+          {w.code === 'proxy_unnamed' && proxies.source !== 'env' && (
+            <button type="button" onClick={() => { void save({ trustedProxies: w.ip }); }} className="btn-key mt-2" data-trust-proxy>
+              {tr('Trust only {ip}', { ip: iso(w.ip) })}
+            </button>
+          )}
         </RowBlock>
       ))}
 

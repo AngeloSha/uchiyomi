@@ -12,15 +12,17 @@ if (DSN) {
   process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-at-least-16-chars';
   process.env.CONFIG_DIR = process.env.CONFIG_DIR || '/tmp/uchiyomi-test-config';
   process.env.LIBRARY_BACKEND = 'owned';
-  // Read once, when env.ts loads: this file's home.
+  // Read once, when env.ts loads: this file's home, and its reverse proxy named by address -- through a proxy only the
+  // default names trust, nobody is at home (lib/clientAddr.ts unnamedHop; clientZone.test.ts).
   process.env.LOCAL_NETWORKS = '192.168.1.0/24';
+  process.env.TRUST_PROXY = 'loopback, 172.18.0.5';
 }
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 const NAMES = ['pz-guardian', 'pz-child'];
 const HOME = '192.168.1.20';
 const AWAY = '203.0.113.5';
-const PROXY = '172.18.0.5'; // trusted by the default TRUST_PROXY (uniquelocal)
+const PROXY = '172.18.0.5'; // named in TRUST_PROXY above
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 
 async function setup() {

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4257
+    "strings": 4259
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -4260,5 +4260,7 @@
   "Signed-in devices": "Устройства со входом",
   "The address the server sees for each, and whether that is at home. If a phone on mobile data reads at home, a proxy or Docker is hiding who is connecting: write your network above.": "Адрес, который сервер видит для каждого устройства, и дома ли он. Если телефон в мобильной сети отображается как «дома», прокси или Docker скрывают, кто подключается: укажите свою сеть выше.",
   "at home": "дома",
-  "outside": "не дома"
+  "outside": "не дома",
+  "You reach the server through the proxy {ip}, trusted only as part of a private network. Until its address is in Trusted proxies, nobody behind it counts as at home: a visitor could write their own address.": "Вы подключаетесь к серверу через прокси {ip}, которому доверяют только как части частной сети. Пока его адрес не указан в доверенных прокси, никто за ним не считается дома: посетитель мог бы указать свой адрес сам.",
+  "Trust only {ip}": "Доверять только {ip}"
 }
