@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.99.0 — 2026-10-22
+
+**Your picks on Discover get a spotlight of their own, right after the first row of covers, and Discover's rows line up
+with the page again.**
+
+### Your picks get the spotlight
+
+- ***Recommended for you* is a band of its own across the page,** right after the first row of covers. It used to be
+  one more row of covers inside the wall, easy to scroll past.
+- **The top pick is a big card** that says why it is there, with **Find and add**. The rest follow in a row you swipe.
+- **The top pick's art glows behind the band.** On a computer the glow takes the art of the card you point at. Under
+  *Reduce effects* or reduced motion it changes without fading.
+- **The covers of the series you read sit beside *Because you read…***, so you can see where your picks come from.
+
+### Rows that line up
+
+- **Discover's rows start on the page's edge again.** Their first card used to snap to the edge of a phone's screen, and
+  under the sidebar on a computer, which cut off the "1" of the Top 10.
+
+### Upgrading
+
+- Nothing to do.
+
 ## v0.98.0 — 2026-10-22
 
 **Discover's hero is always there and quick on a phone, your picks are one full row, and the newest from your sources
