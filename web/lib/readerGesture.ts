@@ -28,6 +28,9 @@ export const TAP_WINDOW_MS = 300;
 /** How far a press may travel and still be a tap rather than a scroll. */
 export const TAP_SLOP_PX = 10;
 
+/** How far apart two touch taps may land and still be a double-tap: the same spot, not two thumbs-widths away. */
+export const DOUBLE_TAP_SLOP_PX = 48;
+
 /**
  * How long after a single click its effect may still be taken back by a `dblclick`.
  *
@@ -129,18 +132,25 @@ export function readTap(args: {
   layout?: TapLayout;
   mode?: 'paged' | 'vertical';
   lastTapAt: number;
+  /** Where that previous tap landed. Without it any two quick taps count, wherever they are. */
+  lastTapPoint?: { x: number; y: number };
   doubleDetect: boolean;
   /** When the last double (touch or mouse) was recognised; 0 when there is none. */
   lastDoubleAt?: number;
 }): TapAction {
-  const { from, to, width, height = 0, layout = 'auto', mode = 'paged', lastTapAt, doubleDetect, lastDoubleAt = 0 } = args;
+  const { from, to, width, height = 0, layout = 'auto', mode = 'paged', lastTapAt, lastTapPoint, doubleDetect, lastDoubleAt = 0 } = args;
   if (!isTap(from, to)) return { kind: 'none' };
   // ⚠️ A third press right behind a double is the tail of the same flurry, not a new single. Without this a
   // triple-click (or a triple-tap) zoomed and then, 300 ms later, turned a page: the double reset the pairing
   // state, so the third press looked like the first of a fresh gesture.
   if (lastDoubleAt > 0 && to.t - lastDoubleAt < TAP_WINDOW_MS) return { kind: 'none' };
-  if (doubleDetect && lastTapAt > 0 && to.t - lastTapAt < TAP_WINDOW_MS) return { kind: 'double' };
-  return { kind: 'single', zone: tapZone(to.x, to.y, width, height, layout, mode), after: singleTapDelay() };
+  const zone = tapZone(to.x, to.y, width, height, layout, mode);
+  // ⚠️ A double-tap zooms, and only from the middle of the screen, on the spot of the first tap. Two quick taps on
+  // the page-turning edge are two TURNS (a thumb paging through a chapter does exactly that), and two taps far
+  // apart are two taps. Before this they zoomed the page, which in paged mode could not be panned.
+  const near = !lastTapPoint || (Math.abs(to.x - lastTapPoint.x) <= DOUBLE_TAP_SLOP_PX && Math.abs(to.y - lastTapPoint.y) <= DOUBLE_TAP_SLOP_PX);
+  if (doubleDetect && lastTapAt > 0 && to.t - lastTapAt < TAP_WINDOW_MS && near && zone === 'chrome') return { kind: 'double' };
+  return { kind: 'single', zone, after: singleTapDelay() };
 }
 
 /** Whether a `dblclick` arriving at `now` should take back a single click's action from `at`. */
@@ -155,4 +165,14 @@ export function undoWindow(at: number | null, now: number): boolean {
  */
 export function undoLeft(at: number | null, now: number): number {
   return at == null ? 0 : Math.max(0, UNDO_WINDOW_MS + 1 - (now - at));
+}
+
+/**
+ * A press that lands while the track is still moving is the reader stopping a fling, not asking for anything.
+ * On a phone, catching a webtoon mid-scroll is the most common touch there is, and it used to toggle the
+ * interface every time.
+ */
+export const CATCH_MS = 160;
+export function isCatch(lastMovedAt: number, now: number): boolean {
+  return lastMovedAt > 0 && now - lastMovedAt < CATCH_MS;
 }

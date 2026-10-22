@@ -79,7 +79,7 @@ test('the colour filter is on the page images, never on the column, the track or
   // card and every button in the track are inverted with the pages. Drop it from ReaderImg: no page is filtered.
   const page = code(read('app/reader/page.tsx'));
   assert.match(page, /<div className="mx-auto" style=\{\{ width: colW \|\| '100%', filter: THEME_FILTER\[prefs\.theme\] \}\}>/, 'the column\'s filter is no longer the theme alone');
-  assert.match(page, /className="hide-scrollbar flex h-screen-d snap-x snap-mandatory overflow-x-auto overflow-y-hidden" style=\{\{ filter: THEME_FILTER\[prefs\.theme\] \}\}/, 'the track\'s filter is no longer the theme alone');
+  assert.match(page, /className=\{`hide-scrollbar flex h-screen-d snap-x snap-mandatory overflow-y-hidden [^`]*`\} style=\{\{ filter: THEME_FILTER\[prefs\.theme\] \}\}/, 'the track\'s filter is no longer the theme alone');
   assert.doesNotMatch(page, /THEME_FILTER\[[^\]]+\][^}]*COLOR_FILTER|COLOR_FILTER[^}]*THEME_FILTER/, 'the colour filter is laid over a container with the theme');
   const img = code(read('components/ReaderPage.tsx'));
   assert.match(img, /style=\{filter \? \{ \.\.\.style, filter \} : style\}/, 'ReaderImg no longer puts the filter on the image');
