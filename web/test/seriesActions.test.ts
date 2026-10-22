@@ -54,19 +54,19 @@ test('an admin: Check for new chapters, and the admin group with Remove from lib
     'reading: notes markAllRead markAllUnread',
     'chapters: findMissing archive checkNew',
     'share: copyLink openTab',
-    'admin: edit cover newBanner rename remove',
+    'admin: edit cover move newBanner rename remove',
   ]);
   const admin = seriesActionGroups(ADMIN).find((g) => g.id === 'admin')!;
   assert.equal(admin.heading, 'Admin');
   assert.deepEqual(admin.items.map((i) => [i.label, !!i.danger]), [
-    ['Edit details', false], ['Change cover', false], ['New banner', false], ['Rename folder', false], ['Remove from library', true],
+    ['Edit details', false], ['Change cover', false], ['Move library', false], ['New banner', false], ['Rename folder', false], ['Remove from library', true],
   ]);
   // New banner only while the hero is the automatic one; Rename folder only with a folder (sent to admins only).
-  assert.deepEqual(shape({ ...ADMIN, autoHero: false, hasFolder: false }).at(-1), 'admin: edit cover remove');
+  assert.deepEqual(shape({ ...ADMIN, autoHero: false, hasFolder: false }).at(-1), 'admin: edit cover move remove');
   // Never an admin's for anyone else, whatever else is true.
   for (const x of [{ ...ADMIN, isAdmin: false }, { ...DOWNLOADER, autoHero: true, hasFolder: true }]) {
     const ids = seriesActionGroups(x).flatMap((g) => g.items.map((i) => i.id));
-    for (const own of ['checkNew', 'edit', 'cover', 'newBanner', 'rename', 'remove'] as const) assert.ok(!ids.includes(own), `${own} is offered to a non-admin`);
+    for (const own of ['checkNew', 'edit', 'cover', 'move', 'newBanner', 'rename', 'remove'] as const) assert.ok(!ids.includes(own), `${own} is offered to a non-admin`);
   }
 });
 
@@ -77,6 +77,7 @@ test('the items a browser walk finds by their hook, whatever the language', () =
   assert.equal(hook('newBanner'), 'new-banner');
   assert.equal(hook('edit'), 'edit-details');
   assert.equal(hook('cover'), 'change-cover');
+  assert.equal(hook('move'), 'move-library');
   assert.equal(hook('remove'), 'remove-series');
 });
 
@@ -109,7 +110,7 @@ test('the Offline key: never in Uchiyomi Desktop, never on a series with nothing
 test('More as a menu: each group named above its first item, icons before the words, Remove apart', () => {
   const picked: string[] = [];
   const items = moreMenuItems(seriesActionGroups(ADMIN), (id) => { picked.push(id); });
-  assert.deepEqual(items.map((i) => i.heading ?? null), ['Reading', null, null, 'Chapters', null, null, 'Share', null, 'Admin', null, null, null, null]);
+  assert.deepEqual(items.map((i) => i.heading ?? null), ['Reading', null, null, 'Chapters', null, null, 'Share', null, 'Admin', null, null, null, null, null]);
   assert.ok(items.every((i) => i.icon), 'an item has no icon');
   const remove = items.at(-1)!;
   assert.equal(remove.label, 'Remove from library');

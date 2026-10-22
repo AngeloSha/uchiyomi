@@ -165,6 +165,6 @@ test('a library card and Move to library say the first folder and "+{n} more"', 
   const line = code(read('components/LibraryFolders.tsx'));
   assert.match(line, /const more = moreFoldersText\(paths\);/);
   assert.match(line, /<bdi className="min-w-0 truncate font-mono">\{paths\[0\]\}<\/bdi>\s*\{more && <span className="shrink-0/, 'the count can be truncated away by a long first folder');
-  const library = code(read('app/library/page.tsx'));
+  const library = code(read('components/MoveToLibrary.tsx'));
   assert.match(library, /<LibraryFolders paths=\{foldersOf\(l\)\} className="text-\[11px\] text-fog-500" \/>/, 'Move to library shows one folder');
 });

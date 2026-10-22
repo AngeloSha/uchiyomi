@@ -1,4 +1,6 @@
 'use client';
+import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { canDownload, useAuth } from '@/lib/auth';
@@ -7,6 +9,7 @@ import type { Series } from '@/lib/types';
 import { useToast } from './Toast';
 import { useContextMenu, type MenuItem } from './ContextMenu';
 import { useArchiveEnqueue } from './ArchiveQueue';
+import { MoveToLibrary } from './MoveToLibrary';
 
 /**
  * A series card's menu (#100): the few things worth doing without opening the series, from wherever it is on
@@ -41,6 +44,10 @@ export function useSeriesMenu(series: Series) {
     } catch { toast(tr('Could not do that'), 'error'); }
   };
 
+  // Move library (admins): the picker is a dialog, so the menu's `element` carries it along with the menu itself.
+  const [moving, setMoving] = useState(false);
+  const [moveBusy, setMoveBusy] = useState(false);
+
   const items = (): MenuItem[] => [
     { label: tr('Open in a new tab'), onSelect: () => { window.open(href, '_blank', 'noopener'); } },
     {
@@ -65,6 +72,7 @@ export function useSeriesMenu(series: Series) {
         } catch { toast(tr('Could not do that'), 'error'); }
       },
     }] : []),
+    ...(isAdmin ? [{ label: tr('Move library'), disabled: offline, onSelect: () => setMoving(true) }] : []),
     // What is missing is the server's to work out; the notice says when there was nothing older to fetch.
     ...(canDownload(user) ? [{
       label: tr('Archive slowly'), divider: !isAdmin, disabled: offline,
@@ -72,5 +80,20 @@ export function useSeriesMenu(series: Series) {
     }] : []),
   ];
 
-  return useContextMenu(items, { label: series.metadata?.title || series.name });
+  const menu = useContextMenu(items, { label: series.metadata?.title || series.name });
+  // Portalled out of the card, as the menu is: a card is tilted and clipped, and a fixed dialog inside it would be too.
+  const picker = moving && typeof document !== 'undefined' ? createPortal(
+    <MoveToLibrary n={1} busy={moveBusy} onClose={() => setMoving(false)} onPick={async (libraryId) => {
+      setMoveBusy(true);
+      try {
+        await api(`/api/admin/series/${encodeURIComponent(series.id)}/library`, { json: { libraryId } });
+        toast(tr('1 series updated'), 'success');
+        settle();
+      } catch { toast(tr('Could not do that'), 'error'); }
+      setMoveBusy(false);
+      setMoving(false);
+    }} />,
+    document.body,
+  ) : null;
+  return { ...menu, element: <>{menu.element}{picker}</> };
 }

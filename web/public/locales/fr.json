@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4208
+    "strings": 4211
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -4211,5 +4211,8 @@
   "Uchiyomi can't tell a file you deleted from one on a drive that isn't connected right now, so it left them as they were. If you deleted or moved them yourself, mark them gone. Then you can forget the series.": "Uchiyomi ne peut pas distinguer un fichier que vous avez supprimé d’un fichier sur un disque qui n’est pas connecté en ce moment, il les a donc laissés tels quels. Si vous les avez supprimés ou déplacés vous-même, marquez-les comme disparus. Vous pourrez ensuite oublier la série.",
   "Mark them gone": "Les marquer comme disparus",
   "Amber: this source lists it under its own name, which came up first for two of this series’ names. Check the covers before you follow it. Following it keeps the name.": "Ambre : cette source la répertorie sous son propre nom, arrivé en premier pour deux des noms de cette série. Comparez les couvertures avant de la suivre. La suivre conserve ce nom.",
-  "Home shows your favorites in this order. Drag one into place, or move it with its arrows.": "L’accueil affiche vos favoris dans cet ordre. Faites-en glisser un à sa place, ou déplacez-le avec ses flèches."
+  "Home shows your favorites in this order. Drag one into place, or move it with its arrows.": "L’accueil affiche vos favoris dans cet ordre. Faites-en glisser un à sa place, ou déplacez-le avec ses flèches.",
+  "Move library": "Move library",
+  "File this series": "File this series",
+  "No files move. This only changes which library this series appears in, and it survives the next scan.": "No files move. This only changes which library this series appears in, and it survives the next scan."
 }
