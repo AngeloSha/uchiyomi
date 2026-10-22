@@ -213,7 +213,7 @@ test('the search follows a pause in the typing, Escape empties it, and the URL c
   const lib = page();
   assert.match(lib, /const q = \(params\.get\('q'\) \|\| ''\)\.trim\(\);/);
   assert.match(lib, /q=\{q\} onSearch=\{\(v\) => setParam\('q', v\)\}/, 'the search does not go through the page\'s one URL writer');
-  assert.match(lib, /queryKey: \['library', active\.key, dir, read, status, genres\.join\(','\), lib, src, anysrc, q\],/);
+  assert.match(lib, /queryKey: \['library', active\.key, dir, read, status, genres\.join\(','\), lib, src, anysrc, author, q\],/);
   assert.match(lib, /query: q \|\| undefined, collapseEditions: true/, 'the search is not sent');
   // The count says how many match, and an empty search says so -- never "your library is empty".
   assert.match(lib, /\(total === 1 \? tr\('1 series matches'\) : tr\('\{n\} series match', \{ n: total \}\)\)/);

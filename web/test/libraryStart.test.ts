@@ -43,7 +43,7 @@ test('the empty Library says how to fill it, and only when it is empty for this 
   // `narrowed` -- a filter, or a search: an empty search is "No series match", never "your library is empty".
   const lib = code(read('app/library/page.tsx'));
   assert.match(lib, /const settled = !isLoading && !isPlaceholderData && !isError;/, 'an empty grid is read from a placeholder or a failure');
-  assert.match(lib, /const narrowed = activeCount > 0 \|\| !!q;/, 'a search is not a narrowing');
+  assert.match(lib, /const narrowed = activeCount > 0 \|\| !!q \|\| !!author;/, 'a search (or, v0.100.0, an author) is not a narrowing');
   assert.match(lib, /\{settled && total === 0 && !narrowed && \(\s*<EmptyState art=\{ART\.emptyLibrary\} title=\{tr\('Your library is empty\.'\)\}>\s*<LibraryStart \/>\s*<\/EmptyState>/,
     'the empty library offers no way to fill it');
   assert.equal((lib.match(/tr\('Your library is empty\.'\)/g) ?? []).length, 1, 'a second, bare "Your library is empty." is back');

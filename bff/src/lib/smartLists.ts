@@ -47,6 +47,8 @@ export const smartQuery = z.object({
   lib: z.string().min(1).max(120).optional(),
   src: z.string().min(1).max(120).optional(),
   anysrc: z.string().min(1).max(120).optional(),
+  // v0.100.0 (#338): one author, by name, as the series page's link names them (lib/ownedCatalog.ts resolveAuthorNames).
+  author: z.string().trim().min(1).max(200).optional(),
   sort: z.enum(SORT_KEYS),
   dir: z.enum(['asc', 'desc']).optional(),
 }).strict();
@@ -72,6 +74,7 @@ export function conditionOf(q: SmartQuery): { allOf: unknown[] } | undefined {
   if (q.read) all.push({ readStatus: { operator: 'is', value: q.read } });
   if (q.status) all.push({ status: { operator: 'is', value: q.status } });
   for (const g of q.genres ?? []) all.push({ genre: { operator: 'is', value: g } });
+  if (q.author) all.push({ authorName: { operator: 'is', value: q.author } });
   return all.length ? { allOf: all } : undefined;
 }
 
