@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.100.0 — 2026-10-22
+
+**Tap an author on a series page to see everything of theirs in your library, and the library's search finds authors
+too.**
+
+### Find more by an author
+
+- **Each name in the *by …* line under a series' title is a link** to your library showing every series by that person,
+  with a tag above the grid to clear it ([#338](https://github.com/AngeloSha/uchiyomi/issues/338), from @sonikvvv). A
+  series with several authors shows each name on its own.
+- **A name finds every way it is written.** *Chugong (추공)* also finds a series that only says *추공*, and
+  *Gi So-Ryeong* finds *Gi So Ryeong*. Only whole names match, so *Oh* is not every name with "oh" in it.
+- **Search your library finds authors as well as titles.**
+- **Save as list keeps the author,** so a list of someone's work fills itself as you add more of it.
+
+### Upgrading
+
+- Nothing to do.
+
 ## v0.99.0 — 2026-10-22
 
 **Your picks on Discover get a spotlight of their own, right after the first row of covers, and Discover's rows line up
