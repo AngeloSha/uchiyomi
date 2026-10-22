@@ -1149,6 +1149,12 @@ export default async function personalRoutes(app: FastifyInstance) {
     if ('comments' in data && typeof data.comments !== 'boolean') {
       return reply.code(400).send({ error: 'bad_settings', message: 'Comments and reactions must be on or off.' });
     }
+    // "Only tell me about a new chapter when it is the one I'd read next" (lib/nextUp.ts notifyOnlyNextOn), read by the server
+    // at every push and every digest, so only a real boolean. Reintroduce by accepting anything: "Only my next chapter
+    // must be on or off" in nextUp.int.test.ts saves "yes".
+    if ('notifyOnlyNext' in data && typeof data.notifyOnlyNext !== 'boolean') {
+      return reply.code(400).send({ error: 'bad_settings', message: 'Only my next chapter must be on or off.' });
+    }
     if ('homeCollections' in data) {
       const parsed = z.array(z.string().min(1).max(64)).max(30).safeParse(data.homeCollections);
       if (!parsed.success) return reply.code(400).send({ error: 'bad_settings', message: 'Choose up to three lists for Home.' });
