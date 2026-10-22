@@ -88,8 +88,7 @@ test('the glow is the top pick\'s cover, the very address its card shows, and it
   const glow = /data-foryou-glow="true"[^>]*>[\s\S]*?<img[^>]*src="([^"]+)"/.exec(html);
   assert.ok(glow, 'the band has no glow');
   assert.equal(glow![1], attr(sourceCover(undefined, PICKS[0].cover)), 'the glow is not the top pick\'s cover');
-  assert.match(spotlightOf(html), new RegExp(`src="${attr(sourceCover(undefined, PICKS[0].cover)).replace(/[.?]/g, '\\$&')}"`),
-    'the glow fetches an address the card does not show');
+  assert.ok(spotlightOf(html).includes(`src="${attr(sourceCover(undefined, PICKS[0].cover))}"`), 'the glow fetches an address the card does not show');
   // A top pick with no cover lights nothing: Img's broken-image tile, blurred across the band, was a grey wash.
   const bare = band([{ ...PICKS[0], cover: null }, ...PICKS.slice(1)]);
   assert.doesNotMatch(bare, /data-foryou-glow/, 'a pick with no cover lights a broken tile behind the band');
