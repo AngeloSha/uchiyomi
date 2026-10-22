@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.98.0 — 2026-10-22
+
+**Discover's hero is always there and quick on a phone, your picks are one full row, and the newest from your sources
+comes first.**
+
+### A hero that always loads
+
+- **The trending titles are kept on the server.** After every restart or update, Discover used to wait on AniList for
+  them; when AniList was busy, a phone showed no hero at all and never asked again. Now the hero comes from the kept
+  copy at once, and the copy is refreshed in the background every six hours.
+- **The hero's space is held while it loads**, so nothing below it jumps when it appears.
+- **On a phone each slide's picture loads once, and sharper.** It used to be fetched twice at two sizes, and was the
+  small cover stretched across the screen.
+- **It moves as Home's hero does:** slides crossfade, a phone's cover drifts slowly, bars show where the slides are, and
+  a **Pause** key holds it. Under *Reduce effects* or reduced motion it stays still.
+
+### One full row of picks
+
+- ***Recommended for you* and *Because you read* are one row.** Each card says why it is there: the service that
+  suggested it, or a small cover of the series you read. A title named by both is one card.
+- **Because you read uses your last five reads, not one**, a pick from each in turn. On a big library it often showed
+  four cards, because the rest were titles you already have.
+- **Your connected trackers can suggest up to eight titles per series you rated**, up from five. These come from
+  suggestions the server already stores, so it makes no extra requests.
+
+### The newest from your sources comes first
+
+- **The wall starts right under the search.** Your picks row comes after its first two rows of covers.
+- **The trending manhwa, manga and manhua rows come every four rows after that,** with the first ten numbered as on
+  Home's Top 10. They used to sit at the very end of the wall, where almost nobody scrolled.
+- A row waits at the end until the wall has filled up to its place, so nothing you are looking at moves.
+
+### Upgrading
+
+- Nothing to do. The server stores the trending lists in a new table, created on start.
+
 ## v0.97.0 — 2026-10-21
 
 **Your favorites in your own order, chapters that failed every night on Natomanga and Mangakakalot now come from the
