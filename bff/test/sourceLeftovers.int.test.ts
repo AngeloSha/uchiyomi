@@ -153,6 +153,8 @@ test('a chapter no followed source lists is named for the delete warning', { ski
 });
 
 test('removing the wrong source takes its chapters, files and read marks, as though never fetched', { skip }, async () => {
+  // The audit log outlives a run on a reused database: only this run's line is counted.
+  const since = (await q('SELECT COALESCE(max(id), 0)::bigint AS id FROM audit_log'))[0].id;
   const r = await app.inject({ method: 'DELETE', url: `/api/admin/series/${S}/sources/${WRONG}`, headers: auth });
   assert.equal(r.statusCode, 200, r.body);
   const body = r.json();
@@ -166,7 +168,8 @@ test('removing the wrong source takes its chapters, files and read marks, as tho
   const marks = (await q('SELECT number::float8 AS n FROM listing_progress WHERE series_id = $1', [S])).map((x: any) => Number(x.n));
   assert.deepEqual(marks, [4], 'the mark on 9 went, the one on 4 stayed');
   assert.equal((await q('SELECT books_count FROM lib_series WHERE id = $1', [S]))[0].books_count, 6);
-  const audit = await q(`SELECT detail FROM audit_log WHERE event = 'series.source_leftovers' AND detail->>'id' = $1`, [S]);
+  const audit = await q(
+    `SELECT detail FROM audit_log WHERE event = 'series.source_leftovers' AND detail->>'id' = $1 AND id > $2`, [S, since]);
   assert.equal(audit.length, 1);
 });
 
