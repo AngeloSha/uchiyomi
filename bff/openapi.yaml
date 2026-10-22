@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.99.0
+  version: 0.100.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -290,13 +290,14 @@ components:
         own search for whoever opens the list.
       properties:
         v: { type: integer, enum: [1] }
-        q: { type: string, minLength: 1, maxLength: 200, description: Title search. }
+        q: { type: string, minLength: 1, maxLength: 200, description: "Title search (and, since v0.100.0, author)." }
         read: { type: string, enum: [UNREAD, IN_PROGRESS, READ] }
         status: { type: string, minLength: 1, maxLength: 40 }
         genres: { type: array, maxItems: 20, items: { type: string, minLength: 1, maxLength: 60 } }
         lib: { type: string, minLength: 1, maxLength: 120, description: Library id. }
         src: { type: string, minLength: 1, maxLength: 120, description: "Main source id; '-' is No source." }
         anysrc: { type: string, minLength: 1, maxLength: 120, description: Any source id. }
+        author: { type: string, minLength: 1, maxLength: 200, description: "Since v0.100.0, one author by name (authorName in POST /api/series/search)." }
         sort: { type: string, enum: [updated, read, new, soon, popular, score, rating, chapters, unread, az] }
         dir: { type: string, enum: [asc, desc] }
     AdminBulkDeleteResult:
@@ -1868,8 +1869,10 @@ paths:
         `genre`, `author`, and -- owned library only, since v0.49.2 -- `mainSource` (the source a series was added
         from, by id) and `anySource` (that, or a source it follows as a fallback); since v0.55.1 (#149)
         `hasMainSource` in Komga's boolean shape (`{operator: isTrue|isFalse}`, no value), `isFalse` being the series
-        with no main source at all, whatever they follow. An unknown key is 400 `unsupported_filter`, and so is
-        `hasMainSource` with any other operator."
+        with no main source at all, whatever they follow. Since v0.100.0 (#338) `authorName`: the series whose author
+        line names the same person, a whole name in any spelling it gives (Komga is asked `author` with `{name}`); a
+        search's `query` matches the author line as well as the title. An unknown key is 400 `unsupported_filter`, and
+        so is `hasMainSource` or `authorName` with any other operator."
       operationId: postApiSeriesSearch
       parameters:
         - name: adult
@@ -5125,7 +5128,7 @@ paths:
       summary: Create a collection (a List), hand-picked or smart, private or shared.
       description: >-
         Since v0.61.0 `query` makes a smart list -- a saved Library search, the Library's own URL words
-        `{v: 1, q?, read?: UNREAD|IN_PROGRESS|READ, status?, genres?, lib?, src? ('-' is No source), anysrc?, sort, dir?:
+        `{v: 1, q?, read?: UNREAD|IN_PROGRESS|READ, status?, genres?, lib?, src? ('-' is No source), anysrc?, author?, sort, dir?:
         asc|desc}`, `sort` one of updated, read, new, soon, popular, score, rating, chapters, unread, az -- answered afresh for
         whoever opens it; a list's kind is fixed when it is made. `shared: true` lets the rest of the household read it
         (never change it). An unknown or oversized query key is 400.

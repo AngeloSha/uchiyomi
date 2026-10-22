@@ -9,6 +9,7 @@ import { noticeBook, noticeShown, visibleBookCount } from './noticeChapters';
 import { rangeEnd, numberText } from './chapterRanges';
 import { anilistScoreOf } from './anilistScores';
 import { AUTO_DETAILS, authorOf, genresOf, summaryOf } from './autoDetailsSql';
+import { lineHas, nameKeys } from './authorNames';
 
 interface Page<T> { content: T[]; totalElements: number; totalPages: number; number: number; size: number; first: boolean; last: boolean }
 
@@ -356,7 +357,52 @@ function condSqlOf(cond: any, params: any[], hasUser: boolean): string {
     return op === 'isFalse' ? '(sv.source_id IS NULL)' : '(sv.source_id IS NOT NULL)';
   }
 
+  // v0.100.0 (#338): an `authorName` leaf, already answered by resolveAuthorNames below as the series it names.
+  // Never built from a request body: JSON cannot make one, so a client sending its own id list gets a 400 below.
+  if (cond instanceof AuthorIds) {
+    if (!cond.ids.length) return cond.negate ? 'TRUE' : 'FALSE';
+    params.push(cond.ids);
+    const ex = `sv.id = ANY($${params.length}::text[])`;
+    return cond.negate ? `NOT (${ex})` : `(${ex})`;
+  }
+
   throw new UnsupportedFilter(Object.keys(cond).filter((k) => k !== 'operator')[0] || 'unknown');
+}
+
+/** The series one `authorName` leaf names, worked out before the tree is compiled (resolveAuthorNames). */
+export class AuthorIds {
+  constructor(readonly ids: string[], readonly negate: boolean) {}
+}
+
+/**
+ * v0.100.0 (#338): the Library's "by this author" (`{authorName: {operator: is|isNot, value}}`), answered here rather
+ * than in SQL. A whole name, in any of its spellings (lib/authorNames.ts): the folding is Unicode's letters and
+ * digits, which a database's collation would answer differently, and the name it is asked for came from the very
+ * line JavaScript split on the series page. Every series' line is read once per search -- one short column, only
+ * when the condition is there -- and each leaf becomes the ids it names; the listing's own gate (browseSrc) still
+ * decides what the viewer sees of them. Bounded first, as condSql is, so a huge tree is refused before any work.
+ */
+export async function resolveAuthorNames(cond: unknown): Promise<unknown> {
+  if (!cond || typeof cond !== 'object' || !JSON.stringify(cond).includes('"authorName"')) return cond;
+  assertCondBounded(cond);
+  let lines: Array<{ id: string; author: string | null }> | null = null;
+  const all = async () => (lines ??= await q<{ id: string; author: string | null }>(
+    `SELECT s.id, ${authorOf('o', 's', 'sad')} AS author
+       FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
+       LEFT JOIN ${AUTO_DETAILS} sad ON sad.series_id = s.id`));
+  const walk = async (c: any): Promise<any> => {
+    if (!c || typeof c !== 'object') return c;
+    if (Array.isArray(c.allOf)) return { ...c, allOf: await Promise.all(c.allOf.map(walk)) };
+    if (Array.isArray(c.anyOf)) return { ...c, anyOf: await Promise.all(c.anyOf.map(walk)) };
+    if (!c.authorName || typeof c.authorName !== 'object') return c;
+    const { operator, value } = c.authorName;
+    if (operator !== 'is' && operator !== 'isNot') throw new UnsupportedFilter(`authorName:${operator}`);
+    if (typeof value !== 'string' || !value.trim() || value.length > 200) throw new UnsupportedFilter('authorName');
+    const wanted = nameKeys(value);
+    const ids = wanted.length ? (await all()).filter((r) => lineHas(r.author, wanted)).map((r) => r.id) : [];
+    return new AuthorIds(ids, operator === 'isNot');
+  };
+  return walk(cond);
 }
 
 /** Exposed for tests: the translator is pure apart from the params it pushes. */
@@ -739,9 +785,12 @@ export const owned = {
       ? `${src} LEFT JOIN mine m ON m.series_id = sv.id LEFT JOIN fav f ON f.series_id = sv.id`
       : src;
 
-    let where = body?.condition ? condSql(body.condition, p.values as any[], wantsUser) : 'TRUE';
+    const condition = body?.condition ? await resolveAuthorNames(body.condition) : undefined;
+    let where = condition ? condSql(condition, p.values as any[], wantsUser) : 'TRUE';
     if (body?.fullTextSearch) {
-      where = `(${where}) AND title ILIKE ${p.add(`%${body.fullTextSearch}%`)}`;
+      // v0.100.0 (#338): the author line too, so typing a name finds what that person wrote.
+      const term = p.add(`%${body.fullTextSearch}%`);
+      where = `(${where}) AND (title ILIKE ${term} OR author ILIKE ${term})`;
     }
     if (collapse) return collapsedSearch(cte, from, where, p, pg, size, sortSql(sort, wantsUser), wantsUser);
     const t = await total(ctx, where, clone(p), cte, from);

@@ -1158,6 +1158,12 @@ by id) and `anySource` (that, or a source it follows as a fallback). Both take `
 extension is gone still filters. Since v0.55.1 (#149) a third, `hasMainSource`, in Komga's boolean shape
 (`{operator: isTrue|isFalse}`, no value): `isFalse` is the series with no main source at all -- folders added by hand,
 and anything never matched to a site -- whatever sources they follow. Any other operator is 400 `unsupported_filter`.
+Since v0.100.0 ([#338](https://github.com/AngeloSha/uchiyomi/issues/338)) `authorName` (`is` / `isNot`, a name of up to
+200 characters, owned backend; Komga is asked `author` with `{name}`) lists the series whose author line names the same
+person: a whole name, never a fragment, in any spelling the name gives -- itself and each name in its brackets, compared
+by letters and digits in any case, so `Chugong (추공)` finds `추공` and `CHUGONG` but `Oh` is not inside `John Oh`. The
+line is the one the series page shows (an admin's edit, else the series' own, else the details the server filled in).
+`author`, Komga's fragment match, is unchanged. A search's `query` matches the author line as well as the title.
 `GET /api/library/sources` answers `{content, none}`: `content` lists `{id, name, main, any, installed}` for every
 source the viewer's library comes from, busiest first -- `main` counts the series added from it, `any` the series
 that read from it at all -- and `none` (since v0.55.1) counts the series with no main source, what `hasMainSource:
@@ -1706,7 +1712,7 @@ series per selected rail; an empty selected List reserves its position and appea
 
 **Smart and shared Lists** (since v0.61.0). `POST /api/collections {name, accent?, query?, shared?}`: a `query` makes a
 *smart* list, a saved Library search in the Library URL's own words -- `{v: 1, q?, read?: 'UNREAD' | 'IN_PROGRESS' |
-'READ', status?, genres?, lib?, src?, anysrc?, sort, dir?: 'asc' | 'desc'}`, `src: '-'` being *No source* and `sort`
+'READ', status?, genres?, lib?, src?, anysrc?, author?, sort, dir?: 'asc' | 'desc'}`, `src: '-'` being *No source* and `sort`
 one of `updated`, `read`, `new`, `popular`, `score`, `rating`, `chapters`, `unread`, `az` -- answered with the
 Library's own search, one card per work, for whoever opens it; an unknown key or an oversized value is **400**. A
 list's kind is fixed when it is made: `PATCH /api/collections/:id {query}` replaces a smart list's search and is

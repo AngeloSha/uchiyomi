@@ -20,12 +20,14 @@ export interface SmartQuery {
   lib?: string;
   src?: string;
   anysrc?: string;
+  /** v0.100.0 (#338): one author, by name, as the series page's link names them. */
+  author?: string;
   sort: string;
   dir?: SortDir;
 }
 
 /** Build the condition tree from the URL. Empty means no condition at all, which needs no user context. */
-export function conditionFrom(read: string, status: string, genres: string[], lib: string, src = '', anysrc = '') {
+export function conditionFrom(read: string, status: string, genres: string[], lib: string, src = '', anysrc = '', author = '') {
   const all: any[] = [];
   if (lib) all.push({ libraryId: { operator: 'is', value: lib } });
   // The two source filters (bff ownedCatalog condSql): the source a series was added from, and any source
@@ -37,12 +39,15 @@ export function conditionFrom(read: string, status: string, genres: string[], li
   if (read) all.push({ readStatus: { operator: 'is', value: read } });
   if (status) all.push({ status: { operator: 'is', value: status } });
   for (const g of genres) all.push({ genre: { operator: 'is', value: g } });
+  // v0.100.0 (#338): a whole name in any of its spellings (bff lib/ownedCatalog.ts resolveAuthorNames), never `author`,
+  // which matches any fragment of the line ("Oh" inside "John Oh").
+  if (author) all.push({ authorName: { operator: 'is', value: author } });
   return all.length ? { allOf: all } : undefined;
 }
 
 /** The condition tree of a saved query: what the Library asked when it was saved. */
 export const conditionOfQuery = (q: SmartQuery) =>
-  conditionFrom(q.read ?? '', q.status ?? '', q.genres ?? [], q.lib ?? '', q.src ?? '', q.anysrc ?? '');
+  conditionFrom(q.read ?? '', q.status ?? '', q.genres ?? [], q.lib ?? '', q.src ?? '', q.anysrc ?? '', q.author ?? '');
 
 const READS = new Set(['UNREAD', 'IN_PROGRESS', 'READ']);
 const validSort = (v: unknown): v is string => typeof v === 'string' && SORTS.some((s) => s.key === v);
@@ -68,6 +73,7 @@ export function queryOfParams(params: URLSearchParams, shown?: { sort?: string; 
     ...(get('lib') ? { lib: get('lib') } : {}),
     ...(get('src') ? { src: get('src') } : {}),
     ...(get('anysrc') ? { anysrc: get('anysrc') } : {}),
+    ...(get('author') ? { author: get('author') } : {}),
     sort,
     ...(dir && dir !== natural ? { dir } : {}),
   };
@@ -83,6 +89,7 @@ export function libraryHref(q: SmartQuery, listId?: string): string {
   if (q.lib) p.set('lib', q.lib);
   if (q.src) p.set('src', q.src);
   if (q.anysrc) p.set('anysrc', q.anysrc);
+  if (q.author) p.set('author', q.author);
   p.set('sort', q.sort);
   if (q.dir) p.set('dir', q.dir);
   if (listId) p.set('list', listId);
@@ -92,13 +99,13 @@ export function libraryHref(q: SmartQuery, listId?: string): string {
 /** Two queries ask for the same shelf. */
 export const sameQuery = (a: SmartQuery | null | undefined, b: SmartQuery | null | undefined): boolean =>
   !!a && !!b && JSON.stringify(normal(a)) === JSON.stringify(normal(b));
-const normal = (q: SmartQuery) => [q.q ?? '', q.read ?? '', q.status ?? '', (q.genres ?? []).join(','), q.lib ?? '', q.src ?? '', q.anysrc ?? '', q.sort, q.dir ?? ''];
+const normal = (q: SmartQuery) => [q.q ?? '', q.read ?? '', q.status ?? '', (q.genres ?? []).join(','), q.lib ?? '', q.src ?? '', q.anysrc ?? '', q.author ?? '', q.sort, q.dir ?? ''];
 
 /**
  * A name for a new list, from what it narrows by: the search in quotes, the reading state, the status, the genres, the
- * library and the source, in the reader's words ("“solo”", "Not started · Romance"); with nothing narrowing, the order
- * itself ("Most popular"). The names of a library and a source are the page's to give, as its chips show them. At most
- * 120 characters, the server's limit for a name.
+ * library, the source and the author, in the reader's words ("“solo”", "Not started · Romance", "by Chugong"); with
+ * nothing narrowing, the order itself ("Most popular"). The names of a library and a source are the page's to give, as
+ * its chips show them. At most 120 characters, the server's limit for a name.
  */
 export function suggestListName(q: SmartQuery, names: { lib?: (id: string) => string; source?: (id: string) => string } = {}): string {
   const parts: string[] = [];
@@ -110,6 +117,7 @@ export function suggestListName(q: SmartQuery, names: { lib?: (id: string) => st
   parts.push(...(q.genres ?? []));
   if (q.lib) parts.push(names.lib?.(q.lib) || q.lib);
   for (const id of [q.src, q.anysrc]) if (id) parts.push(id === NO_SOURCE ? tr('No source') : names.source?.(id) || id);
+  if (q.author) parts.push(tr('by {author}', { author: q.author }));
   const name = parts.length ? parts.join(' · ') : tr(SORTS.find((s) => s.key === q.sort)?.label ?? SORTS[0].label);
   return name.length > 120 ? `${name.slice(0, 119)}…` : name;
 }

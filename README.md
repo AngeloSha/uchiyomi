@@ -114,10 +114,10 @@ sites' terms and your local law.
 **Your library**
 
 - **Files you already own** — CBZ, CBR, PDF, image EPUB or a folder of images, in any folder layout.
-- **A Library you can find things in** — search it, one **Sort** menu where every order runs both ways (newest,
-  recently read, most popular and top rated on AniList, your own stars, most chapters, A–Z), **Comfortable,
-  Compact or List**, covers that show how far you are, and filters (read state, status, source, format, genres)
-  in rows that fold.
+- **A Library you can find things in** — search it by title or author, one **Sort** menu where every order runs
+  both ways (newest, recently read, most popular and top rated on AniList, your own stars, most chapters, A–Z),
+  **Comfortable, Compact or List**, covers that show how far you are, and filters (read state, status, source,
+  format, genres) in rows that fold. Tap an author on a series page to see everything of theirs you have.
 - **Library management** — several libraries, each over as many folders as you like, *Select all* with bulk
   fetch and removal, editable metadata that survives a rescan, merge (each chapter kept once), delete, restore
   and forget, and *Rescan everything* for files changed behind its back. Optionally, a series with no description,
