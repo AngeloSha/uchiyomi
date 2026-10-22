@@ -113,7 +113,7 @@ function useHoverPointer(): boolean {
   return on;
 }
 
-const THEME_LABEL = { amoled: 'AMOLED', sepia: 'Sepia', gray: 'Gray' } as const;
+const THEME_LABEL = { amoled: 'AMOLED', paper: 'Paper', sepia: 'Sepia', gray: 'Gray' } as const;
 
 /* ================================ General ================================ */
 
@@ -414,7 +414,7 @@ function ReadingSection({ prefs, set }: { prefs: ReaderPrefs; set: (p: Partial<R
           help={tr('Long strips and webtoons open in Webtoon mode, manga and right-to-left series in Paged. A series or a source you have set yourself keeps its own.')}
           on={prefs.autoMode} onChange={(autoMode) => set({ autoMode })} />
         <ChoiceRow id="reader-theme" label={tr('Theme')} value={prefs.theme} onChange={(theme) => set({ theme })}
-          options={(['amoled', 'sepia', 'gray'] as const).map((t) => ({ value: t, label: tr(THEME_LABEL[t]), art: <ThemeArt theme={t} /> }))} />
+          options={(['amoled', 'paper', 'sepia', 'gray'] as const).map((t) => ({ value: t, label: tr(THEME_LABEL[t]), art: <ThemeArt theme={t} /> }))} />
         {!isDesktop() && user?.talk && (
           <SwitchRow id="comments" label={tr(COMMENTS_TEXT[0])} help={tr(COMMENTS_TEXT[1])} on={talkWanted} onChange={saveTalk} />
         )}

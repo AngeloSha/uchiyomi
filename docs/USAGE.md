@@ -1466,7 +1466,7 @@ you keep scrolling through a series without interruption.
 - **Tap** the middle to show/hide the chrome (top bar + controls).
 - **Pinch / double-tap** to zoom (width multiplier); with a mouse, **double-click**. A double-click only zooms: it
   never turns the page as well, however slow your computer's double-click setting is (since v0.47.1).
-- **Themes:** AMOLED black, sepia, or gray, from the reader settings.
+- **Themes:** AMOLED black, Paper (a light cream like printed manga paper: white becomes about #F0E8D8, black stays black), sepia, or gray, from the reader settings.
 - **Cover colour at the edges:** a soft wash of the series' cover colour across the top and bottom of the screen,
   so a gold cover tints the edges gold. To read with plain black edges, switch **Cover colour at the edges** off in
   the reader's settings sheet or under Profile → Settings → Reading → More options (since v0.55.7,
