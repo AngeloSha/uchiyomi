@@ -23,6 +23,8 @@ if (DSN) {
   ROOT = mkdtempSync(join(tmpdir(), 'yomi-pace-'));
   process.env.DATABASE_URL = DSN;
   process.env.DL_ROOT = ROOT;
+  // The free-space floor is not this suite's subject: a CI runner with under 10 GiB free refused every download.
+  process.env.MIN_FREE_GB = '0';
   process.env.DOWNLOAD_MIN_GAP_MS = '0';
   process.env.DOWNLOAD_PAGE_GAP_MS = String(GAP);
   process.env.DOWNLOAD_RESUME_WAIT_MS = '0,0,0'; // no 429 here; the resume wait is pacePersists.test.ts's subject
