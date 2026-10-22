@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4208
+    "strings": 4209
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -4211,5 +4211,6 @@
   "Uchiyomi can't tell a file you deleted from one on a drive that isn't connected right now, so it left them as they were. If you deleted or moved them yourself, mark them gone. Then you can forget the series.": "Uchiyomi には、あなたが削除したファイルと、いま接続されていないドライブ上のファイルを区別できないため、そのままにしてあります。自分で削除または移動したのなら、なくなったものとして記録してください。その後、シリーズを「完全に削除」できます。",
   "Mark them gone": "なくなったものとして記録",
   "Amber: this source lists it under its own name, which came up first for two of this series’ names. Check the covers before you follow it. Following it keeps the name.": "黄：このソースは独自の名前で掲載しています。その名前は、このシリーズの 2 つの名前で検索したときに最初に出てきました。フォローする前に表紙を見比べてください。フォローすると、その名前を保存します。",
-  "Home shows your favorites in this order. Drag one into place, or move it with its arrows.": "ホームにはお気に入りがこの順番で表示されます。ドラッグして好きな位置に置くか、矢印で動かせます。"
+  "Home shows your favorites in this order. Drag one into place, or move it with its arrows.": "ホームにはお気に入りがこの順番で表示されます。ドラッグして好きな位置に置くか、矢印で動かせます。",
+  "Paper": "Paper"
 }

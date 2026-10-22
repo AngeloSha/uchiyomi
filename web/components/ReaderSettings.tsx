@@ -183,10 +183,10 @@ export function ReaderSettings({
 
         <Row label={tr('Theme')}>
           <div className="grid grid-cols-3 gap-2">
-            {(['amoled', 'sepia', 'gray'] as const).map((t) => (
+            {(['amoled', 'paper', 'sepia', 'gray'] as const).map((t) => (
               <button key={t} onClick={() => set({ theme: t })}
                 className={`rounded-2xl border py-3 text-sm ${prefs.theme === t ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>
-                {t === 'amoled' ? tr('AMOLED') : t === 'sepia' ? tr('Sepia') : tr('Gray')}
+                {t === 'amoled' ? tr('AMOLED') : t === 'paper' ? tr('Paper') : t === 'sepia' ? tr('Sepia') : tr('Gray')}
               </button>
             ))}
           </div>
