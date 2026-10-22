@@ -15,6 +15,11 @@ too.**
 - **Search your library finds authors as well as titles.**
 - **Save as list keeps the author,** so a list of someone's work fills itself as you add more of it.
 
+### Also
+
+- **A library the sign-in limits read addresses with is updated** (ip-address 10.7.4). On a server that trusts every
+  proxy (`TRUST_PROXY=true`), one crafted address could stall it.
+
 ### Upgrading
 
 - Nothing to do.
