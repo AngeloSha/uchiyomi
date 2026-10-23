@@ -133,6 +133,15 @@ CREATE TABLE IF NOT EXISTS read_progress (
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, book_id)
 );
+
+-- "Remove from Keep reading": the series stays in the library, it only leaves that Home row. A row hides the series
+-- until it is read again (read_progress.updated_at moves past hidden_at), so reading it brings it back by itself.
+CREATE TABLE IF NOT EXISTS keep_reading_hidden (
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  series_id  text NOT NULL,
+  hidden_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, series_id)
+);
 CREATE INDEX IF NOT EXISTS idx_rp_series ON read_progress(user_id, series_id);
 CREATE INDEX IF NOT EXISTS idx_rp_recent ON read_progress(user_id, updated_at DESC) WHERE completed = false;
 

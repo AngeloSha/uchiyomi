@@ -93,9 +93,28 @@ export async function onDeckPicks(uid: string, ctx: ViewCtx, o: { window: DeckWi
      )
      SELECT book_id, series_id, last_read FROM pick
       WHERE book_id IS NOT NULL      -- a series you have finished entirely drops out, correctly
+        -- "Remove from Keep reading": hidden until it is read again (read_progress.updated_at moves past hidden_at)
+        AND NOT EXISTS (SELECT 1 FROM keep_reading_hidden h
+                         WHERE h.user_id = ${uidP} AND h.series_id = pick.series_id AND h.hidden_at >= pick.last_read)
       ORDER BY last_read DESC
       LIMIT ${p.add(o.limit)}`,
     p.values as any[],
   );
   return picks.map((r) => ({ bookId: r.book_id, seriesId: r.series_id, lastRead: new Date(r.last_read).toISOString() }));
+}
+
+/**
+ * The series this person removed from Keep reading and has not read since, newest removal first. Same rule as the filter
+ * in the pick above (a removal lasts until read_progress.updated_at moves past it), for the two callers that do not go
+ * through it: the admin's Komga-style on-deck list and the "Hidden from Keep reading" list.
+ */
+export async function keepReadingHidden(uid: string): Promise<Array<{ seriesId: string; hiddenAt: string }>> {
+  const rows = await q<{ series_id: string; hidden_at: Date }>(
+    `SELECT h.series_id, h.hidden_at FROM keep_reading_hidden h
+      WHERE h.user_id = $1
+        AND h.hidden_at >= COALESCE((SELECT max(updated_at) FROM read_progress rp WHERE rp.user_id = h.user_id AND rp.series_id = h.series_id), '-infinity')
+      ORDER BY h.hidden_at DESC`,
+    [uid],
+  );
+  return rows.map((r) => ({ seriesId: r.series_id, hiddenAt: new Date(r.hidden_at).toISOString() }));
 }

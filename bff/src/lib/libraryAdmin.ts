@@ -618,6 +618,8 @@ const SERIES_KEYED_TABLES = [
   'backup_misses',
   // v0.85.0: the names its translated pages keep (lib/translate/pages.ts). Cascades too; named for the same count.
   'translate_names',
+  // Which readers took it off their Keep reading row (lib/onDeck.ts). No FK on the series; named so a forgotten series leaves no row.
+  'keep_reading_hidden',
 ] as const;
 
 export interface ForgetRefusal {
