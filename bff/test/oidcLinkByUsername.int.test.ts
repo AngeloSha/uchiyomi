@@ -80,6 +80,11 @@ before(async () => {
     await q(`INSERT INTO users (display_name, username, role, password_hash, auth_kind) VALUES ($1,$1,$2,'x','password')`, [u, role]);
   }
   await q(`UPDATE users SET oidc_issuer = $1, oidc_sub = 'someone-else' WHERE username = 'dave'`, [issuer]);
+  // A child's profile alice manages, and one with no password that nobody manages.
+  await q(`INSERT INTO users (display_name, username, role, password_hash, auth_kind, password_login, local_open, managed_by)
+           SELECT 'erin', 'erin', 'user', 'x', 'none', false, true, id FROM users WHERE username = 'alice'`);
+  await q(`INSERT INTO users (display_name, username, role, password_hash, auth_kind, password_login, local_open)
+           VALUES ('frank', 'frank', 'user', 'x', 'none', false, true)`);
   const Fastify = (await import('fastify')).default;
   app = Fastify();
   await app.register((await import('@fastify/cookie')).default);
@@ -134,4 +139,13 @@ test('an exact match is adopted, and its role follows the admin group from the f
 
 test("an account linked to another identity is never taken", { skip }, async () => {
   assert.equal(await signIn({ sub: 'dave-2', preferred_username: 'dave' }), 'username_taken');
+});
+
+test('a managed profile is never adopted, nor one without a password', { skip }, async () => {
+  // A provider reporting `erin` must not take over the reading of the child's profile alice manages; nor `frank`, a
+  // profile that opens at home with no password. With sign-up off, nothing is made either.
+  assert.equal(await signIn({ sub: 'erin-at-idp', preferred_username: 'erin' }), 'no_account');
+  assert.equal((await user('erin')).oidc_sub, null, "the child's profile was handed to the provider's identity");
+  assert.equal(await signIn({ sub: 'frank-at-idp', preferred_username: 'frank' }), 'no_account');
+  assert.equal((await user('frank')).oidc_sub, null);
 });

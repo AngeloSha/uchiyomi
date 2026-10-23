@@ -8,7 +8,7 @@ import { shownDeviceName } from '@/lib/device';
 import { readShownOnce, writeShownOnce } from '@/lib/shownOnce';
 import { Avatar } from '@/components/Avatar';
 import { useToast } from '@/components/Toast';
-import { msgOf } from '@/components/ConfirmDialog';
+import { ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { IcCheck, IcGrid, IcLogOut, IcUser } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
 import { SETTINGS_GRID, Section, Row, useAutosave } from '@/components/settings';
@@ -27,9 +27,12 @@ export function ProfileAccount() {
   // routes behind them are not there. Reintroduce either and "the profile manages no password and no 2FA in SSO-only
   // mode" in web/test/ssoOnly.test.ts fails.
   const { data: config, isFetched } = useAuthConfig();
+  const { user, desktop } = useAuth();
   return (
     <div className={SETTINGS_GRID}>
       <IdentitySection config={config} ready={isFetched} />
+      {/* A member an admin let make profiles, and Uchiyomi Desktop's owner, who has no Members to make them in. */}
+      {(user?.perms?.canManageProfiles || (desktop && user?.kind === 'desktop-owner')) && <ProfilesSection />}
       {!ssoOnly(config) && <TwoFactorSection />}
       <SessionsSection />
       <SignOutSection />
@@ -255,6 +258,65 @@ function TwoFactorSection() {
           <button type="submit" disabled={!disPw}
             className="btn-key btn-key-danger text-red-300">{tr('Disable 2FA')}</button>
         </form>
+      )}
+    </Section>
+  );
+}
+
+/* ================================ Profiles ================================ */
+
+interface ManagedProfile { id: string; displayName: string; avatar: Record<string, unknown> }
+
+/**
+ * The profiles this member manages (bff /api/profiles): for a member an admin let make
+ * them (Admin -> Members -> Can make profiles). Each opens without a password on the home network, from this account's
+ * profile photo (components/ProfileSwitcher.tsx), and starts with no more than this account may see.
+ */
+function ProfilesSection() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { data } = useQuery({ queryKey: ['my-profiles'], queryFn: () => api<{ content: ManagedProfile[] }>('/api/profiles') });
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [removing, setRemoving] = useState<ManagedProfile | null>(null);
+  const refetch = () => qc.invalidateQueries({ queryKey: ['my-profiles'] });
+
+  const add = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    try { await api('/api/profiles', { json: { displayName: name.trim() } }); setName(''); toast(tr('Profile added'), 'success'); refetch(); }
+    catch (err) {
+      toast(err instanceof ApiError && err.body.includes('too_many_profiles') ? tr('That is as many profiles as one account can have.') : msgOf(err, tr('Could not create account')), 'error');
+    }
+    setBusy(false);
+  };
+  const remove = async (p: ManagedProfile) => {
+    try { await api(`/api/profiles/${p.id}`, { method: 'DELETE' }); toast(tr('Account removed'), 'success'); setRemoving(null); refetch(); }
+    catch (err) { toast(msgOf(err, tr('Could not remove that account')), 'error'); }
+  };
+
+  return (
+    <Section id="profiles" title={tr('Profiles')} icon={<IcUser width={18} height={18} />}
+      description={tr('They open without a password on your home network: switch to one from your profile photo.')}>
+      {(data?.content ?? []).map((p) => (
+        <Row key={p.id} label={<span className="flex items-center gap-2"><Avatar avatar={p.avatar} size={24} />{p.displayName}</span>}>
+          <button type="button" onClick={() => setRemoving(p)} className="btn-key btn-key-danger">{tr('Remove')}</button>
+        </Row>
+      ))}
+      <form onSubmit={add} className="flex gap-2 pt-2">
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder={tr('Name')} maxLength={64} className="field min-w-0 flex-1" />
+        <button type="submit" disabled={!name.trim() || busy} className="btn-key">{tr('Add')}</button>
+      </form>
+      {removing && (
+        <ConfirmDialog
+          title={tr('Remove “{name}”?', { name: removing.displayName })}
+          body={tr('Their reading history, favourites and sessions go with the account. Nothing in the library is touched and no files are deleted.')}
+          confirmLabel={tr('Remove')}
+          danger
+          onConfirm={() => remove(removing)}
+          onClose={() => setRemoving(null)}
+        />
       )}
     </Section>
   );

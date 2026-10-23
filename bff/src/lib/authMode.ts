@@ -110,8 +110,10 @@ export async function authModeWarnings(): Promise<string[]> {
     if ((process.env.AUTH_RESCUE_ADMIN ?? '').trim()) out.push('AUTH_RESCUE_ADMIN does nothing outside AUTH_MODE=oidc-only: every account signs in with its password.');
     return out;
   }
+  // A profile without a password is no account the provider should know: it opens at home through a guardian the
+  // provider signed in, so it is not one that "cannot sign in".
   const unlinked = await q<{ username: string | null }>(
-    'SELECT username FROM users WHERE oidc_sub IS NULL AND NOT disabled ORDER BY created_at');
+    'SELECT username FROM users WHERE oidc_sub IS NULL AND NOT disabled AND NOT (local_open AND NOT password_login) ORDER BY created_at');
   if (unlinked.length) {
     const names = unlinked.slice(0, NAMED).map((u) => u.username ?? '?').join(', ');
     const more = unlinked.length > NAMED ? ` and ${unlinked.length - NAMED} more` : '';

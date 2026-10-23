@@ -10,7 +10,10 @@ import {
   IMG_COOKIE,
   IMG_COOKIE_TTL,
   REFRESH_COOKIE,
+  actsAsAdmin,
   authenticate,
+  requireCredentialSession,
+  withoutCredential,
   clientIp,
   cookieOptions,
   imgCookieOptions,
@@ -23,6 +26,8 @@ import {
   revokeAllSessions,
   revokeRefreshToken,
   revokeSessionForUser,
+  resumeHead,
+  parentHeadOf,
   spendTotpStep,
   touchSession,
   userIdOf,
@@ -40,6 +45,11 @@ import { authMode, bootstrapSub, mayBootstrap, rescueAdmin, ssoOnly } from '../l
 import { applyMemberDefaults } from '../lib/memberDefaults';
 import { talkOn } from '../lib/comments';
 import { verifyLoginPassword } from '../lib/loginPassword';
+import { profileKind, type ProfileRow } from '../lib/profiles';
+import { clientZone } from '../lib/clientAddr';
+import {
+  ADMIN_RESUME_HOURS, deviceKeyOf, ensureDeviceKey, forgetRemembered, isRemembered, noteResumed, rememberSession, ringOf,
+} from '../lib/deviceRing';
 
 const loginBody = z.object({
   username: z.string().max(64).optional(),
@@ -47,6 +57,8 @@ const loginBody = z.object({
   code: z.string().max(32).optional(), // TOTP or recovery code (xxxxx-xxxxx-xxxxx-xxxxx is 23)
   deviceId: z.string().max(128).optional(),
   deviceName: z.string().max(128).optional(),
+  // Remember on this device (lib/deviceRing.ts): this session can be taken up again here later without the password.
+  remember: z.boolean().optional(),
 });
 
 interface FullUser {
@@ -60,26 +72,34 @@ interface FullUser {
   totp_enabled: boolean;
   totp_secret: string | null;
   recovery_codes: string[];
+  password_login: boolean;
 }
 const USER_AUTH_COLS =
-  'id, username, display_name, role, password_hash, disabled, locked_until, totp_enabled, totp_secret, recovery_codes';
+  'id, username, display_name, role, password_hash, disabled, locked_until, totp_enabled, totp_secret, recovery_codes, password_login';
 
-function signAccess(app: FastifyInstance, userId: string, role: string): { accessToken: string; expiresIn: number; desktop?: true } {
+/**
+ * `local`: the session was entered without a credential (lib/auth.ts withoutCredential), so the token says `loc: true`
+ * and is good at home only (authenticate). Every other token is byte-for-byte what it was.
+ */
+function signAccess(app: FastifyInstance, userId: string, role: string, local = false): { accessToken: string; expiresIn: number; desktop?: true } {
   // `desktop: true` tells the web app it is inside Uchiyomi Desktop (web/lib/desktop.ts). Spread in only when
   // on, so every server response is byte-for-byte what it was.
   return {
-    accessToken: app.jwt.sign({ sub: userId, role }, { expiresIn: env.ACCESS_TTL_SECONDS }),
+    accessToken: app.jwt.sign({ sub: userId, role, ...(local ? { loc: true } : {}) }, { expiresIn: env.ACCESS_TTL_SECONDS }),
     expiresIn: env.ACCESS_TTL_SECONDS,
     ...(isDesktop() ? { desktop: true as const } : {}),
   };
 }
-function setImgCookie(app: FastifyInstance, reply: any, userId: string) {
-  reply.setCookie(IMG_COOKIE, app.jwt.sign({ sub: userId, typ: 'img' }, { expiresIn: IMG_COOKIE_TTL }), imgCookieOptions());
+/** The image cookie of a session entered without a credential carries `loc` too (routes/images.ts): it lasts a week. */
+function setImgCookie(app: FastifyInstance, reply: any, userId: string, local = false) {
+  reply.setCookie(IMG_COOKIE, app.jwt.sign({ sub: userId, typ: 'img', ...(local ? { loc: true } : {}) }, { expiresIn: IMG_COOKIE_TTL }), imgCookieOptions());
 }
 
 async function userPayload(userId: string) {
-  const user = await one<{ id: string; username: string | null; display_name: string; role: string; avatar: unknown; totp_enabled: boolean; perms: unknown; sso: boolean }>(
-    'SELECT id, username, display_name, role, avatar, totp_enabled, perms, oidc_sub IS NOT NULL AS sso FROM users WHERE id = $1',
+  const user = await one<{ id: string; username: string | null; display_name: string; role: string; avatar: unknown; totp_enabled: boolean; perms: unknown; sso: boolean } & ProfileRow>(
+    `SELECT id, username, display_name, role, avatar, totp_enabled, perms, oidc_sub IS NOT NULL AS sso,
+            password_login, local_open, auth_kind
+       FROM users WHERE id = $1`,
     [userId],
   );
   const settings = await one<{ data: unknown }>('SELECT data FROM app_settings WHERE user_id = $1', [userId]);
@@ -92,6 +112,8 @@ async function userPayload(userId: string) {
     totpEnabled: !!user?.totp_enabled,
     // Linked to an identity at the OIDC provider (v0.63.0): Profile → Account offers Link to … until it is.
     sso: !!user?.sso,
+    // What kind of profile this is (lib/profiles.ts): every account before profiles is `password`.
+    kind: user ? profileKind(user) : 'password',
     perms: user?.perms ?? {},
     settings: settings?.data ?? {},
     // v0.90.0: whether this server has chapter comments at all (lib/comments.ts talkOn: the owned library and two or more
@@ -195,7 +217,7 @@ export default async function authRoutes(app: FastifyInstance) {
     });
     if (!row) return closed();
     await logAudit('setup.complete', { userId: row.id, username: b.data.username, req });
-    const refresh = await issueRefreshToken(row.id, { ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null });
+    const refresh = await issueRefreshToken(row.id, { ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null, via: 'setup' });
     reply.setCookie(REFRESH_COOKIE, refresh, cookieOptions());
     setImgCookie(app, reply, row.id);
     return reply.send({ ...signAccess(app, row.id, 'admin'), user: await userPayload(row.id), refreshExpiresAt: refreshExpiresAt() });
@@ -220,7 +242,11 @@ export default async function authRoutes(app: FastifyInstance) {
     // rescue opens one admin's password sign-in and nobody else's" in ssoRescue.int.test.ts signs a member in.
     const rescue = local ? null : rescueAdmin();
     const user = await one<FullUser>(`SELECT ${USER_AUTH_COLS} FROM users WHERE username = $1`, [username]);
-    const refusal = !local && (username !== rescue || user?.role !== 'admin') ? 'sso_only' : !user ? 'no_user' : null;
+    // A profile without a password (password_login false) is refused here like a name nobody has: its placeholder hash
+    // matches nothing anyway, and the answer must not say which names are such profiles. Reintroduce by dropping the
+    // case: uniformPasswordRefusal.int.test.ts signs its profile without a password in with the hash's own password.
+    const refusal = !local && (username !== rescue || user?.role !== 'admin') ? 'sso_only'
+      : !user ? 'no_user' : !user.password_login ? 'no_password' : null;
     // Before a password is accepted every refusal is one answer, after one verification each (lib/loginPassword.ts): a
     // name nobody has, a name SSO-only mode does not let in, and a wrong password. A disabled or locked account is
     // checked against its own password, and only the right password is told why it cannot sign in -- someone who has
@@ -273,9 +299,13 @@ export default async function authRoutes(app: FastifyInstance) {
     }
 
     await resetFailedLogins(user.id);
-    const refresh = await issueRefreshToken(user.id, { deviceId, deviceName, ip, userAgent: ua });
+    const refresh = await issueRefreshToken(user.id, { deviceId, deviceName, ip, userAgent: ua, via: 'password' });
     reply.setCookie(REFRESH_COOKIE, refresh, cookieOptions());
     setImgCookie(app, reply, user.id);
+    if (parsed.data.remember && !isDesktop()) {
+      const live = await validateRefreshToken(refresh);
+      if (live) await rememberSession(ensureDeviceKey(req, reply), user.id, live.sessionId);
+    }
     // A rescue sign-in is said in the log as well as written down: it is the door SSO-only mode exists to keep shut.
     if (rescue) app.log.warn(`[auth] rescue sign-in by the admin "${username}" (AUTH_RESCUE_ADMIN)`);
     await logAudit(rescue ? 'login.rescue' : 'login.ok', { userId: user.id, username, req });
@@ -341,16 +371,24 @@ export default async function authRoutes(app: FastifyInstance) {
       const b = z.object({ deviceId: z.string().max(128).optional() }).safeParse(req.body ?? {});
       const userId = (await desktopUserId()) ?? (await ensureDesktopUser());
       const user = await one<{ role: string; username: string | null }>('SELECT role, username FROM users WHERE id = $1', [userId]);
-      const refresh = await issueRefreshToken(userId, {
-        deviceId: b.success ? b.data.deviceId : undefined,
-        deviceName: 'This PC',
-        ip: clientIp(req),
-        userAgent: (req.headers['user-agent'] as string) || null,
+      const meta = { ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null };
+      // Back from a profile switched to on this PC: the owner's own session,
+      // the one the profile was opened from, is taken up again and the profile's is ended -- rather than a new owner
+      // session each time, and the old ones left live with no cookie anywhere. Reintroduce a fresh session here:
+      // "back to the owner takes up the session the profile came from" in desktopProfiles.int.test.ts counts two.
+      const held = req.cookies?.[REFRESH_COOKIE];
+      const cur = held ? await validateRefreshToken(held) : null;
+      const from = cur && withoutCredential(cur.via) ? await parentHeadOf(cur.sessionId, userId) : null;
+      if (cur && withoutCredential(cur.via)) await revokeRefreshToken(held!);
+      const resumed = from ? await resumeHead(from, meta) : null;
+      const refresh = resumed ?? await issueRefreshToken(userId, {
+        deviceId: b.success ? b.data.deviceId : undefined, deviceName: 'This PC', via: 'desktop', ...meta,
       });
-      reply.setCookie(REFRESH_COOKIE, refresh, cookieOptions());
+      const expires = resumed ? from!.expiresAt.getTime() : refreshExpiresAt();
+      reply.setCookie(REFRESH_COOKIE, refresh, { ...cookieOptions(), maxAge: Math.max(1, Math.floor((expires - Date.now()) / 1000)) });
       setImgCookie(app, reply, userId);
-      await logAudit('login.desktop', { userId, username: user?.username ?? undefined, req });
-      return reply.send({ ...signAccess(app, userId, user?.role ?? 'admin'), user: await userPayload(userId), refreshExpiresAt: refreshExpiresAt() });
+      await logAudit('login.desktop', { userId, username: user?.username ?? undefined, ...(resumed ? { detail: { from: cur!.userId } } : {}), req });
+      return reply.send({ ...signAccess(app, userId, user?.role ?? 'admin'), user: await userPayload(userId), refreshExpiresAt: expires });
     });
   }
 
@@ -421,6 +459,9 @@ export default async function authRoutes(app: FastifyInstance) {
     const token = req.cookies?.[REFRESH_COOKIE];
     const cur = token ? await validateRefreshToken(token) : null;
     if (!cur) return reply.redirect(`${env.PUBLIC_ORIGIN.replace(/\/$/, '')}/login`);
+    // A profile entered without a credential does not get one from the provider either: a link would let it in from
+    // anywhere (lib/auth.ts requireCredentialSession, which this cookie-only route cannot use).
+    if (withoutCredential(cur.via)) return reply.redirect(`${env.PUBLIC_ORIGIN.replace(/\/$/, '')}/profile/?tab=Account&sso_link=failed`);
     return toProvider(reply, cur.userId);
   });
 
@@ -496,7 +537,7 @@ export default async function authRoutes(app: FastifyInstance) {
     if (!row || row.disabled) return fail('disabled', undefined, true);
 
     const refresh = await issueRefreshToken(userId, {
-      deviceName: 'SSO', ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null,
+      deviceName: 'SSO', ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null, via: 'oidc',
     });
     reply.setCookie(REFRESH_COOKIE, refresh, cookieOptions());
     setImgCookie(app, reply, userId);
@@ -548,8 +589,12 @@ export default async function authRoutes(app: FastifyInstance) {
       // identity whose email or cleaned name happened to match (v0.69.1). Reintroduce by looking up `wanted`:
       // oidcLinkByUsername.int.test.ts adopts 'admin' for an identity that reports no username at all.
       const reported = claims.username;
+      // Never a profile without a password, nor one another account manages: a provider that reports `bob` does not
+      // take over the reading of the child's profile called bob. Reintroduce by
+      // dropping the clause: "a managed profile is never adopted" in oidcLinkByUsername.int.test.ts links it.
       const local = reported
-        ? await one<{ id: string; oidc_sub: string | null }>('SELECT id, oidc_sub FROM users WHERE username = $1', [reported])
+        ? await one<{ id: string; oidc_sub: string | null }>(
+          'SELECT id, oidc_sub FROM users WHERE username = $1 AND managed_by IS NULL AND password_login', [reported])
         : null;
       // Never steal an account already bound to a different SSO identity.
       if (local && !local.oidc_sub) {
@@ -668,7 +713,7 @@ export default async function authRoutes(app: FastifyInstance) {
     }
     if (!row) return taken();
     await logAudit('user.register', { userId: row.id, username, req });
-    const refresh = await issueRefreshToken(row.id, { deviceId, deviceName, ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null });
+    const refresh = await issueRefreshToken(row.id, { deviceId, deviceName, ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null, via: 'register' });
     reply.setCookie(REFRESH_COOKIE, refresh, cookieOptions());
     setImgCookie(app, reply, row.id);
     return reply.send({ ...signAccess(app, row.id, 'user'), user: await userPayload(row.id), refreshExpiresAt: refreshExpiresAt() });
@@ -678,11 +723,16 @@ export default async function authRoutes(app: FastifyInstance) {
     const token = req.cookies?.[REFRESH_COOKIE];
     if (!token) return reply.code(401).send({ error: 'no_refresh' });
     // The decision and its reasons live in planRefresh (lib/auth.ts).
-    const r = await exchangeRefreshToken(token, { ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null });
+    const r = await exchangeRefreshToken(token, {
+      ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null, zone: clientZone(req),
+    });
     if (r.kind === 'refused') {
       reply.clearCookie(REFRESH_COOKIE, { path: '/' });
       return reply.code(401).send({ error: 'invalid_refresh' });
     }
+    // A session entered without a password, outside the home network. The cookie is left alone: back home it works
+    // again, and it opens nothing out here (lib/auth.ts exchangeRefreshToken).
+    if (r.kind === 'remote') return reply.code(401).send({ error: 'local_only' });
     if (r.kind === 'disabled') {
       reply.clearCookie(REFRESH_COOKIE, { path: '/' });
       return reply.code(403).send({ error: 'disabled' });
@@ -694,9 +744,137 @@ export default async function authRoutes(app: FastifyInstance) {
     // long as it does: a recovered token keeps the lifetime of the one it replaces.
     if (r.kind !== 'grace') {
       reply.setCookie(REFRESH_COOKIE, r.token, { ...cookieOptions(), maxAge: Math.max(1, Math.floor((r.expiresAt - Date.now()) / 1000)) });
+      // A session refreshed from another network than its last (lib/clientAddr.ts sameNetwork): said in the activity log,
+      // once a day per session at most, and never acted on -- Wi-Fi to mobile data looks the same from here as a copied
+      // cookie does. Reintroduce a sign-out here and every phone that leaves
+      // the house is signed out.
+      if (r.kind === 'rotated' && r.moved && !(await one(
+        `SELECT 1 FROM audit_log WHERE event = 'session.ip_change' AND detail->>'session' = $1 AND at > now() - interval '1 day'`,
+        [r.moved.session]))) {
+        await logAudit('session.ip_change', { userId: r.userId, detail: { session: r.moved.session, from: r.moved.from }, req });
+      }
     }
-    setImgCookie(app, reply, r.userId);
-    return reply.send({ ...signAccess(app, r.userId, r.role), user: await userPayload(r.userId), refreshExpiresAt: r.expiresAt });
+    setImgCookie(app, reply, r.userId, r.local);
+    return reply.send({ ...signAccess(app, r.userId, r.role, r.local), user: await userPayload(r.userId), refreshExpiresAt: r.expiresAt });
+  });
+
+  // ---- "who is reading?" at home ----
+
+  /** Whether an admin turned the sign-in screen's "who is reading?" on (Admin -> Settings -> Server). Never on desktop. */
+  const localPickOn = async () => !isDesktop()
+    && !!(await one<{ on: boolean }>('SELECT local_pick AS on FROM server_settings WHERE id = 1'))?.on;
+
+  /**
+   * The profiles the sign-in screen offers at home without a password, when an admin turned it on: the enabled ones that
+   * open at home. Outside the home network, or with it off, none -- the same answer either way, so it says nothing
+   * about which.
+   */
+  app.get('/auth/pick', async (req) => {
+    if (clientZone(req) !== 'local' || !(await localPickOn())) return { content: [] };
+    const rows = await q<{ id: string; display_name: string; avatar: unknown }>(
+      `SELECT id, display_name, avatar FROM users WHERE local_open AND NOT disabled AND role <> 'admin' ORDER BY lower(display_name), id`);
+    return { content: rows.map((r) => ({ id: r.id, displayName: r.display_name, avatar: r.avatar ?? {} })) };
+  });
+
+  /**
+   * Sign in as one of those profiles from the sign-in screen, at home, without a password: a session of its own
+   * (`via: 'local-pick'`), held to home on every request and making no credential, as a switched-to one is. Every
+   * refusal is one answer -- off, outside, no such profile -- written down at most once a minute: the route answers
+   * anyone at home. Reintroduce any check by dropping it: its case in profileLocalPick.int.test.ts signs in.
+   */
+  app.post('/auth/profile-login', { config: SIGN_IN_LIMIT }, async (req, reply) => {
+    const b = z.object({ profileId: z.string().uuid(), deviceId: z.string().max(128).optional(), deviceName: z.string().max(128).optional() })
+      .safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const target = clientZone(req) === 'local' && (await localPickOn())
+      ? await one<{ id: string; role: string; username: string | null }>(
+        `SELECT id, role, username FROM users WHERE id = $1 AND local_open AND NOT disabled AND role <> 'admin'`, [b.data.profileId])
+      : null;
+    if (!target) {
+      const attempts = auditEvery('login.fail:local_pick');
+      if (attempts !== null) await logAudit('login.fail', { detail: { reason: 'local_pick', attempts }, req });
+      return reply.code(401).send({ error: 'invalid_credentials' });
+    }
+    const refresh = await issueRefreshToken(target.id, {
+      via: 'local-pick', deviceId: b.data.deviceId, deviceName: b.data.deviceName,
+      ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null,
+    });
+    reply.setCookie(REFRESH_COOKIE, refresh, cookieOptions());
+    setImgCookie(app, reply, target.id, true);
+    reply.clearCookie(KOMGA_SESSION_COOKIE, { path: '/' });
+    await logAudit('login.ok', { userId: target.id, username: target.username ?? undefined, detail: { via: 'local-pick' }, req });
+    return reply.send({ ...signAccess(app, target.id, target.role, true), user: await userPayload(target.id), refreshExpiresAt: refreshExpiresAt() });
+  });
+
+  // ---- the device keyring (lib/deviceRing.ts) ----
+
+  /**
+   * The accounts this device remembers, for the sign-in screen and the profile photo: no session needed, the device's
+   * own cookie is the key, as the refresh cookie is. A session entered without a password is listed at home only, where
+   * it opens.
+   */
+  app.get('/auth/ring', async (req) => {
+    const key = deviceKeyOf(req);
+    if (!key || isDesktop()) return { content: [] };
+    const home = clientZone(req) === 'local';
+    return {
+      content: (await ringOf(key)).filter((r) => home || !withoutCredential(r.via))
+        .map((r) => ({ id: r.userId, displayName: r.displayName, avatar: r.avatar ?? {} })),
+    };
+  });
+
+  /**
+   * Take up a session this device remembers, without its password: its token is superseded as a refresh would, and the
+   * device's cookie becomes it. An admin remembered longer than ADMIN_RESUME_HOURS signs in again (`reauth`, and the
+   * entry is forgotten); a session entered without a password does so at home only. A session the device held and did
+   * not remember is ended rather than left live with no cookie anywhere. The sign-in limit applies: the route answers
+   * without a session. Reintroduce any check by dropping it: its case in deviceRing.int.test.ts resumes.
+   */
+  app.post('/auth/resume', { config: SIGN_IN_LIMIT }, async (req, reply) => {
+    const b = z.object({ profileId: z.string().uuid() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const key = deviceKeyOf(req);
+    const [r] = key && !isDesktop() ? await ringOf(key, b.data.profileId) : [];
+    if (!key || !r) {
+      // Anyone can ask this, with no session: written down at most once a minute, as "who is reading?" is, and against
+      // nobody -- the id is the caller's word, not an account that tried to sign in.
+      const attempts = auditEvery('login.fail:not_remembered');
+      if (attempts !== null) await logAudit('login.fail', { detail: { reason: 'not_remembered', attempts }, req });
+      return reply.code(401).send({ error: 'not_remembered' });
+    }
+    const local = withoutCredential(r.via);
+    if (local && clientZone(req) !== 'local') return reply.code(401).send({ error: 'local_only' });
+    if (r.role === 'admin' && (!r.startedAt || r.startedAt.getTime() < Date.now() - ADMIN_RESUME_HOURS * 3600_000)) {
+      await forgetRemembered(key, r.userId);
+      return reply.code(401).send({ error: 'reauth' });
+    }
+    const held = req.cookies?.[REFRESH_COOKIE];
+    const cur = held ? await validateRefreshToken(held) : null;
+    const token = await resumeHead(r.head, { ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null });
+    if (!token) return reply.code(401).send({ error: 'not_remembered' });
+    if (cur && cur.userId !== r.userId && !(await isRemembered(key, cur.sessionId))) await revokeRefreshToken(held!);
+    await noteResumed(key, r.userId);
+    reply.setCookie(REFRESH_COOKIE, token, { ...cookieOptions(), maxAge: Math.max(1, Math.floor((r.head.expiresAt.getTime() - Date.now()) / 1000)) });
+    setImgCookie(app, reply, r.userId, local);
+    reply.clearCookie(KOMGA_SESSION_COOKIE, { path: '/' });
+    await logAudit('login.switch', { userId: r.userId, detail: { from: cur?.userId ?? null, via: 'ring' }, req });
+    return reply.send({ ...signAccess(app, r.userId, r.role, local), user: await userPayload(r.userId), refreshExpiresAt: r.head.expiresAt.getTime() });
+  });
+
+  /**
+   * Sign in as someone else without forgetting who was here: a session this device remembers is put aside -- the cookies
+   * go, the session stays live for /auth/resume -- and any other is ended, exactly as /auth/logout ends it.
+   */
+  app.post('/auth/leave', async (req, reply) => {
+    const token = req.cookies?.[REFRESH_COOKIE];
+    const cur = token ? await validateRefreshToken(token) : null;
+    const key = deviceKeyOf(req);
+    const kept = !!(cur && key && (await isRemembered(key, cur.sessionId)));
+    if (token && !kept) await revokeRefreshToken(token);
+    reply.clearCookie(REFRESH_COOKIE, { path: '/' });
+    reply.clearCookie(IMG_COOKIE, { path: '/' });
+    reply.clearCookie(KOMGA_SESSION_COOKIE, { path: '/' });
+    return reply.send({ ok: true, remembered: kept });
   });
 
   app.post('/auth/logout', async (req, reply) => {
@@ -715,6 +893,60 @@ export default async function authRoutes(app: FastifyInstance) {
   });
 
   app.get('/auth/me', { preHandler: [authenticate] }, async (req) => userPayload(userIdOf(req)));
+
+  // ---- switching to a profile that opens at home ----
+
+  /**
+   * The profiles this session may switch to: the ones that open at home and this account manages -- every one, for an
+   * admin. From home only, where switching to them works; outside the list is empty and says why (`zone`), and so is
+   * it for a session that was itself entered without a password, which switches nowhere.
+   */
+  app.get('/auth/profiles', { preHandler: [authenticate] }, async (req) => {
+    const zone = clientZone(req);
+    if (zone !== 'local' || (req.user as { loc?: unknown }).loc === true) return { zone, content: [] };
+    const me = userIdOf(req);
+    const rows = await q<{ id: string; display_name: string; avatar: unknown }>(
+      `SELECT id, display_name, avatar FROM users
+        WHERE local_open AND NOT disabled AND id <> $1 AND (managed_by = $1 OR $2)
+        ORDER BY lower(display_name), id`, [me, actsAsAdmin(req)]);
+    return { zone, content: rows.map((r) => ({ id: r.id, displayName: r.display_name, avatar: r.avatar ?? {} })) };
+  });
+
+  /**
+   * Switch this device to a profile that opens at home, without its password. The caller is a session
+   * entered with a credential -- the device's own, by its refresh cookie, not just an access token a script could hold
+   * -- of the account that manages the profile, or of an admin, at home. The profile's session is opened FROM it
+   * (`parent_session`): it ends when that one ends (lib/auth.ts revokeDerived), lasts no longer than it would, holds at
+   * home only, and makes no credential (`via: 'switch'`). The answer is a sign-in's, and the device's cookie becomes
+   * the profile's. Reintroduce any check by dropping it: its case in profileSwitch.int.test.ts switches.
+   */
+  app.post('/auth/switch', { preHandler: [authenticate, requireCredentialSession], config: SIGN_IN_LIMIT }, async (req, reply) => {
+    const b = z.object({ profileId: z.string().uuid() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const me = userIdOf(req);
+    const token = req.cookies?.[REFRESH_COOKIE];
+    const cur = token ? await validateRefreshToken(token) : null;
+    if (!cur || cur.userId !== me) return reply.code(401).send({ error: 'no_session' });
+    if (withoutCredential(cur.via)) return reply.code(403).send({ error: 'credential_required' });
+    if (clientZone(req) !== 'local') return reply.code(401).send({ error: 'local_only' });
+    const target = await one<{ id: string; role: string; username: string | null; disabled: boolean; local_open: boolean; managed_by: string | null }>(
+      'SELECT id, role, username, disabled, local_open, managed_by FROM users WHERE id = $1', [b.data.profileId]);
+    if (!target || target.disabled || !target.local_open || target.id === me || (target.managed_by !== me && !actsAsAdmin(req))) {
+      await logAudit('login.fail', { userId: me, detail: { reason: 'switch_denied', profile: b.data.profileId }, req });
+      return reply.code(403).send({ error: 'switch_denied' });
+    }
+    const refresh = await issueRefreshToken(target.id, {
+      via: 'switch', parentSession: cur.sessionId, expiresAt: cur.expiresAt,
+      deviceId: cur.deviceId ?? undefined, deviceName: cur.deviceName ?? undefined,
+      ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null,
+    });
+    reply.setCookie(REFRESH_COOKIE, refresh, { ...cookieOptions(), maxAge: Math.max(1, Math.floor((cur.expiresAt.getTime() - Date.now()) / 1000)) });
+    setImgCookie(app, reply, target.id, true);
+    // As at sign-out: a Komga session cookie a browser picked up belongs to the account it leaves.
+    reply.clearCookie(KOMGA_SESSION_COOKIE, { path: '/' });
+    await logAudit('login.switch', { userId: target.id, username: target.username ?? undefined, detail: { from: me, via: 'guardian' }, req });
+    return reply.send({ ...signAccess(app, target.id, target.role, true), user: await userPayload(target.id), refreshExpiresAt: cur.expiresAt.getTime() });
+  });
 
   // ---- sessions / devices ----
   app.get('/auth/sessions', { preHandler: [authenticate] }, async (req) => {
@@ -740,7 +972,7 @@ export default async function authRoutes(app: FastifyInstance) {
   });
 
   // ---- change own password ----
-  if (local) app.post('/auth/password', { preHandler: [authenticate], config: SIGN_IN_LIMIT }, async (req, reply) => {
+  if (local) app.post('/auth/password', { preHandler: [authenticate, requireCredentialSession], config: SIGN_IN_LIMIT }, async (req, reply) => {
     const body = z.object({ current: z.string(), next: z.string() }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'bad_request' });
     const uid = userIdOf(req);
@@ -757,7 +989,7 @@ export default async function authRoutes(app: FastifyInstance) {
   });
 
   // ---- TOTP 2FA ----
-  if (local) app.post('/auth/totp/setup', { preHandler: [authenticate] }, async (req, reply) => {
+  if (local) app.post('/auth/totp/setup', { preHandler: [authenticate, requireCredentialSession] }, async (req, reply) => {
     const uid = userIdOf(req);
     const u = await one<{ username: string | null; totp_enabled: boolean }>('SELECT username, totp_enabled FROM users WHERE id = $1', [uid]);
     // ⚠️ Setup is for an account WITHOUT a second step. With 2FA on, the secret in the row is the one the
@@ -779,7 +1011,7 @@ export default async function authRoutes(app: FastifyInstance) {
     return { secret, otpauth: uri, qr };
   });
 
-  if (local) app.post('/auth/totp/enable', { preHandler: [authenticate], config: SIGN_IN_LIMIT }, async (req, reply) => {
+  if (local) app.post('/auth/totp/enable', { preHandler: [authenticate, requireCredentialSession], config: SIGN_IN_LIMIT }, async (req, reply) => {
     const body = z.object({ code: z.string(), password: z.string() }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'bad_request' });
     const uid = userIdOf(req);
@@ -805,7 +1037,7 @@ export default async function authRoutes(app: FastifyInstance) {
     return reply.send({ ok: true, recoveryCodes: codes });
   });
 
-  if (local) app.post('/auth/totp/disable', { preHandler: [authenticate], config: SIGN_IN_LIMIT }, async (req, reply) => {
+  if (local) app.post('/auth/totp/disable', { preHandler: [authenticate, requireCredentialSession], config: SIGN_IN_LIMIT }, async (req, reply) => {
     const body = z.object({ password: z.string() }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'bad_request' });
     const uid = userIdOf(req);

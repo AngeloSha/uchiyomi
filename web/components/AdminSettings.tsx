@@ -37,6 +37,7 @@ import { SERIES_TYPES, seriesTypeKey } from '@/lib/seriesTypes';
 import { hasGroup, normGroup, reorder, withoutGroup } from '@/lib/scanlators';
 import { suggestGroups } from '@/lib/groupSuggest';
 import { NotificationsSection } from '@/components/AdminNotifications';
+import { NetworkSettings } from '@/components/NetworkSettings';
 import { SlowArchiveRow } from '@/components/ArchiveSettings';
 import { TranslateRow } from '@/components/TranslateSettings';
 import { isDesktop } from '@/lib/desktop';
@@ -432,11 +433,20 @@ function ServerSection({ data, save }: { data: any; save: Save }) {
           <SwitchRow id="registration" label={tr('Open registration')} help={tr('Let anyone create their own account')}
             on={!!data.allow_registration} onChange={(next) => save({ allowRegistration: next })} />
         )}
+        {/* "Who is reading?" on the sign-in screen (bff /auth/pick): at home only. */}
+        {!desktop && (
+          <SwitchRow id="local-pick" label={tr('Choose a profile at home')} help={tr('At home, the sign-in screen lists the profiles that open without a password.')}
+            on={!!data.local_pick} onChange={(next) => save({ localPick: next })} />
+        )}
         {!desktop && (
           <SummaryRow id="member-defaults-link" label={tr('When someone signs up')} href="/admin/?tab=Members&section=member-defaults"
             value={defaults.perms.canDownload !== false ? tr('Can download') : tr('No downloads')} />
         )}
       </RowGroup>
+
+      {/* Where profiles without a password open, and the proxies that may say who is connecting (bff /api/admin/network).
+          Not on desktop: its server is reached from its own computer alone, always at home. */}
+      {!desktop && <NetworkSettings />}
 
       <RowGroup title={tr('Updates and privacy')}>
         <SwitchWithMore id="update-check" label={tr('Check for updates')} help={tr('Asks GitHub once a day; nothing about this server is sent.')}

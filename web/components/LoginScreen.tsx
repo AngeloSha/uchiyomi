@@ -1,4 +1,5 @@
 'use client';
+import { Avatar } from './Avatar';
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useAuth } from '@/lib/auth';
@@ -32,7 +33,7 @@ const ssoError = (reason: string): string => {
 };
 
 export function LoginScreen() {
-  const { login, firstRunSetup, register } = useAuth();
+  const { login, firstRunSetup, register, signedOutWhy, resumeProfile, pickProfile } = useAuth();
   // `desktop`: this port is Uchiyomi Desktop's, reached from a browser tab -- see the effect below. `register` (v0.61.0):
   // signing up, reached only from `login` by "Create an account" while Open registration is on. `sso` (v0.63.0): the
   // server signs in through its provider only (lib/authConfig.ts providerOnly), so the screen is that button alone.
@@ -44,6 +45,12 @@ export function LoginScreen() {
   const [needTotp, setNeedTotp] = useState(false);
   const [busy, setBusy] = useState(false);
   const [errMsg, setErrMsg] = useState('');
+  // Remember on this device, and who it remembers (bff lib/deviceRing.ts): a tap each, no password.
+  const [remember, setRemember] = useState(false);
+  const [ring, setRing] = useState<{ id: string; displayName: string; avatar: Record<string, unknown> }[]>([]);
+  const loadRing = () => api<{ content: typeof ring }>('/auth/ring').then((r) => setRing(r.content ?? []), () => {});
+  // "Who is reading?" (bff /auth/pick): the profiles that open at home, offered here at home when an admin turned it on.
+  const [readers, setReaders] = useState<typeof ring>([]);
   const [sso, setSso] = useState<{ enabled: boolean; name: string }>({ enabled: false, name: '' });
   // Admin → Settings → Open registration, as /auth/config says (v0.61.0). The switch existed and POST /auth/register
   // answered behind it, but this screen had no form, so turning it on did nothing anyone could see. Always false on
@@ -91,6 +98,11 @@ export function LoginScreen() {
       setErrMsg(ssoError(reason));
       window.history.replaceState({}, '', window.location.pathname);
     }
+    // A profile that opens at home, used from outside it (bff lib/auth.ts authenticate): nothing was ended, and back home
+    // it opens again. Said, so the sign-in form does not read as a sign-out nobody asked for.
+    if (signedOutWhy === 'local_only') setErrMsg(tr('This profile opens from home only. Sign in with a password, or try again from home.'));
+    void loadRing();
+    void api<{ content: typeof ring }>('/auth/pick').then((r) => setReaders(r.content ?? []), () => {});
   }, []);
 
   const submit = async (e: React.FormEvent) => {
@@ -98,11 +110,21 @@ export function LoginScreen() {
     if (busy || (needTotp ? !code.trim() : !pw)) return;
     setBusy(true);
     setErrMsg('');
-    const r = await login(username.trim() || 'admin', pw, needTotp ? code.trim() : undefined);
+    const r = await login(username.trim() || 'admin', pw, needTotp ? code.trim() : undefined, remember);
     if (!r.ok) {
       if (r.totp) { setNeedTotp(true); setCode(''); }
       else { setErrMsg(r.error || tr('Login failed — please try again.')); setCode(''); if (!needTotp) setPw(''); }
     }
+    setBusy(false);
+  };
+
+  /** Take up an account this device remembers; a refusal says why, and the list is asked again (an entry may be gone). */
+  const resume = async (id: string, how: 'ring' | 'pick' = 'ring') => {
+    if (busy) return;
+    setBusy(true);
+    setErrMsg('');
+    const r = how === 'ring' ? await resumeProfile(id) : await pickProfile(id);
+    if (!r.ok) { setErrMsg(r.error || tr('Login failed — please try again.')); void loadRing(); }
     setBusy(false);
   };
 
@@ -241,6 +263,21 @@ export function LoginScreen() {
         {/* Normal sign-in */}
         {mode === 'login' && (
           <form onSubmit={submit} className="glass grad-border rounded-3xl p-5 shadow-lift">
+            {(['ring', 'pick'] as const).map((how) => {
+              const list = how === 'ring' ? ring : readers.filter((p) => !ring.some((r) => r.id === p.id));
+              return list.length > 0 && !needTotp && (
+              <div key={how} className="mb-4 space-y-2" data-device-ring={how}>
+                <p className={labelCls}>{how === 'ring' ? tr('On this device') : tr('Who is reading?')}</p>
+                {list.map((p) => (
+                  <button key={p.id} type="button" disabled={busy} onClick={() => resume(p.id, how)}
+                    className="flex w-full items-center gap-3 rounded-xl border border-ink-700 px-3 py-2 text-start text-sm text-fog-100 transition hover:border-accent disabled:opacity-60">
+                    <Avatar avatar={p.avatar} size={28} />
+                    <span className="min-w-0 flex-1 truncate">{p.displayName}</span>
+                  </button>
+                ))}
+              </div>
+              );
+            })}
             {/* SSO-only mode with its rescue on (AUTH_RESCUE_ADMIN): the form is back for one admin, and says why. */}
             {config?.rescue && !needTotp && (
               <p className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-200" data-sso-rescue>
@@ -261,6 +298,10 @@ export function LoginScreen() {
                   value={pw} onChange={(e) => setPw(e.target.value)} placeholder="••••••••"
                   className={inputCls}
                 />
+                <label className="mt-3 flex items-center gap-2 text-xs text-fog-400">
+                  <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} data-remember />
+                  {tr('Remember on this device')}
+                </label>
               </>
             ) : (
               <>

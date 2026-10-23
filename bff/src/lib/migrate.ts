@@ -2013,6 +2013,53 @@ CREATE TABLE IF NOT EXISTS anilist_trending (
   items       jsonb NOT NULL DEFAULT '[]'::jsonb,
   fetched_at  timestamptz NOT NULL DEFAULT now()
 );
+
+-- Profiles that open without a password, from the local network only. These
+-- columns come first and nothing writes them yet. password_login: /auth/login accepts the row (false for a profile
+-- with no password). local_open: it opens without a password from the local network. managed_by: the account that
+-- manages it; deleting that account leaves the profile to the admin rather than deleting its reading too. Every row
+-- an older release wrote reads as it did (true, false, NULL), and a rollback has none of them to write.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_login boolean NOT NULL DEFAULT true;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS local_open     boolean NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS managed_by     uuid REFERENCES users(id) ON DELETE SET NULL;
+-- A profile anyone at home can open never runs the server. The desktop app's own account is the exception it already
+-- is (lib/desktopUser.ts): its window is the only way in.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_local_open_not_admin') THEN
+    ALTER TABLE users ADD CONSTRAINT users_local_open_not_admin
+      CHECK (NOT local_open OR role <> 'admin' OR auth_kind = 'desktop');
+  END IF;
+END $$;
+-- A session's name through its rotations (session_id; NULL on a row from before it, which is then its own id), the
+-- session it was opened from (parent_session: ending that one ends this one, lib/auth.ts revokeDerived), and how it
+-- was entered (via). lib/auth.ts supersede carries all three to the next token.
+ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS session_id     uuid;
+ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS parent_session uuid;
+ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS via            text;
+CREATE INDEX IF NOT EXISTS idx_rt_parent  ON refresh_tokens (parent_session) WHERE parent_session IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_rt_session ON refresh_tokens (session_id) WHERE session_id IS NOT NULL;
+
+-- The accounts a device remembers (lib/deviceRing.ts): a sign-in that ticked Remember on this device, by device -- the
+-- hash of its yomi_dev cookie, never the cookie -- and the session it can take up again. No key to refresh_tokens:
+-- sessions are revoked, not deleted, and an entry opens only while its session is live; the daily prune drops the rest.
+-- Additive: an older release never reads it.
+CREATE TABLE IF NOT EXISTS device_ring (
+  device_hash text        NOT NULL,
+  user_id     uuid        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  session_id  uuid        NOT NULL,
+  added_at    timestamptz NOT NULL DEFAULT now(),
+  last_used   timestamptz,
+  PRIMARY KEY (device_hash, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_device_ring_user ON device_ring (user_id);
+-- The sign-in screen's "who is reading?" at home (routes/auth.ts /auth/pick): off unless an admin turns it on.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS local_pick boolean NOT NULL DEFAULT false;
+-- The home network and the trusted proxies as Admin -> Settings -> Server -> Home network sets them (lib/clientAddr.ts):
+-- NULL is the default (the private networks; loopback, link-local and private proxies). LOCAL_NETWORKS and TRUST_PROXY
+-- in the environment outrank both. Additive: an older release never reads them.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS local_networks  text;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS trusted_proxies text;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

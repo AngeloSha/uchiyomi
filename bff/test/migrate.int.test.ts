@@ -174,6 +174,11 @@ const V0510 = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'v0.51.0-requi
   tables: string[];
   columns: Record<string, string[]>;
 };
+/** v0.95.0's own schema, captured the same way (see the file's _provenance): what a rollback from the profile columns boots. */
+const V0950 = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'v0.95.0-required-columns.json'), 'utf8')) as {
+  tables: string[];
+  columns: Record<string, string[]>;
+};
 
 test('migrate: v0.49.0 only adds, and every added column lets v0.48.4 keep writing its rows', { skip }, async () => {
   const tables = await q<{ table_name: string }>(
@@ -1175,6 +1180,62 @@ test('migrate: v0.61.0 only adds -- the release radar and the smart checks\' swi
       await c.query(`DELETE FROM lib_series WHERE id = 't-radar'`);
       const { rows } = await c.query(`SELECT 1 FROM series_radar WHERE series_id = 't-radar'`);
       assert.equal(rows.length, 0, 'the radar outlives a series v0.60.1 deletes');
+    } finally {
+      await c.query('ROLLBACK');
+    }
+  });
+});
+
+test('migrate: the profile columns only add, and v0.95.0 keeps writing its rows', { skip }, async () => {
+  // The whole-schema rule held against v0.95.0's own schema, which a rollback boots: on every table it has, the only
+  // required columns are the ones it already writes. users and refresh_tokens are written on every sign-in.
+  // Reintroduce by declaring users.local_open NOT NULL with no default: the assertion names it.
+  const current = await q<{ table_name: string }>(
+    `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ANY($1)`,
+    [V0950.tables],
+  );
+  assert.deepEqual(current.map((t) => t.table_name).sort(), [...V0950.tables].sort(), 'a v0.95.0 table is gone: the profile columns only add');
+  const required = await q<{ table_name: string; column_name: string }>(
+    `SELECT table_name, column_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = ANY($1) AND is_nullable = 'NO' AND column_default IS NULL`,
+    [V0950.tables],
+  );
+  for (const r of required) {
+    assert.ok(
+      (V0950.columns[r.table_name] ?? []).includes(r.column_name),
+      `${r.table_name}.${r.column_name} is NOT NULL with no default: after a rollback, v0.95.0's INSERTs into ${r.table_name} fail`,
+    );
+  }
+  // As the design declares them: every account as it was (a password, not open at home, nobody's), every session its
+  // own. Reintroduce DEFAULT true on local_open: "users.local_open" fails -- every account would open at home.
+  const declared = await q<{ table_name: string; column_name: string; column_default: string | null; is_nullable: string }>(
+    `SELECT table_name, column_name, column_default, is_nullable FROM information_schema.columns
+      WHERE table_schema = 'public' AND (table_name, column_name) IN
+        (('users', 'password_login'), ('users', 'local_open'), ('users', 'managed_by'),
+         ('refresh_tokens', 'session_id'), ('refresh_tokens', 'parent_session'), ('refresh_tokens', 'via'))`,
+  );
+  assert.deepEqual(Object.fromEntries(declared.map((d) => [`${d.table_name}.${d.column_name}`, [d.column_default, d.is_nullable]])), {
+    'users.password_login': ['true', 'NO'], 'users.local_open': ['false', 'NO'], 'users.managed_by': [null, 'YES'],
+    'refresh_tokens.session_id': [null, 'YES'], 'refresh_tokens.parent_session': [null, 'YES'], 'refresh_tokens.via': [null, 'YES'],
+  }, 'users.local_open (or another profile column) is not declared as the design set it');
+
+  // A profile that opens at home is never an admin, the desktop app's own account aside; and deleting the account
+  // that manages a profile leaves the profile. In a transaction that is rolled back.
+  await withClient(async (c) => {
+    await c.query('BEGIN');
+    try {
+      const add = (name: string, role: string, kind: string, open: boolean, managedBy: string | null = null) => c.query<{ id: string }>(
+        `INSERT INTO users (username, display_name, password_hash, role, auth_kind, local_open, managed_by)
+         VALUES ($1, $1, 'x', $2, $3, $4, $5) RETURNING id`, [name, role, kind, open, managedBy]);
+      const guardian = (await add('t-prof-guardian', 'user', 'password', false)).rows[0].id;
+      const kid = (await add('t-prof-kid', 'user', 'none', true, guardian)).rows[0].id;
+      await add('t-prof-desktop', 'admin', 'desktop', true);
+      await c.query('SAVEPOINT s');
+      await assert.rejects(add('t-prof-admin', 'admin', 'none', true), /users_local_open_not_admin/, 'an admin opened at home');
+      await c.query('ROLLBACK TO SAVEPOINT s');
+      await c.query('DELETE FROM users WHERE id = $1', [guardian]);
+      const { rows } = await c.query<{ managed_by: string | null }>('SELECT managed_by FROM users WHERE id = $1', [kid]);
+      assert.deepEqual(rows, [{ managed_by: null }], 'a profile went with the account that managed it');
     } finally {
       await c.query('ROLLBACK');
     }

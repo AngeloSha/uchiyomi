@@ -1367,6 +1367,110 @@ paths:
           description: Not authenticated
         "403":
           description: The account has been disabled; every session was revoked
+  /auth/pick:
+    get:
+      tags:
+        - auth
+      summary: The profiles the sign-in screen offers at home without a password.
+      operationId: getAuthPick
+      description: >-
+        When an admin turned it on (`localPick` on PATCH /api/admin/settings) and the caller is inside LOCAL_NETWORKS:
+        the enabled profiles that open at home, as `{id, displayName, avatar}`. Otherwise, and on desktop, none.
+      security: []
+      responses:
+        "200":
+          description: "`{content: [{id, displayName, avatar}]}`"
+  /auth/profile-login:
+    post:
+      tags:
+        - auth
+      summary: Sign in from the sign-in screen as a profile that opens at home, without a password.
+      operationId: postAuthProfileLogin
+      description: >-
+        Under the same conditions as GET /auth/pick. The session holds at home only (401 `local_only` from outside on
+        every request) and makes no credential (403 `credential_required`); it ends REFRESH_TTL_DAYS after the pick, however
+        often it is refreshed. Every refusal is 401 `invalid_credentials`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [profileId]
+              properties:
+                profileId:
+                  type: string
+                deviceId:
+                  type: string
+                deviceName:
+                  type: string
+      responses:
+        "200":
+          description: Signed in as the profile
+        "400":
+          description: Malformed body
+        "401":
+          description: "`invalid_credentials`"
+        "429":
+          description: Too many attempts
+  /auth/ring:
+    get:
+      tags:
+        - auth
+      summary: The accounts this device remembers (Remember on this device).
+      operationId: getAuthRing
+      security: []
+      description: >-
+        By the device's own `yomi_dev` cookie, set by a sign-in with `remember: true`; no session needed. Each entry
+        whose session is still live, as `{id, displayName, avatar}`. A session entered without a password is listed from
+        the home network only (LOCAL_NETWORKS). Empty on desktop.
+      responses:
+        "200":
+          description: "`{content: [{id, displayName, avatar}]}`"
+  /auth/resume:
+    post:
+      tags:
+        - auth
+      summary: Take up an account this device remembers, without its password.
+      operationId: postAuthResume
+      security: []
+      description: >-
+        Answers like a sign-in and sets the account's cookies. `reauth` when the account is an admin remembered for more
+        than twelve hours (the entry is forgotten); `local_only` for a session entered without a password, from outside.
+        A session the device held and did not remember is ended.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [profileId]
+              properties:
+                profileId:
+                  type: string
+      responses:
+        "200":
+          description: Signed in as the remembered account
+        "400":
+          description: Malformed body
+        "401":
+          description: "`not_remembered`, `reauth` or `local_only`"
+        "429":
+          description: Too many attempts
+  /auth/leave:
+    post:
+      tags:
+        - auth
+      summary: Sign in as someone else, keeping this account remembered on this device.
+      operationId: postAuthLeave
+      security: []
+      description: >-
+        Clears the session cookies. A session this device remembers stays live for POST /auth/resume
+        (`remembered: true`); any other is ended, as POST /auth/logout ends it.
+      responses:
+        "200":
+          description: "`{ok, remembered}`"
   /auth/logout:
     post:
       tags:
@@ -1397,7 +1501,7 @@ paths:
     get:
       tags:
         - auth
-      summary: "The calling account: id, username, role, permissions, settings and, since v0.90.0, `talk`: whether this server has chapter comments."
+      summary: "The calling account: id, username, role, permissions, settings, `talk` (since v0.90.0: whether this server has chapter comments) and `kind`: `password` for every account until profiles that open without a password exist (`open`, `hybrid`), `desktop-owner` for the desktop app's own account."
       operationId: getAuthMe
       security:
         - bearer: []
@@ -1406,6 +1510,57 @@ paths:
           description: OK
         "401":
           description: Not authenticated
+  /auth/profiles:
+    get:
+      tags:
+        - auth
+      summary: The profiles this session may switch to, from home.
+      operationId: getAuthProfiles
+      description: >-
+        Profiles that open at home without a password that this account manages --
+        every one, for an admin. `zone` is `local` when the caller is inside LOCAL_NETWORKS; outside, and for a session
+        that was itself entered without a password, the list is empty.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "`{zone, content: [{id, displayName, avatar}]}`"
+        "401":
+          description: Not authenticated, or `local_only`
+  /auth/switch:
+    post:
+      tags:
+        - auth
+      summary: Switch this device to a profile that opens at home, without its password.
+      operationId: postAuthSwitch
+      description: >-
+        From the session of the account that manages the profile, or of an admin, at home: the device's refresh cookie
+        and its access token, both entered with a credential. Answers like a sign-in and sets the profile's cookies. The
+        profile's session ends when the caller's does, lasts no longer, holds at home only (401 `local_only` from
+        outside on every request) and makes no credential (403 `credential_required`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [profileId]
+              properties:
+                profileId:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Signed in as the profile
+        "400":
+          description: Malformed body
+        "401":
+          description: "Not authenticated, `no_session` (no refresh cookie of this account) or `local_only`"
+        "403":
+          description: "`switch_denied`, or `credential_required`"
+        "429":
+          description: Too many attempts
   /auth/password:
     post:
       tags:
@@ -4701,6 +4856,120 @@ paths:
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+  /api/profiles:
+    get:
+      tags:
+        - personal
+      summary: The profiles this account manages -- profiles that open at home without a password.
+      operationId: getApiProfiles
+      description: >-
+        Each with `kind` (`open`: no password, opens from LOCAL_NETWORKS only; `hybrid`: no password at home, its password
+        from anywhere else).
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+    post:
+      tags:
+        - personal
+      summary: Make a profile that opens at home, managed by this account.
+      operationId: postApiProfiles
+      description: >-
+        For an admin, or a member whose `perms.canManageProfiles` an admin set. The profile starts with this account's
+        own library access, age limit and download permission, never more, and at most six are managed by one account.
+        With a `password` it is a hybrid. Refused with 403 `credential_required` from a session that was itself entered
+        without a password, and a `password` with 403 `sso_only` in SSO-only mode.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [displayName]
+              properties:
+                displayName:
+                  type: string
+                password:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The profile made
+        "400":
+          description: Malformed body, or `weak_password`
+        "401":
+          description: Not authenticated
+        "403":
+          description: Not allowed to manage profiles, or `credential_required`
+        "409":
+          description: "`too_many_profiles`, or `username_taken`"
+  /api/profiles/{id}:
+    patch:
+      tags:
+        - personal
+      summary: Rename one of this account's profiles, give it a password, or stop it opening at home.
+      operationId: patchApiProfilesId
+      description: >-
+        A password makes it a hybrid; `localOpen: false` needs one (400 `no_way_in` otherwise). Either ends the profile's
+        sessions. Refused with 403 `credential_required` from a session entered without a password.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName:
+                  type: string
+                password:
+                  type: string
+                localOpen:
+                  type: boolean
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The profile as it is now
+        "400":
+          description: Malformed, `no_way_in` or `weak_password`
+        "401":
+          description: Not authenticated
+        "403":
+          description: Not allowed to manage profiles, or `credential_required`
+        "404":
+          description: Not one of this account's profiles
+    delete:
+      tags:
+        - personal
+      summary: Delete one of this account's profiles, with everything it read.
+      operationId: deleteApiProfilesId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: Not allowed to manage profiles, or `credential_required`
+        "404":
+          description: Not one of this account's profiles
   /api/push/key:
     get:
       tags:
@@ -7580,6 +7849,69 @@ paths:
           description: "Conflict: `busy` -- a sweep or a library repair is running"
         "500":
           description: The sweep itself failed; the server log has the details
+  /api/admin/network:
+    get:
+      tags:
+        - admin
+      summary: The home network and the trusted proxies in force, and how this server sees the caller.
+      operationId: getApiAdminNetwork
+      description: >-
+        `ip` is the address the server resolved under the trusted proxies, `peer` the address that connected, `viaProxy`
+        whether that came through a trusted proxy, `zone` `local` when `ip` is in the home network (where profiles
+        without a password open) and `remote` otherwise. `localNetworks` and `trustedProxies` are `{value, source}`, the
+        source being `env` (LOCAL_NETWORKS / TRUST_PROXY, which the settings page cannot change), `settings` or
+        `default` (the private networks; loopback, link-local and private proxies); `defaults` names both defaults.
+        `suggestion` is the caller's own /24 when it is a private address, else null. `warnings` are codes: `trust_all`
+        (every peer trusted, so nobody is at home), `via_cloudflare` (this request came through Cloudflare, where
+        nobody is at home), `home_default_proxy` (through a proxy, with home still the private networks), `proxy_at_home`
+        with `ip`, and `proxy_unnamed` with `ip`, the
+        proxy this request came through that only loopback/linklocal/uniquelocal trust (nobody behind it is at home). `recent` is the address of up to ten
+        live sessions, newest first, with `lastSeen`, the account's `name` and its `zone`. Requires an admin account and a
+        token carrying the admin scope.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: Not an admin
+    patch:
+      tags:
+        - admin
+      summary: Save the home network or the trusted proxies (Admin -> Settings -> Server -> Home network).
+      operationId: patchApiAdminNetwork
+      description: >-
+        Either or both. `localNetworks`: null (or blank) for the default, the private networks; `none` for no network;
+        or a comma list of addresses and CIDR ranges. `trustedProxies`: null (or blank) for the default, or a comma list
+        of addresses, CIDR ranges and loopback / linklocal / uniquelocal -- never true, false, none or a bare number. In
+        force at the next request, no restart. A value LOCAL_NETWORKS or TRUST_PROXY sets in the environment is a 409
+        set_by_env naming it; a value boot would refuse is a 400 bad_network or bad_proxy with a sentence. The answer is
+        the GET's. Audit row settings.network. Not on the desktop app (404). Requires an admin account and a token
+        carrying the admin scope.
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                localNetworks: { type: [string, "null"], maxLength: 2000 }
+                trustedProxies: { type: [string, "null"], maxLength: 2000 }
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: bad_network or bad_proxy
+        "401":
+          description: Not authenticated
+        "403":
+          description: Not an admin
+        "409":
+          description: set_by_env
   /api/admin/users:
     get:
       tags:
@@ -7606,7 +7938,10 @@ paths:
       operationId: postApiAdminUsers
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Refused with 403
-        `sso_only` in SSO-only mode (since v0.63.0): accounts come from the sign-on provider.
+        `sso_only` in SSO-only mode (since v0.63.0): accounts come from the sign-on provider -- except a profile that
+        opens at home with no password (`localOpen: true`, no `password`). `localOpen` makes a profile that opens
+        without a password from LOCAL_NETWORKS (with a `password` too, a hybrid), never an admin (400
+        `local_open_admin`); one with neither is 400 `no_way_in`. `managedBy` names the account that may switch to it.
       requestBody:
         required: false
         content:
@@ -13726,7 +14061,11 @@ paths:
       operationId: patchApiAdminUsersId
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. A body with a
-        `password` is refused whole with 403 `sso_only` in SSO-only mode (since v0.63.0).
+        `password` is refused whole with 403 `sso_only` in SSO-only mode (since v0.63.0). `localOpen`,
+        `removePassword: true` and `managedBy` change how the account gets in: a profile that opens at home is never an
+        admin (400 `local_open_admin`) and an account keeps a way in (400 `no_way_in`); either change ends its sessions.
+        `removePassword` also deletes the account's API and OPDS tokens, unless the sign-on provider still signs it in.
+        `perms.canManageProfiles` lets a member make profiles of its own (POST /api/profiles).
       parameters:
         - name: id
           in: path

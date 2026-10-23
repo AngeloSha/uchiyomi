@@ -1,12 +1,9 @@
 // Append-only activity/audit log: logins, admin actions, downloads, blocks. Best-effort (never throws).
 import type { FastifyRequest } from 'fastify';
 import { q } from './db';
-
-/** The address Fastify resolved under trustProxy (lib/auth.ts clientIp), never a header's first entry. */
-function clientIp(req?: FastifyRequest): string | null {
-  if (!req) return null;
-  return (req.ip || '').slice(0, 64) || null;
-}
+// The one reading of the client's address (lib/clientAddr.ts): this file kept a copy of it, and two copies of the rule
+// that decides who a visitor is can drift apart. clientIpHygiene.test.ts holds every other reader to it.
+import { clientIp } from './clientAddr';
 
 export async function logAudit(
   event: string,
@@ -15,7 +12,7 @@ export async function logAudit(
   const ua = opts.req ? ((opts.req.headers['user-agent'] as string) || '').slice(0, 200) : null;
   await q(
     'INSERT INTO audit_log (user_id, username, event, detail, ip, user_agent) VALUES ($1,$2,$3,$4,$5,$6)',
-    [opts.userId ?? null, opts.username ?? null, event, JSON.stringify(opts.detail ?? {}), clientIp(opts.req), ua],
+    [opts.userId ?? null, opts.username ?? null, event, JSON.stringify(opts.detail ?? {}), opts.req ? clientIp(opts.req) : null, ua],
   ).catch(() => {});
 }
 

@@ -325,7 +325,7 @@ export function startAutofix(
   };
   active = a;
   // The audit line is written when the run ends, long after the request: its IP and user agent are taken now.
-  const from = o.req ? { ip: o.req.ip, headers: { 'x-forwarded-for': o.req.headers['x-forwarded-for'], 'user-agent': o.req.headers['user-agent'] } } as unknown as FastifyRequest : undefined;
+  const from = o.req ? { ip: o.req.ip, headers: { 'user-agent': o.req.headers['user-agent'] } } as unknown as FastifyRequest : undefined;
   lastRun = runAll(a, from).catch((e) => console.warn(`[autofix] ${(e as Error)?.message || e}`));
   return { runId: id };
 }

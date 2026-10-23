@@ -1,8 +1,9 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import type { FastifyReply, FastifyRequest, FastifyServerOptions } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { q, one } from './db';
 import { env } from '../env';
 import { isDesktop } from './desktop';
+import { clientZone, sameNetwork, type Zone } from './clientAddr';
 
 export const REFRESH_COOKIE = 'yomi_rt';
 // Stateless JWT cookie that authorizes <img> requests to /img/* (which can't send a Bearer header).
@@ -144,32 +145,64 @@ export async function resolveOpdsBasic(authHeader?: string): Promise<OpdsIdentit
  */
 export const refreshExpiresAt = () => Date.now() + env.REFRESH_TTL_DAYS * 24 * 60 * 60 * 1000;
 
-/** Issue a fresh opaque refresh token for a new sign-in and persist its hash. Returns the raw token. */
+/**
+ * How a session was entered (refresh_tokens.via), written once at sign-in and carried through every rotation. All but
+ * two carry a credential. `switch` was opened without one from another account's session, `local-pick` from the
+ * sign-in screen's "who is reading?" at home, both into a profile that opens at home:
+ * each is good only from the local network (clientZone), on every request, and creates no credential
+ * (requireCredentialSession).
+ */
+export type SessionVia = 'password' | 'oidc' | 'desktop' | 'register' | 'setup' | 'switch' | 'local-pick';
+
+/** A session entered without a credential: held to the local network. A row from before the column (null) had one. */
+export const withoutCredential = (via: string | null | undefined): boolean => via === 'switch' || via === 'local-pick';
+
+/**
+ * Issue a fresh opaque refresh token for a new sign-in and persist its hash. Returns the raw token.
+ *
+ * The row starts a session: its id is also its `session_id`, the name the session keeps through every rotation
+ * (supersede). `parentSession` names the session this one was opened from, and ending that one ends this one too
+ * (revokeDerived).
+ */
 export async function issueRefreshToken(
   userId: string,
-  opts: { deviceId?: string; deviceName?: string; ip?: string | null; userAgent?: string | null } = {},
+  opts: {
+    deviceId?: string; deviceName?: string; ip?: string | null; userAgent?: string | null;
+    via?: SessionVia; parentSession?: string;
+    /** Sooner than REFRESH_TTL_DAYS: a session opened from another ends no later than it would. */
+    expiresAt?: Date;
+  } = {},
 ): Promise<string> {
   const token = randomBytes(48).toString('hex');
-  const expires = new Date(refreshExpiresAt());
+  const expires = opts.expiresAt ?? new Date(refreshExpiresAt());
+  const id = randomUUID();
   await q(
-    `INSERT INTO refresh_tokens (user_id, token_hash, device_id, device_name, expires_at, ip, user_agent, last_seen)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
-    [userId, sha256(token), opts.deviceId ?? null, opts.deviceName ?? null, expires, opts.ip ?? null, (opts.userAgent ?? null)?.slice(0, 200) ?? null],
+    `INSERT INTO refresh_tokens (id, session_id, user_id, token_hash, device_id, device_name, expires_at, ip, user_agent, last_seen, via, parent_session)
+     VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8, now(), $9, $10)`,
+    [id, userId, sha256(token), opts.deviceId ?? null, opts.deviceName ?? null, expires, opts.ip ?? null,
+      (opts.userAgent ?? null)?.slice(0, 200) ?? null, opts.via ?? null, opts.parentSession ?? null],
   );
   return token;
 }
 
+/** A live refresh token's session: who, which device, which session, how it was entered and until when. */
+export interface LiveSession {
+  userId: string; id: string; deviceId: string | null; deviceName: string | null;
+  sessionId: string; via: string | null; expiresAt: Date;
+}
+
 /** Validate a refresh token; returns the owning user id + device info, or null. */
-export async function validateRefreshToken(
-  token: string,
-): Promise<{ userId: string; id: string; deviceId: string | null; deviceName: string | null } | null> {
-  const row = await one<{ id: string; user_id: string; device_id: string | null; device_name: string | null }>(
-    `SELECT id, user_id, device_id, device_name FROM refresh_tokens
+export async function validateRefreshToken(token: string): Promise<LiveSession | null> {
+  const row = await one<{ id: string; user_id: string; device_id: string | null; device_name: string | null; session_id: string; via: string | null; expires_at: Date }>(
+    `SELECT id, user_id, device_id, device_name, COALESCE(session_id, id) AS session_id, via, expires_at FROM refresh_tokens
      WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
      LIMIT 1`,
     [sha256(token)],
   );
-  return row ? { userId: row.user_id, id: row.id, deviceId: row.device_id, deviceName: row.device_name } : null;
+  return row ? {
+    userId: row.user_id, id: row.id, deviceId: row.device_id, deviceName: row.device_name,
+    sessionId: row.session_id, via: row.via, expiresAt: row.expires_at,
+  } : null;
 }
 
 /**
@@ -209,7 +242,8 @@ export const REFRESH_RECOVER_MS = 24 * 3600_000;
 
 interface PresentedToken {
   id: string; user_id: string; device_id: string | null; device_name: string | null; expires_at: Date;
-  replaced_by: string | null; revoked: boolean; used: boolean; in_grace: boolean;
+  replaced_by: string | null; revoked: boolean; used: boolean; in_grace: boolean; via: string | null;
+  ip: string | null; session_id: string;
 }
 interface ChainLink {
   id: string; replaced_by: string | null; device_id: string | null; device_name: string | null; expires_at: Date;
@@ -254,7 +288,7 @@ export type RefreshPlan =
  */
 export async function planRefresh(token: string, graceMs: number = REFRESH_GRACE_MS, recoverMs: number = REFRESH_RECOVER_MS): Promise<RefreshPlan> {
   const row = await one<PresentedToken>(
-    `SELECT id, user_id, device_id, device_name, expires_at, replaced_by,
+    `SELECT id, user_id, device_id, device_name, expires_at, replaced_by, via, ip, COALESCE(session_id, id) AS session_id,
             revoked_at IS NOT NULL AS revoked, used_at IS NOT NULL AS used,
             COALESCE(revoked_at > now() - make_interval(secs => $2), false) AS in_grace
        FROM refresh_tokens
@@ -302,6 +336,10 @@ export async function planRefresh(token: string, graceMs: number = REFRESH_GRACE
  * Supersede the live token `oldId` with a new one, in ONE statement: the new row exists only if the old one
  * was still live when this ran. Two requests racing on one token therefore cannot both succeed, where the
  * old insert-then-revoke let both insert and left two live tokens for one device. Null when it lost.
+ *
+ * The new token is the same session: it takes the old one's `session_id` (its own id for a row from before the
+ * column), `parent_session` and `via`. Reintroduce by leaving them out: "a session keeps its name, its parent and its
+ * way in through every rotation" in sessionLineage.int.test.ts sees a rotated child outlive its parent.
  */
 async function supersede(
   oldId: string,
@@ -313,21 +351,53 @@ async function supersede(
        UPDATE refresh_tokens
           SET revoked_at = now(), replaced_by = $1, used_at = CASE WHEN $2 THEN now() ELSE used_at END
         WHERE id = $3 AND revoked_at IS NULL
-        RETURNING user_id
+        RETURNING user_id, COALESCE(session_id, id) AS session_id, parent_session, via
      )
-     INSERT INTO refresh_tokens (id, user_id, token_hash, device_id, device_name, expires_at, ip, user_agent, last_seen)
-     SELECT $1, user_id, $4, $5, $6, $7, $8, $9, now() FROM old
+     INSERT INTO refresh_tokens (id, user_id, token_hash, device_id, device_name, expires_at, ip, user_agent, last_seen,
+                                 session_id, parent_session, via)
+     SELECT $1, user_id, $4, $5, $6, $7, $8, $9, now(), session_id, parent_session, via FROM old
      RETURNING id`,
     [randomUUID(), o.used, oldId, sha256(token), o.deviceId, o.deviceName, o.expiresAt, o.ip, o.userAgent?.slice(0, 200) ?? null],
   );
   return row ? token : null;
 }
 
+/**
+ * Take up a remembered session on its device (lib/deviceRing.ts, POST /auth/resume): its live token is superseded by a
+ * new one, as a refresh supersedes it, and the session keeps the expiry it has. Null when the token moved on meanwhile.
+ */
+export async function resumeHead(
+  head: { id: string; expiresAt: Date; deviceId: string | null; deviceName: string | null },
+  meta: { ip: string | null; userAgent: string | null },
+): Promise<string | null> {
+  return supersede(head.id, { used: true, expiresAt: head.expiresAt, deviceId: head.deviceId, deviceName: head.deviceName, ...meta });
+}
+
+/**
+ * The live token of the session a session was opened from (`parent_session`), when that session belongs to `userId`:
+ * what Uchiyomi Desktop's owner goes back to from a profile switched to on this PC (POST /auth/desktop).
+ */
+export async function parentHeadOf(sessionId: string, userId: string): Promise<{ id: string; expiresAt: Date; deviceId: string | null; deviceName: string | null } | null> {
+  const row = await one<{ id: string; expires_at: Date; device_id: string | null; device_name: string | null }>(
+    `SELECT h.id, h.expires_at, h.device_id, h.device_name
+       FROM refresh_tokens c JOIN refresh_tokens h ON h.session_id = c.parent_session
+      WHERE c.session_id = $1 AND h.user_id = $2 AND h.revoked_at IS NULL AND h.expires_at > now()
+      ORDER BY h.created_at DESC LIMIT 1`,
+    [sessionId, userId]);
+  return row ? { id: row.id, expiresAt: row.expires_at, deviceId: row.device_id, deviceName: row.device_name } : null;
+}
+
+/** `local`: the session was entered without a credential and holds only at home, so what is minted for it says so. */
 export type RefreshExchange =
   | { kind: 'refused' }
   | { kind: 'disabled' }
-  | { kind: 'grace'; userId: string; role: string; expiresAt: number }
-  | { kind: 'rotated' | 'recovered'; userId: string; role: string; token: string; expiresAt: number };
+  | { kind: 'remote' }
+  | { kind: 'grace'; userId: string; role: string; expiresAt: number; local: boolean }
+  | {
+    kind: 'rotated' | 'recovered'; userId: string; role: string; token: string; expiresAt: number; local: boolean;
+    /** The session refreshed from another network than its last (sameNetwork): what the soft audit line says. */
+    moved?: { session: string; from: string | null };
+  };
 
 /**
  * The refresh endpoint's whole decision: plan (`planRefresh`), then carry the plan out.
@@ -337,20 +407,30 @@ export type RefreshExchange =
  * lifetime only for a real rotation. ⚠️ `grace` reports the presented token's OWN expiry: answering it with
  * `refreshExpiresAt()` would hand the device a full fresh TTL every time two tabs raced -- an offline grace
  * that renews itself without a single token ever being issued.
+ *
+ * `remote`: a session entered without a credential, presented from outside the local network. Nothing is rotated or
+ * ended -- back home the same cookie works again -- and the caller answers 401 `local_only`. Reintroduce by dropping
+ * the check: "outside, a session entered without a password refreshes nothing" in profileZone.int.test.ts gets a 200.
  */
 export async function exchangeRefreshToken(
   token: string,
-  meta: { ip: string | null; userAgent: string | null },
+  { zone, ...meta }: { ip: string | null; userAgent: string | null; zone: Zone },
 ): Promise<RefreshExchange> {
   for (let attempt = 0; ; attempt++) {
     const plan = await planRefresh(token);
     if (plan.kind === 'refuse') {
       // Step 3. The jar that presented this is cleared by the 401 either way, so ending the session costs the
       // device nothing it was not already losing; what it takes away is the OTHER holder's token.
-      if (plan.endSession) await q('UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL', [plan.endSession]);
+      if (plan.endSession) {
+        await revokeDerived(await q<{ s: string }>(
+          'UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL RETURNING COALESCE(session_id, id) AS s',
+          [plan.endSession]));
+      }
       return { kind: 'refused' };
     }
     const t = plan.token;
+    const local = withoutCredential(t.via);
+    if (local && zone !== 'local') return { kind: 'remote' };
     const user = await one<{ disabled: boolean; role: string }>('SELECT disabled, role FROM users WHERE id = $1', [t.user_id]);
     if (user?.disabled) {
       await revokeAllSessions(t.user_id);
@@ -358,16 +438,21 @@ export async function exchangeRefreshToken(
     }
     const role = user?.role ?? 'user';
     // Three lost races in a row: every plan said this token is good, so answer without touching the cookie.
-    if (plan.kind === 'grace' || attempt >= 3) return { kind: 'grace', userId: t.user_id, role, expiresAt: t.expires_at.getTime() };
+    if (plan.kind === 'grace' || attempt >= 3) return { kind: 'grace', userId: t.user_id, role, expiresAt: t.expires_at.getTime(), local };
 
     if (plan.kind === 'rotate') {
-      const expiresAt = new Date(refreshExpiresAt());
+      // A session entered without a credential lives no longer than it was given: a rotation keeps its expiry rather
+      // than starting a fresh REFRESH_TTL_DAYS. One opened from another session ends no later than that one would; one
+      // picked on the sign-in screen at home ends REFRESH_TTL_DAYS after the pick, however often the tablet is used.
+      // Reintroduce the fresh lifetime: profileLocalPick.int.test.ts sees a picked session outlive its first expiry.
+      const expiresAt = withoutCredential(t.via) ? t.expires_at : new Date(refreshExpiresAt());
       const next = await supersede(t.id, { used: true, expiresAt, deviceId: t.device_id, deviceName: t.device_name, ...meta });
-      if (next) return { kind: 'rotated', userId: t.user_id, role, token: next, expiresAt: expiresAt.getTime() };
+      const moved = t.ip && meta.ip && !sameNetwork(t.ip, meta.ip) ? { session: t.session_id, from: t.ip } : undefined;
+      if (next) return { kind: 'rotated', userId: t.user_id, role, token: next, expiresAt: expiresAt.getTime(), local, moved };
     } else if (plan.kind === 'recover') {
       const h = plan.head;
       const next = await supersede(h.id, { used: false, expiresAt: h.expires_at, deviceId: h.device_id, deviceName: h.device_name, ...meta });
-      if (next) return { kind: 'recovered', userId: t.user_id, role, token: next, expiresAt: h.expires_at.getTime() };
+      if (next) return { kind: 'recovered', userId: t.user_id, role, token: next, expiresAt: h.expires_at.getTime(), local };
     }
     // Another request moved this session on between the plan and the write. Plan again from where it left it.
   }
@@ -431,30 +516,43 @@ export const touchSession = (id: string, ip?: string | null, ua?: string | null)
 export const listSessions = (userId: string) =>
   q(`SELECT id, device_name, device_id, ip, user_agent, created_at, last_seen FROM refresh_tokens
      WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now() ORDER BY last_seen DESC`, [userId]);
-export const revokeSessionForUser = (userId: string, id: string) =>
-  q('UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL', [id, userId]);
-export const revokeAllSessions = (userId: string, exceptId?: string) =>
-  q(`UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL${exceptId ? ' AND id <> $2' : ''}`,
-    exceptId ? [userId, exceptId] : [userId]);
+export async function revokeSessionForUser(userId: string, id: string): Promise<void> {
+  await revokeDerived(await q<{ s: string }>(
+    `UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL
+     RETURNING COALESCE(session_id, id) AS s`, [id, userId]));
+}
+export async function revokeAllSessions(userId: string, exceptId?: string): Promise<void> {
+  await revokeDerived(await q<{ s: string }>(
+    `UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL${exceptId ? ' AND id <> $2' : ''}
+     RETURNING COALESCE(session_id, id) AS s`,
+    exceptId ? [userId, exceptId] : [userId]));
+}
 
 /**
- * Client IP, as Fastify resolved it under `trustProxy` (server.ts, env.TRUST_PROXY).
- *
- * This used to read the first X-Forwarded-For entry whatever `trustProxy` said, and the first entry is the one a
- * client writes itself -- a proxy appends to the header, it does not replace it. `req.ip` walks the chain from the
- * socket back through the trusted proxies only, so it is the address the nearest untrusted hop connected from.
+ * End every session opened from one that has just ended (refresh_tokens.parent_session), and every one opened from
+ * those: a profile entered from another account's session lasts no longer than it.
+ * Each way a session ends calls this with what it ended -- sign-out, a revoke, sign-out-everywhere, a password change,
+ * a disable, step 3 of planRefresh. A rotation (supersede) ends a token, not a session, and does not. UNION, not
+ * UNION ALL, so a cycle cannot loop. Reintroduce by dropping a call: its case in sessionLineage.int.test.ts sees the
+ * child refresh.
  */
-export function clientIp(req: FastifyRequest): string | null {
-  return (req.ip || '').slice(0, 64) || null;
+async function revokeDerived(ended: Array<{ s: string }>): Promise<void> {
+  if (!ended.length) return;
+  await q(
+    `WITH RECURSIVE kids AS (
+       SELECT session_id AS s FROM refresh_tokens WHERE parent_session = ANY($1::uuid[])
+       UNION
+       SELECT r.session_id FROM refresh_tokens r JOIN kids k ON r.parent_session = k.s
+     )
+     UPDATE refresh_tokens SET revoked_at = now()
+      WHERE revoked_at IS NULL AND session_id IN (SELECT s FROM kids)`,
+    [[...new Set(ended.map((e) => e.s))]],
+  );
 }
 
-/** env.TRUST_PROXY as Fastify's `trustProxy` option: true, false, or the address list as written. */
-export function trustProxySetting(raw: string): FastifyServerOptions['trustProxy'] {
-  const v = raw.trim().toLowerCase();
-  if (v === 'true') return true;
-  if (v === 'false' || v === '') return false;
-  return raw.trim();
-}
+// The client's address, and which proxies may say what it is, are read in one place, lib/clientAddr.ts, beside the zone
+// they decide. Exported here as well because every caller has always imported them from this file.
+export { clientIp, trustProxySetting, trustProxyProblems, trustProxyWarnings } from './clientAddr';
 
 /**
  * Sign-out: end the session this token belongs to, not just the token.
@@ -466,7 +564,7 @@ export function trustProxySetting(raw: string): FastifyServerOptions['trustProxy
  * is what makes the end final (step 1).
  */
 export async function revokeRefreshToken(token: string): Promise<void> {
-  await q(
+  await revokeDerived(await q<{ s: string }>(
     `WITH RECURSIVE chain AS (
        SELECT id, replaced_by, 1 AS depth FROM refresh_tokens WHERE token_hash = $1
        UNION ALL
@@ -475,13 +573,15 @@ export async function revokeRefreshToken(token: string): Promise<void> {
         WHERE c.depth < $2
      )
      UPDATE refresh_tokens SET revoked_at = now()
-      WHERE id IN (SELECT id FROM chain) AND revoked_at IS NULL`,
+      WHERE id IN (SELECT id FROM chain) AND revoked_at IS NULL
+     RETURNING COALESCE(session_id, id) AS s`,
     [sha256(token), CHAIN_MAX],
-  );
+  ));
 }
 
 export async function revokeRefreshTokenById(id: string): Promise<void> {
-  await q(`UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1`, [id]);
+  await revokeDerived(await q<{ s: string }>(
+    `UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1 RETURNING COALESCE(session_id, id) AS s`, [id]));
 }
 
 /** Pull the authenticated user id out of a verified JWT. */
@@ -709,4 +809,22 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
   const current = await one<{ role: string }>('SELECT role FROM users WHERE id = $1 AND NOT disabled', [subject]);
   if (!current) return reply.code(401).send({ error: 'unauthorized' });
   (request.user as { role: string }).role = current.role;
+  // A session entered without a credential (`loc`, signAccess in routes/auth.ts) is good at home only, on every request
+  // and not just the next refresh: a phone that leaves the house stops at its next call. Reintroduce by dropping it:
+  // "outside, a session entered without a password opens nothing" in profileZone.int.test.ts sees 200.
+  if ((request.user as { loc?: unknown }).loc === true && clientZone(request) !== 'local') {
+    return reply.code(401).send({ error: 'local_only' });
+  }
+}
+
+/**
+ * Route guard, after `authenticate`: 403 for a session entered without a credential. Such a session must not make one
+ * -- an API or OPDS token, a password, a second factor, a link to the sign-on provider -- or a profile opened at home
+ * would leave with something that works from anywhere. Reintroduce by dropping it from a route: its line in
+ * profileZone.int.test.ts sees the credential made.
+ */
+export async function requireCredentialSession(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  if ((request.user as { loc?: unknown } | undefined)?.loc === true) {
+    return reply.code(403).send({ error: 'credential_required', message: 'Sign in with a password to do this.' });
+  }
 }

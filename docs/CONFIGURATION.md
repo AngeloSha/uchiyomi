@@ -28,7 +28,39 @@ The ones worth knowing:
   app's port directly, around your proxy (another device on the LAN, another container on its Docker network), set
   `TRUST_PROXY` to your proxy's own address, so only it can say who a visitor is (`TRUST_PROXY=172.18.0.5`), or to
   `false` when there is no proxy at all. Since v0.78.1 sign-in counts wrong passwords per address and name, so the
-  address the app sees is worth getting right.
+  address the app sees is worth getting right. An entry the app cannot read (a typo like `loopbak`, a range like
+  `10.0.0.0/33`) stops it at start, with a `[net]` line in `docker logs uchiyomi` naming the entry; a stray comma is
+  ignored. Two values that work but rarely mean what was meant are said in the same log at every start: `true`, and a
+  bare number. Some guides spell "trust one proxy" as `TRUST_PROXY=1`, but here `1` is read as the address 0.0.0.1
+  and trusts no proxy at all. Unset, it can be changed in Admin -> Settings -> Server -> Home network instead (see below).
+- `LOCAL_NETWORKS`: your home network, as addresses or CIDR ranges (`LOCAL_NETWORKS=192.168.1.0/24`, an IPv6 range
+  beside it if your devices use one), or `none`. Profiles without a password open from these networks only: from
+  anywhere else, only an account with a password (or single sign-on) gets in, and a profile without one stops working
+  on the next request once a phone leaves home. Unset, the home network is set in Admin -> Settings -> Server -> Home
+  network, and its default is the private networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, loopback,
+  link-local and their IPv6 kin), as Sonarr and Radarr read "local addresses". One thing that default cannot see: a
+  proxy or a NAT that hands the app every visitor as its own private address -- a reverse proxy that does not send
+  `X-Forwarded-For`, Docker Desktop's port forwarding -- puts the whole internet at home. The same page lists the
+  address the server sees for you and for every signed-in device, each marked at home or outside: if a phone on mobile
+  data reads "at home", write your real network there, or `none`. Write the network, not a name (`uniquelocal` is
+  refused), never `0.0.0.0/0`; the app stops at start on a value it cannot read, and refuses `LOCAL_NETWORKS` together
+  with `TRUST_PROXY=true`, which would let anyone claim a home address (with `TRUST_PROXY=true` and no `LOCAL_NETWORKS`,
+  nobody is at home).
+- **Behind a reverse proxy, name it by address** (`TRUST_PROXY=loopback, 172.18.0.5`, or on the settings page's
+  *Trusted proxies*): a request that comes through a proxy counts as at home only when every proxy on its way is written
+  out by address or range. The default names (`loopback`, `linklocal`, `uniquelocal`) trust every private peer, which is
+  right for the activity log and the sign-in limits, but a chain of private hops -- Docker Desktop's port forwarding, a
+  proxy behind a router -- would then let a visitor write their own `X-Forwarded-For` and pick a home address. Reaching
+  the app's port directly from home needs nothing. The settings page names the proxy you came through when it is not
+  written out, with a key that trusts it alone.
+- **Through Cloudflare, nobody is at home.** A request that crossed Cloudflare's edge -- a Cloudflare Tunnel, or its
+  proxy -- carries `CF-Ray` and `CF-Connecting-IP`, and counts as outside whatever address the hops after it report:
+  `cloudflared` runs at home, so to the proxy behind it every visitor looks like a home address. At home, reach the app
+  by its local address, or by a local DNS name that points at your proxy. Another tunnel (Tailscale Funnel, ngrok, a
+  WireGuard proxy) has no such mark: with one, write your real home network instead of the private-networks default, so
+  the tunnel's own address is not home.
+- **Set in the environment, either one wins**: the settings page shows its value and cannot change it, so what your
+  compose file says is what runs. Saved on the page, a change is in force at the next request, with no restart.
 - `LOG_LEVEL` (since v0.92.0): how much the server log says (`docker logs uchiyomi`). `info` by default, a line for
   every request; `warn` keeps only warnings and errors. `debug` adds, for each series a *Find other sources* run
   looks at, the names it searched each source under, what each source answered, which result it took, and why a

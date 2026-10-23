@@ -89,6 +89,33 @@ libraries, an age limit, downloads) is the admin's choice, under **Admin → Mem
 switch off there is no such link, and accounts come from the admin (**Admin → Members**). The desktop app never offers
 it.
 
+**Profiles without a password.** A household can give the children, or anyone who reads on the family tablet, a
+profile of their own that opens without a password, with its own progress, favourites and history. Tap your profile
+photo, then **Switch profile**: the profiles you manage are a tap away, and **Sign in with another account** takes you
+back to this screen. They open from your home network only. From anywhere else, on mobile data or a friend's Wi-Fi,
+only an account with a password (or single sign-on) gets in, and a profile without one stops at its next request
+until you are home again: the sign-in screen then says *This profile opens from home only*. Signing out of the account
+you switched from closes the profiles opened from it on that device. Which networks are home is set in **Admin →
+Settings → Server → Home network**: by default the private networks your router hands out (192.168.x, 10.x, 172.16–31.x),
+or the networks you write there, or none. The same place names the reverse proxies allowed to say who is connecting, and
+lists the address the server sees for each signed-in device, at home or outside, so a proxy that hides everyone behind
+its own address shows. Behind a reverse proxy, write its address in **Trusted proxies** (the page offers it when you
+reach the server through one): until then nobody behind the proxy counts as at home. Through a Cloudflare Tunnel nobody
+does: at home, open the app by its local address or a local DNS name. `LOCAL_NETWORKS` and `TRUST_PROXY`
+in the environment outrank the page ([Configuration](CONFIGURATION.md)).
+An admin can also turn on **Admin → Settings → Server → Choose a profile at home**: at home, the sign-in screen then
+lists those profiles under *Who is reading?*, a tap each, with nobody else signed in first. From outside it lists
+nothing.
+> 💻 **In the desktop app** the computer's owner adds these profiles under **Profile → Account → Profiles** and switches
+> to one with **Switch profile**; **Back to my account** returns to the owner. The desktop app is home, so they always open
+> there.
+
+**Remember on this device.** Tick it under the password when you sign in, and this device keeps you: the sign-in
+screen lists you under *On this device*, and the others signed in here find you under **Switch profile**, a tap away
+without your password, for as long as your session lasts. **Sign out** forgets you on this device; **Sign in with
+another account** keeps you remembered. An admin is asked for the password again after 12 hours. Nothing is
+remembered unless you tick it, so a shared tablet keeps nobody by default.
+
 ---
 
 ## 3. Your library
@@ -3007,7 +3034,12 @@ Once you have more than one, the Library page grows a row of tabs to switch betw
 
 **Members:** create accounts (user or admin), reset passwords, and per-user controls: make admin/member,
 disable, or allow/deny downloads. Each row shows whether the member has 2FA on, and the provider's name on an account
-linked to single sign-on. On a server that signs in through its provider only (since v0.63.0), Members makes no
+linked to single sign-on. **Opens at home without a password**, on *New account* or on a member's card, makes a
+profile that opens from your home network with no password (§2): never an admin, and with a password as well it signs
+in with it from anywhere else. Choose who manages it, the account that switches to it from its profile photo; under
+the switch, Members says the address the server sees you at and whether that is at home. **Remove password** leaves
+such a profile opening at home alone. **Can make profiles** lets a member add up to six of their own, under
+**Profile → Account → Profiles**; each starts with no more than that member may see. On a server that signs in through its provider only (since v0.63.0), Members makes no
 account and resets no password: a card says where accounts come from instead, the provider's sign-in, and whether
 it makes new ones (`OIDC_ALLOW_SIGNUP`). Everything else here works as before.
 
