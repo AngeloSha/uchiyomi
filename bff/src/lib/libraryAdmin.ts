@@ -618,6 +618,8 @@ const SERIES_KEYED_TABLES = [
   'backup_misses',
   // v0.85.0: the names its translated pages keep (lib/translate/pages.ts). Cascades too; named for the same count.
   'translate_names',
+  // Its English, romaji and native titles from AniList (lib/otherTitles.ts). Cascades too; named for the same count.
+  'series_other_titles',
 ] as const;
 
 export interface ForgetRefusal {
