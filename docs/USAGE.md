@@ -100,7 +100,8 @@ Settings → Server → Home network**: by default the private networks your rou
 or the networks you write there, or none. The same place names the reverse proxies allowed to say who is connecting, and
 lists the address the server sees for each signed-in device, at home or outside, so a proxy that hides everyone behind
 its own address shows. Behind a reverse proxy, write its address in **Trusted proxies** (the page offers it when you
-reach the server through one): until then nobody behind the proxy counts as at home. `LOCAL_NETWORKS` and `TRUST_PROXY`
+reach the server through one): until then nobody behind the proxy counts as at home. Through a Cloudflare Tunnel nobody
+does: at home, open the app by its local address or a local DNS name. `LOCAL_NETWORKS` and `TRUST_PROXY`
 in the environment outrank the page ([Configuration](CONFIGURATION.md)).
 An admin can also turn on **Admin → Settings → Server → Choose a profile at home**: at home, the sign-in screen then
 lists those profiles under *Who is reading?*, a tap each, with nobody else signed in first. From outside it lists

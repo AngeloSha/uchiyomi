@@ -53,6 +53,12 @@ The ones worth knowing:
   proxy behind a router -- would then let a visitor write their own `X-Forwarded-For` and pick a home address. Reaching
   the app's port directly from home needs nothing. The settings page names the proxy you came through when it is not
   written out, with a key that trusts it alone.
+- **Through Cloudflare, nobody is at home.** A request that crossed Cloudflare's edge -- a Cloudflare Tunnel, or its
+  proxy -- carries `CF-Ray` and `CF-Connecting-IP`, and counts as outside whatever address the hops after it report:
+  `cloudflared` runs at home, so to the proxy behind it every visitor looks like a home address. At home, reach the app
+  by its local address, or by a local DNS name that points at your proxy. Another tunnel (Tailscale Funnel, ngrok, a
+  WireGuard proxy) has no such mark: with one, write your real home network instead of the private-networks default, so
+  the tunnel's own address is not home.
 - **Set in the environment, either one wins**: the settings page shows its value and cannot change it, so what your
   compose file says is what runs. Saved on the page, a change is in force at the next request, with no restart.
 - `LOG_LEVEL` (since v0.92.0): how much the server log says (`docker logs uchiyomi`). `info` by default, a line for

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4259
+    "strings": 4261
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4262,5 +4262,7 @@
   "at home": "在家",
   "outside": "在外",
   "You reach the server through the proxy {ip}, trusted only as part of a private network. Until its address is in Trusted proxies, nobody behind it counts as at home: a visitor could write their own address.": "你通过代理 {ip} 访问服务器，它仅因属于私有网络而被信任。在把它的地址填入“受信任的代理”之前，它后面的任何人都不算在家：访问者可能会自己写入地址。",
-  "Trust only {ip}": "只信任 {ip}"
+  "Trust only {ip}": "只信任 {ip}",
+  "You reach the server through Cloudflare, where nobody counts as at home. At home, open it by its local address, or by a local DNS name that points at your proxy.": "你通过 Cloudflare 访问服务器，经由 Cloudflare 的任何人都不算在家。在家时，请通过本地地址或指向你代理的本地 DNS 名称打开它。",
+  "You reach the server through a proxy while home is still every private network: a tunnel or a container running at home looks like home too. Choose These networks above and write your own network, e.g. 192.168.1.0/24.": "你通过代理访问服务器，而家庭网络仍是所有私有网络：在家中运行的隧道或容器也会被当作在家。请在上方选择“这些网络”，并填写你自己的网络，例如 192.168.1.0/24。"
 }

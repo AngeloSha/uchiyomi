@@ -35,7 +35,7 @@ import { worstCase } from '../lib/repairEstimate';
 import { authenticate, requireAdmin, userIdOf, roleOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
 import {
   DEFAULT_TRUSTED_PROXIES, PRIVATE_NETWORKS, atHome, clientIp, clientZone, localNetworks, networkConfig, networkSettingProblem,
-  networkWarnings, saveNetworkSettings, tidyNetworkSetting, unnamedHop,
+  networkWarnings, saveNetworkSettings, tidyNetworkSetting, unnamedHop, viaCloudflare,
 } from '../lib/clientAddr';
 import { logAudit, recentAudit } from '../lib/audit';
 import { markRemoved, forgetVerdict } from '../lib/scoutMemory';
@@ -5106,7 +5106,10 @@ export default async function adminRoutes(app: FastifyInstance) {
    * or a NAT that hides who is connecting makes everyone look the same, and at home, which this list shows before it
    * matters. `suggestion` is the admin's own /24 when it is a private one: "Use my network". `proxy_unnamed` names the
    * proxy this very request came through that is trusted only by loopback/linklocal/uniquelocal: nobody behind it is at
-   * home until it is written out (lib/clientAddr.ts unnamedHop).
+   * home until it is written out (lib/clientAddr.ts unnamedHop). `via_cloudflare`: this request came through
+   * Cloudflare, where nobody is at home (viaCloudflare) -- at home, the app is opened by a local address or a local DNS
+   * name instead. `home_default_proxy`: this request came through a proxy while home is still the private
+   * networks, which a tunnel's own container belongs to.
    */
   const networkState = async (req: FastifyRequest) => {
     const c = networkConfig();
@@ -5130,7 +5133,14 @@ export default async function adminRoutes(app: FastifyInstance) {
       trustedProxies: c.trustedProxies,
       defaults: { localNetworks: PRIVATE_NETWORKS, trustedProxies: DEFAULT_TRUSTED_PROXIES },
       suggestion: ownNet && localNetworks(PRIVATE_NETWORKS).check(plain!, 'ipv4') ? ownNet : null,
-      warnings: [...networkWarnings(c), ...(hop ? [{ code: 'proxy_unnamed' as const, ip: hop }] : [])],
+      warnings: [
+        ...networkWarnings(c),
+        ...(viaCloudflare(req) ? [{ code: 'via_cloudflare' as const }] : []),
+        ...(hop ? [{ code: 'proxy_unnamed' as const, ip: hop }] : []),
+        // Through a proxy with home still the private networks: a tunnel's own container (cloudflared, ngrok, a
+        // WireGuard peer) has a private address, and only a home written out keeps it outside.
+        ...((req.ips?.length ?? 1) > 1 && c.localNetworks.source === 'default' ? [{ code: 'home_default_proxy' as const }] : []),
+      ],
       recent: recent.map((r) => ({ ip: r.ip, lastSeen: r.last_seen, name: r.display_name, zone: atHome(r.ip) ? 'local' : 'remote' })),
     };
   };

@@ -113,6 +113,25 @@ test('the home network on the settings page', { skip }, async (t) => {
       assert.equal(recent.find((r) => r.ip === '198.51.100.8')?.zone, 'remote');
     });
 
+    await t.test('through Cloudflare the page says nobody is at home, and why', async () => {
+      const r = (await app.inject({
+        method: 'GET', url: '/api/admin/network', remoteAddress: '172.18.0.5',
+        headers: { ...asAdmin, 'x-forwarded-for': '79.23.184.6, 172.19.0.3', 'cf-ray': '8a1b2c3d4e5f6a7b-MXP', 'cf-connecting-ip': '79.23.184.6' },
+      })).json();
+      assert.equal(r.zone, 'remote');
+      assert.ok(r.warnings.some((w: any) => w.code === 'via_cloudflare'), JSON.stringify(r.warnings));
+    });
+
+    await t.test('through a proxy with home still the private networks, the page asks for the real one', async () => {
+      // Reintroduce by dropping the warning: a tunnel's container, private, stays home and nobody is told.
+      const via = async () => (await get('172.18.0.5', '192.168.1.30')).json().warnings.map((w: any) => w.code);
+      assert.ok((await via()).includes('home_default_proxy'));
+      assert.equal((await patch({ localNetworks: '192.168.1.0/24' })).statusCode, 200);
+      assert.ok(!(await via()).includes('home_default_proxy'), 'a home written out is what it asks for');
+      await patch({ localNetworks: null });
+      assert.ok(!(await get('192.168.1.20')).json().warnings.some((w: any) => w.code === 'home_default_proxy'), 'straight to the port: nothing to say');
+    });
+
     await t.test('a save is written down', async () => {
       await patch({ localNetworks: '192.168.1.0/24' });
       const row = await one<{ user_id: string; detail: any }>(

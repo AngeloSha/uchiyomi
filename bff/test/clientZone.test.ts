@@ -208,6 +208,32 @@ test('what the settings page saves is in force at the next request, the trusted 
   }
 });
 
+test('through Cloudflare nobody is at home, whatever the hops after it report', async () => {
+  // Outside: internet -> Cloudflare -> cloudflared -> Nginx -> app. Inside: local DNS -> Nginx -> app. With Nginx
+  // named, the hop before it is cloudflared, a home address of its own: every visitor through the tunnel read as at
+  // home. The edge's CF-Ray / CF-Connecting-IP say otherwise. Reintroduce by dropping viaCloudflare from clientZone:
+  // the tunnel's visitor below reads local.
+  const { useNetworkSettings, viaCloudflare } = await import('../src/lib/clientAddr');
+  const Fastify = (await import('fastify')).default;
+  const app = Fastify({ trustProxy: (await import('../src/lib/clientAddr')).trustsPeer });
+  app.get('/', async (req) => ({ zone: (await import('../src/lib/clientAddr')).clientZone(req), cf: viaCloudflare(req) }));
+  const ask = (ra: string, headers: Record<string, string>) => app.inject({ url: '/', remoteAddress: ra, headers }).then((r) => r.json());
+  try {
+    useNetworkSettings({ localNetworks: null, trustedProxies: '192.168.1.10' });
+    const tunnel = { 'x-forwarded-for': '79.23.184.6, 172.19.0.3', 'cf-connecting-ip': '79.23.184.6', 'cf-ray': '8a1b2c3d4e5f6a7b-MXP' };
+    assert.deepEqual(await ask('192.168.1.10', tunnel), { zone: 'remote', cf: true }, 'through the tunnel, from the internet');
+    assert.deepEqual(await ask('192.168.1.10', { 'cf-ray': '8a1b2c3d4e5f6a7b-MXP', 'x-forwarded-for': '172.19.0.3' }),
+      { zone: 'remote', cf: true }, 'CF-Ray alone is enough');
+    assert.deepEqual(await ask('192.168.1.10', { 'x-forwarded-for': '192.168.1.23' }), { zone: 'local', cf: false },
+      'at home through the same Nginx, by a local DNS name');
+    assert.deepEqual(await ask('192.168.1.23', {}), { zone: 'local', cf: false }, 'at home, straight to the port');
+    assert.equal((await ask('192.168.1.23', { 'cf-ray': 'x' })).zone, 'remote', 'adding the header only puts oneself outside');
+  } finally {
+    useNetworkSettings({ localNetworks: null, trustedProxies: null });
+    await app.close();
+  }
+});
+
 test('with every peer trusted as a proxy, nobody is at home', async () => {
   // TRUST_PROXY=true lets anyone say any address: a home would be anyone's. Reintroduce by dropping the check in
   // clientZone: the visitor below, claiming a home address from outside, reads local.

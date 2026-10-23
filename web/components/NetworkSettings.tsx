@@ -21,7 +21,10 @@ export interface NetworkState {
   defaults: { localNetworks: string; trustedProxies: string };
   /** The admin's own /24, when it is a private one: "Use my network". */
   suggestion: string | null;
-  warnings: Array<{ code: 'trust_all' } | { code: 'proxy_at_home' | 'proxy_unnamed'; ip: string }>;
+  warnings: Array<
+    | { code: 'trust_all' } | { code: 'via_cloudflare' } | { code: 'home_default_proxy' }
+    | { code: 'proxy_at_home'; ip: string } | { code: 'proxy_unnamed'; ip: string }
+  >;
   recent: Array<{ ip: string; lastSeen: string; name: string; zone: 'local' | 'remote' }>;
 }
 
@@ -95,11 +98,15 @@ export function NetworkSettings() {
       )}
 
       {data.warnings.map((w) => (
-        <RowBlock key={w.code === 'trust_all' ? w.code : `${w.code}-${w.ip}`}>
+        <RowBlock key={'ip' in w ? `${w.code}-${w.ip}` : w.code}>
           <p role="note" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-200" data-network-warning={w.code}>
             {w.code === 'trust_all'
               ? tr('Every peer is trusted as a proxy (TRUST_PROXY=true), so anyone can say any address: nobody counts as at home.')
-              : w.code === 'proxy_unnamed'
+              : w.code === 'via_cloudflare'
+                ? tr('You reach the server through Cloudflare, where nobody counts as at home. At home, open it by its local address, or by a local DNS name that points at your proxy.')
+                : w.code === 'home_default_proxy'
+                ? tr('You reach the server through a proxy while home is still every private network: a tunnel or a container running at home looks like home too. Choose These networks above and write your own network, e.g. 192.168.1.0/24.')
+                : w.code === 'proxy_unnamed'
                 ? tr('You reach the server through the proxy {ip}, trusted only as part of a private network. Until its address is in Trusted proxies, nobody behind it counts as at home: a visitor could write their own address.', { ip: iso(w.ip) })
                 : tr('The proxy {ip} is inside the home network: a request it forwards without X-Forwarded-For counts as at home.', { ip: iso(w.ip) })}
           </p>

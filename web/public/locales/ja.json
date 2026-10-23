@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4259
+    "strings": 4261
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -4262,5 +4262,7 @@
   "at home": "自宅",
   "outside": "外部",
   "You reach the server through the proxy {ip}, trusted only as part of a private network. Until its address is in Trusted proxies, nobody behind it counts as at home: a visitor could write their own address.": "プロキシ {ip} 経由でサーバーに接続していますが、このプロキシはプライベートネットワークの一部としてのみ信頼されています。信頼するプロキシにそのアドレスを入れるまで、その背後の人は自宅扱いになりません。訪問者が自分のアドレスを書き込める可能性があるためです。",
-  "Trust only {ip}": "{ip} のみ信頼"
+  "Trust only {ip}": "{ip} のみ信頼",
+  "You reach the server through Cloudflare, where nobody counts as at home. At home, open it by its local address, or by a local DNS name that points at your proxy.": "Cloudflare 経由でサーバーに接続しています。Cloudflare 経由では誰も自宅扱いになりません。自宅では、ローカルアドレスか、プロキシを指すローカル DNS 名で開いてください。",
+  "You reach the server through a proxy while home is still every private network: a tunnel or a container running at home looks like home too. Choose These networks above and write your own network, e.g. 192.168.1.0/24.": "プロキシ経由でサーバーに接続していますが、ホームネットワークがまだすべてのプライベートネットワークのままです。自宅で動くトンネルやコンテナも自宅に見えてしまいます。上で「これらのネットワーク」を選び、自分のネットワーク（例：192.168.1.0/24）を入力してください。"
 }

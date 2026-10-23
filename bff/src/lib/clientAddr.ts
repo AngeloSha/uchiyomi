@@ -326,15 +326,27 @@ export function sameNetwork(a: string, b: string): boolean {
 }
 
 /**
+ * Whether this request crossed Cloudflare's edge -- a Cloudflare Tunnel, or its proxy (the orange cloud): the edge adds
+ * CF-Connecting-IP and CF-Ray to every request it passes on, and a proxy after it forwards them. Such a request came from
+ * the internet, whatever address the hops after the edge report: cloudflared runs at home, so to the proxy behind it
+ * every visitor from anywhere looks like a home address. The headers are looked at, never read; a visitor who adds them
+ * only puts themselves outside.
+ */
+export function viaCloudflare(req: FastifyRequest): boolean {
+  return req.headers['cf-connecting-ip'] !== undefined || req.headers['cf-ray'] !== undefined;
+}
+
+/**
  * zoneOf against the home in force. The desktop app's server is this computer's alone: always at home. With every peer
- * trusted as a proxy (TRUST_PROXY=true) anyone can say any address, so nobody is; and through a proxy the trusted
- * proxies name only by loopback/linklocal/uniquelocal, nobody is either (unnamedHop). Reintroduce by dropping either:
- * its case in clientZone.test.ts reads a visitor's own header as at home.
+ * trusted as a proxy (TRUST_PROXY=true) anyone can say any address, so nobody is; through Cloudflare nobody is
+ * (viaCloudflare); and through a proxy the trusted proxies name only by loopback/linklocal/uniquelocal, nobody is either
+ * (unnamedHop). Reintroduce by dropping any: its case in clientZone.test.ts reads a visitor from outside as at home.
  */
 export function clientZone(req: FastifyRequest): Zone {
   if (isDesktop()) return 'local';
   const c = networkConfig();
   if (trustProxySetting(c.trustedProxies.value) === true) return 'remote';
+  if (viaCloudflare(req)) return 'remote';
   if (unnamedHop(req)) return 'remote';
   home ??= localNetworks(c.localNetworks.value);
   return zoneOf(req, home);

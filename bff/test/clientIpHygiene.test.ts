@@ -23,6 +23,9 @@ const ALLOWED: Record<string, string> = {
   // zoneOf: whether the header is there at all, never what it says -- forwarded by a peer TRUST_PROXY does not name
   // means the address seen is not the visitor's, so the request is not at home.
   "lib/clientAddr.ts: if (req.headers['x-forwarded-for'] !== undefined && (req.ips?.length ?? 1) <= 1) return 'remote';": 'presence only',
+  // viaCloudflare: whether Cloudflare's edge passed the request on at all, never the address it reports -- such a
+  // request is not at home, and a visitor who adds the header only puts themselves outside.
+  "lib/clientAddr.ts: return req.headers['cf-connecting-ip'] !== undefined || req.headers['cf-ray'] !== undefined;": 'presence only',
 };
 
 test('no source file reads a forwarding header of its own', () => {
