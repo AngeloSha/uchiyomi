@@ -6,6 +6,7 @@ import { junkPagesFor, setPageOverride } from '../lib/junkPages';
 import { spreadsFor } from '../lib/spreadMeasure';
 import { marksFor, marksJson, setMark } from '../lib/spreadMarks';
 import { komgaImage } from '../lib/komga';
+import { otherTitlesFor } from '../lib/otherTitles';
 import { content as komga, NATIVE_PROGRESS, OWNED } from '../lib/backend';
 import { UnsupportedFilter, owned } from '../lib/ownedCatalog';
 import { cleanDescription } from '../lib/htmlText';
@@ -721,6 +722,19 @@ export default async function catalogRoutes(app: FastifyInstance) {
       else if (byId.has(e.seriesId)) content.push({ relation: e.relation, series: byId.get(e.seriesId) });
     }
     return { lookups: r.lookups, content };
+  });
+
+  /**
+   * The English, romanised and Japanese titles of the series' AniList entry, for the series page: `{titles}`, null when
+   * the series has no checked AniList link, its library's lookups are off, or AniList has no names for it. Kept
+   * (lib/otherTitles.ts), so most reads ask nothing. Resolved through the series' own visibility first: a 404 for a
+   * series this viewer may not open.
+   */
+  app.get('/api/series/:id/other-titles', async (req) => {
+    const { id } = req.params as { id: string };
+    await komga.series(vc(req), id);
+    if (!OWNED) return { titles: null };
+    return { titles: await otherTitlesFor(id) };
   });
 
   app.get('/api/series/:id/books', async (req) => {
