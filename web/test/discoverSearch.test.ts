@@ -38,8 +38,6 @@ const trKeys = (files: string[]): Set<string> => {
 };
 
 const PAGE = 'app/discover/page.tsx';
-/** Where the poll's rules live since #353, shared with the import review's and Add more sources' searches. */
-const POLL = 'lib/searchPoll.ts';
 
 test('the search is a query keyed on the submitted term, not on the field', () => {
   // `q` is whatever is in the field; `term` is what was submitted. Keyed on `q`, every keystroke would be a
@@ -53,7 +51,7 @@ test('the search is a query keyed on the submitted term, not on the field', () =
   const src = code(read(PAGE));
   assert.match(src, /queryKey: \['search-all', term, selected, ratingAsked, adultOn\]/, 'the search is not keyed on the submitted term and the chosen source (or is keyed on the field)');
   assert.match(src, /const only = selected \? `&source=\$\{encodeURIComponent\(selected\)\}` : '';/, 'the chosen source is not sent');
-  assert.match(src, /&wait=\$\{wait\}\$\{only\}\$\{rated\}`, \{ signal \}\)/, 'the chosen source is not sent');
+  assert.match(src, /SEARCH_POLL_WAIT_MS\}\$\{only\}\$\{rated\}`, \{ signal \}\)/, 'the chosen source is not sent');
   // v0.61.0: the submitted term starts as the arrival's `?q=` (empty without one, so the field and the submitted term
   // still start apart from any typing). Updated deliberately from `useState('')`, which this pinned before Discover read
   // the address; v610Related.test.ts pins how the arrival is read.
@@ -68,10 +66,8 @@ test('the poll runs only while the server says sources are still pending', () =>
   // every 1.5 s for as long as the page is open, and `false` would never fill the wall in. Reintroduce by
   // returning `SEARCH_POLL_MS` unconditionally: "does not read pending" fails.
   const src = code(read(PAGE));
-  const poll = code(read(POLL));
-  assert.match(src, /refetchInterval: \(qy\) => searchPoll\(qy\.state\.data\)/, 'the poll does not read the answer');
-  assert.match(poll, /return data\?\.pending \? SEARCH_POLL_MS : false;/, 'the poll does not read pending from the answer');
-  assert.match(poll, /export const SEARCH_POLL_MS = 1500;/, 'the poll interval moved');
+  assert.match(src, /refetchInterval: \(qy\) => \(qy\.state\.data\?\.pending \? SEARCH_POLL_MS : false\)/, 'the poll does not read pending from the answer');
+  assert.match(src, /const SEARCH_POLL_MS = 1500;/, 'the poll interval moved');
   // Leaving search mode disables the query, which is what stops the interval; a poll that ignored the mode
   // would keep asking the server about a search nobody is looking at.
   assert.match(src, /refetchOnWindowFocus: false/, 'a window focus re-runs the search');
@@ -84,12 +80,10 @@ test('only the first request waits the long wait; every poll asks for a short on
   // Reintroduce by dropping `&wait=` from the URL: "no wait= on the request" fails; by writing
   // `wait=${SEARCH_FIRST_WAIT_MS}` for every request: "every request waits the long wait" fails.
   const src = code(read(PAGE));
-  const poll = code(read(POLL));
-  assert.match(src, /search-all\?q=\$\{encodeURIComponent\(term\)\}&wait=\$\{wait\}/, 'no wait= on the request');
-  assert.match(src, /const wait = searchWait\(client\.getQueryState\(queryKey\)\?\.dataUpdateCount \?\? 0\);/, 'the wait is not read from dataUpdateCount');
-  assert.match(poll, /return answers === 0 \? SEARCH_FIRST_WAIT_MS : SEARCH_POLL_WAIT_MS;/, 'every request waits the long wait');
-  assert.match(poll, /export const SEARCH_FIRST_WAIT_MS = 6000;/, 'the first wait is not six seconds');
-  assert.match(poll, /export const SEARCH_POLL_WAIT_MS = 1500;/, 'the poll wait moved');
+  assert.match(src, /search-all\?q=\$\{encodeURIComponent\(term\)\}&wait=\$\{first \? SEARCH_FIRST_WAIT_MS : SEARCH_POLL_WAIT_MS\}/, 'no wait= on the request, or every request waits the long wait');
+  assert.match(src, /const first = \(client\.getQueryState\(queryKey\)\?\.dataUpdateCount \?\? 0\) === 0;/, 'first is not read from dataUpdateCount');
+  assert.match(src, /const SEARCH_FIRST_WAIT_MS = 6000;/, 'the first wait is not six seconds');
+  assert.match(src, /const SEARCH_POLL_WAIT_MS = 1500;/, 'the poll wait moved');
 });
 
 test('an abandoned search is aborted, never retried, and stays fresh for five minutes', () => {
@@ -126,14 +120,12 @@ test('the progress line names who is still being asked, three names then a count
   // sentence. Reintroduce by dropping the slice and naming every pending source: "names are not capped"
   // fails, and a fifteen-source install wraps the line to three at 390 px.
   const src = code(read(PAGE));
-  const poll = code(read(POLL));
-  assert.match(src, /const progress = useMemo\(\(\) => \(mode === 'search' \? searchProgressLine\(searchQ\.data\) : null\), \[mode, searchQ\.data\]\);/, 'the page does not show the shared progress line');
-  assert.match(poll, /export const SEARCH_NAMES_SHOWN = 3;/, 'the name cap moved');
-  assert.match(poll, /waiting\.slice\(0, SEARCH_NAMES_SHOWN\)\.join\(', '\)/, 'names are not capped');
-  assert.match(poll, /d\.sources\.filter\(\(s\) => s\.state === 'pending'\)\.map\(\(s\) => s\.name\)/, 'the names are not the pending sources');
-  assert.match(poll, /tr\('\{n\} of \{m\} sources answered · still asking \{names\}', \{ n, m, names \}\)/, 'the plural sentence is gone');
-  assert.match(poll, /tr\('\{n\} of \{m\} sources answered · still asking \{name\}', \{ n, m, name: waiting\[0\] \}\)/, 'the singular sentence is gone');
-  assert.match(poll, /more > 1 \? `\$\{shown\} \$\{tr\('and \{n\} more', \{ n: more \}\)\}` : more === 1 \? `\$\{shown\} \$\{tr\('and 1 more'\)\}` : shown/, '"and N more" is gone, or one more is not the singular key');
+  assert.match(src, /const SEARCH_NAMES_SHOWN = 3;/, 'the name cap moved');
+  assert.match(src, /waiting\.slice\(0, SEARCH_NAMES_SHOWN\)\.join\(', '\)/, 'names are not capped');
+  assert.match(src, /d\.sources\.filter\(\(s\) => s\.state === 'pending'\)\.map\(\(s\) => s\.name\)/, 'the names are not the pending sources');
+  assert.match(src, /tr\('\{n\} of \{m\} sources answered · still asking \{names\}', \{ n, m, names \}\)/, 'the plural sentence is gone');
+  assert.match(src, /tr\('\{n\} of \{m\} sources answered · still asking \{name\}', \{ n, m, name: waiting\[0\] \}\)/, 'the singular sentence is gone');
+  assert.match(src, /more > 1 \? `\$\{shown\} \$\{tr\('and \{n\} more', \{ n: more \}\)\}` : more === 1 \? `\$\{shown\} \$\{tr\('and 1 more'\)\}` : shown/, '"and N more" is gone, or one more is not the singular key');
   // Rendered on its own row under the heading, and announced: the wall it describes changes under a screen
   // reader without a focus change.
   assert.match(src, /\{mode === 'search' && progress && \(/, 'the progress line is not gated on search mode');
@@ -191,7 +183,7 @@ test('every string the search renders is in all eight locale files', () => {
   // The parity test (library.test.ts) only compares the eight files with each other, so a string that
   // reaches none of them falls back to English in every language without anything failing. This reads the
   // page instead. Reintroduce by deleting any one of the four v0.40.0 keys from public/locales/ar.json.
-  const keys = trKeys([PAGE, POLL]);
+  const keys = trKeys([PAGE]);
   for (const k of ['{n} of {m} sources answered · still asking {names}', '{n} of {m} sources answered · still asking {name}', 'and {n} more', 'and 1 more',
     'Hide 18+', '18+ only', '18+ filter']) {
     assert.ok(keys.has(k), `"${k}" is no longer rendered by the page -- the scan or the page changed`);

@@ -1,6 +1,7 @@
 /**
- * Polling a `/api/sources/search-all` answer until every source has answered (v0.40.0 for Discover; #353 for the import
- * review's manual search and Add more sources), the React-free half, so a test can hold the rules without a browser.
+ * Polling a `/api/sources/search-all` answer until every source has answered (#353), for the import review's manual
+ * search and Add more sources: the same rules as Discover's search (app/discover/page.tsx), the React-free half, so a
+ * test can hold them without a browser.
  *
  * Why: the server answers within `wait` with whatever has landed and says how many sources it is still asking
  * (`pending`). Discover polled; the two sheets asked once and kept that first answer, so a source slower than the
@@ -18,7 +19,7 @@ export const SEARCH_FIRST_WAIT_MS = 6000;
 export const SEARCH_POLL_WAIT_MS = 1500;
 /** How often to poll while the answer says some sources are still pending. */
 export const SEARCH_POLL_MS = 1500;
-/** How many pending sources the progress line names before "and N more", and Discover's last card before "+N". */
+/** How many pending sources the progress line names before "and N more". */
 export const SEARCH_NAMES_SHOWN = 3;
 
 /** The progress half of a search answer; every field optional, so an older server's answer still reads. */
