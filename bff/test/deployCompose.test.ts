@@ -405,3 +405,24 @@ test('Compose itself reads the switch', { skip: composeAvailable ? false : 'dock
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/**
+ * The development stack's database never came up on a fresh volume. It ran supabase/postgres, whose pg_hba maps
+ * every local connection through `supabase_map`; that map knows no `yomi` role, so the image's own init scripts
+ * were refused ("Peer authentication failed for user \"yomi\"") before they created the `yomi` database. The next
+ * start saw a non-empty data directory and skipped init for good, and yomi-app looped on `database "yomi" does
+ * not exist`. Existing volumes hid it: only a fresh clone hit it. Every other file, CI and e2e already ran the
+ * official image, and the app ships the 16 client for pg_dump, so all of them now run the same one.
+ *
+ * Reintroduce by putting supabase/postgres (or any other image) back on any one database container: the
+ * assertion names the file.
+ */
+test('every database container runs the official Postgres image the app is built against', () => {
+  for (const file of [...FILES, 'deploy/casaos/docker-compose.yml']) {
+    const compose = parseYaml(readFileSync(join(REPO, file), 'utf8'));
+    for (const [name, svc] of Object.entries<{ image?: string }>(compose.services)) {
+      if (!name.endsWith('-db')) continue;
+      assert.equal(svc.image, 'postgres:16-alpine', `${file}: ${name} runs ${svc.image}, not the postgres:16-alpine everything else is tested on`);
+    }
+  }
+});

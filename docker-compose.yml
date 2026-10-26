@@ -10,7 +10,10 @@
 #           yomi-flaresolverr + yomi-suwayomi (optional) · yomi-bff + yomi-web under `--profile split`
 services:
   yomi-db:
-    image: supabase/postgres:15.8.1.085
+    # The official image, the same one as every deploy/ file, CI and e2e. supabase/postgres refused its own init
+    # for a custom POSTGRES_USER, so a fresh volume never got the `yomi` database. A volume made by that image
+    # is Postgres 15 and will not start on 16: `docker compose down -v` (or pg_dump first) to move over.
+    image: postgres:16-alpine
     container_name: yomi-db
     restart: unless-stopped
     environment:
