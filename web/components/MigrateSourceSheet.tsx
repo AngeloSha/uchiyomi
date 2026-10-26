@@ -23,6 +23,7 @@ import { bookCountText } from '@/lib/format';
 import { attachButtons, migrateTerms, sourcesParam } from '@/lib/migrateSource';
 import { discoverSources, type Src } from '@/lib/sourceGroups';
 import type { AltTitle } from '@/lib/findSources';
+import { searchPoll, searchProgressLine, searchWait, type SearchProgress } from '@/lib/searchPoll';
 
 interface SourceResult { sourceId: string; title: string; coverUrl?: string }
 interface SourceGroup { source: string; name: string; lang: string | null; results: SourceResult[] }
@@ -98,12 +99,19 @@ export function MigrateSourceSheet({ id, title, attached, mainId, listed, onDone
     setSelected(allIds.filter((x) => cur.has(x)));
   };
 
+  // Polled while sources are still being asked (#353), as Discover's search is: the first answer holds only the
+  // sources that beat the server's grace, so with many sources a slow one never showed here ("only 5 sources").
   const { data, isFetching, error } = useQuery({
     queryKey: ['migrate-search', debounced, only],
-    queryFn: () => api<{ content: SourceGroup[] }>(withAdult(`/api/sources/search-all?groupBy=source&q=${encodeURIComponent(debounced)}${only ? `&sources=${encodeURIComponent(only)}` : ''}`)),
+    queryFn: ({ signal, queryKey, client }) => api<{ content: SourceGroup[] } & SearchProgress>(
+      withAdult(`/api/sources/search-all?groupBy=source&q=${encodeURIComponent(debounced)}${only ? `&sources=${encodeURIComponent(only)}` : ''}&wait=${searchWait(client.getQueryState(queryKey)?.dataUpdateCount ?? 0)}`),
+      { signal },
+    ),
     enabled: debounced.length >= 2,
     staleTime: 30_000,
+    refetchInterval: (qy) => searchPoll(qy.state.data),
   });
+  const progress = searchProgressLine(data);
   const detail = useQuery({
     queryKey: ['migrate-detail', pick?.source, pick?.sourceId],
     queryFn: () => api<Detail>(withAdult(`/api/sources/detail?source=${encodeURIComponent(pick!.source)}&sourceId=${encodeURIComponent(pick!.sourceId)}`)),
@@ -227,6 +235,11 @@ export function MigrateSourceSheet({ id, title, attached, mainId, listed, onDone
         </div>
       )}
 
+      {/* Who the search is still waiting on (#353): the rails below fill in as they answer. Polite, so a screen reader
+          hears it change without the focus moving. */}
+      {debounced.length >= 2 && progress && (
+        <p className="mb-2 px-0.5 text-xs tabular-nums text-fog-500" aria-live="polite" data-search-progress>{progress}</p>
+      )}
       {debounced.length < 2 ? (
         <p role="status" className="py-10 text-center text-sm text-fog-500">{tr('Type at least 2 characters to search.')}</p>
       ) : error ? (

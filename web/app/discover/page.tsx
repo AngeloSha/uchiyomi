@@ -31,6 +31,7 @@ import { forStrip } from '@/lib/jobs';
 import { downloadsHref, stripHref } from '@/lib/libraryView';
 import { useServerDownloads } from '@/lib/useServerDownloads';
 import { canSearchMore, freshCards, noMore, soloSource, type SearchMore } from '@/lib/searchMore';
+import { SEARCH_NAMES_SHOWN, searchPoll, searchProgressLine, searchWait } from '@/lib/searchPoll';
 /**
  * One search card. Since v0.52.0 (#72) `inLibrary` means held in every provider's language, `libraryLangs` the
  * languages the library holds the title in, and each provider carries its own `lang` and `inLibrary`. Since v0.55.4
@@ -56,18 +57,6 @@ interface SearchSourceLine { id: string; name: string; state: 'ok' | 'empty' | '
  */
 interface SearchAnswer { content: SearchGroup[]; sources?: SearchSourceLine[]; pending?: number; asked?: number; rating?: RatingFilter }
 
-/**
- * How long the server may hold the FIRST answer to a search while the sources are still being asked. The
- * server clamps it to its own ceiling; six seconds is the owner's "a few seconds", and a Cloudflare source
- * that needs longer fills in afterwards. Every later poll asks for a short wait only: by then the server
- * answers from the entry it is still filling, so the poll is a cheap join, not a second search.
- */
-const SEARCH_FIRST_WAIT_MS = 6000;
-const SEARCH_POLL_WAIT_MS = 1500;
-/** How often to poll while the answer says some sources are still pending. */
-const SEARCH_POLL_MS = 1500;
-/** How many pending sources the progress line names before "and N more", and the wall's last card before "+N". */
-const SEARCH_NAMES_SHOWN = 3;
 /**
  * How many sources the hero's add looks a title up on, best-ranked first. GET /api/sources/find asks every source it is
  * given at once -- it has no gate like the wall's four-at-a-time -- so when the wall began asking every source
@@ -370,12 +359,10 @@ function DiscoverInner() {
     // before the switch was flipped says nothing about the account's age limit after it.
     queryKey: ['search-all', term, selected, ratingAsked, adultOn],
     queryFn: ({ signal, queryKey, client }) => {
-      // ⚠️ Only the first request may wait the long wait. A poll that also waited six seconds would hold
-      // its answer until the server's grace expired, so the wall would fill in six seconds late every time.
-      const first = (client.getQueryState(queryKey)?.dataUpdateCount ?? 0) === 0;
+      const wait = searchWait(client.getQueryState(queryKey)?.dataUpdateCount ?? 0);
       const only = selected ? `&source=${encodeURIComponent(selected)}` : '';
       const rated = ratingAsked === 'all' ? '' : `&rating=${ratingAsked}`;
-      return api<SearchAnswer>(`/api/sources/search-all?q=${encodeURIComponent(term)}&wait=${first ? SEARCH_FIRST_WAIT_MS : SEARCH_POLL_WAIT_MS}${only}${rated}`, { signal });
+      return api<SearchAnswer>(`/api/sources/search-all?q=${encodeURIComponent(term)}&wait=${wait}${only}${rated}`, { signal });
     },
     // `mayAdd` (v0.61.0): an arrival's `?q=` starts in search mode, and an account the server refuses is not asked.
     enabled: mode === 'search' && !!term && mayAdd,
@@ -383,7 +370,7 @@ function DiscoverInner() {
     retry: false,
     staleTime: 5 * 60_000,
     refetchOnWindowFocus: false,
-    refetchInterval: (qy) => (qy.state.data?.pending ? SEARCH_POLL_MS : false),
+    refetchInterval: (qy) => searchPoll(qy.state.data),
   });
   // An answer to a search made with Show 18+ on, filtered to Hide 18+ although it asked for something else: the
   // account's age limit shows no 18+, and the chips go for the rest of the visit.
@@ -439,19 +426,7 @@ function DiscoverInner() {
    * from the first answer, and this is what says the rest is coming and who is slow. Three names, then a
    * count, so the line stays one line on a phone; one name gets the singular sentence.
    */
-  const progress = useMemo(() => {
-    const d = searchQ.data;
-    if (mode !== 'search' || !d?.pending || !d.sources) return null;
-    const m = d.asked ?? d.sources.filter((s) => s.state !== 'skipped').length;
-    const n = Math.max(0, m - d.pending);
-    const waiting = d.sources.filter((s) => s.state === 'pending').map((s) => s.name);
-    if (waiting.length === 1) return tr('{n} of {m} sources answered · still asking {name}', { n, m, name: waiting[0] });
-    const shown = waiting.slice(0, SEARCH_NAMES_SHOWN).join(', ');
-    const more = waiting.length - SEARCH_NAMES_SHOWN;
-    // A singular key for one: "et 1 autres" is not French, and a plural key cannot know.
-    const names = more > 1 ? `${shown} ${tr('and {n} more', { n: more })}` : more === 1 ? `${shown} ${tr('and 1 more')}` : shown;
-    return tr('{n} of {m} sources answered · still asking {names}', { n, m, names });
-  }, [mode, searchQ.data]);
+  const progress = useMemo(() => (mode === 'search' ? searchProgressLine(searchQ.data) : null), [mode, searchQ.data]);
   /**
    * Who the page is still waiting on, by name: the wall's last card, "Still loading" (v0.58.0). Asking every source
    * fills the wall for longer, and someone scrolling down reached its end with nothing to say more was coming. In
