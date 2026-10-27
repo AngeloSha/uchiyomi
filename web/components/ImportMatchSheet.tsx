@@ -19,6 +19,7 @@ import { t as tr } from '@/lib/i18n';
 import { bookCountText } from '@/lib/format';
 import type { ImportCandidate } from '@/lib/importBatch';
 import type { Src } from '@/lib/sourceGroups';
+import { matchPreview } from '@/lib/matchPreview';
 
 interface SourceResult {
   source: string; sourceId: string; title: string; coverUrl?: string; inLibrary?: boolean;
@@ -27,7 +28,7 @@ interface SourceGroup { source: string; name: string; lang: string | null; resul
 /** A pick under consideration — set by tapping a result card, not yet written to the candidate row. */
 interface Pending { source: string; sourceId: string; title: string; coverUrl?: string }
 /** The fields this screen reads off GET /api/sources/detail; see routes/sources.ts for the rest. */
-interface Detail { title: string; coverUrl: string | null; count: number }
+interface Detail { title: string; coverUrl: string | null; count: number; summary?: string; genres?: string[]; status?: string }
 
 function useDebounced<T>(value: T, ms: number) {
   const [v, setV] = useState(value);
@@ -38,26 +39,53 @@ function useDebounced<T>(value: T, ms: number) {
   return v;
 }
 
-/** Cover + title + chapter count for one pick, so "currently selected" and "new pick" render identically. */
-function MiniCard({ label, title, coverUrl, sourceId, sourceLabel, count, loading }: {
+/**
+ * Cover + title + chapter count for one pick, so "currently selected" and "new pick" render identically, and
+ * (#353) its status, genres and description, so two similarly named titles can be told apart before one is picked.
+ */
+function MiniCard({ label, title, coverUrl, sourceId, sourceLabel, count, loading, preview }: {
   label: string; title: string; coverUrl?: string | null;
   /** Adapter id, e.g. `sw:123` — for the cover proxy, never shown. */
   sourceId: string;
   /** Human-readable source name, for display only. */
   sourceLabel: string;
   count?: number; loading?: boolean;
+  preview?: { facts: string; summary: string };
 }) {
+  // The description starts at two lines: this card sits in the Sheet's pinned footer, twice, and the footer once
+  // took most of a 390 px screen (see `footer` below). More opens it in place.
+  const [open, setOpen] = useState(false);
+  // More only when two lines cut the description off: on one that fits it would be a button that does nothing.
+  const textRef = useRef<HTMLParagraphElement>(null);
+  const [cut, setCut] = useState(false);
+  useEffect(() => {
+    const el = textRef.current;
+    if (el && !open) setCut(el.scrollHeight > el.clientHeight + 1);
+  }, [preview?.summary, open]);
   return (
-    <div className="flex items-center gap-2.5 rounded-xl border border-ink-700 bg-ink-900/50 p-2">
-      <Img src={coverUrl ? sourceCover(sourceId, coverUrl) : ''} alt="" fallbackSrc={coverUrl || undefined}
-        className="h-16 w-11 shrink-0 rounded" />
-      <div className="min-w-0 flex-1">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-fog-500">{label}</p>
-        <p className="truncate text-sm text-fog-100">{title}</p>
-        <p className="truncate text-[11px] text-fog-400">
-          {sourceLabel}{loading ? ` · ${tr('checking…')}` : count != null ? ` · ${bookCountText(count)}` : ''}
-        </p>
+    <div className="rounded-xl border border-ink-700 bg-ink-900/50 p-2">
+      <div className="flex items-center gap-2.5">
+        <Img src={coverUrl ? sourceCover(sourceId, coverUrl) : ''} alt="" fallbackSrc={coverUrl || undefined}
+          className="h-16 w-11 shrink-0 rounded" />
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-fog-500">{label}</p>
+          <p className="truncate text-sm text-fog-100">{title}</p>
+          <p className="truncate text-[11px] text-fog-400">
+            {sourceLabel}{loading ? ` · ${tr('checking…')}` : count != null ? ` · ${bookCountText(count)}` : ''}
+          </p>
+          {preview?.facts && <p className="truncate text-[11px] text-fog-500">{preview.facts}</p>}
+        </div>
       </div>
+      {preview?.summary && (
+        <div className="mt-1.5 text-[11px] leading-relaxed text-fog-400">
+          <p ref={textRef} className={open ? 'max-h-40 overflow-y-auto' : 'line-clamp-2'} data-lenis-prevent>{preview.summary}</p>
+          {(cut || open) && (
+            <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="text-accent">
+              {open ? tr('Less') : tr('More')}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -153,7 +181,7 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
       {candidate.match_source && candidate.match_source_id ? (
         <MiniCard label={tr('Currently selected')} title={candidate.match_title || candidate.backup_title}
           coverUrl={candidate.match_cover} sourceId={candidate.match_source!} sourceLabel={sourceName(candidate.match_source)}
-          count={currentDetail.data?.count} loading={currentDetail.isFetching} />
+          count={currentDetail.data?.count} loading={currentDetail.isFetching} preview={matchPreview(currentDetail.data)} />
       ) : (
         <div className="rounded-xl border border-dashed border-ink-700 px-3 py-2.5 text-center text-[11px] text-fog-500">
           {candidate.decision === 'skip' ? tr('Skipped — nothing will be imported for this title.') : tr('No match yet — pick one from the search results.')}
@@ -162,9 +190,9 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
 
       {pending ? (
         <>
-          <MiniCard label={tr('New pick')} title={pending.title} coverUrl={pending.coverUrl}
+          <MiniCard key={`${pending.source}:${pending.sourceId}`} label={tr('New pick')} title={pending.title} coverUrl={pending.coverUrl}
             sourceId={pending.source} sourceLabel={sourceName(pending.source)}
-            count={pendingDetail.data?.count} loading={pendingDetail.isFetching} />
+            count={pendingDetail.data?.count} loading={pendingDetail.isFetching} preview={matchPreview(pendingDetail.data)} />
           {delta != null && (
             <p className={`text-center text-[11px] ${delta === 0 ? 'text-fog-500' : delta > 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
               {delta === 0 ? tr('Same chapter count as the current pick')
