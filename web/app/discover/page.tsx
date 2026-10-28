@@ -30,7 +30,7 @@ import { IcChevronLeft, IcSearch, IcSparkle, IcX } from '@/components/icons';
 import { forStrip } from '@/lib/jobs';
 import { downloadsHref, stripHref } from '@/lib/libraryView';
 import { useServerDownloads } from '@/lib/useServerDownloads';
-import { canSearchMore, freshCards, noMore, soloSource, sourceSearchPage, type SearchMore } from '@/lib/searchMore';
+import { canSearchMore, freshCards, noMore, soloSource, sourcePageCards, sourceSearchPage, type SearchMore, type SourcePageItem } from '@/lib/searchMore';
 /**
  * One search card. Since v0.52.0 (#72) `inLibrary` means held in every provider's language, `libraryLangs` the
  * languages the library holds the title in, and each provider carries its own `lang` and `inLibrary`. Since v0.55.4
@@ -613,8 +613,8 @@ function DiscoverInner() {
     setMoreBusy(true);
     let fresh: SourceItem[] = [];
     try {
-      const r = await api<{ content: SourceItem[] }>(sourceSearchPage(solo, term, next, searchKind));
-      fresh = freshCards(shown, r.content ?? []);
+      const r = await api<{ content: SourcePageItem[] }>(sourceSearchPage(solo, term, next, searchKind));
+      fresh = freshCards(shown, sourcePageCards(solo, r.content ?? []));
     } catch { /* the end, as an empty page is */ }
     setMore((m) => {
       const base = m.key === key ? m : noMore(key);

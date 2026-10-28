@@ -9,6 +9,14 @@
  */
 import type { SourceItem } from '@/components/cards';
 
+/** A single-source search response knows its source from the request, not from each result. */
+export type SourcePageItem = Omit<SourceItem, 'source'>;
+
+/** Bind later pages to the source that was asked, as the grouped first page already does. */
+export function sourcePageCards(source: string, items: readonly SourcePageItem[]): SourceItem[] {
+  return items.map((item) => ({ ...item, source }));
+}
+
 /** The furthest page a search on one source is scrolled to: the server's own cap (bff routes/sources.ts SEARCH_MAX_PAGE). */
 export const SEARCH_MAX_PAGE = 30;
 

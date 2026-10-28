@@ -40,6 +40,7 @@ const picked = await fetch(`${BASE}/api/admin/import/candidates/${candidateId}`,
 assert.ok(picked.ok, 'the import fixture has a current pick to compare');
 
 const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+const errors = [];
 try {
   const context = browser.defaultBrowserContext();
   for (const line of response.headers.getSetCookie()) {
@@ -50,8 +51,7 @@ try {
   const page = await browser.newPage();
   // This walk scripts API responses; the offline service-worker behavior is covered by run.mjs.
   await page.setBypassServiceWorker(true);
-  const errors = [];
-  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('pageerror', (e) => errors.push(e.stack || e.message));
   await page.setViewport({ width: 1440, height: 1000 });
   const clickText = async (text) => {
     await page.waitForFunction((t) => [...document.querySelectorAll('button')].some((b) => b.textContent.trim() === t && b.getBoundingClientRect().height), { timeout: 15000 }, text);
@@ -75,6 +75,7 @@ try {
   let polls = 0;
   let laterPages = 0;
   const creatorQueries = [];
+  const creatorPages = [];
   const sources = Array.from({ length: 6 }, (_, i) => ({ id: `fake-${i}`, name: `Fixture source ${i}`, lang: 'en', searchPages: true, creatorSearch: i === 0 }));
   const groups = sources.map((s) => ({ source: s.id, name: s.name, lang: 'en', results: Array.from({ length: 18 }, (_, i) => ({
     source: s.id, sourceId: `${s.id}-${i}`, title: `Candidate ${i + 1}`, coverUrl: `${BASE}/img/fixture`,
@@ -94,6 +95,13 @@ try {
       polls++;
       return void json({ content: polls % 2 === 1 ? groups.slice(0, 5) : groups, pending: polls % 2,
         asked: 6, sources: sources.map((s, i) => ({ ...s, state: polls % 2 && i === 5 ? 'pending' : 'ok' })) });
+    }
+    if (u.pathname === '/api/sources/search' && u.searchParams.get('creator')) {
+      const creator = u.searchParams.get('creator');
+      const page = Number(u.searchParams.get('page'));
+      creatorPages.push({ creator, page, source: u.searchParams.get('source') });
+      // Single-source responses omit `source`; Discover must bind the requested provider before rendering.
+      return void json({ content: page === 2 ? [{ sourceId: `${creator}-page-two`, title: `Later work by ${creator}`, coverUrl: `${BASE}/img/fixture` }] : [] });
     }
     if (u.pathname === '/api/sources/search' && u.searchParams.get('page') === '2') {
       laterPages++;
@@ -158,15 +166,20 @@ try {
   console.log('PASS Add more sources preview and independent paging on a phone');
   await page.goto(`${BASE}/discover/?q=Fixture%20Creator&creator=author`, { waitUntil: 'networkidle2' });
   await page.waitForSelector('img[alt="Work by author"]');
+  await page.waitForSelector('img[alt="Later work by author"]');
   assert.equal(await page.$eval('select[aria-label="Search by"]', (el) => el.value), 'author');
   await page.select('select[aria-label="Search by"]', 'artist');
   await page.waitForSelector('img[alt="Work by artist"]');
+  await page.waitForSelector('img[alt="Later work by artist"]');
   assert.ok(creatorQueries.includes('author') && creatorQueries.includes('artist'), 'both creator fields reach the API');
+  assert.ok(['author', 'artist'].every((creator) => creatorPages.some((p) => p.creator === creator && p.page === 2 && p.source === 'fake-0')), 'each creator field pages on its supporting source');
+  assert.equal(await page.$('img[alt="Later work by author"]'), null, 'changing the creator field discards the old later page');
   assert.equal(new URL(page.url()).searchParams.get('creator'), 'artist', 'reload retains the chosen field');
   await page.screenshot({ path: `${OUT}/creator-phone.png`, fullPage: true });
   console.log('PASS creator search field, result isolation and reload address on a phone');
   assert.deepEqual(errors, [], 'no browser runtime errors');
 } catch (error) {
+  if (errors.length) console.error('Browser runtime errors:', ...errors);
   const pages = await browser.pages();
   const page = pages.at(-1);
   await page?.screenshot({ path: `${OUT}/failure.png`, fullPage: true });
