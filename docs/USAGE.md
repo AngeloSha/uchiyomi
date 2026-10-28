@@ -3150,12 +3150,13 @@ the batch away at any point, and one that sits in review for 30 days is dropped 
 The review is the point. Every row shows the title you brought and, on a second line, the title it matched
 (*→ {title}*, dimmed when the two are the same) with how confident the match is; **Change** opens a manual
 search, its results in one sideways-scrolling rail per source so you can see which provider a pick would
-come from, with the cover, title and chapter count of the current pick beside whatever you tap next, so a
-mismatch is visible before you commit to it — or **Skip this one** drops the title. A tracker row that was
-found under one of its other names says *matched under its other name*, dimmed, so the second name is in
-view before you commit; a pick you make by hand drops the note, since it explained a match that is no
-longer there. Rows already in your library default to skipped, visibly, and can be un-skipped; on a
-tracker import they read *Already in your library — linked for progress sync*, because the link to your
+come from, with the cover, title and chapter count of the current pick beside whatever you tap next — and each
+one's status, first genres and description (two lines; **More** opens the rest) — so a mismatch is visible
+before you commit to it, even between two titles a few letters apart — or **Skip this one** drops the
+title. A tracker row that was found under one of its other names says *matched under its other name*, dimmed,
+so the second name is in view before you commit; a pick you make by hand drops the note, since it explained a
+match that is no longer there. Rows already in your library default to skipped, visibly, and can be un-skipped;
+on a tracker import they read *Already in your library — linked for progress sync*, because the link to your
 tracker entry is made at intake, before the review, for the titles you already hold — for an established
 library that is most of the list, and the part that matters for sync. A title you deleted earlier does not
 count as held: it resolves like any other, and importing it puts the same series back, as adding it would.
