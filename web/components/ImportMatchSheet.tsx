@@ -19,6 +19,7 @@ import { t as tr } from '@/lib/i18n';
 import { bookCountText } from '@/lib/format';
 import type { ImportCandidate } from '@/lib/importBatch';
 import type { Src } from '@/lib/sourceGroups';
+import { searchPoll, searchProgressLine, searchWait, type SearchProgress } from '@/lib/searchPoll';
 
 interface SourceResult {
   source: string; sourceId: string; title: string; coverUrl?: string; inLibrary?: boolean;
@@ -80,12 +81,19 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
 
   useEffect(() => { inputRef.current?.focus(); }, []);
 
+  // Polled while sources are still being asked (#353), as Discover's search is: the first answer holds only the
+  // sources that beat the server's grace, and a slower one used to never show here at all.
   const { data, isFetching, error } = useQuery({
     queryKey: ['import-search-source', debounced],
-    queryFn: () => api<{ content: SourceGroup[] }>(`/api/sources/search-all?groupBy=source&q=${encodeURIComponent(debounced)}`),
+    queryFn: ({ signal, queryKey, client }) => api<{ content: SourceGroup[] } & SearchProgress>(
+      `/api/sources/search-all?groupBy=source&q=${encodeURIComponent(debounced)}&wait=${searchWait(client.getQueryState(queryKey)?.dataUpdateCount ?? 0)}`,
+      { signal },
+    ),
     enabled: debounced.length >= 2,
     staleTime: 30_000,
+    refetchInterval: (qy) => searchPoll(qy.state.data),
   });
+  const progress = searchProgressLine(data);
 
   // Source display names for the preview cards -- the candidate row only carries the source id.
   const { data: sourcesData } = useQuery({
@@ -221,6 +229,11 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
         </div>
       </div>
 
+      {/* Who the search is still waiting on (#353): the rails below fill in as they answer. Polite, so a screen reader
+          hears it change without the focus moving. */}
+      {debounced.length >= 2 && progress && (
+        <p className="mb-2 px-0.5 text-xs tabular-nums text-fog-500" aria-live="polite" data-search-progress>{progress}</p>
+      )}
       {debounced.length < 2 ? (
         <p className="py-10 text-center text-sm text-fog-500">{tr('Type at least 2 characters to search.')}</p>
       ) : error ? (
