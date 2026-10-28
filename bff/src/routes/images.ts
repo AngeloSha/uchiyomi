@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import sharp from 'sharp';
 import { IMG_COOKIE, API_TOKEN_PREFIX, resolveApiToken, resolveOpdsBasic, accountActive } from '../lib/auth';
+import { clientZone } from '../lib/clientAddr';
 import { komga, komgaImage } from '../lib/komga';
 import { serveImage, getOrFetch } from '../lib/imageCache';
 import { doneTranslation, drawPage, readerLang } from '../lib/translate/pages';
@@ -556,7 +557,7 @@ export async function authorizeImageRequest(
   const token = req.cookies?.[IMG_COOKIE];
   if (token) {
     try {
-      const claims = app.jwt.verify(token) as { sub?: string; typ?: string };
+      const claims = app.jwt.verify(token) as { sub?: string; typ?: string; loc?: unknown };
       // ⚠️ Only the image cookie itself. Every JWT this server signs verifies under the same secret, so
       // without this an ACCESS token -- or any other signed payload that names a `sub` -- pasted into the
       // yomi_img cookie was an image session for that account. The cookie is minted with `typ: 'img'`
@@ -567,6 +568,9 @@ export async function authorizeImageRequest(
         // disabled or deleted owner gets the 401 every other credential gets. Reintroduce by dropping this line:
         // "the image cookie stops working..." in imageBearer.int.test.ts sees a disabled member's page (200).
         if (!(await accountActive(claims.sub))) return reply.code(401).send({ error: 'unauthorized' });
+        // The cookie of a session entered without a password (`loc`, routes/auth.ts) opens pages at home only, like every
+        // request of that session (lib/auth.ts authenticate); it lasts a week, so it is judged on every use too.
+        if (claims.loc === true && clientZone(req) !== 'local') return reply.code(401).send({ error: 'local_only' });
         (req as any).viewCtx = await viewCtxFor(claims.sub ?? null);
         (req as any).imgCredential = { kind: 'session' } satisfies ImgCredential;
         return;

@@ -2,6 +2,7 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useAdminSettingsViews } from '@/components/AdminSettings';
 import { ConsoleLayout, type PageView } from '@/components/ConsoleLayout';
+import { seenText, useNetwork } from '@/components/NetworkSettings';
 import { ADMIN_SETTINGS } from '@/lib/settingsIndex.admin';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -450,13 +451,17 @@ function Members() {
   });
   // SSO-only mode (v0.63.0, #208): accounts come from the provider. No New account, no password to reset -- the server
   // refuses both -- and a card that says where accounts come from instead. Reintroduce the form and "Members offers no
-  // New account and no password in SSO-only mode" in web/test/ssoOnly.test.ts fails.
+  // New account and no password in SSO-only mode" in web/test/ssoOnly.test.ts fails. The one account Members still
+  // makes there is a profile with no password, which opens at home (New profile, below).
   const ssoOnly = data?.auth?.mode === 'oidc-only';
   const provider = data?.auth?.sso ?? '';
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [role, setRole] = useState<'user' | 'admin'>('user');
+  // A profile that opens at home without a password, and the account that manages it.
+  const [localOpen, setLocalOpen] = useState(false);
+  const [managedBy, setManagedBy] = useState('');
   const [busy, setBusy] = useState(false);
   // A password reset and a deletion are the two things here that cannot be undone by clicking again, so
   // both go through the app's own dialogs. prompt()/confirm() were untranslatable, unstyled, and in a
@@ -469,9 +474,18 @@ function Members() {
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim() || !password || busy) return;
+    // In SSO-only mode the server makes a profile with no password and nothing else (403 sso_only): New profile sends that.
+    const open = localOpen || ssoOnly;
+    if (!username.trim() || (!password && !open) || busy) return;
     setBusy(true);
-    try { await api('/api/admin/users', { json: { username: username.trim(), password, displayName: displayName.trim() || undefined, role } }); toast(tr('Account {name} created', { name: iso(`@${username.trim()}`) }), 'success'); setUsername(''); setPassword(''); setDisplayName(''); setRole('user'); inval(); }
+    try {
+      await api('/api/admin/users', { json: {
+        username: username.trim(), password: ssoOnly ? undefined : password || undefined, displayName: displayName.trim() || undefined,
+        role: open ? 'user' : role, ...(open ? { localOpen: true, managedBy: managedBy || undefined } : {}),
+      } });
+      toast(tr('Account {name} created', { name: iso(`@${username.trim()}`) }), 'success');
+      setUsername(''); setPassword(''); setDisplayName(''); setRole('user'); setLocalOpen(false); setManagedBy(''); inval();
+    }
     catch (e: any) { toast(e instanceof ApiError && e.status === 409 ? tr('Username taken') : msgOf(e, tr('Could not create account')), 'error'); }
     setBusy(false);
   };
@@ -484,6 +498,10 @@ function Members() {
     catch (e) { toast(codeOf(e) === 'last_admin' ? tr('The last admin cannot be removed') : tr('Could not remove that account'), 'error'); }
     setDeletingBusy(false);
   };
+
+  // Who may manage a profile: an enabled account that signs in with a credential of its own (bff routes/admin.ts mayManage).
+  const managers = (data?.content ?? []).filter((m: any) => !m.disabled && (m.kind === 'password' || m.kind === 'hybrid'));
+  const nameOf = (id: string): string => (data?.content ?? []).find((m: any) => m.id === id)?.display_name ?? '?';
 
   return (
     <div className="board">
@@ -504,11 +522,43 @@ function Members() {
         <div className="space-y-2">
           <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder={tr('username')} autoCapitalize="none" autoCorrect="off" className="field" />
           <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder={tr('display name (optional)')} className="field" />
-          <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder={tr('password (min 8)')} className="field" />
-          <div className="flex gap-2">{(['user', 'admin'] as const).map((r) => <button key={r} type="button" onClick={() => setRole(r)} className={`flex-1 rounded-xl border py-2 text-sm capitalize ${role === r ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{roleText(r)}</button>)}</div>
+          <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder={localOpen ? tr('password (optional: for outside home)') : tr('password (min 8)')} className="field" />
+          {/* Opens at home without a password: never an admin, so it replaces the role; with a password as well, the
+              password lets it in from anywhere else. */}
+          <button type="button" onClick={() => setLocalOpen(!localOpen)} aria-pressed={localOpen} data-local-open
+            className={`btn-key w-full ${localOpen ? 'btn-key-accent' : ''}`}>{tr('Opens at home without a password')}</button>
+          {localOpen ? (
+            <>
+              <select value={managedBy} onChange={(e) => setManagedBy(e.target.value)} className="field">
+                <option value="">{tr('Managed by an admin')}</option>
+                {managers.map((m: any) => <option key={m.id} value={m.id}>{m.display_name}</option>)}
+              </select>
+              <HomeNetwork />
+            </>
+          ) : (
+            <div className="flex gap-2">{(['user', 'admin'] as const).map((r) => <button key={r} type="button" onClick={() => setRole(r)} className={`flex-1 rounded-xl border py-2 text-sm capitalize ${role === r ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{roleText(r)}</button>)}</div>
+          )}
         </div>
-        <button type="submit" disabled={busy || !username.trim() || password.length < 8} className="btn-accent mt-3 w-full disabled:opacity-50"><IcPlus width={18} height={18} /> {busy ? tr('Creating…') : tr('Create account')}</button>
+        <button type="submit" disabled={busy || !username.trim() || (localOpen ? password.length > 0 && password.length < 8 : password.length < 8)} className="btn-accent mt-3 w-full disabled:opacity-50"><IcPlus width={18} height={18} /> {busy ? tr('Creating…') : tr('Create account')}</button>
       </form>
+      )}
+      {/* SSO-only mode's one way to make an account here: a profile with no
+          password, which opens on the home network only, through a session the provider signed in or Who is reading?. */}
+      {ssoOnly && data && (
+        <form onSubmit={create} className="card grad-border p-4" data-sso-profile>
+          <h2 className="mb-1 font-display text-base font-semibold">{tr('New profile')}</h2>
+          <p className="mb-3 text-sm leading-relaxed text-fog-300">{tr('Accounts come from {name}, but a profile without a password can be made here: it opens on the home network only.', { name: iso(provider) })}</p>
+          <div className="space-y-2">
+            <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder={tr('username')} autoCapitalize="none" autoCorrect="off" className="field" />
+            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder={tr('display name (optional)')} className="field" />
+            <select value={managedBy} onChange={(e) => setManagedBy(e.target.value)} className="field">
+              <option value="">{tr('Managed by an admin')}</option>
+              {managers.map((m: any) => <option key={m.id} value={m.id}>{m.display_name}</option>)}
+            </select>
+            <HomeNetwork />
+          </div>
+          <button type="submit" disabled={busy || !username.trim()} className="btn-accent mt-3 w-full disabled:opacity-50"><IcPlus width={18} height={18} /> {busy ? tr('Creating…') : tr('Create profile')}</button>
+        </form>
       )}
       {/* #208, item 6: what a member who signs up starts with. A card of its own beside New account, which is an admin
           choosing and is left alone by it. After the users list has answered, which says whether the provider makes
@@ -533,19 +583,27 @@ function Members() {
             </div>
             <p className="mt-2 text-[11px] text-fog-500">
               {/* The provider's name on an account linked to it (v0.63.0), as 2FA marks the accounts that have it. */}
-              {[roleText(u.role), self ? tr('you') : null, u.disabled ? tr('disabled') : null, u.totp_enabled ? '2FA' : null, u.sso && provider ? provider : null].filter(Boolean).join(' · ')}
+              {[roleText(u.role), self ? tr('you') : null, u.disabled ? tr('disabled') : null, u.totp_enabled ? '2FA' : null, u.sso && provider ? provider : null,
+                u.kind === 'open' ? tr('no password, opens at home') : u.kind === 'hybrid' ? tr('no password at home') : null,
+                u.managed_by ? tr('managed by {name}', { name: iso(nameOf(u.managed_by)) }) : null].filter(Boolean).join(' · ')}
             </p>
             {/* Keys (UI refresh): each acts on the account. The choices inside the library and age panels stay chips. */}
             <div className="mt-2.5 flex flex-wrap gap-1.5">
               {!ssoOnly && <button onClick={() => setResetting(u)} className="btn-key">{tr('Reset')}</button>}
               {!self && (
                 <>
-                  <button onClick={() => patch(u, { role: u.role === 'admin' ? 'user' : 'admin' }, tr('Role updated'))} className="btn-key">{u.role === 'admin' ? tr('Make member') : tr('Make admin')}</button>
+                  {!u.local_open && <button onClick={() => patch(u, { role: u.role === 'admin' ? 'user' : 'admin' }, tr('Role updated'))} className="btn-key">{u.role === 'admin' ? tr('Make member') : tr('Make admin')}</button>}
                   <button onClick={() => patch(u, { disabled: !u.disabled }, u.disabled ? tr('Account enabled') : tr('Account disabled'))} className="btn-key">{u.disabled ? tr('Enable') : tr('Disable')}</button>
                   {/* A member's, like the two below: an admin downloads whatever the flag says (routes/sources.ts), so on an
                       admin's card it toggled nothing -- and one the provider made carries the new-member default for
                       the day it is made a member, which read here as a refusal it is not. */}
                   {u.role !== 'admin' && <button onClick={() => patch(u, { perms: { ...u.perms, canDownload: !canDl } }, tr('Permission updated'))} className="btn-key">{canDl ? tr('Deny downloads') : tr('Allow downloads')}</button>}
+                  {/* Profiles that open at home, members only: never an admin's. */}
+                  {u.role !== 'admin' && <button onClick={() => patch(u, { localOpen: !u.local_open }, tr('Permission updated'))} aria-pressed={!!u.local_open}
+                    className={`btn-key ${u.local_open ? 'btn-key-accent' : ''}`}>{tr('Opens at home without a password')}</button>}
+                  {u.role !== 'admin' && u.local_open && u.password_login && !ssoOnly && <button onClick={() => patch(u, { removePassword: true }, tr('Password removed'))} className="btn-key">{tr('Remove password')}</button>}
+                  {u.role !== 'admin' && u.kind !== 'open' && <button onClick={() => patch(u, { perms: { ...u.perms, canManageProfiles: !u.perms?.canManageProfiles } }, tr('Permission updated'))}
+                    aria-pressed={!!u.perms?.canManageProfiles} className={`btn-key ${u.perms?.canManageProfiles ? 'btn-key-accent' : ''}`}>{tr('Can make profiles')}</button>}
                   {/* Library access. "All libraries" is the ABSENCE of grant rows, not a full set of them, so a
                       library added next month is visible to unrestricted accounts without editing anyone. */}
                   {u.role !== 'admin' && <LibraryAccess granted={u.libraries ?? null} onSaved={inval}
@@ -586,6 +644,23 @@ function Members() {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * How the server sees the admin asking (bff GET /api/admin/network), beside a profile that opens at home: whether the
+ * admin is at home, and the way to the page that says which networks are (components/NetworkSettings.tsx).
+ */
+function HomeNetwork() {
+  const { data } = useNetwork();
+  if (!data) return null;
+  return (
+    <p className="text-[11px] leading-relaxed text-fog-500" data-home-network>
+      {seenText(data)}{' '}
+      <a href="/admin/?tab=server&section=local-networks" className="underline decoration-dotted underline-offset-2 hover:text-fog-300">
+        {tr('Home network')}
+      </a>
+    </p>
   );
 }
 

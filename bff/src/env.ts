@@ -125,8 +125,14 @@ const schema = z.object({
   // talking to the app port directly chose its own address for the sign-in rate limits and the activity log. The
   // default trusts the proxies a home server actually has -- loopback, link-local and private networks (Docker, an
   // Umbrel app proxy, nginx or Nginx Proxy Manager on the LAN). `true` trusts every peer as before; `false` none; or a
-  // comma list of addresses and CIDR ranges (for a proxy on a public address).
+  // comma list of addresses and CIDR ranges (for a proxy on a public address). Set here, it outranks Admin -> Settings
+  // -> Server -> Home network, which then shows it and cannot change it (lib/clientAddr.ts networkConfig).
   TRUST_PROXY: z.string().default('loopback, linklocal, uniquelocal'),
+  // The networks that are home (lib/clientAddr.ts): a profile without a password opens from these only, and a visitor
+  // from anywhere else needs a credential. A comma list of addresses and CIDR ranges, e.g. 192.168.1.0/24, or `none`.
+  // Unset, Admin -> Settings -> Server -> Home network decides, and its default is the private networks; set, it
+  // outranks that page.
+  LOCAL_NETWORKS: z.string().default(''),
   CACHE_DIR: z.string().default('/cache'),
   CONFIG_DIR: z.string().default('/config'),
   // Optional OIDC / SSO. Everything stays off unless an issuer and client id are set, so an install that
