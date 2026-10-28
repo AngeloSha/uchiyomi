@@ -2,7 +2,7 @@
 
 ## v0.101.0 — 2026-10-29
 
-**Search creators on sources, open optional local profiles, and preview source cleanup before deleting anything.**
+**Search creators on sources, manage pages with undo, and preview source cleanup before deleting anything.**
 
 ### Creator searches and local profiles
 
@@ -16,7 +16,21 @@
 - Local-only tokens use a separate cryptographic domain, so an older app image rejects them after rollback.
   Existing credential sessions keep their format. Public-proxy defaults continue to require credentials.
 
-### Deliberate cleanup and installation fixes
+### Reversible page cleanup
+
+- Admins can manage a writable local CBZ from the reader's **Pages** sheet: preview and select images,
+  remove them, and restore their exact original bytes. Original page numbers, progress and bookmarks stay
+  in place. Unsupported formats and incomplete chapters keep the existing Skip control (#354).
+- Removed originals stay in server trash until explicitly deleted. Separate confirmations permanently
+  delete selected originals or unused retained images; shared originals still needed by another removed
+  page are kept. Backups and separately saved offline copies are unaffected.
+- Optional GIF skip rules apply to one series or every chapter from its recorded source, with a preview
+  of the scope. A series rule overrides its source rule, and a per-page rescue overrides both. Rules skip
+  images while reading and never delete files automatically.
+- Edited page images get fresh cache identities. An offline download refuses a chapter that changes
+  midway, preventing a saved copy from mixing old and new pages.
+
+### Deliberate source cleanup and installation fixes
 
 - Removing a source keeps downloaded chapters by default. Optional cleanup requires a fresh, account-bound
   preview and a separate confirmation; source references/listings are checked under writer and database locks.

@@ -4355,7 +4355,7 @@
   "Chapters in scope: {n}": "Betroffene Kapitel: {n}",
   "Series GIF rule": "GIF-Regel für die Serie",
   "Source GIF rule": "GIF-Regel für die Quelle",
-  "Inherit": "Übernehmen",
+  "Inherit": "Übergeordnete Regel verwenden",
   "Keep GIF pages visible": "GIF-Seiten sichtbar lassen",
   "Skip GIF pages": "GIF-Seiten überspringen",
   "Confirm GIF rule": "GIF-Regel bestätigen",

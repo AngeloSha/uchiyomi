@@ -81,6 +81,9 @@ jobs:
       - name: Chapter selection and manual source matching
         working-directory: ./web
         run: node test/e2e/backlogWalk.mjs
+      - name: Reversible page cleanup and rule confirmations
+        working-directory: ./web
+        run: node test/e2e/pageCleanupWalk.mjs
       # Machine-assisted translation fails in two ways a unit test cannot see: a string longer than its
       # container, and a right-to-left language rendered inside a left-to-right frame. Both need a browser.
       - name: Every language renders, and Arabic mirrors
