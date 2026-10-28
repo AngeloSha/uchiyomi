@@ -38,6 +38,7 @@ let realList = [1, 2, 3, 4, 5];
 let realError = false;
 let listHook: (() => Promise<void>) | null = null;
 let realCalls = 0;
+let realUnnumbered = 0;
 
 const ch = (n: number) => ({ sourceId: `c/${n}`, number: n, title: `Chapter ${n}` });
 function fake(id: string, name: string, nums: () => number[]) {
@@ -47,7 +48,9 @@ function fake(id: string, name: string, nums: () => number[]) {
     async getSeries(sid: string) { return { sourceId: sid, source: id, title: 'Left Series' }; },
     async listChapters() {
       if (id === REAL) { realCalls++; if (listHook) await listHook(); if (realError) throw new Error('source unavailable'); }
-      return nums().map(ch);
+      const chapters = nums().map(ch);
+      if (id === REAL && realUnnumbered) Object.defineProperty(chapters, Symbol.for('uchiyomi.unnumbered'), { value: realUnnumbered });
+      return chapters;
     },
     async getPageUrls() { return []; },
     async latest() { return []; },
@@ -353,4 +356,180 @@ test('a concurrent old-client detach waits for the confirmed cleanup to finish',
     assert.equal((await removing).statusCode, 404, 'cleanup already unfollowed atomically');
     assert.equal(existsSync(join(DL, file(folder, 20))), false);
   } finally { release(); await q('DELETE FROM lib_series WHERE id = $1', [id]); }
+});
+
+test('a tombstone never removes a refetch backup through a symlink outside the download root', { skip }, async () => {
+  const { symlinkSync, readFileSync } = await import('node:fs');
+  const { REFETCH_BAK } = await import('../src/lib/fsAtomic');
+  const id = 's_left_tombstone_link', folder = 'T!left/Tombstone Link';
+  const outside = join(ROOT, 'outside-backups');
+  const target = join(outside, `Chapter 20.cbz${REFETCH_BAK}`);
+  mkdirSync(outside, { recursive: true });
+  writeFileSync(target, 'must stay outside');
+  mkdirSync(join(DL, 'T!left'), { recursive: true });
+  symlinkSync(outside, join(DL, folder), 'dir');
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id)
+    VALUES ($1,'T!left','Tombstone Link',$2,1,$3,$4,'real-s')`, [id, folder, LIB, REAL]);
+  try {
+    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1,$2,'wrong-s')`, [id, WRONG]);
+    const bid = await book(id, folder, 20, WRONG, { pruned: true });
+    const pre = await app.inject({ method: 'GET', url: `/api/admin/series/${id}/sources/${WRONG}/leftovers`, headers: auth });
+    assert.equal(pre.statusCode, 200, pre.body);
+    const result = await app.inject({ method: 'POST', url: `/api/admin/series/${id}/sources/${WRONG}/cleanup`, headers: auth, payload: { confirmation: pre.json().confirmation } });
+    assert.equal(result.statusCode, 200, result.body);
+    assert.equal(result.json().ok, false);
+    assert.deepEqual(result.json().purged.left, [{ id: bid, reason: 'outside_root' }]);
+    assert.equal(readFileSync(target, 'utf8'), 'must stay outside');
+    assert.equal((await q('SELECT 1 FROM lib_books WHERE id = $1', [bid])).length, 1);
+    assert.equal((await q('SELECT 1 FROM series_sources WHERE series_id = $1 AND source_id = $2', [id, WRONG])).length, 1);
+  } finally { await q('DELETE FROM lib_series WHERE id = $1', [id]); rmSync(join(DL, folder)); }
+});
+
+test('a refetch backup that cannot be removed keeps its original, row, progress and source', { skip }, async () => {
+  const { REFETCH_BAK } = await import('../src/lib/fsAtomic');
+  const id = 's_left_backup_failure', folder = 'T!left/Backup Failure';
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id)
+    VALUES ($1,'T!left','Backup Failure',$2,1,$3,$4,'real-s')`, [id, folder, LIB, REAL]);
+  try {
+    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1,$2,'wrong-s')`, [id, WRONG]);
+    const bid = await book(id, folder, 20, WRONG);
+    // A stale directory at the backup name deterministically refuses a non-recursive unlink on every platform.
+    mkdirSync(join(DL, file(folder, 20) + REFETCH_BAK));
+    await q('INSERT INTO listing_progress (user_id, series_id, number) VALUES ($1,$2,20)', [uid, id]);
+    const pre = await app.inject({ method: 'GET', url: `/api/admin/series/${id}/sources/${WRONG}/leftovers`, headers: auth });
+    assert.equal(pre.statusCode, 200, pre.body);
+    const result = await app.inject({ method: 'POST', url: `/api/admin/series/${id}/sources/${WRONG}/cleanup`, headers: auth, payload: { confirmation: pre.json().confirmation } });
+    assert.equal(result.statusCode, 200, result.body);
+    assert.equal(result.json().ok, false);
+    assert.deepEqual(result.json().purged.left, [{ id: bid, reason: 'unlink_failed' }]);
+    assert.equal(existsSync(join(DL, file(folder, 20))), true, 'backup failure must be found before deleting the original');
+    assert.equal((await q('SELECT 1 FROM lib_books WHERE id = $1', [bid])).length, 1);
+    assert.equal((await q('SELECT 1 FROM listing_progress WHERE series_id = $1 AND number = 20', [id])).length, 1);
+    assert.equal((await q('SELECT 1 FROM series_sources WHERE series_id = $1 AND source_id = $2', [id, WRONG])).length, 1);
+  } finally { await q('DELETE FROM lib_series WHERE id = $1', [id]); }
+});
+
+test('book metadata and new read marks serialize with cleanup eligibility and deletion', { skip }, async (t) => {
+  const id = 's_left_book_locks', folder = 'T!left/Book Locks';
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id)
+    VALUES ($1,'T!left','Book Locks',$2,1,$3,$4,'real-s')`, [id, folder, LIB, REAL]);
+  let release = () => {};
+  let cleaning: Promise<any> | undefined;
+  let editing: Promise<any> | undefined;
+  let marking: Promise<any> | undefined;
+  try {
+    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1,$2,'wrong-s')`, [id, WRONG]);
+    const bid = await book(id, folder, 20, WRONG);
+    await q('INSERT INTO book_overrides (book_id, number) VALUES ($1,21)', [bid]);
+    const pre = await app.inject({ method: 'GET', url: `/api/admin/series/${id}/sources/${WRONG}/leftovers`, headers: auth });
+    assert.equal(pre.statusCode, 200, pre.body);
+    const fs = require('fs/promises');
+    const originalStat = fs.stat;
+    let entered!: () => void;
+    const arrived = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let held = false;
+    t.mock.method(fs, 'stat', function(path: any, ...args: any[]) {
+      if (path === DL && !held) { held = true; entered(); return gate.then(() => originalStat(path, ...args)); }
+      return originalStat(path, ...args);
+    });
+    cleaning = app.inject({ method: 'POST', url: `/api/admin/series/${id}/sources/${WRONG}/cleanup`, headers: auth, payload: { confirmation: pre.json().confirmation } });
+    await Promise.race([arrived, cleaning.then(() => { throw new Error('cleanup finished before the filesystem gate'); })]);
+    // This is the existing override UPDATE path, which does not claim the folder writer. Number1 would protect the
+    // book if it committed after eligibility was read; a new progress row could also make the final DELETE fail its FK.
+    editing = q('UPDATE book_overrides SET number = 1 WHERE book_id = $1 RETURNING book_id /* cleanup-override-race */', [bid]);
+    marking = q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed)
+      VALUES ($1,$2,$3,1,false) /* cleanup-progress-race */`, [uid, bid, id]).then(() => 'inserted', (e: any) => e.code);
+    const locked = async (marker: string) => {
+      for (let tries = 0; tries < 100; tries++) {
+        const rows = await q("SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND query LIKE $1 AND wait_event_type = 'Lock'", [`%${marker}%`]);
+        if (rows.length) return true;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      throw new Error(`the concurrent ${marker} never waited for cleanup`);
+    };
+    assert.equal(await Promise.race([locked('cleanup-override-race'), editing.then(() => false)]), true, 'an override changed while its chapter was being deleted');
+    assert.equal(await Promise.race([locked('cleanup-progress-race'), marking.then(() => false)]), true, 'new progress was inserted during file deletion');
+    release();
+    const result = await cleaning;
+    assert.equal(result.statusCode, 200, result.body);
+    assert.equal(result.json().purged.removed, 1);
+    assert.deepEqual(await editing, [], 'the override update cannot commit on a deleted chapter');
+    assert.equal(await marking, '23503', 'progress must not land after its chapter was deleted');
+    assert.equal(existsSync(join(DL, file(folder, 20))), false);
+  } finally {
+    release();
+    await Promise.allSettled([cleaning, editing, marking].filter(Boolean));
+    await q('DELETE FROM lib_series WHERE id = $1', [id]);
+  }
+});
+
+test('dropped unnumbered posts and malformed number rows never authorize deletion', { skip }, async () => {
+  const id = 's_left_incomplete', folder = 'T!left/Incomplete';
+  const before = realList;
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id)
+    VALUES ($1,'T!left','Incomplete',$2,1,$3,$4,'real-s')`, [id, folder, LIB, REAL]);
+  try {
+    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1,$2,'wrong-s')`, [id, WRONG]);
+    const bid = await book(id, folder, 20, WRONG);
+    const pre = await app.inject({ method: 'GET', url: `/api/admin/series/${id}/sources/${WRONG}/leftovers`, headers: auth });
+    assert.equal(pre.statusCode, 200, pre.body);
+    for (const invalid of ['unnumbered', NaN, Infinity, -1, null, '21']) {
+      realUnnumbered = invalid === 'unnumbered' ? 1 : 0;
+      realList = invalid === 'unnumbered' ? before : [...before, invalid as any];
+      const result = await app.inject({ method: 'POST', url: `/api/admin/series/${id}/sources/${WRONG}/cleanup`, headers: auth, payload: { confirmation: pre.json().confirmation } });
+      assert.equal(result.statusCode, 409, String(invalid) + ': ' + result.body);
+      assert.equal(result.json().error, 'listing_unavailable');
+      assert.equal(existsSync(join(DL, file(folder, 20))), true);
+      assert.equal((await q('SELECT 1 FROM lib_books WHERE id = $1', [bid])).length, 1);
+    }
+  } finally { realList = before; realUnnumbered = 0; await q('DELETE FROM lib_series WHERE id = $1', [id]); }
+});
+
+test('a kept raw range protects its archive and every raw/overridden read mark', { skip }, async () => {
+  const id = 's_left_raw_range', folder = 'T!left/Raw Range';
+  const before = realList;
+  realList = [...before, 21];
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id)
+    VALUES ($1,'T!left','Raw Range',$2,2,$3,$4,'real-s')`, [id, folder, LIB, REAL]);
+  try {
+    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1,$2,'wrong-s')`, [id, WRONG]);
+    const kept = await book(id, folder, 20, WRONG);
+    await q('UPDATE lib_books SET number_end = 22 WHERE id = $1', [kept]);
+    await q('INSERT INTO book_overrides (book_id, number) VALUES ($1,77)', [kept]);
+    const gone = await book(id, folder, 99, WRONG);
+    for (const n of [20, 21, 22]) await q(`INSERT INTO series_listing (series_id, number, source_id, chosen, copies)
+      VALUES ($1,$2,$3,'{}'::jsonb,'[]'::jsonb)`, [id, n, WRONG]);
+    for (const n of [20, 21, 22, 77, 99]) await q('INSERT INTO listing_progress (user_id, series_id, number) VALUES ($1,$2,$3)', [uid, id, n]);
+    const pre = await app.inject({ method: 'GET', url: `/api/admin/series/${id}/sources/${WRONG}/leftovers`, headers: auth });
+    assert.equal(pre.statusCode, 200, pre.body);
+    assert.equal(pre.json().chapters, 1, 'remaining source chapter21 protects the 20–22 archive despite override77');
+    assert.deepEqual(pre.json().numbers, [99], 'kept raw and overridden marks are not deletion candidates');
+    const result = await app.inject({ method: 'POST', url: `/api/admin/series/${id}/sources/${WRONG}/cleanup`, headers: auth, payload: { confirmation: pre.json().confirmation } });
+    assert.equal(result.statusCode, 200, result.body);
+    assert.equal(result.json().purged.removed, 1);
+    assert.equal(existsSync(join(DL, file(folder, 20))), true);
+    assert.equal((await q('SELECT 1 FROM lib_books WHERE id = $1', [gone])).length, 0);
+    assert.deepEqual((await q('SELECT number::float8 AS n FROM listing_progress WHERE series_id = $1 ORDER BY number', [id])).map((r: any) => r.n), [20, 21, 22, 77]);
+  } finally { realList = before; await q('DELETE FROM lib_series WHERE id = $1', [id]); }
+});
+
+test('deleting an exclusive overridden range removes raw/interior/override marks together', { skip }, async () => {
+  const id = 's_left_removed_range', folder = 'T!left/Removed Range';
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id)
+    VALUES ($1,'T!left','Removed Range',$2,1,$3,$4,'real-s')`, [id, folder, LIB, REAL]);
+  try {
+    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1,$2,'wrong-s')`, [id, WRONG]);
+    const bid = await book(id, folder, 20, WRONG);
+    await q('UPDATE lib_books SET number_end = 22 WHERE id = $1', [bid]);
+    await q('INSERT INTO book_overrides (book_id, number) VALUES ($1,77)', [bid]);
+    for (const n of [20, 21.5, 22, 77]) await q('INSERT INTO listing_progress (user_id, series_id, number) VALUES ($1,$2,$3)', [uid, id, n]);
+    const pre = await app.inject({ method: 'GET', url: `/api/admin/series/${id}/sources/${WRONG}/leftovers`, headers: auth });
+    assert.equal(pre.statusCode, 200, pre.body);
+    assert.deepEqual(pre.json().numbers, [20, 21.5, 22, 77]);
+    const result = await app.inject({ method: 'POST', url: `/api/admin/series/${id}/sources/${WRONG}/cleanup`, headers: auth, payload: { confirmation: pre.json().confirmation } });
+    assert.equal(result.statusCode, 200, result.body);
+    assert.equal(result.json().purged.removed, 1);
+    assert.equal((await q('SELECT 1 FROM listing_progress WHERE series_id = $1', [id])).length, 0);
+  } finally { await q('DELETE FROM lib_series WHERE id = $1', [id]); }
 });
