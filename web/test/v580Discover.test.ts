@@ -39,7 +39,7 @@ test('the wall asks every source in the pool, best first, in Newest and Popular 
   // slice of the pool" fails -- and 19 of the owner's 29 sources are never on his wall, as before.
   const page = code(read(PAGE));
   assert.match(page, /const pool = useMemo\(\(\) => budgetForMode\(sources, listMode, Infinity\), \[sources, listMode\]\);/);
-  assert.match(page, /const budget = pool;/, 'the wall asks a slice of the pool');
+  assert.match(page, /const budget = useMemo\(\(\) => creatorSearchBudget\(pool, mode, searchKind\), \[pool, mode, searchKind\]\);/, 'the wall no longer uses the full browse pool or creator-role budget');
   assert.doesNotMatch(page, /pool\.slice\(|\branked\b|6 \+ emptied|emptiedCount/, 'a cap on the sources asked is back');
   assert.match(page, /\{mode === 'newest' && budget\.map\(\(s, i\) => \(\s*<SourceLatest key=\{`\$\{listMode\}:\$\{s\.id\}:\$\{page\}`\} source=\{s\} listMode=\{listMode\}\s*page=\{page\} enabled=\{i < gate\} onSettled=\{onSettled\} \/>/,
     'not every source asked has its request');

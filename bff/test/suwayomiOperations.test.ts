@@ -70,8 +70,8 @@ test('the registry is one document per name, and the names are unique', async ()
   assert.equal(new Set(ALL_OPS.map((o) => o.doc)).size, ALL_OPS.length, 'two operations share a document');
   for (const [key, op] of Object.entries(OPS)) assert.equal(op.name, key, `OPS.${key} is named ${op.name}`);
   for (const op of ALL_OPS) assert.equal(opOf(op.doc), op);
-  // The two reads that may be missing on an engine, and only those (a refusal of either is an answer).
-  assert.deepEqual(ALL_OPS.filter((o) => o.optional).map((o) => o.name).sort(), ['extensionFacts', 'solverSettings']);
+  // The optional reads that may be missing or fail independently (their refusal is an answer).
+  assert.deepEqual(ALL_OPS.filter((o) => o.optional).map((o) => o.name).sort(), ['extensionFacts', 'solverSettings', 'sourceCreatorFilters']);
 });
 
 /** A transport that records every document it is sent and answers each with a plausible shape for its operation. */
@@ -90,6 +90,7 @@ async function recorder() {
   const answers: Record<string, unknown> = {
     aboutServer: { aboutServer: { name: 'Suwayomi-Server', version: 'v2.3.2243', buildType: 'Stable' } },
     sources: { sources: { nodes: [{ id: '1', name: 'S', lang: 'en', contentWarning: 'SAFE', supportsLatest: true }] } },
+    sourceCreatorFilters: { sources: { nodes: [{ id: '1', filters: [{ __typename: 'TextFilter', name: 'Author' }] }] } },
     fetchSourceManga: { fetchSourceManga: { mangas: [manga] } },
     fetchManga: { fetchMangaAndChapters: { manga } },
     fetchChapters: { fetchMangaAndChapters: { chapters: [{ id: 1, chapterNumber: 1, name: 'One', uploadDate: '1704067200000', sourceOrder: 1, url: '/1' }] } },
@@ -133,6 +134,8 @@ test('every adapter function sends documents from the registry, and every docume
   const [remote] = await sources.listRemoteSources(run);
   const a = sources.makeSuwayomiAdapter(remote, run);
   await a.search('t');
+  await sources.enrichCreatorSearch([a], run);
+  await a.searchCreator!('Someone', 'author', 2);
   await a.latest!(1);
   await a.popular!(1);
   await a.getSeries('1');

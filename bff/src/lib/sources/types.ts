@@ -99,6 +99,8 @@ export const unnumberedOf = (list: unknown): number => {
   return typeof n === 'number' && n > 0 ? n : 0;
 };
 
+export type CreatorField = 'author' | 'artist';
+
 export interface SourceAdapter {
   id: string; // 'mangadex'
   name: string; // 'MangaDex'
@@ -110,7 +112,9 @@ export interface SourceAdapter {
    */
   searchPage?(query: string, page: number): Promise<SourceSeries[]>;
   /** Search the provider's creator fields, never its title field. Absent means unsupported. */
-  searchCreator?(name: string, kind: 'author' | 'artist', page?: number): Promise<SourceSeries[]>;
+  searchCreator?(name: string, kind: CreatorField, page?: number): Promise<SourceSeries[]>;
+  /** Supported creator roles; absent on an adapter with searchCreator means both (e.g. MangaDex). */
+  creatorFields?: readonly CreatorField[];
   getSeries(id: string): Promise<SourceSeries | null>;
   listChapters(seriesId: string): Promise<SourceChapter[]>;
   getPageUrls(chapterId: string): Promise<string[]>;
@@ -220,4 +224,9 @@ export interface SourceHost {
   cfGet(url: string): Promise<string>;
   cfPost(url: string, postData: string): Promise<string>;
   cfSession(url: string): Promise<{ cookie: string; userAgent: string }>;
+}
+
+/** A creator method may implement only the fields the extension actually declares. */
+export function supportsCreatorSearch(source: SourceAdapter, field: CreatorField): boolean {
+  return typeof source.searchCreator === 'function' && (!source.creatorFields || source.creatorFields.includes(field));
 }

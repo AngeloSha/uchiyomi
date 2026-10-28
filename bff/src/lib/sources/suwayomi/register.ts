@@ -8,10 +8,11 @@
 // Everything here fails soft. Suwayomi being unset, down, or unauthorised must leave Uchiyomi booting and
 // working exactly as it does without it.
 import { q } from '../../db';
+import type { SourceAdapter } from '../types';
 import { env } from '../../../env';
 import { visibleToAll } from '../../visibility';
 import { registerAdapter } from '../loader';
-import { listRemoteSources, makeSuwayomiAdapter, SW_PREFIX, type RemoteSource } from './sources';
+import { listRemoteSources, makeSuwayomiAdapter, enrichCreatorSearch, SW_PREFIX, type RemoteSource } from './sources';
 import { setSitesOpened } from './siteSessions';
 import { EngineRefusedError, suwayomiConfigured } from './client';
 
@@ -289,6 +290,7 @@ async function load(list: () => Promise<RemoteSource[]>, quiet: boolean, beforeR
   let registered = 0;
   let skipped = 0;
   const out = new Set<string>();
+  const made: SourceAdapter[] = [];
   for (const s of wanted) {
     // Cap registrations rather than silently letting search fan out forever. Say what was dropped, and which.
     if (registered >= env.SUWAYOMI_MAX_SOURCES) {
@@ -298,7 +300,7 @@ async function load(list: () => Promise<RemoteSource[]>, quiet: boolean, beforeR
     }
     const adapter = makeSuwayomiAdapter(s);
     if (backups.has(String(s.id))) adapter.backup = true;
-    if (registerAdapter(adapter)) registered++;
+    if (registerAdapter(adapter)) { registered++; made.push(adapter); }
   }
   leftOut = out;
   if (skipped) {
@@ -306,6 +308,8 @@ async function load(list: () => Promise<RemoteSource[]>, quiet: boolean, beforeR
       `[sources] suwayomi: registered ${registered} source(s); skipped ${skipped} over the SUWAYOMI_MAX_SOURCES limit of ${env.SUWAYOMI_MAX_SOURCES}`,
     );
   }
+  // Never await optional creator metadata: slow/broken filters cannot delay ordinary source registration.
+  void Promise.resolve().then(() => enrichCreatorSearch(made)).catch(() => {});
   return { configured: true, reachable: true, available: remote.length, registered, skipped };
 }
 

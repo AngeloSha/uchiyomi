@@ -3222,6 +3222,13 @@ paths:
                       type: object
                       additionalProperties: true
                       properties:
+                        creatorSearch:
+                          type: boolean
+                          description: Whether this source declares at least one creator search field.
+                        creatorFields:
+                          type: array
+                          items: { type: string, enum: [author, artist] }
+                          description: The exact creator roles this source supports; unsupported roles are never queried.
                         extension:
                           description: >-
                             For an extension source (`sw:` id): the installed extension package it came
@@ -3267,7 +3274,7 @@ paths:
         pages it; a source whose `searchPages` is false (GET /api/sources) answers a later page with
         `{ content: [] }`, never its first page again.
         `creator=author|artist` searches creator relationships instead of titles, only on a source whose
-        `creatorSearch` capability is true. `page` continues the same creator query.
+        `creatorSearch` capability is true and `creatorFields` includes that role. `page` continues the same creator query.
       parameters:
         - name: creator
           in: query

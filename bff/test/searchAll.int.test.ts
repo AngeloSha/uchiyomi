@@ -171,6 +171,31 @@ test('a creator search keeps the selected provider whole before paging past its 
   } finally { delete src.searchCreator; }
 });
 
+test('creator caches preserve case and unsupported roles cannot read a previously cached answer', { skip }, async () => {
+  const src = adapters[FAST] as any;
+  let asked = 0;
+  src.searchCreator = async (name: string) => { asked++; return [{ source: FAST, sourceId: name, title: name }]; };
+  try {
+    const first = await lib.searchAll('Case Creator', [src], { waitMs: 6000, health: await hmap(), creator: 'author' });
+    const second = await lib.searchAll('case creator', [src], { waitMs: 6000, health: await hmap(), creator: 'author' });
+    assert.equal(first.per.get(FAST)?.items[0].title, 'Case Creator');
+    assert.equal(second.per.get(FAST)?.items[0].title, 'case creator');
+    assert.equal(asked, 2, 'a case-sensitive creator reused a differently cased search');
+    await lib.searchAll('Artist Cache Role', [src], { waitMs: 6000, health: await hmap(), creator: 'artist' });
+    src.creatorFields = ['author'];
+    const before = asked;
+    const blocked = await lib.searchAll('Artist Cache Role', [src], { waitMs: 6000, health: await hmap(), creator: 'artist' });
+    assert.equal(blocked.asked, 0);
+    assert.equal(blocked.per.size, 0, 'an unsupported role read cached results');
+    for (const route of ['search', 'search-all']) {
+      const r = await app.inject({ method: 'GET', url: `/api/sources/${route}?source=${FAST}&q=Artist%20Cache%20Role&creator=artist`, headers: tok(ids.plain) });
+      assert.equal(r.statusCode, 200);
+      assert.deepEqual(r.json().content, []);
+    }
+    assert.equal(asked, before, 'an unsupported field called the adapter');
+  } finally { delete src.searchCreator; delete src.creatorFields; }
+});
+
 test('the first answer comes a grace after the fast source, with the slow ones still pending', { skip }, async () => {
   // Reintroduce by making `graceEnd` Infinity in searchAll's wait loop (waiting for every source, as the
   // old fan-out did): the answer arrives when the slow pair settles at SLOW_MS, "pending" reads 0 and fails.

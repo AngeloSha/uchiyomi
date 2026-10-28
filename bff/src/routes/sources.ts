@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { actsAsAdmin, authenticate, userIdOf, roleOf } from '../lib/auth';
 import { getSource, listSources, isSwAdapterId, SW_PREFIX, swAdapterId, withTimeout } from '../lib/sources';
 import { MANGADEX_GROUP } from '../lib/sources/mangadex';
-import type { SourceAdapter, SourceSeries, SourceChapter } from '../lib/sources/types';
+import { supportsCreatorSearch, type SourceAdapter, type SourceSeries, type SourceChapter } from '../lib/sources/types';
 import { chapterFileRel, sanitize, type DownloadInput } from '../lib/downloader';
 import { downloadWithFallback } from '../lib/chapterFallback';
 import { selectChapters, type ChapterFrom } from '../lib/selectChapters';
@@ -2564,7 +2564,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
           // v0.96.0 (#331): whether a search on it goes on past the first page (types.ts searchPage), so Discover
           // loads more of a search on this source alone only where there is more to load.
           searchPages: typeof s.searchPage === 'function',
-          creatorSearch: typeof s.searchCreator === 'function',
+          creatorSearch: (['author', 'artist'] as const).some((field) => supportsCreatorSearch(s, field)),
+          creatorFields: (['author', 'artist'] as const).filter((field) => supportsCreatorSearch(s, field)),
           // What the reader has actually used. Health-then-alphabetical put "18 Porn Comic" and "1Manga.co"
           // at the front of this install's English group while Aqua Manga -- 176 of its 214 series, answering
           // in 2.5s -- was never in the first six fetched.
@@ -2605,7 +2606,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // Only a source that pages its search has one (types.ts searchPage); every other answers a later page with nothing,
     // never its first page again. Clamped like the listings' paging.
     const p = Math.min(SEARCH_MAX_PAGE, Math.max(1, parseInt(page || '1', 10) || 1));
-    if (creator ? typeof src.searchCreator !== 'function' : p > 1 && typeof src.searchPage !== 'function') return { content: [] };
+    if (creator ? !supportsCreatorSearch(src, creator) : p > 1 && typeof src.searchPage !== 'function') return { content: [] };
     if (!sourceAllowedFor(src, vc(req).maxAgeRating)) return denySource(reply);
     // Reachable but not surfaceable: the chip is off and this source is adult. An empty page, NOT
     // `denySource` -- 403 is the permission answer and this is not a permission (the same account with
@@ -3462,7 +3463,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // `sources`: a comma-separated list of ids, for a search that picks which sources to ask (the Add more sources sheet).
     // Narrows the same way `source` does -- never widens `surfaceable` -- and an empty value is no list.
     const picked = narrowTo(rawSources);
-    const ask = all.filter((s) => (!only || s.id === only) && (!picked || picked.has(s.id)) && (!creator || typeof s.searchCreator === 'function'));
+    const ask = all.filter((s) => (!only || s.id === only) && (!picked || picked.has(s.id)) && (!creator || supportsCreatorSearch(s, creator)));
     const health = new Map((await healthAll().catch(() => [])).map((h) => [h.source_id, h] as const));
     const ans = await searchAll(term, ask, { waitMs, health, creator });
     const byId = new Map(ask.map((s) => [s.id, s] as const));

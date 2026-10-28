@@ -44,7 +44,7 @@ test("Discover asks the next page of the search it is showing, through the searc
   const src = readFileSync(join(__dirname, '../app/discover/page.tsx'), 'utf8');
   assert.match(src, /api<\{ content: SourceItem\[\] \}>\(sourceSearchPage\(solo, term, next, searchKind\)\)/);
   assert.match(src, /items: moreCards\.length \? \[\.\.\.searchHits, \.\.\.moreCards\] : searchHits/, "the later pages are not on the wall");
-  assert.match(src, /pages: !!sources\.find\(\(s\) => s\.id === solo\)\?\.\[searchKind === 'title' \? 'searchPages' : 'creatorSearch'\]/, 'paging must use the capability of the selected search field');
+  assert.match(src, /pages: searchKind === 'title' \? !!sources\.find\(\(s\) => s\.id === solo\)\?\.searchPages : supportsCreatorSearch\(sources\.find\(\(s\) => s\.id === solo\), searchKind\)/, 'paging must use the capability of the selected creator role, with title paging unchanged');
 });
 
 test('later search pages preserve the creator field and encode the person as data', () => {

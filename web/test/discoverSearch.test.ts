@@ -49,9 +49,10 @@ test('the search is a query keyed on the submitted term, not on the field', () =
   // `&source=` from the request: "the chosen source is not sent" fails; by bringing back `setSearchHits`:
   // "the imperative search is back" fails. (Since v0.55.4 the 18+ filter is in the key too: see its own test.)
   const src = code(read(PAGE));
-  assert.match(src, /queryKey: \['search-all', term, selected, ratingAsked, adultOn\]/, 'the search is not keyed on the submitted term and the chosen source (or is keyed on the field)');
+  assert.match(src, /queryKey: \['search-all', term, selected, ratingAsked, adultOn, searchKind\]/, 'the search is not keyed on the submitted term and the chosen source (or is keyed on the field)');
+  assert.match(src, /const creator = searchKind === 'title' \? '' : `&creator=\$\{searchKind\}`;/, 'the selected creator role is not sent');
   assert.match(src, /const only = selected \? `&source=\$\{encodeURIComponent\(selected\)\}` : '';/, 'the chosen source is not sent');
-  assert.match(src, /SEARCH_POLL_WAIT_MS\}\$\{only\}\$\{rated\}`, \{ signal \}\)/, 'the chosen source is not sent');
+  assert.match(src, /SEARCH_POLL_WAIT_MS\}\$\{only\}\$\{rated\}\$\{creator\}`, \{ signal \}\)/, 'the chosen source is not sent');
   // v0.61.0: the submitted term starts as the arrival's `?q=` (empty without one, so the field and the submitted term
   // still start apart from any typing). Updated deliberately from `useState('')`, which this pinned before Discover read
   // the address; v610Related.test.ts pins how the arrival is read.
@@ -163,7 +164,7 @@ test('the 18+ filter: three chips in search mode, sent and keyed, and an 18+ mar
   // the key: "the rating is not in the key" fails; by dropping `&rating=`: "the rating is not sent" fails; by
   // rendering the chips outside search mode: "the chips are not gated" fails; by dropping the mark: "no 18+ mark" fails.
   const src = code(read(PAGE));
-  assert.match(src, /queryKey: \['search-all', term, selected, ratingAsked, adultOn\]/, 'the rating is not in the key');
+  assert.match(src, /queryKey: \['search-all', term, selected, ratingAsked, adultOn, searchKind\]/, 'the rating is not in the key');
   assert.match(src, /const rated = ratingAsked === 'all' \? '' : `&rating=\$\{ratingAsked\}`;/, 'the rating is not sent');
   assert.match(src, /\{mode === 'search' && offerRating && \(/, 'the chips are not gated on search mode and offerRating');
   assert.match(src, /\(\[\['all', tr\('All'\)\], \['safe', tr\('Hide 18\+'\)\], \['adult', tr\('18\+ only'\)\]\] as const\)\.map/, 'the three chips are gone');

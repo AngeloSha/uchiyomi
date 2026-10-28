@@ -58,6 +58,10 @@ const PREF_SHAPES = `__typename
 const prefWrite = (field: string, type: string) => `mutation($source:LongString!,$position:Int!,$value:${type}){
   updateSourcePreference(input:{source:$source,change:{position:$position,${field}:$value}}){ preferences { ${PREF_SHAPES} } } }`;
 
+// Filter unions keep every position, but only TextFilter names and bounded group nesting are needed here.
+const creatorFilterShapes = (depth: number): string => `__typename ... on TextFilter { name }
+  ${depth ? `... on GroupFilter { filters { ${creatorFilterShapes(depth - 1)} } }` : ''}`;
+
 export const OPS = {
   // ---- the engine itself
   /** `buildType` replaced `revision`, which the version already carries as its patch number. */
@@ -69,8 +73,10 @@ export const OPS = {
    * (siteSessions.ts). Not `baseUrl`, which every supported engine marks deprecated ("replace with homeUrl").
    */
   sources: op('sources', '{ sources { totalCount nodes { id name displayName lang iconUrl homeUrl contentWarning supportsLatest extension { pkgName name } } } }'),
-  fetchSourceManga: op('fetchSourceManga', `mutation($source:LongString!,$type:FetchSourceMangaType!,$query:String,$page:Int!){
-  fetchSourceManga(input:{source:$source,type:$type,query:$query,page:$page}){ mangas { ${MANGA_FIELDS} } }
+  // Read apart and after registration: one broken extension's getFilterList cannot hide ordinary sources.
+  sourceCreatorFilters: op('sourceCreatorFilters', `{ sources { nodes { id filters { ${creatorFilterShapes(2)} } } } }`, true),
+  fetchSourceManga: op('fetchSourceManga', `mutation($source:LongString!,$type:FetchSourceMangaType!,$query:String,$page:Int!,$filters:[FilterChangeInput!]){
+  fetchSourceManga(input:{source:$source,type:$type,query:$query,page:$page,filters:$filters}){ mangas { ${MANGA_FIELDS} } }
 }`),
   /**
    * The series, through `fetchMangaAndChapters`, which replaced `fetchManga` and runs the same engine code. ⚠️ It
