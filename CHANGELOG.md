@@ -53,10 +53,6 @@
 
 ### Library, reader and source improvements
 
-- Admins can remove and restore selected images in supported local CBZs without renumbering pages. Original
-  images stay in verified trash until an explicit permanent purge. Source/series GIF skip rules are opt-in;
-  a page rescued by hand wins, and existing offline copies remain separate (#354).
-
 - Source identity wins over a title match: different entries on one source remain separate even when their
   titles are identical or normalize alike. Same-title additions receive separate download folders (#357).
 - The series chapter toolbar has **Select all** and **Clear selection**, respecting the current group and
