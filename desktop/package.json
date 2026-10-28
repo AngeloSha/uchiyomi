@@ -26,13 +26,13 @@
     "test:electron": "npm run build && electron out/test/solver.electron.test.js"
   },
   "dependencies": {
-    "electron-updater": "6.8.9"
+    "electron-updater": "6.8.11"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
     "electron": "44.8.0",
-    "electron-builder": "26.15.3",
-    "puppeteer-core": "25.14.0",
+    "electron-builder": "26.18.0",
+    "puppeteer-core": "25.16.0",
     "tsx": "4.23.15",
     "typescript": "7.0.2"
   }
