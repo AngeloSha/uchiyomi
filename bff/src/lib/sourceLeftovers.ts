@@ -22,9 +22,8 @@
 //
 // cleanupPreview proves eligibility from fresh remaining-source listings. purgeLeftovers executes a confirmed
 // preview while the caller owns both the series writer claim and DB row lock.
-import type { FastifyRequest } from 'fastify';
-import { createHmac, timingSafeEqual } from 'crypto';
-import { env } from '../env';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { createHash } from 'crypto';
 import { getSource } from './sources';
 import { bounded } from './autoFollow';
 import { budgetFor } from './sources/budget';
@@ -39,6 +38,7 @@ import { logAudit } from './audit';
 import { heldBy } from './chapterRanges';
 import { numKey } from './postingOrder';
 import { MAX_RANGE } from './naming';
+import { unnumberedOf } from './sources/types';
 
 /** One chapter row a removed source supplied and nothing else lists. */
 export interface LeftoverBook {
@@ -111,7 +111,13 @@ export async function prepareCleanup(seriesId: string, sourceId: string): Promis
       throw new CleanupRefused('listing_unavailable', 'Every remaining source must answer before downloads can be deleted. You can still remove the source and keep its downloads.');
     }
     const chapters = await bounded(Promise.resolve().then(() => source.listChapters(other.ref)), budgetFor(source, 20_000)).catch(() => null);
-    const numbers = new Set((Array.isArray(chapters) ? chapters : []).map((c) => numKey(c.number)).filter(Number.isFinite));
+    // An adapter can explicitly report posts it dropped for lacking numbers. Neither that partial list nor
+    // a malformed row is evidence that a retained source does not carry a chapter we are about to delete.
+    if (!Array.isArray(chapters) || unnumberedOf(chapters) > 0 || chapters.some((c) =>
+      !c || typeof c.number !== 'number' || !Number.isFinite(c.number) || c.number < 0)) {
+      throw new CleanupRefused('listing_unavailable', 'A remaining source returned chapters without reliable numbers. Downloads have been kept.');
+    }
+    const numbers = new Set(chapters.map((c) => numKey(c.number)));
     const known = await listedBy(seriesId, [other.source]);
     if (!numbers.size || known.some((n) => !numbers.has(numKey(n)))) {
       throw new CleanupRefused('listing_unavailable', 'A remaining source returned an empty or incomplete chapter list. Downloads have been kept.');
@@ -134,17 +140,35 @@ export async function cleanupPreview(seriesId: string, sourceId: string, query: 
   return { ...prepared, left: await leftoversOf(seriesId, sourceId, query, prepared.fresh) };
 }
 
-/** An expiring acknowledgement of this exact server preview, bound to the acting account. */
-export function cleanupConfirmation(preview: CleanupPreview, identity: string): string;
-export function cleanupConfirmation(preview: CleanupPreview, identity: string, confirmation: string): boolean;
-export function cleanupConfirmation(preview: CleanupPreview, identity: string, confirmation?: string): string | boolean {
-  const expiry = confirmation === undefined ? String(Date.now() + 5 * 60_000) : confirmation.split('.')[0];
-  if (!/^\d+$/.test(expiry) || Number(expiry) < Date.now() || Number(expiry) > Date.now() + 5 * 60_000) return false;
-  const proof = `${expiry}.${createHmac('sha256', env.JWT_SECRET).update(JSON.stringify({ identity, preview, expiry })).digest('hex')}`;
-  if (confirmation === undefined) return proof;
-  const supplied = Buffer.from(confirmation);
-  const expected = Buffer.from(proof);
-  return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+export interface CleanupIdentity { userId: string; seriesId: string; sourceId: string }
+const CONFIRMATION_TYPE = 'source-cleanup-preview';
+const CONFIRMATION_SECONDS = 300;
+interface ConfirmationClaims {
+  typ: string; aud: string; sub: string; seriesId: string; sourceId: string; snapshot: string; iat: number; exp: number;
+}
+
+/** An expiring, purpose-typed acknowledgement of the exact preview and acting account. It is never an access token. */
+export function cleanupConfirmation(app: FastifyInstance, preview: CleanupPreview, identity: CleanupIdentity): string;
+export function cleanupConfirmation(app: FastifyInstance, preview: CleanupPreview, identity: CleanupIdentity, confirmation: string): boolean;
+export function cleanupConfirmation(app: FastifyInstance, preview: CleanupPreview, identity: CleanupIdentity, confirmation?: string): string | boolean {
+  // This is a fingerprint of chapter/source state, not a credential hash. Account/series/source binding lives in
+  // the signed JWT claims, alongside its purpose and expiry; API and image authentication refuse this token type.
+  const snapshot = createHash('sha256').update(JSON.stringify(preview)).digest('base64url');
+  if (confirmation === undefined) return app.jwt.sign({
+    typ: CONFIRMATION_TYPE, aud: CONFIRMATION_TYPE, sub: identity.userId,
+    seriesId: identity.seriesId, sourceId: identity.sourceId, snapshot,
+  }, { expiresIn: CONFIRMATION_SECONDS });
+  try {
+    // Reject alternate base64 spellings of the same bytes too: acknowledgements have one canonical spelling.
+    const parts = confirmation.split('.');
+    if (parts.length !== 3 || parts.some((part) => !part || Buffer.from(part, 'base64url').toString('base64url') !== part)) return false;
+    const claims = app.jwt.verify<ConfirmationClaims>(confirmation, { allowedAud: CONFIRMATION_TYPE });
+    const now = Math.floor(Date.now() / 1000);
+    return claims.typ === CONFIRMATION_TYPE && claims.sub === identity.userId && claims.seriesId === identity.seriesId
+      && claims.sourceId === identity.sourceId && claims.snapshot === snapshot && Number.isInteger(claims.iat)
+      && Number.isInteger(claims.exp) && claims.iat <= now && claims.exp > now
+      && claims.exp > claims.iat && claims.exp - claims.iat <= CONFIRMATION_SECONDS;
+  } catch { return false; }
 }
 
 const none = (others: string[] = []): Leftovers => ({ others, books: [], numbers: [], readers: 0 });
@@ -173,10 +197,17 @@ async function listedBy(seriesId: string, sources: readonly string[], query: Que
 function listedFor(b: LeftoverBook, listed: Set<number>, sorted: number[]): boolean {
   if (listed.has(numKey(b.number))) return true;
   if (b.override != null && listed.has(numKey(b.override))) return true;
-  if (b.override == null && b.end != null && b.end > b.number && b.end - b.number <= MAX_RANGE) {
+  if (b.end != null && b.end > b.number && b.end - b.number <= MAX_RANGE) {
     return sorted.some((n) => n >= b.number && n <= b.end!);
   }
   return false;
+}
+
+/** Cleanup preserves every number a retained file can represent, including its raw range and an override. */
+function cleanupHeld(books: ReadonlyArray<Pick<LeftoverBook, 'number' | 'end' | 'override'>>) {
+  return heldBy(books.flatMap((b) => [
+    { number: b.number, end: b.end }, ...(b.override == null ? [] : [{ number: b.override, end: null }]),
+  ]));
 }
 
 /**
@@ -206,19 +237,18 @@ export async function leftoversOf(seriesId: string, sourceId: string, query: Que
   const goingIds = new Set(books.map((b) => b.id));
   // The numbers that go: what only this source lists, and what the going rows hold -- less anything another row keeps.
   const here = await listedBy(seriesId, [sourceId], query);
-  const stays = await query<{ number: number; end: number | null }>(
-    `SELECT COALESCE(ov.number, b.number)::float8 AS number,
-            CASE WHEN ov.number IS NULL AND b.number_end > b.number AND b.number_end <= b.number + ${MAX_RANGE} THEN b.number_end::float8 END AS end
+  const stays = await query<{ number: number; override: number | null; end: number | null }>(
+    `SELECT b.number::float8 AS number, ov.number::float8 AS override, b.number_end::float8 AS end
        FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
       WHERE b.series_id = $1 AND NOT (b.id = ANY($2::text[]))`, [seriesId, [...goingIds]]);
-  const kept = heldBy(stays);
+  const kept = cleanupHeld(stays);
   const numbers = new Map<number, number>();
   for (const n of here) if (!listed.has(numKey(n))) numbers.set(numKey(n), n);
   for (const b of books) {
-    const n = b.override ?? b.number;
-    numbers.set(numKey(n), n);
+    numbers.set(numKey(b.number), b.number);
+    if (b.override != null) numbers.set(numKey(b.override), b.override);
   }
-  const removed = heldBy(books.map((b) => ({ number: b.override ?? b.number, end: b.override == null ? b.end : null })));
+  const removed = cleanupHeld(books);
   const marks = await query<{ number: number }>(
     `SELECT number::float8 AS number FROM listing_progress WHERE series_id = $1
      UNION SELECT number::float8 AS number FROM chapter_failures WHERE series_id = $1`, [seriesId]);
@@ -265,28 +295,35 @@ export async function purgeLeftovers(
   for (const b of left.books) {
     const abs = containedPath(DL_ROOT, b.file);
     if (!abs || abs === root) { out.left.push({ id: b.id, reason: 'outside_root' }); continue; }
-    if (!b.pruned) {
-      const looked = await statOrGone(abs);
-      if (typeof looked === 'string') { out.left.push({ id: b.id, reason: 'unlink_failed' }); continue; }
-      if (await realContainedPath(DL_ROOT, b.file) !== abs) { out.left.push({ id: b.id, reason: 'outside_root' }); continue; }
-      if (looked) {
-        try { await rm(abs, { recursive: true, force: true }); }
-        catch { out.left.push({ id: b.id, reason: 'unlink_failed' }); continue; }
-        out.bytes += looked.size;
-      } else if (!(await stat(dirname(abs)).catch(() => null))) {
-        // The file and its folder both absent: the volume is not there, not a chapter gone (deleteChapterFiles says why).
-        out.left.push({ id: b.id, reason: 'unreachable' });
-        continue;
-      }
+    // Tombstones can have a refetch backup, and an interrupted restore can even leave their original file.
+    // They need the same real-path containment as live rows before either path can be touched.
+    const looked = await statOrGone(abs);
+    if (typeof looked === 'string') { out.left.push({ id: b.id, reason: 'unlink_failed' }); continue; }
+    if (await realContainedPath(DL_ROOT, b.file) !== abs) { out.left.push({ id: b.id, reason: 'outside_root' }); continue; }
+    if (!looked && !b.pruned && !(await stat(dirname(abs)).catch(() => null))) {
+      // The file and its folder both absent: the volume is not there, not a chapter gone (deleteChapterFiles says why).
+      out.left.push({ id: b.id, reason: 'unreachable' });
+      continue;
     }
-    // A set-aside copy from a refetch the process died in must not come back at boot as this chapter.
-    await rm(`${abs}${REFETCH_BAK}`, { force: true }).catch(() => {});
+    // Refuse an unreachable/unremovable backup BEFORE deleting the original. Otherwise a failed backup unlink
+    // silently leaves a copy which reapStaleTemp restores at boot after the row and source have been removed.
+    const backup = `${abs}${REFETCH_BAK}`;
+    if (await realContainedPath(DL_ROOT, `${b.file}${REFETCH_BAK}`) !== backup) {
+      out.left.push({ id: b.id, reason: 'outside_root' }); continue;
+    }
+    try { await rm(backup, { force: true }); }
+    catch { out.left.push({ id: b.id, reason: 'unlink_failed' }); continue; }
+    if (looked) {
+      if (await realContainedPath(DL_ROOT, b.file) !== abs) { out.left.push({ id: b.id, reason: 'outside_root' }); continue; }
+      try { await rm(abs, { recursive: true, force: true }); }
+      catch { out.left.push({ id: b.id, reason: 'unlink_failed' }); continue; }
+      out.bytes += looked.size;
+    }
     gone.push(b.id);
   }
   const keptIds = new Set(out.left.map((l) => l.id));
   // A number whose row could not go keeps its marks: they are still that row's.
-  const keptNumbers = heldBy(left.books.filter((b) => keptIds.has(b.id))
-    .map((b) => ({ number: b.override ?? b.number, end: b.override == null ? b.end : null })));
+  const keptNumbers = cleanupHeld(left.books.filter((b) => keptIds.has(b.id)));
   const numbers = left.numbers.filter((n) => !keptNumbers.has(n));
   const removeRows = async (qq: Query) => {
     if (gone.length) {

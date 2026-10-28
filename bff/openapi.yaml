@@ -10220,7 +10220,7 @@ paths:
               required: [confirmation]
               additionalProperties: false
               properties:
-                confirmation: { type: string, minLength: 1, maxLength: 128 }
+                confirmation: { type: string, minLength: 1, maxLength: 2048 }
       security:
         - bearer: []
       responses:

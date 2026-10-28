@@ -2009,7 +2009,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     const { id, sourceId } = req.params as { id: string; sourceId: string };
     const row = await one<{ folder: string }>('SELECT folder FROM lib_series WHERE id = $1', [id]);
     if (!row) return reply.code(404).send({ error: 'not_found' });
-    const body = remove ? z.object({ confirmation: z.string().min(1).max(128) }).strict().safeParse(req.body) : null;
+    const body = remove ? z.object({ confirmation: z.string().min(1).max(2048) }).strict().safeParse(req.body) : null;
     if (remove && !body?.success) return reply.code(400).send({ error: 'bad_request' });
     const claim = claimSeriesWriter([id], [row.folder]);
     if (!claim) return reply.code(409).send({ error: 'busy', message: 'Another task is changing that series.' });
@@ -2023,14 +2023,19 @@ export default async function adminRoutes(app: FastifyInstance) {
         // children too; new children need the parent FK lock, so unrelated series remain free to update.
         await qq('SELECT source_id FROM series_sources WHERE series_id = $1 FOR UPDATE', [id]);
         await qq('SELECT number FROM series_listing WHERE series_id = $1 FOR UPDATE', [id]);
+        // Metadata edits and new read/bookmark rows do not claim the folder writer. Freeze book identities and
+        // existing overrides too: their FK parent locks then serialize new overrides/progress with the deletion.
+        await qq('SELECT id FROM lib_books WHERE series_id = $1 ORDER BY id FOR UPDATE', [id]);
+        await qq(`SELECT ov.book_id FROM book_overrides ov JOIN lib_books b ON b.id = ov.book_id
+                   WHERE b.series_id = $1 ORDER BY ov.book_id FOR UPDATE OF ov`, [id]);
         const preview = await cleanupPreview(id, sourceId, qq, prepared);
-        const identity = `${id}:${sourceId}:${userIdOf(req)}`;
+        const identity = { seriesId: id, sourceId, userId: userIdOf(req) };
         if (!remove) return {
           chapters: preview.left.books.length, numbers: preview.left.numbers, readers: preview.left.readers,
-          lastSource: preview.left.others.length === 0, confirmation: cleanupConfirmation(preview, identity),
+          lastSource: preview.left.others.length === 0, confirmation: cleanupConfirmation(app, preview, identity),
         };
         if (!preview.left.others.length) throw new CleanupRefused('primary_source', 'The last source keeps its downloads. Remove it without cleanup.');
-        if (!cleanupConfirmation(preview, identity, body!.success ? body!.data.confirmation : '')) {
+        if (!cleanupConfirmation(app, preview, identity, body!.success ? body!.data.confirmation : '')) {
           throw new CleanupRefused('preview_changed', 'The chapters or sources changed. Open the preview again.');
         }
         const refusal = await purgeRefusal(preview.left.books);
