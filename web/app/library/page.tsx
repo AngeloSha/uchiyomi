@@ -14,8 +14,7 @@ import { PullToRefresh } from '@/components/PullToRefresh';
 import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from '@/components/Toast';
 import { Modal, ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
-import { LibraryFolders } from '@/components/LibraryFolders';
-import { foldersOf } from '@/lib/libraryFolders';
+import { MoveToLibrary } from '@/components/MoveToLibrary';
 import { useAuth, canDownload } from '@/lib/auth';
 import { AdultToggle, useAdultFilterConfigured, useAdultShown, useLibraries } from '@/components/AdultToggle';
 import { LibraryFilters, NO_SOURCE, READ_STATES, STATUSES, useLibrarySources } from '@/components/LibraryFilters';
@@ -82,6 +81,9 @@ function LibraryInner() {
   const anysrc = params.get('anysrc') || '';
   // "Search your library" (v0.60.0): the toolbar's field, a title filter the server applies with everything else.
   const q = (params.get('q') || '').trim();
+  // v0.100.0 (#338): every series by one author, from a name on a series page. Like the search, not a filter the panel
+  // holds: a chip of its own, outside the Filters badge.
+  const author = (params.get('author') || '').trim();
   const { data: libSources } = useLibrarySources();
   const sourceName = (id: string) => (id === NO_SOURCE ? tr('No source') : libSources?.sources.find((x) => x.id === id)?.name || id);
   const { data: allLibs } = useLibraries();
@@ -140,7 +142,7 @@ function LibraryInner() {
   // the page, so a value read once would not follow it. Downloads only for a viewer who may download.
   const mayDownload = authStatus === 'authed' && canDownload(user);
   const view: LibraryView = readView(params.get('view'), mayDownload);
-  useEffect(() => { setSelecting(false); setPicked(new Set()); anchor.current = null; }, [read, status, genres.join(','), sortKey, dir, lib, src, anysrc, q, view]);
+  useEffect(() => { setSelecting(false); setPicked(new Set()); anchor.current = null; }, [read, status, genres.join(','), sortKey, dir, lib, src, anysrc, q, author, view]);
   // Shift with a click picks the run between the last series clicked and this one (v0.96.0, #333, lib/libraryPick.ts).
   const togglePick = (id: string, e?: React.MouseEvent) => {
     const shift = !!e?.shiftKey;
@@ -151,9 +153,9 @@ function LibraryInner() {
   // so selecting a library filtered the grid while the badge said nothing was filtered and the "· filtered"
   // hint stayed dark. Now that every way to narrow the shelf is in one panel, every one of them counts.
   const activeCount = (read ? 1 : 0) + (status ? 1 : 0) + genres.length + (lib ? 1 : 0) + (src ? 1 : 0) + (anysrc ? 1 : 0);
-  // The shelf is narrowed: a filter, or a search. The search is not a filter the panel holds, so it is not in the
-  // Filters badge; but an empty grid under one is "nothing matches", never "your library is empty".
-  const narrowed = activeCount > 0 || !!q;
+  // The shelf is narrowed: a filter, a search or an author. The last two are not filters the panel holds, so they are
+  // not in the Filters badge; but an empty grid under one is "nothing matches", never "your library is empty".
+  const narrowed = activeCount > 0 || !!q || !!author;
 
   const setParam = (k: string, v: string) => {
     const next = new URLSearchParams(params.toString());
@@ -183,26 +185,27 @@ function LibraryInner() {
     });
   };
 
-  // Everything `activeCount` counts, cleared, and the search with it unless `alsoSearch` is false (the filter panel's
-  // own Clear all clears the panel). The order survives because it is not a filter -- clearing it would reorder the
-  // shelf as a side effect of a button that says it removes restrictions -- and so does its direction.
+  // Everything `activeCount` counts, cleared, and the search and the author with it unless `alsoSearch` is false (the
+  // filter panel's own Clear all clears the panel). The order survives because it is not a filter -- clearing it would
+  // reorder the shelf as a side effect of a button that says it removes restrictions -- and so does its direction.
   const clearAll = (alsoSearch: boolean) => {
     const n = new URLSearchParams();
     if (sortKey) n.set('sort', sortKey);
     if (reversed) n.set('dir', dir);
     if (!alsoSearch && q) n.set('q', q);
+    if (!alsoSearch && author) n.set('author', author);
     // v0.61.0: the smart list this shelf was opened from (its Edit filters) stays, so filters cleared and chosen again
     // can still Update it.
     if (params.get('list')) n.set('list', params.get('list')!);
     router.replace(`/library?${n.toString()}`);
   };
 
-  const condition = useMemo(() => conditionFrom(read, status, genres, lib, src, anysrc), [read, status, genres.join(','), lib, src, anysrc]);
+  const condition = useMemo(() => conditionFrom(read, status, genres, lib, src, anysrc, author), [read, status, genres.join(','), lib, src, anysrc, author]);
   // v0.61.0: the shelf on screen as a smart list's query -- the order in force included, the account's default too.
   const shownQuery = useMemo(() => queryOfParams(params, { sort: active.key, dir }), [params, active.key, dir]);
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError, isLoading, isError, isFetching, isPlaceholderData, refetch } = useInfiniteQuery({
-    queryKey: ['library', active.key, dir, read, status, genres.join(','), lib, src, anysrc, q],
+    queryKey: ['library', active.key, dir, read, status, genres.join(','), lib, src, anysrc, author, q],
     // The Downloads view shows no grid: forty covers fetched to sit unseen behind it would be the wrong work.
     enabled: view === 'series',
     initialPageParam: 0,
@@ -609,7 +612,7 @@ function LibraryInner() {
         {/* How many there are, or match: the order is the toolbar's Sort key now, which says it on its face. Dimmed while
             the count is the shelf being replaced. */}
         <p className={`${mayDownload ? 'mt-2' : 'mt-0.5'} text-xs text-fog-500 ${refreshing ? 'opacity-60' : ''}`} data-library-count>
-          {total != null && (q
+          {total != null && (q || author
             ? (total === 1 ? tr('1 series matches') : tr('{n} series match', { n: total }))
             : (total === 1 ? tr('1 series') : tr('{n} series', { n: total })))}
           {activeCount > 0 && <span className="text-accent">{total != null ? ' · ' : ''}{tr('filtered')}</span>}
@@ -633,6 +636,11 @@ function LibraryInner() {
             {q && (
               <button onClick={() => setParam('q', '')} title={tr('Clear search')} className="chip max-w-full text-xs" data-chip-search>
                 <IcSearch width={12} height={12} aria-hidden className="shrink-0" /><bdi className="min-w-0 truncate">{q}</bdi> ×
+              </button>
+            )}
+            {author && (
+              <button onClick={() => setParam('author', '')} className="chip max-w-full text-xs" data-chip-author>
+                <span className="min-w-0 truncate">{tr('Author: {name}', { name: `\u2068${author}\u2069` })}</span> ×
               </button>
             )}
             {reversed && (
@@ -984,43 +992,6 @@ function ViewSwitch({ view, onView }: { view: LibraryView; onView: (v: LibraryVi
         );
       })}
     </div>
-  );
-}
-
-/**
- * Move a selection into a library, or hand it back to the folder rule.
- *
- * Admin-only, and deliberately phrased as filing rather than moving: nothing on disk changes, and the series
- * stays where the scanner found it. Picking a library pins the choice, so a rescan or a newly created library
- * whose path contains these folders will not quietly undo it.
- */
-function MoveToLibrary({ n, busy, onClose, onPick }: {
-  n: number; busy: boolean; onClose: () => void; onPick: (libraryId: string | null) => void;
-}) {
-  const { data } = useQuery({
-    queryKey: ['admin-libraries'],
-    queryFn: () => api<{ content: { id: string; name: string; path: string; paths?: string[]; age_rating: number | null }[] }>('/api/admin/libraries'),
-  });
-  return (
-    <Modal title={tr('File {n} series', { n })} onClose={onClose}>
-      <div className="space-y-1">
-        {(data?.content ?? []).map((l) => (
-          <button key={l.id} disabled={busy} onClick={() => onPick(l.id)}
-            className="flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-start hover:bg-ink-800/60 disabled:opacity-50">
-            <span className="min-w-0">
-              <span className="block truncate text-sm text-fog-100">{l.name}</span>
-              <LibraryFolders paths={foldersOf(l)} className="text-[11px] text-fog-500" />
-            </span>
-            {l.age_rating != null && <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">{l.age_rating}+</span>}
-          </button>
-        ))}
-        <button disabled={busy} onClick={() => onPick(null)}
-          className="mt-2 w-full rounded-lg border border-ink-700 px-2.5 py-2 text-sm text-fog-400 hover:text-fog-200 disabled:opacity-50">
-          {tr('Automatic — follow the folder')}
-        </button>
-      </div>
-      <p className="mt-3 text-[11px] leading-relaxed text-fog-600">{tr('No files move. This only changes which library these series appear in, and it survives the next scan.')}</p>
-    </Modal>
   );
 }
 

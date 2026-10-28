@@ -525,16 +525,17 @@ test('src is the main source and anysrc any source, from the URL to the search, 
   assert.ok(fn, 'could not find conditionFrom');
   assert.match(page, /import \{ conditionFrom[^}]*\} from '@\/lib\/libraryQuery';/, 'the page builds its condition somewhere else');
   const params = fn![1].split(',').map((p) => p.trim().split(/[\s:=]/)[0]);
-  assert.deepEqual(params.slice(4), ['src', 'anysrc'], 'conditionFrom takes the source filters in another order');
+  assert.deepEqual(params.slice(4, 6), ['src', 'anysrc'], 'conditionFrom takes the source filters in another order');
   // Which parameter guards each condition, and which one it carries.
   const pushed = Object.fromEntries([...fn![2].matchAll(/if \((\w+)\) all\.push\(\{ (\w+): \{ operator: 'is', value: (\w+) \} \}\);/g)]
     .map((m) => [m[2], `${m[1]} -> ${m[3]}`]));
   assert.equal(pushed.mainSource, 'src -> src', 'src is not the main source');
   assert.equal(pushed.anySource, 'anysrc -> anysrc', 'anysrc is not any source');
   assert.match(page, /const src = params\.get\('src'\) \|\| '';\s*const anysrc = params\.get\('anysrc'\) \|\| '';/, 'the URL params are read into the wrong names');
-  assert.match(page, /useMemo\(\(\) => conditionFrom\(read, status, genres, lib, src, anysrc\), \[read, status, genres\.join\(','\), lib, src, anysrc\]\)/,
+  // v0.100.0 (#338): the author (by name) follows them.
+  assert.match(page, /useMemo\(\(\) => conditionFrom\(read, status, genres, lib, src, anysrc, author\), \[read, status, genres\.join\(','\), lib, src, anysrc, author\]\)/,
     'the condition memo does not carry both source filters, in order');
-  assert.match(page, /queryKey: \['library', active\.key, dir, read, status, genres\.join\(','\), lib, src, anysrc, q\],/, "the grid's key does not carry the source filters");
+  assert.match(page, /queryKey: \['library', active\.key, dir, read, status, genres\.join\(','\), lib, src, anysrc, author, q\],/, "the grid's key does not carry the source filters");
   assert.match(page, /const activeCount = [^;]*\+ \(src \? 1 : 0\) \+ \(anysrc \? 1 : 0\);/, 'the badge does not count the source filters');
   // The writing side: Main source's chips set `src` and count `main`, Any source's set `anysrc` and count `any`, and
   // both placements of the panel are handed both values; each active chip clears its own param.

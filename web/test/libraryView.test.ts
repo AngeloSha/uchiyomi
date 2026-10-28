@@ -48,13 +48,13 @@ test('the Downloads view fetches no grid and shows none of the series controls',
   assert.match(src, /onRefresh=\{series \? onRefresh : \(\) => kickDownloads\(qc\)\}/, 'pull to refresh in Downloads rescans the library instead of asking for the jobs');
   // The selection belongs to the grid it was made in -- its order, direction and search too (v0.60.0): a new one loads
   // other pages, and a pick made in the old one would act on series no longer on screen.
-  assert.match(src, /\[read, status, genres\.join\(','\), sortKey, dir, lib, src, anysrc, q, view\]\);/, 'a selection outlives a switch to Downloads');
+  assert.match(src, /\[read, status, genres\.join\(','\), sortKey, dir, lib, src, anysrc, q, author, view\]\);/, 'a selection outlives a switch to Downloads');
 });
 
 test('the underline slides only when motion is welcome', () => {
   // Reintroduce with a plain spring: "the underline slides under Reduce effects" fails.
   const src = page();
-  const sw = src.slice(src.indexOf('function ViewSwitch('), src.indexOf('function MoveToLibrary('));
+  const sw = src.slice(src.indexOf('function ViewSwitch('), src.indexOf('export default function LibraryPage('));
   assert.match(sw, /const plain = useReduceEffects\(\);\s*const still = useReducedMotion\(\);/);
   assert.match(sw, /layoutId="libview"/);
   assert.match(sw, /transition=\{plain \|\| still \? \{ duration: 0 \} : \{ type: 'spring'/, 'the underline slides under Reduce effects');

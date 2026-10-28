@@ -1,5 +1,47 @@
 # Changelog
 
+## Unreleased — backlog review
+
+- Source identity wins over a title match: different entries on one source remain separate even when their
+  titles are identical or normalize alike. Same-title additions receive separate download folders (#357).
+- The series chapter toolbar has **Select all** and **Clear selection**, respecting the current group and
+  missing-chapter filters across chapter pages (#364).
+- Import matching and **Add more sources…** keep slower sources' answers, retain more than twelve matches,
+  offer **More** for paged sources, and show author metadata when available (#353).
+- The reader can pan a zoomed page and offers a **Paper** tone. Touch taps distinguish catching a fling,
+  turning pages and double-tapping. Paged chapter changes show a brief chapter label.
+- Series menus offer **Move library**. Home's **Keep reading** row can hide and restore a series.
+- Alternate AniList titles appear on series pages; correcting the AniList link invalidates their cached identity.
+- An optional account setting filters new-chapter notifications to the next chapter the person would read,
+  including files that landed before indexing finished.
+- Phone Search can open the command palette. Admin settings show download limits and blocked sources.
+- Renaming a missing folder identifies an existing spelling that differs only in case.
+- Dependency updates cover the server, web app and desktop tooling, including Electron 45.
+
+## v0.100.0 — 2026-10-22
+
+**Tap an author on a series page to see everything of theirs in your library, and the library's search finds authors
+too.**
+
+### Find more by an author
+
+- **Each name in the *by …* line under a series' title is a link** to your library showing every series by that person,
+  with a tag above the grid to clear it ([#338](https://github.com/AngeloSha/uchiyomi/issues/338), from @sonikvvv). A
+  series with several authors shows each name on its own.
+- **A name finds every way it is written.** *Chugong (추공)* also finds a series that only says *추공*, and
+  *Gi So-Ryeong* finds *Gi So Ryeong*. Only whole names match, so *Oh* is not every name with "oh" in it.
+- **Search your library finds authors as well as titles.**
+- **Save as list keeps the author,** so a list of someone's work fills itself as you add more of it.
+
+### Also
+
+- **A library the sign-in limits read addresses with is updated** (ip-address 10.7.4). On a server that trusts every
+  proxy (`TRUST_PROXY=true`), one crafted address could stall it.
+
+### Upgrading
+
+- Nothing to do.
+
 ## v0.99.0 — 2026-10-22
 
 **Your picks on Discover get a spotlight of their own, right after the first row of covers, and Discover's rows line up

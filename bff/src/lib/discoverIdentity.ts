@@ -193,9 +193,21 @@ export function heldFor(idx: LibraryIndex, it: ItemRef): Held[] {
   const k = nameKey(it.title);
   if (!k) return [];
   const byName = idx.byName.get(k);
-  if (byName?.length) return byName;
+  if (byName?.length) return withoutConflictingPairs(idx, it, byName);
   const w = workForKey(k);
-  return (w && idx.byWork.get(w)) || [];
+  return withoutConflictingPairs(idx, it, (w && idx.byWork.get(w)) || []);
+}
+
+/** A different entry on the same source is positive evidence against a title-only match (#357). */
+function withoutConflictingPairs(idx: LibraryIndex, it: ItemRef, candidates: Held[]): Held[] {
+  if (!it.source || !it.sourceId || !candidates.length) return candidates;
+  const prefix = `${it.source}\u0001`;
+  const pair = pairKey(it.source, it.sourceId);
+  const others = new Set<string>();
+  for (const [key, held] of idx.byPair) {
+    if (key.startsWith(prefix) && key !== pair) for (const h of held) others.add(h.id);
+  }
+  return candidates.filter((h) => !others.has(h.id));
 }
 
 /**
@@ -204,6 +216,9 @@ export function heldFor(idx: LibraryIndex, it: ItemRef): Held[] {
  */
 export function workOf(idx: LibraryIndex, it: ItemRef, held: Held[] = heldFor(idx, it)): string {
   if (held.length) return held[0].work;
+  // Keep a conflicting source entry out of the owned work's card even when the names fold alike.
+  const names = idx.byName.get(nameKey(it.title)) ?? [];
+  if (withoutConflictingPairs(idx, it, names).length < names.length) return `s:${it.source}:${it.sourceId}`;
   const k = nameKey(it.title);
   if (!k) return `s:${it.source}:${it.sourceId}`;
   return workForKey(k) ?? `n:${k}`;

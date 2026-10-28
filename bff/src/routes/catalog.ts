@@ -6,6 +6,7 @@ import { junkPagesFor, setPageOverride } from '../lib/junkPages';
 import { spreadsFor } from '../lib/spreadMeasure';
 import { marksFor, marksJson, setMark } from '../lib/spreadMarks';
 import { komgaImage } from '../lib/komga';
+import { otherTitlesFor } from '../lib/otherTitles';
 import { content as komga, NATIVE_PROGRESS, OWNED } from '../lib/backend';
 import { UnsupportedFilter, owned } from '../lib/ownedCatalog';
 import { cleanDescription } from '../lib/htmlText';
@@ -20,7 +21,7 @@ import { sourceLabel } from '../lib/health';
 import { actsAsAdmin, authenticate, roleOf, userIdOf } from '../lib/auth';
 import { warmHeroBackdrops } from './images';
 import { writeProgress, reachedEnd } from '../lib/progress';
-import { onDeckPicks, type DeckPick } from '../lib/onDeck';
+import { onDeckPicks, keepReadingHidden, type DeckPick } from '../lib/onDeck';
 import { enrichSeries, newSinceSeen, seenCounts, seriesSeen } from '../lib/enrich';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
@@ -338,6 +339,39 @@ export default async function catalogRoutes(app: FastifyInstance) {
     };
   });
 
+  // "Remove from Keep reading": the series stays in the library and only leaves that row, until it is read again.
+  app.put('/api/keep-reading/:seriesId', async (req, reply) => {
+    const uid = userIdOf(req);
+    const { seriesId } = req.params as { seriesId: string };
+    const { hidden } = z.object({ hidden: z.boolean() }).parse(req.body);
+    if (hidden) {
+      // Only a series this person may see: an id from a library they were not granted is a 404, not a stored row.
+      if (!(await browsableIds([seriesId], vc(req))).has(seriesId)) return reply.code(404).send({ error: 'not_found' });
+      await q(`INSERT INTO keep_reading_hidden (user_id, series_id) VALUES ($1, $2)
+               ON CONFLICT (user_id, series_id) DO UPDATE SET hidden_at = now()`, [uid, seriesId]);
+    } else {
+      await q('DELETE FROM keep_reading_hidden WHERE user_id = $1 AND series_id = $2', [uid, seriesId]);
+    }
+    return { ok: true, hidden };
+  });
+
+  const keepReadingHiddenCount = async (req: FastifyRequest, uid: string): Promise<number> => {
+    const rows = await keepReadingHidden(uid).catch(() => []);
+    if (!rows.length) return 0;
+    return (await browsableIds(rows.map((r) => r.seriesId), vc(req))).size;
+  };
+
+  // What is out of Keep reading right now, for the list that puts it back.
+  app.get('/api/keep-reading/hidden', async (req) => {
+    const rows = await keepReadingHidden(userIdOf(req));
+    const shown = await browsableIds(rows.map((r) => r.seriesId), vc(req));
+    const content = (await Promise.all(rows.filter((r) => shown.has(r.seriesId)).map(async (r) => {
+      const s: any = await komga.series(vc(req), r.seriesId).catch(() => null);
+      return s ? { seriesId: r.seriesId, title: s.metadata?.title || s.name, hiddenAt: r.hiddenAt } : null;
+    }))).filter(Boolean);
+    return { content };
+  });
+
   app.get('/api/home', async (req) => {
     const uid = userIdOf(req);
     const admin = NATIVE_PROGRESS && actsAsAdmin(req);
@@ -351,7 +385,12 @@ export default async function catalogRoutes(app: FastifyInstance) {
 
     let onDeckP: Promise<any[]>;
     if (admin) {
-      onDeckP = komga.booksOnDeck(vc(req), 0, 20).then((r: any) => r.content).catch(() => []);
+      onDeckP = komga.booksOnDeck(vc(req), 0, 20).then((r: any) => r.content).catch(() => [])
+        .then(async (books: any[]) => {
+          if (!books.length) return books;
+          const hide = new Set((await keepReadingHidden(uid).catch(() => [])).map((r) => r.seriesId));
+          return hide.size ? books.filter((b) => !hide.has(b.seriesId)) : books;
+        });
     } else {
       // The pick itself is lib/onDeck.ts (v0.61.0: shared with Pick back up and the OPDS Keep reading shelf).
       onDeckP = onDeckPicks(uid, vc(req), { window: 'recent', limit: ON_DECK_LIMIT }).then(resolvePicks);
@@ -431,6 +470,8 @@ export default async function catalogRoutes(app: FastifyInstance) {
       // v0.61.0: Home draws each only when it has something in it.
       pickUp,
       gems: await enrichSeries(req, (gems as any).content ?? []),
+      // How many series are out of Keep reading by the reader's own choice: the rail's "Hidden" list shows when it is above 0.
+      keepReadingHidden: await keepReadingHiddenCount(req, uid),
       updatesCount,
     };
   });
@@ -721,6 +762,19 @@ export default async function catalogRoutes(app: FastifyInstance) {
       else if (byId.has(e.seriesId)) content.push({ relation: e.relation, series: byId.get(e.seriesId) });
     }
     return { lookups: r.lookups, content };
+  });
+
+  /**
+   * The English, romanised and Japanese titles of the series' AniList entry, for the series page: `{titles}`, null when
+   * the series has no checked AniList link, its library's lookups are off, or AniList has no names for it. Kept
+   * (lib/otherTitles.ts), so most reads ask nothing. Resolved through the series' own visibility first: a 404 for a
+   * series this viewer may not open.
+   */
+  app.get('/api/series/:id/other-titles', async (req) => {
+    const { id } = req.params as { id: string };
+    await komga.series(vc(req), id);
+    if (!OWNED) return { titles: null };
+    return { titles: await otherTitlesFor(id) };
   });
 
   app.get('/api/series/:id/books', async (req) => {

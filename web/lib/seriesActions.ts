@@ -15,7 +15,7 @@ export type SeriesActionId =
   | 'notes' | 'markAllRead' | 'markAllUnread'
   | 'findMissing' | 'hidden' | 'archive' | 'checkNew'
   | 'copyLink' | 'openTab'
-  | 'edit' | 'cover' | 'newBanner' | 'rename' | 'remove';
+  | 'edit' | 'cover' | 'move' | 'newBanner' | 'rename' | 'remove';
 
 export type SeriesActionGroupId = 'reading' | 'chapters' | 'share' | 'admin';
 
@@ -106,6 +106,8 @@ export function seriesActionGroups(x: SeriesActionsInput): SeriesActionGroup[] {
     // #242: a cover from one of the sources the series uses, or an upload. Here rather than a key under the art, where a
     // phone reads Continue first (v0.67.0); a desktop's poster opens it too.
     { id: 'cover' as const, label: tr('Change cover'), hook: 'change-cover', disabled: offline },
+    // Files it under another library (the Library's Select mode does the same for many): nothing on disk moves.
+    { id: 'move' as const, label: tr('Move library'), hook: 'move-library', disabled: offline },
     // Only while the hero is an automatic one: a real banner is changed in Edit details, and Shuffle answers 409 for it.
     ...(x.autoHero ? [{ id: 'newBanner' as const, label: tr('New banner'), hook: 'new-banner', disabled: offline }] : []),
     ...(x.hasFolder ? [{ id: 'rename' as const, label: tr('Rename folder'), disabled: offline }] : []),

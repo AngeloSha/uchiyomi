@@ -18,6 +18,7 @@ import { rm, rename, realpath, stat, readdir } from 'fs/promises';
 import type { Stats } from 'fs';
 import { q, one, tx } from './db';
 import { artFile } from './seriesArt';
+import { caseVariantOnDisk } from './caseVariant';
 import { allWritable, containedPath, realContainedPath, rootUnavailable, statOrGone, writePreflight, type Writability } from './fsGuard';
 export { statOrGone } from './fsGuard';
 import { tombstoneBooks } from './chapterCleanup';
@@ -618,6 +619,10 @@ const SERIES_KEYED_TABLES = [
   'backup_misses',
   // v0.85.0: the names its translated pages keep (lib/translate/pages.ts). Cascades too; named for the same count.
   'translate_names',
+  // Which readers took it off their Keep reading row (lib/onDeck.ts). No FK on the series; named so a forgotten series leaves no row.
+  'keep_reading_hidden',
+  // Its English, romaji and native titles from AniList (lib/otherTitles.ts). Cascades too; named for the same count.
+  'series_other_titles',
 ] as const;
 
 export interface ForgetRefusal {
@@ -1201,6 +1206,15 @@ export async function renameSeriesFolder(id: string, newFolder: string): Promise
 
   const roots = await rootsOf(id);
   if (!roots.length) return { ok: false, reason: 'That series has no files on disk.' };
+  // The folder is absent under its stored spelling in every root but present under another case (`Manga/X` stored, `manga/X`
+  // on disk, after a rename in a file manager): there is nothing at the stored name to move, and the raw ENOENT the rename
+  // would end in says nothing useful. Refuse and name the spelling the disk uses; the next scan finds the series there.
+  // Only when the stored name really is not found (a case-insensitive disk finds it under any case, and the move proceeds).
+  const held = await Promise.all(roots.map(async (root) => { const p = containedPath(root, row.folder); return !!p && await stat(p).then(() => true, () => false); }));
+  if (!held.some(Boolean)) {
+    const other = await caseVariantOnDisk(roots, row.folder);
+    if (other) return { ok: false, reason: `"${row.folder}" is not on disk, but "${other}" is. Rename the series to that folder spelling instead.` };
+  }
   // Desktop: the folders ABOVE the new name spelled the way the disk spells them. On NTFS and APFS
   // `mangadex/Title` lands inside the existing `MangaDex`, and a folder stored with the typed case would
   // never match what the scanner reads back -- the series would split in two on the next scan. The new

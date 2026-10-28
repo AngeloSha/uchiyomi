@@ -418,6 +418,24 @@ test('the detail lookup is one fetch for a pre-warm and the pick that joins it, 
 
 // ---- the 18+ filter (v0.55.4, #158) --------------------------------------------------------------------------------------
 
+test('manual matching retains results beyond twelve and can request another source page', { skip }, async () => {
+  const { registerAdapter } = await import('../src/lib/sources');
+  const term = 'Manual matching long list';
+  const entries = Array.from({ length: 40 }, (_, i) => ({ title: `Manual candidate ${i + 1}` }));
+  const src = probe('sb-manual-pages', 'Manual pages', term, entries) as any;
+  src.searchPage = async (_term: string, page: number) => page === 2
+    ? [{ source: src.id, sourceId: 'manual-page-2', title: 'The correct entry on page two' }] : [];
+  registerAdapter(src);
+  const url = `/api/sources/search-all?q=${encodeURIComponent(term)}&groupBy=source&sources=${src.id}&wait=1000`;
+  const first = await app.inject({ method: 'GET', url, headers: tok(ids.plain) });
+  assert.equal(first.statusCode, 200, first.body);
+  const rail = first.json().content.find((r: any) => r.source === src.id);
+  assert.equal(rail.results.length, 40, 'the manual rail must not discard every match after twelve');
+  const next = await app.inject({ method: 'GET', url: `/api/sources/search?source=${src.id}&q=${encodeURIComponent(term)}&page=2`, headers: tok(ids.plain) });
+  assert.equal(next.statusCode, 200, next.body);
+  assert.equal(next.json().content[0].sourceId, 'manual-page-2');
+});
+
 /** A fake answering only `term`, with these results: anything else is an empty answer, so no other test meets it. */
 function probe(id: string, name: string, term: string, items: Array<{ title: string; genres?: string[]; contentRating?: string }>,
   opts: { isNsfw?: boolean } = {}) {

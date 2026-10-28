@@ -8,6 +8,21 @@ import type { ViewCtx } from './visibility';
 
 export const OWNED = process.env.LIBRARY_BACKEND !== 'komga';
 
+/**
+ * v0.100.0 (#338): the Library's `authorName` leaf (lib/ownedCatalog.ts resolveAuthorNames) in the words Komga has for
+ * it -- `author` with a `{name}` value, Komga's own match on one of a series' authors, any role. Every other leaf passes
+ * as it is.
+ */
+export function komgaCondition(cond: any): any {
+  if (!cond || typeof cond !== 'object') return cond;
+  if (Array.isArray(cond.allOf)) return { ...cond, allOf: cond.allOf.map(komgaCondition) };
+  if (Array.isArray(cond.anyOf)) return { ...cond, anyOf: cond.anyOf.map(komgaCondition) };
+  if (cond.authorName && typeof cond.authorName === 'object') {
+    return { author: { operator: cond.authorName.operator, value: { name: String(cond.authorName.value ?? '') } } };
+  }
+  return cond;
+}
+
 // When false (owned mode) there is no native Komga progress store, so every account — including admin —
 // is tracked via read_progress (catalog.ts gates its admin-native-progress branches on this).
 export const NATIVE_PROGRESS = !OWNED;
@@ -73,7 +88,7 @@ const komgaAdapter = (k: any): ContentBackend => ({
   // Nor scores or the household's reading of them for Hidden gems (v0.61.0): no rail.
   seriesGems: async () => ({ content: [] }),
   booksOnDeck: (_c, p, s) => k.booksOnDeck(p, s),
-  searchSeries: (_c, body, p, s, sort) => k.searchSeries(body, p, s, sort),
+  searchSeries: (_c, body, p, s, sort) => k.searchSeries(body?.condition ? { ...body, condition: komgaCondition(body.condition) } : body, p, s, sort),
   seriesBooks: (_c, id, p, s, sort) => k.seriesBooks(id, p, s, sort),
   book: (_c, id) => k.book(id),
   bookPages: (_c, id) => k.bookPages(id),

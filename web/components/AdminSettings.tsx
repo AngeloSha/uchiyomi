@@ -38,6 +38,7 @@ import { hasGroup, normGroup, reorder, withoutGroup } from '@/lib/scanlators';
 import { suggestGroups } from '@/lib/groupSuggest';
 import { NotificationsSection } from '@/components/AdminNotifications';
 import { SlowArchiveRow } from '@/components/ArchiveSettings';
+import { PolitenessRow } from '@/components/PolitenessSettings';
 import { TranslateRow } from '@/components/TranslateSettings';
 import { isDesktop } from '@/lib/desktop';
 import { ssoOnly, useAuthConfig } from '@/lib/authConfig';
@@ -570,6 +571,7 @@ function SchedulesSection({ data, save }: { data: any; save: Save }) {
         {/* Which languages MangaDex is a source in lives with the sources (components/MangadexCard.tsx); this row goes there, unfolded (`?card=mangadex`, v0.52.0). */}
         <SummaryRow id="mangadex-languages" label={tr('MangaDex languages')} href="/admin/?tab=Sources&card=mangadex" />
         <MoreOptions id="downloads-more">
+          <PolitenessRow />
           {/* v0.89.0 (#305): how many other sources a series may follow (bff lib/followLimit.ts), here since the env's
               MAX_FOLLOWED_SOURCES alone set it -- that number is what the menu shows until one is picked. The help says the
               cost: each one is a chapter list asked for at every update. */}

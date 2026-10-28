@@ -96,7 +96,7 @@ it.
 ![Library](shots/library.webp)
 
 The **Library** tab is your whole collection. Since v0.60.0 a **toolbar** sits above the grid: **Search your library**
-(narrows the shelf by title, filters and sort kept), the **Sort** key, the **Comfortable / Compact / List** switch (remembered
+(narrows the shelf by title, and since v0.100.0 by author too, filters and sort kept), the **Sort** key, the **Comfortable / Compact / List** switch (remembered
 on each device), **Select** and ✦ **Surprise me**. Every way to narrow it lives in one filter panel: which library, read
 state, publication status, format and genre. On a laptop the panel sits down the left of the grid; on a phone it opens
 from **Filters** in the toolbar. Since v0.60.0 its choices are rows rather than chips: each with its own mark (a ring
@@ -142,6 +142,12 @@ belongs, see *Dragging to reorder* below) and a switch to hide it.
 Home follows at once, and the arrangement is saved to your account, so your other devices open the same Home; **Reset**
 puts the original order back. Your lists move together as one rail, and which lists those are is still chosen on
 **Lists** (the sheet's **Choose lists** goes there). A hidden rail isn't fetched at all.
+
+**Take something off Keep reading**: right-click a card in *Keep reading* (press and hold on a phone, or use the ⋯ that
+appears on a computer) and choose **Remove from Keep reading**. The series stays in your library and your progress is
+untouched; it only leaves that row, for you. It comes back by itself the next time you read a chapter of it. To bring it
+back sooner, **Hidden (n)** beside the row's title lists what you removed; pick one to put it back. The same removal
+applies to your e-reader's Keep reading shelf (OPDS) and to *Pick back up*.
 
 **Your favorites in your order** (since v0.97.0): **Manage** at the end of the *Your favorites* row opens your favourites
 as a list. Drag one into place (on a phone, hold it a moment first), move it a step with its arrows, or take it off with
@@ -214,7 +220,8 @@ only when nothing else wants the key: not while you are typing in a field, not w
 Ctrl, Alt or ⌘ held, and never in the reader, which keeps its own keys. Under a Japanese or Chinese
 interface the palette opens empty instead, so the input method composes the whole title. **Profile → Settings →
 General → Type anywhere to search** switches the typing, and the **/** shortcut with it, off on that device;
-**Ctrl+K** keeps working.
+**Ctrl+K** keeps working. A phone has no such keys, so the **Search** tab has a **Search pages, settings and actions**
+button under its box that opens the same palette, with what you have typed already in it.
 
 **Search finds pages and settings too** (since v0.55.4). Type two letters or more and, under the series, **Pages and
 settings** lists what the words name: every page of **Admin** and of your **Profile**, every setting on them (since
@@ -345,6 +352,13 @@ order leaves it alone; Edit a chapter gives it one number instead.
 The series page shows the cover, an ambient backdrop, one muted line about where the chapters come from,
 genres, description, and the **chapter list**.
 
+**Find more by an author** (since v0.100.0, [#338](https://github.com/AngeloSha/uchiyomi/issues/338)). Each name in
+the *by …* line under the title is a link: it opens the Library showing every series by that person, with an
+*Author:* tag above the grid you can clear. A series with several authors shows each name on its own. A name finds every
+way it is written: *Chugong (추공)* also finds a series that only says *추공*, and *Gi So-Ryeong* finds *Gi So Ryeong*.
+It matches whole names, so *Oh* is not every name with "oh" in it. **Save as list** keeps the author, so a list of
+someone's work fills itself as you add more of it. Genres link the same way, to the Library filtered by that genre.
+
 - **The reading button** says what it opens (since v0.60.0): *Continue · Ch. 12* when a chapter is half read (the
   one you read last), *Next · Ch. 11* when you finished chapters 1–10 and nothing is half read, *Start reading* the
   first time, and *Read again* once everything is read. A series with no chapter on disk yet shows *Nothing to read yet*
@@ -363,8 +377,10 @@ genres, description, and the **chapter list**.
   (*Add to list*) and **More**. **More** holds the rest, grouped: *Reading* (notes and saved pages, mark all read
   or unread), *Chapters* (Find missing chapters, Archive slowly, and for an admin Check for new chapters and, while any
   is hidden, Show hidden chapters), *Share* (copy
-  the link, open in a new tab), and for an admin *Edit details*, *New banner*, *Rename folder* and *Remove from
-  library*. On a computer it opens as a menu, on a phone as a sheet.
+  the link, open in a new tab), and for an admin *Edit details*, *Change cover*, *Move library*, *New banner*,
+  *Rename folder* and *Remove from library*. *Move library* files the series under another library (or *Automatic —
+  follow the folder*, which hands it back to the folder rule); no files move, and the choice survives the next scan.
+  An admin's right-click or ⋯ menu on a series card has it too. On a computer it opens as a menu, on a phone as a sheet.
 
   ![The series page's More menu, open: Reading, Chapters, Share and Admin groups](shots/series-more.webp)
 - Click any chapter to read it; the ⬇ on a chapter saves just that one to this device. Toggle
@@ -401,7 +417,8 @@ Progress, favorites, and history are **per-user**, so each account has its own.
 **Filtering the library.** The Library's filter panel (a sidebar on a computer, **Filters** on a phone): read state
 (not started / reading / finished), publication status, genres, and the source a series comes from
 (**Main source** / **Any source**). Picking several genres means all of them. Active filters show as
-removable tags above the grid, and they live in the URL, so you can share a filtered view.
+removable tags above the grid, and they live in the URL, so you can share a filtered view. An author (a name on a
+series page, since v0.100.0) shows there as a tag too.
 
 **Doing something to many series at once.** Hit **Select** on the Library page, tap the ones you want, and the
 bar at the bottom shows what can be done with them. With a keyboard, **Shift**-click picks every series between the
@@ -524,6 +541,15 @@ library). The reader's last page has **Next in the story**, and **More like this
 recommend that you already have. These are kept up in the background with the AniList scores, about every six hours;
 nothing asks AniList when a page opens, a library with AniList lookups off sends nothing, and the 18+ switch and age
 limits apply as everywhere else.
+
+### Titles on AniList
+
+A series linked to AniList shows, above its summary, the **English**, **romanised** and **Japanese** titles of that
+entry, each one that has a name and differs from the title the page already shows. The server asks AniList for them
+when the page is opened, keeps the answer, and asks again after a month (after a day when AniList had no names). A
+series with no AniList link, or in a library with AniList lookups off, sends nothing and shows nothing; if AniList is
+busy or unreachable the page shows the names it last kept. These are read-only and are separate from the **Other
+names** an admin keeps for searching.
 
 ### Cover and banner
 
@@ -1120,6 +1146,20 @@ On the desktop app the archive runs only while Uchiyomi does — its window or t
 computer awake, so a PC that sleeps at night is rarely inside a night-time window; its first look after the app
 starts comes three minutes in. Health does not report the gaps an archive is filling as problems (section 8).
 
+### Downloads & politeness
+
+**Admin → Settings → Downloads → More options → Downloads & politeness** (admins) gathers what keeps the server gentle
+with sites in one place:
+
+- **Limits set by the server** — the numbers that only environment variables set, with the value this server is
+  running on: pages of a chapter fetched at once (`SUWAYOMI_PAGE_CONCURRENCY`), how long a source gets to answer the
+  latest-chapters check and a test (`SOURCE_LATEST_TIMEOUT_MS`, `SOURCE_TEST_TIMEOUT_MS`), library folders scanned
+  at once (`SCAN_CONCURRENCY`), nightly backups kept (`BACKUP_KEEP`) and the image cache's size cap
+  (`CACHE_MAX_BYTES`). They are read-only here; change them in the container's settings and restart. Only these
+  numbers are shown, never a password or key.
+- **Blocked sources** — every source that is refusing requests or cooling down right now, the same list the *Sources*
+  tab shows, with **Unblock** to try it again at once (the same button as on the source's own sheet).
+
 ### Chapters the sources have that you don't
 
 The chapter list also shows, greyed out, every chapter the followed sources list that this server does not
@@ -1364,6 +1404,10 @@ remembered between visits; the switch is, per device.
 
 ### Selecting chapters
 
+**Select all** in the selection toolbar picks every chapter matching the current filter, across chapter pages,
+including grey rows when they are shown. Press **Clear selection** to undo the selection. Selecting alone does not
+download, mark, hide or remove anything; choose an action afterward.
+
 **Select**, beside *Mark all read*, turns the chapter list into a pick list: tap rows to tick them (a grey
 row too), and the bar at the bottom shows what can be done with the selection. **Done** leaves the mode.
 
@@ -1466,7 +1510,11 @@ you keep scrolling through a series without interruption.
 - **Tap** the middle to show/hide the chrome (top bar + controls).
 - **Pinch / double-tap** to zoom (width multiplier); with a mouse, **double-click**. A double-click only zooms: it
   never turns the page as well, however slow your computer's double-click setting is (since v0.47.1).
-- **Themes:** AMOLED black, sepia, or gray, from the reader settings.
+  On a touch screen the double-tap zooms from the middle of the screen, on the spot of the first tap; two quick taps on a
+  page-turning edge are two page turns. In paged mode, a zoomed page is **dragged** to look around it (it does not turn
+  the page), a press that stops a fling is not a tap, and crossing into another chapter shows its name for a moment.
+  The controls stay up while you drag the page slider.
+- **Themes:** AMOLED black, Paper (a light cream like printed manga paper: white becomes about #F0E8D8, black stays black), sepia, or gray, from the reader settings.
 - **Cover colour at the edges:** a soft wash of the series' cover colour across the top and bottom of the screen,
   so a gold cover tints the edges gold. To read with plain black edges, switch **Cover colour at the edges** off in
   the reader's settings sheet or under Profile → Settings → Reading → More options (since v0.55.7,
@@ -2661,6 +2709,9 @@ on disk and rewrites the chapter paths, and it keeps chapter ids and everyone's 
 is marked unread and nothing is re-downloaded. It refuses outright unless *every* folder the series occupies
 is writable: a series often spans your library and Uchiyomi's own downloads folder, and renaming only one of
 them would leave the old name in place for the next scan to pick up as a second, half-read copy.
+If the folder was renamed by hand, changing only its capitals (`Manga` to `manga`, in a file manager), there is nothing
+at the stored name to move: the rename is refused with a message naming the spelling the disk uses, and the next
+library scan picks the series up under that name.
 
 **Delete files** is on **Admin → Libraries**, and only for a series you have already removed. The reversible
 step always comes first, and the irreversible one asks you to type the title. It deletes the chapter files
@@ -3103,15 +3154,20 @@ the batch away at any point, and one that sits in review for 30 days is dropped 
 The review is the point. Every row shows the title you brought and, on a second line, the title it matched
 (*→ {title}*, dimmed when the two are the same) with how confident the match is; **Change** opens a manual
 search, its results in one sideways-scrolling rail per source so you can see which provider a pick would
-come from, with the cover, title and chapter count of the current pick beside whatever you tap next, so a
-mismatch is visible before you commit to it — or **Skip this one** drops the title. A tracker row that was
-found under one of its other names says *matched under its other name*, dimmed, so the second name is in
-view before you commit; a pick you make by hand drops the note, since it explained a match that is no
-longer there. Rows already in your library default to skipped, visibly, and can be un-skipped; on a
-tracker import they read *Already in your library — linked for progress sync*, because the link to your
+come from, with the cover, title and chapter count of the current pick beside whatever you tap next — and each
+one's author when supplied, status, first genres and description (two lines; **More** opens the rest) — so a mismatch is visible
+before you commit to it, even between two titles a few letters apart — or **Skip this one** drops the
+title. A tracker row that was found under one of its other names says *matched under its other name*, dimmed,
+so the second name is in view before you commit; a pick you make by hand drops the note, since it explained a
+match that is no longer there. Rows already in your library default to skipped, visibly, and can be un-skipped;
+on a tracker import they read *Already in your library — linked for progress sync*, because the link to your
 tracker entry is made at intake, before the review, for the titles you already hold — for an established
 library that is most of the list, and the part that matters for sync. A title you deleted earlier does not
 count as held: it resolves like any other, and importing it puts the same series back, as adding it would.
+Search keeps asking slower sources until they answer. Each rail keeps up to 100 results from a source's first
+answer; on sources that support search pages, **More** asks for the next page for that source alone. The same
+search and paging controls are available in **Sources & translations → Add more sources…**, with the selected
+entry's author, status, genres and description available before attaching it.
 A list your library already held in full has nothing to review and closes as done at once; its done card
 then counts *· {n} linked for progress sync* and each such row reads *{title} — linked for progress sync*,
 so it never looks as if nothing happened. **Needs attention** filters to what wants a
@@ -3310,6 +3366,14 @@ OPDS link and an API token have their own *Include 18+ content* (the web app's *
 the browser, so a target carries its own choice). A target aimed at a person is bounded by that person's own
 libraries and age limit whatever the box says — those are permissions, not a reveal — so it never names a
 series they could not open themselves.
+
+**Only your next chapter.** **Profile → Settings → Notifications → Only tell me about my next chapter** (off by default,
+saved to your account) quiets the favourites you are behind on. A new chapter then notifies you, by web push and in a
+message sent to you by a target aimed at you, only when it is the chapter the series page's reading button would open
+for you: you are caught up, or the only thing between you and it is other chapters that arrived with it. With an older
+unread chapter after the last one you finished, or a chapter you are half way through, the new one is behind it and
+stays quiet (it still appears under Updates and in the series). A series' message to a target aimed at the whole server
+is not filtered, since no one reader's place applies to it.
 
 **The digest.** After each library update — the scheduled sweep, or **Run now** on it under **Admin →
 Tasks** — every target gets **one** message for the whole update, never one per chapter, and none when

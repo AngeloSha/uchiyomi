@@ -180,6 +180,28 @@ const latest = async (source: string) => {
   return new Map((r.json().content as any[]).map((x) => [x.sourceId, x]));
 };
 
+test('same-title entries with different source ids can be added to separate shelves', { skip }, async () => {
+  const entry = { sourceId: 'a-distinct', title: 'Held Tale' };
+  LISTS[A].push(entry);
+  try {
+    const result = await call('GET', `/api/sources/search?source=${A}&q=Held`);
+    assert.equal(result.json().content.find((r: any) => r.sourceId === entry.sourceId).inLibrary, false);
+    const add = await call('POST', '/api/sources/add', { source: A, sourceId: entry.sourceId, chapterFrom: 'none' });
+    assert.equal(add.statusCode, 200, add.body);
+    const rows = await q('SELECT id, folder, source_series_id FROM lib_series WHERE source_id = $1 AND title = $2', [A, entry.title]);
+    assert.equal(rows.length, 2, 'each source entry has its own library row');
+    assert.equal(new Set(rows.map((r: any) => r.folder)).size, 2, 'chapter files cannot collide');
+    const added = rows.find((r: any) => r.source_series_id === entry.sourceId);
+    const again = await call('POST', '/api/sources/add', { source: A, sourceId: entry.sourceId, chapterFrom: 'none' });
+    assert.equal(again.statusCode, 200, again.body);
+    assert.equal((await q('SELECT count(*)::int AS n FROM lib_series WHERE source_id = $1 AND source_series_id = $2', [A, entry.sourceId]))[0].n, 1);
+    await q('DELETE FROM lib_series WHERE id = $1', [added.id]);
+  } finally {
+    LISTS[A].pop();
+    di.libraryChanged();
+  }
+});
+
 test('held by its source series, by another name, by a followed source and by its AniList entry', { skip }, async () => {
   // The name the work is known by online, placed as an answer would place it (resolveName below).
   await q(`INSERT INTO title_works (key, work, via) VALUES ('totallydifferentname', 'al:777', 'anilist')`);
@@ -190,7 +212,7 @@ test('held by its source series, by another name, by a followed source and by it
   assert.equal(a.get('a-held').owned, true, 'its very source series');
   assert.equal(b.get('b-held2').owned, true, 'a name the series goes by (Edit details → other names)');
   assert.equal(b.get('b-follow').owned, true, 'the series a followed source has it as, under that source\'s own name');
-  assert.equal(a.get('a-onb').owned, true, 'the name a followed source gives it, on another source');
+  assert.equal(a.get('a-onb').owned, false, 'a different entry from the known main source is distinct, even under a follower\'s title');
   assert.equal(b.get('b-linked').owned, true, 'the work its AniList link says, under a name the library never used');
   assert.equal(a.get('a-new').owned, false);
   // A short other name holds nothing: a description's reading split "…Makes Sense, Right?" into "Right?", an anthology's

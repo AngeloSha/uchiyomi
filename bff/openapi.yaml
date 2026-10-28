@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.99.0
+  version: 0.100.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -251,6 +251,13 @@ components:
         showAllChapters:
           type: boolean
           description: Show one unpaged chapter list, including all grey rows and unfolded older runs.
+        notifyOnlyNext:
+          type: boolean
+          description: >-
+            "Only tell me about my next chapter": this account's web push, and the messages of the notification targets
+            aimed at this account, mention a series' new chapters only when one of them is the chapter the series page's
+            reading button would open for this account (caught up, nothing older unread, nothing half read). Off by
+            default. Announcements that name no chapter are unaffected.
         incognito:
           type: boolean
           description: >-
@@ -290,13 +297,14 @@ components:
         own search for whoever opens the list.
       properties:
         v: { type: integer, enum: [1] }
-        q: { type: string, minLength: 1, maxLength: 200, description: Title search. }
+        q: { type: string, minLength: 1, maxLength: 200, description: "Title search (and, since v0.100.0, author)." }
         read: { type: string, enum: [UNREAD, IN_PROGRESS, READ] }
         status: { type: string, minLength: 1, maxLength: 40 }
         genres: { type: array, maxItems: 20, items: { type: string, minLength: 1, maxLength: 60 } }
         lib: { type: string, minLength: 1, maxLength: 120, description: Library id. }
         src: { type: string, minLength: 1, maxLength: 120, description: "Main source id; '-' is No source." }
         anysrc: { type: string, minLength: 1, maxLength: 120, description: Any source id. }
+        author: { type: string, minLength: 1, maxLength: 200, description: "Since v0.100.0, one author by name (authorName in POST /api/series/search)." }
         sort: { type: string, enum: [updated, read, new, soon, popular, score, rating, chapters, unread, az] }
         dir: { type: string, enum: [asc, desc] }
     AdminBulkDeleteResult:
@@ -1841,7 +1849,9 @@ paths:
         (when the caller last read in the series): the chapter to pick a series back up at, for series last read 90
         days to two years ago in which the caller finished at least one chapter (never a series `onDeck` holds); and
         `gems`, up to 20 series with an AniList score of at least 75 that nobody on the server has read in any
-        language edition, one per work, best score first (empty on a Komga backend).
+        language edition, one per work, best score first (empty on a Komga backend). `keepReadingHidden` is how many
+        series the caller removed from Keep reading and has not read since (PUT /api/keep-reading/{seriesId}); `onDeck`
+        leaves them out.
       operationId: getApiHome
       parameters:
         - name: adult
@@ -1868,8 +1878,10 @@ paths:
         `genre`, `author`, and -- owned library only, since v0.49.2 -- `mainSource` (the source a series was added
         from, by id) and `anySource` (that, or a source it follows as a fallback); since v0.55.1 (#149)
         `hasMainSource` in Komga's boolean shape (`{operator: isTrue|isFalse}`, no value), `isFalse` being the series
-        with no main source at all, whatever they follow. An unknown key is 400 `unsupported_filter`, and so is
-        `hasMainSource` with any other operator."
+        with no main source at all, whatever they follow. Since v0.100.0 (#338) `authorName`: the series whose author
+        line names the same person, a whole name in any spelling it gives (Komga is asked `author` with `{name}`); a
+        search's `query` matches the author line as well as the title. An unknown key is 400 `unsupported_filter`, and
+        so is `hasMainSource` or `authorName` with any other operator."
       operationId: postApiSeriesSearch
       parameters:
         - name: adult
@@ -2238,6 +2250,32 @@ paths:
         18+ for this account (an age limit under 18, or Show 18+ off: AniList's adult flag and the admin's adult
         genres). `lookups` is false, with nothing else, for a series in a library whose AniList lookups are off or with
         no checked AniList link. Read from the copy the server refreshes in the background; a request never asks AniList.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/series/{id}/other-titles:
+    get:
+      tags:
+        - library
+      summary: The English, romanised and Japanese titles of the series' AniList entry.
+      operationId: getApiSeriesIdOtherTitles
+      description: >-
+        `{titles: {english, romaji, native} | null}`, each name null when AniList has none. `titles` is null for a
+        series with no checked AniList link, in a library whose AniList lookups are off, or whose entry has no names.
+        Kept by the server and asked again after a month (a day when it had no names), so most reads ask AniList
+        nothing; when AniList is busy or down, the kept names are answered.
       parameters:
         - name: id
           in: path
@@ -4196,6 +4234,7 @@ paths:
                   sourceId: { type: string }
                   title: { type: string }
                   summary: { type: string, description: "Plain text: HTML and Markdown (MangaDex describes in Markdown) are stripped, link text kept." }
+                  author: { type: string, description: "The source's author name when supplied, otherwise an empty string." }
                   coverUrl: { type: [string, "null"] }
                   genres: { type: array, items: { type: string } }
                   status: { type: string }
@@ -4988,6 +5027,59 @@ paths:
           description: Not found, or not visible to this account
         "429":
           description: More than five Tests in a minute from this admin
+  /api/keep-reading/{seriesId}:
+    put:
+      tags:
+        - library
+      summary: Take a series out of Keep reading, or put it back.
+      operationId: putApiKeepReadingSeriesid
+      description: >-
+        Home's "Remove from Keep reading". `hidden: true` takes the series out of the caller's Keep reading row (and the
+        OPDS Keep reading shelf, and Pick back up) without touching the library, their progress or anyone else's Home; it
+        stays out until the caller reads in the series again (a progress write newer than the removal), then returns by
+        itself. `hidden: false` puts it back at once. Removing a series the caller may not see is a 404.
+      parameters:
+        - name: seriesId
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hidden]
+              additionalProperties: false
+              properties:
+                hidden:
+                  type: boolean
+      responses:
+        "200":
+          description: "`{ ok: true, hidden }`"
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/keep-reading/hidden:
+    get:
+      tags:
+        - library
+      summary: The series the caller removed from Keep reading and has not read since.
+      operationId: getApiKeepReadingHidden
+      description: >-
+        `content`: `{ seriesId, title, hiddenAt }`, newest removal first, only series the caller may see. Home's Hidden
+        list; `GET /api/home` carries the count as `keepReadingHidden`.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
   /api/favorites:
     get:
       tags:
@@ -5125,7 +5217,7 @@ paths:
       summary: Create a collection (a List), hand-picked or smart, private or shared.
       description: >-
         Since v0.61.0 `query` makes a smart list -- a saved Library search, the Library's own URL words
-        `{v: 1, q?, read?: UNREAD|IN_PROGRESS|READ, status?, genres?, lib?, src? ('-' is No source), anysrc?, sort, dir?:
+        `{v: 1, q?, read?: UNREAD|IN_PROGRESS|READ, status?, genres?, lib?, src? ('-' is No source), anysrc?, author?, sort, dir?:
         asc|desc}`, `sort` one of updated, read, new, soon, popular, score, rating, chapters, unread, az -- answered afresh for
         whoever opens it; a list's kind is fixed when it is made. `shared: true` lets the rest of the household read it
         (never change it). An unknown or oversized query key is 400.
@@ -6537,7 +6629,7 @@ paths:
         reader's edges) and, since v0.55.7, `listSorts` (list id to `az`, `za`, `read`, `unread` or `latest`: the order
         each list is shown in; a list's own order is not stored). Since v0.55.8 the validated keys are `librarySort`,
         `homeCollections` and `showAllChapters` (since v0.60.0 also `librarySortDir`, since v0.61.0 `incognito`, a
-        boolean, and since v0.68.0 `trackerPlanOnAdd`, a boolean). Unknown keys remain accepted and retained for compatibility -- since v0.66.0 the web app's `homeRails`
+        boolean, since v0.68.0 `trackerPlanOnAdd`, a boolean, and `notifyOnlyNext`, a boolean). Unknown keys remain accepted and retained for compatibility -- since v0.66.0 the web app's `homeRails`
         (`{order, hidden}`, Home's rails as the reader arranged them; null is the default order) and `tone` (`oled`,
         `graphite` or `midnight`, the background) among them. `avatar` is `{emoji, color, frame}` (since v0.69.1 a hex
         colour; since v0.89.0 `frame`, one of `bronze`, `silver`, `ember`, `gold`, `moon` or `aurora`, the frame a badge
@@ -7643,6 +7735,26 @@ paths:
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Returns
         the collector url and the literal payload, produced by the same function the background job uses, so
         the settings page cannot show something other than what is sent. Previewing does not opt in.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/limits:
+    get:
+      tags:
+        - admin
+      summary: The environment-only numeric knobs and what this server is running on.
+      operationId: getApiAdminLimits
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Read-only:
+        returns {limits: [{key, value, unit}], note} for SUWAYOMI_PAGE_CONCURRENCY, SOURCE_LATEST_TIMEOUT_MS,
+        SOURCE_TEST_TIMEOUT_MS, SCAN_CONCURRENCY, BACKUP_KEEP and CACHE_MAX_BYTES. Numbers only; no secret is
+        ever returned. Change them with environment variables and a restart.
       security:
         - bearer: []
       responses:

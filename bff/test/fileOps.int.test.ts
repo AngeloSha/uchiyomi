@@ -12,7 +12,7 @@
 // Skipped automatically unless TEST_DATABASE_URL is set (CI provides a throwaway Postgres service).
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, rm, writeFile, chmod, stat } from 'fs/promises';
+import { mkdir, rm, writeFile, chmod, stat, rename } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -404,6 +404,21 @@ test('a rename to a path outside the library is refused', { skip }, async () => 
   const r = await renameSeriesFolder(S, '../escaped');
   assert.equal(r.ok, false);
   assert.ok(await exists(join(ROOT, FOLDER, 'ch1.cbz')));
+});
+
+test('a folder the disk spells in another case is named in the refusal, not left to fail as ENOENT', { skip }, async () => {
+  // Stored `T!fo/Berserk`, renamed on disk to `T!fo/berserk` by hand. Nothing is at the stored name, so there is nothing to
+  // move; the refusal says which spelling is real and the database and the folder are left as they were.
+  await seed(false);
+  await rename(join(ROOT, FOLDER), join(ROOT, 'T!fo/berserk'));
+  if (await exists(join(ROOT, FOLDER))) return; // a case-insensitive volume: the two spellings are one folder
+  const r = await renameSeriesFolder(S, 'T!fo/Berserk (Deluxe)');
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /"T!fo\/Berserk" is not on disk, but "T!fo\/berserk" is/);
+  assert.ok(await exists(join(ROOT, 'T!fo/berserk/ch1.cbz')), 'a refused rename moved the folder');
+  assert.equal(await exists(join(ROOT, 'T!fo/Berserk (Deluxe)')), false, 'a refused rename left a new folder behind');
+  const s = await q<{ folder: string }>('SELECT folder FROM lib_series WHERE id = $1', [S]);
+  assert.equal(s[0].folder, FOLDER, 'the database was changed despite the refusal');
 });
 
 test('renaming to the same name is refused rather than doing nothing quietly', { skip }, async () => {

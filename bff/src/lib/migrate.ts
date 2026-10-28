@@ -133,6 +133,15 @@ CREATE TABLE IF NOT EXISTS read_progress (
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, book_id)
 );
+
+-- "Remove from Keep reading": the series stays in the library, it only leaves that Home row. A row hides the series
+-- until it is read again (read_progress.updated_at moves past hidden_at), so reading it brings it back by itself.
+CREATE TABLE IF NOT EXISTS keep_reading_hidden (
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  series_id  text NOT NULL,
+  hidden_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, series_id)
+);
 CREATE INDEX IF NOT EXISTS idx_rp_series ON read_progress(user_id, series_id);
 CREATE INDEX IF NOT EXISTS idx_rp_recent ON read_progress(user_id, updated_at DESC) WHERE completed = false;
 
@@ -1759,6 +1768,19 @@ CREATE TABLE IF NOT EXISTS anilist_related (
   recs        jsonb NOT NULL DEFAULT '[]'::jsonb,
   fetched_at  timestamptz NOT NULL DEFAULT now()
 );
+
+-- The English, romanised and Japanese titles of a series' linked AniList entry, shown on the series page
+-- (lib/otherTitles.ts). One row per series; a row with all three NULL records an answer with no names, asked again
+-- after a day (one with names after a month). Additive: the previous version boots on this schema and ignores it.
+CREATE TABLE IF NOT EXISTS series_other_titles (
+  series_id  text PRIMARY KEY REFERENCES lib_series(id) ON DELETE CASCADE,
+  anilist_id text,
+  english    text,
+  romaji     text,
+  native     text,
+  fetched_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE series_other_titles ADD COLUMN IF NOT EXISTS anilist_id text;
 
 -- v0.61.0: the release radar (lib/releaseRadar.ts) -- when a series' next chapter is likely, from when its chapters
 -- came: the dates its sources list, else when they arrived on this server (most chapters carry no source date).

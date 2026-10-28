@@ -37,6 +37,8 @@ export const PROFILE_SETTINGS: SettingsIndex = {
       help: 'Translations other than English are machine-assisted and have not been checked by a native speaker. If something reads wrong, the language files are one JSON each — corrections are welcome.' },
     { id: 'show-all-chapters', cat: 'general', label: 'Show all chapters at once', keywords: ['chapter list', 'hundred at a time', 'series page'],
       help: 'A series page lists every chapter, including those not here yet, on one page instead of a hundred at a time. Saved to your account.' },
+    { id: 'notify-only-next', cat: 'general', label: 'Only tell me about my next chapter', keywords: ['notifications', 'push', 'alerts', 'new chapter', 'caught up'],
+      help: 'A new chapter notifies you only when it is the one the series page would open for you: you are caught up, with nothing older unread or half read. Applies to push alerts and to messages sent to you. Saved to your account.' },
     // Only a computer's rows change, so a phone or tablet held alone has nothing to switch (lib/compactChapters.ts).
     { id: 'compact-chapters', cat: 'general', label: 'Compact chapter list', when: ['pointer'], keywords: ['thumbnails', 'dense', 'chapter rows'] },
     { id: 'type-to-search', cat: 'general', label: 'Type anywhere to search', when: ['pointer'], keywords: ['shortcut', 'keyboard', 'slash'] },
@@ -54,7 +56,7 @@ export const PROFILE_SETTINGS: SettingsIndex = {
     // ---- Reading ----
     { id: 'reader-mode', cat: 'reading', label: 'Mode', keywords: ['webtoon', 'paged', 'scroll', 'swipe', 'reading mode', 'reader'] },
     { id: 'auto-mode', cat: 'reading', label: 'Pick the mode for each series', keywords: ['automatic', 'long strip', 'manga'] },
-    { id: 'reader-theme', cat: 'reading', label: 'Theme', keywords: ['amoled', 'sepia', 'gray', 'grey', 'page colour'] },
+    { id: 'reader-theme', cat: 'reading', label: 'Theme', keywords: ['amoled', 'paper', 'sepia', 'gray', 'grey', 'page colour', 'cream', 'off-white'] },
     { id: 'comments', cat: 'reading', label: 'Comments and reactions', when: ['web', 'talk'], keywords: ['comments', 'reactions', 'emoji', 'talk', 'discussion', 'household', 'hide comments', 'turn off comments'] },
     { id: 'fit', cat: 'reading', label: 'Fit', keywords: ['fit width', 'original size', 'zoom'] },
     { id: 'wide-pages', cat: 'reading', label: 'Wide pages', keywords: ['double page', 'spread', 'landscape', 'rotate', 'split'] },

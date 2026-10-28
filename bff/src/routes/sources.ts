@@ -1,7 +1,7 @@
 // Search across sources and add a new series to the library (queues its download). Backed by the source
 // adapters + the downloader. The cover proxy lives under /img (cookie auth) so <img> tags can load it.
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { actsAsAdmin, authenticate, userIdOf, roleOf } from '../lib/auth';
 import { getSource, listSources, isSwAdapterId, SW_PREFIX, swAdapterId, withTimeout } from '../lib/sources';
@@ -133,7 +133,7 @@ export const REFRESH_BUDGET_MS = 10_000;
 import { logAudit } from '../lib/audit';
 import { autoFollow, refusals, MAX_AUTO_CANDIDATES, type FollowCandidate, type FollowResult } from '../lib/autoFollow';
 import { altTitlesFor, exactHit, learnAltTitles, learnFromMainSource, namesOf, parseAltTitles, SEARCH_NAMES } from '../lib/altTitles';
-import { currentWork, heldFor, learnPageNames, libraryChanged, libraryIndex, nameableFor, noIndex, noteTitles, pendingOf, workOf, type Held, type LibraryIndex } from '../lib/discoverIdentity';
+import { currentWork, heldFor, pairKey, learnPageNames, libraryChanged, libraryIndex, nameableFor, noIndex, noteTitles, pendingOf, workOf, type Held, type LibraryIndex } from '../lib/discoverIdentity';
 import { env } from '../env';
 import { runtime } from '../lib/runtime';
 import { dismissRun, listRuns, requestStop } from '../lib/downloadJobs';
@@ -1555,9 +1555,29 @@ export async function addSeriesFromSource(opts: {
     folder = stored?.folder ?? await diskSpelling([DL_ROOT, LIBRARY_ROOT], folder);
   }
 
+  // Source identity survives a title change. An exact entry already followed by this library keeps its shelf.
+  if (!edition) {
+    const exact = await one<{ folder: string }>(
+      `SELECT s.folder FROM lib_series s WHERE s.source_id = $1 AND s.source_series_id = $2
+        ORDER BY (s.deleted_at IS NOT NULL), s.created_at LIMIT 1`, [source, sourceId]);
+    if (exact) folder = exact.folder;
+  }
+
   // A deleted series does not count as present: re-adding it is how you undo a delete from the app side.
-  const existing = await one<{ id: string; deleted_at: string | null }>(
-    'SELECT id, deleted_at FROM lib_series WHERE folder = $1', [folder]);
+  type ExistingShelf = { id: string; deleted_at: string | null; source_id: string | null; source_series_id: string | null };
+  const shelfAt = (name: string) => one<ExistingShelf>(
+    'SELECT id, deleted_at, source_id, source_series_id FROM lib_series WHERE folder = $1', [name]);
+  let existing = await shelfAt(folder);
+  const differentEntry = (row: ExistingShelf | null) => !!(row?.source_id && row.source_series_id
+    && pairKey(row.source_id, row.source_series_id) !== pairKey(source!, sourceId!));
+  // Two entries can have an identical title, or sanitize to one filename. They must never share chapter files.
+  // A stable source-derived suffix also makes repeating the second add idempotent.
+  if (differentEntry(existing)) {
+    const identity = createHash('sha256').update(pairKey(source!, sourceId!)).digest('hex').slice(0, 12);
+    folder = `${folder} [${identity}]`;
+    existing = await shelfAt(folder);
+    if (differentEntry(existing)) return { ok: false, status: 409, error: 'folder_collision', message: 'Another series uses that download folder. Rename its folder before adding this entry.' };
+  }
   if (existing?.deleted_at) {
     await q('UPDATE lib_series SET deleted_at = NULL WHERE id = $1', [existing.id]).catch(() => {});
   }
@@ -1605,11 +1625,24 @@ export async function addSeriesFromSource(opts: {
     // dialog can offer "Open it" -- and precisely because the row may be one the caller cannot see, the
     // route gates the id on `seriesVisible` before it answers. The title and the source were always
     // answered here and are unchanged.
-    let dup = await one<{ id: string; title: string; source: string }>(
-      `SELECT id, title, source FROM lib_series
-        WHERE lower(regexp_replace(title, '[^a-zA-Z0-9]', '', 'g')) = $1 AND folder <> $2
-          AND ${visibleToAll('lib_series')} LIMIT 1`,
-      [norm(title), folder]);
+    // Read title matches from the database as well: a scanner/import can have added a row since the cached index.
+    // Its source pairs must agree before a title is allowed to identify it.
+    const titleMatches = await q<{
+      id: string; title: string; source: string;
+      pairs: Array<{ source: string; id: string | null }>;
+    }>(
+      `SELECT s.id, s.title, s.source,
+              (SELECT COALESCE(jsonb_agg(p), '[]'::jsonb) FROM (
+                SELECT s.source_id AS source, s.source_series_id AS id WHERE s.source_id IS NOT NULL
+                UNION ALL SELECT ss.source_id AS source, ss.source_series_id AS id FROM series_sources ss WHERE ss.series_id = s.id
+              ) p) AS pairs
+         FROM lib_series s
+        WHERE lower(regexp_replace(s.title, '[^a-zA-Z0-9]', '', 'g')) = $1 AND s.folder <> $2
+          AND ${visibleToAll('s')} ORDER BY s.id`, [norm(title), folder]);
+    const matched = titleMatches.find((r) => !r.pairs.some((p) => p.source === source && p.id
+      && pairKey(p.source, p.id) !== pairKey(source!, sourceId!)));
+    let dup: { id: string; title: string; source: string } | null = matched
+      ? { id: matched.id, title: matched.title, source: matched.source } : null;
     if (!dup) {
       // v0.56.0: the same work under another name, or this very source series already followed by a series under another
       // title (lib/discoverIdentity.ts heldFor). Only the same title, by the ASCII key, was a duplicate before, so an add
@@ -2579,7 +2612,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const raw = await (p > 1 ? src.searchPage!(query.trim(), p) : src.search(query.trim())).catch(() => []);
     // dedupe by sourceId (duplicate ids collide on the React key → wrong cover/title on a card)
     const seen = new Set<string>();
-    const results = ratedForViewer(req, raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true))).slice(0, 24);
+    const results = ratedForViewer(req, raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true))).slice(0, 100);
     // flag titles already in the library so the UI can mark them instead of offering a duplicate add
     return { content: await decorate(results, src.id, vc(req)) };
   });
@@ -3901,6 +3934,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
       // Plain text: MangaDex describes in Markdown, and the dialog shows this as prose.
       title: series?.title || '', summary: cleanDescription(series?.summary), coverUrl: series?.coverUrl || null,
       genres: series?.genres || [], status: series?.status || '',
+      author: series?.author || '',
       count: chosen.length, first: nums.length ? Math.min(...nums) : null, last: nums.length ? Math.max(...nums) : null,
       groups: groupStats(chapters.map((c) => ({ number: c.number, groups: groupsOf(c), scanlator: c.scanlator, publishedAt: c.publishedAt, lang: c.lang, source })), []),
       versions,

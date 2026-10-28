@@ -47,6 +47,20 @@ test('the key a card folds by: the held work, else its name, never empty', async
     'a name that folds to nothing is its own card, never every such item on one');
 });
 
+test('different entries on the same source outrank identical or normalized titles', async () => {
+  const { heldFor, noIndex, pairKey, workOf } = await load();
+  const idx = noIndex();
+  const h = held('A');
+  idx.byPair.set(pairKey('site', 'first'), [h]);
+  idx.byName.set('name12', [h]);
+  for (const title of ['Name 12', 'Name 1+2']) {
+    assert.deepEqual(heldFor(idx, { source: 'site', sourceId: 'second', title }), []);
+    assert.equal(workOf(idx, { source: 'site', sourceId: 'second', title }), 's:site:second');
+  }
+  assert.deepEqual(heldFor(idx, { source: 'site', sourceId: 'first', title: 'Renamed' }), [h]);
+  assert.deepEqual(heldFor(idx, { source: 'other-site', sourceId: 'second', title: 'Name 12' }), [h]);
+});
+
 test('a work key as it stands now: held works say so, unknown ones come back as they were', async () => {
   const { currentWork, noIndex } = await load();
   const idx = noIndex();

@@ -301,6 +301,10 @@ the settings' `adultSources` list (one list, two ways to write it); `GET /api/ad
 loaded now. **400** for anything but 18 or null, **409** `too_many` past 200 rated sources (`messageSaid`
 `rating.tooMany`). Audited `source.age_rating`.
 
+`GET /api/admin/limits` (admin) is read-only: `{limits: [{key, value, unit}], note}` for the knobs that only
+environment variables set (`SUWAYOMI_PAGE_CONCURRENCY`, `SOURCE_LATEST_TIMEOUT_MS`, `SOURCE_TEST_TIMEOUT_MS`,
+`SCAN_CONCURRENCY`, `BACKUP_KEEP`, `CACHE_MAX_BYTES`) with the value in effect. Numbers only; no secret is returned.
+
 `PATCH /api/admin/sources/custom/:id` (admin) changes a custom site's `base` address, its `lang`, or both, and
 nothing else. The source id is derived from its name and the library is keyed on that id, so editing in place is
 the only way to follow a site to a new domain without orphaning every series that came from it. A new `lang`
@@ -1124,7 +1128,7 @@ GET    /api/updates/expected
 POST   /api/refresh               GET    /api/refresh
 GET    /api/series/:id            GET    /api/series/:id/books
 GET    /api/series/:id/similar    GET    /api/series/:id/color
-GET    /api/series/:id/related
+GET    /api/series/:id/related    GET    /api/series/:id/other-titles
 POST   /api/series/search         GET    /api/leaderboard
 GET    /api/books/:id             POST   /api/books/:id/refetch
 GET    /api/books/:id/pages
@@ -1152,12 +1156,25 @@ background in the same six-hourly round as the outside ratings: missing entries 
 per request, a row asked again after a week -- never for a library whose AniList lookups are off, and never when a page
 opens.
 
+**Titles on AniList.** `GET /api/series/:id/other-titles` answers `{titles: {english, romaji, native} | null}`, the
+three titles of the AniList entry the series is linked to (each `null` when AniList has none). `titles` is `null` for
+a series with no checked AniList link, in a library whose AniList lookups are off, or whose entry has no names. The
+answer is kept (`series_other_titles`) and asked again after a month, or after a day when it was empty; a request asks
+AniList only then, and AniList being busy or down answers with what is kept. A series this account may not open is a
+`404`.
+
 **Filtering the library by source** (since v0.49.2; the filters are @TIGamingTV's, PR #124). On the owned
 backend, `POST /api/series/search` accepts two more conditions: `mainSource` (the source a series was added from,
 by id) and `anySource` (that, or a source it follows as a fallback). Both take `is` / `isNot`, and a source whose
 extension is gone still filters. Since v0.55.1 (#149) a third, `hasMainSource`, in Komga's boolean shape
 (`{operator: isTrue|isFalse}`, no value): `isFalse` is the series with no main source at all -- folders added by hand,
 and anything never matched to a site -- whatever sources they follow. Any other operator is 400 `unsupported_filter`.
+Since v0.100.0 ([#338](https://github.com/AngeloSha/uchiyomi/issues/338)) `authorName` (`is` / `isNot`, a name of up to
+200 characters, owned backend; Komga is asked `author` with `{name}`) lists the series whose author line names the same
+person: a whole name, never a fragment, in any spelling the name gives -- itself and each name in its brackets, compared
+by letters and digits in any case, so `Chugong (추공)` finds `추공` and `CHUGONG` but `Oh` is not inside `John Oh`. The
+line is the one the series page shows (an admin's edit, else the series' own, else the details the server filled in).
+`author`, Komga's fragment match, is unchanged. A search's `query` matches the author line as well as the title.
 `GET /api/library/sources` answers `{content, none}`: `content` lists `{id, name, main, any, installed}` for every
 source the viewer's library comes from, busiest first -- `main` counts the series added from it, `any` the series
 that read from it at all -- and `none` (since v0.55.1) counts the series with no main source, what `hasMainSource:
@@ -1541,6 +1558,7 @@ between series; the rest read `skipped` *The server is shutting down.*
 ### Personal
 ```
 GET    /api/favorites             POST   /api/favorites
+PUT    /api/keep-reading/:seriesId   GET /api/keep-reading/hidden
 DELETE /api/favorites/:seriesId   PUT    /api/favorites/order
 GET    /api/history
 GET    /api/stats                 GET    /api/wrapped
@@ -1617,6 +1635,11 @@ sorts by `popularity`, `score`, `rating`, `chapters` and `lastRead` (see the Ope
   unreadable id and the web app omits it on the next edit; the API refuses a request that tries to add one (another
   member's private List, a malformed id).
 - `showAllChapters: boolean`, the account-wide unpaged chapter-list switch.
+- `notifyOnlyNext: boolean`, "Only tell me about my next chapter", off by default. When on, the account's web push and
+  the messages of notification targets aimed at it mention a series' new chapters only when one of them is the chapter the
+  series page's reading button would open (nothing half read; with chapters finished, the first unfinished one after the
+  highest finished; with none finished, the first). An announcement that names no chapter is always sent. Anything but
+  a boolean is refused with 400 `bad_settings`.
 - `incognito: boolean` (since v0.61.0), **Incognito reading**, for the whole account and enforced by the server: progress
   is still written, so Keep reading and every resume work, but no reading event is recorded -- history, streaks,
   Wrapped, the leaderboard, the household's Top 10 and member activity never see it -- and nothing is pushed to a
@@ -1706,7 +1729,7 @@ series per selected rail; an empty selected List reserves its position and appea
 
 **Smart and shared Lists** (since v0.61.0). `POST /api/collections {name, accent?, query?, shared?}`: a `query` makes a
 *smart* list, a saved Library search in the Library URL's own words -- `{v: 1, q?, read?: 'UNREAD' | 'IN_PROGRESS' |
-'READ', status?, genres?, lib?, src?, anysrc?, sort, dir?: 'asc' | 'desc'}`, `src: '-'` being *No source* and `sort`
+'READ', status?, genres?, lib?, src?, anysrc?, author?, sort, dir?: 'asc' | 'desc'}`, `src: '-'` being *No source* and `sort`
 one of `updated`, `read`, `new`, `popular`, `score`, `rating`, `chapters`, `unread`, `az` -- answered with the
 Library's own search, one card per work, for whoever opens it; an unknown key or an oversized value is **400**. A
 list's kind is fixed when it is made: `PATCH /api/collections/:id {query}` replaces a smart list's search and is
@@ -1786,6 +1809,7 @@ GET    /api/admin/notify-targets  POST   /api/admin/notify-targets
 PATCH  /api/admin/notify-targets/:id DELETE /api/admin/notify-targets/:id
 POST   /api/admin/notify-targets/:id/test
 GET    /api/admin/install-ping/preview
+GET    /api/admin/limits
 GET    /api/admin/users           POST   /api/admin/users
 PATCH  /api/admin/users/:id       DELETE /api/admin/users/:id
 GET    /api/admin/sessions        DELETE /api/admin/sessions/:id

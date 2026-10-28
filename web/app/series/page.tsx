@@ -17,10 +17,12 @@ import { Img, Backdrop, SectionTitle, useWideViewport } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
+import { MoveToLibrary } from '@/components/MoveToLibrary';
 import { useAuth, canDownload } from '@/lib/auth';
 import { IcChevronLeft, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcHourglass, IcGrid, IcRows, IcComment } from '@/components/icons';
 import { commentsLine, seriesTalkKey, talkWantedOf, type ChapterTalkCount } from '@/lib/comments';
 import { ChapterTalkSheet } from '@/components/ChapterTalk';
+import { AuthorLinks } from '@/components/AuthorLinks';
 import { t as tr } from '@/lib/i18n';
 import { statusText } from '@/lib/activity';
 import { deletedText, selectedText, skippedBookmarkedText, skippedNotOursText } from '@/lib/counted';
@@ -35,6 +37,7 @@ import { clampPage, numberingSpan, pageCount, pageLabel, pageOf, pageSizeFor, pa
 import { openRuns, showAllChaptersOn } from '@/lib/showAllChapters';
 import { buttonsClass, compactChaptersOn, dotHide, rowClass, thumbHide } from '@/lib/compactChapters';
 import { chapterRowsClass, chapterViewOn, setChapterView, type ChapterView } from '@/lib/chapterView';
+import { OtherTitles } from '@/components/OtherTitles';
 import { PhoneHeroCover } from '@/components/PhoneHeroCover';
 import { Segmented } from '@/components/settings';
 import { seriesBooksQuery, seriesQuery } from '@/lib/seriesPrefetch';
@@ -1308,6 +1311,14 @@ function SeriesInner() {
     ...pickedGhostList.filter((g) => g.numberEnd == null).map((g) => g.number),
   ])].sort((a, b) => a - b), [pickedBookList, pickedGhostList]);
   const pickedCount = pickedBookList.length + pickedGhostList.length;
+  const allPicked = pickedCount > 0 && pickedCount === filteredBooks.length + filteredGhosts.length;
+  const selectAllChapters = () => {
+    if (allPicked) { clearPicks(); return; }
+    // The active group filter and the Show chapters not on the server switch define the selection,
+    // across every chapter page. Collapsed missing-chapter runs represent selectable chapters too.
+    setPickedBooks(new Set(filteredBooks.map((b) => b.id)));
+    setPickedGhosts(new Set(filteredGhosts.map(ghostKey)));
+  };
   // The select bar on the notices' layer stack (lib/layers.ts), measured: it wraps to three rows at 390 px,
   // and a notice has to rise above whichever height it has.
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -1361,7 +1372,7 @@ function SeriesInner() {
     const listed = fetchable.filter((g) => !g.bookId).map((g) => g.number);
     const deleted = fetchable.flatMap((g) => g.bookId ? [g.bookId] : []);
     const requests: Array<{ path: string; body: Record<string, unknown> }> = [
-      ...(listed.length ? [{ path: '/api/sources/fetch', body: { seriesId: id, numbers: listed } }] : []),
+      ...chunkNumbers(listed).map((numbers) => ({ path: '/api/sources/fetch', body: { seriesId: id, numbers } })),
       ...deleted.map((bookId) => ({ path: `/api/books/${bookId}/refetch`, body: {} })),
     ];
     if (!requests.length) return;
@@ -1442,7 +1453,7 @@ function SeriesInner() {
   // each file replaced in place by the copy in the series' language.
   const refetchMany = (bookIds: string[]) => postInChunks(bookIds, (chunk) =>
     api<{ folder: string; total: number }>(`/api/admin/series/${id}/chapters/refetch`, { method: 'POST', json: { bookIds: chunk } }));
-  const refetchBooks = (picked: Book[]) => startJob(`/api/admin/series/${id}/chapters/refetch`, { bookIds: picked.map((b) => b.id) });
+  const refetchBooks = (picked: Book[]) => refetchMany(picked.map((b) => b.id));
   // "Fetch" on one copy in the chapter sheet. A pick names the copy by source and the source's own id (`copySourceId`, never
   // a split on ':'), and the server takes it as an explicit choice: the group rules, blocklist included, do
   // not apply to it. On a ghost row the copy lands as the chapter; on an on-disk row the file is replaced,
@@ -1478,10 +1489,15 @@ function SeriesInner() {
   };
   const deleteBooks = async (picked: Book[]) => {
     setActing(true);
+    const res = { applied: 0, skipped: [] as { id: string; reason: string }[] };
     try {
-      const res = await api<{ applied: number; skipped: { id: string; reason: string }[] }>(`/api/admin/series/${id}/chapters/delete`, {
-        method: 'POST', json: { bookIds: picked.map((b) => b.id) },
-      });
+      for (const chunk of chunkNumbers(picked, 500)) {
+        const result = await api<typeof res>(`/api/admin/series/${id}/chapters/delete`, {
+          method: 'POST', json: { bookIds: chunk.map((b) => b.id) },
+        });
+        res.applied += result.applied;
+        res.skipped.push(...result.skipped);
+      }
       // Say what was skipped rather than silently deleting fewer than were selected, one line per reason
       // present: `not_owned` (the file is in a library the admin built, not one Uchiyomi fetched) and
       // `bookmarked` (a reader's bookmark names a page inside it) are the two a person can act on; the
@@ -1511,7 +1527,8 @@ function SeriesInner() {
       invalidateChapters();
       leaveSelect();
     } catch (e) {
-      toast(msgOf(e, tr('Could not delete those')), 'error');
+      toast([res.applied ? deletedText(res.applied) : '', msgOf(e, tr('Could not delete those'))].filter(Boolean).join(' · '), 'error');
+      invalidateChapters();
     }
     setActing(false);
     setConfirming(null);
@@ -1572,6 +1589,8 @@ function SeriesInner() {
   // shared blocks (rendered once)
   const [deleting, setDeleting] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const [moveBusy, setMoveBusy] = useState(false);
   const [busyAdmin, setBusyAdmin] = useState(false);
   // A language edition (v0.52.0): the add dialog's "Add a language", and the unlink an admin confirms. `lang` and
   // `source` when a follow was refused for its language ("Add it as an edition"): the dialog opens on that language.
@@ -1702,6 +1721,7 @@ function SeriesInner() {
       // Change cover (#242): an admin's, from More -- never a key under the art, where a phone reads Continue first.
       case 'cover': setCoverPicker(true); break;
       case 'newBanner': void newBanner(); break;
+      case 'move': setMoving(true); break;
       case 'rename': setRenaming(true); break;
       case 'remove': setDeleting(true); break;
     }
@@ -1757,7 +1777,10 @@ function SeriesInner() {
 
   const span = series && books && !mostlyVolumes ? numberingSpan(books.content, series.booksCount) : null;
   const metaBits: ReactNode[] = [
-    author ? <span className="text-fog-300">{tr('by {author}', { author: `\u2068${author}\u2069` })}</span> : null,
+    // v0.100.0 (#338): each name on the author line opens the Library showing that person's series. Only the author's: the
+    // publisher shown in its place when there is none names no one the Library could list.
+    meta?.author ? <AuthorLinks line={meta.author} />
+      : author ? <span className="text-fog-300">{tr('by {author}', { author: `\u2068${author}\u2069` })}</span> : null,
     meta?.status ? <span className="capitalize">{statusText(meta.status)}</span> : null,
     series ? <>{bookCountText(series.booksCount, mostlyVolumes)}</> : null,
     // Their numbers, when they do not run 1 to the count (half chapters, a chapter 0, gaps): "149 chapters · Ch. 0–129".
@@ -1959,6 +1982,8 @@ function SeriesInner() {
     <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:start-[var(--rail-w)] lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
       <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
         <span className="me-auto text-sm font-medium text-fog-100">{acting ? '…' : selectedText(pickedCount)}</span>
+        <button disabled={acting || filteredBooks.length + filteredGhosts.length === 0} onClick={selectAllChapters}
+          data-select-all-chapters className="btn-key">{allPicked ? tr('Clear selection') : tr('Select all')}</button>
         <button disabled={acting || !pickedCount} onClick={() => bulkMark(true)} className="btn-key">{tr('Mark read')}</button>
         <button disabled={acting || !pickedCount} onClick={() => bulkMark(false)} className="btn-key">{tr('Mark unread')}</button>
         {/* The two icons say which side each acts on: ⬇ this device, ☁ the server. */}
@@ -2094,6 +2119,7 @@ function SeriesInner() {
           {series && <div className="hidden lg:block"><RatingsPanel anilist={series.yomi?.anilist} rating={rating} onRate={rate} className="max-w-[440px]" /></div>}
           <div className="hidden lg:block"><SupplyLine parts={supplyWide} loaded={supplyLoaded} wide onOpen={() => setSourcesOpen(true)} /></div>
           {Genres}
+          {series && <OtherTitles seriesId={id} shown={title} />}
           {Summary}
           {Chapters}
         </div>
@@ -2167,6 +2193,18 @@ function SeriesInner() {
           onConfirm={doDelete}
           onClose={() => setDeleting(false)}
         />
+      )}
+      {moving && (
+        <MoveToLibrary n={1} busy={moveBusy} onClose={() => setMoving(false)} onPick={async (libraryId) => {
+          setMoveBusy(true);
+          try {
+            await api(`/api/admin/series/${encodeURIComponent(id)}/library`, { json: { libraryId } });
+            toast(tr('1 series updated'), 'success');
+            for (const k of [['series', id], ['series-books', id], ['library'], ['home'], ['collection']]) qc.invalidateQueries({ queryKey: k });
+          } catch (e) { toast(msgOf(e, tr('Could not do that')), 'error'); }
+          setMoveBusy(false);
+          setMoving(false);
+        }} />
       )}
       {renaming && series?.folder && (
         <RenameFolderModal

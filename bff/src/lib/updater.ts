@@ -859,7 +859,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   if (!added && !posting && refusing.size && followed.every((f) => refusing.has(f.source))) {
     await requestScout(seriesId, 'stuck', { ifBehind: true });
   }
-  if (added) notifyNewChapter(seriesId, s.title, added).catch(() => {});
+  if (added) notifyNewChapter(seriesId, s.title, added, landed.map((c) => c.number)).catch(() => {});
   // backfill release dates onto already-scanned books; freshly downloaded ones are stamped after the sweep's scan
   await setBookDates(s.folder, releases).catch(() => {});
   // Provenance goes only onto what LANDED, never onto the whole listing: the chosen copy for a number can
@@ -1049,7 +1049,7 @@ export async function runUpdateAll(opts: {
     outcomes[r.outcome] = (outcomes[r.outcome] ?? 0) + 1;
     if (r.added && r.folder && r.chapters?.length) dated.push({ id, folder: r.folder, chapters: r.chapters, landed: r.landed });
     // The throw fallback above has `added: 0` and no title, so it can never reach the digest.
-    if (r.added && (r as { title?: string }).title) newChapters.push({ id, title: (r as { title: string }).title, added: r.added });
+    if (r.added && (r as { title?: string }).title) newChapters.push({ id, title: (r as { title: string }).title, added: r.added, numbers: r.landed.map((c) => c.number) });
     if (card) { card.done = visited; card.fetched = added; card.failed = chapterFailures; }
     if (r.diskFull) { stopped = 'disk'; return; }
     if (r.outcome === 'blocked') {

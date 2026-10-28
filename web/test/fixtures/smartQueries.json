@@ -46,5 +46,22 @@
         { "genre": { "operator": "is", "value": "Isekai" } }
       ]
     }
+  },
+  {
+    "name": "an author, by a whole name in any spelling (authorName, never the fragment match author)",
+    "params": "author=Chugong%20(%EC%B6%94%EA%B3%B5)&sort=az",
+    "query": { "v": 1, "author": "Chugong (추공)", "sort": "az" },
+    "condition": { "allOf": [{ "authorName": { "operator": "is", "value": "Chugong (추공)" } }] }
+  },
+  {
+    "name": "an author comes after the genres",
+    "params": "genres=Action&author=Elf%20Toon&sort=updated",
+    "query": { "v": 1, "genres": ["Action"], "author": "Elf Toon", "sort": "updated" },
+    "condition": {
+      "allOf": [
+        { "genre": { "operator": "is", "value": "Action" } },
+        { "authorName": { "operator": "is", "value": "Elf Toon" } }
+      ]
+    }
   }
 ]
