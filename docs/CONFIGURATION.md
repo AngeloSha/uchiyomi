@@ -61,6 +61,15 @@ The ones worth knowing:
   the tunnel's own address is not home.
 - **Set in the environment, either one wins**: the settings page shows its value and cannot change it, so what your
   compose file says is what runs. Saved on the page, a change is in force at the next request, with no restart.
+- **Rolling back after using profiles:** sessions opened without a password use a separate signing key derived from
+  `JWT_SECRET` and a keyed refresh-token hash. Older releases cannot verify their access/image cookies or exchange
+  their refresh cookies, including rotations and remembered sessions. An image rollback therefore signs those
+  profiles out; it cannot turn them into sessions that work from outside home. Ordinary password/SSO sessions retain
+  their existing format. Keep `JWT_SECRET` unchanged for an ordinary rollback. If you previously ran a development
+  profiles build that signed local tokens with the ordinary key, revoke every local session and its descendants,
+  clear `device_ring`, and rotate `JWT_SECRET` before starting an older release (or restore a database backup from
+  before that build). Rotating the key invalidates outstanding access/image cookies; revoke ordinary refresh
+  sessions too if every device must sign in again. Do not reuse the old key later with the old session data.
 - `LOG_LEVEL` (since v0.92.0): how much the server log says (`docker logs uchiyomi`). `info` by default, a line for
   every request; `warn` keeps only warnings and errors. `debug` adds, for each series a *Find other sources* run
   looks at, the names it searched each source under, what each source answered, which result it took, and why a

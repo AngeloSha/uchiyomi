@@ -53,7 +53,7 @@ export interface Remembered {
   /** When the session was first signed in, for ADMIN_RESUME_HOURS. */
   startedAt: Date | null;
   /** The session's live token: what a resume supersedes. */
-  head: { id: string; expiresAt: Date; deviceId: string | null; deviceName: string | null };
+  head: { id: string; expiresAt: Date; deviceId: string | null; deviceName: string | null; via: string | null };
 }
 
 /** What this device remembers that still opens -- a live session of an enabled account -- or the one entry for `userId`. */
@@ -73,7 +73,7 @@ export async function ringOf(deviceKey: string, userId?: string): Promise<Rememb
     [sha(deviceKey), userId ?? null]);
   return rows.map((r) => ({
     userId: r.user_id, displayName: r.display_name, avatar: r.avatar, role: r.role, via: r.via, startedAt: r.started_at,
-    head: { id: r.head_id, expiresAt: r.expires_at, deviceId: r.device_id, deviceName: r.device_name },
+    head: { id: r.head_id, expiresAt: r.expires_at, deviceId: r.device_id, deviceName: r.device_name, via: r.via },
   }));
 }
 

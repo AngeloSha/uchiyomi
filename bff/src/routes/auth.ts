@@ -47,6 +47,7 @@ import { talkOn } from '../lib/comments';
 import { verifyLoginPassword } from '../lib/loginPassword';
 import { profileKind, type ProfileRow } from '../lib/profiles';
 import { clientZone } from '../lib/clientAddr';
+import { signSessionJwt } from '../lib/profileTokens';
 import {
   ADMIN_RESUME_HOURS, deviceKeyOf, ensureDeviceKey, forgetRemembered, isRemembered, noteResumed, rememberSession, ringOf,
 } from '../lib/deviceRing';
@@ -85,14 +86,14 @@ function signAccess(app: FastifyInstance, userId: string, role: string, local = 
   // `desktop: true` tells the web app it is inside Uchiyomi Desktop (web/lib/desktop.ts). Spread in only when
   // on, so every server response is byte-for-byte what it was.
   return {
-    accessToken: app.jwt.sign({ sub: userId, role, ...(local ? { loc: true } : {}) }, { expiresIn: env.ACCESS_TTL_SECONDS }),
+    accessToken: signSessionJwt(app, { sub: userId, role }, env.ACCESS_TTL_SECONDS, local),
     expiresIn: env.ACCESS_TTL_SECONDS,
     ...(isDesktop() ? { desktop: true as const } : {}),
   };
 }
 /** The image cookie of a session entered without a credential carries `loc` too (routes/images.ts): it lasts a week. */
 function setImgCookie(app: FastifyInstance, reply: any, userId: string, local = false) {
-  reply.setCookie(IMG_COOKIE, app.jwt.sign({ sub: userId, typ: 'img', ...(local ? { loc: true } : {}) }, { expiresIn: IMG_COOKIE_TTL }), imgCookieOptions());
+  reply.setCookie(IMG_COOKIE, signSessionJwt(app, { sub: userId, typ: 'img' }, IMG_COOKIE_TTL, local), imgCookieOptions());
 }
 
 async function userPayload(userId: string) {

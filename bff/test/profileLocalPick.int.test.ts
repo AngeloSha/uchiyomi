@@ -76,8 +76,8 @@ test('who is reading, at home', { skip }, async (t) => {
       const r = await pick(kid);
       assert.equal(r.statusCode, 200, r.body);
       const rt = r.cookies.find((c: any) => c.name === 'yomi_rt').value;
-      const { createHash } = await import('node:crypto');
-      await q(`UPDATE refresh_tokens SET expires_at = now() + interval '1 day' WHERE token_hash = $1`, [createHash('sha256').update(rt).digest('hex')]);
+      const { refreshTokenHash } = await import('../src/lib/profileTokens');
+      await q(`UPDATE refresh_tokens SET expires_at = now() + interval '1 day' WHERE token_hash = $1`, [refreshTokenHash(rt)]);
       const again = await app.inject({ method: 'POST', url: '/auth/refresh', remoteAddress: home(), cookies: { yomi_rt: rt } });
       assert.equal(again.statusCode, 200, again.body);
       assert.ok(again.json().refreshExpiresAt < Date.now() + 2 * 86_400_000, 'the rotation started a fresh lifetime');

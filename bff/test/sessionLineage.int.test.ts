@@ -4,7 +4,6 @@
 // session yet; these hold the plumbing the profile switch will stand on. Skipped unless TEST_DATABASE_URL is set.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 
 const DSN = process.env.TEST_DATABASE_URL;
 if (DSN) {
@@ -17,12 +16,13 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 const NAMES = ['sl-guardian', 'sl-child', 'sl-reader'];
 const PASSWORD = 'sl-password-only-for-this-test';
-const sha = (s: string) => createHash('sha256').update(s).digest('hex');
+let sha: (s: string) => string;
 
 async function setup() {
   const { migrate } = await import('../src/lib/migrate');
   const { q, one } = await import('../src/lib/db');
   const auth = await import('../src/lib/auth');
+  sha = (await import('../src/lib/profileTokens')).refreshTokenHash;
   const { hash } = await import('@node-rs/argon2');
   const Fastify = (await import('fastify')).default;
   const authRoutes = (await import('../src/routes/auth')).default;

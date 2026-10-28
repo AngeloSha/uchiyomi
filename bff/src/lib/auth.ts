@@ -4,6 +4,7 @@ import { q, one } from './db';
 import { env } from '../env';
 import { isDesktop } from './desktop';
 import { clientZone, sameNetwork, type Zone } from './clientAddr';
+import { newRefreshValue, refreshTokenHash, verifyLocalSessionJwt } from './profileTokens';
 
 export const REFRESH_COOKIE = 'yomi_rt';
 // Stateless JWT cookie that authorizes <img> requests to /img/* (which can't send a Bearer header).
@@ -173,13 +174,13 @@ export async function issueRefreshToken(
     expiresAt?: Date;
   } = {},
 ): Promise<string> {
-  const token = randomBytes(48).toString('hex');
+  const token = newRefreshValue(withoutCredential(opts.via));
   const expires = opts.expiresAt ?? new Date(refreshExpiresAt());
   const id = randomUUID();
   await q(
     `INSERT INTO refresh_tokens (id, session_id, user_id, token_hash, device_id, device_name, expires_at, ip, user_agent, last_seen, via, parent_session)
      VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8, now(), $9, $10)`,
-    [id, userId, sha256(token), opts.deviceId ?? null, opts.deviceName ?? null, expires, opts.ip ?? null,
+    [id, userId, refreshTokenHash(token), opts.deviceId ?? null, opts.deviceName ?? null, expires, opts.ip ?? null,
       (opts.userAgent ?? null)?.slice(0, 200) ?? null, opts.via ?? null, opts.parentSession ?? null],
   );
   return token;
@@ -197,7 +198,7 @@ export async function validateRefreshToken(token: string): Promise<LiveSession |
     `SELECT id, user_id, device_id, device_name, COALESCE(session_id, id) AS session_id, via, expires_at FROM refresh_tokens
      WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
      LIMIT 1`,
-    [sha256(token)],
+    [refreshTokenHash(token)],
   );
   return row ? {
     userId: row.user_id, id: row.id, deviceId: row.device_id, deviceName: row.device_name,
@@ -294,7 +295,7 @@ export async function planRefresh(token: string, graceMs: number = REFRESH_GRACE
        FROM refresh_tokens
       WHERE token_hash = $1 AND expires_at > now()
       LIMIT 1`,
-    [sha256(token), graceMs / 1000],
+    [refreshTokenHash(token), graceMs / 1000],
   );
   if (!row) return { kind: 'refuse' };
   if (!row.revoked) return { kind: 'rotate', token: row };
@@ -343,21 +344,21 @@ export async function planRefresh(token: string, graceMs: number = REFRESH_GRACE
  */
 async function supersede(
   oldId: string,
-  o: { used: boolean; expiresAt: Date; deviceId: string | null; deviceName: string | null; ip: string | null; userAgent: string | null },
+  o: { used: boolean; local: boolean; expiresAt: Date; deviceId: string | null; deviceName: string | null; ip: string | null; userAgent: string | null },
 ): Promise<string | null> {
-  const token = randomBytes(48).toString('hex');
+  const token = newRefreshValue(o.local);
   const row = await one<{ id: string }>(
     `WITH old AS (
        UPDATE refresh_tokens
           SET revoked_at = now(), replaced_by = $1, used_at = CASE WHEN $2 THEN now() ELSE used_at END
-        WHERE id = $3 AND revoked_at IS NULL
+        WHERE id = $3 AND revoked_at IS NULL AND COALESCE(via IN ('switch', 'local-pick'), false) = $10
         RETURNING user_id, COALESCE(session_id, id) AS session_id, parent_session, via
      )
      INSERT INTO refresh_tokens (id, user_id, token_hash, device_id, device_name, expires_at, ip, user_agent, last_seen,
                                  session_id, parent_session, via)
      SELECT $1, user_id, $4, $5, $6, $7, $8, $9, now(), session_id, parent_session, via FROM old
      RETURNING id`,
-    [randomUUID(), o.used, oldId, sha256(token), o.deviceId, o.deviceName, o.expiresAt, o.ip, o.userAgent?.slice(0, 200) ?? null],
+    [randomUUID(), o.used, oldId, refreshTokenHash(token), o.deviceId, o.deviceName, o.expiresAt, o.ip, o.userAgent?.slice(0, 200) ?? null, o.local],
   );
   return row ? token : null;
 }
@@ -367,24 +368,24 @@ async function supersede(
  * new one, as a refresh supersedes it, and the session keeps the expiry it has. Null when the token moved on meanwhile.
  */
 export async function resumeHead(
-  head: { id: string; expiresAt: Date; deviceId: string | null; deviceName: string | null },
+  head: { id: string; expiresAt: Date; deviceId: string | null; deviceName: string | null; via: string | null },
   meta: { ip: string | null; userAgent: string | null },
 ): Promise<string | null> {
-  return supersede(head.id, { used: true, expiresAt: head.expiresAt, deviceId: head.deviceId, deviceName: head.deviceName, ...meta });
+  return supersede(head.id, { used: true, local: withoutCredential(head.via), expiresAt: head.expiresAt, deviceId: head.deviceId, deviceName: head.deviceName, ...meta });
 }
 
 /**
  * The live token of the session a session was opened from (`parent_session`), when that session belongs to `userId`:
  * what Uchiyomi Desktop's owner goes back to from a profile switched to on this PC (POST /auth/desktop).
  */
-export async function parentHeadOf(sessionId: string, userId: string): Promise<{ id: string; expiresAt: Date; deviceId: string | null; deviceName: string | null } | null> {
-  const row = await one<{ id: string; expires_at: Date; device_id: string | null; device_name: string | null }>(
-    `SELECT h.id, h.expires_at, h.device_id, h.device_name
+export async function parentHeadOf(sessionId: string, userId: string): Promise<{ id: string; expiresAt: Date; deviceId: string | null; deviceName: string | null; via: string | null } | null> {
+  const row = await one<{ id: string; expires_at: Date; device_id: string | null; device_name: string | null; via: string | null }>(
+    `SELECT h.id, h.expires_at, h.device_id, h.device_name, h.via
        FROM refresh_tokens c JOIN refresh_tokens h ON h.session_id = c.parent_session
       WHERE c.session_id = $1 AND h.user_id = $2 AND h.revoked_at IS NULL AND h.expires_at > now()
       ORDER BY h.created_at DESC LIMIT 1`,
     [sessionId, userId]);
-  return row ? { id: row.id, expiresAt: row.expires_at, deviceId: row.device_id, deviceName: row.device_name } : null;
+  return row ? { id: row.id, expiresAt: row.expires_at, deviceId: row.device_id, deviceName: row.device_name, via: row.via } : null;
 }
 
 /** `local`: the session was entered without a credential and holds only at home, so what is minted for it says so. */
@@ -446,12 +447,12 @@ export async function exchangeRefreshToken(
       // picked on the sign-in screen at home ends REFRESH_TTL_DAYS after the pick, however often the tablet is used.
       // Reintroduce the fresh lifetime: profileLocalPick.int.test.ts sees a picked session outlive its first expiry.
       const expiresAt = withoutCredential(t.via) ? t.expires_at : new Date(refreshExpiresAt());
-      const next = await supersede(t.id, { used: true, expiresAt, deviceId: t.device_id, deviceName: t.device_name, ...meta });
+      const next = await supersede(t.id, { used: true, local, expiresAt, deviceId: t.device_id, deviceName: t.device_name, ...meta });
       const moved = t.ip && meta.ip && !sameNetwork(t.ip, meta.ip) ? { session: t.session_id, from: t.ip } : undefined;
       if (next) return { kind: 'rotated', userId: t.user_id, role, token: next, expiresAt: expiresAt.getTime(), local, moved };
     } else if (plan.kind === 'recover') {
       const h = plan.head;
-      const next = await supersede(h.id, { used: false, expiresAt: h.expires_at, deviceId: h.device_id, deviceName: h.device_name, ...meta });
+      const next = await supersede(h.id, { used: false, local, expiresAt: h.expires_at, deviceId: h.device_id, deviceName: h.device_name, ...meta });
       if (next) return { kind: 'recovered', userId: t.user_id, role, token: next, expiresAt: h.expires_at.getTime(), local };
     }
     // Another request moved this session on between the plan and the write. Plan again from where it left it.
@@ -575,7 +576,7 @@ export async function revokeRefreshToken(token: string): Promise<void> {
      UPDATE refresh_tokens SET revoked_at = now()
       WHERE id IN (SELECT id FROM chain) AND revoked_at IS NULL
      RETURNING COALESCE(session_id, id) AS s`,
-    [sha256(token), CHAIN_MAX],
+    [refreshTokenHash(token), CHAIN_MAX],
   ));
 }
 
@@ -790,7 +791,12 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
   try {
     await request.jwtVerify();
   } catch {
-    return reply.code(401).send({ error: 'unauthorized' });
+    try {
+      const raw = header && /^bearer /i.test(header) ? header.slice(7).trim() : '';
+      request.user = verifyLocalSessionJwt(request.server, raw);
+    } catch {
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
   }
   // ⚠️ A verified signature is not enough. Every JWT this server signs uses the same secret, and only the
   // ACCESS token is meant to open /api/*: the `yomi_img` cookie ({ sub, typ: 'img' }, routes/auth.ts) and the

@@ -3,7 +3,6 @@
 // without its password, for as long as its session lives, and on no other device. Skipped unless TEST_DATABASE_URL is set.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 
 const DSN = process.env.TEST_DATABASE_URL;
 if (DSN) {
@@ -18,12 +17,13 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 const PREFIX = 'dr-';
 const PASSWORD = 'dr-password-only-for-this-test';
 const AWAY = '203.0.113.9';
-const sha = (s: string) => createHash('sha256').update(s).digest('hex');
+let sha: (s: string) => string;
 
 test('the device keyring', { skip }, async (t) => {
   const { migrate } = await import('../src/lib/migrate');
   const { q, one } = await import('../src/lib/db');
   const auth = await import('../src/lib/auth');
+  sha = (await import('../src/lib/profileTokens')).refreshTokenHash;
   const ring = await import('../src/lib/deviceRing');
   const { env } = await import('../src/env');
   const { hash } = await import('@node-rs/argon2');

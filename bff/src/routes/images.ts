@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import sharp from 'sharp';
 import { IMG_COOKIE, API_TOKEN_PREFIX, resolveApiToken, resolveOpdsBasic, accountActive } from '../lib/auth';
 import { clientZone } from '../lib/clientAddr';
+import { verifyLocalSessionJwt } from '../lib/profileTokens';
 import { komga, komgaImage } from '../lib/komga';
 import { serveImage, getOrFetch } from '../lib/imageCache';
 import { doneTranslation, drawPage, readerLang } from '../lib/translate/pages';
@@ -557,7 +558,9 @@ export async function authorizeImageRequest(
   const token = req.cookies?.[IMG_COOKIE];
   if (token) {
     try {
-      const claims = app.jwt.verify(token) as { sub?: string; typ?: string; loc?: unknown };
+      let claims: { sub?: string; typ?: string; loc?: unknown };
+      try { claims = app.jwt.verify(token); }
+      catch { claims = verifyLocalSessionJwt(app, token); }
       // ⚠️ Only the image cookie itself. Every JWT this server signs verifies under the same secret, so
       // without this an ACCESS token -- or any other signed payload that names a `sub` -- pasted into the
       // yomi_img cookie was an image session for that account. The cookie is minted with `typ: 'img'`

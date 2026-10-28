@@ -3,7 +3,6 @@
 // any one of them makes its case below switch. Skipped unless TEST_DATABASE_URL is set.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 
 const DSN = process.env.TEST_DATABASE_URL;
 if (DSN) {
@@ -18,12 +17,13 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 const PREFIX = 'ps-';
 const HOME = '192.168.1.20';
 const AWAY = '203.0.113.5';
-const sha = (s: string) => createHash('sha256').update(s).digest('hex');
+let sha: (s: string) => string;
 
 test('switching to a profile that opens at home', { skip }, async (t) => {
   const { migrate } = await import('../src/lib/migrate');
   const { q, one } = await import('../src/lib/db');
   const auth = await import('../src/lib/auth');
+  sha = (await import('../src/lib/profileTokens')).refreshTokenHash;
   const { env } = await import('../src/env');
   await migrate();
   await q('DELETE FROM users WHERE managed_by IN (SELECT id FROM users WHERE username LIKE $1)', [`${PREFIX}%`]);

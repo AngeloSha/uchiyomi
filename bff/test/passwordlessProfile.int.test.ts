@@ -3,7 +3,6 @@
 // profile that opens at home is never an admin, and every account keeps a way in. Skipped unless TEST_DATABASE_URL is set.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 
 const DSN = process.env.TEST_DATABASE_URL;
 if (DSN) {
@@ -16,12 +15,13 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 const PREFIX = 'pp-';
 const PASSWORD = 'pp-password-only-for-this-test';
-const sha = (s: string) => createHash('sha256').update(s).digest('hex');
+let sha: (s: string) => string;
 
 test('profiles that open at home, from Admin -> Members', { skip }, async (t) => {
   const { migrate } = await import('../src/lib/migrate');
   const { q, one } = await import('../src/lib/db');
   const auth = await import('../src/lib/auth');
+  sha = (await import('../src/lib/profileTokens')).refreshTokenHash;
   await migrate();
   await q('DELETE FROM users WHERE username LIKE $1', [`${PREFIX}%`]);
   const admin = (await q<{ id: string }>(

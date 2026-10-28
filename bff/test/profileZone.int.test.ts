@@ -4,7 +4,6 @@
 // (the switch is next), so it is issued here the way the switch will issue it. Skipped unless TEST_DATABASE_URL is set.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 
 const DSN = process.env.TEST_DATABASE_URL;
 if (DSN) {
@@ -23,12 +22,13 @@ const NAMES = ['pz-guardian', 'pz-child'];
 const HOME = '192.168.1.20';
 const AWAY = '203.0.113.5';
 const PROXY = '172.18.0.5'; // named in TRUST_PROXY above
-const sha = (s: string) => createHash('sha256').update(s).digest('hex');
+let sha: (s: string) => string;
 
 async function setup() {
   const { migrate } = await import('../src/lib/migrate');
   const { q, one } = await import('../src/lib/db');
   const auth = await import('../src/lib/auth');
+  sha = (await import('../src/lib/profileTokens')).refreshTokenHash;
   const { env } = await import('../src/env');
   const Fastify = (await import('fastify')).default;
   const { authorizeImageRequest } = await import('../src/routes/images');
