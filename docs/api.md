@@ -1155,6 +1155,10 @@ GET    /api/books/:id/pages
 GET    /api/books/:id/next        PUT    /api/books/:id/progress
 PUT    /api/books/:id/pages/:n/junk
 PUT    /api/books/:id/pages/:n/spread
+GET    /api/admin/books/:id/page-cleanup
+POST   /api/admin/books/:id/page-cleanup
+GET    /api/admin/books/:id/page-rules
+PUT    /api/admin/books/:id/page-rules
 GET    /api/offline/plan             GET    /api/series/:id/listing
 GET    /api/series/:id/groups        GET    /api/series/:id/versions
 GET    /api/series/:id/gaps
@@ -1290,6 +1294,35 @@ place and adds `missing: true`; a page may be both `missing` and `junk`, and a r
 missing placeholder. `GET /api/books/:id/download-manifest` copies the same optional `missing: true` onto
 each affected entry in `pages`, so offline readers preserve the evidence. A complete chapter has
 `missingPages: null` and no page-level `missing` keys.
+
+**Reversible page cleanup (#354).** The four `/api/admin/books/:id/page-cleanup` and `page-rules` operations above
+require an admin account and admin token scope, with the same chapter visibility gate as reading. Cleanup GET
+returns `{revision, contentVersion, pages, retainedBytes, unusedRetainedBytes, unusedRetainedImages}`; each page has
+`number`, `name`, `bytes`, `gif`, `removed` and `restorable`. `revision` is an opaque SHA256 over the archive digest and
+cleanup state. POST accepts `{action, pages, revision, confirm:true}`, where `action` is `remove`, `restore`, `purge`
+or `purge-unused`. Use one to 500 page numbers, or an empty `pages` array for `purge-unused`.
+
+Removal replaces only the selected image bytes with small placeholders under the original ZIP entry names;
+numbered positions, progress, bookmarks and manual spread marks stay fixed. Originals are retained, deduplicated
+and verified under `CONFIG_DIR/page-trash`, and a durable journal precedes each atomic file replacement. `purge`
+explicitly makes selected removed originals unavailable before unlinking any blob no remaining restorable slot
+needs. `purge-unused` clears originals left after restoration or interrupted operations. No automatic expiry runs;
+neither action deletes a separate backup or a device's saved copy. Storage counts include all retained blobs,
+including originals already restored. The editor refuses unsupported formats, partial chapters, unsafe ZIPs,
+archives beyond 128 MiB compressed/decoded or 2,000 entries, busy writers and stale previews.
+
+Page lists and download manifests carry `removed:true` plus `restorable` for removed slots. A copied cleanup CBZ
+can retain those slot labels through its bounded embedded manifest, but another installation cannot restore it
+without the original server's trash/journal. An externally changed/refetched archive refuses restoration. All
+owned page lists/manifests carry an opaque `contentVersion`; append it as `cv` to page-image URLs, including `w` and
+`fit` variants. An old version URL answers **409** instead of receiving different bytes during an offline download.
+Clients must restart that download and discard partial blobs. Existing completed offline copies keep their bytes.
+
+Rules GET previews the current chapter's `.gif` page names, source/series rules and affected scope's chapter count.
+PUT accepts `{scope:'source'|'series', skipGif:boolean|null, confirm:true}`. Absent rules are disabled, a series rule
+overrides its source rule (including explicit false), and null removes that scoped rule. Matching uses the
+downloaded book's own stable `source_id`, never its series' current primary source. Rules skip on existing/future
+reads without editing files, and explicit `PUT .../pages/:n/junk {junk:false}` rescue always wins.
 
 Since v0.77.0 `GET /api/books/:id/pages?spreads=1` (#229, what the reader asks with *Join split double pages* on) adds
 `join: 'rtl' | 'ltr'` to a page that is, with the page after it, one double-page spread the source served as two files,

@@ -196,6 +196,7 @@ ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS latest_mtime bigint      NOT NUL
 ALTER TABLE lib_books  ADD COLUMN IF NOT EXISTS root text NOT NULL DEFAULT '/library';
 -- cached per-page pixel dimensions [{name,width,height}] (the reader needs these to lay pages out)
 ALTER TABLE lib_books  ADD COLUMN IF NOT EXISTS page_dims jsonb;
+ALTER TABLE lib_books  ADD COLUMN IF NOT EXISTS page_dims_version text;
 -- chapter release date on the source (stamped at download/update time; NULL for library-only books)
 ALTER TABLE lib_books  ADD COLUMN IF NOT EXISTS published_at timestamptz;
 -- whether the scheduled updater pulls new chapters for this series (user choice at add time)
@@ -972,6 +973,15 @@ CREATE TABLE IF NOT EXISTS page_hashes (
   PRIMARY KEY (book_id, page)
 );
 CREATE INDEX IF NOT EXISTS page_hashes_hash_idx ON page_hashes (hash);
+
+-- #354: absent means disabled. A series rule overrides its source rule, including an explicit false.
+CREATE TABLE IF NOT EXISTS source_page_rules (
+  source_id text NOT NULL,
+  series_scope text NOT NULL DEFAULT '',
+  skip_gif boolean NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (source_id, series_scope)
+);
 
 -- Bulk import (backup / MangaDex list / pasted titles) → match review → add. Unlike importJob/artJob/
 -- relinkJob (in-memory singletons in admin.ts), this survives a restart on purpose: matching is a

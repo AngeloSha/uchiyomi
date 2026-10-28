@@ -1799,6 +1799,38 @@ chapter that has not been processed yet simply skips nothing. One limit worth kn
 downloaded *before* its pages were fingerprinted keeps the flags it was saved with until you download it
 again.
 
+### Removing unwanted images and source GIF rules
+
+An admin reading the server copy can open **Pages → Manage saved pages** to select unwanted images in a
+downloaded chapter, preview the selection and confirm removal. **Skip** keeps the original image in the file;
+**Remove** takes its bytes out of the CBZ and retains them in the server's page trash. Each image keeps its
+original numbered slot, so story pages, bookmarks and reading progress never shift. Removed slots remain
+labelled in Pages, with **Restore** while their original is retained.
+
+Physical editing supports writable, complete local **CBZ** files only. CBR, PDF, EPUB, loose-image folders,
+remote chapters and partial downloads still offer Skip. For safety the editor also refuses archives over
+128 MiB compressed or decoded, archives with over 2,000 entries, and malformed entries. If the chapter was
+replaced by another program or fetched again after the preview, refresh the preview; originals cannot be
+restored onto a different archive. A copied CBZ can describe removed slots, but needs the original server's
+page trash and journal to restore them.
+
+**Keeping an original in trash still uses storage.** After checking the selection, an admin can permanently
+delete retained originals, or clear unused retained images left after restoration. The confirmation explains
+that this removes the server trash's undo copy. Another removed slot that still needs a shared original keeps
+that image. There is no automatic purge or expiry. Separate backups and existing offline downloads keep
+their own copies; clearing the server trash does not clear those.
+
+The same panel can preview `.gif` images and enable a **GIF skip rule** for this series or its whole source.
+Rules start disabled, apply to existing and future chapter reads, and never delete an image. A series rule
+overrides its source rule, including an explicit **Disabled**; clearing the series rule returns to the source's
+default. A rule follows the copy's recorded source identifier, so another source's version and chapters with
+unknown provenance are left alone. Use the page grid's existing rescue control for any legitimate GIF:
+that page's explicit rescue wins over the rule.
+
+Saved offline chapters retain the images and flags they were downloaded with. Remove this device's saved
+copy in Downloads and reopen the chapter online before editing the server copy or changing its rules;
+download it again afterward to keep the updated version. Other devices' completed downloads are separate.
+
 ### Translated pages
 
 Since v0.85.0. For a chapter in a language you don't read: a raw chapter the day it comes out, or an English chapter in

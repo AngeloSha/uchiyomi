@@ -27,8 +27,9 @@ import { suwayomiUrl, suwayomiBase, suwayomiImageHeaders, onEngineOrigin } from 
 import { fetchPublic, readCapped, withoutCredentials, MAX_COVER_BYTES, MAX_ICON_BYTES, MAX_HTML_BYTES } from '../lib/safeFetch';
 import { env } from '../env';
 import { join } from 'path';
-import { readFile } from 'fs/promises';
+import { readFile, stat } from 'fs/promises';
 import { q, one } from '../lib/db';
+import { pageFileVersion, pageFileVersionOf } from '../lib/pageCleanupFiles';
 import { viewCtxFor, visibleBookFile, seriesVisible, sourceAllowedFor, SYSTEM_CTX, type ViewCtx } from '../lib/visibility';
 import { artFile, firstPageBookOf, FIRST_PAGE } from '../lib/seriesArt';
 import { namesOf } from '../lib/altTitles';
@@ -813,38 +814,52 @@ export const serveLibBookThumb = async (req: FastifyRequest, reply: FastifyReply
 export const serveLibBookPage = async (req: FastifyRequest, reply: FastifyReply, id: string, pageNo: number, w: number, fit = 0, tl: string | null = null) => {
   const abs = await bookFileAbs(id, vc(req));
   if (!abs) return reply.code(404).send({ error: 'no_book' });
+  // The reader changes ?cv= after reversible page edits. The disk cache must identify the new bytes too,
+  // otherwise a fresh browser URL would still be answered with the old cached page.
+  const fileStat = await stat(abs).catch(() => null);
+  if (!fileStat) return reply.code(404).send({ error: 'no_book' });
+  const fileVersion = pageFileVersionOf(fileStat);
+  const requestedVersion = (req.query as Record<string, unknown>).cv;
+  if (requestedVersion !== undefined && requestedVersion !== fileVersion)
+    return reply.code(409).send({ error: 'page_version_changed', message: 'The chapter changed. Reload its page list or restart this download.' });
+  const currentPage = async () => {
+    const page = await pageOrGone(abs, pageNo - 1);
+    if (await pageFileVersion(abs) !== fileVersion)
+      throw Object.assign(new Error('The chapter changed while reading this page. Restart its download.'), { statusCode: 409 });
+    return page;
+  };
   if (tl && !w) {
     const engine = (await translateOn()) ? await engineKey() : null;
     const done = engine ? await doneTranslation(id, pageNo, tl, engine) : null;
     if (done && engine) {
-      return serveImage(req, reply, `lib-page:${id}:${pageNo}:tl${tl}:${engine}:r${RENDER_VERSION}:${done.at}${fit ? `:fit${fit}` : ''}`, async () => {
-        const page = await pageOrGone(abs, pageNo - 1);
+      return serveImage(req, reply, `lib-page:${id}:${pageNo}:tl${tl}:${engine}:r${RENDER_VERSION}:${done.at}${fit ? `:fit${fit}` : ''}:${fileVersion}`, async () => {
+        const page = await currentPage();
         if (!page) throw Object.assign(new Error('no page'), { statusCode: 404 });
         const drawn = await drawPage(page.bytes, done.regions, tl);
         return fit ? pageForScreen(drawn.buffer, drawn.contentType, fit) : drawn;
       });
     }
-    const page = await pageOrGone(abs, pageNo - 1);
+    const page = await currentPage();
     if (!page) return reply.code(404).send({ error: 'no_page' });
     const out = fit ? await pageForScreen(page.bytes, libCt(page.name), fit) : { buffer: page.bytes, contentType: libCt(page.name) };
     return reply.header('content-type', out.contentType).header('cache-control', 'private, no-store').send(out.buffer);
   }
   if (fit && !w) {
-    return serveImage(req, reply, `lib-page:${id}:${pageNo}:fit${fit}`, async () => {
-      const page = await pageOrGone(abs, pageNo - 1);
+    return serveImage(req, reply, `lib-page:${id}:${pageNo}:fit${fit}:${fileVersion}`, async () => {
+      const page = await currentPage();
       if (!page) throw Object.assign(new Error('no page'), { statusCode: 404 });
       return pageForScreen(page.bytes, libCt(page.name), fit);
     });
   }
   if (w && Number.isInteger(w) && w >= 64 && w <= 2000) {
-    return serveImage(req, reply, `lib-page:${id}:${pageNo}:w${w}`, async () => {
-      const page = await pageOrGone(abs, pageNo - 1);
+    return serveImage(req, reply, `lib-page:${id}:${pageNo}:w${w}:${fileVersion}`, async () => {
+      const page = await currentPage();
       if (!page) throw Object.assign(new Error('no page'), { statusCode: 404 });
       return pageAtWidth(page.bytes, w, 74);
     });
   }
-  return serveImage(req, reply, `lib-page:${id}:${pageNo}`, async () => {
-    const page = await pageOrGone(abs, pageNo - 1);
+  return serveImage(req, reply, `lib-page:${id}:${pageNo}:${fileVersion}`, async () => {
+    const page = await currentPage();
     if (!page) throw Object.assign(new Error('no page'), { statusCode: 404 });
     q('UPDATE lib_books SET pages=$1 WHERE id=$2 AND pages<>$1', [page.total, id]).catch(() => {});
     return { buffer: page.bytes, contentType: libCt(page.name) };

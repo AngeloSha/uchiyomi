@@ -98,6 +98,7 @@ import { groupStats, emptyGroupStat, type StatCopy } from '../lib/groupStats';
 import { copyToChapter, reapplyBlocklist, reapplyBlocklistInTransaction, type ListingCopy } from '../lib/seriesListing';
 import { languageRulesFor, type LanguageRules } from '../lib/copyLanguage';
 import { claimWriterFolders } from '../lib/bulkNewest';
+import pageCleanupRoutes from './pageCleanup';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { attachManual, detachMain, type AttachRefused } from '../lib/manualAttach';
 import { fetchCoverImage } from './images';
@@ -576,6 +577,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   await app.register(autoHeroRoutes);
   // v0.55.4: Rescan everything's preview and plan, the same way (routes/rescan.ts).
   await app.register(rescanRoutes);
+  await app.register(pageCleanupRoutes);
 
   /** Synchronous two-sided hand-off between updateSeries and destructive route writers. */
   const claimSeriesWriter = (seriesIds: readonly string[], folders: readonly string[]) =>

@@ -2971,6 +2971,9 @@ paths:
                     height: { type: [integer, "null"] }
                     sizeBytes: { type: [integer, "null"] }
                     junk: { type: boolean }
+                    removed: { type: boolean, description: The original image is retained in page trash; its numbered slot is a placeholder. }
+                    restorable: { type: boolean, description: Present on removed slots; false after explicit purge or when this installation has no original trash. }
+                    contentVersion: { type: string, description: Opaque file identity. Append as cv to image URLs; a changed file answers 409 instead of mixing offline versions. }
                     missing: { type: boolean, description: True only for a repair placeholder in a partial chapter. }
                     join:
                       type: string
@@ -7898,6 +7901,109 @@ paths:
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+  /api/admin/books/{id}/page-cleanup:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [admin]
+      summary: Preview a local CBZ's original page slots and retained images.
+      operationId: getApiAdminBookPageCleanup
+      security: [{ bearer: [] }]
+      description: >-
+        Admin account and admin token scope required. Returns revision (SHA256 of archive digest and cleanup state),
+        contentVersion (image URL identity), pages (number, name, bytes, gif, removed, restorable), retainedBytes,
+        unusedRetainedBytes and unusedRetainedImages. Storage counts cover all physical retained original blobs,
+        including restored or interrupted operations; duplicates share a verified content-addressed blob.
+        Full writable local CBZ only; partial chapters,
+        unsupported formats, duplicate names and archives exceeding safe limits are refused.
+      responses:
+        "200": { description: Preview with current archive revision and page slots }
+        "401": { description: Not authenticated }
+        "403": { description: Admin permission required }
+        "404": { description: Chapter not found or not visible }
+        "409": { description: Unsupported or externally replaced archive }
+    post:
+      tags: [admin]
+      summary: Remove images reversibly, restore originals or explicitly purge retained trash.
+      operationId: postApiAdminBookPageCleanup
+      security: [{ bearer: [] }]
+      description: >-
+        Keeps original ZIP names and page positions. Removed images are retained under CONFIG_DIR/page-trash;
+        no automatic expiry or purge is performed. A durable journal precedes atomic archive replacement.
+        Explicit purge marks selected originals permanently unavailable before unlinking unreferenced blobs;
+        shared blobs remain while another restorable slot needs them. purge-unused clears only blobs no active
+        restorable slot needs. These actions never alter separate backups or existing offline copies.
+        Re-checks preview revision while holding writer/scan claims. Progress, bookmarks and manual marks stay.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, pages, revision, confirm]
+              properties:
+                action: { type: string, enum: [remove, restore, purge, purge-unused] }
+                pages: { type: array, maxItems: 500, description: "One to 500 slots, or an empty array for purge-unused.", items: { type: integer, minimum: 1 } }
+                revision: { type: string, pattern: '^[a-f0-9]{64}$' }
+                confirm: { type: boolean, const: true }
+      responses:
+        "200": { description: Updated preview and archive revision }
+        "400": { description: Invalid selection or confirmation missing }
+        "401": { description: Not authenticated }
+        "403": { description: Admin permission required }
+        "404": { description: Chapter not found or not visible }
+        "409": { description: Busy writer, stale preview, unsupported file, all pages selected or unavailable/corrupt trash }
+  /api/admin/books/{id}/page-rules:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [admin]
+      summary: Preview GIF pages and existing source/series skip rules.
+      operationId: getApiAdminBookPageRules
+      security: [{ bearer: [] }]
+      description: >-
+        Returns stable sourceId (null when unknown), sourceName, seriesId, current chapter's matching pages
+        (number, name and rescued exception flag),
+        sourceRule/seriesRule (boolean or null), chapters and seriesChapters. Unknown provenance never inherits
+        the series' primary source. The GIF rule matches .gif page names and never removes bytes.
+      responses:
+        "200": { description: Current chapter preview, scope counts and saved rules }
+        "401": { description: Not authenticated }
+        "403": { description: Admin permission required }
+        "404": { description: Chapter not found or not visible }
+    put:
+      tags: [admin]
+      summary: Explicitly enable, disable or clear a source/series GIF skip rule.
+      operationId: putApiAdminBookPageRules
+      security: [{ bearer: [] }]
+      description: >-
+        Applies to existing and future reads of chapters stamped with this exact source ID. Absent rules are
+        disabled; a series rule overrides its source rule, including false. Null removes the scoped rule.
+        A page's explicit junk=false rescue always wins. Rules never alter a downloaded file.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scope, skipGif, confirm]
+              properties:
+                scope: { type: string, enum: [series, source] }
+                skipGif: { type: [boolean, "null"] }
+                confirm: { type: boolean, const: true }
+      responses:
+        "200": { description: Rule saved or cleared }
+        "400": { description: Invalid rule or confirmation missing }
+        "401": { description: Not authenticated }
+        "403": { description: Admin permission required }
+        "404": { description: Chapter not found or not visible }
+        "409": { description: Chapter has no recorded stable source }
   /api/admin/library/scan:
     post:
       tags:
