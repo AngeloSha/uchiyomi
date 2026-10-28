@@ -251,6 +251,13 @@ components:
         showAllChapters:
           type: boolean
           description: Show one unpaged chapter list, including all grey rows and unfolded older runs.
+        notifyOnlyNext:
+          type: boolean
+          description: >-
+            "Only tell me about my next chapter": this account's web push, and the messages of the notification targets
+            aimed at this account, mention a series' new chapters only when one of them is the chapter the series page's
+            reading button would open for this account (caught up, nothing older unread, nothing half read). Off by
+            default. Announcements that name no chapter are unaffected.
         incognito:
           type: boolean
           description: >-
@@ -6618,7 +6625,7 @@ paths:
         reader's edges) and, since v0.55.7, `listSorts` (list id to `az`, `za`, `read`, `unread` or `latest`: the order
         each list is shown in; a list's own order is not stored). Since v0.55.8 the validated keys are `librarySort`,
         `homeCollections` and `showAllChapters` (since v0.60.0 also `librarySortDir`, since v0.61.0 `incognito`, a
-        boolean, and since v0.68.0 `trackerPlanOnAdd`, a boolean). Unknown keys remain accepted and retained for compatibility -- since v0.66.0 the web app's `homeRails`
+        boolean, since v0.68.0 `trackerPlanOnAdd`, a boolean, and `notifyOnlyNext`, a boolean). Unknown keys remain accepted and retained for compatibility -- since v0.66.0 the web app's `homeRails`
         (`{order, hidden}`, Home's rails as the reader arranged them; null is the default order) and `tone` (`oled`,
         `graphite` or `midnight`, the background) among them. `avatar` is `{emoji, color, frame}` (since v0.69.1 a hex
         colour; since v0.89.0 `frame`, one of `bronze`, `silver`, `ember`, `gold`, `moon` or `aurora`, the frame a badge

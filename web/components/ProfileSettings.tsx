@@ -11,6 +11,7 @@ import { readShownOnce } from '@/lib/shownOnce';
 import { setTypeToSearchOn, typeToSearchOn } from '@/lib/typeToSearch';
 import { compactChaptersOn, setCompactChaptersOn } from '@/lib/compactChapters';
 import { showAllChaptersOn } from '@/lib/showAllChapters';
+import { notifyOnlyNextOn } from '@/lib/notifyOnlyNext';
 import { contextMenusOn, setContextMenusOn } from '@/lib/contextMenus';
 import { ReaderPrefs, loadPrefs, savePrefs, syncPrefsFromServer } from '@/lib/readerPrefs';
 import { Avatar, AVATAR_EMOJIS, AVATAR_COLORS, type AvatarData } from '@/components/Avatar';
@@ -131,6 +132,15 @@ function GeneralPane({ pointer }: { pointer: boolean }) {
   useEffect(() => { setContextMenus(contextMenusOn()); }, []);
   // Show all chapters at once (lib/showAllChapters.ts): on the account like Reduce effects, so every device the
   // reader signs in on opens the whole list; optimistic, and put back when the server refuses.
+  // Only tell this account about a new chapter when it is the one it would read next (bff lib/nextUp.ts). On the account
+  // like the switch above; the server reads it when it sends a push or a person-aimed target's message.
+  const notifyOnlyNext = notifyOnlyNextOn(user?.settings);
+  const saveNotifyOnlyNext = async (next: boolean) => {
+    const prev = notifyOnlyNext;
+    setSettings({ notifyOnlyNext: next });
+    try { await api('/api/settings', { method: 'PUT', json: { notifyOnlyNext: next } }); }
+    catch (e) { setSettings({ notifyOnlyNext: prev }); throw e; }
+  };
   const showAllChapters = showAllChaptersOn(user?.settings);
   const saveShowAllChapters = async (next: boolean) => {
     const prev = showAllChapters;
@@ -177,6 +187,12 @@ function GeneralPane({ pointer }: { pointer: boolean }) {
             help={tr('On a computer, chapter rows without thumbnails, and their buttons appear when you point at a row. Phones and tablets are unchanged. This device only.')}
             on={compactList} onChange={(next) => { setCompactChaptersOn(next); setCompactList(next); }} />
         )}
+      </RowGroup>
+
+      <RowGroup title={tr('Notifications')}>
+        <SwitchRow id="notify-only-next" label={tr('Only tell me about my next chapter')}
+          help={tr('A new chapter notifies you only when it is the one the series page would open for you: you are caught up, with nothing older unread or half read. Applies to push alerts and to messages sent to you. Saved to your account.')}
+          on={notifyOnlyNext} onChange={saveNotifyOnlyNext} />
       </RowGroup>
 
       <RowGroup title={tr('Shortcuts')}>

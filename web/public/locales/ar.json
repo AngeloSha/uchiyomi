@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4244
+    "strings": 4246
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -4247,5 +4247,7 @@
   "Removed from Keep reading. Reading it again brings it back.": "Removed from Keep reading. Reading it again brings it back.",
   "English": "English",
   "Romaji": "Romaji",
-  "Japanese": "Japanese"
+  "Japanese": "Japanese",
+  "Only tell me about my next chapter": "Only tell me about my next chapter",
+  "A new chapter notifies you only when it is the one the series page would open for you: you are caught up, with nothing older unread or half read. Applies to push alerts and to messages sent to you. Saved to your account.": "A new chapter notifies you only when it is the one the series page would open for you: you are caught up, with nothing older unread or half read. Applies to push alerts and to messages sent to you. Saved to your account."
 }

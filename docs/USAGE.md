@@ -3350,6 +3350,14 @@ the browser, so a target carries its own choice). A target aimed at a person is 
 libraries and age limit whatever the box says — those are permissions, not a reveal — so it never names a
 series they could not open themselves.
 
+**Only your next chapter.** **Profile → Settings → Notifications → Only tell me about my next chapter** (off by default,
+saved to your account) quiets the favourites you are behind on. A new chapter then notifies you, by web push and in a
+message sent to you by a target aimed at you, only when it is the chapter the series page's reading button would open
+for you: you are caught up, or the only thing between you and it is other chapters that arrived with it. With an older
+unread chapter after the last one you finished, or a chapter you are half way through, the new one is behind it and
+stays quiet (it still appears under Updates and in the series). A series' message to a target aimed at the whole server
+is not filtered, since no one reader's place applies to it.
+
 **The digest.** After each library update — the scheduled sweep, or **Run now** on it under **Admin →
 Tasks** — every target gets **one** message for the whole update, never one per chapter, and none when
 nothing new arrived. A series' own *Check now* sends nothing, since its result is already on your screen.

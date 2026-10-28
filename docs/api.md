@@ -1629,6 +1629,11 @@ sorts by `popularity`, `score`, `rating`, `chapters` and `lastRead` (see the Ope
   unreadable id and the web app omits it on the next edit; the API refuses a request that tries to add one (another
   member's private List, a malformed id).
 - `showAllChapters: boolean`, the account-wide unpaged chapter-list switch.
+- `notifyOnlyNext: boolean`, "Only tell me about my next chapter", off by default. When on, the account's web push and
+  the messages of notification targets aimed at it mention a series' new chapters only when one of them is the chapter the
+  series page's reading button would open (nothing half read; with chapters finished, the first unfinished one after the
+  highest finished; with none finished, the first). An announcement that names no chapter is always sent. Anything but
+  a boolean is refused with 400 `bad_settings`.
 - `incognito: boolean` (since v0.61.0), **Incognito reading**, for the whole account and enforced by the server: progress
   is still written, so Keep reading and every resume work, but no reading event is recorded -- history, streaks,
   Wrapped, the leaderboard, the household's Top 10 and member activity never see it -- and nothing is pushed to a
