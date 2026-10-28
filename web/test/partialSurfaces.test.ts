@@ -66,8 +66,8 @@ test('the renderer cannot re-collapse or re-hide a missing placeholder that also
   assert.match(code(read('components/ReaderPage.tsx')), /const collapsed = !!item\.collapsed;/, 'the vertical renderer recomputes collapse from junk');
   assert.match(src, /<ReaderPageRow key=\{p\.key\} item=\{p\}/, 'the vertical renderer hands its rows something other than the flow\'s item');
   assert.match(src, /p\.junk && !p\.missing && !expanded\.has\(`\$\{ch\.id\}:\$\{p\.number\}`\)/, 'the hidden-page notice counts a visible missing placeholder');
-  assert.match(src, /junk: !!p\.junk && !p\.missing,\s*missing: !!p\.missing,/, 'the page grid presents a missing placeholder as skipped');
-  assert.match(code(read('components/PageGrid.tsx')), /onToggleJunk && !p\.missing && \(/, 'the page grid lets a missing placeholder be marked for skipping');
+  assert.match(src, /junk: !!p\.junk && !p\.missing && !p\.removed,[\s\S]*?missing: !!p\.missing,/, 'the page grid presents a missing placeholder as skipped');
+  assert.match(code(read('components/PageGrid.tsx')), /onToggleJunk && !p\.missing && !p\.removed && \(/, 'the page grid lets a missing placeholder be marked for skipping');
 });
 
 test('the reader names the source from what it already has, and asks /api/sources only when allowed', () => {
@@ -81,7 +81,7 @@ test('the reader names the source from what it already has, and asks /api/source
   assert.match(src, /const unnamedMissingSource = chapters\.some\(\(c\) => !!c\.sourceId && !seriesSourceNames\[c\.sourceId\] && c\.pages\.some\(\(p\) => p\.missing\)\)/, 'the gate no longer keys on an unnamed source with a missing page');
   // The flag and the source id both have to survive loadChapter, or the caption never renders online. (v0.77.0: the page
   // list is read by pageList, which carries #229's `join` beside them, and since v0.89.0 #262's `mark`.)
-  assert.match(src, /junk: p\.junk, missing: p\.missing, join: p\.join, mark: p\.mark \}\)\)/, 'loadChapter drops the missing flag from the page list');
+  assert.match(src, /junk: p\.junk, missing: p\.missing, removed: p\.removed, restorable: p\.restorable, contentVersion: p\.contentVersion, join: p\.join, mark: p\.mark \}\)\)/, 'loadChapter drops the missing flag from the page list');
   assert.match(src, /sourceId: b\.sourceId \?\? null,/, 'loadChapter drops the book\'s sourceId');
 });
 
@@ -112,10 +112,10 @@ test('the offline record keeps the missing flag beside junk', () => {
   // Reintroduce by dropping `missing: p.missing` from the pages map in saveChapter.
   const src = code(read('lib/downloads.ts'));
   // v0.77.0: #229's `join` rides beside them, for the same reason (bff routes/downloads.ts); v0.89.0, #262's `mark` too.
-  assert.match(src, /pages: manifest\.pages\.map\(\(p\) => \(\{ number: p\.number, width: p\.width, height: p\.height, junk: p\.junk, missing: p\.missing, join: p\.join, mark: p\.mark \}\)\)/, 'the offline record does not copy `missing` beside `junk`');
-  assert.match(src, /junk\?: boolean; missing\?: true; join\?: 'rtl' \| 'ltr'; mark\?: 'join' \| 'split' \}\[\];/, 'the OfflineChapter page type lost `missing`');
+  assert.match(src, /pages: manifest\.pages\.map\(\(p\) => \(\{ number: p\.number, width: p\.width, height: p\.height, junk: p\.junk, missing: p\.missing, removed: p\.removed, restorable: p\.restorable, contentVersion: p\.contentVersion, join: p\.join, mark: p\.mark \}\)\)/, 'the offline record does not copy `missing` beside `junk`');
+  assert.match(src, /junk\?: boolean; missing\?: true; removed\?: true; restorable\?: boolean; contentVersion\?: string; join\?: 'rtl' \| 'ltr'; mark\?: 'join' \| 'split' \}\[\];/, 'the OfflineChapter page type lost `missing`');
   // The manifest type it reads from carries the flag too, or the copy above is a type error at best.
-  assert.match(code(read('lib/types.ts')), /bytes: number \| null; junk\?: boolean; missing\?: true; join\?: 'rtl' \| 'ltr'; mark\?: 'join' \| 'split' \}\[\];/, 'DownloadManifest pages lost `missing`');
+  assert.match(code(read('lib/types.ts')), /bytes: number \| null; junk\?: boolean; missing\?: true; removed\?: true; restorable\?: boolean; contentVersion\?: string; join\?: 'rtl' \| 'ltr'; mark\?: 'join' \| 'split' \}\[\];/, 'DownloadManifest pages lost `missing`');
   assert.match(code(read('lib/types.ts')), /missingPages\?: number\[\] \| null;/, 'Book lost `missingPages`');
 });
 
