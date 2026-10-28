@@ -36,6 +36,7 @@ import { clampPage, numberingSpan, pageCount, pageLabel, pageOf, pageSizeFor, pa
 import { openRuns, showAllChaptersOn } from '@/lib/showAllChapters';
 import { buttonsClass, compactChaptersOn, dotHide, rowClass, thumbHide } from '@/lib/compactChapters';
 import { chapterRowsClass, chapterViewOn, setChapterView, type ChapterView } from '@/lib/chapterView';
+import { OtherTitles } from '@/components/OtherTitles';
 import { PhoneHeroCover } from '@/components/PhoneHeroCover';
 import { Segmented } from '@/components/settings';
 import { seriesBooksQuery, seriesQuery } from '@/lib/seriesPrefetch';
@@ -2098,6 +2099,7 @@ function SeriesInner() {
           {series && <div className="hidden lg:block"><RatingsPanel anilist={series.yomi?.anilist} rating={rating} onRate={rate} className="max-w-[440px]" /></div>}
           <div className="hidden lg:block"><SupplyLine parts={supplyWide} loaded={supplyLoaded} wide onOpen={() => setSourcesOpen(true)} /></div>
           {Genres}
+          {series && <OtherTitles seriesId={id} shown={title} />}
           {Summary}
           {Chapters}
         </div>

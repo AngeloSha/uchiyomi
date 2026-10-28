@@ -2255,6 +2255,32 @@ paths:
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+  /api/series/{id}/other-titles:
+    get:
+      tags:
+        - library
+      summary: The English, romanised and Japanese titles of the series' AniList entry.
+      operationId: getApiSeriesIdOtherTitles
+      description: >-
+        `{titles: {english, romaji, native} | null}`, each name null when AniList has none. `titles` is null for a
+        series with no checked AniList link, in a library whose AniList lookups are off, or whose entry has no names.
+        Kept by the server and asked again after a month (a day when it had no names), so most reads ask AniList
+        nothing; when AniList is busy or down, the kept names are answered.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
   /api/series/{id}/books:
     get:
       tags:

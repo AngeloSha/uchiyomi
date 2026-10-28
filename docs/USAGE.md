@@ -534,6 +534,15 @@ recommend that you already have. These are kept up in the background with the An
 nothing asks AniList when a page opens, a library with AniList lookups off sends nothing, and the 18+ switch and age
 limits apply as everywhere else.
 
+### Titles on AniList
+
+A series linked to AniList shows, above its summary, the **English**, **romanised** and **Japanese** titles of that
+entry, each one that has a name and differs from the title the page already shows. The server asks AniList for them
+when the page is opened, keeps the answer, and asks again after a month (after a day when AniList had no names). A
+series with no AniList link, or in a library with AniList lookups off, sends nothing and shows nothing; if AniList is
+busy or unreachable the page shows the names it last kept. These are read-only and are separate from the **Other
+names** an admin keeps for searching.
+
 ### Cover and banner
 
 When nobody chose a picture, a series is shown with:

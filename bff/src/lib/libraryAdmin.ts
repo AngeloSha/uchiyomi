@@ -621,6 +621,8 @@ const SERIES_KEYED_TABLES = [
   'translate_names',
   // Which readers took it off their Keep reading row (lib/onDeck.ts). No FK on the series; named so a forgotten series leaves no row.
   'keep_reading_hidden',
+  // Its English, romaji and native titles from AniList (lib/otherTitles.ts). Cascades too; named for the same count.
+  'series_other_titles',
 ] as const;
 
 export interface ForgetRefusal {

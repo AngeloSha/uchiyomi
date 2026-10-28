@@ -115,6 +115,25 @@ export async function fetchAniListCountries(ids: number[]): Promise<Map<number, 
 
 const SCORES = `query($ids:[Int]){Page(perPage:50){media(id_in:$ids,type:MANGA){id averageScore meanScore popularity}}}`;
 
+/** The three titles AniList gives an entry; each null when it has none. */
+export interface AniListTitles { english: string | null; romaji: string | null; native: string | null }
+
+/**
+ * One manga entry's English, romanised and Japanese titles, by its AniList id (lib/otherTitles.ts). A person is on the
+ * series page waiting, so it asks as ASK does: busy past ASK's wait throws, as does any failure, so nothing is kept as
+ * "no names". null when AniList has no such entry. Public data: no token.
+ */
+export async function fetchAniListTitles(id: number): Promise<AniListTitles | null> {
+  const r = await anilistFetch(ANILIST, POST({ query: 'query($id:Int){Media(id:$id,type:MANGA){title{romaji english native}}}', variables: { id } }), ASK);
+  // A missing entry is a 404 with `Media: null`; it is an answer ("no names"), not a failure.
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`anilist ${r.status}`);
+  const t = ((JSON.parse((await readCapped(r, 256 * 1024)).toString('utf8')) as any)?.data?.Media?.title) ?? null;
+  if (!t) return null;
+  const pick = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+  return { english: pick(t.english), romaji: pick(t.romaji), native: pick(t.native) };
+}
+
 /** An entry's outside rating (v0.58.0, lib/anilistScores.ts): its score out of 100 and how many people list it. */
 export interface AniListScore { score: number | null; popularity: number | null }
 
