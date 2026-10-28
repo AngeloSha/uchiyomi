@@ -3493,7 +3493,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
       const it = { source: r.source, sourceId: r.sourceId, title: r.title };
       return workOf(idx, it, heldFor(idx, it).filter((h) => may(h.id)));
     };
-    const groups = groupByTitle(ans.per, order, 30, rated, keyOf);
+    // A selected provider's next page starts after its whole first page. Capping this at 30 when the
+    // provider returned 100 would permanently lose results 31–100 before page two is requested.
+    const groups = groupByTitle(ans.per, order, ask.length === 1 ? 100 : 30, rated, keyOf);
     return {
       content: groups.map((g) => {
         const held = uniqueHeld(g.providers.flatMap((p) => heldFor(idx, { source: p.source, sourceId: p.sourceId, title: p.title })));

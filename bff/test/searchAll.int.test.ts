@@ -157,6 +157,20 @@ test('author, artist and title searches never reuse each other or ask unsupporte
   } finally { delete src.searchCreator; }
 });
 
+test('a creator search keeps the selected provider whole before paging past its first hundred works', { skip }, async () => {
+  const src = adapters[FAST] as any;
+  src.searchCreator = async (_q: string, _kind: string, page = 1) => Array.from({ length: page === 1 ? 100 : 1 }, (_, n) => ({
+    source: FAST, sourceId: `creator-large-${(page - 1) * 100 + n}`, title: `Creator Work ${(page - 1) * 100 + n}`,
+  }));
+  try {
+    const first = await app.inject({ method: 'GET', url: `/api/sources/search-all?source=${FAST}&q=Large%20Creator%20Catalogue&creator=author`, headers: tok(ids.plain) });
+    assert.equal(first.statusCode, 200);
+    assert.equal(first.json().content.length, 100, 'the default global cap must not skip works 31 through 100');
+    const next = await app.inject({ method: 'GET', url: `/api/sources/search?source=${FAST}&q=Large%20Creator%20Catalogue&creator=author&page=2`, headers: tok(ids.plain) });
+    assert.equal(next.json().content[0].sourceId, 'creator-large-100');
+  } finally { delete src.searchCreator; }
+});
+
 test('the first answer comes a grace after the fast source, with the slow ones still pending', { skip }, async () => {
   // Reintroduce by making `graceEnd` Infinity in searchAll's wait loop (waiting for every source, as the
   // old fan-out did): the answer arrives when the slow pair settles at SLOW_MS, "pending" reads 0 and fails.
