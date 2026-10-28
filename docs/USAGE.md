@@ -2675,6 +2675,9 @@ on disk and rewrites the chapter paths, and it keeps chapter ids and everyone's 
 is marked unread and nothing is re-downloaded. It refuses outright unless *every* folder the series occupies
 is writable: a series often spans your library and Uchiyomi's own downloads folder, and renaming only one of
 them would leave the old name in place for the next scan to pick up as a second, half-read copy.
+If the folder was renamed by hand, changing only its capitals (`Manga` to `manga`, in a file manager), there is nothing
+at the stored name to move: the rename is refused with a message naming the spelling the disk uses, and the next
+library scan picks the series up under that name.
 
 **Delete files** is on **Admin → Libraries**, and only for a series you have already removed. The reversible
 step always comes first, and the irreversible one asks you to type the title. It deletes the chapter files
