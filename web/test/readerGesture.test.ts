@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  TAP_WINDOW_MS, UNDO_WINDOW_MS, isTap, readTap, singleTapDelay, tapZone, undoLeft, undoWindow,
+  TAP_WINDOW_MS, UNDO_WINDOW_MS, isTap, readTap, singleTapDelay, tapZone, undoLeft, undoWindow, isCatch, CATCH_MS,
 } from '../lib/readerGesture';
 
 const at = (t: number, x = 500, y = 400) => ({ x, y, t });
@@ -164,4 +164,47 @@ test('the reader turns a physical zone through the track\'s direction and a read
   assert.match(sheet, /<span aria-hidden dir="ltr" className="grid grid-cols-3/, 'the tap sketches mirror with the interface');
   assert.match(sheet, /const back = z === 'prev' \|\| \(z === 'back' && !rtlTrack\) \|\| \(z === 'forward' && rtlTrack\);/);
   assert.match(src, /rtlTrack=\{pagedRtl\}/, 'the sheet is not told which way the track runs');
+});
+
+test('a press during a fling is a catch, not a tap', () => {
+  assert.equal(isCatch(1000, 1000 + CATCH_MS - 1), true);
+  assert.equal(isCatch(1000, 1000 + CATCH_MS), false);
+  assert.equal(isCatch(0, 5), false);
+});
+
+test('two quick taps on a page-turning edge are two taps, never a zoom', () => {
+  // A thumb paging through a chapter taps the edge twice in a row. It used to zoom the page (which paged mode
+  // could not pan) and swallow the first turn.
+  const first = readTap(tap(1000, 100));
+  assert.equal(first.kind, 'single');
+  const second = readTap({ ...tap(1250 - 30, 100), lastTapAt: 1000, lastTapPoint: { x: 100, y: 400 } });
+  assert.equal(second.kind, 'single', 'an edge double-tap is not a zoom');
+  assert.equal((second as { zone: string }).zone, 'back');
+});
+
+test('two taps far apart in the middle are not a double-tap', () => {
+  const second = readTap({ from: at(1250 - 30, 650, 400), to: at(1250, 650, 400), width: 1000, lastTapAt: 1000, lastTapPoint: { x: 350, y: 400 }, doubleDetect: true });
+  assert.equal(second.kind, 'single');
+  const near = readTap({ from: at(1250 - 30, 520, 400), to: at(1250, 520, 400), width: 1000, lastTapAt: 1000, lastTapPoint: { x: 500, y: 400 }, doubleDetect: true });
+  assert.equal(near.kind, 'double', 'the same spot, in the middle, still zooms');
+});
+
+test('the reader wires these: a caught fling, a flushed first tap, a pan, the chapter note, a scrubber that stays', () => {
+  const src = readFileSync(join(__dirname, '..', 'app/reader/page.tsx'), 'utf8');
+  // A press that stops a fling is dropped; reintroduce by deleting the `caughtFling` early return and this fails.
+  assert.match(src, /caughtFling\.current = e\.pointerType === 'touch' && isCatch\(lastMoved\.current, Date\.now\(\)\);/);
+  assert.match(src, /if \(caughtFling\.current\) \{ caughtFling\.current = false; return; \}/);
+  // A mouse's second click drops the first (the browser's dblclick owns the pair); a finger's runs it at once.
+  assert.match(src, /if \(e\.pointerType === 'mouse'\) cancelPendingTap\(\); else flushPendingTap\(\);/);
+  assert.match(src, /if \(lastPointer\.current !== 'mouse'\) return;/, 'a touch double-tap raised dblclick and zoomed a second time');
+  // A zoomed paged page is dragged, not scrolled (scrolling is what turns the page).
+  assert.match(src, /else if \(zoom > 1 && prefs\.mode === 'paged' && pointers\.current\.size === 1\) \{/);
+  assert.match(src, /zoom > 1 \? 'touch-none overflow-x-hidden' : 'touch-pan-x overflow-x-auto'/);
+  // Crossing into another chapter in paged mode says so.
+  assert.match(src, /setChapterNote\(activeChapter\?\.title \|\| tr\('Next chapter'\)\);/);
+  assert.match(src, /was === null \|\| was === id \|\| prefs\.mode !== 'paged'/);
+  // The bar does not time out under a finger that is dragging the slider.
+  assert.match(src, /if \(!chrome \|\| showSettings \|\| scrubbing\) return;/);
+  assert.match(src, /useEffect\(\(\) => \{ if \(!chrome\) setScrubbing\(false\); \}, \[chrome\]\);/);
+  assert.match(src, /onPointerCancel=\{\(\) => setScrubbing\(false\)\} onBlur=\{\(\) => setScrubbing\(false\)\}/);
 });
