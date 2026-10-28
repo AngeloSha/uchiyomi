@@ -394,8 +394,11 @@ someone's work fills itself as you add more of it. Genres link the same way, to 
 **Find more by this author** on that filtered library opens Discover with the author's name. Discover's
 **Search by** control offers **Title**, **Author**, and **Artist**. Creator searches use the provider's own
 creator fields and only ask sources that support them; they never substitute a title search. MangaDex
-supports both roles, including enabled languages and further result pages. Extensions without creator
-search support are left out. The chosen field stays in the address when you reload.
+supports both roles, including enabled languages and further result pages. An extension participates only
+when it declares an Author or Artist text filter; a source with only one role is only asked for that role.
+A provider's combined Author / Artist field searches either kind, as that provider defines it. Filter names,
+positions and group nesting come from the extension; no title syntax or saved preference is changed.
+Extensions without creator search support are left out. The chosen field stays in the address when you reload.
 
 - **The reading button** says what it opens (since v0.60.0): *Continue · Ch. 12* when a chapter is half read (the
   one you read last), *Next · Ch. 11* when you finished chapters 1–10 and nothing is half read, *Start reading* the

@@ -16,7 +16,7 @@
 // A capped account's set never contains an adult source, so it can neither start that source nor read
 // what an uncapped viewer's search got from it. The cache holds raw per-source lists (what the SITE said,
 // viewer-independent) and nothing about who asked -- the filter happens on every read, never on write.
-import type { SourceAdapter, SourceSeries } from './sources/types';
+import { supportsCreatorSearch, type SourceAdapter, type SourceSeries } from './sources/types';
 import { budgetFor } from './sources/budget';
 import { SOLVER_CONCURRENCY } from './sources/flaresolverr';
 import { scanOrder } from './scanOrder';
@@ -244,11 +244,12 @@ export async function searchAll(
   ask: SourceAdapter[],
   opts: { waitMs: number; health: Map<string, SourceHealth>; creator?: 'author' | 'artist' },
 ): Promise<SearchAnswer> {
-  // Creator results cannot share title results (or each other's role) under the same spelling.
+  // Creator results cannot share title results, another role, or another case-sensitive name.
+  // Extensions can declare `Author (Case-sensitive)`, so their exact submitted spelling is part of the key.
   const key = opts.creator
-    ? `${opts.creator}:${term.trim().normalize('NFKC').toLowerCase()}`
+    ? `${opts.creator}:${term.trim()}`
     : `title:${keyOf(term)}`;
-  if (opts.creator) ask = ask.filter((src) => typeof src.searchCreator === 'function');
+  if (opts.creator) ask = ask.filter((src) => supportsCreatorSearch(src, opts.creator!));
   const callStart = Date.now();
   let entry = entries.get(key);
   if (entry && callStart - entry.startedAt >= SEARCH_TTL_MS) {

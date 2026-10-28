@@ -45,6 +45,41 @@ test('extension source registration', { skip: DSN ? false : 'set TEST_DATABASE_U
     assert.equal(loader.listSources().length, 0);
   });
 
+  await t.test('ordinary registration finishes while optional creator metadata is still waiting', async () => {
+    reset();
+    await q("UPDATE suwayomi_sources SET enabled = true WHERE source_id = '0'");
+    const originalFetch = globalThis.fetch;
+    let release!: (response: Response) => void;
+    let began!: () => void;
+    const asked = new Promise<void>((resolve) => { began = resolve; });
+    const held = new Promise<Response>((resolve) => { release = resolve; });
+    globalThis.fetch = (async (_input: any, options: any) => {
+      assert.match(JSON.parse(options.body).query, /filters/);
+      began();
+      return held;
+    }) as typeof fetch;
+    let finished = false;
+    const registration = reg.loadSuwayomiSources(async () => remote(3)).then((r) => { finished = true; return r; });
+    const response = () => new Response(JSON.stringify({ data: { sources: { nodes: [
+      { id: '0', filters: [{ __typename: 'TextFilter', name: 'Author' }] },
+    ] } } }));
+    try {
+      await asked;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(finished, true, 'ordinary registration awaited optional filter metadata');
+      assert.ok(loader.getSource('sw:0'));
+      assert.equal(loader.getSource('sw:0')!.searchCreator, undefined);
+      release(response());
+      await registration;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.deepEqual(loader.getSource('sw:0')!.creatorFields, ['author']);
+    } finally {
+      release(response());
+      await registration;
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   await t.test('only the enabled ones register', async () => {
     reset();
     await q(`UPDATE suwayomi_sources SET enabled = true WHERE source_id IN ('0','2')`);

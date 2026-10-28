@@ -20,7 +20,7 @@ import { pollAfter, type Recommendations } from '@/lib/recommendations';
 import { mergePicks, type Pick, type ReadPick } from '@/lib/forYou';
 import { placeRows, useGridCols, weave } from '@/lib/shelves';
 import { SourcePicker, SourceLatest, Src, SrcState } from '@/components/SourcePicker';
-import { aloneEmpty, answeredPage, budgetForMode, discoverSources, WALL_IN_FLIGHT, type ListMode, type SrcExtension, type StackSource } from '@/lib/sourceGroups';
+import { aloneEmpty, answeredPage, budgetForMode, creatorSearchBudget, supportsCreatorSearch, discoverSources, WALL_IN_FLIGHT, type ListMode, type SrcExtension, type StackSource } from '@/lib/sourceGroups';
 import { normTitle } from '@/lib/normTitle';
 import { applyWorks, foldByWork, followWorks, mergeGroups, unknownWorks, workKey, type WallProvider } from '@/lib/wall';
 import { useLiveWorks } from '@/lib/useLiveWorks';
@@ -311,7 +311,7 @@ function DiscoverInner() {
    * each answer releases the next, so more sources only means the wall keeps filling for longer -- and its last card
    * says who it is still waiting on.
    */
-  const budget = useMemo(() => mode === 'search' && searchKind !== 'title' ? pool.filter((s) => s.creatorSearch) : pool, [pool, mode, searchKind]);
+  const budget = useMemo(() => creatorSearchBudget(pool, mode, searchKind), [pool, mode, searchKind]);
 
   // Where the hero's add looks a title up: the best-ranked HERO_FIND_SOURCES (v0.58.0 kept it there when the wall
   // began asking every source -- /api/sources/find asks all it is given at once, with no gate like the wall's).
@@ -376,7 +376,8 @@ function DiscoverInner() {
       const first = (client.getQueryState(queryKey)?.dataUpdateCount ?? 0) === 0;
       const only = selected ? `&source=${encodeURIComponent(selected)}` : '';
       const rated = ratingAsked === 'all' ? '' : `&rating=${ratingAsked}`;
-      return api<SearchAnswer>(`/api/sources/search-all?q=${encodeURIComponent(term)}&wait=${first ? SEARCH_FIRST_WAIT_MS : SEARCH_POLL_WAIT_MS}${only}${rated}${searchKind === 'title' ? '' : `&creator=${searchKind}`}`, { signal });
+      const creator = searchKind === 'title' ? '' : `&creator=${searchKind}`;
+      return api<SearchAnswer>(`/api/sources/search-all?q=${encodeURIComponent(term)}&wait=${first ? SEARCH_FIRST_WAIT_MS : SEARCH_POLL_WAIT_MS}${only}${rated}${creator}`, { signal });
     },
     // `mayAdd` (v0.61.0): an arrival's `?q=` starts in search mode, and an account the server refuses is not asked.
     enabled: mode === 'search' && !!term && mayAdd,
@@ -603,7 +604,7 @@ function DiscoverInner() {
   // A search on one source, its next page (#331): asked when the end of the wall comes near, one page at a time, until a
   // page brings nothing new. A failure ends it too: a search typed again starts over.
   const canMore = canSearchMore({
-    solo, pages: !!sources.find((s) => s.id === solo)?.[searchKind === 'title' ? 'searchPages' : 'creatorSearch'], rating: ratingAsked,
+    solo, pages: searchKind === 'title' ? !!sources.find((s) => s.id === solo)?.searchPages : supportsCreatorSearch(sources.find((s) => s.id === solo), searchKind), rating: ratingAsked,
     pending: stillAsking, firstPage: searchHits.length, more, busy: moreBusy,
   });
   const loadMore = useCallback(async () => {
