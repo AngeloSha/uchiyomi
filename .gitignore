@@ -43,3 +43,4 @@ docs/shots/tour.webm
 docs/shots/tour-poster.webp
 # Browser evidence from the backlog regression walk.
 web/test/e2e/shots-backlog/
+web/test/e2e/shots-page-cleanup/
