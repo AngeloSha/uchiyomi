@@ -1404,6 +1404,10 @@ remembered between visits; the switch is, per device.
 
 ### Selecting chapters
 
+**Select all** in the selection toolbar picks every chapter matching the current filter, across chapter pages,
+including grey rows when they are shown. Press **Clear selection** to undo the selection. Selecting alone does not
+download, mark, hide or remove anything; choose an action afterward.
+
 **Select**, beside *Mark all read*, turns the chapter list into a pick list: tap rows to tick them (a grey
 row too), and the bar at the bottom shows what can be done with the selection. **Done** leaves the mode.
 
@@ -3151,7 +3155,7 @@ The review is the point. Every row shows the title you brought and, on a second 
 (*→ {title}*, dimmed when the two are the same) with how confident the match is; **Change** opens a manual
 search, its results in one sideways-scrolling rail per source so you can see which provider a pick would
 come from, with the cover, title and chapter count of the current pick beside whatever you tap next — and each
-one's status, first genres and description (two lines; **More** opens the rest) — so a mismatch is visible
+one's author when supplied, status, first genres and description (two lines; **More** opens the rest) — so a mismatch is visible
 before you commit to it, even between two titles a few letters apart — or **Skip this one** drops the
 title. A tracker row that was found under one of its other names says *matched under its other name*, dimmed,
 so the second name is in view before you commit; a pick you make by hand drops the note, since it explained a
@@ -3160,6 +3164,10 @@ on a tracker import they read *Already in your library — linked for progress s
 tracker entry is made at intake, before the review, for the titles you already hold — for an established
 library that is most of the list, and the part that matters for sync. A title you deleted earlier does not
 count as held: it resolves like any other, and importing it puts the same series back, as adding it would.
+Search keeps asking slower sources until they answer. Each rail keeps up to 100 results from a source's first
+answer; on sources that support search pages, **More** asks for the next page for that source alone. The same
+search and paging controls are available in **Sources & translations → Add more sources…**, with the selected
+entry's author, status, genres and description available before attaching it.
 A list your library already held in full has nothing to review and closes as done at once; its done card
 then counts *· {n} linked for progress sync* and each such row reads *{title} — linked for progress sync*,
 so it never looks as if nothing happened. **Needs attention** filters to what wants a

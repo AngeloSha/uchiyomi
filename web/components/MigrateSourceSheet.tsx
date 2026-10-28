@@ -24,11 +24,13 @@ import { attachButtons, migrateTerms, sourcesParam } from '@/lib/migrateSource';
 import { discoverSources, type Src } from '@/lib/sourceGroups';
 import type { AltTitle } from '@/lib/findSources';
 import { searchPoll, searchProgressLine, searchWait, type SearchProgress } from '@/lib/searchPoll';
+import { SourceSearchPages } from '@/components/SourceSearchPages';
+import { matchPreview } from '@/lib/matchPreview';
 
 interface SourceResult { sourceId: string; title: string; coverUrl?: string }
 interface SourceGroup { source: string; name: string; lang: string | null; results: SourceResult[] }
 interface Pick { source: string; sourceId: string; title: string; coverUrl?: string; name: string }
-interface Detail { title: string; coverUrl: string | null; count: number }
+interface Detail { title: string; coverUrl: string | null; count: number; author?: string; summary?: string; genres?: string[]; status?: string }
 
 /** A footer key that shares its row: equal widths, and room for a long word to wrap (btn-key is one line tall). */
 const GROW = 'h-auto min-h-8 flex-1 py-1.5 text-center leading-tight';
@@ -140,13 +142,16 @@ export function MigrateSourceSheet({ id, title, attached, mainId, listed, onDone
   const buttons = attachButtons(mainId);
   const groups = data?.content ?? [];
   const delta = detail.data && listed != null ? detail.data.count - listed : null;
+  const preview = matchPreview(detail.data);
 
   const footer = pick ? (
     <div className="space-y-2">
       <div className="flex items-center gap-2.5 rounded-xl border border-ink-700 bg-ink-900/50 p-2">
         <Img src={pick.coverUrl ? sourceCover(pick.source, pick.coverUrl) : ''} alt="" fallbackSrc={pick.coverUrl || undefined} className="h-16 w-11 shrink-0 rounded" />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm text-fog-100" dir="auto">{pick.title}</p>
+          <p className="line-clamp-2 text-sm text-fog-100" dir="auto">{pick.title}</p>
+          {detail.data?.author && <p className="line-clamp-2 text-[11px] text-fog-400" dir="auto">{tr('by {author}', { author: detail.data.author })}</p>}
+          {preview.facts && <p className="truncate text-[11px] text-fog-500">{preview.facts}</p>}
           <p className="truncate text-[11px] text-fog-400">
             {pick.name}{detail.isFetching ? ` · ${tr('checking…')}` : detail.data ? ` · ${bookCountText(detail.data.count)}` : ''}
           </p>
@@ -157,6 +162,10 @@ export function MigrateSourceSheet({ id, title, attached, mainId, listed, onDone
           )}
         </div>
       </div>
+      {preview.summary && <details key={`${pick.source}:${pick.sourceId}`} className="text-[11px] leading-relaxed text-fog-400">
+        <summary className="cursor-pointer text-accent">{tr('More')}</summary>
+        <p className="max-h-32 overflow-y-auto" data-lenis-prevent>{preview.summary}</p>
+      </details>}
       {refusal && <p role="alert" className="text-[11px] leading-relaxed text-amber-300" data-migrate-refusal>{refusal}</p>}
       {differs && (
         <button type="button" onClick={() => act(differs, true)} disabled={busy} className="btn-key w-full" data-migrate-anyway>
@@ -264,8 +273,10 @@ export function MigrateSourceSheet({ id, title, attached, mainId, listed, onDone
                 <span className="truncate">{g.name}{g.lang ? ` (${g.lang.toUpperCase()})` : ''}</span>
                 {attached.includes(g.source) && <Marker main={g.source === mainId} />}
               </p>
-              <ScrollRail className="flex gap-2.5 pb-3">
-                {g.results.map((r) => {
+              <SourceSearchPages source={g.source} query={debounced} initial={g.results}
+                pageable={!!allSources.find((s) => s.id === g.source)?.searchPages}>
+                {(results) => <ScrollRail className="flex gap-2.5 pb-3">
+                {results.map((r) => {
                   const selected = pick?.source === g.source && pick?.sourceId === r.sourceId;
                   return (
                     <button key={r.sourceId} type="button" disabled={busy} aria-pressed={selected}
@@ -280,7 +291,8 @@ export function MigrateSourceSheet({ id, title, attached, mainId, listed, onDone
                     </button>
                   );
                 })}
-              </ScrollRail>
+              </ScrollRail>}
+              </SourceSearchPages>
             </div>
           ))}
         </div>

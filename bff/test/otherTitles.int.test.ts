@@ -108,6 +108,16 @@ test('no checked link, a library with lookups off, or no link at all: null, and 
   assert.equal((await q('SELECT count(*)::int AS n FROM series_other_titles WHERE series_id = ANY($1)', [IDS]))[0].n, 0);
 });
 
+test('correcting an AniList link never reuses the previous entry\'s cached titles', { skip }, async () => {
+  await get('s_ot_named');
+  await q("UPDATE series_trackers SET external_id = '202' WHERE series_id = 's_ot_named' AND provider = 'anilist'");
+  assert.deepEqual(await get('s_ot_named'), { titles: null });
+  assert.deepEqual(asked, [201, 202]);
+  await q("UPDATE series_trackers SET external_id = '201' WHERE series_id = 's_ot_named' AND provider = 'anilist'");
+  mode = 'down';
+  assert.deepEqual(await get('s_ot_named'), { titles: null }, 'a failed lookup cannot fall back to another work\'s names');
+});
+
 test('a month for an answer with names, a day for an empty one', { skip }, async () => {
   await get('s_ot_named'); await get('s_ot_empty');
   assert.deepEqual(asked, [201, 202]);

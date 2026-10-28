@@ -1774,11 +1774,13 @@ CREATE TABLE IF NOT EXISTS anilist_related (
 -- after a day (one with names after a month). Additive: the previous version boots on this schema and ignores it.
 CREATE TABLE IF NOT EXISTS series_other_titles (
   series_id  text PRIMARY KEY REFERENCES lib_series(id) ON DELETE CASCADE,
+  anilist_id text,
   english    text,
   romaji     text,
   native     text,
   fetched_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE series_other_titles ADD COLUMN IF NOT EXISTS anilist_id text;
 
 -- v0.61.0: the release radar (lib/releaseRadar.ts) -- when a series' next chapter is likely, from when its chapters
 -- came: the dates its sources list, else when they arrived on this server (most chapters carry no source date).

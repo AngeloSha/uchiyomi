@@ -127,6 +127,19 @@ test('web push: a half-read chapter is the one to continue, so the new one is no
   assert.ok(!sent.includes('https://93.184.216.34/wpush/picky'));
 });
 
+test('web push includes a chapter that landed before the scanner indexed its file', { skip }, async () => {
+  await unfinish('picky');
+  for (const n of [1, 2, 3]) await finish('picky', n);
+  sent = [];
+  await push.notifyNewChapter(SID, 'Next Up Title', 1, [4]);
+  assert.ok(sent.includes('https://93.184.216.34/wpush/picky'), 'a caught-up reader must hear about the unindexed new chapter');
+  await q('INSERT INTO listing_progress (user_id, series_id, number) VALUES ($1, $2, 4)', [U.picky.id, SID]);
+  sent = [];
+  await push.notifyNewChapter(SID, 'Next Up Title', 1, [4]);
+  assert.ok(!sent.includes('https://93.184.216.34/wpush/picky'), 'a chapter read elsewhere is already finished');
+  await q('DELETE FROM listing_progress WHERE user_id = $1 AND series_id = $2', [U.picky.id, SID]);
+});
+
 test('a notification target aimed at an account hears only about its next chapter; a server-wide target hears everything', { skip }, async () => {
   await unfinish('picky'); await unfinish('plain');
   await finish('picky', 1); await finish('plain', 1);

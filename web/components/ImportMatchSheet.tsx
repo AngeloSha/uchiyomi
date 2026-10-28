@@ -21,6 +21,7 @@ import type { ImportCandidate } from '@/lib/importBatch';
 import type { Src } from '@/lib/sourceGroups';
 import { searchPoll, searchProgressLine, searchWait, type SearchProgress } from '@/lib/searchPoll';
 import { matchPreview } from '@/lib/matchPreview';
+import { SourceSearchPages } from '@/components/SourceSearchPages';
 
 interface SourceResult {
   source: string; sourceId: string; title: string; coverUrl?: string; inLibrary?: boolean;
@@ -29,7 +30,7 @@ interface SourceGroup { source: string; name: string; lang: string | null; resul
 /** A pick under consideration — set by tapping a result card, not yet written to the candidate row. */
 interface Pending { source: string; sourceId: string; title: string; coverUrl?: string }
 /** The fields this screen reads off GET /api/sources/detail; see routes/sources.ts for the rest. */
-interface Detail { title: string; coverUrl: string | null; count: number; summary?: string; genres?: string[]; status?: string }
+interface Detail { title: string; coverUrl: string | null; count: number; summary?: string; genres?: string[]; status?: string; author?: string }
 
 function useDebounced<T>(value: T, ms: number) {
   const [v, setV] = useState(value);
@@ -44,7 +45,7 @@ function useDebounced<T>(value: T, ms: number) {
  * Cover + title + chapter count for one pick, so "currently selected" and "new pick" render identically, and
  * (#353) its status, genres and description, so two similarly named titles can be told apart before one is picked.
  */
-function MiniCard({ label, title, coverUrl, sourceId, sourceLabel, count, loading, preview }: {
+function MiniCard({ label, title, coverUrl, sourceId, sourceLabel, count, loading, preview, author }: {
   label: string; title: string; coverUrl?: string | null;
   /** Adapter id, e.g. `sw:123` — for the cover proxy, never shown. */
   sourceId: string;
@@ -52,6 +53,7 @@ function MiniCard({ label, title, coverUrl, sourceId, sourceLabel, count, loadin
   sourceLabel: string;
   count?: number; loading?: boolean;
   preview?: { facts: string; summary: string };
+  author?: string;
 }) {
   // The description starts at two lines: this card sits in the Sheet's pinned footer, twice, and the footer once
   // took most of a 390 px screen (see `footer` below). More opens it in place.
@@ -70,7 +72,8 @@ function MiniCard({ label, title, coverUrl, sourceId, sourceLabel, count, loadin
           className="h-16 w-11 shrink-0 rounded" />
         <div className="min-w-0 flex-1">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-fog-500">{label}</p>
-          <p className="truncate text-sm text-fog-100">{title}</p>
+          <p className="line-clamp-2 text-sm text-fog-100" dir="auto">{title}</p>
+          {author && <p className="line-clamp-2 text-[11px] text-fog-400" dir="auto">{tr('by {author}', { author })}</p>}
           <p className="truncate text-[11px] text-fog-400">
             {sourceLabel}{loading ? ` · ${tr('checking…')}` : count != null ? ` · ${bookCountText(count)}` : ''}
           </p>
@@ -189,7 +192,7 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
       {candidate.match_source && candidate.match_source_id ? (
         <MiniCard label={tr('Currently selected')} title={candidate.match_title || candidate.backup_title}
           coverUrl={candidate.match_cover} sourceId={candidate.match_source!} sourceLabel={sourceName(candidate.match_source)}
-          count={currentDetail.data?.count} loading={currentDetail.isFetching} preview={matchPreview(currentDetail.data)} />
+          count={currentDetail.data?.count} loading={currentDetail.isFetching} preview={matchPreview(currentDetail.data)} author={currentDetail.data?.author} />
       ) : (
         <div className="rounded-xl border border-dashed border-ink-700 px-3 py-2.5 text-center text-[11px] text-fog-500">
           {candidate.decision === 'skip' ? tr('Skipped — nothing will be imported for this title.') : tr('No match yet — pick one from the search results.')}
@@ -200,7 +203,7 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
         <>
           <MiniCard key={`${pending.source}:${pending.sourceId}`} label={tr('New pick')} title={pending.title} coverUrl={pending.coverUrl}
             sourceId={pending.source} sourceLabel={sourceName(pending.source)}
-            count={pendingDetail.data?.count} loading={pendingDetail.isFetching} preview={matchPreview(pendingDetail.data)} />
+            count={pendingDetail.data?.count} loading={pendingDetail.isFetching} preview={matchPreview(pendingDetail.data)} author={pendingDetail.data?.author} />
           {delta != null && (
             <p className={`text-center text-[11px] ${delta === 0 ? 'text-fog-500' : delta > 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
               {delta === 0 ? tr('Same chapter count as the current pick')
@@ -292,8 +295,10 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
                   so a two-line title lifted its cover 14 px, wrapping into a 730 px block at 390 px with
                   nothing to scroll. `pb-3`, not `hide-scrollbar`: ScrollRail stops hiding the bar on purpose
                   (see its header) and wants room for it under the cards. */}
-              <ScrollRail className="flex gap-2.5 pb-3">
-                {g.results.map((r) => {
+              <SourceSearchPages source={g.source} query={debounced} initial={g.results}
+                pageable={!!sourcesData?.content.find((s) => s.id === g.source)?.searchPages}>
+                {(results) => <ScrollRail className="flex gap-2.5 pb-3">
+                {results.map((r) => {
                   const selected = pending?.source === g.source && pending?.sourceId === r.sourceId;
                   return (
                     <button
@@ -321,7 +326,8 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
                     </button>
                   );
                 })}
-              </ScrollRail>
+              </ScrollRail>}
+              </SourceSearchPages>
             </div>
           ))}
         </div>

@@ -27,3 +27,10 @@ test('with no source in every language, the order is the caller\'s, unchanged', 
   const [card] = groupByTitle(per as any, order);
   assert.deepEqual(card.providers.map((p) => p.source), ['site', 'ext-es', 'ext-en']);
 });
+
+test('same-title entries on one source each retain a selectable card', () => {
+  const items = [hit('site'), { ...hit('site'), sourceId: 'site|2' }];
+  const per = new Map([['site', { state: 'ok' as const, items }]]);
+  const cards = groupByTitle(per as any, [src('site')]);
+  assert.deepEqual(cards.flatMap((c) => c.providers.map((p) => p.sourceId)), ['site|1', 'site|2']);
+});

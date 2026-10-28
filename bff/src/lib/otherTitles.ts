@@ -21,7 +21,7 @@ export async function otherTitlesFor(seriesId: string): Promise<OtherTitles | nu
        JOIN libraries l ON l.id = s.library_id AND l.anilist_lookup
        LEFT JOIN series_trackers t ON t.series_id = s.id AND t.provider = 'anilist'
                                   AND (t.linked_by IS NOT NULL OR t.checked_at IS NOT NULL)
-       LEFT JOIN series_other_titles o ON o.series_id = s.id
+       LEFT JOIN series_other_titles o ON o.series_id = s.id AND o.anilist_id = t.external_id
       WHERE s.id = $1`,
     [seriesId],
   );
@@ -33,9 +33,9 @@ export async function otherTitlesFor(seriesId: string): Promise<OtherTitles | nu
   try {
     const out = (await fetchAniListTitles(id)) ?? { english: null, romaji: null, native: null };
     await q(
-      `INSERT INTO series_other_titles (series_id, english, romaji, native) VALUES ($1, $2, $3, $4)
-       ON CONFLICT (series_id) DO UPDATE SET english = $2, romaji = $3, native = $4, fetched_at = now()`,
-      [seriesId, out.english, out.romaji, out.native],
+      `INSERT INTO series_other_titles (series_id, english, romaji, native, anilist_id) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (series_id) DO UPDATE SET english = $2, romaji = $3, native = $4, anilist_id = $5, fetched_at = now()`,
+      [seriesId, out.english, out.romaji, out.native, link.al],
     );
     return named(out) ? out : null;
   } catch {

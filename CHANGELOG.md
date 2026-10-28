@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — backlog review
+
+- Source identity wins over a title match: different entries on one source remain separate even when their
+  titles are identical or normalize alike. Same-title additions receive separate download folders (#357).
+- The series chapter toolbar has **Select all** and **Clear selection**, respecting the current group and
+  missing-chapter filters across chapter pages (#364).
+- Import matching and **Add more sources…** keep slower sources' answers, retain more than twelve matches,
+  offer **More** for paged sources, and show author metadata when available (#353).
+- The reader can pan a zoomed page and offers a **Paper** tone. Touch taps distinguish catching a fling,
+  turning pages and double-tapping. Paged chapter changes show a brief chapter label.
+- Series menus offer **Move library**. Home's **Keep reading** row can hide and restore a series.
+- Alternate AniList titles appear on series pages; correcting the AniList link invalidates their cached identity.
+- An optional account setting filters new-chapter notifications to the next chapter the person would read,
+  including files that landed before indexing finished.
+- Phone Search can open the command palette. Admin settings show download limits and blocked sources.
+- Renaming a missing folder identifies an existing spelling that differs only in case.
+- Dependency updates cover the server, web app and desktop tooling, including Electron 45.
+
 ## v0.100.0 — 2026-10-22
 
 **Tap an author on a series page to see everything of theirs in your library, and the library's search finds authors

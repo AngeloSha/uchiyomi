@@ -1311,6 +1311,14 @@ function SeriesInner() {
     ...pickedGhostList.filter((g) => g.numberEnd == null).map((g) => g.number),
   ])].sort((a, b) => a - b), [pickedBookList, pickedGhostList]);
   const pickedCount = pickedBookList.length + pickedGhostList.length;
+  const allPicked = pickedCount > 0 && pickedCount === filteredBooks.length + filteredGhosts.length;
+  const selectAllChapters = () => {
+    if (allPicked) { clearPicks(); return; }
+    // The active group filter and the Show chapters not on the server switch define the selection,
+    // across every chapter page. Collapsed missing-chapter runs represent selectable chapters too.
+    setPickedBooks(new Set(filteredBooks.map((b) => b.id)));
+    setPickedGhosts(new Set(filteredGhosts.map(ghostKey)));
+  };
   // The select bar on the notices' layer stack (lib/layers.ts), measured: it wraps to three rows at 390 px,
   // and a notice has to rise above whichever height it has.
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -1968,6 +1976,8 @@ function SeriesInner() {
     <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:start-[var(--rail-w)] lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
       <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
         <span className="me-auto text-sm font-medium text-fog-100">{acting ? '…' : selectedText(pickedCount)}</span>
+        <button disabled={acting || filteredBooks.length + filteredGhosts.length === 0} onClick={selectAllChapters}
+          data-select-all-chapters className="btn-key">{allPicked ? tr('Clear selection') : tr('Select all')}</button>
         <button disabled={acting || !pickedCount} onClick={() => bulkMark(true)} className="btn-key">{tr('Mark read')}</button>
         <button disabled={acting || !pickedCount} onClick={() => bulkMark(false)} className="btn-key">{tr('Mark unread')}</button>
         {/* The two icons say which side each acts on: ⬇ this device, ☁ the server. */}

@@ -53,7 +53,7 @@ export const SEARCH_TTL_MS = knob('SEARCH_TTL_MS', 300_000, 1000);
 /** How many entries are kept; the oldest goes first. A bound on memory, not a policy. */
 export const SEARCH_CACHE_MAX = Math.max(1, knob('SEARCH_CACHE_MAX', 50, 1));
 /** Results kept per source, as the old fan-out sliced them. */
-export const SEARCH_PER_SOURCE = 12;
+export const SEARCH_PER_SOURCE = 100;
 
 export type SearchState = 'ok' | 'empty' | 'timeout' | 'failed' | 'skipped' | 'pending';
 export interface SearchSourceLine { id: string; name: string; state: SearchState; ms?: number; why?: 'disabled' | 'cooldown' }
@@ -435,9 +435,14 @@ export function groupByTitle(
       // v0.56.0: the caller's key -- Discover's work (lib/discoverIdentity.ts workOf), under which two sites naming one series
       // differently are one card -- else the normalised title, as every caller before it. A work key is never empty, so a
       // title in another script is a card of its own, where the ASCII key dropped it.
-      const key = keyOf ? keyOf(r, src) : normTerm(r.title);
+      let key = keyOf ? keyOf(r, src) : normTerm(r.title);
       if (!key) continue;
       let g = groups.get(key);
+      // Titles alone cannot collapse two different entries from one source (#357).
+      if (g?.providers.some((p) => p.source === r.source && p.sourceId !== r.sourceId)) {
+        key = `s:${r.source}:${r.sourceId}`;
+        g = groups.get(key);
+      }
       if (!g) {
         g = { title: r.title, coverUrl: r.coverUrl, updatedAt: r.updatedAt, providers: [], ...(keyOf ? { work: key } : {}) };
         groups.set(key, g); judged.set(g, []);

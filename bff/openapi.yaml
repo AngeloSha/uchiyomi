@@ -4234,6 +4234,7 @@ paths:
                   sourceId: { type: string }
                   title: { type: string }
                   summary: { type: string, description: "Plain text: HTML and Markdown (MangaDex describes in Markdown) are stripped, link text kept." }
+                  author: { type: string, description: "The source's author name when supplied, otherwise an empty string." }
                   coverUrl: { type: [string, "null"] }
                   genres: { type: array, items: { type: string } }
                   status: { type: string }
