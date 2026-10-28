@@ -82,6 +82,7 @@ export const ADMIN_SETTINGS: SettingsIndex = {
     { id: 'group-priority', cat: 'downloads', label: 'Default priority', editor: 'scanlators', keywords: ['group order', 'ranking'] },
     { id: 'patience', cat: 'downloads', label: 'Patience (days)', editor: 'scanlators', keywords: ['wait for group'] },
     { id: 'group-upgrade', cat: 'downloads', label: 'Upgrade chapters to a preferred group', editor: 'scanlators', keywords: ['replace chapters', 'better group'] },
+    { id: 'politeness', cat: 'downloads', more: 'downloads-more', label: 'Downloads & politeness', keywords: ['limits', 'environment variables', 'concurrency', 'timeout', 'blocked sources', 'unblock', 'cache size', 'backup keep'] },
     { id: 'slow-archive', cat: 'downloads', label: 'Slow archive', keywords: ['archive', 'older chapters', 'whole series', 'pace'] },
     { id: 'archive-per-hour', cat: 'downloads', label: 'Chapters an hour, per source', editor: 'slow-archive', keywords: ['pace', 'speed'] },
     { id: 'archive-window', cat: 'downloads', label: 'Only during set hours', editor: 'slow-archive', keywords: ['night', 'schedule', 'hours'] },

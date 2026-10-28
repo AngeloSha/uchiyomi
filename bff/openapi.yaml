@@ -7652,6 +7652,26 @@ paths:
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/limits:
+    get:
+      tags:
+        - admin
+      summary: The environment-only numeric knobs and what this server is running on.
+      operationId: getApiAdminLimits
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Read-only:
+        returns {limits: [{key, value, unit}], note} for SUWAYOMI_PAGE_CONCURRENCY, SOURCE_LATEST_TIMEOUT_MS,
+        SOURCE_TEST_TIMEOUT_MS, SCAN_CONCURRENCY, BACKUP_KEEP and CACHE_MAX_BYTES. Numbers only; no secret is
+        ever returned. Change them with environment variables and a restart.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
   /api/admin/translate:
     get:
       tags:
