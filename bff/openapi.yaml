@@ -1841,7 +1841,9 @@ paths:
         (when the caller last read in the series): the chapter to pick a series back up at, for series last read 90
         days to two years ago in which the caller finished at least one chapter (never a series `onDeck` holds); and
         `gems`, up to 20 series with an AniList score of at least 75 that nobody on the server has read in any
-        language edition, one per work, best score first (empty on a Komga backend).
+        language edition, one per work, best score first (empty on a Komga backend). `keepReadingHidden` is how many
+        series the caller removed from Keep reading and has not read since (PUT /api/keep-reading/{seriesId}); `onDeck`
+        leaves them out.
       operationId: getApiHome
       parameters:
         - name: adult
@@ -4988,6 +4990,59 @@ paths:
           description: Not found, or not visible to this account
         "429":
           description: More than five Tests in a minute from this admin
+  /api/keep-reading/{seriesId}:
+    put:
+      tags:
+        - library
+      summary: Take a series out of Keep reading, or put it back.
+      operationId: putApiKeepReadingSeriesid
+      description: >-
+        Home's "Remove from Keep reading". `hidden: true` takes the series out of the caller's Keep reading row (and the
+        OPDS Keep reading shelf, and Pick back up) without touching the library, their progress or anyone else's Home; it
+        stays out until the caller reads in the series again (a progress write newer than the removal), then returns by
+        itself. `hidden: false` puts it back at once. Removing a series the caller may not see is a 404.
+      parameters:
+        - name: seriesId
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hidden]
+              additionalProperties: false
+              properties:
+                hidden:
+                  type: boolean
+      responses:
+        "200":
+          description: "`{ ok: true, hidden }`"
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/keep-reading/hidden:
+    get:
+      tags:
+        - library
+      summary: The series the caller removed from Keep reading and has not read since.
+      operationId: getApiKeepReadingHidden
+      description: >-
+        `content`: `{ seriesId, title, hiddenAt }`, newest removal first, only series the caller may see. Home's Hidden
+        list; `GET /api/home` carries the count as `keepReadingHidden`.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
   /api/favorites:
     get:
       tags:

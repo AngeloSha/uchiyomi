@@ -1545,6 +1545,7 @@ between series; the rest read `skipped` *The server is shutting down.*
 ### Personal
 ```
 GET    /api/favorites             POST   /api/favorites
+PUT    /api/keep-reading/:seriesId   GET /api/keep-reading/hidden
 DELETE /api/favorites/:seriesId   PUT    /api/favorites/order
 GET    /api/history
 GET    /api/stats                 GET    /api/wrapped

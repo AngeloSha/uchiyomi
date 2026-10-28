@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4235
+    "strings": 4241
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -4238,5 +4238,11 @@
   "Search pages, settings and actions": "Search pages, settings and actions",
   "Move library": "Move library",
   "File this series": "File this series",
-  "No files move. This only changes which library this series appears in, and it survives the next scan.": "No files move. This only changes which library this series appears in, and it survives the next scan."
+  "No files move. This only changes which library this series appears in, and it survives the next scan.": "No files move. This only changes which library this series appears in, and it survives the next scan.",
+  "Back in Keep reading": "Back in Keep reading",
+  "Put back in Keep reading": "Put back in Keep reading",
+  "Hidden from Keep reading": "Hidden from Keep reading",
+  "Hidden ({n})": "Hidden ({n})",
+  "Remove from Keep reading": "Remove from Keep reading",
+  "Removed from Keep reading. Reading it again brings it back.": "Removed from Keep reading. Reading it again brings it back."
 }

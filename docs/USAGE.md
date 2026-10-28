@@ -143,6 +143,12 @@ Home follows at once, and the arrangement is saved to your account, so your othe
 puts the original order back. Your lists move together as one rail, and which lists those are is still chosen on
 **Lists** (the sheet's **Choose lists** goes there). A hidden rail isn't fetched at all.
 
+**Take something off Keep reading**: right-click a card in *Keep reading* (press and hold on a phone, or use the ⋯ that
+appears on a computer) and choose **Remove from Keep reading**. The series stays in your library and your progress is
+untouched; it only leaves that row, for you. It comes back by itself the next time you read a chapter of it. To bring it
+back sooner, **Hidden (n)** beside the row's title lists what you removed; pick one to put it back. The same removal
+applies to your e-reader's Keep reading shelf (OPDS) and to *Pick back up*.
+
 **Your favorites in your order** (since v0.97.0): **Manage** at the end of the *Your favorites* row opens your favourites
 as a list. Drag one into place (on a phone, hold it a moment first), move it a step with its arrows, or take it off with
 its ×. Home shows them in that order, and so does every other device and the OPDS feed. A series you favourite later
