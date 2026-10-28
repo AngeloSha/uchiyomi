@@ -29,6 +29,8 @@ const IcFindMissing = ({ size = 16, className }: Glyph) => glyph(size, className
 const IcBanner = ({ size = 16, className }: Glyph) => glyph(size, className, <><rect x="3" y="5" width="18" height="14" rx="2.5" /><circle cx="9" cy="10" r="1.6" /><path d="m21 16-5-5-8 8" /></>);
 // The banner's picture stood upright: a cover (#242).
 const IcCover = ({ size = 16, className }: Glyph) => glyph(size, className, <><rect x="5" y="3" width="14" height="18" rx="2.5" /><circle cx="10" cy="9" r="1.6" /><path d="m19 16-4.5-4.5L6 20" /></>);
+// An arrow carrying the series to another library.
+const IcMove = ({ size = 16, className }: Glyph) => glyph(size, className, <><path d="M4 12h15" /><path d="m13 6 6 6-6 6" /></>);
 const IcFolder = ({ size = 16, className }: Glyph) => glyph(size, className, <><path d="M3 7V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9L11.7 5H19a2 2 0 0 1 2 2v2" /><path d="M3 9h18l-1.5 9a2 2 0 0 1-2 1.8H6.5a2 2 0 0 1-2-1.8Z" /></>);
 
 /** Each More item's icon, in the menu and in the sheet alike. */
@@ -47,6 +49,7 @@ export function ActionIcon({ id, size = 16 }: { id: SeriesActionId; size?: numbe
     case 'cover': return <IcCover size={size} />;
     case 'newBanner': return <IcBanner size={size} />;
     case 'rename': return <IcFolder size={size} />;
+    case 'move': return <IcMove size={size} />;
     case 'remove': return <IcTrash {...p} />;
   }
 }

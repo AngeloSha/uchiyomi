@@ -17,6 +17,7 @@ import { Img, Backdrop, SectionTitle, useWideViewport } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
+import { MoveToLibrary } from '@/components/MoveToLibrary';
 import { useAuth, canDownload } from '@/lib/auth';
 import { IcChevronLeft, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcHourglass, IcGrid, IcRows, IcComment } from '@/components/icons';
 import { commentsLine, seriesTalkKey, talkWantedOf, type ChapterTalkCount } from '@/lib/comments';
@@ -1572,6 +1573,8 @@ function SeriesInner() {
   // shared blocks (rendered once)
   const [deleting, setDeleting] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const [moveBusy, setMoveBusy] = useState(false);
   const [busyAdmin, setBusyAdmin] = useState(false);
   // A language edition (v0.52.0): the add dialog's "Add a language", and the unlink an admin confirms. `lang` and
   // `source` when a follow was refused for its language ("Add it as an edition"): the dialog opens on that language.
@@ -1702,6 +1705,7 @@ function SeriesInner() {
       // Change cover (#242): an admin's, from More -- never a key under the art, where a phone reads Continue first.
       case 'cover': setCoverPicker(true); break;
       case 'newBanner': void newBanner(); break;
+      case 'move': setMoving(true); break;
       case 'rename': setRenaming(true); break;
       case 'remove': setDeleting(true); break;
     }
@@ -2167,6 +2171,18 @@ function SeriesInner() {
           onConfirm={doDelete}
           onClose={() => setDeleting(false)}
         />
+      )}
+      {moving && (
+        <MoveToLibrary n={1} busy={moveBusy} onClose={() => setMoving(false)} onPick={async (libraryId) => {
+          setMoveBusy(true);
+          try {
+            await api(`/api/admin/series/${encodeURIComponent(id)}/library`, { json: { libraryId } });
+            toast(tr('1 series updated'), 'success');
+            for (const k of [['series', id], ['series-books', id], ['library'], ['home'], ['collection']]) qc.invalidateQueries({ queryKey: k });
+          } catch (e) { toast(msgOf(e, tr('Could not do that')), 'error'); }
+          setMoveBusy(false);
+          setMoving(false);
+        }} />
       )}
       {renaming && series?.folder && (
         <RenameFolderModal
