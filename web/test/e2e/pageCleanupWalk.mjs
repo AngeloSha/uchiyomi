@@ -34,7 +34,7 @@ const api = async (path, { method, json } = {}) => {
 };
 await api('/api/admin/sources/fake-a/enable', { method: 'POST' });
 await api('/api/admin/sources/fake-a/unblock', { method: 'POST' });
-const added = await api('/api/sources/add', { json: { source: 'fake-a', sourceId: 'walk-tale', chapterCount: 1, chapterFrom: 'latest', autoUpdate: false } });
+const added = await api('/api/sources/add', { json: { source: 'fake-a', sourceId: 'walk-tale', chapterCount: 1, chapterFrom: 'newest', autoUpdate: false } });
 const seriesId = added.seriesId || await waitFor(async () => (await api('/api/series/search?size=100', { json: {} })).content.find((s) => s.name === 'Walk Tale')?.id);
 const book = await waitFor(async () => {
   const { content } = await api(`/api/series/${seriesId}/books?size=100`);
@@ -93,7 +93,7 @@ try {
   await page.waitForSelector(`[data-cleanup-page="${chosenPage}"]`);
   await click(`[data-cleanup-page="${chosenPage}"]`);
   await click('[data-cleanup-review]');
-  assert.match(await page.$eval('[data-cleanup-confirm]', (el) => el.textContent), new RegExp(`\\b${chosenPage}\\b`), 'confirmation names the selected original page number');
+  assert.deepEqual(await page.$eval('[data-cleanup-confirm] > p:nth-of-type(2)', (el) => el.textContent.match(/\d+/g)), [String(chosenPage)], 'confirmation names the selected original page number');
   await click('[data-cleanup-confirm-yes]');
   const removed = await waitFor(async () => { const p = await api(`/api/admin/books/${BOOK}/page-cleanup`); return p.pages.find((p) => p.number === chosenPage)?.removed ? p : null; });
   assert.equal(removed.pages.find((p) => p.number === chosenPage).restorable, true);
@@ -139,6 +139,25 @@ try {
   assert.deepEqual(await snapshot(), before, 'restoring preserves original page numbers, progress and bookmark values');
   assert.deepEqual(pageMutations.map((p) => p.action), ['remove', 'restore']);
   assert.ok(pageMutations.every((p) => p.confirm === true && p.revision.length === 64));
+  if (process.env.E2E_SKIP_STALE_RETRY !== '1') {
+    // Simulate another device changing the archive while this reader retains its old page metadata.
+    // Force the current image to make a fresh request: a decoded immutable image would otherwise mask the stale URL.
+    await page.$eval('[data-manage-pages]', (button) => button.closest('[role="dialog"]').querySelector('button').click());
+    await page.setCacheEnabled(false);
+    const recoverAfterExternalChange = async (action) => {
+      const previous = await api(`/api/admin/books/${BOOK}/page-cleanup`);
+      const changed = await api(`/api/admin/books/${BOOK}/page-cleanup`, { json: { action, pages: [chosenPage], revision: previous.revision, confirm: true } });
+      assert.notEqual(changed.contentVersion, previous.contentVersion, 'external edit changes the immutable image version');
+      await page.$eval('img[src*="/page/1"]', (image) => { image.src += `${image.src.includes('?') ? '&' : '?'}external_retry=${Date.now()}`; });
+      await click('[data-reader-image-retry]');
+      await page.waitForFunction((version) => [...document.querySelectorAll('img')].some((image) => image.src.includes('/page/1?') && new URL(image.src).searchParams.get('cv') === version && image.complete && image.naturalWidth > 0), { timeout: 30000 }, changed.contentVersion);
+      assert.equal(await page.$eval('[data-chapter]', (el) => Number(el.dataset.page)), 1, 'manual retry preserves the original page anchor');
+      assert.deepEqual(await snapshot(), before, 'external edit and manual retry preserve page numbering/progress/bookmarks');
+    };
+    await recoverAfterExternalChange('remove');
+    await recoverAfterExternalChange('restore');
+    console.log('PASS manual image retry refreshes stale archive metadata after external remove/restore without losing the page');
+  }
   assert.deepEqual(errors, [], 'no browser exceptions');
   await page.screenshot({ path: `${OUT}/restored-page.png`, fullPage: true });
   console.log('PASS restore returns the page without moving reading history; no browser exceptions');

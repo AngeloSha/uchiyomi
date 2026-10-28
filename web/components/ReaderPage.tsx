@@ -5,6 +5,7 @@ import { IcRefresh } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
 import { LEFT_HALF, RIGHT_HALF, contentBox, cropStyle, fitBox, type Region } from '@/lib/readerCrop';
 import type { Half, WidePages } from '@/lib/readerSpread';
+import { retryReaderImage, type ReaderImageRetry } from '@/lib/readerImageRetry';
 import { ChapterSeam } from '@/components/ChapterTalk';
 
 /**
@@ -49,7 +50,7 @@ export interface RowItem {
  */
 export const ReaderPageRow = memo(function ReaderPageRow({
   item, height, gap, divider, seam, seamLabel, seamSeries, seamActive, onSeam, src, stripSrc, recollapsible, missingSource, wide, rightFirst, crop,
-  imgFilter, onLoaded, onExpand, onCollapse,
+  imgFilter, onLoaded, onRetry, onExpand, onCollapse,
 }: {
   item: RowItem;
   height: number;
@@ -70,6 +71,7 @@ export const ReaderPageRow = memo(function ReaderPageRow({
   /** The colour filter over the page's image (lib/readerDevice.ts COLOR_FILTER): on the image, never the row. */
   imgFilter?: string;
   onLoaded?: (key: string, img: HTMLImageElement) => void;
+  onRetry?: ReaderImageRetry;
   onExpand: (key: string) => void;
   onCollapse: (key: string) => void;
 }) {
@@ -129,7 +131,7 @@ export const ReaderPageRow = memo(function ReaderPageRow({
           <div data-wide="split" dir="ltr" className="flex h-full w-full flex-col">
             {(rightFirst ? [RIGHT_HALF, LEFT_HALF] : [LEFT_HALF, RIGHT_HALF]).map((region) => (
               <div key={region.l} data-half={region.l ? 'right' : 'left'} className="relative w-full flex-1 overflow-hidden">
-                <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block max-w-none" style={cropStyle(region).img} filter={imgFilter} />
+                <ReaderImg onRetry={onRetry} src={src} alt={tr('Page {n}', { n: item.number })} className="block max-w-none" style={cropStyle(region).img} filter={imgFilter} />
               </div>
             ))}
           </div>
@@ -140,18 +142,18 @@ export const ReaderPageRow = memo(function ReaderPageRow({
              one edge and turned off the side of the column. */
           <div className="flex h-full w-full items-center justify-center overflow-hidden">
             <div data-wide="rotate" className="shrink-0" style={{ width: height, height: height * (item.height / item.width), transform: 'rotate(90deg)' }}>
-              <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block h-full w-full max-w-none" filter={imgFilter} />
+              <ReaderImg onRetry={onRetry} src={src} alt={tr('Page {n}', { n: item.number })} className="block h-full w-full max-w-none" filter={imgFilter} />
             </div>
           </div>
         ) : src && crop && (crop.l || crop.r) ? (
           /* v0.61.0, Crop page borders: the chapter's one trim of both sides. The image is drawn wider than the column by
              exactly what is trimmed and shifted left by the left trim; the reader reserved the taller row that makes. */
           <div dir="ltr" className="relative h-full w-full overflow-hidden">
-            <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block max-w-none"
+            <ReaderImg onRetry={onRetry} src={src} alt={tr('Page {n}', { n: item.number })} className="block max-w-none"
               style={cropStyle({ l: crop.l, t: 0, r: crop.r, b: 0 }).img} filter={imgFilter} onLoaded={onLoaded ? loaded : undefined} />
           </div>
         ) : src ? (
-          <ReaderImg src={src} alt={tr('Page {n}', { n: item.number })} className="block h-full w-full object-cover"
+          <ReaderImg onRetry={onRetry} src={src} alt={tr('Page {n}', { n: item.number })} className="block h-full w-full object-cover"
             filter={imgFilter} onLoaded={onLoaded && wide === 'whole' ? loaded : undefined} />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-xs text-ink-600">{item.number}</div>
@@ -189,12 +191,13 @@ export const ReaderPageRow = memo(function ReaderPageRow({
  * `pending`: Crop page borders is on and this page's margins are not known yet. The page is not shown until they are,
  * or until 300 ms after it loaded -- then it is shown whole rather than not at all. Opacity, at once: no new motion.
  */
-export function SlideRegion({ src, alt, width, height, region, area, zoom, pending, half, filter, trimmed, onLoaded }: {
+export function SlideRegion({ src, alt, width, height, region, area, zoom, pending, half, filter, trimmed, onLoaded, onRetry }: {
   src: string; alt: string; width: number; height: number; region: Region; area: { w: number; h: number }; zoom: number;
   pending?: boolean; half?: Exclude<Half, null>; filter?: string;
   /** The page's own left trim, while Crop page borders is on: `data-crop`, which the browser walk reads. */
   trimmed?: number;
   onLoaded?: (img: HTMLImageElement) => void;
+  onRetry?: ReaderImageRetry;
 }) {
   const late = useLate(src, !!pending);
   const st = cropStyle(region);
@@ -205,7 +208,7 @@ export function SlideRegion({ src, alt, width, height, region, area, zoom, pendi
     // margin of a cropped page, the left half for the right).
     <div dir="ltr" data-half={half} data-crop={trimmed == null || pending ? undefined : trimmed.toFixed(3)} className="relative shrink-0 overflow-hidden"
       style={{ width: fit.width, height: fit.height, transform: zoom !== 1 ? `scale(${zoom})` : undefined, opacity: pending && !late.on ? 0 : undefined }}>
-      <ReaderImg src={src} alt={alt} className="block max-w-none" style={st.img} filter={filter} onLoaded={late.wrap(onLoaded)} />
+      <ReaderImg onRetry={onRetry} src={src} alt={alt} className="block max-w-none" style={st.img} filter={filter} onLoaded={late.wrap(onLoaded)} />
     </div>
   );
 }
@@ -214,12 +217,12 @@ export function SlideRegion({ src, alt, width, height, region, area, zoom, pendi
  * A page of the paged track whose size is not known yet, while Crop page borders is on: drawn as it always was, hidden
  * until its margins are measured (or 300 ms after it loaded, as SlideRegion), so it is not seen whole and then cropped.
  */
-export function SlidePending({ src, alt, className, zoom, filter, onLoaded }: {
-  src: string; alt: string; className: string; zoom: number; filter?: string; onLoaded?: (img: HTMLImageElement) => void;
+export function SlidePending({ src, alt, className, zoom, filter, onLoaded, onRetry }: {
+  src: string; alt: string; className: string; zoom: number; filter?: string; onLoaded?: (img: HTMLImageElement) => void; onRetry?: ReaderImageRetry;
 }) {
   const late = useLate(src, true);
   return (
-    <ReaderImg src={src} alt={alt} className={className} filter={filter} onLoaded={late.wrap(onLoaded)}
+    <ReaderImg onRetry={onRetry} src={src} alt={alt} className={className} filter={filter} onLoaded={late.wrap(onLoaded)}
       style={{ transform: zoom !== 1 ? `scale(${zoom})` : undefined, opacity: late.on ? undefined : 0 }} />
   );
 }
@@ -268,15 +271,15 @@ export function measurePage(img: HTMLImageElement): { all: Region; sides: Region
  * and zoomed like any page. ⚠️ Centred as a flex item of the slide, never with `inset-0 m-auto`: until it is turned the
  * box is wider than the slide, auto margins never go below zero, and it sat against one edge (seen in a browser).
  */
-export function SlideTurned({ src, alt, width, height, area, zoom, filter }: {
-  src: string; alt: string; width: number; height: number; area: { w: number; h: number }; zoom: number; filter?: string;
+export function SlideTurned({ src, alt, width, height, area, zoom, filter, onRetry }: {
+  src: string; alt: string; width: number; height: number; area: { w: number; h: number }; zoom: number; filter?: string; onRetry?: ReaderImageRetry;
 }) {
   // Turned, the page stands `height` wide and `width` tall: fit THAT, then draw the box the other way round.
   const fit = fitBox(height, width, area.w, area.h);
   return (
     <div data-rotated className="shrink-0"
       style={{ width: fit.height, height: fit.width, transform: `rotate(90deg)${zoom !== 1 ? ` scale(${zoom})` : ''}` }}>
-      <ReaderImg src={src} alt={alt} className="block h-full w-full max-w-none" filter={filter} />
+      <ReaderImg onRetry={onRetry} src={src} alt={alt} className="block h-full w-full max-w-none" filter={filter} />
     </div>
   );
 }
@@ -286,8 +289,8 @@ export function SlideTurned({ src, alt, width, height, area, zoom, filter }: {
  * SlideTurned turns one in a single file: the two pages side by side, `pages[0]` on the left as drawn, at one height, in a
  * box of the spread's shape sized so that once turned a quarter it fits the slide.
  */
-export function SlideTurnedPair({ pages, area, zoom, filter }: {
-  pages: Array<{ src: string; alt: string; width: number; height: number }>; area: { w: number; h: number }; zoom: number; filter?: string;
+export function SlideTurnedPair({ pages, area, zoom, filter, onRetry }: {
+  pages: Array<{ src: string; alt: string; width: number; height: number }>; area: { w: number; h: number }; zoom: number; filter?: string; onRetry?: ReaderImageRetry;
 }) {
   // At the first page's height: the second's width scaled to it. The detector only joins pages within 2 % of each other.
   const h = pages[0].height;
@@ -298,7 +301,7 @@ export function SlideTurnedPair({ pages, area, zoom, filter }: {
     <div data-rotated data-joined-turned dir="ltr" className="flex shrink-0"
       style={{ width: fit.height, height: fit.width, transform: `rotate(90deg)${zoom !== 1 ? ` scale(${zoom})` : ''}` }}>
       {pages.map((p, k) => (
-        <ReaderImg key={p.src} src={p.src} alt={p.alt} className="block h-full max-w-none" filter={filter}
+        <ReaderImg onRetry={onRetry} key={p.src} src={p.src} alt={p.alt} className="block h-full max-w-none" filter={filter}
           style={{ width: `${(widths[k] / w) * 100}%` }} />
       ))}
     </div>
@@ -312,14 +315,22 @@ export function SlideTurnedPair({ pages, area, zoom, filter }: {
  * layouts size a page completely differently: one fills a box whose height was reserved from `page_dims`,
  * the other is bounded by the viewport. Only the failure behaviour is shared.
  */
-export function ReaderImg({ src, alt, className, style, filter, onLoaded }: {
+export function ReaderImg({ src, alt, className, style, filter, onLoaded, onRetry }: {
   src: string; alt: string; className?: string; style?: React.CSSProperties;
   /** A colour filter over the page (v0.61.0, lib/readerDevice.ts): on the image, so nothing around it changes. */
   filter?: string;
   /** Handed the image once it has loaded (v0.61.0, to measure its margins) -- also when it had loaded already. */
   onLoaded?: (img: HTMLImageElement) => void;
+  onRetry?: ReaderImageRetry;
 }) {
   const { src: shown, failed, onError, retry } = useImgRetry(src);
+  const [retrying, setRetrying] = useState(false);
+  const again = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try { await retryReaderImage(src, onRetry, retry); }
+    finally { setRetrying(false); }
+  };
   const ref = useRef<HTMLImageElement>(null);
   // An image that loaded before anybody asked (Crop page borders switched on over pages already on screen) raises no
   // load event again, so it is handed over as soon as it is asked for.
@@ -332,7 +343,7 @@ export function ReaderImg({ src, alt, className, style, filter, onLoaded }: {
     // the one action that fixes it, without reloading the chapter and losing their place.
     return (
       <div className="flex h-full w-full items-center justify-center p-4">
-        <button onClick={retry} className="chip text-xs text-fog-300">
+        <button onClick={() => void again()} disabled={retrying} data-reader-image-retry className="chip text-xs text-fog-300">
           <IcRefresh width={13} height={13} />{tr('Page did not load — tap to retry')}
         </button>
       </div>
