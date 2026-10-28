@@ -2275,6 +2275,10 @@ type as on the site (on a phone, a tap is a click and brings up the keyboard, a 
 the keyboard back), sign in, and press **Done**. The engine keeps the sign-in for that extension, and the sheet says
 whether the source answers now. **Start over** opens the site's home page again.
 
+**Open site is optional.** If an extension already searches and downloads normally, no visit or sign-in is
+needed. A verification loop in this manual browser view does not by itself mean the extension is broken.
+Use the view when you actually need to sign in or a blocked source asks you to complete a site check.
+
 **Signing in with a link the site emails you** (since v0.94.0). A sign-in link signs in whichever browser opens it, so
 opening it from your email signs in your own browser, not the engine's. Ask the site for the link inside **Open site**,
 then copy the link from the email without opening it (long-press it on a phone, right-click it on a computer, and
