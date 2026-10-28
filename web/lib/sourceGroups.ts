@@ -25,6 +25,8 @@ export interface Src {
   popular?: boolean;
   /** Whether a search on it goes on past the first page (v0.96.0, #331): Discover loads more of a search on it alone. */
   searchPages?: boolean;
+  /** The source declares a real author/artist query, separate from its title search. */
+  creatorSearch?: boolean;
   /**
    * `quiet` is the server saying "this answers without error and returns nothing". It used to be
    * unrepresentable: a source whose listing had drifted threw nothing, so it never earned a cooldown, kept

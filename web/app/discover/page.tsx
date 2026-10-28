@@ -30,7 +30,7 @@ import { IcChevronLeft, IcSearch, IcSparkle, IcX } from '@/components/icons';
 import { forStrip } from '@/lib/jobs';
 import { downloadsHref, stripHref } from '@/lib/libraryView';
 import { useServerDownloads } from '@/lib/useServerDownloads';
-import { canSearchMore, freshCards, noMore, soloSource, type SearchMore } from '@/lib/searchMore';
+import { canSearchMore, freshCards, noMore, soloSource, sourceSearchPage, type SearchMore } from '@/lib/searchMore';
 /**
  * One search card. Since v0.52.0 (#72) `inLibrary` means held in every provider's language, `libraryLangs` the
  * languages the library holds the title in, and each provider carries its own `lang` and `inLibrary`. Since v0.55.4
@@ -156,6 +156,7 @@ function DiscoverInner() {
   // `?view=`; afterwards the page writes the address itself (writeQ below), so a reload stays on what is on screen.
   const params = useSearchParams();
   const [arrivedQ] = useState(() => (params.get('q') ?? '').trim().slice(0, 200));
+  const [searchKind, setSearchKind] = useState<'title' | 'author' | 'artist'>(() => { const kind = params.get('creator'); return kind === 'author' || kind === 'artist' ? kind : 'title'; });
 
   const { data: sourcesData } = useQuery({
     queryKey: ['sources'],
@@ -310,7 +311,7 @@ function DiscoverInner() {
    * each answer releases the next, so more sources only means the wall keeps filling for longer -- and its last card
    * says who it is still waiting on.
    */
-  const budget = pool;
+  const budget = useMemo(() => mode === 'search' && searchKind !== 'title' ? pool.filter((s) => s.creatorSearch) : pool, [pool, mode, searchKind]);
 
   // Where the hero's add looks a title up: the best-ranked HERO_FIND_SOURCES (v0.58.0 kept it there when the wall
   // began asking every source -- /api/sources/find asks all it is given at once, with no gate like the wall's).
@@ -368,14 +369,14 @@ function DiscoverInner() {
     // `selected` is part of the key: narrowing to a source is a different question, and must not be
     // answered from the unfiltered search's cache. So is the 18+ filter, and whether Show 18+ is on: an answer from
     // before the switch was flipped says nothing about the account's age limit after it.
-    queryKey: ['search-all', term, selected, ratingAsked, adultOn],
+    queryKey: ['search-all', term, selected, ratingAsked, adultOn, searchKind],
     queryFn: ({ signal, queryKey, client }) => {
       // ⚠️ Only the first request may wait the long wait. A poll that also waited six seconds would hold
       // its answer until the server's grace expired, so the wall would fill in six seconds late every time.
       const first = (client.getQueryState(queryKey)?.dataUpdateCount ?? 0) === 0;
       const only = selected ? `&source=${encodeURIComponent(selected)}` : '';
       const rated = ratingAsked === 'all' ? '' : `&rating=${ratingAsked}`;
-      return api<SearchAnswer>(`/api/sources/search-all?q=${encodeURIComponent(term)}&wait=${first ? SEARCH_FIRST_WAIT_MS : SEARCH_POLL_WAIT_MS}${only}${rated}`, { signal });
+      return api<SearchAnswer>(`/api/sources/search-all?q=${encodeURIComponent(term)}&wait=${first ? SEARCH_FIRST_WAIT_MS : SEARCH_POLL_WAIT_MS}${only}${rated}${searchKind === 'title' ? '' : `&creator=${searchKind}`}`, { signal });
     },
     // `mayAdd` (v0.61.0): an arrival's `?q=` starts in search mode, and an account the server refuses is not asked.
     enabled: mode === 'search' && !!term && mayAdd,
@@ -429,7 +430,7 @@ function DiscoverInner() {
   // at a time -- so a search on the chosen source, or on the only one there is, loads its next page as the wall is
   // scrolled (below, under "more"). Keyed on the search, so another term, source or filter starts over.
   const solo = mode === 'search' ? soloSource(selected, searchQ.data?.sources) : null;
-  const moreKey = solo ? [term, solo, ratingAsked, adultOn ? 'adult' : 'safe'].join('\u0000') : '';
+  const moreKey = solo ? [term, solo, searchKind, ratingAsked, adultOn ? 'adult' : 'safe'].join('\u0000') : '';
   const [moreState, setMore] = useState<SearchMore>(noMore());
   const more = moreState.key === moreKey ? moreState : noMore(moreKey);
   const [moreBusy, setMoreBusy] = useState(false);
@@ -519,10 +520,11 @@ function DiscoverInner() {
    * The address says what is on screen (v0.61.0): `?q=` while a search is, nothing while browsing -- replaced, never
    * pushed, so Back leaves Discover instead of stepping through its searches.
    */
-  const writeQ = (value: string) => {
+  const writeQ = (value: string, kind = searchKind) => {
     try {
       const u = new URL(window.location.href);
       if (value) u.searchParams.set('q', value); else u.searchParams.delete('q');
+      if (value && kind !== 'title') u.searchParams.set('creator', kind); else u.searchParams.delete('creator');
       window.history.replaceState(window.history.state, '', `${u.pathname}${u.search}${u.hash}`);
     } catch { /* the page works the same without it */ }
   };
@@ -601,7 +603,7 @@ function DiscoverInner() {
   // A search on one source, its next page (#331): asked when the end of the wall comes near, one page at a time, until a
   // page brings nothing new. A failure ends it too: a search typed again starts over.
   const canMore = canSearchMore({
-    solo, pages: !!sources.find((s) => s.id === solo)?.searchPages, rating: ratingAsked,
+    solo, pages: !!sources.find((s) => s.id === solo)?.[searchKind === 'title' ? 'searchPages' : 'creatorSearch'], rating: ratingAsked,
     pending: stillAsking, firstPage: searchHits.length, more, busy: moreBusy,
   });
   const loadMore = useCallback(async () => {
@@ -610,7 +612,7 @@ function DiscoverInner() {
     setMoreBusy(true);
     let fresh: SourceItem[] = [];
     try {
-      const r = await api<{ content: SourceItem[] }>(`/api/sources/search?source=${encodeURIComponent(solo)}&q=${encodeURIComponent(term)}&page=${next}`);
+      const r = await api<{ content: SourceItem[] }>(sourceSearchPage(solo, term, next, searchKind));
       fresh = freshCards(shown, r.content ?? []);
     } catch { /* the end, as an empty page is */ }
     setMore((m) => {
@@ -618,7 +620,7 @@ function DiscoverInner() {
       return { key, items: [...base.items, ...fresh], page: next, done: fresh.length === 0 };
     });
     setMoreBusy(false);
-  }, [solo, moreKey, more, searchHits, term]);
+  }, [solo, moreKey, more, searchHits, term, searchKind]);
   useEffect(() => {
     const el = sentinel.current;
     if (!el || !canMore) return;
@@ -774,7 +776,14 @@ function DiscoverInner() {
               {tr('Manual AniList actions can contact AniList even when automatic lookups are off.')}
             </p>
           </div>
-          <form onSubmit={search} className="flex w-full items-center gap-2 sm:w-auto">
+          <form onSubmit={search} className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <select value={searchKind} aria-label={tr('Search by')}
+              onChange={(e) => { const kind = e.target.value as 'title' | 'author' | 'artist'; setSearchKind(kind); if (mode === 'search') writeQ(term, kind); }}
+              className="field max-w-28 py-2.5 text-sm">
+              <option value="title">{tr('Title')}</option>
+              <option value="author">{tr('Author')}</option>
+              <option value="artist">{tr('Artist')}</option>
+            </select>
             <div className="field flex min-w-0 flex-1 items-center gap-2 py-0 sm:w-72 lg:w-80">
               <IcSearch width={17} height={17} className="shrink-0 text-fog-500" />
               <input value={q} onChange={(e) => setQ(e.target.value)}
@@ -790,6 +799,11 @@ function DiscoverInner() {
             <button className="btn-accent shrink-0 px-5 py-2.5 text-sm">{tr('Search')}</button>
           </form>
         </div>
+        {searchKind !== 'title' && (
+          <p className="mt-2 text-xs text-fog-500" role="status">
+            {tr('Creator searches only ask sources that support author and artist filters.')}
+          </p>
+        )}
       </header>
 
       {/*

@@ -359,6 +359,12 @@ way it is written: *Chugong (추공)* also finds a series that only says *추공
 It matches whole names, so *Oh* is not every name with "oh" in it. **Save as list** keeps the author, so a list of
 someone's work fills itself as you add more of it. Genres link the same way, to the Library filtered by that genre.
 
+**Find more by this author** on that filtered library opens Discover with the author's name. Discover's
+**Search by** control offers **Title**, **Author**, and **Artist**. Creator searches use the provider's own
+creator fields and only ask sources that support them; they never substitute a title search. MangaDex
+supports both roles, including enabled languages and further result pages. Extensions without creator
+search support are left out. The chosen field stays in the address when you reload.
+
 - **The reading button** says what it opens (since v0.60.0): *Continue · Ch. 12* when a chapter is half read (the
   one you read last), *Next · Ch. 11* when you finished chapters 1–10 and nothing is half read, *Start reading* the
   first time, and *Read again* once everything is read. A series with no chapter on disk yet shows *Nothing to read yet*

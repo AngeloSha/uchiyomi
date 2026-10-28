@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4247
+    "strings": 4251
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4250,5 +4250,9 @@
   "Japanese": "Japanese",
   "Only tell me about my next chapter": "Only tell me about my next chapter",
   "A new chapter notifies you only when it is the one the series page would open for you: you are caught up, with nothing older unread or half read. Applies to push alerts and to messages sent to you. Saved to your account.": "A new chapter notifies you only when it is the one the series page would open for you: you are caught up, with nothing older unread or half read. Applies to push alerts and to messages sent to you. Saved to your account.",
-  "Author: {name}": "作者：{name}"
+  "Author: {name}": "作者：{name}",
+  "Search by": "搜索方式",
+  "Creator searches only ask sources that support author and artist filters.": "创作者搜索仅查询支持作者和画师筛选的来源。",
+  "Find more by this author": "查找这位作者的更多作品",
+  "Artist": "画师"
 }

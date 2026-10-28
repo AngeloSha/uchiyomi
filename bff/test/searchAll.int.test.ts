@@ -126,6 +126,32 @@ after(async () => {
   await q('DELETE FROM users WHERE username = ANY($1)', [USERS]);
 });
 
+test('author, artist and title searches never reuse each other or ask unsupported sources', { skip }, async () => {
+  const src = adapters[FAST] as any;
+  const unsupportedBefore = calls[EMPTY];
+  src.searchCreator = async (_q: string, kind: string, page = 1) => [{ source: FAST, sourceId: `${kind}-${page}`, title: `${kind} result ${page}` }];
+  try {
+    const title = await lib.searchAll('Creator Cache Isolation', [src], { waitMs: 6000, health: await hmap() });
+    const author = await lib.searchAll('Creator Cache Isolation', [src, adapters[EMPTY]], { waitMs: 6000, health: await hmap(), creator: 'author' });
+    const artist = await lib.searchAll('Creator Cache Isolation', [src], { waitMs: 6000, health: await hmap(), creator: 'artist' });
+    assert.notEqual(title.per.get(FAST)?.items[0].title, author.per.get(FAST)?.items[0].title);
+    assert.equal(author.per.get(FAST)?.items[0].title, 'author result 1');
+    assert.equal(artist.per.get(FAST)?.items[0].title, 'artist result 1');
+    assert.equal(author.asked, 1);
+    assert.equal(calls[EMPTY], unsupportedBefore);
+    const response = await app.inject({ method: 'GET', url: `/api/sources/search?source=${FAST}&q=Creator&creator=artist&page=2`, headers: tok(ids.plain) });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().content[0].title, 'artist result 2');
+    const all = await app.inject({ method: 'GET', url: `/api/sources/search-all?source=${FAST}&q=Creator%20Cache%20Isolation&creator=artist`, headers: tok(ids.plain) });
+    assert.equal(all.statusCode, 200);
+    assert.equal(all.json().content[0].title, 'artist result 1');
+    for (const route of ['search', 'search-all']) {
+      const invalid = await app.inject({ method: 'GET', url: `/api/sources/${route}?source=${FAST}&q=Creator&creator=invalid`, headers: tok(ids.plain) });
+      assert.equal(invalid.statusCode, 400, 'an invalid creator field must not silently become a title query');
+    }
+  } finally { delete src.searchCreator; }
+});
+
 test('the first answer comes a grace after the fast source, with the slow ones still pending', { skip }, async () => {
   // Reintroduce by making `graceEnd` Infinity in searchAll's wait loop (waiting for every source, as the
   // old fan-out did): the answer arrives when the slow pair settles at SLOW_MS, "pending" reads 0 and fails.

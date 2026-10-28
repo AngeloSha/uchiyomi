@@ -109,6 +109,8 @@ export interface SourceAdapter {
    * first page alone, and GET /api/sources reports which can go further (`searchPages`).
    */
   searchPage?(query: string, page: number): Promise<SourceSeries[]>;
+  /** Search the provider's creator fields, never its title field. Absent means unsupported. */
+  searchCreator?(name: string, kind: 'author' | 'artist', page?: number): Promise<SourceSeries[]>;
   getSeries(id: string): Promise<SourceSeries | null>;
   listChapters(seriesId: string): Promise<SourceChapter[]>;
   getPageUrls(chapterId: string): Promise<string[]>;

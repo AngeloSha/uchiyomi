@@ -12,6 +12,11 @@ import type { SourceItem } from '@/components/cards';
 /** The furthest page a search on one source is scrolled to: the server's own cap (bff routes/sources.ts SEARCH_MAX_PAGE). */
 export const SEARCH_MAX_PAGE = 30;
 
+/** Keep the search's field on later pages; omitting it changes an author query into a title query. */
+export function sourceSearchPage(source: string, term: string, page: number, kind: 'title' | 'author' | 'artist' = 'title'): string {
+  return `/api/sources/search?source=${encodeURIComponent(source)}&q=${encodeURIComponent(term)}&page=${page}${kind === 'title' ? '' : `&creator=${kind}`}`;
+}
+
 /**
  * The one source a search asked: the chosen one, or the only source the answer says it asked (a skipped source was not).
  * Null for a search across several.

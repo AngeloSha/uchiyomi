@@ -74,7 +74,8 @@ try {
 
   let polls = 0;
   let laterPages = 0;
-  const sources = Array.from({ length: 6 }, (_, i) => ({ id: `fake-${i}`, name: `Fixture source ${i}`, lang: 'en', searchPages: true }));
+  const creatorQueries = [];
+  const sources = Array.from({ length: 6 }, (_, i) => ({ id: `fake-${i}`, name: `Fixture source ${i}`, lang: 'en', searchPages: true, creatorSearch: i === 0 }));
   const groups = sources.map((s) => ({ source: s.id, name: s.name, lang: 'en', results: Array.from({ length: 18 }, (_, i) => ({
     source: s.id, sourceId: `${s.id}-${i}`, title: `Candidate ${i + 1}`, coverUrl: `${BASE}/img/fixture`,
   })) }));
@@ -84,6 +85,12 @@ try {
     const json = (body) => request.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
     if (u.pathname === '/api/sources') return void json({ content: sources });
     if (u.pathname === '/api/sources/search-all') {
+      const creator = u.searchParams.get('creator');
+      if (creator) {
+        creatorQueries.push(creator);
+        const provider = { source: 'fake-0', name: sources[0].name, sourceId: `creator-${creator}`, title: `Work by ${creator}`, coverUrl: `${BASE}/img/fixture` };
+        return void json({ content: [{ ...provider, providers: [provider] }], pending: 0, asked: 1, sources: [{ id: 'fake-0', name: sources[0].name, state: 'ok' }] });
+      }
       polls++;
       return void json({ content: polls % 2 === 1 ? groups.slice(0, 5) : groups, pending: polls % 2,
         asked: 6, sources: sources.map((s, i) => ({ ...s, state: polls % 2 && i === 5 ? 'pending' : 'ok' })) });
@@ -149,6 +156,15 @@ try {
   await page.waitForFunction(() => document.body.textContent.includes('Fixture Author'));
   await page.screenshot({ path: `${OUT}/sources-phone.png`, fullPage: true });
   console.log('PASS Add more sources preview and independent paging on a phone');
+  await page.goto(`${BASE}/discover/?q=Fixture%20Creator&creator=author`, { waitUntil: 'networkidle2' });
+  await page.waitForSelector('img[alt="Work by author"]');
+  assert.equal(await page.$eval('select[aria-label="Search by"]', (el) => el.value), 'author');
+  await page.select('select[aria-label="Search by"]', 'artist');
+  await page.waitForSelector('img[alt="Work by artist"]');
+  assert.ok(creatorQueries.includes('author') && creatorQueries.includes('artist'), 'both creator fields reach the API');
+  assert.equal(new URL(page.url()).searchParams.get('creator'), 'artist', 'reload retains the chosen field');
+  await page.screenshot({ path: `${OUT}/creator-phone.png`, fullPage: true });
+  console.log('PASS creator search field, result isolation and reload address on a phone');
   assert.deepEqual(errors, [], 'no browser runtime errors');
 } catch (error) {
   const pages = await browser.pages();

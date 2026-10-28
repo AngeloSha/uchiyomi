@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { canSearchMore, freshCards, noMore, soloSource, SEARCH_MAX_PAGE } from '../lib/searchMore';
+import { canSearchMore, freshCards, noMore, soloSource, sourceSearchPage, SEARCH_MAX_PAGE } from '../lib/searchMore';
 
 const card = (source: string, sourceId: string) => ({ source, sourceId, title: sourceId });
 
@@ -42,7 +42,17 @@ test("a later page's cards are the ones not on the wall already, and a page with
 test("Discover asks the next page of the search it is showing, through the search route's page", () => {
   // Reintroduce the request without `page`: every scroll asks the first page again, and nothing new ever lands.
   const src = readFileSync(join(__dirname, '../app/discover/page.tsx'), 'utf8');
-  assert.match(src, /api<\{ content: SourceItem\[\] \}>\(`\/api\/sources\/search\?source=\$\{encodeURIComponent\(solo\)\}&q=\$\{encodeURIComponent\(term\)\}&page=\$\{next\}`\)/);
+  assert.match(src, /api<\{ content: SourceItem\[\] \}>\(sourceSearchPage\(solo, term, next, searchKind\)\)/);
   assert.match(src, /items: moreCards\.length \? \[\.\.\.searchHits, \.\.\.moreCards\] : searchHits/, "the later pages are not on the wall");
-  assert.match(src, /pages: !!sources\.find\(\(s\) => s\.id === solo\)\?\.searchPages/, 'a source that does not page is asked anyway');
+  assert.match(src, /pages: !!sources\.find\(\(s\) => s\.id === solo\)\?\.\[searchKind === 'title' \? 'searchPages' : 'creatorSearch'\]/, 'paging must use the capability of the selected search field');
+});
+
+test('later search pages preserve the creator field and encode the person as data', () => {
+  for (const kind of ['title', 'author', 'artist'] as const) {
+    const url = new URL(sourceSearchPage('source&other', 'Name & Artist/作者', 3, kind), 'https://example.test');
+    assert.equal(url.searchParams.get('source'), 'source&other');
+    assert.equal(url.searchParams.get('q'), 'Name & Artist/作者');
+    assert.equal(url.searchParams.get('page'), '3');
+    assert.equal(url.searchParams.get('creator'), kind === 'title' ? null : kind);
+  }
 });

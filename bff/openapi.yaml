@@ -3111,7 +3111,14 @@ paths:
         Since v0.96.0 (#331) `page` (1-based, clamped to 30) asks a later page of the same search, as the site
         pages it; a source whose `searchPages` is false (GET /api/sources) answers a later page with
         `{ content: [] }`, never its first page again.
+        `creator=author|artist` searches creator relationships instead of titles, only on a source whose
+        `creatorSearch` capability is true. `page` continues the same creator query.
       parameters:
+        - name: creator
+          in: query
+          schema:
+            type: string
+            enum: [author, artist]
         - name: source
           in: query
           required: false
@@ -3393,6 +3400,8 @@ paths:
       summary: Search every enabled source at once, answering before the slow ones do.
       operationId: getApiSourcesSearchAll
       description: >-
+        `creator=author|artist` searches only sources that declare creator-search support. Creator, artist
+        and title searches have separate cache entries, and all existing visibility and age filters apply.
         By default groups results by normalized title (one card, every provider that has it — what Discover
         uses). With `groupBy=source`, groups by provider instead (one rail per source, mirroring Mihon's
         global search) — used by the import review sheet's manual-search screen, where which specific source
@@ -3424,6 +3433,11 @@ paths:
         An account capped below 18, and any request without `adult=1`, is held to `safe` -- so with Show 18+ off an
         18+ title from a source that is not adult itself (MangaDex's erotica) no longer shows.
       parameters:
+        - name: creator
+          in: query
+          schema:
+            type: string
+            enum: [author, artist]
         - name: q
           in: query
           required: false

@@ -2564,6 +2564,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
           // v0.96.0 (#331): whether a search on it goes on past the first page (types.ts searchPage), so Discover
           // loads more of a search on this source alone only where there is more to load.
           searchPages: typeof s.searchPage === 'function',
+          creatorSearch: typeof s.searchCreator === 'function',
           // What the reader has actually used. Health-then-alphabetical put "18 Porn Comic" and "1Manga.co"
           // at the front of this install's English group while Aqua Manga -- 176 of its 214 series, answering
           // in 2.5s -- was never in the first six fetched.
@@ -2595,21 +2596,23 @@ export default async function sourceRoutes(app: FastifyInstance) {
   // called this one. Deleted rather than gated, because a second door to the same room is what went wrong.
 
   app.get('/api/sources/search', async (req, reply) => {
-    const { source, q: query, page } = req.query as { source?: string; q?: string; page?: string };
+    const { source, q: query, page, creator: rawCreator } = req.query as { source?: string; q?: string; page?: string; creator?: string };
+    const creator = rawCreator === 'author' || rawCreator === 'artist' ? rawCreator : undefined;
+    if (rawCreator !== undefined && !creator) return reply.code(400).send({ error: 'bad_creator' });
     const src = source ? getSource(source) : null;
     if (!src || !query?.trim()) return { content: [] };
     // `page` (v0.96.0, #331): a later page of the same search, for Discover scrolling a search on this source alone.
     // Only a source that pages its search has one (types.ts searchPage); every other answers a later page with nothing,
     // never its first page again. Clamped like the listings' paging.
     const p = Math.min(SEARCH_MAX_PAGE, Math.max(1, parseInt(page || '1', 10) || 1));
-    if (p > 1 && typeof src.searchPage !== 'function') return { content: [] };
+    if (creator ? typeof src.searchCreator !== 'function' : p > 1 && typeof src.searchPage !== 'function') return { content: [] };
     if (!sourceAllowedFor(src, vc(req).maxAgeRating)) return denySource(reply);
     // Reachable but not surfaceable: the chip is off and this source is adult. An empty page, NOT
     // `denySource` -- 403 is the permission answer and this is not a permission (the same account with
     // `?adult=1` gets the results), and `{ content: [] }` is already what this route answers for a source
     // that has nothing. The source is never even asked, so hiding it costs nothing outbound either.
     if (!discoverable(req).some((s) => s.id === src.id)) return { content: [] };
-    const raw = await (p > 1 ? src.searchPage!(query.trim(), p) : src.search(query.trim())).catch(() => []);
+    const raw = await (creator ? src.searchCreator!(query.trim(), creator, p) : p > 1 ? src.searchPage!(query.trim(), p) : src.search(query.trim())).catch(() => []);
     // dedupe by sourceId (duplicate ids collide on the React key → wrong cover/title on a card)
     const seen = new Set<string>();
     const results = ratedForViewer(req, raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true))).slice(0, 100);
@@ -3417,8 +3420,10 @@ export default async function sourceRoutes(app: FastifyInstance) {
    * so a client that ignores them -- the import review sheet -- keeps working, and one that reads `pending`
    * polls the same URL with a short `wait` until it is 0.
    */
-  app.get('/api/sources/search-all', async (req) => {
-    const { q: rawQ, groupBy, wait, source, sources: rawSources, rating: rawRating } = req.query as { q?: string; groupBy?: string; wait?: string; source?: string; sources?: string; rating?: string };
+  app.get('/api/sources/search-all', async (req, reply) => {
+    const { q: rawQ, groupBy, wait, source, sources: rawSources, rating: rawRating, creator: rawCreator } = req.query as { q?: string; groupBy?: string; wait?: string; source?: string; sources?: string; rating?: string; creator?: string };
+    const creator = rawCreator === 'author' || rawCreator === 'artist' ? rawCreator : undefined;
+    if (rawCreator !== undefined && !creator) return reply.code(400).send({ error: 'bad_creator' });
     // The 18+ filter (v0.55.4, #158): `rating=all|safe|adult`, anything else read as all. Applied to this viewer's
     // answer only, after the shared entry (lib/searchAll.ts ratingOf, groupByTitle). An account capped below 18 is never
     // shown an 18+ result whatever it asks: the add checks only the source, so the cap is held here. And with "Show 18+"
@@ -3457,9 +3462,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // `sources`: a comma-separated list of ids, for a search that picks which sources to ask (the Add more sources sheet).
     // Narrows the same way `source` does -- never widens `surfaceable` -- and an empty value is no list.
     const picked = narrowTo(rawSources);
-    const ask = all.filter((s) => (!only || s.id === only) && (!picked || picked.has(s.id)));
+    const ask = all.filter((s) => (!only || s.id === only) && (!picked || picked.has(s.id)) && (!creator || typeof s.searchCreator === 'function'));
     const health = new Map((await healthAll().catch(() => [])).map((h) => [h.source_id, h] as const));
-    const ans = await searchAll(term, ask, { waitMs, health });
+    const ans = await searchAll(term, ask, { waitMs, health, creator });
     const byId = new Map(ask.map((s) => [s.id, s] as const));
     // Shaped in provider-preference order, as before: the first provider of a card is the default pick.
     const order = findOrder().map((id) => byId.get(id)).filter((s): s is SourceAdapter => !!s);
