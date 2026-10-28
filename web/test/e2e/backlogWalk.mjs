@@ -114,6 +114,12 @@ try {
   assert.ok((await page.$eval('body', (b) => b.textContent)).includes('Completed · Action · Drama'));
   console.log('PASS import preview, eighteenth result, slow sixth source and per-source page two');
   await page.setViewport({ width: 390, height: 844 });
+  const resultsRoom = () => page.evaluate(() => {
+    const comparison = document.querySelector('[data-match-comparison]')?.getBoundingClientRect();
+    const search = document.querySelector('input[placeholder="Search sources…"]')?.getBoundingClientRect();
+    return comparison && search ? comparison.top - search.bottom : 0;
+  });
+  assert.ok(await resultsRoom() >= 180, 'two previews still leave space for a complete result card on a phone');
   await page.screenshot({ path: `${OUT}/import-phone.png`, fullPage: true });
   const confirmVisible = await page.evaluate(() => {
     const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Use this pick');
@@ -121,6 +127,8 @@ try {
     return !!r && r.top >= 0 && r.bottom <= innerHeight;
   });
   assert.ok(confirmVisible, 'comparison controls stay reachable on a phone');
+  await page.click('[data-match-comparison] button');
+  assert.ok(await resultsRoom() >= 180, 'expanding a description does not swallow the search results');
 
   // The second sheet uses the same paging control, independently of the import sheet's query/cache.
   polls = 0;

@@ -189,6 +189,8 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
   // what is being compared, and Use this pick / Skip, stay at the bottom, clear of the phone nav.
   const footer = (
     <div className="space-y-2">
+      {/* Long descriptions must not consume the result list or push the confirmation buttons off screen. */}
+      <div className="max-h-[32svh] space-y-2 overflow-y-auto overscroll-contain" data-lenis-prevent data-match-comparison>
       {candidate.match_source && candidate.match_source_id ? (
         <MiniCard label={tr('Currently selected')} title={candidate.match_title || candidate.backup_title}
           coverUrl={candidate.match_cover} sourceId={candidate.match_source!} sourceLabel={sourceName(candidate.match_source)}
@@ -199,7 +201,7 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
         </div>
       )}
 
-      {pending ? (
+      {pending && (
         <>
           <MiniCard key={`${pending.source}:${pending.sourceId}`} label={tr('New pick')} title={pending.title} coverUrl={pending.coverUrl}
             sourceId={pending.source} sourceLabel={sourceName(pending.source)}
@@ -213,6 +215,10 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
                 : tr('{n} fewer chapters than the current pick', { n: Math.abs(delta) })}
             </p>
           )}
+        </>
+      )}
+      </div>
+      {pending ? (
           <div className="flex gap-2">
             <button onClick={() => setPending(null)} disabled={busy === '__confirm'} className="chip flex-1 py-1.5 text-xs disabled:opacity-50">
               {tr('Cancel')}
@@ -221,7 +227,6 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
               {busy === '__confirm' ? tr('Working…') : tr('Use this pick')}
             </button>
           </div>
-        </>
       ) : (
         <div className="flex gap-2">
           <button onClick={skip} disabled={!!busy} className="chip flex-1 py-1.5 text-xs disabled:opacity-50">
