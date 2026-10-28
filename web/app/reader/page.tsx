@@ -2458,7 +2458,7 @@ function ReaderInner() {
                 </button>
                 {/* The counter is the button. A long-press would be invisible on a phone, which this repo
                     already learned once from a hover-only affordance nobody found. */}
-                <button dir="ltr" onClick={() => setShowPages(true)} aria-label={tr('Jump to a page')}
+                <button dir="ltr" data-reader-pages onClick={() => setShowPages(true)} aria-label={tr('Jump to a page')}
                   className="shrink-0 rounded-full px-1.5 py-0.5 text-[11px] tabular-nums text-fog-300 transition hover:bg-white/10 hover:text-white">
                   {chapterPageCount ? `${pageInChapter}/${chapterPageCount}` : `${current + 1}/${total}`}
                 </button>
