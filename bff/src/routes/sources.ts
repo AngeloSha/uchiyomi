@@ -1544,13 +1544,6 @@ export async function addSeriesFromSource(opts: {
   const srcDir = process.platform === 'win32' ? sanitize(src.name) : src.name;
   // An edition's folder carries its language (lib/editions.ts editionFolder), so it never lands in the original's.
   let folder = edition ? editionFolder(srcDir, title, edition.lang) : `${srcDir}/${sanitize(title)}`;
-  // Source identity survives a title change. An exact entry already followed by this library keeps its shelf.
-  if (!edition) {
-    const exact = await one<{ folder: string }>(
-      `SELECT s.folder FROM lib_series s WHERE s.source_id = $1 AND s.source_series_id = $2
-        ORDER BY (s.deleted_at IS NOT NULL), s.created_at LIMIT 1`, [source, sourceId]);
-    if (exact) folder = exact.folder;
-  }
   // ⚠️ Desktop, case-insensitive disks (NTFS, APFS): a source that now spells the title `Solo leveling`
   // still downloads into the existing `Solo Leveling` folder, and the scanner reads that folder back with
   // its on-disk spelling -- so a row keyed on the new spelling never met its own chapters, and the series
@@ -1560,6 +1553,14 @@ export async function addSeriesFromSource(opts: {
     const stored = await one<{ folder: string }>(
       'SELECT folder FROM lib_series WHERE lower(folder) = lower($1) ORDER BY (deleted_at IS NOT NULL), created_at LIMIT 1', [folder]);
     folder = stored?.folder ?? await diskSpelling([DL_ROOT, LIBRARY_ROOT], folder);
+  }
+
+  // Source identity survives a title change. An exact entry already followed by this library keeps its shelf.
+  if (!edition) {
+    const exact = await one<{ folder: string }>(
+      `SELECT s.folder FROM lib_series s WHERE s.source_id = $1 AND s.source_series_id = $2
+        ORDER BY (s.deleted_at IS NOT NULL), s.created_at LIMIT 1`, [source, sourceId]);
+    if (exact) folder = exact.folder;
   }
 
   // A deleted series does not count as present: re-adding it is how you undo a delete from the app side.

@@ -1372,7 +1372,7 @@ function SeriesInner() {
     const listed = fetchable.filter((g) => !g.bookId).map((g) => g.number);
     const deleted = fetchable.flatMap((g) => g.bookId ? [g.bookId] : []);
     const requests: Array<{ path: string; body: Record<string, unknown> }> = [
-      ...(listed.length ? [{ path: '/api/sources/fetch', body: { seriesId: id, numbers: listed } }] : []),
+      ...chunkNumbers(listed).map((numbers) => ({ path: '/api/sources/fetch', body: { seriesId: id, numbers } })),
       ...deleted.map((bookId) => ({ path: `/api/books/${bookId}/refetch`, body: {} })),
     ];
     if (!requests.length) return;
@@ -1453,7 +1453,7 @@ function SeriesInner() {
   // each file replaced in place by the copy in the series' language.
   const refetchMany = (bookIds: string[]) => postInChunks(bookIds, (chunk) =>
     api<{ folder: string; total: number }>(`/api/admin/series/${id}/chapters/refetch`, { method: 'POST', json: { bookIds: chunk } }));
-  const refetchBooks = (picked: Book[]) => startJob(`/api/admin/series/${id}/chapters/refetch`, { bookIds: picked.map((b) => b.id) });
+  const refetchBooks = (picked: Book[]) => refetchMany(picked.map((b) => b.id));
   // "Fetch" on one copy in the chapter sheet. A pick names the copy by source and the source's own id (`copySourceId`, never
   // a split on ':'), and the server takes it as an explicit choice: the group rules, blocklist included, do
   // not apply to it. On a ghost row the copy lands as the chapter; on an on-disk row the file is replaced,
@@ -1489,10 +1489,15 @@ function SeriesInner() {
   };
   const deleteBooks = async (picked: Book[]) => {
     setActing(true);
+    const res = { applied: 0, skipped: [] as { id: string; reason: string }[] };
     try {
-      const res = await api<{ applied: number; skipped: { id: string; reason: string }[] }>(`/api/admin/series/${id}/chapters/delete`, {
-        method: 'POST', json: { bookIds: picked.map((b) => b.id) },
-      });
+      for (const chunk of chunkNumbers(picked, 500)) {
+        const result = await api<typeof res>(`/api/admin/series/${id}/chapters/delete`, {
+          method: 'POST', json: { bookIds: chunk.map((b) => b.id) },
+        });
+        res.applied += result.applied;
+        res.skipped.push(...result.skipped);
+      }
       // Say what was skipped rather than silently deleting fewer than were selected, one line per reason
       // present: `not_owned` (the file is in a library the admin built, not one Uchiyomi fetched) and
       // `bookmarked` (a reader's bookmark names a page inside it) are the two a person can act on; the
@@ -1522,7 +1527,8 @@ function SeriesInner() {
       invalidateChapters();
       leaveSelect();
     } catch (e) {
-      toast(msgOf(e, tr('Could not delete those')), 'error');
+      toast([res.applied ? deletedText(res.applied) : '', msgOf(e, tr('Could not delete those'))].filter(Boolean).join(' · '), 'error');
+      invalidateChapters();
     }
     setActing(false);
     setConfirming(null);
