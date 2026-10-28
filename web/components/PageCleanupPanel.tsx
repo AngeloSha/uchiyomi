@@ -132,6 +132,7 @@ export function PageCleanupPanel({ bookId, offline, initialRestore, contentVersi
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={img.page(bookId, p.number, 200, preview?.contentVersion ?? contentVersion)} alt="" loading="lazy" className="aspect-[2/3] w-full object-cover object-top" />
             <p className="truncate text-[10px] text-fog-400" title={p.name}>{p.number} · {p.name}</p>
+            {p.rescued && <p className="text-[10px] text-fog-300">{tr('Keep GIF pages visible')}</p>}
           </div>)}</div>
           {(['series', 'source'] as const).map((scope) => <div key={scope} className="mb-3 flex flex-wrap items-center gap-2">
             <span className="text-xs">{scope === 'series' ? tr('This series') : tr('Every series from this source')} · {tr('Chapters in scope: {n}', { n: scope === 'series' ? rules.seriesChapters : rules.chapters })}</span>

@@ -4,7 +4,7 @@ export interface CleanupPage { number: number; name: string; bytes: number; gif:
 export interface PageCleanupPreview { revision: string; contentVersion: string; pages: CleanupPage[]; retainedBytes: number; unusedRetainedBytes: number; unusedRetainedImages: number }
 export interface PageRulePreview {
   sourceId: string | null; sourceName?: string; seriesId?: string;
-  pages: Array<{ number: number; name: string }>;
+  pages: Array<{ number: number; name: string; rescued?: boolean }>;
   sourceRule: boolean | null; seriesRule: boolean | null; chapters: number; seriesChapters: number;
 }
 export type CleanupAction = 'remove' | 'restore' | 'purge' | 'purge-unused';
