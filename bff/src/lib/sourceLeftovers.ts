@@ -6,7 +6,8 @@
 // (lib/updater.ts reads it by number, from any source), so when the real series reached that number the sweep took it
 // as held and never fetched it, and a reader's mark on the wrong chapter carried onto the real one.
 //
-// So removing a source takes with it every chapter ONLY it lists, as though it had never been fetched:
+// Explicitly cleaning up a source can take every chapter ONLY it lists, as though it had never been fetched:
+// Removing a source alone always keeps downloaded chapters and progress.
 //  - WHICH: rows of this series stamped with that source (lib_books.source_id, written when its file landed) whose
 //    number -- the file's own and an admin's override, and every number of a range -- no source the series still
 //    follows lists (series_listing, every copy of every row). Live chapters and tombstones alike: a tombstone is what
@@ -19,12 +20,18 @@
 //    the append-only record of what was read (lib/migrate.ts), and counts nothing the sweep looks at.
 //  - A row whose file cannot be removed (unreadable, its folder missing: an unmounted share) is left as it is.
 //
-// leftoversOf is the preview (the Sources sheet asks it before the ×); purgeLeftovers does it. The caller holds the
-// series' writer claim (routes/admin.ts claimSeriesWriter).
+// cleanupPreview proves eligibility from fresh remaining-source listings. purgeLeftovers executes a confirmed
+// preview while the caller owns both the series writer claim and DB row lock.
 import type { FastifyRequest } from 'fastify';
+import { createHmac, timingSafeEqual } from 'crypto';
+import { env } from '../env';
+import { getSource } from './sources';
+import { bounded } from './autoFollow';
+import { budgetFor } from './sources/budget';
+import { standingRows } from './sourceStanding';
 import { rm, stat } from 'fs/promises';
 import { dirname, resolve } from 'path';
-import { q, one, tx } from './db';
+import { q, tx } from './db';
 import { DL_ROOT } from './library';
 import { allWritable, containedPath, realContainedPath, statOrGone } from './fsGuard';
 import { REFETCH_BAK } from './fsAtomic';
@@ -58,19 +65,101 @@ export interface Leftovers {
   readers: number;
 }
 
+type Query = typeof q;
+
+export class CleanupRefused extends Error {
+  constructor(public readonly reason: 'not_found' | 'listing_unavailable' | 'numbering_pending' | 'preview_changed' | 'busy' | 'refused' | 'primary_source', message: string, public readonly fix?: string) { super(message); }
+}
+
+interface CleanupListing { sources: Array<{ source: string; ref: string }>; fresh: number[] }
+interface CleanupPreview extends CleanupListing { left: Leftovers }
+
+/**
+ * Caller owns the folder writer. A cached absence is never permission to delete:
+ * ask every remaining source now, require a nonempty answer and retain every number already known there.
+ * A cooldown, failed extension, empty/short answer or uncertain numbering refuses cleanup, but not detach.
+ */
+async function cleanupSources(seriesId: string, sourceId: string, query: Query) {
+  const [series] = await query<{ source_id: string | null; source_series_id: string | null; numbering: string | null; numbering_pending: string | null; renumber_plan: unknown }>(
+    'SELECT source_id, source_series_id, numbering, numbering_pending, renumber_plan FROM lib_series WHERE id = $1', [seriesId]);
+  if (!series) throw new CleanupRefused('not_found', 'The series is no longer available.');
+  const followers = await query<{ source_id: string; source_series_id: string }>(
+    'SELECT source_id, source_series_id FROM series_sources WHERE series_id = $1 ORDER BY source_id', [seriesId]);
+  const sources = [
+    ...(series.source_id ? [{ source: series.source_id, ref: series.source_series_id ?? '' }] : []),
+    ...followers.map((f) => ({ source: f.source_id, ref: f.source_series_id })),
+  ].sort((a, b) => a.source.localeCompare(b.source));
+  if (series.source_id === sourceId && sources.length > 1) throw new CleanupRefused('primary_source', 'Make a replacement source main first. Then remove this source with cleanup. Detach alone keeps all downloads.');
+  if (!sources.some((s) => s.source === sourceId)) throw new CleanupRefused('not_found', 'The source is no longer followed.');
+  if (sources.length > 1 && (series.numbering === 'posting_order' || series.numbering_pending || series.renumber_plan)) {
+    throw new CleanupRefused('numbering_pending', 'Chapter numbering must be settled before cleaning up downloads.');
+  }
+  return sources;
+}
+
+/** Network requests finish before taking a DB connection/row lock; otherwise parallel slow sources exhaust the pool. */
+export async function prepareCleanup(seriesId: string, sourceId: string): Promise<CleanupListing> {
+  const sources = await cleanupSources(seriesId, sourceId, q);
+  const others = sources.filter((s) => s.source !== sourceId);
+  if (!others.length) return { sources, fresh: [] };
+  const standing = await standingRows(others.map((s) => s.source));
+  const fresh = new Set<number>();
+  for (const other of others) {
+    const source = getSource(other.source);
+    const health = standing.get(other.source);
+    if (!other.ref.trim() || !source || health?.disabled || (health?.blocked_until && new Date(health.blocked_until).getTime() > Date.now())) {
+      throw new CleanupRefused('listing_unavailable', 'Every remaining source must answer before downloads can be deleted. You can still remove the source and keep its downloads.');
+    }
+    const chapters = await bounded(Promise.resolve().then(() => source.listChapters(other.ref)), budgetFor(source, 20_000)).catch(() => null);
+    const numbers = new Set((Array.isArray(chapters) ? chapters : []).map((c) => numKey(c.number)).filter(Number.isFinite));
+    const known = await listedBy(seriesId, [other.source]);
+    if (!numbers.size || known.some((n) => !numbers.has(numKey(n)))) {
+      throw new CleanupRefused('listing_unavailable', 'A remaining source returned an empty or incomplete chapter list. Downloads have been kept.');
+    }
+    for (const n of numbers) fresh.add(n);
+  }
+  const numbers = [...fresh].sort((a, b) => a - b);
+  return { sources, fresh: numbers };
+}
+
+/** Re-read eligibility under the series row lock; any source/ref change since the network requests refuses cleanup. */
+export async function cleanupPreview(seriesId: string, sourceId: string, query: Query, prepared: CleanupListing): Promise<CleanupPreview> {
+  const sources = await cleanupSources(seriesId, sourceId, query);
+  if (JSON.stringify(sources) !== JSON.stringify(prepared.sources)) {
+    throw new CleanupRefused('listing_unavailable', 'The followed sources changed. Open the preview again.');
+  }
+  const known = await listedBy(seriesId, sources.filter((s) => s.source !== sourceId).map((s) => s.source), query);
+  const fresh = new Set(prepared.fresh.map(numKey));
+  if (known.some((n) => !fresh.has(numKey(n)))) throw new CleanupRefused('listing_unavailable', 'The remaining chapter listing changed. Open the preview again.');
+  return { ...prepared, left: await leftoversOf(seriesId, sourceId, query, prepared.fresh) };
+}
+
+/** An expiring acknowledgement of this exact server preview, bound to the acting account. */
+export function cleanupConfirmation(preview: CleanupPreview, identity: string): string;
+export function cleanupConfirmation(preview: CleanupPreview, identity: string, confirmation: string): boolean;
+export function cleanupConfirmation(preview: CleanupPreview, identity: string, confirmation?: string): string | boolean {
+  const expiry = confirmation === undefined ? String(Date.now() + 5 * 60_000) : confirmation.split('.')[0];
+  if (!/^\d+$/.test(expiry) || Number(expiry) < Date.now() || Number(expiry) > Date.now() + 5 * 60_000) return false;
+  const proof = `${expiry}.${createHmac('sha256', env.JWT_SECRET).update(JSON.stringify({ identity, preview, expiry })).digest('hex')}`;
+  if (confirmation === undefined) return proof;
+  const supplied = Buffer.from(confirmation);
+  const expected = Buffer.from(proof);
+  return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+}
+
 const none = (others: string[] = []): Leftovers => ({ others, books: [], numbers: [], readers: 0 });
 
 /** The sources a series follows: its main and every follower. */
-async function sourcesOf(seriesId: string): Promise<string[]> {
-  const s = await one<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1', [seriesId]);
-  const f = await q<{ source_id: string }>('SELECT source_id FROM series_sources WHERE series_id = $1', [seriesId]);
-  return [...new Set([...(s?.source_id ? [s.source_id] : []), ...f.map((r) => r.source_id)])];
+async function sourcesOf(seriesId: string, query: Query = q): Promise<string[]> {
+  const [s] = await query<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1', [seriesId]);
+  const f = await query<{ source_id: string }>('SELECT source_id FROM series_sources WHERE series_id = $1', [seriesId]);
+  return [...new Set([...(s?.source_id ? [s.source_id] : []), ...f.map((r) => r.source_id)])].sort();
 }
 
 /** Every number listed for the series by a source in `sources`: each copy of each row, or the row's own source. */
-async function listedBy(seriesId: string, sources: readonly string[]): Promise<number[]> {
+async function listedBy(seriesId: string, sources: readonly string[], query: Query = q): Promise<number[]> {
   if (!sources.length) return [];
-  const rows = await q<{ number: number }>(
+  const rows = await query<{ number: number }>(
     `SELECT DISTINCT l.number::float8 AS number
        FROM series_listing l
        CROSS JOIN LATERAL (SELECT e ->> 'source' AS source
@@ -94,18 +183,18 @@ function listedFor(b: LeftoverBook, listed: Set<number>, sorted: number[]): bool
  * What removing `sourceId` from the series would take with it (see the header). Read-only. `sourceId` may already be
  * off the series (the route asks after a detach promoted a follower): the remaining sources are everything else.
  */
-export async function leftoversOf(seriesId: string, sourceId: string): Promise<Leftovers> {
-  const others = (await sourcesOf(seriesId)).filter((s) => s !== sourceId);
+export async function leftoversOf(seriesId: string, sourceId: string, query: Query = q, freshNumbers?: number[]): Promise<Leftovers> {
+  const others = (await sourcesOf(seriesId, query)).filter((s) => s !== sourceId);
   if (!others.length) return none();
-  const elsewhere = await listedBy(seriesId, others);
+  const elsewhere = freshNumbers ?? await listedBy(seriesId, others, query);
   const listed = new Set(elsewhere.map(numKey));
   const sorted = [...elsewhere].sort((a, b) => a - b);
-  const rows = await q<{ id: string; number: number; override: number | null; end: number | null; root: string | null; file: string; pruned: boolean }>(
+  const rows = await query<{ id: string; number: number; override: number | null; end: number | null; root: string | null; file: string; pruned: boolean }>(
     `SELECT b.id, b.number::float8 AS number, ov.number::float8 AS override, b.number_end::float8 AS end,
             b.root, b.file, (b.pruned_at IS NOT NULL) AS pruned
        FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
       WHERE b.series_id = $1 AND b.source_id = $2
-      ORDER BY b.number, b.file`, [seriesId, sourceId]);
+      ORDER BY b.number, b.file, b.id`, [seriesId, sourceId]);
   const books: LeftoverBook[] = rows
     // The download folder only: a file anywhere else arrived some other way, and is not this server's to delete.
     .filter((r) => r.root === DL_ROOT)
@@ -116,8 +205,8 @@ export async function leftoversOf(seriesId: string, sourceId: string): Promise<L
     .filter((b) => !listedFor(b, listed, sorted));
   const goingIds = new Set(books.map((b) => b.id));
   // The numbers that go: what only this source lists, and what the going rows hold -- less anything another row keeps.
-  const here = await listedBy(seriesId, [sourceId]);
-  const stays = await q<{ number: number; end: number | null }>(
+  const here = await listedBy(seriesId, [sourceId], query);
+  const stays = await query<{ number: number; end: number | null }>(
     `SELECT COALESCE(ov.number, b.number)::float8 AS number,
             CASE WHEN ov.number IS NULL AND b.number_end > b.number AND b.number_end <= b.number + ${MAX_RANGE} THEN b.number_end::float8 END AS end
        FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
@@ -129,10 +218,15 @@ export async function leftoversOf(seriesId: string, sourceId: string): Promise<L
     const n = b.override ?? b.number;
     numbers.set(numKey(n), n);
   }
+  const removed = heldBy(books.map((b) => ({ number: b.override ?? b.number, end: b.override == null ? b.end : null })));
+  const marks = await query<{ number: number }>(
+    `SELECT number::float8 AS number FROM listing_progress WHERE series_id = $1
+     UNION SELECT number::float8 AS number FROM chapter_failures WHERE series_id = $1`, [seriesId]);
+  for (const mark of marks) if (removed.has(Number(mark.number))) numbers.set(numKey(Number(mark.number)), Number(mark.number));
   for (const k of [...numbers.keys()]) if (kept.has(numbers.get(k)!)) numbers.delete(k);
   const nums = [...numbers.values()].sort((a, b) => a - b);
   if (!books.length && !nums.length) return none(others);
-  const readers = await one<{ n: number }>(
+  const [readers] = await query<{ n: number }>(
     `SELECT count(DISTINCT user_id)::int AS n FROM (
        SELECT user_id FROM read_progress WHERE book_id = ANY($2::text[])
        UNION SELECT user_id FROM listing_progress WHERE series_id = $1 AND number = ANY($3::real[])
@@ -162,7 +256,7 @@ export async function purgeRefusal(books: readonly LeftoverBook[]): Promise<{ re
  * keeps its row, so nothing on disk is ever unlisted. One audit line, `series.source_leftovers`.
  */
 export async function purgeLeftovers(
-  seriesId: string, sourceId: string, left: Leftovers, o: { userId: string | null; req?: FastifyRequest },
+  seriesId: string, sourceId: string, left: Leftovers, o: { userId: string | null; req?: FastifyRequest }, query?: Query,
 ): Promise<PurgeResult> {
   const out: PurgeResult = { removed: 0, bytes: 0, left: [] };
   if (!left.books.length && !left.numbers.length) return out;
@@ -191,9 +285,10 @@ export async function purgeLeftovers(
   }
   const keptIds = new Set(out.left.map((l) => l.id));
   // A number whose row could not go keeps its marks: they are still that row's.
-  const keptNumbers = new Set(left.books.filter((b) => keptIds.has(b.id)).map((b) => numKey(b.override ?? b.number)));
-  const numbers = left.numbers.filter((n) => !keptNumbers.has(numKey(n)));
-  await tx(async (qq) => {
+  const keptNumbers = heldBy(left.books.filter((b) => keptIds.has(b.id))
+    .map((b) => ({ number: b.override ?? b.number, end: b.override == null ? b.end : null })));
+  const numbers = left.numbers.filter((n) => !keptNumbers.has(n));
+  const removeRows = async (qq: Query) => {
     if (gone.length) {
       // read_progress.book_id is ON DELETE RESTRICT (lib/migrate.ts): a read row would refuse the DELETE below.
       await qq('DELETE FROM read_progress WHERE book_id = ANY($1::text[])', [gone]);
@@ -206,27 +301,25 @@ export async function purgeLeftovers(
       await qq('DELETE FROM listing_progress WHERE series_id = $1 AND number = ANY($2::real[])', [seriesId, numbers]);
       await qq('DELETE FROM chapter_failures WHERE series_id = $1 AND number = ANY($2::real[])', [seriesId, numbers]);
     }
-  });
+  };
+  if (query) await removeRows(query); else await tx(removeRows);
   if (out.removed) {
     // The rollups as a merge's clean-up puts them right (lib/extraCopies.ts): count, newest, and the lowest live cover.
-    await q(
+    await (query ?? q)(
       `UPDATE lib_series s SET books_count = c.n, latest_mtime = COALESCE(c.mt, 0)
          FROM (SELECT count(*) n, max(mtime) mt FROM lib_books WHERE series_id = $1) c
         WHERE s.id = $1`, [seriesId]);
-    await q(
+    await (query ?? q)(
       `UPDATE lib_series SET cover_book_id = (
          SELECT id FROM lib_books WHERE series_id = $1 ORDER BY (pruned_at IS NOT NULL), number ASC, file ASC LIMIT 1
        ) WHERE id = $1`, [seriesId]);
   }
-  const title = (await one<{ title: string }>('SELECT title FROM lib_series WHERE id = $1', [seriesId]).catch(() => null))?.title ?? null;
-  await logAudit('series.source_leftovers', {
-    userId: o.userId,
-    detail: {
-      id: seriesId, title, source: sourceId, removed: out.removed, bytes: out.bytes, left: out.left.length,
-      numbers: numbers.slice(0, 50),
-    },
-    req: o.req,
-  });
+  const title = (await (query ?? q)<{ title: string }>('SELECT title FROM lib_series WHERE id = $1', [seriesId]))[0]?.title ?? null;
+  const detail = { id: seriesId, title, source: sourceId, removed: out.removed, bytes: out.bytes, left: out.left.length, numbers: numbers.slice(0, 50) };
+  if (query) {
+    await query('INSERT INTO audit_log (user_id, event, detail, ip, user_agent) VALUES ($1,$2,$3,$4,$5)',
+      [o.userId, 'series.source_leftovers', JSON.stringify(detail), o.req?.ip?.slice(0, 64) ?? null, String(o.req?.headers['user-agent'] ?? '').slice(0, 200) || null]);
+  } else await logAudit('series.source_leftovers', { userId: o.userId, detail, req: o.req });
   return out;
 }
 

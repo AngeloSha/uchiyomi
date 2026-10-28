@@ -2134,28 +2134,26 @@ the source calls it something that is not the series' title or one of its other 
 and offers **Attach anyway**. The other rules stay (the series' language, posting-order numbering, a check running right
 now, a waiting renumber, a source cooling down after errors, the follower limit for an extra source). A series with no
 source takes the pick as its main. The **×** on the main source detaches it, after asking: the next source takes over, or
-the series is left with none. When another source takes over, the chapters only the detached source listed are deleted,
-as *Removing a source* below explains. When it was the series' only source, its chapters and everyone's progress stay. A
+the series is left with none. Detaching keeps downloaded chapters and everyone's progress. A
 series numbered by posting order keeps its main source.
 
 #### Removing a source
 
-A source followed by mistake, for example the wrong series on its site, often fetches chapters the real series doesn't
-have yet. Removing it takes those chapters with it, as though they had never been fetched. That covers every chapter
-the source downloaded whose number no remaining source lists: the file, the chapter itself (including one already
-deleted from the server), everyone's reading progress and bookmarks on it, and read marks on numbers only that source
-listed. The numbers are then free, so when the real series reaches them, the next check fetches the real chapters.
-Before, a leftover chapter, even a deleted one, kept its number "held" and the real chapter was never downloaded.
+The **×** beside a source offers **Remove source and keep downloads** as the default. This keeps its files,
+chapter rows and everyone's reading progress. Removing the series' only source always keeps its downloads.
 
-- A chapter another source the series follows also lists stays, even if it was downloaded from the removed source.
-  *Fetch again* replaces it with the chosen copy.
-- Removing the series' **only** source deletes nothing.
-- When something would be deleted, the **×** asks first, under the source's row: *Stop following {name}? {n} downloaded
-  chapters no other source lists will be deleted from the server, together with everyone's reading progress.* When
-  nothing would be deleted, a followed source goes at once, as before.
-- "Lists" means the source lists as of each source's last check. A source followed a moment ago counts once its first
-  check has run.
-- While a download or another task is changing the series, the removal is refused and can be tried again a moment later.
+When a follower was attached by mistake, choose **Stop following and delete** to remove the chapters it downloaded
+that no remaining source lists. The preview names how many chapters and readers are affected. This permanently
+deletes those files, their rows (including old deletion markers), reading progress, bookmarks and offline records,
+and read marks on chapter numbers unique to that source. The numbers become available for the real chapters again.
+A chapter another followed source lists stays; **Fetch again** can replace it with the correct copy.
+
+Cleanup asks every remaining source for a fresh, nonempty chapter list. An unavailable, cooling, empty or incomplete
+source refuses deletion; you can still remove the source and keep downloads. If sources or eligible chapters change,
+open a new preview before confirming. A download or another writer changing the series also refuses cleanup.
+
+To clean up the current main source, first make its replacement main, keeping the old source as a follower; then
+remove the old follower with cleanup. Plain main detach keeps all downloads and uses the usual promotion rules.
 
 ### MangaDex in other languages
 

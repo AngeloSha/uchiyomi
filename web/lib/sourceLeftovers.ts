@@ -1,8 +1,8 @@
 /**
  * The warnings around chapters no other source has (bff lib/sourceLeftovers.ts).
  *
- * Removing a source deletes the downloaded chapters only it lists, with everyone's progress on them, so the Sources
- * sheet asks first with the count. Deleting a chapter no followed source lists cannot be undone by Fetch again, so the
+ * Optional cleanup deletes the downloaded chapters only a removed source lists, with everyone's progress on them;
+ * the Sources sheet keeps downloads by default and offers deletion with a fresh preview. Deleting a chapter no followed source lists cannot be undone by Fetch again, so the
  * Delete from server confirmation says so.
  */
 import { t as tr } from './i18n';
@@ -13,6 +13,7 @@ export interface SourceLeftovers {
   numbers: number[];
   readers: number;
   lastSource: boolean;
+  confirmation: string;
 }
 
 /** The line in the remove-source question: what goes with it. Null when nothing does. */

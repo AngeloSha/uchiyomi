@@ -787,7 +787,14 @@ function SeriesInner() {
   const deletingIds = confirming?.what === 'delete' ? confirming.books.map((b) => b.id) : [];
   const { data: unlisted } = useQuery({
     queryKey: ['chapters-unlisted', id, deletingIds.join(',')],
-    queryFn: () => api<{ unlisted: string[] }>(`/api/admin/series/${encodeURIComponent(id)}/chapters/unlisted`, { json: { bookIds: deletingIds.slice(0, 500) } }),
+    queryFn: async () => {
+      const unlisted: string[] = [];
+      for (const bookIds of chunkNumbers(deletingIds, 500)) {
+        const result = await api<{ unlisted: string[] }>(`/api/admin/series/${encodeURIComponent(id)}/chapters/unlisted`, { json: { bookIds } });
+        unlisted.push(...result.unlisted);
+      }
+      return { unlisted };
+    },
     enabled: !!id && deletingIds.length > 0,
     retry: false,
   });

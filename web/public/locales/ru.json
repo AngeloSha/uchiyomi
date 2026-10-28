@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4256
+    "strings": 4261
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -4259,5 +4259,10 @@
   "No source this series follows lists {n} of these chapters. Once they are deleted, they cannot be fetched again.": "Ни один источник этой серии не содержит некоторые из этих глав ({n}). После удаления их нельзя будет скачать снова.",
   "Stop following {name}?": "Перестать следить за {name}?",
   "Stop following and delete": "Перестать следить и удалить",
-  "Detach {name}? The next source takes over as main.": "Отключить {name}? Основным станет следующий источник."
+  "Detach {name}? The next source takes over as main.": "Отключить {name}? Основным станет следующий источник.",
+  "Remove source and keep downloads": "Удалить источник и сохранить загрузки",
+  "Read marks for {n} chapter numbers only this source lists will also be removed.": "Также будут удалены отметки чтения для {n} номеров глав, которые есть только в этом источнике.",
+  "Some downloads could not be deleted. The source is still followed.": "Не удалось удалить некоторые загрузки. Подписка на источник сохранена.",
+  "Cleanup is unavailable. You can remove the source and keep its downloads.": "Очистка недоступна. Вы можете удалить источник и сохранить его загрузки.",
+  "Optional cleanup": "Необязательная очистка"
 }

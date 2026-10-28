@@ -38,7 +38,7 @@ test('the Sources sheet offers Add more sources, and the main source detaches af
   assert.match(sheet, /data-add-more-sources/);
   // The × asks the server what would go first (lib/sourceLeftovers.ts); the main source then always asks before it detaches.
   assert.match(sheet, /onUnfollow=\{isAdmin \? \(\) => void askUnfollow\(s\)/);
-  assert.match(sheet, /if \(s\.primary\) \{ setDetachLeft\(left\.chapters\); setDetachAsk\(true\); return; \}/, 'the main row asks before it detaches');
+  assert.match(sheet, /if \(s\.primary\) \{[^\n]*setDetachAsk\(true\); return; \}/, 'the main row asks before it detaches');
   assert.match(sheet, /data-detach-confirm/);
   const mig = readFileSync(new URL('../components/MigrateSourceSheet.tsx', import.meta.url), 'utf8');
   assert.match(mig, /\/attach-source/);

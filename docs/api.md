@@ -822,17 +822,21 @@ offers `replace_source`, the source's `standing` is `cooling` (so it still carri
 `frozen-series` cause), and `GET /api/admin/sources` leaves it out of `failing`. The downloader's stored words for a
 refused chapter name the refusal it blamed -- *HTTP 429*, *HTTP 403* -- never a worse page status beside it.
 
-**Removing a source takes the chapters only it lists.** `DELETE /api/admin/series/:id/sources/:sourceId` (a follower,
-or the main source with a follower to take over) deletes every chapter of the series that the source supplied
-(`lib_books.source_id`, in the download folder) and that no remaining source lists (any copy in `series_listing`):
-the file, the row (a tombstone too), its reading progress, bookmarks and offline rows, and the by-number read marks
-and failure entries of every number only that source listed. Afterwards its numbers are free, so the sweep fetches the
-series' real chapters under them. The series' last source keeps its chapters. The answer carries
-`purged {removed, bytes, left[]}` when anything was taken; it is a 409 `busy` while another task changes the series, and a
-409 `refused` when the download folder may not be written. The audit event is `series.source_leftovers`. `GET
-.../sources/:sourceId/leftovers` previews it as `{chapters, numbers, readers, lastSource}`. `POST
-/api/admin/series/:id/chapters/unlisted {bookIds}` answers `{unlisted}`: the chosen chapters no followed source lists,
-which the Delete from server confirmation warns about.
+**Removing a source keeps downloads by default.** `DELETE /api/admin/series/:id/sources/:sourceId`
+keeps all chapter files, rows and reading progress. For explicit follower cleanup, `GET
+.../sources/:sourceId/leftovers` returns `{chapters, numbers, readers, lastSource, confirmation}` after fresh
+nonempty remaining-source listings. `POST .../sources/:sourceId/cleanup {confirmation}` rechecks the exact
+preview, deletes only downloaded chapters uniquely supplied by that follower, and detaches it atomically.
+It also removes those chapters' progress, bookmarks/offline records, and unique by-number marks/failures.
+The response is `{ok, purged: {removed, bytes, left[]}}`; `left` names files that could not be deleted, in which
+case `ok` is false and the source remains followed. Cleanup never deletes a chapter another source lists.
+
+A changed/expired preview is 409 `preview_changed`; an unavailable, empty or incomplete remaining listing is
+409 `listing_unavailable`; an active writer is 409 `busy`. To clean up the main source, first make a replacement
+main and keep the old main as a follower (`primary_source` otherwise). The last source's files always stay.
+Cleanup holds its writer claim before eligibility reads and protects the source/listing snapshot during file
+and row deletion. The audit event is `series.source_leftovers`. `POST
+/api/admin/series/:id/chapters/unlisted {bookIds}` answers `{unlisted}` for the delete dialog's warning.
 
 **Failed chapters follow the series** (since v0.55.3). A failed chapter (one row of the ledger Health's
 `chapter-failures` check reads) that is filed under a source its series no longer uses -- neither its main source nor
@@ -1863,6 +1867,7 @@ POST   /api/admin/series/bulk/chapters/delete/cancel
 GET    /api/admin/series/:id/scanlators GET    /api/admin/scanlators
 POST   /api/admin/series/:id/sources DELETE /api/admin/series/:id/sources/:sourceId
 GET    /api/admin/series/:id/sources/:sourceId/leftovers
+POST   /api/admin/series/:id/sources/:sourceId/cleanup {confirmation}
 POST   /api/admin/series/:id/main-source
 POST   /api/admin/series/:id/attach-source
 GET    /api/admin/series/:id/alt-titles POST   /api/admin/series/:id/alt-titles

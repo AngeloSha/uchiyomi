@@ -5,6 +5,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { leftoversText, unlistedWarning } from '../lib/sourceLeftovers';
+import * as React from 'react';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { SourceRow } from '../components/SourcesSheet';
+
+(globalThis as { React?: unknown }).React = React;
 
 test('removing a source says how many chapters go with it, and nothing when none do', () => {
   assert.equal(leftoversText(0), null);
@@ -27,4 +33,21 @@ test('the Sources sheet asks before a removal that deletes, and the delete dialo
   const page = readFileSync(join(__dirname, '../app/series/page.tsx'), 'utf8');
   assert.match(page, /chapters\/unlisted`/);
   assert.match(page, /data-unlisted-warning/);
+});
+
+
+test('the removal question focuses keeping downloads and only offers deletion with a usable preview', () => {
+  const render = (canDelete: boolean) => renderToStaticMarkup(createElement(SourceRow, {
+    s: { sourceId: 'wrong', name: 'Wrong source', primary: false, registered: true } as any,
+    removeAsk: { text: 'Optional cleanup: 3 chapters.', busy: false, canDelete, onConfirm() {}, onKeep() {}, onCancel() {} },
+  }));
+  const html = render(true);
+  const keep = html.match(/<button[^>]*data-remove-source-keep[^>]*>[^<]*<\/button>/)?.[0];
+  assert.ok(keep, 'keeping downloads remains an explicit action');
+  assert.match(keep, /autofocus/);
+  assert.match(keep, /Remove source and keep downloads/);
+  assert.ok(html.indexOf('data-remove-source-keep') < html.indexOf('data-remove-source-yes'));
+  const unavailable = render(false);
+  assert.match(unavailable, /data-remove-source-keep/);
+  assert.doesNotMatch(unavailable, /data-remove-source-yes/, 'a failed preview cannot expose the destructive choice');
 });

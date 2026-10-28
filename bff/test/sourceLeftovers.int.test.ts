@@ -35,6 +35,9 @@ const REAL = 'left-real', WRONG = 'left-wrong';
 const USER = 'left-admin';
 let q: any, app: any, auth: Record<string, string>, uid: string, updateSeries: any;
 let realList = [1, 2, 3, 4, 5];
+let realError = false;
+let listHook: (() => Promise<void>) | null = null;
+let realCalls = 0;
 
 const ch = (n: number) => ({ sourceId: `c/${n}`, number: n, title: `Chapter ${n}` });
 function fake(id: string, name: string, nums: () => number[]) {
@@ -42,7 +45,10 @@ function fake(id: string, name: string, nums: () => number[]) {
     id, name,
     async search() { return []; },
     async getSeries(sid: string) { return { sourceId: sid, source: id, title: 'Left Series' }; },
-    async listChapters() { return nums().map(ch); },
+    async listChapters() {
+      if (id === REAL) { realCalls++; if (listHook) await listHook(); if (realError) throw new Error('source unavailable'); }
+      return nums().map(ch);
+    },
     async getPageUrls() { return []; },
     async latest() { return []; },
   };
@@ -138,7 +144,7 @@ test('the preview names the chapters only the removed source lists, and who read
   assert.equal(body.lastSource, false);
   // The real source: everything it supplied the wrong one lists too, so nothing would go.
   const real = (await app.inject({ method: 'GET', url: `/api/admin/series/${S}/sources/${REAL}/leftovers`, headers: auth })).json();
-  assert.equal(real.chapters, 0);
+  assert.equal(real.error, 'primary_source', 'make another source main before cleaning up the current main');
   const none = await app.inject({ method: 'GET', url: `/api/admin/series/${S}/sources/not-here/leftovers`, headers: auth });
   assert.equal(none.statusCode, 404);
 });
@@ -152,25 +158,124 @@ test('a chapter no followed source lists is named for the delete warning', { ski
   assert.deepEqual(r.json().unlisted, [`b_left_${S}_10`]);
 });
 
+test('an old client detaches without deleting files, rows or progress', { skip }, async () => {
+  const before = await numbersOf(S);
+  const r = await app.inject({ method: 'DELETE', url: `/api/admin/series/${S}/sources/${WRONG}`, headers: auth });
+  assert.equal(r.statusCode, 200, r.body);
+  assert.equal(r.json().purged, undefined);
+  assert.deepEqual(await numbersOf(S), before);
+  assert.ok(existsSync(join(DL, file(FOLDER, 8))));
+  assert.equal((await q('SELECT 1 FROM read_progress WHERE series_id = $1', [S])).length, 1);
+  const { runsInside } = await import('../src/lib/updater');
+  for (let i = 0; runsInside(S) && i < 100; i++) await new Promise((r) => setTimeout(r, 5));
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id, title) VALUES ($1,$2,'wrong-s','Left Series')`, [S, WRONG]);
+  await updateSeries(S, 0);
+});
+
+const preview = async () => {
+  const r = await app.inject({ method: 'GET', url: `/api/admin/series/${S}/sources/${WRONG}/leftovers`, headers: auth });
+  return r;
+};
+const cleanup = (confirmation?: string) => app.inject({ method: 'POST', url: `/api/admin/series/${S}/sources/${WRONG}/cleanup`, headers: auth, payload: confirmation ? { confirmation } : {} });
+
+test('cleanup requires an explicit preview acknowledgement and never accepts an arbitrary token', { skip }, async () => {
+  assert.equal((await cleanup()).statusCode, 400);
+  assert.equal((await cleanup('not-a-preview')).statusCode, 409);
+  assert.ok(existsSync(join(DL, file(FOLDER, 8))));
+});
+
+test('confirmation is account-bound and cannot be edited', { skip }, async () => {
+  const confirmation = (await preview()).json().confirmation;
+  assert.equal(typeof confirmation, 'string');
+  const other = (await q(`INSERT INTO users (username, display_name, password_hash, role, auth_kind)
+    VALUES ('left-other-admin','Other','x','admin','password') RETURNING id`))[0].id;
+  try {
+    const r = await app.inject({ method: 'POST', url: `/api/admin/series/${S}/sources/${WRONG}/cleanup`,
+      headers: { authorization: `Bearer ${app.jwt.sign({ sub: other, role: 'admin' })}` }, payload: { confirmation } });
+    assert.equal(r.statusCode, 409, r.body);
+    assert.equal((await cleanup(confirmation.slice(0, -1) + (confirmation.endsWith('a') ? 'b' : 'a'))).statusCode, 409);
+    assert.ok(existsSync(join(DL, file(FOLDER, 8))));
+  } finally { await q('DELETE FROM users WHERE id = $1', [other]); }
+});
+
+test('an unavailable, empty or shorter remaining listing never authorizes cleanup', { skip }, async () => {
+  const beforePreview = await preview();
+  assert.equal(beforePreview.statusCode, 200, beforePreview.body);
+  const confirmation = beforePreview.json().confirmation;
+  const before = realList;
+  try {
+    realError = true;
+    assert.equal((await cleanup(confirmation)).statusCode, 409);
+    realError = false;
+    realList = [];
+    assert.equal((await cleanup(confirmation)).statusCode, 409);
+    realList = [1, 2];
+    assert.equal((await cleanup(confirmation)).statusCode, 409);
+    realList = before;
+    await q('UPDATE lib_series SET source_series_id = NULL WHERE id = $1', [S]);
+    assert.equal((await cleanup(confirmation)).statusCode, 409, 'a missing remaining-source identity cannot authorize deletion');
+    assert.ok(existsSync(join(DL, file(FOLDER, 8))));
+  } finally { realError = false; realList = before; await q("UPDATE lib_series SET source_series_id = 'real-s' WHERE id = $1", [S]); }
+});
+
+test('a changed source identity or chapter set requires a new preview', { skip }, async () => {
+  const confirmation = (await preview()).json().confirmation;
+  await q("UPDATE lib_series SET source_series_id = 'different-series' WHERE id = $1", [S]);
+  try { assert.equal((await cleanup(confirmation)).statusCode, 409); }
+  finally { await q("UPDATE lib_series SET source_series_id = 'real-s' WHERE id = $1", [S]); }
+  const id = await book(S, FOLDER, 6.5, WRONG);
+  try {
+    assert.equal((await cleanup(confirmation)).statusCode, 409);
+    assert.ok(existsSync(join(DL, file(FOLDER, 8))));
+  } finally { await q('DELETE FROM lib_books WHERE id = $1', [id]); rmSync(join(DL, file(FOLDER, 6.5))); }
+});
+
+test('writer claim is acquired before requesting or reading any cleanup eligibility', { skip }, async () => {
+  const { claimWriterFolders } = await import('../src/lib/bulkNewest');
+  const claim = claimWriterFolders([FOLDER]);
+  assert.ok(claim);
+  const calls = realCalls;
+  try { assert.equal((await preview()).statusCode, 409); assert.equal(realCalls, calls); }
+  finally { claim.release(); }
+});
+
+test('a source changed during the fresh listing cannot authorize deletion under the new source set', { skip }, async () => {
+  const confirmation = (await preview()).json().confirmation;
+  listHook = async () => {
+    listHook = null;
+    await q("UPDATE lib_series SET source_series_id = 'changed-during-listing' WHERE id = $1", [S]);
+  };
+  try {
+    const r = await cleanup(confirmation);
+    assert.equal(r.statusCode, 409, r.body);
+    assert.ok(existsSync(join(DL, file(FOLDER, 8))));
+  } finally { listHook = null; await q("UPDATE lib_series SET source_series_id = 'real-s' WHERE id = $1", [S]); }
+});
+
 test('removing the wrong source takes its chapters, files and read marks, as though never fetched', { skip }, async () => {
   // The audit log outlives a run on a reused database: only this run's line is counted.
   const since = (await q('SELECT COALESCE(max(id), 0)::bigint AS id FROM audit_log'))[0].id;
-  const r = await app.inject({ method: 'DELETE', url: `/api/admin/series/${S}/sources/${WRONG}`, headers: auth });
+  const ranged = await book(S, FOLDER, 20, WRONG);
+  await q('UPDATE lib_books SET number_end = 22 WHERE id = $1', [ranged]);
+  await q('INSERT INTO listing_progress (user_id, series_id, number) VALUES ($1,$2,21.5)', [uid, S]);
+  const confirmation = (await preview()).json().confirmation;
+  const r = await cleanup(confirmation);
   assert.equal(r.statusCode, 200, r.body);
   const body = r.json();
-  assert.equal(body.purged.removed, 3);
+  assert.equal(body.purged.removed, 4);
   assert.deepEqual(body.purged.left, []);
   assert.deepEqual(await numbersOf(S), [1, 2, 3, 4, 5, 10], 'the shared number 4 and the hand-added 10 stay');
-  for (const n of [6, 8]) assert.equal(existsSync(join(DL, file(FOLDER, n))), false, `chapter ${n}'s file is gone`);
+  for (const n of [6, 8, 20]) assert.equal(existsSync(join(DL, file(FOLDER, n))), false, `chapter ${n}'s file is gone`);
   assert.equal(existsSync(join(DL, file(FOLDER, 4))), true);
   assert.equal((await q('SELECT 1 FROM read_progress WHERE series_id = $1', [S])).length, 0);
   assert.equal((await q('SELECT 1 FROM bookmarks WHERE series_id = $1', [S])).length, 0);
   const marks = (await q('SELECT number::float8 AS n FROM listing_progress WHERE series_id = $1', [S])).map((x: any) => Number(x.n));
-  assert.deepEqual(marks, [4], 'the mark on 9 went, the one on 4 stayed');
+  assert.deepEqual(marks, [4], 'ghost 9 and the interior range mark 21.5 went; shared chapter 4 stayed');
   assert.equal((await q('SELECT books_count FROM lib_series WHERE id = $1', [S]))[0].books_count, 6);
   const audit = await q(
     `SELECT detail FROM audit_log WHERE event = 'series.source_leftovers' AND detail->>'id' = $1 AND id > $2`, [S, since]);
   assert.equal(audit.length, 1);
+  assert.equal((await q('SELECT 1 FROM series_sources WHERE series_id = $1 AND source_id = $2', [S, WRONG])).length, 0, 'cleanup detached before releasing its writer');
 });
 
 test('the real series\' own next chapters are not held by anything the wrong source left', { skip }, async () => {
@@ -184,9 +289,68 @@ test('the series\' last source keeps its chapters', { skip }, async () => {
   const pre = (await app.inject({ method: 'GET', url: `/api/admin/series/${LONE}/sources/${WRONG}/leftovers`, headers: auth })).json();
   assert.equal(pre.lastSource, true);
   assert.equal(pre.chapters, 0);
+  const cannotDelete = await app.inject({ method: 'POST', url: `/api/admin/series/${LONE}/sources/${WRONG}/cleanup`, headers: auth, payload: { confirmation: pre.confirmation } });
+  assert.equal(cannotDelete.statusCode, 409);
   const r = await app.inject({ method: 'DELETE', url: `/api/admin/series/${LONE}/sources/${WRONG}`, headers: auth });
   assert.equal(r.statusCode, 200, r.body);
   assert.equal(r.json().purged, undefined);
   assert.deepEqual(await numbersOf(LONE), [1]);
   assert.equal(existsSync(join(DL, file(LONE_FOLDER, 1))), true);
+});
+
+
+test('an unsafe file path keeps the row, range progress and source attached', { skip }, async () => {
+  const id = 's_left_unsafe', bid = 'b_left_unsafe';
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id)
+    VALUES ($1,'T!left','Unsafe Left','T!left/Unsafe',1,$2,$3,'real-s')`, [id, LIB, REAL]);
+  try {
+    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id, title) VALUES ($1,$2,'wrong-s','Unsafe Left')`, [id, WRONG]);
+    await q(`INSERT INTO lib_books (id, series_id, source, file, number, number_end, root, source_id)
+      VALUES ($1,$2,'T!left','../outside.cbz',20,22,$3,$4)`, [bid, id, DL, WRONG]);
+    await q('INSERT INTO listing_progress (user_id, series_id, number) VALUES ($1,$2,21.5)', [uid, id]);
+    const p = await app.inject({ method: 'GET', url: `/api/admin/series/${id}/sources/${WRONG}/leftovers`, headers: auth });
+    assert.equal(p.statusCode, 200, p.body);
+    const r = await app.inject({ method: 'POST', url: `/api/admin/series/${id}/sources/${WRONG}/cleanup`, headers: auth, payload: { confirmation: p.json().confirmation } });
+    assert.equal(r.statusCode, 200, r.body);
+    assert.equal(r.json().ok, false);
+    assert.deepEqual(r.json().purged.left, [{ id: bid, reason: 'outside_root' }]);
+    assert.equal((await q('SELECT 1 FROM series_sources WHERE series_id = $1 AND source_id = $2', [id, WRONG])).length, 1);
+    assert.equal((await q('SELECT 1 FROM lib_books WHERE id = $1', [bid])).length, 1);
+    assert.equal((await q('SELECT 1 FROM listing_progress WHERE series_id = $1 AND number = 21.5', [id])).length, 1);
+  } finally { await q('DELETE FROM lib_series WHERE id = $1', [id]); }
+});
+
+test('a concurrent old-client detach waits for the confirmed cleanup to finish', { skip }, async (t) => {
+  const id = 's_left_concurrent', folder = 'T!left/Concurrent';
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id)
+    VALUES ($1,'T!left','Concurrent Left',$2,1,$3,$4,'real-s')`, [id, folder, LIB, REAL]);
+  let release = () => {};
+  try {
+    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id, title) VALUES ($1,$2,'wrong-s','Concurrent Left')`, [id, WRONG]);
+    await book(id, folder, 20, WRONG);
+    const p = await app.inject({ method: 'GET', url: `/api/admin/series/${id}/sources/${WRONG}/leftovers`, headers: auth });
+    assert.equal(p.statusCode, 200, p.body);
+    const fs = require('fs/promises');
+    const stat = fs.stat;
+    let entered!: () => void;
+    const arrived = new Promise<void>((r) => { entered = r; });
+    const gate = new Promise<void>((r) => { release = r; });
+    let held = false;
+    t.mock.method(fs, 'stat', function(path: any, ...args: any[]) {
+      if (path === DL && !held) { held = true; entered(); return gate.then(() => stat(path, ...args)); }
+      return stat(path, ...args);
+    });
+    const cleaning = app.inject({ method: 'POST', url: `/api/admin/series/${id}/sources/${WRONG}/cleanup`, headers: auth, payload: { confirmation: p.json().confirmation } });
+    await Promise.race([arrived, cleaning.then(() => { throw new Error('cleanup finished before the filesystem hold'); })]);
+    let detached = false;
+    const removing = app.inject({ method: 'DELETE', url: `/api/admin/series/${id}/sources/${WRONG}`, headers: auth }).then((r: any) => { detached = true; return r; });
+    await new Promise((r) => setTimeout(r, 25));
+    assert.equal(detached, false, 'the child row is protected while cleanup changes files');
+    release();
+    const result = await cleaning;
+    assert.equal(result.statusCode, 200, result.body);
+    assert.equal(result.json().purged.removed, 1);
+    assert.equal((await removing).statusCode, 404, 'cleanup already unfollowed atomically');
+    assert.equal(existsSync(join(DL, file(folder, 20))), false);
+  } finally { release(); await q('DELETE FROM lib_series WHERE id = $1', [id]); }
 });
