@@ -96,7 +96,7 @@ it.
 ![Library](shots/library.webp)
 
 The **Library** tab is your whole collection. Since v0.60.0 a **toolbar** sits above the grid: **Search your library**
-(narrows the shelf by title, filters and sort kept), the **Sort** key, the **Comfortable / Compact / List** switch (remembered
+(narrows the shelf by title, and since v0.100.0 by author too, filters and sort kept), the **Sort** key, the **Comfortable / Compact / List** switch (remembered
 on each device), **Select** and ✦ **Surprise me**. Every way to narrow it lives in one filter panel: which library, read
 state, publication status, format and genre. On a laptop the panel sits down the left of the grid; on a phone it opens
 from **Filters** in the toolbar. Since v0.60.0 its choices are rows rather than chips: each with its own mark (a ring
@@ -352,6 +352,13 @@ order leaves it alone; Edit a chapter gives it one number instead.
 The series page shows the cover, an ambient backdrop, one muted line about where the chapters come from,
 genres, description, and the **chapter list**.
 
+**Find more by an author** (since v0.100.0, [#338](https://github.com/AngeloSha/uchiyomi/issues/338)). Each name in
+the *by …* line under the title is a link: it opens the Library showing every series by that person, with an
+*Author:* tag above the grid you can clear. A series with several authors shows each name on its own. A name finds every
+way it is written: *Chugong (추공)* also finds a series that only says *추공*, and *Gi So-Ryeong* finds *Gi So Ryeong*.
+It matches whole names, so *Oh* is not every name with "oh" in it. **Save as list** keeps the author, so a list of
+someone's work fills itself as you add more of it. Genres link the same way, to the Library filtered by that genre.
+
 - **The reading button** says what it opens (since v0.60.0): *Continue · Ch. 12* when a chapter is half read (the
   one you read last), *Next · Ch. 11* when you finished chapters 1–10 and nothing is half read, *Start reading* the
   first time, and *Read again* once everything is read. A series with no chapter on disk yet shows *Nothing to read yet*
@@ -410,7 +417,8 @@ Progress, favorites, and history are **per-user**, so each account has its own.
 **Filtering the library.** The Library's filter panel (a sidebar on a computer, **Filters** on a phone): read state
 (not started / reading / finished), publication status, genres, and the source a series comes from
 (**Main source** / **Any source**). Picking several genres means all of them. Active filters show as
-removable tags above the grid, and they live in the URL, so you can share a filtered view.
+removable tags above the grid, and they live in the URL, so you can share a filtered view. An author (a name on a
+series page, since v0.100.0) shows there as a tag too.
 
 **Doing something to many series at once.** Hit **Select** on the Library page, tap the ones you want, and the
 bar at the bottom shows what can be done with them. With a keyboard, **Shift**-click picks every series between the

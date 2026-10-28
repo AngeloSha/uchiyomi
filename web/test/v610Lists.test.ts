@@ -67,6 +67,8 @@ test('a new list is named by what it narrows, else by its order', () => {
   assert.equal(suggestListName({ v: 1, sort: 'popular' }), 'Most popular');
   assert.equal(suggestListName({ v: 1, status: 'ONGOING', lib: 'lib_a', src: '-', sort: 'az' }, { lib: () => 'Manga' }), 'Ongoing · Manga · No source');
   assert.equal(suggestListName({ v: 1, anysrc: 'mdx', sort: 'az' }, { source: (id) => (id === 'mdx' ? 'MangaDex' : id) }), 'MangaDex');
+  // v0.100.0 (#338): a shelf opened from an author's name is named by them.
+  assert.equal(suggestListName({ v: 1, author: 'Elf Toon', genres: ['Action'], sort: 'az' }), 'Action · by Elf Toon');
   assert.ok(suggestListName({ v: 1, q: 'x'.repeat(300), sort: 'az' }).length <= 120, 'within the server\'s limit for a name');
 });
 

@@ -81,6 +81,9 @@ function LibraryInner() {
   const anysrc = params.get('anysrc') || '';
   // "Search your library" (v0.60.0): the toolbar's field, a title filter the server applies with everything else.
   const q = (params.get('q') || '').trim();
+  // v0.100.0 (#338): every series by one author, from a name on a series page. Like the search, not a filter the panel
+  // holds: a chip of its own, outside the Filters badge.
+  const author = (params.get('author') || '').trim();
   const { data: libSources } = useLibrarySources();
   const sourceName = (id: string) => (id === NO_SOURCE ? tr('No source') : libSources?.sources.find((x) => x.id === id)?.name || id);
   const { data: allLibs } = useLibraries();
@@ -139,7 +142,7 @@ function LibraryInner() {
   // the page, so a value read once would not follow it. Downloads only for a viewer who may download.
   const mayDownload = authStatus === 'authed' && canDownload(user);
   const view: LibraryView = readView(params.get('view'), mayDownload);
-  useEffect(() => { setSelecting(false); setPicked(new Set()); anchor.current = null; }, [read, status, genres.join(','), sortKey, dir, lib, src, anysrc, q, view]);
+  useEffect(() => { setSelecting(false); setPicked(new Set()); anchor.current = null; }, [read, status, genres.join(','), sortKey, dir, lib, src, anysrc, q, author, view]);
   // Shift with a click picks the run between the last series clicked and this one (v0.96.0, #333, lib/libraryPick.ts).
   const togglePick = (id: string, e?: React.MouseEvent) => {
     const shift = !!e?.shiftKey;
@@ -150,9 +153,9 @@ function LibraryInner() {
   // so selecting a library filtered the grid while the badge said nothing was filtered and the "· filtered"
   // hint stayed dark. Now that every way to narrow the shelf is in one panel, every one of them counts.
   const activeCount = (read ? 1 : 0) + (status ? 1 : 0) + genres.length + (lib ? 1 : 0) + (src ? 1 : 0) + (anysrc ? 1 : 0);
-  // The shelf is narrowed: a filter, or a search. The search is not a filter the panel holds, so it is not in the
-  // Filters badge; but an empty grid under one is "nothing matches", never "your library is empty".
-  const narrowed = activeCount > 0 || !!q;
+  // The shelf is narrowed: a filter, a search or an author. The last two are not filters the panel holds, so they are
+  // not in the Filters badge; but an empty grid under one is "nothing matches", never "your library is empty".
+  const narrowed = activeCount > 0 || !!q || !!author;
 
   const setParam = (k: string, v: string) => {
     const next = new URLSearchParams(params.toString());
@@ -182,26 +185,27 @@ function LibraryInner() {
     });
   };
 
-  // Everything `activeCount` counts, cleared, and the search with it unless `alsoSearch` is false (the filter panel's
-  // own Clear all clears the panel). The order survives because it is not a filter -- clearing it would reorder the
-  // shelf as a side effect of a button that says it removes restrictions -- and so does its direction.
+  // Everything `activeCount` counts, cleared, and the search and the author with it unless `alsoSearch` is false (the
+  // filter panel's own Clear all clears the panel). The order survives because it is not a filter -- clearing it would
+  // reorder the shelf as a side effect of a button that says it removes restrictions -- and so does its direction.
   const clearAll = (alsoSearch: boolean) => {
     const n = new URLSearchParams();
     if (sortKey) n.set('sort', sortKey);
     if (reversed) n.set('dir', dir);
     if (!alsoSearch && q) n.set('q', q);
+    if (!alsoSearch && author) n.set('author', author);
     // v0.61.0: the smart list this shelf was opened from (its Edit filters) stays, so filters cleared and chosen again
     // can still Update it.
     if (params.get('list')) n.set('list', params.get('list')!);
     router.replace(`/library?${n.toString()}`);
   };
 
-  const condition = useMemo(() => conditionFrom(read, status, genres, lib, src, anysrc), [read, status, genres.join(','), lib, src, anysrc]);
+  const condition = useMemo(() => conditionFrom(read, status, genres, lib, src, anysrc, author), [read, status, genres.join(','), lib, src, anysrc, author]);
   // v0.61.0: the shelf on screen as a smart list's query -- the order in force included, the account's default too.
   const shownQuery = useMemo(() => queryOfParams(params, { sort: active.key, dir }), [params, active.key, dir]);
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError, isLoading, isError, isFetching, isPlaceholderData, refetch } = useInfiniteQuery({
-    queryKey: ['library', active.key, dir, read, status, genres.join(','), lib, src, anysrc, q],
+    queryKey: ['library', active.key, dir, read, status, genres.join(','), lib, src, anysrc, author, q],
     // The Downloads view shows no grid: forty covers fetched to sit unseen behind it would be the wrong work.
     enabled: view === 'series',
     initialPageParam: 0,
@@ -608,7 +612,7 @@ function LibraryInner() {
         {/* How many there are, or match: the order is the toolbar's Sort key now, which says it on its face. Dimmed while
             the count is the shelf being replaced. */}
         <p className={`${mayDownload ? 'mt-2' : 'mt-0.5'} text-xs text-fog-500 ${refreshing ? 'opacity-60' : ''}`} data-library-count>
-          {total != null && (q
+          {total != null && (q || author
             ? (total === 1 ? tr('1 series matches') : tr('{n} series match', { n: total }))
             : (total === 1 ? tr('1 series') : tr('{n} series', { n: total })))}
           {activeCount > 0 && <span className="text-accent">{total != null ? ' · ' : ''}{tr('filtered')}</span>}
@@ -632,6 +636,11 @@ function LibraryInner() {
             {q && (
               <button onClick={() => setParam('q', '')} title={tr('Clear search')} className="chip max-w-full text-xs" data-chip-search>
                 <IcSearch width={12} height={12} aria-hidden className="shrink-0" /><bdi className="min-w-0 truncate">{q}</bdi> ×
+              </button>
+            )}
+            {author && (
+              <button onClick={() => setParam('author', '')} className="chip max-w-full text-xs" data-chip-author>
+                <span className="min-w-0 truncate">{tr('Author: {name}', { name: `\u2068${author}\u2069` })}</span> ×
               </button>
             )}
             {reversed && (

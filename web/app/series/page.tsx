@@ -22,6 +22,7 @@ import { useAuth, canDownload } from '@/lib/auth';
 import { IcChevronLeft, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcHourglass, IcGrid, IcRows, IcComment } from '@/components/icons';
 import { commentsLine, seriesTalkKey, talkWantedOf, type ChapterTalkCount } from '@/lib/comments';
 import { ChapterTalkSheet } from '@/components/ChapterTalk';
+import { AuthorLinks } from '@/components/AuthorLinks';
 import { t as tr } from '@/lib/i18n';
 import { statusText } from '@/lib/activity';
 import { deletedText, selectedText, skippedBookmarkedText, skippedNotOursText } from '@/lib/counted';
@@ -1762,7 +1763,10 @@ function SeriesInner() {
 
   const span = series && books && !mostlyVolumes ? numberingSpan(books.content, series.booksCount) : null;
   const metaBits: ReactNode[] = [
-    author ? <span className="text-fog-300">{tr('by {author}', { author: `\u2068${author}\u2069` })}</span> : null,
+    // v0.100.0 (#338): each name on the author line opens the Library showing that person's series. Only the author's: the
+    // publisher shown in its place when there is none names no one the Library could list.
+    meta?.author ? <AuthorLinks line={meta.author} />
+      : author ? <span className="text-fog-300">{tr('by {author}', { author: `\u2068${author}\u2069` })}</span> : null,
     meta?.status ? <span className="capitalize">{statusText(meta.status)}</span> : null,
     series ? <>{bookCountText(series.booksCount, mostlyVolumes)}</> : null,
     // Their numbers, when they do not run 1 to the count (half chapters, a chapter 0, gaps): "149 chapters · Ch. 0–129".
