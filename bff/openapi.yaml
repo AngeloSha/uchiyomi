@@ -10037,6 +10037,113 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: The series was not following that source
+  /api/admin/series/{id}/sources/{sourceId}/leftovers:
+    get:
+      tags:
+        - admin
+      summary: Preview optional follower cleanup with a fresh confirmation.
+      operationId: getApiAdminSeriesIdSourcesSourceIdLeftovers
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The downloaded
+        chapters only this follower lists, every unique chapter number, and how many readers have progress.
+        The confirmation is account-bound and expires after five minutes. Every remaining source must return a
+        fresh nonempty complete listing. Plain DELETE keeps downloads. A main with followers is primary_source:
+        first make its replacement main and keep this source as a follower. The last source's files always stay.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sourceId
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The preview.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [chapters, numbers, readers, lastSource, confirmation]
+                properties:
+                  chapters: { type: integer }
+                  numbers: { type: array, items: { type: number } }
+                  readers: { type: integer }
+                  lastSource: { type: boolean }
+                  confirmation: { type: string }
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: The series does not use that source
+        "409":
+          description: listing_unavailable, primary_source, numbering_pending, or busy.
+  /api/admin/series/{id}/sources/{sourceId}/cleanup:
+    post:
+      tags: [admin]
+      summary: Explicitly delete a follower's unique downloads and stop following it.
+      operationId: postApiAdminSeriesIdSourcesSourceIdCleanup
+      description: >-
+        Requires an admin account and admin token scope. Rechecks the fresh leftovers preview while holding the
+        series writer claim and source/listing locks. Deletes only downloaded chapter files uniquely supplied
+        by this follower, their rows and progress, and its unique by-number marks. The source is removed in the
+        same operation. A partial filesystem failure returns ok false with purged.left and keeps the source.
+        The current main must first be replaced, keeping it as a follower. Last-source files always stay.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: sourceId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmation]
+              additionalProperties: false
+              properties:
+                confirmation: { type: string, minLength: 1, maxLength: 128 }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Cleanup result. Files named in left were kept; the follower stays when any could not be removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, purged]
+                properties:
+                  ok: { type: boolean }
+                  purged:
+                    type: object
+                    required: [removed, bytes, left]
+                    properties:
+                      removed: { type: integer }
+                      bytes: { type: integer }
+                      left:
+                        type: array
+                        items:
+                          type: object
+                          required: [id, reason]
+                          properties:
+                            id: { type: string }
+                            reason: { type: string, enum: [unlink_failed, outside_root, unreachable] }
+        "400":
+          description: A preview confirmation is required.
+        "401":
+          description: Not authenticated.
+        "403":
+          description: Admin permission or token scope required.
+        "404":
+          description: The series or followed source no longer exists.
+        "409":
+          description: preview_changed, listing_unavailable, primary_source, numbering_pending, busy, or refused.
   /api/admin/series/{id}/check:
     post:
       tags:
@@ -10892,6 +10999,60 @@ paths:
           description: Not found, or not visible to this account
         "409":
           description: "`refused`: the download directory is not writable; `message` and `fix` say what to do"
+  /api/admin/series/{id}/chapters/unlisted:
+    post:
+      tags:
+        - admin
+      summary: Which chosen chapters no followed source lists.
+      operationId: postApiAdminSeriesIdChaptersUnlisted
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Of the chosen
+        chapters, the ones whose number (an admin's override too, and every number of a range) no source the series
+        follows lists in its stored listing: once deleted, nothing can fetch them again. Read-only; the Delete from
+        server confirmation warns with it.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bookIds]
+              properties:
+                bookIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [unlisted]
+                properties:
+                  unlisted:
+                    type: array
+                    items:
+                      type: string
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found
   /api/admin/series/{id}/chapters/keep-once:
     post:
       tags:

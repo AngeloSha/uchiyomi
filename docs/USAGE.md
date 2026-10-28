@@ -650,7 +650,7 @@ Tap the line and the **Sources & translations** sheet opens. It has two sections
   followed on its own (see *Following a second source*), *{n} chapters listed* as of the last check, and
   *checked {ago}*. A source that is no longer installed is dimmed and says *not installed*. A series with
   no source says *No source — the chapters were scanned from disk.* Admins also get an × on a followed source
-  to stop following it, and two chips under the list: **Check now**, one for the series since a check
+  to stop following it (see *Removing a source* below), and two chips under the list: **Check now**, one for the series since a check
   visits every followed source, and **Add one from Find missing chapters**, which closes the sheet and
   opens that dialog (see *Following a second source*).
 - **Translated by** — one row per scanlation group, ranked groups first, then the busiest, blocked groups
@@ -1488,7 +1488,9 @@ folder — is ever deleted, and **a chapter anyone has bookmarked is kept**, bec
 inside the file. A chapter in a library you assembled, or one with a bookmark on it, is skipped, and the toast
 says how many were and why (*3 skipped: not downloaded by Uchiyomi*, *1 skipped: bookmarked by a reader*); a
 delete that deleted nothing says so in red rather than reporting *0 deleted* as a success. A deleted chapter
-is not fetched back by the updater; the tombstone is what tells it the chapter is accounted for.
+is not fetched back by the updater; the tombstone is what tells it the chapter is accounted for. When a chosen
+chapter isn't listed by any source the series follows, the confirmation warns that once deleted, it can't be fetched
+again.
 
 **Fetch again** is the replace that the translation rules deliberately never do on their own: it downloads
 the copy those rules choose *now* — the group you ranked since, from whichever followed source carries it —
@@ -2170,8 +2172,26 @@ the source calls it something that is not the series' title or one of its other 
 and offers **Attach anyway**. The other rules stay (the series' language, posting-order numbering, a check running right
 now, a waiting renumber, a source cooling down after errors, the follower limit for an extra source). A series with no
 source takes the pick as its main. The **×** on the main source detaches it, after asking: the next source takes over, or
-the series is left with none; downloaded chapters and your progress stay either way. A series numbered by posting order
-keeps its main source.
+the series is left with none. Detaching keeps downloaded chapters and everyone's progress. A
+series numbered by posting order keeps its main source.
+
+#### Removing a source
+
+The **×** beside a source offers **Remove source and keep downloads** as the default. This keeps its files,
+chapter rows and everyone's reading progress. Removing the series' only source always keeps its downloads.
+
+When a follower was attached by mistake, choose **Stop following and delete** to remove the chapters it downloaded
+that no remaining source lists. The preview names how many chapters and readers are affected. This permanently
+deletes those files, their rows (including old deletion markers), reading progress, bookmarks and offline records,
+and read marks on chapter numbers unique to that source. The numbers become available for the real chapters again.
+A chapter another followed source lists stays; **Fetch again** can replace it with the correct copy.
+
+Cleanup asks every remaining source for a fresh, nonempty chapter list. An unavailable, cooling, empty or incomplete
+source refuses deletion; you can still remove the source and keep downloads. If sources or eligible chapters change,
+open a new preview before confirming. A download or another writer changing the series also refuses cleanup.
+
+To clean up the current main source, first make its replacement main, keeping the old source as a follower; then
+remove the old follower with cleanup. Plain main detach keeps all downloads and uses the usual promotion rules.
 
 ### MangaDex in other languages
 

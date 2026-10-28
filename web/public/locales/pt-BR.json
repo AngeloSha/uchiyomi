@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4304
+    "strings": 4318
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -4307,5 +4307,19 @@
   "You reach the server through the proxy {ip}, trusted only as part of a private network. Until its address is in Trusted proxies, nobody behind it counts as at home: a visitor could write their own address.": "Você chega ao servidor pelo proxy {ip}, confiável só por estar numa rede privada. Até o endereço dele estar em Proxies confiáveis, ninguém atrás dele conta como em casa: um visitante poderia escrever o próprio endereço.",
   "Trust only {ip}": "Confiar só em {ip}",
   "You reach the server through Cloudflare, where nobody counts as at home. At home, open it by its local address, or by a local DNS name that points at your proxy.": "Você chega ao servidor pelo Cloudflare, e por ele ninguém conta como em casa. Em casa, abra-o pelo endereço local ou por um nome DNS local que aponte para o seu proxy.",
-  "You reach the server through a proxy while home is still every private network: a tunnel or a container running at home looks like home too. Choose These networks above and write your own network, e.g. 192.168.1.0/24.": "Você chega ao servidor por um proxy enquanto a rede de casa ainda é qualquer rede privada: um túnel ou contêiner rodando em casa também parece de casa. Escolha Estas redes acima e escreva sua própria rede, ex.: 192.168.1.0/24."
+  "You reach the server through a proxy while home is still every private network: a tunnel or a container running at home looks like home too. Choose These networks above and write your own network, e.g. 192.168.1.0/24.": "Você chega ao servidor por um proxy enquanto a rede de casa ainda é qualquer rede privada: um túnel ou contêiner rodando em casa também parece de casa. Escolha Estas redes acima e escreva sua própria rede, ex.: 192.168.1.0/24.",
+  "1 downloaded chapter no other source lists will be deleted from the server, together with everyone's reading progress.": "1 capítulo baixado que nenhuma outra fonte lista será apagado do servidor, junto com o progresso de leitura de todos.",
+  "{n} downloaded chapters no other source lists will be deleted from the server, together with everyone's reading progress.": "{n} capítulos baixados que nenhuma outra fonte lista serão apagados do servidor, junto com o progresso de leitura de todos.",
+  "No source this series follows lists this chapter. Once it is deleted, it cannot be fetched again.": "Nenhuma fonte que esta série segue lista este capítulo. Depois de apagado, não poderá ser baixado de novo.",
+  "No source this series follows lists these chapters. Once they are deleted, they cannot be fetched again.": "Nenhuma fonte que esta série segue lista estes capítulos. Depois de apagados, não poderão ser baixados de novo.",
+  "No source this series follows lists one of these chapters. Once it is deleted, it cannot be fetched again.": "Nenhuma fonte que esta série segue lista um destes capítulos. Depois de apagado, não poderá ser baixado de novo.",
+  "No source this series follows lists {n} of these chapters. Once they are deleted, they cannot be fetched again.": "Nenhuma fonte que esta série segue lista {n} destes capítulos. Depois de apagados, não poderão ser baixados de novo.",
+  "Stop following {name}?": "Deixar de seguir {name}?",
+  "Stop following and delete": "Deixar de seguir e apagar",
+  "Detach {name}? The next source takes over as main.": "Desvincular {name}? A próxima fonte passa a ser a principal.",
+  "Remove source and keep downloads": "Remover a fonte e manter os downloads",
+  "Read marks for {n} chapter numbers only this source lists will also be removed.": "As marcações de leitura de {n} números de capítulo listados apenas por esta fonte também serão removidas.",
+  "Some downloads could not be deleted. The source is still followed.": "Alguns downloads não puderam ser excluídos. A fonte continua sendo seguida.",
+  "Cleanup is unavailable. You can remove the source and keep its downloads.": "A limpeza não está disponível. Você pode remover a fonte e manter os downloads dela.",
+  "Optional cleanup": "Limpeza opcional"
 }

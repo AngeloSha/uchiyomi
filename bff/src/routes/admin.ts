@@ -105,6 +105,7 @@ import { bounded } from '../lib/autoFollow';
 import { budgetFor } from '../lib/sources/budget';
 import { switchMainSource } from '../lib/mainSource';
 import { refileFailures } from '../lib/chapterFailures';
+import { prepareCleanup, cleanupPreview, cleanupConfirmation, purgeLeftovers, purgeRefusal, unlistedOf, CleanupRefused } from '../lib/sourceLeftovers';
 import { mainUses, retireSource } from '../lib/retireSource';
 import { sourcesOverview } from '../lib/sourcesOverview';
 import { titlesFromBackup, entriesFromBackup, type BackupEntry } from '../lib/tachibk';
@@ -1999,6 +2000,65 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { ...out, sources: list };
   });
 
+  // A source detach is deliberately separate from file cleanup. Old clients' DELETE requests keep their downloads.
+  // Both preview and explicit cleanup claim the writer BEFORE reading eligibility, then lock the series row so follows,
+  // source switches and listing replacements cannot change the proof while files are being removed.
+  const sourceCleanup = async (req: FastifyRequest, reply: FastifyReply, remove: boolean) => {
+    const { id, sourceId } = req.params as { id: string; sourceId: string };
+    const row = await one<{ folder: string }>('SELECT folder FROM lib_series WHERE id = $1', [id]);
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    const body = remove ? z.object({ confirmation: z.string().min(1).max(128) }).strict().safeParse(req.body) : null;
+    if (remove && !body?.success) return reply.code(400).send({ error: 'bad_request' });
+    const claim = claimSeriesWriter([id], [row.folder]);
+    if (!claim) return reply.code(409).send({ error: 'busy', message: 'Another task is changing that series.' });
+    try {
+      const prepared = await prepareCleanup(id, sourceId);
+      const outcome = await tx(async (qq) => {
+        const [locked] = await qq<{ folder: string }>('SELECT folder FROM lib_series WHERE id = $1 AND deleted_at IS NULL AND merged_into IS NULL FOR UPDATE', [id]);
+        if (!locked) throw new CleanupRefused('not_found', 'The series is no longer available.');
+        if (locked.folder !== row.folder) throw new CleanupRefused('busy', 'The series moved. Open the preview again.');
+        // Bulk retirement can delete child rows without locking the parent. Lock this series' existing
+        // children too; new children need the parent FK lock, so unrelated series remain free to update.
+        await qq('SELECT source_id FROM series_sources WHERE series_id = $1 FOR UPDATE', [id]);
+        await qq('SELECT number FROM series_listing WHERE series_id = $1 FOR UPDATE', [id]);
+        const preview = await cleanupPreview(id, sourceId, qq, prepared);
+        const identity = `${id}:${sourceId}:${userIdOf(req)}`;
+        if (!remove) return {
+          chapters: preview.left.books.length, numbers: preview.left.numbers, readers: preview.left.readers,
+          lastSource: preview.left.others.length === 0, confirmation: cleanupConfirmation(preview, identity),
+        };
+        if (!preview.left.others.length) throw new CleanupRefused('primary_source', 'The last source keeps its downloads. Remove it without cleanup.');
+        if (!cleanupConfirmation(preview, identity, body!.success ? body!.data.confirmation : '')) {
+          throw new CleanupRefused('preview_changed', 'The chapters or sources changed. Open the preview again.');
+        }
+        const refusal = await purgeRefusal(preview.left.books);
+        if (refusal) throw new CleanupRefused('refused', refusal.reason, refusal.fix);
+        const purged = await purgeLeftovers(id, sourceId, preview.left, { userId: userIdOf(req), req }, qq);
+        if (purged.left.length) return { ok: false, purged };
+        // Cleanup removes the follower before releasing its writer claim: the wrong source can never download
+        // its just-cleaned chapters again between two HTTP requests.
+        await qq('DELETE FROM series_sources WHERE series_id = $1 AND source_id = $2', [id, sourceId]);
+        await qq('DELETE FROM series_listing WHERE series_id = $1 AND source_id = $2', [id, sourceId]);
+        await qq(`INSERT INTO scout_verdicts (series_id, source_id, verdict, at) VALUES ($1,$2,'removed',now())
+          ON CONFLICT (series_id, source_id) DO UPDATE SET verdict = 'removed', at = now()`, [id, sourceId]);
+        await qq('DELETE FROM backup_links WHERE series_id = $1 AND source_id = $2', [id, sourceId]);
+        await refileFailures(qq, [id]);
+        return { ok: true, purged };
+      });
+      if (remove && 'purged' in outcome && outcome.ok) {
+        await logAudit('series.unfollow_source', { userId: userIdOf(req), detail: { id, source: sourceId, cleanup: true }, req });
+        claim.release();
+        void updateSeries(id, 0).catch(() => {});
+      }
+      return outcome;
+    } catch (e) {
+      if (e instanceof CleanupRefused) return reply.code(e.reason === 'not_found' ? 404 : 409).send({ error: e.reason, message: e.message, ...(e.fix ? { fix: e.fix } : {}) });
+      throw e;
+    } finally { claim.release(); }
+  };
+  app.get('/api/admin/series/:id/sources/:sourceId/leftovers', (req, reply) => sourceCleanup(req, reply, false));
+  app.post('/api/admin/series/:id/sources/:sourceId/cleanup', (req, reply) => sourceCleanup(req, reply, true));
+
   app.delete('/api/admin/series/:id/sources/:sourceId', async (req, reply) => {
     const { id, sourceId } = req.params as { id: string; sourceId: string };
     // The main source (#243): a follower takes over, or the series is left with none (lib/manualAttach.ts detachMain).
@@ -2664,6 +2724,18 @@ export default async function adminRoutes(app: FastifyInstance) {
       if ('refused' in r) return reply.code(409).send({ error: 'refused', message: r.refused.reason, fix: r.refused.fix });
       return { ok: true, applied: r.applied, bytes: r.bytes, skipped: r.skipped };
     } finally { claim.release(); }
+  });
+
+  /**
+   * Of the chosen chapters, the ones no source the series follows lists (lib/sourceLeftovers.ts unlistedOf): once
+   * deleted, nothing can fetch them again. The Delete from server confirmation warns with it. 200 `{unlisted: ids}`.
+   */
+  app.post('/api/admin/series/:id/chapters/unlisted', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ bookIds: z.array(z.string().min(1).max(64)).min(1).max(500) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!(await getSeriesRow(id))) return reply.code(404).send({ error: 'not_found' });
+    return { unlisted: await unlistedOf(id, b.data.bookIds) };
   });
 
   /**
