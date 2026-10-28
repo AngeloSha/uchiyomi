@@ -1081,6 +1081,10 @@ POST   /auth/totp/setup           POST   /auth/totp/enable
 POST   /auth/totp/disable
 GET    /auth/oidc/start             GET    /auth/oidc/callback
 GET    /auth/oidc/link
+GET    /auth/profiles             POST   /auth/switch
+GET    /auth/ring                 POST   /auth/resume
+GET    /auth/pick                 POST   /auth/profile-login
+POST   /auth/leave
 ```
 
 **SSO-only mode** (since v0.63.0, `AUTH_MODE=oidc-only`): `/api/setup`, `/auth/login`, `/auth/register`,
@@ -1577,6 +1581,8 @@ GET    /api/tokens                POST   /api/tokens
 GET    /api/bookmarks             PUT    /api/bookmarks/:bookId/:page
 DELETE /api/bookmarks/:bookId/:page
 DELETE /api/tokens/:id            POST   /api/opds/token
+GET    /api/profiles              POST   /api/profiles
+PATCH  /api/profiles/:id          DELETE /api/profiles/:id
 GET    /api/opds/token            DELETE /api/opds/token
 PATCH  /api/opds/token
 GET    /api/trackers              POST   /api/trackers/anilist
@@ -1810,6 +1816,7 @@ PATCH  /api/admin/notify-targets/:id DELETE /api/admin/notify-targets/:id
 POST   /api/admin/notify-targets/:id/test
 GET    /api/admin/install-ping/preview
 GET    /api/admin/limits
+GET    /api/admin/network         PATCH  /api/admin/network
 GET    /api/admin/users           POST   /api/admin/users
 PATCH  /api/admin/users/:id       DELETE /api/admin/users/:id
 GET    /api/admin/sessions        DELETE /api/admin/sessions/:id

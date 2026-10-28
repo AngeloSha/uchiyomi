@@ -1,6 +1,6 @@
 // SSO-only mode in the web app (v0.63.0, #208): the sign-in screen is the provider's button alone, Members makes no
-// account and sets no password, and the profile manages neither a password nor a second step -- the server has none of
-// those routes in that mode (bff ssoOnly.int.test.ts). Read from source, like seriesPage.test.ts, plus the pure helpers.
+// account but a profile with no password and sets no password, and the profile manages neither a password nor a second
+// step -- the server has none of those routes in that mode (bff ssoOnly.int.test.ts). Read from source, like seriesPage.test.ts, plus the pure helpers.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
@@ -45,6 +45,20 @@ test('Members offers no New account and no password in SSO-only mode, and marks 
   assert.match(members, /\{ssoOnly \? \(\s*<div className="card grad-border p-4" data-sso-accounts>/);
   assert.match(members, /\{!ssoOnly && <button onClick=\{\(\) => setResetting\(u\)\} className="btn-key">\{tr\('Reset'\)\}<\/button>\}/);
   assert.match(members, /u\.sso && provider \? provider : null/);
+});
+
+test('in SSO-only mode Members makes a profile without a password, and nothing else', () => {
+  const members = code(read('app/admin/page.tsx'));
+  // The server makes that one account in this mode (bff passwordlessProfile.int.test.ts) and refuses any other: drop
+  // `|| ssoOnly` and the form sends a member with no password, which it refuses.
+  assert.match(members, /const open = localOpen \|\| ssoOnly;/);
+  assert.match(members, /password: ssoOnly \? undefined : password \|\| undefined/);
+  assert.match(members, /\.\.\.\(open \? \{ localOpen: true, managedBy: managedBy \|\| undefined \} : \{\}\)/);
+  const form = members.slice(members.indexOf('{ssoOnly && data && ('), members.indexOf('{!ssoOnly && data && <NewMemberDefaults'));
+  assert.ok(form.includes('data-sso-profile'), 'there is no New profile in SSO-only mode');
+  assert.doesNotMatch(form, /type="password"/, 'New profile in SSO-only mode asks for a password');
+  assert.doesNotMatch(form, /setRole/, 'New profile in SSO-only mode offers a role');
+  assert.match(form, /<HomeNetwork \/>/);
 });
 
 test('the profile manages no password and no 2FA in SSO-only mode, and links an account to the provider', () => {

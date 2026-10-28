@@ -11,6 +11,7 @@ import { arrival } from '@/lib/destinations';
 import { openInConsole } from '@/lib/consoleOnScreen';
 import { useReduceEffects } from '@/lib/useReduceEffects';
 import { Avatar } from './Avatar';
+import { ProfileSwitcher } from './ProfileSwitcher';
 import { useIncognito } from './IncognitoBanner';
 import { useLibraries, useAdultShown, useAdultFilterConfigured } from './AdultToggle';
 import { Row, SwitchRow } from './settings';
@@ -23,7 +24,7 @@ import { OnBody, Sheet, useRtl } from './ui';
  * Show 18+ is the session's reveal (lib/adult.ts) and, as AdultToggle does, renders nothing for an account
  * with no 18+ library or filter to reveal.
  */
-export function QuickSettings({ onClose }: { onClose: () => void }) {
+export function QuickSettings({ onClose, onSwitch }: { onClose: () => void; onSwitch?: () => void }) {
   const { user, logout } = useAuth();
   const qc = useQueryClient();
   const incognito = useIncognito();
@@ -67,6 +68,8 @@ export function QuickSettings({ onClose }: { onClose: () => void }) {
       </div>
       <div className="mt-2 flex items-center justify-between gap-2 border-t border-ink-800/70 pt-3">
         <a href="/profile/?tab=general" onClick={go('/profile/?tab=general')} data-profile-settings-link className={link}>{tr('Profile settings')}</a>
+        {/* Another profile on this device (components/ProfileSwitcher.tsx), on desktop too: this PC's people take turns. */}
+        {onSwitch && <button type="button" onClick={onSwitch} className={link}>{tr('Switch profile')}</button>}
         {/* Not on desktop: the app signs itself back in at once, so "Sign out" there would do nothing visible (as on the profile rail). */}
         {!isDesktop() && <button type="button" onClick={() => { onClose(); void logout(); }} className="rounded-lg px-2 py-1.5 text-sm text-red-300 hover:bg-red-500/10">{tr('Sign out')}</button>}
       </div>
@@ -78,6 +81,8 @@ export function QuickSettings({ onClose }: { onClose: () => void }) {
 export function ProfileMenu({ active }: { active: boolean }) {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
+  // Outside the popover, which closes on any press outside it -- the switcher's sheet included.
+  const [switching, setSwitching] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const rtl = useRtl();
@@ -123,20 +128,23 @@ export function ProfileMenu({ active }: { active: boolean }) {
             style={{ top: pos.top, ...(rtl ? { left: pos.edge } : { right: pos.edge }) }}
             className="glass fixed z-50 w-80 max-w-[calc(100vw-1rem)] rounded-2xl border border-ink-700 p-4 shadow-2xl outline-none">
             <div data-lenis-prevent className="max-h-[calc(100vh-6rem)] overflow-y-auto">
-              <QuickSettings onClose={() => close(false)} />
+              <QuickSettings onClose={() => close(false)} onSwitch={() => { close(false); setSwitching(true); }} />
             </div>
           </div>
         </OnBody>
       )}
+      {switching && <ProfileSwitcher onClose={() => setSwitching(false)} />}
     </>
   );
 }
 
 /** The phone's version: the same body in a bottom sheet, opened from Home's avatar. */
 export function QuickSettingsSheet({ onClose }: { onClose: () => void }) {
+  const [switching, setSwitching] = useState(false);
+  if (switching) return <ProfileSwitcher onClose={onClose} />;
   return (
     <Sheet title={tr('Quick settings')} onClose={onClose} overBottomNav>
-      <div data-lenis-prevent className="min-h-0 overflow-y-auto px-4"><QuickSettings onClose={onClose} /></div>
+      <div data-lenis-prevent className="min-h-0 overflow-y-auto px-4"><QuickSettings onClose={onClose} onSwitch={() => setSwitching(true)} /></div>
     </Sheet>
   );
 }

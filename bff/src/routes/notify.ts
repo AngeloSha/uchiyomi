@@ -16,8 +16,9 @@
  *
  * ⚠️ TEST TAKES AN ID, NEVER A URL. A "test this address" endpoint that accepts one in the body is a port
  * scanner with an admin login and an open proxy for one POST. It is also limited to five a minute PER ADMIN
- * -- keyed on the user id, not the address: server.ts runs with `trustProxy: true`, so `req.ip` is whatever
- * the leftmost X-Forwarded-For says and a limit keyed on it is one header away from no limit at all.
+ * -- keyed on the user id, not the address. Written when server.ts trusted every peer's X-Forwarded-For; since v0.69.1
+ * only TRUST_PROXY's do, but its default still names every device on the LAN and every container on the Docker
+ * network, and any of those can say what address it likes. A limit on a signed-in admin is a limit on the admin.
  */
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
