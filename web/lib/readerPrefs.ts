@@ -2,7 +2,7 @@ import type { WidePages } from './readerSpread';
 import type { AutoGuess } from './readerAuto';
 import type { SeriesType } from './types';
 
-export type ReaderTheme = 'amoled' | 'sepia' | 'gray';
+export type ReaderTheme = 'amoled' | 'paper' | 'sepia' | 'gray';
 
 /**
  * What the reader does with a page that repeats across chapters -- a credit page, an advert.
@@ -552,6 +552,11 @@ function allSourcePrefs(): Record<string, SourcePrefs> {
 
 export const THEME_FILTER: Record<ReaderTheme, string> = {
   amoled: 'none',
+  // Printed manga is black ink on warm off-white paper, not on the pure white of a scan. This maps a white pixel to
+  // about #F0E8D8 (a light cream: red above green above blue, the order a CSS `sepia()` alone cannot give, because it
+  // clips red and green together at white), leaves black black, and keeps mid greys neutral-warm. The first brightness
+  // makes room under the clip for the tint; the last puts the page back at paper level.
+  paper: 'brightness(0.92) sepia(0.25) saturate(1.1) brightness(0.94)',
   sepia: 'sepia(0.55) saturate(1.15) brightness(0.94)',
   gray: 'grayscale(0.25) brightness(0.88) contrast(0.95)',
 };
