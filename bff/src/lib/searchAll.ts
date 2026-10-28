@@ -245,7 +245,9 @@ export async function searchAll(
   opts: { waitMs: number; health: Map<string, SourceHealth>; creator?: 'author' | 'artist' },
 ): Promise<SearchAnswer> {
   // Creator results cannot share title results (or each other's role) under the same spelling.
-  const key = `${opts.creator ?? 'title'}:${keyOf(term)}`;
+  const key = opts.creator
+    ? `${opts.creator}:${term.trim().normalize('NFKC').toLowerCase()}`
+    : `title:${keyOf(term)}`;
   if (opts.creator) ask = ask.filter((src) => typeof src.searchCreator === 'function');
   const callStart = Date.now();
   let entry = entries.get(key);

@@ -27,7 +27,7 @@ services:
     # NOTE: deliberately NO `ports:` and only on yomi_internal -> unreachable from outside the stack
     healthcheck:
       # pg_isready succeeds even when the requested database is missing after an interrupted initialization.
-      test: ["CMD-SHELL", "psql -X --no-password -h 127.0.0.1 -U yomi -d yomi -Atqc 'SELECT 1' >/dev/null"]
+      test: ["CMD-SHELL", "PGPASSWORD=\"$${POSTGRES_PASSWORD}\" psql -X --no-password -h 127.0.0.1 -U yomi -d yomi -Atqc 'SELECT 1' >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 5

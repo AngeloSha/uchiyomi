@@ -40,6 +40,8 @@ test('fresh initialization and existing PostgreSQL 15 data survive container rec
     'exec', '-e', `PGPASSWORD=${password}`, name, 'psql', '-X', '--no-password', '-h', '127.0.0.1',
     '-U', user, '-d', database, '-Atqc', sql,
   ]);
+  // Docker Compose unescapes $$ before the container receives the health command.
+  const health = (name: string): string => docker(['exec', name, 'sh', '-c', service.healthcheck.test[1].replaceAll('$$', '$')]);
   const waitForQuery = async (name: string, user: string, database: string): Promise<void> => {
     for (let attempt = 0; attempt < 120; attempt++) {
       if (docker(['inspect', '--format', '{{.State.Running}}', name]) !== 'true')
@@ -93,13 +95,24 @@ test('fresh initialization and existing PostgreSQL 15 data survive container rec
       assert.equal(query(name, 'supabase_admin', 'postgres', "SELECT count(*) FROM pg_extension WHERE extname = 'supabase_vault'"), '1');
       assert.equal(client(name, password), '1');
       assert.throws(() => client(name, 'incorrect-password'), /password authentication failed/, 'TCP clients must still authenticate');
-      docker(['exec', name, 'sh', '-c', service.healthcheck.test[1]]);
+      health(name);
       seed(name);
       const before = snapshot(name);
       remove(name); name = start(volume, 'fixed');
       await waitForQuery(name, 'yomi', 'yomi');
       assert.equal(snapshot(name), before);
       assert.match(docker(['logs', name]), /Skipping initialization/);
+      // Existing installations may require a password even on loopback. SQL readiness must use the
+      // configured credential rather than depending on the vendor image's permissive local HBA rule.
+      execFileSync('docker', ['exec', '-i', name, 'sh', '-c', 'cat > /var/lib/postgresql/data/uchiyomi-test-hba.conf'], {
+        input: 'local all all trust\nhost all all 0.0.0.0/0 scram-sha-256\nhost all all ::0/0 scram-sha-256\n',
+      });
+      query(name, 'yomi', 'yomi', "ALTER SYSTEM SET hba_file = '/var/lib/postgresql/data/uchiyomi-test-hba.conf'");
+      remove(name); name = start(volume, 'fixed');
+      await waitForQuery(name, 'yomi', 'yomi');
+      health(name);
+      assert.equal(query(name, 'yomi', 'yomi', 'SELECT note FROM saved_development_rows WHERE id = 1'), 'keep this row');
+      assert.throws(() => docker(['exec', name, 'psql', '-X', '--no-password', '-h', '127.0.0.1', '-U', 'yomi', '-d', 'yomi', '-Atqc', 'SELECT 1']), /no password supplied/);
     });
 
     await t.test('an existing vendor cluster keeps its rows, extensions and configuration under the new initializer settings', async () => {
@@ -117,7 +130,7 @@ test('fresh initialization and existing PostgreSQL 15 data survive container rec
       await waitForQuery(name, 'yomi', 'yomi');
       assert.equal(snapshot(name), before);
       assert.equal(client(name, password), '1');
-      docker(['exec', name, 'sh', '-c', service.healthcheck.test[1]]);
+      health(name);
       assert.match(docker(['logs', name]), /Skipping initialization/);
     });
 
@@ -133,7 +146,7 @@ test('fresh initialization and existing PostgreSQL 15 data survive container rec
       remove(name); name = start(volume, 'fixed');
       await waitForQuery(name, 'yomi', 'postgres');
       assert.throws(() => query(name, 'yomi', 'yomi', 'SELECT 1'), /database "yomi" does not exist/);
-      assert.throws(() => docker(['exec', name, 'sh', '-c', service.healthcheck.test[1]]), /database "yomi" does not exist/);
+      assert.throws(() => health(name), /database "yomi" does not exist/);
       assert.equal(query(name, 'yomi', 'postgres', "SELECT count(*) FROM pg_roles WHERE rolname = 'supabase_admin'"), '0', 'existing clusters must not run the new init hook');
       assert.match(docker(['logs', name]), /Skipping initialization/);
     });

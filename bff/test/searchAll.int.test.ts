@@ -129,7 +129,8 @@ after(async () => {
 test('author, artist and title searches never reuse each other or ask unsupported sources', { skip }, async () => {
   const src = adapters[FAST] as any;
   const unsupportedBefore = calls[EMPTY];
-  src.searchCreator = async (_q: string, kind: string, page = 1) => [{ source: FAST, sourceId: `${kind}-${page}`, title: `${kind} result ${page}` }];
+  let creatorCalls = 0;
+  src.searchCreator = async (_q: string, kind: string, page = 1) => [{ source: FAST, sourceId: `${kind}-${page}-${++creatorCalls}`, title: `${kind} result ${page}` }];
   try {
     const title = await lib.searchAll('Creator Cache Isolation', [src], { waitMs: 6000, health: await hmap() });
     const author = await lib.searchAll('Creator Cache Isolation', [src, adapters[EMPTY]], { waitMs: 6000, health: await hmap(), creator: 'author' });
@@ -145,6 +146,10 @@ test('author, artist and title searches never reuse each other or ask unsupporte
     const all = await app.inject({ method: 'GET', url: `/api/sources/search-all?source=${FAST}&q=Creator%20Cache%20Isolation&creator=artist`, headers: tok(ids.plain) });
     assert.equal(all.statusCode, 200);
     assert.equal(all.json().content[0].title, 'artist result 1');
+    const first = await lib.searchAll('Lee 王', [src], { waitMs: 6000, health: await hmap(), creator: 'author' });
+    const other = await lib.searchAll('Lee 李', [src], { waitMs: 6000, health: await hmap(), creator: 'author' });
+    assert.notEqual(first.per.get(FAST)?.items[0].sourceId, other.per.get(FAST)?.items[0].sourceId,
+      'different creator names must not share the title normalizer that strips non-Latin characters');
     for (const route of ['search', 'search-all']) {
       const invalid = await app.inject({ method: 'GET', url: `/api/sources/${route}?source=${FAST}&q=Creator&creator=invalid`, headers: tok(ids.plain) });
       assert.equal(invalid.statusCode, 400, 'an invalid creator field must not silently become a title query');
