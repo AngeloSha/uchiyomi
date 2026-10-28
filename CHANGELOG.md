@@ -2,6 +2,9 @@
 
 ## Unreleased — backlog review
 
+- Fresh development databases initialize with the existing PostgreSQL 15 image. Existing volumes keep
+  their data/configuration, and the database healthcheck detects a missing application database (#363).
+
 - Source identity wins over a title match: different entries on one source remain separate even when their
   titles are identical or normalize alike. Same-title additions receive separate download folders (#357).
 - The series chapter toolbar has **Select all** and **Clear selection**, respecting the current group and

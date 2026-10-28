@@ -55,6 +55,11 @@ the admin from a password you type, fixes volume ownership, and starts the devel
 `yomi-db`, `yomi-suwayomi`, `yomi-flaresolverr`). `yomi-app` is the same single container the install ships,
 built from source.
 
+For a source checkout, the development database stays on its existing PostgreSQL 15 image. A fresh volume
+now finishes initialization with the image's own bootstrap role before creating Uchiyomi's `yomi` database;
+existing volumes retain their data and configuration. If an earlier first start failed before creating that
+database, see the recovery notes in [Contributing](../CONTRIBUTING.md#tests) before touching its volume.
+
 ---
 
 ## 2. Signing in

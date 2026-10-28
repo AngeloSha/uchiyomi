@@ -44,6 +44,23 @@ TEST_DATABASE_URL=postgres://test:test@127.0.0.1:5432/uchiyomi_test npm test
 
 CI runs both suites (with a throwaway Postgres) on every pull request.
 
+The development stack keeps its pinned Supabase PostgreSQL 15 image so existing `yomi_pgdata` volumes keep
+working. Fresh volumes initialize with the image's `supabase_admin` role, then `deploy/dev-db/zz-uchiyomi.sh`
+creates the separate `yomi` login/database. The hook never runs for an existing cluster. To check both fresh
+initialization and existing data/configuration with disposable Docker volumes (also run by CI):
+
+```bash
+cd bff
+TEST_DEV_DB_INIT=1 node --import tsx --test test/devDbInit.test.ts
+```
+
+If a previous fresh start failed with `Peer authentication failed for user "yomi"`, PostgreSQL may already
+have initialized its cluster without creating the application database or the vendor roles. The healthcheck
+now catches a missing database. Keep that volume and any backups: the init hook deliberately does not try
+to repair or reinitialize an existing cluster. Inspect the logs and database contents before choosing a
+recovery path. Creating only the missing database leaves the vendor roles/migrations incomplete; changing
+PostgreSQL's major version or deleting its volume is not an upgrade.
+
 If you're fixing a bug, a test that fails before the fix and passes after is the most useful thing you can
 add — several of the existing ones exist because something broke quietly and nobody noticed for weeks.
 

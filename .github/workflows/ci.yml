@@ -157,6 +157,9 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npm run test:ci
+      - name: Development database initialization and existing-volume compatibility
+        working-directory: ./bff
+        run: TEST_DEV_DB_INIT=1 node --import tsx --test test/devDbInit.test.ts
       - name: Web tests
         working-directory: ./web
         run: |
