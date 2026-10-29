@@ -76,12 +76,22 @@ test('only active runs poll, including an explicitly requested run while nightly
 test('idle pages wake once at the next nightly deadline and cleanly stop when disabled or failed', () => {
   const now = Date.UTC(2026, 9, 30, 12), status = overview({ schedule: { hour: 3, timezone: 'UTC', nextRunAt: new Date(now + 60_000).toISOString() } });
   assert.equal(coverTitleBatchResumeDelay(status, false, now), 91_000);
-  assert.equal(coverTitleBatchResumeDelay(status, false, now + 100_000), 0);
+  assert.equal(coverTitleBatchResumeDelay(status, false, now + 100_000), 60_000);
   assert.equal(coverTitleBatchResumeDelay({ ...status, enabled: false }, false, now), null);
   assert.equal(coverTitleBatchResumeDelay({ ...status, running: true }, false, now), null);
   assert.equal(coverTitleBatchResumeDelay(status, true, now), null);
   assert.equal(coverTitleBatchResumeDelay(overview({ schedule: { hour: 3, timezone: 'UTC', nextRunAt: 'bad' } }), false, now), null);
   assert.equal(coverTitleBatchResumeDelay(overview({ schedule: { hour: 3, timezone: 'UTC', nextRunAt: new Date(now + 9_000_000_000).toISOString() } }), false, now), 2_147_483_647);
+});
+
+test('an offline worker with an overdue nightly schedule cannot cause an immediate status refetch loop', () => {
+  const now = Date.UTC(2026, 9, 30, 12), status = overview({ available: false, running: false,
+    schedule: { hour: 3, timezone: 'UTC', nextRunAt: new Date(now - 3_600_000).toISOString() } });
+  assert.equal(coverTitleBatchResumeDelay(status, false, now), 60_000);
+  assert.equal(coverTitleBatchResumeDelay(status, false, now + 60_000), 60_000, 'an unchanged overdue response keeps the same bounded backoff');
+  assert.equal(coverTitleBatchResumeDelay(status, true, now), null, 'failed reads still wait for an explicit retry');
+  const future = { ...status, schedule: { ...status.schedule, nextRunAt: new Date(now + 90_000).toISOString() } };
+  assert.equal(coverTitleBatchResumeDelay(future, false, now), 121_000, 'future deadlines retain precise timing');
 });
 
 test('read/start/stop/review errors are actionable without claiming artwork changed', () => {

@@ -21,11 +21,13 @@ export function coverTitleBatchPoll(status: CoverTitleBatchStatus | undefined, f
   return status?.running && !failed ? 2500 : false;
 }
 
-/** Idle settings pages sleep until the next nightly tick; neither this read nor the timer starts work. */
+/** Idle pages sleep until the next tick; overdue schedules back off while the worker cannot advance them. */
 export function coverTitleBatchResumeDelay(status: CoverTitleBatchStatus | undefined, failed: boolean, now: number): number | null {
   if (!status?.enabled || status.running || failed || !status.schedule.nextRunAt) return null;
   const at = Date.parse(status.schedule.nextRunAt);
-  return Number.isFinite(at) ? Math.min(2_147_483_647, Math.max(0, at + 31_000 - now)) : null;
+  if (!Number.isFinite(at)) return null;
+  const remaining = at + 31_000 - now;
+  return Math.min(2_147_483_647, remaining > 0 ? remaining : 60_000);
 }
 
 /** These are disjoint server states. Cancelled work is finished, without being called checked or successful. */
