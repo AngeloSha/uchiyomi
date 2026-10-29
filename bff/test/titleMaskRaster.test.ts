@@ -14,6 +14,9 @@ test('round dots use pixel centers, preserve baseline alpha and never mutate it'
   assert.equal(output[50 * 100 + 51], 255);
   assert.equal(output[51 * 100 + 51], 0);
   assert.equal(output[0], 127); assert.equal(original[50 * 100 + 50], 0);
+  const buffer = Buffer.alloc(10000);
+  rasterizeTitleMask(buffer, 100, 100, [{ mode: 'restore', radius: .01, points: [{ x: .505, y: .505 }] }]);
+  assert.equal(buffer[50 * 100 + 50], 0, 'Node Buffer.slice is a view and must not mutate the immutable baseline');
 });
 test('continuous capsules have no gaps and straight-line sampling does not change the result', () => {
   const original = new Uint8Array(10000);

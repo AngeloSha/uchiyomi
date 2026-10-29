@@ -46,7 +46,7 @@ function segmentsFor(width: number, height: number, strokes: readonly MaskStroke
 export function rasterizeTitleMask(baseline: Uint8Array, width: number, height: number, strokes: readonly MaskStroke[]): Uint8Array {
   if (!(baseline instanceof Uint8Array) || baseline.length !== width * height) invalid();
   const segments = segmentsFor(width, height, strokes);
-  const alpha = baseline.slice();
+  const alpha = Uint8Array.from(baseline);
   for (const segment of segments) {
     const { ax, ay, bx, by, radius, value, left, top, right, bottom } = segment;
     const dx = bx - ax, dy = by - ay, lengthSquared = dx * dx + dy * dy, radiusSquared = radius * radius;
