@@ -81,7 +81,9 @@ try {
   await click('[data-extract-exclusion-keyboard]');
   const leftField = '[data-extract-exclusion="0"] [data-extract-coordinate="left"]';
   await page.click(leftField);
-  await page.keyboard.press('Control+A');
+  await page.keyboard.down('Control');
+  await page.keyboard.press('A');
+  await page.keyboard.up('Control');
   await page.keyboard.type('65');
   const creation = page.waitForResponse((response) => new URL(response.url()).pathname === root && response.request().method() === 'POST');
   await click('[data-extract-create]');
