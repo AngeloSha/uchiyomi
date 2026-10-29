@@ -533,3 +533,44 @@ test('deleting an exclusive overridden range removes raw/interior/override marks
     assert.equal((await q('SELECT 1 FROM listing_progress WHERE series_id = $1', [id])).length, 0);
   } finally { await q('DELETE FROM lib_series WHERE id = $1', [id]); }
 });
+
+test('cleanup checks viewer visibility again under its row lock after a fresh listing', { skip }, async () => {
+  const id = 's_left_visibility', folder = 'T!left/Visibility';
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id)
+    VALUES ($1,'T!left','Visibility',$2,1,$3,$4,'real-s')`, [id, folder, LIB, REAL]);
+  try {
+    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1,$2,'wrong-s')`, [id, WRONG]);
+    const bid = await book(id, folder, 20, WRONG);
+    await q('INSERT INTO read_progress (user_id, book_id, series_id, page, completed) VALUES ($1,$2,$3,1,false)', [uid, bid, id]);
+    await q('INSERT INTO bookmarks (user_id, book_id, series_id, page, note) VALUES ($1,$2,$3,1,\'Keep this mark\')', [uid, bid, id]);
+    const preview = () => app.inject({ method: 'GET', url: `/api/admin/series/${id}/sources/${WRONG}/leftovers`, headers: auth });
+    await q('UPDATE lib_series SET deleted_at = now() WHERE id = $1', [id]);
+    const calls = realCalls;
+    assert.equal((await preview()).statusCode, 404, 'a hidden series is not previewed');
+    assert.equal(realCalls, calls, 'the hidden series is refused before asking its source');
+    await q('UPDATE lib_series SET deleted_at = NULL WHERE id = $1', [id]);
+    for (const state of ['hidden', 'merged']) {
+      const pre = await preview();
+      assert.equal(pre.statusCode, 200, pre.body);
+      listHook = async () => {
+        listHook = null;
+        if (state === 'hidden') await q('UPDATE lib_series SET deleted_at = now() WHERE id = $1', [id]);
+        else await q('UPDATE lib_series SET merged_into = $2 WHERE id = $1', [id, S]);
+      };
+      const result = await app.inject({ method: 'POST', url: `/api/admin/series/${id}/sources/${WRONG}/cleanup`, headers: auth, payload: { confirmation: pre.json().confirmation } });
+      assert.equal(result.statusCode, 404, state + ': ' + result.body);
+      assert.equal(existsSync(join(DL, file(folder, 20))), true, 'the file was not removed');
+      assert.equal((await q('SELECT 1 FROM lib_books WHERE id = $1', [bid])).length, 1);
+      assert.equal((await q('SELECT page FROM read_progress WHERE book_id = $1', [bid]))[0].page, 1);
+      assert.equal((await q('SELECT note FROM bookmarks WHERE book_id = $1', [bid]))[0].note, 'Keep this mark');
+      assert.equal((await q('SELECT 1 FROM series_sources WHERE series_id = $1 AND source_id = $2', [id, WRONG])).length, 1);
+      await q('UPDATE lib_series SET deleted_at = NULL, merged_into = NULL WHERE id = $1', [id]);
+    }
+    assert.equal((await preview()).statusCode, 200, 'refusals release the writer claim for a later request');
+  } finally {
+    listHook = null;
+    await q('DELETE FROM read_progress WHERE series_id = $1', [id]);
+    await q('DELETE FROM bookmarks WHERE series_id = $1', [id]);
+    await q('DELETE FROM lib_series WHERE id = $1', [id]);
+  }
+});

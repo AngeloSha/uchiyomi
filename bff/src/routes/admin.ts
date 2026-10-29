@@ -70,7 +70,7 @@ import sharp from 'sharp';
 import { ART_BODY_LIMIT, ART_DIR, FIRST_PAGE, artFile, artOverview } from '../lib/seriesArt';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
-import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, applyAdultSources, rateSourceAdult, MAX_ADULT_SOURCES, browsableIds, nameableIds, viewCtxFor, hideAdult, ADULT_RATING } from '../lib/visibility';
+import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, applyAdultSources, rateSourceAdult, MAX_ADULT_SOURCES, browsableIds, nameableIds, viewCtxFor, visible, Params, hideAdult, ADULT_RATING } from '../lib/visibility';
 import { cleanSourceOrder, invalidateSourcePrefs } from '../lib/sourcePrefs';
 import { keepRestricted, memberDefaults, memberDefaultsShape, permsShape, saveMemberDefaults } from '../lib/memberDefaults';
 import { FOLLOW_LIMIT_MAX, followerLimit, forgetFollowerLimit } from '../lib/followLimit';
@@ -2007,7 +2007,11 @@ export default async function adminRoutes(app: FastifyInstance) {
   // source switches and listing replacements cannot change the proof while files are being removed.
   const sourceCleanup = async (req: FastifyRequest, reply: FastifyReply, remove: boolean) => {
     const { id, sourceId } = req.params as { id: string; sourceId: string };
-    const row = await one<{ folder: string }>('SELECT folder FROM lib_series WHERE id = $1', [id]);
+    const viewer = await viewCtxFor(userIdOf(req), roleOf(req));
+    const scope = new Params();
+    const target = scope.add(id);
+    const allowed = visible('s', viewer, scope);
+    const row = await one<{ folder: string }>(`SELECT s.folder FROM lib_series s WHERE s.id = ${target} AND ${allowed}`, scope.values);
     if (!row) return reply.code(404).send({ error: 'not_found' });
     const body = remove ? z.object({ confirmation: z.string().min(1).max(2048) }).strict().safeParse(req.body) : null;
     if (remove && !body?.success) return reply.code(400).send({ error: 'bad_request' });
@@ -2016,7 +2020,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     try {
       const prepared = await prepareCleanup(id, sourceId);
       const outcome = await tx(async (qq) => {
-        const [locked] = await qq<{ folder: string }>('SELECT folder FROM lib_series WHERE id = $1 AND deleted_at IS NULL AND merged_into IS NULL FOR UPDATE', [id]);
+        const [locked] = await qq<{ folder: string }>(`SELECT s.folder FROM lib_series s WHERE s.id = ${target} AND ${allowed} FOR UPDATE OF s`, scope.values);
         if (!locked) throw new CleanupRefused('not_found', 'The series is no longer available.');
         if (locked.folder !== row.folder) throw new CleanupRefused('busy', 'The series moved. Open the preview again.');
         // Bulk retirement can delete child rows without locking the parent. Lock this series' existing
