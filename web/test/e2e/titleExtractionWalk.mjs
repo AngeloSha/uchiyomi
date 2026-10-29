@@ -41,7 +41,7 @@ const initial = await detail();
 assert.equal(initial.titleArt.mode, 'automatic', 'titleArtWalk/reset or a fresh fixture should run first');
 const setLogo = (body) => api(`/api/admin/series/${encodeURIComponent(id)}/art`, { method: 'PUT', body: JSON.stringify({ kind: 'logo', ...body }) });
 const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
-const errors = [];
+const errors = [], servedPreviews = new Set();
 let page, expectedJobId;
 try {
   await mode('ok');
@@ -53,7 +53,11 @@ try {
   }
   page = await browser.newPage();
   page.on('pageerror', (error) => errors.push(error.message));
-  page.on('response', (response) => { if (response.status() >= 500) errors.push(`${response.status()} ${new URL(response.url()).pathname}`); });
+  page.on('response', (response) => {
+    const path = new URL(response.url()).pathname;
+    if (response.status() >= 500) errors.push(`${response.status()} ${path}`);
+    if (response.status() === 200 && path.startsWith(root + '/') && path.endsWith('/preview')) servedPreviews.add(path);
+  });
   await page.setBypassServiceWorker(true);
   await page.setViewport({ width: 1440, height: 1000 });
   await page.goto(BASE + '/series/?id=' + encodeURIComponent(id), { waitUntil: 'networkidle2' });
@@ -81,13 +85,13 @@ try {
     // browser default can abandon a healthy running job; terminal failures should instead fail at once.
     const deadline = Date.now() + (capabilities.timeoutSeconds + 10) * 1000;
     assert.ok(expectedJobId, 'readiness belongs to the accepted preview request');
-    // A retried preview can briefly still show the previous error while DELETE/POST/state adoption
-    // complete. Read the exact accepted job, never interpret that old terminal state as its result.
+    // A retried preview can briefly still show the previous result during DELETE/POST/state adoption.
+    // Require the accepted server job and its actual private preview response before checking decoded UI.
     for (;;) {
       const { job } = await api(`${root}/${encodeURIComponent(expectedJobId)}`, { signal: AbortSignal.timeout(5000) });
       assert.equal(job.id, expectedJobId);
       assert.ok(!['error', 'rejected', 'expired', 'applied'].includes(job.status), `preview ${job.id} failed: ${job.error || job.status}`);
-      if (job.status === 'ready') break;
+      if (job.status === 'ready' && servedPreviews.has(`${root}/${encodeURIComponent(expectedJobId)}/preview`)) break;
       assert.ok(Date.now() < deadline, 'accepted extraction finishes within its advertised work budget');
       await sleep(500);
     }
@@ -214,7 +218,7 @@ try {
 } catch (error) {
   // Preserve evidence before cleanup changes the title version or closes the dialog. Never log cookies,
   // access tokens, request headers, source image bytes or the worker's imageBase64 input.
-  const diagnostic = { failure: error.message, timeoutSeconds: capabilities.timeoutSeconds, seriesId: id, pageErrors: errors };
+  const diagnostic = { failure: error.message, timeoutSeconds: capabilities.timeoutSeconds, seriesId: id, pageErrors: errors, expectedJobId, previewServed: !!expectedJobId && servedPreviews.has(`${root}/${encodeURIComponent(expectedJobId)}/preview`) };
   try {
     const { job } = await api(expectedJobId ? `${root}/${encodeURIComponent(expectedJobId)}` : root, { signal: AbortSignal.timeout(5000) });
     diagnostic.job = job ? { id: job.id, status: job.status, error: job.error, reasons: job.reasons, selectionMode: job.selectionMode, region: job.region, exclusions: job.exclusions } : null;
