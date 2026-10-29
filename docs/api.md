@@ -1907,6 +1907,8 @@ GET    /api/admin/series/:id/title-extraction/:jobId
 DELETE /api/admin/series/:id/title-extraction/:jobId
 GET    /api/admin/series/:id/title-extraction/:jobId/cover
 GET    /api/admin/series/:id/title-extraction/:jobId/preview
+GET    /api/admin/series/:id/title-extraction/:jobId/mask/baseline
+PATCH  /api/admin/series/:id/title-extraction/:jobId/mask
 POST   /api/admin/series/:id/title-extraction/:jobId/apply
 POST   /api/admin/series/:id/hero/shuffle
 PATCH  /api/admin/series/:id      DELETE /api/admin/series/:id
