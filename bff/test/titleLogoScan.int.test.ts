@@ -81,8 +81,11 @@ test('a bounded batch continues beyond 128 titles after scheduler restart withou
   await seed(140);
   let release!: () => void; const gate = new Promise<void>((r) => { release = r; });
   art.setTitleLogoLookupForTests(async (anilistId) => { calls.push(anilistId); if (calls.length === 1) await gate; return { kind: 'missing' }; });
-  assert.equal(await scan.scanTitleLogos(), 128); await eventually(() => calls.length === 1);
-  assert.equal(art.titleLogoQueueState().ids.length, 128); release(); await art.titleLogoQueueSettled();
+  try {
+    assert.equal(await scan.scanTitleLogos(), 128); await eventually(() => calls.length === 1);
+    assert.equal(art.titleLogoQueueState().ids.length, 128);
+  } finally { release(); }
+  await art.titleLogoQueueSettled();
   let status = await scan.titleLogoScanStatus(); assert.equal(status.checked, 128); assert.equal(status.counts.unchecked, 12); assert.equal(status.counts.missing, 128); assert.equal(status.running, true);
   const clock = timers(); stop = scan.startTitleLogoScan(undefined, clock.options);
   assert.equal(clock.fire(), 15_000); await eventually(() => calls.length === 140); await art.titleLogoQueueSettled();
@@ -161,10 +164,14 @@ test('boot restores a legacy failed-refresh wait before new requests, including 
 test('queued work rechecks manual choices and identity changes, and turning off the setting cancels it immediately', { skip }, async () => {
   await seed(3); let release!: () => void; const gate = new Promise<void>((r) => { release = r; });
   art.setTitleLogoLookupForTests(async (anilistId) => { calls.push(anilistId); await gate; return { kind: 'missing' }; });
-  await scan.scanTitleLogos(); await eventually(() => calls.length === 1);
-  await q("INSERT INTO series_title_art(series_id,mode) VALUES($1,'text')", [id(2)]);
-  await q("UPDATE series_trackers SET external_id='20003' WHERE series_id=$1", [id(3)]);
-  release(); await art.titleLogoQueueSettled(); assert.equal(calls.length, 1); assert.equal((await scan.titleLogoScanStatus()).checked, 1);
+  try {
+    await scan.scanTitleLogos(); await eventually(() => calls.length === 1);
+    const active = Number(calls[0])-10000;
+    const waiting = [1, 2, 3].filter((n) => n !== active);
+    await q("INSERT INTO series_title_art(series_id,mode) VALUES($1,'text')", [id(waiting[0])]);
+    await q("UPDATE series_trackers SET external_id='20003' WHERE series_id=$1", [id(waiting[1])]);
+  } finally { release(); }
+  await art.titleLogoQueueSettled(); assert.equal(calls.length, 1); assert.equal((await scan.titleLogoScanStatus()).checked, 1);
   await q("UPDATE server_settings SET title_logo_retry_at=now()+interval '1 hour' WHERE id=1");
   await scan.scanTitleLogos(); await art.titleLogoQueueSettled(); assert.equal(art.titleLogoQueueState().ids.length, 1);
   const response = await app.inject({ method: 'PATCH', url: '/api/admin/settings', headers: auth(admin), payload: { automaticTitleLogos: false } });
@@ -174,8 +181,12 @@ test('queued work rechecks manual choices and identity changes, and turning off 
 test('scheduler shutdown clears its timer, discards in-flight automatic results and prevents rearming', { skip }, async () => {
   await seed(1); let release!: () => void; const gate = new Promise<void>((r) => { release = r; });
   art.setTitleLogoLookupForTests(async (anilistId) => { calls.push(anilistId); await gate; return { kind: 'missing' }; });
-  const clock = timers(); stop = scan.startTitleLogoScan(undefined, clock.options); clock.fire(); await eventually(() => calls.length === 1);
-  stop(); release(); await art.titleLogoQueueSettled(); await eventually(() => clock.pending.size === 0);
+  const clock = timers();
+  try {
+    stop = scan.startTitleLogoScan(undefined, clock.options); clock.fire(); await eventually(() => calls.length === 1);
+    stop();
+  } finally { release(); }
+  await art.titleLogoQueueSettled(); await eventually(() => clock.pending.size === 0);
   assert.equal((await scan.titleLogoScanStatus()).checked, 0); assert.equal(art.titleLogoQueueState().ids.length, 0);
   stop = scan.startTitleLogoScan(undefined, clock.options); assert.equal(clock.pending.size, 1); stop(); assert.equal(clock.pending.size, 0); assert.ok(clock.cleared > 0);
   runtime.stopping = true; stop = scan.startTitleLogoScan(undefined, clock.options); assert.equal(clock.pending.size, 0);
@@ -183,14 +194,20 @@ test('scheduler shutdown clears its timer, discards in-flight automatic results 
 
 test('explicit Find promotes an already queued automatic identity ahead of bulk work without interrupting the active lookup', { skip }, async () => {
   await seed(3); let release!: () => void; const gate = new Promise<void>((r) => { release = r; });
+  let promoted = '';
   art.setTitleLogoLookupForTests(async (anilistId, opts) => {
-    calls.push(anilistId); assert.equal(opts?.interactive, anilistId === '10003' ? true : undefined);
+    calls.push(anilistId); assert.equal(opts?.interactive, anilistId === promoted ? true : undefined);
     if (calls.length === 1) await gate; return { kind: 'missing' };
   });
-  await scan.scanTitleLogos(); await eventually(() => calls.length === 1);
-  const find = await app.inject({ method: 'POST', url: `/api/admin/series/${id(3)}/logo/refresh`, headers: auth(admin), payload: {} });
-  assert.equal(find.statusCode, 200); assert.equal(art.titleLogoQueueState().ids.length, 3);
-  release(); await art.titleLogoQueueSettled(); assert.deepEqual(calls, ['10001', '10003', '10002']);
+  let active = ''; let target = '';
+  try {
+    await scan.scanTitleLogos(); await eventually(() => calls.length === 1); active = calls[0];
+    target = art.titleLogoQueueState().ids.filter((sid) => sid !== id(Number(active)-10000)).at(-1)!;
+    promoted = String(10000+Number(target.match(/[0-9]+$/)![0]));
+    const find = await app.inject({ method: 'POST', url: `/api/admin/series/${target}/logo/refresh`, headers: auth(admin), payload: {} });
+    assert.equal(find.statusCode, 200); assert.equal(art.titleLogoQueueState().ids.length, 3);
+  } finally { release(); }
+  await art.titleLogoQueueSettled(); assert.equal(calls[0], active); assert.equal(calls[1], promoted); assert.equal(new Set(calls).size, 3);
 });
 
 test('a full automatic queue gives Find a waiting slot and rediscovers the evicted identity in the next scan', { skip }, async () => {
@@ -199,13 +216,19 @@ test('a full automatic queue gives Find a waiting slot and rediscovers the evict
     calls.push(anilistId); assert.equal(opts?.interactive, anilistId === '10130' ? true : undefined);
     if (calls.length === 1) await gate; return { kind: 'missing' };
   });
-  await scan.scanTitleLogos(); await eventually(() => calls.length === 1);
-  const find = await app.inject({ method: 'POST', url: `/api/admin/series/${id(130)}/logo/refresh`, headers: auth(admin), payload: {} });
-  assert.equal(find.statusCode, 200); const queued = art.titleLogoQueueState().ids;
-  assert.equal(queued.length, 128); assert.ok(queued.includes(id(1)), 'the active lookup keeps its slot');
-  assert.ok(queued.includes(id(130))); assert.ok(!queued.includes(id(128)), 'only waiting automatic work is evicted');
-  release(); await art.titleLogoQueueSettled(); assert.equal(calls.length, 128); assert.equal(calls[1], '10130');
-  assert.equal(calls.includes('10128'), false); assert.equal((await scan.titleLogoScanStatus()).counts.unchecked, 2);
+  let evicted = '';
+  try {
+    await scan.scanTitleLogos(); await eventually(() => calls.length === 1);
+    const before = art.titleLogoQueueState().ids; const active = id(Number(calls[0])-10000);
+    const find = await app.inject({ method: 'POST', url: `/api/admin/series/${id(130)}/logo/refresh`, headers: auth(admin), payload: {} });
+    assert.equal(find.statusCode, 200); const queued = art.titleLogoQueueState().ids;
+    assert.equal(queued.length, 128); assert.ok(queued.includes(active), 'the actual active lookup keeps its slot');
+    assert.ok(queued.includes(id(130))); const removed = before.filter((sid) => !queued.includes(sid));
+    assert.equal(removed.length, 1); assert.notEqual(removed[0], active, 'only waiting automatic work is evicted');
+    evicted = String(10000+Number(removed[0].match(/[0-9]+$/)![0]));
+  } finally { release(); }
+  await art.titleLogoQueueSettled(); assert.equal(calls.length, 128); assert.equal(calls[1], '10130');
+  assert.equal(calls.includes(evicted), false); assert.equal((await scan.titleLogoScanStatus()).counts.unchecked, 2);
   assert.equal(await scan.scanTitleLogos(), 2); await art.titleLogoQueueSettled();
   assert.equal(calls.length, 130); assert.equal(new Set(calls).size, 130); assert.equal((await scan.titleLogoScanStatus()).checked, 130);
 });
@@ -215,11 +238,13 @@ test('a queue filled with manual requests cannot evict manual or active work for
   art.setTitleLogoLookupForTests(async (anilistId, opts) => {
     calls.push(anilistId); assert.equal(opts?.interactive, true); if (calls.length === 1) await gate; return { kind: 'missing' };
   });
-  await art.queueTitleLogos(Array.from({ length: 128 }, (_, n) => id(n+1)), 'manual'); await eventually(() => calls.length === 1);
-  const before = art.titleLogoQueueState().ids;
-  const find = await app.inject({ method: 'POST', url: `/api/admin/series/${id(129)}/logo/refresh`, headers: auth(admin), payload: {} });
-  assert.equal(find.statusCode, 429); assert.equal(find.json().error, 'busy'); assert.deepEqual(art.titleLogoQueueState().ids, before);
-  release(); await art.titleLogoQueueSettled(); assert.equal(calls.length, 128); assert.equal(calls.includes('10129'), false);
+  try {
+    await art.queueTitleLogos(Array.from({ length: 128 }, (_, n) => id(n+1)), 'manual'); await eventually(() => calls.length === 1);
+    const before = art.titleLogoQueueState().ids;
+    const find = await app.inject({ method: 'POST', url: `/api/admin/series/${id(129)}/logo/refresh`, headers: auth(admin), payload: {} });
+    assert.equal(find.statusCode, 429); assert.equal(find.json().error, 'busy'); assert.deepEqual(art.titleLogoQueueState().ids, before);
+  } finally { release(); }
+  await art.titleLogoQueueSettled(); assert.equal(calls.length, 128); assert.equal(calls.includes('10129'), false);
 });
 
 test('status is admin-only and read-only; explicit scan rejects disabled mode and responds before provider completion', { skip }, async () => {
@@ -233,7 +258,9 @@ test('status is admin-only and read-only; explicit scan rejects disabled mode an
   let release!: () => void; const gate = new Promise<void>((r) => { release = r; });
   art.setTitleLogoLookupForTests(async (anilistId) => { calls.push(anilistId); await gate; return { kind: 'missing' }; });
   await q('UPDATE server_settings SET automatic_title_logos=true WHERE id=1');
-  const post = await app.inject({ method: 'POST', url: '/api/admin/title-logos/scan', headers: auth(admin), payload: { retryMissing: false } });
-  assert.equal(post.statusCode, 200); assert.equal(post.json().ok, true); assert.equal(post.json().status.running, true);
-  release(); await art.titleLogoQueueSettled(); assert.equal((await scan.titleLogoScanStatus()).checked, 1);
+  try {
+    const post = await app.inject({ method: 'POST', url: '/api/admin/title-logos/scan', headers: auth(admin), payload: { retryMissing: false } });
+    assert.equal(post.statusCode, 200); assert.equal(post.json().ok, true); assert.equal(post.json().status.running, true);
+  } finally { release(); }
+  await art.titleLogoQueueSettled(); assert.equal((await scan.titleLogoScanStatus()).checked, 1);
 });
