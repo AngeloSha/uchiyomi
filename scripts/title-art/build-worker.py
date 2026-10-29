@@ -26,7 +26,7 @@ def main():
     version = json.loads((repository / 'bff/package.json').read_text())['version']
     with tempfile.TemporaryDirectory(prefix='uchiyomi-title-extractor-build-') as stage:
         context = Path(stage)
-        for name in ['worker.py', 'server.py', 'sam_refinement.py', 'requirements.txt', 'Dockerfile']:
+        for name in ['worker.py', 'server.py', 'sam_refinement.py', 'stroke_completion.py', 'requirements.txt', 'Dockerfile']:
             shutil.copyfile(directory / name, context / name)
         subprocess.run(['git', '-C', str(source), 'archive', '--format=tar', '-o', str(context / 'hi-sam.tar'), REVISION], check=True)
         subprocess.run(['docker', 'build', '-t', args.tag, '--label', 'org.uchiyomi.hi-sam-revision=' + REVISION,
