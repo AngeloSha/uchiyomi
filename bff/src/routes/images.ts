@@ -26,12 +26,12 @@ import { fetchPublicHop } from '../lib/publicConnection';
 import { suwayomiUrl, suwayomiBase, suwayomiImageHeaders, onEngineOrigin } from '../lib/sources/suwayomi/client';
 import { fetchPublic, readCapped, withoutCredentials, MAX_COVER_BYTES, MAX_ICON_BYTES, MAX_HTML_BYTES } from '../lib/safeFetch';
 import { env } from '../env';
-import { join } from 'path';
+import { basename, join, resolve, sep } from 'path';
 import { readFile, stat } from 'fs/promises';
 import { q, one } from '../lib/db';
 import { pageFileVersion, pageFileVersionOf } from '../lib/pageCleanupFiles';
 import { viewCtxFor, visibleBookFile, seriesVisible, sourceAllowedFor, SYSTEM_CTX, type ViewCtx } from '../lib/visibility';
-import { artFile, firstPageBookOf, FIRST_PAGE } from '../lib/seriesArt';
+import { ART_DIR, artFile, firstPageBookOf, FIRST_PAGE } from '../lib/seriesArt';
 import { readTitleLogo } from '../lib/titleArt';
 import { namesOf } from '../lib/altTitles';
 import { HERO_FRAMES, backdropLook, heroFit, type HeroAr } from '../lib/heroFrame';
@@ -703,7 +703,11 @@ export const serveLibSeriesThumb = async (req: FastifyRequest, reply: FastifyRep
 export async function seriesCoverInput(id: string, ctx: ViewCtx): Promise<Buffer> {
   if (!(await seriesVisible(id, ctx))) throw Object.assign(new Error('no cover'), { statusCode: 404 });
   const ovr = await one<{ cover: string | null }>('SELECT cover FROM series_overrides WHERE series_id=$1', [id]);
-  if (ovr?.cover === 'upload') return readFile(artFile(id, 'cover'));
+  if (ovr?.cover === 'upload') {
+    const path=resolve(ART_DIR,basename(artFile(id,'cover')));
+    if(!path.startsWith(resolve(ART_DIR)+sep))throw Object.assign(new Error('no cover'),{statusCode:404});
+    return readFile(path);
+  }
   if (ovr?.cover === FIRST_PAGE) return firstPageInput(id, ctx);
   if (ovr?.cover) {
     try { return await fetchCoverImage(ovr.cover); } catch { return firstPageInput(id, ctx); }

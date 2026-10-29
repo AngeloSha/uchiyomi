@@ -2,7 +2,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, rename, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join, resolve, sep } from 'node:path';
 import sharp from 'sharp';
 import { env } from '../env';
 import { q, one, tx } from './db';
@@ -25,14 +25,22 @@ export const BATCH_RETENTION_DAYS=14,BATCH_ASSET_BUDGET=2*1024*1024*1024;
 const hash = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 const validJob = (id: string) => /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(id);
 const jobAsset=/^([a-f0-9-]{36})\.(?:png|webp|candidate\.png|mask-base\.png|revision\.[1-9][0-9]{0,9}\.[a-f0-9-]{36}\.webp)(?:\.[a-f0-9-]{36}\.part)?$/;
+const revisionAsset=/^([a-f0-9-]{36})\.revision\.[1-9][0-9]{0,9}\.([a-f0-9-]{36})\.webp$/;
 type FileKind='cover'|'preview'|'candidate'|'mask-base';
 const file = (id: string, kind: FileKind) => {
   if (!validJob(id)) throw new ExtractionError('not_found',404);
-  return join(EXTRACTION_DIR,`${id.toLowerCase()}${kind==='mask-base'?'.mask-base':kind==='candidate'?'.candidate':''}.${kind==='preview'?'webp':'png'}`);
+  return join(EXTRACTION_DIR,`${basename(id).toLowerCase()}${kind==='mask-base'?'.mask-base':kind==='candidate'?'.candidate':''}.${kind==='preview'?'webp':'png'}`);
 };
 function revisedFile(id:string,name:string):string {
-  if(!validJob(id)||!new RegExp('^'+id.toLowerCase()+'\\.revision\\.[1-9][0-9]{0,9}\\.[a-f0-9-]{36}\\.webp$').test(name))throw new ExtractionError('not_found',404);
-  return join(EXTRACTION_DIR,name);
+  const leaf=basename(name),match=revisionAsset.exec(leaf);
+  if(leaf!==name||!validJob(id)||!match||match[1]!==id.toLowerCase()||!validJob(match[2]))throw new ExtractionError('not_found',404);
+  return join(EXTRACTION_DIR,leaf);
+}
+/** Private I/O accepts only one validated asset leaf beneath the fixed cache directory. */
+function privateFile(path:string):string {
+  const leaf=basename(path);
+  if(resolve(path)!==resolve(EXTRACTION_DIR,leaf)||!jobAsset.test(leaf))throw new ExtractionError('not_found',404);
+  return resolve(EXTRACTION_DIR,leaf);
 }
 type Status = 'queued'|'running'|'ready'|'rejected'|'error'|'applied';
 export interface JobRow {
@@ -96,16 +104,21 @@ export async function titleExtractionVerificationContext(snapshot:Snapshot,model
 }
 async function writePrivateFile(path:string,bytes:Buffer) {
   if(bytes.length>ART_MAX_BYTES) throw new ExtractionError('extract_failed',502);
+  const target=resolve(privateFile(path));
+  if(!target.startsWith(resolve(EXTRACTION_DIR)+sep))throw new ExtractionError('not_found',404);
   await mkdir(EXTRACTION_DIR,{recursive:true,mode:0o700});
-  const part=path+'.'+randomUUID()+'.part';
-  try {await writeFile(part,bytes,{flag:'wx',mode:0o600});await rename(part,path);}
+  const part=resolve(EXTRACTION_DIR,basename(target)+'.'+randomUUID()+'.part');
+  if(!part.startsWith(resolve(EXTRACTION_DIR)+sep))throw new ExtractionError('not_found',404);
+  try {await writeFile(part,bytes,{flag:'wx',mode:0o600});await rename(part,target);}
   finally {await rm(part,{force:true}).catch(()=>{});}
 }
 async function writeJobFile(id:string,kind:FileKind,bytes:Buffer) {return writePrivateFile(file(id,kind),bytes);}
 async function readPrivateFile(path:string):Promise<Buffer> {
   let handle:Awaited<ReturnType<typeof open>>|undefined;
   try {
-    handle=await open(path,constants.O_RDONLY|(constants.O_NOFOLLOW||0));
+    const target=resolve(privateFile(path));
+    if(!target.startsWith(resolve(EXTRACTION_DIR)+sep))throw new ExtractionError('not_found',404);
+    handle=await open(target,constants.O_RDONLY|(constants.O_NOFOLLOW||0));
     const meta=await handle.stat(); if(!meta.isFile()||meta.size<1||meta.size>ART_MAX_BYTES) throw new Error('size');
     const bytes=Buffer.alloc(meta.size+1); const {bytesRead}=await handle.read(bytes,0,bytes.length,0);
     const after=await handle.stat(); if(bytesRead!==meta.size||after.size!==meta.size||after.mtimeMs!==meta.mtimeMs) throw new Error('changed');
@@ -425,7 +438,8 @@ export async function correctTitleExtractionMask(seriesId:string,jobId:string,us
   const bytes=await normalizeTitleLogo(png);
   const revision=input.expectedRevision+1;
   const previousRevisionBytes=row.mask_preview_file?await lstat(revisedFile(jobId,row.mask_preview_file)).then(meta=>meta.isFile()?meta.size:0,()=>0):0;
-  const name=`${jobId.toLowerCase()}.revision.${revision}.${randomUUID()}.webp`,path=revisedFile(jobId,name);
+  const name=`${jobId.toLowerCase()}.revision.${revision}.${randomUUID()}.webp`,path=resolve(revisedFile(jobId,name));
+  if(!path.startsWith(resolve(EXTRACTION_DIR)+sep))throw new ExtractionError('not_found',404);
   await writePrivateFile(path,bytes);
   let committed=false;
   try {

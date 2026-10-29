@@ -279,6 +279,26 @@ test('concurrent corrections accept one revision and persist only its winning pr
   assert.equal((await readdir(core.EXTRACTION_DIR)).filter(n=>n.startsWith(id+'.revision.')).length,1);
   await request('DELETE',base+'/'+id);assert.equal((await readdir(core.EXTRACTION_DIR)).some(n=>n.startsWith(id+'.')),false);
 });
+test('private preview filenames reject traversal, another job and malformed revision identities', {skip},async()=>{
+  const id=await makeCorrectable(),saved=await edit(id,0,[restore]);assert.equal(saved.statusCode,200,saved.body);
+  const original=(await q('SELECT mask_preview_file FROM series_title_extractions WHERE id=$1',[id]))[0].mask_preview_file;
+  const otherId=await makeCorrectable(),otherSaved=await edit(otherId,0,[restore]);assert.equal(otherSaved.statusCode,200,otherSaved.body);
+  const otherName=(await q('SELECT mask_preview_file FROM series_title_extractions WHERE id=$1',[otherId]))[0].mask_preview_file;
+  const sentinel=join(ROOT,'private-preview-sentinel.webp'),bytes=(await request('GET',saved.json().job.previewUrl)).rawPayload;
+  const malformed=`${id}.revision.1.${'a'.repeat(36)}.webp`;
+  await writeFile(sentinel,bytes);await writeFile(join(core.EXTRACTION_DIR,malformed),bytes);
+  try{
+    for(const name of[sentinel,'../private-preview-sentinel.webp',otherName,malformed]){
+      await q('UPDATE series_title_extractions SET mask_preview_file=$2 WHERE id=$1',[id,name]);
+      assert.equal((await request('GET',saved.json().job.previewUrl)).statusCode,404,name);
+      assert.equal((await request('POST',base+'/'+id+'/apply',{expectedMaskRevision:1})).statusCode,404,name);
+    }
+    assert.equal((await request('GET',base+'/'+encodeURIComponent('../'+id)+'/preview')).statusCode,404);
+    assert.deepEqual(await readFile(sentinel),bytes,'refused paths never modify files outside the private directory');
+    assert.equal((await request('GET',otherSaved.json().job.previewUrl)).statusCode,200,'the other job remains intact');
+  }finally{await q('UPDATE series_title_extractions SET mask_preview_file=$2 WHERE id=$1',[id,original]);await rm(sentinel,{force:true});}
+  assert.equal((await request('GET',saved.json().job.previewUrl)).statusCode,200);assert.equal((await currentArt()).logoUrl,null);
+});
 test('cover/title changes and baseline corruption reject corrections without publishing', {skip},async()=>{
   let id=await makeCorrectable();await request('PUT',`/api/admin/series/${SID}/art`,{kind:'logo',mode:'style',style:'fantasy'});
   assert.equal((await edit(id,0,[restore])).statusCode,409);await core.dropTitleExtractions(SID);
