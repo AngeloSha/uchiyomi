@@ -237,6 +237,28 @@ test('mask correction replays an immutable full-source baseline and preserves or
   assert.equal(applied.json().titleArt.mode,'custom');assert.equal(applied.json().titleArt.attribution.source,'Cover lettering');
   assert.equal((await readdir(core.EXTRACTION_DIR)).some(n=>n.startsWith(id+'.')),false,'Apply removes baseline, raw mask and all private revisions');
 });
+test('an isolated restored pixel keeps exact alpha bounds and source color in both preview and published artwork', {skip},async()=>{
+  const rgb=Buffer.alloc(600*900*3,184),pixel=(720*600+480)*3;rgb[pixel]=23;rgb[pixel+1]=141;rgb[pixel+2]=205;
+  const source=await sharp(rgb,{raw:{width:600,height:900,channels:3}}).png().toBuffer();
+  const upload=await request('PUT',`/api/admin/series/${SID}/art`,{kind:'cover',mode:'upload',dataUrl:'data:image/png;base64,'+source.toString('base64')});
+  assert.equal(upload.statusCode,200,upload.body);
+  core.setTitleExtractionForTests({ready:async()=>true,assess:async()=>quality(),worker:async(bytes,selection)=>({
+    ...await worker(bytes,selection),sourceWidth:600,sourceHeight:900,candidateRegion:{left:60/600,top:100/900,width:240/600,height:80/900},
+  })});
+  const id=await makeReady(),snapshot=await request('GET',(await jobState(id)).mask.canvas.sourceUrl);
+  const sourceRgb=await sharp(snapshot.rawPayload).removeAlpha().raw().toBuffer();
+  const saved=await edit(id,0,[{mode:'restore',radius:.0005,points:[{x:480.5/600,y:720.5/900}]}]);
+  assert.equal(saved.statusCode,200,saved.body);const job=saved.json().job;
+  assert.deepEqual(job.mask.previewRegion,{left:80/600,top:120/900,width:401/600,height:601/900});
+  const preview=await request('GET',job.previewUrl);assert.equal(preview.statusCode,200);
+  const decoded=await sharp(preview.rawPayload).ensureAlpha().raw().toBuffer({resolveWithObject:true});
+  assert.deepEqual([decoded.info.width,decoded.info.height],[401,601],'a detached restored pixel remains inside the final bounds');
+  const last=(600*401+400)*4;assert.deepEqual([...decoded.data.subarray(last,last+4)],[...sourceRgb.subarray(pixel,pixel+3),255]);
+  const first=(120*600+80)*3;assert.deepEqual([...decoded.data.subarray(0,4)],[...sourceRgb.subarray(first,first+3),255],'existing lettering uses source colors too');
+  assert.equal(decoded.data[((600*401)+399)*4+3],0,'adjacent background remains transparent');
+  const applied=await request('POST',base+'/'+id+'/apply',{expectedMaskRevision:1});assert.equal(applied.statusCode,200,applied.body);
+  assert.deepEqual((await art.readTitleLogo(SID))!.bytes,preview.rawPayload,'Apply publishes exactly the decoded and reviewed preview');
+});
 test('mask correction is admin/owner authorized and validates bounded source-only strokes', {skip},async()=>{
   const id=await makeCorrectable(),job=await jobState(id),url=base+'/'+id+'/mask';
   assert.equal((await app.inject({method:'PATCH',url,payload:{expectedRevision:0,strokes:[]}})).statusCode,401);

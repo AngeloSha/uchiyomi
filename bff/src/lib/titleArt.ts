@@ -179,8 +179,26 @@ export async function normalizeTitleLogo(bytes: Buffer): Promise<Buffer> {
     const info = await image.metadata();
     if (!['png', 'webp', 'jpeg', 'avif', 'heif'].includes(info.format ?? '') || (info.pages ?? 1) > 1) throw new Error('not a still raster');
     if (!info.width || !info.height || info.width * info.height > MAX_PIXELS) throw new Error('too many pixels');
-    if (info.hasAlpha && (await image.stats()).channels.at(-1)?.max === 0) throw new Error('empty image');
-    return await image.rotate().trim({ background: '#00000000', threshold: 0 }).resize({ width: 1600, height: 800, fit: 'inside', withoutEnlargement: true })
+    let bounded = image.rotate();
+    if (info.hasAlpha) {
+      const { data, info: decoded } = await image.clone().rotate().toColourspace('srgb').ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      let left = decoded.width, top = decoded.height, right = 0, bottom = 0, transparent = false;
+      for (let n = 0; n < decoded.width * decoded.height; n++) {
+        const alpha = data[n * 4 + 3];
+        if (alpha < 255) transparent = true;
+        if (alpha > 0) {
+          const x = n % decoded.width, y = Math.floor(n / decoded.width);
+          left = Math.min(left, x); top = Math.min(top, y); right = Math.max(right, x + 1); bottom = Math.max(bottom, y + 1);
+        }
+      }
+      if (right <= left || bottom <= top) throw new Error('empty image');
+      // Heuristic trim can discard a detached title dot or a user's isolated restored pixel.
+      // Transparency is authoritative: include every nonzero-alpha pixel, regardless of its RGB.
+      if (transparent) bounded = sharp(data, { raw: { width: decoded.width, height: decoded.height, channels: 4 } })
+        .extract({ left, top, width: right - left, height: bottom - top });
+      else bounded = bounded.trim({ background: '#00000000', threshold: 0 });
+    } else bounded = bounded.trim({ background: '#00000000', threshold: 0 });
+    return await bounded.resize({ width: 1600, height: 800, fit: 'inside', withoutEnlargement: true })
       .webp({ lossless: true }).toBuffer();
   } catch { throw new TitleArtError('bad_image', 400, 'That file is not a readable, still raster image.'); }
 }
