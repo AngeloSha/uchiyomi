@@ -55,6 +55,11 @@ the admin from a password you type, fixes volume ownership, and starts the devel
 `yomi-db`, `yomi-suwayomi`, `yomi-flaresolverr`). `yomi-app` is the same single container the install ships,
 built from source.
 
+For a source checkout, the development database stays on its existing PostgreSQL 15 image. A fresh volume
+now finishes initialization with the image's own bootstrap role before creating Uchiyomi's `yomi` database;
+existing volumes retain their data and configuration. If an earlier first start failed before creating that
+database, see the recovery notes in [Contributing](../CONTRIBUTING.md#tests) before touching its volume.
+
 ---
 
 ## 2. Signing in
@@ -88,6 +93,33 @@ whatever its capital letters: with `admin` here, `Admin` is taken too. What a ne
 libraries, an age limit, downloads) is the admin's choice, under **Admin → Members → When someone signs up**. With the
 switch off there is no such link, and accounts come from the admin (**Admin → Members**). The desktop app never offers
 it.
+
+**Profiles without a password.** A household can give the children, or anyone who reads on the family tablet, a
+profile of their own that opens without a password, with its own progress, favourites and history. Tap your profile
+photo, then **Switch profile**: the profiles you manage are a tap away, and **Sign in with another account** takes you
+back to this screen. They open from your home network only. From anywhere else, on mobile data or a friend's Wi-Fi,
+only an account with a password (or single sign-on) gets in, and a profile without one stops at its next request
+until you are home again: the sign-in screen then says *This profile opens from home only*. Signing out of the account
+you switched from closes the profiles opened from it on that device. Which networks are home is set in **Admin →
+Settings → Server → Home network**: by default the private networks your router hands out (192.168.x, 10.x, 172.16–31.x),
+or the networks you write there, or none. The same place names the reverse proxies allowed to say who is connecting, and
+lists the address the server sees for each signed-in device, at home or outside, so a proxy that hides everyone behind
+its own address shows. Behind a reverse proxy, write its address in **Trusted proxies** (the page offers it when you
+reach the server through one): until then nobody behind the proxy counts as at home. Through a Cloudflare Tunnel nobody
+does: at home, open the app by its local address or a local DNS name. `LOCAL_NETWORKS` and `TRUST_PROXY`
+in the environment outrank the page ([Configuration](CONFIGURATION.md)).
+An admin can also turn on **Admin → Settings → Server → Choose a profile at home**: at home, the sign-in screen then
+lists those profiles under *Who is reading?*, a tap each, with nobody else signed in first. From outside it lists
+nothing.
+> 💻 **In the desktop app** the computer's owner adds these profiles under **Profile → Account → Profiles** and switches
+> to one with **Switch profile**; **Back to my account** returns to the owner. The desktop app is home, so they always open
+> there.
+
+**Remember on this device.** Tick it under the password when you sign in, and this device keeps you: the sign-in
+screen lists you under *On this device*, and the others signed in here find you under **Switch profile**, a tap away
+without your password, for as long as your session lasts. **Sign out** forgets you on this device; **Sign in with
+another account** keeps you remembered. An admin is asked for the password again after 12 hours. Nothing is
+remembered unless you tick it, so a shared tablet keeps nobody by default.
 
 ---
 
@@ -359,6 +391,15 @@ way it is written: *Chugong (추공)* also finds a series that only says *추공
 It matches whole names, so *Oh* is not every name with "oh" in it. **Save as list** keeps the author, so a list of
 someone's work fills itself as you add more of it. Genres link the same way, to the Library filtered by that genre.
 
+**Find more by this author** on that filtered library opens Discover with the author's name. Discover's
+**Search by** control offers **Title**, **Author**, and **Artist**. Creator searches use the provider's own
+creator fields and only ask sources that support them; they never substitute a title search. MangaDex
+supports both roles, including enabled languages and further result pages. An extension participates only
+when it declares an Author or Artist text filter; a source with only one role is only asked for that role.
+A provider's combined Author / Artist field searches either kind, as that provider defines it. Filter names,
+positions and group nesting come from the extension; no title syntax or saved preference is changed.
+Extensions without creator search support are left out. The chosen field stays in the address when you reload.
+
 - **The reading button** says what it opens (since v0.60.0): *Continue · Ch. 12* when a chapter is half read (the
   one you read last), *Next · Ch. 11* when you finished chapters 1–10 and nothing is half read, *Start reading* the
   first time, and *Read again* once everything is read. A series with no chapter on disk yet shows *Nothing to read yet*
@@ -612,7 +653,7 @@ Tap the line and the **Sources & translations** sheet opens. It has two sections
   followed on its own (see *Following a second source*), *{n} chapters listed* as of the last check, and
   *checked {ago}*. A source that is no longer installed is dimmed and says *not installed*. A series with
   no source says *No source — the chapters were scanned from disk.* Admins also get an × on a followed source
-  to stop following it, and two chips under the list: **Check now**, one for the series since a check
+  to stop following it (see *Removing a source* below), and two chips under the list: **Check now**, one for the series since a check
   visits every followed source, and **Add one from Find missing chapters**, which closes the sheet and
   opens that dialog (see *Following a second source*).
 - **Translated by** — one row per scanlation group, ranked groups first, then the busiest, blocked groups
@@ -1450,7 +1491,9 @@ folder — is ever deleted, and **a chapter anyone has bookmarked is kept**, bec
 inside the file. A chapter in a library you assembled, or one with a bookmark on it, is skipped, and the toast
 says how many were and why (*3 skipped: not downloaded by Uchiyomi*, *1 skipped: bookmarked by a reader*); a
 delete that deleted nothing says so in red rather than reporting *0 deleted* as a success. A deleted chapter
-is not fetched back by the updater; the tombstone is what tells it the chapter is accounted for.
+is not fetched back by the updater; the tombstone is what tells it the chapter is accounted for. When a chosen
+chapter isn't listed by any source the series follows, the confirmation warns that once deleted, it can't be fetched
+again.
 
 **Fetch again** is the replace that the translation rules deliberately never do on their own: it downloads
 the copy those rules choose *now* — the group you ranked since, from whichever followed source carries it —
@@ -1755,6 +1798,38 @@ Pages are fingerprinted by a background job, listed with the other library jobs 
 chapter that has not been processed yet simply skips nothing. One limit worth knowing: a chapter you
 downloaded *before* its pages were fingerprinted keeps the flags it was saved with until you download it
 again.
+
+### Removing unwanted images and source GIF rules
+
+An admin reading the server copy can open **Pages → Manage saved pages** to select unwanted images in a
+downloaded chapter, preview the selection and confirm removal. **Skip** keeps the original image in the file;
+**Remove** takes its bytes out of the CBZ and retains them in the server's page trash. Each image keeps its
+original numbered slot, so story pages, bookmarks and reading progress never shift. Removed slots remain
+labelled in Pages, with **Restore** while their original is retained.
+
+Physical editing supports writable, complete local **CBZ** files only. CBR, PDF, EPUB, loose-image folders,
+remote chapters and partial downloads still offer Skip. For safety the editor also refuses archives over
+128 MiB compressed or decoded, archives with over 2,000 entries, and malformed entries. If the chapter was
+replaced by another program or fetched again after the preview, refresh the preview; originals cannot be
+restored onto a different archive. A copied CBZ can describe removed slots, but needs the original server's
+page trash and journal to restore them.
+
+**Keeping an original in trash still uses storage.** After checking the selection, an admin can permanently
+delete retained originals, or clear unused retained images left after restoration. The confirmation explains
+that this removes the server trash's undo copy. Another removed slot that still needs a shared original keeps
+that image. There is no automatic purge or expiry. Separate backups and existing offline downloads keep
+their own copies; clearing the server trash does not clear those.
+
+The same panel can preview `.gif` images and enable a **GIF skip rule** for this series or its whole source.
+Rules start disabled, apply to existing and future chapter reads, and never delete an image. A series rule
+overrides its source rule, including an explicit **Disabled**; clearing the series rule returns to the source's
+default. A rule follows the copy's recorded source identifier, so another source's version and chapters with
+unknown provenance are left alone. Use the page grid's existing rescue control for any legitimate GIF:
+that page's explicit rescue wins over the rule.
+
+Saved offline chapters retain the images and flags they were downloaded with. Remove this device's saved
+copy in Downloads and reopen the chapter online before editing the server copy or changing its rules;
+download it again afterward to keep the updated version. Other devices' completed downloads are separate.
 
 ### Translated pages
 
@@ -2132,8 +2207,26 @@ the source calls it something that is not the series' title or one of its other 
 and offers **Attach anyway**. The other rules stay (the series' language, posting-order numbering, a check running right
 now, a waiting renumber, a source cooling down after errors, the follower limit for an extra source). A series with no
 source takes the pick as its main. The **×** on the main source detaches it, after asking: the next source takes over, or
-the series is left with none; downloaded chapters and your progress stay either way. A series numbered by posting order
-keeps its main source.
+the series is left with none. Detaching keeps downloaded chapters and everyone's progress. A
+series numbered by posting order keeps its main source.
+
+#### Removing a source
+
+The **×** beside a source offers **Remove source and keep downloads** as the default. This keeps its files,
+chapter rows and everyone's reading progress. Removing the series' only source always keeps its downloads.
+
+When a follower was attached by mistake, choose **Stop following and delete** to remove the chapters it downloaded
+that no remaining source lists. The preview names how many chapters and readers are affected. This permanently
+deletes those files, their rows (including old deletion markers), reading progress, bookmarks and offline records,
+and read marks on chapter numbers unique to that source. The numbers become available for the real chapters again.
+A chapter another followed source lists stays; **Fetch again** can replace it with the correct copy.
+
+Cleanup asks every remaining source for a fresh, nonempty chapter list. An unavailable, cooling, empty or incomplete
+source refuses deletion; you can still remove the source and keep downloads. If sources or eligible chapters change,
+open a new preview before confirming. A download or another writer changing the series also refuses cleanup.
+
+To clean up the current main source, first make its replacement main, keeping the old source as a follower; then
+remove the old follower with cleanup. Plain main detach keeps all downloads and uses the usual promotion rules.
 
 ### MangaDex in other languages
 
@@ -2236,6 +2329,10 @@ same sheet. It opens the site in the extension engine's own browser, live and ov
 type as on the site (on a phone, a tap is a click and brings up the keyboard, a swipe scrolls, and **Keyboard** brings
 the keyboard back), sign in, and press **Done**. The engine keeps the sign-in for that extension, and the sheet says
 whether the source answers now. **Start over** opens the site's home page again.
+
+**Open site is optional.** If an extension already searches and downloads normally, no visit or sign-in is
+needed. A verification loop in this manual browser view does not by itself mean the extension is broken.
+Use the view when you actually need to sign in or a blocked source asks you to complete a site check.
 
 **Signing in with a link the site emails you** (since v0.94.0). A sign-in link signs in whichever browser opens it, so
 opening it from your email signs in your own browser, not the engine's. Ask the site for the link inside **Open site**,
@@ -3058,7 +3155,12 @@ Once you have more than one, the Library page grows a row of tabs to switch betw
 
 **Members:** create accounts (user or admin), reset passwords, and per-user controls: make admin/member,
 disable, or allow/deny downloads. Each row shows whether the member has 2FA on, and the provider's name on an account
-linked to single sign-on. On a server that signs in through its provider only (since v0.63.0), Members makes no
+linked to single sign-on. **Opens at home without a password**, on *New account* or on a member's card, makes a
+profile that opens from your home network with no password (§2): never an admin, and with a password as well it signs
+in with it from anywhere else. Choose who manages it, the account that switches to it from its profile photo; under
+the switch, Members says the address the server sees you at and whether that is at home. **Remove password** leaves
+such a profile opening at home alone. **Can make profiles** lets a member add up to six of their own, under
+**Profile → Account → Profiles**; each starts with no more than that member may see. On a server that signs in through its provider only (since v0.63.0), Members makes no
 account and resets no password: a card says where accounts come from instead, the provider's sign-in, and whether
 it makes new ones (`OIDC_ALLOW_SIGNUP`). Everything else here works as before.
 

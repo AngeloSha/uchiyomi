@@ -1879,6 +1879,7 @@ export function createFakeEngine({ seed = defaultSeed(), schema: initialSchema =
     const first = doc.definitions.find((d) => d.kind === 'operation' && (!operationName || d.name === operationName));
     if (row) {
       row.operation = first?.operation;
+      row.operationName = first?.name ?? null;
       row.fields = first ? first.selectionSet.filter((s) => s.kind === 'field').map((s) => s.name) : [];
       row.variables = variables ?? {};
       row.deprecated = [...new Set(deprecated)];

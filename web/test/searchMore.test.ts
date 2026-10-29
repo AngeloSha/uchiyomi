@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { canSearchMore, freshCards, noMore, soloSource, SEARCH_MAX_PAGE } from '../lib/searchMore';
+import { canSearchMore, freshCards, noMore, soloSource, sourcePageCards, sourceSearchPage, SEARCH_MAX_PAGE } from '../lib/searchMore';
 
 const card = (source: string, sourceId: string) => ({ source, sourceId, title: sourceId });
 
@@ -39,10 +39,32 @@ test("a later page's cards are the ones not on the wall already, and a page with
   assert.deepEqual(freshCards(shown, [card('sw:b', '1'), card('sw:b', '2')]), [], 'a site that ignores the page number');
 });
 
+test('single-source response items acquire the requested source before deduplication and display', () => {
+  // /api/sources/search decorates source-less adapter results; the first page instead carries providers.
+  const rows = [{ sourceId: '2', title: 'Second work' }, { sourceId: '3', title: 'Third work' }];
+  const items = sourcePageCards('sw:batcave', rows);
+  assert.deepEqual(items.map((it) => [it.source, it.sourceId]), [['sw:batcave', '2'], ['sw:batcave', '3']]);
+  assert.deepEqual(freshCards([card('sw:batcave', '2')], items).map((it) => it.sourceId), ['3']);
+  const mismatched = { ...rows[0], source: 'other' };
+  assert.equal(sourcePageCards('requested', [mismatched])[0].source, 'requested', 'the request scopes even a response carrying a different source');
+  assert.equal('source' in rows[0], false, 'the response is not mutated');
+});
+
 test("Discover asks the next page of the search it is showing, through the search route's page", () => {
   // Reintroduce the request without `page`: every scroll asks the first page again, and nothing new ever lands.
   const src = readFileSync(join(__dirname, '../app/discover/page.tsx'), 'utf8');
-  assert.match(src, /api<\{ content: SourceItem\[\] \}>\(`\/api\/sources\/search\?source=\$\{encodeURIComponent\(solo\)\}&q=\$\{encodeURIComponent\(term\)\}&page=\$\{next\}`\)/);
+  assert.match(src, /api<\{ content: SourcePageItem\[\] \}>\(sourceSearchPage\(solo, term, next, searchKind\)\)/);
+  assert.match(src, /freshCards\(shown, sourcePageCards\(solo, r\.content \?\? \[\]\)\)/, 'bind source-less later-page responses before deduplication');
   assert.match(src, /items: moreCards\.length \? \[\.\.\.searchHits, \.\.\.moreCards\] : searchHits/, "the later pages are not on the wall");
-  assert.match(src, /pages: !!sources\.find\(\(s\) => s\.id === solo\)\?\.searchPages/, 'a source that does not page is asked anyway');
+  assert.match(src, /pages: searchKind === 'title' \? !!sources\.find\(\(s\) => s\.id === solo\)\?\.searchPages : supportsCreatorSearch\(sources\.find\(\(s\) => s\.id === solo\), searchKind\)/, 'paging must use the capability of the selected creator role, with title paging unchanged');
+});
+
+test('later search pages preserve the creator field and encode the person as data', () => {
+  for (const kind of ['title', 'author', 'artist'] as const) {
+    const url = new URL(sourceSearchPage('source&other', 'Name & Artist/作者', 3, kind), 'https://example.test');
+    assert.equal(url.searchParams.get('source'), 'source&other');
+    assert.equal(url.searchParams.get('q'), 'Name & Artist/作者');
+    assert.equal(url.searchParams.get('page'), '3');
+    assert.equal(url.searchParams.get('creator'), kind === 'title' ? null : kind);
+  }
 });

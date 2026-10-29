@@ -25,6 +25,10 @@ export interface Src {
   popular?: boolean;
   /** Whether a search on it goes on past the first page (v0.96.0, #331): Discover loads more of a search on it alone. */
   searchPages?: boolean;
+  /** The source declares a real author/artist query, separate from its title search. */
+  creatorSearch?: boolean;
+  /** Roles the source declares. Missing on an older server means both when creatorSearch is true. */
+  creatorFields?: readonly ('author' | 'artist')[];
   /**
    * `quiet` is the server saying "this answers without error and returns nothing". It used to be
    * unrepresentable: a source whose listing had drifted threw nothing, so it never earned a cooldown, kept
@@ -232,4 +236,16 @@ export function iconTint(name: string): string {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
   return `linear-gradient(135deg, hsl(${h} 45% 30%), hsl(${(h + 40) % 360} 45% 18%))`;
+}
+
+/** Do not offer an artist-only field as author search (or vice versa). */
+export function supportsCreatorSearch(source: Pick<Src, 'creatorSearch' | 'creatorFields'> | undefined, field: 'author' | 'artist'): boolean {
+  return !!source?.creatorSearch && (!source.creatorFields || source.creatorFields.includes(field));
+}
+
+/** Browsing and title searches keep the full pool; creator searches ask only sources declaring that role. */
+export function creatorSearchBudget<T extends Pick<Src, 'creatorSearch' | 'creatorFields'>>(
+  pool: T[], mode: 'newest' | 'search', field: 'title' | 'author' | 'artist',
+): T[] {
+  return mode === 'search' && field !== 'title' ? pool.filter((source) => supportsCreatorSearch(source, field)) : pool;
 }

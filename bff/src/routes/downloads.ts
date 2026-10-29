@@ -63,12 +63,15 @@ export default async function downloadRoutes(app: FastifyInstance) {
       totalBytes += p.sizeBytes ?? 0;
       return {
         number: p.number,
-        url: `/img/books/${encodeURIComponent(id)}/page/${p.number}`,
+        url: `/img/books/${encodeURIComponent(id)}/page/${p.number}${p.contentVersion ? `?cv=${p.contentVersion}` : ''}`,
         width: p.width ?? null,
         height: p.height ?? null,
         bytes: p.sizeBytes ?? null,
         mediaType: p.mediaType ?? null,
-        junk: junk.has(p.number) || undefined,
+        junk: p.junk || junk.has(p.number) || undefined,
+        removed: p.removed || undefined,
+        restorable: p.removed ? !!p.restorable : undefined,
+        contentVersion: p.contentVersion,
         // A placeholder page of a partial chapter (lib/partial.ts), marked by bookPages. Copied for the same
         // reason as `junk`: the offline reader never asks the server, so the caption has to travel with the
         // download. The placeholder's bytes download like any page.

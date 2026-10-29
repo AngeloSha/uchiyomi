@@ -10,20 +10,24 @@
 #           yomi-flaresolverr + yomi-suwayomi (optional) · yomi-bff + yomi-web under `--profile split`
 services:
   yomi-db:
+    # Keep this exact PostgreSQL 15 image so existing development volumes remain readable. Its initializer
+    # requires its own bootstrap role/database; the final init hook creates the app's separate yomi login/DB.
     image: supabase/postgres:15.8.1.085
     container_name: yomi-db
     restart: unless-stopped
     environment:
-      POSTGRES_DB: yomi
-      POSTGRES_USER: yomi
+      POSTGRES_DB: postgres
+      POSTGRES_USER: supabase_admin
       POSTGRES_PASSWORD: ${DB_PASSWORD:-uchiyomi}   # internal-only DB (no published port); override in .env for extra safety
     volumes:
       - yomi_pgdata:/var/lib/postgresql/data
+      - ./deploy/dev-db/zz-uchiyomi.sh:/docker-entrypoint-initdb.d/zz-uchiyomi.sh:ro
     networks:
       - yomi_internal          # private: only the BFF can reach the DB
     # NOTE: deliberately NO `ports:` and only on yomi_internal -> unreachable from outside the stack
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U yomi -d yomi"]
+      # pg_isready succeeds even when the requested database is missing after an interrupted initialization.
+      test: ["CMD-SHELL", "PGPASSWORD=\"$${POSTGRES_PASSWORD}\" psql -X --no-password -h 127.0.0.1 -U yomi -d yomi -Atqc 'SELECT 1' >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 5

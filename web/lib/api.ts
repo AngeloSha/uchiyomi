@@ -15,7 +15,7 @@ import { desktopShell, noteServerDesktop } from './desktop';
  */
 export type SessionResult =
   | { kind: 'authed'; user: any; refreshExpiresAt?: number }
-  | { kind: 'rejected' }      // the server answered, and the answer was no
+  | { kind: 'rejected'; reason?: string } // the server answered, and the answer was no -- by its code, when it gave one
   | { kind: 'unreachable' };  // no usable answer at all: offline, DNS, a 502 mid-deploy, a captive portal
 
 let accessToken: string | null = null;
@@ -82,7 +82,12 @@ export async function refreshSession(): Promise<SessionResult> {
         // appears there. Only in the shell's own window: the marker is the one thing a browser tab on the
         // same port cannot have, and without the shell's header the exchange would only 401 anyway.
         if (r.status === 401 && desktopShell()) return desktopExchange();
-        if (r.status === 401 || r.status === 403) return { kind: 'rejected' };
+        if (r.status === 401 || r.status === 403) {
+          // `local_only`: a profile that opens at home, refreshed from outside it -- the sign-in screen says so. Every
+          // other refusal is the bare answer it always was.
+          const body = (await r.json().catch(() => null)) as { error?: string } | null;
+          return body?.error === 'local_only' ? { kind: 'rejected', reason: 'local_only' } : { kind: 'rejected' };
+        }
         if (!r.ok) return { kind: 'unreachable' };
         const j = await r.json();
         accessToken = j.accessToken;
@@ -201,10 +206,10 @@ export const img = {
   // server error and a broken tile.
   seriesThumb: (id: string, av?: number, w?: number) =>
     id ? `/img/series/${encodeURIComponent(id)}/thumb?v=2${av ? `&av=${av}` : ''}${w ? `&w=${w}` : ''}` : '',
-  bookThumb: (id: string) => (id ? `/img/books/${encodeURIComponent(id)}/thumb` : ''),
-  page: (bookId: string, n: number, w?: number) =>
-    `/img/books/${encodeURIComponent(bookId)}/page/${n}${w ? `?w=${w}` : ''}`,
+  bookThumb: (id: string, contentVersion?: string) => (id ? `/img/books/${encodeURIComponent(id)}/thumb${contentVersion ? `?cv=${encodeURIComponent(contentVersion)}` : ''}` : ''),
+  page: (bookId: string, n: number, w?: number, contentVersion?: string) =>
+    `/img/books/${encodeURIComponent(bookId)}/page/${n}${w ? `?w=${w}` : ''}${contentVersion ? `${w ? '&' : '?'}cv=${encodeURIComponent(contentVersion)}` : ''}`,
   /** A page for a screen that shows it `fit` px wide (#234, lib/readerFit.ts); 0 is the page as scanned. */
-  pageFit: (bookId: string, n: number, fit: number) =>
-    `/img/books/${encodeURIComponent(bookId)}/page/${n}${fit ? `?fit=${fit}` : ''}`,
+  pageFit: (bookId: string, n: number, fit: number, contentVersion?: string) =>
+    `/img/books/${encodeURIComponent(bookId)}/page/${n}${fit ? `?fit=${fit}` : ''}${contentVersion ? `${fit ? '&' : '?'}cv=${encodeURIComponent(contentVersion)}` : ''}`,
 };

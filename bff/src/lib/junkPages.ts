@@ -1,5 +1,6 @@
 import { q } from './db';
 import { junkHashes } from './pageHash';
+import { sourceGifPages } from './sourcePageRules';
 
 /**
  * Which pages of a chapter are furniture rather than story.
@@ -16,6 +17,7 @@ import { junkHashes } from './pageHash';
  * un-flagged is silently re-flagged on the next run of the hash job.
  */
 export async function junkPagesFor(bookId: string): Promise<Set<number>> {
+  const bySource = await sourceGifPages(bookId);
   const rows = await q<{ book_id: string; page: number; hash: string | null; override: boolean | null }>(
     `SELECT p.book_id, p.page, p.hash, p.override
        FROM page_hashes p
@@ -23,19 +25,20 @@ export async function junkPagesFor(bookId: string): Promise<Set<number>> {
       WHERE b.series_id = (SELECT series_id FROM lib_books WHERE id = $1)`,
     [bookId],
   ).catch(() => []);
-  if (!rows.length) return new Set();
+  if (!rows.length) return bySource;
 
   const junk = junkHashes(
     rows.filter((r) => r.hash).map((r) => ({ bookId: r.book_id, page: r.page, hash: r.hash as string })),
   );
 
   const byHand = new Set<number>();
+  const rescued = new Set<number>();
   const byRule = new Set<number>();
   let pages = 0;
   for (const r of rows) {
     if (r.book_id !== bookId) continue;
     if (r.page > 0) pages++;                          // page 0 is the job's "looked at it" mark, not a page
-    if (r.override === false) continue;               // rescued by hand: never skip
+    if (r.override === false) { rescued.add(r.page); continue; } // rescued by hand: never skip
     if (r.override === true) byHand.add(r.page);
     else if (r.hash && junk.has(r.hash)) byRule.add(r.page);
   }
@@ -62,6 +65,7 @@ export async function junkPagesFor(bookId: string): Promise<Set<number>> {
    */
   const out = new Set(byHand);
   if (pages === 0 || byRule.size * 3 <= pages) for (const p of byRule) out.add(p);
+  for (const p of bySource) if (!rescued.has(p)) out.add(p);
   return out;
 }
 

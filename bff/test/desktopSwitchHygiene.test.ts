@@ -71,6 +71,11 @@ const IS_DESKTOP_ALLOWED = new Set([
   'lib/backupExtensions.ts',
   // v0.85.0: translated pages are Docker only for now: the engine's processes do not run inside the desktop app.
   'lib/translate/engine.ts',
+  // Profiles that open at home: the desktop server is this computer's alone, so every
+  // request to it is at home.
+  'lib/clientAddr.ts',
+  // And the desktop app's own account is the desktop owner there, an ordinary account anywhere else.
+  'lib/profiles.ts',
 ]);
 
 test('UCHIYOMI_DESKTOP is read in lib/desktop.ts and nowhere else', () => {
@@ -109,8 +114,9 @@ test('server.ts keeps the server arm of every networking difference', () => {
   // Reintroduce by writing `host: '127.0.0.1'` without the ternary: the Docker image stops answering on its port.
   assert.match(s, /host: isDesktop\(\) \? '127\.0\.0\.1' : '0\.0\.0\.0'/, 'the listen host lost its server arm');
   // Reintroduce by writing `trustProxy: false`: every server behind a reverse proxy logs the proxy's address. The
-  // server arm trusts the proxies TRUST_PROXY names (v0.69.1, trustProxy.test.ts), the desktop arm nothing.
-  assert.match(s, /trustProxy: isDesktop\(\) \? false : trustProxySetting\(env\.TRUST_PROXY\),/, 'trustProxy lost its server arm');
+  // server arm trusts the proxies in force -- TRUST_PROXY, or Admin -> Settings (v0.69.1, trustProxy.test.ts;
+  // lib/clientAddr.ts trustsPeer) -- the desktop arm nothing.
+  assert.match(s, /trustProxy: isDesktop\(\) \? false : trustsPeer,/, 'trustProxy lost its server arm');
   // The guard hook only on desktop, and only once.
   // Reintroduce by calling installDesktopGuards(app) unconditionally: every server request with a Host other
   // than 127.0.0.1 would answer 421.

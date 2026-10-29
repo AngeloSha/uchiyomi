@@ -1,6 +1,57 @@
 # Changelog
 
-## Unreleased — backlog review
+## v0.101.0 — 2026-10-29
+
+**Search creators on sources, manage pages with undo, and preview source cleanup before deleting anything.**
+
+### Creator searches and local profiles
+
+- Discover offers Title, Author and Artist searches. MangaDex and Suwayomi extensions with declared creator
+  text filters use their actual creator fields. Unsupported fields are left out; role, exact spelling and
+  page remain separate through shared caches and pagination (#338).
+- The author-filtered library links to Discover. A selected provider retains its full first hundred works
+  before another page is requested.
+- Optional managed profiles can open on explicitly configured local networks. Local-only credentials stay
+  restricted on every request, including refresh, image cookies and remembered-profile switching (#351).
+- Local-only tokens use a separate cryptographic domain, so an older app image rejects them after rollback.
+  Existing credential sessions keep their format. Public-proxy defaults continue to require credentials.
+
+### Reversible page cleanup
+
+- Admins can manage a writable local CBZ from the reader's **Pages** sheet: preview and select images,
+  remove them, and restore their exact original bytes. Original page numbers, progress and bookmarks stay
+  in place. Unsupported formats and incomplete chapters keep the existing Skip control (#354).
+- Removed originals stay in server trash until explicitly deleted. Separate confirmations permanently
+  delete selected originals or unused retained images; shared originals still needed by another removed
+  page are kept. Backups and separately saved offline copies are unaffected.
+- Optional GIF skip rules apply to one series or every chapter from its recorded source, with a preview
+  of the scope. A series rule overrides its source rule, and a per-page rescue overrides both. Rules skip
+  images while reading and never delete files automatically.
+- Edited page images get fresh cache identities. An offline download refuses a chapter that changes
+  midway, preventing a saved copy from mixing old and new pages.
+
+### Deliberate source cleanup and installation fixes
+
+- Removing a source keeps downloaded chapters by default. Optional cleanup requires a fresh, account-bound
+  preview and a separate confirmation; source references/listings are checked under writer and database locks.
+  An empty, unavailable or shorter remaining listing cannot authorize deleting chapters (#339).
+- To clean up a main source, first promote its replacement and keep the old source as a follower. Explicit
+  cleanup removes that follower atomically so it cannot immediately download the unwanted chapters again.
+- Fresh development databases initialize with the existing Supabase PostgreSQL 15 image and its required
+  bootstrap identity. Existing volumes keep their data, extensions and configuration; SQL readiness also
+  detects an interrupted initialization with no application database (#363).
+- Security dependency patches update fast-uri and the desktop build's undici (#367, #368).
+- Open site is optional when an extension already searches and downloads normally. A verification loop in
+  that manual browser view is assessed separately from whether the extension works (#352).
+
+### Upgrading
+
+- No PostgreSQL major-version change is included. Existing authentication settings remain in effect.
+- Local profile picking and destructive cleanup require explicit configuration or confirmation.
+
+## v0.100.0 — 2026-10-29
+
+### Library, reader and source improvements
 
 - Source identity wins over a title match: different entries on one source remain separate even when their
   titles are identical or normalize alike. Same-title additions receive separate download folders (#357).
@@ -17,8 +68,6 @@
 - Phone Search can open the command palette. Admin settings show download limits and blocked sources.
 - Renaming a missing folder identifies an existing spelling that differs only in case.
 - Dependency updates cover the server, web app and desktop tooling, including Electron 45.
-
-## v0.100.0 — 2026-10-22
 
 **Tap an author on a series page to see everything of theirs in your library, and the library's search finds authors
 too.**

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { stat } from 'node:fs/promises';
 import sharp from 'sharp';
 import { one, q } from '../db';
 import { cbzPageAt, LIBRARY_ROOT } from '../library';
@@ -40,7 +41,9 @@ export async function translatePage(bookId: string, pageNo: number, lang: string
   const b = await one<{ file: string; root: string | null; series_id: string; title: string }>(
     `SELECT b.file, b.root, b.series_id, s.title FROM lib_books b JOIN lib_series s ON s.id = b.series_id WHERE b.id = $1`, [bookId]);
   if (!b) throw new Error('the chapter is gone');
-  const page = await cbzPageAt(path.join(b.root || LIBRARY_ROOT, b.file), pageNo - 1);
+  const file = path.join(b.root || LIBRARY_ROOT, b.file);
+  const before = await stat(file);
+  const page = await cbzPageAt(file, pageNo - 1);
   if (!page) throw new Error('the page is gone');
   const src = (await seriesLanguage(b.series_id)).lang;
   const t0 = Date.now();
@@ -67,6 +70,11 @@ export async function translatePage(bookId: string, pageNo: number, lang: string
         [b.series_id, lang, n.source, n.target]);
     }
   }
+  // OCR/model work can outlive a physical page edit. Never publish an old page's translation onto its
+  // replacement (a cleanup placeholder or restored original); the next request can translate that copy.
+  const after = await stat(file);
+  if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ino !== before.ino)
+    throw new Error('the chapter changed while its page was being translated');
   await q(
     `INSERT INTO page_translations (book_id, page, lang, engine, status, regions, error, ms, created_at)
      VALUES ($1, $2, $3, $4, 'done', $5, NULL, $6, now())

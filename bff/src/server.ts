@@ -44,6 +44,7 @@ import { runExtensionMonitor } from './lib/extensionMonitor';
 import { startEngineCacheKeeper } from './lib/sources/suwayomi/cache';
 import { startSweeper } from './lib/imageCache';
 import { pruneAudit } from './lib/audit';
+import { pruneRing } from './lib/deviceRing';
 import { startActivityLog, flushActivityLog } from './lib/activityLog';
 import { runBackup, backupDelay, backupSettings, stampDelay } from './lib/backup';
 import { firstRunFloor, DESKTOP_FLOORS } from './lib/desktop';
@@ -57,7 +58,8 @@ import { registerApiDocs } from './lib/apiDocs';
 import { appVersion } from './lib/appVersion';
 import { buildPayload, installFacts, sendPing } from './lib/installPing';
 import authRoutes from './routes/auth';
-import { trustProxySetting } from './lib/auth';
+import { trustProxyProblems, trustProxyWarnings } from './lib/auth';
+import { loadNetworkSettings, localNetworksProblems, localNetworksWarnings, networkConfig, trustsPeer } from './lib/clientAddr';
 import adminRoutes, { sweepImportBatches } from './routes/admin';
 import catalogRoutes from './routes/catalog';
 import imageRoutes, { authorizeImageRequest } from './routes/images';
@@ -78,7 +80,29 @@ import { initialiseBulkChapterDeleteRuns } from './lib/bulkChapterDelete';
 import { authFacts, authModeProblems, authModeWarnings } from './lib/authMode';
 
 async function main() {
+  // A TRUST_PROXY entry Fastify cannot read stops the server here, naming the entry, before the migrations run; one that
+  // works but not as its author likely thinks is said at every start (lib/auth.ts trustProxyProblems, trustProxyWarnings).
+  // Not on desktop, which trusts no proxy whatever is set (`trustProxy` below).
+  // LOCAL_NETWORKS likewise (lib/clientAddr.ts): it decides who is at home, where a profile without a password opens.
+  if (!isDesktop()) {
+    const netProblems = [...trustProxyProblems(env.TRUST_PROXY), ...localNetworksProblems(env.LOCAL_NETWORKS, env.TRUST_PROXY)];
+    if (netProblems.length) {
+      for (const p of netProblems) console.error(`[net] ${p}`);
+      process.exit(1);
+    }
+  } else if (env.LOCAL_NETWORKS.trim()) {
+    console.warn('[net] Uchiyomi Desktop is reached from this computer alone: LOCAL_NETWORKS is ignored.');
+  }
   await migrate();
+  // What Admin -> Settings -> Server -> Home network saved, where the environment does not say (lib/clientAddr.ts),
+  // before any request is judged by it; then what is in force, said once.
+  if (!isDesktop()) {
+    await loadNetworkSettings();
+    const net = networkConfig();
+    for (const w of [...trustProxyWarnings(net.trustedProxies.value), ...localNetworksWarnings(net.localNetworks.value, net.trustedProxies.value)]) {
+      console.warn(`[net] ${w}`);
+    }
+  }
   // v0.63.0 (#208, lib/authMode.ts): a sign-in mode that cannot work stops the server here and says why, before any
   // route exists -- a typo in AUTH_MODE must never leave the password routes open behind an operator who thinks them
   // closed -- and SSO-only mode says what it changes at every start.
@@ -132,10 +156,11 @@ async function main() {
     // LOG_LEVEL (env.ts logLevelOf): `info` in production unless the operator says otherwise.
     logger: { level: logLevel },
     // Desktop: nothing sits in front of the app, so a forwarded-for header is only ever something a local
-    // process made up. Elsewhere only the peers TRUST_PROXY names may set it (env.ts): trusting every peer let a client
-    // on the app port choose its own address for the rate limits. Reintroduce `true`: trustProxy.test.ts sees 14
-    // sign-ins with rotating X-Forwarded-For all answered 401, none 429.
-    trustProxy: isDesktop() ? false : trustProxySetting(env.TRUST_PROXY),
+    // process made up. Elsewhere only the trusted proxies may set it (TRUST_PROXY, or Admin -> Settings): trusting every
+    // peer let a client on the app port choose its own address for the rate limits. Reintroduce `true`:
+    // trustProxy.test.ts sees 14 sign-ins with rotating X-Forwarded-For all answered 401, none 429. A function rather
+    // than the list, so a save on the settings page is in force at the next request (lib/clientAddr.ts trustsPeer).
+    trustProxy: isDesktop() ? false : trustsPeer,
     bodyLimit: 2 * 1024 * 1024,
   });
 
@@ -260,7 +285,11 @@ async function main() {
   startSweeper();
   // v0.69.1: the refusal rows an outside caller can write stay bounded (lib/audit.ts pruneAudit, refusals only -- the
   // rest of audit_log is evidence other code reads back). Shortly after boot, then once a day.
-  const pruneRefusals = () => { pruneAudit().catch((e) => app.log.warn({ err: e }, 'audit prune failed')); };
+  const pruneRefusals = () => {
+    pruneAudit().catch((e) => app.log.warn({ err: e }, 'audit prune failed'));
+    // And the device keyring's entries whose session has ended (lib/deviceRing.ts): they open nothing meanwhile.
+    pruneRing().catch((e) => app.log.warn({ err: e }, 'device ring prune failed'));
+  };
   setTimeout(pruneRefusals, 10 * 60_000).unref();
   setInterval(pruneRefusals, 24 * 60 * 60_000).unref();
 

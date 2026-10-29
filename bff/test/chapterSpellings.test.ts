@@ -80,3 +80,17 @@ test('a chapter saved under another spelling of its number is not fetched again'
     unregisterAdapter('spell-dl');
   }
 });
+
+
+test('registry filtering preserves dropped-number evidence without mutating the adapter array', async () => {
+  const { fileableChapters } = await import('../src/lib/sources/loader');
+  const { UNNUMBERED, unnumberedOf } = await import('../src/lib/sources/types');
+  const raw = [{ sourceId: 'kept', number: 1 }, { sourceId: 'unknown', number: -1 }];
+  Object.defineProperty(raw, UNNUMBERED, { value: 2 });
+  const filtered = fileableChapters(raw);
+  assert.deepEqual(filtered.map((c) => c.number), [1]);
+  assert.equal(unnumberedOf(filtered), 3, 'the registry lost the adapter evidence or its own discarded row');
+  assert.equal(unnumberedOf(raw), 2);
+  assert.equal(Object.getOwnPropertyDescriptor(filtered, UNNUMBERED)?.enumerable, false);
+  assert.equal(unnumberedOf(fileableChapters(filtered)), 3, 'filtering twice counted the evidence twice');
+});

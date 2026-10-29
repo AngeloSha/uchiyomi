@@ -36,6 +36,7 @@ import { translatedSrc, translating, type TranslateStatus } from '@/lib/readerTr
 import { ReaderSettings } from '@/components/ReaderSettings';
 import { SectionTitle, useImgRetry, useRtl } from '@/components/ui';
 import { PageGrid } from '@/components/PageGrid';
+import { PageCleanupPanel } from '@/components/PageCleanupPanel';
 import { ChapterSheet } from '@/components/ChapterSheet';
 import { SeriesCard } from '@/components/cards';
 import { NextInStory } from '@/components/RelatedRail';
@@ -51,7 +52,7 @@ import { useContextMenu, type MenuItem } from '@/components/ContextMenu';
 import { ReaderShortcuts, useHasKeyboard } from '@/components/ReaderShortcuts';
 import { capLabel } from '@/components/ReaderKeys';
 
-interface PageDim { number: number; width: number | null; height: number | null; junk?: boolean; missing?: boolean; join?: 'rtl' | 'ltr'; mark?: SpreadMark }
+interface PageDim { number: number; width: number | null; height: number | null; junk?: boolean; missing?: boolean; removed?: boolean; restorable?: boolean; contentVersion?: string; join?: 'rtl' | 'ltr'; mark?: SpreadMark }
 /**
  * `sourceId`: the adapter the copy came from, for naming it on a missing page's caption. Unknown for a downloaded copy.
  * `spreads` (#229, Join split double pages): what the server said of the chapter's spreads when asked (`x-spreads`):
@@ -60,7 +61,7 @@ interface PageDim { number: number; width: number | null; height: number | null;
  */
 interface Chapter { id: string; seriesId: string; seriesTitle: string; title: string; pages: PageDim[]; offline: boolean; readingDirection?: string | null; pruned?: boolean; sourceId?: string | null; spreads?: 'done' | 'pending' | 'none' }
 interface ChapterRef { id: string; label: string }
-interface FlatItem { ci: number; number: number; width: number | null; height: number | null; key: string; firstOfChapter: boolean; junk?: boolean; join?: 'rtl' | 'ltr'; mark?: SpreadMark; forced?: boolean; missing?: boolean; collapsed?: boolean }
+interface FlatItem { ci: number; number: number; width: number | null; height: number | null; key: string; firstOfChapter: boolean; junk?: boolean; join?: 'rtl' | 'ltr'; mark?: SpreadMark; forced?: boolean; missing?: boolean; contentVersion?: string; collapsed?: boolean }
 
 /**
  * #229: when to ask again for a chapter whose spreads the server is still measuring, after each `pending`: then the
@@ -130,7 +131,7 @@ async function pageList(bookId: string, spreads: boolean): Promise<{ pages: Page
   const { data, headers } = await apiWithHeaders<PageInfo[]>(`/api/books/${bookId}/pages${spreads ? '?spreads=1' : ''}`);
   const said = headers.get('x-spreads');
   return {
-    pages: data.map((p) => ({ number: p.number, width: p.width ?? null, height: p.height ?? null, junk: p.junk, missing: p.missing, join: p.join, mark: p.mark })),
+    pages: data.map((p) => ({ number: p.number, width: p.width ?? null, height: p.height ?? null, junk: p.junk, missing: p.missing, removed: p.removed, restorable: p.restorable, contentVersion: p.contentVersion, join: p.join, mark: p.mark })),
     spreads: spreads ? (said === 'done' || said === 'pending' ? said : 'none') : undefined,
   };
 }
@@ -258,6 +259,8 @@ function ReaderInner() {
   const [chrome, setChrome] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [showPages, setShowPages] = useState(false);
+  const [cleanupFor, setCleanupFor] = useState<{ id: string; restore?: number } | null>(null);
+  const cleanupAnchor = useRef<{ id: string; page: number } | null>(null);
   const [showChapters, setShowChapters] = useState(false);
   /** Whether the right-click menu is open (it is made further down): the keys are its while it is, Escape included. */
   const menuOpen = useRef(false);
@@ -912,7 +915,7 @@ function ReaderInner() {
    * is drawn; translated once the server has the page in the reader's language (v0.85.0), the original until then.
    */
   const onlineSrc = (ch: Chapter, i: number): string => {
-    const src = (device.fitPages ? img.pageFit(ch.id, flat[i].number, fitFor(i)) : img.page(ch.id, flat[i].number));
+    const src = (device.fitPages ? img.pageFit(ch.id, flat[i].number, fitFor(i), flat[i].contentVersion) : img.page(ch.id, flat[i].number, undefined, flat[i].contentVersion));
     return translatedSrc(src, trLang, trOn ? trStatus[ch.id]?.pages[flat[i].number] : undefined);
   };
 
@@ -926,12 +929,13 @@ function ReaderInner() {
     for (const i of prefetchList(flat, Math.max(...activeSet), PREFETCH)) {
       const it = flat[i];
       const ch = chapters[it.ci];
-      if (!ch || ch.offline || prefetched.current.has(it.key)) continue;
-      prefetched.current.add(it.key);
+      const cacheKey = `${it.key}:${it.contentVersion ?? ''}`;
+      if (!ch || ch.offline || prefetched.current.has(cacheKey)) continue;
+      prefetched.current.add(cacheKey);
       // The address the page's <img> will ask for (onlineSrc), so what is warmed is what is then shown.
       void fetch(onlineSrc(ch, i), { credentials: 'same-origin', priority: 'low' } as RequestInit)
         .then((r) => (r.ok ? r.arrayBuffer() : null))
-        .catch(() => { prefetched.current.delete(it.key); });
+        .catch(() => { prefetched.current.delete(cacheKey); });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSet]);
@@ -957,7 +961,7 @@ function ReaderInner() {
     const ch = chapters[it.ci];
     if (!ch) return null;
     if (ch.offline) return blobUrls.current.get(it.key) || null;   // already decoded in memory; no network
-    return img.page(ch.id, it.number, 200);
+    return img.page(ch.id, it.number, 200, it.contentVersion);
   };
 
   /**
@@ -1348,6 +1352,7 @@ function ReaderInner() {
     staleTime: 5 * 60 * 1000,
   });
   const activeChapter = chapters[flat[current]?.ci ?? 0];
+  const pageActionsOnline = showPages && serverReachableHint();
   // Paged mode has no strip between chapters: crossing into another one says so, briefly, so a chapter with no title page is still
   // plainly a new chapter. (The webtoon column has its own divider.) Not on the first chapter opened, and not while the chapter's
   // own page is being jumped to.
@@ -1414,6 +1419,33 @@ function ReaderInner() {
     else el.scrollTo({ left: trackSign * (slideOf[i] ?? i) * (el.clientWidth || 0) });
   }, [flat.length, prefs.mode, tops, slideOf, trackSign]);
 
+  // Stable across scroll renders so memoised rows can share the same manual-retry callback.
+  const pageRefreshState = useRef({ chapters, flat, current, joinSplit: prefs.joinSplit });
+  pageRefreshState.current = { chapters, flat, current, joinSplit: prefs.joinSplit };
+  const refreshEditedPages = useCallback(async (bookId?: string) => {
+    const state = pageRefreshState.current;
+    const online = state.chapters.filter((c) => !c.offline && (!bookId || c.id === bookId));
+    if (!online.length) return;
+    const lists = await Promise.all(online.map(async (c) => ({ id: c.id, list: await pageList(c.id, state.joinSplit) })));
+    // The reader may have moved during the request; preserve the page it is on when the new metadata arrives.
+    const now = pageRefreshState.current;
+    const at = now.flat[now.current];
+    const anchor = at ? { id: now.chapters[at.ci].id, page: at.number } : null;
+    const byId = new Map(lists.map((r) => [r.id, r.list]));
+    prefetched.current.clear();
+    cleanupAnchor.current = anchor;
+    setTrStatus({});
+    setChapters((prev) => prev.map((c) => byId.has(c.id) ? { ...c, ...byId.get(c.id)! } : c));
+  }, []);
+  useLayoutEffect(() => {
+    const anchor = cleanupAnchor.current;
+    if (!anchor) return;
+    const ci = chapters.findIndex((c) => c.id === anchor.id);
+    if (ci < 0) return;
+    cleanupAnchor.current = null;
+    jumpTo(startIndex(flat, ci, anchor.page));
+  }, [chapters, flat, jumpTo]);
+
   /**
    * Mark or un-mark one page by hand, from the page grid.
    *
@@ -1429,7 +1461,7 @@ function ReaderInner() {
    */
   const toggleJunk = useCallback((pageNumber: number, junk: boolean) => {
     const ch = chapters[flat[current]?.ci ?? 0];
-    if (!ch) return;
+    if (!ch || ch.pages.find((p) => p.number === pageNumber)?.removed) return;
     const apply = (v: boolean) => setChapters((prev) => prev.map((c) => (c.id !== ch.id ? c : {
       ...c, pages: c.pages.map((p) => (p.number === pageNumber ? { ...p, junk: v } : p)),
     })));
@@ -1462,12 +1494,14 @@ function ReaderInner() {
     return ch.pages.map((p) => ({
       idx: indexOfKey.get(`${ch.id}:${p.number}`) ?? startIndex(flat, ci, p.number),
       // A missing placeholder may carry an old junk flag, but it is not furniture and cannot be skipped.
-      junk: !!p.junk && !p.missing,
+      junk: !!p.junk && !p.missing && !p.removed,
+      removed: !!p.removed,
+      restorable: p.restorable,
       missing: !!p.missing,
       number: p.number,
       // An offline chapter has no URL to request: its pages are blobs already decoded into memory, and
       // the same blob is the thumbnail.
-      src: ch.offline ? blobUrls.current.get(`${ch.id}:${p.number}`) || null : img.page(ch.id, p.number, 200),
+      src: ch.offline ? blobUrls.current.get(`${ch.id}:${p.number}`) || null : img.page(ch.id, p.number, 200, p.contentVersion),
     }));
   }, [showPages, flat, current, chapters, indexOfKey]);
   const activeIdx = chapterRefs.findIndex((c) => c.id === activeChapter?.id);
@@ -2180,7 +2214,7 @@ function ReaderInner() {
                 missingSource={p.missing ? sourceNameOf(chapters[p.ci]?.sourceId) : null}
                 wide={!p.missing && isWide(p) ? wideMode : 'whole'} rightFirst={rightFirst}
                 crop={rowCrop(p, !p.missing && isWide(p) ? wideMode : 'whole')} imgFilter={imgFilter}
-                onLoaded={prefs.cropBorders ? onPageLoad : undefined}
+                onLoaded={prefs.cropBorders ? onPageLoad : undefined} onRetry={refreshEditedPages}
                 onExpand={expandPage} onCollapse={collapsePage} />
             ))}
             {ended && upNextCard}
@@ -2216,7 +2250,7 @@ function ReaderInner() {
                 {turnedPair ? (
                   // Both pages, or neither: half a spread turned on its side is no page at all.
                   shown.every((i) => activeSet.has(i) && srcFor(i) && flat[i].width && flat[i].height)
-                    ? <SlideTurnedPair pages={shown.map((i) => ({ src: srcFor(i)!, alt: tr('Page {n}', { n: flat[i].number }), width: flat[i].width!, height: flat[i].height! }))}
+                    ? <SlideTurnedPair onRetry={refreshEditedPages} pages={shown.map((i) => ({ src: srcFor(i)!, alt: tr('Page {n}', { n: flat[i].number }), width: flat[i].width!, height: flat[i].height! }))}
                         area={area} zoom={zoom} filter={imgFilter} />
                     : shown.map((i) => <span key={flat[i].key} className="text-ink-600">{flat[i].number}</span>)
                 ) : shown.map((i) => {
@@ -2230,7 +2264,7 @@ function ReaderInner() {
                     return (
                       <div key={p.key} className={`relative flex h-full items-center justify-center ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`}
                         style={{ transform: zoom !== 1 ? `scale(${zoom})` : undefined }}>
-                        <ReaderImg src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} className="max-h-full object-contain" filter={imgFilter} />
+                        <ReaderImg onRetry={refreshEditedPages} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} className="max-h-full object-contain" filter={imgFilter} />
                         <MissingCaption number={p.number} source={sourceNameOf(chapters[p.ci]?.sourceId)} dir={uiDir} />
                       </div>
                     );
@@ -2244,20 +2278,20 @@ function ReaderInner() {
                   // v0.61.0, Wide pages: one half of the page, or the page turned on its side, fitted to the slide. A page
                   // whose size is not known is never wide (lib/readerSpread.ts rule 5), so it never gets here.
                   if (halfOf && p.width && p.height) {
-                    return <SlideRegion key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={p.width} height={p.height}
+                    return <SlideRegion onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={p.width} height={p.height}
                       region={cropOn ? halfCrop(halfOf, box?.all ?? WHOLE) : halfOf === 'left' ? LEFT_HALF : RIGHT_HALF}
                       half={halfOf} area={area} zoom={zoom} pending={cropOn && box === undefined} onLoaded={loaded}
                       filter={imgFilter} trimmed={cropOn ? (box?.all ?? WHOLE).l : undefined} />;
                   }
                   if (wideMode === 'rotate' && idxs.length === 1 && isWide(p)) {
-                    return <SlideTurned key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={p.width!} height={p.height!}
+                    return <SlideTurned onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={p.width!} height={p.height!}
                       area={area} zoom={zoom} filter={imgFilter} />;
                   }
                   if (cropOn) {
                     const w = p.width || box?.w;
                     const h = p.height || box?.h;
                     if (!(w && h)) {
-                      return <SlidePending key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} zoom={zoom} onLoaded={loaded} filter={imgFilter}
+                      return <SlidePending onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} zoom={zoom} onLoaded={loaded} filter={imgFilter}
                         className={`max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`} />;
                     }
                     let region: Region = box?.all ?? WHOLE;
@@ -2271,12 +2305,12 @@ function ReaderInner() {
                       region = pairCrop(pair[0]?.all ?? WHOLE, pair[1]?.all ?? WHOLE)[sits.indexOf(i)];
                     }
                     // Half the slide each, less half the gap -- a joined spread has none.
-                    return <SlideRegion key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={w} height={h}
+                    return <SlideRegion onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={w} height={h}
                       region={region} area={shown.length === 2 ? { w: area.w / 2 - (isJoined ? 0 : 2), h: area.h } : area} zoom={zoom}
                       pending={pending} onLoaded={loaded} filter={imgFilter} trimmed={region.l} />;
                   }
                   return (
-                    <ReaderImg key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })}
+                    <ReaderImg onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })}
                       className={`max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`}
                       style={{ transform: zoom !== 1 ? `scale(${zoom})` : undefined }} filter={imgFilter} />
                   );
@@ -2413,7 +2447,7 @@ function ReaderInner() {
                   const it = flat[current];
                   const ch = chapters[it.ci];
                   if (!ch) return null;
-                  const src = ch.offline ? blobUrls.current.get(it.key) || null : img.page(ch.id, it.number, 200);
+                  const src = ch.offline ? blobUrls.current.get(it.key) || null : img.page(ch.id, it.number, 200, it.contentVersion);
                   return (
                     <div className="pointer-events-none absolute bottom-full left-1/2 mb-3 -translate-x-1/2 overflow-hidden rounded-xl border border-ink-600 bg-ink-900 shadow-lift">
                       {src ? (
@@ -2432,7 +2466,7 @@ function ReaderInner() {
                 </button>
                 {/* The counter is the button. A long-press would be invisible on a phone, which this repo
                     already learned once from a hover-only affordance nobody found. */}
-                <button dir="ltr" onClick={() => setShowPages(true)} aria-label={tr('Jump to a page')}
+                <button dir="ltr" data-reader-pages onClick={() => setShowPages(true)} aria-label={tr('Jump to a page')}
                   className="shrink-0 rounded-full px-1.5 py-0.5 text-[11px] tabular-nums text-fog-300 transition hover:bg-white/10 hover:text-white">
                   {chapterPageCount ? `${pageInChapter}/${chapterPageCount}` : `${current + 1}/${total}`}
                 </button>
@@ -2545,8 +2579,14 @@ function ReaderInner() {
            flag anyway. */
         <PageGrid title={activeChapter?.title || tr('Pages')} pages={gridPages} current={current}
           onPick={jumpTo} onClose={() => setShowPages(false)}
-          onToggleJunk={!serverReachableHint() ? undefined : toggleJunk} />
+          onManage={user?.role === 'admin' && pageActionsOnline && activeChapter ? () => { setShowPages(false); setCleanupFor({ id: activeChapter.id }); } : undefined}
+          onRestore={user?.role === 'admin' && pageActionsOnline && activeChapter ? (page) => { setShowPages(false); setCleanupFor({ id: activeChapter.id, restore: page }); } : undefined}
+          onToggleJunk={!pageActionsOnline ? undefined : toggleJunk} />
       )}
+      {cleanupFor && <PageCleanupPanel bookId={cleanupFor.id} initialRestore={cleanupFor.restore}
+        contentVersion={chapters.find((c) => c.id === cleanupFor.id)?.pages[0]?.contentVersion}
+        offline={!!chapters.find((c) => c.id === cleanupFor.id)?.offline}
+        onChanged={refreshEditedPages} onClose={() => { setCleanupFor(null); setShowPages(true); }} />}
       {showChapters && (
         <ChapterSheet title={tr('Chapters')} chapters={chapterRefs} activeId={activeChapter?.id}
           onPick={goChapter} onClose={() => setShowChapters(false)}

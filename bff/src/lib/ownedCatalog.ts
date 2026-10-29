@@ -10,6 +10,9 @@ import { rangeEnd, numberText } from './chapterRanges';
 import { anilistScoreOf } from './anilistScores';
 import { AUTO_DETAILS, authorOf, genresOf, summaryOf } from './autoDetailsSql';
 import { lineHas, nameKeys } from './authorNames';
+import { pageCleanupMetadata, pageFileVersion } from './pageCleanupFiles';
+import { env } from '../env';
+import path from 'node:path';
 
 interface Page<T> { content: T[]; totalElements: number; totalPages: number; number: number; size: number; first: boolean; last: boolean }
 
@@ -85,7 +88,7 @@ const browseSrc = (ctx: ViewCtx, p: Params, alias = 'sv') => seriesSrcWith(brows
  * order, next/previous, the OPDS feed and what the tracker is told. Mirrors SERIES_SRC.
  */
 const booksSrc = (ctx: ViewCtx, p: Params, alias = 'bv') => `(
-  SELECT b.id, b.series_id, b.source, b.file, b.root, b.pages, b.mtime, b.published_at, b.page_dims,
+  SELECT b.id, b.series_id, b.source, b.file, b.root, b.pages, b.mtime, b.published_at, b.page_dims, b.page_dims_version,
          b.updated_at, b.fingerprint, b.scanlator, b.source_id, b.pruned_at, b.pruned_reason, b.size, b.missing_pages, b.chapter_name,
          COALESCE(ov.number, b.number) AS number,
          ${rangeEnd('b', 'ov')} AS number_end,
@@ -866,8 +869,8 @@ export const owned = {
     // Goes through booksSrc so page dimensions cannot enumerate a chapter of a hidden series.
     const p = new Params();
     const bsrc = booksSrc(ctx, p);
-    const r = await one<{ file: string; root: string; pruned_at: string | null; missing_pages: number[] | null; page_dims: Array<{ name: string; width: number | null; height: number | null }> | null }>(
-      `SELECT file, root, pruned_at, missing_pages, page_dims FROM ${bsrc} WHERE id = ${p.add(id)}`,
+    const r = await one<{ file: string; root: string; pruned_at: string | null; missing_pages: number[] | null; page_dims_version: string | null; page_dims: Array<{ name: string; width: number | null; height: number | null }> | null }>(
+      `SELECT file, root, pruned_at, missing_pages, page_dims, page_dims_version FROM ${bsrc} WHERE id = ${p.add(id)}`,
       p.values as any[],
     );
     if (!r) return [];
@@ -880,16 +883,27 @@ export const owned = {
     // stays a page -- it has a real image behind it and keeps its number -- the mark only says what the
     // image is. Same idiom as `junk` on the route.
     const missing = new Set(Array.isArray(r.missing_pages) ? r.missing_pages.map(Number) : []);
-    const mark = <T extends { number: number }>(pg: T): T | (T & { missing: true }) => (missing.has(pg.number) ? { ...pg, missing: true as const } : pg);
-    if (Array.isArray(r.page_dims) && r.page_dims.length) {
-      return r.page_dims.map((pd, i) => mark({ number: i + 1, fileName: pd.name, mediaType: mediaType(pd.name), width: pd.width ?? null, height: pd.height ?? null, sizeBytes: null }));
+    const contentVersion = await pageFileVersion(path.join(r.root || LIBRARY_ROOT, r.file)).catch(() => undefined);
+    const cleanup = await pageCleanupMetadata({ bookId: id, file: path.join(r.root || LIBRARY_ROOT, r.file), store: path.join(env.CONFIG_DIR, 'page-trash') });
+    const mark = <T extends { number: number }>(pg: T) => ({ ...pg,
+      ...(missing.has(pg.number) ? { missing: true as const } : {}),
+      ...(contentVersion ? { contentVersion } : {}),
+      ...(cleanup.removed.has(pg.number) ? { removed: true as const, restorable: cleanup.restorable.has(pg.number), junk: true, width: 32, height: 48 } : {}),
+    });
+    const stable = async <T>(listed: T[]): Promise<T[]> => {
+      const after = await pageFileVersion(path.join(r.root || LIBRARY_ROOT, r.file)).catch(() => undefined);
+      if (after !== contentVersion) throw Object.assign(new Error('The chapter changed while its page list was being read. Reload it.'), { statusCode: 409 });
+      return listed;
+    };
+    if (Array.isArray(r.page_dims) && r.page_dims.length && (!cleanup.revision || !contentVersion || r.page_dims_version === contentVersion)) {
+      return stable(r.page_dims.map((pd, i) => mark({ number: i + 1, fileName: pd.name, mediaType: mediaType(pd.name), width: pd.width ?? null, height: pd.height ?? null, sizeBytes: null })));
     }
     const dims = await cbzPageDims(`${r.root || LIBRARY_ROOT}/${r.file}`).catch(() => [] as Array<{ name: string; width: number | null; height: number | null }>);
     // This is a cache, so a failed write must never hide readable pages; but once this call resolves a
     // second reader should be able to use the cache instead of opening the archive again. Fire-and-forget
     // made that ordering depend on database load and was exposed by the partial-chapter completion suite.
-    if (dims.length) await q('UPDATE lib_books SET pages = $1, page_dims = $2 WHERE id = $3', [dims.length, JSON.stringify(dims), id]).catch(() => {});
-    return dims.map((pd, i) => mark({ number: i + 1, fileName: pd.name, mediaType: mediaType(pd.name), width: pd.width, height: pd.height, sizeBytes: null }));
+    if (dims.length) await q('UPDATE lib_books SET pages = $1, page_dims = $2, page_dims_version = $4 WHERE id = $3', [dims.length, JSON.stringify(dims), id, contentVersion ?? null]).catch(() => {});
+    return stable(dims.map((pd, i) => mark({ number: i + 1, fileName: pd.name, mediaType: mediaType(pd.name), width: pd.width, height: pd.height, sizeBytes: null })));
   },
 
   // Next/previous compare (number, file) rather than number alone. Two chapters legitimately share a

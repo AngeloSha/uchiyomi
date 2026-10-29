@@ -16,7 +16,7 @@
 // A capped account's set never contains an adult source, so it can neither start that source nor read
 // what an uncapped viewer's search got from it. The cache holds raw per-source lists (what the SITE said,
 // viewer-independent) and nothing about who asked -- the filter happens on every read, never on write.
-import type { SourceAdapter, SourceSeries } from './sources/types';
+import { supportsCreatorSearch, type SourceAdapter, type SourceSeries } from './sources/types';
 import { budgetFor } from './sources/budget';
 import { SOLVER_CONCURRENCY } from './sources/flaresolverr';
 import { scanOrder } from './scanOrder';
@@ -173,7 +173,7 @@ function cancelEntry(entry: Entry): void {
  * Ask one source, under a slot, and write what it said into the entry. Never throws: the state is the report. `slow`:
  * the health read this search made shows the source on a slow streak, which an answer inside the budget ends.
  */
-async function askOne(entry: Entry, src: SourceAdapter, term: string, slow = false): Promise<void> {
+async function askOne(entry: Entry, src: SourceAdapter, term: string, slow = false, creator?: 'author' | 'artist'): Promise<void> {
   const cell = entry.per.get(src.id)!;
   const lane = laneFor(src);
   if (!(await lane.take(entry))) return;
@@ -181,7 +181,7 @@ async function askOne(entry: Entry, src: SourceAdapter, term: string, slow = fal
   const budget = budgetFor(src, SEARCH_SOURCE_MS);
   try {
     if (entry.cancelled) return;
-    const raw = await bounded(src.search(term), budget);
+    const raw = await bounded(creator ? src.searchCreator!(term, creator, 1) : src.search(term), budget);
     const items = (Array.isArray(raw) ? raw : []).slice(0, SEARCH_PER_SOURCE);
     // Empty is a normal answer -- the title is not on this source -- and is reported nowhere: the newest
     // listing's empty-streak evidence is about page 1 of a listing, not about a search for one title.
@@ -242,9 +242,14 @@ function makeRoom(now: number): void {
 export async function searchAll(
   term: string,
   ask: SourceAdapter[],
-  opts: { waitMs: number; health: Map<string, SourceHealth> },
+  opts: { waitMs: number; health: Map<string, SourceHealth>; creator?: 'author' | 'artist' },
 ): Promise<SearchAnswer> {
-  const key = keyOf(term);
+  // Creator results cannot share title results, another role, or another case-sensitive name.
+  // Extensions can declare `Author (Case-sensitive)`, so their exact submitted spelling is part of the key.
+  const key = opts.creator
+    ? `${opts.creator}:${term.trim()}`
+    : `title:${keyOf(term)}`;
+  if (opts.creator) ask = ask.filter((src) => supportsCreatorSearch(src, opts.creator!));
   const callStart = Date.now();
   let entry = entries.get(key);
   if (entry && callStart - entry.startedAt >= SEARCH_TTL_MS) {
@@ -267,7 +272,7 @@ export async function searchAll(
     if (h?.disabled) { skipped.set(id, 'disabled'); continue; }
     if (h?.blocked_until && new Date(h.blocked_until).getTime() > callStart) { skipped.set(id, 'cooldown'); continue; }
     entry.per.set(id, { state: 'pending', items: [] });
-    void askOne(entry, byId.get(id)!, term, (h?.slow_streak ?? 0) > 0);
+    void askOne(entry, byId.get(id)!, term, (h?.slow_streak ?? 0) > 0, opts.creator);
   }
 
   // Wait for the earliest of: everything mine settled, my own wait, or the grace after the first source

@@ -4,7 +4,7 @@
 // install with no sources mounted is the legal, scraper-free default.
 import { readdirSync } from 'fs';
 import { join } from 'path';
-import type { SourceAdapter, SourceChapter, SourceHost } from './types';
+import { UNNUMBERED, unnumberedOf, type SourceAdapter, type SourceChapter, type SourceHost } from './types';
 import { cfGet, cfPost, cfSession } from './flaresolverr';
 import { learnImageHosts } from './imageHosts';
 
@@ -27,8 +27,15 @@ function isAdapter(x: any): x is SourceAdapter {
  * that rule for every other source. Reintroduce by returning the list as it came: "a chapter a source numbers below
  * zero is never listed" in chapterSpellings.test.ts finds the -1.
  */
-export const fileableChapters = (list: SourceChapter[]): SourceChapter[] =>
-  Array.isArray(list) ? list.filter((c) => !(Number(c?.number) < 0)) : list;
+export const fileableChapters = (list: SourceChapter[]): SourceChapter[] => {
+  if (!Array.isArray(list)) return list;
+  const out = list.filter((c) => !(Number(c?.number) < 0));
+  // Array.filter loses non-enumerable adapter metadata. A partial list must remain partial at the registry boundary,
+  // or destructive cleanup can mistake a dropped/unnumbered chapter for a proven absence on the retained source.
+  const dropped = unnumberedOf(list) + list.length - out.length;
+  if (dropped > 0) Object.defineProperty(out, UNNUMBERED, { value: dropped });
+  return out;
+};
 
 /** The adapters whose listChapters already goes through fileableChapters: a re-registered one is not wrapped twice. */
 const fileable = new WeakSet<SourceAdapter>();

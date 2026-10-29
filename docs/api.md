@@ -822,6 +822,22 @@ offers `replace_source`, the source's `standing` is `cooling` (so it still carri
 `frozen-series` cause), and `GET /api/admin/sources` leaves it out of `failing`. The downloader's stored words for a
 refused chapter name the refusal it blamed -- *HTTP 429*, *HTTP 403* -- never a worse page status beside it.
 
+**Removing a source keeps downloads by default.** `DELETE /api/admin/series/:id/sources/:sourceId`
+keeps all chapter files, rows and reading progress. For explicit follower cleanup, `GET
+.../sources/:sourceId/leftovers` returns `{chapters, numbers, readers, lastSource, confirmation}` after fresh
+nonempty remaining-source listings. `POST .../sources/:sourceId/cleanup {confirmation}` rechecks the exact
+preview, deletes only downloaded chapters uniquely supplied by that follower, and detaches it atomically.
+It also removes those chapters' progress, bookmarks/offline records, and unique by-number marks/failures.
+The response is `{ok, purged: {removed, bytes, left[]}}`; `left` names files that could not be deleted, in which
+case `ok` is false and the source remains followed. Cleanup never deletes a chapter another source lists.
+
+A changed/expired preview is 409 `preview_changed`; an unavailable, empty or incomplete remaining listing is
+409 `listing_unavailable`; an active writer is 409 `busy`. To clean up the main source, first make a replacement
+main and keep the old main as a follower (`primary_source` otherwise). The last source's files always stay.
+Cleanup holds its writer claim before eligibility reads and protects the source/listing snapshot during file
+and row deletion. The audit event is `series.source_leftovers`. `POST
+/api/admin/series/:id/chapters/unlisted {bookIds}` answers `{unlisted}` for the delete dialog's warning.
+
 **Failed chapters follow the series** (since v0.55.3). A failed chapter (one row of the ledger Health's
 `chapter-failures` check reads) that is filed under a source its series no longer uses -- neither its main source nor
 one it follows -- is filed under the series' main source, its attempts back to 0, its first failure (`firstAt`) and
@@ -1081,6 +1097,10 @@ POST   /auth/totp/setup           POST   /auth/totp/enable
 POST   /auth/totp/disable
 GET    /auth/oidc/start             GET    /auth/oidc/callback
 GET    /auth/oidc/link
+GET    /auth/profiles             POST   /auth/switch
+GET    /auth/ring                 POST   /auth/resume
+GET    /auth/pick                 POST   /auth/profile-login
+POST   /auth/leave
 ```
 
 **SSO-only mode** (since v0.63.0, `AUTH_MODE=oidc-only`): `/api/setup`, `/auth/login`, `/auth/register`,
@@ -1135,6 +1155,10 @@ GET    /api/books/:id/pages
 GET    /api/books/:id/next        PUT    /api/books/:id/progress
 PUT    /api/books/:id/pages/:n/junk
 PUT    /api/books/:id/pages/:n/spread
+GET    /api/admin/books/:id/page-cleanup
+POST   /api/admin/books/:id/page-cleanup
+GET    /api/admin/books/:id/page-rules
+PUT    /api/admin/books/:id/page-rules
 GET    /api/offline/plan             GET    /api/series/:id/listing
 GET    /api/series/:id/groups        GET    /api/series/:id/versions
 GET    /api/series/:id/gaps
@@ -1270,6 +1294,35 @@ place and adds `missing: true`; a page may be both `missing` and `junk`, and a r
 missing placeholder. `GET /api/books/:id/download-manifest` copies the same optional `missing: true` onto
 each affected entry in `pages`, so offline readers preserve the evidence. A complete chapter has
 `missingPages: null` and no page-level `missing` keys.
+
+**Reversible page cleanup (#354).** The four `/api/admin/books/:id/page-cleanup` and `page-rules` operations above
+require an admin account and admin token scope, with the same chapter visibility gate as reading. Cleanup GET
+returns `{revision, contentVersion, pages, retainedBytes, unusedRetainedBytes, unusedRetainedImages}`; each page has
+`number`, `name`, `bytes`, `gif`, `removed` and `restorable`. `revision` is an opaque SHA256 over the archive digest and
+cleanup state. POST accepts `{action, pages, revision, confirm:true}`, where `action` is `remove`, `restore`, `purge`
+or `purge-unused`. Use one to 500 page numbers, or an empty `pages` array for `purge-unused`.
+
+Removal replaces only the selected image bytes with small placeholders under the original ZIP entry names;
+numbered positions, progress, bookmarks and manual spread marks stay fixed. Originals are retained, deduplicated
+and verified under `CONFIG_DIR/page-trash`, and a durable journal precedes each atomic file replacement. `purge`
+explicitly makes selected removed originals unavailable before unlinking any blob no remaining restorable slot
+needs. `purge-unused` clears originals left after restoration or interrupted operations. No automatic expiry runs;
+neither action deletes a separate backup or a device's saved copy. Storage counts include all retained blobs,
+including originals already restored. The editor refuses unsupported formats, partial chapters, unsafe ZIPs,
+archives beyond 128 MiB compressed/decoded or 2,000 entries, busy writers and stale previews.
+
+Page lists and download manifests carry `removed:true` plus `restorable` for removed slots. A copied cleanup CBZ
+can retain those slot labels through its bounded embedded manifest, but another installation cannot restore it
+without the original server's trash/journal. An externally changed/refetched archive refuses restoration. All
+owned page lists/manifests carry an opaque `contentVersion`; append it as `cv` to page-image URLs, including `w` and
+`fit` variants. An old version URL answers **409** instead of receiving different bytes during an offline download.
+Clients must restart that download and discard partial blobs. Existing completed offline copies keep their bytes.
+
+Rules GET previews the current chapter's `.gif` page names, source/series rules and affected scope's chapter count.
+PUT accepts `{scope:'source'|'series', skipGif:boolean|null, confirm:true}`. Absent rules are disabled, a series rule
+overrides its source rule (including explicit false), and null removes that scoped rule. Matching uses the
+downloaded book's own stable `source_id`, never its series' current primary source. Rules skip on existing/future
+reads without editing files, and explicit `PUT .../pages/:n/junk {junk:false}` rescue always wins.
 
 Since v0.77.0 `GET /api/books/:id/pages?spreads=1` (#229, what the reader asks with *Join split double pages* on) adds
 `join: 'rtl' | 'ltr'` to a page that is, with the page after it, one double-page spread the source served as two files,
@@ -1577,6 +1630,8 @@ GET    /api/tokens                POST   /api/tokens
 GET    /api/bookmarks             PUT    /api/bookmarks/:bookId/:page
 DELETE /api/bookmarks/:bookId/:page
 DELETE /api/tokens/:id            POST   /api/opds/token
+GET    /api/profiles              POST   /api/profiles
+PATCH  /api/profiles/:id          DELETE /api/profiles/:id
 GET    /api/opds/token            DELETE /api/opds/token
 PATCH  /api/opds/token
 GET    /api/trackers              POST   /api/trackers/anilist
@@ -1810,6 +1865,7 @@ PATCH  /api/admin/notify-targets/:id DELETE /api/admin/notify-targets/:id
 POST   /api/admin/notify-targets/:id/test
 GET    /api/admin/install-ping/preview
 GET    /api/admin/limits
+GET    /api/admin/network         PATCH  /api/admin/network
 GET    /api/admin/users           POST   /api/admin/users
 PATCH  /api/admin/users/:id       DELETE /api/admin/users/:id
 GET    /api/admin/sessions        DELETE /api/admin/sessions/:id
@@ -1850,6 +1906,8 @@ GET    /api/admin/series/bulk/chapters/delete
 POST   /api/admin/series/bulk/chapters/delete/cancel
 GET    /api/admin/series/:id/scanlators GET    /api/admin/scanlators
 POST   /api/admin/series/:id/sources DELETE /api/admin/series/:id/sources/:sourceId
+GET    /api/admin/series/:id/sources/:sourceId/leftovers
+POST   /api/admin/series/:id/sources/:sourceId/cleanup {confirmation}
 POST   /api/admin/series/:id/main-source
 POST   /api/admin/series/:id/attach-source
 GET    /api/admin/series/:id/alt-titles POST   /api/admin/series/:id/alt-titles
@@ -1865,6 +1923,7 @@ POST   /api/admin/series/:id/delete-files
 POST   /api/admin/series/:id/forget
 POST   /api/admin/series/:id/rename-folder
 POST   /api/admin/series/:id/chapters/delete POST   /api/admin/series/:id/chapters/refetch
+POST   /api/admin/series/:id/chapters/unlisted
 POST   /api/admin/series/:id/chapters/keep-once
 POST   /api/admin/series/:id/chapters/hide POST   /api/admin/series/:id/chapters/unhide
 GET    /api/admin/series/:id/chapters/hidden

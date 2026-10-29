@@ -1,7 +1,8 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { hash } from '@node-rs/argon2';
 import rateLimit from '@fastify/rate-limit';
 import { z } from 'zod';
-import { q, one } from '../lib/db';
+import { q, one, tx } from '../lib/db';
 // backend-agnostic content client: the owned library in owned mode, Komga otherwise. The old direct
 // `lib/komga` import silently nulled every series lookup here after the owned-library cutover.
 import { content as komga } from '../lib/backend';
@@ -12,13 +13,15 @@ import { startBulkNewest, bulkNewestState } from '../lib/bulkNewest';
 // routes/admin.ts imports it from there too.
 import { jobBusy } from './sources';
 import { BlockedAddress } from '../lib/ssrfGuard';
-import { authenticate, userIdOf, roleOf, actsAsAdmin, issueOpdsToken, issueApiToken, listApiTokens, revokeApiToken, API_SCOPES, revokeOpdsToken, opdsTokenStatus, setOpdsShowAdult, OPDS_TOKEN_DAYS } from '../lib/auth';
+import { authenticate, requireCredentialSession, passwordError, revokeAllSessions, userIdOf, roleOf, actsAsAdmin, issueOpdsToken, issueApiToken, listApiTokens, revokeApiToken, API_SCOPES, revokeOpdsToken, opdsTokenStatus, setOpdsShowAdult, OPDS_TOKEN_DAYS } from '../lib/auth';
 import { enrichSeries, seenCounts } from '../lib/enrich';
 import { env } from '../env';
 import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription } from '../lib/push';
 import { statusFor, saveConnection, disconnect, whoAmI, pushSeriesProgress, pushSeriesProgressAsync, clearTrackerFloor, testConnection } from '../lib/trackers';
 import { ADAPTERS, isProvider, verdictOf, type Provider } from '../lib/trackerProviders';
 import { logAudit } from '../lib/audit';
+import { ssoOnly } from '../lib/authMode';
+import { MAX_MANAGED_PROFILES, freeUsername, inheritRestrictions, placeholderPasswordHash, profileKind, profileRefusal } from '../lib/profiles';
 import { noticeBook } from '../lib/noticeChapters';
 import { devicesOf, hourIn, lastDays, loadTimeline, summarize, validTz, yearRange } from '../lib/readingTime';
 import { listFor, ownListFor, listsFor, listItems, kindOf, ownerOf, type ListRow } from '../lib/lists';
@@ -86,7 +89,8 @@ export default async function personalRoutes(app: FastifyInstance) {
   const vc = (req: any): ViewCtx => req.viewCtx as ViewCtx;
 
   // issue/rotate the caller's OPDS token (shown once); used as the HTTP Basic password in an external reader
-  app.post('/api/opds/token', async (req) => {
+  // Not from a session entered without a password: the token would open the library from anywhere.
+  app.post('/api/opds/token', { preHandler: requireCredentialSession }, async (req) => {
     const token = await issueOpdsToken(userIdOf(req));
     return { token, url: `${env.PUBLIC_ORIGIN.replace(/\/$/, '')}/opds`, expiresInDays: OPDS_TOKEN_DAYS };
   });
@@ -114,7 +118,7 @@ export default async function personalRoutes(app: FastifyInstance) {
   // create call and never again, because only its hash is stored.
   app.get('/api/tokens', async (req) => ({ content: await listApiTokens(userIdOf(req)) }));
 
-  app.post('/api/tokens', async (req, reply) => {
+  app.post('/api/tokens', { preHandler: requireCredentialSession }, async (req, reply) => {
     const b = z
       .object({
         name: z.string().trim().min(1).max(60),
@@ -148,6 +152,116 @@ export default async function personalRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     if (!(await revokeApiToken(userIdOf(req), id))) return reply.code(404).send({ error: 'not_found' });
     await logAudit('token.revoke', { userId: userIdOf(req), detail: { id }, req });
+    return { ok: true };
+  });
+
+  // ---- profiles this account manages ----
+  // A member the admin allows (perms.canManageProfiles), or an admin, makes profiles that open at home without a
+  // password -- the children's, say -- and switches to them from its own session. Its own only: Admin -> Members manages
+  // everyone's. Each starts with the member's own restrictions (lib/profiles.ts inheritRestrictions), and none of this
+  // is open to a session that was itself entered without a password.
+  const mayManageProfiles = async (req: FastifyRequest): Promise<boolean> => {
+    if (actsAsAdmin(req)) return true;
+    const u = await one<{ perms: { canManageProfiles?: boolean } | null }>('SELECT perms FROM users WHERE id = $1', [userIdOf(req)]);
+    return u?.perms?.canManageProfiles === true;
+  };
+  const NOT_ALLOWED = { error: 'forbidden', message: 'This account cannot manage profiles. Ask whoever runs the server.' };
+  const PROFILE_COLS = `id, username, display_name, avatar, disabled, created_at,
+                        password_login, local_open, oidc_sub IS NOT NULL AS sso, auth_kind`;
+  const asProfile = ({ password_login, local_open, sso, auth_kind, display_name, ...p }: any) =>
+    ({ ...p, displayName: display_name, kind: profileKind({ password_login, local_open, sso, auth_kind }) });
+  const profileId = (req: FastifyRequest) => z.string().uuid().safeParse((req.params as { id: string }).id);
+
+  app.get('/api/profiles', async (req) => ({
+    content: (await q(`SELECT ${PROFILE_COLS} FROM users WHERE managed_by = $1 ORDER BY created_at`, [userIdOf(req)])).map(asProfile),
+  }));
+
+  app.post('/api/profiles', { preHandler: requireCredentialSession }, async (req, reply) => {
+    const b = z.object({
+      displayName: z.string().trim().min(1).max(64),
+      // With a password it is a hybrid: no password at home, this one from anywhere else.
+      password: z.string().min(1).max(200).optional(),
+    }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!(await mayManageProfiles(req))) return reply.code(403).send(NOT_ALLOWED);
+    const { displayName, password } = b.data;
+    if (password && ssoOnly()) return reply.code(403).send({ error: 'sso_only' });
+    if (password) {
+      const pwErr = passwordError(password);
+      if (pwErr) return reply.code(400).send({ error: 'weak_password', message: pwErr });
+    }
+    const me = userIdOf(req);
+    const ph = password ? await hash(password) : await placeholderPasswordHash();
+    let made: { id: string } | null;
+    try {
+      made = await tx(async (qq) => {
+        // Counted and made under one lock per manager, so two requests at once cannot both pass the count.
+        await qq('SELECT pg_advisory_xact_lock(hashtextextended($1::text, 6400))', [me]);
+        const [{ n }] = await qq<{ n: number }>('SELECT count(*)::int AS n FROM users WHERE managed_by = $1', [me]);
+        if (n >= MAX_MANAGED_PROFILES) return null;
+        const [row] = await qq<{ id: string }>(
+          `INSERT INTO users (display_name, username, role, password_hash, auth_kind, password_login, local_open, managed_by)
+           VALUES ($1, $2, 'user', $3, $4, $5, true, $6) RETURNING id`,
+          [displayName, await freeUsername(qq, displayName), ph, password ? 'password' : 'none', !!password, me]);
+        await qq(`INSERT INTO app_settings (user_id, data) VALUES ($1, '{}'::jsonb) ON CONFLICT (user_id) DO NOTHING`, [row.id]);
+        await inheritRestrictions(qq, me, row.id);
+        return row;
+      });
+    } catch (e) {
+      // Another writer took the generated name between the check and the insert (uq_users_username).
+      if ((e as { code?: string })?.code === '23505') return reply.code(409).send({ error: 'username_taken' });
+      throw e;
+    }
+    if (!made) return reply.code(409).send({ error: 'too_many_profiles', message: `At most ${MAX_MANAGED_PROFILES} profiles.` });
+    await logAudit('profile.create', { userId: me, detail: { profile: made.id, hybrid: !!password }, req });
+    return asProfile(await one(`SELECT ${PROFILE_COLS} FROM users WHERE id = $1`, [made.id]));
+  });
+
+  app.patch('/api/profiles/:id', { preHandler: requireCredentialSession }, async (req, reply) => {
+    const id = profileId(req);
+    const b = z.object({
+      displayName: z.string().trim().min(1).max(64).optional(),
+      password: z.string().min(1).max(200).optional(),
+      localOpen: z.boolean().optional(),
+    }).safeParse(req.body);
+    if (!id.success || !b.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!(await mayManageProfiles(req))) return reply.code(403).send(NOT_ALLOWED);
+    const me = userIdOf(req);
+    const p = await one<{ password_login: boolean; local_open: boolean; sso: boolean }>(
+      'SELECT password_login, local_open, oidc_sub IS NOT NULL AS sso FROM users WHERE id = $1 AND managed_by = $2', [id.data, me]);
+    if (!p) return reply.code(404).send({ error: 'not_found' });
+    const { displayName, password, localOpen } = b.data;
+    if (password && ssoOnly()) return reply.code(403).send({ error: 'sso_only' });
+    const refused = profileRefusal({ role: 'user', localOpen: localOpen ?? p.local_open, credential: p.sso || p.password_login || !!password });
+    if (refused) return reply.code(400).send(refused);
+    if (password) {
+      const pwErr = passwordError(password);
+      if (pwErr) return reply.code(400).send({ error: 'weak_password', message: pwErr });
+      await q(`UPDATE users SET password_hash = $2, password_login = true, password_changed_at = now(), failed_logins = 0, locked_until = NULL
+                WHERE id = $1`, [id.data, await hash(password)]);
+    }
+    if (displayName) await q('UPDATE users SET display_name = $2 WHERE id = $1', [id.data, displayName]);
+    if (localOpen !== undefined) await q('UPDATE users SET local_open = $2 WHERE id = $1', [id.data, localOpen]);
+    // A new way in, or one taken away: the profile's sessions end, as an admin's password reset ends them.
+    if (password || localOpen !== undefined) await revokeAllSessions(id.data);
+    await logAudit('profile.update', { userId: me, detail: { profile: id.data, displayName, password: password ? '***' : undefined, localOpen }, req });
+    return asProfile(await one(`SELECT ${PROFILE_COLS} FROM users WHERE id = $1`, [id.data]));
+  });
+
+  app.delete('/api/profiles/:id', { preHandler: requireCredentialSession }, async (req, reply) => {
+    const id = profileId(req);
+    if (!id.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!(await mayManageProfiles(req))) return reply.code(403).send(NOT_ALLOWED);
+    const me = userIdOf(req);
+    const p = await one<{ username: string | null }>('SELECT username FROM users WHERE id = $1 AND managed_by = $2', [id.data, me]);
+    if (!p) return reply.code(404).send({ error: 'not_found' });
+    // As DELETE /api/admin/users/:id does: what the profile's reading was, counted before there is nothing to count.
+    const lost = await one<{ progress: number; events: number; favorites: number }>(
+      `SELECT (SELECT count(*)::int FROM read_progress  WHERE user_id = $1) AS progress,
+              (SELECT count(*)::int FROM reading_events WHERE user_id = $1) AS events,
+              (SELECT count(*)::int FROM favorites      WHERE user_id = $1) AS favorites`, [id.data]).catch(() => null);
+    await logAudit('profile.delete', { userId: me, detail: { target: id.data, username: p.username, destroyed: lost ?? 'uncounted' }, req });
+    await q('DELETE FROM users WHERE id = $1', [id.data]);
     return { ok: true };
   });
 

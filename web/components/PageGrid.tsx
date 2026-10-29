@@ -11,6 +11,9 @@ export interface GridPage {
   junk?: boolean;
   /** A server-written placeholder. It may never be offered as a page to skip. */
   missing?: boolean;
+  /** The stable slot of a page removed from the archive. */
+  removed?: boolean;
+  restorable?: boolean;
 }
 
 /**
@@ -24,7 +27,7 @@ export interface GridPage {
  * and each new width is a fresh archive open plus a resize, so reusing a warm width makes this open with
  * thumbnails already on disk instead of paying for a whole new generation of them.
  */
-export function PageGrid({ title, pages, current, onPick, onClose, onToggleJunk }: {
+export function PageGrid({ title, pages, current, onPick, onClose, onToggleJunk, onManage, onRestore }: {
   title: string;
   pages: GridPage[];
   /** Flat index of the page being read, so it can be marked and scrolled to. */
@@ -33,11 +36,17 @@ export function PageGrid({ title, pages, current, onPick, onClose, onToggleJunk 
   onClose: () => void;
   /** Mark or un-mark a page by hand. Omitted when the decision cannot be saved (offline). */
   onToggleJunk?: (pageNumber: number, junk: boolean) => void;
+  onManage?: () => void;
+  onRestore?: (pageNumber: number) => void;
 }) {
   return (
     <Sheet title={title} onClose={onClose}>
+      {onManage && <button type="button" onClick={onManage} className="btn-key mb-3" data-manage-pages>{tr('Manage chapter pages')}</button>}
       <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
-        {pages.map((p) => (
+        {pages.map((p) => p.removed ? <div key={`${p.number}:removed`} className="flex aspect-[2/3] flex-col items-center justify-center gap-2 rounded-lg border border-ink-700 bg-ink-900 p-1 text-center" data-removed-page={p.number}>
+          <span className="text-xs text-fog-500">{p.number} · {p.restorable === false ? tr('Original permanently deleted') : tr('Removed')}</span>
+          {onRestore && p.restorable !== false && <button type="button" className="btn-key text-xs" onClick={() => onRestore(p.number)} aria-label={tr('Restore page {n}', { n: p.number })}>{tr('Restore')}</button>}
+        </div> : (
           <button
             key={`${p.number}:${p.idx}`}
             onClick={() => { onPick(p.idx); onClose(); }}
@@ -61,7 +70,7 @@ export function PageGrid({ title, pages, current, onPick, onClose, onToggleJunk 
             {/* ⚠️ A <span role="button"> rather than a nested <button>, which is invalid HTML: the browser
                 closes the outer button before this one, and the tile stops being clickable at all. The tile
                 is the jump; this is the correction, so it stops the event rather than bubbling into it. */}
-            {onToggleJunk && !p.missing && (
+            {onToggleJunk && !p.missing && !p.removed && (
               <span
                 role="button"
                 tabIndex={0}

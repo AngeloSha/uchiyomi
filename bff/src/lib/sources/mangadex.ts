@@ -17,6 +17,23 @@ const API = (process.env.MANGADEX_API_URL || 'https://api.mangadex.org').replace
 const HEADERS = { 'user-agent': 'Uchiyomi/1.0 (self-hosted personal reader)' };
 const RATINGS = ['safe', 'suggestive', 'erotica'].map((r) => `contentRating[]=${r}`).join('&');
 
+// Language adapters share one name lookup, including its in-flight request. A global search may ask
+// every enabled language at once; resolving the same person separately would spend the API's rate limit.
+const creators = new Map<string, { until: number; ids: Promise<string[]> }>();
+function creatorIds(name: string): Promise<string[]> {
+  const key = name.trim().toLowerCase();
+  const hit = creators.get(key);
+  if (hit && hit.until > Date.now()) return hit.ids;
+  if (creators.size >= 50) creators.delete(creators.keys().next().value!);
+  const ids = mdGet(`${API}/author?name=${encodeURIComponent(name.trim())}&limit=100`).then((people) =>
+    [...new Set<string>((people.data || []).map((p: any) => p.id).filter((id: unknown): id is string => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)))],
+  );
+  const cell = { until: Date.now() + 300_000, ids };
+  creators.set(key, cell);
+  ids.catch(() => { if (creators.get(key) === cell) creators.delete(key); });
+  return ids;
+}
+
 /** The rate group every MangaDex adapter declares (types.ts `rateGroup`): one API, one limit, however many languages. */
 export const MANGADEX_GROUP = 'mangadex';
 
@@ -315,6 +332,20 @@ export function makeMangadex(code: string): SourceAdapter {
       // Only titles with chapters in this language, English included (v0.62.0): a hit it cannot serve is a dead end,
       // and English no longer falls back to another language to fill one.
       const j = await mdGet(`${API}/manga?title=${encodeURIComponent(query)}&limit=12&${RATINGS}&includes[]=cover_art&includes[]=author&order[relevance]=desc&availableTranslatedLanguage[]=${md}`);
+      return (j.data || []).map(series);
+    },
+
+    async searchCreator(name, kind, page = 1) {
+      // The author catalogue holds both writers and artists. Resolve the name there, then ask the
+      // requested relationship field; using title= here would silently search for a different thing.
+      if (!name.trim()) return [];
+      const ids = await creatorIds(name);
+      if (!ids.length) return [];
+      const field = kind === 'artist' ? 'artists[]' : 'authors[]';
+      const offset = (Math.max(1, Math.floor(page)) - 1) * 100;
+      if (offset >= 10_000) return [];
+      const creator = ids.map((id) => `${field}=${encodeURIComponent(id)}`).join('&');
+      const j = await mdGet(`${API}/manga?${creator}&limit=100&offset=${offset}&${RATINGS}&includes[]=cover_art&includes[]=author&includes[]=artist&availableTranslatedLanguage[]=${md}`);
       return (j.data || []).map(series);
     },
 

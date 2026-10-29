@@ -537,6 +537,11 @@ export interface LanguageSettings {
 
 export interface PageInfo {
   number: number;
+  /** A stable page slot removed by an admin; never shown as a reading page. */
+  removed?: true;
+  restorable?: boolean;
+  /** Archive revision used to invalidate immutable image URLs after an edit. */
+  contentVersion?: string;
   /** Set by the server when this page recurs across chapters of the series -- a credit page, an advert. */
   junk?: boolean;
   /**
@@ -803,7 +808,7 @@ export interface DownloadManifest {
   coverUrl: string;
   totalBytes: number;
   /** `missing` rides along like `junk`: the placeholder bytes download like any page, and the caption is drawn offline too. */
-  pages: { number: number; url: string; width: number | null; height: number | null; bytes: number | null; junk?: boolean; missing?: true; join?: 'rtl' | 'ltr'; mark?: 'join' | 'split' }[];
+  pages: { number: number; url: string; width: number | null; height: number | null; bytes: number | null; junk?: boolean; missing?: true; removed?: true; restorable?: boolean; contentVersion?: string; join?: 'rtl' | 'ltr'; mark?: 'join' | 'split' }[];
 }
 
 export function isWebtoon(dir?: string): boolean {

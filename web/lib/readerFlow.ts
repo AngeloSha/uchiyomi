@@ -21,6 +21,8 @@ export interface FlowPage {
   width: number | null;
   height: number | null;
   junk?: boolean;
+  removed?: boolean;
+  contentVersion?: string;
   /**
    * A placeholder the server saved in place of a page the source never served (v0.40.0). Carried, never
    * acted on: a missing page is drawn at full height with a caption over it, in every mode. It is not
@@ -49,6 +51,8 @@ export interface FlowItem {
   key: string;
   firstOfChapter: boolean;
   junk?: boolean;
+  removed?: boolean;
+  contentVersion?: string;
   /** The page is a placeholder for one the source never served; the renderer draws the caption. See FlowPage. */
   missing?: boolean;
   /** Drawn as a thin band of itself rather than at full height. Derived, never stored. */
@@ -85,12 +89,13 @@ export function buildFlow(
   chapters.forEach((ch, ci) => {
     // `expanded` means "the reader asked for this page" in both modes: collapse draws it full height, hide
     // puts it back in the flow. One state axis, so a page can never be expanded-but-absent.
+    const available = ch.pages.filter((p) => !p.removed);
     const keep = mode === 'hide'
-      ? ch.pages.filter((p) => p.missing || !p.junk || expanded.has(`${ch.id}:${p.number}`))
-      : ch.pages;
+      ? available.filter((p) => p.missing || !p.junk || expanded.has(`${ch.id}:${p.number}`))
+      : available;
     // A chapter that is nothing but furniture is a chapter we have got wrong. Showing it empty would read as
     // a broken download, so it is shown whole instead.
-    const pages = keep.length ? keep : ch.pages;
+    const pages = keep.length ? keep : available;
     pages.forEach((p) => {
       const key = `${ch.id}:${p.number}`;
       out.push({
@@ -101,6 +106,7 @@ export function buildFlow(
         key,
         firstOfChapter: false,
         junk: p.junk,
+        contentVersion: p.contentVersion,
         join: p.join,
         mark: p.mark,
         // ⚠️ Passed through untouched and never a reason to collapse or drop the page. The flow's job is

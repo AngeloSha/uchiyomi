@@ -643,6 +643,11 @@ function LibraryInner() {
                 <span className="min-w-0 truncate">{tr('Author: {name}', { name: `\u2068${author}\u2069` })}</span> ×
               </button>
             )}
+            {author && canDownload(user) && (
+              <Link href={`/discover/?q=${encodeURIComponent(author)}&creator=author`} className="chip text-xs">
+                {tr('Find more by this author')}
+              </Link>
+            )}
             {reversed && (
               <button onClick={() => setParam('dir', naturalDir(active))} className="chip text-xs" data-chip-dir>
                 {tr(dirLabel(active, dir))} ×

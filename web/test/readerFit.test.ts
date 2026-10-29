@@ -63,10 +63,10 @@ test('a page once asked for sharper is never asked for at less', () => {
 test('Fit pages to my screen is this device\'s, off until chosen, and only it asks for ?fit=', () => {
   const page = read('app/reader/page.tsx');
   // Reintroduce the PR's default (every page through ?w=): the reader asks for re-encoded pages with the switch off.
-  assert.match(page, /\(device\.fitPages \? img\.pageFit\(ch\.id, flat\[i\]\.number, fitFor\(i\)\) : img\.page\(ch\.id, flat\[i\]\.number\)\)/);
+  assert.match(page, /\(device\.fitPages \? img\.pageFit\(ch\.id, flat\[i\]\.number, fitFor\(i\), flat\[i\]\.contentVersion\) : img\.page\(ch\.id, flat\[i\]\.number, undefined, flat\[i\]\.contentVersion\)\)/);
   // The column's look-ahead warms the address the page then asks for.
   assert.match(page, /void fetch\(onlineSrc\(ch, i\),/);
   assert.doesNotMatch(page, /pageWidthBucket/);
-  assert.match(read('lib/api.ts'), /pageFit: \(bookId: string, n: number, fit: number\) =>/);
+  assert.match(read('lib/api.ts'), /pageFit: \(bookId: string, n: number, fit: number, contentVersion\?: string\) =>/);
   assert.match(read('components/ReaderSettings.tsx'), /on=\{device\.fitPages\} onChange=\{\(fitPages\) => setDevice\(\{ fitPages \}\)\}/);
 });

@@ -11,6 +11,7 @@ import { gql as defaultGql, suwayomiUrl, suwayomiImageHeaders, onEngineOrigin, t
 import { OPS } from './operations';
 import { needsBrowserCheck, passSiteCheck, siteWasOpened } from './siteSessions';
 import { env } from '../../../env';
+import { creatorFilterPaths, creatorFilterChange, type FilterChange } from './creatorFilters';
 
 export const SW_PREFIX = 'sw:';
 
@@ -31,6 +32,8 @@ export interface RemoteSource {
   /** The engine's own word: SAFE, MIXED or NSFW. */
   contentWarning?: string | null;
   supportsLatest?: boolean | null;
+  /** Optional search metadata; ordinary registration does not wait for it. */
+  filters?: unknown;
   /**
    * The installed extension (APK) this source came out of. One package can expose many sources -- 3Hentai
    * is one extension and twenty-nine language variants -- and `pkgName` is the only thing they share that
@@ -59,6 +62,27 @@ export async function listRemoteSources(run: Gql = defaultGql): Promise<RemoteSo
   return Array.isArray(nodes)
     ? nodes.filter((s) => s && s.id != null).map((s) => ({ ...s, isNsfw: adultOf(s.contentWarning) }))
     : [];
+}
+
+// A bounded optional read enriches adapters already in the registry. Concurrent reloads share only the in-flight
+// read; a later reload re-reads metadata after extension updates. Old adapter objects can no longer affect new ones.
+const creatorReaders = new WeakMap<Gql, Promise<Map<string, unknown>>>();
+const creatorSetters = new WeakMap<SourceAdapter, (filters: unknown) => void>();
+
+export async function enrichCreatorSearch(adapters: readonly SourceAdapter[], run: Gql = defaultGql): Promise<void> {
+  if (!adapters.length) return;
+  let pending = creatorReaders.get(run);
+  if (!pending) {
+    pending = run<{ sources?: { nodes?: Array<{ id?: unknown; filters?: unknown }> } }>(OPS.sourceCreatorFilters.doc, {}, 2500)
+      .then((d) => new Map((Array.isArray(d?.sources?.nodes) ? d.sources!.nodes! : [])
+        .filter((s) => s && s.id != null).map((s) => [String(s.id), s.filters])));
+    creatorReaders.set(run, pending);
+  }
+  try {
+    const found = await pending;
+    for (const adapter of adapters) creatorSetters.get(adapter)?.(found.get(adapter.id.slice(SW_PREFIX.length)));
+  } catch { /* creator fields stay unsupported; ordinary sources are already registered */ }
+  finally { if (creatorReaders.get(run) === pending) creatorReaders.delete(run); }
 }
 
 // ---- the adapter --------------------------------------------------------------------------------------------------
@@ -220,12 +244,13 @@ export function makeSuwayomiAdapter(remote: RemoteSource, gqlRun: Gql = defaultG
     }
   };
 
-  const fetchList = async (type: 'SEARCH' | 'LATEST' | 'POPULAR', query: string | null, page: number): Promise<SourceSeries[]> => {
+  const fetchList = async (type: 'SEARCH' | 'LATEST' | 'POPULAR', query: string | null, page: number, filters?: FilterChange[]): Promise<SourceSeries[]> => {
     const d = await run<{ fetchSourceManga: { mangas: RemoteManga[] } }>(OPS.fetchSourceManga.doc, {
       source: remote.id,
       type,
       query,
       page: Math.max(1, page),
+      ...(filters ? { filters } : {}),
     });
     const list = d?.fetchSourceManga?.mangas;
     if (!Array.isArray(list)) return [];
@@ -335,5 +360,17 @@ export function makeSuwayomiAdapter(remote: RemoteSource, gqlRun: Gql = defaultG
   // the first caller.
   adapter.popular = (page = 1) => fetchList('POPULAR', null, page);
 
+  const setCreatorFilters = (filters: unknown) => {
+    const paths = creatorFilterPaths(filters);
+    if (!paths.size) { delete adapter.searchCreator; delete adapter.creatorFields; return; }
+    adapter.creatorFields = [...paths.keys()];
+    adapter.searchCreator = async (name, kind, page = 1) => {
+      const path = paths.get(kind);
+      if (!path || !name.trim()) return [];
+      return fetchList('SEARCH', '', Math.max(1, Math.floor(page)), [creatorFilterChange(path, name.trim())]);
+    };
+  };
+  creatorSetters.set(adapter, setCreatorFilters);
+  if (remote.filters) setCreatorFilters(remote.filters);
   return adapter;
 }

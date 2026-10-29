@@ -169,7 +169,7 @@ export default async function findSourcesRoutes(app: FastifyInstance) {
     // The audit line is written when the run ends, long after this answer; the two things logAudit reads of a
     // request, its IP and user agent, are taken now (POST /api/admin/sources/check does the same).
     const h = req.headers;
-    const from = { ip: req.ip, headers: { 'x-forwarded-for': h['x-forwarded-for'], 'user-agent': h['user-agent'] } } as unknown as FastifyRequest;
+    const from = { ip: req.ip, headers: { 'user-agent': h['user-agent'] } } as unknown as FastifyRequest;
     // The admin's own view, without the 18+ hide: that is a tidy screen, and the scope is what they asked for.
     const r = await startFind(scope, userIdOf(req)!, await viewCtxFor(userIdOf(req), roleOf(req)), from, {
       review: b.data.review, ...(replace ? { mode: 'replace' as const, turnOff: b.data.turnOff } : {}),
