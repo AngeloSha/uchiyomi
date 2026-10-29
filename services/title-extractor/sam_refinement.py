@@ -156,9 +156,21 @@ class SamRefiner:
         if not isinstance(proposals, (list, tuple)) or len(proposals) > MAX_PROPOSALS:
             raise ValueError('invalid_refinement_proposals')
         height, width = seed.shape
-        boxes = [_box(value, width, height) for value in proposals]
+        boxes = []
+        for value in proposals:
+            if isinstance(value, dict):
+                if set(value) != {'box', 'seedBox', 'additive'} or value['additive'] is not True:
+                    raise ValueError('invalid_refinement_proposal')
+                box = _box(value['box'], width, height)
+                seed_box = _box(value['seedBox'], width, height)
+                if not (box[0] <= seed_box[0] < seed_box[2] <= box[2] and box[1] <= seed_box[1] < seed_box[3] <= box[3]):
+                    raise ValueError('invalid_refinement_seed_box')
+                boxes.append((box, seed_box, True))
+            else:
+                box = _box(value, width, height)
+                boxes.append((box, box, False))
         # A proposal without credible seed must never trigger model inference.
-        boxes = [box for box in boxes if seed[box[1]:box[3], box[0]:box[2]].any()]
+        boxes = [entry for entry in boxes if seed[entry[1][1]:entry[1][3], entry[1][0]:entry[1][2]].any()]
         output = seed.copy()
         if not boxes:
             return output
@@ -166,9 +178,15 @@ class SamRefiner:
         with self.torch.inference_mode():
             try:
                 self.predictor.set_image(np.ascontiguousarray(rgb))
-                for box in boxes:
-                    chosen = select_refinement(seed, self._predict_masks(box), box)
+                for box, seed_box, additive in boxes:
+                    credible = np.zeros_like(seed)
+                    sx0, sy0, sx1, sy1 = seed_box
+                    credible[sy0:sy1, sx0:sx1] = seed[sy0:sy1, sx0:sx1]
+                    chosen = select_refinement(credible, self._predict_masks(box), box)
                     if chosen is not None:
+                        if additive:
+                            output |= chosen
+                            continue
                         # Accepted candidates may remove weak-seed contamination
                         # inside the proposal. Outside it, original alpha survives.
                         left, top, right, bottom = box

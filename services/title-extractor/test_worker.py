@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from worker import Extractor, ExtractionError, MODEL_FINGERPRINT, complete_region, decode_image, normalized, rectangle
+from worker import Extractor, ExtractionError, MODEL_FINGERPRINT, clean_added_speckles, complete_region, decode_image, normalized, rectangle
 from server import State, handler_for
 
 
@@ -22,6 +22,33 @@ def image_request(width=100, height=150, rgb=None):
     image = Image.fromarray(rgb) if rgb is not None else Image.new('RGB', (width, height), (91, 128, 200))
     output = BytesIO(); image.save(output, format='PNG')
     return {'imageBase64': base64.b64encode(output.getvalue()).decode()}
+
+
+class CompleteTitleTest(unittest.TestCase):
+    def test_cleanup_preserves_baseline_punctuation_and_nearby_new_strokes(self):
+        baseline = np.zeros((80, 100), dtype=bool)
+        baseline[30:50, 30:50] = True
+        baseline[2, 2] = True
+        mask = baseline.copy()
+        mask[4, 90] = True
+        mask[28, 35] = True
+        output = clean_added_speckles(mask, baseline)
+        self.assertTrue(output[2, 2], 'existing punctuation must never be erased')
+        self.assertTrue(output[28, 35], 'a nearby recovered stroke must survive')
+        self.assertFalse(output[4, 90], 'isolated new scenery noise should be removed')
+
+    def test_separate_last_character_and_second_line_survive_without_skinny_scenery_or_credits(self):
+        mask = np.zeros((340, 260), dtype=bool)
+        mask[250:290, 20:160] = True
+        mask[250:290, 180:220] = True
+        mask[185:225, 50:110] = True
+        mask[140:170, 140:150] = True
+        mask[300:305, 30:120] = True
+        box = complete_region(mask, [20, 250, 160, 290])
+        self.assertGreaterEqual(box[2], 220)
+        self.assertLessEqual(box[1], 185)
+        self.assertGreater(box[1], 170)
+        self.assertLess(box[3], 300)
 
 
 def bounds_from_key(key):

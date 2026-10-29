@@ -18,6 +18,9 @@
 - Administrators can extract lettering from the current cover, adjust the title region and exclude credits, preview
   the transparent result on a hero, and explicitly apply or discard it. Changed covers and newer artwork choices
   invalidate old drafts. The optional model service remains isolated from the application and library files.
+- Cover selection reruns detection on overlapping title-line views and refines missed letters using the existing
+  local SAM weights. Automatic selection groups neighboring lines and separated characters. Edited regions immediately
+  hide the previous preview, and detected bounds remain separate from the administrator's requested selection.
 - An optional background cover fallback requires verified manga identities, complete title recognition, image checks
   and an approved empirical verification record before it can apply artwork. Uncertain results require review;
   unavailable or unvalidated verification keeps automatic application disabled.

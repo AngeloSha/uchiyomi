@@ -7,6 +7,12 @@ result private until an administrator applies it or an empirically approved auto
 The main app image does not contain Python, segmentation weights or an extra translation model. This service has
 no library, database or application-config mount and requires no external network access during inference.
 
+Detection uses up to three overlapping views so a second title line can be found independently of the dominant
+line. The pinned base SAM checkpoint refines up to four proposed lines or glyphs in one additional image pass.
+This improves lettering that the text detector misses, while retaining original RGB. It can still include scenery
+or miss a flourish, so a result remains a visual-review candidate. Model scores never approve automatic application.
+An initial preview can take about a minute on three CPU threads; repeated views use a small bounded mask cache.
+
 ## Build and stage
 
 Use the pinned Hi-SAM checkout and checkpoints documented in

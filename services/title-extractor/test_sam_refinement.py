@@ -106,6 +106,28 @@ class RefinementLifecycleTest(unittest.TestCase):
         self.assertTrue(np.all(output[15, 10:20]))
         self.assertTrue(output[28, 45], 'alpha outside proposal must survive')
 
+    def test_glyph_context_uses_its_own_seed_and_adds_flourish_without_erasing_neighbor(self):
+        refiner = self.refiner()
+        seed = np.zeros((30, 50), dtype=bool)
+        seed[10:15, 10:20] = True
+        seed[8:20, 25:30] = True  # Another letter inside the prompt's context.
+        candidate = np.zeros_like(seed)
+        candidate[10:15, 10:20] = True
+        candidate[15:18, 8:20] = True  # A newly recovered curved stroke.
+        refiner._predict_masks = lambda box: [candidate]
+        output = refiner.refine(np.zeros((30, 50, 3), np.uint8), seed,
+            [{'box': [5, 5, 35, 25], 'seedBox': [10, 10, 20, 15], 'additive': True}])
+        self.assertTrue(output[17, 8])
+        self.assertTrue(np.all(output[8:20, 25:30]), 'recovering one glyph must preserve its neighbor')
+        self.assertEqual([event[0] for event in refiner.events], ['ensure', 'image', 'reset'])
+
+    def test_glyph_seed_must_stay_inside_its_context(self):
+        refiner = self.refiner()
+        with self.assertRaises(ValueError):
+            refiner.refine(np.zeros((30, 50, 3), np.uint8), np.zeros((30, 50), bool),
+                [{'box': [5, 5, 35, 25], 'seedBox': [0, 0, 20, 15], 'additive': True}])
+        self.assertEqual(refiner.events, [])
+
     def test_no_seed_skips_model_and_decoder_failure_clears_embedding(self):
         refiner = self.refiner()
         rgb = np.zeros((30, 50, 3), np.uint8); seed = np.zeros((30, 50), dtype=bool)

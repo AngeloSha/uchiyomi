@@ -1,5 +1,5 @@
 FROM python:3.12-slim-bookworm
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TORCH_FORCE_WEIGHTS_ONLY_LOAD=1
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TORCH_FORCE_WEIGHTS_ONLY_LOAD=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=3
 RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 libglib2.0-0 \
  && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
@@ -10,7 +10,7 @@ RUN pip install --no-cache-dir -r /service/requirements.txt
 COPY hi-sam.tar /tmp/hi-sam.tar
 RUN mkdir -p /opt/hi-sam /models && tar -xf /tmp/hi-sam.tar -C /opt/hi-sam && rm /tmp/hi-sam.tar \
  && rm -rf /opt/hi-sam/pretrained_checkpoint && ln -s /models /opt/hi-sam/pretrained_checkpoint
-COPY worker.py server.py /service/
+COPY worker.py server.py sam_refinement.py /service/
 WORKDIR /service
 USER 10002:10002
 ENV PORT=3081 HI_SAM_DIR=/opt/hi-sam INFERENCE_THREADS=3
