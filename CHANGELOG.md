@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.102.0 — 2026-10-29
+
+**Manga title artwork, cover extraction with precise corrections, and optional nightly library processing.**
 
 ### Manga title artwork
 
@@ -29,9 +31,12 @@
 - Title previews offer precise Restore and Erase brushes, zoom, pan, undo and reset. Corrections replay against an
   immutable cover and alpha mask, save as a private revision, and require review before Apply. Revision checks prevent
   older tabs from applying unseen corrections; manual corrections never inherit automatic quality approval.
-- An optional background cover fallback requires verified manga identities, complete title recognition, image checks
-  and an approved empirical verification record before it can apply artwork. Uncertain results require review;
-  unavailable or unvalidated verification keeps automatic application disabled.
+- Opt-in nightly cover extraction processes existing and newly added manga through a persistent queue. Manual
+  requests take priority; unchanged covers are skipped and uncertain previews remain available for 14 days.
+- A separate opt-in can apply results that pass the available canonical-title and image checks. Existing manual
+  artwork, styled titles and provider logos are preserved. Both options are off by default; missing identity,
+  unavailable recognition, incomplete titles and other failed checks leave results for review. Empirical calibration
+  remains separate from these runtime checks and is never inferred from an extraction score.
 
 ## v0.101.0 — 2026-10-29
 
