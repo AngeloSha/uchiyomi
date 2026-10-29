@@ -2,6 +2,7 @@
 """Offline cover-lettering trial. Outputs are review candidates; this never changes Uchiyomi artwork."""
 import argparse
 import hashlib
+from io import BytesIO
 import json
 import os
 from pathlib import Path
@@ -20,6 +21,15 @@ WEIGHTS = {
     'sam_vit_b_01ec64.pth': 'ec2df62732614e57411cdcf32a23ffdf28910380d03139ee0f4fcbe91eb8c912',
 }
 Image.MAX_IMAGE_PIXELS = 12_000_000
+
+
+def read_cover_bytes(path, max_bytes=12_000_000):
+    """Decode and hash the same bounded snapshot, even if the input path changes during inference."""
+    with path.open('rb') as handle:
+        data = handle.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise ValueError('cover exceeds the trial byte limit')
+    return data
 
 
 def region_box(region, width, height):
@@ -126,9 +136,8 @@ def main():
         title = str(row.get('title', 'Untitled'))[:200]
         name = f'{index + 1:02d}'
         path = (manifest_path.parent / row['input']).resolve()
-        if path.stat().st_size > 12_000_000:
-            raise ValueError('cover exceeds the trial byte limit')
-        with Image.open(path) as original:
+        cover_bytes = read_cover_bytes(path)
+        with Image.open(BytesIO(cover_bytes)) as original:
             if getattr(original, 'n_frames', 1) != 1:
                 raise ValueError('choose a still cover image')
             if original.width * original.height > Image.MAX_IMAGE_PIXELS:
@@ -176,7 +185,7 @@ def main():
             canvas.paste(preview.convert('RGB'), (690, 130))
         canvas.save(output / (name + '-review.jpg'), quality=90)
         tiles.append(canvas)
-        result = {'id': row.get('id'), 'title': title, 'sourceSha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+        result = {'id': row.get('id'), 'title': title, 'sourceSha256': hashlib.sha256(cover_bytes).hexdigest(),
             'seconds': round(time.perf_counter() - item_started, 2), 'coverSize': [width, height],
             'foregroundFraction': round(float(mask.mean()), 4), 'modelMaskScore': float(np.squeeze(scores)),
             'region': box, 'selection': 'human_region' if 'region' in row else 'largest_text_region',

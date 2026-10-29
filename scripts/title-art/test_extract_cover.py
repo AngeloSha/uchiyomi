@@ -1,6 +1,7 @@
 """Boundary checks for the optional, review-only cover extraction trial."""
 import importlib.util
 from pathlib import Path
+import tempfile
 import unittest
 import numpy as np
 
@@ -10,6 +11,16 @@ spec.loader.exec_module(trial)
 
 
 class CoverExtractionTest(unittest.TestCase):
+    def test_cover_snapshot_is_bounded_and_independent_of_later_replacement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'cover'
+            path.write_bytes(b'12345')
+            snapshot = trial.read_cover_bytes(path, 5)
+            path.write_bytes(b'other version')
+            self.assertEqual(snapshot, b'12345')
+            with self.assertRaises(ValueError):
+                trial.read_cover_bytes(path, 5)
+
     def test_invalid_regions_are_refused(self):
         for region in (None, [], [0, 0, 1], [-.1, 0, 1, 1], [0, 0, 2, 1], [0, .5, 1, .5],
                        [0, 0, float('nan'), 1], [False, 0, 1, 1], [0, 0, .00001, .00001]):
