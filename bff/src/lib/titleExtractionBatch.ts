@@ -7,8 +7,8 @@ import{FIRST_PAGE}from'./seriesArt';
 import{readTitleLogo}from'./titleArt';
 import{msUntilHour}from'./backup';
 import{titleExtractorHealth,ExtractionError}from'./titleExtractionWorker';
-import{titleExtractionCapabilities,titleExtractionCover,createTitleExtraction,titleExtractionsSettled,titleExtractionWorkerBusy,
-  cancelBatchTitleExtraction,collectBatchTitleExtractions,BATCH_RETENTION_DAYS,type JobRow}from'./titleExtraction';
+import{titleExtractionCapabilities,titleExtractionCover,createTitleExtraction,titleExtractionsSettled,titleExtractionJobSettled,titleExtractionWorkerBusy,
+  titleExtractionJobInFlight,titleExtractionVerificationContext,recoverCompletedBatchJob,cancelBatchTitleExtraction,collectBatchTitleExtractions,BATCH_RETENTION_DAYS,type JobRow}from'./titleExtraction';
 
 const LOCK=91826525,HOUR=3,MAX_ATTEMPTS=3;
 type ItemStatus='pending'|'processing'|'ready'|'applied'|'skipped'|'failed'|'cancelled';
@@ -112,27 +112,32 @@ async function claim():Promise<(ItemRow&{retry_errors:boolean})|null>{
 
 async function processItem(item:ItemRow&{retry_errors:boolean}){
  let fingerprint:string|null=null,modelFingerprint:string|null=null;
+ let context:{key:string;publicationRequested:boolean}|null=null;
  try{
   if(!item.series_id){await finish(item,'skipped','series_unavailable');return;}
   await cancelBatchTitleExtraction(item.id);
   const reason=await protectedReason(item.series_id);if(reason){await finish(item,'skipped',reason);return;}
   const cover=await titleExtractionCover(item.series_id,SYSTEM_CTX);fingerprint=cover.fingerprint;modelFingerprint=await model();
   if(!modelFingerprint)throw new ExtractionError('worker_unavailable');
-  const previous=await one<{source_fingerprint:string;model_fingerprint:string;outcome:string;retry_at:Date|null}>('SELECT * FROM series_title_extraction_history WHERE series_id=$1',[item.series_id]);
+  context=await titleExtractionVerificationContext(cover.snapshot,modelFingerprint);
+  const previous=await one<{source_fingerprint:string;model_fingerprint:string;outcome:string;retry_at:Date|null;verification_key:string;publication_requested:boolean}>('SELECT * FROM series_title_extraction_history WHERE series_id=$1',[item.series_id]);
   if(previous?.source_fingerprint===fingerprint&&previous.model_fingerprint===modelFingerprint){
    const failed=['failed','no_text','rejected'].includes(previous.outcome);
-   if(!failed||!item.retry_errors&&previous.retry_at&&new Date(previous.retry_at).getTime()>clock()){
+   const sameChecks=previous.verification_key===context.key;
+   if(previous.outcome==='applied'||sameChecks&&(!failed&&(!context.publicationRequested||previous.publication_requested)
+      ||failed&&!item.retry_errors&&previous.retry_at&&new Date(previous.retry_at).getTime()>clock())){
     await finish(item,'skipped',failed?'previous_failure_cooldown':'unchanged');return;
    }
   }
   const created=await createTitleExtraction(item.series_id,null,SYSTEM_CTX,{exclusions:[]},true,{itemId:item.id,cover});
-  await titleExtractionsSettled();
+  await titleExtractionJobSettled(created.id);
   if(stopped||runtime.stopping)return;
   const job=await one<JobRow>('SELECT * FROM series_title_extractions WHERE id=$1',[created.id]);
   const current=await one<{status:string}>('SELECT status FROM title_extraction_items WHERE id=$1',[item.id]);if(current?.status!=='processing')return;
   if(!job)throw new ExtractionError('extract_interrupted');
   if(job.status==='ready'||job.status==='applied'){
-   await finish(item,job.status);await storeHistory(item.series_id,fingerprint,job.model_fingerprint??modelFingerprint,job.status,null);
+   await recoverCompletedBatchJob(job.id);
+   await finish(item,job.status);await storeHistory(item.series_id,fingerprint,job.model_fingerprint??modelFingerprint,job.status,null,context);
    await collectBatchTitleExtractions(item.series_id,job.id);return;
   }
   throw new ExtractionError(job.error??(job.status==='rejected'?'rejected':'extract_failed'));
@@ -148,17 +153,19 @@ async function processItem(item:ItemRow&{retry_errors:boolean}){
    await q("UPDATE title_extraction_items SET status='pending',reason=$2,retry_at=now()+($3::int*interval '1 millisecond') WHERE id=$1 AND status='processing'",[item.id,code,delay]);return;
   }
   await finish(item,'failed',code);
-  if(item.series_id&&fingerprint&&modelFingerprint)await storeHistory(item.series_id,fingerprint,modelFingerprint,code==='no_text'?'no_text':code==='rejected'?'rejected':'failed',new Date(clock()+(transient?6*60*60_000:7*24*60*60_000)));
+  if(item.series_id&&fingerprint&&modelFingerprint)await storeHistory(item.series_id,fingerprint,modelFingerprint,code==='no_text'?'no_text':code==='rejected'?'rejected':'failed',new Date(clock()+(transient?6*60*60_000:7*24*60*60_000)),context);
  }
 }
-async function storeHistory(seriesId:string,fingerprint:string,modelFingerprint:string,outcome:string,retryAt:Date|null){
- await q(`INSERT INTO series_title_extraction_history(series_id,source_fingerprint,model_fingerprint,outcome,retry_at)VALUES($1,$2,$3,$4,$5)
-  ON CONFLICT(series_id)DO UPDATE SET source_fingerprint=$2,model_fingerprint=$3,outcome=$4,retry_at=$5,processed_at=now()`,[seriesId,fingerprint,modelFingerprint,outcome,retryAt]);
+async function storeHistory(seriesId:string,fingerprint:string,modelFingerprint:string,outcome:string,retryAt:Date|null,context:{key:string;publicationRequested:boolean}|null){
+ await q(`INSERT INTO series_title_extraction_history(series_id,source_fingerprint,model_fingerprint,outcome,retry_at,verification_key,publication_requested)VALUES($1,$2,$3,$4,$5,$6,$7)
+  ON CONFLICT(series_id)DO UPDATE SET source_fingerprint=$2,model_fingerprint=$3,outcome=$4,retry_at=$5,verification_key=$6,publication_requested=$7,processed_at=now()`,
+  [seriesId,fingerprint,modelFingerprint,outcome,retryAt,context?.key??'',context?.publicationRequested??false]);
 }
 
 export function wakeTitleExtractionBatch(){
  if(stopped||runtime.stopping||driving)return;
  driving=Promise.resolve().then(async()=>{
+  await reconcileStrandedItems();
   while(!stopped&&!runtime.stopping){
    if(titleExtractionWorkerBusy())await titleExtractionsSettled();
    if(stopped||runtime.stopping||!(await titleExtractionCapabilities()).available)break;
@@ -172,13 +179,30 @@ export function wakeTitleExtractionBatch(){
  }).catch(()=>{}).finally(()=>{driving=null;});
 }
 
+/** After an infrastructure failure, retry orphaned work without requiring an application restart. */
+async function reconcileStrandedItems(){
+ const items=await q<ItemRow>(`SELECT i.* FROM title_extraction_items i JOIN title_extraction_runs r ON r.id=i.run_id
+  WHERE r.status='running' AND i.status='processing'`);
+ for(const item of items){
+  if(item.job_id&&titleExtractionJobInFlight(item.job_id))continue;
+  if(item.job_id){try{if(await recoverCompletedBatchJob(item.job_id))continue;}catch(error){
+    if(error instanceof ExtractionError){await finish(item,error.code.startsWith('stale_')?'skipped':'failed',error.code);continue;}
+    throw error;
+  }}
+  await cancelBatchTitleExtraction(item.id);
+  await q("UPDATE title_extraction_items SET status='pending',reason='interrupted',retry_at=now() WHERE id=$1 AND status='processing'",[item.id]);
+ }
+}
+
 export async function initializeTitleExtractionBatch(){
  // A completed draft may have committed just before its process disappeared. Keep it rather than infer again.
- await q(`INSERT INTO series_title_extraction_history(series_id,source_fingerprint,model_fingerprint,outcome)
-  SELECT DISTINCT ON(j.series_id) j.series_id,j.cover_fingerprint,j.model_fingerprint,j.status FROM series_title_extractions j
-  JOIN title_extraction_items i ON i.job_id=j.id WHERE i.status='processing' AND j.status IN('ready','applied') AND j.model_fingerprint IS NOT NULL
+ await q(`INSERT INTO series_title_extraction_history(series_id,source_fingerprint,model_fingerprint,outcome,verification_key,publication_requested)
+  SELECT DISTINCT ON(j.series_id) j.series_id,j.cover_fingerprint,j.model_fingerprint,j.status,COALESCE(j.verification_key,''),
+   j.publication_requested AND s.automatic_cover_title_generation AND s.automatic_cover_title_apply FROM series_title_extractions j
+  JOIN title_extraction_items i ON i.job_id=j.id JOIN server_settings s ON s.id=1 WHERE i.status='processing' AND j.status IN('ready','applied') AND j.model_fingerprint IS NOT NULL
   ORDER BY j.series_id,j.created_at DESC ON CONFLICT(series_id)DO UPDATE SET source_fingerprint=EXCLUDED.source_fingerprint,
-  model_fingerprint=EXCLUDED.model_fingerprint,outcome=EXCLUDED.outcome,processed_at=now(),retry_at=NULL`);
+  model_fingerprint=EXCLUDED.model_fingerprint,outcome=EXCLUDED.outcome,verification_key=EXCLUDED.verification_key,
+  publication_requested=EXCLUDED.publication_requested,processed_at=now(),retry_at=NULL`);
  await q(`UPDATE title_extraction_items i SET status=j.status FROM series_title_extractions j WHERE i.job_id=j.id AND i.status='processing' AND j.status IN('ready','applied')`);
  await q("UPDATE title_extraction_items SET status='pending',reason='interrupted',retry_at=now() WHERE status='processing'");
  const s=await settings();if(s?.automatic_cover_title_generation&&!s.cover_title_next_run_at)

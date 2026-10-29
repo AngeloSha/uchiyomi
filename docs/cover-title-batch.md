@@ -22,11 +22,13 @@ matching source/candidate OCR remain required; unlinked, incomplete or uncertain
 calibration approval remains a separate stricter signal. Passing the available checks does not claim that calibration
 was approved or guarantee every decorative edge. Manual brush corrections are never automatically certified.
 
-Review previews are private and retained for14 days, with a2GiB automatic-draft asset budget. They do not consume
+Review previews are private and retained for14 days, with a2GiB generation budget. Manual corrections may grow retained drafts beyond that budget; their bytes are
+counted, so new background generation pauses until space is available. They do not consume
 the32 short-lived manual preview slots. The latest ready reviews are linked from the task status. A storage limit
 pauses remaining work instead of silently dropping targets. Failures have bounded retries; **Retry failed** explicitly
-tries previous failures again. Source/model fingerprints survive preview expiry and deletion, so the same unchanged
-cover is not inferred every night or regenerated immediately after a preview expires. A per-series manual preview
+tries previous failures again. Source/model/verifier and cached canonical-alias fingerprints survive preview expiry and deletion, so the same unchanged
+cover is not inferred every night or regenerated immediately after a preview expires. Newly available OCR or canonical
+aliases, or newly enabled checked publication, allow one bounded reevaluation; unchanged verification inputs are skipped. A per-series manual preview
 can always be created again when needed.
 
 The status API is read-only. `ready` counts private review drafts, `applied` counts actual publication, and pending,

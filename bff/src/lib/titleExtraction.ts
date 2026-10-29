@@ -44,6 +44,7 @@ export interface JobRow {
   mask_original_sha256:string|null;mask_preview_file:string|null;
   mask_bounds:ExtractionRect|null;
   batch_item_id:string|null;asset_bytes:number|string;
+  verification_key:string|null;publication_requested:boolean;
 }
 export interface TitleExtractionJob {
   id:string; seriesId:string; automatic:boolean; status:Status|'expired'; createdAt:string; expiresAt:string;
@@ -85,6 +86,14 @@ async function currentCover(id:string,viewer:ViewCtx) {
 }
 export const titleExtractionCover=currentCover;
 export const titleExtractionSnapshot=snapshotFor;
+/** Only cached canonical titles and the pinned local verifier enter retry identity; no metadata lookup. */
+export async function titleExtractionVerificationContext(snapshot:Snapshot,modelFingerprint:string){
+ const[ocr,settings]=await Promise.all([ocrCapability(modelFingerprint),one<{automatic_cover_title_generation:boolean;automatic_cover_title_apply:boolean}>(
+  'SELECT automatic_cover_title_generation,automatic_cover_title_apply FROM server_settings WHERE id=1')]);
+ return{key:hash(JSON.stringify({verifier:ocr.available?ocr.verifierFingerprint:null,aliases:snapshot.aliases_id===snapshot.anilist_id
+  ?[snapshot.aliases_id,snapshot.english,snapshot.romaji,snapshot.native]:null})),
+  publicationRequested:!!settings?.automatic_cover_title_generation&&!!settings.automatic_cover_title_apply&&ocr.available};
+}
 async function writePrivateFile(path:string,bytes:Buffer) {
   if(bytes.length>ART_MAX_BYTES) throw new ExtractionError('extract_failed',502);
   await mkdir(EXTRACTION_DIR,{recursive:true,mode:0o700});
@@ -170,8 +179,12 @@ export async function titleExtractionCapabilities() {
     maxExclusions:8,timeoutSeconds:90,maskCorrection:true,maxMaskStrokes:128,maxMaskPoints:8192};
 }
 const waiting:string[]=[];let active:{id:string;abort:AbortController}|null=null;let draining:Promise<void>|null=null;let stopped=false;
+const batchSignals=new Map<string,{promise:Promise<void>;resolve:()=>void}>();
+export const titleExtractionJobSettled=(id:string)=>batchSignals.get(id)?.promise??Promise.resolve();
+function resolveBatchSignal(id:string){batchSignals.get(id)?.resolve();batchSignals.delete(id);}
 export const titleExtractionsSettled=()=>draining??Promise.resolve();
 export const titleExtractionWorkerBusy=()=>!!active||waiting.length>0;
+export const titleExtractionJobInFlight=(id:string)=>active?.id===id||waiting.includes(id);
 export async function createTitleExtraction(seriesId:string,userId:string|null,viewer:ViewCtx,
   selection:{region?:ExtractionRect;exclusions:ExtractionRect[];coverFingerprint?:string},automatic=false,
   batch?:{itemId:string;cover:Awaited<ReturnType<typeof currentCover>>}):Promise<TitleExtractionJob> {
@@ -186,6 +199,9 @@ export async function createTitleExtraction(seriesId:string,userId:string|null,v
     await tx(async(qq)=>{
       // Serialize the global storage cap without holding a lock during image fetching or model inference.
       await qq('SELECT pg_advisory_xact_lock(91826524)');
+      // Manual preview intent and automatic publication serialize on the same series row.
+      const p=new Params(),target=p.add(seriesId),allowed=visible('s',viewer,p);
+      if(!(await qq(`SELECT s.id FROM lib_series s WHERE s.id=${target} AND ${allowed} FOR UPDATE OF s`,p.values)).length)throw new ExtractionError('not_found',404);
       const [count]=await qq<{n:number;pending:number;batch_n:number;batch_bytes:string}>(`SELECT count(*)FILTER(WHERE batch_item_id IS NULL)::int n,
         count(*)FILTER(WHERE status IN('queued','running'))::int pending,count(*)FILTER(WHERE batch_item_id IS NOT NULL AND status='ready')::int batch_n,
         COALESCE(sum(asset_bytes)FILTER(WHERE batch_item_id IS NOT NULL),0)::text batch_bytes
@@ -193,7 +209,9 @@ export async function createTitleExtraction(seriesId:string,userId:string|null,v
       if((!batch&&count.n>=MAX_JOBS)||count.pending>=MAX_QUEUED) throw new ExtractionError('extract_busy',429);
       if(batch){
         if(count.batch_n>=2048||Number(count.batch_bytes)+4*ART_MAX_BYTES>BATCH_ASSET_BUDGET)throw new ExtractionError('extraction_storage_full',507);
-        const [item]=await qq('SELECT i.id FROM title_extraction_items i JOIN title_extraction_runs r ON r.id=i.run_id WHERE i.id=$1 AND i.series_id=$2 AND i.status=\'processing\' AND r.status=\'running\' FOR UPDATE OF i,r',[batch.itemId,seriesId]);
+        // Match claim/cancel/finalization: run first, then item. PostgreSQL join row-lock order is not a contract.
+        await qq(`SELECT r.id FROM title_extraction_runs r JOIN title_extraction_items i ON i.run_id=r.id WHERE i.id=$1 FOR UPDATE OF r`,[batch.itemId]);
+        const [item]=await qq('SELECT i.id FROM title_extraction_items i JOIN title_extraction_runs r ON r.id=i.run_id WHERE i.id=$1 AND i.series_id=$2 AND i.status=\'processing\' AND r.status=\'running\' FOR UPDATE OF i',[batch.itemId,seriesId]);
         if(!item)throw new ExtractionError('batch_cancelled',409);
       }
       const current=await snapshotFor(seriesId,viewer,qq);
@@ -208,6 +226,7 @@ export async function createTitleExtraction(seriesId:string,userId:string|null,v
         ON CONFLICT(series_id)DO UPDATE SET automatic_key=$2,retry_at=EXCLUDED.retry_at`,[seriesId,cover.key]);
     });
   } catch(error) {await removeFiles(jobId);throw error;}
+  if(batch){let resolve!:()=>void;const promise=new Promise<void>(done=>{resolve=done;});batchSignals.set(jobId,{promise,resolve});}
   if(automatic)waiting.push(jobId);else waiting.unshift(jobId);
   if(!draining)draining=Promise.resolve().then(drain);
   return dto((await one<JobRow>('SELECT * FROM series_title_extractions WHERE id=$1',[jobId]))!);
@@ -216,7 +235,7 @@ async function drain() {
   try {while(waiting.length&&!stopped&&!runtime.stopping) {
     const jobId=waiting.shift()!;const abort=new AbortController();active={id:jobId,abort};
     try {await runJob(jobId,abort.signal);} catch {/* An individual database/shutdown failure leaves the original art intact. */}
-    finally {active=null;}
+    finally {active=null;resolveBatchSignal(jobId);}
   }} finally {draining=null;}
 }
 async function freshJob(row:JobRow,viewer:ViewCtx,qq:ScopedQuery=q) {
@@ -245,6 +264,7 @@ async function runJob(jobId:string,parentSignal:AbortSignal) {
   const row=await one<JobRow>('SELECT * FROM series_title_extractions WHERE id=$1',[jobId]);if(!row)return;
   if(new Date(row.expires_at).getTime()<=Date.now()){await q('DELETE FROM series_title_extractions WHERE id=$1',[jobId]);await removeFiles(jobId);return;}
   let timer:ReturnType<typeof setTimeout>|undefined;
+  let terminalSaved=false;
   const timeout=new AbortController(); const signal=AbortSignal.any([parentSignal,timeout.signal]);
   try {
     const viewer=row.automatic?SYSTEM_CTX:await viewCtxFor(row.owner_id);
@@ -285,24 +305,57 @@ async function runJob(jobId:string,parentSignal:AbortSignal) {
     const bytes=await normalizeTitleLogo(result.bytes);
     if((await sharp(bytes).stats()).isOpaque)throw new ExtractionError('extract_failed',502);
     await writeJobFile(jobId,'preview',bytes);
+    const context=row.batch_item_id?await titleExtractionVerificationContext(current,result.modelFingerprint??''):null;
     const updated=await q(`UPDATE series_title_extractions SET status=$2,quality=$3,reasons=$4,result_region=$5,candidate_sha256=$6,candidate_region=$7,model_fingerprint=$8,
-      mask_width=$9,mask_height=$10,mask_baseline_sha256=$11,mask_original_sha256=$12,asset_bytes=$13
+      mask_width=$9,mask_height=$10,mask_baseline_sha256=$11,mask_original_sha256=$12,asset_bytes=$13,verification_key=$14,publication_requested=$15
       WHERE id=$1 AND status='running' RETURNING id`,
       [jobId,quality.manualApplyAllowed?'ready':'rejected',JSON.stringify(quality),JSON.stringify(quality.reasons.map((r)=>r.code)),JSON.stringify(result.region),hash(bytes),
         result.candidateRegion?JSON.stringify(result.candidateRegion):null,result.modelFingerprint??null,
         mask?.width??null,mask?.height??null,mask?hash(mask.bytes):null,mask?hash(result.bytes):null,
-        source.length+bytes.length+(mask?mask.bytes.length+result.bytes.length:0)]);
+        source.length+bytes.length+(mask?mask.bytes.length+result.bytes.length:0),context?.key??null,context?.publicationRequested??false]);
     if(!updated.length){await removeFiles(jobId);return;}
+    terminalSaved=true;
     if(row.automatic&&quality.manualApplyAllowed&&(quality.safeToApply||row.batch_item_id&&quality.availableChecksPassed===true)){
       if(!row.batch_item_id||await batchPublicationEnabled())await applySystemDraft({...row,status:'ready',quality},bytes);
     }
+    if(row.batch_item_id){await finalizeCompletedBatchJob(jobId);await collectBatchTitleExtractions(row.series_id,jobId);}
   } catch(error) {
+    // A transient bookkeeping/publication DB failure must not destroy a committed review result.
+    // The durable batch reconciler will observe ready/applied and finish it without inferring again.
+    if(row.batch_item_id&&terminalSaved)return;
     const code=error instanceof ExtractionError?error.code:error instanceof TitleArtError?error.code:'extract_failed';
     await q("UPDATE series_title_extractions SET status='error',error=$2 WHERE id=$1 AND mask_revision=0 AND status IN ('queued','running','ready')",[jobId,code]).catch(()=>{});
     if(row.automatic&&['extract_timeout','worker_unavailable','extract_busy'].includes(code))
       await q("UPDATE series_title_extraction_state SET retry_at=now()+interval '5 minutes' WHERE series_id=$1 AND automatic_key=$2",[row.series_id,row.snapshot]).catch(()=>{});
     await rm(file(jobId,'preview'),{force:true}).catch(()=>{});
   } finally {if(timer)clearTimeout(timer);}
+}
+export async function recoverCompletedBatchJob(jobId:string){
+ const job=await one<JobRow>('SELECT * FROM series_title_extractions WHERE id=$1',[jobId]);
+ if(!job?.batch_item_id||!['ready','applied'].includes(job.status))return false;
+ if(job.status==='ready'&&Number(job.mask_revision)===0&&job.quality?.manualApplyAllowed
+   &&(job.quality.safeToApply||job.quality.availableChecksPassed===true)&&await batchPublicationEnabled()){
+  const bytes=await readPreview(job);if(hash(bytes)!==job.candidate_sha256)throw new ExtractionError('extract_failed',409);
+  await applySystemDraft(job,bytes);
+ }
+ await finalizeCompletedBatchJob(jobId);return true;
+}
+/** Commit the terminal outcome before the worker advances to unrelated manual jobs or cleanup can remove applied rows. */
+export async function finalizeCompletedBatchJob(jobId:string){
+ await tx(async qq=>{
+  const [run]=await qq<{id:string}>(`SELECT r.id FROM title_extraction_runs r JOIN title_extraction_items i ON i.run_id=r.id
+   JOIN series_title_extractions j ON j.batch_item_id=i.id WHERE j.id=$1 FOR UPDATE OF r`,[jobId]);if(!run)return;
+  const [item]=await qq<{id:string;status:string}>(`SELECT i.id,i.status FROM title_extraction_items i JOIN series_title_extractions j ON j.batch_item_id=i.id WHERE j.id=$1 FOR UPDATE OF i`,[jobId]);if(!item)return;
+  const [job]=await qq<JobRow>('SELECT * FROM series_title_extractions WHERE id=$1 FOR SHARE',[jobId]);
+  if(!job||!['ready','applied'].includes(job.status))return;
+  if(item.status==='processing')await qq('UPDATE title_extraction_items SET status=$2,reason=NULL WHERE id=$1',[item.id,job.status]);
+  const[settings]=await qq<{enabled:boolean}>('SELECT(automatic_cover_title_generation AND automatic_cover_title_apply) enabled FROM server_settings WHERE id=1');
+  if(job.model_fingerprint)await qq(`INSERT INTO series_title_extraction_history(series_id,source_fingerprint,model_fingerprint,outcome,verification_key,publication_requested)
+   VALUES($1,$2,$3,$4,$5,$6)ON CONFLICT(series_id)DO UPDATE SET source_fingerprint=$2,model_fingerprint=$3,outcome=$4,verification_key=$5,publication_requested=$6,retry_at=NULL,processed_at=now()`,
+   [job.series_id,job.cover_fingerprint,job.model_fingerprint,job.status,job.verification_key??'',job.publication_requested&&!!settings?.enabled]);
+  await qq(`UPDATE title_extraction_runs SET status='completed',finished_at=now() WHERE id=$1 AND status='running'
+   AND NOT EXISTS(SELECT 1 FROM title_extraction_items WHERE run_id=$1 AND status IN('pending','processing'))`,[run.id]);
+ });
 }
 async function batchPublicationEnabled() {
   const settings=await one<{automatic_cover_title_generation:boolean;automatic_cover_title_apply:boolean}>('SELECT automatic_cover_title_generation,automatic_cover_title_apply FROM server_settings WHERE id=1');
@@ -319,6 +372,8 @@ async function assertAutomatic(row:JobRow,qq:ScopedQuery) {
   if(row.batch_item_id){
     const [run]=await qq(`SELECT r.id FROM title_extraction_items i JOIN title_extraction_runs r ON r.id=i.run_id WHERE i.id=$1 AND r.status='running' FOR SHARE OF r`,[row.batch_item_id]);
     if(!settings?.automatic_cover_title_generation||!settings.automatic_cover_title_apply||!run)throw new ExtractionError('publication_disabled',409);
+    if((await qq(`SELECT id FROM series_title_extractions WHERE series_id=$1 AND id<>$2 AND expires_at>now()
+      AND status IN('queued','running','ready') AND(NOT automatic OR mask_revision>0) LIMIT 1`,[row.series_id,row.id])).length)throw new ExtractionError('publication_disabled',409);
     if(!gate||gate.first_page||gate.mode!=='automatic'||!gate.anilist_id)throw new ExtractionError('stale_candidate',409);
   }else if(!settings?.automatic_cover_titles||!gate?.allowed||gate.first_page||gate.mode!=='automatic'||gate.provider_logo||gate.lookup_status!=='missing'
     ||gate.lookup_anilist_id!==gate.anilist_id||!gate.anilist_id)throw new ExtractionError('stale_candidate',409);
@@ -364,6 +419,7 @@ export async function correctTitleExtractionMask(seriesId:string,jobId:string,us
     .extract({left,top,width:right-left,height:bottom-top}).resize({width:1600,height:800,fit:'inside',withoutEnlargement:true}).png().toBuffer();
   const bytes=await normalizeTitleLogo(png);
   const revision=input.expectedRevision+1;
+  const previousRevisionBytes=row.mask_preview_file?await lstat(revisedFile(jobId,row.mask_preview_file)).then(meta=>meta.isFile()?meta.size:0,()=>0):0;
   const name=`${jobId.toLowerCase()}.revision.${revision}.${randomUUID()}.webp`,path=revisedFile(jobId,name);
   await writePrivateFile(path,bytes);
   let committed=false;
@@ -386,7 +442,8 @@ export async function correctTitleExtractionMask(seriesId:string,jobId:string,us
       const quality:CoverTitleQualityResult={policyVersion:'strict-v1',safeToApply:false,availableChecksPassed:false,manualApplyAllowed:true,needsReview:true,
         reasons:[{code:'manual_mask_edit',severity:'warning'}],sourceTitleMatched:null,candidateTitleMatched:null,matchedAlias:null};
       const [saved]=await qq<JobRow>(`UPDATE series_title_extractions SET mask_revision=$2,mask_strokes=$3,mask_preview_file=$4,candidate_sha256=$5,
-        quality=$6,reasons=$7,mask_bounds=$8 WHERE id=$1 RETURNING *`,[jobId,revision,JSON.stringify(input.strokes),name,hash(bytes),JSON.stringify(quality),JSON.stringify(['manual_mask_edit']),JSON.stringify(bounds)]);
+        quality=$6,reasons=$7,mask_bounds=$8,asset_bytes=GREATEST(0,asset_bytes+$9::bigint-$10::bigint) WHERE id=$1 RETURNING *`,
+        [jobId,revision,JSON.stringify(input.strokes),name,hash(bytes),JSON.stringify(quality),JSON.stringify(['manual_mask_edit']),JSON.stringify(bounds),bytes.length,previousRevisionBytes]);
       return saved;
     });
     committed=true;
@@ -416,14 +473,14 @@ export async function applyTitleExtraction(seriesId:string,jobId:string,userId:s
   await removeFiles(jobId);return titleArt;
 }
 export async function discardTitleExtraction(seriesId:string,jobId:string,userId:string,viewer:ViewCtx) {
-  await ownedJob(seriesId,jobId,userId,viewer);if(active?.id===jobId)active.abort.abort();
+  const row=await ownedJob(seriesId,jobId,userId,viewer);if(row.batch_item_id)await finalizeCompletedBatchJob(jobId);if(active?.id===jobId)active.abort.abort();
   for(let at=waiting.indexOf(jobId);at>=0;at=waiting.indexOf(jobId))waiting.splice(at,1);
-  await q('DELETE FROM series_title_extractions WHERE id=$1',[jobId]);await removeFiles(jobId);
+  await q('DELETE FROM series_title_extractions WHERE id=$1',[jobId]);await removeFiles(jobId);resolveBatchSignal(jobId);
 }
 /** Batch cancellation is confined to its own uncompleted system draft, never a user's preview or title artwork. */
 export async function cancelBatchTitleExtraction(itemId:string) {
   const rows=await q<{id:string}>(`DELETE FROM series_title_extractions WHERE batch_item_id=$1 AND automatic AND status IN('queued','running','error') RETURNING id`,[itemId]);
-  for(const{id}of rows){if(active?.id===id)active.abort.abort();for(let at=waiting.indexOf(id);at>=0;at=waiting.indexOf(id))waiting.splice(at,1);await removeFiles(id);}
+  for(const{id}of rows){if(active?.id===id)active.abort.abort();for(let at=waiting.indexOf(id);at>=0;at=waiting.indexOf(id))waiting.splice(at,1);await removeFiles(id);resolveBatchSignal(id);}
 }
 export async function collectBatchTitleExtractions(seriesId:string,keepId:string) {
   const rows=await q<{id:string}>(`DELETE FROM series_title_extractions WHERE series_id=$1 AND id<>$2 AND batch_item_id IS NOT NULL AND mask_revision=0
@@ -436,7 +493,8 @@ export async function dropTitleExtractions(seriesId:string) {
   await q('DELETE FROM series_title_extraction_state WHERE series_id=$1',[seriesId]);
 }
 export async function cleanupTitleExtractions() {
-  const rows=await q<{id:string}>('DELETE FROM series_title_extractions WHERE expires_at<=now() OR status=\'applied\' RETURNING id');
+  const rows=await q<{id:string}>(`DELETE FROM series_title_extractions j WHERE expires_at<=now() OR(status='applied'
+    AND NOT EXISTS(SELECT 1 FROM title_extraction_items i WHERE i.job_id=j.id AND i.status='processing')) RETURNING id`);
   for(const {id}of rows)await removeFiles(id);
   const keep=new Map((await q<{id:string;mask_preview_file:string|null}>('SELECT id,mask_preview_file FROM series_title_extractions')).map((r)=>[r.id,r.mask_preview_file]));
   for(const name of await readdir(EXTRACTION_DIR).catch(()=>[] as string[])) {
@@ -488,4 +546,4 @@ export function startTitleExtractions(log:{warn(message:string):void}) {
     finally{if(!stopped&&!runtime.stopping){timer=setTimeout(()=>void tick(),30_000);timer.unref();}}};
   timer=setTimeout(()=>void tick(),30_000);timer.unref();return stopTitleExtractions;
 }
-export function stopTitleExtractions() {stopped=true;if(timer)clearTimeout(timer);timer=null;waiting.length=0;active?.abort.abort();stopCoverTitleOcr();}
+export function stopTitleExtractions() {stopped=true;if(timer)clearTimeout(timer);timer=null;waiting.length=0;active?.abort.abort();for(const id of batchSignals.keys())resolveBatchSignal(id);stopCoverTitleOcr();}

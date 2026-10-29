@@ -2161,6 +2161,10 @@ CREATE TABLE IF NOT EXISTS series_title_extraction_history (
 );
 ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS batch_item_id uuid REFERENCES title_extraction_items(id) ON DELETE SET NULL;
 ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS asset_bytes bigint NOT NULL DEFAULT 0;
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS verification_key text;
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS publication_requested boolean NOT NULL DEFAULT false;
+ALTER TABLE series_title_extraction_history ADD COLUMN IF NOT EXISTS verification_key text NOT NULL DEFAULT '';
+ALTER TABLE series_title_extraction_history ADD COLUMN IF NOT EXISTS publication_requested boolean NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS series_title_extraction_state (
   series_id text PRIMARY KEY REFERENCES lib_series(id) ON DELETE CASCADE,
   automatic_key text NOT NULL,
