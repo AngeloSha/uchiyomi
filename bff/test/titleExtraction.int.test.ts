@@ -330,3 +330,28 @@ test('a valid high-entropy full-resolution cover saves a small title without enc
   const preview=await request('GET',saved.json().job.previewUrl);assert.equal(preview.statusCode,200);const meta=await sharp(preview.rawPayload).metadata();
   assert.equal(meta.width,400);assert.equal(meta.height,200);assert.equal((await currentArt()).logoUrl,null);
 });
+
+test('a durable one-off batch creates a retained private preview while nightly generation is off', {skip},async()=>{
+  const batch=await import('../src/lib/titleExtractionBatch');await batch.initializeTitleExtractionBatch();batch.setTitleExtractionBatchForTests({model:async()=>'a'.repeat(64)});
+  try{
+    await q('UPDATE server_settings SET automatic_cover_title_generation=false,automatic_cover_title_apply=false WHERE id=1');
+    const start=await request('POST','/api/admin/title-extraction/batch/run',{});assert.equal(start.statusCode,202,start.body);
+    await batch.titleExtractionBatchSettled();const state=(await request('GET','/api/admin/title-extraction/batch/status')).json();
+    assert.equal(state.enabled,false);assert.equal(state.running,false);assert.equal(state.run.status,'completed');
+    assert.equal(state.run.counts.total,1);assert.equal(state.run.counts.ready,1);assert.equal(state.run.counts.applied,0);
+    assert.equal(state.reviewCount,1);assert.equal(state.reviewSeries[0].id,SID);assert.equal((await currentArt()).logoUrl,null);
+    const job=await jobState(state.reviewSeries[0].jobId);assert.ok(new Date(job.expiresAt).getTime()>Date.now()+13*86400000);
+  }finally{batch.stopTitleExtractionBatch();batch.setTitleExtractionBatchForTests();}
+});
+test('new batch publication requires both opt-ins and measured checks, without requiring legacy provider-miss consent', {skip},async()=>{
+  const batch=await import('../src/lib/titleExtractionBatch');await batch.initializeTitleExtractionBatch();batch.setTitleExtractionBatchForTests({model:async()=>'a'.repeat(64)});
+  core.setTitleExtractionForTests({worker,ready:async()=>true,assess:async()=>({...quality(),availableChecksPassed:true}),ocrCapability:async()=>({available:true,calibrated:false,verifierFingerprint:'a'.repeat(64)})});
+  try{
+    await q('UPDATE server_settings SET automatic_cover_title_generation=true,automatic_cover_title_apply=true,automatic_cover_titles=false WHERE id=1');
+    await q('UPDATE libraries SET anilist_lookup=false WHERE id=$1',[LIB]);
+    const start=await request('POST','/api/admin/title-extraction/batch/run',{});assert.equal(start.statusCode,202,start.body);await batch.titleExtractionBatchSettled();
+    const state=(await request('GET','/api/admin/title-extraction/batch/status')).json();assert.equal(state.run.counts.applied,1,JSON.stringify(state));
+    const title=await currentArt();assert.equal(title.mode,'automatic');assert.equal(title.attribution?.source,'Cover lettering');
+    const[job]=await q('SELECT quality,status FROM series_title_extractions WHERE series_id=$1',[SID]);assert.equal(job.quality.safeToApply,false);assert.equal(job.quality.availableChecksPassed,true);assert.equal(job.status,'applied');
+  }finally{await q('UPDATE server_settings SET automatic_cover_title_generation=false,automatic_cover_title_apply=false WHERE id=1');batch.stopTitleExtractionBatch();batch.setTitleExtractionBatchForTests();}
+});

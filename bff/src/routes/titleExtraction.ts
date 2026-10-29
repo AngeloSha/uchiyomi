@@ -1,6 +1,7 @@
 // Registered under the admin plugin: session role and admin token scope gate every JSON and image route.
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import {z}from'zod';
+import{titleExtractionBatchStatus,runTitleExtractionBatch,cancelTitleExtractionBatch}from'../lib/titleExtractionBatch';
 import { roleOf, userIdOf } from '../lib/auth';
 import { viewCtxFor } from '../lib/visibility';
 import { TitleArtError } from '../lib/titleArt';
@@ -21,6 +22,15 @@ const handle=(fn:(req:FastifyRequest,reply:FastifyReply)=>Promise<unknown>)=>asy
 };
 export default async function titleExtractionRoutes(app:FastifyInstance) {
   app.get('/api/admin/title-extraction/capabilities',handle(async()=>titleExtractionCapabilities()));
+  app.get('/api/admin/title-extraction/batch/status',handle(async req=>titleExtractionBatchStatus((await context(req)).viewer)));
+  app.post('/api/admin/title-extraction/batch/run',handle(async(req,reply)=>{
+    const parsed=z.object({retryErrors:z.boolean().optional()}).strict().safeParse(req.body??{});if(!parsed.success)return reply.code(400).send({error:'bad_request'});
+    const{userId,viewer}=await context(req);await runTitleExtractionBatch(userId,parsed.data);return reply.code(202).send(await titleExtractionBatchStatus(viewer));
+  }));
+  app.post('/api/admin/title-extraction/batch/cancel',handle(async(req,reply)=>{
+    const parsed=z.object({runId:z.uuid()}).strict().safeParse(req.body);if(!parsed.success)return reply.code(400).send({error:'bad_request'});
+    await cancelTitleExtractionBatch(parsed.data.runId);return titleExtractionBatchStatus((await context(req)).viewer);
+  }));
   app.get('/api/admin/series/:id/title-extraction/cover',handle(async(req,reply)=>{
     const{id} = req.params as {id:string};const{viewer}=await context(req);const cover=await titleExtractionCover(id,viewer);
     return reply.type('image/png').header('cache-control','private, no-store').header('x-content-type-options','nosniff')

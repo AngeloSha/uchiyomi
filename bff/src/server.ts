@@ -27,6 +27,7 @@ import { scheduleMergeLeftovers } from './lib/mergeLeftovers';
 import { scheduleAniListScores } from './lib/anilistScores';
 import { initializeTitleLogoScan, startTitleLogoScan } from './lib/titleLogoScan';
 import { initializeTitleExtractions, startTitleExtractions } from './lib/titleExtraction';
+import { initializeTitleExtractionBatch, startTitleExtractionBatch } from './lib/titleExtractionBatch';
 import { notifyAdmins } from './lib/push';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
@@ -98,6 +99,7 @@ async function main() {
   await migrate();
   await initializeTitleLogoScan();
   await initializeTitleExtractions();
+  await initializeTitleExtractionBatch();
   // What Admin -> Settings -> Server -> Home network saved, where the environment does not say (lib/clientAddr.ts),
   // before any request is judged by it; then what is in force, said once.
   if (!isDesktop()) {
@@ -524,6 +526,8 @@ async function main() {
   app.addHook('onClose', async () => { stopTitleLogoScan(); });
   const stopTitleExtractions=startTitleExtractions(app.log);
   app.addHook('onClose',async()=>{stopTitleExtractions();});
+  const stopTitleExtractionBatch=startTitleExtractionBatch(app.log);
+  app.addHook('onClose',async()=>{stopTitleExtractionBatch();});
 
   /**
    * The opt-in install count.

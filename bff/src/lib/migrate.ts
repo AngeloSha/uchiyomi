@@ -2134,6 +2134,33 @@ ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS mask_baseline_sha2
 ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS mask_original_sha256 text;
 ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS mask_preview_file text;
 ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS mask_bounds jsonb;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS automatic_cover_title_generation boolean NOT NULL DEFAULT false;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS automatic_cover_title_apply boolean NOT NULL DEFAULT false;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS cover_title_next_run_at timestamptz;
+CREATE TABLE IF NOT EXISTS title_extraction_runs (
+  id uuid PRIMARY KEY, origin text NOT NULL CHECK(origin IN ('manual','nightly')),
+  status text NOT NULL DEFAULT 'running' CHECK(status IN ('running','completed','cancelled','error')),
+  created_by uuid REFERENCES users(id) ON DELETE SET NULL, started_at timestamptz NOT NULL DEFAULT now(), finished_at timestamptz,
+  retry_errors boolean NOT NULL DEFAULT false
+);
+CREATE UNIQUE INDEX IF NOT EXISTS title_extraction_one_run_idx ON title_extraction_runs((true)) WHERE status='running';
+CREATE TABLE IF NOT EXISTS title_extraction_items (
+  id uuid PRIMARY KEY, run_id uuid NOT NULL REFERENCES title_extraction_runs(id) ON DELETE CASCADE,
+  series_id text REFERENCES lib_series(id) ON DELETE SET NULL, series_key text NOT NULL,
+  status text NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','processing','ready','applied','skipped','failed','cancelled')),
+  job_id uuid REFERENCES series_title_extractions(id) ON DELETE SET NULL,
+  attempts integer NOT NULL DEFAULT 0, retry_at timestamptz NOT NULL DEFAULT now(), reason text,
+  UNIQUE(run_id,series_key)
+);
+CREATE INDEX IF NOT EXISTS title_extraction_items_due_idx ON title_extraction_items(run_id,status,retry_at);
+CREATE UNIQUE INDEX IF NOT EXISTS title_extraction_one_active_item_idx ON title_extraction_items(run_id) WHERE status='processing';
+CREATE TABLE IF NOT EXISTS series_title_extraction_history (
+  series_id text PRIMARY KEY REFERENCES lib_series(id) ON DELETE CASCADE,
+  source_fingerprint text NOT NULL, model_fingerprint text NOT NULL, outcome text NOT NULL,
+  processed_at timestamptz NOT NULL DEFAULT now(), retry_at timestamptz
+);
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS batch_item_id uuid REFERENCES title_extraction_items(id) ON DELETE SET NULL;
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS asset_bytes bigint NOT NULL DEFAULT 0;
 CREATE TABLE IF NOT EXISTS series_title_extraction_state (
   series_id text PRIMARY KEY REFERENCES lib_series(id) ON DELETE CASCADE,
   automatic_key text NOT NULL,

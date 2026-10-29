@@ -73,6 +73,7 @@ import { cancelAutomaticTitleLogoQueue } from '../lib/titleArt';
 import { scanTitleLogos, titleLogoScanStatus, wakeTitleLogoScan } from '../lib/titleLogoScan';
 import titleExtractionRoutes from './titleExtraction';
 import { titleExtractionCapabilities } from '../lib/titleExtraction';
+import { titleExtractionBatchTick } from '../lib/titleExtractionBatch';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, applyAdultSources, rateSourceAdult, MAX_ADULT_SOURCES, browsableIds, nameableIds, viewCtxFor, visible, Params, hideAdult, ADULT_RATING } from '../lib/visibility';
@@ -642,7 +643,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   }));
 
   // ---- server settings ----
-  const SETTINGS_COLS = 'server_name, allow_registration, local_pick, automatic_title_logos, automatic_cover_titles, updater_hours, extension_hours, extension_auto_update, '
+  const SETTINGS_COLS = 'server_name, allow_registration, local_pick, automatic_title_logos, automatic_cover_titles, automatic_cover_title_generation, automatic_cover_title_apply, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, backup_enabled, auto_follow_on_failure, '
     + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, fill_details, discover_lookups, '
     + 'mangadex_langs, unstated_lang, hide_notice_types, deleted_as_ghosts, update_smart, finish_downloads, '
@@ -743,6 +744,8 @@ export default async function adminRoutes(app: FastifyInstance) {
       localPick: z.boolean().optional(),
       automaticTitleLogos: z.boolean().optional(),
       automaticCoverTitles: z.boolean().optional(),
+      automaticCoverTitleGeneration: z.boolean().optional(),
+      automaticCoverTitleApply: z.boolean().optional(),
       updaterHours: z.number().int().min(1).max(168).optional(),
       extensionHours: z.number().int().min(1).max(168).optional(),
       extensionAutoUpdate: z.boolean().optional(),
@@ -886,6 +889,8 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (b.unstatedLang !== undefined && !canonLang(b.unstatedLang)) {
       return reply.code(400).send({ error: 'unknown_language', message: `"${b.unstatedLang}" is not one language.` });
     }
+    if(b.automaticCoverTitleGeneration===true&&!(await titleExtractionCapabilities()).available)return reply.code(409).send({error:'worker_unavailable'});
+    if(b.automaticCoverTitleApply===true&&!(await titleExtractionCapabilities()).checkedApplyAvailable)return reply.code(409).send({error:'checked_application_unavailable'});
     if (b.automaticCoverTitles === true) {
       const current=await one<{automatic_cover_titles:boolean}>('SELECT automatic_cover_titles FROM server_settings WHERE id=1');
       if(!current?.automatic_cover_titles&&!(await titleExtractionCapabilities()).automaticAvailable)
@@ -899,6 +904,9 @@ export default async function adminRoutes(app: FastifyInstance) {
       if (b.automaticTitleLogos) wakeTitleLogoScan(); else cancelAutomaticTitleLogoQueue();
     }
     if (b.automaticCoverTitles !== undefined) await q('UPDATE server_settings SET automatic_cover_titles=$1,updated_at=now() WHERE id=1',[b.automaticCoverTitles]);
+    if(b.automaticCoverTitleGeneration!==undefined)await q('UPDATE server_settings SET automatic_cover_title_generation=$1,cover_title_next_run_at=CASE WHEN $1 THEN cover_title_next_run_at ELSE NULL END,updated_at=now() WHERE id=1',[b.automaticCoverTitleGeneration]);
+    if(b.automaticCoverTitleApply!==undefined)await q('UPDATE server_settings SET automatic_cover_title_apply=$1,updated_at=now() WHERE id=1',[b.automaticCoverTitleApply]);
+    if(b.automaticCoverTitleGeneration!==undefined||b.automaticCoverTitleApply!==undefined)await titleExtractionBatchTick();
     if (b.updaterHours !== undefined) await q('UPDATE server_settings SET updater_hours = $1, updated_at = now() WHERE id = 1', [b.updaterHours]);
     if (b.extensionHours !== undefined) await q('UPDATE server_settings SET extension_hours = $1, updated_at = now() WHERE id = 1', [b.extensionHours]);
     if (b.extensionAutoUpdate !== undefined) await q('UPDATE server_settings SET extension_auto_update = $1, updated_at = now() WHERE id = 1', [b.extensionAutoUpdate]);

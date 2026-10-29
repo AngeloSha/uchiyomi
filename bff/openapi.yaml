@@ -467,6 +467,59 @@ components:
             properties:
               x: { type: number, minimum: 0, maximum: 1 }
               y: { type: number, minimum: 0, maximum: 1 }
+    TitleExtractionBatchStatus:
+      type: object
+      required: [enabled, applyEnabled, available, checkedApplyAvailable, running, schedule, run, retentionDays, reviewCount, reviewSeries]
+      properties:
+        enabled: { type: boolean, description: Nightly local generation opt-in; false by default. }
+        applyEnabled: { type: boolean, description: Separate available-checks publication opt-in; false by default. }
+        available: { type: boolean }
+        checkedApplyAvailable: { type: boolean, description: Worker and pinned OCR available; independent of optional calibration approval. }
+        running: { type: boolean, description: Includes persisted pending work waiting for retry or the manual worker. }
+        retentionDays: { type: integer }
+        nextRetryAt: { type: [string, "null"], format: date-time }
+        pausedReason: { type: [string, "null"] }
+        schedule:
+          type: object
+          properties:
+            hour: { type: integer, enum: [3] }
+            timezone: { type: string }
+            nextRunAt: { type: [string, "null"], format: date-time }
+        run:
+          type: [object, "null"]
+          properties:
+            id: { type: string, format: uuid }
+            origin: { type: string, enum: [manual, nightly] }
+            status: { type: string, enum: [running, completed, cancelled, error] }
+            startedAt: { type: string, format: date-time }
+            finishedAt: { type: [string, "null"], format: date-time }
+            currentSeries:
+              type: [object, "null"]
+              properties:
+                id: { type: string }
+                title: { type: string }
+            counts:
+              type: object
+              description: Total equals the sum of all seven disjoint item states. Ready is a private review draft, not a successful automatic application.
+              properties:
+                total: { type: integer }
+                pending: { type: integer }
+                processing: { type: integer }
+                ready: { type: integer }
+                applied: { type: integer }
+                skipped: { type: integer }
+                failed: { type: integer }
+                cancelled: { type: integer }
+        reviewCount: { type: integer }
+        reviewSeries:
+          type: array
+          maxItems: 10
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              title: { type: string }
+              jobId: { type: string, format: uuid }
     TitleExtractionJob:
       type: object
       description: Private, owner-bound local extraction draft. Originals remain unchanged until Apply or a calibrated automatic pass.
@@ -508,6 +561,7 @@ components:
           properties:
             policyVersion: { type: string }
             safeToApply: { type: boolean }
+            availableChecksPassed: { type: boolean, description: Actual complete-title and image checks passed; independent of optional calibration approval. Legacy missing values mean false. }
             manualApplyAllowed: { type: boolean }
             needsReview: { type: boolean }
     KomgaAuthor:
@@ -8515,6 +8569,12 @@ paths:
                     description: >-
                       Automatic linked-manga logo lookups through Wikidata and Wikimedia Commons. Off by default;
                       library lookup opt-outs and first-page-only art choices also suppress automatic requests.
+                  automatic_cover_title_generation:
+                    type: boolean
+                    description: Default-off nightly local cover-title generation at03:00 server time. Existing manual/text choices and provider logos remain protected; uncertain results remain private review drafts.
+                  automatic_cover_title_apply:
+                    type: boolean
+                    description: Default-off available-checks publication. Requires generation enabled and actual title/image checks passed; optional calibration approval is a separate legacy policy.
                   automatic_cover_titles:
                     type: boolean
                     description: Default-off local cover title fallback. Calibrated complete-title matches may apply; uncertain results remain review drafts.
@@ -8647,6 +8707,12 @@ paths:
                 automaticTitleLogos:
                   type: boolean
                   description: Enable automatic exact linked-manga logo discovery. Default false; cached art remains usable when disabled.
+                automaticCoverTitleGeneration:
+                  type: boolean
+                  description: Enable nightly local cover-title generation; worker must be available. Disabling stops a nightly run without discarding completed previews.
+                automaticCoverTitleApply:
+                  type: boolean
+                  description: Separately opt in to applying outputs whose measured available checks pass. Requires worker and pinned OCR; publication also requires generation enabled. No calibration approval is implied.
                 automaticCoverTitles:
                   type: boolean
                   description: Enable calibrated local cover title fallbacks after a checked provider miss. Enabling requires the pinned OCR pack and validated profile.
@@ -12212,9 +12278,81 @@ paths:
       security: [{ bearer: [] }]
       responses:
         "200":
-          description: available, reason, automaticAvailable, automaticApplyAvailable, automaticReason, maxExclusions, timeoutSeconds, maskCorrection, maxMaskStrokes and maxMaskPoints. No secrets or model paths.
+          description: available, reason, automaticAvailable, automaticApplyAvailable, automaticReason, maxExclusions, timeoutSeconds, maskCorrection, maxMaskStrokes, maxMaskPoints, checkedApplyAvailable and checkedApplyReason. Checked apply requires worker and pinned OCR, while legacy automaticApplyAvailable still requires calibration. No secrets or model paths.
         "401": { description: Not authenticated }
         "403": { description: Not an admin or admin scope missing }
+  /api/admin/title-extraction/batch/status:
+    get:
+      tags: [admin]
+      operationId: getApiAdminTitleExtractionBatchStatus
+      summary: Read durable nightly cover-title progress and retained review previews.
+      description: Read-only; never starts inference or performs metadata lookup. Returned review titles and current series honor the admin's current visibility.
+      security: [{ bearer: [] }]
+      responses:
+        "200":
+          description: Generation/publication switches, next server-local03:00 run, disjoint counts, retry wait and bounded retained review list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TitleExtractionBatchStatus" }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or admin scope missing }
+  /api/admin/title-extraction/batch/run:
+    post:
+      tags: [admin]
+      operationId: postApiAdminTitleExtractionBatchRun
+      summary: Start or resume one durable local cover-title run.
+      description: >-
+        Explicit Run now may prepare previews while nightly generation is off; it cannot publish while generation
+        is off. An existing running batch is reused. Manual jobs have worker priority. Unchanged source/model
+        fingerprints are skipped even after review expiry; retryErrors explicitly retries prior failures.
+        Custom/text choices, manual drafts, selected first-page art and usable provider logos are skipped.
+        No AniList link or external lookup consent is required for local generation; batch processing never warms metadata.
+      security: [{ bearer: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                retryErrors: { type: boolean, default: false }
+      responses:
+        "202":
+          description: Current durable run and progress.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TitleExtractionBatchStatus" }
+        "400": { description: Invalid request }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or admin scope missing }
+        "503": { description: Local extraction worker unavailable }
+  /api/admin/title-extraction/batch/cancel:
+    post:
+      tags: [admin]
+      operationId: postApiAdminTitleExtractionBatchCancel
+      summary: Stop only the named run, retaining its completed private previews.
+      description: Cancels pending work and this run's active private job. Existing manual jobs, artwork and completed review drafts remain. A later nightly run can discover new or changed covers.
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [runId]
+              properties:
+                runId: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Current durable progress after stopping.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TitleExtractionBatchStatus" }
+        "400": { description: Invalid run ID }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or admin scope missing }
+        "404": { description: Run not found }
   /api/admin/series/{id}/title-extraction/cover:
     get:
       tags: [admin]

@@ -7,7 +7,7 @@ import sharp from 'sharp';
 import { q, tx } from './db';
 import { ART_DIR, ART_MAX_BYTES, FIRST_PAGE } from './seriesArt';
 import { containedPath } from './fsGuard';
-import { Params, visible, visibleToAll, type ViewCtx } from './visibility';
+import { Params, SYSTEM_CTX, visible, visibleToAll, type ViewCtx } from './visibility';
 import { withAniListMutation, type AniListAuthority, type ScopedQuery } from './anilistPolicy';
 import { runtime } from './runtime';
 import { fetchPublic } from './safeFetch';
@@ -373,15 +373,15 @@ async function runJob(job: Job): Promise<void> {
 
 /** Only strict, opt-in local extraction uses this publisher; a reliable provider logo or manual choice always wins. */
 export async function applyAutomaticCoverTitle(id: string, bytes: Buffer, expectedVersion: number, anilistId: string,
-  coverKey: string, assertCurrent: (qq: ScopedQuery) => Promise<void>): Promise<void> {
-  await withAniListMutation({ id }, 'automatic', async (qq, sid) => {
+  coverKey: string, assertCurrent: (qq: ScopedQuery) => Promise<void>, localBatch=false): Promise<void> {
+  const publish=async (qq:ScopedQuery,sid:string) => {
     await qq('SELECT series_id FROM series_trackers WHERE series_id=$1 FOR SHARE',[sid]);
     await qq('SELECT series_id FROM series_overrides WHERE series_id=$1 FOR SHARE',[sid]);
     await qq('SELECT series_id FROM series_art WHERE series_id=$1 FOR SHARE',[sid]);
     const [row] = await qq<ArtRow>(`SELECT s.id,a.*,${coverSelectionSql('s')} AS cover_selection FROM lib_series s
       LEFT JOIN series_title_art a ON a.series_id=s.id WHERE s.id=$1 AND ${visibleToAll('s')}`, [sid]);
     if (!row || runtime.stopping || (row.mode ?? 'automatic') !== 'automatic' || nversion(row.version) !== expectedVersion
-      || (row.auto_file && !row.auto_cover_key) || coverSelectionKey(row.cover_selection) !== coverKey) throw new TitleArtError('stale_candidate',409,'The title or cover changed.');
+      || (row.auto_file && !row.auto_cover_key && (!localBatch||await assetAvailable(row.auto_file))) || coverSelectionKey(row.cover_selection) !== coverKey) throw new TitleArtError('stale_candidate',409,'The title or cover changed.');
     await assertCurrent(qq);
     await ensureRow(qq,sid);
     const file = await putAsset(sid,bytes);
@@ -389,7 +389,10 @@ export async function applyAutomaticCoverTitle(id: string, bytes: Buffer, expect
     await qq(`UPDATE series_title_art SET auto_file=$2,auto_anilist_id=$3,auto_cover_key=$4,auto_language=NULL,auto_caption=true,
       auto_manual=false,auto_attribution=$5,version=$6,updated_at=now() WHERE series_id=$1`,
       [sid,file,anilistId,coverKey,JSON.stringify({source:'Cover lettering',sourceUrl:null,artist:null,license:null,licenseUrl:null}),nextVersion(row.version)]);
-  });
+  };
+  // Local cover processing neither sends metadata nor inherits consent for an external AniList lookup.
+  if(localBatch)await tx(async qq=>{await lockVisible(qq,id,SYSTEM_CTX);await publish(qq,id);});
+  else await withAniListMutation({id},'automatic',publish);
   await collectCurrentAssets(id);
 }
 

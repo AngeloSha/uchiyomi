@@ -1,0 +1,34 @@
+# Nightly cover titles
+
+Local cover-title generation and automatic application have separate, default-off switches in Admin. The optional
+local extraction worker is required for generation. Enabling automatic application additionally requires the pinned
+OCR pack. The older calibrated fallback setting is retained for compatibility and does not enable this batch task.
+
+A nightly run starts at03:00 in the server's reported timezone. Its next deadline, target queue and progress are
+stored in PostgreSQL, so restart resumes work rather than restarting the library. Newly added series and changed
+covers are picked up on the next night. **Run now** starts the same task immediately; it can prepare private previews
+while the nightly switch is off. It cannot apply them while that switch is off. **Stop run** cancels that run's pending
+and active work, keeping completed previews and all published artwork.
+
+One existing extraction worker processes the queue. A manual extraction gets priority between batch items.
+The task uses the actual selected cover and existing cover pipeline. It does not perform external title or identity
+lookups, and an AniList link is not required to generate a preview. Library external-lookup opt-outs do not forbid
+this local processing. Custom/text title choices, active manual previews, selected first-page art and usable provider
+logos are protected. Source bytes, cover selection, title version and identity are checked again before publication.
+
+**Apply results that pass checks** is a separate opt-in. It publishes only when generation and application are both
+on and the output passes the actual available image and complete-title checks. Verified canonical identity and
+matching source/candidate OCR remain required; unlinked, incomplete or uncertain results wait for review. Optional
+calibration approval remains a separate stricter signal. Passing the available checks does not claim that calibration
+was approved or guarantee every decorative edge. Manual brush corrections are never automatically certified.
+
+Review previews are private and retained for14 days, with a2GiB automatic-draft asset budget. They do not consume
+the32 short-lived manual preview slots. The latest ready reviews are linked from the task status. A storage limit
+pauses remaining work instead of silently dropping targets. Failures have bounded retries; **Retry failed** explicitly
+tries previous failures again. Source/model fingerprints survive preview expiry and deletion, so the same unchanged
+cover is not inferred every night or regenerated immediately after a preview expires. A per-series manual preview
+can always be created again when needed.
+
+The status API is read-only. `ready` counts private review drafts, `applied` counts actual publication, and pending,
+processing, ready, applied, skipped, failed and cancelled are disjoint states whose sum is the run total. Existing
+reading progress, downloads and published title artwork remain untouched by generation or cancellation.
