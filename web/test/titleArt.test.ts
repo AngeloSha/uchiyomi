@@ -87,6 +87,14 @@ test('a title-art preview does not insert a second page heading', () => {
   assert.doesNotMatch(html, /<h1/);
 });
 
+test('an admin preview may use an in-memory image without accepting external artwork URLs', () => {
+  const local = renderToStaticMarkup(React.createElement(HeroTitle, { series: series(), as: 'div', previewUrl: 'blob:private-preview' }));
+  assert.match(local, /src="blob:private-preview"/);
+  assert.match(local, />The Hero<\/span>/, 'the canonical name remains readable while the cutout loads');
+  const external = renderToStaticMarkup(React.createElement(HeroTitle, { series: series(), as: 'div', previewUrl: 'https://outside.test/image.png' }));
+  assert.doesNotMatch(external, /<img/);
+});
+
 test('only pending jobs are polled and a run ends after a minute even if the provider remains slow', () => {
   assert.equal(titleArtPending([series(art({ status: 'pending' }))]), true);
   assert.equal(titleArtPending([series(), series(art({ status: 'ready' })), series(art({ status: 'error' }))]), false);

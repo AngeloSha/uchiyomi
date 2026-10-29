@@ -636,6 +636,9 @@ html.lenis, html.lenis body { height: auto; }
 .hero-title[data-title-style='action'] .hero-title-text,
 .hero-title[data-title-style='fantasy'] .hero-title-text { background: linear-gradient(155deg, #fffdf6 22%, rgb(var(--title-accent)) 100%); background-clip: text; -webkit-background-clip: text; color: transparent; text-shadow: none; filter: drop-shadow(0 3px 6px rgb(0 0 0 / .8)); }
 .hero-title[data-title-script='natural'] .hero-title-text { font-family: var(--ff-sans), sans-serif; letter-spacing: normal; line-height: 1.25; }
+.title-extraction-preview .hero-title-logo { max-width: 100%; max-height: 140px; }
+.title-extraction-preview[data-extract-surface='light'] .hero-title-caption { color: #171721; text-shadow: none; }
+.title-extraction-preview[data-extract-surface='light'] .hero-title-text { color: #171721; background: none; filter: none; text-shadow: none; }
 @media (min-width: 1024px) {
   .hero-title-logo { max-width: min(100%, 480px); max-height: min(180px, 19vh); }
   .hero-title-caption { font-size: 1.1rem; }

@@ -51,6 +51,7 @@ import { memberDefaultsOf } from '@/lib/memberDefaults';
 import { joinSentences } from '@/lib/jobs';
 import { clockText, hoursText, intervalChoices } from '@/lib/settingsChoices';
 import { TitleLogoScan } from '@/components/TitleLogoScan';
+import { AutomaticCoverTitles } from '@/components/TitleExtraction';
 
 /** One PATCH. Resolves once the server has answered, so the row that called it can show its tick. */
 type Save = (body: Record<string, unknown>) => Promise<unknown>;
@@ -538,6 +539,9 @@ function SeriesSection({ data, save }: { data: any; save: Save }) {
             help={tr('Find original manga title artwork using confirmed manga links. Titles without artwork use styled text; your uploaded artwork always wins.')}
             on={data.automatic_title_logos === true} onChange={(next) => save({ automaticTitleLogos: next })} />
           <TitleLogoScan enabled={data.automatic_title_logos === true} />
+        </RowBlock>
+        <RowBlock id="automatic-cover-titles">
+          <AutomaticCoverTitles enabled={data.automatic_cover_titles === true} save={(next) => save({ automaticCoverTitles: next })} />
         </RowBlock>
         {/* v0.73.0 (#257 and #245 from @Squeaks72): the nightly repair's ninth step. Off by default: it asks sources about
             series, and AniList's text is English. What it fills in sits below a series' own details, never over them. */}

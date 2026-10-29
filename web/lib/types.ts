@@ -199,7 +199,7 @@ export interface SeriesTitleArt {
   logoUrl: string | null;
   language: 'en' | 'original' | null;
   showReadableTitle: boolean;
-  attribution: null | { source: 'Wikimedia Commons'; sourceUrl: string; artist: string | null; license: string | null; licenseUrl: string | null };
+  attribution: null | { source: 'Wikimedia Commons' | 'Cover lettering'; sourceUrl: string | null; artist: string | null; license: string | null; licenseUrl: string | null };
 }
 
 export interface Series {

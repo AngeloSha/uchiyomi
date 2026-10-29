@@ -34,6 +34,7 @@ import { msgOf } from './ConfirmDialog';
 import { Backdrop, useRtl } from './ui';
 import { ProgressRing } from './ProgressRing';
 import { HeroTitle } from './HeroTitle';
+import { TitleExtractionButton } from './TitleExtraction';
 import { TITLE_ART_STYLES, TITLE_ART_STYLE_LABELS } from '@/lib/titleArt';
 import type { TitleArtStyle } from '@/lib/types';
 import { useContextMenu } from './ContextMenu';
@@ -858,6 +859,7 @@ function ArtPanel({ id, series, onSaved, onNewBanner }: { id: string; series: Se
           <button type="button" data-art-logo-reset disabled={!!busy} onClick={() => void reset('logo')} className="btn-key">{tr('Reset to automatic')}</button>
           <button type="button" data-art-logo-text disabled={!!busy || series.titleArt?.mode === 'text'}
             onClick={() => void change('logo', { mode: 'text' }, tr('Styled title selected'))} className="btn-key">{tr('Use styled title')}</button>
+          <TitleExtractionButton series={series} disabled={!!busy} onSaved={onSaved} />
         </div>
         {series.titleArt && series.titleArt.mode !== 'automatic' && <p className="mt-2 text-[11px] text-fog-500">{tr('Reset to automatic before looking for another logo.')}</p>}
         {linkFor === 'logo' && <LinkField kind="logo" busy={busy === 'logo'} onSet={(u) => void fromLink('logo', u)} onCancel={() => setLinkFor(null)} />}
@@ -879,7 +881,9 @@ function ArtPanel({ id, series, onSaved, onNewBanner }: { id: string; series: Se
             : tr('Automatic: verified title artwork, otherwise a style matched to this manga.')}
         </p>
         {series.titleArt?.attribution && <div className="mt-2 space-y-1 text-[11px] text-fog-400">
-          {webLink(series.titleArt.attribution.sourceUrl) && <a href={series.titleArt.attribution.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-accent underline">{series.titleArt.attribution.source}</a>}
+          {series.titleArt.attribution.sourceUrl && webLink(series.titleArt.attribution.sourceUrl)
+            ? <a href={series.titleArt.attribution.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-accent underline">{series.titleArt.attribution.source}</a>
+            : <p>{series.titleArt.attribution.source === 'Cover lettering' ? tr('From the cover') : series.titleArt.attribution.source}</p>}
           {series.titleArt.attribution.artist && <p>{series.titleArt.attribution.artist}</p>}
           {series.titleArt.attribution.license && (series.titleArt.attribution.licenseUrl && webLink(series.titleArt.attribution.licenseUrl)
             ? <a href={series.titleArt.attribution.licenseUrl} target="_blank" rel="noopener noreferrer" className="block underline">{series.titleArt.attribution.license}</a>
