@@ -6,7 +6,7 @@ const args = new Map();
 for (let i = 2; i < process.argv.length; i += 2) args.set(process.argv[i], process.argv[i + 1]);
 const port = Number(args.get('--port') || 29379);
 const token = process.env.TITLE_EXTRACTOR_TOKEN || 'e2e-title-extractor-only-token';
-const fingerprint = createHash('sha256').update('deterministic-source-mask-fixture-v5').digest('hex');
+const fingerprint = createHash('sha256').update('deterministic-source-mask-fixture-v6').digest('hex');
 const crc = (bytes) => { let value = 0xffffffff; for (const byte of bytes) { value ^= byte; for (let n = 0; n < 8; n++) value = value & 1 ? (value >>> 1) ^ 0xedb88320 : value >>> 1; } return (value ^ 0xffffffff) >>> 0; };
 const chunk = (name, bytes) => { const type = Buffer.from(name), data = Buffer.concat([type, bytes]), size = Buffer.alloc(4), check = Buffer.alloc(4); size.writeUInt32BE(bytes.length); check.writeUInt32BE(crc(data)); return Buffer.concat([size, data, check]); };
 function png(width, height, rgba) {
@@ -30,14 +30,16 @@ function sourcePixels(bytes) {
   return { width, height, channels, pixels };
 }
 function cutout(source, region) {
-  const decoded = sourcePixels(source), width = 200, height = 80;
+  const decoded = sourcePixels(source), width = Math.min(200, decoded.width), height = Math.min(80, decoded.height);
   const left = Math.max(0, Math.min(decoded.width - width, Math.floor((region?.left ?? .05) * decoded.width) + 5));
   const top = Math.max(0, Math.min(decoded.height - height, Math.floor((region?.top ?? .05) * decoded.height) + 5));
   const rgba = Buffer.alloc(width * height * 4);
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
     const from = ((top + y) * decoded.width + left + x) * decoded.channels, to = (y * width + x) * 4;
     rgba[to] = decoded.pixels[from]; rgba[to + 1] = decoded.pixels[from + 1]; rgba[to + 2] = decoded.pixels[from + 2];
-    rgba[to + 3] = x >= 30 && x <= 170 && y >= 20 && y <= 60 && !(x >= 80 && x <= 100 && y >= 30 && y <= 50) ? 255 : 0;
+    const rx = x / width, ry = y / height;
+    const hole = width >= 4 && height >= 4 && rx >= .4 && rx <= .5 && ry >= .375 && ry <= .625;
+    rgba[to + 3] = rx >= .15 && rx <= .85 && ry >= .25 && ry <= .75 && !hole ? 255 : 0;
   }
   return { bytes: png(width, height, rgba), width, height, candidateRegion: { left: left / decoded.width, top: top / decoded.height, width: width / decoded.width, height: height / decoded.height } };
 }
@@ -61,12 +63,15 @@ const server = http.createServer(async (request, response) => {
   const source = Buffer.from(body.imageBase64 || '', 'base64');
   if (source.length < 24 || source.toString('hex', 0, 8) !== '89504e470d0a1a0a') return json(response, 422, { error: 'no_text' });
   const thisMode = mode;
-  log.push({ mode: thisMode, region: body.region ?? null, exclusions: body.exclusions ?? [], expectedTitles: body.expectedTitles ?? [] });
+  const entry = { mode: thisMode, region: body.region ?? null, exclusions: body.exclusions ?? [], expectedTitles: body.expectedTitles ?? [],
+    sourceWidth: source.readUInt32BE(16), sourceHeight: source.readUInt32BE(20) };
+  log.push(entry);
   await new Promise((resolve) => setTimeout(resolve, thisMode === 'slow' ? 8000 : 700));
   if (response.destroyed) return;
-  if (thisMode === 'unavailable') return json(response, 503, { error: 'not_ready' });
-  if (thisMode === 'empty') return json(response, 422, { error: 'no_text' });
+  if (thisMode === 'unavailable') { entry.responseStatus = 503; return json(response, 503, { error: 'not_ready' }); }
+  if (thisMode === 'empty' || entry.sourceWidth < 2 || entry.sourceHeight < 2) { entry.responseStatus = 422; return json(response, 422, { error: 'no_text' }); }
   const candidate = cutout(source, body.region);
+  Object.assign(entry, { candidateWidth: candidate.width, candidateHeight: candidate.height, candidateRegion: candidate.candidateRegion, responseStatus: 200 });
   return json(response, 200, { version: 1, sourceSha256: createHash('sha256').update(source).digest('hex'),
     candidateBase64: candidate.bytes.toString('base64'), width: candidate.width, height: candidate.height, candidateRegion: candidate.candidateRegion,
     sourceWidth: source.readUInt32BE(16), sourceHeight: source.readUInt32BE(20),

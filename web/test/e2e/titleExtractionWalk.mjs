@@ -223,7 +223,7 @@ try {
     const { job } = await api(expectedJobId ? `${root}/${encodeURIComponent(expectedJobId)}` : root, { signal: AbortSignal.timeout(5000) });
     diagnostic.job = job ? { id: job.id, status: job.status, error: job.error, reasons: job.reasons, selectionMode: job.selectionMode, region: job.region, exclusions: job.exclusions } : null;
   } catch { diagnostic.jobReadFailed = true; }
-  try { diagnostic.workerRequests = (await (await fetch(WORKER + '/__log', { signal: AbortSignal.timeout(5000) })).json()).slice(-3).map(({ mode, region, exclusions, expectedTitles }) => ({ mode, region, exclusions, expectedTitles })); }
+  try { diagnostic.workerRequests = (await (await fetch(WORKER + '/__log', { signal: AbortSignal.timeout(5000) })).json()).slice(-3).map(({ mode, region, exclusions, expectedTitles, sourceWidth, sourceHeight, candidateWidth, candidateHeight, candidateRegion, responseStatus }) => ({ mode, region, exclusions, expectedTitles, sourceWidth, sourceHeight, candidateWidth, candidateHeight, candidateRegion, responseStatus })); }
   catch { diagnostic.workerReadFailed = true; }
   if (page) {
     try {
