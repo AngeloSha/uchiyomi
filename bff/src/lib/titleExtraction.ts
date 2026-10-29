@@ -30,11 +30,13 @@ interface JobRow {
   id:string; series_id:string; owner_id:string|null; automatic:boolean; status:Status; snapshot:string;
   cover_fingerprint:string; source_sha256:string; candidate_sha256:string|null; title_version:number|string; region:ExtractionRect|null; exclusions:ExtractionRect[];
   quality:CoverTitleQualityResult|null; reasons:string[]; error:string|null; created_at:Date; expires_at:Date;
+  selection_mode:'manual'|'automatic'|'legacy';result_region:ExtractionRect|null;candidate_region:ExtractionRect|null;model_fingerprint:string|null;
 }
 export interface TitleExtractionJob {
   id:string; seriesId:string; automatic:boolean; status:Status|'expired'; createdAt:string; expiresAt:string;
   previewUrl:string|null; coverPreviewUrl:string|null; coverFingerprint:string; region:ExtractionRect|null;
   exclusions:ExtractionRect[]; quality:CoverTitleQualityResult|null; reasons:string[]; error:string|null;
+  selectionMode:'manual'|'automatic'|'legacy';resultRegion:ExtractionRect|null;candidateRegion:ExtractionRect|null;modelFingerprint:string|null;
 }
 interface Snapshot {
   id:string; selection:string; version:string|number|null; mode:string|null; anilist_id:string|null;
@@ -91,7 +93,10 @@ function dto(row:JobRow):TitleExtractionJob {
   return {id:row.id,seriesId:row.series_id,automatic:row.automatic,status:expired?'expired':row.status,
     createdAt:new Date(row.created_at).toISOString(),expiresAt:new Date(row.expires_at).toISOString(),
     previewUrl:!expired&&row.status==='ready'?base+'/preview':null,coverPreviewUrl:!expired?base+'/cover':null,
-    coverFingerprint:row.cover_fingerprint,region:row.region,exclusions:row.exclusions,quality:row.quality,reasons:row.reasons,error:row.error};
+    coverFingerprint:row.cover_fingerprint,region:row.selection_mode==='manual'?row.region:null,
+    selectionMode:row.selection_mode??'legacy',resultRegion:row.result_region??(row.selection_mode==='legacy'?row.region:null),
+    candidateRegion:row.candidate_region??null,modelFingerprint:row.model_fingerprint??null,
+    exclusions:row.exclusions,quality:row.quality,reasons:row.reasons,error:row.error};
 }
 async function ownedJob(seriesId:string,jobId:string,userId:string,viewer:ViewCtx,qq:ScopedQuery=q):Promise<JobRow> {
   if(!validJob(jobId)||!(await seriesVisible(seriesId,viewer))) throw new ExtractionError('not_found',404);
@@ -147,9 +152,9 @@ export async function createTitleExtraction(seriesId:string,userId:string|null,v
       if(count.n>=MAX_JOBS||count.pending>=MAX_QUEUED) throw new ExtractionError('extract_busy',429);
       const current=await snapshotFor(seriesId,viewer,qq);
       if(coverSelectionKey(current.selection)!==cover.key||Number(current.version??0)!==Number(cover.snapshot.version??0)) throw new ExtractionError('stale_candidate',409);
-      await qq(`INSERT INTO series_title_extractions(id,series_id,owner_id,automatic,status,snapshot,cover_fingerprint,source_sha256,title_version,region,exclusions)
-        VALUES($1,$2,$3,$4,'queued',$5,$6,$7,$8,$9,$10)`,[jobId,seriesId,userId,automatic,cover.key,cover.fingerprint,cover.sha256,Number(current.version??0),
-        selection.region?JSON.stringify(selection.region):null,JSON.stringify(selection.exclusions)]);
+      await qq(`INSERT INTO series_title_extractions(id,series_id,owner_id,automatic,status,snapshot,cover_fingerprint,source_sha256,title_version,region,exclusions,selection_mode)
+        VALUES($1,$2,$3,$4,'queued',$5,$6,$7,$8,$9,$10,$11)`,[jobId,seriesId,userId,automatic,cover.key,cover.fingerprint,cover.sha256,Number(current.version??0),
+        selection.region?JSON.stringify(selection.region):null,JSON.stringify(selection.exclusions),selection.region?'manual':'automatic']);
       if(automatic)await qq(`INSERT INTO series_title_extraction_state(series_id,automatic_key,retry_at)VALUES($1,$2,now()+interval '7 days')
         ON CONFLICT(series_id)DO UPDATE SET automatic_key=$2,retry_at=EXCLUDED.retry_at`,[seriesId,cover.key]);
     });
@@ -204,7 +209,7 @@ async function runJob(jobId:string,parentSignal:AbortSignal) {
     });
     await Promise.race([warmCanonicalAliases(row,current,viewer,signal),aborted]);
     current=await freshJob(row,viewer);
-    const result=await Promise.race([worker(source,{region:row.region??undefined,exclusions:row.exclusions},
+    const result=await Promise.race([worker(source,{region:row.selection_mode==='manual'?row.region??undefined:undefined,exclusions:row.exclusions},
       current.aliases_id===current.anilist_id?[current.english,current.romaji,current.native].filter((s):s is string=>!!s):[],signal),
       aborted]);
     if(signal.aborted||stopped||runtime.stopping)return;
@@ -228,8 +233,10 @@ async function runJob(jobId:string,parentSignal:AbortSignal) {
     const bytes=await normalizeTitleLogo(result.bytes);
     if((await sharp(bytes).stats()).isOpaque)throw new ExtractionError('extract_failed',502);
     await writeJobFile(jobId,'preview',bytes);
-    const updated=await q(`UPDATE series_title_extractions SET status=$2,quality=$3,reasons=$4,region=$5,candidate_sha256=$6 WHERE id=$1 AND status='running' RETURNING id`,
-      [jobId,quality.manualApplyAllowed?'ready':'rejected',JSON.stringify(quality),JSON.stringify(quality.reasons.map((r)=>r.code)),JSON.stringify(result.region),hash(bytes)]);
+    const updated=await q(`UPDATE series_title_extractions SET status=$2,quality=$3,reasons=$4,result_region=$5,candidate_sha256=$6,candidate_region=$7,model_fingerprint=$8
+      WHERE id=$1 AND status='running' RETURNING id`,
+      [jobId,quality.manualApplyAllowed?'ready':'rejected',JSON.stringify(quality),JSON.stringify(quality.reasons.map((r)=>r.code)),JSON.stringify(result.region),hash(bytes),
+        result.candidateRegion?JSON.stringify(result.candidateRegion):null,result.modelFingerprint??null]);
     if(!updated.length){await removeFiles(jobId);return;}
     if(row.automatic&&quality.safeToApply&&quality.manualApplyAllowed)await applySystemDraft({...row,status:'ready',quality},bytes);
   } catch(error) {

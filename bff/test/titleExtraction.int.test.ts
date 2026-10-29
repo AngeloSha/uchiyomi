@@ -85,6 +85,33 @@ test('selection cannot supply arbitrary URLs, malformed rectangles, stale cover 
     {exclusions:Array.from({length:9},()=>({left:0,top:0,width:.1,height:.1}))}])assert.equal((await request('POST',base,body)).statusCode,400);
   assert.equal((await request('POST',base,{coverFingerprint:'0'.repeat(64)})).statusCode,409);assert.equal(calls,0);
 });
+test('manual selection intent remains exact when worker ROI and tight candidate bounds differ', {skip},async()=>{
+  const selected={left:.053125,top:.545125,width:.890125,height:.357125},excluded=[{left:.8,top:.7,width:.05,height:.05}];
+  const detected={left:.054,top:.545,width:.889,height:.358},tight={left:.09,top:.61,width:.75,height:.16};
+  core.setTitleExtractionForTests({ready:async()=>true,assess:async()=>quality(),worker:async(bytes,selection)=>{
+    assert.deepEqual(selection.region,selected);assert.deepEqual(selection.exclusions,excluded);
+    return{...await worker(bytes,selection),region:detected,candidateRegion:tight};
+  }});
+  const created=await request('POST',base,{region:selected,exclusions:excluded});assert.equal(created.statusCode,202,created.body);
+  assert.equal(created.json().job.selectionMode,'manual');assert.deepEqual(created.json().job.region,selected);
+  await core.titleExtractionsSettled();const ready=await jobState(created.json().job.id);
+  assert.equal(ready.selectionMode,'manual');assert.deepEqual(ready.region,selected);assert.deepEqual(ready.exclusions,excluded);
+  assert.deepEqual(ready.resultRegion,detected);assert.deepEqual(ready.candidateRegion,tight);assert.equal(ready.modelFingerprint,'a'.repeat(64));
+  const latest=(await request('GET',base)).json().job;assert.deepEqual(latest.region,selected);assert.deepEqual(latest.candidateRegion,tight);
+});
+test('automatic detections and legacy output never silently become manual regions on regeneration', {skip},async()=>{
+  const received:Array<unknown>=[];
+  core.setTitleExtractionForTests({ready:async()=>true,assess:async()=>quality(),worker:async(bytes,selection)=>{received.push(selection.region);return worker(bytes,selection);}});
+  for(let n=0;n<2;n++){
+    const job=await makeReady(),ready=await jobState(job);assert.equal(ready.selectionMode,'automatic');assert.equal(ready.region,null);
+    assert.deepEqual(ready.resultRegion,{left:0,top:0,width:1,height:.3});
+  }
+  assert.deepEqual(received,[undefined,undefined]);
+  const latest=(await request('GET',base)).json().job;const oldRegion={left:.1,top:.2,width:.8,height:.3};
+  await q("UPDATE series_title_extractions SET selection_mode='legacy',region=$2,result_region=NULL WHERE id=$1",[latest.id,JSON.stringify(oldRegion)]);
+  const legacy=await jobState(latest.id);assert.equal(legacy.selectionMode,'legacy');assert.equal(legacy.region,null);assert.deepEqual(legacy.resultRegion,oldRegion);
+  assert.equal((await request('POST',base+'/'+latest.id+'/apply',{})).statusCode,200,'an explicitly reviewed older draft still applies');
+});
 test('changed cover, checked identity and manual title edits reject stale Apply without replacing the original art', {skip},async()=>{
   for(const change of['cover','identity','style','file-bytes']as const){
     const job=await makeReady();const before=await currentArt();

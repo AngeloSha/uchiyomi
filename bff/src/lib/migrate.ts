@@ -2119,6 +2119,12 @@ CREATE TABLE IF NOT EXISTS series_title_extractions (
   CHECK((automatic AND owner_id IS NULL) OR (NOT automatic AND owner_id IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS series_title_extractions_series_idx ON series_title_extractions(series_id,created_at DESC);
+-- Older drafts overwrote the request region with inference output; their original selection intent is unknown.
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS selection_mode text NOT NULL DEFAULT 'legacy'
+  CHECK(selection_mode IN ('manual','automatic','legacy'));
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS result_region jsonb;
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS candidate_region jsonb;
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS model_fingerprint text;
 CREATE TABLE IF NOT EXISTS series_title_extraction_state (
   series_id text PRIMARY KEY REFERENCES lib_series(id) ON DELETE CASCADE,
   automatic_key text NOT NULL,

@@ -14,6 +14,7 @@ export class ExtractionError extends Error {
 export interface WorkerExtraction {
   bytes: Buffer; sourceSha256: string; width: number; height: number; region: ExtractionRect;
   sourceWidth: number; sourceHeight: number; ms: number;
+  candidateRegion?:ExtractionRect;
   evidence: Record<string, unknown>; modelFingerprint?:string;
 }
 const config = () => {
@@ -50,7 +51,7 @@ export async function extractCoverTitle(bytes: Buffer, selection: { region?: Ext
   try {
     const body = JSON.parse((await readCapped(response, 15*1024*1024)).toString('utf8'));
     const value = z.object({ version: z.literal(1), sourceSha256: z.string().regex(/^[a-f0-9]{64}$/), candidateBase64: z.string().max(15*1024*1024),
-      width: z.number().int().positive().max(12000), height: z.number().int().positive().max(12000), region: extractionRect,
+      width: z.number().int().positive().max(12000), height: z.number().int().positive().max(12000), region: extractionRect,candidateRegion:extractionRect.optional(),
       sourceWidth: z.number().int().positive().max(12000), sourceHeight: z.number().int().positive().max(12000), ms: z.number().nonnegative().max(300_000),
       modelFingerprint:z.string().regex(/^[a-f0-9]{64}$/).optional(),evidence: z.record(z.string(), z.unknown()) }).parse(body);
     if (value.sourceSha256 !== createHash('sha256').update(bytes).digest('hex') || !/^[a-z0-9+/]*={0,2}$/i.test(value.candidateBase64)) throw new Error('wrong source');

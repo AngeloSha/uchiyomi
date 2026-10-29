@@ -462,7 +462,11 @@ components:
         coverFingerprint: { type: string }
         previewUrl: { type: [string, "null"], description: Authenticated admin WebP; private and never externally hosted. }
         coverPreviewUrl: { type: [string, "null"], description: Authenticated immutable cover PNG used for this job. }
-        region: { oneOf: [{ $ref: "#/components/schemas/ExtractionRect" }, { type: "null" }] }
+        selectionMode: { type: string, enum: [manual, automatic, legacy], description: Legacy drafts lost the original request intent and must not silently become manual selections. }
+        region: { oneOf: [{ $ref: "#/components/schemas/ExtractionRect" }, { type: "null" }], description: Exact requested rectangle for manual drafts; null for automatic or legacy drafts. Inference never overwrites it. }
+        resultRegion: { oneOf: [{ $ref: "#/components/schemas/ExtractionRect" }, { type: "null" }], description: Worker selection in full prepared-source coordinates, separate from request intent. }
+        candidateRegion: { oneOf: [{ $ref: "#/components/schemas/ExtractionRect" }, { type: "null" }], description: Tight cutout bounds in full prepared-source coordinates. }
+        modelFingerprint: { type: [string, "null"], description: Inference algorithm provenance; older reviewed drafts remain manually applicable. }
         exclusions: { type: array, maxItems: 8, items: { $ref: "#/components/schemas/ExtractionRect" } }
         reasons: { type: array, items: { type: string } }
         error: { type: [string, "null"] }

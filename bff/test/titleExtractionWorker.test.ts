@@ -19,7 +19,8 @@ const server=createServer(async(req,res)=>{
   if(behavior==='oversized'){res.end(' '.repeat(15*1024*1024+1));return;}
   res.setHeader('content-type','application/json');res.end(JSON.stringify({version:1,sourceSha256:behavior==='wrong-source'?'0'.repeat(64):digest,
     candidateBase64:Buffer.from('fixture bytes decoded later').toString('base64'),width:240,height:80,sourceWidth:480,sourceHeight:640,
-    region:{left:0,top:0,width:1,height:.3},ms:1,evidence:{maskScore:.9},modelFingerprint:'a'.repeat(64)}));
+    region:{left:0,top:0,width:1,height:.3},candidateRegion:behavior==='invalid-bounds'?{left:.9,top:0,width:.2,height:1}:{left:.1,top:.05,width:.8,height:.2},
+    ms:1,evidence:{maskScore:.9},modelFingerprint:'a'.repeat(64)}));
 });
 before(async()=>{await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));url='http://127.0.0.1:'+(server.address()as any).port;});
 after(async()=>{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));
@@ -33,7 +34,9 @@ test('operator configuration is required; health is authenticated and exposes on
 });
 test('actual worker POST stays bounded to the configured service and checks response source identity',async()=>{
   configure();behavior='ok';const result=await extract();assert.equal(result.sourceSha256,digest);assert.equal(result.modelFingerprint,'a'.repeat(64));
+  assert.deepEqual(result.candidateRegion,{left:.1,top:.05,width:.8,height:.2});
   behavior='wrong-source';await assert.rejects(extract(),(error:any)=>error instanceof ExtractionError&&error.code==='extract_failed');
+  behavior='invalid-bounds';await assert.rejects(extract(),(error:any)=>error instanceof ExtractionError&&error.code==='extract_failed');
 });
 test('redirects, oversized payloads, busy status and cancellation never become valid candidates',async()=>{
   configure();behavior='redirect';await assert.rejects(extract(),(error:any)=>error.code==='worker_unavailable');
