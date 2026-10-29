@@ -32,6 +32,9 @@ const brand = localFont({
   weight: '600 800',
 });
 
+const titleAction = localFont({ src: './fonts/BarlowCondensed-Bold.woff2', variable: '--ff-title-action', display: 'swap', weight: '700', preload: false });
+const titleFantasy = localFont({ src: './fonts/Cinzel-latin.woff2', variable: '--ff-title-fantasy', display: 'swap', weight: '400 900', preload: false });
+
 export const metadata: Metadata = {
   title: 'Uchiyomi — your self-hosted manga server',
   description: 'Read, download and keep up with your manga, manhwa and webtoons, on your own server.',
@@ -62,7 +65,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     // suppressHydrationWarning: TONE_BOOT may have put `data-tone` on <html> before React hydrates it, on purpose.
-    <html lang="en" className={`${display.variable} ${sans.variable} ${brand.variable}`} suppressHydrationWarning>
+    <html lang="en" className={`${display.variable} ${sans.variable} ${brand.variable} ${titleAction.variable} ${titleFantasy.variable}`} suppressHydrationWarning>
       <head>
         {/* The reader's background tone from the device's copy, and the browser bar's colour, while the page is still
             being parsed: without it a Graphite or Midnight reader saw true black until the app booted (lib/tone.ts). */}

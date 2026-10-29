@@ -190,6 +190,18 @@ export interface SeriesEdition {
   editions?: EditionRow[];
 }
 
+export type TitleArtStyle = 'auto' | 'action' | 'fantasy' | 'scifi' | 'soft' | 'noir' | 'plain';
+export interface SeriesTitleArt {
+  mode: 'automatic' | 'custom' | 'text';
+  style: TitleArtStyle;
+  status: 'ready' | 'pending' | 'missing' | 'error' | 'disabled';
+  version: number;
+  logoUrl: string | null;
+  language: 'en' | 'original' | null;
+  showReadableTitle: boolean;
+  attribution: null | { source: 'Wikimedia Commons' | 'Cover lettering'; sourceUrl: string | null; artist: string | null; license: string | null; licenseUrl: string | null };
+}
+
 export interface Series {
   /** Admins only: the library it is in. */
   library?: { id: string; name: string };
@@ -231,6 +243,8 @@ export interface Series {
   source?: { missing: number | null; chapters: number | null; checkedAt: string } | null;
   yomi?: UchiyomiFlags;
   artVersion?: number; // bumps when an admin edits the cover/banner → cache-busts the image URLs
+  /** Cached title artwork; absent on older servers, which retain the styled readable title. */
+  titleArt?: SeriesTitleArt;
   /**
    * v0.51.0: the banner the server makes from the series' own pages, for a series with no banner of its own --
    * `{seed}` once one is made (lib/art.ts autoHeroUrl), null when it has a banner, is 18+, or none is made (yet).

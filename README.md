@@ -113,6 +113,10 @@ sites' terms and your local law.
 
 **Your library**
 
+- **Manga title artwork** — Home and series heroes show matching title logos or styled lettering. Admins can
+  upload their own artwork, find verified Wikimedia logos, or review lettering cut from a cover with the
+  [optional local CPU service](services/title-extractor/README.md). Restore/Erase brushes repair a private preview
+  before Apply; automatic work is opt-in and preserves manual choices.
 - **Files you already own** — CBZ, CBR, PDF, image EPUB or a folder of images, in any folder layout.
 - **A Library you can find things in** — search it by title or author, one **Sort** menu where every order runs
   both ways (newest, recently read, most popular and top rated on AniList, your own stars, most chapters, A–Z),

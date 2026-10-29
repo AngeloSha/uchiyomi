@@ -25,6 +25,9 @@ import { scheduleMatchCheck } from './lib/matchCheck';
 import { startTitleWorks } from './lib/discoverIdentity';
 import { scheduleMergeLeftovers } from './lib/mergeLeftovers';
 import { scheduleAniListScores } from './lib/anilistScores';
+import { initializeTitleLogoScan, startTitleLogoScan } from './lib/titleLogoScan';
+import { initializeTitleExtractions, startTitleExtractions } from './lib/titleExtraction';
+import { initializeTitleExtractionBatch, startTitleExtractionBatch } from './lib/titleExtractionBatch';
 import { notifyAdmins } from './lib/push';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
@@ -94,6 +97,9 @@ async function main() {
     console.warn('[net] Uchiyomi Desktop is reached from this computer alone: LOCAL_NETWORKS is ignored.');
   }
   await migrate();
+  await initializeTitleLogoScan();
+  await initializeTitleExtractions();
+  await initializeTitleExtractionBatch();
   // What Admin -> Settings -> Server -> Home network saved, where the environment does not say (lib/clientAddr.ts),
   // before any request is judged by it; then what is in force, said once.
   if (!isDesktop()) {
@@ -514,6 +520,14 @@ async function main() {
    * entry, a few minutes after boot and then every six hours -- each round only what is missing or three days old.
    */
   scheduleAniListScores(app.log);
+
+  // Opt-in discovery continues across the whole library and after restart, without needing page views.
+  const stopTitleLogoScan = startTitleLogoScan(app.log);
+  app.addHook('onClose', async () => { stopTitleLogoScan(); });
+  const stopTitleExtractions=startTitleExtractions(app.log);
+  app.addHook('onClose',async()=>{stopTitleExtractions();});
+  const stopTitleExtractionBatch=startTitleExtractionBatch(app.log);
+  app.addHook('onClose',async()=>{stopTitleExtractionBatch();});
 
   /**
    * The opt-in install count.

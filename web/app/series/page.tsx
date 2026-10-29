@@ -40,6 +40,8 @@ import { buttonsClass, compactChaptersOn, dotHide, rowClass, thumbHide } from '@
 import { chapterRowsClass, chapterViewOn, setChapterView, type ChapterView } from '@/lib/chapterView';
 import { OtherTitles } from '@/components/OtherTitles';
 import { PhoneHeroCover } from '@/components/PhoneHeroCover';
+import { HeroTitle } from '@/components/HeroTitle';
+import { useTitleArtPolling } from '@/lib/useTitleArtPolling';
 import { Segmented } from '@/components/settings';
 import { seriesBooksQuery, seriesQuery } from '@/lib/seriesPrefetch';
 import { fetchingToast } from '@/lib/jobs';
@@ -850,7 +852,8 @@ function SeriesInner() {
 
   // The same two queries lib/seriesPrefetch.ts asks for at the click that opens this page, so the page usually mounts on
   // them rather than on its placeholders.
-  const { data: series } = useQuery({ ...seriesQuery(id), enabled: !!id });
+  const { data: series, refetch: refetchTitleArt } = useQuery({ ...seriesQuery(id), enabled: !!id });
+  useTitleArtPolling(id, series ? [series] : [], refetchTitleArt, authStatus !== 'offline');
   const { data: books } = useQuery({ ...seriesBooksQuery(id), enabled: !!id });
   // v0.87.0: which chapters have talk, and how much (GET /api/series/:id/comments); nothing while `on` is false, and never
   // asked on Uchiyomi Desktop, where the route does not exist. v0.90.0: nor by an account that switched Comments and
@@ -2083,7 +2086,7 @@ function SeriesInner() {
           {meta?.status && (
             <span className="mb-2 inline-block rounded-md bg-white/15 px-2 py-0.5 text-2xs font-semibold uppercase tracking-wide text-white backdrop-blur rtl:tracking-normal">{statusText(meta.status)}</span>
           )}
-          <h1 ref={heroTitleRef} dir="auto" className="line-clamp-3 break-words font-display text-[2rem] font-bold leading-[1.05] text-white [text-shadow:0_2px_18px_rgba(0,0,0,0.75)]">{title}</h1>
+          <HeroTitle series={series ?? { id, name: title, metadata: {} }} title={title} headingRef={heroTitleRef} />
           <div className="mt-2">{Meta}</div>
         </motion.div>
         {/* desktop title-over-art (Jellyfin style) — offset to the right of the floating poster */}
@@ -2095,7 +2098,7 @@ function SeriesInner() {
               <span data-series-status className="rounded-md bg-white/10 px-2 py-0.5 text-2xs font-semibold uppercase tracking-wide text-fog-100 backdrop-blur rtl:tracking-normal">{statusText(meta.status)}</span>
             </div>
           )}
-          <h1 dir="auto" className="font-display text-4xl font-bold leading-tight text-white [text-shadow:0_2px_16px_rgba(0,0,0,0.6)]">{title}</h1>
+          <HeroTitle series={series ?? { id, name: title, metadata: {} }} title={title} />
           <div className="mt-2">{Meta}</div>
           {/* The block is pointer-events-none over the banner; the chips take their taps back. */}
           {editions && <EditionChips editions={editions} onAdd={addLanguage} className="pointer-events-auto mt-3" />}

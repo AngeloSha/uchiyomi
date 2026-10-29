@@ -18,6 +18,8 @@ import { rm, rename, realpath, stat, readdir } from 'fs/promises';
 import type { Stats } from 'fs';
 import { q, one, tx } from './db';
 import { artFile } from './seriesArt';
+import { dropTitleArt } from './titleArt';
+import { dropTitleExtractions } from './titleExtraction';
 import { caseVariantOnDisk } from './caseVariant';
 import { allWritable, containedPath, realContainedPath, rootUnavailable, statOrGone, writePreflight, type Writability } from './fsGuard';
 export { statOrGone } from './fsGuard';
@@ -48,8 +50,10 @@ export interface SeriesRow {
 export const getSeriesRow = (id: string) =>
   one<SeriesRow>(`SELECT id, title, folder, deleted_at, merged_into FROM lib_series WHERE id = $1`, [id]);
 
-/** Remove the derived, per-series art: the DB rows and the three files nothing else ever sweeps (the page the cleanup kept too). */
+/** Remove per-series artwork, including versioned title logos and the first page the cleanup kept. */
 async function dropArt(id: string): Promise<void> {
+  await dropTitleExtractions(id).catch(() => {});
+  await dropTitleArt(id).catch(() => {});
   await q(`DELETE FROM series_art WHERE series_id = $1`, [id]).catch(() => {});
   await q(`DELETE FROM series_overrides WHERE series_id = $1`, [id]).catch(() => {});
   for (const kind of ['cover', 'banner', 'page'] as const) {
@@ -589,7 +593,8 @@ const BOOK_KEYED_USER_TABLES = ['read_progress', 'reading_events', 'bookmarks', 
 const BOOK_KEYED_TABLES = [...BOOK_KEYED_USER_TABLES, 'book_overrides', 'page_hashes', 'page_translations', 'chapter_comments', 'chapter_reactions', 'spread_marks'] as const;
 /** Every table keyed on the series id. lib_books and lib_series themselves come last, on their own. */
 const SERIES_KEYED_TABLES = [
-  'favorites', 'collection_items', 'ratings', 'series_colors', 'series_art', 'series_seen', 'series_trackers',
+  'favorites', 'collection_items', 'ratings', 'series_colors', 'series_art', 'series_title_art', 'series_seen', 'series_trackers',
+  'series_title_extractions', 'series_title_extraction_state', 'series_title_extraction_history', 'title_extraction_items',
   'series_overrides', 'notes', 'series_sources', 'series_listing', 'chapter_failures', 'tracker_progress',
   'reading_events', 'offline_downloads', 'bookmarks', 'listing_progress',
   // v0.49.0: a series' posting-order numbers (#116) and its slow archive (#117). Both cascade from lib_series,

@@ -1,7 +1,7 @@
 'use client';
 import { ScrollRail, CARD_RAIL } from '@/components/ScrollRail';
 import Link from 'next/link';
-import { Fragment, ReactNode, useEffect, useState } from 'react';
+import { Fragment, ReactNode, useCallback, useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
 import { HomePayload, Series } from '@/lib/types';
@@ -14,6 +14,7 @@ import { Img, ProgressBar, RailSkeleton, SectionTitle, Reveal } from '@/componen
 import { SeriesCard, ContinueCard } from '@/components/cards';
 import { KeepReadingHidden } from '@/components/KeepReadingHidden';
 import { HeroCarousel } from '@/components/HeroCarousel';
+import { useTitleArtPolling } from '@/lib/useTitleArtPolling';
 import { useArtUnderChrome } from '@/lib/overArt';
 import { AdultToggle, useAdultFilterConfigured } from '@/components/AdultToggle';
 import { IcPlay, IcSparkle, IcRefresh, IcBell } from '@/components/icons';
@@ -39,7 +40,7 @@ type CollectionRow = ListRow;
  * (lib/lists.ts), a smart one or one someone shares included, from ['lists-all'].
  */
 function CollectionRails() {
-  const { user } = useAuth();
+  const { user, status: authStatus } = useAuth();
   const { data } = useListsAll(true, 300_000);
   const all = data?.content ?? [];
   const saved = user?.settings?.homeCollections;
@@ -93,7 +94,7 @@ function greeting(name?: string) {
 }
 
 export default function HomePage() {
-  const { user } = useAuth();
+  const { user, status: authStatus } = useAuth();
   const [quickOpen, setQuickOpen] = useState(false);
   const qc = useQueryClient();
   // A second reason for the 18+ reveal to render: a genre or source on the admin's 18+ filter.
@@ -106,6 +107,8 @@ export default function HomePage() {
   const { data: foryou } = useQuery({ queryKey: ['foryou'], queryFn: () => api<{ genres: string[]; content: Series[] }>('/api/foryou'), staleTime: 600000, enabled: on('forYou') });
   const { data: trending } = useQuery({ queryKey: ['trending'], queryFn: () => api<{ content: Series[] }>('/api/trending'), staleTime: 300000, enabled: on('top10') });
   const { data: featured, isPending: featuredPending } = useQuery({ queryKey: ['featured'], queryFn: () => api<{ content: Series[] }>('/api/featured'), staleTime: 600000 });
+  const refetchTitleArt = useCallback(() => qc.refetchQueries({ queryKey: ['featured'], exact: true }), [qc]);
+  useTitleArtPolling('featured', featured?.content ?? [], refetchTitleArt, authStatus !== 'offline');
 
   // "Because you read X" — seed a named recommendation rail from what you're currently reading (else a top favorite)
   const seed = data?.onDeck?.[0]
@@ -294,7 +297,7 @@ export default function HomePage() {
       {(featured?.content?.length ?? 0) > 0 ? (
         <HeroCarousel slides={featured!.content} />
       ) : isLoading || featuredPending ? (
-        <div className="skeleton bleed-lg under-topbar under-phone-header h-[min(150vw,82svh)] lg:h-[62vh] lg:min-h-[440px]" />
+        <div data-home-hero-skeleton className="skeleton bleed-lg under-topbar under-phone-header h-[min(150vw,82svh)] lg:h-[72vh]" />
       ) : (
         <div className="bleed-lg under-topbar under-phone-header relative h-[58vh] min-h-[420px] overflow-hidden lg:h-[70vh]">
           {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -26,12 +26,13 @@ import { fetchPublicHop } from '../lib/publicConnection';
 import { suwayomiUrl, suwayomiBase, suwayomiImageHeaders, onEngineOrigin } from '../lib/sources/suwayomi/client';
 import { fetchPublic, readCapped, withoutCredentials, MAX_COVER_BYTES, MAX_ICON_BYTES, MAX_HTML_BYTES } from '../lib/safeFetch';
 import { env } from '../env';
-import { join } from 'path';
+import { basename, join, resolve, sep } from 'path';
 import { readFile, stat } from 'fs/promises';
 import { q, one } from '../lib/db';
 import { pageFileVersion, pageFileVersionOf } from '../lib/pageCleanupFiles';
 import { viewCtxFor, visibleBookFile, seriesVisible, sourceAllowedFor, SYSTEM_CTX, type ViewCtx } from '../lib/visibility';
-import { artFile, firstPageBookOf, FIRST_PAGE } from '../lib/seriesArt';
+import { ART_DIR, artFile, firstPageBookOf, FIRST_PAGE } from '../lib/seriesArt';
+import { readTitleLogo } from '../lib/titleArt';
 import { namesOf } from '../lib/altTitles';
 import { HERO_FRAMES, backdropLook, heroFit, type HeroAr } from '../lib/heroFrame';
 import { heroServable, heroFrame, heroVariant, queueHero, type AutoHeroAr } from '../lib/autoHero';
@@ -674,11 +675,7 @@ export const serveLibSeriesThumb = async (req: FastifyRequest, reply: FastifyRep
   const ovr = await one<{ cover: string | null; v: string }>('SELECT cover, EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1', [id]);
   if (ovr?.cover) {
     return serveImage(req, reply, `lib-sthumb:${id}:ov:${Math.floor(Number(ovr.v))}${wk}`, async () => {
-      let input: Buffer;
-      if (ovr.cover === 'upload') input = await readFile(artFile(id, 'cover'));
-      // Use the first page (v0.55.7): nothing to fetch, and series_art is not read -- whatever it holds.
-      else if (ovr.cover === FIRST_PAGE) input = await firstPageInput(id, vc(req));
-      else { try { input = await fetchCoverImage(ovr.cover!); } catch { input = await firstPageInput(id, vc(req)); } }
+      const input = await seriesCoverInput(id, vc(req));
       storeColor(id, input);
       const buffer = await thumbWebp(input, w, 80);
       return { buffer, contentType: 'image/webp' };
@@ -689,21 +686,39 @@ export const serveLibSeriesThumb = async (req: FastifyRequest, reply: FastifyRep
   if (art?.cover) {
     return serveImage(req, reply, `lib-sthumb:${id}:c${wk}`, async () => {
       // remote cover first; on ANY failure (hotlink CDN, dead link, timeout) fall back to the first page
-      let input: Buffer;
-      try { input = await fetchCoverImage(art.cover!, art.source_id || undefined); }
-      catch { input = await firstPageInput(id, vc(req)); }
+      const input = await seriesCoverInput(id, vc(req));
       storeColor(id, input);
       const buffer = await thumbWebp(input, w, 80);
       return { buffer, contentType: 'image/webp' };
     });
   }
   return serveImage(req, reply, `lib-sthumb:${id}:p${wk}`, async () => {
-    const input = await firstPageInput(id, vc(req));
+    const input = await seriesCoverInput(id, vc(req));
     storeColor(id, input);
     const buffer = await thumbWebp(input, w, 72);
     return { buffer, contentType: 'image/webp' };
   });
 };
+/** The current cover's actual input, shared by thumbnails and local title extraction. No new metadata lookup. */
+export async function seriesCoverInput(id: string, ctx: ViewCtx): Promise<Buffer> {
+  if (!(await seriesVisible(id, ctx))) throw Object.assign(new Error('no cover'), { statusCode: 404 });
+  const ovr = await one<{ cover: string | null }>('SELECT cover FROM series_overrides WHERE series_id=$1', [id]);
+  if (ovr?.cover === 'upload') {
+    const path=resolve(ART_DIR,basename(artFile(id,'cover')));
+    if(!path.startsWith(resolve(ART_DIR)+sep))throw Object.assign(new Error('no cover'),{statusCode:404});
+    return readFile(path);
+  }
+  if (ovr?.cover === FIRST_PAGE) return firstPageInput(id, ctx);
+  if (ovr?.cover) {
+    try { return await fetchCoverImage(ovr.cover); } catch { return firstPageInput(id, ctx); }
+  }
+  const art = await one<{ cover: string | null; source_id: string | null }>(
+    'SELECT a.cover,s.source_id FROM series_art a JOIN lib_series s ON s.id=a.series_id WHERE a.series_id=$1', [id]);
+  if (art?.cover) {
+    try { return await fetchCoverImage(art.cover, art.source_id || undefined); } catch { return firstPageInput(id, ctx); }
+  }
+  return firstPageInput(id, ctx);
+}
 /** WebP holds no image taller (or wider) than this; JPEG holds 65,535. */
 const WEBP_MAX_SIDE = 16383;
 const JPEG_MAX_SIDE = 65535;
@@ -1016,6 +1031,15 @@ export default async function imageRoutes(app: FastifyInstance) {
     const ar: HeroAr = (req.query as Record<string, string>)?.ar === 'tall' ? 'tall' : 'wide';
     const r = await backdropRecipe(id, style, ar, vc(req));
     return serveImage(req, reply, r.variant, r.producer);
+  });
+
+  // A title logo is already a local normalized raster. Do not crop it or fall back to a cover.
+  app.get('/img/series/:id/logo', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!(await seriesVisible(id, vc(req)))) return reply.code(404).header('cache-control', 'private, no-store').send({ error: 'not_found' });
+    const logo = await readTitleLogo(id);
+    if (!logo) return reply.code(404).header('cache-control', 'private, no-store').send({ error: 'not_found' });
+    return reply.type('image/webp').header('cache-control', 'private, max-age=86400').header('x-content-type-options', 'nosniff').send(logo.bytes);
   });
 
   // The automatic banner (v0.51.0, lib/autoHero.ts): four crops of the series' own pages, for a series with no banner

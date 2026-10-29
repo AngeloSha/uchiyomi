@@ -77,3 +77,9 @@ updates:
       # already had. Minor and patch updates of the current major still arrive here as before.
       - dependency-name: "node"
         update-types: ["version-update:semver-major"]
+  - package-ecosystem: docker
+    directory: /services/title-extractor
+    schedule: { interval: weekly, day: monday }
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major"]

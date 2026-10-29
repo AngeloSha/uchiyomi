@@ -1,0 +1,15 @@
+Uchiyomi optional title extractor
+
+Uchiyomi service and integration source: MPL-2.0; /service/LICENSE.
+Source: https://github.com/AngeloSha/uchiyomi
+
+The image includes the unmodified Hi-SAM source at commit
+69009434d4dba5541f228d8f5acb0754c333d417, including its original copyright
+headers and Apache-2.0 license at /opt/hi-sam/LICENSE.
+Source: https://github.com/ymy-k/Hi-SAM
+
+Hi-SAM incorporates Segment Anything components with their upstream copyright
+headers. Model checkpoints are not included in this image. Operators obtain
+and mount the separately documented upstream checkpoints read-only.
+
+Installed Python packages retain the license notices provided in their wheels.

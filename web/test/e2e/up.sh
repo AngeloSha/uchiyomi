@@ -26,6 +26,8 @@
 #   KEEP=1 E2E_EMPTY_LIBRARY=1 E2E_NO_WALK=1 bash web/test/e2e/up.sh   # walk49's find: a new server, nothing in its library
 #   KEEP=1 E2E_ANILIST=1 E2E_NO_WALK=1 bash web/test/e2e/up.sh   # walk49's matches: a fake AniList (fakeAniList.mjs) as
 #     ANILIST_API_URL, so nothing on the instance asks the real AniList
+#   KEEP=1 E2E_TITLE_EXTRACTION=1 E2E_NO_WALK=1 bash web/test/e2e/up.sh   # titleExtractionWalk's local fixture service,
+#     so real extraction jobs and previews can be checked without model downloads or outside requests
 #   KEEP=1 E2E_TRANSLATE_DIR=<an installed translation engine> E2E_NO_WALK=1 bash web/test/e2e/up.sh   # walkTranslate's
 #
 # The embedded leg is the proof that the one-container layout behaves like the two-container one, in the
@@ -48,6 +50,8 @@ ENGINE_C="$NET-engine"
 SOLVER_MAIN="$NET-solver-main"
 SOLVER_BACKUP="$NET-solver-backup"
 ANILIST_C="$NET-anilist"
+TITLE_EXTRACT_C="$NET-title-extractor"
+TITLE_EXTRACT_PORT=${E2E_TITLE_EXTRACT_PORT:-$((29000 + PORT % 1000))}
 # Docker's default address pools can be exhausted on a busy host, so the subnet is pinned rather than left
 # to chance -- an unexplained "all predefined address pools have been fully subnetted" is a bad first
 # impression of a test suite.
@@ -119,6 +123,9 @@ EXTRA_B="${E2E_FAKE_EXTRA:-none}"
 if [ -n "${E2E_FAKE_EXTRA:-}" ]; then EXTRA_A="$EXTRA_A,$E2E_FAKE_EXTRA"; fi
 # What the app is started with beyond the common set, for both database layouts.
 APP_ENV=()
+if [ "${E2E_TITLE_EXTRACTION:-0}" = "1" ]; then
+  APP_ENV+=(-e "TITLE_EXTRACTOR_URL=http://$TITLE_EXTRACT_C:$TITLE_EXTRACT_PORT" -e "TITLE_EXTRACTOR_TOKEN=e2e-title-extractor-only-token")
+fi
 # E2E_ARCHIVE_FAST=1: the slow archive's test-only timing (#117; bff lib/archive.ts, lib/archivePace.ts). With the
 # owner's defaults its first look comes ten minutes after a boot, every chapter is followed by a break of at least
 # 45 s and pages are 1.5-4 s apart, so a walk could never watch a chapter land. Here: the first look 5 s after the
@@ -154,14 +161,14 @@ cleanup() {
   [ "${KEEP:-0}" = "1" ] && { echo "kept: $NET on :$PORT, fake sources on :$FAKE_A_PORT/:$FAKE_B_PORT${ENGINE:+, fake engine on :$ENGINE_PORT}$([ "$OWNER" = "1" ] && echo ", fake-c/fake-d on :$FAKE_C_PORT/:$FAKE_D_PORT")$([ "$SOLVERS" = "1" ] && echo ", solvers on :$SOLVER_MAIN_PORT/:$SOLVER_BACKUP_PORT")$([ "$ANILIST" = "1" ] && echo ", fake AniList on :$ANILIST_PORT") (library $LIB, data $DATA)"; return; }
   # -v: postgres:16-alpine declares its data directory a volume, and every run left that anonymous volume behind
   # (about 49 MB); nothing else here has one to leave.
-  docker rm -f -v "$APP" "$DB" "$FAKE_A" "$FAKE_B" "$FAKE_C" "$FAKE_D" "$ENGINE_C" "$SOLVER_MAIN" "$SOLVER_BACKUP" "$ANILIST_C" >/dev/null 2>&1 || true
+  docker rm -f -v "$APP" "$DB" "$FAKE_A" "$FAKE_B" "$FAKE_C" "$FAKE_D" "$ENGINE_C" "$SOLVER_MAIN" "$SOLVER_BACKUP" "$ANILIST_C" "$TITLE_EXTRACT_C" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
   # /data is written by the container as PUID (our own uid), so a plain rm works.
   rm -rf "$LIB" "$DATA"
 }
 trap cleanup EXIT INT TERM
 
-docker rm -f -v "$APP" "$DB" "$FAKE_A" "$FAKE_B" "$FAKE_C" "$FAKE_D" "$ENGINE_C" "$SOLVER_MAIN" "$SOLVER_BACKUP" "$ANILIST_C" >/dev/null 2>&1 || true
+docker rm -f -v "$APP" "$DB" "$FAKE_A" "$FAKE_B" "$FAKE_C" "$FAKE_D" "$ENGINE_C" "$SOLVER_MAIN" "$SOLVER_BACKUP" "$ANILIST_C" "$TITLE_EXTRACT_C" >/dev/null 2>&1 || true
 docker network rm "$NET" >/dev/null 2>&1 || true
 docker network create --subnet "$SUBNET" "$NET" >/dev/null
 
@@ -196,6 +203,13 @@ if [ "$SOLVERS" = "1" ]; then
     -v "$REPO:/repo:ro" -w /repo node:24-alpine \
     node web/test/e2e/fakeSolver.mjs --name backup --port 8191 --greeting flaresolverr --version 3.5.2 >/dev/null
   STUBS="$STUBS http://127.0.0.1:$SOLVER_MAIN_PORT/__mode http://127.0.0.1:$SOLVER_BACKUP_PORT/__mode"
+fi
+if [ "${E2E_TITLE_EXTRACTION:-0}" = "1" ]; then
+  echo "· starting the title extraction fixture"
+  docker run -d --name "$TITLE_EXTRACT_C" --network "$NET" -p "127.0.0.1:$TITLE_EXTRACT_PORT:$TITLE_EXTRACT_PORT" \
+    -v "$REPO:/repo:ro" -w /repo node:24-alpine \
+    node web/test/e2e/fakeTitleExtraction.mjs --port "$TITLE_EXTRACT_PORT" >/dev/null
+  STUBS="$STUBS http://127.0.0.1:$TITLE_EXTRACT_PORT/__log"
 fi
 if [ "$ANILIST" = "1" ]; then
   echo "· and a fake AniList"

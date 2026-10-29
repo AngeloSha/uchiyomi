@@ -115,7 +115,9 @@ const rowsFor = (t: string, col: string, ids: string[]) =>
 async function wipe() {
   const books = (await q<{ id: string }>(`SELECT id FROM lib_books WHERE source = $1`, [SRC])).map((b) => b.id);
   for (const t of BOOK_TABLES) await q(`DELETE FROM ${t} WHERE book_id = ANY($1)`, [books]).catch(() => {});
-  for (const t of SERIES_TABLES) await q(`DELETE FROM ${t} WHERE series_id = ANY($1)`, [ALL]).catch(() => {});
+  for (const t of [...SERIES_TABLES, 'series_title_extraction_history', 'title_extraction_items']) {
+    await q(`DELETE FROM ${t} WHERE series_id = ANY($1)`, [ALL]).catch(() => {});
+  }
   await q(`DELETE FROM collections WHERE name LIKE 'fg-%'`).catch(() => {});
   await q(`DELETE FROM lib_series WHERE source = $1`, [SRC]);
   await q(`DELETE FROM audit_log WHERE detail->>'id' = ANY($1)`, [ALL]).catch(() => {});
@@ -414,6 +416,33 @@ test('forget removes its terminal bulk-delete journal item but retains the paren
       'the terminal parent run remains as operation history');
   } finally {
     await q(`DELETE FROM admin_bulk_delete_runs WHERE id = $1`, [runId]);
+  }
+});
+
+test('forget removes cover extraction history and items while retaining the run and unrelated series', { skip }, async () => {
+  await series(S, 'Extracted', { deleted: true });
+  await series(O, 'Keep this series');
+  const runId = '00000000-0000-4000-8000-000000005560';
+  await q(`INSERT INTO title_extraction_runs (id, origin, status, finished_at) VALUES ($1,'nightly','completed',now())`, [runId]);
+  try {
+    for (const [index, sid] of [S, O].entries()) {
+      await q(`INSERT INTO title_extraction_items (id,run_id,series_id,series_key,status)
+               VALUES ($1,$2,$3,$3,'ready')`, [`00000000-0000-4000-8000-00000000556${index + 1}`, runId, sid]);
+      await q(`INSERT INTO series_title_extraction_history (series_id,source_fingerprint,model_fingerprint,outcome)
+               VALUES ($1,'source','model','ready')`, [sid]);
+    }
+    const result = await admin.forgetSeries(S);
+    assert.equal(result.ok, true, result.ok ? '' : (result as any).message);
+    assert.equal((result as any).rowsByTable.title_extraction_items, 1);
+    assert.equal((result as any).rowsByTable.series_title_extraction_history, 1);
+    for (const table of ['title_extraction_items', 'series_title_extraction_history']) {
+      assert.equal(await rowsFor(table, 'series_id', [S]), 0);
+      assert.equal(await rowsFor(table, 'series_id', [O]), 1);
+    }
+    assert.equal((await q(`SELECT 1 FROM title_extraction_runs WHERE id=$1`, [runId])).length, 1,
+      'the completed parent run remains as operation history');
+  } finally {
+    await q(`DELETE FROM title_extraction_runs WHERE id=$1`, [runId]);
   }
 });
 

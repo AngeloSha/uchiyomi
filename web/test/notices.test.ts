@@ -252,6 +252,7 @@ const NOT_CENTRED: Record<string, string> = {
  */
 const CLEAR_OF_THE_CORNER: Record<string, string> = {
   'components/SeriesEditor.tsx': 'Edit details (v0.53.0), about 880 px wide with the art in a column',
+  'components/TitleExtraction.tsx': 'Cover title preview, with the source cover and candidate side by side',
 };
 /** A max-w-* class in rem: Tailwind's named steps, and an arbitrary px or rem width. */
 const maxWidthRem = (w: string): number | null => {

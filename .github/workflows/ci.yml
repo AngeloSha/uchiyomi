@@ -1,6 +1,6 @@
 name: CI
 
-# Builds all three published images and runs the test suites on every pull request
+# Builds the application images and optional CPU title extractor, and runs the test suites on every pull request
 # (and on pushes to main). A green build proves deps install and the app compiles:
 # `tsc` for the BFF and `next build` for the web app. The Tests job additionally
 # proves behaviour — including the reading-progress rules, which are enforced in
@@ -58,6 +58,67 @@ jobs:
       - name: Build the single-container image
         run: docker build -f Dockerfile.aio -t uchiyomi:ci .
 
+  title-extractor:
+    name: Title extractor (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-latest }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Check out pinned title segmentation source
+        uses: actions/checkout@v7
+        with:
+          repository: ymy-k/Hi-SAM
+          ref: 69009434d4dba5541f228d8f5acb0754c333d417
+          path: .title-extractor-source
+          persist-credentials: false
+      - name: Test extraction boundaries without checkpoints
+        run: |
+          python -m pip install -r services/title-extractor/requirements.txt
+          python -m unittest discover -s services/title-extractor -p 'test_*.py'
+          python -m unittest discover -s scripts/title-art -p 'test_*.py'
+      - name: Build the optional inference image without models
+        run: |
+          title_context="$RUNNER_TEMP/title-extractor-context"
+          python scripts/title-art/build-worker.py --hi-sam-dir .title-extractor-source --prepare-context "$title_context"
+          docker build -t uchiyomi-title-extractor:ci "$title_context"
+      - name: Missing checkpoints fail closed without a published port
+        run: |
+          docker run -d --name uchiyomi-title-extractor-ci --network none --read-only --tmpfs /tmp:rw,size=134217728 \
+            --cap-drop ALL --security-opt no-new-privileges --memory 4g \
+            -e TITLE_EXTRACTOR_TOKEN=ci-only-title-extractor-token-00000000 uchiyomi-title-extractor:ci
+          docker exec -i uchiyomi-title-extractor-ci python - <<'PY'
+          import json, os, time, urllib.request, urllib.error
+          def request(auth):
+              req = urllib.request.Request('http://127.0.0.1:3081/healthz', headers={'authorization': 'Bearer ' + os.environ['TITLE_EXTRACTOR_TOKEN']} if auth else {})
+              try:
+                  with urllib.request.urlopen(req, timeout=2) as response:
+                      return response.status, json.load(response)
+              except urllib.error.HTTPError as error:
+                  return error.code, json.load(error)
+          for attempt in range(30):
+              try:
+                  assert request(False)[0] == 401
+                  status, body = request(True)
+                  assert status == 503 and body['ready'] is False
+                  break
+              except (OSError, urllib.error.URLError):
+                  time.sleep(1)
+          else:
+              raise RuntimeError('Private worker did not answer')
+          PY
+      - name: Remove the disposable inference container
+        if: always()
+        run: docker rm -f uchiyomi-title-extractor-ci || true
+
   # The web tier had one test file and CI proved only that it compiles, which is how four user-facing bugs
   # shipped in v0.8.0 -- all of them routes wired to the wrong thing, none of them visible to a test that
   # imports a function and calls it. This brings the app up for real and drives it in a browser.
@@ -77,13 +138,28 @@ jobs:
         run: docker build -f Dockerfile.aio -t uchiyomi:e2e-ci .
       - name: Bring it up and drive it
         working-directory: ./web
-        run: KEEP=1 E2E_SKIP_BUILD=1 E2E_IMAGE=uchiyomi:e2e-ci npm run test:e2e
+        run: KEEP=1 E2E_SKIP_BUILD=1 E2E_IMAGE=uchiyomi:e2e-ci E2E_TITLE_EXTRACTION=1 npm run test:e2e
       - name: Chapter selection and manual source matching
         working-directory: ./web
         run: node test/e2e/backlogWalk.mjs
       - name: Reversible page cleanup and rule confirmations
         working-directory: ./web
         run: node test/e2e/pageCleanupWalk.mjs
+      - name: Manga title logos and styled fallbacks
+        working-directory: ./web
+        run: node test/e2e/titleArtWalk.mjs
+      - name: Library title artwork scan and progress
+        working-directory: ./web
+        run: node test/e2e/titleLogoScanWalk.mjs
+      - name: Extract and review title artwork from a cover
+        working-directory: ./web
+        run: node test/e2e/titleExtractionWalk.mjs
+      - name: Correct title transparency with precise brushes
+        working-directory: ./web
+        run: node test/e2e/titleMaskWalk.mjs
+      - name: Schedule cover titles and review generated artwork
+        working-directory: ./web
+        run: node test/e2e/coverTitleBatchWalk.mjs
       # Machine-assisted translation fails in two ways a unit test cannot see: a string longer than its
       # container, and a right-to-left language rendered inside a left-to-right frame. Both need a browser.
       - name: Every language renders, and Arabic mirrors
@@ -101,7 +177,7 @@ jobs:
       - name: Tear it down
         if: always()
         run: |
-          docker rm -f uchiyomi-e2e uchiyomi-e2e-db uchiyomi-e2e-fake-a uchiyomi-e2e-fake-b \
+          docker rm -f uchiyomi-e2e uchiyomi-e2e-db uchiyomi-e2e-fake-a uchiyomi-e2e-fake-b uchiyomi-e2e-title-extractor \
             uchiyomi-e2e-embedded uchiyomi-e2e-embedded-fake-a uchiyomi-e2e-embedded-fake-b || true
           docker ps -aq --filter 'name=^/uchiyomi-e2e-v558-' | xargs -r docker rm -f -v || true
           docker network rm uchiyomi-e2e uchiyomi-e2e-embedded || true
@@ -117,6 +193,11 @@ jobs:
             web/test/e2e/shots-i18n/
             web/test/e2e/shots-backlog/
             web/test/e2e/shots-page-cleanup/
+            web/test/e2e/shots-title-art/
+            web/test/e2e/shots-title-logo-scan/
+            web/test/e2e/shots-title-extraction/
+            web/test/e2e/shots-title-mask/
+            web/test/e2e/shots-cover-title-batch/
             web/test/e2e/shots-v558/
           retention-days: 7
 

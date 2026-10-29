@@ -83,7 +83,8 @@ async function readTile(rgb: Buffer, W: number, H: number, kind: 'main' | 'ko'):
     const [, T, C] = t.dims;
     ctcDecode(t.data, batch.length, T, C, r.chars).forEach((res, k) => {
       const c = batch[k];
-      if (res.text.trim() && res.score >= MIN_SCORE) lines.push({ box: [c.b.x0, c.b.y0, c.b.x1, c.b.y1], text: res.text, score: res.score, tall: c.tall });
+      if (res.text.trim() && res.score >= MIN_SCORE) lines.push({ box: [c.b.x0, c.b.y0, c.b.x1, c.b.y1], text: res.text, score: res.score, tall: c.tall,
+        ...(c.b.contentBox ? { contentBox: c.b.contentBox } : {}) });
     });
   }
   return lines;
@@ -113,16 +114,18 @@ export async function readPage(bytes: Buffer, lang: string): Promise<{ lines: Oc
     const tile = th === H ? rgb : rgb.subarray(top * W * 3, (top + th) * W * 3);
     for (const l of await readTile(Buffer.from(tile), W, th, kind)) {
       const box: OcrLine['box'] = [l.box[0], l.box[1] + top, l.box[2], l.box[3] + top];
+      const contentBox: OcrLine['contentBox'] = l.contentBox ? [l.contentBox[0], l.contentBox[1] + top, l.contentBox[2], l.contentBox[3] + top] : undefined;
       const dup = all.findIndex((o) => iou(o.box, box) > 0.5);
-      if (dup === -1) all.push({ ...l, box });
-      else if (l.score > all[dup].score) all[dup] = { ...l, box };
+      if (dup === -1) all.push({ ...l, box, ...(contentBox ? { contentBox } : {}) });
+      else if (l.score > all[dup].score) all[dup] = { ...l, box, ...(contentBox ? { contentBox } : {}) };
     }
     if (top + th >= H) break;
   }
   const inv = 1 / scale;
   return {
     width, height,
-    lines: all.map((l) => ({ ...l, box: l.box.map((v) => Math.round(v * inv)) as OcrLine['box'] })),
+    lines: all.map((l) => ({ ...l, box: l.box.map((v) => Math.round(v * inv)) as OcrLine['box'],
+      ...(l.contentBox ? { contentBox: l.contentBox.map((v) => Math.round(v * inv)) as OcrLine['box'] } : {}) })),
   };
 }
 
