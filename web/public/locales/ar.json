@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4504
+    "strings": 4505
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -4507,5 +4507,6 @@
   "Nightly runs are off.": "العمليات الليلية معطّلة.",
   "With nightly runs off, Run now prepares previews only. Automatic applying needs both switches turned on.": "عندما تكون العمليات الليلية معطّلة، يُجهّز «التشغيل الآن» المعاينات فقط. يتطلب التطبيق التلقائي تفعيل الخيارين.",
   "Showing the latest {n} previews.": "عرض أحدث {n} معاينات.",
-  "Could not open this title preview. Try again.": "تعذّر فتح معاينة هذا العنوان. حاول مجددًا."
+  "Could not open this title preview. Try again.": "تعذّر فتح معاينة هذا العنوان. حاول مجددًا.",
+  "Showing the latest 1 preview.": "عرض أحدث معاينة واحدة."
 }

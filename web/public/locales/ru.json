@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4504
+    "strings": 4505
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -4507,5 +4507,6 @@
   "Nightly runs are off.": "Ночные запуски выключены.",
   "With nightly runs off, Run now prepares previews only. Automatic applying needs both switches turned on.": "При выключенных ночных запусках «Запустить сейчас» создаёт только предпросмотры. Для автоматического применения нужно включить обе настройки.",
   "Showing the latest {n} previews.": "Показаны последние предпросмотры: {n}.",
-  "Could not open this title preview. Try again.": "Не удалось открыть этот предпросмотр названия. Повторите попытку."
+  "Could not open this title preview. Try again.": "Не удалось открыть этот предпросмотр названия. Повторите попытку.",
+  "Showing the latest 1 preview.": "Показан последний предпросмотр."
 }
