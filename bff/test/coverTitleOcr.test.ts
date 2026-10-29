@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import sharp from 'sharp';
-import { createCoverTitleOcr, coverTitleVerifierFingerprint, type CoverTitleCandidateInput } from '../src/lib/coverTitleOcr';
+import { createCoverTitleOcr, coverTitleVerifierFingerprint, prepareCoverTitleOcrCanvas, type CoverTitleCandidateInput } from '../src/lib/coverTitleOcr';
 import type { CoverTitleCalibration } from '../src/lib/coverTitleQuality';
 
 const model = 'c'.repeat(64), pack = 'd'.repeat(64), verifier = coverTitleVerifierFingerprint(model, pack);
@@ -89,4 +89,35 @@ test('a worker claim cannot turn an opaque rectangle or empty alpha plane into a
     assert.equal(quality.safeToApply, false); assert.equal(quality.manualApplyAllowed, false);
     assert.ok(quality.reasons.some((r) => r.severity === 'error'));
   }
+});
+
+test('wide wordmarks gain only uniform padding, retaining every foreground pixel and bounded detector aspect', async () => {
+  const original = await sharp({ create: { width: 800, height: 80, channels: 4, background: '#00000000' } })
+    .composite([{ input: await sharp({ create: { width: 600, height: 30, channels: 4, background: '#4488ddff' } }).png().toBuffer(), left: 50, top: 20 }]).png().toBuffer();
+  const prepared = await prepareCoverTitleOcrCanvas(original, 'dark');
+  assert.equal(prepared.width, 800); assert.equal(prepared.height, 200);
+  assert.deepEqual(prepared.padding, { left: 0, top: 60, right: 0, bottom: 60 });
+  const raw = await sharp(prepared.bytes).raw().toBuffer();
+  const pixel = (x: number, y: number) => [...raw.subarray((y * 800 + x) * 3, (y * 800 + x) * 3 + 3)];
+  assert.deepEqual(pixel(50, 80), [68, 136, 221]);
+  assert.deepEqual(pixel(649, 109), [68, 136, 221]);
+  assert.deepEqual(pixel(50, 20), [21, 19, 31]);
+  const crop = await sharp(prepared.bytes).extract({ left: 0, top: 60, width: 800, height: 80 }).raw().toBuffer();
+  const expected = await sharp(original).flatten({ background: '#15131f' }).raw().toBuffer();
+  assert.ok(crop.equals(expected), 'padding neither crops nor resamples the original flattened pixels');
+});
+
+test('OCR boxes on a padded wordmark are mapped back to original cutout coordinates', async () => {
+  const f = await fixture(); let calls = 0;
+  const candidateBytes = await sharp({ create: { width: 800, height: 80, channels: 4, background: '#00000000' } })
+    .composite([{ input: await sharp({ create: { width: 600, height: 30, channels: 4, background: '#ffffffff' } }).png().toBuffer(), left: 50, top: 20 }]).png().toBuffer();
+  const adapter = createCoverTitleOcr({ directory: () => '/fake', calibrationFile: () => '/approved',
+    verifyPack: async () => pack, loadCalibration: async () => profile, worker: () => ({ stop() {},
+      read: async (bytes) => { const m = await sharp(bytes).metadata(); calls++; return { width: m.width!, height: m.height!, ms: 1,
+        lines: [{ text: 'ONE PIECE', score: .99, tall: false, box: calls === 1 ? [10, 10, 300, 60] : [10, 70, 300, 120] }] }; } }) });
+  const result = await adapter.inspect({ ...f.want, candidateBytes, evidence: { ...f.want.evidence, candidateWidth: 800, candidateHeight: 80 } });
+  assert.equal(result.quality.safeToApply, true);
+  assert.deepEqual(result.candidateDarkOcr?.lines[0].box, [10, 10, 300, 60]);
+  assert.equal(result.candidateDarkOcr?.height, 80);
+  adapter.stop(); f.adapter.stop();
 });

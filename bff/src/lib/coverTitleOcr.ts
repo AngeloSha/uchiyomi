@@ -24,7 +24,28 @@ function boundedOcr(width: number, height: number): boolean {
 }
 export function coverTitleVerifierFingerprint(modelFingerprint: string, ocrFingerprint = OCR_PACK): string {
   if (!HASH.test(modelFingerprint) || !HASH.test(ocrFingerprint)) throw new Error('Invalid title verifier fingerprint');
-  return sha(JSON.stringify({ policy: 'strict-v1', adapter: 'prepared-source-dark-primary-v1', model: modelFingerprint, ocr: ocrFingerprint }));
+  return sha(JSON.stringify({ policy: 'strict-v1', adapter: 'prepared-source-dark-primary-padded-v2', model: modelFingerprint, ocr: ocrFingerprint }));
+}
+
+/** Add only uniform inspection background, never resize/crop the cutout's pixels to satisfy detector limits. */
+export async function prepareCoverTitleOcrCanvas(bytes: Buffer, background: 'light' | 'dark') {
+  const image = sharp(bytes, { limitInputPixels: 8_000_000 });
+  const m = await image.metadata();
+  if (!m.width || !m.height || m.width < 8 || m.height < 8 || m.width > 1600 || m.height > 1600) throw new Error('Cutout is outside OCR geometry limits');
+  const width = Math.max(m.width, Math.ceil(m.height / 4)), height = Math.max(m.height, Math.ceil(m.width / 4));
+  const left = Math.floor((width - m.width) / 2), top = Math.floor((height - m.height) / 2);
+  const padding = { left, top, right: width - m.width - left, bottom: height - m.height - top };
+  const color = background === 'light' ? '#ffffff' : '#15131f';
+  const prepared = image.flatten({ background: color });
+  if (padding.left || padding.right || padding.top || padding.bottom) prepared.extend({ ...padding, background: color });
+  return { bytes: await prepared.png().toBuffer(), width, height, originalWidth: m.width, originalHeight: m.height, padding };
+}
+function mapCanvasOcr(page: PageText, canvas: Awaited<ReturnType<typeof prepareCoverTitleOcrCanvas>>): PageText {
+  if (page.width !== canvas.width || page.height !== canvas.height) throw new Error('Wrong OCR canvas dimensions');
+  const x = (v: number) => Math.max(0, Math.min(canvas.originalWidth, v - canvas.padding.left));
+  const y = (v: number) => Math.max(0, Math.min(canvas.originalHeight, v - canvas.padding.top));
+  return { ...page, width: canvas.originalWidth, height: canvas.originalHeight,
+    lines: page.lines.map((l) => ({ ...l, box: [x(l.box[0]), y(l.box[1]), x(l.box[2]), y(l.box[3])] })) };
 }
 
 export interface CoverTitleOcrCapability { available: boolean; calibrated: boolean; verifierFingerprint: string | null }
@@ -114,7 +135,8 @@ export function createCoverTitleOcr(deps: Dependencies) {
         sourceOcr: null, candidateLightOcr: null, candidateDarkOcr: null });
       if (at !== generation) return fallback();
       if (!assessCoverTitleQuality(evidence).manualApplyAllowed) return fallback();
-      if (!boundedOcr(evidence.sourceWidth, evidence.sourceHeight) || !boundedOcr(evidence.candidateWidth, evidence.candidateHeight)) return fallback();
+      if (!boundedOcr(evidence.sourceWidth, evidence.sourceHeight) || evidence.candidateWidth < 8 || evidence.candidateHeight < 8
+        || evidence.candidateWidth > 1600 || evidence.candidateHeight > 1600) return fallback();
       // Images are already bounded by the extraction adapter, and are bounded again before invoking OCR/Sharp.
       if (!want.sourceBytes.length || want.sourceBytes.length > BYTE_LIMIT || !want.candidateBytes.length || want.candidateBytes.length > BYTE_LIMIT
         || sha(want.sourceBytes) !== want.sourceSha256 || !HASH.test(want.modelFingerprint)) return fallback();
@@ -144,10 +166,10 @@ export function createCoverTitleOcr(deps: Dependencies) {
           invalid.quality.reasons.push({ code: !dimensions.hasAlpha || stats.isOpaque ? 'opaque_foreground' : 'empty_foreground', severity: 'error' });
           return invalid;
         }
-        const light = await image.clone().flatten({ background: '#ffffff' }).png().toBuffer();
-        const dark = await image.clone().flatten({ background: '#15131f' }).png().toBuffer();
-        const candidateLightOcr = await reader.read(light, language, 60_000);
-        const candidateDarkOcr = await reader.read(dark, language, 60_000);
+        const light = await prepareCoverTitleOcrCanvas(want.candidateBytes, 'light');
+        const dark = await prepareCoverTitleOcrCanvas(want.candidateBytes, 'dark');
+        const candidateLightOcr = mapCanvasOcr(await reader.read(light.bytes, language, 60_000), light);
+        const candidateDarkOcr = mapCanvasOcr(await reader.read(dark.bytes, language, 60_000), dark);
         if (at !== generation) return fallback();
         // The actual hero is dark: source+dark must pass. White lettering can legitimately vanish on a white
         // inspection sheet, so weak/empty light OCR cannot veto it. Confident contradictory light text still can.
