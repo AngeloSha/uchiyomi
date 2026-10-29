@@ -162,15 +162,16 @@ export async function titleExtractionImage(seriesId:string,jobId:string,userId:s
   if(hash(bytes)!==(kind==='cover'?row.source_sha256:kind==='mask-base'?row.mask_baseline_sha256:row.candidate_sha256))throw new ExtractionError('extract_failed',409);
   return {bytes,fingerprint:row.cover_fingerprint};
 }
-let worker=extractCoverTitle,ready=titleExtractorReady,assess=assessCoverTitleCandidate,ocrCapability=coverTitleOcrCapability;
+let worker=extractCoverTitle,ready=titleExtractorReady,workerHealth=titleExtractorHealth,assess=assessCoverTitleCandidate,ocrCapability=coverTitleOcrCapability;
 let timeoutMs=TIMEOUT_MS;
 /** Deterministic local worker seams; production never replaces these. */
-export function setTitleExtractionForTests(deps?:{worker?:typeof worker;ready?:typeof ready;assess?:typeof assess;ocrCapability?:typeof ocrCapability;timeoutMs?:number}) {
+export function setTitleExtractionForTests(deps?:{worker?:typeof worker;ready?:typeof ready;health?:typeof workerHealth;assess?:typeof assess;ocrCapability?:typeof ocrCapability;timeoutMs?:number}) {
   worker=deps?.worker??extractCoverTitle;ready=deps?.ready??titleExtractorReady;assess=deps?.assess??assessCoverTitleCandidate;
+  workerHealth=deps?.health??titleExtractorHealth;
   ocrCapability=deps?.ocrCapability??coverTitleOcrCapability;timeoutMs=deps?.timeoutMs??TIMEOUT_MS;
 }
 export async function titleExtractionCapabilities() {
-  const [available,health]=await Promise.all([ready(),titleExtractorHealth()]);
+  const [available,health]=await Promise.all([ready(),workerHealth()]);
   const ocr=await ocrCapability(health?.modelFingerprint??undefined);
   return {available,reason:available?null:'worker_unavailable',automaticAvailable:available&&ocr.available&&ocr.calibrated,
     automaticApplyAvailable:available&&ocr.available&&ocr.calibrated,
@@ -335,8 +336,12 @@ export async function recoverCompletedBatchJob(jobId:string){
  if(!job?.batch_item_id||!['ready','applied'].includes(job.status))return false;
  if(job.status==='ready'&&Number(job.mask_revision)===0&&job.quality?.manualApplyAllowed
    &&(job.quality.safeToApply||job.quality.availableChecksPassed===true)&&await batchPublicationEnabled()){
-  const bytes=await readPreview(job);if(hash(bytes)!==job.candidate_sha256)throw new ExtractionError('extract_failed',409);
-  await applySystemDraft(job,bytes);
+  const health=await workerHealth(),current=await snapshotFor(job.series_id,SYSTEM_CTX);
+  const context=await titleExtractionVerificationContext(current,health?.modelFingerprint??job.model_fingerprint??'');
+  if(health?.ready&&health.modelFingerprint===job.model_fingerprint&&context.key===job.verification_key){
+   const bytes=await readPreview(job);if(hash(bytes)!==job.candidate_sha256)throw new ExtractionError('extract_failed',409);
+   await applySystemDraft(job,bytes);
+  }else await q('UPDATE series_title_extractions SET publication_requested=false WHERE id=$1',[job.id]);
  }
  await finalizeCompletedBatchJob(jobId);return true;
 }

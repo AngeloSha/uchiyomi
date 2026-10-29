@@ -51,7 +51,7 @@ beforeEach(async()=>{
  await q('UPDATE libraries SET anilist_lookup=true WHERE id=$1',[LIB]);
  await series(1);await q("INSERT INTO series_trackers(series_id,provider,external_id,checked_at)VALUES($1,'anilist','87216',now())",[SID()]);
  await q("INSERT INTO series_other_titles(series_id,anilist_id,english,romaji)VALUES($1,'87216','Fixture title','Fixture title')",[SID()]);
- core.setTitleExtractionForTests({worker,ready:async()=>true,assess:async()=>quality(),ocrCapability:async()=>({available:true,calibrated:false,verifierFingerprint:'b'.repeat(64)})});
+ core.setTitleExtractionForTests({worker,ready:async()=>true,health:async()=>({ready:true,modelFingerprint:'a'.repeat(64)}),assess:async()=>quality(),ocrCapability:async()=>({available:true,calibrated:false,verifierFingerprint:'b'.repeat(64)})});
  batch.setTitleExtractionBatchForTests({model:async()=>'a'.repeat(64)});await core.initializeTitleExtractions();await batch.initializeTitleExtractionBatch();calls=0;externalCalls=0;
 });
 after(async()=>{
@@ -101,8 +101,8 @@ test('cancelling a run aborts only its active system job and retains existing ma
  const manual=await request('POST',root(),{});assert.equal(manual.statusCode,202);await core.titleExtractionsSettled();const manualId=manual.json().job.id;await series(3);
  let entered!:()=>void,release!:()=>void;const started=new Promise<void>(r=>{entered=r;}),gate=new Promise<void>(r=>{release=r;});
  core.setTitleExtractionForTests({ready:async()=>true,assess:async()=>quality(),worker:async(bytes,selection)=>{entered();await gate;return worker(bytes,selection);}});
- try{const id=await run();await startedWithin(started);assert.equal((await request('POST',BASE+'/cancel',{runId:id})).statusCode,200);}
- finally{release();}await settle();const s=await status();assert.equal(s.run.status,'cancelled');assert.equal(s.run.counts.skipped,1);assert.equal(s.run.counts.cancelled,2);
+ let beforeCancel:any;try{const id=await run();await startedWithin(started);beforeCancel=(await status()).run.counts;assert.equal((await request('POST',BASE+'/cancel',{runId:id})).statusCode,200);}
+ finally{release();}await settle();const s=await status();assert.equal(s.run.status,'cancelled');assert.equal(s.run.counts.skipped,beforeCancel.skipped);assert.equal(s.run.counts.cancelled,beforeCancel.pending+beforeCancel.processing);assert.equal(s.run.counts.total,s.run.counts.skipped+s.run.counts.cancelled);
  assert.equal((await request('GET',root()+'/'+manualId)).json().job.status,'ready');assert.equal((await art.titleArtsFor([SID()])).get(SID())!.logoUrl,null);
 });
 
@@ -173,6 +173,28 @@ test('generation backpressure pauses unfinished work and saved revision bytes re
  const{lstat}=await import('node:fs/promises');async function bytes(){const names=(await readdir(core.EXTRACTION_DIR)).filter(name=>name.startsWith(jobId+'.')&&!name.endsWith('.part'));return(await Promise.all(names.map(name=>lstat(join(core.EXTRACTION_DIR,name))))).reduce((n,s)=>n+s.size,0);}
  let recorded=(await q('SELECT asset_bytes FROM series_title_extractions WHERE id=$1',[jobId]))[0].asset_bytes;assert.ok(recorded>before);assert.equal(recorded,await bytes());
  saved=await request('PATCH',root()+'/'+jobId+'/mask',{expectedRevision:1,strokes:[]});assert.equal(saved.statusCode,200,saved.body);recorded=(await q('SELECT asset_bytes FROM series_title_extractions WHERE id=$1',[jobId]))[0].asset_bytes;assert.equal(recorded,await bytes());
- await q('UPDATE series_title_extractions SET asset_bytes=$2 WHERE id=$1',[jobId,core.BATCH_ASSET_BUDGET]);await series(2);await run();await settle();let s=await status();assert.equal(s.running,true);assert.equal(s.pausedReason,'extraction_storage_full');assert.equal(s.run.counts.pending,1);assert.equal(calls,1);
+ await q('UPDATE series_title_extractions SET asset_bytes=$2 WHERE id=$1',[jobId,core.BATCH_ASSET_BUDGET]);await series(2);await run();await settle();let s=await status();assert.equal(s.running,true);assert.equal(s.pausedReason,'extraction_storage_full');assert.ok(s.run.counts.pending>=1);assert.equal((await q("SELECT status FROM title_extraction_items WHERE run_id=$1 AND series_id=$2",[s.run.id,SID(1)]))[0].status,'pending');assert.equal(calls,1);
  await q('UPDATE series_title_extractions SET asset_bytes=$2 WHERE id=$1',[jobId,recorded]);await q("UPDATE title_extraction_items SET retry_at=now()-interval '1 second' WHERE status='pending'");await batch.titleExtractionBatchTick();await settle();s=await status();assert.equal(s.running,false);assert.equal(s.run.counts.ready,1);assert.equal(calls,2);
+});
+
+test('restart replays an eligible committed ready result before finalizing its interrupted batch item',{skip},async()=>{
+ core.setTitleExtractionForTests({worker,ready:async()=>true,health:async()=>({ready:true,modelFingerprint:'a'.repeat(64)}),assess:async()=>quality(true),ocrCapability:async()=>({available:true,calibrated:false,verifierFingerprint:'b'.repeat(64)})});
+ const runId=await run();await settle();assert.equal(calls,1);assert.equal((await art.titleArtsFor([SID()])).get(SID())!.logoUrl,null);
+ const[job]=await q('SELECT id FROM series_title_extractions WHERE series_id=$1',[SID()]);
+ await q('UPDATE server_settings SET automatic_cover_title_generation=true,automatic_cover_title_apply=true WHERE id=1');
+ await q('UPDATE series_title_extractions SET publication_requested=true WHERE id=$1',[job.id]);
+ await q("UPDATE title_extraction_runs SET status='running',finished_at=NULL WHERE id=$1",[runId]);await q("UPDATE title_extraction_items SET status='processing' WHERE run_id=$1",[runId]);await q('DELETE FROM series_title_extraction_history');
+ await batch.initializeTitleExtractionBatch();assert.equal((await status()).run.counts.processing,1,'boot must not mark an unperformed publication complete');
+ batch.wakeTitleExtractionBatch();await settle();const s=await status();assert.equal(s.run.status,'completed');assert.equal(s.run.counts.applied,1);assert.equal(calls,1,'a valid checked draft is reused without another model run');
+ assert.ok((await art.titleArtsFor([SID()])).get(SID())!.logoUrl);
+});
+
+test('changed verifier evidence across restart stays private and permits only one new evaluation',{skip},async()=>{
+ core.setTitleExtractionForTests({worker,ready:async()=>true,health:async()=>({ready:true,modelFingerprint:'a'.repeat(64)}),assess:async()=>quality(true),ocrCapability:async()=>({available:true,calibrated:false,verifierFingerprint:'b'.repeat(64)})});
+ const runId=await run();await settle();const[job]=await q('SELECT id FROM series_title_extractions WHERE series_id=$1',[SID()]);
+ await q('UPDATE server_settings SET automatic_cover_title_generation=true,automatic_cover_title_apply=true WHERE id=1');await q('UPDATE series_title_extractions SET publication_requested=true WHERE id=$1',[job.id]);
+ await q("UPDATE title_extraction_runs SET status='running',finished_at=NULL WHERE id=$1",[runId]);await q("UPDATE title_extraction_items SET status='processing' WHERE run_id=$1",[runId]);await q('DELETE FROM series_title_extraction_history');
+ core.setTitleExtractionForTests({worker,ready:async()=>true,health:async()=>({ready:true,modelFingerprint:'a'.repeat(64)}),assess:async()=>quality(),ocrCapability:async()=>({available:true,calibrated:false,verifierFingerprint:'c'.repeat(64)})});
+ await batch.initializeTitleExtractionBatch();batch.wakeTitleExtractionBatch();await settle();assert.equal(calls,1);assert.equal((await status()).run.counts.ready,1);assert.equal((await art.titleArtsFor([SID()])).get(SID())!.logoUrl,null);
+ await run();await settle();assert.equal(calls,2);assert.equal((await status()).run.counts.ready,1);await run();await settle();assert.equal(calls,2);assert.equal((await status()).run.counts.skipped,1);
 });

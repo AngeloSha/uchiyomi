@@ -195,16 +195,10 @@ async function reconcileStrandedItems(){
 }
 
 export async function initializeTitleExtractionBatch(){
- // A completed draft may have committed just before its process disappeared. Keep it rather than infer again.
- await q(`INSERT INTO series_title_extraction_history(series_id,source_fingerprint,model_fingerprint,outcome,verification_key,publication_requested)
-  SELECT DISTINCT ON(j.series_id) j.series_id,j.cover_fingerprint,j.model_fingerprint,j.status,COALESCE(j.verification_key,''),
-   j.publication_requested AND s.automatic_cover_title_generation AND s.automatic_cover_title_apply FROM series_title_extractions j
-  JOIN title_extraction_items i ON i.job_id=j.id JOIN server_settings s ON s.id=1 WHERE i.status='processing' AND j.status IN('ready','applied') AND j.model_fingerprint IS NOT NULL
-  ORDER BY j.series_id,j.created_at DESC ON CONFLICT(series_id)DO UPDATE SET source_fingerprint=EXCLUDED.source_fingerprint,
-  model_fingerprint=EXCLUDED.model_fingerprint,outcome=EXCLUDED.outcome,verification_key=EXCLUDED.verification_key,
-  publication_requested=EXCLUDED.publication_requested,processed_at=now(),retry_at=NULL`);
- await q(`UPDATE title_extraction_items i SET status=j.status FROM series_title_extractions j WHERE i.job_id=j.id AND i.status='processing' AND j.status IN('ready','applied')`);
- await q("UPDATE title_extraction_items SET status='pending',reason='interrupted',retry_at=now() WHERE status='processing'");
+ // Leave committed ready/applied jobs processing until the post-start reconciler can replay guarded publication.
+ // Boot performs no cover fetch or inference, and never converts an unperformed publication into a completed outcome.
+ await q(`UPDATE title_extraction_items i SET status='pending',reason='interrupted',retry_at=now() WHERE i.status='processing'
+  AND NOT EXISTS(SELECT 1 FROM series_title_extractions j WHERE j.id=i.job_id AND j.status IN('ready','applied'))`);
  const s=await settings();if(s?.automatic_cover_title_generation&&!s.cover_title_next_run_at)
   await q('UPDATE server_settings SET cover_title_next_run_at=$1 WHERE id=1',[nextTitleExtractionNight(clock())]);
  stopped=false;
