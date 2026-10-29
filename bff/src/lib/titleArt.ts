@@ -101,14 +101,44 @@ function fileFor(r: ArtRow): string | null {
   return validId(r.linked_anilist_id) && r.auto_anilist_id === r.linked_anilist_id ? r.auto_file : null;
 }
 
-interface Job { id: string; anilistId: string; version: number; authority: AniListAuthority }
+interface Job { id: string; anilistId: string; version: number; authority: AniListAuthority; generation: number }
 const pending = new Map<string, Job>();
 const waiting = new Set<string>();
 let draining: Promise<void> | null = null;
+let activeJob: Job | null = null;
+let queuePaceMs = PACE_MS;
+let automaticGeneration = 0;
 let provider: typeof lookupTitleLogo = (...args) => lookupTitleLogo(...args);
 /** A transport seam for deterministic provider/privacy/race tests; no production caller changes it. */
 export function setTitleLogoLookupForTests(lookup?: typeof lookupTitleLogo): void {
   provider = lookup ?? ((...args) => lookupTitleLogo(...args));
+}
+export const titleLogoQueueState = () => ({ ids: [...pending.keys()], active: activeJob !== null, capacity: MAX_PENDING });
+/** A test clock seam: production always uses the same conservative 2.2-second pace. */
+export function setTitleLogoQueuePaceForTests(ms?: number): void { queuePaceMs = ms ?? PACE_MS; }
+export function cancelAutomaticTitleLogoQueue(): void {
+  automaticGeneration++;
+  for (const [id, job] of pending) if (job.authority === 'automatic') { pending.delete(id); waiting.delete(id); }
+}
+export async function titleLogoProviderRetryAt(): Promise<number> {
+  const [row] = await q<{ title_logo_retry_at: Date | null }>('SELECT title_logo_retry_at FROM server_settings WHERE id=1');
+  return row?.title_logo_retry_at ? new Date(row.title_logo_retry_at).getTime() : 0;
+}
+/** Stop queued automatic work immediately when the setting or a series' privacy/manual choice changes. */
+export async function pruneAutomaticTitleLogoQueue(): Promise<void> {
+  const jobs = [...pending.values()].filter((job) => job.authority === 'automatic');
+  if (!jobs.length) return;
+  const rows = new Map((await rowsFor(jobs.map((job) => job.id))).map((row) => [row.id, row]));
+  for (const job of jobs) {
+    const row = rows.get(job.id);
+    if (!row || !sameChoice(row, job) || !row.online || !row.library_online || row.first_page) {
+      if (pending.get(job.id) === job) { pending.delete(job.id); waiting.delete(job.id); }
+    }
+  }
+}
+/** A paused provider leaves queued work in place; the scanner resumes it only after the persisted deadline. */
+export function resumeTitleLogoQueue(): void {
+  if (waiting.size && !draining && !runtime.stopping) draining = Promise.resolve().then(drain);
 }
 
 function dto(r: ArtRow): TitleArt {
@@ -131,7 +161,7 @@ function dto(r: ArtRow): TitleArt {
     attribution: mode === 'custom' ? null : (file ? r.auto_attribution : null),
   };
 }
-/** All catalog surfaces get the same cheap batch read. Only explicit hero routes enqueue discovery. */
+/** All catalog surfaces get the same cheap batch read; hero routes and the background scanner enqueue discovery. */
 export async function titleArtsFor(ids: string[]): Promise<Map<string, TitleArt>> {
   return new Map((await rowsFor(ids)).map((r) => [r.id, dto(r)]));
 }
@@ -224,12 +254,16 @@ export async function refreshTitleLogo(id: string, viewer: ViewCtx): Promise<Tit
   if (row.lookup_status === 'error' && row.lookup_anilist_id === row.linked_anilist_id && rest > 0) {
     throw new TitleArtError('provider_busy', 429, 'The artwork provider is resting. Try again later.', rest);
   }
+  const providerRest = await titleLogoProviderRetryAt() - Date.now();
+  if (providerRest > 0) throw new TitleArtError('provider_busy', 429, 'The artwork provider is resting. Try again later.', providerRest);
   await queueTitleLogos([id], 'manual');
   return (await titleArtsFor([id])).get(id) ?? null;
 }
 
 export async function queueTitleLogos(ids: string[], authority: AniListAuthority = 'automatic'): Promise<void> {
+  const generation = automaticGeneration;
   for (const r of await rowsFor(ids)) {
+    if (runtime.stopping || (authority === 'automatic' && generation !== automaticGeneration)) break;
     if ((r.mode ?? 'automatic') !== 'automatic' || !validId(r.linked_anilist_id)) continue;
     if (r.lookup_status === 'error' && r.lookup_anilist_id === r.linked_anilist_id && r.retry_at && new Date(r.retry_at).getTime() > Date.now()) continue;
     if (authority === 'automatic') {
@@ -243,29 +277,33 @@ export async function queueTitleLogos(ids: string[], authority: AniListAuthority
       if (authority === 'manual') throw new TitleArtError('busy', 429, 'Title artwork is busy. Try again shortly.', 5000);
       continue;
     }
-    pending.set(r.id, { id: r.id, anilistId: r.linked_anilist_id!, version: nversion(r.version), authority });
+    pending.set(r.id, { id: r.id, anilistId: r.linked_anilist_id!, version: nversion(r.version), authority, generation });
     waiting.add(r.id);
   }
-  if (waiting.size && !draining) draining = Promise.resolve().then(drain);
+  resumeTitleLogoQueue();
 }
 export const titleLogoQueueSettled = (): Promise<void> => draining ?? Promise.resolve();
 async function drain(): Promise<void> {
   try {
     while (waiting.size && !runtime.stopping) {
+      if (await titleLogoProviderRetryAt() > Date.now()) break;
       const id = waiting.values().next().value!; waiting.delete(id);
       const job = pending.get(id); if (!job) continue;
+      activeJob = job;
       try { await runJob(job); } catch { /* A DB/shutdown failure must not stop later requests from trying again. */ }
+      activeJob = null;
       if (pending.get(id) === job) pending.delete(id);
-      if (waiting.size && !runtime.stopping) await new Promise((resolve) => setTimeout(resolve, PACE_MS));
+      if (waiting.size && !runtime.stopping) await new Promise((resolve) => setTimeout(resolve, queuePaceMs));
     }
-  } finally { draining = null; if (runtime.stopping) { waiting.clear(); pending.clear(); } }
+  } finally { draining = null; activeJob = null; if (runtime.stopping) { waiting.clear(); pending.clear(); } }
 }
 function sameChoice(r: ArtRow, job: Job): boolean {
   return (r.mode ?? 'automatic') === 'automatic' && nversion(r.version) === job.version && r.linked_anilist_id === job.anilistId;
 }
 async function runJob(job: Job): Promise<void> {
+  const cancelled = () => job.authority === 'automatic' && job.generation !== automaticGeneration;
   const before = (await rowsFor([job.id]))[0];
-  if (!before || !sameChoice(before, job) || (job.authority === 'automatic' && (!before.online || !before.library_online || before.first_page))) return;
+  if (cancelled() || !before || !sameChoice(before, job) || (job.authority === 'automatic' && (!before.online || !before.library_online || before.first_page))) return;
   let found: Awaited<ReturnType<typeof lookupTitleLogo>> | null = null;
   let bytes: Buffer | null = null; let failure: unknown = null;
   try {
@@ -273,8 +311,17 @@ async function runJob(job: Job): Promise<void> {
     if (found.kind === 'found') bytes = await normalizeTitleLogo(found.candidate.bytes);
   }
   catch (error) { failure = error; }
+  if (runtime.stopping) return;
+  // A shared remote Retry-After survives a restart and pauses the queue, rather than making every queued
+  // manga look like a failed lookup. Local decode failures have no provider retry deadline.
+  const providerRest = Number((failure as any)?.retryAfterMs);
+  if (failure && Number.isSafeInteger(providerRest) && providerRest >= 0 && providerRest <= 8_000_000_000_000_000 - Date.now()) {
+    await q(`UPDATE server_settings SET title_logo_retry_at=GREATEST(COALESCE(title_logo_retry_at,now()),now()+($1::bigint*interval '1 millisecond')) WHERE id=1`, [providerRest]);
+  }
+  if (cancelled()) return;
   // Only local decoding/filesystem work happens under the authoritative lock; never HTTP.
   await withAniListMutation({ id: job.id }, job.authority, async (qq, id) => {
+    if (runtime.stopping || cancelled()) return;
     if (!(await qq(`SELECT s.id FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [id])).length) return;
     const [link] = await qq<{ external_id: string }>(`SELECT external_id FROM series_trackers WHERE series_id=$1 AND provider='anilist'
       AND (linked_by IS NOT NULL OR checked_at IS NOT NULL) FOR SHARE`, [id]);
@@ -285,11 +332,12 @@ async function runJob(job: Job): Promise<void> {
       if (!settings?.automatic_title_logos || cover?.cover === FIRST_PAGE) return;
     }
     const row = await ensureRow(qq, id);
-    if (row.mode !== 'automatic' || nversion(row.version) !== job.version) return;
+    if (runtime.stopping || cancelled() || row.mode !== 'automatic' || nversion(row.version) !== job.version) return;
     if (found?.kind === 'found' && bytes) {
       const file = await putAsset(id, bytes); const c = found.candidate;
       const attribution: TitleAttribution = { source: 'Wikimedia Commons', sourceUrl: c.attribution.pageUrl,
         artist: c.attribution.author, license: c.attribution.license, licenseUrl: c.attribution.licenseUrl };
+      if (runtime.stopping || cancelled()) return;
       await qq(`UPDATE series_title_art SET auto_file=$2, auto_anilist_id=$3, auto_language=$4, auto_caption=$5,
         auto_attribution=$6, lookup_anilist_id=$3, lookup_status='ready', retry_at=NULL, version=$7, auto_manual=$8, updated_at=now()
         WHERE series_id=$1`, [id, file, job.anilistId, c.language == null ? null : c.language === 'en' ? 'en' : 'original', c.showReadableTitle,

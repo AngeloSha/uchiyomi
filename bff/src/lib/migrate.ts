@@ -2094,6 +2094,8 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS local_networks  text;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS trusted_proxies text;
 -- Title wordmarks are optional persistent art. Existing installations make no new online requests by default.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS automatic_title_logos boolean NOT NULL DEFAULT false;
+-- Provider-wide Retry-After survives a process restart; no title or user identity is stored here.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS title_logo_retry_at timestamptz;
 CREATE TABLE IF NOT EXISTS series_title_art (
   series_id text PRIMARY KEY REFERENCES lib_series(id) ON DELETE CASCADE,
   mode text NOT NULL DEFAULT 'automatic' CHECK (mode IN ('automatic','custom','text')),

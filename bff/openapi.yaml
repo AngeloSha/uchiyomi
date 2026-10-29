@@ -12127,6 +12127,74 @@ paths:
           description: Not found, or not visible to this account
         "413":
           description: The body is over the limit (a picture over 11 MB)
+  /api/admin/title-logos/status:
+    get:
+      tags: [admin]
+      operationId: getApiAdminTitleLogosStatus
+      summary: Read title-logo discovery coverage and scheduled retries.
+      description: >-
+        Requires an admin and admin token scope. This read-only summary performs no discovery, queueing or
+        external requests. Ready, missing, error, unchecked, custom and text partition the active series;
+        a default missing row without a matching checked identity is unchecked. Eligibility and privacy-gate
+        counts are separate facts. Running includes queued work and eligible due work awaiting the next refill.
+      security: [{ bearer: [] }]
+      responses:
+        "200":
+          description: Current derived coverage, pending work and future retry timestamps.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled, running, counts, checked, nextRetryAt, providerRetryAt, lastScanAt]
+                properties:
+                  enabled: { type: boolean }
+                  running: { type: boolean }
+                  checked: { type: integer }
+                  nextRetryAt: { type: [string, "null"], format: date-time }
+                  providerRetryAt: { type: [string, "null"], format: date-time }
+                  lastScanAt: { type: [string, "null"], format: date-time }
+                  counts:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      ready: { type: integer }
+                      missing: { type: integer }
+                      error: { type: integer }
+                      unchecked: { type: integer }
+                      custom: { type: integer }
+                      text: { type: integer }
+                      eligible: { type: integer }
+                      needsLink: { type: integer }
+                      libraryOptOut: { type: integer }
+                      firstPage: { type: integer }
+                      pending: { type: integer }
+                      due: { type: integer }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or token lacks the admin scope }
+  /api/admin/title-logos/scan:
+    post:
+      tags: [admin]
+      operationId: postApiAdminTitleLogosScan
+      summary: Resume automatic title-logo discovery across the library.
+      description: >-
+        Requires an admin, admin token scope and the automatic-title-logo setting enabled. Refills the bounded
+        paced worker without waiting for remote art. Respects library opt-outs, first-page choices, custom/text
+        choices and checked AniList identity. retryMissing resets only completed, current-identity eligible misses;
+        provider failures and Retry-After deadlines remain protected. Normal scheduled discovery resumes at boot.
+      security: [{ bearer: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                retryMissing: { type: boolean, default: false }
+      responses:
+        "200": { description: Accepted; returns ok and the current status summary. }
+        "400": { description: Invalid request body }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or token lacks the admin scope }
+        "409": { description: Automatic title logos are disabled }
   /api/admin/series/{id}/logo/refresh:
     post:
       tags: [admin]

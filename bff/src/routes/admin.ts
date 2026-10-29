@@ -69,6 +69,8 @@ import { dirname, resolve, sep } from 'path';
 import sharp from 'sharp';
 import { ART_BODY_LIMIT, ART_DIR, FIRST_PAGE, artFile, artOverview } from '../lib/seriesArt';
 import { changeTitleArtRoute, refreshTitleArtRoute } from './titleArt';
+import { cancelAutomaticTitleLogoQueue } from '../lib/titleArt';
+import { scanTitleLogos, titleLogoScanStatus, wakeTitleLogoScan } from '../lib/titleLogoScan';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, applyAdultSources, rateSourceAdult, MAX_ADULT_SOURCES, browsableIds, nameableIds, viewCtxFor, visible, Params, hideAdult, ADULT_RATING } from '../lib/visibility';
@@ -883,7 +885,10 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
     if (b.localPick !== undefined) await q('UPDATE server_settings SET local_pick = $1, updated_at = now() WHERE id = 1', [b.localPick]);
-    if (b.automaticTitleLogos !== undefined) await q('UPDATE server_settings SET automatic_title_logos = $1, updated_at = now() WHERE id = 1', [b.automaticTitleLogos]);
+    if (b.automaticTitleLogos !== undefined) {
+      await q('UPDATE server_settings SET automatic_title_logos = $1, updated_at = now() WHERE id = 1', [b.automaticTitleLogos]);
+      if (b.automaticTitleLogos) wakeTitleLogoScan(); else cancelAutomaticTitleLogoQueue();
+    }
     if (b.updaterHours !== undefined) await q('UPDATE server_settings SET updater_hours = $1, updated_at = now() WHERE id = 1', [b.updaterHours]);
     if (b.extensionHours !== undefined) await q('UPDATE server_settings SET extension_hours = $1, updated_at = now() WHERE id = 1', [b.extensionHours]);
     if (b.extensionAutoUpdate !== undefined) await q('UPDATE server_settings SET extension_auto_update = $1, updated_at = now() WHERE id = 1', [b.extensionAutoUpdate]);
@@ -3524,6 +3529,16 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // The covers the sources this series uses have for it (#242), for the series page's Change cover. Each is answered by
   app.post('/api/admin/series/:id/logo/refresh', refreshTitleArtRoute);
+
+  // These summaries never enqueue a provider request; Scan only refills the same bounded background queue.
+  app.get('/api/admin/title-logos/status', async () => titleLogoScanStatus());
+  app.post('/api/admin/title-logos/scan', async (req, reply) => {
+    const body = z.object({ retryMissing: z.boolean().optional() }).strict().parse(req.body ?? {});
+    const settings = await one<{ automatic_title_logos: boolean }>('SELECT automatic_title_logos FROM server_settings WHERE id=1');
+    if (!settings?.automatic_title_logos) return reply.code(409).send({ error: 'disabled', message: 'Turn on automatic title logos before scanning the library.' });
+    await scanTitleLogos(body); wakeTitleLogoScan();
+    return { ok: true, status: await titleLogoScanStatus() };
+  });
 
   // The covers the sources this series uses have for it (#242), for the series page's Change cover. Each is answered by
   // the source's own record of the series (the same lookup the updater makes), in parallel, each under its source's own

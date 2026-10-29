@@ -25,6 +25,7 @@ import { scheduleMatchCheck } from './lib/matchCheck';
 import { startTitleWorks } from './lib/discoverIdentity';
 import { scheduleMergeLeftovers } from './lib/mergeLeftovers';
 import { scheduleAniListScores } from './lib/anilistScores';
+import { startTitleLogoScan } from './lib/titleLogoScan';
 import { notifyAdmins } from './lib/push';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
@@ -514,6 +515,10 @@ async function main() {
    * entry, a few minutes after boot and then every six hours -- each round only what is missing or three days old.
    */
   scheduleAniListScores(app.log);
+
+  // Opt-in discovery continues across the whole library and after restart, without needing page views.
+  const stopTitleLogoScan = startTitleLogoScan(app.log);
+  app.addHook('onClose', async () => { stopTitleLogoScan(); });
 
   /**
    * The opt-in install count.

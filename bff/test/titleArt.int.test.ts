@@ -75,7 +75,7 @@ beforeEach(async () => {
   await q('DELETE FROM lib_series WHERE id=$1', [SID]);
   await q(`INSERT INTO lib_series(id,source,title,folder,books_count,library_id) VALUES($1,'T!title','Logo Tale',$1,0,$2)`, [SID, LIB]);
   await q('UPDATE libraries SET anilist_lookup=true WHERE id=$1', [LIB]);
-  await q('UPDATE server_settings SET automatic_title_logos=false WHERE id=1');
+  await q('UPDATE server_settings SET automatic_title_logos=false,title_logo_retry_at=NULL WHERE id=1');
   calls = 0;
   art.setTitleLogoLookupForTests(async () => { calls++; return { kind: 'found', candidate: candidate() }; });
 });
@@ -85,7 +85,7 @@ after(async () => {
     await q('DELETE FROM lib_series WHERE id=$1', [SID]);
     await q('DELETE FROM libraries WHERE id=ANY($1)', [[LIB, QUIET]]);
     await q("DELETE FROM users WHERE username LIKE 'title-core-%'");
-    await q('UPDATE server_settings SET automatic_title_logos=false WHERE id=1');
+    await q('UPDATE server_settings SET automatic_title_logos=false,title_logo_retry_at=NULL WHERE id=1');
     await pool.end();
   }
   globalThis.fetch = realFetch;
@@ -182,7 +182,7 @@ test('replacement versions change; failed refresh keeps good bytes; transient re
   assert.equal(failed.status, 'error'); assert.equal(failed.logoUrl, before.logoUrl); assert.deepEqual((await art.readTitleLogo(SID))!.bytes, bytes);
   assert.equal((await q('SELECT retry_at>now()+interval \'48 hours\' AS delayed FROM series_title_art WHERE series_id=$1', [SID]))[0].delayed, true, 'a Retry-After longer than a day must survive a restart');
   const busy = await refresh(); assert.equal(busy.statusCode, 429); assert.match(busy.headers['retry-after'], /^[0-9]+$/);
-  await q('UPDATE server_settings SET automatic_title_logos=true WHERE id=1'); await seedLink('90001');
+  await q('UPDATE server_settings SET automatic_title_logos=true,title_logo_retry_at=NULL WHERE id=1'); await seedLink('90001');
   art.setTitleLogoLookupForTests(async () => { calls++; return { kind: 'missing' }; });
   await art.queueTitleLogos([SID]); await settle(); const count = calls; await art.queueTitleLogos([SID]); await settle(); assert.equal(calls, count);
   assert.equal((await q('SELECT retry_at>now()+interval \'6 days\' AS delayed FROM series_title_art WHERE series_id=$1', [SID]))[0].delayed, true);
