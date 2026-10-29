@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { TitleLogoScanProgress } from '../components/TitleLogoScan';
-import { titleLogoNextAttempt, titleLogoScanPoll, type TitleLogoScanStatus } from '../lib/titleLogoScan';
+import { titleLogoNextAttempt, titleLogoScanPoll, titleLogoScanResumeDelay, type TitleLogoScanStatus } from '../lib/titleLogoScan';
 
 (globalThis as { React?: unknown }).React = React;
 const overview = (extra: Partial<TitleLogoScanStatus> = {}): TitleLogoScanStatus => ({
@@ -75,6 +75,20 @@ test('the displayed next attempt respects both an artwork retry and the site’s
   assert.equal(titleLogoNextAttempt(overview({ nextRetryAt: short, providerRetryAt: long }), now), now + 180_000);
   assert.equal(titleLogoNextAttempt(overview({ nextRetryAt: long, providerRetryAt: short }), now), now + 180_000);
   assert.equal(titleLogoNextAttempt(overview({ nextRetryAt: new Date(now - 1).toISOString(), providerRetryAt: 'bad-date' }), now), null);
+});
+
+test('an idle enabled page reads once after a retry resumes, without an idle poll or an overflowing browser timer', () => {
+  const now = Date.UTC(2026, 9, 29, 12);
+  const status = overview({ nextRetryAt: new Date(now + 60_000).toISOString() });
+  assert.equal(titleLogoScanResumeDelay(status, true, false, now), 91_000);
+  assert.equal(titleLogoScanResumeDelay(status, true, false, now + 80_000), 11_000, 'a cached deadline keeps its scanner grace');
+  assert.equal(titleLogoScanResumeDelay(status, true, false, now + 100_000), 0, 'an expired cached answer is checked once');
+  assert.equal(titleLogoScanResumeDelay(overview(), true, false, now), null, 'no deadline means no timer');
+  assert.equal(titleLogoScanResumeDelay(status, false, false, now), null);
+  assert.equal(titleLogoScanResumeDelay({ ...status, enabled: false }, true, false, now), null);
+  assert.equal(titleLogoScanResumeDelay({ ...status, running: true }, true, false, now), null, 'the live scan already has its poll');
+  assert.equal(titleLogoScanResumeDelay(status, true, true, now), null, 'a failed read waits for the user to retry');
+  assert.equal(titleLogoScanResumeDelay(overview({ nextRetryAt: new Date(now + 9_000_000_000).toISOString() }), true, false, now), 2_147_483_647);
 });
 
 test('a failed read or start has a readable inline error and a failed read can be tried again', () => {

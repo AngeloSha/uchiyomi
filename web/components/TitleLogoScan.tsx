@@ -5,7 +5,7 @@ import { api } from '@/lib/api';
 import { t as tr } from '@/lib/i18n';
 import { untilText } from '@/lib/format';
 import {
-  TITLE_LOGO_SCAN_KEY, TITLE_LOGO_SCAN_URL, TITLE_LOGO_STATUS_URL, titleLogoNextAttempt, titleLogoScanPoll,
+  TITLE_LOGO_SCAN_KEY, TITLE_LOGO_SCAN_URL, TITLE_LOGO_STATUS_URL, titleLogoNextAttempt, titleLogoScanPoll, titleLogoScanResumeDelay,
   type TitleLogoScanStatus,
 } from '@/lib/titleLogoScan';
 
@@ -37,6 +37,12 @@ export function TitleLogoScan({ enabled }: { enabled: boolean }) {
     seenEnabled.current = enabled;
     void qc.invalidateQueries({ queryKey: TITLE_LOGO_SCAN_KEY });
   }, [enabled, qc]);
+  useEffect(() => {
+    const delay = titleLogoScanResumeDelay(q.data, enabled, q.isError, Date.now());
+    if (delay === null) return;
+    const timer = setTimeout(() => { void qc.invalidateQueries({ queryKey: TITLE_LOGO_SCAN_KEY }); }, delay);
+    return () => clearTimeout(timer);
+  }, [q.data, q.isError, enabled, qc]);
   const scan = async (retryMissing: boolean) => {
     if (!enabled || starting || q.data?.running) return;
     setStarting(true);

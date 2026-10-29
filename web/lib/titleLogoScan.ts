@@ -38,3 +38,14 @@ export function titleLogoNextAttempt(status: TitleLogoScanStatus, now: number): 
     .map((t) => t ? Date.parse(t) : NaN).filter((t) => Number.isFinite(t) && t > now);
   return times.length ? Math.max(...times) : null;
 }
+
+/**
+ * An idle page can sleep until a future retry, then read once after the scanner's 30-second tick. The small grace
+ * avoids reading just before that tick and missing the resumed work. A stale cached deadline also gets one read;
+ * the next response clears it or supplies a new deadline. Browser timeouts are capped at their signed 32-bit limit.
+ */
+export function titleLogoScanResumeDelay(status: TitleLogoScanStatus | undefined, enabled: boolean, failed: boolean, now: number): number | null {
+  if (!enabled || !status?.enabled || status.running || failed) return null;
+  const at = titleLogoNextAttempt(status, 0);
+  return at === null ? null : Math.min(2_147_483_647, Math.max(0, at + 31_000 - now));
+}

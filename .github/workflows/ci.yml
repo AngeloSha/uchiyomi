@@ -87,6 +87,9 @@ jobs:
       - name: Manga title logos and styled fallbacks
         working-directory: ./web
         run: node test/e2e/titleArtWalk.mjs
+      - name: Library title artwork scan and progress
+        working-directory: ./web
+        run: node test/e2e/titleLogoScanWalk.mjs
       # Machine-assisted translation fails in two ways a unit test cannot see: a string longer than its
       # container, and a right-to-left language rendered inside a left-to-right frame. Both need a browser.
       - name: Every language renders, and Arabic mirrors
@@ -121,6 +124,7 @@ jobs:
             web/test/e2e/shots-backlog/
             web/test/e2e/shots-page-cleanup/
             web/test/e2e/shots-title-art/
+            web/test/e2e/shots-title-logo-scan/
             web/test/e2e/shots-v558/
           retention-days: 7
 
