@@ -68,6 +68,7 @@ import { readFile, writeFile, mkdir, rm, rename, stat } from 'fs/promises';
 import { dirname, resolve, sep } from 'path';
 import sharp from 'sharp';
 import { ART_BODY_LIMIT, ART_DIR, FIRST_PAGE, artFile, artOverview } from '../lib/seriesArt';
+import { changeTitleArtRoute, refreshTitleArtRoute } from './titleArt';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, applyAdultSources, rateSourceAdult, MAX_ADULT_SOURCES, browsableIds, nameableIds, viewCtxFor, visible, Params, hideAdult, ADULT_RATING } from '../lib/visibility';
@@ -636,7 +637,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   }));
 
   // ---- server settings ----
-  const SETTINGS_COLS = 'server_name, allow_registration, local_pick, updater_hours, extension_hours, extension_auto_update, '
+  const SETTINGS_COLS = 'server_name, allow_registration, local_pick, automatic_title_logos, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, backup_enabled, auto_follow_on_failure, '
     + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, fill_details, discover_lookups, '
     + 'mangadex_langs, unstated_lang, hide_notice_types, deleted_as_ghosts, update_smart, finish_downloads, '
@@ -735,6 +736,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       allowRegistration: z.boolean().optional(),
       // The sign-in screen's "who is reading?" at home (routes/auth.ts /auth/pick).
       localPick: z.boolean().optional(),
+      automaticTitleLogos: z.boolean().optional(),
       updaterHours: z.number().int().min(1).max(168).optional(),
       extensionHours: z.number().int().min(1).max(168).optional(),
       extensionAutoUpdate: z.boolean().optional(),
@@ -881,6 +883,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
     if (b.localPick !== undefined) await q('UPDATE server_settings SET local_pick = $1, updated_at = now() WHERE id = 1', [b.localPick]);
+    if (b.automaticTitleLogos !== undefined) await q('UPDATE server_settings SET automatic_title_logos = $1, updated_at = now() WHERE id = 1', [b.automaticTitleLogos]);
     if (b.updaterHours !== undefined) await q('UPDATE server_settings SET updater_hours = $1, updated_at = now() WHERE id = 1', [b.updaterHours]);
     if (b.extensionHours !== undefined) await q('UPDATE server_settings SET extension_hours = $1, updated_at = now() WHERE id = 1', [b.extensionHours]);
     if (b.extensionAutoUpdate !== undefined) await q('UPDATE server_settings SET extension_auto_update = $1, updated_at = now() WHERE id = 1', [b.extensionAutoUpdate]);
@@ -3445,6 +3448,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   // own pages -- nothing found online is shown or looked up for it (lib/seriesArt.ts FIRST_PAGE). Reset to automatic
   // takes it back.
   app.put('/api/admin/series/:id/art', { bodyLimit: ART_BODY_LIMIT }, async (req, reply) => {
+    if ((req.body as { kind?: unknown } | null)?.kind === 'logo') return changeTitleArtRoute(req, reply);
     const requestedId = (req.params as { id: string }).id;
     const b = z.object({
       kind: z.enum(['cover', 'banner']),
@@ -3517,6 +3521,9 @@ export default async function adminRoutes(app: FastifyInstance) {
     await logAudit('series.art_override', { userId: userIdOf(req), detail: { id, kind, mode }, req });
     return { ok: true };
   });
+
+  // The covers the sources this series uses have for it (#242), for the series page's Change cover. Each is answered by
+  app.post('/api/admin/series/:id/logo/refresh', refreshTitleArtRoute);
 
   // The covers the sources this series uses have for it (#242), for the series page's Change cover. Each is answered by
   // the source's own record of the series (the same lookup the updater makes), in parallel, each under its source's own

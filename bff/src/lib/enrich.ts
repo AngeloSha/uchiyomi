@@ -21,6 +21,7 @@ import { effectiveLang } from './seriesLang';
 import { browsable, Params, type ViewCtx } from './visibility';
 import { hidingActive, noticeBook, noticeHidden } from './noticeChapters';
 import { radarsFor } from './releaseRadar';
+import { titleArtsFor } from './titleArt';
 
 export async function seriesColors(ids: string[]): Promise<Map<string, string>> {
   if (!ids.length) return new Map();
@@ -193,6 +194,7 @@ export async function enrichSeries(req: FastifyRequest, list: any[]): Promise<an
   const outside = await anilistScores(list.map((s) => s.id));
   const radars = await radarsFor(list.map((s) => s.id));
   const editions = await editionLangs(list, (req as any).viewCtx as ViewCtx | undefined);
+  const titles = await titleArtsFor(list.map((s) => s.id));
   return list.map((s) => {
     const p = progress?.get(s.id);
     const total = s.booksCount ?? 0;
@@ -207,6 +209,7 @@ export async function enrichSeries(req: FastifyRequest, list: any[]): Promise<an
       // v0.51.0: the banner made from its own pages (lib/autoHero.ts), for a series with no banner of its own; null
       // when it has one or may not have one. The web shows /img/series/:id/hero?v=<seed> in its hero.
       autoHero: heroes.get(s.id) ?? null,
+      titleArt: titles.get(s.id),
       // v0.52.0: the languages of this work the viewer may browse, when that is more than this one series.
       edition: (editions.get(s.workId)?.length ?? 0) > 1 ? { langs: editions.get(s.workId)! } : null,
       yomi: {

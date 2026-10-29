@@ -23,6 +23,7 @@ import { warmHeroBackdrops } from './images';
 import { writeProgress, reachedEnd } from '../lib/progress';
 import { onDeckPicks, keepReadingHidden, type DeckPick } from '../lib/onDeck';
 import { enrichSeries, newSinceSeen, seenCounts, seriesSeen } from '../lib/enrich';
+import { queueTitleLogos } from '../lib/titleArt';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
 import { listingFor, type ListingCopy } from '../lib/seriesListing';
@@ -276,6 +277,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const picks = merged.slice(0, 7);
     // pre-generate both hero frames for today's picks so the carousel never waits on sharp/remote fetches
     void warmHeroBackdrops(picks.map((s) => s.id));
+    await queueTitleLogos(picks.map((s) => s.id));
     return { content: await enrichSeries(req, picks) };
   });
 
@@ -498,6 +500,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/series/:id', async (req) => {
     const { id } = req.params as { id: string };
     const series = await komga.series(vc(req), id);
+    await queueTitleLogos([id]);
     // opening a series marks its new chapters as seen -- in every chapter row, hidden notices included (lib/enrich.ts
     // seenCounts)
     await q(
