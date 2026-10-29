@@ -99,6 +99,14 @@ test('source clipping, any edge ink, alpha loss, RGB changes and poor contrast p
   }
 });
 
+test('recognition context outside the selection is harmless, but actual detector content outside it is clipping', () => {
+  const withContext = { ...line('ONE PIECE', .99, [0, 0, 500, 500]), contentBox: [50, 50, 300, 90] as OcrLine['box'] };
+  assert.equal(assess(input({ sourceOcr: [withContext] }), profile).safeToApply, true);
+  const clipped = { ...withContext, contentBox: [50, 450, 300, 500] as OcrLine['box'] };
+  const rejected = assess(input({ sourceOcr: [clipped] }), profile);
+  assert.equal(rejected.safeToApply, false); assert.ok(reasons(rejected).includes('source_text_clipped'));
+});
+
 test('invalid geometry, invalid mask fractions, empty foreground and opaque extraction cannot be applied manually either', () => {
   for (const patch of [{ region: [0, 0, 2, 1] }, { sourceWidth: 0 }, { candidateWidth: Number.NaN },
     { sourceWidth: 12_000_001 }, { candidateWidth: 8_000_001 }, { foregroundFraction: 0 }, { foregroundFraction: 1 },

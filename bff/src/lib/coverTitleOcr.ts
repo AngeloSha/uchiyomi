@@ -24,7 +24,7 @@ function boundedOcr(width: number, height: number): boolean {
 }
 export function coverTitleVerifierFingerprint(modelFingerprint: string, ocrFingerprint = OCR_PACK): string {
   if (!HASH.test(modelFingerprint) || !HASH.test(ocrFingerprint)) throw new Error('Invalid title verifier fingerprint');
-  return sha(JSON.stringify({ policy: 'strict-v1', adapter: 'prepared-source-dark-primary-padded-v2', model: modelFingerprint, ocr: ocrFingerprint }));
+  return sha(JSON.stringify({ policy: 'strict-v1', adapter: 'prepared-source-dark-primary-content-box-v3', model: modelFingerprint, ocr: ocrFingerprint }));
 }
 
 /** Add only uniform inspection background, never resize/crop the cutout's pixels to satisfy detector limits. */
@@ -45,7 +45,8 @@ function mapCanvasOcr(page: PageText, canvas: Awaited<ReturnType<typeof prepareC
   const x = (v: number) => Math.max(0, Math.min(canvas.originalWidth, v - canvas.padding.left));
   const y = (v: number) => Math.max(0, Math.min(canvas.originalHeight, v - canvas.padding.top));
   return { ...page, width: canvas.originalWidth, height: canvas.originalHeight,
-    lines: page.lines.map((l) => ({ ...l, box: [x(l.box[0]), y(l.box[1]), x(l.box[2]), y(l.box[3])] })) };
+    lines: page.lines.map((l) => ({ ...l, box: [x(l.box[0]), y(l.box[1]), x(l.box[2]), y(l.box[3])],
+      ...(l.contentBox ? { contentBox: [x(l.contentBox[0]), y(l.contentBox[1]), x(l.contentBox[2]), y(l.contentBox[3])] as typeof l.contentBox } : {}) })) };
 }
 
 export interface CoverTitleOcrCapability { available: boolean; calibrated: boolean; verifierFingerprint: string | null }

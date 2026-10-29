@@ -72,10 +72,11 @@ const intersection = (a: readonly number[], b: readonly number[]) => Math.max(0,
   * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
 
 function validOcr(lines: readonly OcrLine[], width: number, height: number): boolean {
+  const box = (b: unknown): boolean => Array.isArray(b) && b.length === 4 && b.every((n: unknown) => typeof n === 'number' && Number.isFinite(n))
+    && b[0] >= 0 && b[1] >= 0 && b[2] > b[0] && b[3] > b[1] && b[2] <= width && b[3] <= height;
   return Array.isArray(lines) && lines.length <= 128 && lines.every((l) => l && typeof l.text === 'string' && l.text.length <= 500
-    && fraction(l.score) && typeof l.tall === 'boolean' && Array.isArray(l.box) && l.box.length === 4
-    && l.box.every((v: unknown) => typeof v === 'number' && Number.isFinite(v)) && l.box[0] >= 0 && l.box[1] >= 0
-    && l.box[2] > l.box[0] && l.box[3] > l.box[1] && l.box[2] <= width && l.box[3] <= height);
+    && fraction(l.score) && typeof l.tall === 'boolean' && box(l.box) && (l.contentBox === undefined || (box(l.contentBox)
+      && l.contentBox[0] >= l.box[0] && l.contentBox[1] >= l.box[1] && l.contentBox[2] <= l.box[2] && l.contentBox[3] <= l.box[3])));
 }
 
 function readings(lines: readonly OcrLine[], direction: CoverTitleQualityInput['readingDirection']): string[] {
@@ -130,8 +131,8 @@ export function assessCoverTitleQuality(input: CoverTitleQualityInput, calibrati
   const candidateValid = input.candidateOcr !== undefined && validOcr(input.candidateOcr, input.candidateWidth, input.candidateHeight);
   if ((input.sourceOcr !== undefined && !sourceValid) || (input.candidateOcr !== undefined && !candidateValid)) add('ocr_evidence_invalid');
   const box = [r[0] * input.sourceWidth, r[1] * input.sourceHeight, r[2] * input.sourceWidth, r[3] * input.sourceHeight];
-  const sourceLines = sourceValid ? input.sourceOcr!.filter((l) => l.text.trim() && intersection(box, l.box) > 0) : [];
-  if (sourceLines.some((l) => intersection(box, l.box) < area(l.box) * .995)) add('source_text_clipped');
+  const sourceLines = sourceValid ? input.sourceOcr!.filter((l) => l.text.trim() && intersection(box, l.contentBox ?? l.box) > 0) : [];
+  if (sourceLines.some((l) => intersection(box, l.contentBox ?? l.box) < area(l.contentBox ?? l.box))) add('source_text_clipped');
   const source = sourceValid ? evidence(sourceLines, aliases, input.readingDirection) : null;
   const candidate = candidateValid ? evidence(input.candidateOcr!, aliases, input.readingDirection) : null;
   result.sourceTitleMatched = source ? !!source.match : null;

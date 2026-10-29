@@ -39,6 +39,8 @@ test('each blob of text in the probability map is one box, grown around the text
   assert.ok(b.x0 < 120 && b.y0 < 60 && b.x1 > 180 && b.y1 > 90, JSON.stringify(b));
   assert.ok(a.x1 <= 200 && b.y1 <= 120, 'inside the page');
   assert.ok(a.score > 0.5 && a.score <= 0.9);
+  assert.deepEqual(a.contentBox, [20, 20, 82, 42], 'content excludes recognition unclip padding');
+  assert.deepEqual(b.contentBox, [120, 60, 182, 92]);
 });
 
 test('a faint blob is not text', () => {
