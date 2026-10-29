@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4360
+    "strings": 4388
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -4363,5 +4363,33 @@
   "Apply this GIF rule to every chapter downloaded from this source?": "このGIFルールを、このソースからダウンロードしたすべての章に適用しますか？",
   "This changes existing and future chapters. A series rule overrides the source rule. No files are deleted.": "既存の章と今後の章に適用されます。シリーズのルールはソースのルールより優先されます。ファイルは削除されません。",
   "No recorded source is available for GIF rules.": "GIFルールに使用できるソースの記録がありません。",
-  "Restore page {n}": "{n}ページを復元"
+  "Restore page {n}": "{n}ページを復元",
+  "Action": "アクション",
+  "An online logo lookup is not available for this manga.": "この漫画ではオンラインのロゴ検索を利用できません。",
+  "Automatic logo lookup is off or this manga has no confirmed AniList link.": "自動ロゴ検索が無効か、この漫画に確認済みのAniListリンクがありません。",
+  "Automatic style": "自動スタイル",
+  "Automatic title logos": "タイトルロゴの自動取得",
+  "Automatic: verified title artwork, otherwise a style matched to this manga.": "自動：確認済みのタイトルロゴを使用し、なければ漫画に合った文字スタイルを表示します。",
+  "Could not change the title logo": "タイトルロゴを変更できませんでした",
+  "Fantasy": "ファンタジー",
+  "Find logo": "ロゴを検索",
+  "Find original manga title artwork on Wikimedia using confirmed AniList links. Library online-lookup opt-outs are respected. Missing logos use styled text; your uploaded artwork always wins.": "確認済みのAniListリンクを使い、Wikimediaから漫画のタイトルロゴを探します。ライブラリのオンライン検索設定を尊重します。ロゴがない場合は装飾した文字を表示し、アップロードした画像を常に優先します。",
+  "Horror and mystery": "ホラー・ミステリー",
+  "Looking for original title artwork…": "オリジナルのタイトルロゴを検索中…",
+  "No matching logo found. The styled title is shown.": "一致するロゴが見つかりません。装飾したタイトルを表示します。",
+  "Plain title": "通常のタイトル",
+  "Reset to automatic before looking for another logo.": "別のロゴを探す前に、自動設定に戻してください。",
+  "Romance and everyday life": "恋愛・日常",
+  "Science fiction": "SF",
+  "Style for titles without a logo": "ロゴがないタイトルのスタイル",
+  "Styled text, by your choice. No automatic logo lookup.": "選択した文字スタイルを使用します。自動ロゴ検索は行いません。",
+  "Styled title selected": "文字スタイルのタイトルを選択しました",
+  "The artwork source is unavailable. Cached artwork or the styled title stays visible.": "画像の取得元を利用できません。保存済みの画像または装飾したタイトルを表示し続けます。",
+  "Title logo": "タイトルロゴ",
+  "Title logo reset to automatic": "タイトルロゴを自動設定に戻しました",
+  "Title logo updated": "タイトルロゴを更新しました",
+  "Title style updated": "タイトルのスタイルを更新しました",
+  "Transparent PNG or WebP works best. Original-language logos keep a readable title beneath them.": "透過PNGまたはWebPを推奨します。原語のロゴの下には、読めるタイトルも表示します。",
+  "Use styled title": "装飾したタイトルを使用",
+  "Your title logo. Automatic lookups will not replace it.": "選択したタイトルロゴです。自動検索で置き換えることはありません。"
 }

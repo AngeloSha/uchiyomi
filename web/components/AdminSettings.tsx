@@ -77,6 +77,9 @@ export function useAdminSettingsViews(extra: Partial<Record<string, ReactNode>> 
     void qc.invalidateQueries({ queryKey: ['admin-settings'] });
     // A blocklist save hides, or shows again, every series' chapters only blocked groups released (bff
     // reapplyBlocklist): any series page already cached refetches its rows, its versions and its groups.
+    if (body.automaticTitleLogos !== undefined) {
+      for (const k of ['featured', 'series']) void qc.invalidateQueries({ queryKey: [k] });
+    }
     if (body.scanlatorPrefs !== undefined) {
       for (const k of ['series-listing', 'series-versions', 'series-groups', 'series-scanlators']) void qc.invalidateQueries({ queryKey: [k] });
     }
@@ -529,6 +532,9 @@ function SeriesSection({ data, save }: { data: any; save: Save }) {
       </RowGroup>
 
       <RowGroup title={tr('From the internet')}>
+        <SwitchRow id="automatic-title-logos" label={tr('Automatic title logos')}
+          help={tr('Find original manga title artwork on Wikimedia using confirmed AniList links. Library online-lookup opt-outs are respected. Missing logos use styled text; your uploaded artwork always wins.')}
+          on={data.automatic_title_logos === true} onChange={(next) => save({ automaticTitleLogos: next })} />
         {/* v0.73.0 (#257 and #245 from @Squeaks72): the nightly repair's ninth step. Off by default: it asks sources about
             series, and AniList's text is English. What it fills in sits below a series' own details, never over them. */}
         <SwitchRow id="fill-details" label={tr('Fill in missing details')}

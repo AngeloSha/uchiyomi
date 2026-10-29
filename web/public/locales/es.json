@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4360
+    "strings": 4388
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -4363,5 +4363,33 @@
   "Apply this GIF rule to every chapter downloaded from this source?": "¿Aplicar esta regla GIF a todos los capítulos descargados de esta fuente?",
   "This changes existing and future chapters. A series rule overrides the source rule. No files are deleted.": "Esto cambia los capítulos existentes y futuros. La regla de una serie prevalece sobre la regla de la fuente. No se elimina ningún archivo.",
   "No recorded source is available for GIF rules.": "No hay ninguna fuente registrada disponible para las reglas de GIF.",
-  "Restore page {n}": "Restaurar página {n}"
+  "Restore page {n}": "Restaurar página {n}",
+  "Action": "Acción",
+  "An online logo lookup is not available for this manga.": "La búsqueda de logotipos en línea no está disponible para este manga.",
+  "Automatic logo lookup is off or this manga has no confirmed AniList link.": "La búsqueda automática de logotipos está desactivada o este manga no tiene un enlace de AniList confirmado.",
+  "Automatic style": "Estilo automático",
+  "Automatic title logos": "Logotipos de título automáticos",
+  "Automatic: verified title artwork, otherwise a style matched to this manga.": "Automático: el logotipo verificado del título o un estilo adecuado para este manga.",
+  "Could not change the title logo": "No se pudo cambiar el logotipo del título",
+  "Fantasy": "Fantasía",
+  "Find logo": "Buscar logotipo",
+  "Find original manga title artwork on Wikimedia using confirmed AniList links. Library online-lookup opt-outs are respected. Missing logos use styled text; your uploaded artwork always wins.": "Busca logotipos originales de manga en Wikimedia mediante enlaces de AniList confirmados. Respeta las bibliotecas que desactivan las consultas en línea. Si no hay logotipo, usa texto con estilo; las imágenes que subas siempre tienen prioridad.",
+  "Horror and mystery": "Terror y misterio",
+  "Looking for original title artwork…": "Buscando el logotipo original del título…",
+  "No matching logo found. The styled title is shown.": "No se encontró un logotipo coincidente. Se muestra el título con estilo.",
+  "Plain title": "Título sencillo",
+  "Reset to automatic before looking for another logo.": "Restablece el modo automático antes de buscar otro logotipo.",
+  "Romance and everyday life": "Romance y vida cotidiana",
+  "Science fiction": "Ciencia ficción",
+  "Style for titles without a logo": "Estilo para títulos sin logotipo",
+  "Styled text, by your choice. No automatic logo lookup.": "Texto con estilo, por tu elección. Sin búsqueda automática de logotipos.",
+  "Styled title selected": "Título con estilo seleccionado",
+  "The artwork source is unavailable. Cached artwork or the styled title stays visible.": "La fuente de imágenes no está disponible. Se mantiene la imagen guardada o el título con estilo.",
+  "Title logo": "Logotipo del título",
+  "Title logo reset to automatic": "Logotipo del título restablecido al modo automático",
+  "Title logo updated": "Logotipo del título actualizado",
+  "Title style updated": "Estilo del título actualizado",
+  "Transparent PNG or WebP works best. Original-language logos keep a readable title beneath them.": "Se recomienda PNG o WebP transparente. Los logotipos en el idioma original conservan debajo un título legible.",
+  "Use styled title": "Usar título con estilo",
+  "Your title logo. Automatic lookups will not replace it.": "Tu logotipo del título. Las búsquedas automáticas no lo sustituirán."
 }

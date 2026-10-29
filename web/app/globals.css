@@ -620,3 +620,26 @@ html.lenis, html.lenis body { height: auto; }
 @media (pointer: coarse) {
   [data-reorder] { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 }
+
+/* Manga title artwork stays independent of the hero's background wash. A failed logo retains the readable heading. */
+.hero-title { margin: 0; max-width: 36rem; color: #faf9ff; line-height: 1.04; overflow-wrap: anywhere; }
+.hero-title-logo { display: block; width: auto; height: auto; max-width: min(100%, 300px); max-height: min(110px, 16svh); object-fit: contain; object-position: left center; filter: drop-shadow(0 2px 2px rgb(255 255 255 / .28)) drop-shadow(0 4px 12px rgb(0 0 0 / .85)); }
+.hero-title-loading { position: absolute; opacity: 0; pointer-events: none; }
+[dir='rtl'] .hero-title-logo { object-position: right center; }
+.hero-title-caption { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: .65rem; font-family: var(--ff-sans), sans-serif; font-size: .95rem; font-weight: 600; line-height: 1.3; color: #f4f1ff; text-shadow: 0 2px 10px #000; }
+.hero-title-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-family: var(--ff-display), sans-serif; font-size: clamp(2rem, 5.5vw, 3.75rem); font-weight: 700; text-wrap: balance; text-shadow: 0 3px 15px rgb(0 0 0 / .75); }
+.hero-title[data-title-style='action'] .hero-title-text { font-family: var(--ff-title-action), var(--ff-display), sans-serif; font-weight: 700; letter-spacing: -.015em; }
+.hero-title[data-title-style='fantasy'] .hero-title-text { font-family: var(--ff-title-fantasy), var(--ff-display), serif; font-weight: 700; letter-spacing: .015em; color: #fff4d4; }
+.hero-title[data-title-style='scifi'] .hero-title-text { font-family: var(--ff-display), sans-serif; color: rgb(var(--title-accent)); text-shadow: 0 2px 14px #000, 0 0 16px rgb(var(--title-accent) / .18); }
+.hero-title[data-title-style='soft'] .hero-title-text { font-family: var(--ff-sans), sans-serif; font-weight: 700; color: #fff2f5; letter-spacing: -.025em; }
+.hero-title[data-title-style='noir'] .hero-title-text { font-family: var(--ff-brand), var(--ff-display), sans-serif; font-weight: 600; font-size: clamp(1.8rem, 4.5vw, 3.15rem); letter-spacing: -.025em; color: #edf1ff; text-shadow: 0 2px 2px #000, 0 5px 18px #000; }
+.hero-title[data-title-style='action'] .hero-title-text,
+.hero-title[data-title-style='fantasy'] .hero-title-text { background: linear-gradient(155deg, #fffdf6 22%, rgb(var(--title-accent)) 100%); background-clip: text; -webkit-background-clip: text; color: transparent; text-shadow: none; filter: drop-shadow(0 3px 6px rgb(0 0 0 / .8)); }
+.hero-title[data-title-script='natural'] .hero-title-text { font-family: var(--ff-sans), sans-serif; letter-spacing: normal; line-height: 1.25; }
+@media (min-width: 1024px) {
+  .hero-title-logo { max-width: min(100%, 480px); max-height: min(180px, 19vh); }
+  .hero-title-caption { font-size: 1.1rem; }
+}
+@media (forced-colors: active) {
+  .hero-title .hero-title-text { background: none; color: CanvasText; -webkit-text-fill-color: CanvasText; filter: none; text-shadow: none; }
+}

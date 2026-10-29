@@ -8,6 +8,7 @@ import { Series } from '@/lib/types';
 import { useWideViewport } from './ui';
 import { HeroArt } from './MosaicArt';
 import { PhoneHeroCover } from './PhoneHeroCover';
+import { HeroTitle } from './HeroTitle';
 import { backdropSources } from '@/lib/art';
 import { applyCover } from '@/lib/theme';
 import { IcPlay, IcHeart, IcChevronLeft, IcChevronRight } from './icons';
@@ -117,7 +118,7 @@ export function HeroCarousel({ slides }: { slides: Series[] }) {
           </Link>
           <div className="max-w-xl">
             <span className="mb-3 inline-flex items-center gap-1.5 rounded-md bg-white/10 px-2.5 py-1 text-2xs font-semibold uppercase tracking-wider text-fog-100 backdrop-blur rtl:tracking-normal">★ {tr('Daily pick')}</span>
-            <h1 className="line-clamp-2 font-brand text-3xl font-bold leading-[1.05] text-white drop-shadow-[0_2px_16px_rgba(0,0,0,0.6)] lg:text-6xl">{cur.metadata?.title || cur.name}</h1>
+            <HeroTitle series={cur} />
             <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fog-300 lg:text-sm">
               {cur.metadata?.status && <span className="capitalize text-fog-200">{statusText(cur.metadata.status)}</span>}
               <span>· {tr('{n} ch', { n: cur.booksCount })}</span>

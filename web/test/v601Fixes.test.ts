@@ -60,12 +60,17 @@ test('the heart is mirrored about its tip, x = 12', () => {
 test("the phone title is on the cover, whole: never behind the art, never past the screen's edge", () => {
   // v0.60.1: the cover-and-title row rose into the banner, which painted over a long title's first lines. Since the UI
   // refresh's phone pass the title is IN the hero, on the cover's foot, so nothing can paint over it. Reintroduce the old
-  // row, or take the title out of the hero: this fails; drop `break-words` or `line-clamp-3`: a long word overflows, or a
-  // long title climbs up the art.
+  // row, or take the shared heading out of the hero: this fails; removing its wrapping/clamp lets long names
+  // escape the screen or climb up the art.
   const page = src('app/series/page.tsx');
   const hero = page.slice(page.indexOf('<div data-series-hero'), page.indexOf('{/* content */}'));
   assert.ok(hero.length > 0, 'the hero is not where this test looks');
-  assert.match(hero, /<h1 ref=\{heroTitleRef\} dir="auto" className="line-clamp-3 break-words [^"]*"/, 'the phone title is not on the cover');
+  assert.match(hero, /<HeroTitle[^>]*headingRef=\{heroTitleRef\}/, 'the shared phone title is not on the cover');
+  const title = src('components/HeroTitle.tsx');
+  assert.match(title, /<h1 ref=\{headingRef\}/, 'the sticky observer no longer observes the heading');
+  const css = src('app/globals.css');
+  assert.match(css, /\.hero-title \{[^}]*overflow-wrap: anywhere/, 'long names can escape the hero');
+  assert.match(css, /\.hero-title-text \{[^}]*-webkit-line-clamp: 2/, 'long styled names can climb beyond the art');
   assert.doesNotMatch(page, /<div className="relative z-10 min-w-0 pb-1 lg:hidden">/, 'the old row beside a small cover is back');
 });
 

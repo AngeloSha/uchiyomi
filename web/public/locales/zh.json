@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4360
+    "strings": 4388
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4363,5 +4363,33 @@
   "Apply this GIF rule to every chapter downloaded from this source?": "要将此 GIF 规则应用于从此来源下载的所有章节吗？",
   "This changes existing and future chapters. A series rule overrides the source rule. No files are deleted.": "这会更改现有和未来的章节。系列规则优先于来源规则，不会删除任何文件。",
   "No recorded source is available for GIF rules.": "没有已记录的来源可用于 GIF 规则。",
-  "Restore page {n}": "恢复第 {n} 页"
+  "Restore page {n}": "恢复第 {n} 页",
+  "Action": "动作",
+  "An online logo lookup is not available for this manga.": "此漫画暂时无法使用在线标志搜索。",
+  "Automatic logo lookup is off or this manga has no confirmed AniList link.": "自动标志搜索已关闭，或此漫画尚未关联已确认的 AniList 条目。",
+  "Automatic style": "自动样式",
+  "Automatic title logos": "自动获取标题标志",
+  "Automatic: verified title artwork, otherwise a style matched to this manga.": "自动：优先使用已验证的标题标志，否则显示适合此漫画的文字样式。",
+  "Could not change the title logo": "无法更改标题标志",
+  "Fantasy": "奇幻",
+  "Find logo": "查找标志",
+  "Find original manga title artwork on Wikimedia using confirmed AniList links. Library online-lookup opt-outs are respected. Missing logos use styled text; your uploaded artwork always wins.": "通过已确认的 AniList 关联，在 Wikimedia 查找漫画原有的标题标志。尊重各书库关闭在线查询的设置。没有标志时显示艺术字标题；你上传的图片始终优先。",
+  "Horror and mystery": "恐怖与悬疑",
+  "Looking for original title artwork…": "正在查找原有标题标志…",
+  "No matching logo found. The styled title is shown.": "未找到匹配标志，显示艺术字标题。",
+  "Plain title": "普通标题",
+  "Reset to automatic before looking for another logo.": "查找其他标志前，请先恢复自动设置。",
+  "Romance and everyday life": "恋爱与日常",
+  "Science fiction": "科幻",
+  "Style for titles without a logo": "无标志时的标题样式",
+  "Styled text, by your choice. No automatic logo lookup.": "按你的选择使用艺术字，不再自动搜索标志。",
+  "Styled title selected": "已选择艺术字标题",
+  "The artwork source is unavailable. Cached artwork or the styled title stays visible.": "图片来源暂不可用，继续显示已缓存的图片或艺术字标题。",
+  "Title logo": "标题标志",
+  "Title logo reset to automatic": "标题标志已恢复自动设置",
+  "Title logo updated": "标题标志已更新",
+  "Title style updated": "标题样式已更新",
+  "Transparent PNG or WebP works best. Original-language logos keep a readable title beneath them.": "建议使用透明 PNG 或 WebP。原文标志下方会保留可读的标题。",
+  "Use styled title": "使用艺术字标题",
+  "Your title logo. Automatic lookups will not replace it.": "你选择的标题标志，自动搜索不会将其替换。"
 }
