@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4478
+    "strings": 4504
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -4481,5 +4481,31 @@
   "Create a new preview to fine-tune this title.": "Créez un nouvel aperçu pour affiner ce titre.",
   "Preparing the editor…": "Préparation de l’éditeur…",
   "Title correction canvas": "Zone de correction du titre",
-  "The arrow keys move the brush; Space paints. Hold Shift for larger steps.": "Les flèches déplacent le pinceau ; Espace permet de peindre. Maintenez Maj pour des déplacements plus grands."
+  "The arrow keys move the brush; Space paints. Hold Shift for larger steps.": "Les flèches déplacent le pinceau ; Espace permet de peindre. Maintenez Maj pour des déplacements plus grands.",
+  "Off by default. Prepares title artwork from existing and new manga covers every night. No manga link is required to make a preview.": "Désactivé par défaut. Prépare chaque nuit les titres à partir des couvertures des mangas existants et nouveaux. Aucun lien manga n’est nécessaire pour créer un aperçu.",
+  "Apply cover titles that pass checks": "Appliquer les titres de couverture qui passent les contrôles",
+  "Off by default. Applies results that pass the available title and image checks. Unlinked manga, unsupported languages, partial titles and uncertain results stay as previews for review.": "Désactivé par défaut. Applique les résultats qui passent les contrôles de titre et d’image disponibles. Les mangas non liés, les langues non prises en charge, les titres incomplets et les résultats incertains restent des aperçus à vérifier.",
+  "Title checks are not available on this server yet. You can still generate previews for review.": "Les contrôles de titre ne sont pas encore disponibles sur ce serveur. Vous pouvez toujours créer des aperçus à vérifier.",
+  "Creating title previews…": "Création des aperçus de titre…",
+  "Creating": "Création en cours",
+  "Previews to review": "Aperçus à vérifier",
+  "Applied automatically": "Appliqués automatiquement",
+  "Could not load cover title progress.": "Impossible de charger la progression des titres de couverture.",
+  "Could not start cover title generation.": "Impossible de démarrer la création des titres de couverture.",
+  "Could not stop cover title generation.": "Impossible d’arrêter la création des titres de couverture.",
+  "Stop this run": "Arrêter ce traitement",
+  "Retry failed titles": "Réessayer les titres en échec",
+  "Nightly run": "Traitement nocturne",
+  "Manual run": "Traitement manuel",
+  "Next nightly run: {time}": "Prochain traitement nocturne : {time}",
+  "Every night at {time} ({zone}).": "Chaque nuit à {time} ({zone}).",
+  "Last started: {time}": "Dernier démarrage : {time}",
+  "Creating a preview for {title}…": "Création d’un aperçu pour {title}…",
+  "Your manual artwork, styled titles and original title logos are kept. Covers taken from chapter pages are skipped.": "Vos images de titre choisies manuellement, titres stylisés et logos de titre existants sont conservés. Les couvertures provenant de pages de chapitre sont ignorées.",
+  "Finished: {done} of {total}": "Terminé : {done} sur {total}",
+  "Previews are kept for {days} days. Open a manga’s Art settings and choose Extract from cover to review or fine-tune its title.": "Les aperçus sont conservés pendant {days} jours. Ouvrez les réglages d’illustration d’un manga et choisissez « Extraire de la couverture » pour vérifier ou retoucher son titre.",
+  "Nightly runs are off.": "Les traitements nocturnes sont désactivés.",
+  "With nightly runs off, Run now prepares previews only. Automatic applying needs both switches turned on.": "Lorsque les traitements nocturnes sont désactivés, « Lancer maintenant » prépare uniquement des aperçus. L’application automatique nécessite l’activation des deux options.",
+  "Showing the latest {n} previews.": "Affichage des {n} derniers aperçus.",
+  "Could not open this title preview. Try again.": "Impossible d’ouvrir cet aperçu de titre. Réessayez."
 }

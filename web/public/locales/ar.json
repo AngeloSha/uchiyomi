@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4478
+    "strings": 4504
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -4481,5 +4481,31 @@
   "Create a new preview to fine-tune this title.": "أنشئ معاينة جديدة لتنقيح هذا العنوان.",
   "Preparing the editor…": "جارٍ تجهيز المحرّر…",
   "Title correction canvas": "مساحة تصحيح العنوان",
-  "The arrow keys move the brush; Space paints. Hold Shift for larger steps.": "تحرّك مفاتيح الأسهم الفرشاة؛ اضغط مفتاح المسافة للرسم. اضغط مع Shift للتحرك بخطوات أكبر."
+  "The arrow keys move the brush; Space paints. Hold Shift for larger steps.": "تحرّك مفاتيح الأسهم الفرشاة؛ اضغط مفتاح المسافة للرسم. اضغط مع Shift للتحرك بخطوات أكبر.",
+  "Off by default. Prepares title artwork from existing and new manga covers every night. No manga link is required to make a preview.": "معطّل افتراضيًا. يُجهّز صور العناوين من أغلفة المانغا الحالية والجديدة كل ليلة. لا يلزم ربط المانغا لإنشاء معاينة.",
+  "Apply cover titles that pass checks": "تطبيق عناوين الأغلفة التي تجتاز الفحوصات",
+  "Off by default. Applies results that pass the available title and image checks. Unlinked manga, unsupported languages, partial titles and uncertain results stay as previews for review.": "معطّل افتراضيًا. يطبّق النتائج التي تجتاز فحوصات العنوان والصورة المتاحة. تبقى المانغا غير المرتبطة واللغات غير المدعومة والعناوين الناقصة والنتائج غير المؤكدة كمعاينات للمراجعة.",
+  "Title checks are not available on this server yet. You can still generate previews for review.": "فحوصات العناوين غير متاحة على هذا الخادم بعد. لا يزال بإمكانك إنشاء معاينات للمراجعة.",
+  "Creating title previews…": "جارٍ إنشاء معاينات العناوين…",
+  "Creating": "جارٍ الإنشاء",
+  "Previews to review": "معاينات للمراجعة",
+  "Applied automatically": "طُبّقت تلقائيًا",
+  "Could not load cover title progress.": "تعذّر تحميل تقدّم معالجة عناوين الأغلفة.",
+  "Could not start cover title generation.": "تعذّر بدء إنشاء عناوين الأغلفة.",
+  "Could not stop cover title generation.": "تعذّر إيقاف إنشاء عناوين الأغلفة.",
+  "Stop this run": "إيقاف هذه العملية",
+  "Retry failed titles": "إعادة محاولة العناوين التي فشلت",
+  "Nightly run": "عملية ليلية",
+  "Manual run": "عملية يدوية",
+  "Next nightly run: {time}": "العملية الليلية التالية: {time}",
+  "Every night at {time} ({zone}).": "كل ليلة عند {time} ({zone}).",
+  "Last started: {time}": "آخر بدء: {time}",
+  "Creating a preview for {title}…": "جارٍ إنشاء معاينة لعنوان {title}…",
+  "Your manual artwork, styled titles and original title logos are kept. Covers taken from chapter pages are skipped.": "تُحفظ صور العناوين التي اخترتها يدويًا والعناوين المنسّقة وشعارات العناوين الموجودة. تُتخطّى الأغلفة المأخوذة من صفحات الفصول.",
+  "Finished: {done} of {total}": "اكتمل: {done} من {total}",
+  "Previews are kept for {days} days. Open a manga’s Art settings and choose Extract from cover to review or fine-tune its title.": "تُحفظ المعاينات لمدة {days} يومًا. افتح إعدادات الصور الخاصة بالمانغا واختر «استخراج من الغلاف» لمراجعة عنوانها أو تحسينه.",
+  "Nightly runs are off.": "العمليات الليلية معطّلة.",
+  "With nightly runs off, Run now prepares previews only. Automatic applying needs both switches turned on.": "عندما تكون العمليات الليلية معطّلة، يُجهّز «التشغيل الآن» المعاينات فقط. يتطلب التطبيق التلقائي تفعيل الخيارين.",
+  "Showing the latest {n} previews.": "عرض أحدث {n} معاينات.",
+  "Could not open this title preview. Try again.": "تعذّر فتح معاينة هذا العنوان. حاول مجددًا."
 }

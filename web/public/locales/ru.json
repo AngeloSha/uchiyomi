@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4478
+    "strings": 4504
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -4481,5 +4481,31 @@
   "Create a new preview to fine-tune this title.": "Создайте новый предпросмотр, чтобы уточнить это название.",
   "Preparing the editor…": "Подготовка редактора…",
   "Title correction canvas": "Полотно для исправления названия",
-  "The arrow keys move the brush; Space paints. Hold Shift for larger steps.": "Стрелки перемещают кисть; пробел рисует. Удерживайте Shift для перемещения большими шагами."
+  "The arrow keys move the brush; Space paints. Hold Shift for larger steps.": "Стрелки перемещают кисть; пробел рисует. Удерживайте Shift для перемещения большими шагами.",
+  "Off by default. Prepares title artwork from existing and new manga covers every night. No manga link is required to make a preview.": "По умолчанию выключено. Каждую ночь создаёт оформление названий из обложек существующих и новых манг. Для создания предпросмотра привязка манги не нужна.",
+  "Apply cover titles that pass checks": "Применять названия с обложек, прошедшие проверки",
+  "Off by default. Applies results that pass the available title and image checks. Unlinked manga, unsupported languages, partial titles and uncertain results stay as previews for review.": "По умолчанию выключено. Применяет результаты, прошедшие доступные проверки названия и изображения. Манги без привязки, неподдерживаемые языки, неполные названия и сомнительные результаты остаются для проверки.",
+  "Title checks are not available on this server yet. You can still generate previews for review.": "Проверки названий пока недоступны на этом сервере. Вы по-прежнему можете создавать предпросмотры для проверки.",
+  "Creating title previews…": "Создаются предпросмотры названий…",
+  "Creating": "Создание",
+  "Previews to review": "Предпросмотры для проверки",
+  "Applied automatically": "Применено автоматически",
+  "Could not load cover title progress.": "Не удалось загрузить ход обработки названий с обложек.",
+  "Could not start cover title generation.": "Не удалось запустить создание названий с обложек.",
+  "Could not stop cover title generation.": "Не удалось остановить создание названий с обложек.",
+  "Stop this run": "Остановить этот запуск",
+  "Retry failed titles": "Повторить названия с ошибками",
+  "Nightly run": "Ночной запуск",
+  "Manual run": "Ручной запуск",
+  "Next nightly run: {time}": "Следующий ночной запуск: {time}",
+  "Every night at {time} ({zone}).": "Каждую ночь в {time} ({zone}).",
+  "Last started: {time}": "Последний запуск: {time}",
+  "Creating a preview for {title}…": "Создаётся предпросмотр для {title}…",
+  "Your manual artwork, styled titles and original title logos are kept. Covers taken from chapter pages are skipped.": "Выбранные вручную изображения, стилизованные названия и существующие логотипы названий сохраняются. Обложки из страниц глав пропускаются.",
+  "Finished: {done} of {total}": "Завершено: {done} из {total}",
+  "Previews are kept for {days} days. Open a manga’s Art settings and choose Extract from cover to review or fine-tune its title.": "Предпросмотры хранятся {days} дней. Откройте настройки оформления манги и выберите «Извлечь из обложки», чтобы проверить или доработать название.",
+  "Nightly runs are off.": "Ночные запуски выключены.",
+  "With nightly runs off, Run now prepares previews only. Automatic applying needs both switches turned on.": "При выключенных ночных запусках «Запустить сейчас» создаёт только предпросмотры. Для автоматического применения нужно включить обе настройки.",
+  "Showing the latest {n} previews.": "Показаны последние предпросмотры: {n}.",
+  "Could not open this title preview. Try again.": "Не удалось открыть этот предпросмотр названия. Повторите попытку."
 }

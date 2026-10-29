@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4478
+    "strings": 4504
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -4481,5 +4481,31 @@
   "Create a new preview to fine-tune this title.": "Erstelle eine neue Vorschau, um diesen Titel nachzubearbeiten.",
   "Preparing the editor…": "Editor wird vorbereitet…",
   "Title correction canvas": "Zeichenfläche für Titelkorrekturen",
-  "The arrow keys move the brush; Space paints. Hold Shift for larger steps.": "Die Pfeiltasten bewegen den Pinsel; die Leertaste malt. Halte die Umschalttaste für größere Schritte gedrückt."
+  "The arrow keys move the brush; Space paints. Hold Shift for larger steps.": "Die Pfeiltasten bewegen den Pinsel; die Leertaste malt. Halte die Umschalttaste für größere Schritte gedrückt.",
+  "Off by default. Prepares title artwork from existing and new manga covers every night. No manga link is required to make a preview.": "Standardmäßig aus. Erstellt jede Nacht Titelgrafiken aus den Covern vorhandener und neuer Manga. Für eine Vorschau ist keine Manga-Verknüpfung nötig.",
+  "Apply cover titles that pass checks": "Geprüfte Cover-Titel automatisch übernehmen",
+  "Off by default. Applies results that pass the available title and image checks. Unlinked manga, unsupported languages, partial titles and uncertain results stay as previews for review.": "Standardmäßig aus. Übernimmt Ergebnisse, die die verfügbaren Titel- und Bildprüfungen bestehen. Nicht verknüpfte Manga, nicht unterstützte Sprachen, unvollständige Titel und unsichere Ergebnisse bleiben zur Prüfung als Vorschau erhalten.",
+  "Title checks are not available on this server yet. You can still generate previews for review.": "Die Titelprüfung ist auf diesem Server noch nicht verfügbar. Du kannst weiterhin Vorschauen zur Prüfung erstellen.",
+  "Creating title previews…": "Titelvorschauen werden erstellt…",
+  "Creating": "Wird erstellt",
+  "Previews to review": "Vorschauen zur Prüfung",
+  "Applied automatically": "Automatisch übernommen",
+  "Could not load cover title progress.": "Der Fortschritt der Cover-Titel konnte nicht geladen werden.",
+  "Could not start cover title generation.": "Die Erstellung der Cover-Titel konnte nicht gestartet werden.",
+  "Could not stop cover title generation.": "Die Erstellung der Cover-Titel konnte nicht gestoppt werden.",
+  "Stop this run": "Diesen Durchlauf stoppen",
+  "Retry failed titles": "Fehlgeschlagene Titel erneut versuchen",
+  "Nightly run": "Nächtlicher Durchlauf",
+  "Manual run": "Manueller Durchlauf",
+  "Next nightly run: {time}": "Nächster nächtlicher Durchlauf: {time}",
+  "Every night at {time} ({zone}).": "Jede Nacht um {time} ({zone}).",
+  "Last started: {time}": "Zuletzt gestartet: {time}",
+  "Creating a preview for {title}…": "Eine Vorschau für {title} wird erstellt…",
+  "Your manual artwork, styled titles and original title logos are kept. Covers taken from chapter pages are skipped.": "Deine eigenen Titelgrafiken, gestalteten Texttitel und vorhandenen Titellogos bleiben erhalten. Cover aus Kapitelseiten werden übersprungen.",
+  "Finished: {done} of {total}": "Abgeschlossen: {done} von {total}",
+  "Previews are kept for {days} days. Open a manga’s Art settings and choose Extract from cover to review or fine-tune its title.": "Vorschauen werden {days} Tage aufbewahrt. Öffne die Grafikeinstellungen eines Manga und wähle „Aus Cover extrahieren“, um den Titel zu prüfen oder nachzubessern.",
+  "Nightly runs are off.": "Nächtliche Durchläufe sind ausgeschaltet.",
+  "With nightly runs off, Run now prepares previews only. Automatic applying needs both switches turned on.": "Bei ausgeschalteten nächtlichen Durchläufen erstellt „Jetzt starten“ nur Vorschauen. Für die automatische Übernahme müssen beide Schalter eingeschaltet sein.",
+  "Showing the latest {n} previews.": "Die letzten {n} Vorschauen werden angezeigt.",
+  "Could not open this title preview. Try again.": "Diese Titelvorschau konnte nicht geöffnet werden. Versuche es erneut."
 }
