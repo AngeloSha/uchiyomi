@@ -2096,6 +2096,34 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS trusted_proxies text;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS automatic_title_logos boolean NOT NULL DEFAULT false;
 -- Provider-wide Retry-After survives a process restart; no title or user identity is stored here.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS title_logo_retry_at timestamptz;
+-- Local cover lettering creates private review drafts; this never authorizes automatic publication.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS automatic_cover_titles boolean NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS series_title_extractions (
+  id uuid PRIMARY KEY,
+  series_id text NOT NULL REFERENCES lib_series(id) ON DELETE CASCADE,
+  owner_id uuid REFERENCES users(id) ON DELETE CASCADE,
+  automatic boolean NOT NULL DEFAULT false,
+  status text NOT NULL CHECK(status IN ('queued','running','ready','rejected','error','applied')),
+  snapshot text NOT NULL,
+  cover_fingerprint text NOT NULL,
+  source_sha256 text NOT NULL,
+  candidate_sha256 text,
+  title_version bigint NOT NULL,
+  region jsonb,
+  exclusions jsonb NOT NULL DEFAULT '[]',
+  quality jsonb,
+  reasons jsonb NOT NULL DEFAULT '[]',
+  error text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL DEFAULT now()+interval '30 minutes',
+  CHECK((automatic AND owner_id IS NULL) OR (NOT automatic AND owner_id IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS series_title_extractions_series_idx ON series_title_extractions(series_id,created_at DESC);
+CREATE TABLE IF NOT EXISTS series_title_extraction_state (
+  series_id text PRIMARY KEY REFERENCES lib_series(id) ON DELETE CASCADE,
+  automatic_key text NOT NULL,
+  retry_at timestamptz NOT NULL
+);
 CREATE TABLE IF NOT EXISTS series_title_art (
   series_id text PRIMARY KEY REFERENCES lib_series(id) ON DELETE CASCADE,
   mode text NOT NULL DEFAULT 'automatic' CHECK (mode IN ('automatic','custom','text')),
@@ -2113,6 +2141,8 @@ CREATE TABLE IF NOT EXISTS series_title_art (
   retry_at timestamptz,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE series_title_art ADD COLUMN IF NOT EXISTS auto_cover_key text;
+ALTER TABLE series_title_art ADD COLUMN IF NOT EXISTS custom_attribution jsonb;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

@@ -1899,6 +1899,15 @@ PUT    /api/admin/series/:id/art  PUT    /api/admin/series/:id/meta
 POST   /api/admin/series/:id/logo/refresh
 GET    /api/admin/title-logos/status
 POST   /api/admin/title-logos/scan
+GET    /api/admin/title-extraction/capabilities
+GET    /api/admin/series/:id/title-extraction/cover
+GET    /api/admin/series/:id/title-extraction
+POST   /api/admin/series/:id/title-extraction
+GET    /api/admin/series/:id/title-extraction/:jobId
+DELETE /api/admin/series/:id/title-extraction/:jobId
+GET    /api/admin/series/:id/title-extraction/:jobId/cover
+GET    /api/admin/series/:id/title-extraction/:jobId/preview
+POST   /api/admin/series/:id/title-extraction/:jobId/apply
 POST   /api/admin/series/:id/hero/shuffle
 PATCH  /api/admin/series/:id      DELETE /api/admin/series/:id
 POST   /api/admin/series/:id/editions DELETE /api/admin/series/:id/edition

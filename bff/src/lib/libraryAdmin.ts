@@ -19,6 +19,7 @@ import type { Stats } from 'fs';
 import { q, one, tx } from './db';
 import { artFile } from './seriesArt';
 import { dropTitleArt } from './titleArt';
+import { dropTitleExtractions } from './titleExtraction';
 import { caseVariantOnDisk } from './caseVariant';
 import { allWritable, containedPath, realContainedPath, rootUnavailable, statOrGone, writePreflight, type Writability } from './fsGuard';
 export { statOrGone } from './fsGuard';
@@ -51,6 +52,7 @@ export const getSeriesRow = (id: string) =>
 
 /** Remove per-series artwork, including versioned title logos and the first page the cleanup kept. */
 async function dropArt(id: string): Promise<void> {
+  await dropTitleExtractions(id).catch(() => {});
   await dropTitleArt(id).catch(() => {});
   await q(`DELETE FROM series_art WHERE series_id = $1`, [id]).catch(() => {});
   await q(`DELETE FROM series_overrides WHERE series_id = $1`, [id]).catch(() => {});

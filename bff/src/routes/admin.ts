@@ -71,6 +71,8 @@ import { ART_BODY_LIMIT, ART_DIR, FIRST_PAGE, artFile, artOverview } from '../li
 import { changeTitleArtRoute, refreshTitleArtRoute } from './titleArt';
 import { cancelAutomaticTitleLogoQueue } from '../lib/titleArt';
 import { scanTitleLogos, titleLogoScanStatus, wakeTitleLogoScan } from '../lib/titleLogoScan';
+import titleExtractionRoutes from './titleExtraction';
+import { titleExtractionCapabilities } from '../lib/titleExtraction';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, applyAdultSources, rateSourceAdult, MAX_ADULT_SOURCES, browsableIds, nameableIds, viewCtxFor, visible, Params, hideAdult, ADULT_RATING } from '../lib/visibility';
@@ -128,7 +130,7 @@ import { namesMatch } from '../lib/onlineMatch';
 import { READING_DIRECTIONS } from '../lib/komgaDto';
 import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
 import { fetchKitsuBanner } from '../lib/kitsu';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { appVersion } from '../lib/appVersion';
 import { PING_URL, buildPayload, installFacts, monthlyId, newSecret, sendForget } from '../lib/installPing';
 import { withOrigin } from '../lib/downloadActivity';
@@ -581,6 +583,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   // v0.55.4: Rescan everything's preview and plan, the same way (routes/rescan.ts).
   await app.register(rescanRoutes);
   await app.register(pageCleanupRoutes);
+  await app.register(titleExtractionRoutes);
 
   /** Synchronous two-sided hand-off between updateSeries and destructive route writers. */
   const claimSeriesWriter = (seriesIds: readonly string[], folders: readonly string[]) =>
@@ -639,7 +642,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   }));
 
   // ---- server settings ----
-  const SETTINGS_COLS = 'server_name, allow_registration, local_pick, automatic_title_logos, updater_hours, extension_hours, extension_auto_update, '
+  const SETTINGS_COLS = 'server_name, allow_registration, local_pick, automatic_title_logos, automatic_cover_titles, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, backup_enabled, auto_follow_on_failure, '
     + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, fill_details, discover_lookups, '
     + 'mangadex_langs, unstated_lang, hide_notice_types, deleted_as_ghosts, update_smart, finish_downloads, '
@@ -739,6 +742,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       // The sign-in screen's "who is reading?" at home (routes/auth.ts /auth/pick).
       localPick: z.boolean().optional(),
       automaticTitleLogos: z.boolean().optional(),
+      automaticCoverTitles: z.boolean().optional(),
       updaterHours: z.number().int().min(1).max(168).optional(),
       extensionHours: z.number().int().min(1).max(168).optional(),
       extensionAutoUpdate: z.boolean().optional(),
@@ -882,6 +886,11 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (b.unstatedLang !== undefined && !canonLang(b.unstatedLang)) {
       return reply.code(400).send({ error: 'unknown_language', message: `"${b.unstatedLang}" is not one language.` });
     }
+    if (b.automaticCoverTitles === true) {
+      const current=await one<{automatic_cover_titles:boolean}>('SELECT automatic_cover_titles FROM server_settings WHERE id=1');
+      if(!current?.automatic_cover_titles&&!(await titleExtractionCapabilities()).automaticAvailable)
+        return reply.code(409).send({error:'automatic_unavailable',message:'Automatic cover titles need the verified local OCR profile.'});
+    }
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
     if (b.localPick !== undefined) await q('UPDATE server_settings SET local_pick = $1, updated_at = now() WHERE id = 1', [b.localPick]);
@@ -889,6 +898,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       await q('UPDATE server_settings SET automatic_title_logos = $1, updated_at = now() WHERE id = 1', [b.automaticTitleLogos]);
       if (b.automaticTitleLogos) wakeTitleLogoScan(); else cancelAutomaticTitleLogoQueue();
     }
+    if (b.automaticCoverTitles !== undefined) await q('UPDATE server_settings SET automatic_cover_titles=$1,updated_at=now() WHERE id=1',[b.automaticCoverTitles]);
     if (b.updaterHours !== undefined) await q('UPDATE server_settings SET updater_hours = $1, updated_at = now() WHERE id = 1', [b.updaterHours]);
     if (b.extensionHours !== undefined) await q('UPDATE server_settings SET extension_hours = $1, updated_at = now() WHERE id = 1', [b.extensionHours]);
     if (b.extensionAutoUpdate !== undefined) await q('UPDATE server_settings SET extension_auto_update = $1, updated_at = now() WHERE id = 1', [b.extensionAutoUpdate]);
@@ -3476,13 +3486,12 @@ export default async function adminRoutes(app: FastifyInstance) {
     // this endpoint begins at an HTTP parameter and writes or removes a persistent file.
     if (!artPath.startsWith(resolve(ART_DIR) + sep)) return reply.code(400).send({ error: 'bad_path' });
     let value: string | null = null;
+    let replacement: Buffer | null = null;
     if (mode === 'first_page') {
-      await rm(artPath, { force: true }).catch(() => {});
       value = FIRST_PAGE;
     } else if (mode === 'url') {
       if (!b.data.url) return reply.code(400).send({ error: 'no_url', message: 'Paste an image URL.' });
       value = b.data.url;
-      await rm(artPath, { force: true }).catch(() => {});
     } else if (mode === 'upload') {
       const m = /^data:image\/[a-z0-9.+-]+;base64,(.+)$/i.exec(b.data.dataUrl || '');
       if (!m) return reply.code(400).send({ error: 'bad_image', message: 'Upload a valid image.' });
@@ -3491,8 +3500,7 @@ export default async function adminRoutes(app: FastifyInstance) {
         const maxW = kind === 'banner' ? 1600 : 1000;
         buf = await sharp(Buffer.from(m[1], 'base64')).rotate().resize({ width: maxW, withoutEnlargement: true }).webp({ quality: 86 }).toBuffer();
       } catch { return reply.code(400).send({ error: 'bad_image', message: "That file isn't a readable image." }); }
-      await mkdir(ART_DIR, { recursive: true }).catch(() => {});
-      await writeFile(artPath, buf);
+      replacement = buf;
       value = 'upload';
     } else if (mode === 'source') {
       // A cover taken from a source this series uses (#242, @Squeaks72). Only the source's id is taken from the caller:
@@ -3510,19 +3518,26 @@ export default async function adminRoutes(app: FastifyInstance) {
         const raw = await fetchCoverImage(sr.coverUrl, src.id);
         buf = await sharp(raw).rotate().resize({ width: 1000, withoutEnlargement: true }).webp({ quality: 86 }).toBuffer();
       } catch { return reply.code(502).send({ error: 'unavailable', message: 'The source would not hand over its cover.' }); }
-      await mkdir(ART_DIR, { recursive: true }).catch(() => {});
-      await writeFile(artFile(id, kind), buf);
+      replacement = buf;
       value = 'upload';
     } else {
-      await rm(artPath, { force: true }).catch(() => {});
       value = null;
     }
     const col = kind === 'cover' ? 'cover' : 'banner';
-    await q(
+    await tx(async(qq)=>{
+      // Local extraction Apply holds the same row while checking its cover snapshot and publishing a title.
+      await qq('SELECT id FROM lib_series WHERE id=$1 FOR UPDATE',[id]);
+      if(replacement){
+        await mkdir(ART_DIR,{recursive:true});
+        const part=artPath+'.'+randomUUID()+'.part';
+        try{await writeFile(part,replacement,{flag:'wx'});await rename(part,artPath);}finally{await rm(part,{force:true}).catch(()=>{});}
+      }else await rm(artPath,{force:true}).catch(()=>{});
+      await qq(
       `INSERT INTO series_overrides (series_id, ${col}, updated_at) VALUES ($1, $2, now())
        ON CONFLICT (series_id) DO UPDATE SET ${col} = $2, updated_at = now()`,
       [id, value],
-    );
+      );
+    });
     await logAudit('series.art_override', { userId: userIdOf(req), detail: { id, kind, mode }, req });
     return { ok: true };
   });

@@ -12,13 +12,14 @@ import { withAniListMutation, type AniListAuthority, type ScopedQuery } from './
 import { runtime } from './runtime';
 import { fetchPublic } from './safeFetch';
 import { lookupTitleLogo } from './titleLogoProvider';
+import { coverSelectionKey, coverSelectionSql } from './coverSelection';
 
 export const TITLE_STYLES = ['auto', 'action', 'fantasy', 'scifi', 'soft', 'noir', 'plain'] as const;
 export type TitleStyle = typeof TITLE_STYLES[number];
 export type TitleMode = 'automatic' | 'custom' | 'text';
 export type TitleStatus = 'ready' | 'pending' | 'missing' | 'error' | 'disabled';
 export interface TitleAttribution {
-  source: 'Wikimedia Commons'; sourceUrl: string; artist: string | null; license: string | null; licenseUrl: string | null;
+  source: 'Wikimedia Commons' | 'Cover lettering'; sourceUrl: string | null; artist: string | null; license: string | null; licenseUrl: string | null;
 }
 export interface TitleArt {
   mode: TitleMode; style: TitleStyle; status: TitleStatus; version: number; logoUrl: string | null;
@@ -27,9 +28,11 @@ export interface TitleArt {
 interface ArtRow {
   id: string; series_id: string | null; mode: TitleMode | null; style: TitleStyle | null; version: string | number | null;
   custom_file: string | null; auto_file: string | null; auto_anilist_id: string | null;
+  custom_attribution: TitleAttribution | null;
   auto_language: 'en' | 'original' | null; auto_caption: boolean | null; auto_attribution: TitleAttribution | null;
   auto_manual: boolean | null;
   lookup_status: 'ready' | 'missing' | 'error' | null; lookup_anilist_id: string | null; retry_at: Date | string | null;
+  auto_cover_key: string | null; cover_selection: unknown;
   linked_anilist_id: string | null; online: boolean; library_online: boolean; first_page: boolean;
 }
 
@@ -85,7 +88,8 @@ async function rowsFor(ids: string[]): Promise<ArtRow[]> {
   if (!ids.length) return [];
   return q<ArtRow>(`SELECT s.id, a.*, t.external_id AS linked_anilist_id,
       COALESCE(ss.automatic_title_logos, false) AS online, COALESCE(l.anilist_lookup, false) AS library_online,
-      COALESCE(o.cover = $2, false) AS first_page
+      COALESCE(o.cover = $2, false) AS first_page,
+      CASE WHEN a.auto_cover_key IS NOT NULL THEN ${coverSelectionSql('s')} END AS cover_selection
     FROM lib_series s LEFT JOIN series_title_art a ON a.series_id = s.id
     LEFT JOIN libraries l ON l.id = s.library_id
     LEFT JOIN series_trackers t ON t.series_id = s.id AND t.provider = 'anilist'
@@ -98,6 +102,7 @@ function fileFor(r: ArtRow): string | null {
   if (r.mode === 'text') return null;
   if (r.mode === 'custom') return r.custom_file;
   if (r.first_page && !r.auto_manual) return null;
+  if (r.auto_cover_key && r.auto_cover_key !== coverSelectionKey(r.cover_selection)) return null;
   return validId(r.linked_anilist_id) && r.auto_anilist_id === r.linked_anilist_id ? r.auto_file : null;
 }
 
@@ -158,7 +163,7 @@ function dto(r: ArtRow): TitleArt {
     logoUrl: file ? `/img/series/${encodeURIComponent(r.id)}/logo?v=${nversion(r.version)}` : null,
     language: mode === 'custom' ? null : r.auto_language,
     showReadableTitle: mode === 'custom' ? true : r.auto_caption !== false,
-    attribution: mode === 'custom' ? null : (file ? r.auto_attribution : null),
+    attribution: mode === 'custom' ? r.custom_attribution ?? null : (file ? r.auto_attribution : null),
   };
 }
 /** All catalog surfaces get the same cheap batch read; hero routes and the background scanner enqueue discovery. */
@@ -222,18 +227,24 @@ async function lockVisible(qq: ScopedQuery, id: string, viewer: ViewCtx): Promis
   if (!rows.length) throw new TitleArtError('not_found', 404, 'The series is no longer available.');
 }
 export type TitleArtChange = { mode: 'upload' | 'url'; bytes: Buffer } | { mode: 'reset' | 'text' } | { mode: 'style'; style: TitleStyle };
-export async function changeTitleArt(id: string, change: TitleArtChange, viewer: ViewCtx): Promise<TitleArt | null> {
+export async function changeTitleArt(id: string, change: TitleArtChange, viewer: ViewCtx,
+  guard?: { expectedVersion: number; assertCurrent: (qq: ScopedQuery) => Promise<void>; attribution?:TitleAttribution }): Promise<TitleArt | null> {
   await tx(async (qq) => {
     await lockVisible(qq, id, viewer);
     const row = await ensureRow(qq, id);
+    if (guard) {
+      if (nversion(row.version) !== guard.expectedVersion) throw new TitleArtError('stale_candidate', 409, 'The title artwork changed. Make a new preview.');
+      await guard.assertCurrent(qq);
+    }
     let custom = row.custom_file;
+    let customAttribution = row.custom_attribution;
     let mode = row.mode ?? 'automatic'; let style = row.style ?? 'auto';
-    if (change.mode === 'upload' || change.mode === 'url') { custom = await putAsset(id, change.bytes); mode = 'custom'; }
+    if (change.mode === 'upload' || change.mode === 'url') { custom = await putAsset(id, change.bytes); mode = 'custom'; customAttribution=guard?.attribution??null; }
     else if (change.mode === 'style') style = change.style;
     else if (change.mode === 'text') mode = 'text';
-    else { mode = 'automatic'; style = 'auto'; custom = null; }
-    await qq('UPDATE series_title_art SET mode=$2, style=$3, custom_file=$4, version=$5, updated_at=now() WHERE series_id=$1',
-      [id, mode, style, custom, nextVersion(row.version)]);
+    else { mode = 'automatic'; style = 'auto'; custom = null; customAttribution=null; }
+    await qq('UPDATE series_title_art SET mode=$2, style=$3, custom_file=$4, version=$5, custom_attribution=$6, updated_at=now() WHERE series_id=$1',
+      [id, mode, style, custom, nextVersion(row.version),customAttribution?JSON.stringify(customAttribution):null]);
   });
   await collectCurrentAssets(id);
   if (change.mode === 'reset') await queueTitleLogos([id]);
@@ -268,7 +279,7 @@ export async function queueTitleLogos(ids: string[], authority: AniListAuthority
     if (r.lookup_status === 'error' && r.lookup_anilist_id === r.linked_anilist_id && r.retry_at && new Date(r.retry_at).getTime() > Date.now()) continue;
     if (authority === 'automatic') {
       if (!r.online || !r.library_online || r.first_page) continue;
-      if (r.auto_anilist_id === r.linked_anilist_id && r.auto_file && await assetAvailable(r.auto_file)) continue;
+      if (!r.auto_cover_key && r.auto_anilist_id === r.linked_anilist_id && r.auto_file && await assetAvailable(r.auto_file)) continue;
       if (r.lookup_anilist_id === r.linked_anilist_id && r.retry_at && new Date(r.retry_at).getTime() > Date.now()) continue;
     }
     const old = pending.get(r.id);
@@ -346,7 +357,7 @@ async function runJob(job: Job): Promise<void> {
         artist: c.attribution.author, license: c.attribution.license, licenseUrl: c.attribution.licenseUrl };
       if (runtime.stopping || cancelled()) return;
       await qq(`UPDATE series_title_art SET auto_file=$2, auto_anilist_id=$3, auto_language=$4, auto_caption=$5,
-        auto_attribution=$6, lookup_anilist_id=$3, lookup_status='ready', retry_at=NULL, version=$7, auto_manual=$8, updated_at=now()
+        auto_attribution=$6, lookup_anilist_id=$3, lookup_status='ready', retry_at=NULL, version=$7, auto_manual=$8, auto_cover_key=NULL, updated_at=now()
         WHERE series_id=$1`, [id, file, job.anilistId, c.language == null ? null : c.language === 'en' ? 'en' : 'original', c.showReadableTitle,
         JSON.stringify(attribution), nextVersion(row.version), job.authority === 'manual']);
     } else {
@@ -358,6 +369,28 @@ async function runJob(job: Job): Promise<void> {
     }
   });
   await collectCurrentAssets(job.id);
+}
+
+/** Only strict, opt-in local extraction uses this publisher; a reliable provider logo or manual choice always wins. */
+export async function applyAutomaticCoverTitle(id: string, bytes: Buffer, expectedVersion: number, anilistId: string,
+  coverKey: string, assertCurrent: (qq: ScopedQuery) => Promise<void>): Promise<void> {
+  await withAniListMutation({ id }, 'automatic', async (qq, sid) => {
+    await qq('SELECT series_id FROM series_trackers WHERE series_id=$1 FOR SHARE',[sid]);
+    await qq('SELECT series_id FROM series_overrides WHERE series_id=$1 FOR SHARE',[sid]);
+    await qq('SELECT series_id FROM series_art WHERE series_id=$1 FOR SHARE',[sid]);
+    const [row] = await qq<ArtRow>(`SELECT s.id,a.*,${coverSelectionSql('s')} AS cover_selection FROM lib_series s
+      LEFT JOIN series_title_art a ON a.series_id=s.id WHERE s.id=$1 AND ${visibleToAll('s')}`, [sid]);
+    if (!row || runtime.stopping || (row.mode ?? 'automatic') !== 'automatic' || nversion(row.version) !== expectedVersion
+      || (row.auto_file && !row.auto_cover_key) || coverSelectionKey(row.cover_selection) !== coverKey) throw new TitleArtError('stale_candidate',409,'The title or cover changed.');
+    await assertCurrent(qq);
+    await ensureRow(qq,sid);
+    const file = await putAsset(sid,bytes);
+    if(runtime.stopping)throw new TitleArtError('stale_candidate',409,'The server is stopping.');
+    await qq(`UPDATE series_title_art SET auto_file=$2,auto_anilist_id=$3,auto_cover_key=$4,auto_language=NULL,auto_caption=true,
+      auto_manual=false,auto_attribution=$5,version=$6,updated_at=now() WHERE series_id=$1`,
+      [sid,file,anilistId,coverKey,JSON.stringify({source:'Cover lettering',sourceUrl:null,artist:null,license:null,licenseUrl:null}),nextVersion(row.version)]);
+  });
+  await collectCurrentAssets(id);
 }
 
 /** Caller first authorizes the viewer and series. A missing file is a 404, never a cover or opaque placeholder. */

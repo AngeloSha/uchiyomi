@@ -113,6 +113,10 @@ const schema = z.object({
   // How much the server log says: logLevel below.
   LOG_LEVEL: z.string().optional(),
   PORT: z.coerce.number().default(3000),
+  TITLE_EXTRACTOR_URL: z.string().default(''),
+  TITLE_EXTRACTOR_TOKEN: z.string().default(''),
+  TITLE_EXTRACTOR_OCR_DIR: z.string().default(''),
+  TITLE_EXTRACTOR_CALIBRATION_FILE: z.string().default(''),
   DATABASE_URL: z.string().min(1),
   KOMGA_BASE_URL: z.string().url().default('http://komga:25600'),
   KOMGA_API_KEY: z.string().default(''), // only needed when LIBRARY_BACKEND=komga; owned mode ignores it

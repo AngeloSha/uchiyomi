@@ -4,6 +4,7 @@ import { q, one } from './db';
 import { FIRST_PAGE } from './seriesArt';
 import { visibleToAll } from './visibility';
 import { runtime } from './runtime';
+import { coverSelectionHashSql } from './coverSelection';
 import { cancelAutomaticTitleLogoQueue, pruneAutomaticTitleLogoQueue, queueTitleLogos, resumeTitleLogoQueue, titleLogoQueueState } from './titleArt';
 
 // A raw default lookup_status='missing' without a matching lookup identity has never completed a lookup.
@@ -12,8 +13,10 @@ const FACTS = `WITH facts AS (
    t.external_id AS anilist_id, COALESCE(l.anilist_lookup,false) AS library_online,
    COALESCE(o.cover=$1,false) AS first_page,
    (t.external_id ~ '^[1-9][0-9]{0,15}$') IS TRUE AS checked_link,
-   (a.auto_file IS NOT NULL AND a.auto_anilist_id=t.external_id AND (COALESCE(o.cover<>$1,true) OR a.auto_manual)) IS TRUE AS saved_logo,
-   (a.lookup_anilist_id=t.external_id) IS TRUE AS current_attempt
+   (a.auto_file IS NOT NULL AND a.auto_anilist_id=t.external_id AND (COALESCE(o.cover<>$1,true) OR a.auto_manual)
+     AND (a.auto_cover_key IS NULL OR a.auto_cover_key=${coverSelectionHashSql('s')})) IS TRUE AS saved_logo,
+   (a.lookup_anilist_id=t.external_id) IS TRUE AS current_attempt,
+   (a.auto_file IS NOT NULL AND a.auto_anilist_id=t.external_id AND a.auto_cover_key IS NULL) IS TRUE AS provider_logo
  FROM lib_series s LEFT JOIN series_title_art a ON a.series_id=s.id
  LEFT JOIN series_trackers t ON t.series_id=s.id AND t.provider='anilist'
    AND (t.linked_by IS NOT NULL OR t.checked_at IS NOT NULL)
@@ -26,7 +29,7 @@ const FACTS = `WITH facts AS (
       WHEN current_attempt AND lookup_status='missing' THEN 'missing' ELSE 'unchecked' END AS state
  FROM facts
 ), due AS (
- SELECT *, (eligible AND NOT saved_logo AND (NOT current_attempt OR retry_at IS NULL OR retry_at<=now())) AS due_now
+ SELECT *, (eligible AND NOT provider_logo AND (NOT current_attempt OR retry_at IS NULL OR retry_at<=now())) AS due_now
  FROM scoped
 )
 `;
@@ -64,7 +67,7 @@ export async function titleLogoScanStatus(): Promise<TitleLogoScanStatus> {
       count(*) FILTER(WHERE mode='automatic' AND first_page)::int AS "firstPage",
       count(*) FILTER(WHERE due_now)::int AS due,
       count(*) FILTER(WHERE current_attempt)::int AS checked,
-      min(retry_at) FILTER(WHERE eligible AND NOT saved_logo AND current_attempt AND retry_at>now()) AS next_retry
+      min(retry_at) FILTER(WHERE eligible AND NOT provider_logo AND current_attempt AND retry_at>now()) AS next_retry
       FROM due`, [FIRST_PAGE]),
   ]);
   const state = titleLogoQueueState();
