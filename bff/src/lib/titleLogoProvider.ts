@@ -37,6 +37,15 @@ const USER_AGENT = 'Uchiyomi-title-art/1 (+https://github.com/AngeloSha/uchiyomi
 const API_MAX_BYTES = 2 * 1024 * 1024;
 const IMAGE_MAX_BYTES = 8 * 1024 * 1024;
 const IMAGE_MAX_PIXELS = 8_000_000;
+// Wikipedia usage verifies a Commons discovery against the exact manga item, never a search-result title.
+const CANONICAL_WIKIS: Record<string, string> = {
+  enwiki: 'en.wikipedia.org', eswiki: 'es.wikipedia.org', jawiki: 'ja.wikipedia.org', kowiki: 'ko.wikipedia.org',
+  zhwiki: 'zh.wikipedia.org', frwiki: 'fr.wikipedia.org', dewiki: 'de.wikipedia.org', ptwiki: 'pt.wikipedia.org',
+  itwiki: 'it.wikipedia.org', arwiki: 'ar.wikipedia.org', rowiki: 'ro.wikipedia.org',
+};
+const DISCOVERY_SEARCH_LIMIT = 8;
+const DISCOVERY_FILE_LIMIT = 3;
+const DISCOVERY_WIKI_LIMIT = 2;
 const LANGUAGES: Record<string, string> = {
   Q1860: 'en', Q5287: 'ja', Q9176: 'ko', Q7850: 'zh', Q727694: 'zh',
   Q150: 'fr', Q188: 'de', Q1321: 'es', Q7737: 'ru', Q13955: 'ar', Q9288: 'he',
@@ -60,16 +69,35 @@ function retryAfter(r: PublicFetch, now: number): number | undefined {
   return Number.isFinite(ms) && ms >= 0 ? Math.max(60_000, ms) : undefined;
 }
 
-/** Only the thumbnail URL returned by Commons, not arbitrary image URLs or active original SVGs. */
-function thumbnailUrl(value: unknown): string | null {
+/** Commons may return an unscaled original PNG as thumburl; SVG originals are never accepted. */
+function rasterUrl(value: unknown, originalPng = false): string | null {
   if (typeof value !== 'string' || value.length > 4096) return null;
   try {
     const u = new URL(value);
     if (u.protocol !== 'https:' || u.username || u.password || (u.port && u.port !== '443') || u.hash) return null;
     if (!['upload.wikimedia.org', 'thumb.wikimedia.org'].includes(u.hostname)) return null;
-    if (!u.pathname.startsWith('/wikipedia/commons/thumb/') || !/\.png$/i.test(u.pathname)) return null;
+    if (!/\.png$/i.test(u.pathname)) return null;
+    if (!u.pathname.startsWith('/wikipedia/commons/thumb/') && !(originalPng && u.hostname === 'upload.wikimedia.org'
+      && /^\/wikipedia\/commons\/[a-f0-9]\/[a-f0-9]{2}\/[^/]+\.png$/i.test(u.pathname))) return null;
     return u.href;
   } catch { return null; }
+}
+
+function imageUrl(image: Json): string | null {
+  const originalPng = image.mime === 'image/png' && Number.isInteger(image.size) && image.size > 0 && image.size <= IMAGE_MAX_BYTES
+    && Number.isInteger(image.width) && Number.isInteger(image.height) && image.width >= 16 && image.height >= 8
+    && image.width * image.height <= IMAGE_MAX_PIXELS;
+  return rasterUrl(image.thumburl, originalPng) ?? (originalPng ? rasterUrl(image.url, true) : null);
+}
+
+const canonicalFile = (value: unknown) => typeof value === 'string' ? value.replace(/^File:/i, '').replace(/_/g, ' ').normalize('NFC') : '';
+const canonicalTitle = (value: unknown) => typeof value === 'string' ? value.replace(/_/g, ' ').normalize('NFC') : '';
+const words = (value: string) => value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ');
+function discoveryName(name: string, names: string[]): boolean {
+  const stem = words(name.replace(/\.[^.]+$/, ''));
+  // Discovery is deliberately narrower than a P154 claim: only an exact known work name plus a logo label.
+  // In particular, films, numbered variants, seasons and anime adaptations do not become a base manga's logo.
+  return names.some((n) => ['logo', 'logotype', 'wordmark'].some((mark) => stem === `${words(n)} ${mark}` || stem === `${mark} ${words(n)}`));
 }
 
 function licenseUrl(value: unknown): string | null {
@@ -189,33 +217,85 @@ export function createTitleLogoProvider(deps: Dependencies = {}): (anilistId: st
     if (Number(search.query.searchinfo?.totalhits) > 5 || search.continue) return { kind: 'missing' };
     const ids = [...new Set(records(search.query.search).map((r) => r.title).filter((id): id is string => typeof id === 'string' && /^Q[1-9]\d*$/.test(id)))].slice(0, 5);
     if (!ids.length) return { kind: 'missing' };
-    const body = await json(apiUrl(WIKIDATA, { action: 'wbgetentities', ids: ids.join('|'), props: 'claims|labels|aliases', languages: 'en|ja|ko|zh' }, interactive));
+    const body = await json(apiUrl(WIKIDATA, { action: 'wbgetentities', ids: ids.join('|'), props: 'claims|labels|aliases|sitelinks',
+      languages: 'en|ja|ko|zh', sitefilter: Object.keys(CANONICAL_WIKIS).join('|') }, interactive));
     if (!body.entities || typeof body.entities !== 'object') throw unavailable('Wikimedia identities were incomplete');
     if (ids.some((id) => !body.entities[id] || (!body.entities[id].missing && !body.entities[id].claims))) throw unavailable('Wikimedia identities were incomplete');
     const matches = ids.map((id) => body.entities[id]).filter((e): e is Json => e && typeof e === 'object' && values(claims(e, 'P8731')).includes(anilistId));
     if (matches.length !== 1) return { kind: 'missing' }; // Duplicated or changed identities need a human choice.
-    const { logos, names } = choices(matches[0]);
-    for (const logo of logos) {
-      const info = await json(apiUrl(COMMONS, { action: 'query', titles: `File:${logo.name}`, prop: 'imageinfo', iiprop: 'url|size|mime|extmetadata', iiurlwidth: '1200', iiurlheight: '600', iiextmetadatafilter: 'Artist|LicenseShortName|LicenseUrl|ImageDescription' }, interactive));
-      if (!Array.isArray(info.query?.pages)) throw unavailable('Wikimedia image metadata was incomplete');
-      const canonicalFile = (value: unknown) => typeof value === 'string' ? value.replace(/^File:/i, '').replace(/_/g, ' ').normalize('NFC') : '';
-      const page = records(info.query.pages).find((p) => canonicalFile(p.title) === canonicalFile(logo.name) && !p.missing);
-      if (!page) continue;
+    const item = matches[0];
+    const { logos, names } = choices(item);
+    const imageParams = { iiprop: 'url|size|mime|extmetadata', iiurlwidth: '1200', iiurlheight: '600',
+      iiextmetadatafilter: 'Artist|LicenseShortName|LicenseUrl|ImageDescription' };
+    const candidate = async (logo: Choice, page: Json): Promise<TitleLogoLookupResult | null> => {
       const image = records(page.imageinfo)[0];
-      if (!image) continue;
+      if (!image) return null;
       const meta = image.extmetadata ?? {};
-      if (unrelatedVariant(logo.name, text(meta.ImageDescription?.value, 2000) ?? '', names)) continue;
-      const url = thumbnailUrl(image.thumburl);
-      if (!url) continue;
+      if (unrelatedVariant(logo.name, text(meta.ImageDescription?.value, 2000) ?? '', names)) return null;
+      const url = imageUrl(image);
+      if (!url) return null;
       const r = await get(url, IMAGE_MAX_BYTES);
-      if (r.status === 404 || r.status === 410) continue;
+      if (r.status === 404 || r.status === 410) return null;
       if (r.status !== 200) throw unavailable(`Wikimedia artwork returned ${r.status}`, retryAfter(r, now()));
-      if ((r.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase() !== 'image/png' || !(await rasterLogo(r.body))) continue;
+      if ((r.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase() !== 'image/png' || !(await rasterLogo(r.body))) return null;
       return { kind: 'found', candidate: {
         bytes: r.body, language: logo.language, showReadableTitle: logo.language !== 'en',
         attribution: { provider: 'wikimedia', fileName: logo.name, pageUrl: `https://commons.wikimedia.org/wiki/File:${encodeURIComponent(logo.name).replace(/%20/g, '_')}`,
           author: text(meta.Artist?.value), license: text(meta.LicenseShortName?.value, 200), licenseUrl: licenseUrl(meta.LicenseUrl?.value) },
       } };
+    };
+    for (const logo of logos) {
+      const info = await json(apiUrl(COMMONS, { action: 'query', titles: `File:${logo.name}`, prop: 'imageinfo', ...imageParams }, interactive));
+      if (!Array.isArray(info.query?.pages)) throw unavailable('Wikimedia image metadata was incomplete');
+      const page = records(info.query.pages).find((p) => canonicalFile(p.title) === canonicalFile(logo.name) && !p.missing);
+      if (!page) continue;
+      const result = await candidate(logo, page);
+      if (result) return result;
+    }
+
+    // P154 is often absent even when Commons has the title. A search can discover candidates, but can never
+    // authorize one: its use on a canonical wiki page must resolve back to this exact AniList-verified item.
+    const links = Object.entries(item.sitelinks ?? {}).filter(([site, link]: [string, any]) => Object.hasOwn(CANONICAL_WIKIS, site)
+      && typeof link?.title === 'string' && link.title.length <= 500);
+    if (!links.length || typeof item.id !== 'string' || !ids.includes(item.id)) return { kind: 'missing' };
+    const commonsName = values(claims(item, 'P373')).find((name): name is string => typeof name === 'string' && names.some((n) => words(n) === words(name)));
+    const label = commonsName ?? item.labels?.en?.value ?? names[0];
+    const term = typeof label === 'string' ? words(label).slice(0, 180) : '';
+    if (!term) return { kind: 'missing' };
+    const found = await json(apiUrl(COMMONS, { action: 'query', list: 'search', srnamespace: '6',
+      srsearch: `intitle:"${term}" intitle:logo`, srlimit: String(DISCOVERY_SEARCH_LIMIT) }, interactive));
+    if (!Array.isArray(found.query?.search)) throw unavailable('Wikimedia artwork search was incomplete');
+    const candidates = [...new Set(records(found.query.search).slice(0, DISCOVERY_SEARCH_LIMIT).map((p) => fileName(canonicalFile(p.title)))
+      .filter((name): name is string => !!name && discoveryName(name, names) && !unrelatedVariant(name, '', names)))].slice(0, DISCOVERY_FILE_LIMIT);
+    if (!candidates.length) return { kind: 'missing' };
+    const info = await json(apiUrl(COMMONS, { action: 'query', titles: candidates.map((name) => `File:${name}`).join('|'),
+      prop: 'imageinfo|globalusage', gulimit: '20', guprop: 'url', ...imageParams }, interactive));
+    if (!Array.isArray(info.query?.pages)) throw unavailable('Wikimedia discovered artwork metadata was incomplete');
+    const verified = new Map<string, boolean>();
+    for (const name of candidates) {
+      const page = records(info.query.pages).find((p) => canonicalFile(p.title) === name && !p.missing);
+      if (!page || !Array.isArray(page.globalusage) || !imageUrl(records(page.imageinfo)[0] ?? {})) continue;
+      const description = text(records(page.imageinfo)[0]?.extmetadata?.ImageDescription?.value, 2000) ?? '';
+      if (unrelatedVariant(name, description, names) || /\b(?:anime|animated|television|tv series|film|movie|live.action|adaptation)\b/i.test(description)) continue;
+      let exact = false;
+      for (const use of records(page.globalusage).slice(0, 20)) {
+        // GlobalUsage's `wiki` is a hostname (es.wikipedia.org), whereas Wikidata sitelinks use a site id (eswiki).
+        const link = links.find(([site, l]: [string, any]) => CANONICAL_WIKIS[site] === use.wiki && canonicalTitle(l.title) === canonicalTitle(use.title));
+        if (!link) continue;
+        const key = `${link[0]}:${canonicalTitle(use.title)}`;
+        if (!verified.has(key)) {
+          if (verified.size >= DISCOVERY_WIKI_LIMIT) continue;
+          const identity = await json(apiUrl(`https://${CANONICAL_WIKIS[link[0]]}/w/api.php`, { action: 'query',
+            titles: canonicalTitle(use.title), prop: 'pageprops', ppprop: 'wikibase_item' }, interactive));
+          if (!Array.isArray(identity.query?.pages)) throw unavailable('Wikimedia canonical page identity was incomplete');
+          verified.set(key, records(identity.query.pages).some((p) => !p.missing && canonicalTitle(p.title) === canonicalTitle(use.title)
+            && p.pageprops?.wikibase_item === item.id));
+        }
+        if (verified.get(key)) { exact = true; break; }
+      }
+      if (!exact) continue;
+      const result = await candidate({ name, language: null, score: 0 }, page);
+      if (result) return result;
     }
     return { kind: 'missing' };
   };

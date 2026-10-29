@@ -78,6 +78,29 @@ async function fixture(options: Fixture = {}) {
   return { lookup, asked, waits, image, advance: (ms: number) => { clock += ms; } };
 }
 
+async function discoveryFixture(options: { hits?: string[]; uses?: any[]; identity?: string; description?: string;
+  sitelinks?: any; search?: any; intercept?: Fixture['intercept'] } = {}) {
+  const item = { ...entity([]), sitelinks: options.sitelinks ?? { eswiki: { title: 'Manga' } } };
+  (item.claims as any).P373 = [claim('Manga')];
+  return fixture({ item, intercept: (url, opts) => {
+    const override = options.intercept?.(url, opts);
+    if (override !== undefined) return override;
+    if (url.hostname === 'commons.wikimedia.org' && url.searchParams.get('list') === 'search') {
+      return reply(url.href, options.search ?? { query: { search: (options.hits ?? ['File:Manga logo.svg']).map((title) => ({ title })) } });
+    }
+    if (url.hostname === 'commons.wikimedia.org' && url.searchParams.get('prop') === 'imageinfo|globalusage') {
+      return reply(url.href, { query: { pages: url.searchParams.get('titles')!.split('|').map((title) => ({ title,
+        imageinfo: [{ ...metadata(title.slice(5)), ...(options.description ? { extmetadata: { ImageDescription: { value: options.description } } } : {}) }],
+        globalusage: options.uses ?? [{ wiki: 'es.wikipedia.org', title: 'Manga', url: 'https://es.wikipedia.org/wiki/Manga' }],
+      })) } });
+    }
+    if (url.hostname.endsWith('.wikipedia.org')) {
+      return reply(url.href, { query: { pages: [{ title: url.searchParams.get('titles'), pageprops: { wikibase_item: options.identity ?? QID } }] } });
+    }
+    return undefined;
+  } });
+}
+
 test('a checked AniList manga ID leads through verified claims to a local raster candidate and safe attribution', async () => {
   const f = await fixture();
   const r = await f.lookup(ID);
@@ -352,4 +375,125 @@ test('decoded metadata beyond its cap and missing requested identity objects are
   await assert.rejects(oversized.lookup(ID), TitleLogoProviderUnavailable);
   const incomplete = await fixture({ entities: {} });
   await assert.rejects(incomplete.lookup(ID), TitleLogoProviderUnavailable);
+});
+
+test('a Commons PNG smaller than the requested thumbnail is accepted from thumburl or the original URL', async () => {
+  const image = await png();
+  const original = 'https://upload.wikimedia.org/wikipedia/commons/a/aa/Manga_logo.png?utm_content=thumbnail_unscaled';
+  for (const hasThumb of [true, false]) {
+    const f = await fixture({ item: entity([claim('Manga logo.png')]), image,
+      info: () => ({ mime: 'image/png', size: image.length, width: 64, height: 24, url: original, ...(hasThumb ? { thumburl: original } : {}) }),
+      intercept: (url) => url.hostname === 'upload.wikimedia.org' ? reply(url.href, image, 200, { 'content-type': 'image/png' }) : undefined });
+    const result = await f.lookup(ID);
+    assert.equal(result.kind, 'found');
+    assert.equal(f.asked.length, 4);
+    if (result.kind === 'found') assert.ok(result.candidate.bytes.equals(image));
+  }
+});
+
+test('original PNG support never admits raw SVG, foreign paths, unsafe metadata, opaque bytes or redirects', async () => {
+  const image = await png();
+  const base = { mime: 'image/png', size: image.length, width: 64, height: 24,
+    thumburl: 'https://upload.wikimedia.org/wikipedia/commons/a/aa/Manga_logo.png' };
+  for (const override of [
+    { mime: 'image/svg+xml' }, { size: 8 * 1024 * 1024 + 1 }, { width: 8_000_001 }, { size: undefined },
+    { thumburl: 'https://upload.wikimedia.org/wikipedia/en/a/aa/Manga_logo.png' },
+    { thumburl: 'https://upload.wikimedia.org/wikipedia/commons/a/aa/Manga_logo.svg' },
+    { thumburl: 'https://upload.wikimedia.org.evil.test/wikipedia/commons/a/aa/Manga_logo.png' },
+  ]) {
+    const f = await fixture({ info: () => ({ ...base, ...override }) });
+    assert.deepEqual(await f.lookup(ID), { kind: 'missing' });
+    assert.equal(f.asked.length, 3, 'an untrusted original URL never reaches the transport');
+  }
+  const opaque = await png('opaque');
+  const f = await fixture({ info: () => base,
+    intercept: (url) => url.hostname === 'upload.wikimedia.org' ? reply(url.href, opaque, 200, { 'content-type': 'image/png' }) : undefined });
+  assert.deepEqual(await f.lookup(ID), { kind: 'missing' });
+  const redirected = await fixture({ info: () => base,
+    intercept: (url) => url.hostname === 'upload.wikimedia.org' ? reply('https://elsewhere.test/image.png', image, 200, { 'content-type': 'image/png' }) : undefined });
+  await assert.rejects(redirected.lookup(ID), TitleLogoProviderUnavailable);
+});
+
+test('a missing logo claim uses Commons GlobalUsage hostnames to verify the exact canonical manga identity', async () => {
+  const f = await discoveryFixture();
+  const result = await f.lookup(ID);
+  assert.equal(result.kind, 'found');
+  if (result.kind === 'found') {
+    assert.equal(result.candidate.attribution.fileName, 'Manga logo.svg');
+    assert.equal(result.candidate.language, null, 'a Commons filename does not establish artwork language');
+    assert.equal(result.candidate.showReadableTitle, true);
+  }
+  assert.equal(f.asked.length, 6);
+  assert.ok(f.asked.some(({ url }) => url.hostname === 'es.wikipedia.org' && url.searchParams.get('ppprop') === 'wikibase_item'));
+  const discovery = f.asked.find(({ url }) => url.hostname === 'commons.wikimedia.org' && url.searchParams.get('list') === 'search')!;
+  assert.equal(discovery.url.searchParams.get('srnamespace'), '6');
+  assert.equal(discovery.url.searchParams.get('srlimit'), '8');
+  for (const { url, opts } of f.asked) {
+    assert.equal(opts.maxHops, 0);
+    if (url.pathname === '/w/api.php') assert.equal(url.searchParams.get('maxlag'), '5');
+  }
+});
+
+test('canonical usage must match both the trusted sitelink title and its current exact manga QID', async () => {
+  for (const options of [
+    { identity: 'Q999' },
+    { uses: [{ wiki: 'es.wikipedia.org', title: 'Manga (anime)' }] },
+    { uses: [{ wiki: 'es.wikipedia.org.evil.test', title: 'Manga', url: 'https://es.wikipedia.org/wiki/Manga' }] },
+    { uses: [{ wiki: 'eswiki', title: 'Manga' }] },
+    { uses: [{ wiki: 'evilwiki', title: 'Manga', url: 'https://127.0.0.1/private' }] },
+    { sitelinks: { constructor: { title: 'Manga' } }, uses: [{ wiki: 'constructor', title: 'Manga' }] },
+  ]) {
+    const f = await discoveryFixture(options);
+    assert.deepEqual(await f.lookup(ID), { kind: 'missing' });
+    assert.equal(f.asked.filter(({ url }) => url.hostname === 'thumb.wikimedia.org').length, 0, 'unverified art is not downloaded');
+    assert.ok(f.asked.every(({ url }) => ['www.wikidata.org', 'commons.wikimedia.org', 'es.wikipedia.org'].includes(url.hostname)));
+  }
+});
+
+test('a canonical manga page using a movie, numbered variant or other similarly named logo does not authorize it', async () => {
+  const f = await discoveryFixture({ hits: ['File:Manga movie logo.svg', 'File:Manga season 2 logo.svg', 'File:Manga logo 2.svg',
+    'File:Manga adventure logo.svg', 'File:Manga anime logo.svg'] });
+  assert.deepEqual(await f.lookup(ID), { kind: 'missing' });
+  assert.equal(f.asked.length, 3, 'unrelated search hits need no metadata or image request');
+  for (const description of ['Manga anime television adaptation logo', 'Manga season 2 logo', 'Manga Film Gold logo']) {
+    const bad = await discoveryFixture({ description });
+    assert.deepEqual(await bad.lookup(ID), { kind: 'missing' });
+    assert.equal(bad.asked.length, 4, 'an adaptation is refused before canonical checks or image downloads');
+  }
+});
+
+test('discovery never follows paging beyond eight search hits, three files, twenty usages or two canonical pages', async () => {
+  const beyondSearch = await discoveryFixture({ search: { continue: { sroffset: 8 }, query: { search: [
+    ...Array.from({ length: 8 }, (_, i) => ({ title: `File:Unrelated ${i} logo.svg` })), { title: 'File:Manga logo.svg' },
+  ] } } });
+  assert.deepEqual(await beyondSearch.lookup(ID), { kind: 'missing' });
+  assert.equal(beyondSearch.asked.length, 3);
+  const beyondUsage = await discoveryFixture({ uses: [...Array.from({ length: 20 }, () => ({ wiki: 'unknownwiki', title: 'Manga' })),
+    { wiki: 'es.wikipedia.org', title: 'Manga' }] });
+  assert.deepEqual(await beyondUsage.lookup(ID), { kind: 'missing' });
+  const limited = await discoveryFixture({ identity: 'Q999', hits: ['File:Manga logo.svg', 'File:Logo Manga.svg', 'File:Manga wordmark.svg', 'File:Wordmark Manga.svg'],
+    sitelinks: { enwiki: { title: 'Manga' }, eswiki: { title: 'Manga' }, jawiki: { title: 'Manga' } },
+    uses: [{ wiki: 'en.wikipedia.org', title: 'Manga' }, { wiki: 'es.wikipedia.org', title: 'Manga' }, { wiki: 'ja.wikipedia.org', title: 'Manga' }] });
+  assert.deepEqual(await limited.lookup(ID), { kind: 'missing' });
+  assert.equal(limited.asked.filter(({ url }) => url.hostname.endsWith('.wikipedia.org')).length, 2);
+  assert.equal(limited.asked.find(({ url }) => url.searchParams.get('prop') === 'imageinfo|globalusage')!.url.searchParams.get('titles')!.split('|').length, 3);
+});
+
+test('new discovery and canonical endpoints retain outage cooldown, no redirects and explicit interactive semantics', async () => {
+  for (const stage of ['search', 'wiki'] as const) {
+    const f = await discoveryFixture({ intercept: (url) => {
+      if ((stage === 'search' && url.hostname === 'commons.wikimedia.org' && url.searchParams.get('list') === 'search')
+        || (stage === 'wiki' && url.hostname === 'es.wikipedia.org')) return reply(url.href, { error: { code: 'maxlag' } }, 200, { 'retry-after': '120' });
+      return undefined;
+    } });
+    await assert.rejects(f.lookup(ID), (error: any) => error.retryAfterMs === 120_000);
+    const count = f.asked.length;
+    await assert.rejects(f.lookup('90001', { interactive: true }), TitleLogoProviderUnavailable);
+    assert.equal(f.asked.length, count, 'a new ID/manual action cannot bypass discovery cooldown');
+  }
+  const redirected = await discoveryFixture({ intercept: (url) => url.hostname === 'es.wikipedia.org' ? reply('https://elsewhere.test/wiki', {}) : undefined });
+  await assert.rejects(redirected.lookup(ID), TitleLogoProviderUnavailable);
+  const manual = await discoveryFixture();
+  assert.equal((await manual.lookup(ID, { interactive: true })).kind, 'found');
+  for (const { url } of manual.asked) assert.equal(url.searchParams.has('maxlag'), false);
 });
