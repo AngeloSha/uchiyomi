@@ -47,3 +47,4 @@ web/test/e2e/shots-page-cleanup/
 web/test/e2e/shots-title-art/
 web/test/e2e/shots-title-logo-scan/
 web/test/e2e/shots-title-extraction/
+web/test/e2e/shots-title-mask/

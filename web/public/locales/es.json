@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4453
+    "strings": 4478
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -4456,5 +4456,30 @@
   "The cover or artwork changed. Create a new preview before applying.": "La portada o la imagen del título han cambiado. Crea otra vista previa antes de aplicar.",
   "This preview has expired. Create a new one.": "Esta vista previa ha caducado. Crea otra.",
   "The title could not be separated from the cover. Adjust the title area and try again.": "No se pudo separar el título de la portada. Ajusta el área del título e inténtalo de nuevo.",
-  "From the cover": "De la portada"
+  "From the cover": "De la portada",
+  "Fine-tune title": "Ajustar el título",
+  "Erase": "Borrar",
+  "Move": "Mover",
+  "Brush size": "Tamaño del pincel",
+  "Zoom": "Zoom",
+  "Zoom out": "Alejar",
+  "Fit to view": "Ajustar a la vista",
+  "Reset corrections": "Restablecer correcciones",
+  "Save corrections": "Guardar correcciones",
+  "Saving corrections…": "Guardando correcciones…",
+  "Corrections saved.": "Correcciones guardadas.",
+  "Unsaved corrections": "Correcciones sin guardar",
+  "Paint over missing lettering to restore it, or erase unwanted parts. Zoom in for precise edges.": "Pinta sobre las letras que faltan para recuperarlas o borra las partes no deseadas. Acerca la imagen para ajustar los bordes.",
+  "The faint cover is a guide. The previews show the actual cutout.": "La portada tenue sirve de guía. Las vistas previas muestran el recorte real.",
+  "Save corrections before applying this title.": "Guarda las correcciones antes de aplicar este título.",
+  "All lettering is hidden. Restore part of the title before saving.": "Todo el título está oculto. Recupera alguna parte antes de guardar.",
+  "Too many brush strokes. Undo a stroke or reset corrections.": "Hay demasiados trazos. Deshaz un trazo o restablece las correcciones.",
+  "This correction is too detailed. Use fewer strokes or a smaller brush.": "Esta corrección tiene demasiados detalles. Usa menos trazos o un pincel más pequeño.",
+  "Could not load the correction editor. Try again.": "No se pudo cargar el editor de correcciones. Inténtalo de nuevo.",
+  "Could not save corrections. Your current artwork is unchanged.": "No se pudieron guardar las correcciones. Tu imagen actual no ha cambiado.",
+  "This preview changed elsewhere. Reload it before editing again.": "Esta vista previa cambió en otra sesión. Vuelve a cargarla antes de editar.",
+  "Create a new preview to fine-tune this title.": "Crea otra vista previa para ajustar este título.",
+  "Preparing the editor…": "Preparando el editor…",
+  "Title correction canvas": "Lienzo de corrección del título",
+  "The arrow keys move the brush; Space paints. Hold Shift for larger steps.": "Las flechas mueven el pincel; Espacio pinta. Mantén Mayús para dar pasos más grandes."
 }

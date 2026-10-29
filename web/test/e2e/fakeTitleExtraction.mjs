@@ -1,13 +1,46 @@
 // Dependency-free fixture service. It exercises the real API/job/image flow without downloading any models.
 import http from 'node:http';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { deflateSync, inflateSync } from 'node:zlib';
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 2) args.set(process.argv[i], process.argv[i + 1]);
 const port = Number(args.get('--port') || 29379);
 const token = process.env.TITLE_EXTRACTOR_TOKEN || 'e2e-title-extractor-only-token';
-const candidate = readFileSync(new URL('../fixtures/title-logo.png', import.meta.url));
-const fingerprint = createHash('sha256').update(candidate).digest('hex');
+const fingerprint = createHash('sha256').update('deterministic-source-mask-fixture-v5').digest('hex');
+const crc = (bytes) => { let value = 0xffffffff; for (const byte of bytes) { value ^= byte; for (let n = 0; n < 8; n++) value = value & 1 ? (value >>> 1) ^ 0xedb88320 : value >>> 1; } return (value ^ 0xffffffff) >>> 0; };
+const chunk = (name, bytes) => { const type = Buffer.from(name), data = Buffer.concat([type, bytes]), size = Buffer.alloc(4), check = Buffer.alloc(4); size.writeUInt32BE(bytes.length); check.writeUInt32BE(crc(data)); return Buffer.concat([size, data, check]); };
+function png(width, height, rgba) {
+  const header = Buffer.alloc(13); header.writeUInt32BE(width); header.writeUInt32BE(height, 4); header[8] = 8; header[9] = 6;
+  const rows = Buffer.alloc((width * 4 + 1) * height);
+  for (let y = 0; y < height; y++) Buffer.from(rgba.subarray(y * width * 4, (y + 1) * width * 4)).copy(rows, y * (width * 4 + 1) + 1);
+  return Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', header), chunk('IDAT', deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
+}
+function sourcePixels(bytes) {
+  const width = bytes.readUInt32BE(16), height = bytes.readUInt32BE(20), channels = bytes[25] === 6 ? 4 : bytes[25] === 2 ? 3 : 0;
+  if (bytes[24] !== 8 || !channels || bytes[28] !== 0) throw Error('unsupported fixture source');
+  const compressed = [];
+  for (let offset = 8; offset < bytes.length;) { const length = bytes.readUInt32BE(offset); if (bytes.toString('ascii', offset + 4, offset + 8) === 'IDAT') compressed.push(bytes.subarray(offset + 8, offset + 8 + length)); offset += length + 12; }
+  const raw = inflateSync(Buffer.concat(compressed)), stride = width * channels, pixels = Buffer.alloc(stride * height);
+  const paeth = (a, b, c) => { const p = a + b - c, aa = Math.abs(p - a), bb = Math.abs(p - b), cc = Math.abs(p - c); return aa <= bb && aa <= cc ? a : bb <= cc ? b : c; };
+  for (let y = 0; y < height; y++) for (let x = 0; x < stride; x++) {
+    const filter = raw[y * (stride + 1)], value = raw[y * (stride + 1) + x + 1], left = x >= channels ? pixels[y * stride + x - channels] : 0;
+    const up = y ? pixels[(y - 1) * stride + x] : 0, corner = y && x >= channels ? pixels[(y - 1) * stride + x - channels] : 0;
+    pixels[y * stride + x] = value + (filter === 1 ? left : filter === 2 ? up : filter === 3 ? Math.floor((left + up) / 2) : filter === 4 ? paeth(left, up, corner) : 0);
+  }
+  return { width, height, channels, pixels };
+}
+function cutout(source, region) {
+  const decoded = sourcePixels(source), width = 200, height = 80;
+  const left = Math.max(0, Math.min(decoded.width - width, Math.floor((region?.left ?? .05) * decoded.width) + 5));
+  const top = Math.max(0, Math.min(decoded.height - height, Math.floor((region?.top ?? .05) * decoded.height) + 5));
+  const rgba = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const from = ((top + y) * decoded.width + left + x) * decoded.channels, to = (y * width + x) * 4;
+    rgba[to] = decoded.pixels[from]; rgba[to + 1] = decoded.pixels[from + 1]; rgba[to + 2] = decoded.pixels[from + 2];
+    rgba[to + 3] = x >= 30 && x <= 170 && y >= 20 && y <= 60 && !(x >= 80 && x <= 100 && y >= 30 && y <= 50) ? 255 : 0;
+  }
+  return { bytes: png(width, height, rgba), width, height, candidateRegion: { left: left / decoded.width, top: top / decoded.height, width: width / decoded.width, height: height / decoded.height } };
+}
 const log = [];
 let mode = 'ok';
 const json = (response, status, body) => { response.writeHead(status, { 'content-type': 'application/json' }); response.end(JSON.stringify(body)); };
@@ -33,8 +66,9 @@ const server = http.createServer(async (request, response) => {
   if (response.destroyed) return;
   if (thisMode === 'unavailable') return json(response, 503, { error: 'not_ready' });
   if (thisMode === 'empty') return json(response, 422, { error: 'no_text' });
+  const candidate = cutout(source, body.region);
   return json(response, 200, { version: 1, sourceSha256: createHash('sha256').update(source).digest('hex'),
-    candidateBase64: candidate.toString('base64'), width: candidate.readUInt32BE(16), height: candidate.readUInt32BE(20),
+    candidateBase64: candidate.bytes.toString('base64'), width: candidate.width, height: candidate.height, candidateRegion: candidate.candidateRegion,
     sourceWidth: source.readUInt32BE(16), sourceHeight: source.readUInt32BE(20),
     region: body.region || { left: .05, top: .05, width: .9, height: .35 }, ms: 1, modelFingerprint: fingerprint,
     evidence: { maskScore: .9, foregroundFraction: .25, edgeInkFraction: 0, maskRetainedFraction: 1, foregroundChangedFraction: 0 } });

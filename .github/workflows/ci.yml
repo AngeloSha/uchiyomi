@@ -93,6 +93,9 @@ jobs:
       - name: Extract and review title artwork from a cover
         working-directory: ./web
         run: node test/e2e/titleExtractionWalk.mjs
+      - name: Correct title transparency with precise brushes
+        working-directory: ./web
+        run: node test/e2e/titleMaskWalk.mjs
       # Machine-assisted translation fails in two ways a unit test cannot see: a string longer than its
       # container, and a right-to-left language rendered inside a left-to-right frame. Both need a browser.
       - name: Every language renders, and Arabic mirrors
@@ -129,6 +132,7 @@ jobs:
             web/test/e2e/shots-title-art/
             web/test/e2e/shots-title-logo-scan/
             web/test/e2e/shots-title-extraction/
+            web/test/e2e/shots-title-mask/
             web/test/e2e/shots-v558/
           retention-days: 7
 

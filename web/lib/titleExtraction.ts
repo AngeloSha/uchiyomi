@@ -1,9 +1,16 @@
 import { keys } from './i18n';
 import { sameCoverSelection, type CoverTitleRect } from './coverTitleRegions';
+import type { TitleMaskStroke } from './titleMaskRaster';
 
 export interface TitleExtractionCapabilities {
   available: boolean; reason: string | null; automaticAvailable: boolean; automaticApplyAvailable: boolean;
   maxExclusions: number; timeoutSeconds: number;
+  maskCorrection?: boolean;
+}
+export interface TitleExtractionMask {
+  revision: number; strokes: TitleMaskStroke[];
+  canvas: { width: number; height: number; sourceUrl: string; baselineUrl: string };
+  previewRegion?: CoverTitleRect | null;
 }
 export interface TitleExtractionJob {
   id: string; seriesId: string; automatic: boolean;
@@ -13,11 +20,21 @@ export interface TitleExtractionJob {
   selectionMode?: 'manual' | 'automatic' | 'legacy';
   resultRegion?: CoverTitleRect | null;
   candidateRegion?: CoverTitleRect | null;
+  mask?: TitleExtractionMask | null;
   quality: Record<string, unknown> | null;
 }
 export const EXTRACTION_CAPABILITIES_KEY = ['title-extraction-capabilities'] as const;
 export const EXTRACTION_CAPABILITIES_URL = '/api/admin/title-extraction/capabilities';
 export const extractionRoot = (id: string) => `/api/admin/series/${encodeURIComponent(id)}/title-extraction`;
+/** A decoded preview is usable only for this job's exact saved correction revision. Never attach auth to remote URLs. */
+export function extractionPreviewPath(seriesId: string, job: TitleExtractionJob | null): string | null {
+  if (!job?.previewUrl || job.seriesId !== seriesId) return null;
+  const path = `${extractionRoot(seriesId)}/${encodeURIComponent(job.id)}/preview`;
+  if (!job.mask) return path;
+  return Number.isSafeInteger(job.mask.revision) && job.mask.revision >= 0 ? `${path}?revision=${job.mask.revision}` : null;
+}
+export const extractionPreviewDecoded = (seriesId: string, job: TitleExtractionJob | null, decodedPath: string | null): boolean =>
+  !!decodedPath && decodedPath === extractionPreviewPath(seriesId, job);
 export const extractionActive = (job?: TitleExtractionJob | null): boolean => job?.status === 'queued' || job?.status === 'running';
 export const extractionPoll = (job: TitleExtractionJob | null | undefined, failed = false, paused = false): number | false =>
   extractionActive(job) && !failed && !paused ? 1500 : false;

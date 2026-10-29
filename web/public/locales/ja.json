@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4453
+    "strings": 4478
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -4456,5 +4456,30 @@
   "The cover or artwork changed. Create a new preview before applying.": "表紙またはタイトル画像が変更されました。適用する前に新しいプレビューを作成してください。",
   "This preview has expired. Create a new one.": "このプレビューの有効期限が切れました。新しく作成してください。",
   "The title could not be separated from the cover. Adjust the title area and try again.": "表紙からタイトルを分離できませんでした。タイトル範囲を調整して、もう一度お試しください。",
-  "From the cover": "表紙から抽出"
+  "From the cover": "表紙から抽出",
+  "Fine-tune title": "タイトルを微調整",
+  "Erase": "消す",
+  "Move": "移動",
+  "Brush size": "ブラシの大きさ",
+  "Zoom": "ズーム",
+  "Zoom out": "縮小",
+  "Fit to view": "全体を表示",
+  "Reset corrections": "修正をリセット",
+  "Save corrections": "修正を保存",
+  "Saving corrections…": "修正を保存中…",
+  "Corrections saved.": "修正を保存しました。",
+  "Unsaved corrections": "未保存の修正",
+  "Paint over missing lettering to restore it, or erase unwanted parts. Zoom in for precise edges.": "欠けた文字をなぞって戻すか、不要な部分を消してください。拡大すると輪郭を細かく調整できます。",
+  "The faint cover is a guide. The previews show the actual cutout.": "薄く表示された表紙はガイドです。プレビューには実際の切り抜きが表示されます。",
+  "Save corrections before applying this title.": "このタイトルを適用する前に修正を保存してください。",
+  "All lettering is hidden. Restore part of the title before saving.": "タイトル全体が非表示になっています。保存する前に一部を戻してください。",
+  "Too many brush strokes. Undo a stroke or reset corrections.": "ブラシの線が多すぎます。元に戻すか、修正をリセットしてください。",
+  "This correction is too detailed. Use fewer strokes or a smaller brush.": "この修正は細かすぎます。線を減らすか、ブラシを小さくしてください。",
+  "Could not load the correction editor. Try again.": "修正エディターを読み込めませんでした。もう一度お試しください。",
+  "Could not save corrections. Your current artwork is unchanged.": "修正を保存できませんでした。現在の画像は変更されていません。",
+  "This preview changed elsewhere. Reload it before editing again.": "このプレビューは別の場所で変更されました。編集する前に再読み込みしてください。",
+  "Create a new preview to fine-tune this title.": "このタイトルを微調整するには、新しいプレビューを作成してください。",
+  "Preparing the editor…": "エディターを準備中…",
+  "Title correction canvas": "タイトル修正キャンバス",
+  "The arrow keys move the brush; Space paints. Hold Shift for larger steps.": "矢印キーでブラシを移動し、スペースで塗ります。Shiftを押すと大きく移動します。"
 }

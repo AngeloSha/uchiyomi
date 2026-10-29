@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4453
+    "strings": 4478
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4456,5 +4456,30 @@
   "The cover or artwork changed. Create a new preview before applying.": "封面或标题图片已更改。应用前请创建新预览。",
   "This preview has expired. Create a new one.": "此预览已过期。请重新创建。",
   "The title could not be separated from the cover. Adjust the title area and try again.": "无法从封面中分离标题。请调整标题区域后重试。",
-  "From the cover": "来自封面"
+  "From the cover": "来自封面",
+  "Fine-tune title": "微调标题",
+  "Erase": "擦除",
+  "Move": "移动",
+  "Brush size": "画笔大小",
+  "Zoom": "缩放",
+  "Zoom out": "缩小",
+  "Fit to view": "适应视图",
+  "Reset corrections": "重置修正",
+  "Save corrections": "保存修正",
+  "Saving corrections…": "正在保存修正…",
+  "Corrections saved.": "修正已保存。",
+  "Unsaved corrections": "未保存的修正",
+  "Paint over missing lettering to restore it, or erase unwanted parts. Zoom in for precise edges.": "涂抹缺失的文字来恢复它们，或擦除不需要的部分。放大可精细调整边缘。",
+  "The faint cover is a guide. The previews show the actual cutout.": "淡色封面仅作参考，预览显示实际切图。",
+  "Save corrections before applying this title.": "应用此标题前请先保存修正。",
+  "All lettering is hidden. Restore part of the title before saving.": "所有文字均已隐藏。请先恢复一部分再保存。",
+  "Too many brush strokes. Undo a stroke or reset corrections.": "画笔笔画过多。请撤销一笔或重置修正。",
+  "This correction is too detailed. Use fewer strokes or a smaller brush.": "此修正过于复杂。请减少笔画或使用更小的画笔。",
+  "Could not load the correction editor. Try again.": "无法加载修正编辑器。请重试。",
+  "Could not save corrections. Your current artwork is unchanged.": "无法保存修正。当前图片未更改。",
+  "This preview changed elsewhere. Reload it before editing again.": "此预览已在其他地方更改。请重新加载后再编辑。",
+  "Create a new preview to fine-tune this title.": "请创建新预览后再微调此标题。",
+  "Preparing the editor…": "正在准备编辑器…",
+  "Title correction canvas": "标题修正画布",
+  "The arrow keys move the brush; Space paints. Hold Shift for larger steps.": "方向键移动画笔，空格键涂抹。按住 Shift 可加大移动步长。"
 }

@@ -7,13 +7,15 @@ import type { Series } from '@/lib/types';
 import { useLayer } from '@/lib/layers';
 import {
   EXTRACTION_CAPABILITIES_KEY, EXTRACTION_CAPABILITIES_URL, extractionActive, extractionCanApply, extractionPoll,
-  extractionProblem, extractionRoot, extractionSelectionChanged, extractionJobSelection, type TitleExtractionCapabilities, type TitleExtractionJob,
+  extractionProblem, extractionRoot, extractionSelectionChanged, extractionJobSelection, extractionPreviewPath, extractionPreviewDecoded, type TitleExtractionCapabilities, type TitleExtractionJob,
 } from '@/lib/titleExtraction';
 import { OnBody } from './ui';
 import { HeroTitle } from './HeroTitle';
 import { ProgressRing } from './ProgressRing';
 import { SwitchRow } from './settings';
 import { CoverTitleRegions, type CoverTitleSelection } from './CoverTitleRegions';
+import { CoverTitleMaskEditor, type TitleMaskDraft } from './CoverTitleMaskEditor';
+import type { TitleMaskStroke } from '@/lib/titleMaskRaster';
 
 export function useTitleExtractionCapabilities() {
   return useQuery({ queryKey: EXTRACTION_CAPABILITIES_KEY, queryFn: () => api<TitleExtractionCapabilities>(EXTRACTION_CAPABILITIES_URL),
@@ -88,13 +90,19 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
   const root = extractionRoot(series.id);
   const [selection, setSelection] = useState<CoverTitleSelection>({ region: null, exclusions: [] });
   const [job, setJob] = useState<TitleExtractionJob | null>(null);
-  const [operation, setOperation] = useState<'create' | 'apply' | 'cancel' | null>(null);
+  const [operation, setOperation] = useState<'create' | 'apply' | 'cancel' | 'mask' | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
   const [paused, setPaused] = useState(false);
   const [pollRound, setPollRound] = useState(0);
   const [attempt, setAttempt] = useState(0);
-  const [previewDecoded, setPreviewDecoded] = useState(false);
+  const [previewAttempt, setPreviewAttempt] = useState(0);
+  const [decodedPreviewPath, setDecodedPreviewPath] = useState<string | null>(null);
+  const [maskEditing, setMaskEditing] = useState(false);
+  const [maskDraft, setMaskDraft] = useState<TitleMaskDraft | null>(null);
+  const [maskConflict, setMaskConflict] = useState(false);
+  const [maskProblem, setMaskProblem] = useState<string | null>(null);
+  const [maskSaved, setMaskSaved] = useState(false);
   const closed = useRef(false);
   const applied = useRef(false);
   const jobRef = useRef<TitleExtractionJob | null>(null);
@@ -117,6 +125,7 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
     refetchOnWindowFocus: false, gcTime: 0, refetchInterval: (query) => extractionPoll(query.state.data?.job ?? job, query.state.status === 'error', paused) });
   useEffect(() => {
     if (progress.data?.job && progress.data.job.id === job?.id) {
+      if ((progress.data.job.mask?.revision ?? -1) < (job.mask?.revision ?? -1)) return;
       if (extractionActive(job) && !extractionActive(progress.data.job)) {
         setSelection(extractionJobSelection(progress.data.job));
       }
@@ -132,12 +141,20 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
   const coverPath = job && !stale ? `${root}/${encodeURIComponent(job.id)}/cover` : `${root}/cover`;
   const cover = useExtractionImage(coverPath, attempt);
   const changed = extractionSelectionChanged(job, selection);
-  const previewPath = job?.previewUrl && ['ready', 'rejected'].includes(job.status) && !stale && !changed ? `${root}/${encodeURIComponent(job.id)}/preview` : null;
-  const preview = useExtractionImage(previewPath, attempt);
-  useEffect(() => { setPreviewDecoded(false); }, [preview.image?.url]);
+  const previewPath = job && ['ready', 'rejected'].includes(job.status) && !stale && !changed ? extractionPreviewPath(series.id, job) : null;
+  const preview = useExtractionImage(previewPath, attempt + previewAttempt);
   const active = extractionActive(job);
   const busy = operation !== null;
-  const canApply = extractionCanApply(job, changed, stale, previewDecoded && !!cover.image && !progress.isError, busy);
+  const currentMaskDraft = maskDraft?.jobId === job?.id ? maskDraft : null;
+  const maskDirty = !!currentMaskDraft && (currentMaskDraft.dirty || currentMaskDraft.drawing);
+  const localPreview = maskDirty && currentMaskDraft?.valid ? currentMaskDraft.previewUrl : null;
+  const displayedPreview = maskDirty ? localPreview : preview.image?.url;
+  const canApply = extractionCanApply(job, changed, stale, !!preview.image && extractionPreviewDecoded(series.id, job, decodedPreviewPath) && !!cover.image && !progress.isError, busy)
+    && !maskDirty && !maskConflict;
+  const maskDraftChanged = useCallback((draft: TitleMaskDraft | null) => setMaskDraft(draft), []);
+  useEffect(() => {
+    setMaskEditing(false); setMaskDraft(null); setMaskConflict(false); setMaskProblem(null); setMaskSaved(false);
+  }, [job?.id, changed]);
 
   const remove = useCallback(async (candidate: TitleExtractionJob | null) => {
     if (candidate && candidate.status !== 'applied') await api(`${root}/${encodeURIComponent(candidate.id)}`, { method: 'DELETE' });
@@ -185,14 +202,41 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
     if (!canApply || !job) return;
     setOperation('apply'); setProblem(null);
     try {
-      await api(`${root}/${encodeURIComponent(job.id)}/apply`, { method: 'POST', json: {} });
+      await api(`${root}/${encodeURIComponent(job.id)}/apply`, { method: 'POST', json: job.mask ? { expectedMaskRevision: job.mask.revision } : {} });
       applied.current = true;
       onSaved();
       for (const key of [['series', series.id], ['featured'], ['admin-title-logo-scan'], ['title-extraction-latest', series.id]]) void qc.invalidateQueries({ queryKey: key });
       onClose();
     } catch (error) {
-      setProblem(codeOf(error) ?? 'extract_failed');
-      if (error instanceof ApiError && [404, 409, 410].includes(error.status)) { setStale(true); setSelection({ region: null, exclusions: [] }); onSaved(); }
+      if (codeOf(error) === 'stale_mask') {
+        setMaskConflict(true); setMaskProblem(tr('This preview changed elsewhere. Reload it before editing again.'));
+      } else {
+        setProblem(codeOf(error) ?? 'extract_failed');
+        if (error instanceof ApiError && [404, 409, 410].includes(error.status)) { setStale(true); setSelection({ region: null, exclusions: [] }); onSaved(); }
+      }
+    } finally { setOperation(null); }
+  };
+  const saveMask = async (strokes: TitleMaskStroke[]) => {
+    if (!job?.mask || busy || maskConflict) return;
+    setOperation('mask'); setMaskProblem(null); setMaskSaved(false);
+    try {
+      const result = await api<{ job: TitleExtractionJob }>(`${root}/${encodeURIComponent(job.id)}/mask`, {
+        method: 'PATCH', json: { expectedRevision: job.mask.revision, strokes },
+      });
+      if (closed.current || jobRef.current?.id !== result.job.id) return;
+      setJob(result.job); qc.setQueryData(['title-extraction-job', series.id, result.job.id], result); setMaskSaved(true);
+    } catch (error) {
+      if (codeOf(error) === 'stale_mask' || error instanceof ApiError && [404, 409, 410].includes(error.status)) {
+        setMaskConflict(true); setMaskProblem(tr('This preview changed elsewhere. Reload it before editing again.'));
+      } else setMaskProblem(tr('Could not save corrections. Your current artwork is unchanged.'));
+    } finally { if (!closed.current) setOperation(null); }
+  };
+  const reloadMask = async () => {
+    if (busy) return;
+    setOperation('mask'); setMaskEditing(false); setMaskDraft(null); setMaskSaved(false);
+    try {
+      const result = await progress.refetch();
+      if (result.data?.job && !result.error) { setJob(result.data.job); setMaskProblem(null); setMaskConflict(false); setPreviewAttempt((n) => n + 1); }
     } finally { setOperation(null); }
   };
   const keyDown = (event: globalThis.KeyboardEvent) => {
@@ -229,13 +273,20 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
       <div className="min-h-0 overflow-y-auto overscroll-contain p-4" data-extract-scroll data-lenis-prevent>
         <div className="grid min-w-0 gap-6 lg:grid-cols-2">
           <section className="min-w-0">
-            <h3 className="mb-3 text-sm font-semibold text-fog-200">{tr('Choose the title')}</h3>
-            {cover.image ? <CoverTitleRegions key={cover.image.url} src={cover.image.url} selection={selection} disabled={busy || active}
+            <h3 className="mb-3 text-sm font-semibold text-fog-200">{maskEditing ? tr('Fine-tune title') : tr('Choose the title')}</h3>
+            {maskEditing && job?.mask && cover.image ? <CoverTitleMaskEditor key={job.id} jobId={job.id} mask={job.mask} sourceUrl={cover.image.url}
+              baselinePath={`${root}/${encodeURIComponent(job.id)}/mask/baseline`} disabled={busy || maskConflict}
+              onDraft={maskDraftChanged} onReset={() => saveMask([])} onDone={() => { setMaskEditing(false); setMaskDraft(null); }} />
+              : cover.image ? <CoverTitleRegions key={cover.image.url} src={cover.image.url} selection={selection} disabled={busy || active}
               maxExclusions={Math.min(8, capabilities.maxExclusions)} onChange={setSelection} />
               : <p className="text-xs text-fog-400">{cover.failed ? tr('The cover could not be loaded. Close this preview and try again.') : tr('Loading…')}</p>}
           </section>
           <section className="min-w-0" data-extract-result={job?.status ?? 'idle'} data-extract-selection-mode={job?.selectionMode}>
             <h3 className="mb-3 text-sm font-semibold text-fog-200">{tr('Preview the title')}</h3>
+            {job?.status === 'ready' && !changed && !stale && capabilities.maskCorrection && !maskEditing && <div className="mb-3">
+              {job.mask ? <button type="button" className="btn-key" data-extract-fine-tune disabled={busy} onClick={() => { setMaskEditing(true); setMaskProblem(null); setMaskSaved(false); }}>{tr('Fine-tune title')}</button>
+                : <p className="text-xs text-fog-400">{tr('Create a new preview to fine-tune this title.')}</p>}
+            </div>}
             {latest.isPending && <p className="text-xs text-fog-400">{tr('Checking for a saved preview…')}</p>}
             {(active || operation === 'create') && <div className="mb-4 flex items-center gap-3 text-sm text-fog-300" aria-live="polite">
               <ProgressRing progress="spin" /><span>{job?.status === 'queued' ? tr('Waiting to create your preview…') : tr('Creating your title preview…')}</span>
@@ -247,22 +298,29 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
             {errorMessage && <p role="alert" className="mb-3 text-xs leading-relaxed text-amber-200" data-extract-error>{tr(errorMessage)}</p>}
             {job?.automatic && <p className="mb-3 text-xs text-fog-400">{tr('Prepared automatically for your review. Nothing has been applied.')}</p>}
             {changed && <p className="mb-3 text-xs text-amber-200" aria-live="polite" data-extract-selection-changed>{tr('The selected areas changed. Create a new preview before applying.')}</p>}
-            {preview.image ? <>
-              <ExtractionHeroPreview series={series} url={preview.image.url} onDecoded={() => setPreviewDecoded(true)} />
+            {maskDirty && <p className="mb-3 text-xs text-amber-200" data-mask-unsaved>{tr('Save corrections before applying this title.')}</p>}
+            {maskProblem && <div className="mb-3 space-y-2"><p role="alert" className="text-xs text-amber-200" data-mask-save-error>{maskProblem}</p>
+              {maskConflict && <button type="button" className="btn-key" data-mask-reload onClick={() => void reloadMask()}>{tr('Reload preview')}</button>}</div>}
+            {maskSaved && !maskDirty && <p className="mb-3 text-xs text-accent" data-mask-saved>{tr('Corrections saved.')}</p>}
+            {displayedPreview ? <>
+              <ExtractionHeroPreview series={series} url={displayedPreview} onDecoded={() => { if (!maskDirty && preview.image) setDecodedPreviewPath(preview.image.path); }} />
               <p className="mt-3 text-xs leading-relaxed text-fog-300">{tr('Check that the whole title is present, with clean edges and no author names or volume numbers. A preview can miss letters; only apply it if it looks right.')}</p>
-            </> : !active && !changed && <p className="text-xs leading-relaxed text-fog-400">{tr('Create a preview to see how the title looks on dark and light backgrounds.')}</p>}
-            {preview.failed && <div className="mt-3 space-y-2"><p role="alert" className="text-xs text-amber-200">{tr('The title preview could not be loaded.')}</p>
-              <button type="button" className="btn-key" onClick={() => setAttempt((n) => n + 1)}>{tr('Try again')}</button></div>}
+            </> : !active && !changed && !maskEditing && <p className="text-xs leading-relaxed text-fog-400">{tr('Create a preview to see how the title looks on dark and light backgrounds.')}</p>}
+            {preview.failed && !maskDirty && <div className="mt-3 space-y-2"><p role="alert" className="text-xs text-amber-200">{tr('The title preview could not be loaded.')}</p>
+              <button type="button" className="btn-key" onClick={() => { void progress.refetch(); setPreviewAttempt((n) => n + 1); }}>{tr('Try again')}</button></div>}
           </section>
         </div>
       </div>
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-ink-800 bg-ink-950 p-3">
         <button type="button" className="btn-key" data-extract-discard disabled={operation === 'apply'} onClick={onClose}>{tr('Discard')}</button>
         {active && <button type="button" className="btn-key" data-extract-cancel disabled={busy} onClick={() => void cancel()}>{tr('Cancel preview')}</button>}
-        <button type="button" className="btn-key" data-extract-create disabled={busy || active || latest.isPending || !cover.image?.fingerprint} onClick={() => void create()}>
+        <button type="button" className="btn-key" data-extract-create disabled={busy || active || maskDirty || latest.isPending || !cover.image?.fingerprint} onClick={() => void create()}>
           {job ? tr('Create a new preview') : tr('Create preview')}</button>
-        <button type="button" className="btn-accent px-4 py-2 text-sm disabled:opacity-40" data-extract-apply disabled={!canApply} onClick={() => void apply()}>
-          {operation === 'apply' ? tr('Applying…') : tr('Apply title artwork')}</button>
+        {maskDirty ? <button type="button" className="btn-accent px-4 py-2 text-sm disabled:opacity-40" data-mask-save
+          disabled={busy || maskConflict || !currentMaskDraft?.valid || currentMaskDraft.drawing || currentMaskDraft.revision !== job?.mask?.revision}
+          onClick={() => { if (currentMaskDraft) void saveMask(currentMaskDraft.strokes); }}>{operation === 'mask' ? tr('Saving corrections…') : tr('Save corrections')}</button>
+          : <button type="button" className="btn-accent px-4 py-2 text-sm disabled:opacity-40" data-extract-apply disabled={!canApply} onClick={() => void apply()}>
+            {operation === 'apply' ? tr('Applying…') : tr('Apply title artwork')}</button>}
       </div>
     </div>
   </div>;
