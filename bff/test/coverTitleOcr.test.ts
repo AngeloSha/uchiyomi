@@ -80,3 +80,13 @@ test('untrusted source hashes, oversized geometry and missing runtime cannot byp
   const preview = await badPack.assess(f.want);
   assert.equal(preview.safeToApply, false); assert.equal(preview.manualApplyAllowed, true);
 });
+
+test('a worker claim cannot turn an opaque rectangle or empty alpha plane into a valid title cutout', async () => {
+  for (const background of ['#ffffffff', '#00000000']) {
+    const f = await fixture();
+    const candidateBytes = await sharp({ create: { width: 400, height: 120, channels: 4, background } }).png().toBuffer();
+    const quality = await f.adapter.assess({ ...f.want, candidateBytes });
+    assert.equal(quality.safeToApply, false); assert.equal(quality.manualApplyAllowed, false);
+    assert.ok(quality.reasons.some((r) => r.severity === 'error'));
+  }
+});
