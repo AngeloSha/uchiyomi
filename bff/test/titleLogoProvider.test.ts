@@ -98,6 +98,24 @@ test('a checked AniList manga ID leads through verified claims to a local raster
     assert.match(opts.headers['user-agent'], /Uchiyomi.*https:\/\/github\.com\/AngeloSha\/uchiyomi/);
     assert.equal(opts.headers.authorization, undefined);
   }
+  for (const { url } of f.asked.filter((a) => a.url.pathname === '/w/api.php')) assert.equal(url.searchParams.get('maxlag'), '5');
+});
+
+test('only explicitly interactive metadata queries omit maxlag; both modes retain every transport guard and pacing', async () => {
+  const manual = await fixture();
+  assert.equal((await manual.lookup(ID, { interactive: true })).kind, 'found');
+  for (const { url, opts } of manual.asked) {
+    assert.equal(url.searchParams.has('maxlag'), false);
+    assert.equal(opts.maxHops, 0);
+    assert.equal(opts.timeoutMs, 10_000);
+  }
+  assert.deepEqual(manual.waits, [1000, 1000, 1000]);
+  const background = await fixture();
+  assert.equal((await background.lookup(ID, { interactive: false })).kind, 'found');
+  for (const { url } of background.asked.filter((a) => a.url.pathname === '/w/api.php')) assert.equal(url.searchParams.get('maxlag'), '5');
+  const throttled = await fixture({ intercept: (url) => reply(url.href, {}, 429, { 'retry-after': '120' }) });
+  await assert.rejects(throttled.lookup(ID, { interactive: true }), (error: any) => error.retryAfterMs === 120_000);
+  assert.equal(throttled.asked.length, 1, 'interactive mode does not retry a provider throttle');
 });
 
 test('qualified English wins over an original-language logo, independently of incoming order and preferred rank', async () => {

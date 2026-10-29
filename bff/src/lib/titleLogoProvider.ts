@@ -16,6 +16,10 @@ export interface TitleLogoCandidate {
   };
 }
 export type TitleLogoLookupResult = { kind: 'found'; candidate: TitleLogoCandidate } | { kind: 'missing' };
+export interface TitleLogoLookupOptions {
+  /** Only an explicit administrator's Find logo action; queued/implicit lookups keep the background maxlag policy. */
+  interactive?: boolean;
+}
 
 /** The queue can postpone this lookup rather than retaining an outage as "no logo". */
 export class TitleLogoProviderUnavailable extends Error {
@@ -46,7 +50,7 @@ const text = (v: unknown, limit = 500): string | null => {
   if (typeof v !== 'string') return null;
   return plainText(plainText(v.slice(0, 5000))).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, limit) || null;
 };
-const apiUrl = (base: string, params: Record<string, string>) => `${base}?${new URLSearchParams({ format: 'json', formatversion: '2', maxlag: '5', ...params })}`;
+const apiUrl = (base: string, params: Record<string, string>, interactive: boolean) => `${base}?${new URLSearchParams({ format: 'json', formatversion: '2', ...(interactive ? {} : { maxlag: '5' }), ...params })}`;
 
 function retryAfter(r: PublicFetch, now: number): number | undefined {
   const raw = r.headers.get('retry-after');
@@ -132,7 +136,7 @@ async function rasterLogo(bytes: Buffer): Promise<boolean> {
 }
 
 /** Injectable transport/clock for tests; the normal client always uses the shared SSRF-guarded public fetch. */
-export function createTitleLogoProvider(deps: Dependencies = {}): (anilistId: string) => Promise<TitleLogoLookupResult> {
+export function createTitleLogoProvider(deps: Dependencies = {}): (anilistId: string, options?: TitleLogoLookupOptions) => Promise<TitleLogoLookupResult> {
   const fetcher = deps.fetchPublic ?? fetchPublic;
   const sleep = deps.sleep ?? delay;
   const now = deps.now ?? Date.now;
@@ -162,21 +166,24 @@ export function createTitleLogoProvider(deps: Dependencies = {}): (anilistId: st
     if (!body || typeof body !== 'object' || Array.isArray(body) || body.error) throw new TitleLogoProviderUnavailable('Wikimedia metadata is temporarily unavailable', retryAfter(r, now()));
     return body;
   };
-  return async (anilistId: string): Promise<TitleLogoLookupResult> => {
+  return async (anilistId: string, options: TitleLogoLookupOptions = {}): Promise<TitleLogoLookupResult> => {
     if (!/^[1-9]\d{0,9}$/.test(anilistId)) return { kind: 'missing' };
-    const search = await json(apiUrl(WIKIDATA, { action: 'query', list: 'search', srsearch: `haswbstatement:P8731=${anilistId}`, srnamespace: '0', srlimit: '5' }));
+    // MediaWiki explicitly distinguishes a person waiting for a result from background clients yielding to maxlag.
+    // This changes metadata's maxlag parameter only; both modes retain pacing, SSRF/image guards and 429 backoff.
+    const interactive = options.interactive === true;
+    const search = await json(apiUrl(WIKIDATA, { action: 'query', list: 'search', srsearch: `haswbstatement:P8731=${anilistId}`, srnamespace: '0', srlimit: '5' }, interactive));
     if (!Array.isArray(search.query?.search)) throw new TitleLogoProviderUnavailable('Wikimedia identity search was incomplete');
     if (Number(search.query.searchinfo?.totalhits) > 5 || search.continue) return { kind: 'missing' };
     const ids = [...new Set(records(search.query.search).map((r) => r.title).filter((id): id is string => typeof id === 'string' && /^Q[1-9]\d*$/.test(id)))].slice(0, 5);
     if (!ids.length) return { kind: 'missing' };
-    const body = await json(apiUrl(WIKIDATA, { action: 'wbgetentities', ids: ids.join('|'), props: 'claims|labels|aliases', languages: 'en|ja|ko|zh' }));
+    const body = await json(apiUrl(WIKIDATA, { action: 'wbgetentities', ids: ids.join('|'), props: 'claims|labels|aliases', languages: 'en|ja|ko|zh' }, interactive));
     if (!body.entities || typeof body.entities !== 'object') throw new TitleLogoProviderUnavailable('Wikimedia identities were incomplete');
     if (ids.some((id) => !body.entities[id] || (!body.entities[id].missing && !body.entities[id].claims))) throw new TitleLogoProviderUnavailable('Wikimedia identities were incomplete');
     const matches = ids.map((id) => body.entities[id]).filter((e): e is Json => e && typeof e === 'object' && values(claims(e, 'P8731')).includes(anilistId));
     if (matches.length !== 1) return { kind: 'missing' }; // Duplicated or changed identities need a human choice.
     const { logos, names } = choices(matches[0]);
     for (const logo of logos) {
-      const info = await json(apiUrl(COMMONS, { action: 'query', titles: `File:${logo.name}`, prop: 'imageinfo', iiprop: 'url|size|mime|extmetadata', iiurlwidth: '1200', iiurlheight: '600', iiextmetadatafilter: 'Artist|LicenseShortName|LicenseUrl|ImageDescription' }));
+      const info = await json(apiUrl(COMMONS, { action: 'query', titles: `File:${logo.name}`, prop: 'imageinfo', iiprop: 'url|size|mime|extmetadata', iiurlwidth: '1200', iiurlheight: '600', iiextmetadatafilter: 'Artist|LicenseShortName|LicenseUrl|ImageDescription' }, interactive));
       if (!Array.isArray(info.query?.pages)) throw new TitleLogoProviderUnavailable('Wikimedia image metadata was incomplete');
       const canonicalFile = (value: unknown) => typeof value === 'string' ? value.replace(/^File:/i, '').replace(/_/g, ' ').normalize('NFC') : '';
       const page = records(info.query.pages).find((p) => canonicalFile(p.title) === canonicalFile(logo.name) && !p.missing);
