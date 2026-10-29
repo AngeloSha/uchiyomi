@@ -594,6 +594,7 @@ const BOOK_KEYED_TABLES = [...BOOK_KEYED_USER_TABLES, 'book_overrides', 'page_ha
 /** Every table keyed on the series id. lib_books and lib_series themselves come last, on their own. */
 const SERIES_KEYED_TABLES = [
   'favorites', 'collection_items', 'ratings', 'series_colors', 'series_art', 'series_title_art', 'series_seen', 'series_trackers',
+  'series_title_extractions', 'series_title_extraction_state',
   'series_overrides', 'notes', 'series_sources', 'series_listing', 'chapter_failures', 'tracker_progress',
   'reading_events', 'offline_downloads', 'bookmarks', 'listing_progress',
   // v0.49.0: a series' posting-order numbers (#116) and its slow archive (#117). Both cascade from lib_series,
