@@ -140,6 +140,9 @@ class MaskTest(unittest.TestCase):
         for x in range(1, 7): extractor.view('same-source', rgb, [x, 20, x + 20, 32])
         self.assertEqual(len(extractor.cache), 6)
         self.assertNotIn('same-source:0,0,20,12', extractor.cache)
+        self.assertEqual(set(extractor.weak_cache), set(extractor.cache))
+        self.assertEqual(len(extractor.weak_cache), 6)
+        self.assertTrue(all(value.dtype == np.bool_ for value in extractor.weak_cache.values()))
 
     def test_manual_roi_and_split_masks_map_to_original_rgb_and_global_bounds(self):
         yy, xx = np.indices((150, 100)); rgb = np.dstack((xx, yy, (xx + yy) % 255)).astype(np.uint8)
@@ -238,10 +241,12 @@ class MaskTest(unittest.TestCase):
         rgb = np.zeros((150, 100, 3), dtype=np.uint8); rgb[45:70, 15:25] = [220, 180, 90]; rgb[60:70, 25:80] = [220, 180, 90]
         request = {**image_request(rgb=rgb), 'region': normalized([5, 30, 95, 90], 100, 150)}
         first = extractor.extract(request); cache = {key: value[0].copy() for key, value in extractor.cache.items()}; calls = len(count)
+        weak_cache = {key: value.copy() for key, value in extractor.weak_cache.items()}
         removed = extractor.extract({**request, 'exclusions': [normalized([10, 35, 30, 80], 100, 150)]})
         self.assertLess(removed['evidence']['inkPixels'], first['evidence']['inkPixels'])
         self.assertEqual(len(count), calls)
         self.assertTrue(all(np.array_equal(mask, extractor.cache[key][0]) for key, mask in cache.items()))
+        self.assertTrue(all(np.array_equal(mask, extractor.weak_cache[key]) for key, mask in weak_cache.items()))
         self.assertEqual(extractor.extract(request)['candidateBase64'], first['candidateBase64'])
 
     def test_wrong_view_shape_is_rejected_before_any_global_paste(self):

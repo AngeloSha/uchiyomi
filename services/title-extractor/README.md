@@ -7,11 +7,18 @@ result private until an administrator applies it or an empirically approved auto
 The main app image does not contain Python, segmentation weights or an extra translation model. This service has
 no library, database or application-config mount and requires no external network access during inference.
 
-Detection uses up to three overlapping views so a second title line can be found independently of the dominant
-line. The pinned base SAM checkpoint refines up to four proposed lines or glyphs in one additional image pass.
+Detection uses three overlapping views so a second title line can be found independently of the dominant
+line. A manual region also gets one full-cover context view; automatic detection already starts with that view. The pinned base SAM checkpoint refines up to four proposed lines or glyphs in one additional image pass.
 This improves lettering that the text detector misses, while retaining original RGB. It can still include scenery
 or miss a flourish, so a result remains a visual-review candidate. Model scores never approve automatic application.
-An initial preview can take about a minute on three CPU threads; repeated views use a small bounded mask cache.
+Dark outline completion also considers weak native text-model support near established bright lettering. It
+adds only original source pixels from small, nearby dark components that pass whole-image geometry, contrast,
+model-support and area limits. Components are measured before clipping, so a large background region cannot
+masquerade as a little outline. Enclosed transparent font counters are preserved from the original alpha; dark
+cover pixels visible through a letter hole cannot become recovered lettering. Existing alpha and multicolour RGB are preserved. This can recover a shadow or
+letter tip omitted by a hard text threshold; it does not reconstruct hidden strokes or certify a complete title.
+An initial preview can take about a minute on three CPU threads; repeated views use bounded six-entry hard/weak
+boolean mask caches. The extra manual context view is included in the application's 90-second worker budget.
 
 Once a preview is ready, **Fine-tune title** offers Restore/Erase brushes, zoom, pan, undo and reset. This editor
 changes only alpha using the saved original cover pixels; it does not run either model again. **Save corrections**

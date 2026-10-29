@@ -10,7 +10,7 @@ RUN pip install --no-cache-dir -r /service/requirements.txt
 COPY hi-sam.tar /tmp/hi-sam.tar
 RUN mkdir -p /opt/hi-sam /models && tar -xf /tmp/hi-sam.tar -C /opt/hi-sam && rm /tmp/hi-sam.tar \
  && rm -rf /opt/hi-sam/pretrained_checkpoint && ln -s /models /opt/hi-sam/pretrained_checkpoint
-COPY worker.py server.py sam_refinement.py /service/
+COPY worker.py server.py sam_refinement.py stroke_completion.py /service/
 WORKDIR /service
 USER 10002:10002
 ENV PORT=3081 HI_SAM_DIR=/opt/hi-sam INFERENCE_THREADS=3

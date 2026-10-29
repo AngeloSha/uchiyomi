@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import cv2
 import numpy as np
 from PIL import Image, ImageOps
+from stroke_completion import STROKE_COMPLETION_POLICY, complete_dark_strokes
 
 MAX_IMAGE_BYTES = 11 * 1024 * 1024
 MAX_PIXELS = 12_000_000
@@ -22,9 +23,10 @@ WEIGHTS = {
     'sam_vit_b_01ec64.pth': 'ec2df62732614e57411cdcf32a23ffdf28910380d03139ee0f4fcbe91eb8c912',
 }
 MODEL_FINGERPRINT = hashlib.sha256(json.dumps({
-    'algorithm': 'hisam-lines-sam-refinement-v2', 'sourceRevision': SOURCE_REVISION, 'weights': WEIGHTS,
-    'prepare': [1200, 1600], 'threshold': 0, 'views': 3,
+    'algorithm': 'hisam-lines-sam-refinement-v3', 'sourceRevision': SOURCE_REVISION, 'weights': WEIGHTS,
+    'prepare': [1200, 1600], 'threshold': 0, 'views': 4,
     'refinement': 'bounded-line-and-glyph-v1', 'cleanup': 'added-speckles-v1',
+    'strokeCompletion': STROKE_COMPLETION_POLICY,
 }, sort_keys=True).encode()).hexdigest()
 Image.MAX_IMAGE_PIXELS = MAX_PIXELS
 
@@ -271,20 +273,28 @@ class Extractor:
             checkpoint=str(source / 'pretrained_checkpoint/sam_tss_b_textseg.pth'), model_type='vit_b',
             hier_det=False, attn_layers=1, prompt_len=12)).eval().to('cpu'))
         self.cache = OrderedDict()
+        self.weak_cache = OrderedDict()
         self.source = source
         self.refiner = None
 
     def mask(self, key, rgb):
+        if not hasattr(self, 'weak_cache'):
+            self.weak_cache = OrderedDict()
         if key in self.cache:
             self.cache.move_to_end(key)
             return self.cache[key]
         with self.torch.inference_mode():
             self.predictor.set_image(rgb)
             _, logits, _, score = self.predictor.predict(return_logits=True)
-        value = np.squeeze(logits) > 0, float(np.squeeze(score))
+        raw = np.squeeze(logits)
+        if raw.shape != rgb.shape[:2] or not np.isfinite(raw).all():
+            raise ExtractionError('extract_failed', 500)
+        value = raw > 0, float(np.squeeze(score))
+        self.weak_cache[key] = raw > STROKE_COMPLETION_POLICY['weakLogit']
         self.cache[key] = value
         while len(self.cache) > 6:
-            self.cache.popitem(last=False)
+            old, _ = self.cache.popitem(last=False)
+            self.weak_cache.pop(old, None)
         return value
 
     def view(self, source_hash, rgb, box):
@@ -296,6 +306,15 @@ class Extractor:
         mapped = np.zeros(rgb.shape[:2], dtype=bool)
         mapped[top:bottom, left:right] = local
         return mapped, score
+
+    def full_support(self, source_hash, rgb, fallback):
+        if not hasattr(self, 'weak_cache'):
+            return fallback
+        box = [0, 0, rgb.shape[1], rgb.shape[0]]
+        key = source_hash + ':' + ','.join(map(str, box))
+        strong, _ = self.mask(key, rgb)
+        # Tests or a legacy in-memory cache without logits may retain only strong ink; no unsupported expansion.
+        return getattr(self, 'weak_cache', {}).get(key, strong)
 
     def extract(self, request):
         if not isinstance(request, dict) or set(request) - {'imageBase64', 'region', 'exclusions', 'expectedTitles'}:
@@ -328,6 +347,8 @@ class Extractor:
                 extra, _ = self.view(source_hash, rgb, box)
                 mask |= extra
         region = region or complete_region(mask, anchor or automatic_region(mask))
+        # Compute the one native context mask before lazily loading the second model on a cold manual request.
+        support = self.full_support(source_hash, rgb, mask)
         reference = mask.copy()
         proposals = refinement_proposals(mask, baseline, region)
         if proposals:
@@ -339,6 +360,7 @@ class Extractor:
                 np.ascontiguousarray(rgb[top:bottom, left:right]), mask[top:bottom, left:right].copy(), proposals)
         left, top, right, bottom = region
         mask[top:bottom, left:right] = clean_added_speckles(mask[top:bottom, left:right], baseline[top:bottom, left:right])
+        mask = complete_dark_strokes(rgb, mask, support, region)
         for left, top, right, bottom in excluded:
             mask[top:bottom, left:right] = False
             reference[top:bottom, left:right] = False
