@@ -2092,6 +2092,25 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS local_pick boolean NOT NULL
 -- in the environment outrank both. Additive: an older release never reads them.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS local_networks  text;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS trusted_proxies text;
+-- Title wordmarks are optional persistent art. Existing installations make no new online requests by default.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS automatic_title_logos boolean NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS series_title_art (
+  series_id text PRIMARY KEY REFERENCES lib_series(id) ON DELETE CASCADE,
+  mode text NOT NULL DEFAULT 'automatic' CHECK (mode IN ('automatic','custom','text')),
+  style text NOT NULL DEFAULT 'auto' CHECK (style IN ('auto','action','fantasy','scifi','soft','noir','plain')),
+  version bigint NOT NULL DEFAULT 0,
+  custom_file text,
+  auto_file text,
+  auto_anilist_id text,
+  auto_language text CHECK (auto_language IN ('en','original')),
+  auto_caption boolean NOT NULL DEFAULT true,
+  auto_manual boolean NOT NULL DEFAULT false,
+  auto_attribution jsonb,
+  lookup_status text NOT NULL DEFAULT 'missing' CHECK (lookup_status IN ('ready','missing','error')),
+  lookup_anilist_id text,
+  retry_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

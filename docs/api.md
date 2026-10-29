@@ -1896,6 +1896,7 @@ POST   /api/admin/sources/reload  GET    /api/admin/sources/custom
 POST   /api/admin/sources/custom  DELETE /api/admin/sources/custom/:id
 PATCH  /api/admin/sources/custom/:id
 PUT    /api/admin/series/:id/art  PUT    /api/admin/series/:id/meta
+POST   /api/admin/series/:id/logo/refresh
 POST   /api/admin/series/:id/hero/shuffle
 PATCH  /api/admin/series/:id      DELETE /api/admin/series/:id
 POST   /api/admin/series/:id/editions DELETE /api/admin/series/:id/edition
@@ -3143,6 +3144,7 @@ at once; a source with no picture, or that did not answer in time, is left out t
 own copy as an upload, so the cover survives the source changing or going away.
 ```
 GET    /img/series/:id/thumb      GET    /img/series/:id/backdrop
+GET    /img/series/:id/logo
 GET    /img/series/:id/hero
 GET    /img/extensions/icon/:pkgName
 GET    /img/books/:id/thumb       GET    /img/books/:id/page/:n

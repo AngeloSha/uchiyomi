@@ -32,6 +32,7 @@ import { q, one } from '../lib/db';
 import { pageFileVersion, pageFileVersionOf } from '../lib/pageCleanupFiles';
 import { viewCtxFor, visibleBookFile, seriesVisible, sourceAllowedFor, SYSTEM_CTX, type ViewCtx } from '../lib/visibility';
 import { artFile, firstPageBookOf, FIRST_PAGE } from '../lib/seriesArt';
+import { readTitleLogo } from '../lib/titleArt';
 import { namesOf } from '../lib/altTitles';
 import { HERO_FRAMES, backdropLook, heroFit, type HeroAr } from '../lib/heroFrame';
 import { heroServable, heroFrame, heroVariant, queueHero, type AutoHeroAr } from '../lib/autoHero';
@@ -1016,6 +1017,15 @@ export default async function imageRoutes(app: FastifyInstance) {
     const ar: HeroAr = (req.query as Record<string, string>)?.ar === 'tall' ? 'tall' : 'wide';
     const r = await backdropRecipe(id, style, ar, vc(req));
     return serveImage(req, reply, r.variant, r.producer);
+  });
+
+  // A title logo is already a local normalized raster. Do not crop it or fall back to a cover.
+  app.get('/img/series/:id/logo', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!(await seriesVisible(id, vc(req)))) return reply.code(404).header('cache-control', 'private, no-store').send({ error: 'not_found' });
+    const logo = await readTitleLogo(id);
+    if (!logo) return reply.code(404).header('cache-control', 'private, no-store').send({ error: 'not_found' });
+    return reply.type('image/webp').header('cache-control', 'private, max-age=86400').header('x-content-type-options', 'nosniff').send(logo.bytes);
   });
 
   // The automatic banner (v0.51.0, lib/autoHero.ts): four crops of the series' own pages, for a series with no banner

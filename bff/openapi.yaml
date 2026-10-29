@@ -419,6 +419,26 @@ components:
         strictly (LocalDateTime.parse) and a trailing `Z` or `.sss` would date every chapter at the epoch.
         A required date that is not known is `1970-01-01T00:00:00`.
       example: "2026-09-20T12:34:56"
+    TitleArt:
+      type: object
+      description: Cached title-logo metadata on enriched series. Pending/error may retain a usable cached logoUrl.
+      required: [mode, style, status, version, logoUrl, language, showReadableTitle, attribution]
+      properties:
+        mode: { type: string, enum: [automatic, custom, text] }
+        style: { type: string, enum: [auto, action, fantasy, scifi, soft, noir, plain] }
+        status: { type: string, enum: [ready, pending, missing, error, disabled] }
+        version: { type: integer }
+        logoUrl: { type: [string, "null"], description: Authenticated local image URL; never an external image address. }
+        language: { type: [string, "null"], enum: [en, original, null] }
+        showReadableTitle: { type: boolean }
+        attribution:
+          type: [object, "null"]
+          properties:
+            source: { type: string, enum: [Wikimedia Commons] }
+            sourceUrl: { type: string }
+            artist: { type: [string, "null"] }
+            license: { type: [string, "null"] }
+            licenseUrl: { type: [string, "null"] }
     KomgaAuthor:
       type: object
       required: [name, role]
@@ -2117,6 +2137,8 @@ paths:
                 type: object
                 additionalProperties: true
                 properties:
+                  titleArt:
+                    $ref: "#/components/schemas/TitleArt"
                   autoHero:
                     description: >-
                       Since v0.51.0, on every series in a payload: `{seed}` once the banner made from its own pages
@@ -7287,6 +7309,28 @@ paths:
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+  /img/series/{id}/logo:
+    get:
+      tags: [images]
+      operationId: getImgSeriesIdLogo
+      summary: The series' local transparent title logo, if one is selected.
+      description: >-
+        Uses the standard image authentication and viewer visibility rules. Hidden, merged, restricted or missing
+        logos return 404; there is no cover fallback. Bytes are sanitized WebP, privately cached; v is the TitleArt
+        version cache-buster. This read never starts an online lookup.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: v, in: query, schema: { type: integer } }
+      security: [{ bearer: [] }, { imgCookie: [] }, { opdsBasic: [] }]
+      responses:
+        "200":
+          description: Local logo retaining its alpha channel.
+          content:
+            image/webp:
+              schema: { type: string, format: binary }
+        "401": { description: Not authenticated }
+        "403": { description: Token scope disallows images }
+        "404": { description: No selected logo, or series not visible }
   /img/series/{id}/backdrop:
     get:
       tags:
@@ -8395,6 +8439,11 @@ paths:
                     description: Since v0.55.3 (#147), the notice switches' rule (PATCH hideNoticeShortOnly); true unless set off.
                   newMemberDefaults:
                     $ref: "#/components/schemas/NewMemberDefaults"
+                  automatic_title_logos:
+                    type: boolean
+                    description: >-
+                      Automatic linked-manga logo lookups through Wikidata and Wikimedia Commons. Off by default;
+                      library lookup opt-outs and first-page-only art choices also suppress automatic requests.
                   cleanup_read:
                     type: boolean
                     description: Whether the opt-in read-chapter cleanup is on. Off by default.
@@ -8521,6 +8570,9 @@ paths:
                   type: string
                 allowRegistration:
                   type: boolean
+                automaticTitleLogos:
+                  type: boolean
+                  description: Enable automatic exact linked-manga logo discovery. Default false; cached art remains usable when disabled.
                 updaterHours:
                   type: integer
                 extensionHours:
@@ -12011,7 +12063,7 @@ paths:
     put:
       tags:
         - admin
-      summary: Set a series' cover or banner (upload, URL, or a candidate).
+      summary: Set a series' cover, banner or transparent title logo.
       operationId: putApiAdminSeriesIdArt
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. `upload` takes an
@@ -12023,6 +12075,9 @@ paths:
         `source` (the cover only) takes the cover a followed source has for the series: only the source's id is sent, the
         picture's address is read from the source's own record of the series, and the server keeps its own copy.
         Automatic art is kept from an online entry only when it is named as the series is (v0.55.7).
+        For `kind: logo`, `upload` and `url` validate and keep a local alpha WebP copy; raw SVG is refused.
+        `text` selects styled text, `style` changes the fallback preset, and `reset` selects automatic mode/style.
+        Failed imports preserve the previous logo. Responses to logo changes also include TitleArt.
       parameters:
         - name: id
           in: path
@@ -12039,10 +12094,14 @@ paths:
               properties:
                 kind:
                   type: string
-                  enum: [cover, banner]
+                  enum: [cover, banner, logo]
                 mode:
                   type: string
-                  enum: [url, upload, reset, first_page, source]
+                  enum: [url, upload, reset, first_page, source, text, style]
+                style:
+                  type: string
+                  enum: [auto, action, fantasy, scifi, soft, noir, plain]
+                  description: Required for kind logo and mode style.
                 source:
                   type: string
                   description: For `source` (the cover only), the id of a source this series follows; see GET /api/admin/series/{id}/cover-candidates.
@@ -12068,6 +12127,34 @@ paths:
           description: Not found, or not visible to this account
         "413":
           description: The body is over the limit (a picture over 11 MB)
+  /api/admin/series/{id}/logo/refresh:
+    post:
+      tags: [admin]
+      operationId: postApiAdminSeriesIdLogoRefresh
+      summary: Find a title logo for this series' checked AniList manga link, in the background.
+      description: >-
+        Requires an admin and admin token scope. One explicit lookup may bypass automatic online opt-outs.
+        Custom/text choices return 409; reset to automatic first. Current good art remains during a refresh
+        or provider outage. A changed link or manual choice prevents publishing a stale result.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      security: [{ bearer: [] }]
+      responses:
+        "200":
+          description: Queued (or already pending); includes current TitleArt.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  status: { type: string }
+                  titleArt: { $ref: "#/components/schemas/TitleArt" }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or token lacks the admin scope }
+        "404": { description: Series not visible }
+        "409": { description: Manual choice active, or no checked AniList manga link }
+        "429": { description: Provider Retry-After/backoff is active, or the bounded worker queue is full }
   /api/admin/art/overview:
     get:
       tags:
