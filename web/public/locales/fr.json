@@ -4393,7 +4393,7 @@
   "Use styled title": "Utiliser un titre stylisé",
   "Your title logo. Automatic lookups will not replace it.": "Votre logo de titre. La recherche automatique ne le remplacera pas.",
   "Scan library": "Analyser la bibliothèque",
-  "Retry no matches": "Réessayer sans résultat",
+  "Retry no matches": "Relancer les recherches sans résultat",
   "Checking title artwork…": "Recherche des images de titre…",
   "Searches only titles with confirmed manga links and online lookups allowed. Your uploaded artwork and styled-title choices are kept.": "Seuls les titres avec des liens manga confirmés et les recherches en ligne autorisées sont vérifiés. Vos images importées et vos choix de style de titre sont conservés.",
   "Turn on automatic title logos to scan the library.": "Activez les logos de titre automatiques pour analyser la bibliothèque.",
@@ -4405,7 +4405,7 @@
   "Not checked yet": "Pas encore vérifiés",
   "Needs a manga link": "Lien manga requis",
   "Online lookups off": "Recherches en ligne désactivées",
-  "Own pages only": "Pages propres uniquement",
+  "Own pages only": "Pages de l’œuvre uniquement",
   "No match means the search finished without suitable artwork. The styled title stays visible.": "Aucun résultat signifie que la recherche s’est terminée sans image adaptée. Le titre stylisé reste visible.",
   "Next attempt: {time}": "Prochain essai : {time}",
   "Find original manga title artwork using confirmed manga links. Titles without artwork use styled text; your uploaded artwork always wins.": "Trouvez les images originales des titres de manga grâce à des liens confirmés. Sans image, le titre utilise du texte stylisé ; vos images importées restent toujours prioritaires."
