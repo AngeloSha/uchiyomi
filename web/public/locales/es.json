@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4388
+    "strings": 4405
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -4391,5 +4391,22 @@
   "Title style updated": "Estilo del título actualizado",
   "Transparent PNG or WebP works best. Original-language logos keep a readable title beneath them.": "Se recomienda PNG o WebP transparente. Los logotipos en el idioma original conservan debajo un título legible.",
   "Use styled title": "Usar título con estilo",
-  "Your title logo. Automatic lookups will not replace it.": "Tu logotipo del título. Las búsquedas automáticas no lo sustituirán."
+  "Your title logo. Automatic lookups will not replace it.": "Tu logotipo del título. Las búsquedas automáticas no lo sustituirán.",
+  "Scan library": "Escanear la biblioteca",
+  "Retry no matches": "Reintentar sin coincidencias",
+  "Checking title artwork…": "Buscando imágenes de títulos…",
+  "Searches only titles with confirmed manga links and online lookups allowed. Your uploaded artwork and styled-title choices are kept.": "Solo se buscan títulos con enlaces de manga confirmados y consultas en línea permitidas. Se conservan tus imágenes subidas y los estilos de título que hayas elegido.",
+  "Turn on automatic title logos to scan the library.": "Activa los logotipos de título automáticos para escanear la biblioteca.",
+  "Could not load title artwork progress.": "No se pudo cargar el progreso de las imágenes de título.",
+  "Could not start the title artwork scan.": "No se pudo iniciar la búsqueda de imágenes de título.",
+  "Checked online": "Comprobados en línea",
+  "Automatic logos ready": "Logotipos automáticos listos",
+  "Waiting to retry": "Pendientes de reintento",
+  "Not checked yet": "Sin comprobar aún",
+  "Needs a manga link": "Necesitan un enlace de manga",
+  "Online lookups off": "Consultas en línea desactivadas",
+  "Own pages only": "Solo páginas propias",
+  "No match means the search finished without suitable artwork. The styled title stays visible.": "Sin coincidencias significa que la búsqueda terminó sin una imagen adecuada. El título con estilo sigue visible.",
+  "Next attempt: {time}": "Próximo intento: {time}",
+  "Find original manga title artwork using confirmed manga links. Titles without artwork use styled text; your uploaded artwork always wins.": "Busca imágenes originales de títulos de manga mediante enlaces confirmados. Los títulos sin imagen usan texto con estilo; tus imágenes subidas siempre tienen prioridad."
 }

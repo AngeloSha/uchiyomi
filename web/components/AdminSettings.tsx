@@ -50,6 +50,7 @@ import { discoverSources } from '@/lib/sourceGroups';
 import { memberDefaultsOf } from '@/lib/memberDefaults';
 import { joinSentences } from '@/lib/jobs';
 import { clockText, hoursText, intervalChoices } from '@/lib/settingsChoices';
+import { TitleLogoScan } from '@/components/TitleLogoScan';
 
 /** One PATCH. Resolves once the server has answered, so the row that called it can show its tick. */
 type Save = (body: Record<string, unknown>) => Promise<unknown>;
@@ -532,9 +533,12 @@ function SeriesSection({ data, save }: { data: any; save: Save }) {
       </RowGroup>
 
       <RowGroup title={tr('From the internet')}>
-        <SwitchRow id="automatic-title-logos" label={tr('Automatic title logos')}
-          help={tr('Find original manga title artwork on Wikimedia using confirmed AniList links. Library online-lookup opt-outs are respected. Missing logos use styled text; your uploaded artwork always wins.')}
-          on={data.automatic_title_logos === true} onChange={(next) => save({ automaticTitleLogos: next })} />
+        <RowBlock id="automatic-title-logos">
+          <SwitchRow label={tr('Automatic title logos')}
+            help={tr('Find original manga title artwork using confirmed manga links. Titles without artwork use styled text; your uploaded artwork always wins.')}
+            on={data.automatic_title_logos === true} onChange={(next) => save({ automaticTitleLogos: next })} />
+          <TitleLogoScan enabled={data.automatic_title_logos === true} />
+        </RowBlock>
         {/* v0.73.0 (#257 and #245 from @Squeaks72): the nightly repair's ninth step. Off by default: it asks sources about
             series, and AniList's text is English. What it fills in sits below a series' own details, never over them. */}
         <SwitchRow id="fill-details" label={tr('Fill in missing details')}

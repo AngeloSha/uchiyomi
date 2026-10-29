@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4388
+    "strings": 4405
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -4391,5 +4391,22 @@
   "Title style updated": "Стиль названия обновлён",
   "Transparent PNG or WebP works best. Original-language logos keep a readable title beneath them.": "Лучше всего подходит прозрачный PNG или WebP. Под логотипом на языке оригинала остаётся читаемое название.",
   "Use styled title": "Использовать стилизованное название",
-  "Your title logo. Automatic lookups will not replace it.": "Ваш логотип названия. Автопоиск его не заменит."
+  "Your title logo. Automatic lookups will not replace it.": "Ваш логотип названия. Автопоиск его не заменит.",
+  "Scan library": "Проверить библиотеку",
+  "Retry no matches": "Повторить поиск без совпадений",
+  "Checking title artwork…": "Поиск изображений названий…",
+  "Searches only titles with confirmed manga links and online lookups allowed. Your uploaded artwork and styled-title choices are kept.": "Проверяются только произведения с подтверждёнными ссылками на мангу и разрешённым поиском в интернете. Загруженные вами изображения и выбранные стили названий сохраняются.",
+  "Turn on automatic title logos to scan the library.": "Включите автоматический поиск логотипов, чтобы проверить библиотеку.",
+  "Could not load title artwork progress.": "Не удалось загрузить ход поиска изображений названий.",
+  "Could not start the title artwork scan.": "Не удалось начать поиск изображений названий.",
+  "Checked online": "Проверено в интернете",
+  "Automatic logos ready": "Автоматических логотипов готово",
+  "Waiting to retry": "Ожидают повтора",
+  "Not checked yet": "Ещё не проверены",
+  "Needs a manga link": "Нужна ссылка на мангу",
+  "Online lookups off": "Поиск в интернете выключен",
+  "Own pages only": "Только страницы произведения",
+  "No match means the search finished without suitable artwork. The styled title stays visible.": "Отсутствие совпадений означает, что поиск завершён без подходящего изображения. Оформленное название остаётся видимым.",
+  "Next attempt: {time}": "Следующая попытка: {time}",
+  "Find original manga title artwork using confirmed manga links. Titles without artwork use styled text; your uploaded artwork always wins.": "Находите оригинальные изображения названий манги по подтверждённым ссылкам. Если изображения нет, используется оформленный текст; загруженные вами изображения всегда имеют приоритет."
 }

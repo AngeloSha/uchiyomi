@@ -12,10 +12,13 @@ export function titleArtStyle(genres: readonly string[] = [], chosen: TitleArtSt
   if (chosen !== 'auto') return chosen;
   const words = genres.map((g) => g.toLowerCase().replace(/[-_]/g, ' '));
   if (words.some((g) => /horror|mystery|thriller|psychological/.test(g))) return 'noir';
-  if (words.some((g) => /romance|slice of life|comedy|iyashikei/.test(g))) return 'soft';
+  // Romance and everyday-life stories keep their soft treatment. Comedy is a common secondary tag on action
+  // and fantasy manga, so it must not make their more distinctive lettering look like ordinary body text.
+  if (words.some((g) => /romance|slice of life|iyashikei/.test(g))) return 'soft';
   if (words.some((g) => /sci.?fi|science fiction|mecha|cyberpunk|game/.test(g))) return 'scifi';
   if (words.some((g) => /fantasy|historical|supernatural|isekai/.test(g))) return 'fantasy';
   if (words.some((g) => /action|adventure|martial arts|sports|superhero/.test(g))) return 'action';
+  if (words.some((g) => /comedy/.test(g))) return 'soft';
   return 'plain';
 }
 

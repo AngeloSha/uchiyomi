@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4388
+    "strings": 4405
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -4391,5 +4391,22 @@
   "Title style updated": "タイトルのスタイルを更新しました",
   "Transparent PNG or WebP works best. Original-language logos keep a readable title beneath them.": "透過PNGまたはWebPを推奨します。原語のロゴの下には、読めるタイトルも表示します。",
   "Use styled title": "装飾したタイトルを使用",
-  "Your title logo. Automatic lookups will not replace it.": "選択したタイトルロゴです。自動検索で置き換えることはありません。"
+  "Your title logo. Automatic lookups will not replace it.": "選択したタイトルロゴです。自動検索で置き換えることはありません。",
+  "Scan library": "ライブラリを確認",
+  "Retry no matches": "未発見の作品を再検索",
+  "Checking title artwork…": "タイトル画像を確認中…",
+  "Searches only titles with confirmed manga links and online lookups allowed. Your uploaded artwork and styled-title choices are kept.": "確認済みのマンガリンクがあり、オンライン検索が許可された作品だけを検索します。アップロードした画像と選択したタイトルスタイルは保持されます。",
+  "Turn on automatic title logos to scan the library.": "ライブラリを確認するには、タイトルロゴの自動取得を有効にしてください。",
+  "Could not load title artwork progress.": "タイトル画像の確認状況を読み込めませんでした。",
+  "Could not start the title artwork scan.": "タイトル画像の検索を開始できませんでした。",
+  "Checked online": "オンライン確認済み",
+  "Automatic logos ready": "自動取得ロゴあり",
+  "Waiting to retry": "再試行待ち",
+  "Not checked yet": "未確認",
+  "Needs a manga link": "マンガリンクが必要",
+  "Online lookups off": "オンライン検索が無効",
+  "Own pages only": "作品内のページのみ",
+  "No match means the search finished without suitable artwork. The styled title stays visible.": "「見つかりません」は、適切な画像がないまま検索が完了したことを意味します。装飾されたタイトルは引き続き表示されます。",
+  "Next attempt: {time}": "次の試行：{time}",
+  "Find original manga title artwork using confirmed manga links. Titles without artwork use styled text; your uploaded artwork always wins.": "確認済みのマンガリンクからオリジナルのタイトル画像を探します。画像がない作品は装飾された文字で表示され、アップロードした画像が常に優先されます。"
 }

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4388
+    "strings": 4405
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4391,5 +4391,22 @@
   "Title style updated": "标题样式已更新",
   "Transparent PNG or WebP works best. Original-language logos keep a readable title beneath them.": "建议使用透明 PNG 或 WebP。原文标志下方会保留可读的标题。",
   "Use styled title": "使用艺术字标题",
-  "Your title logo. Automatic lookups will not replace it.": "你选择的标题标志，自动搜索不会将其替换。"
+  "Your title logo. Automatic lookups will not replace it.": "你选择的标题标志，自动搜索不会将其替换。",
+  "Scan library": "检查书库",
+  "Retry no matches": "重试未匹配的作品",
+  "Checking title artwork…": "正在查找标题图片…",
+  "Searches only titles with confirmed manga links and online lookups allowed. Your uploaded artwork and styled-title choices are kept.": "仅搜索具有已确认漫画链接且允许在线查询的作品。你上传的图片和选择的标题样式都会保留。",
+  "Turn on automatic title logos to scan the library.": "请开启自动标题徽标以检查书库。",
+  "Could not load title artwork progress.": "无法加载标题图片查找进度。",
+  "Could not start the title artwork scan.": "无法开始查找标题图片。",
+  "Checked online": "已在线检查",
+  "Automatic logos ready": "自动徽标已就绪",
+  "Waiting to retry": "等待重试",
+  "Not checked yet": "尚未检查",
+  "Needs a manga link": "需要漫画链接",
+  "Online lookups off": "在线查询已关闭",
+  "Own pages only": "仅使用作品内页",
+  "No match means the search finished without suitable artwork. The styled title stays visible.": "无匹配表示搜索已结束，但未找到合适的图片。样式化标题会继续显示。",
+  "Next attempt: {time}": "下次尝试：{time}",
+  "Find original manga title artwork using confirmed manga links. Titles without artwork use styled text; your uploaded artwork always wins.": "通过已确认的漫画链接查找原创标题图片。没有图片的作品使用样式化文字；你上传的图片始终优先。"
 }

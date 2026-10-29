@@ -22,6 +22,22 @@ test('mixed genres choose the same title treatment regardless of metadata order,
   assert.equal(titleArtStyle(['Action'], 'plain'), 'plain');
 });
 
+test('comedy is a secondary mood and cannot erase action, fantasy or science-fiction lettering', () => {
+  for (const [genres, expected] of [
+    [['Action', 'Comedy'], 'action'],
+    [['Fantasy', 'Action', 'Comedy'], 'fantasy'],
+    [['Comedy', 'Science Fiction', 'Mecha'], 'scifi'],
+    [['Sports', 'Comedy'], 'action'],
+    [['Comedy'], 'soft'],
+    [['Romance', 'Fantasy', 'Comedy'], 'soft'],
+    [['Slice of Life', 'Action', 'Comedy'], 'soft'],
+  ] as const) {
+    assert.equal(titleArtStyle(genres), expected, genres.join(', '));
+    assert.equal(titleArtStyle([...genres].reverse()), expected, 'source genre order must not change the treatment');
+    assert.equal(titleArtStyle(genres, 'plain'), 'plain', 'an explicit choice still wins');
+  }
+});
+
 test('title palette lifts dark covers and cannot interpolate arbitrary CSS', () => {
   assert.equal(titleArtAccent('#000000'), '163 163 163');
   assert.equal(titleArtAccent('#ffffff'), '255 255 255');
