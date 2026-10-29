@@ -48,7 +48,7 @@ try {
       caption: h.querySelector('.hero-title-caption')?.textContent, fallback: !!h.querySelector('.hero-title-text') };
   });
   const click = async (selector) => {
-    await page.waitForSelector(selector, { visible: true });
+    await page.waitForSelector(selector, { visible: true }); await page.waitForFunction((value) => { const node = document.querySelector(value); return node && !node.disabled; }, {}, selector);
     await page.$eval(selector, (e) => e.scrollIntoView({ block: 'center' }));
     await page.click(selector);
   };

@@ -57,7 +57,7 @@ try {
   await page.goto(BASE + '/series/?id=' + encodeURIComponent(id), { waitUntil: 'networkidle2' });
   assert.ok(await pressSeriesMoreItem(page, 'edit-details'));
   await page.waitForSelector('[data-title-art-editor]', { visible: true });
-  const click = async (selector) => { await page.waitForSelector(selector, { visible: true }); await page.$eval(selector, (node) => node.scrollIntoView({ block: 'center' })); await page.click(selector); };
+  const click = async (selector) => { await page.waitForSelector(selector, { visible: true }); await page.waitForFunction((value) => { const node = document.querySelector(value); return node && !node.disabled; }, {}, selector); await page.$eval(selector, (node) => node.scrollIntoView({ block: 'center' })); await page.click(selector); };
   const open = async () => {
     if (!(await page.$eval('[data-art-extract-cover]', (node) => node.getClientRects().length > 0))) await click('[data-edit-tab="art"]');
     await click('[data-art-extract-cover]');
@@ -80,7 +80,8 @@ try {
   await click('[data-extract-exclusion-add]');
   await click('[data-extract-exclusion-keyboard]');
   const leftField = '[data-extract-exclusion="0"] [data-extract-coordinate="left"]';
-  await page.click(leftField, { clickCount: 3 });
+  await page.click(leftField);
+  await page.keyboard.press('Control+A');
   await page.keyboard.type('65');
   const creation = page.waitForResponse((response) => new URL(response.url()).pathname === root && response.request().method() === 'POST');
   await click('[data-extract-create]');
@@ -89,11 +90,17 @@ try {
   assert.equal(typeof selection.coverFingerprint, 'string');
   assert.ok(Math.abs(selection.region.left - .15) < .03 && Math.abs(selection.region.width - .7) < .03);
   assert.equal(selection.exclusions.length, 1);
+  assert.equal(selection.exclusions[0].left, .65, 'keyboard percentage editing reaches the selected value');
   assert.ok(!('x' in selection.region), 'API coordinates use left/top consistently');
   await ready();
   assert.equal((await detail()).titleArt.version, original.version, 'making and viewing a preview does not change current artwork');
   assert.equal(await page.$$eval('[data-extract-hero-preview] .hero-title-caption', (nodes) => nodes.length), 2, 'both backgrounds retain the readable name');
+  await page.$eval('[data-extract-hero-preview]', (node) => node.scrollIntoView({ block: 'center' }));
   await page.screenshot({ path: `${OUT}/extract-desktop.png` });
+  await page.evaluate(() => document.activeElement?.blur());
+  await page.keyboard.press('Tab');
+  assert.ok(await page.evaluate(() => document.querySelector('[data-title-extraction-dialog]')?.contains(document.activeElement)), 'Tab returns body focus to the active preview');
+  await page.evaluate(() => document.activeElement?.blur());
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.querySelector('[data-title-extraction-dialog]'));
   assert.ok(await page.$('[data-title-art-editor]'), 'Escape closes the preview, keeping Edit details open');

@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiResponse, ApiError } from '@/lib/api';
 import { t as tr } from '@/lib/i18n';
@@ -196,22 +196,32 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
       if (error instanceof ApiError && [404, 409, 410].includes(error.status)) { setStale(true); setSelection({ region: null, exclusions: [] }); onSaved(); }
     } finally { setOperation(null); }
   };
-  const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+  const keyDown = (event: globalThis.KeyboardEvent) => {
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (operation !== 'apply') closeRef.current(); }
     else if (event.key === 'Tab') {
       event.stopPropagation();
       const items = [...(panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),[tabindex="0"]') ?? [])].filter((el) => el.getClientRects().length);
       const first = items[0], last = items.at(-1);
-      if (event.shiftKey && (document.activeElement === first || document.activeElement === panel.current)) { event.preventDefault(); last?.focus(); }
+      if (!panel.current?.contains(document.activeElement) || document.activeElement === panel.current) { event.preventDefault(); (event.shiftKey ? last : first)?.focus(); }
+      else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     }
   };
+  const keyboard = useRef(keyDown);
+  keyboard.current = keyDown;
+  useEffect(() => {
+    // A temporarily disabled Create button can drop focus to <body>. Capture there too, before Edit details'
+    // document listener, so Escape closes only this top dialog and Tab returns to its own controls.
+    const capture = (event: globalThis.KeyboardEvent) => keyboard.current(event);
+    document.addEventListener('keydown', capture, true);
+    return () => document.removeEventListener('keydown', capture, true);
+  }, []);
   const errorMessage = problem !== null ? extractionProblem(problem) : job?.error ? extractionProblem(job.error)
     : job?.status === 'rejected' ? extractionProblem('rejected') : job?.status === 'expired' ? extractionProblem('expired') : null;
-  return <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-3 pb-[calc(6rem+env(safe-area-inset-bottom))] lg:px-6 lg:pb-28 lg:pt-[5.5rem]" onClick={() => { if (operation !== 'apply') onClose(); }}>
+  return <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/80 p-3 pb-[calc(6rem+env(safe-area-inset-bottom))] lg:px-6 lg:pb-28 lg:pt-[5.5rem]" onClick={() => { if (operation !== 'apply') onClose(); }}>
     <div ref={panel} tabIndex={-1} role="dialog" aria-modal="true" aria-label={tr('Extract title from cover')} data-title-extraction-dialog
       data-lenis-prevent className="flex max-h-[calc(100dvh-7rem-env(safe-area-inset-bottom))] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-ink-700 bg-ink-950 outline-hidden lg:max-h-[calc(100dvh-13rem)]"
-      onKeyDown={keyDown} onClick={(event) => event.stopPropagation()}>
+      onClick={(event) => event.stopPropagation()}>
       <div className="flex shrink-0 items-start justify-between gap-3 border-b border-ink-800 p-4">
         <div className="min-w-0"><h2 className="text-lg font-semibold text-fog-100">{tr('Extract title from cover')}</h2>
           <p className="mt-1 text-xs leading-relaxed text-fog-400">{tr('Your current artwork stays until you choose Apply.')}</p></div>
