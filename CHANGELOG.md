@@ -21,6 +21,9 @@
 - Cover selection reruns detection on overlapping title-line views and refines missed letters using the existing
   local SAM weights. Automatic selection groups neighboring lines and separated characters. Edited regions immediately
   hide the previous preview, and detected bounds remain separate from the administrator's requested selection.
+- Cover extraction can retain dark outlines and shadow strokes next to detected lettering when source-image
+  contrast, text-model support and bounded component checks agree. Original colors and previously detected ink
+  remain intact; ambiguous results still require visual review.
 - Title previews offer precise Restore and Erase brushes, zoom, pan, undo and reset. Corrections replay against an
   immutable cover and alpha mask, save as a private revision, and require review before Apply. Revision checks prevent
   older tabs from applying unseen corrections; manual corrections never inherit automatic quality approval.
