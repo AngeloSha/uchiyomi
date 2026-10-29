@@ -4,6 +4,7 @@
 // its container and breaks the layout, and a right-to-left language rendered inside a left-to-right frame,
 // which technically "works" and looks broken to anyone who reads it.
 import puppeteer from 'puppeteer';
+import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, mkdirSync } from 'fs';
 
 const BASE = process.env.BASE || 'http://127.0.0.1:18140';
@@ -16,47 +17,36 @@ const b = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox', '--di
 const p = await b.newPage();
 await p.setViewport({ width: 1280, height: 900 });
 
-// Sign in once.
-await p.goto(BASE, { waitUntil: 'networkidle2', timeout: 60000 });
-// networkidle2 fires before React has hydrated the login form under puppeteer 24 + Next 15, so grabbing
-// inputs immediately found none. Wait for the form itself, not the network.
-/**
- * Sign in, resolving each field at the moment it is typed into.
- *
- * ⚠️ NOT VIA `$$('input')` HANDLES. The form is grabbed after `waitForSelector`, but React re-renders it
- * once the session check settles, and a handle taken before that render points at a node that is no longer
- * in the document -- puppeteer then throws `DOM.resolveNode: Node with given id does not belong to the
- * document` and the whole run dies before a single language is checked. Passing a selector makes puppeteer
- * re-query at type time, which is the same race the comment above the original wait already describes.
- */
+// A successful POST is only the start of sign-in: AuthProvider still purges the old account's local
+// cache before it adopts the new user. A fixed sleep followed by goto can destroy that work on a busy
+// CI runner. Wait for the authenticated shell before navigating, and never measure the login screen.
 async function signIn() {
-  await p.waitForSelector('input[type=password]', { timeout: 30000 });
-  await new Promise((r) => setTimeout(r, 800));
-  await p.type('input:not([type=password])', process.env.E2E_USER || 'e2e');
-  await p.type('input[type=password]', process.env.E2E_PASS || 'e2e-passw0rd-123');
-  await p.keyboard.press('Enter');
-  await new Promise((r) => setTimeout(r, 4500));
+  await p.locator('form input[type="text"]').fill(process.env.E2E_USER || 'e2e');
+  await p.locator('form input[type="password"]').fill(process.env.E2E_PASS || 'e2e-passw0rd-123');
+  const response = p.waitForResponse((r) => new URL(r.url()).pathname === '/auth/login' && r.request().method() === 'POST', { timeout: 30000 });
+  await p.locator('form button[type="submit"]').click();
+  assert.equal((await response).status(), 200, 'the locale walk must sign in successfully');
+  await p.waitForSelector('[data-topbar]', { visible: true, timeout: 30000 });
+  await p.waitForSelector('input[type="password"]', { hidden: true, timeout: 30000 });
 }
-await signIn();
 
-/**
- * Sign in again if the session went, and wait for the library to have actually rendered.
- *
- * ⚠️ TWO RACES, BOTH OF WHICH MAKE THIS FILE MEASURE THE WRONG PAGE. This harness runs against the instance
- * the browser suite leaves behind, which ends by signing out and drives several tabs that share one cookie
- * jar; and `networkidle2` fires before React has painted, which is the same race the comment above the
- * login already records. Either way the text sampled below is a login form or an empty shell, and a
- * translation check against a page with no words on it passes every language.
- */
-async function readyLibrary() {
-  if (await p.$('input[type=password]')) {
-    await signIn();
-    await p.goto(LIBRARY_URL, { waitUntil: 'networkidle2', timeout: 60000 });
-  }
-  // The filter sidebar is the last thing on this page to exist, so it is the honest "rendered" signal.
-  await p.waitForSelector('aside', { timeout: 20000 }).catch(() => {});
-  await new Promise((r) => setTimeout(r, 1200));
+async function readyAuthenticated() {
+  // Refresh/hydration can reveal the password form after networkidle2. Observe both possible outcomes,
+  // rather than probing once and swallowing the later missing-page timeout.
+  await p.waitForFunction(() => document.querySelector('[data-topbar]') || document.querySelector('form input[type="password"]'), { timeout: 30000 });
+  if (await p.$('form input[type="password"]')) await signIn();
+  await p.waitForSelector('[data-topbar]', { visible: true, timeout: 30000 });
+  assert.equal(await p.$('form input[type="password"]'), null, 'translation checks require an authenticated page');
 }
+
+async function readyLibrary() {
+  await readyAuthenticated();
+  await p.waitForSelector('[data-library-toolbar]', { visible: true, timeout: 30000 });
+  await p.waitForSelector('aside', { visible: true, timeout: 30000 });
+}
+
+await p.goto(BASE, { waitUntil: 'networkidle2', timeout: 60000 });
+await readyAuthenticated();
 
 // `?sort=updated`: since v0.60.0 the order is one key in the toolbar saying the order in force, and this check reads its
 // label -- so the order is named in the URL rather than inherited from whatever an earlier walk saved as the default.
@@ -148,6 +138,7 @@ for (const code of LOCALES) {
   if (code !== 'en') {
     for (const [path, words] of CONSOLES) {
       await p.goto(`${BASE}${path}`, { waitUntil: 'networkidle2', timeout: 60000 });
+      await readyAuthenticated();
       await new Promise((r) => setTimeout(r, 2400));
       const text = await p.evaluate(() => document.body.innerText || '');
       const english = words.filter((w) => new RegExp(`\\b${w}\\b`).test(text));
