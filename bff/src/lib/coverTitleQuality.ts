@@ -9,7 +9,7 @@ export type CoverTitleQualityCode =
   | 'ocr_low_confidence' | 'title_ocr_disagrees' | 'additional_text' | 'source_text_clipped'
   | 'source_resolution_low' | 'candidate_resolution_low' | 'possible_mask_clipping' | 'sparse_foreground'
   | 'dense_foreground' | 'quality_evidence_incomplete' | 'foreground_lost' | 'foreground_changed' | 'low_contrast'
-  | 'title_identity_unverified' | 'verifier_profile_mismatch';
+  | 'title_identity_unverified' | 'verifier_profile_mismatch' | 'light_ocr_contradiction';
 
 export interface CoverTitleQualityInput {
   /** Normalized left, top, right, bottom in the exact prepared source image used by sourceOcr. */
@@ -87,6 +87,8 @@ function readings(lines: readonly OcrLine[], direction: CoverTitleQualityInput['
     : (a, b) => a.box[1] - b.box[1] || a.box[0] - b.box[0]);
   return [key(order.map((l) => l.text).join(' '))];
 }
+export const normalizeCoverTitleText = key;
+export const coverTitleOcrReading = (lines: readonly OcrLine[], direction?: CoverTitleQualityInput['readingDirection']) => readings(lines, direction)[0];
 
 function evidence(lines: readonly OcrLine[], aliases: readonly string[], direction: CoverTitleQualityInput['readingDirection']) {
   const read = readings(lines, direction);

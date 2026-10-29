@@ -9,9 +9,10 @@ const model = 'c'.repeat(64), pack = 'd'.repeat(64), verifier = coverTitleVerifi
 const profile: CoverTitleCalibration = { profile: 'strict-v1', verifierFingerprint: verifier, corpusSha256: 'e'.repeat(64),
   reviewedCases: 10, knownUnsafeCases: 4, rejectedUnsafeCases: 4, falseAccepts: 0, unassistedCleanCasesPassed: 1,
   visuallyReviewed: true, reviewMethod: 'operator_visual_audit', reviewer: 'codex', automaticAcceptanceApproved: true };
-async function fixture(partialDark = false) {
+async function fixture(partialDark = false, lightText = 'ONE PIECE') {
   const sourceBytes = await sharp({ create: { width: 80, height: 120, channels: 3, background: '#ffffff' } }).png().toBuffer();
-  const candidateBytes = await sharp({ create: { width: 400, height: 120, channels: 4, background: '#00000000' } }).png().toBuffer();
+  const candidateBytes = await sharp({ create: { width: 400, height: 120, channels: 4, background: '#00000000' } })
+    .composite([{ input: await sharp({ create: { width: 250, height: 40, channels: 4, background: '#ffffffff' } }).png().toBuffer(), left: 10, top: 10 }]).png().toBuffer();
   let calls = 0, stops = 0, active = 0, peak = 0;
   const adapter = createCoverTitleOcr({ directory: () => '/test-ocr', calibrationFile: () => '/trusted-calibration',
     verifyPack: async () => pack, loadCalibration: async () => profile, worker: () => ({
@@ -21,7 +22,7 @@ async function fixture(partialDark = false) {
         await new Promise((resolve) => setTimeout(resolve, 1));
         const m = await sharp(bytes).metadata(); active--;
         return { width: m.width!, height: m.height!, ms: 1,
-          lines: [{ box: [10, 10, 300, 60], text: partialDark && calls === 3 ? 'NEP ECE' : 'ONE PIECE', score: .99, tall: false }] };
+          lines: [{ box: [10, 10, 300, 60], text: partialDark && calls === 3 ? 'NEP ECE' : calls === 2 ? lightText : 'ONE PIECE', score: .99, tall: false }] };
       },
     }) });
   const want: CoverTitleCandidateInput = { sourceBytes, candidateBytes, sourceSha256: createHash('sha256').update(sourceBytes).digest('hex'),
@@ -41,7 +42,7 @@ test('OCR-only capability separates missing pack, ready pack and matching review
   assert.equal(f.counts().calls, 0, 'checking capability starts no OCR inference');
 });
 
-test('only actual source and both candidate backgrounds authorize a strict pass', async () => {
+test('source and the actual dark hero must pass; empty/weak light inspection is allowed but contradictions are not', async () => {
   const f = await fixture(); const result = await f.adapter.inspect(f.want);
   assert.equal(result.quality.safeToApply, true); assert.equal(result.verifierFingerprint, verifier);
   assert.equal(result.sourceOcr?.width, 800); assert.equal(result.sourceOcr?.height, 1200);
@@ -49,6 +50,12 @@ test('only actual source and both candidate backgrounds authorize a strict pass'
   const partial = await fixture(true); const bad = await partial.adapter.inspect(partial.want);
   assert.equal(bad.quality.safeToApply, false); assert.equal(bad.quality.manualApplyAllowed, true);
   assert.ok(bad.quality.reasons.some((r) => r.code === 'candidate_title_not_confirmed'));
+  const whiteLetters = await fixture(false, '');
+  assert.equal((await whiteLetters.adapter.assess(whiteLetters.want)).safeToApply, true, 'white letters disappear on a white inspection sheet');
+  const contradiction = await fixture(false, 'VOLUME ONE');
+  const conflict = await contradiction.adapter.assess(contradiction.want);
+  assert.equal(conflict.safeToApply, false);
+  assert.ok(conflict.reasons.some((r) => r.code === 'light_ocr_contradiction'));
 });
 
 test('source cache is tied to actual byte hash/language/prepared dimensions and OCR calls are serialized', async () => {
@@ -63,7 +70,9 @@ test('source cache is tied to actual byte hash/language/prepared dimensions and 
 test('untrusted source hashes, oversized geometry and missing runtime cannot bypass checks or start inference', async () => {
   const f = await fixture();
   for (const want of [{ ...f.want, sourceSha256: '0'.repeat(64) }, { ...f.want, modelFingerprint: 'bad' },
-    { ...f.want, evidence: { ...f.want.evidence, sourceWidth: 12_000_001 } }]) {
+    { ...f.want, evidence: { ...f.want.evidence, sourceWidth: 12_000_001 } },
+    { ...f.want, evidence: { ...f.want.evidence, candidateWidth: 1600, candidateHeight: 1 } },
+    { ...f.want, evidence: { ...f.want.evidence, sourceWidth: 1200, sourceHeight: 10 } }]) {
     assert.equal((await f.adapter.assess(want)).safeToApply, false);
   }
   assert.equal(f.counts().calls, 0);

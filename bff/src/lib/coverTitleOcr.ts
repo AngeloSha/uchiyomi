@@ -5,16 +5,26 @@ import { lstat, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
 import { OcrWorker, type PageText } from './translate/ocr';
-import { assessCoverTitleQuality, isCoverTitleCalibration, type CoverTitleCalibration, type CoverTitleQualityInput, type CoverTitleQualityResult } from './coverTitleQuality';
+import { detSize, OCR_MAX_SIDE } from './translate/ocrCore';
+import { assessCoverTitleQuality, isCoverTitleCalibration, normalizeCoverTitleText, coverTitleOcrReading,
+  type CoverTitleCalibration, type CoverTitleQualityInput, type CoverTitleQualityResult } from './coverTitleQuality';
 
 const OCR_PACK = 'e9e37c7cb2b7af61042a41f5f188a5e9c14cfeb78c35425551118f2e288c7d09';
 const CURRENT_MODEL = '9cd371602da73a8c1f9ae8902b4aa33b4658bc6133821720ff63ac17e56945c8';
 const HASH = /^[a-f0-9]{64}$/;
 const BYTE_LIMIT = 12 * 1024 * 1024;
 const sha = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
+function boundedOcr(width: number, height: number): boolean {
+  // OCR expands the short side to736px. A thin cutout can therefore exceed the detector's memory budget even
+  // when its compressed bytes and original pixels are tiny. Such a cutout is still available for visual review.
+  if (width > 1600 || height > 1600) return false;
+  const scale = Math.min(1, OCR_MAX_SIDE / Math.max(width, height));
+  const size = detSize(Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale)));
+  return size.w * size.h <= 3_000_000;
+}
 export function coverTitleVerifierFingerprint(modelFingerprint: string, ocrFingerprint = OCR_PACK): string {
   if (!HASH.test(modelFingerprint) || !HASH.test(ocrFingerprint)) throw new Error('Invalid title verifier fingerprint');
-  return sha(JSON.stringify({ policy: 'strict-v1', adapter: 'prepared-source-light-dark-v1', model: modelFingerprint, ocr: ocrFingerprint }));
+  return sha(JSON.stringify({ policy: 'strict-v1', adapter: 'prepared-source-dark-primary-v1', model: modelFingerprint, ocr: ocrFingerprint }));
 }
 
 export interface CoverTitleOcrCapability { available: boolean; calibrated: boolean; verifierFingerprint: string | null }
@@ -104,6 +114,7 @@ export function createCoverTitleOcr(deps: Dependencies) {
         sourceOcr: null, candidateLightOcr: null, candidateDarkOcr: null });
       if (at !== generation) return fallback();
       if (!assessCoverTitleQuality(evidence).manualApplyAllowed) return fallback();
+      if (!boundedOcr(evidence.sourceWidth, evidence.sourceHeight) || !boundedOcr(evidence.candidateWidth, evidence.candidateHeight)) return fallback();
       // Images are already bounded by the extraction adapter, and are bounded again before invoking OCR/Sharp.
       if (!want.sourceBytes.length || want.sourceBytes.length > BYTE_LIMIT || !want.candidateBytes.length || want.candidateBytes.length > BYTE_LIMIT
         || sha(want.sourceBytes) !== want.sourceSha256 || !HASH.test(want.modelFingerprint)) return fallback();
@@ -126,18 +137,30 @@ export function createCoverTitleOcr(deps: Dependencies) {
         const image = sharp(want.candidateBytes, { limitInputPixels: 8_000_000 });
         const dimensions = await image.metadata();
         if (dimensions.width !== evidence.candidateWidth || dimensions.height !== evidence.candidateHeight) return fallback();
+        const stats = await image.stats();
+        if (!dimensions.hasAlpha || stats.isOpaque || (stats.channels.at(-1)?.max ?? 0) === 0) {
+          const invalid = fallback();
+          invalid.quality.manualApplyAllowed = false;
+          invalid.quality.reasons.push({ code: !dimensions.hasAlpha || stats.isOpaque ? 'opaque_foreground' : 'empty_foreground', severity: 'error' });
+          return invalid;
+        }
         const light = await image.clone().flatten({ background: '#ffffff' }).png().toBuffer();
         const dark = await image.clone().flatten({ background: '#15131f' }).png().toBuffer();
         const candidateLightOcr = await reader.read(light, language, 60_000);
         const candidateDarkOcr = await reader.read(dark, language, 60_000);
         if (at !== generation) return fallback();
-        const checks = [candidateLightOcr, candidateDarkOcr].map((c) => assessCoverTitleQuality({ ...evidence, verifierFingerprint,
-          sourceOcr: sourceOcr!.lines, candidateOcr: c.lines }, profile));
-        const quality = checks[0];
-        for (const reason of checks[1].reasons) if (!quality.reasons.some((r) => r.code === reason.code)) quality.reasons.push(reason);
-        quality.safeToApply = checks.every((c) => c.safeToApply);
-        quality.manualApplyAllowed = checks.every((c) => c.manualApplyAllowed);
-        quality.candidateTitleMatched = checks.every((c) => c.candidateTitleMatched === true);
+        // The actual hero is dark: source+dark must pass. White lettering can legitimately vanish on a white
+        // inspection sheet, so weak/empty light OCR cannot veto it. Confident contradictory light text still can.
+        const quality = assessCoverTitleQuality({ ...evidence, verifierFingerprint, sourceOcr: sourceOcr.lines, candidateOcr: candidateDarkOcr.lines }, profile);
+        const lightCheck = assessCoverTitleQuality({ ...evidence, verifierFingerprint, sourceOcr: sourceOcr.lines, candidateOcr: candidateLightOcr.lines }, profile);
+        const lightLines = candidateLightOcr.lines.filter((l) => l.text.trim());
+        const invalidLight = lightCheck.reasons.some((r) => r.code === 'ocr_evidence_invalid');
+        const lightRead = invalidLight ? '' : coverTitleOcrReading(lightLines, evidence.readingDirection);
+        const expected = normalizeCoverTitleText(quality.matchedAlias ?? '');
+        if (invalidLight || (lightLines.length > 0 && lightLines.every((l) => l.score >= .98) && expected && !expected.includes(lightRead))) {
+          quality.reasons.push({ code: invalidLight ? 'ocr_evidence_invalid' : 'light_ocr_contradiction', severity: 'warning' });
+          quality.safeToApply = false;
+        }
         quality.needsReview = !quality.safeToApply;
         return { quality, verifierFingerprint, sourceOcr, candidateLightOcr, candidateDarkOcr };
       } catch { return fallback(); }
