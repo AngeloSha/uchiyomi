@@ -10,6 +10,13 @@
   opt-outs remain effective; lookups run in the background and do not delay opening a page.
 - Edit details offers logo upload, image links, refresh, styled titles and reset to automatic. Manual choices take priority,
   and artwork source information stays available with the preview.
+- Automatic discovery scans the eligible library without opening every manga, resumes after restarts, and honors
+  provider-wide retry pauses. The admin progress panel distinguishes unchecked titles from completed no-match results.
+- Logo matching also accepts transparent PNG originals and verifies bounded Commons discovery against the exact manga's
+  canonical identity, recovering artwork absent from the direct logo field.
+- Action, fantasy and science-fiction titles retain their distinctive typography when Comedy is a secondary genre.
+- Optional isolated tooling trials cover-lettering extraction on local images, producing review candidates without
+  automatically changing artwork or adding model dependencies to the application.
 
 ## v0.101.0 — 2026-10-29
 

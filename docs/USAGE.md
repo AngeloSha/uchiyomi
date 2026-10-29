@@ -640,6 +640,18 @@ logo. The library's automatic online-lookup opt-out is respected, as is **Use th
 Opening a hero never waits for the lookup: it shows the styled title while work runs, and keeps that title when
 there is no reliable logo. A provider outage leaves any cached picture available.
 
+When automatic title logos are enabled, the server also checks the eligible library in the background; opening
+each manga is not required. It resumes after restarts and retries temporary failures after the artwork provider's
+requested pause. The progress panel beside the setting separates checked titles, ready logos, completed searches
+with no match, retries, titles not checked yet, and missing manga links. **Scan library** checks work that is due;
+**Retry no matches** also repeats eligible completed searches that found nothing. Neither action overrides a
+library's online-lookup preference or an admin's artwork choice. A missing manga link needs confirmation through
+the existing manga-link controls before automatic logo matching can use it.
+
+The lookup accepts matching transparent Commons PNG originals as well as rendered thumbnails. If an exact manga
+entry has no logo field, bounded artwork discovery can use a canonical Wikipedia page to verify the candidate
+against that same manga identity. Filename similarity alone never selects the artwork.
+
 In **Edit details → Art → Title logo**, an admin can:
 
 - Upload a transparent PNG or WebP, or use **From a link**, to choose a logo explicitly.
@@ -652,7 +664,12 @@ In **Edit details → Art → Title logo**, an admin can:
 
 The preview includes the artwork's source and attribution when supplied. Uploaded and downloaded logos are kept with
 the server's configuration and included in configuration backups. Changing a title logo leaves the manga's cover,
-chapter files and reading progress in place. Extracting lettering from covers is not part of this version.
+chapter files and reading progress in place.
+
+An optional [cover-lettering trial](../scripts/title-art/README.md) lets an operator test extraction on a small set
+of local covers in a separate CPU environment. It produces transparent candidates and comparison sheets for
+review, without changing any manga artwork. It is not an automatic fallback or a button in the app: incomplete
+lettering, author names and volume numbers must be checked before explicitly uploading a candidate.
 
 ### Sources & translations
 
