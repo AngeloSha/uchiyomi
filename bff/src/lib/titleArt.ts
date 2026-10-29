@@ -1,6 +1,7 @@
 // Series title logos are persistent artwork, not thumbnails. Network discovery never holds a hero response.
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, mkdir, open, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { q, tx } from './db';
@@ -46,6 +47,35 @@ function assetPath(name: string): string {
   const path = containedPath(ART_DIR, name);
   if (!path) throw new Error('Invalid title art path');
   return path;
+}
+async function assetAvailable(name: string): Promise<boolean> {
+  return lstat(assetPath(name)).then((s) => s.isFile() && s.size > 0 && s.size <= ART_MAX_BYTES, () => false);
+}
+/** No-follow open + fstat protects the actual file, not only its name. Reads stay capped even if it grows. */
+async function readAsset(name: string): Promise<Buffer | null> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    const path = assetPath(name);
+    const before = await lstat(path);
+    if (!before.isFile() || before.size < 1 || before.size > ART_MAX_BYTES) return null;
+    handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
+    const opened = await handle.stat();
+    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size < 1 || opened.size > ART_MAX_BYTES) return null;
+    const chunks: Buffer[] = []; let count = 0;
+    for (;;) {
+      const chunk = Buffer.alloc(Math.min(64 * 1024, ART_MAX_BYTES + 1 - count));
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
+      if (!bytesRead) break;
+      count += bytesRead; if (count > ART_MAX_BYTES) return null;
+      chunks.push(chunk.subarray(0, bytesRead));
+    }
+    const after = await handle.stat();
+    if (after.size !== count || opened.size !== after.size || opened.mtimeMs !== after.mtimeMs) return null;
+    const bytes = Buffer.concat(chunks, count);
+    if (!name.endsWith(`${createHash('sha256').update(bytes).digest('hex')}.webp`)) return null;
+    return bytes;
+  } catch { return null; }
+  finally { await handle?.close().catch(() => {}); }
 }
 const nversion = (v: ArtRow['version']) => Math.max(0, Number(v) || 0);
 const nextVersion = (v: ArtRow['version']) => Math.max(Date.now(), nversion(v) + 1);
@@ -204,7 +234,7 @@ export async function queueTitleLogos(ids: string[], authority: AniListAuthority
     if (r.lookup_status === 'error' && r.lookup_anilist_id === r.linked_anilist_id && r.retry_at && new Date(r.retry_at).getTime() > Date.now()) continue;
     if (authority === 'automatic') {
       if (!r.online || !r.library_online || r.first_page) continue;
-      if (r.auto_anilist_id === r.linked_anilist_id && r.auto_file && await stat(assetPath(r.auto_file)).then((s) => s.isFile(), () => false)) continue;
+      if (r.auto_anilist_id === r.linked_anilist_id && r.auto_file && await assetAvailable(r.auto_file)) continue;
       if (r.lookup_anilist_id === r.linked_anilist_id && r.retry_at && new Date(r.retry_at).getTime() > Date.now()) continue;
     }
     const old = pending.get(r.id);
@@ -262,10 +292,12 @@ async function runJob(job: Job): Promise<void> {
         artist: c.attribution.author, license: c.attribution.license, licenseUrl: c.attribution.licenseUrl };
       await qq(`UPDATE series_title_art SET auto_file=$2, auto_anilist_id=$3, auto_language=$4, auto_caption=$5,
         auto_attribution=$6, lookup_anilist_id=$3, lookup_status='ready', retry_at=NULL, version=$7, auto_manual=$8, updated_at=now()
-        WHERE series_id=$1`, [id, file, job.anilistId, c.language === 'en' ? 'en' : 'original', c.showReadableTitle,
+        WHERE series_id=$1`, [id, file, job.anilistId, c.language == null ? null : c.language === 'en' ? 'en' : 'original', c.showReadableTitle,
         JSON.stringify(attribution), nextVersion(row.version), job.authority === 'manual']);
     } else {
-      const retry = failure ? Math.max(ERROR_MS, Math.min(24 * 3600_000, Number((failure as any)?.retryAfterMs) || ERROR_MS)) : MISS_MS;
+      const supplied = Number((failure as any)?.retryAfterMs);
+      const retry = failure ? Math.max(ERROR_MS,
+        Number.isSafeInteger(supplied) && supplied >= 0 && supplied <= 8_000_000_000_000_000 - Date.now() ? supplied : ERROR_MS) : MISS_MS;
       await qq(`UPDATE series_title_art SET lookup_anilist_id=$2, lookup_status=$3, retry_at=now()+($4::bigint*interval '1 millisecond'), updated_at=now()
         WHERE series_id=$1`, [id, job.anilistId, failure ? 'error' : 'missing', retry]);
     }
@@ -280,7 +312,7 @@ export async function readTitleLogo(id: string): Promise<{ bytes: Buffer; versio
   for (let attempt = 0; attempt < 2; attempt++) {
     const row = (await rowsFor([id]))[0]; if (!row) return null;
     const file = fileFor(row); if (!file) return null;
-    const bytes = await readFile(assetPath(file)).catch(() => null);
+    const bytes = await readAsset(file);
     if (bytes) return { bytes, version: nversion(row.version) };
   }
   return null;

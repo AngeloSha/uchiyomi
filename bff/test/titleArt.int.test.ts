@@ -1,7 +1,7 @@
 // Real DB/file/image/auth checks. Provider bytes are synthetic; no library title or image leaves this test.
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdir, rm } from 'node:fs/promises';
+import { lstat, open, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TitleLogoCandidate } from '../src/lib/titleLogoProvider';
@@ -144,6 +144,15 @@ test('manual one-shot refresh bypasses online opt-outs but never overrides custo
   assert.equal((await put({ mode: 'text' })).statusCode, 200); assert.equal((await refresh()).statusCode, 409);
   const reset = await put({ mode: 'reset' }); assert.equal(reset.statusCode, 200); assert.equal(reset.json().titleArt.style, 'auto');
 });
+test('unknown logo language stays unknown and a known original-language logo retains its readable caption', { skip }, async () => {
+  await seedLink();
+  for (const language of [null, 'ja']) {
+    art.setTitleLogoLookupForTests(async () => ({ kind: 'found', candidate: { ...candidate(), language, showReadableTitle: true } }));
+    assert.equal((await refresh()).statusCode, 200); await settle();
+    assert.equal((await state()).language, language == null ? null : 'original');
+    assert.equal((await state()).showReadableTitle, true);
+  }
+});
 test('invalid imports keep the old good logo; source URL import refuses local addresses and raw SVG', { skip }, async () => {
   assert.equal((await put(upload())).statusCode, 200); const before = await state(); const bytes = (await art.readTitleLogo(SID))!.bytes;
   assert.equal((await put({ mode: 'upload', dataUrl: 'data:image/png;base64,bm90YW5pbWFnZQ==' })).statusCode, 400);
@@ -151,12 +160,27 @@ test('invalid imports keep the old good logo; source URL import refuses local ad
   assert.equal((await put({ mode: 'url', url: 'http://127.0.0.1/private.png' })).statusCode, 400);
   assert.deepEqual(await state(), before); assert.deepEqual((await art.readTitleLogo(SID))!.bytes, bytes);
 });
+test('matching-name symlinks and oversized sparse files are not served, and a symlink is not a warm automatic cache hit', { skip }, async () => {
+  await seedLink(); await q('UPDATE server_settings SET automatic_title_logos=true WHERE id=1');
+  await art.queueTitleLogos([SID]); await settle(); assert.equal(calls, 1);
+  const file = (await q('SELECT auto_file FROM series_title_art WHERE series_id=$1', [SID]))[0].auto_file;
+  const path = join(ROOT, 'series-art', file); const secret = join(ROOT, 'private.txt');
+  await writeFile(secret, 'private fixture data'); await rm(path); await symlink(secret, path);
+  assert.equal(await art.readTitleLogo(SID), null);
+  const url = (await state()).logoUrl!;
+  assert.equal((await app.inject({ method: 'GET', url, headers: { cookie: imageCookies.admin } })).statusCode, 404);
+  await art.queueTitleLogos([SID]); await settle(); assert.equal(calls, 2, 'a symlink must not suppress cache repair');
+  assert.equal((await lstat(path)).isFile(), true); assert.equal(await readFile(secret, 'utf8'), 'private fixture data');
+  const sparse = await open(path, 'w'); try { await sparse.truncate(11 * 1024 * 1024 + 1); } finally { await sparse.close(); }
+  assert.equal(await art.readTitleLogo(SID), null, 'oversized local bytes are refused without reading the full file');
+  assert.equal((await app.inject({ method: 'GET', url, headers: { cookie: imageCookies.admin } })).statusCode, 404);
+});
 test('replacement versions change; failed refresh keeps good bytes; transient retry and real misses are distinct', { skip }, async () => {
   await seedLink(); assert.equal((await refresh()).statusCode, 200); await settle(); const before = await state(); const bytes = (await art.readTitleLogo(SID))!.bytes;
-  art.setTitleLogoLookupForTests(async () => { calls++; throw Object.assign(new Error('provider offline'), { retryAfterMs: 600_000 }); });
+  art.setTitleLogoLookupForTests(async () => { calls++; throw Object.assign(new Error('provider offline'), { retryAfterMs: 49 * 3600_000 }); });
   assert.equal((await refresh()).statusCode, 200); await settle(); const failed = await state();
   assert.equal(failed.status, 'error'); assert.equal(failed.logoUrl, before.logoUrl); assert.deepEqual((await art.readTitleLogo(SID))!.bytes, bytes);
-  assert.equal((await q('SELECT retry_at>now()+interval \'9 minutes\' AS delayed FROM series_title_art WHERE series_id=$1', [SID]))[0].delayed, true);
+  assert.equal((await q('SELECT retry_at>now()+interval \'48 hours\' AS delayed FROM series_title_art WHERE series_id=$1', [SID]))[0].delayed, true, 'a Retry-After longer than a day must survive a restart');
   const busy = await refresh(); assert.equal(busy.statusCode, 429); assert.match(busy.headers['retry-after'], /^[0-9]+$/);
   await q('UPDATE server_settings SET automatic_title_logos=true WHERE id=1'); await seedLink('90001');
   art.setTitleLogoLookupForTests(async () => { calls++; return { kind: 'missing' }; });
