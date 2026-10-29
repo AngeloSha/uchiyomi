@@ -6,6 +6,8 @@ Turn on **Automatically extract cover titles** to process existing and newly add
 
 **Run now** starts one library pass. With nightly generation off, this makes previews only, even if the applying choice is stored. **Stop this run** stops that pass and keeps completed previews; it does not disable the nightly schedule. **Retry failed titles** retries results that failed to produce a preview.
 
-The progress panel separates queued work, previews being created, previews awaiting review, automatically applied results, skipped titles, failures and cancellations. It also lists retained previews. Choose **Review** to open that exact result, inspect it on dark and light backgrounds, fine-tune missing lettering or unwanted parts, and explicitly apply it. Discard keeps the manga's current published artwork.
+The progress panel separates queued work, previews being created, previews awaiting review, automatically applied results, skipped titles, failures and cancellations. It also lists retained previews. Choose **Review** to open that exact result, inspect it on dark and light backgrounds, fine-tune missing lettering or unwanted parts, and explicitly apply it. Closing an automatic preview keeps it and any saved corrections for later. **Discard** explicitly removes that preview and keeps the manga's current published artwork.
+
+Run totals describe the results of that pass. The **Previews to review** list counts the previews still waiting for review, so it shrinks when they are applied or discarded.
 
 Ready previews remain available for the retention period shown in the panel. They can also be opened from the manga's **Edit details → Art → Extract from cover** controls.

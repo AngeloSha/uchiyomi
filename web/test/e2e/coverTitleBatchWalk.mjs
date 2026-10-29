@@ -26,7 +26,7 @@ const chunk=(name,b)=>{const t=Buffer.from(name),h=Buffer.alloc(4),c=Buffer.allo
 const cover=red=>{const w=600,h=900,header=Buffer.alloc(13);header.writeUInt32BE(w);header.writeUInt32BE(h,4);header[8]=8;header[9]=2;const rows=Buffer.alloc((w*3+1)*h);for(let y=0;y<h;y++)for(let x=0;x<w;x++){const n=y*(w*3+1)+x*3+1;rows[n]=red;rows[n+1]=80;rows[n+2]=160}return'data:image/png;base64,'+Buffer.concat([Buffer.from('89504e470d0a1a0a','hex'),chunk('IHDR',header),chunk('IDAT',deflateSync(rows)),chunk('IEND',Buffer.alloc(0))]).toString('base64')};
 const setCover=red=>art(target,{kind:'cover',mode:'upload',dataUrl:cover(red)});
 const browser=await puppeteer.launch({headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
-const jobs=new Set(),errors=[],proof={defaultOff:true,previewOnlyWithNightlyOff:false,exactReviewJob:false,protectedArtworkKept:false,nightlySaved:false,cancelled:false,retried:false,checkedApplyingUnavailable:true};
+const jobs=new Set(),errors=[],proof={defaultOff:true,previewOnlyWithNightlyOff:false,exactReviewJob:false,dismissRetained:false,savedCorrectionRetained:false,explicitDiscardRemoved:false,protectedArtworkKept:false,nightlySaved:false,cancelled:false,retried:false,checkedApplyingUnavailable:true};
 try{
  await art(target,{kind:'logo',mode:'reset'});await setCover(140);
  await art(protectedId,{kind:'logo',mode:'upload',dataUrl:'data:image/png;base64,'+readFileSync(new URL('../fixtures/title-logo.png',import.meta.url)).toString('base64')});
@@ -51,10 +51,21 @@ try{
  await click(`[data-cover-title-review="${item.jobId}"]`);await exact;await page.waitForSelector('[data-title-extraction-dialog]',{visible:true});
  await page.waitForFunction(()=>{const b=document.querySelector('[data-extract-apply]');return b&&!b.disabled});proof.exactReviewJob=true;
  assert.equal((await detail(target)).titleArt.version,original.titleArt.version);await page.screenshot({path:OUT+'/review-exact-job.png'});
+  await click('[data-extract-fine-tune]');await page.waitForSelector('[data-title-mask-editor][data-mask-ready="true"]');
+  await page.focus('[data-mask-surface]');await page.keyboard.press(' ');await click('[data-mask-save]');
+  await page.waitForFunction(()=>{const b=document.querySelector('[data-extract-apply]');return b&&!b.disabled});
+  const saved=(await api(`/api/admin/series/${target}/title-extraction/${item.jobId}`)).job;assert.ok(saved.mask.revision>0&&saved.mask.strokes.length>0);
+  await click('[data-extract-close]');await page.waitForFunction(()=>!document.querySelector('[data-title-extraction-dialog]'));
+  const retained=(await api(`/api/admin/series/${target}/title-extraction/${item.jobId}`)).job;
+  assert.equal(retained.status,'ready');assert.equal(retained.mask.revision,saved.mask.revision);assert.deepEqual(retained.mask.strokes,saved.mask.strokes);
+  assert.ok((await status()).reviewSeries.some(x=>x.jobId===item.jobId));proof.dismissRetained=true;proof.savedCorrectionRetained=true;
+  await click(`[data-cover-title-review="${item.jobId}"]`);await page.waitForFunction(()=>{const b=document.querySelector('[data-extract-apply]');return b&&!b.disabled});
  await click('[data-extract-discard]');await page.waitForFunction(()=>!document.querySelector('[data-title-extraction-dialog]'));
  await wait(async()=>!(await status()).reviewSeries.some(x=>x.jobId===item.jobId),'discard refreshes retained review list');
+  assert.equal((await fetch(BASE+`/api/admin/series/${target}/title-extraction/${item.jobId}/preview?revision=${saved.mask.revision}`,{headers:{authorization:'Bearer '+accessToken}})).status,404);
+  assert.equal((await detail(target)).titleArt.version,original.titleArt.version);proof.explicitDiscardRemoved=true;
  assert.deepEqual((await detail(protectedId)).titleArt,protectedArt);proof.protectedArtworkKept=true;
- console.log('PASS defaults off; one-off while nightly is off prepares review only; exact retained job opens; manual artwork kept');
+ console.log('PASS defaults off; one-off prepares review only; X retains exact saved correction; explicit Discard removes draft; manual artwork kept');
  const saving=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/admin/settings'&&r.request().method()==='PATCH');
  await click(section+' button[role="switch"][aria-label="Automatically extract cover titles"]');
  assert.equal(JSON.parse((await saving).request().postData()).automaticCoverTitleGeneration,true);

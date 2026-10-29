@@ -92,7 +92,7 @@ export function CoverTitleBatchProgress({ enabled, status, loading = false, fail
         <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
           <Count name="pending" label={tr('Queued')} value={run.counts.pending} />
           <Count name="processing" label={tr('Creating')} value={run.counts.processing} />
-          <Count name="ready" label={tr('Previews to review')} value={run.counts.ready} />
+          <Count name="ready" label={tr('Ready')} value={run.counts.ready} />
           <Count name="applied" label={tr('Applied automatically')} value={run.counts.applied} />
           <Count name="skipped" label={tr('Skipped')} value={run.counts.skipped} />
           <Count name="failed" label={tr('Failed')} value={run.counts.failed} />

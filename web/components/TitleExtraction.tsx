@@ -135,6 +135,7 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
   const [maskSaved, setMaskSaved] = useState(false);
   const closed = useRef(false);
   const applied = useRef(false);
+  const explicitlyRemoved = useRef(false);
   const jobRef = useRef<TitleExtractionJob | null>(null);
   const closeRef = useRef(onClose);
   const discardedRef = useRef(onDiscarded);
@@ -190,7 +191,10 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
   }, [job?.id, changed]);
 
   const remove = useCallback(async (candidate: TitleExtractionJob | null) => {
-    if (candidate && candidate.status !== 'applied') await api(`${root}/${encodeURIComponent(candidate.id)}`, { method: 'DELETE' });
+    if (candidate && candidate.status !== 'applied') {
+      await api(`${root}/${encodeURIComponent(candidate.id)}`, { method: 'DELETE' });
+      discardedRef.current?.();
+    }
   }, [root]);
   useEffect(() => {
     closed.current = false;
@@ -200,7 +204,9 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
     panel.current?.focus();
     return () => {
       closed.current = true;
-      if (!applied.current) void remove(jobRef.current).then(() => discardedRef.current?.()).catch(() => {});
+      // Automatic results are durable review items, including saved mask corrections. A normal X/Escape,
+      // navigation or unmount must not throw them away. Manual scratch previews retain their old cleanup.
+      if (!applied.current && !explicitlyRemoved.current && !jobRef.current?.automatic) void remove(jobRef.current).catch(() => {});
       if (parent) { parent.inert = wasInert; if (hidden === null) parent.removeAttribute('aria-hidden'); else if (hidden !== undefined) parent.setAttribute('aria-hidden', hidden); }
       opener?.focus();
     };
@@ -230,6 +236,16 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
     try { await remove(job); setJob(null); setStale(false); setAttempt((n) => n + 1); }
     catch { setProblem('extract_failed'); }
     finally { setOperation(null); }
+  };
+  const discard = async () => {
+    if (busy) return;
+    setOperation('cancel'); setProblem(null);
+    try {
+      await remove(jobRef.current);
+      explicitlyRemoved.current = true;
+      onClose();
+    } catch { if (!closed.current) setProblem('extract_failed'); }
+    finally { if (!closed.current) setOperation(null); }
   };
   const apply = async () => {
     if (!canApply || !job) return;
@@ -301,7 +317,7 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
       <div className="flex shrink-0 items-start justify-between gap-3 border-b border-ink-800 p-4">
         <div className="min-w-0"><h2 className="text-lg font-semibold text-fog-100">{tr('Extract title from cover')}</h2>
           <p className="mt-1 text-xs leading-relaxed text-fog-400">{tr('Your current artwork stays until you choose Apply.')}</p></div>
-        <button type="button" className="btn-key shrink-0" aria-label={tr('Close')} disabled={operation === 'apply'} onClick={onClose}>×</button>
+        <button type="button" className="btn-key shrink-0" data-extract-close aria-label={tr('Close')} disabled={operation === 'apply'} onClick={onClose}>×</button>
       </div>
       <div className="min-h-0 overflow-y-auto overscroll-contain p-4" data-extract-scroll data-lenis-prevent>
         <div className="grid min-w-0 gap-6 lg:grid-cols-2">
@@ -347,7 +363,7 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
         </div>
       </div>
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-ink-800 bg-ink-950 p-3">
-        <button type="button" className="btn-key" data-extract-discard disabled={operation === 'apply'} onClick={onClose}>{tr('Discard')}</button>
+        <button type="button" className="btn-key" data-extract-discard disabled={busy} onClick={() => void discard()}>{tr('Discard')}</button>
         {active && <button type="button" className="btn-key" data-extract-cancel disabled={busy} onClick={() => void cancel()}>{tr('Cancel preview')}</button>}
         <button type="button" className="btn-key" data-extract-create disabled={!capabilities.available || busy || active || maskDirty || latest.isPending || !cover.image?.fingerprint} onClick={() => void create()}>
           {job ? tr('Create a new preview') : tr('Create preview')}</button>
