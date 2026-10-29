@@ -15,8 +15,12 @@
 - Logo matching also accepts transparent PNG originals and verifies bounded Commons discovery against the exact manga's
   canonical identity, recovering artwork absent from the direct logo field.
 - Action, fantasy and science-fiction titles retain their distinctive typography when Comedy is a secondary genre.
-- Optional isolated tooling trials cover-lettering extraction on local images, producing review candidates without
-  automatically changing artwork or adding model dependencies to the application.
+- Administrators can extract lettering from the current cover, adjust the title region and exclude credits, preview
+  the transparent result on a hero, and explicitly apply or discard it. Changed covers and newer artwork choices
+  invalidate old drafts. The optional model service remains isolated from the application and library files.
+- An optional background cover fallback requires verified manga identities, complete title recognition, image checks
+  and an approved empirical verification record before it can apply artwork. Uncertain results require review;
+  unavailable or unvalidated verification keeps automatic application disabled.
 
 ## v0.101.0 — 2026-10-29
 

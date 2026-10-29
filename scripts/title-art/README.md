@@ -1,4 +1,10 @@
-# Cover lettering trial
+# Cover lettering tools
+
+The app now supports **Edit details → Art → Title logo → Extract from cover** when the optional local service is
+configured. It saves a private draft, lets an administrator adjust the region and exclusions, and previews the
+cutout before an explicit Apply. See [the service setup](../../services/title-extractor/README.md) and
+[verification requirements](../../docs/cover-title-verification.md). The command-line trial below remains useful
+for a separate evaluation corpus; it does not change app artwork.
 
 This optional tool tests whether lettering already present on a cover can become a transparent hero title.
 It runs locally, keeps the original RGB strokes, and writes review images and candidates to a separate directory.

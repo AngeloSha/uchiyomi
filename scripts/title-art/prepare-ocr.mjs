@@ -66,6 +66,8 @@ export async function prepareOcr(destination) {
   } finally { await rm(stage, { recursive: true, force: true }); }
 }
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-  if (!process.argv[2]) throw Error('Usage: prepare-ocr.mjs /absolute/output/directory');
+  const usage = 'Usage: node scripts/title-art/prepare-ocr.mjs /absolute/output/directory';
+  if (process.argv[2] === '--help' || process.argv[2] === '-h') { console.log(usage); process.exit(0); }
+  if (process.argv.length !== 3 || !path.isAbsolute(process.argv[2]) || process.argv[2].startsWith('-')) throw Error(usage);
   console.log(JSON.stringify(await prepareOcr(path.resolve(process.argv[2]))));
 }
