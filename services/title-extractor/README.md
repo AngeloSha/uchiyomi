@@ -13,6 +13,12 @@ This improves lettering that the text detector misses, while retaining original 
 or miss a flourish, so a result remains a visual-review candidate. Model scores never approve automatic application.
 An initial preview can take about a minute on three CPU threads; repeated views use a small bounded mask cache.
 
+Once a preview is ready, **Fine-tune title** offers Restore/Erase brushes, zoom, pan, undo and reset. This editor
+changes only alpha using the saved original cover pixels; it does not run either model again. **Save corrections**
+stores a private revision and reloads its final title preview. **Apply title artwork** remains a separate action.
+An older tab cannot apply a corrected revision it has not loaded. Manual corrections require visual review and do
+not qualify for automatic publication. Earlier drafts without an immutable raw mask need a new extraction first.
+
 ## Build and stage
 
 Use the pinned Hi-SAM checkout and checkpoints documented in

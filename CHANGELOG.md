@@ -21,6 +21,9 @@
 - Cover selection reruns detection on overlapping title-line views and refines missed letters using the existing
   local SAM weights. Automatic selection groups neighboring lines and separated characters. Edited regions immediately
   hide the previous preview, and detected bounds remain separate from the administrator's requested selection.
+- Title previews offer precise Restore and Erase brushes, zoom, pan, undo and reset. Corrections replay against an
+  immutable cover and alpha mask, save as a private revision, and require review before Apply. Revision checks prevent
+  older tabs from applying unseen corrections; manual corrections never inherit automatic quality approval.
 - An optional background cover fallback requires verified manga identities, complete title recognition, image checks
   and an approved empirical verification record before it can apply artwork. Uncertain results require review;
   unavailable or unvalidated verification keeps automatic application disabled.
