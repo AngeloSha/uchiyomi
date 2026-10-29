@@ -26,7 +26,7 @@ const chunk=(name,b)=>{const t=Buffer.from(name),h=Buffer.alloc(4),c=Buffer.allo
 const cover=red=>{const w=600,h=900,header=Buffer.alloc(13);header.writeUInt32BE(w);header.writeUInt32BE(h,4);header[8]=8;header[9]=2;const rows=Buffer.alloc((w*3+1)*h);for(let y=0;y<h;y++)for(let x=0;x<w;x++){const n=y*(w*3+1)+x*3+1;rows[n]=red;rows[n+1]=80;rows[n+2]=160}return'data:image/png;base64,'+Buffer.concat([Buffer.from('89504e470d0a1a0a','hex'),chunk('IHDR',header),chunk('IDAT',deflateSync(rows)),chunk('IEND',Buffer.alloc(0))]).toString('base64')};
 const setCover=red=>art(target,{kind:'cover',mode:'upload',dataUrl:cover(red)});
 const browser=await puppeteer.launch({headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
-const jobs=new Set(),errors=[],proof={defaultOff:true,previewOnlyWithNightlyOff:false,exactReviewJob:false,dismissRetained:false,savedCorrectionRetained:false,explicitDiscardRemoved:false,protectedArtworkKept:false,nightlySaved:false,cancelled:false,retried:false,checkedApplyingUnavailable:true};
+const jobs=new Set(),errors=[],proof={defaultOff:true,bare202Status:false,phoneReviewAccessible:false,previewOnlyWithNightlyOff:false,exactReviewJob:false,dismissRetained:false,savedCorrectionRetained:false,explicitDiscardRemoved:false,protectedArtworkKept:false,nightlySaved:false,cancelled:false,retried:false,checkedApplyingUnavailable:true};
 try{
  await art(target,{kind:'logo',mode:'reset'});await setCover(140);
  await art(protectedId,{kind:'logo',mode:'upload',dataUrl:'data:image/png;base64,'+readFileSync(new URL('../fixtures/title-logo.png',import.meta.url)).toString('base64')});
@@ -40,7 +40,7 @@ try{
  await page.waitForFunction(()=>{const b=document.querySelector('[data-cover-title-action="run"]');return b&&!b.disabled});
  const switches=section+' button[role="switch"]';
  assert.deepEqual(await page.$$eval(switches,n=>n.map(x=>({on:x.getAttribute('aria-checked'),disabled:x.disabled}))),[{on:'false',disabled:false},{on:'false',disabled:true}]);
- await mode('slow');const starting=page.waitForResponse(r=>new URL(r.url()).pathname===batch+'/run'&&r.request().method()==='POST');await click(run);assert.deepEqual(JSON.parse((await starting).request().postData()),{retryErrors:false});
+ await mode('slow');const starting=page.waitForResponse(r=>new URL(r.url()).pathname===batch+'/run'&&r.request().method()==='POST');await click(run);const startedResponse=await starting;assert.equal(startedResponse.status(),202);assert.deepEqual(JSON.parse(startedResponse.request().postData()),{retryErrors:false});const startedStatus=await startedResponse.json();assert.equal(typeof startedStatus.running,'boolean');assert.ok(startedStatus.run?.id);assert.equal('status' in startedStatus,false,'run endpoint returns the bare status, not a wrapper');proof.bare202Status=true;
  await page.waitForSelector('[data-cover-title-batch="running"]');
  await wait(async()=>{const s=await status();return s.run?.counts.processing>0?s:null},'real worker processing');
  await page.$eval(section,n=>n.scrollIntoView({block:'center'}));await page.screenshot({path:OUT+'/running-desktop.png'});
@@ -87,7 +87,11 @@ try{
  assert.deepEqual(JSON.parse((await retrying).request().postData()),{retryErrors:true});
  const retried=await wait(async()=>{const s=await status();return !s.running&&s.run?.status==='completed'&&s.run.counts.ready>0?s:null},'retry becomes preview');proof.retried=true;
  for(const row of retried.reviewSeries)if(row.id===target)jobs.add(row.jobId);
- await page.setViewport({width:390,height:844});await page.$eval(section,n=>n.scrollIntoView({block:'center'}));await page.screenshot({path:OUT+'/progress-phone.png'});
+ const latestReview=retried.reviewSeries.find(x=>x.id===target);assert.ok(latestReview);
+ await page.waitForSelector('[data-cover-title-batch="idle"]');await page.waitForSelector(`[data-cover-title-review="${latestReview.jobId}"]`);
+ await page.setViewport({width:390,height:844});await page.$eval('[data-cover-title-batch]',n=>{n.scrollIntoView({block:'start'});window.scrollBy({top:-80,behavior:'instant'})});await sleep(250);await page.screenshot({path:OUT+'/progress-phone.png'});
+ await page.$eval('[data-cover-title-review-list]',n=>n.scrollIntoView({block:'center'}));await sleep(250);await page.screenshot({path:OUT+'/review-list-phone.png'});
+ assert.ok(await page.$eval(`[data-cover-title-review="${latestReview.jobId}"]`,n=>{const r=n.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return!n.disabled&&r.top>=0&&r.bottom<=innerHeight&&(hit===n||n.contains(hit))}),'phone review action is visible and uncovered');proof.phoneReviewAccessible=true;
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));assert.deepEqual((await detail(protectedId)).titleArt,protectedArt);
  assert.equal((await detail(target)).titleArt.version,original.titleArt.version);assert.deepEqual((await detail(target)).metadata,original.metadata);assert.deepEqual(errors,[]);
  proof.allVerified=true;writeFileSync(OUT+'/batch-proof.json',JSON.stringify(proof,null,2)+'\n');console.log('PASS failed results can be retried; honest unavailable-checker gate and390px progress/review layout preserve published art');
