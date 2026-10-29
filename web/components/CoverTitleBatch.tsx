@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { t as tr } from '@/lib/i18n';
 import { relativeTime, untilText } from '@/lib/format';
-import { COVER_TITLE_BATCH_KEY, COVER_TITLE_BATCH_ROOT, coverTitleBatchFinished, coverTitleBatchPoll, coverTitleBatchResumeDelay,
+import { COVER_TITLE_BATCH_KEY, COVER_TITLE_BATCH_ROOT, coverTitleBatchFinished, coverTitleBatchPoll, coverTitleBatchResumeDelay, requestCoverTitleBatch,
   type CoverTitleBatchStatus, type CoverTitleReview } from '@/lib/coverTitleBatch';
 
 export function CoverTitleBatch({ enabled, applyEnabled, reviewing, reviewError, onReview }: {
@@ -42,11 +42,8 @@ export function CoverTitleBatch({ enabled, applyEnabled, reviewing, reviewError,
     if (operation || !q.data || q.isError || (kind === 'run' ? q.data.running || !q.data.available : !q.data.running || !q.data.run)) return;
     setOperation(kind); setProblem(null);
     try {
-      const result = await api<{ ok: true; status?: CoverTitleBatchStatus }>(COVER_TITLE_BATCH_ROOT + (kind === 'run' ? '/run' : '/cancel'), {
-        method: 'POST', json: kind === 'run' ? { retryErrors } : { runId: q.data.run!.id },
-      });
-      if (result.status) qc.setQueryData(COVER_TITLE_BATCH_KEY, result.status);
-      else await q.refetch();
+      const result = await requestCoverTitleBatch(kind === 'run' ? { kind, retryErrors } : { kind, runId: q.data.run!.id });
+      qc.setQueryData(COVER_TITLE_BATCH_KEY, result);
     } catch { setProblem(kind); void q.refetch(); }
     finally { setOperation(null); }
   };

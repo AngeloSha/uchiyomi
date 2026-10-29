@@ -1,3 +1,5 @@
+import { api } from './api';
+
 export interface CoverTitleReview {
   id: string; title: string; jobId: string;
 }
@@ -15,6 +17,13 @@ export interface CoverTitleBatchStatus {
 }
 export const COVER_TITLE_BATCH_KEY = ['admin-cover-title-batch'] as const;
 export const COVER_TITLE_BATCH_ROOT = '/api/admin/title-extraction/batch';
+
+/** Both actions return the authoritative status itself, ready to replace the overview cache. */
+export function requestCoverTitleBatch(action: { kind: 'run'; retryErrors: boolean } | { kind: 'stop'; runId: string }): Promise<CoverTitleBatchStatus> {
+  return api<CoverTitleBatchStatus>(COVER_TITLE_BATCH_ROOT + (action.kind === 'run' ? '/run' : '/cancel'), {
+    method: 'POST', json: action.kind === 'run' ? { retryErrors: action.retryErrors } : { runId: action.runId },
+  });
+}
 
 /** A manually requested run can be active with nightly generation off. Failed reads stop polling. */
 export function coverTitleBatchPoll(status: CoverTitleBatchStatus | undefined, failed = false): number | false {

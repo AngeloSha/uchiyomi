@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { CoverTitleBatchProgress } from '../components/CoverTitleBatch';
 import { AutomaticCoverTitles } from '../components/TitleExtraction';
-import { COVER_TITLE_BATCH_KEY, coverTitleBatchFinished, coverTitleBatchPoll, coverTitleBatchResumeDelay, type CoverTitleBatchStatus } from '../lib/coverTitleBatch';
+import { COVER_TITLE_BATCH_KEY, coverTitleBatchFinished, coverTitleBatchPoll, coverTitleBatchResumeDelay, requestCoverTitleBatch, type CoverTitleBatchStatus } from '../lib/coverTitleBatch';
 import { EXTRACTION_CAPABILITIES_KEY } from '../lib/titleExtraction';
 (globalThis as { React?: unknown }).React = React;
 const overview = (extra: Partial<CoverTitleBatchStatus> = {}): CoverTitleBatchStatus => ({
@@ -100,4 +100,19 @@ test('read/start/stop/review errors are actionable without claiming artwork chan
   assert.match(render({ problem: 'run' }), /Could not start cover title generation/);
   assert.match(render({ problem: 'stop' }), /Could not stop cover title generation/);
   assert.match(render({ reviewError: true }), /Could not open this title preview/);
+});
+
+test('run and cancel each adopt the bare authoritative status from one POST, preserving their request contract', async (t) => {
+  const calls: { path: string; method?: string; body: unknown }[] = [];
+  const expected = overview();
+  t.mock.method(globalThis, 'fetch', async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    calls.push({ path: new URL(String(input), 'http://fixture').pathname, method: init?.method, body: JSON.parse(String(init?.body)) });
+    return Response.json(expected);
+  });
+  assert.deepEqual(await requestCoverTitleBatch({ kind: 'run', retryErrors: true }), expected);
+  assert.deepEqual(await requestCoverTitleBatch({ kind: 'stop', runId: 'r_1' }), expected);
+  assert.deepEqual(calls, [
+    { path: '/api/admin/title-extraction/batch/run', method: 'POST', body: { retryErrors: true } },
+    { path: '/api/admin/title-extraction/batch/cancel', method: 'POST', body: { runId: 'r_1' } },
+  ]);
 });
