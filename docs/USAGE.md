@@ -627,6 +627,33 @@ its own copy, so the cover survives the source changing or going away. **Upload 
 a picture from the device instead. The new cover shows at once on every card of this device, not after the browser's
 day-long copy of the old one runs out.
 
+### Hero title artwork
+
+The home carousel and a manga's series-page hero can show its own transparent title logo. Without a logo, the title
+uses a readable style matched to its genres and cover colours. The same treatment fits a phone and a computer. A
+logo in the original language, or one whose language is not known, keeps the readable manga title underneath it.
+
+**Admin → Settings → Server → Automatic title logos** enables background logo lookup. It is off until enabled.
+Only a series with a checked or manually confirmed AniList manga link is looked up; the server uses that ID to find
+matching artwork on Wikidata and Wikimedia Commons, and keeps its own copy. A title alone is not enough to choose a
+logo. The library's automatic online-lookup opt-out is respected, as is **Use the first page** for automatic artwork.
+Opening a hero never waits for the lookup: it shows the styled title while work runs, and keeps that title when
+there is no reliable logo. A provider outage leaves any cached picture available.
+
+In **Edit details → Art → Title logo**, an admin can:
+
+- Upload a transparent PNG or WebP, or use **From a link**, to choose a logo explicitly.
+- Use **Find again** to request a fresh match for a series in automatic mode. This explicit action can look online
+  even when automatic lookup is off for the server or library.
+- Choose **Use styled title** and a style, including a plain title. That choice stops automatic logo lookup for the
+  series until it is reset.
+- Choose **Reset to automatic** to clear a manual choice. A custom logo remains in charge until it is reset; a
+  background result cannot overwrite a later manual edit.
+
+The preview includes the artwork's source and attribution when supplied. Uploaded and downloaded logos are kept with
+the server's configuration and included in configuration backups. Changing a title logo leaves the manga's cover,
+chapter files and reading progress in place. Extracting lettering from covers is not part of this version.
+
 ### Sources & translations
 
 Under the title, every series carries one muted line that says where its chapters come from. On a phone it

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Manga title artwork
+
+- Home and series heroes show cached transparent title logos when available, with readable captions for original-language
+  artwork. Genre and cover-colour title styles provide a fallback, with the same layout on phones and computers.
+- Optional automatic lookup uses confirmed AniList manga identities to find Wikimedia artwork. Existing online-lookup
+  opt-outs remain effective; lookups run in the background and do not delay opening a page.
+- Edit details offers logo upload, image links, refresh, styled titles and reset to automatic. Manual choices take priority,
+  and artwork source information stays available with the preview.
+
 ## v0.101.0 — 2026-10-29
 
 **Search creators on sources, manage pages with undo, and preview source cleanup before deleting anything.**
