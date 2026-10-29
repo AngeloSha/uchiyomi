@@ -5,10 +5,9 @@ import { api, apiResponse, ApiError } from '@/lib/api';
 import { t as tr } from '@/lib/i18n';
 import type { Series } from '@/lib/types';
 import { useLayer } from '@/lib/layers';
-import { sameCoverSelection } from '@/lib/coverTitleRegions';
 import {
   EXTRACTION_CAPABILITIES_KEY, EXTRACTION_CAPABILITIES_URL, extractionActive, extractionCanApply, extractionPoll,
-  extractionProblem, extractionRoot, type TitleExtractionCapabilities, type TitleExtractionJob,
+  extractionProblem, extractionRoot, extractionSelectionChanged, extractionJobSelection, type TitleExtractionCapabilities, type TitleExtractionJob,
 } from '@/lib/titleExtraction';
 import { OnBody } from './ui';
 import { HeroTitle } from './HeroTitle';
@@ -110,7 +109,7 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
     adopted.current = true;
     const candidate = latest.data.job;
     if (candidate && !['expired', 'applied'].includes(candidate.status)) {
-      setJob(candidate); setSelection({ region: candidate.region, exclusions: candidate.exclusions });
+      setJob(candidate); setSelection(extractionJobSelection(candidate));
     }
   }, [latest.data]);
   const progress = useQuery({ queryKey: ['title-extraction-job', series.id, job?.id], enabled: !!job,
@@ -119,7 +118,7 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
   useEffect(() => {
     if (progress.data?.job && progress.data.job.id === job?.id) {
       if (extractionActive(job) && !extractionActive(progress.data.job)) {
-        setSelection({ region: progress.data.job.region, exclusions: progress.data.job.exclusions });
+        setSelection(extractionJobSelection(progress.data.job));
       }
       setJob(progress.data.job);
     }
@@ -132,12 +131,12 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
   }, [job?.id, job?.status, capabilities.timeoutSeconds, pollRound]);
   const coverPath = job && !stale ? `${root}/${encodeURIComponent(job.id)}/cover` : `${root}/cover`;
   const cover = useExtractionImage(coverPath, attempt);
-  const previewPath = job?.previewUrl && ['ready', 'rejected'].includes(job.status) && !stale ? `${root}/${encodeURIComponent(job.id)}/preview` : null;
+  const changed = extractionSelectionChanged(job, selection);
+  const previewPath = job?.previewUrl && ['ready', 'rejected'].includes(job.status) && !stale && !changed ? `${root}/${encodeURIComponent(job.id)}/preview` : null;
   const preview = useExtractionImage(previewPath, attempt);
   useEffect(() => { setPreviewDecoded(false); }, [preview.image?.url]);
   const active = extractionActive(job);
   const busy = operation !== null;
-  const changed = !!job && !sameCoverSelection(selection, { region: job.region, exclusions: job.exclusions });
   const canApply = extractionCanApply(job, changed, stale, previewDecoded && !!cover.image && !progress.isError, busy);
 
   const remove = useCallback(async (candidate: TitleExtractionJob | null) => {
@@ -235,7 +234,7 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
               maxExclusions={Math.min(8, capabilities.maxExclusions)} onChange={setSelection} />
               : <p className="text-xs text-fog-400">{cover.failed ? tr('The cover could not be loaded. Close this preview and try again.') : tr('Loading…')}</p>}
           </section>
-          <section className="min-w-0" data-extract-result={job?.status ?? 'idle'}>
+          <section className="min-w-0" data-extract-result={job?.status ?? 'idle'} data-extract-selection-mode={job?.selectionMode}>
             <h3 className="mb-3 text-sm font-semibold text-fog-200">{tr('Preview the title')}</h3>
             {latest.isPending && <p className="text-xs text-fog-400">{tr('Checking for a saved preview…')}</p>}
             {(active || operation === 'create') && <div className="mb-4 flex items-center gap-3 text-sm text-fog-300" aria-live="polite">
@@ -247,13 +246,13 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
             </div>}
             {errorMessage && <p role="alert" className="mb-3 text-xs leading-relaxed text-amber-200" data-extract-error>{tr(errorMessage)}</p>}
             {job?.automatic && <p className="mb-3 text-xs text-fog-400">{tr('Prepared automatically for your review. Nothing has been applied.')}</p>}
+            {changed && <p className="mb-3 text-xs text-amber-200" aria-live="polite" data-extract-selection-changed>{tr('The selected areas changed. Create a new preview before applying.')}</p>}
             {preview.image ? <>
               <ExtractionHeroPreview series={series} url={preview.image.url} onDecoded={() => setPreviewDecoded(true)} />
               <p className="mt-3 text-xs leading-relaxed text-fog-300">{tr('Check that the whole title is present, with clean edges and no author names or volume numbers. A preview can miss letters; only apply it if it looks right.')}</p>
-            </> : !active && <p className="text-xs leading-relaxed text-fog-400">{tr('Create a preview to see how the title looks on dark and light backgrounds.')}</p>}
+            </> : !active && !changed && <p className="text-xs leading-relaxed text-fog-400">{tr('Create a preview to see how the title looks on dark and light backgrounds.')}</p>}
             {preview.failed && <div className="mt-3 space-y-2"><p role="alert" className="text-xs text-amber-200">{tr('The title preview could not be loaded.')}</p>
               <button type="button" className="btn-key" onClick={() => setAttempt((n) => n + 1)}>{tr('Try again')}</button></div>}
-            {changed && <p className="mt-3 text-xs text-amber-200">{tr('The selected areas changed. Create a new preview before applying.')}</p>}
           </section>
         </div>
       </div>

@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { CoverTitleRegions } from '../components/CoverTitleRegions';
 import { AutomaticCoverTitles, TitleExtractionButton } from '../components/TitleExtraction';
 import { coverPoint, coverRect, editCoverRect, sameCoverSelection } from '../lib/coverTitleRegions';
-import { EXTRACTION_CAPABILITIES_KEY, extractionCanApply, extractionPoll, extractionProblem, type TitleExtractionJob } from '../lib/titleExtraction';
+import { EXTRACTION_CAPABILITIES_KEY, extractionCanApply, extractionPoll, extractionProblem, extractionSelectionChanged, extractionJobSelection, type TitleExtractionJob } from '../lib/titleExtraction';
 import type { Series } from '../lib/types';
 
 (globalThis as { React?: unknown }).React = React;
@@ -81,6 +81,36 @@ test('worker and stale errors are plain sentences rather than raw internals', ()
   assert.match(extractionProblem('worker_unavailable'), /not available/);
   assert.match(extractionProblem('extract_timeout'), /too long/);
   assert.doesNotMatch(extractionProblem('Traceback: model failed'), /Traceback|model/);
+});
+
+test('a preview becomes out of date when its title box or exclusions change, and exact undo may reuse it', () => {
+  const region = { left: .1, top: .2, width: .7, height: .3 };
+  const excluded = { left: .8, top: .8, width: .1, height: .1 };
+  const saved = job({ region, exclusions: [excluded] });
+  assert.equal(extractionSelectionChanged(saved, { region: { ...region }, exclusions: [{ ...excluded }] }), false);
+  assert.equal(extractionSelectionChanged(saved, { region: { ...region, left: .15 }, exclusions: [excluded] }), true);
+  assert.equal(extractionSelectionChanged(saved, { region, exclusions: [] }), true);
+  assert.equal(extractionSelectionChanged(saved, { region, exclusions: [{ ...excluded, top: .75 }] }), true);
+  assert.equal(extractionSelectionChanged(saved, { region: null, exclusions: [excluded] }), true);
+  assert.equal(extractionSelectionChanged(saved, { region, exclusions: [excluded] }), false, 'undoing the selection restores exactly the saved preview');
+  assert.equal(extractionSelectionChanged(null, { region, exclusions: [] }), false);
+});
+
+test('detected and tight cutout boxes never replace the requested manual area or invent one for automatic/legacy jobs', () => {
+  const requested = { left: .07, top: .12, width: .83, height: .52 };
+  const detected = { left: .11, top: .14, width: .7, height: .31 };
+  const tight = { left: .17, top: .16, width: .6, height: .28 };
+  const manual = job({ selectionMode: 'manual', region: requested, resultRegion: detected, candidateRegion: tight });
+  assert.deepEqual(extractionJobSelection(manual).region, requested);
+  assert.equal(extractionSelectionChanged(manual, { region: requested, exclusions: [] }), false);
+  assert.equal(extractionSelectionChanged(manual, { region: detected, exclusions: [] }), true);
+  for (const selectionMode of ['automatic', 'legacy'] as const) {
+    const saved = job({ selectionMode, region: null, resultRegion: detected, candidateRegion: tight });
+    assert.deepEqual(extractionJobSelection(saved), { region: null, exclusions: [] });
+    assert.equal(extractionSelectionChanged(saved, { region: null, exclusions: [] }), false);
+    assert.equal(extractionSelectionChanged(saved, { region: detected, exclusions: [] }), true);
+  }
+  assert.deepEqual(extractionJobSelection(job({ region: requested })).region, requested, 'older servers remain compatible');
 });
 
 test('unavailable capabilities disable extraction and automatic opt-in starts off until full checks are available', () => {

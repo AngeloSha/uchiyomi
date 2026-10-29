@@ -1,5 +1,5 @@
 import { keys } from './i18n';
-import type { CoverTitleRect } from './coverTitleRegions';
+import { sameCoverSelection, type CoverTitleRect } from './coverTitleRegions';
 
 export interface TitleExtractionCapabilities {
   available: boolean; reason: string | null; automaticAvailable: boolean; automaticApplyAvailable: boolean;
@@ -10,6 +10,9 @@ export interface TitleExtractionJob {
   status: 'queued' | 'running' | 'ready' | 'rejected' | 'error' | 'expired' | 'applied';
   createdAt: string; expiresAt: string; previewUrl: string | null; coverPreviewUrl: string | null;
   region: CoverTitleRect | null; exclusions: CoverTitleRect[]; reasons: string[]; error: string | null;
+  selectionMode?: 'manual' | 'automatic' | 'legacy';
+  resultRegion?: CoverTitleRect | null;
+  candidateRegion?: CoverTitleRect | null;
   quality: Record<string, unknown> | null;
 }
 export const EXTRACTION_CAPABILITIES_KEY = ['title-extraction-capabilities'] as const;
@@ -18,6 +21,14 @@ export const extractionRoot = (id: string) => `/api/admin/series/${encodeURIComp
 export const extractionActive = (job?: TitleExtractionJob | null): boolean => job?.status === 'queued' || job?.status === 'running';
 export const extractionPoll = (job: TitleExtractionJob | null | undefined, failed = false, paused = false): number | false =>
   extractionActive(job) && !failed && !paused ? 1500 : false;
+/** Detected/tight result boxes are evidence, not a new manual selection. Legacy jobs have no recoverable request. */
+export function extractionJobSelection(job: TitleExtractionJob): { region: CoverTitleRect | null; exclusions: CoverTitleRect[] } {
+  return { region: job.selectionMode === 'automatic' || job.selectionMode === 'legacy' ? null : job.region, exclusions: job.exclusions };
+}
+/** An old cutout is not a preview of an edited rectangle, even though its job is still available on the server. */
+export function extractionSelectionChanged(job: TitleExtractionJob | null, selection: { region: CoverTitleRect | null; exclusions: CoverTitleRect[] }): boolean {
+  return !!job && !sameCoverSelection(selection, extractionJobSelection(job));
+}
 export const extractionCanApply = (job: TitleExtractionJob | null, changed: boolean, stale: boolean, previewLoaded: boolean, busy: boolean): boolean =>
   job?.status === 'ready' && !changed && !stale && previewLoaded && !busy && Date.parse(job.expiresAt) > Date.now();
 
