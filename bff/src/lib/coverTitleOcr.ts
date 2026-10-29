@@ -6,11 +6,11 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { OcrWorker, type PageText } from './translate/ocr';
 import { detSize, OCR_MAX_SIDE } from './translate/ocrCore';
-import { assessCoverTitleQuality, isCoverTitleCalibration, normalizeCoverTitleText, coverTitleOcrReading,
+import { assessCoverTitleQuality, coverTitleAvailableChecksPassed, isCoverTitleCalibration, normalizeCoverTitleText, coverTitleOcrReading,
   type CoverTitleCalibration, type CoverTitleQualityInput, type CoverTitleQualityResult } from './coverTitleQuality';
 
 const OCR_PACK = 'e9e37c7cb2b7af61042a41f5f188a5e9c14cfeb78c35425551118f2e288c7d09';
-const CURRENT_MODEL = '7d3af4077b9da8728cff8b78d5a5463570b89e985ddc4ef58694fcb0144f1331';
+const CURRENT_MODEL = '27a76caa54201b4786a3d0503fa8a8eb3d0a17686b757bfcb9ff8164e667b5ce';
 const HASH = /^[a-f0-9]{64}$/;
 const BYTE_LIMIT = 12 * 1024 * 1024;
 const sha = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
@@ -185,6 +185,7 @@ export function createCoverTitleOcr(deps: Dependencies) {
           quality.safeToApply = false;
         }
         quality.needsReview = !quality.safeToApply;
+        quality.availableChecksPassed = coverTitleAvailableChecksPassed(quality);
         return { quality, verifierFingerprint, sourceOcr, candidateLightOcr, candidateDarkOcr };
       } catch { return fallback(); }
     });

@@ -33,6 +33,9 @@ export interface CoverTitleQualityInput {
 export interface CoverTitleQualityResult {
   policyVersion: 'strict-v1';
   safeToApply: boolean;
+  /** Current title/image checks passed. Older stored drafts omit this and must fail closed.
+   * This does not assert that a matching empirical calibration has been approved. */
+  availableChecksPassed?: boolean;
   manualApplyAllowed: boolean;
   needsReview: boolean;
   reasons: Array<{ code: CoverTitleQualityCode; severity: 'warning' | 'error' }>;
@@ -71,6 +74,12 @@ const area = (b: OcrLine['box']) => (b[2] - b[0]) * (b[3] - b[1]);
 const intersection = (a: readonly number[], b: readonly number[]) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0]))
   * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
 
+/** Explicit nightly auto-use checks. Calibration status stays visible and never becomes synthetic approval. */
+export function coverTitleAvailableChecksPassed(result: CoverTitleQualityResult): boolean {
+  return result.manualApplyAllowed && result.sourceTitleMatched === true && result.candidateTitleMatched === true
+    && result.reasons.every(({ code }) => code === 'automatic_verification_unvalidated' || code === 'verifier_profile_mismatch');
+}
+
 function validOcr(lines: readonly OcrLine[], width: number, height: number): boolean {
   const box = (b: unknown): boolean => Array.isArray(b) && b.length === 4 && b.every((n: unknown) => typeof n === 'number' && Number.isFinite(n))
     && b[0] >= 0 && b[1] >= 0 && b[2] > b[0] && b[3] > b[1] && b[2] <= width && b[3] <= height;
@@ -101,7 +110,7 @@ function evidence(lines: readonly OcrLine[], aliases: readonly string[], directi
 
 /** Pure, bounded and fail-closed. Valid rough cutouts remain usable in an explicit visual-review workflow. */
 export function assessCoverTitleQuality(input: CoverTitleQualityInput, calibration?: CoverTitleCalibration): CoverTitleQualityResult {
-  const result: CoverTitleQualityResult = { policyVersion: 'strict-v1', safeToApply: false, manualApplyAllowed: true,
+  const result: CoverTitleQualityResult = { policyVersion: 'strict-v1', safeToApply: false, availableChecksPassed: false, manualApplyAllowed: true,
     needsReview: true, reasons: [], sourceTitleMatched: null, candidateTitleMatched: null, matchedAlias: null };
   const add = (code: CoverTitleQualityCode, severity: 'warning' | 'error' = 'warning') => {
     if (!result.reasons.some((r) => r.code === code)) result.reasons.push({ code, severity });
@@ -154,6 +163,7 @@ export function assessCoverTitleQuality(input: CoverTitleQualityInput, calibrati
   if (input.darkBackgroundContrastRatio !== undefined && (!Number.isFinite(input.darkBackgroundContrastRatio)
     || input.darkBackgroundContrastRatio < 3 || input.darkBackgroundContrastRatio > 21)) add('low_contrast');
   result.safeToApply = result.reasons.length === 0 && result.sourceTitleMatched === true && result.candidateTitleMatched === true;
+  result.availableChecksPassed = coverTitleAvailableChecksPassed(result);
   result.needsReview = !result.safeToApply;
   return result;
 }

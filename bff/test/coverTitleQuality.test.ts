@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assessCoverTitleQuality as assess, type CoverTitleQualityInput, type CoverTitleCalibration } from '../src/lib/coverTitleQuality';
+import { assessCoverTitleQuality as assess, coverTitleAvailableChecksPassed, type CoverTitleQualityInput, type CoverTitleCalibration } from '../src/lib/coverTitleQuality';
 import type { OcrLine } from '../src/lib/translate/ocrCore';
 
 const FINGERPRINT = 'a'.repeat(64);
@@ -34,6 +34,31 @@ test('incomplete/failed/unreviewed synthetic calibration or changed pipeline nev
     assert.equal(assess(input(), { ...profile, ...patch } as CoverTitleCalibration).safeToApply, false);
   }
   assert.ok(reasons(assess(input({ verifierFingerprint: 'c'.repeat(64) }), profile)).includes('verifier_profile_mismatch'));
+});
+
+test('an explicit available-checks opt-in can use complete evidence without inventing calibration approval', () => {
+  const uncalibrated = assess(input());
+  assert.equal(uncalibrated.availableChecksPassed, true);
+  assert.equal(uncalibrated.safeToApply, false, 'empirical approval remains separate');
+  assert.ok(reasons(uncalibrated).includes('automatic_verification_unvalidated'));
+  const changedProfile = assess(input({ verifierFingerprint: 'c'.repeat(64) }), profile);
+  assert.equal(changedProfile.availableChecksPassed, true);
+  assert.equal(changedProfile.safeToApply, false);
+  assert.ok(reasons(changedProfile).includes('verifier_profile_mismatch'));
+  assert.equal(assess(input(), profile).availableChecksPassed, true);
+});
+
+test('available checks retain every title, identity, image and OCR rejection without a calibration file', () => {
+  for (const patch of [{ sourceOcr: undefined }, { candidateOcr: [line('NEP ECE')] }, { aliases: [] },
+    { linkedAnilistId: null }, { aliasesAnilistId: '87216' }, { candidateOcr: [line('ONE PIECE', .979)] },
+    { candidateOcr: [line(), line('AUTHOR', .99, [50, 95, 300, 115])] }, { foregroundFraction: 1 },
+    { edgeInkFraction: .000001 }, { maskRetainedFraction: .99 }, { foregroundChangedFraction: .000001 },
+    { darkBackgroundContrastRatio: 2.99 }]) {
+    assert.equal(assess(input(patch)).availableChecksPassed, false, JSON.stringify(patch));
+  }
+  const edited = assess(input());
+  edited.reasons.push({ code: 'manual_mask_edit', severity: 'warning' });
+  assert.equal(coverTitleAvailableChecksPassed(edited), false, 'manual brush edits remain an explicit review choice');
 });
 
 test('high segmentation and OCR scores never rescue a partial title, abbreviation or missing symbol', () => {

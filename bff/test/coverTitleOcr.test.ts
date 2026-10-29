@@ -9,13 +9,13 @@ const model = 'c'.repeat(64), pack = 'd'.repeat(64), verifier = coverTitleVerifi
 const profile: CoverTitleCalibration = { profile: 'strict-v1', verifierFingerprint: verifier, corpusSha256: 'e'.repeat(64),
   reviewedCases: 10, knownUnsafeCases: 4, rejectedUnsafeCases: 4, falseAccepts: 0, unassistedCleanCasesPassed: 1,
   visuallyReviewed: true, reviewMethod: 'operator_visual_audit', reviewer: 'codex', automaticAcceptanceApproved: true };
-async function fixture(partialDark = false, lightText = 'ONE PIECE') {
+async function fixture(partialDark = false, lightText = 'ONE PIECE', calibrated = true) {
   const sourceBytes = await sharp({ create: { width: 80, height: 120, channels: 3, background: '#ffffff' } }).png().toBuffer();
   const candidateBytes = await sharp({ create: { width: 400, height: 120, channels: 4, background: '#00000000' } })
     .composite([{ input: await sharp({ create: { width: 250, height: 40, channels: 4, background: '#ffffffff' } }).png().toBuffer(), left: 10, top: 10 }]).png().toBuffer();
   let calls = 0, stops = 0, active = 0, peak = 0;
   const adapter = createCoverTitleOcr({ directory: () => '/test-ocr', calibrationFile: () => '/trusted-calibration',
-    verifyPack: async () => pack, loadCalibration: async () => profile, worker: () => ({
+    verifyPack: async () => pack, loadCalibration: async () => calibrated ? profile : undefined, worker: () => ({
       stop: () => { stops++; },
       read: async (bytes) => {
         calls++; active++; peak = Math.max(peak, active);
@@ -56,6 +56,22 @@ test('source and the actual dark hero must pass; empty/weak light inspection is 
   const conflict = await contradiction.adapter.assess(contradiction.want);
   assert.equal(conflict.safeToApply, false);
   assert.ok(conflict.reasons.some((r) => r.code === 'light_ocr_contradiction'));
+});
+
+test('available checks use actual OCR without calibration, and contradictory light text vetoes both modes', async () => {
+  const f = await fixture(false, 'ONE PIECE', false);
+  const result = await f.adapter.inspect(f.want);
+  assert.equal(result.quality.availableChecksPassed, true);
+  assert.equal(result.quality.safeToApply, false);
+  assert.equal((await f.adapter.capability(model)).calibrated, false);
+  assert.equal(f.counts().calls, 3, 'the available-checks mode still reads source and both inspection backgrounds');
+  const bad = await fixture(false, 'VOLUME ONE', false);
+  const conflict = await bad.adapter.assess(bad.want);
+  assert.equal(conflict.availableChecksPassed, false);
+  assert.equal(conflict.safeToApply, false);
+  assert.ok(conflict.reasons.some((r) => r.code === 'light_ocr_contradiction'));
+  const partial = await fixture(true, 'ONE PIECE', false);
+  assert.equal((await partial.adapter.assess(partial.want)).availableChecksPassed, false);
 });
 
 test('source cache is tied to actual byte hash/language/prepared dimensions and OCR calls are serialized', async () => {
