@@ -6,6 +6,8 @@
 
 - Home and series heroes show cached transparent title logos when available, with readable captions for original-language
   artwork. Genre and cover-colour title styles provide a fallback, with the same layout on phones and computers.
+- Title logos occupy more of the Home and series heroes, with proportional sizing for small originals and
+  compact layouts that keep reading controls clear on short screens.
 - Optional automatic lookup uses confirmed AniList manga identities to find Wikimedia artwork. Existing online-lookup
   opt-outs remain effective; lookups run in the background and do not delay opening a page.
 - Edit details offers logo upload, image links, refresh, styled titles and reset to automatic. Manual choices take priority,
