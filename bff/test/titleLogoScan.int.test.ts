@@ -181,6 +181,47 @@ test('scheduler shutdown clears its timer, discards in-flight automatic results 
   runtime.stopping = true; stop = scan.startTitleLogoScan(undefined, clock.options); assert.equal(clock.pending.size, 0);
 });
 
+test('explicit Find promotes an already queued automatic identity ahead of bulk work without interrupting the active lookup', { skip }, async () => {
+  await seed(3); let release!: () => void; const gate = new Promise<void>((r) => { release = r; });
+  art.setTitleLogoLookupForTests(async (anilistId, opts) => {
+    calls.push(anilistId); assert.equal(opts?.interactive, anilistId === '10003' ? true : undefined);
+    if (calls.length === 1) await gate; return { kind: 'missing' };
+  });
+  await scan.scanTitleLogos(); await eventually(() => calls.length === 1);
+  const find = await app.inject({ method: 'POST', url: `/api/admin/series/${id(3)}/logo/refresh`, headers: auth(admin), payload: {} });
+  assert.equal(find.statusCode, 200); assert.equal(art.titleLogoQueueState().ids.length, 3);
+  release(); await art.titleLogoQueueSettled(); assert.deepEqual(calls, ['10001', '10003', '10002']);
+});
+
+test('a full automatic queue gives Find a waiting slot and rediscovers the evicted identity in the next scan', { skip }, async () => {
+  await seed(130); let release!: () => void; const gate = new Promise<void>((r) => { release = r; });
+  art.setTitleLogoLookupForTests(async (anilistId, opts) => {
+    calls.push(anilistId); assert.equal(opts?.interactive, anilistId === '10130' ? true : undefined);
+    if (calls.length === 1) await gate; return { kind: 'missing' };
+  });
+  await scan.scanTitleLogos(); await eventually(() => calls.length === 1);
+  const find = await app.inject({ method: 'POST', url: `/api/admin/series/${id(130)}/logo/refresh`, headers: auth(admin), payload: {} });
+  assert.equal(find.statusCode, 200); const queued = art.titleLogoQueueState().ids;
+  assert.equal(queued.length, 128); assert.ok(queued.includes(id(1)), 'the active lookup keeps its slot');
+  assert.ok(queued.includes(id(130))); assert.ok(!queued.includes(id(128)), 'only waiting automatic work is evicted');
+  release(); await art.titleLogoQueueSettled(); assert.equal(calls.length, 128); assert.equal(calls[1], '10130');
+  assert.equal(calls.includes('10128'), false); assert.equal((await scan.titleLogoScanStatus()).counts.unchecked, 2);
+  assert.equal(await scan.scanTitleLogos(), 2); await art.titleLogoQueueSettled();
+  assert.equal(calls.length, 130); assert.equal(new Set(calls).size, 130); assert.equal((await scan.titleLogoScanStatus()).checked, 130);
+});
+
+test('a queue filled with manual requests cannot evict manual or active work for another Find', { skip }, async () => {
+  await seed(129); let release!: () => void; const gate = new Promise<void>((r) => { release = r; });
+  art.setTitleLogoLookupForTests(async (anilistId, opts) => {
+    calls.push(anilistId); assert.equal(opts?.interactive, true); if (calls.length === 1) await gate; return { kind: 'missing' };
+  });
+  await art.queueTitleLogos(Array.from({ length: 128 }, (_, n) => id(n+1)), 'manual'); await eventually(() => calls.length === 1);
+  const before = art.titleLogoQueueState().ids;
+  const find = await app.inject({ method: 'POST', url: `/api/admin/series/${id(129)}/logo/refresh`, headers: auth(admin), payload: {} });
+  assert.equal(find.statusCode, 429); assert.equal(find.json().error, 'busy'); assert.deepEqual(art.titleLogoQueueState().ids, before);
+  release(); await art.titleLogoQueueSettled(); assert.equal(calls.length, 128); assert.equal(calls.includes('10129'), false);
+});
+
 test('status is admin-only and read-only; explicit scan rejects disabled mode and responds before provider completion', { skip }, async () => {
   await seed(1); await q('UPDATE server_settings SET automatic_title_logos=false WHERE id=1');
   assert.equal((await app.inject({ method: 'GET', url: '/api/admin/title-logos/status' })).statusCode, 401);

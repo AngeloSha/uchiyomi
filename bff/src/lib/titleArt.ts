@@ -272,13 +272,20 @@ export async function queueTitleLogos(ids: string[], authority: AniListAuthority
       if (r.lookup_anilist_id === r.linked_anilist_id && r.retry_at && new Date(r.retry_at).getTime() > Date.now()) continue;
     }
     const old = pending.get(r.id);
-    if (old && (old.authority === 'manual' || authority === 'automatic')) continue;
+    if (old && (authority === 'automatic' || old === activeJob)) continue;
     if (!old && pending.size >= MAX_PENDING) {
-      if (authority === 'manual') throw new TitleArtError('busy', 429, 'Title artwork is busy. Try again shortly.', 5000);
-      continue;
+      if (authority === 'automatic') continue;
+      // Bulk discovery is recoverable from SQL. Give an explicit Find the waiting slot furthest away,
+      // preserving every manual request and the active lookup; the next scan rediscovers the evicted ID.
+      const evict = [...waiting].reverse().find((id) => pending.get(id)?.authority === 'automatic' && pending.get(id) !== activeJob);
+      if (!evict) throw new TitleArtError('busy', 429, 'Title artwork is busy. Try again shortly.', 5000);
+      waiting.delete(evict); pending.delete(evict);
     }
     pending.set(r.id, { id: r.id, anilistId: r.linked_anilist_id!, version: nversion(r.version), authority, generation });
-    waiting.add(r.id);
+    if (authority === 'manual') {
+      const rest = [...waiting].filter((id) => id !== r.id); waiting.clear(); waiting.add(r.id);
+      for (const id of rest) waiting.add(id);
+    } else waiting.add(r.id);
   }
   resumeTitleLogoQueue();
 }
