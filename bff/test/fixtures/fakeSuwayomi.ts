@@ -155,6 +155,8 @@ export interface FakeCall {
   /** ok | error (the engine answered with errors) | rejected (validation) | unimplemented | dropped | abandoned | missing | unauthorized | refused */
   status?: string;
   operation?: 'query' | 'mutation' | 'subscription';
+  /** The parsed GraphQL operation name, null for an anonymous document. */
+  operationName?: string | null;
   /** The root fields the operation selected. */
   fields?: string[];
   variables?: Record<string, unknown>;

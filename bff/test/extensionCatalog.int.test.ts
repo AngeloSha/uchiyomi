@@ -252,10 +252,12 @@ test('Admin → Extensions on a repository the size of a real one', { skip: DSN 
       assert.equal(r.json().changed, 1, 'a source with no row yet is switched on');
       assert.equal((await rows())[SOURCE_IDS.webtoons], true, 'and its row says so');
       // A source it knows costs the engine nothing more than the reload it always did.
-      const asked = fake.graphqlCalls('sources').length;
+      // Optional creator-filter discovery is a separate read after registration, not another source reload.
+      const loads = () => fake.graphqlCalls('sources').filter((c) => c.operationName !== 'SourceCreatorFilters').length;
+      const asked = loads();
       const off = await post('/api/admin/extensions/sources/bulk', { ids: [SOURCE_IDS.webtoons], enabled: false });
       assert.equal(off.statusCode, 200, off.body);
-      assert.equal(fake.graphqlCalls('sources').length - asked, 1, 'the reload\'s one look, and no other');
+      assert.equal(loads() - asked, 1, 'the reload\'s one look, and no other ordinary source load');
     });
 
     /** Reintroduce by dropping `used` from the rows: "the series that came from it" fails. */

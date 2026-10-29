@@ -106,8 +106,11 @@ test('with nothing left out, a switch asks the engine nothing', { skip }, async 
   env.SUWAYOMI_MAX_SOURCES = 3;
   await sources.reloadAll();
   assert.equal(registered().length, 3, 'PREMISE: all three fit');
-  const before = fake!.graphqlCalls().length;
+  // A preceding reload's optional filter discovery may still be finishing. Count every ordinary engine call,
+  // so a switch that incorrectly reloads sources or mutates engine state still fails this assertion.
+  const ordinaryCalls = () => fake!.graphqlCalls().filter((c) => c.operationName !== 'SourceCreatorFilters').length;
+  const before = ordinaryCalls();
   assert.equal((await post(sw(ID.c), 'disable')).statusCode, 200);
   assert.equal((await post(sw(ID.c), 'enable')).statusCode, 200);
-  assert.equal(fake!.graphqlCalls().length, before, 'no load');
+  assert.equal(ordinaryCalls(), before, 'no ordinary engine request');
 });

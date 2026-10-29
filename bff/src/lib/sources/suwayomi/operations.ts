@@ -74,7 +74,7 @@ export const OPS = {
    */
   sources: op('sources', '{ sources { totalCount nodes { id name displayName lang iconUrl homeUrl contentWarning supportsLatest extension { pkgName name } } } }'),
   // Read apart and after registration: one broken extension's getFilterList cannot hide ordinary sources.
-  sourceCreatorFilters: op('sourceCreatorFilters', `{ sources { nodes { id filters { ${creatorFilterShapes(2)} } } } }`, true),
+  sourceCreatorFilters: op('sourceCreatorFilters', `query SourceCreatorFilters { sources { nodes { id filters { ${creatorFilterShapes(2)} } } } }`, true),
   fetchSourceManga: op('fetchSourceManga', `mutation($source:LongString!,$type:FetchSourceMangaType!,$query:String,$page:Int!,$filters:[FilterChangeInput!]){
   fetchSourceManga(input:{source:$source,type:$type,query:$query,page:$page,filters:$filters}){ mangas { ${MANGA_FIELDS} } }
 }`),
