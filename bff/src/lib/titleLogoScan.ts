@@ -106,9 +106,12 @@ export async function scanTitleLogos(options: { retryMissing?: boolean } = {}): 
 /** Preserve an old version's still-active provider waits on the first upgrade to the full scanner. */
 async function restoreProviderWait(): Promise<void> {
   await q(FACTS + `UPDATE server_settings SET title_logo_retry_at=(
-      SELECT max(retry_at) FROM due WHERE eligible AND state='error' AND current_attempt AND retry_at>now())
+      SELECT max(retry_at) FROM due WHERE eligible AND lookup_status='error' AND current_attempt AND retry_at>now())
     WHERE id=1 AND automatic_title_logos AND title_logo_retry_at IS NULL`, [FIRST_PAGE]);
 }
+
+/** Before serving requests, preserve a legacy provider wait even when its failed refresh kept good cached art. */
+export async function initializeTitleLogoScan(): Promise<void> { await restoreProviderWait(); }
 
 export interface TitleLogoScanTimers {
   initialMs?: number; intervalMs?: number;

@@ -25,7 +25,7 @@ import { scheduleMatchCheck } from './lib/matchCheck';
 import { startTitleWorks } from './lib/discoverIdentity';
 import { scheduleMergeLeftovers } from './lib/mergeLeftovers';
 import { scheduleAniListScores } from './lib/anilistScores';
-import { startTitleLogoScan } from './lib/titleLogoScan';
+import { initializeTitleLogoScan, startTitleLogoScan } from './lib/titleLogoScan';
 import { notifyAdmins } from './lib/push';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
@@ -95,6 +95,7 @@ async function main() {
     console.warn('[net] Uchiyomi Desktop is reached from this computer alone: LOCAL_NETWORKS is ignored.');
   }
   await migrate();
+  await initializeTitleLogoScan();
   // What Admin -> Settings -> Server -> Home network saved, where the environment does not say (lib/clientAddr.ts),
   // before any request is judged by it; then what is in force, said once.
   if (!isDesktop()) {

@@ -135,6 +135,29 @@ test('a shared provider Retry-After pauses other identities and persists longer 
   await scan.scanTitleLogos(); await art.titleLogoQueueSettled(); assert.equal(calls.length, 3); status = await scan.titleLogoScanStatus(); assert.equal(status.counts.error, 1); assert.equal(status.counts.missing, 2);
 });
 
+test('boot restores a legacy failed-refresh wait before new requests, including cached art, while excluding protected identities', { skip }, async () => {
+  await seed(6);
+  await q(`INSERT INTO series_title_art(series_id,lookup_status,lookup_anilist_id,retry_at,auto_file,auto_anilist_id)
+    SELECT 's_title_scan_'||lpad(i::text,4,'0'),'error',(10000+i)::text,now()+i*interval '1 hour',
+      CASE WHEN i=1 THEN 'legacy-cached.webp' END,CASE WHEN i=1 THEN '10001' END FROM generate_series(1,5)i`);
+  await q('DELETE FROM series_trackers WHERE series_id=$1', [id(2)]);
+  await q('UPDATE lib_series SET library_id=$2 WHERE id=$1', [id(3), QUIET]);
+  await q("INSERT INTO series_overrides(series_id,cover) VALUES($1,'first_page')", [id(4)]);
+  await q("UPDATE series_title_art SET mode='custom' WHERE series_id=$1", [id(5)]);
+  assert.equal((await scan.titleLogoScanStatus()).counts.ready, 1, 'cached artwork still counts ready despite its last refresh failing');
+  await q('UPDATE server_settings SET automatic_title_logos=false WHERE id=1');
+  await scan.initializeTitleLogoScan(); assert.equal(await art.titleLogoProviderRetryAt(), 0, 'global opt-out makes no upgrade change');
+  await q('UPDATE server_settings SET automatic_title_logos=true WHERE id=1');
+  await scan.initializeTitleLogoScan(); const deadline = await art.titleLogoProviderRetryAt();
+  assert.ok(deadline > Date.now()+55*60_000 && deadline < Date.now()+65*60_000,
+    'only the consented, checked automatic identity contributes its one-hour wait');
+  await art.queueTitleLogos([id(6)]); await art.titleLogoQueueSettled();
+  assert.deepEqual(calls, [], 'an early request for a different identity respects the restored provider wait');
+  assert.equal((await q('SELECT count(*)::int n FROM series_title_art WHERE series_id=$1', [id(6)]))[0].n, 0);
+  await q("UPDATE series_title_art SET retry_at=now()+interval '10 hours' WHERE series_id=$1", [id(1)]);
+  await scan.initializeTitleLogoScan(); assert.equal(await art.titleLogoProviderRetryAt(), deadline, 'an existing persisted deadline is authoritative');
+});
+
 test('queued work rechecks manual choices and identity changes, and turning off the setting cancels it immediately', { skip }, async () => {
   await seed(3); let release!: () => void; const gate = new Promise<void>((r) => { release = r; });
   art.setTitleLogoLookupForTests(async (anilistId) => { calls.push(anilistId); await gate; return { kind: 'missing' }; });
