@@ -41,7 +41,12 @@ try {
     await page.$eval('[data-mask-viewport]', (node) => node.scrollIntoView({ block: 'center' }));
     await page.$eval('[data-mask-viewport]', (node, p) => { const canvas = node.querySelector('canvas'), a = canvas.getBoundingClientRect(), b = node.getBoundingClientRect(); node.scrollLeft += a.left + (p.x + .1) / canvas.width * a.width - b.left - b.width / 2; node.scrollTop += a.top + (p.y + .1) / canvas.height * a.height - b.top - b.height / 2; }, point);
     const p = await page.$eval('[data-mask-canvas]', (canvas, pixel) => { const rect = canvas.getBoundingClientRect(); return { x: rect.left + (pixel.x + .1) / canvas.width * rect.width, y: rect.top + (pixel.y + .1) / canvas.height * rect.height }; }, point);
-    if (touch) { const handle = await page.touchscreen.touchStart(p.x, p.y); await handle.end(); } else await page.mouse.click(p.x, p.y);
+    assert.ok(await page.$eval('[data-mask-viewport]', (node, p) => { const b=node.getBoundingClientRect(); return p.x>b.left&&p.x<b.right&&p.y>b.top&&p.y<b.bottom; }, p), 'source target is physically inside the scrolled viewport');
+    if (touch) {
+      await page.evaluate(() => { window.__touchPoint=null; const surface=document.querySelector('[data-mask-surface]'); surface.addEventListener('pointerdown', (event) => { const c=surface.querySelector('canvas'), r=c.getBoundingClientRect(); window.__touchPoint={x:Math.floor((event.clientX-r.left)/r.width*c.width),y:Math.floor((event.clientY-r.top)/r.height*c.height)}; }, {capture:true,once:true}); });
+      const handle=await page.touchscreen.touchStart(p.x,p.y); await handle.end(); const actual=await page.evaluate(()=>window.__touchPoint); assert.ok(actual,'touch reached the correction canvas'); return actual;
+    } else await page.mouse.click(p.x,p.y);
+    return point;
   };
   await page.focus('[data-mask-radius]'); await page.keyboard.press('Home'); assert.equal(Number(await page.$eval('[data-mask-radius]', (node) => node.value)), .0005);
   await paintAt(empty); await wait(async () => await alphaAt(empty) === 255, 'one pixel restore');
@@ -67,9 +72,9 @@ try {
   await page.waitForSelector('[data-extract-apply]');
   await click('[data-mask-zoom-in]'); await click('[data-mask-zoom-in]'); assert.equal(Number(await page.$eval('[data-mask-zoom]', (node) => node.value)), 2);
   const another = { x: Math.floor(width * .65), y: Math.floor(height * .7) };
-  await click('[data-mask-tool="restore"]'); await paintAt(another, true); await wait(async () => await alphaAt(another) === 255, 'touch restore at zoom');
-  saved = await save(); assert.equal(saved.job.mask.revision, 2); assert.equal(saved.body.strokes.at(-1).points[0].x, (another.x + .5) / width);
-  await page.screenshot({ path: `${OUT}/corrections-desktop.png` });
+  await click('[data-mask-tool="restore"]'); const touched=await paintAt(another, true); await wait(async () => await alphaAt(touched) === 255, 'touch restore at zoom');
+  saved = await save(); assert.equal(saved.job.mask.revision, 2); assert.equal(saved.body.strokes.at(-1).points[0].x, (touched.x + .5) / width); assert.equal(saved.body.strokes.at(-1).points[0].y, (touched.y + .5) / height);
+  await page.$eval('[data-extract-scroll]', n=>n.scrollTop=0); await page.screenshot({ path: `${OUT}/corrections-desktop.png` });
   const resetting = page.waitForResponse((r) => new URL(r.url()).pathname.endsWith('/mask') && r.request().method() === 'PATCH');
   await click('[data-mask-reset]'); assert.deepEqual(JSON.parse((await resetting).request().postData()).strokes, []);
   await wait(async () => { job = (await api(`${root}/${jobId}`)).job; return job.mask.revision === 3 && job.mask.strokes.length === 0; }, 'server reset baseline');
@@ -77,6 +82,7 @@ try {
   await click('[data-mask-fit]'); await click('[data-mask-tool="erase"]'); await paintAt(opaque); await wait(async () => await alphaAt(opaque) === 0, 'erase baseline pixel');
   saved = await save(); assert.equal(saved.job.mask.revision, 4);
   await page.setViewport({ width: 390, height: 844, hasTouch: true });
+  await page.$eval('[data-extract-scroll]', n=>n.scrollTop=0); await page.screenshot({ path: `${OUT}/corrections-phone-editor.png` });
   await page.$eval('[data-extract-hero-preview]', (node) => node.scrollIntoView({ block: 'center' })); await page.screenshot({ path: `${OUT}/corrections-phone.png` });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
   const applying = page.waitForResponse((r) => new URL(r.url()).pathname.endsWith('/apply') && r.request().method() === 'POST');

@@ -190,7 +190,7 @@ export function CoverTitleMaskEditor({ jobId, mask, sourceUrl, baselinePath, dis
         onContextMenu={(event) => event.preventDefault()}
         onPointerDown={(event) => {
           if (event.button !== 0 || disabled || pointerId.current !== null) return;
-          event.preventDefault(); event.currentTarget.focus(); pointerId.current = event.pointerId;
+          event.preventDefault(); event.currentTarget.focus({ preventScroll: true }); pointerId.current = event.pointerId;
           if (tool === 'move' && viewport.current) { pan.current = { x: event.clientX, y: event.clientY, left: viewport.current.scrollLeft, top: viewport.current.scrollTop }; setPanning(true); }
           else { const p = point(event); if (p) begin(p); }
           if (pending.current || pan.current) event.currentTarget.setPointerCapture(event.pointerId);
