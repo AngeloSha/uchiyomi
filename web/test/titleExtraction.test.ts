@@ -113,14 +113,14 @@ test('detected and tight cutout boxes never replace the requested manual area or
   assert.deepEqual(extractionJobSelection(job({ region: requested })).region, requested, 'older servers remain compatible');
 });
 
-test('unavailable capabilities disable extraction and automatic opt-in starts off until full checks are available', () => {
+test('unavailable inference disables extraction and nightly generation while keeping both opt-ins off', () => {
   const qc = new QueryClient();
   qc.setQueryData(EXTRACTION_CAPABILITIES_KEY, { available: false, reason: 'worker_unavailable', automaticAvailable: false, automaticApplyAvailable: false, maxExclusions: 8, timeoutSeconds: 90 });
   const html = renderToStaticMarkup(React.createElement(QueryClientProvider, { client: qc }, React.createElement(React.Fragment, null,
     React.createElement(TitleExtractionButton, { series: { id: 's_1', name: 'Title' } as Series, onSaved: () => {} }),
-    React.createElement(AutomaticCoverTitles, { enabled: false, save: async () => {} }))));
+    React.createElement(AutomaticCoverTitles, { enabled: false, applyEnabled: false, save: async () => {}, saveApply: async () => {} }))));
   assert.match(html, /data-art-extract-cover="true" disabled=""/);
   assert.match(html, /role="switch"[^>]*aria-checked="false"[^>]*disabled=""/);
-  assert.match(html, /Other results wait for review/);
-  assert.match(html, /Your manual choices and existing title logos are kept/);
+  assert.match(html, /uncertain results stay as previews for review/);
+  assert.match(html, /Your manual artwork, styled titles and original title logos are kept/);
 });

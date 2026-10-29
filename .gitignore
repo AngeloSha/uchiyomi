@@ -48,3 +48,4 @@ web/test/e2e/shots-title-art/
 web/test/e2e/shots-title-logo-scan/
 web/test/e2e/shots-title-extraction/
 web/test/e2e/shots-title-mask/
+web/test/e2e/shots-cover-title-batch/

@@ -16,23 +16,52 @@ import { SwitchRow } from './settings';
 import { CoverTitleRegions, type CoverTitleSelection } from './CoverTitleRegions';
 import { CoverTitleMaskEditor, type TitleMaskDraft } from './CoverTitleMaskEditor';
 import type { TitleMaskStroke } from '@/lib/titleMaskRaster';
+import { CoverTitleBatch } from './CoverTitleBatch';
+import { COVER_TITLE_BATCH_KEY, type CoverTitleReview } from '@/lib/coverTitleBatch';
 
 export function useTitleExtractionCapabilities() {
   return useQuery({ queryKey: EXTRACTION_CAPABILITIES_KEY, queryFn: () => api<TitleExtractionCapabilities>(EXTRACTION_CAPABILITIES_URL),
     retry: false, staleTime: 30_000, refetchOnWindowFocus: false });
 }
 
-export function AutomaticCoverTitles({ enabled, save }: { enabled: boolean; save: (next: boolean) => Promise<unknown> }) {
+export function AutomaticCoverTitles({ enabled, save, applyEnabled = false, saveApply }: {
+  enabled: boolean; save: (next: boolean) => Promise<unknown>; applyEnabled?: boolean; saveApply?: (next: boolean) => Promise<unknown>;
+}) {
   const { data } = useTitleExtractionCapabilities();
+  const qc = useQueryClient();
+  const [review, setReview] = useState<{ series: Series; jobId: string } | null>(null);
+  const [reviewing, setReviewing] = useState<string | null>(null);
+  const [reviewError, setReviewError] = useState(false);
+  const reviewOpener = useRef<HTMLButtonElement | null>(null);
+  const refresh = useCallback(() => { void qc.invalidateQueries({ queryKey: COVER_TITLE_BATCH_KEY }); }, [qc]);
+  const openReview = async (item: CoverTitleReview, opener: HTMLButtonElement) => {
+    if (reviewing) return;
+    setReviewing(item.jobId); setReviewError(false); reviewOpener.current = opener;
+    try { setReview({ series: await api<Series>(`/api/series/${encodeURIComponent(item.id)}`), jobId: item.jobId }); }
+    catch { setReviewError(true); }
+    finally { setReviewing(null); }
+  };
+  const capabilities: TitleExtractionCapabilities = data ?? {
+    available: false, reason: 'worker_unavailable', automaticAvailable: false, automaticApplyAvailable: false,
+    maxExclusions: 8, timeoutSeconds: 90,
+  };
   return <>
     <SwitchRow label={tr('Automatically extract cover titles')} on={enabled}
-      disabled={!enabled && (!data?.available || !data.automaticAvailable || !data.automaticApplyAvailable)} onChange={save}
-      help={tr('Off by default. Applies only when the full title and image pass checks. Other results wait for review. Your manual choices and existing title logos are kept.')} />
-    {(!data?.available || !data.automaticAvailable || !data.automaticApplyAvailable) && <p className="mt-2 text-[11px] leading-relaxed text-fog-500">
-      {data?.available
-        ? tr('Automatic cover titles are not available on this server yet. You can still create a preview or upload your own title artwork.')
-        : tr('Cover title previews are not available on this server yet.')}
-    </p>}
+      disabled={!enabled && !data?.available} onChange={save}
+      help={tr('Off by default. Prepares title artwork from existing and new manga covers every night. No manga link is required to make a preview.')} />
+    <p className="mt-2 text-[11px] leading-relaxed text-fog-500">
+      {tr('Your manual artwork, styled titles and original title logos are kept. Covers taken from chapter pages are skipped.')}
+    </p>
+    {!data?.available && <p className="mt-2 text-[11px] leading-relaxed text-fog-500">{tr('Cover title previews are not available on this server yet.')}</p>}
+    {saveApply && <div className="mt-3 border-t border-ink-800 pt-3">
+      <SwitchRow label={tr('Apply cover titles that pass checks')} on={applyEnabled}
+        disabled={!applyEnabled && !data?.checkedApplyAvailable} onChange={saveApply}
+        help={tr('Off by default. Applies results that pass the available title and image checks. Unlinked manga, unsupported languages, partial titles and uncertain results stay as previews for review.')} />
+      {!data?.checkedApplyAvailable && <p className="mt-2 text-[11px] leading-relaxed text-fog-500">{tr('Title checks are not available on this server yet. You can still generate previews for review.')}</p>}
+    </div>}
+    <CoverTitleBatch enabled={enabled} applyEnabled={applyEnabled} reviewing={reviewing} reviewError={reviewError} onReview={openReview} />
+    {review && <OnBody><TitleExtractionDialog series={review.series} initialJobId={review.jobId} capabilities={capabilities}
+      opener={reviewOpener.current} onClose={() => setReview(null)} onSaved={refresh} onDiscarded={refresh} /></OnBody>}
   </>;
 }
 
@@ -81,8 +110,9 @@ function useExtractionImage(path: string | null, attempt: number) {
 }
 
 /** A separate dialog keeps the cover selector comfortable without widening the existing details sheet. */
-export function TitleExtractionDialog({ series, capabilities, opener, onClose, onSaved }: {
+export function TitleExtractionDialog({ series, capabilities, opener, onClose, onSaved, initialJobId, onDiscarded }: {
   series: Series; capabilities: TitleExtractionCapabilities; opener: HTMLElement | null; onClose: () => void; onSaved: () => void;
+  initialJobId?: string; onDiscarded?: () => void;
 }) {
   useLayer('dialog', true, { navBandFree: true });
   const qc = useQueryClient();
@@ -107,9 +137,12 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
   const applied = useRef(false);
   const jobRef = useRef<TitleExtractionJob | null>(null);
   const closeRef = useRef(onClose);
+  const discardedRef = useRef(onDiscarded);
+  discardedRef.current = onDiscarded;
   closeRef.current = onClose;
   jobRef.current = job;
-  const latest = useQuery({ queryKey: ['title-extraction-latest', series.id], queryFn: () => api<{ job: TitleExtractionJob | null }>(root),
+  const latest = useQuery({ queryKey: ['title-extraction-latest', series.id, initialJobId ?? null],
+    queryFn: () => api<{ job: TitleExtractionJob | null }>(initialJobId ? `${root}/${encodeURIComponent(initialJobId)}` : root),
     retry: false, refetchOnWindowFocus: false, staleTime: 0, gcTime: 0 });
   const adopted = useRef(false);
   useEffect(() => {
@@ -167,7 +200,7 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
     panel.current?.focus();
     return () => {
       closed.current = true;
-      if (!applied.current) void remove(jobRef.current).catch(() => {});
+      if (!applied.current) void remove(jobRef.current).then(() => discardedRef.current?.()).catch(() => {});
       if (parent) { parent.inert = wasInert; if (hidden === null) parent.removeAttribute('aria-hidden'); else if (hidden !== undefined) parent.setAttribute('aria-hidden', hidden); }
       opener?.focus();
     };
@@ -288,6 +321,8 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
                 : <p className="text-xs text-fog-400">{tr('Create a new preview to fine-tune this title.')}</p>}
             </div>}
             {latest.isPending && <p className="text-xs text-fog-400">{tr('Checking for a saved preview…')}</p>}
+            {latest.isError && <div className="mb-3 space-y-2"><p role="alert" className="text-xs text-amber-200">{tr('The title preview could not be loaded.')}</p>
+              <button type="button" className="btn-key" onClick={() => void latest.refetch()}>{tr('Try again')}</button></div>}
             {(active || operation === 'create') && <div className="mb-4 flex items-center gap-3 text-sm text-fog-300" aria-live="polite">
               <ProgressRing progress="spin" /><span>{job?.status === 'queued' ? tr('Waiting to create your preview…') : tr('Creating your title preview…')}</span>
             </div>}
@@ -314,7 +349,7 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-ink-800 bg-ink-950 p-3">
         <button type="button" className="btn-key" data-extract-discard disabled={operation === 'apply'} onClick={onClose}>{tr('Discard')}</button>
         {active && <button type="button" className="btn-key" data-extract-cancel disabled={busy} onClick={() => void cancel()}>{tr('Cancel preview')}</button>}
-        <button type="button" className="btn-key" data-extract-create disabled={busy || active || maskDirty || latest.isPending || !cover.image?.fingerprint} onClick={() => void create()}>
+        <button type="button" className="btn-key" data-extract-create disabled={!capabilities.available || busy || active || maskDirty || latest.isPending || !cover.image?.fingerprint} onClick={() => void create()}>
           {job ? tr('Create a new preview') : tr('Create preview')}</button>
         {maskDirty ? <button type="button" className="btn-accent px-4 py-2 text-sm disabled:opacity-40" data-mask-save
           disabled={busy || maskConflict || !currentMaskDraft?.valid || currentMaskDraft.drawing || currentMaskDraft.revision !== job?.mask?.revision}

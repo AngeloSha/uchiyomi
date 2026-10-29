@@ -4,6 +4,8 @@ import type { TitleMaskStroke } from './titleMaskRaster';
 
 export interface TitleExtractionCapabilities {
   available: boolean; reason: string | null; automaticAvailable: boolean; automaticApplyAvailable: boolean;
+  checkedApplyAvailable?: boolean;
+  checkedApplyReason?: string | null;
   maxExclusions: number; timeoutSeconds: number;
   maskCorrection?: boolean;
 }

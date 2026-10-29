@@ -1,0 +1,90 @@
+// Real opt-in, batch and retained-preview UI against up.sh E2E_TITLE_EXTRACTION=1. Never production.
+import assert from 'node:assert/strict';
+import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
+import {deflateSync} from 'node:zlib';
+import puppeteer from 'puppeteer';
+const BASE=process.env.BASE||'http://127.0.0.1:18140',origin=new URL(BASE);
+assert.ok(origin.protocol==='http:'&&['localhost','127.0.0.1'].includes(origin.hostname),'disposable loopback fixture required');
+const WORKER=process.env.E2E_TITLE_EXTRACT_URL||`http://127.0.0.1:${process.env.E2E_TITLE_EXTRACT_PORT||29000+Number(origin.port)%1000}`;
+assert.ok(['localhost','127.0.0.1'].includes(new URL(WORKER).hostname));
+const OUT=process.env.OUT||'test/e2e/shots-cover-title-batch';mkdirSync(OUT,{recursive:true});
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const wait=async(fn,label)=>{for(let n=0;n<240;n++){const result=await fn();if(result)return result;await sleep(200)}throw Error('Timed out: '+label)};
+const login=await fetch(BASE+'/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:process.env.E2E_USER||'e2e',password:process.env.E2E_PASS||'e2e-passw0rd-123'})});
+assert.equal(login.status,200);const{accessToken}=await login.json();
+const api=async(path,options={})=>{const r=await fetch(BASE+path,{...options,headers:{authorization:'Bearer '+accessToken,...(options.body?{'content-type':'application/json'}:{})}});assert.ok(r.ok,`${path}:${r.status}`);return r.json()};
+const settings=()=>api('/api/admin/settings'),batch='/api/admin/title-extraction/batch',status=()=>api(batch+'/status');
+const mode=async(value)=>{const r=await fetch(WORKER+'/__mode',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mode:value})});assert.equal(r.status,200)};
+const initial=await settings();assert.equal(initial.automatic_cover_title_generation,false);assert.equal(initial.automatic_cover_title_apply,false);assert.equal(initial.automatic_title_logos,false);
+const capabilities=await api('/api/admin/title-extraction/capabilities');assert.equal(capabilities.available,true);assert.equal(capabilities.checkedApplyAvailable,false,'the honest CI fixture has no OCR pack');
+const series=(await api('/api/featured')).content;assert.ok(series.length>=2);
+const target=series[0].id,protectedId=series[1].id,detail=id=>api('/api/series/'+encodeURIComponent(id));
+const art=(id,body)=>api(`/api/admin/series/${encodeURIComponent(id)}/art`,{method:'PUT',body:JSON.stringify(body)});
+// A small generated raster cover makes changed-content scheduling deterministic without external images/models.
+const crc=b=>{let v=0xffffffff;for(const x of b){v^=x;for(let n=0;n<8;n++)v=v&1?(v>>>1)^0xedb88320:v>>>1}return(v^0xffffffff)>>>0};
+const chunk=(name,b)=>{const t=Buffer.from(name),h=Buffer.alloc(4),c=Buffer.alloc(4);h.writeUInt32BE(b.length);c.writeUInt32BE(crc(Buffer.concat([t,b])));return Buffer.concat([h,t,b,c])};
+const cover=red=>{const w=600,h=900,header=Buffer.alloc(13);header.writeUInt32BE(w);header.writeUInt32BE(h,4);header[8]=8;header[9]=2;const rows=Buffer.alloc((w*3+1)*h);for(let y=0;y<h;y++)for(let x=0;x<w;x++){const n=y*(w*3+1)+x*3+1;rows[n]=red;rows[n+1]=80;rows[n+2]=160}return'data:image/png;base64,'+Buffer.concat([Buffer.from('89504e470d0a1a0a','hex'),chunk('IHDR',header),chunk('IDAT',deflateSync(rows)),chunk('IEND',Buffer.alloc(0))]).toString('base64')};
+const setCover=red=>art(target,{kind:'cover',mode:'upload',dataUrl:cover(red)});
+const browser=await puppeteer.launch({headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
+const jobs=new Set(),errors=[],proof={defaultOff:true,previewOnlyWithNightlyOff:false,exactReviewJob:false,protectedArtworkKept:false,nightlySaved:false,cancelled:false,retried:false,checkedApplyingUnavailable:true};
+try{
+ await art(target,{kind:'logo',mode:'reset'});await setCover(140);
+ await art(protectedId,{kind:'logo',mode:'upload',dataUrl:'data:image/png;base64,'+readFileSync(new URL('../fixtures/title-logo.png',import.meta.url)).toString('base64')});
+ const original=await detail(target),protectedArt=(await detail(protectedId)).titleArt;
+ for(const c of login.headers.getSetCookie()){const p=c.split(';')[0],i=p.indexOf('=');await browser.defaultBrowserContext().setCookie({name:p.slice(0,i),value:p.slice(i+1),url:BASE})}
+ const page=await browser.newPage();await page.setViewport({width:1440,height:1000});await page.setBypassServiceWorker(true);
+ page.on('pageerror',e=>errors.push(e.message));
+ const click=async(s)=>{await page.waitForSelector(s,{visible:true});await page.waitForFunction(sel=>{const n=document.querySelector(sel);return n&&!n.disabled},{},s);await page.$eval(s,n=>n.scrollIntoView({block:'center'}));await page.click(s)};
+ const section='#automatic-cover-titles',run='[data-cover-title-action="run"]';
+ await page.goto(BASE+'/admin/?tab=series&section=automatic-cover-titles',{waitUntil:'networkidle2'});await page.waitForSelector(section+' [data-cover-title-batch]');
+ await page.waitForFunction(()=>{const b=document.querySelector('[data-cover-title-action="run"]');return b&&!b.disabled});
+ const switches=section+' button[role="switch"]';
+ assert.deepEqual(await page.$$eval(switches,n=>n.map(x=>({on:x.getAttribute('aria-checked'),disabled:x.disabled}))),[{on:'false',disabled:false},{on:'false',disabled:true}]);
+ await mode('slow');const starting=page.waitForResponse(r=>new URL(r.url()).pathname===batch+'/run'&&r.request().method()==='POST');await click(run);assert.deepEqual(JSON.parse((await starting).request().postData()),{retryErrors:false});
+ await page.waitForSelector('[data-cover-title-batch="running"]');
+ await wait(async()=>{const s=await status();return s.run?.counts.processing>0?s:null},'real worker processing');
+ await page.$eval(section,n=>n.scrollIntoView({block:'center'}));await page.screenshot({path:OUT+'/running-desktop.png'});
+ const done=await wait(async()=>{const s=await status();return s.run?.status==='completed'&&!s.running?s:null},'one-off completion');
+ assert.ok(done.run.counts.ready>=1);assert.equal(done.run.counts.applied,0);assert.equal((await detail(target)).titleArt.version,original.titleArt.version);proof.previewOnlyWithNightlyOff=true;
+ const item=done.reviewSeries.find(x=>x.id===target);assert.ok(item);jobs.add(item.jobId);
+ const exact=page.waitForResponse(r=>new URL(r.url()).pathname===`/api/admin/series/${target}/title-extraction/${item.jobId}`&&r.request().method()==='GET');
+ await click(`[data-cover-title-review="${item.jobId}"]`);await exact;await page.waitForSelector('[data-title-extraction-dialog]',{visible:true});
+ await page.waitForFunction(()=>{const b=document.querySelector('[data-extract-apply]');return b&&!b.disabled});proof.exactReviewJob=true;
+ assert.equal((await detail(target)).titleArt.version,original.titleArt.version);await page.screenshot({path:OUT+'/review-exact-job.png'});
+ await click('[data-extract-discard]');await page.waitForFunction(()=>!document.querySelector('[data-title-extraction-dialog]'));
+ await wait(async()=>!(await status()).reviewSeries.some(x=>x.jobId===item.jobId),'discard refreshes retained review list');
+ assert.deepEqual((await detail(protectedId)).titleArt,protectedArt);proof.protectedArtworkKept=true;
+ console.log('PASS defaults off; one-off while nightly is off prepares review only; exact retained job opens; manual artwork kept');
+ const saving=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/admin/settings'&&r.request().method()==='PATCH');
+ await click(section+' button[role="switch"][aria-label="Automatically extract cover titles"]');
+ assert.equal(JSON.parse((await saving).request().postData()).automaticCoverTitleGeneration,true);
+ await wait(async()=>(await settings()).automatic_cover_title_generation===true,'generation opt-in saved');
+ const scheduled=await wait(async()=>{const s=await status();return s.enabled&&Number.isFinite(Date.parse(s.schedule.nextRunAt))?s:null},'nightly deadline scheduled');assert.equal(scheduled.schedule.hour,3);assert.ok(scheduled.schedule.timezone);proof.nightlySaved=true;
+ await page.waitForFunction(()=>document.querySelector('[data-cover-title-schedule]')?.textContent.includes('03:00'));
+ assert.equal((await settings()).automatic_cover_title_apply,false,'enabling generation cannot enable publishing');
+ await setCover(155);await mode('slow');await click(run);
+ const live=await wait(async()=>{const s=await status();return s.running&&s.run.counts.processing>0?s:null},'cancellable run');
+ const stopping=page.waitForResponse(r=>new URL(r.url()).pathname===batch+'/cancel'&&r.request().method()==='POST');await click('[data-cover-title-action="stop"]');
+ assert.deepEqual(JSON.parse((await stopping).request().postData()),{runId:live.run.id});
+ await wait(async()=>{const s=await status();return !s.running&&s.run.status==='cancelled'&&s.run.counts.cancelled>0},'run cancelled');proof.cancelled=true;
+ assert.equal((await settings()).automatic_cover_title_generation,true,'stopping one run preserves nightly opt-in');
+ await sleep(8500);assert.equal((await detail(target)).titleArt.version,original.titleArt.version,'late worker results cannot apply cancelled work');
+ console.log('PASS generation opt-in and nightly schedule persist independently; Stop cancels this run without changing published art');
+ await setCover(170);await mode('empty');await click(run);
+ await wait(async()=>{const s=await status();return !s.running&&s.run?.counts.failed>0?s:null},'failed cover result');
+ await mode('ok');const retrying=page.waitForResponse(r=>new URL(r.url()).pathname===batch+'/run'&&r.request().method()==='POST');await click('[data-cover-title-action="retry"]');
+ assert.deepEqual(JSON.parse((await retrying).request().postData()),{retryErrors:true});
+ const retried=await wait(async()=>{const s=await status();return !s.running&&s.run?.status==='completed'&&s.run.counts.ready>0?s:null},'retry becomes preview');proof.retried=true;
+ for(const row of retried.reviewSeries)if(row.id===target)jobs.add(row.jobId);
+ await page.setViewport({width:390,height:844});await page.$eval(section,n=>n.scrollIntoView({block:'center'}));await page.screenshot({path:OUT+'/progress-phone.png'});
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));assert.deepEqual((await detail(protectedId)).titleArt,protectedArt);
+ assert.equal((await detail(target)).titleArt.version,original.titleArt.version);assert.deepEqual((await detail(target)).metadata,original.metadata);assert.deepEqual(errors,[]);
+ proof.allVerified=true;writeFileSync(OUT+'/batch-proof.json',JSON.stringify(proof,null,2)+'\n');console.log('PASS failed results can be retried; honest unavailable-checker gate and390px progress/review layout preserve published art');
+}finally{
+ try{
+  await mode('ok');const s=await status();if(s.running&&s.run)await api(batch+'/cancel',{method:'POST',body:JSON.stringify({runId:s.run.id})});
+  await api('/api/admin/settings',{method:'PATCH',body:JSON.stringify({automaticCoverTitleGeneration:false})});
+  for(const id of jobs)await fetch(BASE+`/api/admin/series/${target}/title-extraction/${id}`,{method:'DELETE',headers:{authorization:'Bearer '+accessToken}});
+  await art(target,{kind:'cover',mode:'reset'});await art(target,{kind:'logo',mode:'reset'});await art(protectedId,{kind:'logo',mode:'reset'});
+ }finally{await browser.close()}
+}

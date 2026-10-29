@@ -541,7 +541,8 @@ function SeriesSection({ data, save }: { data: any; save: Save }) {
           <TitleLogoScan enabled={data.automatic_title_logos === true} />
         </RowBlock>
         <RowBlock id="automatic-cover-titles">
-          <AutomaticCoverTitles enabled={data.automatic_cover_titles === true} save={(next) => save({ automaticCoverTitles: next })} />
+          <AutomaticCoverTitles enabled={data.automatic_cover_title_generation === true} save={(next) => save({ automaticCoverTitleGeneration: next })}
+            applyEnabled={data.automatic_cover_title_apply === true} saveApply={(next) => save({ automaticCoverTitleApply: next })} />
         </RowBlock>
         {/* v0.73.0 (#257 and #245 from @Squeaks72): the nightly repair's ninth step. Off by default: it asks sources about
             series, and AniList's text is English. What it fills in sits below a series' own details, never over them. */}
