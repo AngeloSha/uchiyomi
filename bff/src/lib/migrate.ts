@@ -2125,6 +2125,15 @@ ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS selection_mode tex
 ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS result_region jsonb;
 ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS candidate_region jsonb;
 ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS model_fingerprint text;
+-- The immutable baseline and private numbered previews belong only to their expiring extraction draft.
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS mask_revision integer NOT NULL DEFAULT 0 CHECK(mask_revision>=0);
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS mask_strokes jsonb NOT NULL DEFAULT '[]';
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS mask_width integer;
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS mask_height integer;
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS mask_baseline_sha256 text;
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS mask_original_sha256 text;
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS mask_preview_file text;
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS mask_bounds jsonb;
 CREATE TABLE IF NOT EXISTS series_title_extraction_state (
   series_id text PRIMARY KEY REFERENCES lib_series(id) ON DELETE CASCADE,
   automatic_key text NOT NULL,

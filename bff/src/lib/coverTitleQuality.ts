@@ -9,7 +9,7 @@ export type CoverTitleQualityCode =
   | 'ocr_low_confidence' | 'title_ocr_disagrees' | 'additional_text' | 'source_text_clipped'
   | 'source_resolution_low' | 'candidate_resolution_low' | 'possible_mask_clipping' | 'sparse_foreground'
   | 'dense_foreground' | 'quality_evidence_incomplete' | 'foreground_lost' | 'foreground_changed' | 'low_contrast'
-  | 'title_identity_unverified' | 'verifier_profile_mismatch' | 'light_ocr_contradiction';
+  | 'manual_mask_edit' | 'title_identity_unverified' | 'verifier_profile_mismatch' | 'light_ocr_contradiction';
 
 export interface CoverTitleQualityInput {
   /** Normalized left, top, right, bottom in the exact prepared source image used by sourceOcr. */

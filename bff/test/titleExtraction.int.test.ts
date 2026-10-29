@@ -87,7 +87,7 @@ test('selection cannot supply arbitrary URLs, malformed rectangles, stale cover 
 });
 test('manual selection intent remains exact when worker ROI and tight candidate bounds differ', {skip},async()=>{
   const selected={left:.053125,top:.545125,width:.890125,height:.357125},excluded=[{left:.8,top:.7,width:.05,height:.05}];
-  const detected={left:.054,top:.545,width:.889,height:.358},tight={left:.09,top:.61,width:.75,height:.16};
+  const detected={left:.054,top:.545,width:.889,height:.358},tight={left:.1,top:.6,width:.5,height:.125};
   core.setTitleExtractionForTests({ready:async()=>true,assess:async()=>quality(),worker:async(bytes,selection)=>{
     assert.deepEqual(selection.region,selected);assert.deepEqual(selection.exclusions,excluded);
     return{...await worker(bytes,selection),region:detected,candidateRegion:tight};
@@ -201,4 +201,132 @@ test('canonical alias warming checks exact returned manga identity and consent a
     globalThis.fetch=(async()=>new Response(JSON.stringify({data:{Media:{id:87216,type:'MANGA',title:{english:'Fixture Tale',romaji:'Fixture Tale',native:'作品'}}}}),{status:200}))as typeof fetch;
     await makeReady();const[kept]=await q('SELECT anilist_id,native FROM series_other_titles WHERE series_id=$1',[SID]);assert.equal(kept.anilist_id,'87216');assert.equal(kept.native,'作品');
   }finally{globalThis.fetch=baseline;}
+});
+
+async function makeCorrectable(){
+  core.setTitleExtractionForTests({ready:async()=>true,assess:async()=>quality(),worker:async(bytes,selection)=>({
+    ...await worker(bytes,selection),sourceWidth:240,sourceHeight:320,candidateRegion:{left:0,top:.25,width:1,height:.25},
+  })});return makeReady();
+}
+const edit=(id:string,expectedRevision:number,strokes:any[],token=admin)=>request('PATCH',base+'/'+id+'/mask',{expectedRevision,strokes},token);
+const restore={mode:'restore',radius:.02,points:[{x:.5,y:.7}]};
+const erase={mode:'erase',radius:.02,points:[{x:.15,y:.375}]};
+test('mask correction replays an immutable full-source baseline and preserves original RGB until explicit Apply', {skip},async()=>{
+  const id=await makeCorrectable(),before=await jobState(id),originalArt=await currentArt();
+  assert.deepEqual([before.mask.canvas.width,before.mask.canvas.height],[480,640]);assert.equal(before.mask.revision,0);
+  const baseline=await request('GET',before.mask.canvas.baselineUrl),source=await request('GET',before.mask.canvas.sourceUrl);
+  assert.equal(baseline.statusCode,200);assert.equal(baseline.headers['cache-control'],'private, no-store');
+  const baselineBefore=createHash('sha256').update(baseline.rawPayload).digest('hex');
+  const saved=await edit(id,0,[restore,erase]);assert.equal(saved.statusCode,200,saved.body);const changed=saved.json().job;
+  assert.equal(changed.mask.revision,1);assert.deepEqual(changed.mask.strokes,[restore,erase]);assert.match(changed.previewUrl,/revision=1$/);
+  assert.equal(changed.quality.safeToApply,false);assert.equal(changed.quality.sourceTitleMatched,null);assert.equal(changed.quality.needsReview,true);
+  assert.ok(changed.reasons.includes('manual_mask_edit'));assert.equal((await currentArt()).version,originalArt.version);assert.equal((await currentArt()).logoUrl,null);
+  const preview=await request('GET',changed.previewUrl),decoded=await sharp(preview.rawPayload).ensureAlpha().raw().toBuffer({resolveWithObject:true});
+  const sourceRgb=await sharp(source.rawPayload).removeAlpha().raw().toBuffer(),bounds=changed.mask.previewRegion;
+  const offset=(x:number,y:number)=>((y-Math.round(bounds.top*640))*decoded.info.width+x-Math.round(bounds.left*480))*4;
+  const restored=offset(240,448),erased=offset(72,240);assert.equal(decoded.data[restored+3],255);assert.equal(decoded.data[erased+3],0);
+  assert.deepEqual(decoded.data.subarray(restored,restored+3),sourceRgb.subarray((448*480+240)*3,(448*480+240)*3+3));
+  assert.equal(createHash('sha256').update((await request('GET',before.mask.canvas.baselineUrl)).rawPayload).digest('hex'),baselineBefore);
+  assert.equal((await request('GET',before.previewUrl)).statusCode,409,'a versioned old URL cannot silently show a newer preview');
+  assert.equal((await edit(id,0,[restore])).statusCode,409);
+  assert.equal((await request('POST',base+'/'+id+'/apply',{})).statusCode,409,'an older client cannot apply unseen corrections');
+  assert.equal((await request('POST',base+'/'+id+'/apply',{expectedMaskRevision:0})).statusCode,409);
+  const reset=await edit(id,1,[]);assert.equal(reset.statusCode,200,reset.body);assert.equal(reset.json().job.mask.revision,2);
+  assert.deepEqual(reset.json().job.mask.strokes,[]);assert.equal((await edit(id,1,[restore])).statusCode,409);
+  const applied=await request('POST',base+'/'+id+'/apply',{expectedMaskRevision:2});assert.equal(applied.statusCode,200,applied.body);
+  assert.equal(applied.json().titleArt.mode,'custom');assert.equal(applied.json().titleArt.attribution.source,'Cover lettering');
+  assert.equal((await readdir(core.EXTRACTION_DIR)).some(n=>n.startsWith(id+'.')),false,'Apply removes baseline, raw mask and all private revisions');
+});
+test('mask correction is admin/owner authorized and validates bounded source-only strokes', {skip},async()=>{
+  const id=await makeCorrectable(),job=await jobState(id),url=base+'/'+id+'/mask';
+  assert.equal((await app.inject({method:'PATCH',url,payload:{expectedRevision:0,strokes:[]}})).statusCode,401);
+  assert.equal((await edit(id,0,[],member)).statusCode,403);assert.equal((await edit(id,0,[],other)).statusCode,404);
+  assert.equal((await request('GET',job.mask.canvas.baselineUrl,undefined,other)).statusCode,404);
+  assert.equal((await request('GET',job.mask.canvas.baselineUrl,undefined,member)).statusCode,403);
+  for(const body of[{expectedRevision:0,strokes:[],rgb:'arbitrary'},{expectedRevision:-1,strokes:[]},{expectedRevision:0,strokes:[{...restore,radius:.1}]},
+    {expectedRevision:0,strokes:[{...restore,points:[]}]},{expectedRevision:0,strokes:[{...restore,points:[{x:2,y:.1}]}]},
+    {expectedRevision:0,strokes:Array.from({length:129},()=>restore)},
+    {expectedRevision:0,strokes:[{...restore,points:Array.from({length:8192},()=>({x:.1,y:.2}))},restore]}])
+    assert.equal((await request('PATCH',url,body)).statusCode,400);
+  assert.equal((await jobState(id)).mask.revision,0);assert.equal((await currentArt()).logoUrl,null);
+});
+test('concurrent corrections accept one revision and persist only its winning private preview', {skip},async()=>{
+  const id=await makeCorrectable(),results=await Promise.all([edit(id,0,[restore]),edit(id,0,[erase])]);
+  assert.deepEqual(results.map(r=>r.statusCode).sort(),[200,409]);const saved=(await jobState(id));assert.equal(saved.mask.revision,1);
+  assert.deepEqual(saved.mask.strokes,results.find(r=>r.statusCode===200)!.json().job.mask.strokes);
+  assert.equal((await readdir(core.EXTRACTION_DIR)).filter(n=>n.startsWith(id+'.revision.')).length,1);
+  await request('DELETE',base+'/'+id);assert.equal((await readdir(core.EXTRACTION_DIR)).some(n=>n.startsWith(id+'.')),false);
+});
+test('cover/title changes and baseline corruption reject corrections without publishing', {skip},async()=>{
+  let id=await makeCorrectable();await request('PUT',`/api/admin/series/${SID}/art`,{kind:'logo',mode:'style',style:'fantasy'});
+  assert.equal((await edit(id,0,[restore])).statusCode,409);await core.dropTitleExtractions(SID);
+  id=await makeCorrectable();await q("UPDATE series_trackers SET external_id='9999' WHERE series_id=$1",[SID]);
+  assert.equal((await edit(id,0,[restore])).statusCode,409);await q("UPDATE series_trackers SET external_id='87216' WHERE series_id=$1",[SID]);await core.dropTitleExtractions(SID);
+  id=await makeCorrectable();await writeFile(join(core.EXTRACTION_DIR,id+'.mask-base.png'),Buffer.from('corrupt baseline'));
+  assert.equal((await edit(id,0,[restore])).statusCode,409);assert.equal((await jobState(id)).mask.revision,0);await core.dropTitleExtractions(SID);
+  id=await makeCorrectable();const path=join(core.EXTRACTION_DIR,id+'.mask-base.png');await rm(path);await symlink(join(core.EXTRACTION_DIR,id+'.png'),path);
+  assert.equal((await edit(id,0,[restore])).statusCode,404);assert.equal((await currentArt()).logoUrl,null);
+});
+test('Apply rechecks the preview revision after waiting for its job row lock', {skip},async()=>{
+  const id=await makeCorrectable(),client=await pool.connect();let committed=false;
+  try{
+    await client.query('BEGIN');await client.query('SELECT id FROM series_title_extractions WHERE id=$1 FOR UPDATE',[id]);
+    const applying=request('POST',base+'/'+id+'/apply',{});let waiting=false;
+    for(let n=0;n<100;n++){
+      const rows=await q("SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock' AND query LIKE '%series_title_extractions%FOR UPDATE%'");
+      if(rows.length){waiting=true;break;}await new Promise(resolve=>setTimeout(resolve,5));
+    }
+    assert.equal(waiting,true,'Apply has read the old revision and is waiting for the job lock');
+    await client.query('UPDATE series_title_extractions SET mask_revision=1 WHERE id=$1',[id]);await client.query('COMMIT');committed=true;
+    const response=await applying;assert.equal(response.statusCode,409,response.body);assert.equal(response.json().error,'stale_mask');assert.equal((await currentArt()).logoUrl,null);
+  }finally{if(!committed)await client.query('ROLLBACK');client.release();}
+});
+
+test('shared automatic review drafts can be corrected explicitly but never retain automatic certification', {skip},async()=>{
+  const id=await makeCorrectable();await q('UPDATE series_title_extractions SET automatic=true,owner_id=NULL WHERE id=$1',[id]);
+  const response=await edit(id,0,[restore],other);assert.equal(response.statusCode,200,response.body);
+  assert.equal(response.json().job.automatic,true);assert.equal(response.json().job.quality.safeToApply,false);
+  const job=await jobState(id);assert.equal(job.mask.revision,1);assert.equal((await currentArt()).logoUrl,null);
+});
+test('empty output, work-budget abuse, changed covers and expiry leave the saved draft untouched', {skip},async()=>{
+  let id=await makeCorrectable();
+  const wipe={mode:'erase',radius:.05,points:[{x:0,y:.3125},{x:1,y:.3125},{x:1,y:.36},{x:0,y:.36},{x:0,y:.40625},{x:1,y:.40625},{x:1,y:.4375},{x:0,y:.4375}]};
+  assert.equal((await edit(id,0,[wipe])).statusCode,422);assert.equal((await jobState(id)).mask.revision,0);
+  const excessive={...restore,points:Array.from({length:8192},(_,n)=>({x:n%2,y:n%2}))};
+  const refusal=await edit(id,0,[excessive]);assert.equal(refusal.statusCode,400);assert.equal(refusal.json().error,'mask_too_complex');
+  const replacement=await sharp({create:{width:480,height:640,channels:3,background:'#aabbcc'}}).png().toBuffer();
+  await request('PUT',`/api/admin/series/${SID}/art`,{kind:'cover',mode:'upload',dataUrl:'data:image/png;base64,'+replacement.toString('base64')});
+  assert.equal((await edit(id,0,[restore])).statusCode,409);await core.dropTitleExtractions(SID);
+  id=await makeCorrectable();await q("UPDATE series_title_extractions SET expires_at=now()-interval '1 second' WHERE id=$1",[id]);
+  assert.equal((await edit(id,0,[restore])).statusCode,410);await core.cleanupTitleExtractions();
+  assert.equal((await readdir(core.EXTRACTION_DIR)).some(n=>n.startsWith(id+'.')),false);
+});
+test('startup validates the current correction revision and cleanup removes abandoned immutable files', {skip},async()=>{
+  const id=await makeCorrectable(),saved=await edit(id,0,[restore]);assert.equal(saved.statusCode,200);
+  await core.initializeTitleExtractions();assert.equal((await jobState(id)).status,'ready');
+  const row=(await q('SELECT mask_preview_file FROM series_title_extractions WHERE id=$1',[id]))[0];await rm(join(core.EXTRACTION_DIR,row.mask_preview_file));
+  await core.initializeTitleExtractions();assert.equal((await jobState(id)).error,'extract_interrupted');
+  await core.dropTitleExtractions(SID);assert.equal((await readdir(core.EXTRACTION_DIR)).some(n=>n.startsWith(id+'.')),false);
+});
+test('a valid high-entropy full-resolution cover saves a small title without encoding the whole RGB canvas as RGBA', {skip},async()=>{
+  const width=1800,height=2400,rgb=Buffer.alloc(width*height*3);let state=0x12345678;
+  for(let n=0;n<rgb.length;n++){state^=state<<13;state^=state>>>17;state^=state<<5;rgb[n]=state>>>26;}
+  const source=await sharp(rgb,{raw:{width,height,channels:3}}).png().toBuffer();
+  const{ART_MAX_BYTES,artFile}=await import('../src/lib/seriesArt');assert.ok(source.length<ART_MAX_BYTES);
+  const alpha=new Uint8Array(width*height);for(let y=1000;y<1200;y++)alpha.fill(255,y*width+700,y*width+1100);
+  const{sourceRgba}=await import('../src/lib/titleMaskProjection');
+  const oversized=await sharp(sourceRgba(rgb,alpha),{raw:{width,height,channels:4}}).png().toBuffer();
+  assert.ok(oversized.length>ART_MAX_BYTES,'the former full-canvas encoding exceeds the cap although the original cover fits');
+  // Local cover-pipeline fixture: a real source/page cover may retain higher resolution than an admin upload.
+  await writeFile(artFile(SID,'cover'),source);
+  const rgba=Buffer.alloc(400*200*4,255);rgba[3]=0;const rawCandidate=await sharp(rgba,{raw:{width:400,height:200,channels:4}}).png().toBuffer();
+  core.setTitleExtractionForTests({ready:async()=>true,assess:async()=>quality(),worker:async(bytes,selection)=>({
+    ...await worker(bytes,selection),bytes:rawCandidate,width:400,height:200,sourceWidth:width,sourceHeight:height,
+    candidateRegion:{left:700/width,top:1000/height,width:400/width,height:200/height},
+  })});
+  const id=await makeReady(),job=await jobState(id);assert.deepEqual([job.mask.canvas.width,job.mask.canvas.height],[width,height]);
+  const baseline=await request('GET',job.mask.canvas.baselineUrl);assert.ok(baseline.rawPayload.length<100_000,'zero-RGB alpha baseline does not duplicate cover entropy');
+  const saved=await edit(id,0,[]);assert.equal(saved.statusCode,200,saved.body);
+  const preview=await request('GET',saved.json().job.previewUrl);assert.equal(preview.statusCode,200);const meta=await sharp(preview.rawPayload).metadata();
+  assert.equal(meta.width,400);assert.equal(meta.height,200);assert.equal((await currentArt()).logoUrl,null);
 });

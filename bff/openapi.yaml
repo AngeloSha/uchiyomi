@@ -449,6 +449,24 @@ components:
         top: { type: number, minimum: 0, maximum: 1 }
         width: { type: number, exclusiveMinimum: 0, maximum: 1 }
         height: { type: number, exclusiveMinimum: 0, maximum: 1 }
+    TitleMaskStroke:
+      type: object
+      additionalProperties: false
+      required: [mode, radius, points]
+      properties:
+        mode: { type: string, enum: [restore, erase] }
+        radius: { type: number, minimum: 0.0005, maximum: 0.05, description: Radius relative to the immutable full-source canvas short side. }
+        points:
+          type: array
+          minItems: 1
+          maxItems: 8192
+          items:
+            type: object
+            additionalProperties: false
+            required: [x, y]
+            properties:
+              x: { type: number, minimum: 0, maximum: 1 }
+              y: { type: number, minimum: 0, maximum: 1 }
     TitleExtractionJob:
       type: object
       description: Private, owner-bound local extraction draft. Originals remain unchanged until Apply or a calibrated automatic pass.
@@ -467,6 +485,20 @@ components:
         resultRegion: { oneOf: [{ $ref: "#/components/schemas/ExtractionRect" }, { type: "null" }], description: Worker selection in full prepared-source coordinates, separate from request intent. }
         candidateRegion: { oneOf: [{ $ref: "#/components/schemas/ExtractionRect" }, { type: "null" }], description: Tight cutout bounds in full prepared-source coordinates. }
         modelFingerprint: { type: [string, "null"], description: Inference algorithm provenance; older reviewed drafts remain manually applicable. }
+        mask:
+          type: [object, "null"]
+          description: Available on new ready drafts with verified raw-candidate placement. Old drafts require a new extraction.
+          properties:
+            revision: { type: integer, minimum: 0 }
+            strokes: { type: array, maxItems: 128, items: { $ref: "#/components/schemas/TitleMaskStroke" } }
+            previewRegion: { oneOf: [{ $ref: "#/components/schemas/ExtractionRect" }, { type: "null" }], description: Tight edited alpha bounds before final title-logo trim/resize. }
+            canvas:
+              type: object
+              properties:
+                width: { type: integer, minimum: 1, maximum: 2400 }
+                height: { type: integer, minimum: 1, maximum: 2400 }
+                sourceUrl: { type: string, description: Private immutable PNG used for every RGB pixel. }
+                baselineUrl: { type: string, description: Private immutable lossless full-canvas baseline alpha. }
         exclusions: { type: array, maxItems: 8, items: { $ref: "#/components/schemas/ExtractionRect" } }
         reasons: { type: array, items: { type: string } }
         error: { type: [string, "null"] }
@@ -12180,7 +12212,7 @@ paths:
       security: [{ bearer: [] }]
       responses:
         "200":
-          description: available, reason, automaticAvailable, automaticApplyAvailable, automaticReason, maxExclusions and timeoutSeconds. No secrets or model paths.
+          description: available, reason, automaticAvailable, automaticApplyAvailable, automaticReason, maxExclusions, timeoutSeconds, maskCorrection, maxMaskStrokes and maxMaskPoints. No secrets or model paths.
         "401": { description: Not authenticated }
         "403": { description: Not an admin or admin scope missing }
   /api/admin/series/{id}/title-extraction/cover:
@@ -12228,7 +12260,21 @@ paths:
               properties:
                 coverFingerprint: { type: string, pattern: '^[a-f0-9]{64}$' }
                 region: { $ref: "#/components/schemas/ExtractionRect" }
-                exclusions: { type: array, maxItems: 8, items: { $ref: "#/components/schemas/ExtractionRect" } }
+                mask:
+          type: [object, "null"]
+          description: Available on new ready drafts with verified raw-candidate placement. Old drafts require a new extraction.
+          properties:
+            revision: { type: integer, minimum: 0 }
+            strokes: { type: array, maxItems: 128, items: { $ref: "#/components/schemas/TitleMaskStroke" } }
+            previewRegion: { oneOf: [{ $ref: "#/components/schemas/ExtractionRect" }, { type: "null" }], description: Tight edited alpha bounds before final title-logo trim/resize. }
+            canvas:
+              type: object
+              properties:
+                width: { type: integer, minimum: 1, maximum: 2400 }
+                height: { type: integer, minimum: 1, maximum: 2400 }
+                sourceUrl: { type: string, description: Private immutable PNG used for every RGB pixel. }
+                baselineUrl: { type: string, description: Private immutable lossless full-canvas baseline alpha. }
+        exclusions: { type: array, maxItems: 8, items: { $ref: "#/components/schemas/ExtractionRect" } }
       responses:
         "202": { description: Object with queued TitleExtractionJob in job. }
         "400": { description: Invalid selection or unexpected body field }
@@ -12294,11 +12340,79 @@ paths:
         "404": { description: Job not owned or image unavailable }
         "409": { description: Preview not ready }
         "410": { description: Draft expired }
+  /api/admin/series/{id}/title-extraction/{jobId}/mask/baseline:
+    get:
+      tags: [admin]
+      operationId: getApiAdminSeriesIdTitleExtractionJobIdMaskBaseline
+      summary: Read the immutable full-source correction baseline.
+      description: Private lossless zero-RGB RGBA PNG at exactly the immutable cover snapshot dimensions. Alpha is projected from the original raw worker PNG; compose it with RGB from the separate immutable source snapshot. Admin ownership and current visibility are required.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+      security: [{ bearer: [] }]
+      responses:
+        "200": { description: Private no-store full-canvas zero-RGB RGBA PNG. }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or admin scope missing }
+        "404": { description: Job not owned, series not visible or baseline unavailable }
+        "409": { description: Draft not ready or baseline bytes changed }
+        "410": { description: Draft expired }
+  /api/admin/series/{id}/title-extraction/{jobId}/mask:
+    patch:
+      tags: [admin]
+      operationId: patchApiAdminSeriesIdTitleExtractionJobIdMask
+      summary: Replace the whole correction stroke list and save a private preview revision.
+      description: >-
+        Always replays from the immutable original alpha. Strokes use normalized full-source coordinates,
+        with hard round caps and joins, evaluated at pixel centers. Restore sets alpha to 255 and erase to 0;
+        every visible RGB pixel comes from the immutable source PNG. An empty stroke list resets the mask.
+        Allows at most 128 strokes, 8192 total points, and 40 million bounded raster pixel visits.
+        Rejects empty/opaque output, stale cover/title/link, stale revision, changed files and concurrent cancellation.
+        Changes only the expiring draft; Apply remains explicit and corrected output is never automatically certified.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedRevision, strokes]
+              properties:
+                expectedRevision: { type: integer, minimum: 0, maximum: 2147483646 }
+                strokes: { type: array, maxItems: 128, items: { $ref: "#/components/schemas/TitleMaskStroke" } }
+      responses:
+        "200":
+          description: Saved a new revision; returns job with revision-versioned final normalized previewUrl.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job: { $ref: "#/components/schemas/TitleExtractionJob" }
+        "400": { description: Invalid strokes or raster work limit exceeded }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or admin scope missing }
+        "404": { description: Job not owned or series not visible }
+        "409": { description: Draft not ready, stale mask/source/title/link, missing baseline or changed bytes }
+        "410": { description: Draft expired }
+        "422": { description: Empty or fully opaque mask }
   /api/admin/series/{id}/title-extraction/{jobId}/apply:
     post:
       tags: [admin]
       operationId: postApiAdminSeriesIdTitleExtractionJobIdApply
       summary: Apply a visually reviewed draft as a protected custom title.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                expectedMaskRevision: { type: integer, minimum: 0, maximum: 2147483646, description: Required after any saved correction. Prevents publishing edits unseen by an older tab. }
       description: >-
         The server rechecks the current cover bytes/selection, title-art version, checked identity, ownership and
         visibility before publishing atomically. A concurrent cover or title edit wins. Returns ok and TitleArt;

@@ -16,27 +16,39 @@ import { changeTitleArt, applyAutomaticCoverTitle, normalizeTitleLogo, TitleArtE
 import { ExtractionError, extractCoverTitle, titleExtractorReady, titleExtractorHealth, type ExtractionRect } from './titleExtractionWorker';
 import { assessCoverTitleCandidate, coverTitleOcrCapability, stopCoverTitleOcr } from './coverTitleOcr';
 import type { CoverTitleQualityResult } from './coverTitleQuality';
+import { projectTitleAlpha, sourceRgba } from './titleMaskProjection';
+import { rasterizeTitleMask, type MaskStroke } from './titleMaskRaster';
 
 export const EXTRACTION_DIR = join(env.CACHE_DIR,'title-extractions');
 const MAX_JOBS = 32, MAX_QUEUED = 8, TIMEOUT_MS = 90_000;
 const hash = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 const validJob = (id: string) => /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(id);
-const file = (id: string, kind: 'cover'|'preview') => {
+const jobAsset=/^([a-f0-9-]{36})\.(?:png|webp|candidate\.png|mask-base\.png|revision\.[1-9][0-9]{0,9}\.[a-f0-9-]{36}\.webp)(?:\.[a-f0-9-]{36}\.part)?$/;
+type FileKind='cover'|'preview'|'candidate'|'mask-base';
+const file = (id: string, kind: FileKind) => {
   if (!validJob(id)) throw new ExtractionError('not_found',404);
-  return join(EXTRACTION_DIR,`${id.toLowerCase()}.${kind==='cover'?'png':'webp'}`);
+  return join(EXTRACTION_DIR,`${id.toLowerCase()}${kind==='mask-base'?'.mask-base':kind==='candidate'?'.candidate':''}.${kind==='preview'?'webp':'png'}`);
 };
+function revisedFile(id:string,name:string):string {
+  if(!validJob(id)||!new RegExp('^'+id.toLowerCase()+'\\.revision\\.[1-9][0-9]{0,9}\\.[a-f0-9-]{36}\\.webp$').test(name))throw new ExtractionError('not_found',404);
+  return join(EXTRACTION_DIR,name);
+}
 type Status = 'queued'|'running'|'ready'|'rejected'|'error'|'applied';
 interface JobRow {
   id:string; series_id:string; owner_id:string|null; automatic:boolean; status:Status; snapshot:string;
   cover_fingerprint:string; source_sha256:string; candidate_sha256:string|null; title_version:number|string; region:ExtractionRect|null; exclusions:ExtractionRect[];
   quality:CoverTitleQualityResult|null; reasons:string[]; error:string|null; created_at:Date; expires_at:Date;
   selection_mode:'manual'|'automatic'|'legacy';result_region:ExtractionRect|null;candidate_region:ExtractionRect|null;model_fingerprint:string|null;
+  mask_revision:number;mask_strokes:MaskStroke[];mask_width:number|null;mask_height:number|null;mask_baseline_sha256:string|null;
+  mask_original_sha256:string|null;mask_preview_file:string|null;
+  mask_bounds:ExtractionRect|null;
 }
 export interface TitleExtractionJob {
   id:string; seriesId:string; automatic:boolean; status:Status|'expired'; createdAt:string; expiresAt:string;
   previewUrl:string|null; coverPreviewUrl:string|null; coverFingerprint:string; region:ExtractionRect|null;
   exclusions:ExtractionRect[]; quality:CoverTitleQualityResult|null; reasons:string[]; error:string|null;
   selectionMode:'manual'|'automatic'|'legacy';resultRegion:ExtractionRect|null;candidateRegion:ExtractionRect|null;modelFingerprint:string|null;
+  mask:{revision:number;strokes:MaskStroke[];previewRegion:ExtractionRect|null;canvas:{width:number;height:number;sourceUrl:string;baselineUrl:string}}|null;
 }
 interface Snapshot {
   id:string; selection:string; version:string|number|null; mode:string|null; anilist_id:string|null;
@@ -70,33 +82,53 @@ async function currentCover(id:string,viewer:ViewCtx) {
   return {bytes,snapshot:after,key:selection,sha256:hash(bytes),fingerprint:hash(selection+'\0'+hash(bytes))};
 }
 export const titleExtractionCover=currentCover;
-async function writeJobFile(id:string,kind:'cover'|'preview',bytes:Buffer) {
+async function writePrivateFile(path:string,bytes:Buffer) {
   if(bytes.length>ART_MAX_BYTES) throw new ExtractionError('extract_failed',502);
   await mkdir(EXTRACTION_DIR,{recursive:true,mode:0o700});
-  const path=file(id,kind),part=path+'.'+randomUUID()+'.part';
+  const part=path+'.'+randomUUID()+'.part';
   try {await writeFile(part,bytes,{flag:'wx',mode:0o600});await rename(part,path);}
   finally {await rm(part,{force:true}).catch(()=>{});}
 }
-async function readJobFile(id:string,kind:'cover'|'preview'):Promise<Buffer> {
+async function writeJobFile(id:string,kind:FileKind,bytes:Buffer) {return writePrivateFile(file(id,kind),bytes);}
+async function readPrivateFile(path:string):Promise<Buffer> {
   let handle:Awaited<ReturnType<typeof open>>|undefined;
   try {
-    handle=await open(file(id,kind),constants.O_RDONLY|(constants.O_NOFOLLOW||0));
+    handle=await open(path,constants.O_RDONLY|(constants.O_NOFOLLOW||0));
     const meta=await handle.stat(); if(!meta.isFile()||meta.size<1||meta.size>ART_MAX_BYTES) throw new Error('size');
     const bytes=Buffer.alloc(meta.size+1); const {bytesRead}=await handle.read(bytes,0,bytes.length,0);
     const after=await handle.stat(); if(bytesRead!==meta.size||after.size!==meta.size||after.mtimeMs!==meta.mtimeMs) throw new Error('changed');
     return bytes.subarray(0,bytesRead);
   } catch {throw new ExtractionError('not_found',404);} finally {await handle?.close().catch(()=>{});}
 }
-async function removeFiles(id:string) {await Promise.all(['cover','preview'].map((kind)=>rm(file(id,kind as 'cover'|'preview'),{force:true}).catch(()=>{})));}
+async function readJobFile(id:string,kind:FileKind) {return readPrivateFile(file(id,kind));}
+async function readPreview(row:JobRow) {return row.mask_preview_file?readPrivateFile(revisedFile(row.id,row.mask_preview_file)):readJobFile(row.id,'preview');}
+async function initialMask(source:Buffer,candidate:Buffer,region:ExtractionRect,preparedWidth:number,preparedHeight:number) {
+  const info=await sharp(source,{limitInputPixels:4_320_000,animated:false}).metadata();
+  const {data:alpha,info:cut}=await sharp(candidate,{limitInputPixels:12_000_000,animated:false}).extractChannel('alpha').raw().toBuffer({resolveWithObject:true});
+  const projected=projectTitleAlpha(alpha,cut.width,cut.height,region,preparedWidth,preparedHeight,info.width!,info.height!);
+  // Only alpha belongs in the baseline. Do not duplicate high-entropy cover RGB or exceed the input byte cap.
+  const rgba=Buffer.alloc(projected.length*4);for(let n=0;n<projected.length;n++)rgba[n*4+3]=projected[n];
+  const bytes=await sharp(rgba,{raw:{width:info.width!,height:info.height!,channels:4}}).png().toBuffer();
+  return {bytes,width:info.width!,height:info.height!};
+}
+async function removeFiles(id:string) {
+  if(!validJob(id))return;
+  const names=await readdir(EXTRACTION_DIR).catch(()=>[] as string[]);
+  await Promise.all(names.filter(name=>jobAsset.exec(name)?.[1]===id.toLowerCase())
+    .map(name=>rm(join(EXTRACTION_DIR,name),{force:true}).catch(()=>{})));
+}
 function dto(row:JobRow):TitleExtractionJob {
   const expired=new Date(row.expires_at).getTime()<=Date.now(); const base=`/api/admin/series/${encodeURIComponent(row.series_id)}/title-extraction/${row.id}`;
   return {id:row.id,seriesId:row.series_id,automatic:row.automatic,status:expired?'expired':row.status,
     createdAt:new Date(row.created_at).toISOString(),expiresAt:new Date(row.expires_at).toISOString(),
-    previewUrl:!expired&&row.status==='ready'?base+'/preview':null,coverPreviewUrl:!expired?base+'/cover':null,
+    previewUrl:!expired&&row.status==='ready'?base+'/preview?revision='+Number(row.mask_revision??0):null,coverPreviewUrl:!expired?base+'/cover':null,
     coverFingerprint:row.cover_fingerprint,region:row.selection_mode==='manual'?row.region:null,
     selectionMode:row.selection_mode??'legacy',resultRegion:row.result_region??(row.selection_mode==='legacy'?row.region:null),
     candidateRegion:row.candidate_region??null,modelFingerprint:row.model_fingerprint??null,
-    exclusions:row.exclusions,quality:row.quality,reasons:row.reasons,error:row.error};
+    exclusions:row.exclusions,quality:row.quality,reasons:row.reasons,error:row.error,
+    mask:!expired&&row.status==='ready'&&row.mask_baseline_sha256&&row.mask_width&&row.mask_height
+      ?{revision:Number(row.mask_revision??0),strokes:row.mask_strokes??[],previewRegion:row.mask_bounds??null,
+        canvas:{width:row.mask_width,height:row.mask_height,sourceUrl:base+'/cover',baselineUrl:base+'/mask/baseline'}}:null};
 }
 async function ownedJob(seriesId:string,jobId:string,userId:string,viewer:ViewCtx,qq:ScopedQuery=q):Promise<JobRow> {
   if(!validJob(jobId)||!(await seriesVisible(seriesId,viewer))) throw new ExtractionError('not_found',404);
@@ -109,12 +141,13 @@ export async function latestTitleExtraction(seriesId:string,userId:string,viewer
   const row=await one<JobRow>(`SELECT * FROM series_title_extractions WHERE series_id=$1 AND(owner_id=$2 OR automatic)
     AND expires_at>now() AND status<>'applied' ORDER BY created_at DESC LIMIT 1`,[seriesId,userId]);return row?dto(row):null;
 }
-export async function titleExtractionImage(seriesId:string,jobId:string,userId:string,viewer:ViewCtx,kind:'cover'|'preview') {
+export async function titleExtractionImage(seriesId:string,jobId:string,userId:string,viewer:ViewCtx,kind:'cover'|'preview'|'mask-base',expectedRevision?:number) {
   const row=await ownedJob(seriesId,jobId,userId,viewer);
   if(new Date(row.expires_at).getTime()<=Date.now()) throw new ExtractionError('expired',410);
-  if(kind==='preview'&&row.status!=='ready') throw new ExtractionError('not_ready',409);
-  const bytes=await readJobFile(jobId,kind);
-  if(hash(bytes)!==(kind==='cover'?row.source_sha256:row.candidate_sha256))throw new ExtractionError('extract_failed',409);
+  if(kind!=='cover'&&row.status!=='ready') throw new ExtractionError('not_ready',409);
+  if(kind==='preview'&&expectedRevision!==undefined&&expectedRevision!==Number(row.mask_revision??0))throw new ExtractionError('stale_mask',409);
+  const bytes=kind==='preview'?await readPreview(row):await readJobFile(jobId,kind);
+  if(hash(bytes)!==(kind==='cover'?row.source_sha256:kind==='mask-base'?row.mask_baseline_sha256:row.candidate_sha256))throw new ExtractionError('extract_failed',409);
   return {bytes,fingerprint:row.cover_fingerprint};
 }
 let worker=extractCoverTitle,ready=titleExtractorReady,assess=assessCoverTitleCandidate,ocrCapability=coverTitleOcrCapability;
@@ -130,7 +163,7 @@ export async function titleExtractionCapabilities() {
   return {available,reason:available?null:'worker_unavailable',automaticAvailable:available&&ocr.available&&ocr.calibrated,
     automaticApplyAvailable:available&&ocr.available&&ocr.calibrated,
     automaticReason:!available?'worker_unavailable':!ocr.available?'ocr_unavailable':!ocr.calibrated?'automatic_verification_unvalidated':null,
-    maxExclusions:8,timeoutSeconds:90};
+    maxExclusions:8,timeoutSeconds:90,maskCorrection:true,maxMaskStrokes:128,maxMaskPoints:8192};
 }
 const waiting:string[]=[];let active:{id:string;abort:AbortController}|null=null;let draining:Promise<void>|null=null;let stopped=false;
 export const titleExtractionsSettled=()=>draining??Promise.resolve();
@@ -230,18 +263,22 @@ async function runJob(jobId:string,parentSignal:AbortSignal) {
         linkedAnilistId:current.anilist_id,aliasesAnilistId:current.aliases_id}}),aborted]);
     if(signal.aborted||stopped||runtime.stopping)return;
     await freshJob(row,viewer);
+    const mask=result.candidateRegion?await initialMask(source,result.bytes,result.candidateRegion,result.sourceWidth,result.sourceHeight):null;
+    if(mask){await writeJobFile(jobId,'candidate',result.bytes);await writeJobFile(jobId,'mask-base',mask.bytes);}
     const bytes=await normalizeTitleLogo(result.bytes);
     if((await sharp(bytes).stats()).isOpaque)throw new ExtractionError('extract_failed',502);
     await writeJobFile(jobId,'preview',bytes);
-    const updated=await q(`UPDATE series_title_extractions SET status=$2,quality=$3,reasons=$4,result_region=$5,candidate_sha256=$6,candidate_region=$7,model_fingerprint=$8
+    const updated=await q(`UPDATE series_title_extractions SET status=$2,quality=$3,reasons=$4,result_region=$5,candidate_sha256=$6,candidate_region=$7,model_fingerprint=$8,
+      mask_width=$9,mask_height=$10,mask_baseline_sha256=$11,mask_original_sha256=$12
       WHERE id=$1 AND status='running' RETURNING id`,
       [jobId,quality.manualApplyAllowed?'ready':'rejected',JSON.stringify(quality),JSON.stringify(quality.reasons.map((r)=>r.code)),JSON.stringify(result.region),hash(bytes),
-        result.candidateRegion?JSON.stringify(result.candidateRegion):null,result.modelFingerprint??null]);
+        result.candidateRegion?JSON.stringify(result.candidateRegion):null,result.modelFingerprint??null,
+        mask?.width??null,mask?.height??null,mask?hash(mask.bytes):null,mask?hash(result.bytes):null]);
     if(!updated.length){await removeFiles(jobId);return;}
     if(row.automatic&&quality.safeToApply&&quality.manualApplyAllowed)await applySystemDraft({...row,status:'ready',quality},bytes);
   } catch(error) {
     const code=error instanceof ExtractionError?error.code:error instanceof TitleArtError?error.code:'extract_failed';
-    await q("UPDATE series_title_extractions SET status='error',error=$2 WHERE id=$1 AND status IN ('queued','running','ready')",[jobId,code]).catch(()=>{});
+    await q("UPDATE series_title_extractions SET status='error',error=$2 WHERE id=$1 AND mask_revision=0 AND status IN ('queued','running','ready')",[jobId,code]).catch(()=>{});
     if(row.automatic&&['extract_timeout','worker_unavailable','extract_busy'].includes(code))
       await q("UPDATE series_title_extraction_state SET retry_at=now()+interval '5 minutes' WHERE series_id=$1 AND automatic_key=$2",[row.series_id,row.snapshot]).catch(()=>{});
     await rm(file(jobId,'preview'),{force:true}).catch(()=>{});
@@ -266,17 +303,76 @@ async function applySystemDraft(row:JobRow,bytes:Buffer) {
   if(!current.anilist_id)throw new ExtractionError('stale_candidate',409);
   await applyAutomaticCoverTitle(row.series_id,bytes,Number(row.title_version),current.anilist_id,row.snapshot,async(qq)=>{
     await assertAutomatic(row,qq);
-    const rows=await qq("UPDATE series_title_extractions SET status='applied' WHERE id=$1 AND status='ready' AND expires_at>now() RETURNING id",[row.id]);
+    const rows=await qq(`UPDATE series_title_extractions SET status='applied' WHERE id=$1 AND automatic AND status='ready'
+      AND mask_revision=0 AND candidate_sha256=$2 AND quality->>'safeToApply'='true' AND expires_at>now() RETURNING id`,[row.id,hash(bytes)]);
     if(!rows.length)throw new ExtractionError('stale_candidate',409);
   });
   await removeFiles(row.id);
 }
-export async function applyTitleExtraction(seriesId:string,jobId:string,userId:string,viewer:ViewCtx) {
-  const row=await ownedJob(seriesId,jobId,userId,viewer);if(new Date(row.expires_at).getTime()<=Date.now())throw new ExtractionError('expired',410);
-  if(row.status!=='ready'||row.quality?.manualApplyAllowed!==true)throw new ExtractionError('not_ready',409);
+export async function correctTitleExtractionMask(seriesId:string,jobId:string,userId:string,viewer:ViewCtx,
+  input:{expectedRevision:number;strokes:MaskStroke[]}) {
+  const row=await ownedJob(seriesId,jobId,userId,viewer);
+  if(new Date(row.expires_at).getTime()<=Date.now())throw new ExtractionError('expired',410);
+  if(row.status!=='ready')throw new ExtractionError('not_ready',409);
+  if(!row.mask_baseline_sha256||!row.mask_original_sha256||!row.mask_width||!row.mask_height)throw new ExtractionError('mask_unavailable',409);
+  if(Number(row.mask_revision)!==input.expectedRevision)throw new ExtractionError('stale_mask',409);
   await freshJob(row,viewer);
   const cover=await currentCover(seriesId,viewer);if(cover.fingerprint!==row.cover_fingerprint)throw new ExtractionError('stale_candidate',409);
-  const bytes=await readJobFile(jobId,'preview');
+  const[source,baseline,original]=await Promise.all([readJobFile(jobId,'cover'),readJobFile(jobId,'mask-base'),readJobFile(jobId,'candidate')]);
+  if(hash(source)!==row.source_sha256||hash(baseline)!==row.mask_baseline_sha256||hash(original)!==row.mask_original_sha256)throw new ExtractionError('extract_failed',409);
+  const {data:rgb,info}=await sharp(source,{limitInputPixels:4_320_000,animated:false}).removeAlpha().raw().toBuffer({resolveWithObject:true});
+  const {data:baseAlpha,info:baseInfo}=await sharp(baseline,{limitInputPixels:4_320_000,animated:false}).extractChannel('alpha').raw().toBuffer({resolveWithObject:true});
+  if(info.width!==row.mask_width||info.height!==row.mask_height||baseInfo.width!==info.width||baseInfo.height!==info.height)throw new ExtractionError('extract_failed',409);
+  let alpha:Uint8Array;
+  try{alpha=rasterizeTitleMask(baseAlpha,info.width,info.height,input.strokes);}catch(error){
+    throw new ExtractionError((error as {code?:string}).code==='mask_too_complex'?'mask_too_complex':'invalid_mask',400);
+  }
+  let left=info.width,top=info.height,right=0,bottom=0,hasTransparency=false;
+  for(let n=0;n<alpha.length;n++){if(alpha[n]<255)hasTransparency=true;if(alpha[n]>0){const x=n%info.width,y=Math.floor(n/info.width);left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x+1);bottom=Math.max(bottom,y+1);}}
+  if(right<=left||bottom<=top||!hasTransparency)throw new ExtractionError('invalid_mask',422);
+  const bounds={left:left/info.width,top:top/info.height,width:(right-left)/info.width,height:(bottom-top)/info.height};
+  // Crop and cap final title dimensions before encoding: a valid source PNG can grow past 11 MiB as full RGBA.
+  const png=await sharp(sourceRgba(rgb,alpha),{raw:{width:info.width,height:info.height,channels:4}})
+    .extract({left,top,width:right-left,height:bottom-top}).resize({width:1600,height:800,fit:'inside',withoutEnlargement:true}).png().toBuffer();
+  const bytes=await normalizeTitleLogo(png);
+  const revision=input.expectedRevision+1;
+  const name=`${jobId.toLowerCase()}.revision.${revision}.${randomUUID()}.webp`,path=revisedFile(jobId,name);
+  await writePrivateFile(path,bytes);
+  let committed=false;
+  try {
+    const updated=await tx(async(qq)=>{
+      await qq("SET LOCAL lock_timeout='5s'");
+      // Match title-art publisher lock order. A cover edit, title edit, cancellation or Apply wins atomically.
+      const p=new Params(),id=p.add(seriesId),allowed=visible('s',viewer,p);
+      if(!(await qq(`SELECT s.id FROM lib_series s WHERE s.id=${id} AND ${allowed} FOR UPDATE OF s`,p.values)).length)throw new ExtractionError('not_found',404);
+      await qq('SELECT series_id FROM series_title_art WHERE series_id=$1 FOR UPDATE',[seriesId]);
+      await qq('SELECT series_id FROM series_trackers WHERE series_id=$1 FOR SHARE',[seriesId]);
+      await qq('SELECT series_id FROM series_overrides WHERE series_id=$1 FOR SHARE',[seriesId]);
+      await qq('SELECT series_id FROM series_art WHERE series_id=$1 FOR SHARE',[seriesId]);
+      const[current]=await qq<JobRow>('SELECT * FROM series_title_extractions WHERE id=$1 AND series_id=$2 AND(owner_id=$3 OR automatic) FOR UPDATE',[jobId,seriesId,userId]);
+      if(!current)throw new ExtractionError('not_found',404);
+      if(new Date(current.expires_at).getTime()<=Date.now())throw new ExtractionError('expired',410);
+      if(current.status!=='ready')throw new ExtractionError('not_ready',409);
+      if(Number(current.mask_revision)!==input.expectedRevision||current.mask_baseline_sha256!==row.mask_baseline_sha256)throw new ExtractionError('stale_mask',409);
+      await freshJob(current,viewer,qq);
+      const quality:CoverTitleQualityResult={policyVersion:'strict-v1',safeToApply:false,manualApplyAllowed:true,needsReview:true,
+        reasons:[{code:'manual_mask_edit',severity:'warning'}],sourceTitleMatched:null,candidateTitleMatched:null,matchedAlias:null};
+      const [saved]=await qq<JobRow>(`UPDATE series_title_extractions SET mask_revision=$2,mask_strokes=$3,mask_preview_file=$4,candidate_sha256=$5,
+        quality=$6,reasons=$7,mask_bounds=$8 WHERE id=$1 RETURNING *`,[jobId,revision,JSON.stringify(input.strokes),name,hash(bytes),JSON.stringify(quality),JSON.stringify(['manual_mask_edit']),JSON.stringify(bounds)]);
+      return saved;
+    });
+    committed=true;
+    if(row.mask_preview_file)await rm(revisedFile(jobId,row.mask_preview_file),{force:true}).catch(()=>{});
+    return dto(updated);
+  } finally {if(!committed)await rm(path,{force:true}).catch(()=>{});}
+}
+export async function applyTitleExtraction(seriesId:string,jobId:string,userId:string,viewer:ViewCtx,expectedMaskRevision?:number) {
+  const row=await ownedJob(seriesId,jobId,userId,viewer);if(new Date(row.expires_at).getTime()<=Date.now())throw new ExtractionError('expired',410);
+  if(row.status!=='ready'||row.quality?.manualApplyAllowed!==true)throw new ExtractionError('not_ready',409);
+  if((Number(row.mask_revision)>0&&expectedMaskRevision===undefined)||(expectedMaskRevision!==undefined&&expectedMaskRevision!==Number(row.mask_revision)))throw new ExtractionError('stale_mask',409);
+  await freshJob(row,viewer);
+  const cover=await currentCover(seriesId,viewer);if(cover.fingerprint!==row.cover_fingerprint)throw new ExtractionError('stale_candidate',409);
+  const bytes=await readPreview(row);
   if(hash(bytes)!==row.candidate_sha256)throw new ExtractionError('extract_failed',409);
   const titleArt=await changeTitleArt(seriesId,{mode:'upload',bytes},viewer,{expectedVersion:Number(row.title_version),
     attribution:{source:'Cover lettering',sourceUrl:null,artist:null,license:null,licenseUrl:null},assertCurrent:async(qq)=>{
@@ -286,6 +382,7 @@ export async function applyTitleExtraction(seriesId:string,jobId:string,userId:s
     await freshJob(row,viewer,qq);
     const [current]=await qq<JobRow>('SELECT * FROM series_title_extractions WHERE id=$1 AND series_id=$2 AND(owner_id=$3 OR automatic) FOR UPDATE',[jobId,seriesId,userId]);
     if(!current||current.status!=='ready'||new Date(current.expires_at).getTime()<=Date.now())throw new ExtractionError('stale_candidate',409);
+    if(Number(current.mask_revision)!==Number(row.mask_revision)||current.candidate_sha256!==row.candidate_sha256||current.mask_preview_file!==row.mask_preview_file)throw new ExtractionError('stale_mask',409);
     await qq("UPDATE series_title_extractions SET status='applied' WHERE id=$1",[jobId]);
   }});
   await removeFiles(jobId);return titleArt;
@@ -303,10 +400,10 @@ export async function dropTitleExtractions(seriesId:string) {
 export async function cleanupTitleExtractions() {
   const rows=await q<{id:string}>('DELETE FROM series_title_extractions WHERE expires_at<=now() OR status=\'applied\' RETURNING id');
   for(const {id}of rows)await removeFiles(id);
-  const keep=new Set((await q<{id:string}>('SELECT id FROM series_title_extractions')).map((r)=>r.id));
+  const keep=new Map((await q<{id:string;mask_preview_file:string|null}>('SELECT id,mask_preview_file FROM series_title_extractions')).map((r)=>[r.id,r.mask_preview_file]));
   for(const name of await readdir(EXTRACTION_DIR).catch(()=>[] as string[])) {
-    const match=/^([a-f0-9-]{36})\.(?:png|webp)(?:\.[a-f0-9-]{36}\.part)?$/.exec(name);
-    if(match&&!keep.has(match[1])){
+    const match=jobAsset.exec(name);
+    if(match&&(!keep.has(match[1])||name.endsWith('.part')||(name.includes('.revision.')&&keep.get(match[1])!==name))){
       // A cover is atomically written just before its job INSERT. Never collect that in-progress snapshot.
       const meta=await lstat(join(EXTRACTION_DIR,name)).catch(()=>null);
       if(meta&&meta.mtimeMs<Date.now()-60_000)await rm(join(EXTRACTION_DIR,name),{force:true}).catch(()=>{});
@@ -337,11 +434,13 @@ export async function scanAutomaticTitleExtractions() {
 let timer:ReturnType<typeof setTimeout>|null=null;
 export async function initializeTitleExtractions() {
   await q("UPDATE series_title_extractions SET status='error',error='extract_interrupted' WHERE status IN('queued','running')");
-  for(const row of await q<{id:string}>("SELECT id FROM series_title_extractions WHERE status='ready'")){
-    const present=await Promise.all((['cover','preview']as const).map(async kind=>{
-      const meta=await lstat(file(row.id,kind)).catch(()=>null);return!!meta?.isFile()&&meta.size>0&&meta.size<=ART_MAX_BYTES;
+  for(const row of await q<JobRow>("SELECT * FROM series_title_extractions WHERE status='ready'")){
+    const present=await Promise.all([file(row.id,'cover'),row.mask_preview_file?revisedFile(row.id,row.mask_preview_file):file(row.id,'preview')].map(async path=>{
+      const meta=await lstat(path).catch(()=>null);return!!meta?.isFile()&&meta.size>0&&meta.size<=ART_MAX_BYTES;
     }));
     if(present.some(ok=>!ok))await q("UPDATE series_title_extractions SET status='error',error='extract_interrupted' WHERE id=$1",[row.id]);
+    if(row.mask_baseline_sha256){const present=await Promise.all((['candidate','mask-base']as const).map(async kind=>{const meta=await lstat(file(row.id,kind)).catch(()=>null);return!!meta?.isFile()&&meta.size>0&&meta.size<=ART_MAX_BYTES;}));
+      if(present.some(ok=>!ok))await q('UPDATE series_title_extractions SET mask_baseline_sha256=NULL WHERE id=$1',[row.id]);}
   }
   await cleanupTitleExtractions();stopped=false;
 }
