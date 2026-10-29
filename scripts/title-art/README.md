@@ -19,7 +19,7 @@ the checkout, weights, environment, covers and outputs outside the Uchiyomi sour
 ```sh
 python3 -m venv /path/to/title-trial/venv
 /path/to/title-trial/venv/bin/pip install --index-url https://download.pytorch.org/whl/cpu \
-  torch==2.8.0+cpu torchvision==0.23.0+cpu
+  torch==2.8.0+cpu torchvision==0.23.0
 /path/to/title-trial/venv/bin/pip install -r scripts/title-art/requirements.txt
 git clone https://github.com/ymy-k/Hi-SAM.git /path/to/title-trial/Hi-SAM
 git -C /path/to/title-trial/Hi-SAM checkout 69009434d4dba5541f228d8f5acb0754c333d417

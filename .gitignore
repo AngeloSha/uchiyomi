@@ -1,4 +1,5 @@
 .env
+.env.title-extractor
 node_modules
 bff/node_modules
 web/node_modules

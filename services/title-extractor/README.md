@@ -2,7 +2,9 @@
 
 This CPU service cuts existing lettering out of a cover. It preserves detected foreground RGB and returns a PNG
 with transparency. It cannot restore strokes hidden by a character or generate a missing title. The app keeps each
-result private until an administrator applies it or an empirically approved automatic assessment passes.
+result private until an administrator applies it or the administrator's separate automatic-apply opt-in and all
+available title/image checks pass. That opt-in is off by default; passing available checks is not a calibrated
+guarantee that a title is complete.
 
 The main app image does not contain Python, segmentation weights or an extra translation model. This service has
 no library, database or application-config mount and requires no external network access during inference.
@@ -26,7 +28,73 @@ stores a private revision and reloads its final title preview. **Apply title art
 An older tab cannot apply a corrected revision it has not loaded. Manual corrections require visual review and do
 not qualify for automatic publication. Earlier drafts without an immutable raw mask need a new extraction first.
 
-## Build and stage
+## Install the optional published image
+
+Application releases also publish `ghcr.io/angelosha/uchiyomi:title-extractor-v<VERSION>` for native Linux amd64 and arm64.
+These distinct tags reuse the existing public package; the app retains its normal version and `latest` tags.
+The overlay pins v0.102.0; choose `title-extractor-latest` explicitly only when you intend rolling worker upgrades.
+The image contains the CPU runtime and pinned Hi-SAM source, including its upstream Apache-2.0 license at
+`/opt/hi-sam/LICENSE`; Uchiyomi's MPL-2.0 license and component notice are in `/service`. It contains **no model
+checkpoints, OCR pack, cover images, application credentials or library files**. It downloads nothing at runtime.
+
+For the standard [single-container install](../../deploy/docker-compose.yml), copy
+[`deploy/docker-compose.title-extractor.yml`](../../deploy/docker-compose.title-extractor.yml) beside your existing
+`docker-compose.yml`. The overlay preserves the existing app image, volumes and network, adding only the optional
+service, its internal network and read-only OCR mount. Custom stacks can adapt those two service entries; the
+development stack names its app `yomi-app`, rather than `uchiyomi`.
+
+Stage data outside the source checkout. Put these lines in the existing `.env`, keeping its other values:
+
+```dotenv
+TITLE_EXTRACTOR_DATA=/absolute/path/to/title-art-data
+TITLE_EXTRACTOR_IMAGE=ghcr.io/angelosha/uchiyomi:title-extractor-v0.102.0
+```
+
+Set the same absolute `TITLE_EXTRACTOR_DATA` path in your setup shell, then create its two directories:
+
+```sh
+export TITLE_EXTRACTOR_DATA=/absolute/path/to/title-art-data
+mkdir -p "$TITLE_EXTRACTOR_DATA/models" "$TITLE_EXTRACTOR_DATA/ocr"
+# Create once; noclobber preserves an existing token when these instructions are repeated.
+(umask 077; set -C; printf 'TITLE_EXTRACTOR_TOKEN=%s\n' "$(openssl rand -hex 32)" > .env.title-extractor)
+```
+
+Download the two upstream checkpoints listed in [the extraction tools](../../scripts/title-art/README.md) into
+`$TITLE_EXTRACTOR_DATA/models/`. Verify them before starting the service:
+
+```sh
+(cd "$TITLE_EXTRACTOR_DATA/models" && printf '%s\n' \
+  'fa59d9c5ab9bdb7fbdb35b523bf3d64dbc8d00305e63fb9b23d742ddb00e4790  sam_tss_b_textseg.pth' \
+  'ec2df62732614e57411cdcf32a23ffdf28910380d03139ee0f4fcbe91eb8c912  sam_vit_b_01ec64.pth' | sha256sum -c -)
+```
+
+From the matching release's source checkout, use Node 24+ and `tar` to stage the small OCR-only pack:
+
+```sh
+node scripts/title-art/prepare-ocr.mjs "$TITLE_EXTRACTOR_DATA/ocr"
+chmod -R a+rX "$TITLE_EXTRACTOR_DATA/models" "$TITLE_EXTRACTOR_DATA/ocr"
+```
+
+The data directories contain only public model/runtime files; keep the private token file beside the Compose
+files, outside them. The worker's uid 10002 and an app using a custom PUID must both be able to read the mounts.
+The staging tool includes the PaddleOCR and ONNX Runtime licenses and verifies every downloaded file. It does
+not stage a translation language model or an automatic-approval record.
+
+Run from the directory containing your existing Compose file and volumes:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.title-extractor.yml --profile title-art pull uchiyomi title-extractor
+docker compose -f docker-compose.yml -f docker-compose.title-extractor.yml --profile title-art up -d uchiyomi title-extractor
+```
+
+Wait for the worker to become healthy, then use **Edit details → Art → Title logo → Extract from cover**.
+Installing this service does not change any automatic or nightly opt-in setting. Manual previews and optional
+nightly generation need a ready worker. The separate default-off option to apply results that pass available
+checks also needs the pinned OCR pack, current verified canonical title aliases and every runtime title/image
+check to pass. Uncertain results stay private for review and expire after 14 days. This overlay supports the
+single-container Docker install. Desktop installations do not download or launch the Python service automatically.
+
+## Build from source
 
 Use the pinned Hi-SAM checkout and checkpoints documented in
 [the extraction tools](../../scripts/title-art/README.md). Build with:
@@ -40,6 +108,20 @@ node scripts/title-art/prepare-ocr.mjs --help
 checkpoint hashes before becoming ready. `prepare-ocr.mjs` stages a pinned, checksum-verified OCR-only pack; it does
 not install the translation language model. Keep checkpoint and OCR files in persistent server storage, outside
 the source checkout. Mount both read-only. Keep user covers and generated candidates outside Git.
+For a local image, pass `--hi-sam-dir /path/to/Hi-SAM --tag uchiyomi-title-extractor:local`. CI uses
+`--prepare-context /new/empty/path` with the same verified source, builds both native architectures without weights,
+and tests that a worker without checkpoints rejects requests and never becomes ready. Release tags publish the image
+alongside the three application images; the shared `latest` gate waits for all four multi-architecture indexes.
+
+## Upgrade or disable
+
+Keep the worker image tag matched to the app release (or pin both to reviewed immutable digests). Back up the app
+database/configuration, retain the old Compose files and image IDs, update the worker tag in `.env`, and use the same
+two-file `pull` and `up -d` commands above. Reuse the existing model/OCR directories and token. A worker without the
+required checkpoint hashes stays unavailable; normal manga reading and provider logos remain usable.
+
+To stop just inference, run the same two-file Compose command with `stop title-extractor`; saved artwork is kept.
+Do not use `down -v` to disable this feature: that would also remove the existing application's named volumes.
 
 ## Connect the app
 
@@ -60,11 +142,18 @@ Set the same token on the worker and mount the two checkpoint files at `/models`
 environment file used only by these two containers. Do not add other app credentials to the worker. The worker's
 authenticated `/healthz` reports readiness; model loading can take longer than the app startup.
 
-The default-off automatic option lives under **Admin → Series → Automatic title logos**. It becomes usable only
-when worker readiness, pinned OCR and an approved verification record are present. It processes confirmed provider
-misses, preserves manual/text choices and lookup opt-outs, and leaves uncertain drafts for review. Existing provider
-logos take priority. See [the strict verification policy](../../docs/cover-title-verification.md) before approving
-any record; a model score or a synthetic test cannot establish that a complete title was extracted.
+The two default-off cover-title options, **Automatically extract cover titles** and **Apply cover titles that pass
+checks**, live under **Admin → Series → Automatic title logos**. Nightly generation
+runs at 03:00 in the server's time zone, with **Run now** for an initial batch; it can create local previews without
+an external metadata link. Automatic application is a separate opt-in: it requires current verified canonical
+title aliases, source and candidate OCR agreement, and the available geometry, alpha and image checks. Missing
+identity or failed checks leave a private review draft instead. Local generation does not fetch external aliases
+when external metadata sharing is disabled. Existing provider artwork and manual/text choices take priority.
+
+The older calibrated automatic-application setting remains separate and still requires an approved verification
+record. The available-checks opt-in does not create or claim that approval. See
+[the verification policy](../../docs/cover-title-verification.md): a model score, successful OCR or a synthetic test
+cannot guarantee that every flourish or outline was extracted correctly.
 
 ## Verify
 

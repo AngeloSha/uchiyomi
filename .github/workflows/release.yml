@@ -38,7 +38,9 @@ permissions:
   attestations: write
 
 env:
-  IMAGES: ghcr.io/angelosha/uchiyomi-bff ghcr.io/angelosha/uchiyomi-web ghcr.io/angelosha/uchiyomi
+  # image=tag-prefix pairs. Reuse the existing public AIO package for the optional worker: new GHCR
+  # packages start private, and repository permission inheritance does not make their visibility public.
+  IMAGE_TAG_PREFIXES: ghcr.io/angelosha/uchiyomi-bff= ghcr.io/angelosha/uchiyomi-web= ghcr.io/angelosha/uchiyomi= ghcr.io/angelosha/uchiyomi=title-extractor-
 
 jobs:
   build:
@@ -50,7 +52,7 @@ jobs:
       # the other. `latest` is gated on all of them succeeding, so a half-publish cannot reach anyone via :latest.
       fail-fast: false
       matrix:
-        service: [bff, web, aio]
+        service: [bff, web, aio, title-extractor]
         arch: [amd64, arm64]
         include:
           - { service: bff, image: ghcr.io/angelosha/uchiyomi-bff, context: ./bff,  file: ./bff/Dockerfile }
@@ -58,11 +60,28 @@ jobs:
           # The single-container build: the same API serving the web app itself. Its context is the repo
           # root because it builds both halves.
           - { service: aio, image: ghcr.io/angelosha/uchiyomi,     context: .,      file: ./Dockerfile.aio }
+          # Optional CPU inference image: no checkpoints, OCR pack or user data are baked in.
+          - { service: title-extractor, image: ghcr.io/angelosha/uchiyomi, context: ./services/title-extractor, file: ./services/title-extractor/Dockerfile, license: 'MPL-2.0 AND Apache-2.0' }
           # Native runners, no emulation: ubuntu-24.04-arm is a real arm64 machine (free for public repos).
           - { arch: amd64, runner: ubuntu-latest }
           - { arch: arm64, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@v7
+      - name: Check out pinned title segmentation source
+        if: matrix.service == 'title-extractor'
+        uses: actions/checkout@v7
+        with:
+          repository: ymy-k/Hi-SAM
+          ref: 69009434d4dba5541f228d8f5acb0754c333d417
+          path: .title-extractor-source
+          persist-credentials: false
+      - name: Stage optional title extractor context
+        if: matrix.service == 'title-extractor'
+        id: title_context
+        run: |
+          title_context="$RUNNER_TEMP/title-extractor-context"
+          python3 scripts/title-art/build-worker.py --hi-sam-dir .title-extractor-source --prepare-context "$title_context"
+          echo "path=$title_context" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v4
       - name: Log in to GHCR
         uses: docker/login-action@v4
@@ -74,7 +93,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v7
         with:
-          context: ${{ matrix.context }}
+          context: ${{ steps.title_context.outputs.path || matrix.context }}
           file: ${{ matrix.file }}
           platforms: linux/${{ matrix.arch }}
           # No tag here: each architecture is pushed by digest and the merge job below writes the tag over
@@ -91,7 +110,7 @@ jobs:
             org.opencontainers.image.url=https://uchiyomi.com
             org.opencontainers.image.version=${{ github.ref_name }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.licenses=MPL-2.0
+            org.opencontainers.image.licenses=${{ matrix.license || 'MPL-2.0' }}
       - name: Record the digest
         # ⚠️ FAIL HERE RATHER THAN LATER. build-push-action only sets this output `if (digest)`, so a build
         # that somehow succeeds without producing image metadata leaves it empty -- and this step used to
@@ -127,6 +146,7 @@ jobs:
           - { service: bff, image: ghcr.io/angelosha/uchiyomi-bff }
           - { service: web, image: ghcr.io/angelosha/uchiyomi-web }
           - { service: aio, image: ghcr.io/angelosha/uchiyomi }
+          - { service: title-extractor, image: ghcr.io/angelosha/uchiyomi, tag_prefix: title-extractor- }
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -140,28 +160,28 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/setup-buildx-action@v4
-      - name: Write ${{ matrix.image }}:${{ github.ref_name }} over both architectures
+      - name: Write ${{ matrix.image }}:${{ matrix.tag_prefix }}${{ github.ref_name }} over both architectures
         id: index
         run: |
           set -euo pipefail
           ls digests
           refs=""
           for f in digests/${{ matrix.service }}-*; do refs="$refs ${{ matrix.image }}@$(cat "$f")"; done
-          docker buildx imagetools create -t "${{ matrix.image }}:${{ github.ref_name }}" $refs
+          docker buildx imagetools create -t "${{ matrix.image }}:${{ matrix.tag_prefix }}${{ github.ref_name }}" $refs
           # Inspect ONCE into a variable and read from that. Piping the inspect into `grep -q` or an awk
           # that exits early closes the pipe under it; buildx then dies of SIGPIPE, and with pipefail that
           # is the step's exit status (255) -- which is exactly how the first run of this pipeline failed
           # all three merges after every build had succeeded.
-          out=$(docker buildx imagetools inspect "${{ matrix.image }}:${{ github.ref_name }}")
+          out=$(docker buildx imagetools inspect "${{ matrix.image }}:${{ matrix.tag_prefix }}${{ github.ref_name }}")
           printf '%s\n' "$out"
           # Both architectures must be in the index, or the tag is a half-publish with a new spelling.
           for arch in amd64 arm64; do
             grep -q "linux/$arch" <<<"$out" \
-              || { echo "::error::${{ matrix.image }}:${{ github.ref_name }} has no linux/$arch"; exit 1; }
+              || { echo "::error::${{ matrix.image }}:${{ matrix.tag_prefix }}${{ github.ref_name }} has no linux/$arch"; exit 1; }
           done
           digest=$(awk '/^Digest:/ && !d {print $2; d=1}' <<<"$out")
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
-          echo "::notice title=${{ matrix.image }}:${{ github.ref_name }}::$digest   (this is the digest an Umbrel manifest pins)"
+          echo "::notice title=${{ matrix.image }}:${{ matrix.tag_prefix }}${{ github.ref_name }}::$digest   (this is the digest an Umbrel manifest pins)"
       # A signed statement, verifiable with `gh attestation verify oci://<image>:<tag> --owner AngeloSha`,
       # that this index was built by this workflow from this commit.
       - uses: actions/attest-build-provenance@v4
@@ -194,18 +214,20 @@ jobs:
       - name: Point latest at ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          for img in $IMAGES; do
-            echo "retagging $img:${GITHUB_REF_NAME} -> :latest"
-            docker buildx imagetools create -t "$img:latest" "$img:${GITHUB_REF_NAME}"
+          for entry in $IMAGE_TAG_PREFIXES; do
+            img=${entry%=*}; prefix=${entry#*=}
+            echo "retagging $img:${prefix}${GITHUB_REF_NAME} -> :${prefix}latest"
+            docker buildx imagetools create -t "$img:${prefix}latest" "$img:${prefix}${GITHUB_REF_NAME}"
           done
       - name: Verify every image resolves to the same digest under both tags
         run: |
           set -euo pipefail
           # No early-exiting awk on a pipe from buildx: see the merge job for why.
           digest_of() { local out; out=$(docker buildx imagetools inspect "$1"); awk '/^Digest:/ && !d {print $2; d=1}' <<<"$out"; }
-          for img in $IMAGES; do
-            v=$(digest_of "$img:${GITHUB_REF_NAME}")
-            l=$(digest_of "$img:latest")
+          for entry in $IMAGE_TAG_PREFIXES; do
+            img=${entry%=*}; prefix=${entry#*=}
+            v=$(digest_of "$img:${prefix}${GITHUB_REF_NAME}")
+            l=$(digest_of "$img:${prefix}latest")
             echo "$img  version=$v  latest=$l"
             [ -n "$v" ] && [ "$v" = "$l" ] || { echo "::error::$img latest does not match ${GITHUB_REF_NAME}"; exit 1; }
           done
