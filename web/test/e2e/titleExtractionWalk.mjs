@@ -1,6 +1,6 @@
 // Real browser/API/job/image checks against up.sh E2E_TITLE_EXTRACTION=1; never a production library.
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import puppeteer from 'puppeteer';
 import { pressSeriesMoreItem } from './seriesMore.mjs';
 const BASE = process.env.BASE || 'http://127.0.0.1:18140';
@@ -28,6 +28,7 @@ const api = async (path, options = {}) => {
 const mode = async (value) => { const r = await fetch(WORKER + '/__mode', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: value }) }); assert.equal(r.status, 200); };
 const capabilities = await api('/api/admin/title-extraction/capabilities');
 assert.equal(capabilities.available, true, 'run up.sh with E2E_TITLE_EXTRACTION=1');
+assert.ok(Number.isFinite(capabilities.timeoutSeconds) && capabilities.timeoutSeconds > 0 && capabilities.timeoutSeconds <= 90, 'the extraction API exposes a finite bounded work budget');
 assert.equal(capabilities.automaticApplyAvailable, false, 'a fixture without OCR cannot claim safe automatic Apply');
 const settings = await api('/api/admin/settings');
 assert.equal(settings.automatic_cover_titles, false, 'automatic extraction is opt-in');
@@ -41,6 +42,7 @@ assert.equal(initial.titleArt.mode, 'automatic', 'titleArtWalk/reset or a fresh 
 const setLogo = (body) => api(`/api/admin/series/${encodeURIComponent(id)}/art`, { method: 'PUT', body: JSON.stringify({ kind: 'logo', ...body }) });
 const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
 const errors = [];
+let page, expectedJobId;
 try {
   await mode('ok');
   await setLogo({ mode: 'upload', dataUrl: 'data:image/png;base64,' + readFileSync(new URL('../fixtures/title-logo.png', import.meta.url)).toString('base64') });
@@ -49,7 +51,7 @@ try {
     const pair = cookie.split(';')[0], i = pair.indexOf('=');
     await browser.defaultBrowserContext().setCookie({ name: pair.slice(0, i), value: pair.slice(i + 1), url: BASE });
   }
-  const page = await browser.newPage();
+  page = await browser.newPage();
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('response', (response) => { if (response.status() >= 500) errors.push(`${response.status()} ${new URL(response.url()).pathname}`); });
   await page.setBypassServiceWorker(true);
@@ -63,11 +65,40 @@ try {
     await click('[data-art-extract-cover]');
     await page.waitForSelector('[data-title-extraction-dialog]', { visible: true });
     await page.waitForSelector('[data-extract-cover-surface] img', { visible: true });
-    await page.waitForFunction(() => !document.querySelector('[data-extract-create]')?.disabled);
+    await page.waitForFunction(() => { const button = document.querySelector('[data-extract-create]'); return button && !button.disabled; });
+  };
+  const createPreview = async () => {
+    const response = page.waitForResponse((r) => new URL(r.url()).pathname === root && r.request().method() === 'POST');
+    await click('[data-extract-create]');
+    const created = await response;
+    assert.equal(created.status(), 202);
+    const { job } = await created.json();
+    assert.ok(job.id); expectedJobId = job.id;
+    return { response: created, job };
   };
   const ready = async () => {
-    await page.waitForFunction(() => document.querySelector('[data-extract-result]')?.getAttribute('data-extract-result') === 'ready');
-    await page.waitForFunction(() => !document.querySelector('[data-extract-apply]')?.disabled);
+    // The API allows 90 seconds of work, plus a final status poll/image decode. A fixed 30-second
+    // browser default can abandon a healthy running job; terminal failures should instead fail at once.
+    const deadline = Date.now() + (capabilities.timeoutSeconds + 10) * 1000;
+    assert.ok(expectedJobId, 'readiness belongs to the accepted preview request');
+    // A retried preview can briefly still show the previous error while DELETE/POST/state adoption
+    // complete. Read the exact accepted job, never interpret that old terminal state as its result.
+    for (;;) {
+      const { job } = await api(`${root}/${encodeURIComponent(expectedJobId)}`, { signal: AbortSignal.timeout(5000) });
+      assert.equal(job.id, expectedJobId);
+      assert.ok(!['error', 'rejected', 'expired', 'applied'].includes(job.status), `preview ${job.id} failed: ${job.error || job.status}`);
+      if (job.status === 'ready') break;
+      assert.ok(Date.now() < deadline, 'accepted extraction finishes within its advertised work budget');
+      await sleep(500);
+    }
+    await page.waitForFunction(() => {
+      const status = document.querySelector('[data-extract-result]')?.getAttribute('data-extract-result');
+      const apply = document.querySelector('[data-extract-apply]');
+      return status === 'ready' && apply && !apply.disabled;
+    }, { timeout: Math.max(1, deadline - Date.now()) });
+    const result = await page.$eval('[data-extract-result]', (node) => ({ status: node.getAttribute('data-extract-result'), error: node.querySelector('[data-extract-error]')?.textContent }));
+    assert.equal(result.status, 'ready', `extraction must produce a ready preview: ${result.error || result.status}`);
+    assert.equal(await page.$eval('[data-extract-apply]', (node) => node.disabled), false, 'the reviewed image is decoded and Apply exists and is enabled');
   };
   await open();
   assert.equal(await page.$eval('[data-extract-apply]', (node) => node.disabled), true);
@@ -85,10 +116,7 @@ try {
   await page.keyboard.press('A');
   await page.keyboard.up('Control');
   await page.keyboard.type('65');
-  const creation = page.waitForResponse((response) => new URL(response.url()).pathname === root && response.request().method() === 'POST');
-  await click('[data-extract-create]');
-  const createdResponse = await creation;
-  const firstJob = (await createdResponse.json()).job;
+  const { response: createdResponse, job: firstJob } = await createPreview();
   const request = createdResponse.request();
   const selection = JSON.parse(request.postData());
   assert.equal(typeof selection.coverFingerprint, 'string');
@@ -109,11 +137,8 @@ try {
   await page.waitForFunction(() => !document.querySelector('[data-extract-hero-preview]'));
   await page.waitForSelector('[data-extract-selection-changed]', { visible: true });
   assert.equal(await page.$eval('[data-extract-apply]', (node) => node.disabled), true);
-  const recomputing = page.waitForResponse((response) => new URL(response.url()).pathname === root && response.request().method() === 'POST');
-  await click('[data-extract-create]');
-  const recomputedResponse = await recomputing;
+  const { response: recomputedResponse, job: nextJob } = await createPreview();
   const updatedSelection = JSON.parse(recomputedResponse.request().postData());
-  const nextJob = (await recomputedResponse.json()).job;
   assert.equal(updatedSelection.region.left, .2);
   assert.equal(updatedSelection.exclusions[0].left, .65);
   assert.notEqual(nextJob.id, firstJob.id, 'changing the rectangle creates a fresh extraction');
@@ -134,12 +159,12 @@ try {
 
   await mode('unavailable');
   await open();
-  await click('[data-extract-create]');
+  await createPreview();
   await page.waitForFunction(() => document.querySelector('[data-extract-result]')?.getAttribute('data-extract-result') === 'error');
   assert.match(await page.$eval('[data-extract-error]', (node) => node.textContent), /not available/i);
   assert.equal((await detail()).titleArt.version, original.version);
   await mode('ok');
-  await click('[data-extract-create]');
+  await createPreview();
   await ready();
   console.log('PASS temporary worker failure has a readable error and can be retried without changing current artwork');
   await setLogo({ mode: 'style', style: 'noir' });
@@ -154,8 +179,8 @@ try {
   console.log('PASS the real API rejects a stale preview and the editor requires a fresh one');
 
   await page.setViewport({ width: 390, height: 844 });
-  await page.waitForFunction(() => !document.querySelector('[data-extract-create]')?.disabled);
-  await click('[data-extract-create]');
+  await page.waitForFunction(() => { const button = document.querySelector('[data-extract-create]'); return button && !button.disabled; });
+  await createPreview();
   await ready();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), '390px editor has no sideways overflow');
   await page.$eval('[data-extract-hero-preview]', (node) => node.scrollIntoView({ block: 'center' }));
@@ -174,7 +199,7 @@ try {
 
   await mode('slow');
   await open();
-  await click('[data-extract-create]');
+  await createPreview();
   await page.waitForSelector('[data-extract-cancel]', { visible: true });
   await wait(async () => (await (await fetch(WORKER + '/__log')).json()).at(-1)?.mode === 'slow', 'worker started cancellable request');
   await click('[data-extract-cancel]');
@@ -186,6 +211,27 @@ try {
   assert.equal(after.booksCount, initial.booksCount);
   assert.deepEqual(errors, [], 'no browser runtime errors or API 5xx responses');
   console.log('PASS cancelling active work preserves applied artwork; series metadata and chapter count stay unchanged');
+} catch (error) {
+  // Preserve evidence before cleanup changes the title version or closes the dialog. Never log cookies,
+  // access tokens, request headers, source image bytes or the worker's imageBase64 input.
+  const diagnostic = { failure: error.message, timeoutSeconds: capabilities.timeoutSeconds, seriesId: id, pageErrors: errors };
+  try {
+    const { job } = await api(expectedJobId ? `${root}/${encodeURIComponent(expectedJobId)}` : root, { signal: AbortSignal.timeout(5000) });
+    diagnostic.job = job ? { id: job.id, status: job.status, error: job.error, reasons: job.reasons, selectionMode: job.selectionMode, region: job.region, exclusions: job.exclusions } : null;
+  } catch { diagnostic.jobReadFailed = true; }
+  try { diagnostic.workerRequests = (await (await fetch(WORKER + '/__log', { signal: AbortSignal.timeout(5000) })).json()).slice(-3).map(({ mode, region, exclusions, expectedTitles }) => ({ mode, region, exclusions, expectedTitles })); }
+  catch { diagnostic.workerReadFailed = true; }
+  if (page) {
+    try {
+      diagnostic.ui = await page.evaluate(() => ({ status: document.querySelector('[data-extract-result]')?.getAttribute('data-extract-result'),
+        error: document.querySelector('[data-extract-error]')?.textContent, selectionChanged: !!document.querySelector('[data-extract-selection-changed]'),
+        applyExists: !!document.querySelector('[data-extract-apply]'), applyDisabled: document.querySelector('[data-extract-apply]')?.disabled }));
+      await page.screenshot({ path: `${OUT}/extract-failure.png` });
+    } catch { diagnostic.pageReadFailed = true; }
+  }
+  writeFileSync(`${OUT}/extract-failure.json`, JSON.stringify(diagnostic, null, 2) + '\n');
+  console.error('Extraction failure evidence:', JSON.stringify(diagnostic));
+  throw error;
 } finally {
   try { await mode('ok'); await setLogo({ mode: 'reset' }); if (initial.titleArt.style !== 'auto') await setLogo({ mode: 'style', style: initial.titleArt.style }); }
   finally { await browser.close(); }
