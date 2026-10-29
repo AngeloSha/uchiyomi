@@ -57,7 +57,7 @@ function retryAfter(r: PublicFetch, now: number): number | undefined {
   if (!raw) return undefined;
   const seconds = Number(raw);
   const ms = /^\d+(?:\.\d+)?$/.test(raw.trim()) ? seconds * 1000 : Date.parse(raw) - now;
-  return Number.isFinite(ms) && ms >= 0 ? Math.max(60_000, Math.min(ms, 24 * 60 * 60_000)) : undefined;
+  return Number.isFinite(ms) && ms >= 0 ? Math.max(60_000, ms) : undefined;
 }
 
 /** Only the thumbnail URL returned by Commons, not arbitrary image URLs or active original SVGs. */
@@ -142,17 +142,29 @@ export function createTitleLogoProvider(deps: Dependencies = {}): (anilistId: st
   const now = deps.now ?? Date.now;
   let serial: Promise<unknown> = Promise.resolve();
   let lastStart: number | null = null;
+  let unavailableUntil = 0;
+  const assertAvailable = (): void => {
+    const remaining = unavailableUntil - now();
+    // A local refusal must not extend the server's deadline when another manga or an admin asks again.
+    if (remaining > 0) throw new TitleLogoProviderUnavailable('Wikimedia title artwork is resting', remaining);
+  };
+  const unavailable = (message: string, retryAfterMs = 5 * 60_000): TitleLogoProviderUnavailable => {
+    unavailableUntil = Math.max(unavailableUntil, now() + retryAfterMs);
+    return new TitleLogoProviderUnavailable(message, Math.max(0, unavailableUntil - now()));
+  };
   const get = (url: string, maxBytes: number): Promise<PublicFetch> => {
     const next = serial.then(async () => {
+      assertAvailable();
       if (lastStart != null) await sleep(Math.max(0, 1000 - (now() - lastStart)));
+      assertAvailable();
       lastStart = now();
       // No redirects: even an otherwise public redirect must not turn this fixed-provider client into another fetcher.
       let r: PublicFetch | null;
       try {
         r = await fetcher(url, { maxBytes, timeoutMs: 10_000, maxHops: 0, headers: { 'user-agent': USER_AGENT, accept: maxBytes === IMAGE_MAX_BYTES ? 'image/png' : 'application/json' } });
-      } catch { throw new TitleLogoProviderUnavailable('Wikimedia title artwork is unavailable'); }
-      if (!r || r.url !== url || r.body.length > maxBytes) throw new TitleLogoProviderUnavailable('Wikimedia title artwork is unavailable');
-      if (r.status === 429 || r.status === 403 || r.status >= 500) throw new TitleLogoProviderUnavailable(`Wikimedia title artwork returned ${r.status}`, retryAfter(r, now()));
+      } catch { throw unavailable('Wikimedia title artwork is unavailable'); }
+      if (!r || r.url !== url || r.body.length > maxBytes) throw unavailable('Wikimedia title artwork is unavailable');
+      if (r.status === 429 || r.status === 403 || r.status >= 500) throw unavailable(`Wikimedia title artwork returned ${r.status}`, retryAfter(r, now()));
       return r;
     });
     serial = next.then(() => undefined, () => undefined);
@@ -160,31 +172,32 @@ export function createTitleLogoProvider(deps: Dependencies = {}): (anilistId: st
   };
   const json = async (url: string): Promise<Json> => {
     const r = await get(url, API_MAX_BYTES);
-    if (r.status !== 200) throw new TitleLogoProviderUnavailable(`Wikimedia metadata returned ${r.status}`, retryAfter(r, now()));
+    if (r.status !== 200) throw unavailable(`Wikimedia metadata returned ${r.status}`, retryAfter(r, now()));
     let body: Json;
-    try { body = JSON.parse(r.body.toString('utf8')); } catch { throw new TitleLogoProviderUnavailable('Wikimedia metadata was not JSON'); }
-    if (!body || typeof body !== 'object' || Array.isArray(body) || body.error) throw new TitleLogoProviderUnavailable('Wikimedia metadata is temporarily unavailable', retryAfter(r, now()));
+    try { body = JSON.parse(r.body.toString('utf8')); } catch { throw unavailable('Wikimedia metadata was not JSON'); }
+    if (!body || typeof body !== 'object' || Array.isArray(body) || body.error) throw unavailable('Wikimedia metadata is temporarily unavailable', retryAfter(r, now()));
     return body;
   };
   return async (anilistId: string, options: TitleLogoLookupOptions = {}): Promise<TitleLogoLookupResult> => {
     if (!/^[1-9]\d{0,9}$/.test(anilistId)) return { kind: 'missing' };
+    assertAvailable();
     // MediaWiki explicitly distinguishes a person waiting for a result from background clients yielding to maxlag.
     // This changes metadata's maxlag parameter only; both modes retain pacing, SSRF/image guards and 429 backoff.
     const interactive = options.interactive === true;
     const search = await json(apiUrl(WIKIDATA, { action: 'query', list: 'search', srsearch: `haswbstatement:P8731=${anilistId}`, srnamespace: '0', srlimit: '5' }, interactive));
-    if (!Array.isArray(search.query?.search)) throw new TitleLogoProviderUnavailable('Wikimedia identity search was incomplete');
+    if (!Array.isArray(search.query?.search)) throw unavailable('Wikimedia identity search was incomplete');
     if (Number(search.query.searchinfo?.totalhits) > 5 || search.continue) return { kind: 'missing' };
     const ids = [...new Set(records(search.query.search).map((r) => r.title).filter((id): id is string => typeof id === 'string' && /^Q[1-9]\d*$/.test(id)))].slice(0, 5);
     if (!ids.length) return { kind: 'missing' };
     const body = await json(apiUrl(WIKIDATA, { action: 'wbgetentities', ids: ids.join('|'), props: 'claims|labels|aliases', languages: 'en|ja|ko|zh' }, interactive));
-    if (!body.entities || typeof body.entities !== 'object') throw new TitleLogoProviderUnavailable('Wikimedia identities were incomplete');
-    if (ids.some((id) => !body.entities[id] || (!body.entities[id].missing && !body.entities[id].claims))) throw new TitleLogoProviderUnavailable('Wikimedia identities were incomplete');
+    if (!body.entities || typeof body.entities !== 'object') throw unavailable('Wikimedia identities were incomplete');
+    if (ids.some((id) => !body.entities[id] || (!body.entities[id].missing && !body.entities[id].claims))) throw unavailable('Wikimedia identities were incomplete');
     const matches = ids.map((id) => body.entities[id]).filter((e): e is Json => e && typeof e === 'object' && values(claims(e, 'P8731')).includes(anilistId));
     if (matches.length !== 1) return { kind: 'missing' }; // Duplicated or changed identities need a human choice.
     const { logos, names } = choices(matches[0]);
     for (const logo of logos) {
       const info = await json(apiUrl(COMMONS, { action: 'query', titles: `File:${logo.name}`, prop: 'imageinfo', iiprop: 'url|size|mime|extmetadata', iiurlwidth: '1200', iiurlheight: '600', iiextmetadatafilter: 'Artist|LicenseShortName|LicenseUrl|ImageDescription' }, interactive));
-      if (!Array.isArray(info.query?.pages)) throw new TitleLogoProviderUnavailable('Wikimedia image metadata was incomplete');
+      if (!Array.isArray(info.query?.pages)) throw unavailable('Wikimedia image metadata was incomplete');
       const canonicalFile = (value: unknown) => typeof value === 'string' ? value.replace(/^File:/i, '').replace(/_/g, ' ').normalize('NFC') : '';
       const page = records(info.query.pages).find((p) => canonicalFile(p.title) === canonicalFile(logo.name) && !p.missing);
       if (!page) continue;
@@ -196,7 +209,7 @@ export function createTitleLogoProvider(deps: Dependencies = {}): (anilistId: st
       if (!url) continue;
       const r = await get(url, IMAGE_MAX_BYTES);
       if (r.status === 404 || r.status === 410) continue;
-      if (r.status !== 200) throw new TitleLogoProviderUnavailable(`Wikimedia artwork returned ${r.status}`, retryAfter(r, now()));
+      if (r.status !== 200) throw unavailable(`Wikimedia artwork returned ${r.status}`, retryAfter(r, now()));
       if ((r.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase() !== 'image/png' || !(await rasterLogo(r.body))) continue;
       return { kind: 'found', candidate: {
         bytes: r.body, language: logo.language, showReadableTitle: logo.language !== 'en',

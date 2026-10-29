@@ -47,8 +47,9 @@ async function fixture(options: Fixture = {}) {
   const image = options.image ?? await png();
   const asked: Array<{ url: URL; opts: any }> = [];
   const waits: number[] = [];
+  let clock = 1_700_000_000_000;
   const lookup = createTitleLogoProvider({
-    now: () => 1_700_000_000_000, sleep: async (ms) => { waits.push(ms); },
+    now: () => clock, sleep: async (ms) => { waits.push(ms); clock += ms; },
     fetchPublic: async (input, opts) => {
       const url = new URL(String(input));
       asked.push({ url, opts });
@@ -74,7 +75,7 @@ async function fixture(options: Fixture = {}) {
       return reply(url.href, image, 200, { 'content-type': 'image/png' });
     },
   });
-  return { lookup, asked, waits, image };
+  return { lookup, asked, waits, image, advance: (ms: number) => { clock += ms; } };
 }
 
 test('a checked AniList manga ID leads through verified claims to a local raster candidate and safe attribution', async () => {
@@ -283,9 +284,60 @@ test('429, provider blocks, maxlag, malformed/incomplete JSON and unreachable pr
     const f = await fixture({ search: { query: { search: [] } }, intercept: (url) => failing ? failure(url) : undefined });
     await assert.rejects(f.lookup(ID), (error: any) => error instanceof TitleLogoProviderUnavailable && error.retryAfterMs >= 60_000);
     failing = false;
+    await assert.rejects(f.lookup(ID), TitleLogoProviderUnavailable, 'a provider outage has a shared cooldown');
+    assert.equal(f.asked.length, 1, 'a local cooldown never sends another HTTP request');
+    f.advance(5 * 60_000);
     assert.deepEqual(await f.lookup(ID), { kind: 'missing' }, 'an outage was not remembered as a miss');
     assert.equal(f.asked.length, 2);
   }
+});
+
+test('429, 503 and maxlag share their full deadline across manga IDs and interactive calls without extending local refusals', async () => {
+  const start = 1_700_000_000_000;
+  const cases = [
+    { status: 429, body: {}, headers: { 'retry-after': '120' }, duration: 120_000 },
+    { status: 503, body: {}, headers: { 'retry-after': '120' }, duration: 120_000 },
+    { status: 200, body: { error: { code: 'maxlag' } }, headers: { 'retry-after': '120' }, duration: 120_000 },
+    { status: 503, body: {}, headers: {}, duration: 300_000 },
+    { status: 200, body: { error: { code: 'maxlag' } }, headers: {}, duration: 300_000 },
+    { status: 429, body: {}, headers: { 'retry-after': '172800' }, duration: 172_800_000 },
+    { status: 503, body: {}, headers: { 'retry-after': new Date(start + 120_000).toUTCString() }, duration: 120_000 },
+  ];
+  for (const scenario of cases) {
+    let clock = start;
+    let calls = 0;
+    const lookup = createTitleLogoProvider({ now: () => clock, sleep: async (ms) => { clock += ms; },
+      fetchPublic: async (input) => {
+        calls++;
+        const url = String(input);
+        return calls === 1 ? reply(url, scenario.body, scenario.status, scenario.headers)
+          : reply(url, { query: { search: [] } });
+      } });
+    await assert.rejects(lookup(ID), (error: any) => error.retryAfterMs === scenario.duration);
+    clock += 5000;
+    await assert.rejects(lookup('90001', { interactive: true }), (error: any) => error.retryAfterMs === scenario.duration - 5000);
+    clock += 25_000;
+    await assert.rejects(lookup('90002'), (error: any) => error.retryAfterMs === scenario.duration - 30_000);
+    clock = start + scenario.duration - 1;
+    await assert.rejects(lookup('90003'), (error: any) => error.retryAfterMs === 1);
+    assert.equal(calls, 1, 'no other manga or interactive action bypasses the provider deadline');
+    clock++;
+    assert.deepEqual(await lookup('90004', { interactive: true }), { kind: 'missing' });
+    assert.equal(calls, 2, 'local refusals did not move the deadline');
+  }
+});
+
+test('an already queued concurrent lookup rechecks cooldown before its HTTP request', async () => {
+  let clock = 1_700_000_000_000;
+  let calls = 0;
+  const lookup = createTitleLogoProvider({ now: () => clock, sleep: async (ms) => { clock += ms; },
+    fetchPublic: async (input) => { calls++; return reply(String(input), {}, 429, { 'retry-after': '120' }); } });
+  const results = await Promise.allSettled([lookup(ID), lookup('90001', { interactive: true })]);
+  for (const result of results) {
+    assert.equal(result.status, 'rejected');
+    if (result.status === 'rejected') assert.equal(result.reason.retryAfterMs, 120_000);
+  }
+  assert.equal(calls, 1, 'a queued second lookup must not contact a resting provider');
 });
 
 test('image rate limits carry Retry-After and an unexpected redirected response cannot be accepted', async () => {
