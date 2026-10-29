@@ -4,9 +4,12 @@ The extractor proposes a transparent cutout from existing cover pixels. Segmenta
 whether an entire title design was recovered. A high score can accompany a missing character, emblem, outline or
 subtitle. Valid uncertain candidates remain available for explicit visual review.
 
-Automatic application requires both the administrator's opt-in and a passing `strict-v1` assessment. The policy
-module itself does not publish artwork. Its caller must still recheck the current series, cover, title choice,
-tracker identity, job version and applicable automatic-artwork settings before publishing a result.
+Automatic application requires the administrator's opt-in and passing title and image checks from `strict-v1`.
+The legacy calibrated mode additionally requires explicit empirical approval. The separate
+[nightly batch option](cover-title-batch.md) can apply results that pass the available runtime checks without
+claiming that calibration is approved. The policy module itself does not publish artwork. Its caller must still
+recheck the current series, cover, title choice, tracker identity, job version and applicable automatic-artwork
+settings before publishing a result.
 
 ## Necessary evidence
 
@@ -49,6 +52,8 @@ Keep source/candidate hashes, model fingerprints, selected geometry, source/ligh
 the private corpus record. Keep user covers and cutouts outside the repository. Preserve raw automatic proposals
 separately from candidates improved with human-selected regions or exclusions.
 
-Missing OCR, an absent/unapproved record, a changed fingerprint or a failed necessary check leaves automatic
-application disabled for that result. It does not discard a valid preview or prevent an explicitly reviewed manual
+In calibrated mode, missing OCR, an absent/unapproved record, a changed fingerprint or a failed necessary check
+leaves automatic application disabled for that result. The nightly available-checks mode still requires pinned OCR,
+current canonical identity and every necessary title and image check; it does not convert a missing calibration
+record into approval. Failed checks do not discard a valid preview or prevent an explicitly reviewed manual
 application. Empty, opaque or invalid cutouts cannot be applied through that review path either.
