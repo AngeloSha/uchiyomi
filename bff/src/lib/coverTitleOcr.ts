@@ -8,6 +8,7 @@ import { OcrWorker, type PageText } from './translate/ocr';
 import { assessCoverTitleQuality, isCoverTitleCalibration, type CoverTitleCalibration, type CoverTitleQualityInput, type CoverTitleQualityResult } from './coverTitleQuality';
 
 const OCR_PACK = 'e9e37c7cb2b7af61042a41f5f188a5e9c14cfeb78c35425551118f2e288c7d09';
+const CURRENT_MODEL = '9cd371602da73a8c1f9ae8902b4aa33b4658bc6133821720ff63ac17e56945c8';
 const HASH = /^[a-f0-9]{64}$/;
 const BYTE_LIMIT = 12 * 1024 * 1024;
 const sha = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
@@ -150,7 +151,7 @@ export function createCoverTitleOcr(deps: Dependencies) {
 
 const current = createCoverTitleOcr({ directory: () => process.env.TITLE_EXTRACTOR_OCR_DIR ?? '',
   calibrationFile: () => process.env.TITLE_EXTRACTOR_CALIBRATION_FILE ?? '' });
-export const coverTitleOcrCapability = current.capability;
+export const coverTitleOcrCapability = (modelFingerprint = CURRENT_MODEL) => current.capability(modelFingerprint);
 export const inspectCoverTitleCandidate = current.inspect;
 export const assessCoverTitleCandidate = current.assess;
 export const stopCoverTitleOcr = current.stop;
