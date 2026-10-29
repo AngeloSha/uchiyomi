@@ -120,6 +120,7 @@ jobs:
             web/test/e2e/shots-i18n/
             web/test/e2e/shots-backlog/
             web/test/e2e/shots-page-cleanup/
+            web/test/e2e/shots-title-art/
             web/test/e2e/shots-v558/
           retention-days: 7
 
