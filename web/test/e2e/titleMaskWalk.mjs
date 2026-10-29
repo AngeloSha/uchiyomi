@@ -2,13 +2,14 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import puppeteer from 'puppeteer';
+import { fixtureLogin } from './loginCooldown.mjs';
 import { pressSeriesMoreItem } from './seriesMore.mjs';
 const BASE = process.env.BASE || 'http://127.0.0.1:18140', target = new URL(BASE);
 assert.ok(target.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(target.hostname));
 const OUT = process.env.OUT || 'test/e2e/shots-title-mask'; mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const wait = async (fn, label) => { for (let n = 0; n < 150; n++) { const value = await fn(); if (value) return value; await sleep(100); } throw Error('Timed out: ' + label); };
-const login = await fetch(BASE + '/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: process.env.E2E_USER || 'e2e', password: process.env.E2E_PASS || 'e2e-passw0rd-123' }) });
+const login = await fixtureLogin(BASE, { username: process.env.E2E_USER || 'e2e', password: process.env.E2E_PASS || 'e2e-passw0rd-123' });
 assert.equal(login.status, 200); const { accessToken } = await login.json();
 const api = async (path, options = {}) => { const response = await fetch(BASE + path, { ...options, headers: { authorization: 'Bearer ' + accessToken, ...(options.body ? { 'content-type': 'application/json' } : {}) } }); assert.ok(response.ok, path + ':' + response.status); return response.json(); };
 const capabilities = await api('/api/admin/title-extraction/capabilities'); assert.equal(capabilities.maskCorrection, true);

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import puppeteer from 'puppeteer';
+import { fixtureLogin } from './loginCooldown.mjs';
 
 const BASE = process.env.BASE || 'http://127.0.0.1:18140';
 const target = new URL(BASE);
@@ -23,8 +24,7 @@ const wait = async (fn, label) => {
   throw new Error(`Timed out: ${label}`);
 };
 mkdirSync(OUT, { recursive: true });
-const login = await fetch(BASE + '/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ username: process.env.E2E_USER || 'e2e', password: process.env.E2E_PASS || 'e2e-passw0rd-123' }) });
+const login = await fixtureLogin(BASE, { username: process.env.E2E_USER || 'e2e', password: process.env.E2E_PASS || 'e2e-passw0rd-123' });
 assert.equal(login.status, 200);
 const { accessToken } = await login.json();
 const api = async (path, options = {}) => {

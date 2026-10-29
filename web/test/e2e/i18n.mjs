@@ -5,6 +5,7 @@
 // which technically "works" and looks broken to anyone who reads it.
 import puppeteer from 'puppeteer';
 import assert from 'node:assert/strict';
+import { waitForLoginCooldown } from './loginCooldown.mjs';
 import { readdirSync, readFileSync, mkdirSync } from 'fs';
 
 const BASE = process.env.BASE || 'http://127.0.0.1:18140';
@@ -21,13 +22,23 @@ await p.setViewport({ width: 1280, height: 900 });
 // cache before it adopts the new user. A fixed sleep followed by goto can destroy that work on a busy
 // CI runner. Wait for the authenticated shell before navigating, and never measure the login screen.
 async function signIn() {
-  await p.locator('form input[type="text"]').fill(process.env.E2E_USER || 'e2e');
-  await p.locator('form input[type="password"]').fill(process.env.E2E_PASS || 'e2e-passw0rd-123');
-  const response = p.waitForResponse((r) => new URL(r.url()).pathname === '/auth/login' && r.request().method() === 'POST', { timeout: 30000 });
-  await p.locator('form button[type="submit"]').click();
-  assert.equal((await response).status(), 200, 'the locale walk must sign in successfully');
-  await p.waitForSelector('[data-topbar]', { visible: true, timeout: 30000 });
-  await p.waitForSelector('input[type="password"]', { hidden: true, timeout: 30000 });
+  // The preceding browser walks share the server's ten-sign-ins/five-minutes address budget.
+  // Respect one advertised cooldown; never bypass the limit or treat a refusal as signed in.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await p.locator('form input[type="text"]').fill(process.env.E2E_USER || 'e2e');
+    await p.locator('form input[type="password"]').fill(process.env.E2E_PASS || 'e2e-passw0rd-123');
+    const response = p.waitForResponse((r) => new URL(r.url()).pathname === '/auth/login' && r.request().method() === 'POST', { timeout: 30000 });
+    await p.locator('form button[type="submit"]').click();
+    const result = await response;
+    if (result.status() === 429 && attempt === 0) {
+      await waitForLoginCooldown(result.headers()['retry-after']);
+      continue;
+    }
+    assert.equal(result.status(), 200, 'the locale walk must sign in successfully');
+    await p.waitForSelector('[data-topbar]', { visible: true, timeout: 30000 });
+    await p.waitForSelector('input[type="password"]', { hidden: true, timeout: 30000 });
+    return;
+  }
 }
 
 async function readyAuthenticated() {
