@@ -10,7 +10,7 @@ import { assessCoverTitleQuality, isCoverTitleCalibration, normalizeCoverTitleTe
   type CoverTitleCalibration, type CoverTitleQualityInput, type CoverTitleQualityResult } from './coverTitleQuality';
 
 const OCR_PACK = 'e9e37c7cb2b7af61042a41f5f188a5e9c14cfeb78c35425551118f2e288c7d09';
-const CURRENT_MODEL = '9cd371602da73a8c1f9ae8902b4aa33b4658bc6133821720ff63ac17e56945c8';
+const CURRENT_MODEL = '7d3af4077b9da8728cff8b78d5a5463570b89e985ddc4ef58694fcb0144f1331';
 const HASH = /^[a-f0-9]{64}$/;
 const BYTE_LIMIT = 12 * 1024 * 1024;
 const sha = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
