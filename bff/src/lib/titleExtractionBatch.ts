@@ -206,8 +206,8 @@ async function processItem(item:ItemRow&{retry_errors:boolean}){
   const current=await one<{status:string}>('SELECT status FROM title_extraction_items WHERE id=$1',[item.id]);if(current?.status!=='processing')return;
   if(!job)throw new ExtractionError('extract_interrupted');
   if(job.status==='ready'||job.status==='applied'){
-   await recoverCompletedBatchJob(job.id);
-   await finish(item,job.status);await storeHistory(item.series_id,fingerprint,job.model_fingerprint??modelFingerprint,job.status,null,context);
+   // The core finalizer atomically records the persisted publication decision, including a held review.
+   if(!await recoverCompletedBatchJob(job.id))throw new ExtractionError('extract_interrupted');
    await collectBatchTitleExtractions(item.series_id,job.id);return;
   }
   throw new ExtractionError(job.error??(job.status==='rejected'?'rejected':'extract_failed'));
