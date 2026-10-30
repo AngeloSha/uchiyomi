@@ -155,13 +155,12 @@ test('review blockers use distinct server group counts without summing overlappi
   ];
   const html = render({ status: overview({ reviewCount: 270, reviewReasons: reasons }) });
   for (const { code, count } of reasons) assert.match(html, new RegExp(`data-cover-title-review-reason="${code}"[\\s\\S]*?<dd[^>]*>${count}</dd>`));
-  const text = html.replace(/<[^>]+>/g, '');
-  assert.match(text, /Why previews need review/); assert.match(text, /Previews to review: 270/);
-  assert.match(text, /Title not verified/); assert.match(text, /Title text unclear/); assert.match(text, /Lettering may be missing/);
-  assert.match(text, /These counts can overlap/); assert.doesNotMatch(text, /title_not_verified|text_unclear|calibrat|OCR/i);
+  assert.match(html, />[^<]*Why previews need review[^<]*</); assert.match(html, />[^<]*Previews to review: 270[^<]*</);
+  assert.match(html, />[^<]*Title not verified[^<]*</); assert.match(html, />[^<]*Title text unclear[^<]*</); assert.match(html, />[^<]*Lettering may be missing[^<]*</);
+  assert.match(html, />[^<]*These counts can overlap[^<]*</); assert.doesNotMatch(html, />[^<]*(?:title_not_verified|text_unclear|calibrat|OCR)[^<]*</i);
   assert.match(html, /data-cover-title-review="j_1">Review/);
-  const future = render({ status: overview({ reviewReasons: [{ code: 'future_check', count: 2 }] }) }).replace(/<[^>]+>/g, '');
-  assert.match(future, /Other checks need review/); assert.doesNotMatch(future, /future_check/);
+  const future = render({ status: overview({ reviewReasons: [{ code: 'future_check', count: 2 }] }) });
+  assert.match(future, />[^<]*Other checks need review[^<]*</); assert.doesNotMatch(future, />[^<]*future_check[^<]*</);
 });
 
 test('older status responses do not invent online checks or review blockers', () => {
