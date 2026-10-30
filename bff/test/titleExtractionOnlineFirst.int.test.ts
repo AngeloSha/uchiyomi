@@ -163,3 +163,25 @@ test('a pending manual refresh takes precedence over an older fresh negative res
  try{await art.queueTitleLogos([SID()],'manual');await run();await settle();assert.equal(calls,0);assert.equal(warmCalls,0);assert.equal((await status()).online.waitingOnline,1);}
  finally{release();}await art.titleLogoQueueSettled();await retry();assert.equal(calls,1);assert.equal(providerCalls,1);
 });
+
+test('an online decision changing during inference keeps review private, then retries publication once after a miss',{skip},async()=>{
+ await missing();await q('UPDATE server_settings SET automatic_cover_title_generation=true,automatic_cover_title_apply=true WHERE id=1');let generation=0;
+ core.setTitleExtractionForTests({worker:async(...args)=>{
+  if(generation++===0)await q("UPDATE series_title_art SET lookup_status='error',retry_at=now()+interval '5 minutes' WHERE series_id=$1",[SID()]);
+  return worker(...args);
+ },ready:async()=>true,health:async()=>({ready:true,modelFingerprint:'a'.repeat(64)}),assess:async()=>quality(true),ocrCapability:async()=>({available:true,calibrated:false,verifierFingerprint:'b'.repeat(64)})});
+ await run();await settle();assert.equal(calls,1);assert.equal((await status()).run.counts.ready,1);assert.equal((await status()).run.counts.applied,0);
+ assert.equal((await q('SELECT publication_requested FROM series_title_extraction_history WHERE series_id=$1',[SID()]))[0].publication_requested,false);
+ await missing();await run();await settle();assert.equal(calls,2);assert.equal((await status()).run.counts.applied,1);
+ await run();await settle();assert.equal(calls,2,'same evidence and completed publication must not loop');assert.equal(providerCalls,0);
+});
+
+test('a checked-ID relink wakes obsolete per-ID backoff but preserves a shared provider deadline',{skip},async()=>{
+ await missing();await q("UPDATE series_title_art SET lookup_status='error',retry_at=now()+interval '49 hours' WHERE series_id=$1",[SID()]);
+ await run();await settle();assert.equal(providerCalls,0);assert.equal(calls,0);assert.equal((await status()).pausedReason,'online_provider_busy');
+ await q("UPDATE series_trackers SET external_id='30013' WHERE series_id=$1",[SID()]);await q("UPDATE server_settings SET title_logo_retry_at=now()+interval '1 hour' WHERE id=1");
+ await batch.titleExtractionBatchTick();await settle();assert.equal(providerCalls,0,'valid relink cannot bypass shared cooldown');assert.equal(calls,0);
+ await q('UPDATE server_settings SET title_logo_retry_at=NULL WHERE id=1');await batch.titleExtractionBatchTick();await settle();await art.titleLogoQueueSettled();
+ assert.equal(providerCalls,1,'new checked identity must not inherit the old identity error deadline');assert.equal(calls,0);await retry();assert.equal(calls,1);
+ assert.equal((await q('SELECT lookup_anilist_id FROM series_title_art WHERE series_id=$1',[SID()]))[0].lookup_anilist_id,'30013');
+});

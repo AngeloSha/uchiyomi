@@ -291,8 +291,10 @@ export async function titleExtractionBatchTick(){
   WHERE i.run_id=r.id AND r.status='running' AND i.status='pending' AND i.retry_at>now()
    AND i.reason IN('online_lookup_pending','online_provider_busy') AND EXISTS(
     SELECT 1 FROM lib_series s JOIN libraries l ON l.id=s.library_id JOIN server_settings ss ON ss.id=1
+    LEFT JOIN series_title_art a ON a.series_id=s.id
     LEFT JOIN series_trackers t ON t.series_id=s.id AND t.provider='anilist' AND(t.checked_at IS NOT NULL OR t.linked_by IS NOT NULL)
-    WHERE s.id=i.series_id AND(NOT ss.automatic_title_logos OR NOT l.anilist_lookup OR NOT COALESCE(t.external_id~'^[1-9][0-9]{0,15}$',false)))`);
+    WHERE s.id=i.series_id AND(NOT ss.automatic_title_logos OR NOT l.anilist_lookup OR NOT COALESCE(t.external_id~'^[1-9][0-9]{0,15}$',false)
+      OR(a.lookup_anilist_id IS DISTINCT FROM t.external_id AND COALESCE(ss.title_logo_retry_at,now())<=now())))`);
  wakeTitleExtractionBatch();
 }
 export function startTitleExtractionBatch(log:{warn(message:string):void}){
