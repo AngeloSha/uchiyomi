@@ -148,7 +148,11 @@ runs at 03:00 in the server's time zone, with **Run now** for an initial batch; 
 an external metadata link. Automatic application is a separate opt-in: it requires current verified canonical
 title aliases, source and candidate OCR agreement, and the available geometry, alpha and image checks. Missing
 identity or failed checks leave a private review draft instead. Local generation does not fetch external aliases
-when external metadata sharing is disabled. Existing provider artwork and manual/text choices take priority.
+when external metadata sharing is disabled. With online title logos and library external lookup enabled, checked
+manga identities finish online artwork lookup first; only a current completed miss permits cover fallback. Provider
+errors and pending lookups wait for their retry deadline. After a miss, missing canonical aliases are warmed for the
+exact checked identity before verification. Unlinked series remain local previews, not claimed online misses. Existing
+provider artwork and manual/text choices take priority. See [batch behavior and status](../../docs/cover-title-batch.md).
 
 The older calibrated automatic-application setting remains separate and still requires an approved verification
 record. The available-checks opt-in does not create or claim that approval. See

@@ -1,14 +1,14 @@
-// Durable local cover-title generation. The existing extraction worker remains the only inference consumer.
+// Durable online-first title discovery and local fallback. One existing extraction worker consumes cover jobs.
 import{randomUUID}from'node:crypto';
 import{q,one,tx}from'./db';
 import{runtime}from'./runtime';
 import{SYSTEM_CTX,visibleToAll,visible,Params,type ViewCtx}from'./visibility';
 import{FIRST_PAGE}from'./seriesArt';
-import{readTitleLogo}from'./titleArt';
+import{readTitleLogo,queueTitleLogos,titleLogoQueueState,titleLogoProviderRetryAt}from'./titleArt';
 import{msUntilHour}from'./backup';
 import{titleExtractorHealth,ExtractionError}from'./titleExtractionWorker';
 import{titleExtractionCapabilities,titleExtractionCover,createTitleExtraction,titleExtractionsSettled,titleExtractionJobSettled,titleExtractionWorkerBusy,
-  titleExtractionJobInFlight,titleExtractionVerificationContext,recoverCompletedBatchJob,cancelBatchTitleExtraction,collectBatchTitleExtractions,BATCH_RETENTION_DAYS,type JobRow}from'./titleExtraction';
+  titleExtractionJobInFlight,titleExtractionVerificationContext,warmTitleExtractionAliases,recoverCompletedBatchJob,cancelBatchTitleExtraction,collectBatchTitleExtractions,BATCH_RETENTION_DAYS,type JobRow}from'./titleExtraction';
 
 const LOCK=91826525,HOUR=3,MAX_ATTEMPTS=3;
 type ItemStatus='pending'|'processing'|'ready'|'applied'|'skipped'|'failed'|'cancelled';
@@ -21,19 +21,23 @@ export interface TitleExtractionBatchStatus{
  run:null|{id:string;origin:'manual'|'nightly';status:RunRow['status'];startedAt:string;finishedAt:string|null;
  counts:{total:number;pending:number;processing:number;ready:number;applied:number;skipped:number;failed:number;cancelled:number};currentSeries:{id:string;title:string}|null};
  reviewCount:number;reviewSeries:Array<{id:string;title:string;jobId:string}>;
+ online:{waitingOnline:number;needsLink:number;optedOut:number};
+ reviewReasons:Array<{code:'title_not_verified'|'text_unclear'|'lettering_incomplete'|'low_contrast'|'checks_unavailable'|'other';count:number}>;
 }
 const iso=(date:Date|string|null|undefined)=>date?new Date(date).toISOString():null;
 const settings=()=>one<Settings>('SELECT automatic_cover_title_generation,automatic_cover_title_apply,cover_title_next_run_at FROM server_settings WHERE id=1');
 let stopped=false,driving:Promise<void>|null=null,timer:ReturnType<typeof setTimeout>|null=null;
 let clock=()=>Date.now(),model=async()=>(await titleExtractorHealth())?.modelFingerprint??null;
+let warmAliases=warmTitleExtractionAliases;
 /** Deterministic time/model seams; production never supplies metadata or identity from a request. */
-export function setTitleExtractionBatchForTests(deps?:{now?:()=>number;model?:()=>Promise<string|null>}){clock=deps?.now??(()=>Date.now());model=deps?.model??(async()=>(await titleExtractorHealth())?.modelFingerprint??null);}
+export function setTitleExtractionBatchForTests(deps?:{now?:()=>number;model?:()=>Promise<string|null>;warmAliases?:typeof warmAliases}){clock=deps?.now??(()=>Date.now());model=deps?.model??(async()=>(await titleExtractorHealth())?.modelFingerprint??null);warmAliases=deps?.warmAliases??warmTitleExtractionAliases;}
 export const nextTitleExtractionNight=(now=Date.now())=>new Date(now+msUntilHour(HOUR,new Date(now)));
 export const titleExtractionBatchSettled=()=>driving??Promise.resolve();
 
 export async function titleExtractionBatchStatus(viewer:ViewCtx=SYSTEM_CTX):Promise<TitleExtractionBatchStatus>{
  const[s,cap,run]=await Promise.all([settings(),titleExtractionCapabilities(),one<RunRow>(`SELECT * FROM title_extraction_runs ORDER BY(status='running') DESC,started_at DESC LIMIT 1`)]);
  let detail:TitleExtractionBatchStatus['run']=null,nextRetryAt:null|string=null,pausedReason:string|null=null;
+ let online:TitleExtractionBatchStatus['online']={waitingOnline:0,needsLink:0,optedOut:0};
  if(run){
   const[totals]=await q<any>(`SELECT count(*)::int total,count(*)FILTER(WHERE status='pending')::int pending,count(*)FILTER(WHERE status='processing')::int processing,
    count(*)FILTER(WHERE status='ready')::int ready,count(*)FILTER(WHERE status='applied')::int applied,count(*)FILTER(WHERE status='skipped')::int skipped,
@@ -42,14 +46,63 @@ export async function titleExtractionBatchStatus(viewer:ViewCtx=SYSTEM_CTX):Prom
   const p=new Params(),rid=p.add(run.id),allowed=visible('s',viewer,p);
   const current=await one<{id:string;title:string}>(`SELECT s.id,s.title FROM title_extraction_items i JOIN lib_series s ON s.id=i.series_id WHERE i.run_id=${rid} AND i.status='processing' AND ${allowed} LIMIT 1`,p.values);
   const{next_retry,...counts}=totals;nextRetryAt=iso(next_retry);detail={id:run.id,origin:run.origin,status:run.status,startedAt:iso(run.started_at)!,finishedAt:iso(run.finished_at),counts,currentSeries:current};
-  if(run.status==='running')pausedReason=!cap.available?'worker_unavailable':(await one<{reason:string}>(`SELECT reason FROM title_extraction_items WHERE run_id=$1 AND status='pending' AND reason='extraction_storage_full' LIMIT 1`,[run.id]))?.reason??null;
+  const op=new Params(),oid=op.add(run.id),first=op.add(FIRST_PAGE),oa=visible('s',viewer,op);
+  online=(await one<TitleExtractionBatchStatus['online']>(`SELECT
+   count(*)FILTER(WHERE i.status='pending' AND i.reason IN('online_lookup_pending','online_provider_busy'))::int AS "waitingOnline",
+   count(*)FILTER(WHERE COALESCE(a.mode,'automatic')='automatic' AND COALESCE(o.cover<>${first},true)
+     AND NOT COALESCE(t.external_id~'^[1-9][0-9]{0,15}$',false))::int AS "needsLink",
+   count(*)FILTER(WHERE COALESCE(a.mode,'automatic')='automatic' AND COALESCE(o.cover<>${first},true)
+     AND(NOT ss.automatic_title_logos OR NOT l.anilist_lookup))::int AS "optedOut"
+   FROM title_extraction_items i JOIN lib_series s ON s.id=i.series_id JOIN libraries l ON l.id=s.library_id
+   LEFT JOIN series_title_art a ON a.series_id=s.id LEFT JOIN series_overrides o ON o.series_id=s.id
+   LEFT JOIN series_trackers t ON t.series_id=s.id AND t.provider='anilist' AND(t.checked_at IS NOT NULL OR t.linked_by IS NOT NULL)
+   JOIN server_settings ss ON ss.id=1 WHERE i.run_id=${oid} AND ${oa}`,op.values))??online;
+  if(run.status==='running')pausedReason=!cap.available?'worker_unavailable':(await one<{reason:string}>(`SELECT reason FROM title_extraction_items WHERE run_id=$1 AND status='pending'
+   AND reason IN('extraction_storage_full','online_provider_busy','online_lookup_pending') ORDER BY CASE reason WHEN 'extraction_storage_full' THEN 0 WHEN 'online_provider_busy' THEN 1 ELSE 2 END LIMIT 1`,[run.id]))?.reason??null;
  }
  const p=new Params(),allowed=visible('s',viewer,p);
  const reviews=await q<{id:string;title:string;jobId:string;total:number}>(`SELECT s.id,s.title,j.id AS "jobId",count(*)OVER()::int total FROM series_title_extractions j JOIN lib_series s ON s.id=j.series_id
   WHERE j.batch_item_id IS NOT NULL AND j.status='ready' AND j.expires_at>now() AND ${allowed} ORDER BY j.created_at DESC LIMIT 10`,p.values);
+ const reviewReasons=await q<TitleExtractionBatchStatus['reviewReasons'][number]>(`WITH ready AS(SELECT j.id,j.reasons FROM series_title_extractions j JOIN lib_series s ON s.id=j.series_id
+   WHERE j.batch_item_id IS NOT NULL AND j.status='ready' AND j.expires_at>now() AND ${allowed}
+   ORDER BY j.created_at DESC,j.id LIMIT 2048),reasons AS(SELECT j.id,CASE
+   WHEN r.code IN('missing_verified_alias','title_identity_unverified','title_alias_too_short') THEN 'title_not_verified'
+   WHEN r.code IN('source_title_not_confirmed','candidate_title_not_confirmed','title_ocr_disagrees','ocr_low_confidence','additional_text','light_ocr_contradiction','source_resolution_low','candidate_resolution_low') THEN 'text_unclear'
+   WHEN r.code IN('foreground_lost','foreground_changed','possible_mask_clipping','source_text_clipped','sparse_foreground','dense_foreground') THEN 'lettering_incomplete'
+   WHEN r.code='low_contrast' THEN 'low_contrast'
+   WHEN r.code IN('ocr_unavailable','quality_evidence_incomplete','ocr_evidence_invalid') THEN 'checks_unavailable' ELSE 'other' END code
+   FROM ready j CROSS JOIN LATERAL jsonb_array_elements_text(j.reasons) r(code)
+   WHERE r.code NOT IN('automatic_verification_unvalidated','verifier_profile_mismatch'))
+   SELECT code,count(DISTINCT id)::int count FROM reasons GROUP BY code ORDER BY count DESC,code LIMIT 64`,p.values);
  return{enabled:!!s?.automatic_cover_title_generation,applyEnabled:!!s?.automatic_cover_title_apply,available:cap.available,checkedApplyAvailable:cap.checkedApplyAvailable,
   running:run?.status==='running',schedule:{hour:HOUR,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,nextRunAt:s?.automatic_cover_title_generation?iso(s.cover_title_next_run_at):null},
-  run:detail,retentionDays:BATCH_RETENTION_DAYS,nextRetryAt,pausedReason,reviewCount:reviews[0]?.total??0,reviewSeries:reviews.map(({id,title,jobId})=>({id,title,jobId}))};
+  run:detail,retentionDays:BATCH_RETENTION_DAYS,nextRetryAt,pausedReason,online,reviewReasons,reviewCount:reviews[0]?.total??0,reviewSeries:reviews.map(({id,title,jobId})=>({id,title,jobId}))};
+}
+
+type OnlineGate={kind:'missing';anilistId:string}|{kind:'unavailable';reason:'no_checked_identity'|'online_disabled'|'library_opt_out'}
+ |{kind:'waiting';reason:'online_lookup_pending'|'online_provider_busy';retryAt:number}|{kind:'found'};
+/** A raw default `missing` is unchecked. Only a completed, current, unexpired negative result allows fallback. */
+async function onlineGate(seriesId:string):Promise<OnlineGate>{
+ const row=await one<{enabled:boolean;allowed:boolean;anilist_id:string|null;lookup_anilist_id:string|null;lookup_status:string|null;retry_at:Date|null;provider:boolean}>(`SELECT ss.automatic_title_logos enabled,l.anilist_lookup allowed,t.external_id anilist_id,
+  a.lookup_anilist_id,a.lookup_status,a.retry_at,(a.auto_file IS NOT NULL AND a.auto_cover_key IS NULL AND a.auto_anilist_id=t.external_id) provider FROM lib_series s JOIN libraries l ON l.id=s.library_id JOIN server_settings ss ON ss.id=1
+  LEFT JOIN series_trackers t ON t.series_id=s.id AND t.provider='anilist' AND(t.checked_at IS NOT NULL OR t.linked_by IS NOT NULL)
+  LEFT JOIN series_title_art a ON a.series_id=s.id WHERE s.id=$1 AND ${visibleToAll('s')}`,[seriesId]);
+ if(!row?.enabled)return{kind:'unavailable',reason:'online_disabled'};
+ if(!row.allowed)return{kind:'unavailable',reason:'library_opt_out'};
+ if(!row.anilist_id||!/^[1-9][0-9]{0,15}$/.test(row.anilist_id))return{kind:'unavailable',reason:'no_checked_identity'};
+ // The provider publisher has already checked the identity and its file; a cached good logo needs no HTTP.
+ if(row.provider&&await readTitleLogo(seriesId))return{kind:'found'};
+ const now=clock(),providerRetry=await titleLogoProviderRetryAt(),current=row.lookup_anilist_id===row.anilist_id;
+ const queued=titleLogoQueueState().ids.includes(seriesId);
+ if(!queued&&current&&row.lookup_status==='missing'&&row.retry_at&&new Date(row.retry_at).getTime()>now)return{kind:'missing',anilistId:row.anilist_id};
+ const retry=current&&row.lookup_status==='error'&&row.retry_at?new Date(row.retry_at).getTime():0;
+ if(Math.max(providerRetry,retry)>now)return{kind:'waiting',reason:'online_provider_busy',retryAt:Math.max(providerRetry,retry)};
+ await queueTitleLogos([seriesId]);
+ return{kind:'waiting',reason:'online_lookup_pending',retryAt:now+30_000};
+}
+async function deferOnline(item:ItemRow,gate:Extract<OnlineGate,{kind:'waiting'}>){
+ // Waiting for the provider is not an extraction failure and must never exhaust the model retry budget.
+ await q(`UPDATE title_extraction_items SET status='pending',reason=$2,retry_at=$3,attempts=GREATEST(0,attempts-1) WHERE id=$1 AND status='processing'`,[item.id,gate.reason,new Date(gate.retryAt)]);
 }
 
 /** Starting a run snapshots target IDs only. Cover reads/model work happen later, one at a time. */
@@ -117,7 +170,24 @@ async function processItem(item:ItemRow&{retry_errors:boolean}){
   if(!item.series_id){await finish(item,'skipped','series_unavailable');return;}
   await cancelBatchTitleExtraction(item.id);
   const reason=await protectedReason(item.series_id);if(reason){await finish(item,'skipped',reason);return;}
-  const cover=await titleExtractionCover(item.series_id,SYSTEM_CTX);fingerprint=cover.fingerprint;modelFingerprint=await model();
+  // The provider owns its queue, pacing and retry cache. Never turn an unfinished/error result into a miss.
+  let cover:Awaited<ReturnType<typeof titleExtractionCover>>|null=null;
+  for(let pass=0;pass<2;pass++){
+   const gate=await onlineGate(item.series_id);
+   if(gate.kind==='found'){await finish(item,'skipped','existing_logo');return;}
+   if(gate.kind==='waiting'){await deferOnline(item,gate);return;}
+   if(gate.kind==='missing')await warmAliases(item.series_id,SYSTEM_CTX);
+   if(stopped||runtime.stopping)return;
+   const protectedNow=await protectedReason(item.series_id);if(protectedNow){await finish(item,'skipped',protectedNow);return;}
+   const snapshot=await titleExtractionCover(item.series_id,SYSTEM_CTX),latest=await onlineGate(item.series_id);
+   if(latest.kind==='found'){await finish(item,'skipped','existing_logo');return;}
+   if(latest.kind==='waiting'){await deferOnline(item,latest);return;}
+   // Relinking or enabling online discovery during alias/cover loading must not reuse the old miss.
+   if(latest.kind==='missing'&&(gate.kind!=='missing'||gate.anilistId!==latest.anilistId||snapshot.snapshot.anilist_id!==latest.anilistId))continue;
+   cover=snapshot;break;
+  }
+  if(!cover){await deferOnline(item,{kind:'waiting',reason:'online_lookup_pending',retryAt:clock()+30_000});return;}
+  fingerprint=cover.fingerprint;modelFingerprint=await model();
   if(!modelFingerprint)throw new ExtractionError('worker_unavailable');
   context=await titleExtractionVerificationContext(cover.snapshot,modelFingerprint);
   const previous=await one<{source_fingerprint:string;model_fingerprint:string;outcome:string;retry_at:Date|null;verification_key:string;publication_requested:boolean}>('SELECT * FROM series_title_extraction_history WHERE series_id=$1',[item.series_id]);
@@ -215,6 +285,14 @@ export async function titleExtractionBatchTick(){
  }else{
   const run=await one<RunRow>("SELECT * FROM title_extraction_runs WHERE status='running' AND origin='nightly'");if(run)await cancelTitleExtractionBatch(run.id);
  }
+ // An online outage must not hold a newly opted-out or unlinked local preview behind an obsolete deadline.
+ // The provider's own retry timestamp stays intact; processItem rechecks the current policy before doing work.
+ await q(`UPDATE title_extraction_items i SET retry_at=now() FROM title_extraction_runs r
+  WHERE i.run_id=r.id AND r.status='running' AND i.status='pending' AND i.retry_at>now()
+   AND i.reason IN('online_lookup_pending','online_provider_busy') AND EXISTS(
+    SELECT 1 FROM lib_series s JOIN libraries l ON l.id=s.library_id JOIN server_settings ss ON ss.id=1
+    LEFT JOIN series_trackers t ON t.series_id=s.id AND t.provider='anilist' AND(t.checked_at IS NOT NULL OR t.linked_by IS NOT NULL)
+    WHERE s.id=i.series_id AND(NOT ss.automatic_title_logos OR NOT l.anilist_lookup OR NOT COALESCE(t.external_id~'^[1-9][0-9]{0,15}$',false)))`);
  wakeTitleExtractionBatch();
 }
 export function startTitleExtractionBatch(log:{warn(message:string):void}){

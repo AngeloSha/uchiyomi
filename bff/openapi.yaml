@@ -469,7 +469,7 @@ components:
               y: { type: number, minimum: 0, maximum: 1 }
     TitleExtractionBatchStatus:
       type: object
-      required: [enabled, applyEnabled, available, checkedApplyAvailable, running, schedule, run, retentionDays, reviewCount, reviewSeries]
+      required: [enabled, applyEnabled, available, checkedApplyAvailable, running, schedule, run, retentionDays, reviewCount, reviewSeries, online, reviewReasons]
       properties:
         enabled: { type: boolean, description: Nightly local generation opt-in; false by default. }
         applyEnabled: { type: boolean, description: Separate available-checks publication opt-in; false by default. }
@@ -510,6 +510,24 @@ components:
                 skipped: { type: integer }
                 failed: { type: integer }
                 cancelled: { type: integer }
+        online:
+          type: object
+          required: [waitingOnline, needsLink, optedOut]
+          description: Latest-run diagnostics. Needs-link and opted-out are live eligibility counts and may overlap; they do not claim an online search occurred. No run yields zero counts.
+          properties:
+            waitingOnline: { type: integer, minimum: 0, description: Pending items awaiting provider completion or backoff. }
+            needsLink: { type: integer, minimum: 0, description: Automatic non-first-page series without a checked canonical identity; local previews remain allowed. }
+            optedOut: { type: integer, minimum: 0, description: Automatic non-first-page series with global online lookup or library external lookup disabled. }
+        reviewReasons:
+          type: array
+          maxItems: 6
+          description: Distinct ready batch drafts per product group, across the latest 2048 visible unexpired previews. Groups can overlap; calibration-only diagnostics are omitted.
+          items:
+            type: object
+            required: [code, count]
+            properties:
+              code: { type: string, enum: [title_not_verified, text_unclear, lettering_incomplete, low_contrast, checks_unavailable, other] }
+              count: { type: integer, minimum: 1 }
         reviewCount: { type: integer }
         reviewSeries:
           type: array
