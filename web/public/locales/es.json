@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4360
+    "strings": 4378
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -4363,5 +4363,23 @@
   "Apply this GIF rule to every chapter downloaded from this source?": "¿Aplicar esta regla GIF a todos los capítulos descargados de esta fuente?",
   "This changes existing and future chapters. A series rule overrides the source rule. No files are deleted.": "Esto cambia los capítulos existentes y futuros. La regla de una serie prevalece sobre la regla de la fuente. No se elimina ningún archivo.",
   "No recorded source is available for GIF rules.": "No hay ninguna fuente registrada disponible para las reglas de GIF.",
-  "Restore page {n}": "Restaurar página {n}"
+  "Restore page {n}": "Restaurar página {n}",
+  "Uploaded 1 file": "1 archivo subido",
+  "Uploaded {n} files": "{n} archivos subidos",
+  "Uploading…": "Subiendo…",
+  "Uploading {i} of {n}…": "Subiendo {i} de {n}…",
+  "Upload chapters": "Subir capítulos",
+  "Chapter files you already have: .cbz, .cbr, .zip, .rar, .pdf or .epub. The chapter number is read from each file name, as in “Chapter 12.cbz”.": "Archivos de capítulos que ya tienes: .cbz, .cbr, .zip, .rar, .pdf o .epub. El número de capítulo se lee del nombre de cada archivo, como en «Chapter 12.cbz».",
+  "Choose files…": "Elegir archivos…",
+  "Upload a series": "Subir una serie",
+  "For a series no source has, when you already have its chapters. The files go into the download folder, under Uploads, and the chapter number is read from each file name.": "Para una serie que ninguna fuente tiene, cuando ya tienes sus capítulos. Los archivos van a la carpeta de descargas, dentro de Uploads, y el número de capítulo se lee del nombre de cada archivo.",
+  "Series title": "Título de la serie",
+  "Open “{title}”": "Abrir «{title}»",
+  "{name} is already in this series.": "{name} ya está en esta serie.",
+  "{name} is not a .cbz, .cbr, .zip, .rar, .pdf or .epub file.": "{name} no es un archivo .cbz, .cbr, .zip, .rar, .pdf ni .epub.",
+  "{name} is not the kind of file its name says.": "{name} no es el tipo de archivo que dice su nombre.",
+  "{name} is empty.": "{name} está vacío.",
+  "{name} is too large to upload.": "{name} es demasiado grande para subirlo.",
+  "The download folder is out of space.": "La carpeta de descargas no tiene espacio.",
+  "Could not upload {name}": "No se pudo subir {name}"
 }

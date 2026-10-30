@@ -513,6 +513,9 @@ rarely needed:
   toward it for the sources Uchiyomi adds on its own.
 - `MIN_FREE_GB` (default `10`): refuse to start a download when the download disk has less than this free.
   `0` disables the floor. Fails open if free space cannot be measured.
+- `UPLOAD_MAX_MB` (default `2048`): the largest chapter or volume file an admin can upload by hand, from a series'
+  **Edit details → Files → Upload chapters** or **Admin → Library → Upload a series**. Uploads go into the download
+  folder (a new series under `Uploads/<title>`) and stop at `MIN_FREE_GB` as downloads do.
 
 An ordinary chapter failure may continue from as many of the sources already followed for that series as a series may
 follow (**Other sources per series**, three by default), at most four. A copy explicitly picked by a person never switches. A 403/429 never becomes a

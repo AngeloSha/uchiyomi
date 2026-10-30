@@ -37,6 +37,7 @@ import { useContextMenu } from './ContextMenu';
 import { useCheckNow } from './SourcesSheet';
 import { IcX } from './icons';
 import { GenreTagInput } from './GenreTagInput';
+import { UploadChaptersRow } from './ChapterUpload';
 import { LinkRow, Row, SaveScope, SaveState, Segmented, SwitchRow, TextRow, useAutosave, useSaveScope } from './settings';
 
 /**
@@ -607,6 +608,7 @@ function FilesPane({ id, series, onSaved }: { id: string; series: Series; onSave
   return (
     <>
       <LibraryRow id={id} series={series} onSaved={onSaved} />
+      <UploadChaptersRow seriesId={id} onSaved={onSaved} />
       {/* Where it is on disk (#136): the folder as full paths, one per root its chapters are under, each copied with
           one tap. LTR whatever the page's direction: a path is not a sentence. */}
       {!!series.paths?.length && (

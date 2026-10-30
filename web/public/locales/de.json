@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4360
+    "strings": 4378
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -4363,5 +4363,23 @@
   "Apply this GIF rule to every chapter downloaded from this source?": "Diese GIF-Regel auf alle Kapitel anwenden, die aus dieser Quelle heruntergeladen wurden?",
   "This changes existing and future chapters. A series rule overrides the source rule. No files are deleted.": "Dies betrifft bestehende und zukünftige Kapitel. Eine Serienregel hat Vorrang vor der Quellenregel. Es werden keine Dateien gelöscht.",
   "No recorded source is available for GIF rules.": "Für GIF-Regeln ist keine gespeicherte Quelle verfügbar.",
-  "Restore page {n}": "Seite {n} wiederherstellen"
+  "Restore page {n}": "Seite {n} wiederherstellen",
+  "Uploaded 1 file": "1 Datei hochgeladen",
+  "Uploaded {n} files": "{n} Dateien hochgeladen",
+  "Uploading…": "Wird hochgeladen…",
+  "Uploading {i} of {n}…": "Lade {i} von {n} hoch…",
+  "Upload chapters": "Kapitel hochladen",
+  "Chapter files you already have: .cbz, .cbr, .zip, .rar, .pdf or .epub. The chapter number is read from each file name, as in “Chapter 12.cbz”.": "Kapiteldateien, die du schon hast: .cbz, .cbr, .zip, .rar, .pdf oder .epub. Die Kapitelnummer wird aus jedem Dateinamen gelesen, etwa „Chapter 12.cbz“.",
+  "Choose files…": "Dateien auswählen…",
+  "Upload a series": "Eine Serie hochladen",
+  "For a series no source has, when you already have its chapters. The files go into the download folder, under Uploads, and the chapter number is read from each file name.": "Für eine Serie, die keine Quelle hat, deren Kapitel du aber schon besitzt. Die Dateien kommen in den Download-Ordner unter Uploads, und die Kapitelnummer wird aus jedem Dateinamen gelesen.",
+  "Series title": "Serientitel",
+  "Open “{title}”": "„{title}“ öffnen",
+  "{name} is already in this series.": "{name} ist bereits in dieser Serie.",
+  "{name} is not a .cbz, .cbr, .zip, .rar, .pdf or .epub file.": "{name} ist keine .cbz-, .cbr-, .zip-, .rar-, .pdf- oder .epub-Datei.",
+  "{name} is not the kind of file its name says.": "{name} ist nicht die Art Datei, die ihr Name angibt.",
+  "{name} is empty.": "{name} ist leer.",
+  "{name} is too large to upload.": "{name} ist zu groß zum Hochladen.",
+  "The download folder is out of space.": "Im Download-Ordner ist kein Platz mehr.",
+  "Could not upload {name}": "{name} konnte nicht hochgeladen werden"
 }
