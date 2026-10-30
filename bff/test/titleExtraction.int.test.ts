@@ -478,3 +478,23 @@ test('enabling online discovery during extraction requires a current completed m
     releaseProvider?.();await art.titleLogoQueueSettled();art.setTitleLogoLookupForTests();releaseProvider=undefined;
   }}finally{releaseProvider?.();await art.titleLogoQueueSettled();art.setTitleLogoLookupForTests();await q('UPDATE server_settings SET automatic_title_logos=false,automatic_cover_title_generation=false,automatic_cover_title_apply=false WHERE id=1');batch.stopTitleExtractionBatch();batch.setTitleExtractionBatchForTests();}
 });
+test('an online-held ready result permits one later checked publication after a completed miss', {skip},async()=>{
+  const batch=await import('../src/lib/titleExtractionBatch');batch.setTitleExtractionBatchForTests({model:async()=>'a'.repeat(64)});
+  await q('UPDATE server_settings SET automatic_title_logos=false,automatic_cover_title_generation=true,automatic_cover_title_apply=true WHERE id=1');
+  let entered!:()=>void,release!:()=>void;const started=new Promise<void>(r=>{entered=r;}),gate=new Promise<void>(r=>{release=r;});
+  core.setTitleExtractionForTests({ready:async()=>true,assess:async()=>({...quality(),availableChecksPassed:true}),ocrCapability:async()=>({available:true,calibrated:false,verifierFingerprint:'a'.repeat(64)}),
+    worker:async(bytes,selection)=>{entered();await gate;return worker(bytes,selection);}});
+  try{
+    await batch.initializeTitleExtractionBatch();
+    try{assert.equal((await request('POST','/api/admin/title-extraction/batch/run',{})).statusCode,202);await started;await q('UPDATE server_settings SET automatic_title_logos=true WHERE id=1');}finally{release();}
+    await batch.titleExtractionBatchSettled();assert.equal(calls,1);assert.equal((await currentArt()).logoUrl,null);
+    assert.equal((await q('SELECT publication_requested FROM series_title_extractions WHERE series_id=$1',[SID]))[0].publication_requested,false);
+    assert.equal((await q('SELECT publication_requested FROM series_title_extraction_history WHERE series_id=$1',[SID]))[0].publication_requested,false,'deferred publication cannot claim completed eligibility');
+    await q(`INSERT INTO series_title_art(series_id,lookup_status,lookup_anilist_id,retry_at)VALUES($1,'missing','87216',now()+interval '7 days')
+      ON CONFLICT(series_id)DO UPDATE SET lookup_status='missing',lookup_anilist_id='87216',retry_at=now()+interval '7 days'`,[SID]);
+    assert.equal((await request('POST','/api/admin/title-extraction/batch/run',{})).statusCode,202);await batch.titleExtractionBatchSettled();
+    assert.equal(calls,2);assert.ok((await currentArt()).logoUrl);assert.equal((await request('GET','/api/admin/title-extraction/batch/status')).json().run.counts.applied,1);
+    assert.equal((await request('POST','/api/admin/title-extraction/batch/run',{})).statusCode,202);await batch.titleExtractionBatchSettled();
+    assert.equal(calls,2,'unchanged successful eligibility does not loop');assert.equal((await request('GET','/api/admin/title-extraction/batch/status')).json().run.counts.skipped,1);
+  }finally{release();await q('UPDATE server_settings SET automatic_title_logos=false,automatic_cover_title_generation=false,automatic_cover_title_apply=false WHERE id=1');batch.stopTitleExtractionBatch();batch.setTitleExtractionBatchForTests();}
+});

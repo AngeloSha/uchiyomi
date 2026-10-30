@@ -423,7 +423,9 @@ async function applySystemDraft(row:JobRow,bytes:Buffer) {
     const rows=await qq(`UPDATE series_title_extractions SET status='applied' WHERE id=$1 AND automatic AND status='ready'
       AND mask_revision=0 AND candidate_sha256=$2 AND (quality->>'safeToApply'='true' OR($3::boolean AND quality->>'availableChecksPassed'='true')) AND expires_at>now() RETURNING id`,[row.id,hash(bytes),!!row.batch_item_id]);
     if(!rows.length)throw new ExtractionError('stale_candidate',409);
-  },!!row.batch_item_id);}catch(error){if(row.batch_item_id&&error instanceof ExtractionError&&error.code==='publication_disabled')return;throw error;}
+  },!!row.batch_item_id);}catch(error){if(row.batch_item_id&&error instanceof ExtractionError&&error.code==='publication_disabled'){
+    await q("UPDATE series_title_extractions SET publication_requested=false WHERE id=$1 AND status='ready'",[row.id]);return;
+  }throw error;}
   await removeFiles(row.id);
 }
 export async function correctTitleExtractionMask(seriesId:string,jobId:string,userId:string,viewer:ViewCtx,
