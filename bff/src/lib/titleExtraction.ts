@@ -252,18 +252,22 @@ async function drain() {
     finally {active=null;resolveBatchSignal(jobId);}
   }} finally {draining=null;}
 }
-async function freshJob(row:JobRow,viewer:ViewCtx,qq:ScopedQuery=q) {
+async function freshJob(row:Pick<JobRow,'series_id'|'title_version'|'snapshot'>,viewer:ViewCtx,qq:ScopedQuery=q) {
   const current=await snapshotFor(row.series_id,viewer,qq);
   if(Number(current.version??0)!==Number(row.title_version)||coverSelectionKey(current.selection)!==row.snapshot) throw new ExtractionError('stale_candidate',409);
   return current;
 }
-async function warmCanonicalAliases(row:JobRow,current:Snapshot,viewer:ViewCtx,signal:AbortSignal) {
-  if(!current.anilist_id||current.aliases_id===current.anilist_id||!(await automaticAniListAllowed({id:row.series_id})))return;
+async function warmCanonicalAliases(row:Pick<JobRow,'series_id'|'title_version'|'snapshot'>,current:Snapshot,viewer:ViewCtx,signal:AbortSignal,onlineOnly=false) {
+  const cached=current.aliases_id===current.anilist_id&&[current.english,current.romaji,current.native].some(title=>!!title?.trim());
+  if(signal.aborted||stopped||runtime.stopping||!current.anilist_id||!/^[1-9][0-9]{0,9}$/.test(current.anilist_id)||cached
+    ||!(await automaticAniListAllowed({id:row.series_id})))return;
+  if(onlineOnly&&!(await one<{enabled:boolean}>('SELECT automatic_title_logos enabled FROM server_settings WHERE id=1'))?.enabled)return;
   const cover=await one<{cover:string|null}>('SELECT cover FROM series_overrides WHERE series_id=$1',[row.series_id]);
   const id=Number(current.anilist_id);if(cover?.cover===FIRST_PAGE||!Number.isSafeInteger(id)||id<=0||id>2_147_483_647)return;
   try {
-    const titles=await fetchVerifiedAniListTitles(id);if(!titles||signal.aborted)return;
+    const titles=await fetchVerifiedAniListTitles(id);if(!titles||![titles.english,titles.romaji,titles.native].some(title=>!!title?.trim())||signal.aborted)return;
     await withAniListMutation({id:row.series_id},'automatic',async(qq)=>{
+      if(onlineOnly&&!(await qq<{enabled:boolean}>('SELECT automatic_title_logos enabled FROM server_settings WHERE id=1 FOR SHARE'))[0]?.enabled)return;
       await qq('SELECT series_id FROM series_trackers WHERE series_id=$1 FOR SHARE',[row.series_id]);
       const [chosen]=await qq<{cover:string|null}>('SELECT cover FROM series_overrides WHERE series_id=$1 FOR SHARE',[row.series_id]);
       if(chosen?.cover===FIRST_PAGE||signal.aborted||stopped||runtime.stopping)return;
@@ -273,6 +277,11 @@ async function warmCanonicalAliases(row:JobRow,current:Snapshot,viewer:ViewCtx,s
         [row.series_id,current.anilist_id,titles.english,titles.romaji,titles.native]);
     });
   }catch{/* Alias outages leave manual review usable; no guessed title is introduced. */}
+}
+/** Warm only the current checked manga's canonical titles, after an online logo miss and before retry identity. */
+export async function warmTitleExtractionAliases(seriesId:string,viewer:ViewCtx,signal=AbortSignal.timeout(30_000)):Promise<void> {
+  const current=await snapshotFor(seriesId,viewer);
+  await warmCanonicalAliases({series_id:seriesId,title_version:Number(current.version??0),snapshot:coverSelectionKey(current.selection)},current,viewer,signal,true);
 }
 async function runJob(jobId:string,parentSignal:AbortSignal) {
   const row=await one<JobRow>('SELECT * FROM series_title_extractions WHERE id=$1',[jobId]);if(!row)return;
@@ -290,8 +299,9 @@ async function runJob(jobId:string,parentSignal:AbortSignal) {
       const fail=()=>{stopCoverTitleOcr();reject(new ExtractionError('extract_timeout',504));};
       if(signal.aborted)fail();else signal.addEventListener('abort',fail,{once:true});
     });
-    // Nightly local generation never initiates an external identity/metadata lookup.
-    if(!row.batch_item_id)await Promise.race([warmCanonicalAliases(row,current,viewer,signal),aborted]);
+    // Cached canonical titles are proof inputs; consented checked links may fill a missing cache.
+    // A privacy opt-out or absent link still permits local generation without an external request.
+    await Promise.race([warmCanonicalAliases(row,current,viewer,signal,!!row.batch_item_id),aborted]);
     current=await freshJob(row,viewer);
     const result=await Promise.race([worker(source,{region:row.selection_mode==='manual'?row.region??undefined:undefined,exclusions:row.exclusions},
       current.aliases_id===current.anilist_id?[current.english,current.romaji,current.native].filter((s):s is string=>!!s):[],signal),

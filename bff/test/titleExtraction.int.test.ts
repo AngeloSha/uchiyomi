@@ -202,6 +202,57 @@ test('canonical alias warming checks exact returned manga identity and consent a
     await makeReady();const[kept]=await q('SELECT anilist_id,native FROM series_other_titles WHERE series_id=$1',[SID]);assert.equal(kept.anilist_id,'87216');assert.equal(kept.native,'作品');
   }finally{globalThis.fetch=baseline;}
 });
+test('ordered online warming fills checked canonical aliases before retry identity and repairs an empty cache', {skip},async()=>{
+  const{SYSTEM_CTX}=await import('../src/lib/visibility');await q('DELETE FROM series_other_titles WHERE series_id=$1',[SID]);
+  await q('UPDATE server_settings SET automatic_title_logos=true WHERE id=1');const baseline=globalThis.fetch;let requests=0;
+  const before=await core.titleExtractionVerificationContext(await core.titleExtractionSnapshot(SID,SYSTEM_CTX),'a'.repeat(64));
+  globalThis.fetch=(async(_url,options)=>{requests++;const body=JSON.parse(String(options?.body));assert.equal(body.variables.id,87216);assert.match(body.query,/id type title/);
+    return new Response(JSON.stringify({data:{Media:{id:87216,type:'MANGA',title:{english:'Fixture Tale',romaji:'Fikushon',native:'作品'}}}}),{status:200});})as typeof fetch;
+  try{
+    await core.warmTitleExtractionAliases(SID,SYSTEM_CTX);let[row]=await q('SELECT * FROM series_other_titles WHERE series_id=$1',[SID]);
+    assert.deepEqual([row.anilist_id,row.english,row.romaji,row.native],['87216','Fixture Tale','Fikushon','作品']);
+    const after=await core.titleExtractionVerificationContext(await core.titleExtractionSnapshot(SID,SYSTEM_CTX),'a'.repeat(64));assert.notEqual(after.key,before.key,'old missing-alias review history invalidates after verified evidence arrives');
+    await core.warmTitleExtractionAliases(SID,SYSTEM_CTX);assert.equal(requests,1,'a populated checked cache does not trigger another lookup');
+    await q('UPDATE series_other_titles SET english=NULL,romaji=NULL,native=NULL WHERE series_id=$1',[SID]);
+    await core.warmTitleExtractionAliases(SID,SYSTEM_CTX);assert.equal(requests,2);[row]=await q('SELECT * FROM series_other_titles WHERE series_id=$1',[SID]);assert.equal(row.native,'作品');
+    let observed=false;core.setTitleExtractionForTests({worker,ready:async()=>true,assess:async input=>{observed=true;assert.deepEqual(input.evidence.aliases,['Fixture Tale','Fikushon','作品']);assert.equal(input.evidence.aliasesAnilistId,input.evidence.linkedAnilistId);return quality();}});
+    await makeReady();assert.equal(observed,true);assert.equal(requests,2);
+  }finally{globalThis.fetch=baseline;}
+});
+test('online warming sends nothing for disabled discovery, private libraries, unverified IDs, first pages or an aborted request', {skip},async()=>{
+  const{SYSTEM_CTX}=await import('../src/lib/visibility');await q('DELETE FROM series_other_titles WHERE series_id=$1',[SID]);const baseline=globalThis.fetch;let requests=0;
+  globalThis.fetch=(async()=>{requests++;throw Error('unexpected metadata request');})as typeof fetch;
+  try{
+    await core.warmTitleExtractionAliases(SID,SYSTEM_CTX);assert.equal(requests,0,'global online lookup is off');
+    await q('UPDATE server_settings SET automatic_title_logos=true WHERE id=1');await q('UPDATE libraries SET anilist_lookup=false WHERE id=$1',[LIB]);
+    await core.warmTitleExtractionAliases(SID,SYSTEM_CTX);await q('UPDATE libraries SET anilist_lookup=true WHERE id=$1',[LIB]);
+    await q("UPDATE series_trackers SET checked_at=NULL,linked_by=NULL WHERE series_id=$1 AND provider='anilist'",[SID]);await core.warmTitleExtractionAliases(SID,SYSTEM_CTX);
+    await q("UPDATE series_trackers SET checked_at=now(),external_id='087216' WHERE series_id=$1 AND provider='anilist'",[SID]);await core.warmTitleExtractionAliases(SID,SYSTEM_CTX);
+    await q("UPDATE series_trackers SET external_id='87216' WHERE series_id=$1 AND provider='anilist'",[SID]);
+    const abort=new AbortController();abort.abort();await core.warmTitleExtractionAliases(SID,SYSTEM_CTX,abort.signal);
+    await request('PUT',`/api/admin/series/${SID}/art`,{kind:'cover',mode:'first_page'});await core.warmTitleExtractionAliases(SID,SYSTEM_CTX);
+    assert.equal(requests,0);assert.equal((await q('SELECT count(*)::int n FROM series_other_titles WHERE series_id=$1',[SID]))[0].n,0);
+  }finally{globalThis.fetch=baseline;}
+});
+test('online canonical warming rechecks consent, link, cover and artwork after the network response', {skip},async()=>{
+  const{SYSTEM_CTX}=await import('../src/lib/visibility');const baseline=globalThis.fetch;
+  try{for(const change of['global','library','identity','cover','title']){
+    await q('DELETE FROM series_other_titles WHERE series_id=$1',[SID]);await q('UPDATE server_settings SET automatic_title_logos=true WHERE id=1');
+    await q('UPDATE libraries SET anilist_lookup=true WHERE id=$1',[LIB]);await q("UPDATE series_trackers SET external_id='87216',checked_at=now() WHERE series_id=$1 AND provider='anilist'",[SID]);
+    await q("UPDATE series_overrides SET cover='upload' WHERE series_id=$1",[SID]);
+    let entered!:()=>void,release!:()=>void;const started=new Promise<void>(r=>{entered=r;}),gate=new Promise<void>(r=>{release=r;});
+    globalThis.fetch=(async()=>{entered();await gate;return new Response(JSON.stringify({data:{Media:{id:87216,type:'MANGA',title:{english:'Verified title',romaji:'Verified title',native:'作品'}}}}),{status:200});})as typeof fetch;
+    const warming=core.warmTitleExtractionAliases(SID,SYSTEM_CTX);
+    try{await started;
+      if(change==='global')await q('UPDATE server_settings SET automatic_title_logos=false WHERE id=1');
+      else if(change==='library')await q('UPDATE libraries SET anilist_lookup=false WHERE id=$1',[LIB]);
+      else if(change==='identity')await q("UPDATE series_trackers SET external_id='99999' WHERE series_id=$1 AND provider='anilist'",[SID]);
+      else if(change==='cover')await q("UPDATE series_overrides SET cover='first_page' WHERE series_id=$1",[SID]);
+      else await request('PUT',`/api/admin/series/${SID}/art`,{kind:'logo',mode:'style',style:'fantasy'});
+    }finally{release();}await warming;
+    assert.equal((await q('SELECT count(*)::int n FROM series_other_titles WHERE series_id=$1',[SID]))[0].n,0,change+' changed before publication');
+  }}finally{globalThis.fetch=baseline;}
+});
 
 async function makeCorrectable(){
   core.setTitleExtractionForTests({ready:async()=>true,assess:async()=>quality(),worker:async(bytes,selection)=>({
