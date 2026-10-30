@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4505
+    "strings": 4522
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4508,5 +4508,22 @@
   "With nightly runs off, Run now prepares previews only. Automatic applying needs both switches turned on.": "关闭夜间运行时，“立即运行”只会制作预览。自动应用需要同时开启两个开关。",
   "Showing the latest {n} previews.": "正在显示最新的 {n} 个预览。",
   "Could not open this title preview. Try again.": "无法打开此标题预览。请重试。",
-  "Showing the latest 1 preview.": "正在显示最新的 1 个预览。"
+  "Showing the latest 1 preview.": "正在显示最新的 1 个预览。",
+  "Automatic applying is on": "自动应用已开启",
+  "Automatic applying is off": "自动应用已关闭",
+  "Automatic applying is waiting for title checks": "自动应用正在等待标题检查",
+  "Previews that do not pass the title and image checks stay for review.": "未通过标题和图像检查的预览将保留，等待审核。",
+  "Online artwork checks": "在线标题图片检查",
+  "Waiting for online artwork": "等待在线标题图片",
+  "Online artwork is checked before cover extraction when a checked manga link and online lookups are available.": "存在已验证的漫画链接且允许在线查询时，会先检查在线标题图片，再从封面提取。",
+  "Manga without a checked link or with online lookups off can still get cover previews.": "没有已验证链接或已关闭在线查询的漫画，仍然可以生成封面预览。",
+  "Waiting titles stay queued until their online artwork search can finish.": "等待中的作品会留在队列中，直到在线标题图片搜索能够完成。",
+  "These counts can overlap.": "同一作品可能会计入多个分类。",
+  "Why previews need review": "预览需要审核的原因",
+  "Title not verified": "标题尚未验证",
+  "Title text unclear": "标题文字不清晰",
+  "Lettering may be missing": "文字可能有缺失",
+  "Low contrast": "对比度低",
+  "Checks unavailable": "检查暂不可用",
+  "Other checks need review": "其他检查需要审核"
 }
