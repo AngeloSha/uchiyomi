@@ -1973,9 +1973,11 @@ translated once per language and kept, so reading it again costs nothing.
   about six seconds); source rows show *Searching…*, empty, failed, disabled or cooling-down states while
   the rest arrive. Repeating the same search continues the in-flight work and a recent term opens from the
   five-minute cache. Results are still filtered for the signed-in account, including its age limit.
+  Results come in each source's own relevance order, so the *Newest*/*Popular* toggle is hidden while they are up;
+  the × in the search box, or searching with the box empty, goes back to browsing and brings it back.
   With one source chosen in the chip, a search asks **only that source** and the chip stays on screen while
   the results are up, so you can see the search is narrowed and clear it with its × (which searches every
-  source again). Switching the toggle to *Newest* or *Popular* goes back to browsing.
+  source again).
   A search on one source (the one chosen, or the only one you have) **keeps going as you scroll** (since v0.96.0,
   [#331](https://github.com/AngeloSha/uchiyomi/issues/331)): a site answers its search a page at a time (BatCave ten
   at a time, 209 for *Star Trek*), and the next page loads as you near the end of the wall, up to 30 pages. Every
