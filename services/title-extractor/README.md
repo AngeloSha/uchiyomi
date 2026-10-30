@@ -32,7 +32,7 @@ not qualify for automatic publication. Earlier drafts without an immutable raw m
 
 Application releases also publish `ghcr.io/angelosha/uchiyomi:title-extractor-v<VERSION>` for native Linux amd64 and arm64.
 These distinct tags reuse the existing public package; the app retains its normal version and `latest` tags.
-The overlay pins v0.102.0; choose `title-extractor-latest` explicitly only when you intend rolling worker upgrades.
+The overlay pins v0.102.1; choose `title-extractor-latest` explicitly only when you intend rolling worker upgrades.
 The image contains the CPU runtime and pinned Hi-SAM source, including its upstream Apache-2.0 license at
 `/opt/hi-sam/LICENSE`; Uchiyomi's MPL-2.0 license and component notice are in `/service`. It contains **no model
 checkpoints, OCR pack, cover images, application credentials or library files**. It downloads nothing at runtime.
@@ -47,7 +47,7 @@ Stage data outside the source checkout. Put these lines in the existing `.env`, 
 
 ```dotenv
 TITLE_EXTRACTOR_DATA=/absolute/path/to/title-art-data
-TITLE_EXTRACTOR_IMAGE=ghcr.io/angelosha/uchiyomi:title-extractor-v0.102.0
+TITLE_EXTRACTOR_IMAGE=ghcr.io/angelosha/uchiyomi:title-extractor-v0.102.1
 ```
 
 Set the same absolute `TITLE_EXTRACTOR_DATA` path in your setup shell, then create its two directories:
@@ -148,7 +148,11 @@ runs at 03:00 in the server's time zone, with **Run now** for an initial batch; 
 an external metadata link. Automatic application is a separate opt-in: it requires current verified canonical
 title aliases, source and candidate OCR agreement, and the available geometry, alpha and image checks. Missing
 identity or failed checks leave a private review draft instead. Local generation does not fetch external aliases
-when external metadata sharing is disabled. Existing provider artwork and manual/text choices take priority.
+when external metadata sharing is disabled. With online title logos and library external lookup enabled, checked
+manga identities finish online artwork lookup first; only a current completed miss permits cover fallback. Provider
+errors and pending lookups wait for their retry deadline. After a miss, missing canonical aliases are warmed for the
+exact checked identity before verification. Unlinked series remain local previews, not claimed online misses. Existing
+provider artwork and manual/text choices take priority. See [batch behavior and status](../../docs/cover-title-batch.md).
 
 The older calibrated automatic-application setting remains separate and still requires an approved verification
 record. The available-checks opt-in does not create or claim that approval. See

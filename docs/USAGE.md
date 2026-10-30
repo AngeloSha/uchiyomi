@@ -633,7 +633,7 @@ The home carousel and a manga's series-page hero can show its own transparent ti
 uses a readable style matched to its genres and cover colours. The same treatment fits a phone and a computer. A
 logo in the original language, or one whose language is not known, keeps the readable manga title underneath it.
 
-**Admin → Settings → Server → Automatic title logos** enables background logo lookup. It is off until enabled.
+**Admin → Settings → Series & chapters → Automatic title logos** enables background logo lookup. It is off until enabled.
 Only a series with a checked or manually confirmed AniList manga link is looked up; the server uses that ID to find
 matching artwork on Wikidata and Wikimedia Commons, and keeps its own copy. A title alone is not enough to choose a
 logo. The library's automatic online-lookup opt-out is respected, as is **Use the first page** for automatic artwork.
@@ -666,10 +666,19 @@ The preview includes the artwork's source and attribution when supplied. Uploade
 the server's configuration and included in configuration backups. Changing a title logo leaves the manga's cover,
 chapter files and reading progress in place.
 
-An optional [cover-lettering trial](../scripts/title-art/README.md) lets an operator test extraction on a small set
-of local covers in a separate CPU environment. It produces transparent candidates and comparison sheets for
-review, without changing any manga artwork. It is not an automatic fallback or a button in the app: incomplete
-lettering, author names and volume numbers must be checked before explicitly uploading a candidate.
+With the optional local extraction service installed, **Extract from cover** prepares a transparent title preview.
+Choose the title area, exclude credits, and use Restore or Erase to correct its edges before applying it.
+
+**Automatically extract cover titles** is a separate, default-off nightly option for existing and new manga.
+For a checked manga link with online lookups enabled, it waits for the online logo search first; only a completed
+no-match result allows cover extraction. Provider errors stay queued until retry is allowed. Series without a checked
+link, or with online lookups disabled, can still receive local previews without an online search.
+
+**Apply cover titles that pass checks** is also off by default. It requires complete-title and image checks; uncertain
+results stay for review. The panel shows whether automatic applying is on, online-search progress, and why previews
+need review. A preview may have several reasons. Manual artwork and corrected drafts remain protected.
+See [Nightly cover titles](cover-title-batch.md) for scheduling, retry and retention details. The standalone
+[cover-lettering trial](../scripts/title-art/README.md) remains available for operators testing local covers.
 
 ### Sources & translations
 

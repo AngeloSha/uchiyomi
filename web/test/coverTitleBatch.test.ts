@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { CoverTitleBatchProgress } from '../components/CoverTitleBatch';
 import { AutomaticCoverTitles } from '../components/TitleExtraction';
-import { COVER_TITLE_BATCH_KEY, coverTitleBatchFinished, coverTitleBatchPoll, coverTitleBatchResumeDelay, requestCoverTitleBatch, type CoverTitleBatchStatus } from '../lib/coverTitleBatch';
+import { COVER_TITLE_BATCH_KEY, coverTitleApplyState, coverTitleBatchFinished, coverTitleBatchPoll, coverTitleBatchResumeDelay, requestCoverTitleBatch, type CoverTitleBatchStatus } from '../lib/coverTitleBatch';
 import { EXTRACTION_CAPABILITIES_KEY } from '../lib/titleExtraction';
 (globalThis as { React?: unknown }).React = React;
 const overview = (extra: Partial<CoverTitleBatchStatus> = {}): CoverTitleBatchStatus => ({
@@ -115,4 +115,56 @@ test('run and cancel each adopt the bare authoritative status from one POST, pre
     { path: '/api/admin/title-extraction/batch/run', method: 'POST', body: { retryErrors: true } },
     { path: '/api/admin/title-extraction/batch/cancel', method: 'POST', body: { runId: 'r_1' } },
   ]);
+});
+
+
+test('automatic applying reflects both stored opt-ins and live checks, independent of zero published results', () => {
+  const on = overview({ applyEnabled: true, checkedApplyAvailable: true, reviewCount: 270 });
+  on.run!.counts.applied = 0;
+  assert.equal(coverTitleApplyState(on), 'on');
+  assert.match(render({ status: on }), /data-cover-title-apply-state="on"/);
+  assert.match(render({ status: on }), /Automatic applying is on/);
+  assert.equal(coverTitleApplyState({ ...on, enabled: false }), 'off');
+  assert.equal(coverTitleApplyState({ ...on, applyEnabled: false }), 'off');
+  for (const status of [{ ...on, available: false }, { ...on, checkedApplyAvailable: false }]) {
+    assert.equal(coverTitleApplyState(status), 'waiting');
+    assert.match(render({ status }), /Automatic applying is waiting for title checks/);
+  }
+});
+
+test('online waiting, missing links and opt-outs remain overlapping diagnostics, never completed no-matches', () => {
+  const status = overview({ running: true, online: { waitingOnline: 3, needsLink: 7, optedOut: 5 },
+    pausedReason: 'online_provider_busy', nextRetryAt: new Date(Date.now() + 60_000).toISOString() });
+  status.run!.status = 'running'; status.run!.counts.processing = 0;
+  const html = render({ status });
+  for (const [name, expected] of Object.entries(status.online!)) {
+    assert.match(html, new RegExp(`data-cover-title-online-count="${name}"[\\s\\S]*?<dd[^>]*>${expected}</dd>`));
+  }
+  assert.match(html, /Waiting titles stay queued/); assert.match(html, /Next attempt:/);
+  assert.match(html, /Manga without a checked link or with online lookups off can still get cover previews/);
+  assert.match(html, /These counts can overlap/); assert.doesNotMatch(html, /No match found|online_provider_busy/);
+  assert.equal(count(html, 'ready'), status.run!.counts.ready); assert.equal(count(html, 'pending'), status.run!.counts.pending);
+  assert.match(html, /data-cover-title-action="run" disabled/); assert.match(html, /data-cover-title-action="stop">Stop this run/);
+});
+
+test('review blockers use distinct server group counts without summing overlapping previews or exposing codes', () => {
+  const reasons = [
+    { code: 'title_not_verified', count: 255 }, { code: 'text_unclear', count: 218 },
+    { code: 'lettering_incomplete', count: 113 }, { code: 'low_contrast', count: 108 },
+    { code: 'checks_unavailable', count: 3 }, { code: 'other', count: 1 },
+  ];
+  const html = render({ status: overview({ reviewCount: 270, reviewReasons: reasons }) });
+  for (const { code, count } of reasons) assert.match(html, new RegExp(`data-cover-title-review-reason="${code}"[\\s\\S]*?<dd[^>]*>${count}</dd>`));
+  assert.match(html, />[^<]*Why previews need review[^<]*</); assert.match(html, />[^<]*Previews to review: 270[^<]*</);
+  assert.match(html, />[^<]*Title not verified[^<]*</); assert.match(html, />[^<]*Title text unclear[^<]*</); assert.match(html, />[^<]*Lettering may be missing[^<]*</);
+  assert.match(html, />[^<]*These counts can overlap[^<]*</); assert.doesNotMatch(html, />[^<]*(?:title_not_verified|text_unclear|calibrat|OCR)[^<]*</i);
+  assert.match(html, /data-cover-title-review="j_1">Review/);
+  const future = render({ status: overview({ reviewReasons: [{ code: 'future_check', count: 2 }] }) });
+  assert.match(future, />[^<]*Other checks need review[^<]*</); assert.doesNotMatch(future, />[^<]*future_check[^<]*</);
+});
+
+test('older status responses do not invent online checks or review blockers', () => {
+  const html = render();
+  assert.doesNotMatch(html, /data-cover-title-online|data-cover-title-review-reasons|Why previews need review/);
+  assert.match(html, /data-cover-title-review="j_1">Review/);
 });

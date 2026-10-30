@@ -14,6 +14,11 @@ export interface CoverTitleBatchStatus {
     currentSeries: { id: string; title: string } | null;
   };
   retentionDays: number; reviewCount: number; reviewSeries: CoverTitleReview[];
+  /** Live diagnostics for the latest run; these overlap rather than partition its progress. */
+  online?: { waitingOnline: number; needsLink: number; optedOut: number };
+  nextRetryAt?: string | null; pausedReason?: string | null;
+  /** Distinct ready previews per group; one preview may belong to several groups. */
+  reviewReasons?: { code: string; count: number }[];
 }
 export const COVER_TITLE_BATCH_KEY = ['admin-cover-title-batch'] as const;
 export const COVER_TITLE_BATCH_ROOT = '/api/admin/title-extraction/batch';
@@ -42,4 +47,10 @@ export function coverTitleBatchResumeDelay(status: CoverTitleBatchStatus | undef
 /** These are disjoint server states. Cancelled work is finished, without being called checked or successful. */
 export function coverTitleBatchFinished(run: NonNullable<CoverTitleBatchStatus['run']>): number {
   return Math.max(0, Math.min(run.counts.total, run.counts.total - run.counts.pending - run.counts.processing));
+}
+
+/** Publishing needs both opt-ins and available title checks; a zero applied count is not a switch state. */
+export function coverTitleApplyState(status: CoverTitleBatchStatus): 'on' | 'off' | 'waiting' {
+  if (!status.enabled || !status.applyEnabled) return 'off';
+  return status.available && status.checkedApplyAvailable ? 'on' : 'waiting';
 }

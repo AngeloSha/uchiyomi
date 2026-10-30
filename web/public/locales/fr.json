@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4505
+    "strings": 4522
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -4508,5 +4508,22 @@
   "With nightly runs off, Run now prepares previews only. Automatic applying needs both switches turned on.": "Lorsque les traitements nocturnes sont désactivés, « Lancer maintenant » prépare uniquement des aperçus. L’application automatique nécessite l’activation des deux options.",
   "Showing the latest {n} previews.": "Affichage des {n} derniers aperçus.",
   "Could not open this title preview. Try again.": "Impossible d’ouvrir cet aperçu de titre. Réessayez.",
-  "Showing the latest 1 preview.": "Affichage du dernier aperçu."
+  "Showing the latest 1 preview.": "Affichage du dernier aperçu.",
+  "Automatic applying is on": "L’application automatique est activée",
+  "Automatic applying is off": "L’application automatique est désactivée",
+  "Automatic applying is waiting for title checks": "L’application automatique attend les contrôles de titre",
+  "Previews that do not pass the title and image checks stay for review.": "Les aperçus qui ne passent pas les contrôles de titre et d’image restent à vérifier.",
+  "Online artwork checks": "Recherche d’illustrations en ligne",
+  "Waiting for online artwork": "En attente d’illustrations en ligne",
+  "Online artwork is checked before cover extraction when a checked manga link and online lookups are available.": "Les illustrations en ligne sont recherchées avant l’extraction de la couverture lorsqu’un lien manga vérifié et les recherches en ligne sont disponibles.",
+  "Manga without a checked link or with online lookups off can still get cover previews.": "Les mangas sans lien vérifié ou dont les recherches en ligne sont désactivées peuvent toujours avoir des aperçus de couverture.",
+  "Waiting titles stay queued until their online artwork search can finish.": "Les titres en attente restent dans la file jusqu’à ce que leur recherche d’illustrations en ligne puisse se terminer.",
+  "These counts can overlap.": "Ces nombres peuvent se recouper.",
+  "Why previews need review": "Pourquoi les aperçus doivent être vérifiés",
+  "Title not verified": "Titre non vérifié",
+  "Title text unclear": "Texte du titre peu lisible",
+  "Lettering may be missing": "Des lettres peuvent manquer",
+  "Low contrast": "Faible contraste",
+  "Checks unavailable": "Contrôles indisponibles",
+  "Other checks need review": "Autres contrôles à vérifier"
 }

@@ -27,7 +27,7 @@ const chunk=(name,b)=>{const t=Buffer.from(name),h=Buffer.alloc(4),c=Buffer.allo
 const cover=red=>{const w=600,h=900,header=Buffer.alloc(13);header.writeUInt32BE(w);header.writeUInt32BE(h,4);header[8]=8;header[9]=2;const rows=Buffer.alloc((w*3+1)*h);for(let y=0;y<h;y++)for(let x=0;x<w;x++){const n=y*(w*3+1)+x*3+1;rows[n]=red;rows[n+1]=80;rows[n+2]=160}return'data:image/png;base64,'+Buffer.concat([Buffer.from('89504e470d0a1a0a','hex'),chunk('IHDR',header),chunk('IDAT',deflateSync(rows)),chunk('IEND',Buffer.alloc(0))]).toString('base64')};
 const setCover=red=>art(target,{kind:'cover',mode:'upload',dataUrl:cover(red)});
 const browser=await puppeteer.launch({headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
-const jobs=new Set(),errors=[],proof={defaultOff:true,bare202Status:false,phoneReviewAccessible:false,previewOnlyWithNightlyOff:false,exactReviewJob:false,dismissRetained:false,savedCorrectionRetained:false,explicitDiscardRemoved:false,protectedArtworkKept:false,nightlySaved:false,cancelled:false,retried:false,checkedApplyingUnavailable:true};
+const jobs=new Set(),errors=[],proof={defaultOff:true,bare202Status:false,phoneReviewAccessible:false,previewOnlyWithNightlyOff:false,exactReviewJob:false,dismissRetained:false,savedCorrectionRetained:false,explicitDiscardRemoved:false,protectedArtworkKept:false,nightlySaved:false,cancelled:false,retried:false,checkedApplyingUnavailable:true,onlineCounters:false,reviewReasons:false,applyState:false};
 try{
  await art(target,{kind:'logo',mode:'reset'});await setCover(140);
  await art(protectedId,{kind:'logo',mode:'upload',dataUrl:'data:image/png;base64,'+readFileSync(new URL('../fixtures/title-logo.png',import.meta.url)).toString('base64')});
@@ -47,6 +47,16 @@ try{
  await page.$eval(section,n=>n.scrollIntoView({block:'center'}));await page.screenshot({path:OUT+'/running-desktop.png'});
  const done=await wait(async()=>{const s=await status();return s.run?.status==='completed'&&!s.running?s:null},'one-off completion');
  assert.ok(done.run.counts.ready>=1);assert.equal(done.run.counts.applied,0);assert.equal((await detail(target)).titleArt.version,original.titleArt.version);proof.previewOnlyWithNightlyOff=true;
+ assert.deepEqual(Object.keys(done.online).sort(),['needsLink','optedOut','waitingOnline']);
+ assert.ok(done.reviewReasons.some(r=>r.code==='checks_unavailable'&&r.count>0));
+ await page.waitForFunction(expected=>{
+  const value=(selector)=>Number(document.querySelector(selector+' dd')?.textContent);
+  return Object.entries(expected.online).every(([key,n])=>value(`[data-cover-title-online-count="${key}"]`)===n)
+   &&expected.reasons.every(({code,count})=>value(`[data-cover-title-review-reason="${code}"]`)===count);
+ },{}, {online:done.online,reasons:done.reviewReasons});
+ assert.equal(await page.$eval('[data-cover-title-apply-state]',n=>n.getAttribute('data-cover-title-apply-state')),'off');
+ assert.match(await page.$eval('[data-cover-title-review-reasons]',n=>n.textContent),/These counts can overlap/);
+ proof.onlineCounters=true;proof.reviewReasons=true;proof.applyState=true;
  const item=done.reviewSeries.find(x=>x.id===target);assert.ok(item);jobs.add(item.jobId);
  const exact=page.waitForResponse(r=>new URL(r.url()).pathname===`/api/admin/series/${target}/title-extraction/${item.jobId}`&&r.request().method()==='GET');
  await click(`[data-cover-title-review="${item.jobId}"]`);await exact;await page.waitForSelector('[data-title-extraction-dialog]',{visible:true});

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4505
+    "strings": 4522
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -4508,5 +4508,22 @@
   "With nightly runs off, Run now prepares previews only. Automatic applying needs both switches turned on.": "При выключенных ночных запусках «Запустить сейчас» создаёт только предпросмотры. Для автоматического применения нужно включить обе настройки.",
   "Showing the latest {n} previews.": "Показаны последние предпросмотры: {n}.",
   "Could not open this title preview. Try again.": "Не удалось открыть этот предпросмотр названия. Повторите попытку.",
-  "Showing the latest 1 preview.": "Показан последний предпросмотр."
+  "Showing the latest 1 preview.": "Показан последний предпросмотр.",
+  "Automatic applying is on": "Автоматическое применение включено",
+  "Automatic applying is off": "Автоматическое применение выключено",
+  "Automatic applying is waiting for title checks": "Автоматическое применение ожидает проверки названий",
+  "Previews that do not pass the title and image checks stay for review.": "Предпросмотры, не прошедшие проверки названия и изображения, остаются для проверки.",
+  "Online artwork checks": "Поиск оформления в интернете",
+  "Waiting for online artwork": "Ожидание оформления из интернета",
+  "Online artwork is checked before cover extraction when a checked manga link and online lookups are available.": "Если есть подтверждённая привязка манги и доступны онлайн-запросы, оформление сначала ищется в интернете, а затем извлекается из обложки.",
+  "Manga without a checked link or with online lookups off can still get cover previews.": "Для манги без подтверждённой привязки или с отключёнными онлайн-запросами можно создавать предпросмотры из обложек.",
+  "Waiting titles stay queued until their online artwork search can finish.": "Ожидающие названия остаются в очереди до завершения поиска оформления в интернете.",
+  "These counts can overlap.": "Эти числа могут пересекаться.",
+  "Why previews need review": "Почему предпросмотры требуют проверки",
+  "Title not verified": "Название не подтверждено",
+  "Title text unclear": "Текст названия плохо читается",
+  "Lettering may be missing": "Возможно, отсутствуют буквы",
+  "Low contrast": "Низкий контраст",
+  "Checks unavailable": "Проверки недоступны",
+  "Other checks need review": "Требуются другие проверки"
 }

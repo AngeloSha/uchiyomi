@@ -83,7 +83,7 @@ test('optional title inference ships on both native architectures without model 
   assert.match(JSON.stringify(ci.steps), /--prepare-context/);
   const overlay = parseYaml(read('deploy/docker-compose.title-extractor.yml'));
   const service = overlay.services['title-extractor'];
-  assert.equal(service.image, '${TITLE_EXTRACTOR_IMAGE:-ghcr.io/angelosha/uchiyomi:title-extractor-v0.102.0}');
+  assert.equal(service.image, '${TITLE_EXTRACTOR_IMAGE:-ghcr.io/angelosha/uchiyomi:title-extractor-v' + JSON.parse(read('bff/package.json')).version + '}');
   assert.deepEqual(service.profiles, ['title-art']);
   assert.equal(service.read_only, true);
   assert.equal(service.ports, undefined);

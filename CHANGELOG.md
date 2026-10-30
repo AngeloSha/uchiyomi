@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.102.1 — 2026-10-30
+
+- Nightly cover-title processing waits for the online logo search for each checked manga before extracting a cover. Pending searches and provider retry pauses remain queued.
+- Canonical manga titles are fetched before cover-title verification and retry decisions, so a missing metadata cache no longer prevents otherwise valid results from being automatically applied. Existing checks, manual artwork and review corrections remain protected.
+- The automatic-title panel shows the auto-apply state, online-search progress and the reasons previews need review, with translations in every supported language.
+
 ## v0.102.0 — 2026-10-29
 
 **Manga title artwork, cover extraction with precise corrections, and optional nightly library processing.**
