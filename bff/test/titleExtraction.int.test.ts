@@ -448,3 +448,33 @@ test('new batch publication requires both opt-ins and measured checks, without r
     const[job]=await q('SELECT quality,status FROM series_title_extractions WHERE series_id=$1',[SID]);assert.equal(job.quality.safeToApply,false);assert.equal(job.quality.availableChecksPassed,true);assert.equal(job.status,'applied');
   }finally{await q('UPDATE server_settings SET automatic_cover_title_generation=false,automatic_cover_title_apply=false WHERE id=1');batch.stopTitleExtractionBatch();batch.setTitleExtractionBatchForTests();}
 });
+test('enabling online discovery during extraction requires a current completed miss before automatic publication', {skip},async()=>{
+  const batch=await import('../src/lib/titleExtractionBatch');batch.setTitleExtractionBatchForTests({model:async()=>'a'.repeat(64)});let releaseProvider:(()=>void)|undefined;
+  try{for(const result of['unchecked','error','expired','other_identity','ready','pending','missing']){
+    batch.stopTitleExtractionBatch();await core.dropTitleExtractions(SID);await q('DELETE FROM title_extraction_runs');await q('DELETE FROM series_title_extraction_history WHERE series_id=$1',[SID]);
+    await q('UPDATE server_settings SET automatic_title_logos=false,automatic_cover_title_generation=true,automatic_cover_title_apply=true WHERE id=1');
+    await q('UPDATE libraries SET anilist_lookup=true WHERE id=$1',[LIB]);
+    let entered!:()=>void,release!:()=>void;const started=new Promise<void>(r=>{entered=r;}),gate=new Promise<void>(r=>{release=r;});
+    core.setTitleExtractionForTests({ready:async()=>true,assess:async()=>({...quality(),availableChecksPassed:true}),ocrCapability:async()=>({available:true,calibrated:false,verifierFingerprint:'a'.repeat(64)}),
+      worker:async(bytes,selection)=>{entered();await gate;return worker(bytes,selection);}});
+    await batch.initializeTitleExtractionBatch();
+    try{
+      const start=await request('POST','/api/admin/title-extraction/batch/run',{});assert.equal(start.statusCode,202,start.body);await started;
+      await q('UPDATE server_settings SET automatic_title_logos=true WHERE id=1');
+      await q(`INSERT INTO series_title_art(series_id,lookup_status,lookup_anilist_id,retry_at)VALUES($1,$2,$3,$4)
+        ON CONFLICT(series_id)DO UPDATE SET lookup_status=$2,lookup_anilist_id=$3,retry_at=$4`,
+        [SID,result==='error'?'error':result==='ready'?'ready':'missing',result==='unchecked'?null:result==='other_identity'?'99999':'87216',result==='unchecked'?null:new Date(Date.now()+(result==='expired'?-60_000:3600_000))]);
+      if(result==='pending'){
+        let providerEntered!:()=>void;const providerStarted=new Promise<void>(r=>{providerEntered=r;}),providerGate=new Promise<void>(r=>{releaseProvider=r;});
+        art.setTitleLogoLookupForTests(async()=>{providerEntered();await providerGate;return{kind:'missing'};});
+        await art.queueTitleLogos([SID],'manual');await providerStarted;
+      }
+    }finally{release();}
+    await batch.titleExtractionBatchSettled();await core.titleExtractionsSettled();
+    const state=(await request('GET','/api/admin/title-extraction/batch/status')).json(),published=result==='missing';
+    assert.equal(state.run.counts.applied,published?1:0,result);assert.equal(state.run.counts.ready,published?0:1,result);
+    assert.equal(!!(await currentArt()).logoUrl,published,result);
+    if(!published){const[job]=await q('SELECT id,status FROM series_title_extractions WHERE series_id=$1',[SID]);assert.equal(job.status,'ready');assert.equal((await request('GET',(await jobState(job.id)).previewUrl)).statusCode,200);}
+    releaseProvider?.();await art.titleLogoQueueSettled();art.setTitleLogoLookupForTests();releaseProvider=undefined;
+  }}finally{releaseProvider?.();await art.titleLogoQueueSettled();art.setTitleLogoLookupForTests();await q('UPDATE server_settings SET automatic_title_logos=false,automatic_cover_title_generation=false,automatic_cover_title_apply=false WHERE id=1');batch.stopTitleExtractionBatch();batch.setTitleExtractionBatchForTests();}
+});

@@ -12,7 +12,7 @@ import { runtime } from './runtime';
 import { ART_MAX_BYTES, FIRST_PAGE } from './seriesArt';
 import { coverSelectionKey, coverSelectionSql, coverSelectionHashSql } from './coverSelection';
 import { SYSTEM_CTX, Params, seriesVisible, viewCtxFor, visible, visibleToAll, type ViewCtx } from './visibility';
-import { changeTitleArt, applyAutomaticCoverTitle, normalizeTitleLogo, TitleArtError } from './titleArt';
+import { changeTitleArt, applyAutomaticCoverTitle, normalizeTitleLogo, titleLogoQueueState, TitleArtError } from './titleArt';
 import { ExtractionError, extractCoverTitle, titleExtractorReady, titleExtractorHealth, type ExtractionRect } from './titleExtractionWorker';
 import { assessCoverTitleCandidate, coverTitleOcrCapability, stopCoverTitleOcr } from './coverTitleOcr';
 import type { CoverTitleQualityResult } from './coverTitleQuality';
@@ -390,29 +390,35 @@ async function batchPublicationEnabled() {
   return !!settings?.automatic_cover_title_generation&&!!settings.automatic_cover_title_apply;
 }
 async function assertAutomatic(row:JobRow,qq:ScopedQuery) {
-  const [settings]=await qq<{automatic_cover_titles:boolean;automatic_cover_title_generation:boolean;automatic_cover_title_apply:boolean}>('SELECT automatic_cover_titles,automatic_cover_title_generation,automatic_cover_title_apply FROM server_settings WHERE id=1 FOR SHARE');
-  const [gate]=await qq<{allowed:boolean;first_page:boolean;mode:string;anilist_id:string;lookup_status:string;lookup_anilist_id:string;provider_logo:boolean}>(
+  const [settings]=await qq<{automatic_cover_titles:boolean;automatic_cover_title_generation:boolean;automatic_cover_title_apply:boolean;automatic_title_logos:boolean}>('SELECT automatic_cover_titles,automatic_cover_title_generation,automatic_cover_title_apply,automatic_title_logos FROM server_settings WHERE id=1 FOR SHARE');
+  const [gate]=await qq<{allowed:boolean;first_page:boolean;mode:string;anilist_id:string;lookup_status:string;lookup_anilist_id:string;provider_logo:boolean;online_missing:boolean}>(
     `SELECT l.anilist_lookup AS allowed,COALESCE(o.cover=$2,false) first_page,COALESCE(a.mode,'automatic') mode,t.external_id anilist_id,
-      a.lookup_status,a.lookup_anilist_id,(a.auto_file IS NOT NULL AND a.auto_cover_key IS NULL) provider_logo FROM lib_series s
+      a.lookup_status,a.lookup_anilist_id,(a.auto_file IS NOT NULL AND a.auto_cover_key IS NULL) provider_logo,
+      COALESCE(a.lookup_anilist_id=t.external_id AND a.lookup_status='missing' AND a.retry_at>now(),false) online_missing FROM lib_series s
       JOIN libraries l ON l.id=s.library_id LEFT JOIN series_overrides o ON o.series_id=s.id LEFT JOIN series_title_art a ON a.series_id=s.id
       LEFT JOIN series_trackers t ON t.series_id=s.id AND t.provider='anilist' AND(t.checked_at IS NOT NULL OR t.linked_by IS NOT NULL)
-      WHERE s.id=$1`,[row.series_id,FIRST_PAGE]);
+      WHERE s.id=$1 FOR SHARE OF l`,[row.series_id,FIRST_PAGE]);
   if(row.batch_item_id){
     const [run]=await qq(`SELECT r.id FROM title_extraction_items i JOIN title_extraction_runs r ON r.id=i.run_id WHERE i.id=$1 AND r.status='running' FOR SHARE OF r`,[row.batch_item_id]);
     if(!settings?.automatic_cover_title_generation||!settings.automatic_cover_title_apply||!run)throw new ExtractionError('publication_disabled',409);
     if((await qq(`SELECT id FROM series_title_extractions WHERE series_id=$1 AND id<>$2 AND expires_at>now()
       AND status IN('queued','running','ready') AND(NOT automatic OR mask_revision>0) LIMIT 1`,[row.series_id,row.id])).length)throw new ExtractionError('publication_disabled',409);
     if(!gate||gate.first_page||gate.mode!=='automatic'||!gate.anilist_id)throw new ExtractionError('stale_candidate',409);
+    // Eligibility may have changed since generation started. A pending/error/unchecked lookup is never a miss.
+    if(settings.automatic_title_logos&&gate.allowed&&(!gate.online_missing||titleLogoQueueState().ids.includes(row.series_id)))
+      throw new ExtractionError('publication_disabled',409);
   }else if(!settings?.automatic_cover_titles||!gate?.allowed||gate.first_page||gate.mode!=='automatic'||gate.provider_logo||gate.lookup_status!=='missing'
     ||gate.lookup_anilist_id!==gate.anilist_id||!gate.anilist_id)throw new ExtractionError('stale_candidate',409);
   return gate.anilist_id;
 }
 async function applySystemDraft(row:JobRow,bytes:Buffer) {
-  await freshJob(row,SYSTEM_CTX);
-  const cover=await currentCover(row.series_id,SYSTEM_CTX);if(cover.fingerprint!==row.cover_fingerprint)throw new ExtractionError('stale_candidate',409);
-  const current=await freshJob(row,SYSTEM_CTX);
-  if(!current.anilist_id)throw new ExtractionError('stale_candidate',409);
-  try{await applyAutomaticCoverTitle(row.series_id,bytes,Number(row.title_version),current.anilist_id,row.snapshot,async(qq)=>{
+  try{
+    if(row.batch_item_id)await assertAutomatic(row,q);
+    await freshJob(row,SYSTEM_CTX);
+    const cover=await currentCover(row.series_id,SYSTEM_CTX);if(cover.fingerprint!==row.cover_fingerprint)throw new ExtractionError('stale_candidate',409);
+    const current=await freshJob(row,SYSTEM_CTX);
+    if(!current.anilist_id)throw new ExtractionError('stale_candidate',409);
+    await applyAutomaticCoverTitle(row.series_id,bytes,Number(row.title_version),current.anilist_id,row.snapshot,async(qq)=>{
     await assertAutomatic(row,qq);
     const rows=await qq(`UPDATE series_title_extractions SET status='applied' WHERE id=$1 AND automatic AND status='ready'
       AND mask_revision=0 AND candidate_sha256=$2 AND (quality->>'safeToApply'='true' OR($3::boolean AND quality->>'availableChecksPassed'='true')) AND expires_at>now() RETURNING id`,[row.id,hash(bytes),!!row.batch_item_id]);
