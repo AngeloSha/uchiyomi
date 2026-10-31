@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.103.1 — 2026-10-31
+
+**A special no longer shifts the chapter numbers after it, and a series is no longer linked to an AniList entry that
+only lists its name among its synonyms.**
+
+### Specials stay out of the chapter numbers
+
+- **A special no longer takes a chapter's number** ([#379](https://github.com/AngeloSha/uchiyomi/issues/379), reported
+  by **Calvin-Davidson**). Some sources count every post as a chapter, specials included: on Tapas, *24. The Other
+  Side* comes after three specials, so it was numbered 27. Such a series is now numbered by its chapter titles: each
+  chapter at the number in its title, and each special just after the chapter before it (*Caption Contest!* is 24.01).
+- **A series you add is numbered this way at once**, and the add dialog says so (*Numbered by the chapter titles*).
+  **Keep the source's numbers** adds it the old way.
+- **One already in your library is never renamed on its own.** Its page says *Chapter numbers need a review*, and
+  nothing new downloads for it until an admin opens **Review renumbering**, checks the plan and confirms it (Health's
+  *Chapter numbering* lists it too). Files are renamed in place, and reading progress stays with each chapter. **Keep
+  the source's numbers** leaves it as it is, and **Use the source's numbers** undoes it later.
+- **Other sources keep working with such a series**, and one that counts its specials the same way is read by its
+  titles too, so its new chapters line up.
+
+### The right AniList entry
+
+- **A synonym gives way to an entry's own title.** AniList's synonyms are anyone's to add, and an anthology lists every
+  story in it: *Pick Me Up* was linked to an 18+ anthology with a story of that name, so it showed the anthology's cover
+  and banner and read right to left. When the search's first answer matches only by a synonym, the lookup now looks at
+  the next few answers (one more request, only then) and takes the first one that has the name as its own title. The
+  synonym's entry is kept only when none does.
+- **Links made before are corrected after the upgrade.** The background check holds every automatic link to the new
+  rule once and moves the ones it applies to. The cover and banner the old entry gave the series become the new
+  entry's, a reading direction and type that AniList had set are learned again from the new entry, and the progress
+  recorded for the old entry no longer counts for the new one. A link a person made is never touched. Admin → Tasks
+  says how many moved. On the project's own server that was *Pick Me Up* and *Overgeared* (linked to an earlier,
+  finished adaptation).
+
+### Upgrading
+
+- Nothing to do. Chapter numbering needs no database change. The AniList check runs a couple of minutes after the
+  server starts; a link that matches only by a synonym costs one AniList search, paced in the background (about 130
+  on a 215-link library, a few minutes).
+
 ## v0.103.0 — 2026-10-31
 
 **Title logos from the Uchiyomi logo library: picked and cut out by hand, one per manga, for every server.**
