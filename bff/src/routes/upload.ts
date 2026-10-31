@@ -1,8 +1,7 @@
 /**
- * Manual uploads: a chapter or volume file an admin already has, put into the library by hand -- for a series no source
+ * Manual uploads: chapter or volume files an account already has, started as a series by hand -- for a series no source
  * carries (or one that is gone), where nothing could ever download it.
  *
- *   POST /api/admin/series/:id/upload?name=<file name>       into that series' folder
  *   POST /api/library/upload?title=<series>&name=<file>       into a new series' folder (Uploads/<title>)
  *
  * The body is the file itself (application/octet-stream), streamed to disk: a volume is hundreds of megabytes, and the
@@ -20,9 +19,8 @@
  * sweep reaps and the scanner never reads as a chapter), checked to be the archive its extension says, then renamed into
  * place, and a scan indexes it. The chapter's number is read from its file name, as for every file the scan meets.
  *
- * The series route is registered from inside routes/admin.ts, after its `authenticate` + `requireAdmin` hooks, so it
- * is admin-only structurally. Starting a new series is its own plugin (uploadSeriesRoutes, from server.ts): an admin,
- * or a member an admin gave `perms.canUploadManually`.
+ * The route is its own plugin (uploadSeriesRoutes, from server.ts): an admin, or a member an admin gave
+ * `perms.canUploadManually`.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createWriteStream, promises as fs } from 'fs';
@@ -38,7 +36,6 @@ import { DL_ROOT, persistScan } from '../lib/library';
 import { MIN_FREE_GB, freeBytes, sanitize } from '../lib/downloader';
 import { realContainedPath } from '../lib/fsGuard';
 import { renameRetry } from '../lib/fsAtomic';
-import { renumberRunning } from '../lib/numbering';
 import { scheduleHealthSummaryRefresh } from '../lib/healthSummary';
 
 /** The largest file an upload takes, in MB (UPLOAD_MAX_MB). A whole volume as one CBZ fits well inside the default. */
@@ -128,33 +125,6 @@ const bookAt = (rel: string) =>
   one<{ id: string; series_id: string; number: number }>(`SELECT id, series_id, number FROM lib_books WHERE root = $1 AND file = $2`, [DL_ROOT, rel]);
 
 const NAME = z.string().min(1).max(255);
-
-export default async function uploadRoutes(app: FastifyInstance) {
-  // The body is handed to the route as the request stream, unread: receive() streams it to disk under its own cap.
-  app.addContentTypeParser('application/octet-stream', (_req, payload, done) => done(null, payload));
-
-  app.post('/api/admin/series/:id/upload', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const p = z.object({ name: NAME }).safeParse(req.query);
-    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
-    const name = uploadName(p.data.name);
-    if (!name) return refuse(reply, { code: 400, error: 'bad_type', message: 'Upload a .cbz, .cbr, .zip, .rar, .pdf or .epub file.' });
-    const s = await one<{ id: string; folder: string; deleted_at: string | null; merged_into: string | null }>(
-      'SELECT id, folder, deleted_at, merged_into FROM lib_series WHERE id = $1', [id]);
-    if (!s || s.deleted_at) return reply.code(404).send({ error: 'not_found' });
-    if (s.merged_into) return refuse(reply, { code: 409, error: 'merged', message: 'This series was merged into another; upload there.' });
-    // A renumber renames the folder's files under a journal (lib/numbering.ts): a file arriving mid-way is not in it.
-    if (renumberRunning(s.id)) return refuse(reply, { code: 409, error: 'renumber_pending', message: 'This series is being renumbered. Try again in a moment.' });
-
-    const r = await receive(req, s.folder, name);
-    if ('error' in r) return refuse(reply, r);
-    await persistScan().catch((e) => req.log.warn(`[upload] ${s.folder}: the scan after the upload threw: ${(e as Error)?.message || e}`));
-    scheduleHealthSummaryRefresh();
-    const book = await bookAt(r.rel);
-    await logAudit('series.upload', { userId: userIdOf(req), detail: { id: s.id, file: r.rel, bytes: r.bytes }, req });
-    return { ok: true, file: r.rel, bookId: book?.id ?? null, number: book?.number ?? null };
-  });
-}
 
 /** Whether the account may start a series from its own files: an admin, or a member with `canUploadManually` (opt-in). */
 async function mayUpload(req: FastifyRequest): Promise<boolean> {

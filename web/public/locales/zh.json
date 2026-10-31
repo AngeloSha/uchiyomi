@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4543
+    "strings": 4541
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4371,8 +4371,6 @@
   "Uploaded {n} files": "已上传 {n} 个文件",
   "Uploading…": "正在上传…",
   "Uploading {i} of {n}…": "正在上传第 {i} 个，共 {n} 个…",
-  "Upload chapters": "上传章节",
-  "Chapter files you already have: .cbz, .cbr, .zip, .rar, .pdf or .epub. The chapter number is read from each file name, as in “Chapter 12.cbz”.": "你已有的章节文件：.cbz、.cbr、.zip、.rar、.pdf 或 .epub。章节号从每个文件名中读取，例如“Chapter 12.cbz”。",
   "Choose files…": "选择文件…",
   "Upload a series": "上传系列",
   "For a series no source has, when you already have its chapters. The files go into the download folder, under Uploads, and the chapter number is read from each file name.": "用于没有任何来源、但你已有其章节的系列。文件会放入下载文件夹的 Uploads 下，章节号从每个文件名中读取。",

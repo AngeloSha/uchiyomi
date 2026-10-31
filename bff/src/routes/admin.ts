@@ -105,7 +105,6 @@ import { copyToChapter, reapplyBlocklist, reapplyBlocklistInTransaction, type Li
 import { languageRulesFor, type LanguageRules } from '../lib/copyLanguage';
 import { claimWriterFolders } from '../lib/bulkNewest';
 import pageCleanupRoutes from './pageCleanup';
-import uploadRoutes from './upload';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { attachManual, detachMain, type AttachRefused } from '../lib/manualAttach';
 import { fetchCoverImage } from './images';
@@ -585,8 +584,6 @@ export default async function adminRoutes(app: FastifyInstance) {
   // v0.55.4: Rescan everything's preview and plan, the same way (routes/rescan.ts).
   await app.register(rescanRoutes);
   await app.register(pageCleanupRoutes);
-  // Manual uploads: a chapter file put into a series by hand, the same way (routes/upload.ts).
-  await app.register(uploadRoutes);
   await app.register(titleExtractionRoutes);
 
   /** Synchronous two-sided hand-off between updateSeries and destructive route writers. */

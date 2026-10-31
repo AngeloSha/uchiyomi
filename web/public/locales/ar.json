@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4543
+    "strings": 4541
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -4371,8 +4371,6 @@
   "Uploaded {n} files": "تم رفع {n} ملفات",
   "Uploading…": "جارٍ الرفع…",
   "Uploading {i} of {n}…": "جارٍ رفع {i} من {n}…",
-  "Upload chapters": "رفع فصول",
-  "Chapter files you already have: .cbz, .cbr, .zip, .rar, .pdf or .epub. The chapter number is read from each file name, as in “Chapter 12.cbz”.": "ملفات الفصول الموجودة لديك: ‎.cbz أو ‎.cbr أو ‎.zip أو ‎.rar أو ‎.pdf أو ‎.epub. يُقرأ رقم الفصل من اسم كل ملف، مثل «Chapter 12.cbz».",
   "Choose files…": "اختيار ملفات…",
   "Upload a series": "رفع سلسلة",
   "For a series no source has, when you already have its chapters. The files go into the download folder, under Uploads, and the chapter number is read from each file name.": "لسلسلة لا يوفرها أي مصدر، عندما تكون فصولها لديك بالفعل. توضع الملفات في مجلد التنزيلات داخل Uploads، ويُقرأ رقم الفصل من اسم كل ملف.",

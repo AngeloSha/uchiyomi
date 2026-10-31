@@ -1,6 +1,5 @@
 'use client';
-// Uploading chapter files by hand (lib/chapterUpload.ts): Edit details → Files for a series already here, and the
-// Upload a series page for a series that is not here yet.
+// Uploading chapter files by hand (lib/chapterUpload.ts): the Upload a series page, for a series that is not here yet.
 import { useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
@@ -9,7 +8,6 @@ import { t as tr } from '@/lib/i18n';
 import { CHAPTER_ACCEPT, uploadAll, type UploadRun, type UploadTarget } from '@/lib/chapterUpload';
 import { useToast } from './Toast';
 import { ProgressRing } from './ProgressRing';
-import { Row } from './settings';
 
 /** Run the files, saying how far along it is, and say how it went. */
 function useUpload(onDone: (run: UploadRun) => void) {
@@ -31,23 +29,6 @@ function useUpload(onDone: (run: UploadRun) => void) {
 
 const progressText = (at: { i: number; n: number }) =>
   at.n === 1 ? tr('Uploading…') : tr('Uploading {i} of {n}…', { i: at.i + 1, n: at.n });
-
-/** Edit details → Files: chapter files from the admin's own disk, into this series' folder. */
-export function UploadChaptersRow({ seriesId, onSaved }: { seriesId: string; onSaved: () => void }) {
-  const input = useRef<HTMLInputElement>(null);
-  const { at, start } = useUpload((run) => { if (run.done) onSaved(); });
-  return (
-    <Row label={tr('Upload chapters')} stacked
-      help={tr('Chapter files you already have: .cbz, .cbr, .zip, .rar, .pdf or .epub. The chapter number is read from each file name, as in “Chapter 12.cbz”.')}>
-      <input ref={input} type="file" multiple accept={CHAPTER_ACCEPT} hidden data-upload-chapters
-        onChange={(e) => { const files = [...(e.target.files ?? [])]; e.target.value = ''; void start({ seriesId }, files); }} />
-      <button type="button" onClick={() => input.current?.click()} disabled={!!at} className="btn-key">
-        {at && <ProgressRing progress="spin" size={14} />}
-        {at ? progressText(at) : tr('Choose files…')}
-      </button>
-    </Row>
-  );
-}
 
 /** The Upload a series page (app/upload/page.tsx): a series that is not here yet, started from its files. Title and
  *  files in either order; Upload waits for both, and the server refuses a title already here. */

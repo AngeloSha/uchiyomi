@@ -1,4 +1,4 @@
-// Chapter files an admin uploads by hand (bff routes/upload.ts): for a series no source carries, whose chapters are
+// Chapter files uploaded by hand (bff routes/upload.ts): for a series no source carries, whose chapters are
 // already on the admin's own disk. One file per request, the file itself as the body, one after another.
 import { api, ApiError } from './api';
 import { t as tr } from './i18n';
@@ -8,13 +8,11 @@ export const CHAPTER_ACCEPT = '.cbz,.cbr,.zip,.rar,.pdf,.epub';
 
 export interface Uploaded { file: string; seriesId?: string | null; bookId: string | null; number: number | null }
 
-/** Into an existing series, or into a new one by its title (Uploads/<title> on the server). */
-export type UploadTarget = { seriesId: string } | { title: string; fresh?: boolean };
+/** Into a new series by its title (Uploads/<title> on the server). */
+export type UploadTarget = { title: string; fresh?: boolean };
 
 const urlFor = (to: UploadTarget, name: string): string =>
-  'seriesId' in to
-    ? `/api/admin/series/${encodeURIComponent(to.seriesId)}/upload?name=${encodeURIComponent(name)}`
-    : `/api/library/upload?title=${encodeURIComponent(to.title)}&name=${encodeURIComponent(name)}${to.fresh ? '&fresh=1' : ''}`;
+  `/api/library/upload?title=${encodeURIComponent(to.title)}&name=${encodeURIComponent(name)}${to.fresh ? '&fresh=1' : ''}`;
 
 export const uploadChapter = (to: UploadTarget, f: File): Promise<Uploaded> =>
   api<Uploaded>(urlFor(to, f.name), { method: 'POST', body: f, headers: { 'content-type': 'application/octet-stream' } });
@@ -47,18 +45,18 @@ export interface UploadRun { done: number; failed: string[]; seriesId: string | 
  */
 export async function uploadAll(to: UploadTarget, files: File[], onFile?: (i: number, f: File) => void): Promise<UploadRun> {
   const sorted = [...files].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-  const run: UploadRun = { done: 0, failed: [], seriesId: 'seriesId' in to ? to.seriesId : null };
+  const run: UploadRun = { done: 0, failed: [], seriesId: null };
   for (const [i, f] of sorted.entries()) {
     onFile?.(i, f);
     // A new series' title is checked on its first file only; the rest join what that one made.
-    const here = 'title' in to && i > 0 ? { title: to.title } : to;
+    const here = i > 0 ? { title: to.title } : to;
     try {
       const r = await uploadChapter(here, f);
       run.done++;
       if (r.seriesId) run.seriesId = r.seriesId;
     } catch (e) {
       // A title already here stops the run: nothing of it was written, and the rest would only be refused too.
-      if (i === 0 && 'title' in to && to.fresh && e instanceof ApiError && e.status === 409 && e.body.includes('"taken"')) { run.taken = true; break; }
+      if (i === 0 && to.fresh && e instanceof ApiError && e.status === 409 && e.body.includes('"taken"')) { run.taken = true; break; }
       run.failed.push(uploadRefusal(e, f.name));
     }
   }

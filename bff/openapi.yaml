@@ -12288,56 +12288,6 @@ paths:
           description: Not found, or not visible to this account
         "413":
           description: The body is over the limit (a picture over 11 MB)
-  /api/admin/series/{id}/upload:
-    post:
-      tags:
-        - admin
-      summary: Upload a chapter file into a series by hand.
-      operationId: postApiAdminSeriesIdUpload
-      description: >-
-        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The body is the file
-        itself (.cbz, .cbr, .zip, .rar, .pdf or .epub), streamed into the series' folder under the download folder, then
-        the library is scanned. Nothing is overwritten.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: name
-          in: query
-          required: true
-          description: The file's name, extension included; the chapter number is read from it.
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/octet-stream:
-            schema:
-              type: string
-              format: binary
-      security:
-        - bearer: []
-      responses:
-        "200":
-          description: OK. `file` is where it was stored, relative to the download folder; `bookId` and `number` are the chapter the scan made of it.
-        "400":
-          description: >-
-            Malformed parameter, a name the scanner would not read as a chapter (`bad_type`), bytes that are not the
-            archive the name says (`bad_file`), or an empty body (`empty`)
-        "401":
-          description: Not authenticated
-        "403":
-          description: "Forbidden: token scope, account permission or age limit"
-        "409":
-          description: A file of that name is already there (`exists`), or the series cannot take one now
-        "413":
-          description: The file is over UPLOAD_MAX_MB (`too_large`)
-        "507":
-          description: The download disk is at its MIN_FREE_GB floor (`disk_full`)
-        "404":
-          description: Not found, or not visible to this account
   /api/library/upload:
     post:
       tags:
@@ -12345,9 +12295,10 @@ paths:
       summary: Start a series from an uploaded chapter file.
       operationId: postApiAdminLibraryUpload
       description: >-
-        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. As POST
-        /api/admin/series/{id}/upload, into `Uploads/<title>` under the download folder; the scan makes it a series, and a
-        second upload under the same title joins it. `seriesId` names the series.
+        Requires an admin account, or a member an admin gave `canUploadManually`. The body is the file itself (.cbz, .cbr,
+        .zip, .rar, .pdf or .epub), streamed into `Uploads/<title>` under the download folder, then the library is scanned;
+        the scan makes it a series, and a second upload under the same title joins it. Nothing is overwritten. `seriesId`
+        names the series.
       parameters:
         - name: fresh
           in: query
