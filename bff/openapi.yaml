@@ -12129,6 +12129,13 @@ paths:
         /api/admin/series/{id}/upload, into `Uploads/<title>` under the download folder; the scan makes it a series, and a
         second upload under the same title joins it. `seriesId` names the series.
       parameters:
+        - name: fresh
+          in: query
+          required: false
+          description: '`1` on a run''s first file: refuse with 409 `taken` when a series by that title is already here.'
+          schema:
+            type: string
+            enum: ['1']
         - name: title
           in: query
           required: true

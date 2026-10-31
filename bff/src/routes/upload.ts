@@ -171,7 +171,8 @@ export async function uploadSeriesRoutes(app: FastifyInstance) {
   app.addContentTypeParser('application/octet-stream', (_req, payload, done) => done(null, payload));
 
   app.post('/api/library/upload', async (req, reply) => {
-    const p = z.object({ title: z.string().trim().min(1).max(300), name: NAME }).safeParse(req.query);
+    // `fresh=1` on a run's first file: the title must be new. The rest of the run omit it and join the series it made.
+    const p = z.object({ title: z.string().trim().min(1).max(300), name: NAME, fresh: z.literal('1').optional() }).safeParse(req.query);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
     const name = uploadName(p.data.name);
     if (!name) return refuse(reply, { code: 400, error: 'bad_type', message: 'Upload a .cbz, .cbr, .zip, .rar, .pdf or .epub file.' });
@@ -180,6 +181,9 @@ export async function uploadSeriesRoutes(app: FastifyInstance) {
     // a deleted series (lib/library.ts), so a file put there would never be seen.
     const known = await one<{ deleted_at: string | null }>(
       'SELECT deleted_at FROM lib_series WHERE folder = $1 ORDER BY (deleted_at IS NOT NULL) LIMIT 1', [folder]);
+    if (p.data.fresh && (known || await one('SELECT 1 FROM lib_series WHERE deleted_at IS NULL AND merged_into IS NULL AND lower(title) = lower($1) LIMIT 1', [p.data.title]))) {
+      return refuse(reply, { code: 409, error: 'taken', message: 'A series by that title is already here. Pick another title.' });
+    }
     if (known?.deleted_at) return refuse(reply, { code: 409, error: 'deleted', message: 'A series of that name was deleted. Restore it, or pick another title.' });
 
     const r = await receive(req, folder, name);

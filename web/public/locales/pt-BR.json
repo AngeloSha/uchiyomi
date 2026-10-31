@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4380
+    "strings": 4381
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -4270,6 +4270,7 @@
   "Password removed": "Senha removida",
   "Can make profiles": "Pode criar perfis",
   "Can upload series": "Pode enviar séries",
+  "A series by that title is already here. Pick another title.": "Já existe uma série com esse título. Escolha outro.",
   "Your account is not allowed to upload series.": "Sua conta não tem permissão para enviar séries.",
   "The server sees you at {ip}, at home.": "O servidor vê você em {ip}, em casa.",
   "The server sees you at {ip}, outside your home network.": "O servidor vê você em {ip}, fora da sua rede doméstica.",

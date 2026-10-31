@@ -9,12 +9,12 @@ export const CHAPTER_ACCEPT = '.cbz,.cbr,.zip,.rar,.pdf,.epub';
 export interface Uploaded { file: string; seriesId?: string | null; bookId: string | null; number: number | null }
 
 /** Into an existing series, or into a new one by its title (Uploads/<title> on the server). */
-export type UploadTarget = { seriesId: string } | { title: string };
+export type UploadTarget = { seriesId: string } | { title: string; fresh?: boolean };
 
 const urlFor = (to: UploadTarget, name: string): string =>
   'seriesId' in to
     ? `/api/admin/series/${encodeURIComponent(to.seriesId)}/upload?name=${encodeURIComponent(name)}`
-    : `/api/library/upload?title=${encodeURIComponent(to.title)}&name=${encodeURIComponent(name)}`;
+    : `/api/library/upload?title=${encodeURIComponent(to.title)}&name=${encodeURIComponent(name)}${to.fresh ? '&fresh=1' : ''}`;
 
 export const uploadChapter = (to: UploadTarget, f: File): Promise<Uploaded> =>
   api<Uploaded>(urlFor(to, f.name), { method: 'POST', body: f, headers: { 'content-type': 'application/octet-stream' } });
@@ -28,6 +28,7 @@ export function uploadRefusal(e: unknown, name: string): string {
     code = b?.error ?? null;
     message = b?.message ?? null;
   } catch { /* not JSON: the plain failure */ }
+  if (code === 'taken') return tr('A series by that title is already here. Pick another title.');
   if (code === 'exists') return tr('{name} is already in this series.', { name });
   if (code === 'bad_type') return tr('{name} is not a .cbz, .cbr, .zip, .rar, .pdf or .epub file.', { name });
   if (code === 'bad_file') return tr('{name} is not the kind of file its name says.', { name });
@@ -38,7 +39,7 @@ export function uploadRefusal(e: unknown, name: string): string {
   return tr('Could not upload {name}', { name });
 }
 
-export interface UploadRun { done: number; failed: string[]; seriesId: string | null }
+export interface UploadRun { done: number; failed: string[]; seriesId: string | null; taken?: boolean }
 
 /**
  * Every file, one after another, in name order (Chapter 2 before Chapter 10 is the scanner's business: it reads the
@@ -49,11 +50,17 @@ export async function uploadAll(to: UploadTarget, files: File[], onFile?: (i: nu
   const run: UploadRun = { done: 0, failed: [], seriesId: 'seriesId' in to ? to.seriesId : null };
   for (const [i, f] of sorted.entries()) {
     onFile?.(i, f);
+    // A new series' title is checked on its first file only; the rest join what that one made.
+    const here = 'title' in to && i > 0 ? { title: to.title } : to;
     try {
-      const r = await uploadChapter(to, f);
+      const r = await uploadChapter(here, f);
       run.done++;
       if (r.seriesId) run.seriesId = r.seriesId;
-    } catch (e) { run.failed.push(uploadRefusal(e, f.name)); }
+    } catch (e) {
+      // A title already here stops the run: nothing of it was written, and the rest would only be refused too.
+      if (i === 0 && 'title' in to && to.fresh && e instanceof ApiError && e.status === 409 && e.body.includes('"taken"')) { run.taken = true; break; }
+      run.failed.push(uploadRefusal(e, f.name));
+    }
   }
   return run;
 }

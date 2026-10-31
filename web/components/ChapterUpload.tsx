@@ -4,6 +4,7 @@
 import { useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
+import { IcX } from './icons';
 import { t as tr } from '@/lib/i18n';
 import { CHAPTER_ACCEPT, uploadAll, type UploadRun, type UploadTarget } from '@/lib/chapterUpload';
 import { useToast } from './Toast';
@@ -48,34 +49,59 @@ export function UploadChaptersRow({ seriesId, onSaved }: { seriesId: string; onS
   );
 }
 
-/** The Upload a series page (app/upload/page.tsx): a series that is not here yet, started from its files. */
+/** The Upload a series page (app/upload/page.tsx): a series that is not here yet, started from its files. Title and
+ *  files in either order; Upload waits for both, and the server refuses a title already here. */
 export function UploadSeriesSection() {
   const uid = useId();
   const input = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
   const [made, setMade] = useState<{ id: string; title: string } | null>(null);
+  const [takenTitle, setTakenTitle] = useState<string | null>(null);
   const { at, start } = useUpload((run) => {
-    if (run.done && run.seriesId) { setMade({ id: run.seriesId, title: title.trim() }); setTitle(''); }
+    if (run.taken) setTakenTitle(title.trim());
+    if (run.done && run.seriesId) { setMade({ id: run.seriesId, title: title.trim() }); setTitle(''); setFiles([]); }
   });
-  const ready = !!title.trim() && !at;
+  const taken = !!takenTitle && takenTitle === title.trim();
+  const ready = !!title.trim() && !taken && files.length > 0 && !at;
+  const add = (more: File[]) => setFiles((had) => [...had, ...more.filter((f) => !had.some((h) => h.name === f.name))]
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })));
   return (
     <section data-upload-series>
       <p className="mb-3 max-w-prose text-xs leading-relaxed text-fog-500">
         {tr('For a series no source has, when you already have its chapters. The files go into the download folder, under Uploads, and the chapter number is read from each file name.')}
       </p>
-      <div className="flex flex-wrap items-center gap-2">
-        <label htmlFor={uid} className="sr-only">{tr('Title')}</label>
-        <input id={uid} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} dir="auto"
-          placeholder={tr('Series title')} className="field min-w-0 flex-1 sm:max-w-sm" />
-        <input ref={input} type="file" multiple accept={CHAPTER_ACCEPT} hidden
-          onChange={(e) => { const files = [...(e.target.files ?? [])]; e.target.value = ''; void start({ title: title.trim() }, files); }} />
-        <button type="button" onClick={() => input.current?.click()} disabled={!ready} className="chip shrink-0 text-xs">
-          {at && <ProgressRing progress="spin" size={12} />}
-          {at ? progressText(at) : tr('Choose files…')}
-        </button>
+      <label htmlFor={uid} className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Title')}</label>
+      <input id={uid} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} dir="auto" disabled={!!at}
+        placeholder={tr('Series title')} aria-invalid={taken || undefined} className="field w-full sm:max-w-md" />
+      {taken && <p className="mt-1 text-xs text-red-400" role="alert">{tr('A series by that title is already here. Pick another title.')}</p>}
+
+      <input ref={input} type="file" multiple accept={CHAPTER_ACCEPT} hidden
+        onChange={(e) => { const more = [...(e.target.files ?? [])]; e.target.value = ''; add(more); }} />
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <button type="button" onClick={() => input.current?.click()} disabled={!!at} className="btn-key">{tr('Choose files…')}</button>
+        {files.length > 0 && !at && <button type="button" onClick={() => setFiles([])} className="chip text-xs">{tr('Clear all')}</button>}
       </div>
+      {files.length > 0 && (
+        <ul className="mt-3 divide-y divide-ink-700 rounded-xl border border-ink-700" data-upload-files>
+          {files.map((f) => (
+            <li key={f.name} className="flex items-center gap-2 px-3 py-2 text-sm">
+              <span className="min-w-0 flex-1 truncate text-fog-200" dir="auto">{f.name}</span>
+              {!at && (
+                <button type="button" onClick={() => setFiles((had) => had.filter((h) => h !== f))} aria-label={tr('Remove')}
+                  className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-fog-500 hover:text-fog-100"><IcX width={14} height={14} /></button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <button type="button" onClick={() => void start({ title: title.trim(), fresh: true }, files)} disabled={!ready} className="btn-accent mt-4 w-full sm:w-auto disabled:opacity-50" data-upload-start>
+        {at && <ProgressRing progress="spin" size={14} />}
+        {at ? progressText(at) : tr('Upload')}
+      </button>
       {made && (
-        <p className="mt-2 text-xs text-fog-400">
+        <p className="mt-3 text-xs text-fog-400">
           <Link href={`/series/?id=${encodeURIComponent(made.id)}`} className="text-accent underline-offset-2 hover:underline">
             {tr('Open “{title}”', { title: made.title })}
           </Link>
