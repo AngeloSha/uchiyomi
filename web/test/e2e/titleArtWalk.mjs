@@ -87,11 +87,9 @@ try {
   await page.screenshot({ path: `${OUT}/home-desktop.png`, fullPage: false });
   console.log('PASS real upload preserves transparency/caption and updates both series and batch-enriched home heroes');
 
-  await page.setViewport({ width: 390, height: 844 });
+  // A failed logo keeps the readable title -- on a computer, the only screen that draws one (v0.102.2).
   await page.goto(`${BASE}/series/?id=${encodeURIComponent(id)}`, { waitUntil: 'networkidle2' });
-  await wait(async () => (await visibleTitle())?.logo, 'phone hero logo');
-  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'phone has no sideways overflow');
-  await page.screenshot({ path: `${OUT}/series-phone.png`, fullPage: false });
+  await wait(async () => (await visibleTitle())?.logo, 'desktop hero logo again');
   await page.setCacheEnabled(false);
   await page.setRequestInterception(true);
   const rejectLogo = (request) => request.url().includes(`/img/series/${encodeURIComponent(id)}/logo`) ? request.abort('failed') : request.continue();
@@ -101,9 +99,29 @@ try {
   assert.equal((await visibleTitle()).logo, false);
   page.off('request', rejectLogo);
   await page.setRequestInterception(false);
-  console.log('PASS phone logo fits and a failed image keeps the readable title');
+  console.log('PASS a failed image keeps the readable title');
 
-  await page.reload({ waitUntil: 'networkidle2' });
+  // v0.102.2: a phone's hero is the cover, lettering and all. Both heroes show the styled title there, and the logo is
+  // never even requested. Reintroduce the logo on a phone (HeroTitle without `logo`): every assertion below fails.
+  await page.setViewport({ width: 390, height: 844 });
+  const logoRequests = [];
+  const countLogo = (request) => { if (/\/img\/series\/[^/?]+\/logo/.test(request.url())) logoRequests.push(request.url()); };
+  page.on('request', countLogo);
+  await page.goto(`${BASE}/series/?id=${encodeURIComponent(id)}`, { waitUntil: 'networkidle2' });
+  await wait(async () => (await visibleTitle())?.fallback, 'phone series hero shows the styled title');
+  assert.equal((await visibleTitle()).logo, false, 'a phone series hero draws no logo');
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'phone has no sideways overflow');
+  await page.screenshot({ path: `${OUT}/series-phone.png`, fullPage: false });
+  await page.goto(BASE + '/', { waitUntil: 'networkidle2' });
+  await page.waitForSelector('[data-home-hero]');
+  await wait(async () => (await visibleTitle())?.fallback, 'phone home hero shows the styled title');
+  assert.equal((await visibleTitle()).logo, false, 'a phone home hero draws no logo');
+  await page.screenshot({ path: `${OUT}/home-phone.png`, fullPage: false });
+  page.off('request', countLogo);
+  assert.deepEqual(logoRequests, [], 'a phone downloads no title logo');
+  console.log('PASS a phone shows the styled title over its cover and downloads no logo');
+
+  await page.goto(`${BASE}/series/?id=${encodeURIComponent(id)}`, { waitUntil: 'networkidle2' });
   await openEditor();
   assert.equal(await page.$eval('[data-art-find-logo]', (e) => e.disabled), true, 'a custom choice blocks automatic replacement');
   await click('[data-art-logo-text]');

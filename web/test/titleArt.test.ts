@@ -81,6 +81,16 @@ test('a downloading logo never blanks the accessible title, and only readable En
   assert.match(fallback, /class="hero-title-text">The Hero<\/span>/);
 });
 
+test('where the cover is the hero (a phone), the logo is neither drawn nor downloaded and the styled title shows', () => {
+  // v0.102.2 (HeroTitle `logo`). Reintroduce by ignoring the prop: the phone markup carries an <img>.
+  const phone = renderToStaticMarkup(React.createElement(HeroTitle, { series: series(art()), logo: false }));
+  assert.doesNotMatch(phone, /<img/, 'a phone hero requests the logo');
+  assert.match(phone, /class="hero-title-text">The Hero<\/span>/, 'the styled title is the title there');
+  assert.match(phone, /<h1[^>]*data-hero-title/, 'it stays the page heading');
+  const computer = renderToStaticMarkup(React.createElement(HeroTitle, { series: series(art()), logo: true }));
+  assert.match(computer, /<img[^>]*src="\/img\/series\/s_1\/logo\?v=4"/, 'a computer still draws the logo');
+});
+
 test('a title-art preview does not insert a second page heading', () => {
   const html = renderToStaticMarkup(React.createElement(HeroTitle, { series: series(art()), as: 'div' }));
   assert.match(html, /<div[^>]*data-hero-title/);

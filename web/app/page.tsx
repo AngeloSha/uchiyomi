@@ -10,7 +10,7 @@ import { useAuth } from '@/lib/auth';
 import { triggerRefresh } from '@/lib/refresh';
 import { applyCover, clearCover } from '@/lib/theme';
 import { ART } from '@/lib/art';
-import { Img, ProgressBar, RailSkeleton, SectionTitle, Reveal } from '@/components/ui';
+import { Img, ProgressBar, RailSkeleton, SectionTitle, Reveal, useWideViewport } from '@/components/ui';
 import { SeriesCard, ContinueCard } from '@/components/cards';
 import { KeepReadingHidden } from '@/components/KeepReadingHidden';
 import { HeroCarousel } from '@/components/HeroCarousel';
@@ -108,7 +108,9 @@ export default function HomePage() {
   const { data: trending } = useQuery({ queryKey: ['trending'], queryFn: () => api<{ content: Series[] }>('/api/trending'), staleTime: 300000, enabled: on('top10') });
   const { data: featured, isPending: featuredPending } = useQuery({ queryKey: ['featured'], queryFn: () => api<{ content: Series[] }>('/api/featured'), staleTime: 600000 });
   const refetchTitleArt = useCallback(() => qc.refetchQueries({ queryKey: ['featured'], exact: true }), [qc]);
-  useTitleArtPolling('featured', featured?.content ?? [], refetchTitleArt, authStatus !== 'offline');
+  // The hero's title logo is a computer's (v0.102.2, components/HeroTitle.tsx `logo`): a phone has none to wait for.
+  const wideHero = useWideViewport();
+  useTitleArtPolling('featured', featured?.content ?? [], refetchTitleArt, authStatus !== 'offline' && wideHero);
 
   // "Because you read X" — seed a named recommendation rail from what you're currently reading (else a top favorite)
   const seed = data?.onDeck?.[0]

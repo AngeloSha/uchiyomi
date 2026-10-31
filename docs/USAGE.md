@@ -629,9 +629,11 @@ day-long copy of the old one runs out.
 
 ### Hero title artwork
 
-The home carousel and a manga's series-page hero can show its own transparent title logo. Without a logo, the title
-uses a readable style matched to its genres and cover colours. The same treatment fits a phone and a computer. A
-logo in the original language, or one whose language is not known, keeps the readable manga title underneath it.
+On a computer, the home carousel and a manga's series-page hero can show its own transparent title logo. Without a
+logo, the title uses a readable style matched to its genres and cover colours. On a phone (and any screen under 1024
+pixels wide) the cover itself is the hero and already carries its lettering, so the hero shows that readable title
+instead of the logo, and the logo is not downloaded (since v0.102.2). A logo in the original language, or one whose
+language is not known, keeps the readable manga title underneath it.
 
 **Admin → Settings → Series & chapters → Automatic title logos** enables background logo lookup. It is off until enabled.
 Only a series with a checked or manually confirmed AniList manga link is looked up; the server uses that ID to find
@@ -1973,9 +1975,11 @@ translated once per language and kept, so reading it again costs nothing.
   about six seconds); source rows show *Searching…*, empty, failed, disabled or cooling-down states while
   the rest arrive. Repeating the same search continues the in-flight work and a recent term opens from the
   five-minute cache. Results are still filtered for the signed-in account, including its age limit.
+  Results come in each source's own relevance order, so the *Newest*/*Popular* toggle is hidden while they are up;
+  the × in the search box, or searching with the box empty, goes back to browsing and brings it back.
   With one source chosen in the chip, a search asks **only that source** and the chip stays on screen while
   the results are up, so you can see the search is narrowed and clear it with its × (which searches every
-  source again). Switching the toggle to *Newest* or *Popular* goes back to browsing.
+  source again).
   A search on one source (the one chosen, or the only one you have) **keeps going as you scroll** (since v0.96.0,
   [#331](https://github.com/AngeloSha/uchiyomi/issues/331)): a site answers its search a page at a time (BatCave ten
   at a time, 209 for *Star Trek*), and the next page loads as you near the end of the wall, up to 30 pages. Every

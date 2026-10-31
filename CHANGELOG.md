@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.102.2 — 2026-10-31
+
+**Title logos are a computer's: on a phone the cover is the hero, so it shows the title instead.**
+
+### Title logos on computers only
+
+- **A phone's hero shows the readable title over the cover, never the title logo.** On a phone the cover is the hero and
+  already carries its own lettering, so a logo on top of it said the title twice. Home and series heroes on a computer
+  keep their logos as before. This applies to any screen under 1024 pixels wide, where the cover replaces the banner.
+- **A phone no longer downloads title logos** or keeps checking for one that is still being looked up.
+
+### Also
+
+- **Discover hides *Newest* and *Popular* while search results are up** ([#376](https://github.com/AngeloSha/uchiyomi/pull/376),
+  from @Calvin-Davidson). Results come in each source's own order, so the toggle did nothing but throw the search away.
+  Searching with an empty box now goes back to browsing, like the ×.
+
+### Upgrading
+
+- Nothing to do.
+
 ## v0.102.1 — 2026-10-30
 
 - Nightly cover-title processing waits for the online logo search for each checked manga before extracting a cover. Pending searches and provider retry pauses remain queued.

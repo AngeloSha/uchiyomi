@@ -533,7 +533,7 @@ function DiscoverInner() {
   const search = (e?: React.FormEvent) => {
     e?.preventDefault();
     const next = q.trim();
-    if (!next) return;
+    if (!next) { backToNewest(); return; }
     setMode('search');
     writeQ(next);
     // The same term submitted again while its answer is on screen is a refetch -- a failed search has no
@@ -810,8 +810,8 @@ function DiscoverInner() {
       {/*
         In both modes, not just while browsing. The picker is the only place the chosen source is visible or
         clearable, so hiding it during a search -- while the search itself is narrowed to that source --
-        would leave the results silently filtered with nothing on screen to say why. Choosing a list tab is
-        a browse action, so from a search it returns to browsing that list.
+        would leave the results silently filtered with nothing on screen to say why. The Newest/Popular tabs
+        are browse-only: search results come in each source's relevance order, so they are not offered then.
       */}
       <SourcePicker
         sources={budget} states={states} settled={settled} total={budget.length}
@@ -823,9 +823,9 @@ function DiscoverInner() {
         mode={listMode}
         // The source shown alone stays chosen when the other listing has it: flipping dropped it, so one source's Newest
         // flipped to every source's Popular.
-        onMode={(m) => {
+        onMode={mode === 'search' ? undefined : (m) => {
           setListMode(m); setSelected(selected && budgetForMode(sources, m, Infinity).some((s) => s.id === selected) ? selected : null);
-          setPage(1); if (mode === 'search') backToNewest();
+          setPage(1);
         }}
       />
 

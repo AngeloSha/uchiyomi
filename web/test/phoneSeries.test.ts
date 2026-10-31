@@ -79,3 +79,14 @@ test('Home\'s hero on a phone is its slide\'s cover too, filling it; a computer 
   assert.match(home, /skeleton bleed-lg under-topbar under-phone-header h-\[min\(150vw,82svh\)\] lg:h-\[72vh\]/);
 });
 
+test('a phone shows the styled title over its cover, never the logo, and does not poll for one (v0.102.2)', () => {
+  // The owner: the cover is already the hero on a phone, so the title logo is a computer's. Reintroduce the logo on a
+  // phone (drop `logo={false}` or `logo={wide}`): this fails, and titleArtWalk.mjs counts a logo request at 390 px.
+  assert.match(hero, /<HeroTitle series=\{series \?\? \{ id, name: title, metadata: \{\} \}\} title=\{title\} headingRef=\{heroTitleRef\} logo=\{false\} \/>/);
+  assert.match(hero, /<HeroTitle series=\{series \?\? \{ id, name: title, metadata: \{\} \}\} title=\{title\} logo=\{wide\} \/>/);
+  const carousel = readFileSync(join(__dirname, '..', 'components/HeroCarousel.tsx'), 'utf8');
+  assert.match(carousel, /<HeroTitle series=\{cur\} logo=\{wide\} \/>/);
+  assert.match(page, /useTitleArtPolling\(id, series \? \[series\] : \[\], refetchTitleArt, authStatus !== 'offline' && wide\);/);
+  const home = readFileSync(join(__dirname, '..', 'app/page.tsx'), 'utf8');
+  assert.match(home, /useTitleArtPolling\('featured', featured\?\.content \?\? \[\], refetchTitleArt, authStatus !== 'offline' && wideHero\);/);
+});

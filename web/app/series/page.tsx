@@ -853,7 +853,10 @@ function SeriesInner() {
   // The same two queries lib/seriesPrefetch.ts asks for at the click that opens this page, so the page usually mounts on
   // them rather than on its placeholders.
   const { data: series, refetch: refetchTitleArt } = useQuery({ ...seriesQuery(id), enabled: !!id });
-  useTitleArtPolling(id, series ? [series] : [], refetchTitleArt, authStatus !== 'offline');
+  // A computer's layout (lg and up): the banner hero with the title logo, the More menu. Under it the cover is the hero
+  // and no logo is shown (v0.102.2), so a phone does not poll for one either.
+  const wide = useWideViewport();
+  useTitleArtPolling(id, series ? [series] : [], refetchTitleArt, authStatus !== 'offline' && wide);
   const { data: books } = useQuery({ ...seriesBooksQuery(id), enabled: !!id });
   // v0.87.0: which chapters have talk, and how much (GET /api/series/:id/comments); nothing while `on` is false, and never
   // asked on Uchiyomi Desktop, where the route does not exist. v0.90.0: nor by an account that switched Comments and
@@ -1682,8 +1685,7 @@ function SeriesInner() {
   // Under the cover there were up to twelve stacked buttons, and on a 768-px-tall screen an admin's last ones ran past
   // the bottom of the sticky column. Now: one button that says what it opens, how far the reader is, and four keys --
   // Favourite, Offline, List, More. More holds the rest, grouped (lib/seriesActions.ts decides who sees what): a menu
-  // from lg up, a sheet below, where a thumb is.
-  const wide = useWideViewport();
+  // from lg up, a sheet below, where a thumb is (`wide`, above).
   const seriesHref = `/series/?id=${encodeURIComponent(id)}`;
   const notesHref = `/moments/?series=${encodeURIComponent(id)}`;
   const openReader = () => { if (resumeBook) router.push(`/reader/?book=${resumeBook.id}`); };
@@ -2086,7 +2088,8 @@ function SeriesInner() {
           {meta?.status && (
             <span className="mb-2 inline-block rounded-md bg-white/15 px-2 py-0.5 text-2xs font-semibold uppercase tracking-wide text-white backdrop-blur rtl:tracking-normal">{statusText(meta.status)}</span>
           )}
-          <HeroTitle series={series ?? { id, name: title, metadata: {} }} title={title} headingRef={heroTitleRef} />
+          {/* The cover above is the hero and carries its own lettering: the styled title, never the logo (HeroTitle). */}
+          <HeroTitle series={series ?? { id, name: title, metadata: {} }} title={title} headingRef={heroTitleRef} logo={false} />
           <div className="mt-2">{Meta}</div>
         </motion.div>
         {/* desktop title-over-art (Jellyfin style) — offset to the right of the floating poster */}
@@ -2098,7 +2101,8 @@ function SeriesInner() {
               <span data-series-status className="rounded-md bg-white/10 px-2 py-0.5 text-2xs font-semibold uppercase tracking-wide text-fog-100 backdrop-blur rtl:tracking-normal">{statusText(meta.status)}</span>
             </div>
           )}
-          <HeroTitle series={series ?? { id, name: title, metadata: {} }} title={title} />
+          {/* Hidden under 1024 px by CSS, and `logo={wide}` so a phone does not download the logo it never shows. */}
+          <HeroTitle series={series ?? { id, name: title, metadata: {} }} title={title} logo={wide} />
           <div className="mt-2">{Meta}</div>
           {/* The block is pointer-events-none over the banner; the chips take their taps back. */}
           {editions && <EditionChips editions={editions} onAdd={addLanguage} className="pointer-events-auto mt-3" />}
