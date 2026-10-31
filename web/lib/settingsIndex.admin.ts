@@ -70,6 +70,8 @@ export const ADMIN_SETTINGS: SettingsIndex = {
     { id: 'notice-short-only', cat: 'series', label: 'Only hide short ones (3 pages or fewer)', editor: 'notice-chapters' },
     { id: 'adult-filter', cat: 'series', label: '18+ filter', keywords: ['adult', 'nsfw', 'mature', 'show 18+', 'genres'] },
     { id: 'deleted-ghosts', cat: 'series', label: 'Show deleted chapters as ghosts', keywords: ['deleted chapters', 'ghost', 'fetch again'] },
+    { id: 'automatic-title-logos', cat: 'series', label: 'Automatic title logos', keywords: ['manga', 'logo', 'title artwork', 'wikimedia', 'anilist', 'hero'] },
+    { id: 'automatic-cover-titles', cat: 'series', label: 'Automatically extract cover titles', keywords: ['cover', 'extract', 'title', 'preview', 'logo', 'local'] },
     { id: 'fill-details', cat: 'series', label: 'Fill in missing details', keywords: ['anilist', 'metadata', 'description', 'author', 'cover'] },
     { id: 'borrow-names', cat: 'series', label: 'Borrow chapter names from other sources', keywords: ['chapter titles', 'chapter names'] },
     { id: 'discover-lookups', cat: 'series', label: 'Match Discover titles online', keywords: ['discover', 'anilist', 'mangadex', 'mangaupdates', 'duplicates'] },

@@ -8,6 +8,7 @@ import { Series } from '@/lib/types';
 import { useWideViewport } from './ui';
 import { HeroArt } from './MosaicArt';
 import { PhoneHeroCover } from './PhoneHeroCover';
+import { HeroTitle } from './HeroTitle';
 import { backdropSources } from '@/lib/art';
 import { applyCover } from '@/lib/theme';
 import { IcPlay, IcHeart, IcChevronLeft, IcChevronRight } from './icons';
@@ -83,7 +84,7 @@ export function HeroCarousel({ slides }: { slides: Series[] }) {
   return (
     <div
       data-home-hero
-      className="bleed-lg under-topbar under-phone-header relative h-[min(150vw,82svh)] overflow-hidden lg:h-[64vh] lg:min-h-[420px]"
+      className="bleed-lg under-topbar under-phone-header relative h-[min(150vw,82svh)] overflow-hidden lg:h-[72vh]"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       onTouchStart={(e) => { startX.current = e.touches[0].clientX; }}
@@ -109,29 +110,30 @@ export function HeroCarousel({ slides }: { slides: Series[] }) {
           keys legible. */}
       <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 z-[1] h-28 bg-linear-to-b from-ink-950/70 to-transparent lg:h-32" />
 
-      <div className="relative z-10 flex h-full items-end px-5 pb-12 lg:pb-20 lg:pe-14 lg:ps-[calc(var(--rail-w)+3.5rem)]">
-        <div className="flex items-end gap-7">
+      <div data-home-hero-content className="relative z-10 flex h-full items-end px-5 pb-12 lg:pb-14 lg:pe-14 lg:ps-[calc(var(--rail-w)+3.5rem)]">
+        <div className="flex w-full min-w-0 items-end gap-7">
           <Link href={`/series/?id=${cur.id}`} className="hidden h-72 w-48 shrink-0 overflow-hidden rounded-2xl border border-white/10 shadow-lift transition hover:-translate-y-1 lg:block">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={withCoverBust(img.seriesThumb(cur.id, undefined, 800))} alt={cur.metadata?.title || cur.name} className="h-full w-full object-cover" />
           </Link>
-          <div className="max-w-xl">
-            <span className="mb-3 inline-flex items-center gap-1.5 rounded-md bg-white/10 px-2.5 py-1 text-2xs font-semibold uppercase tracking-wider text-fog-100 backdrop-blur rtl:tracking-normal">★ {tr('Daily pick')}</span>
-            <h1 className="line-clamp-2 font-brand text-3xl font-bold leading-[1.05] text-white drop-shadow-[0_2px_16px_rgba(0,0,0,0.6)] lg:text-6xl">{cur.metadata?.title || cur.name}</h1>
-            <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fog-300 lg:text-sm">
+          <div data-home-hero-copy className="min-w-0 flex-1 max-w-2xl">
+            <span data-home-hero-badge className="mb-2 inline-flex items-center gap-1.5 rounded-md bg-white/10 px-2.5 py-1 text-2xs font-semibold uppercase tracking-wider text-fog-100 backdrop-blur rtl:tracking-normal">★ {tr('Daily pick')}</span>
+            {/* A phone's hero is the cover, lettering and all: the title logo is a computer's (HeroTitle `logo`). */}
+            <HeroTitle series={cur} logo={wide} />
+            <div data-home-hero-meta className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fog-300 lg:text-sm">
               {cur.metadata?.status && <span className="capitalize text-fog-200">{statusText(cur.metadata.status)}</span>}
               <span>· {tr('{n} ch', { n: cur.booksCount })}</span>
               {(cur.metadata?.genres ?? []).slice(0, 3).map((g) => <span key={g} className="capitalize">· {g}</span>)}
             </div>
-            {summary && <p className="mt-3 line-clamp-2 max-w-lg text-sm text-fog-300 lg:line-clamp-3">{summary}</p>}
-            <div className="mt-5 flex items-center gap-3">
+            {summary && <p data-home-hero-summary className="mt-3 line-clamp-2 max-w-lg text-sm text-fog-300">{summary}</p>}
+            <div data-home-hero-actions className="mt-4 flex items-center gap-3">
               <Link href={`/series/?id=${cur.id}`} className="btn-accent cta-glow px-7 py-3.5"><IcPlay width={18} height={18} />{tr('Read')}</Link>
               <FavButton series={cur} />
             </div>
             {/* Where the slides are: one segment each, the current one filling while it shows (still under Reduce effects
                 or reduced motion, and while held). The segments are the slide buttons, under the text they belong to. */}
             {n > 1 && (
-              <div className="mt-6 flex items-center gap-1.5" data-hero-slides>
+              <div className="mt-4 flex items-center gap-1.5" data-hero-slides>
                 {slides.map((_, k) => (
                   <button key={k} type="button" aria-label={tr('Slide {n}', { n: k + 1 })} aria-current={k === i || undefined} onClick={() => setI(k)}
                     className="group grid h-5 place-items-center">
@@ -152,7 +154,7 @@ export function HeroCarousel({ slides }: { slides: Series[] }) {
       {/* Hold, and step: the Pause key on every screen (a phone swipes between slides); the arrows from lg up, together at
           the bottom end, clear of the sidebar and of the text. */}
       {n > 1 && (
-        <div className="absolute bottom-5 end-4 z-10 flex items-center gap-2 lg:bottom-8 lg:end-8">
+        <div data-home-hero-controls className="absolute bottom-5 end-4 z-10 flex items-center gap-2 lg:bottom-8 lg:end-8">
           <button type="button" onClick={() => go(-1)} aria-label={tr('Previous')} className={`hidden lg:grid ${HERO_KEY}`}><IcChevronLeft width={18} height={18} className="rtl:-scale-x-100" /></button>
           <button type="button" onClick={() => setHeld((v) => !v)} aria-label={held ? tr('Resume') : tr('Pause')} aria-pressed={held} className={`grid ${HERO_KEY}`}>
             {held ? <IcPlay width={15} height={15} /> : <span aria-hidden className="flex gap-[3px]"><span className="h-3.5 w-[3px] rounded-[1px] bg-current" /><span className="h-3.5 w-[3px] rounded-[1px] bg-current" /></span>}

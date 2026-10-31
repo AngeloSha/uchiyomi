@@ -1897,6 +1897,23 @@ POST   /api/admin/sources/custom  DELETE /api/admin/sources/custom/:id
 PATCH  /api/admin/sources/custom/:id
 PUT    /api/admin/series/:id/art  PUT    /api/admin/series/:id/meta
 POST   /api/admin/series/:id/upload POST   /api/library/upload
+POST   /api/admin/series/:id/logo/refresh
+GET    /api/admin/title-logos/status
+POST   /api/admin/title-logos/scan
+GET    /api/admin/title-extraction/capabilities
+GET    /api/admin/title-extraction/batch/status
+POST   /api/admin/title-extraction/batch/run
+POST   /api/admin/title-extraction/batch/cancel
+GET    /api/admin/series/:id/title-extraction/cover
+GET    /api/admin/series/:id/title-extraction
+POST   /api/admin/series/:id/title-extraction
+GET    /api/admin/series/:id/title-extraction/:jobId
+DELETE /api/admin/series/:id/title-extraction/:jobId
+GET    /api/admin/series/:id/title-extraction/:jobId/cover
+GET    /api/admin/series/:id/title-extraction/:jobId/preview
+GET    /api/admin/series/:id/title-extraction/:jobId/mask/baseline
+PATCH  /api/admin/series/:id/title-extraction/:jobId/mask
+POST   /api/admin/series/:id/title-extraction/:jobId/apply
 POST   /api/admin/series/:id/hero/shuffle
 PATCH  /api/admin/series/:id      DELETE /api/admin/series/:id
 POST   /api/admin/series/:id/editions DELETE /api/admin/series/:id/edition
@@ -3144,6 +3161,7 @@ at once; a source with no picture, or that did not answer in time, is left out t
 own copy as an upload, so the cover survives the source changing or going away.
 ```
 GET    /img/series/:id/thumb      GET    /img/series/:id/backdrop
+GET    /img/series/:id/logo
 GET    /img/series/:id/hero
 GET    /img/extensions/icon/:pkgName
 GET    /img/books/:id/thumb       GET    /img/books/:id/page/:n
@@ -3494,3 +3512,7 @@ provider's *Subject mode* decides what that subject is.)
 - SSO sessions appear in **Profile → Account → Active sessions** as a device named "SSO" and can be revoked like any other.
 - Signing in through SSO does not ask for a second factor here; your identity provider is responsible for
   that. Local password logins still use Uchiyomi's own 2FA.
+
+Nightly local cover-title generation has separate default-off generation and available-checks application switches.
+The durable run/status/cancel APIs, private14-day review retention and source/model fingerprint behavior are described
+in [Nightly cover titles](cover-title-batch.md). Status reads do not start inference or metadata discovery.

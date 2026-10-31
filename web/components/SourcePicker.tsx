@@ -86,7 +86,8 @@ export function SourcePicker({ sources, states, settled, total, count, selected,
   selected: string | null;
   onSelect: (id: string | null) => void;
   mode: ListMode;
-  onMode: (m: ListMode) => void;
+  /** Absent while a search is on screen: search results come in each source's own relevance order, so neither tab would change them. */
+  onMode?: (m: ListMode) => void;
 }) {
   // The parent namespaces its bookkeeping by listing mode, so a bare id finds nothing here. Getting this
   // wrong is silent: every row would simply read as "not asked yet" and sit permanently dimmed.
@@ -113,7 +114,7 @@ export function SourcePicker({ sources, states, settled, total, count, selected,
           end-to-end arrow test, which means for the trending rail below. */}
       <div className="flex flex-wrap items-center gap-2">
         {/* Which listing, before which sources -- it changes what the chip beside it can even offer. */}
-        <div className="flex items-center gap-1.5 pe-1">
+        {onMode && <div className="flex items-center gap-1.5 pe-1">
           {(['newest', 'popular'] as const).map((m) => (
             <button key={m} type="button" onClick={() => onMode(m)} aria-pressed={mode === m}
               className={`chip text-xs ${mode === m ? 'chip-active' : ''}`}>
@@ -121,7 +122,7 @@ export function SourcePicker({ sources, states, settled, total, count, selected,
             </button>
           ))}
           <span aria-hidden className="mx-0.5 h-4 w-px bg-ink-700" />
-        </div>
+        </div>}
 
         {current ? (
           // Two SIBLING buttons, never a × inside the chip: a button inside a button is invalid DOM, and on

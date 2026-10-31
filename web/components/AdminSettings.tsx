@@ -50,6 +50,8 @@ import { discoverSources } from '@/lib/sourceGroups';
 import { memberDefaultsOf } from '@/lib/memberDefaults';
 import { joinSentences } from '@/lib/jobs';
 import { clockText, hoursText, intervalChoices } from '@/lib/settingsChoices';
+import { TitleLogoScan } from '@/components/TitleLogoScan';
+import { AutomaticCoverTitles } from '@/components/TitleExtraction';
 
 /** One PATCH. Resolves once the server has answered, so the row that called it can show its tick. */
 type Save = (body: Record<string, unknown>) => Promise<unknown>;
@@ -77,6 +79,9 @@ export function useAdminSettingsViews(extra: Partial<Record<string, ReactNode>> 
     void qc.invalidateQueries({ queryKey: ['admin-settings'] });
     // A blocklist save hides, or shows again, every series' chapters only blocked groups released (bff
     // reapplyBlocklist): any series page already cached refetches its rows, its versions and its groups.
+    if (body.automaticTitleLogos !== undefined) {
+      for (const k of ['featured', 'series']) void qc.invalidateQueries({ queryKey: [k] });
+    }
     if (body.scanlatorPrefs !== undefined) {
       for (const k of ['series-listing', 'series-versions', 'series-groups', 'series-scanlators']) void qc.invalidateQueries({ queryKey: [k] });
     }
@@ -529,6 +534,16 @@ function SeriesSection({ data, save }: { data: any; save: Save }) {
       </RowGroup>
 
       <RowGroup title={tr('From the internet')}>
+        <RowBlock id="automatic-title-logos">
+          <SwitchRow label={tr('Automatic title logos')}
+            help={tr('Find original manga title artwork using confirmed manga links. Titles without artwork use styled text; your uploaded artwork always wins.')}
+            on={data.automatic_title_logos === true} onChange={(next) => save({ automaticTitleLogos: next })} />
+          <TitleLogoScan enabled={data.automatic_title_logos === true} />
+        </RowBlock>
+        <RowBlock id="automatic-cover-titles">
+          <AutomaticCoverTitles enabled={data.automatic_cover_title_generation === true} save={(next) => save({ automaticCoverTitleGeneration: next })}
+            applyEnabled={data.automatic_cover_title_apply === true} saveApply={(next) => save({ automaticCoverTitleApply: next })} />
+        </RowBlock>
         {/* v0.73.0 (#257 and #245 from @Squeaks72): the nightly repair's ninth step. Off by default: it asks sources about
             series, and AniList's text is English. What it fills in sits below a series' own details, never over them. */}
         <SwitchRow id="fill-details" label={tr('Fill in missing details')}

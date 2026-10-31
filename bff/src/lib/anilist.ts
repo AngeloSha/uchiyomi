@@ -134,6 +134,16 @@ export async function fetchAniListTitles(id: number): Promise<AniListTitles | nu
   return { english: pick(t.english), romaji: pick(t.romaji), native: pick(t.native) };
 }
 
+/** Canonical alias evidence for strict local cover checks: the response must identify the exact requested manga. */
+export async function fetchVerifiedAniListTitles(id:number):Promise<AniListTitles|null> {
+  const r=await anilistFetch(ANILIST,POST({query:'query($id:Int){Media(id:$id,type:MANGA){id type title{romaji english native}}}',variables:{id}}),ASK);
+  if(!r.ok)return null;
+  const media=(JSON.parse((await readCapped(r,256*1024)).toString('utf8'))as any)?.data?.Media;
+  if(media?.id!==id||media.type!=='MANGA'||!media.title)return null;
+  const pick=(value:unknown)=>typeof value==='string'&&value.trim()?value.trim().slice(0,200):null;
+  return{english:pick(media.title.english),romaji:pick(media.title.romaji),native:pick(media.title.native)};
+}
+
 /** An entry's outside rating (v0.58.0, lib/anilistScores.ts): its score out of 100 and how many people list it. */
 export interface AniListScore { score: number | null; popularity: number | null }
 

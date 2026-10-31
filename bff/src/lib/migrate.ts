@@ -2092,6 +2092,103 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS local_pick boolean NOT NULL
 -- in the environment outrank both. Additive: an older release never reads them.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS local_networks  text;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS trusted_proxies text;
+-- Title wordmarks are optional persistent art. Existing installations make no new online requests by default.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS automatic_title_logos boolean NOT NULL DEFAULT false;
+-- Provider-wide Retry-After survives a process restart; no title or user identity is stored here.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS title_logo_retry_at timestamptz;
+-- Local cover lettering creates private review drafts; this never authorizes automatic publication.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS automatic_cover_titles boolean NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS series_title_extractions (
+  id uuid PRIMARY KEY,
+  series_id text NOT NULL REFERENCES lib_series(id) ON DELETE CASCADE,
+  owner_id uuid REFERENCES users(id) ON DELETE CASCADE,
+  automatic boolean NOT NULL DEFAULT false,
+  status text NOT NULL CHECK(status IN ('queued','running','ready','rejected','error','applied')),
+  snapshot text NOT NULL,
+  cover_fingerprint text NOT NULL,
+  source_sha256 text NOT NULL,
+  candidate_sha256 text,
+  title_version bigint NOT NULL,
+  region jsonb,
+  exclusions jsonb NOT NULL DEFAULT '[]',
+  quality jsonb,
+  reasons jsonb NOT NULL DEFAULT '[]',
+  error text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL DEFAULT now()+interval '30 minutes',
+  CHECK((automatic AND owner_id IS NULL) OR (NOT automatic AND owner_id IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS series_title_extractions_series_idx ON series_title_extractions(series_id,created_at DESC);
+-- Older drafts overwrote the request region with inference output; their original selection intent is unknown.
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS selection_mode text NOT NULL DEFAULT 'legacy'
+  CHECK(selection_mode IN ('manual','automatic','legacy'));
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS result_region jsonb;
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS candidate_region jsonb;
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS model_fingerprint text;
+-- The immutable baseline and private numbered previews belong only to their expiring extraction draft.
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS mask_revision integer NOT NULL DEFAULT 0 CHECK(mask_revision>=0);
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS mask_strokes jsonb NOT NULL DEFAULT '[]';
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS mask_width integer;
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS mask_height integer;
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS mask_baseline_sha256 text;
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS mask_original_sha256 text;
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS mask_preview_file text;
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS mask_bounds jsonb;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS automatic_cover_title_generation boolean NOT NULL DEFAULT false;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS automatic_cover_title_apply boolean NOT NULL DEFAULT false;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS cover_title_next_run_at timestamptz;
+CREATE TABLE IF NOT EXISTS title_extraction_runs (
+  id uuid PRIMARY KEY, origin text NOT NULL CHECK(origin IN ('manual','nightly')),
+  status text NOT NULL DEFAULT 'running' CHECK(status IN ('running','completed','cancelled','error')),
+  created_by uuid REFERENCES users(id) ON DELETE SET NULL, started_at timestamptz NOT NULL DEFAULT now(), finished_at timestamptz,
+  retry_errors boolean NOT NULL DEFAULT false
+);
+CREATE UNIQUE INDEX IF NOT EXISTS title_extraction_one_run_idx ON title_extraction_runs((true)) WHERE status='running';
+CREATE TABLE IF NOT EXISTS title_extraction_items (
+  id uuid PRIMARY KEY, run_id uuid NOT NULL REFERENCES title_extraction_runs(id) ON DELETE CASCADE,
+  series_id text REFERENCES lib_series(id) ON DELETE SET NULL, series_key text NOT NULL,
+  status text NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','processing','ready','applied','skipped','failed','cancelled')),
+  job_id uuid REFERENCES series_title_extractions(id) ON DELETE SET NULL,
+  attempts integer NOT NULL DEFAULT 0, retry_at timestamptz NOT NULL DEFAULT now(), reason text,
+  UNIQUE(run_id,series_key)
+);
+CREATE INDEX IF NOT EXISTS title_extraction_items_due_idx ON title_extraction_items(run_id,status,retry_at);
+CREATE UNIQUE INDEX IF NOT EXISTS title_extraction_one_active_item_idx ON title_extraction_items(run_id) WHERE status='processing';
+CREATE TABLE IF NOT EXISTS series_title_extraction_history (
+  series_id text PRIMARY KEY REFERENCES lib_series(id) ON DELETE CASCADE,
+  source_fingerprint text NOT NULL, model_fingerprint text NOT NULL, outcome text NOT NULL,
+  processed_at timestamptz NOT NULL DEFAULT now(), retry_at timestamptz
+);
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS batch_item_id uuid REFERENCES title_extraction_items(id) ON DELETE SET NULL;
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS asset_bytes bigint NOT NULL DEFAULT 0;
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS verification_key text;
+ALTER TABLE series_title_extractions ADD COLUMN IF NOT EXISTS publication_requested boolean NOT NULL DEFAULT false;
+ALTER TABLE series_title_extraction_history ADD COLUMN IF NOT EXISTS verification_key text NOT NULL DEFAULT '';
+ALTER TABLE series_title_extraction_history ADD COLUMN IF NOT EXISTS publication_requested boolean NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS series_title_extraction_state (
+  series_id text PRIMARY KEY REFERENCES lib_series(id) ON DELETE CASCADE,
+  automatic_key text NOT NULL,
+  retry_at timestamptz NOT NULL
+);
+CREATE TABLE IF NOT EXISTS series_title_art (
+  series_id text PRIMARY KEY REFERENCES lib_series(id) ON DELETE CASCADE,
+  mode text NOT NULL DEFAULT 'automatic' CHECK (mode IN ('automatic','custom','text')),
+  style text NOT NULL DEFAULT 'auto' CHECK (style IN ('auto','action','fantasy','scifi','soft','noir','plain')),
+  version bigint NOT NULL DEFAULT 0,
+  custom_file text,
+  auto_file text,
+  auto_anilist_id text,
+  auto_language text CHECK (auto_language IN ('en','original')),
+  auto_caption boolean NOT NULL DEFAULT true,
+  auto_manual boolean NOT NULL DEFAULT false,
+  auto_attribution jsonb,
+  lookup_status text NOT NULL DEFAULT 'missing' CHECK (lookup_status IN ('ready','missing','error')),
+  lookup_anilist_id text,
+  retry_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE series_title_art ADD COLUMN IF NOT EXISTS auto_cover_key text;
+ALTER TABLE series_title_art ADD COLUMN IF NOT EXISTS custom_attribution jsonb;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

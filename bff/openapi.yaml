@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.101.0
+  version: 0.102.2
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -419,6 +419,169 @@ components:
         strictly (LocalDateTime.parse) and a trailing `Z` or `.sss` would date every chapter at the epoch.
         A required date that is not known is `1970-01-01T00:00:00`.
       example: "2026-09-20T12:34:56"
+    TitleArt:
+      type: object
+      description: Cached title-logo metadata on enriched series. Pending/error may retain a usable cached logoUrl.
+      required: [mode, style, status, version, logoUrl, language, showReadableTitle, attribution]
+      properties:
+        mode: { type: string, enum: [automatic, custom, text] }
+        style: { type: string, enum: [auto, action, fantasy, scifi, soft, noir, plain] }
+        status: { type: string, enum: [ready, pending, missing, error, disabled] }
+        version: { type: integer }
+        logoUrl: { type: [string, "null"], description: Authenticated local image URL; never an external image address. }
+        language: { type: [string, "null"], enum: [en, original, null] }
+        showReadableTitle: { type: boolean }
+        attribution:
+          type: [object, "null"]
+          properties:
+            source: { type: string, enum: [Wikimedia Commons, Cover lettering] }
+            sourceUrl: { type: [string, "null"] }
+            artist: { type: [string, "null"] }
+            license: { type: [string, "null"] }
+            licenseUrl: { type: [string, "null"] }
+    ExtractionRect:
+      type: object
+      required: [left, top, width, height]
+      additionalProperties: false
+      description: Normalized image coordinates; nonempty and entirely within the displayed immutable cover.
+      properties:
+        left: { type: number, minimum: 0, maximum: 1 }
+        top: { type: number, minimum: 0, maximum: 1 }
+        width: { type: number, exclusiveMinimum: 0, maximum: 1 }
+        height: { type: number, exclusiveMinimum: 0, maximum: 1 }
+    TitleMaskStroke:
+      type: object
+      additionalProperties: false
+      required: [mode, radius, points]
+      properties:
+        mode: { type: string, enum: [restore, erase] }
+        radius: { type: number, minimum: 0.0005, maximum: 0.05, description: Radius relative to the immutable full-source canvas short side. }
+        points:
+          type: array
+          minItems: 1
+          maxItems: 8192
+          items:
+            type: object
+            additionalProperties: false
+            required: [x, y]
+            properties:
+              x: { type: number, minimum: 0, maximum: 1 }
+              y: { type: number, minimum: 0, maximum: 1 }
+    TitleExtractionBatchStatus:
+      type: object
+      required: [enabled, applyEnabled, available, checkedApplyAvailable, running, schedule, run, retentionDays, reviewCount, reviewSeries, online, reviewReasons]
+      properties:
+        enabled: { type: boolean, description: Nightly local generation opt-in; false by default. }
+        applyEnabled: { type: boolean, description: Separate available-checks publication opt-in; false by default. }
+        available: { type: boolean }
+        checkedApplyAvailable: { type: boolean, description: Worker and pinned OCR available; independent of optional calibration approval. }
+        running: { type: boolean, description: Includes persisted pending work waiting for retry or the manual worker. }
+        retentionDays: { type: integer }
+        nextRetryAt: { type: [string, "null"], format: date-time }
+        pausedReason: { type: [string, "null"] }
+        schedule:
+          type: object
+          properties:
+            hour: { type: integer, enum: [3] }
+            timezone: { type: string }
+            nextRunAt: { type: [string, "null"], format: date-time }
+        run:
+          type: [object, "null"]
+          properties:
+            id: { type: string, format: uuid }
+            origin: { type: string, enum: [manual, nightly] }
+            status: { type: string, enum: [running, completed, cancelled, error] }
+            startedAt: { type: string, format: date-time }
+            finishedAt: { type: [string, "null"], format: date-time }
+            currentSeries:
+              type: [object, "null"]
+              properties:
+                id: { type: string }
+                title: { type: string }
+            counts:
+              type: object
+              description: Total equals the sum of all seven disjoint item states. Ready is a private review draft, not a successful automatic application.
+              properties:
+                total: { type: integer }
+                pending: { type: integer }
+                processing: { type: integer }
+                ready: { type: integer }
+                applied: { type: integer }
+                skipped: { type: integer }
+                failed: { type: integer }
+                cancelled: { type: integer }
+        online:
+          type: object
+          required: [waitingOnline, needsLink, optedOut]
+          description: Latest-run diagnostics. Needs-link and opted-out are live eligibility counts and may overlap; they do not claim an online search occurred. No run yields zero counts.
+          properties:
+            waitingOnline: { type: integer, minimum: 0, description: Pending items awaiting provider completion or backoff. }
+            needsLink: { type: integer, minimum: 0, description: Automatic non-first-page series without a checked canonical identity; local previews remain allowed. }
+            optedOut: { type: integer, minimum: 0, description: Automatic non-first-page series with global online lookup or library external lookup disabled. }
+        reviewReasons:
+          type: array
+          maxItems: 6
+          description: Distinct ready batch drafts per product group, across the latest 2048 visible unexpired previews. Groups can overlap; calibration-only diagnostics are omitted.
+          items:
+            type: object
+            required: [code, count]
+            properties:
+              code: { type: string, enum: [title_not_verified, text_unclear, lettering_incomplete, low_contrast, checks_unavailable, other] }
+              count: { type: integer, minimum: 1 }
+        reviewCount: { type: integer }
+        reviewSeries:
+          type: array
+          maxItems: 10
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              title: { type: string }
+              jobId: { type: string, format: uuid }
+    TitleExtractionJob:
+      type: object
+      description: Private, owner-bound local extraction draft. Originals remain unchanged until Apply or a calibrated automatic pass.
+      properties:
+        id: { type: string, format: uuid }
+        seriesId: { type: string }
+        automatic: { type: boolean }
+        status: { type: string, enum: [queued, running, ready, rejected, error, expired, applied] }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        coverFingerprint: { type: string }
+        previewUrl: { type: [string, "null"], description: Authenticated admin WebP; private and never externally hosted. }
+        coverPreviewUrl: { type: [string, "null"], description: Authenticated immutable cover PNG used for this job. }
+        selectionMode: { type: string, enum: [manual, automatic, legacy], description: Legacy drafts lost the original request intent and must not silently become manual selections. }
+        region: { oneOf: [{ $ref: "#/components/schemas/ExtractionRect" }, { type: "null" }], description: Exact requested rectangle for manual drafts; null for automatic or legacy drafts. Inference never overwrites it. }
+        resultRegion: { oneOf: [{ $ref: "#/components/schemas/ExtractionRect" }, { type: "null" }], description: Worker selection in full prepared-source coordinates, separate from request intent. }
+        candidateRegion: { oneOf: [{ $ref: "#/components/schemas/ExtractionRect" }, { type: "null" }], description: Tight cutout bounds in full prepared-source coordinates. }
+        modelFingerprint: { type: [string, "null"], description: Inference algorithm provenance; older reviewed drafts remain manually applicable. }
+        mask:
+          type: [object, "null"]
+          description: Available on new ready drafts with verified raw-candidate placement. Old drafts require a new extraction.
+          properties:
+            revision: { type: integer, minimum: 0 }
+            strokes: { type: array, maxItems: 128, items: { $ref: "#/components/schemas/TitleMaskStroke" } }
+            previewRegion: { oneOf: [{ $ref: "#/components/schemas/ExtractionRect" }, { type: "null" }], description: Tight edited alpha bounds before final title-logo trim/resize. }
+            canvas:
+              type: object
+              properties:
+                width: { type: integer, minimum: 1, maximum: 2400 }
+                height: { type: integer, minimum: 1, maximum: 2400 }
+                sourceUrl: { type: string, description: Private immutable PNG used for every RGB pixel. }
+                baselineUrl: { type: string, description: Private immutable lossless full-canvas baseline alpha. }
+        exclusions: { type: array, maxItems: 8, items: { $ref: "#/components/schemas/ExtractionRect" } }
+        reasons: { type: array, items: { type: string } }
+        error: { type: [string, "null"] }
+        quality:
+          type: [object, "null"]
+          description: OCR/geometry review evidence. A mask score is not proof of a complete or correct title.
+          properties:
+            policyVersion: { type: string }
+            safeToApply: { type: boolean }
+            availableChecksPassed: { type: boolean, description: Actual complete-title and image checks passed; independent of optional calibration approval. Legacy missing values mean false. }
+            manualApplyAllowed: { type: boolean }
+            needsReview: { type: boolean }
     KomgaAuthor:
       type: object
       required: [name, role]
@@ -2117,6 +2280,8 @@ paths:
                 type: object
                 additionalProperties: true
                 properties:
+                  titleArt:
+                    $ref: "#/components/schemas/TitleArt"
                   autoHero:
                     description: >-
                       Since v0.51.0, on every series in a payload: `{seed}` once the banner made from its own pages
@@ -7287,6 +7452,28 @@ paths:
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+  /img/series/{id}/logo:
+    get:
+      tags: [images]
+      operationId: getImgSeriesIdLogo
+      summary: The series' local transparent title logo, if one is selected.
+      description: >-
+        Uses the standard image authentication and viewer visibility rules. Hidden, merged, restricted or missing
+        logos return 404; there is no cover fallback. Bytes are sanitized WebP, privately cached; v is the TitleArt
+        version cache-buster. This read never starts an online lookup.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: v, in: query, schema: { type: integer } }
+      security: [{ bearer: [] }, { imgCookie: [] }, { opdsBasic: [] }]
+      responses:
+        "200":
+          description: Local logo retaining its alpha channel.
+          content:
+            image/webp:
+              schema: { type: string, format: binary }
+        "401": { description: Not authenticated }
+        "403": { description: Token scope disallows images }
+        "404": { description: No selected logo, or series not visible }
   /img/series/{id}/backdrop:
     get:
       tags:
@@ -8395,6 +8582,20 @@ paths:
                     description: Since v0.55.3 (#147), the notice switches' rule (PATCH hideNoticeShortOnly); true unless set off.
                   newMemberDefaults:
                     $ref: "#/components/schemas/NewMemberDefaults"
+                  automatic_title_logos:
+                    type: boolean
+                    description: >-
+                      Automatic linked-manga logo lookups through Wikidata and Wikimedia Commons. Off by default;
+                      library lookup opt-outs and first-page-only art choices also suppress automatic requests.
+                  automatic_cover_title_generation:
+                    type: boolean
+                    description: Default-off nightly local cover-title generation at03:00 server time. Existing manual/text choices and provider logos remain protected; uncertain results remain private review drafts.
+                  automatic_cover_title_apply:
+                    type: boolean
+                    description: Default-off available-checks publication. Requires generation enabled and actual title/image checks passed; optional calibration approval is a separate legacy policy.
+                  automatic_cover_titles:
+                    type: boolean
+                    description: Default-off local cover title fallback. Calibrated complete-title matches may apply; uncertain results remain review drafts.
                   cleanup_read:
                     type: boolean
                     description: Whether the opt-in read-chapter cleanup is on. Off by default.
@@ -8521,6 +8722,18 @@ paths:
                   type: string
                 allowRegistration:
                   type: boolean
+                automaticTitleLogos:
+                  type: boolean
+                  description: Enable automatic exact linked-manga logo discovery. Default false; cached art remains usable when disabled.
+                automaticCoverTitleGeneration:
+                  type: boolean
+                  description: Enable nightly local cover-title generation; worker must be available. Disabling stops a nightly run without discarding completed previews.
+                automaticCoverTitleApply:
+                  type: boolean
+                  description: Separately opt in to applying outputs whose measured available checks pass. Requires worker and pinned OCR; publication also requires generation enabled. No calibration approval is implied.
+                automaticCoverTitles:
+                  type: boolean
+                  description: Enable calibrated local cover title fallbacks after a checked provider miss. Enabling requires the pinned OCR pack and validated profile.
                 updaterHours:
                   type: integer
                 extensionHours:
@@ -12011,7 +12224,7 @@ paths:
     put:
       tags:
         - admin
-      summary: Set a series' cover or banner (upload, URL, or a candidate).
+      summary: Set a series' cover, banner or transparent title logo.
       operationId: putApiAdminSeriesIdArt
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. `upload` takes an
@@ -12023,6 +12236,9 @@ paths:
         `source` (the cover only) takes the cover a followed source has for the series: only the source's id is sent, the
         picture's address is read from the source's own record of the series, and the server keeps its own copy.
         Automatic art is kept from an online entry only when it is named as the series is (v0.55.7).
+        For `kind: logo`, `upload` and `url` validate and keep a local alpha WebP copy; raw SVG is refused.
+        `text` selects styled text, `style` changes the fallback preset, and `reset` selects automatic mode/style.
+        Failed imports preserve the previous logo. Responses to logo changes also include TitleArt.
       parameters:
         - name: id
           in: path
@@ -12039,10 +12255,14 @@ paths:
               properties:
                 kind:
                   type: string
-                  enum: [cover, banner]
+                  enum: [cover, banner, logo]
                 mode:
                   type: string
-                  enum: [url, upload, reset, first_page, source]
+                  enum: [url, upload, reset, first_page, source, text, style]
+                style:
+                  type: string
+                  enum: [auto, action, fantasy, scifi, soft, noir, plain]
+                  description: Required for kind logo and mode style.
                 source:
                   type: string
                   description: For `source` (the cover only), the id of a source this series follows; see GET /api/admin/series/{id}/cover-candidates.
@@ -12173,6 +12393,398 @@ paths:
           description: The file is over UPLOAD_MAX_MB (`too_large`)
         "507":
           description: The download disk is at its MIN_FREE_GB floor (`disk_full`)
+  /api/admin/title-extraction/capabilities:
+    get:
+      tags: [admin]
+      operationId: getApiAdminTitleExtractionCapabilities
+      summary: Check local title extraction and calibrated automatic availability.
+      security: [{ bearer: [] }]
+      responses:
+        "200":
+          description: available, reason, automaticAvailable, automaticApplyAvailable, automaticReason, maxExclusions, timeoutSeconds, maskCorrection, maxMaskStrokes, maxMaskPoints, checkedApplyAvailable and checkedApplyReason. Checked apply requires worker and pinned OCR, while legacy automaticApplyAvailable still requires calibration. No secrets or model paths.
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or admin scope missing }
+  /api/admin/title-extraction/batch/status:
+    get:
+      tags: [admin]
+      operationId: getApiAdminTitleExtractionBatchStatus
+      summary: Read durable nightly cover-title progress and retained review previews.
+      description: Read-only; never starts inference or performs metadata lookup. Returned review titles and current series honor the admin's current visibility.
+      security: [{ bearer: [] }]
+      responses:
+        "200":
+          description: Generation/publication switches, next server-local03:00 run, disjoint counts, retry wait and bounded retained review list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TitleExtractionBatchStatus" }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or admin scope missing }
+  /api/admin/title-extraction/batch/run:
+    post:
+      tags: [admin]
+      operationId: postApiAdminTitleExtractionBatchRun
+      summary: Start or resume one durable local cover-title run.
+      description: >-
+        Explicit Run now may prepare previews while nightly generation is off; it cannot publish while generation
+        is off. An existing running batch is reused. Manual jobs have worker priority. Unchanged source/model
+        fingerprints are skipped even after review expiry; retryErrors explicitly retries prior failures.
+        Custom/text choices, manual drafts, selected first-page art and usable provider logos are skipped.
+        No AniList link or external lookup consent is required for local generation; batch processing never warms metadata.
+      security: [{ bearer: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                retryErrors: { type: boolean, default: false }
+      responses:
+        "202":
+          description: Current durable run and progress.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TitleExtractionBatchStatus" }
+        "400": { description: Invalid request }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or admin scope missing }
+        "503": { description: Local extraction worker unavailable }
+  /api/admin/title-extraction/batch/cancel:
+    post:
+      tags: [admin]
+      operationId: postApiAdminTitleExtractionBatchCancel
+      summary: Stop only the named run, retaining its completed private previews.
+      description: Cancels pending work and this run's active private job. Existing manual jobs, artwork and completed review drafts remain. A later nightly run can discover new or changed covers.
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [runId]
+              properties:
+                runId: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Current durable progress after stopping.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TitleExtractionBatchStatus" }
+        "400": { description: Invalid run ID }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or admin scope missing }
+        "404": { description: Run not found }
+  /api/admin/series/{id}/title-extraction/cover:
+    get:
+      tags: [admin]
+      operationId: getApiAdminSeriesIdTitleExtractionCover
+      summary: Read the current actual cover as a bounded PNG for region selection.
+      description: Reuses the cover pipeline. The x-cover-fingerprint header binds a later job to these exact bytes and stored cover selection.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      security: [{ bearer: [] }]
+      responses:
+        "200": { description: Private PNG; x-cover-fingerprint identifies the immutable input. }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or admin scope missing }
+        "404": { description: Series not visible }
+        "422": { description: No readable bounded cover }
+  /api/admin/series/{id}/title-extraction:
+    get:
+      tags: [admin]
+      operationId: getApiAdminSeriesIdTitleExtraction
+      summary: Read the latest own or shared automatic title draft.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      security: [{ bearer: [] }]
+      responses:
+        "200": { description: An object with job, either a TitleExtractionJob or null. Reading queues nothing. }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or admin scope missing }
+        "404": { description: Series not visible }
+    post:
+      tags: [admin]
+      operationId: postApiAdminSeriesIdTitleExtraction
+      summary: Create a private local cover title preview without changing artwork.
+      description: >-
+        The current cover is resolved by the server; callers cannot supply URLs or file paths. Normalized region and
+        exclusions refer to the exact cover fingerprint. One bounded worker handles queued jobs. Candidates expire
+        after thirty minutes; a timeout, worker failure or rejected quality check never replaces the original.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      security: [{ bearer: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                coverFingerprint: { type: string, pattern: '^[a-f0-9]{64}$' }
+                region: { $ref: "#/components/schemas/ExtractionRect" }
+                mask:
+          type: [object, "null"]
+          description: Available on new ready drafts with verified raw-candidate placement. Old drafts require a new extraction.
+          properties:
+            revision: { type: integer, minimum: 0 }
+            strokes: { type: array, maxItems: 128, items: { $ref: "#/components/schemas/TitleMaskStroke" } }
+            previewRegion: { oneOf: [{ $ref: "#/components/schemas/ExtractionRect" }, { type: "null" }], description: Tight edited alpha bounds before final title-logo trim/resize. }
+            canvas:
+              type: object
+              properties:
+                width: { type: integer, minimum: 1, maximum: 2400 }
+                height: { type: integer, minimum: 1, maximum: 2400 }
+                sourceUrl: { type: string, description: Private immutable PNG used for every RGB pixel. }
+                baselineUrl: { type: string, description: Private immutable lossless full-canvas baseline alpha. }
+        exclusions: { type: array, maxItems: 8, items: { $ref: "#/components/schemas/ExtractionRect" } }
+      responses:
+        "202": { description: Object with queued TitleExtractionJob in job. }
+        "400": { description: Invalid selection or unexpected body field }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or admin scope missing }
+        "404": { description: Series not visible }
+        "409": { description: Cover changed; reload the selection image }
+        "422": { description: No readable bounded cover }
+        "429": { description: Bounded private queue or storage limit reached }
+        "503": { description: Local worker unavailable }
+  /api/admin/series/{id}/title-extraction/{jobId}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [admin]
+      operationId: getApiAdminSeriesIdTitleExtractionJobId
+      summary: Read an owned or shared automatic extraction job.
+      security: [{ bearer: [] }]
+      responses:
+        "200": { description: Object with TitleExtractionJob in job. }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or admin scope missing }
+        "404": { description: Job not owned, expired and cleaned, or series not visible }
+    delete:
+      tags: [admin]
+      operationId: deleteApiAdminSeriesIdTitleExtractionJobId
+      summary: Discard a preview and cancel its queued or running work.
+      security: [{ bearer: [] }]
+      responses:
+        "200": { description: Discarded; title artwork remains unchanged. }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or admin scope missing }
+        "404": { description: Job not owned or series not visible }
+  /api/admin/series/{id}/title-extraction/{jobId}/cover:
+    get:
+      tags: [admin]
+      operationId: getApiAdminSeriesIdTitleExtractionJobIdCover
+      summary: Read the exact private PNG used to create a draft.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+      security: [{ bearer: [] }]
+      responses:
+        "200": { description: Private PNG with x-cover-fingerprint; never changes during the draft. }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or admin scope missing }
+        "404": { description: Job not owned or image unavailable }
+        "410": { description: Draft expired }
+  /api/admin/series/{id}/title-extraction/{jobId}/preview:
+    get:
+      tags: [admin]
+      operationId: getApiAdminSeriesIdTitleExtractionJobIdPreview
+      summary: Read a ready transparent title cutout for visual review.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+      security: [{ bearer: [] }]
+      responses:
+        "200": { description: Private WebP; no-store and owner-authorized. }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or admin scope missing }
+        "404": { description: Job not owned or image unavailable }
+        "409": { description: Preview not ready }
+        "410": { description: Draft expired }
+  /api/admin/series/{id}/title-extraction/{jobId}/mask/baseline:
+    get:
+      tags: [admin]
+      operationId: getApiAdminSeriesIdTitleExtractionJobIdMaskBaseline
+      summary: Read the immutable full-source correction baseline.
+      description: Private lossless zero-RGB RGBA PNG at exactly the immutable cover snapshot dimensions. Alpha is projected from the original raw worker PNG; compose it with RGB from the separate immutable source snapshot. Admin ownership and current visibility are required.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+      security: [{ bearer: [] }]
+      responses:
+        "200": { description: Private no-store full-canvas zero-RGB RGBA PNG. }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or admin scope missing }
+        "404": { description: Job not owned, series not visible or baseline unavailable }
+        "409": { description: Draft not ready or baseline bytes changed }
+        "410": { description: Draft expired }
+  /api/admin/series/{id}/title-extraction/{jobId}/mask:
+    patch:
+      tags: [admin]
+      operationId: patchApiAdminSeriesIdTitleExtractionJobIdMask
+      summary: Replace the whole correction stroke list and save a private preview revision.
+      description: >-
+        Always replays from the immutable original alpha. Strokes use normalized full-source coordinates,
+        with hard round caps and joins, evaluated at pixel centers. Restore sets alpha to 255 and erase to 0;
+        every visible RGB pixel comes from the immutable source PNG. An empty stroke list resets the mask.
+        Allows at most 128 strokes, 8192 total points, and 40 million bounded raster pixel visits.
+        Rejects empty/opaque output, stale cover/title/link, stale revision, changed files and concurrent cancellation.
+        Changes only the expiring draft; Apply remains explicit and corrected output is never automatically certified.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expectedRevision, strokes]
+              properties:
+                expectedRevision: { type: integer, minimum: 0, maximum: 2147483646 }
+                strokes: { type: array, maxItems: 128, items: { $ref: "#/components/schemas/TitleMaskStroke" } }
+      responses:
+        "200":
+          description: Saved a new revision; returns job with revision-versioned final normalized previewUrl.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job: { $ref: "#/components/schemas/TitleExtractionJob" }
+        "400": { description: Invalid strokes or raster work limit exceeded }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or admin scope missing }
+        "404": { description: Job not owned or series not visible }
+        "409": { description: Draft not ready, stale mask/source/title/link, missing baseline or changed bytes }
+        "410": { description: Draft expired }
+        "422": { description: Empty or fully opaque mask }
+  /api/admin/series/{id}/title-extraction/{jobId}/apply:
+    post:
+      tags: [admin]
+      operationId: postApiAdminSeriesIdTitleExtractionJobIdApply
+      summary: Apply a visually reviewed draft as a protected custom title.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                expectedMaskRevision: { type: integer, minimum: 0, maximum: 2147483646, description: Required after any saved correction. Prevents publishing edits unseen by an older tab. }
+      description: >-
+        The server rechecks the current cover bytes/selection, title-art version, checked identity, ownership and
+        visibility before publishing atomically. A concurrent cover or title edit wins. Returns ok and TitleArt;
+        the readable title remains visible and attribution records Cover lettering without an external source URL.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+      security: [{ bearer: [] }]
+      responses:
+        "200": { description: Applied as custom artwork; returns ok and titleArt. }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or admin scope missing }
+        "404": { description: Job not owned or series not visible }
+        "409": { description: Draft not ready, bytes changed, or current cover/title/identity no longer matches }
+        "410": { description: Draft expired }
+  /api/admin/title-logos/status:
+    get:
+      tags: [admin]
+      operationId: getApiAdminTitleLogosStatus
+      summary: Read title-logo discovery coverage and scheduled retries.
+      description: >-
+        Requires an admin and admin token scope. This read-only summary performs no discovery, queueing or
+        external requests. Ready, missing, error, unchecked, custom and text partition the active series;
+        a default missing row without a matching checked identity is unchecked. Eligibility and privacy-gate
+        counts are separate facts. Running includes queued work and eligible due work awaiting the next refill.
+      security: [{ bearer: [] }]
+      responses:
+        "200":
+          description: Current derived coverage, pending work and future retry timestamps.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled, running, counts, checked, nextRetryAt, providerRetryAt, lastScanAt]
+                properties:
+                  enabled: { type: boolean }
+                  running: { type: boolean }
+                  checked: { type: integer }
+                  nextRetryAt: { type: [string, "null"], format: date-time }
+                  providerRetryAt: { type: [string, "null"], format: date-time }
+                  lastScanAt: { type: [string, "null"], format: date-time }
+                  counts:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      ready: { type: integer }
+                      missing: { type: integer }
+                      error: { type: integer }
+                      unchecked: { type: integer }
+                      custom: { type: integer }
+                      text: { type: integer }
+                      eligible: { type: integer }
+                      needsLink: { type: integer }
+                      libraryOptOut: { type: integer }
+                      firstPage: { type: integer }
+                      pending: { type: integer }
+                      due: { type: integer }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or token lacks the admin scope }
+  /api/admin/title-logos/scan:
+    post:
+      tags: [admin]
+      operationId: postApiAdminTitleLogosScan
+      summary: Resume automatic title-logo discovery across the library.
+      description: >-
+        Requires an admin, admin token scope and the automatic-title-logo setting enabled. Refills the bounded
+        paced worker without waiting for remote art. Respects library opt-outs, first-page choices, custom/text
+        choices and checked AniList identity. retryMissing resets only completed, current-identity eligible misses;
+        provider failures and Retry-After deadlines remain protected. Normal scheduled discovery resumes at boot.
+      security: [{ bearer: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                retryMissing: { type: boolean, default: false }
+      responses:
+        "200": { description: Accepted; returns ok and the current status summary. }
+        "400": { description: Invalid request body }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or token lacks the admin scope }
+        "409": { description: Automatic title logos are disabled }
+  /api/admin/series/{id}/logo/refresh:
+    post:
+      tags: [admin]
+      operationId: postApiAdminSeriesIdLogoRefresh
+      summary: Find a title logo for this series' checked AniList manga link, in the background.
+      description: >-
+        Requires an admin and admin token scope. One explicit lookup may bypass automatic online opt-outs.
+        Custom/text choices return 409; reset to automatic first. Current good art remains during a refresh
+        or provider outage. A changed link or manual choice prevents publishing a stale result.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      security: [{ bearer: [] }]
+      responses:
+        "200":
+          description: Queued (or already pending); includes current TitleArt.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  status: { type: string }
+                  titleArt: { $ref: "#/components/schemas/TitleArt" }
+        "401": { description: Not authenticated }
+        "403": { description: Not an admin or token lacks the admin scope }
+        "404": { description: Series not visible }
+        "409": { description: Manual choice active, or no checked AniList manga link }
+        "429": { description: Provider Retry-After/backoff is active, or the bounded worker queue is full }
   /api/admin/art/overview:
     get:
       tags:

@@ -17,8 +17,12 @@ export const REC_MIN_WIDTH = 320;
 /** Lines are recognised this many at a time, narrowest first so a batch pads little. */
 export const REC_BATCH = 6;
 
-export interface Box { x0: number; y0: number; x1: number; y1: number; score: number }
-export interface OcrLine { box: [number, number, number, number]; text: string; score: number; tall: boolean }
+export interface Box { x0: number; y0: number; x1: number; y1: number; score: number; contentBox?: [number, number, number, number] }
+export interface OcrLine {
+  box: [number, number, number, number]; text: string; score: number; tall: boolean;
+  /** Detector content before recognition's unclip/context padding, in the same image coordinates as box. */
+  contentBox?: [number, number, number, number];
+}
 
 /** The detector's input size for a W x H image: short side at least DET_MIN_SIDE, both sides multiples of 32. */
 export function detSize(W: number, H: number): { w: number; h: number } {
@@ -91,9 +95,11 @@ export function dbBoxes(pred: ArrayLike<number>, w: number, h: number, W: number
     if (score < boxThresh) continue;
     const d = (bw * bh * unclip) / (2 * (bw + bh));
     if (Math.min(bw, bh) + 2 * d < 5) continue;
-    const b = {
+    const b: Box = {
       x0: Math.max(0, Math.round((x0 - d) * sx)), y0: Math.max(0, Math.round((y0 - d) * sy)),
       x1: Math.min(W, Math.round((x1 + 1 + d) * sx)), y1: Math.min(H, Math.round((y1 + 1 + d) * sy)), score,
+      contentBox: [Math.max(0, Math.round(x0 * sx)), Math.max(0, Math.round(y0 * sy)),
+        Math.min(W, Math.round((x1 + 1) * sx)), Math.min(H, Math.round((y1 + 1) * sy))],
     };
     if (b.x1 - b.x0 > 3 && b.y1 - b.y0 > 3) out.push(b);
   }

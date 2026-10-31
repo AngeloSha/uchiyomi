@@ -1,6 +1,7 @@
 # Bundled fonts
 
-Three latin-subset variable `.woff2` files, byte-identical to what Google Fonts serves for these families.
+Five latin-subset `.woff2` files, byte-identical to what Google Fonts serves for these families. Barlow Condensed is
+the static bold weight; the other families are variable fonts.
 
 They are committed rather than fetched because `next/font/google` downloads from `fonts.gstatic.com` **at
 build time**. A blip there fails the image build outright — which is exactly how v0.5.1 first shipped
@@ -12,6 +13,10 @@ builds behind a firewall, and with no third-party request.
 | `SpaceGrotesk-latin.woff2` | [Space Grotesk](https://fonts.google.com/specimen/Space+Grotesk) | SIL Open Font License 1.1 |
 | `Inter-latin.woff2` | [Inter](https://fonts.google.com/specimen/Inter) | SIL Open Font License 1.1 |
 | `Unbounded-latin.woff2` | [Unbounded](https://fonts.google.com/specimen/Unbounded) | SIL Open Font License 1.1 |
+| `BarlowCondensed-Bold.woff2` | [Barlow Condensed](https://fonts.google.com/specimen/Barlow+Condensed), 700 | SIL Open Font License 1.1 |
+| `Cinzel-latin.woff2` | [Cinzel](https://fonts.google.com/specimen/Cinzel), 400–900 | SIL Open Font License 1.1 |
+
+The title-art fonts include their upstream notices in `OFL-barlowcondensed.txt` and `OFL-cinzel.txt`.
 
 The OFL permits bundling and redistribution, including in a commercial or differently-licensed project, as
 long as the fonts are not sold on their own and the licence travels with them.

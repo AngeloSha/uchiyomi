@@ -1,5 +1,70 @@
 # Changelog
 
+## v0.102.2 — 2026-10-31
+
+**Title logos are a computer's: on a phone the cover is the hero, so it shows the title instead.**
+
+### Title logos on computers only
+
+- **A phone's hero shows the readable title over the cover, never the title logo.** On a phone the cover is the hero and
+  already carries its own lettering, so a logo on top of it said the title twice. Home and series heroes on a computer
+  keep their logos as before. This applies to any screen under 1024 pixels wide, where the cover replaces the banner.
+- **A phone no longer downloads title logos** or keeps checking for one that is still being looked up.
+
+### Also
+
+- **Discover hides *Newest* and *Popular* while search results are up** ([#376](https://github.com/AngeloSha/uchiyomi/pull/376),
+  from @Calvin-Davidson). Results come in each source's own order, so the toggle did nothing but throw the search away.
+  Searching with an empty box now goes back to browsing, like the ×.
+
+### Upgrading
+
+- Nothing to do.
+
+## v0.102.1 — 2026-10-30
+
+- Nightly cover-title processing waits for the online logo search for each checked manga before extracting a cover. Pending searches and provider retry pauses remain queued.
+- Canonical manga titles are fetched before cover-title verification and retry decisions, so a missing metadata cache no longer prevents otherwise valid results from being automatically applied. Existing checks, manual artwork and review corrections remain protected.
+- The automatic-title panel shows the auto-apply state, online-search progress and the reasons previews need review, with translations in every supported language.
+
+## v0.102.0 — 2026-10-29
+
+**Manga title artwork, cover extraction with precise corrections, and optional nightly library processing.**
+
+### Manga title artwork
+
+- Home and series heroes show cached transparent title logos when available, with readable captions for original-language
+  artwork. Genre and cover-colour title styles provide a fallback, with the same layout on phones and computers.
+- Title logos occupy more of the Home and series heroes, with proportional sizing for small originals and
+  compact layouts that keep reading controls clear on short screens.
+- Optional automatic lookup uses confirmed AniList manga identities to find Wikimedia artwork. Existing online-lookup
+  opt-outs remain effective; lookups run in the background and do not delay opening a page.
+- Edit details offers logo upload, image links, refresh, styled titles and reset to automatic. Manual choices take priority,
+  and artwork source information stays available with the preview.
+- Automatic discovery scans the eligible library without opening every manga, resumes after restarts, and honors
+  provider-wide retry pauses. The admin progress panel distinguishes unchecked titles from completed no-match results.
+- Logo matching also accepts transparent PNG originals and verifies bounded Commons discovery against the exact manga's
+  canonical identity, recovering artwork absent from the direct logo field.
+- Action, fantasy and science-fiction titles retain their distinctive typography when Comedy is a secondary genre.
+- Administrators can extract lettering from the current cover, adjust the title region and exclude credits, preview
+  the transparent result on a hero, and explicitly apply or discard it. Changed covers and newer artwork choices
+  invalidate old drafts. The optional model service remains isolated from the application and library files.
+- Cover selection reruns detection on overlapping title-line views and refines missed letters using the existing
+  local SAM weights. Automatic selection groups neighboring lines and separated characters. Edited regions immediately
+  hide the previous preview, and detected bounds remain separate from the administrator's requested selection.
+- Cover extraction can retain dark outlines and shadow strokes next to detected lettering when source-image
+  contrast, text-model support and bounded component checks agree. Original colors and previously detected ink
+  remain intact; ambiguous results still require visual review.
+- Title previews offer precise Restore and Erase brushes, zoom, pan, undo and reset. Corrections replay against an
+  immutable cover and alpha mask, save as a private revision, and require review before Apply. Revision checks prevent
+  older tabs from applying unseen corrections; manual corrections never inherit automatic quality approval.
+- Opt-in nightly cover extraction processes existing and newly added manga through a persistent queue. Manual
+  requests take priority; unchanged covers are skipped and uncertain previews remain available for 14 days.
+- A separate opt-in can apply results that pass the available canonical-title and image checks. Existing manual
+  artwork, styled titles and provider logos are preserved. Both options are off by default; missing identity,
+  unavailable recognition, incomplete titles and other failed checks leave results for review. Empirical calibration
+  remains separate from these runtime checks and is never inferred from an extraction score.
+
 ## v0.101.0 — 2026-10-29
 
 **Search creators on sources, manage pages with undo, and preview source cleanup before deleting anything.**

@@ -35,7 +35,7 @@ test('arm64 is built on an arm64 runner, never emulated, and merged into one ind
   assert.match(code(y), /ubuntu-24\.04-arm/, 'no native arm64 runner');
   assert.match(code(y), /push-by-digest=true/, 'architectures are not pushed by digest, so the tag can point at one of them');
   assert.ok(wf.jobs.merge, 'no merge job: nothing writes the tag over both architectures');
-  assert.match(code(y), /imagetools create -t "\$\{\{ matrix\.image \}\}:\$\{\{ github\.ref_name \}\}"/, 'the merge job does not write the version tag');
+  assert.match(code(y), /imagetools create -t "\$\{\{ matrix\.image \}\}:\$\{\{ matrix\.tag_prefix \}\}\$\{\{ github\.ref_name \}\}"/, 'the merge job does not write the version tag');
   assert.match(code(y), /grep -q "linux\/\$arch"/, 'the merge job does not check both architectures are in the index');
   // Reintroduce by piping `imagetools inspect` into grep -q or an early-exiting awk: buildx dies of SIGPIPE,
   // pipefail makes that the step's status, and every merge fails after every build succeeded -- the first
@@ -58,8 +58,70 @@ test('arm64 is built on an arm64 runner, never emulated, and merged into one ind
   assert.match(record.run, /sha256:\*\)/, 'the recorded digest is not validated before it is written');
   assert.match(record.run, /exit 1/, 'a malformed digest does not fail the build');
   // Every image, both architectures.
-  assert.deepEqual(wf.jobs.build.strategy.matrix.service, ['bff', 'web', 'aio']);
+  assert.deepEqual(wf.jobs.build.strategy.matrix.service, ['bff', 'web', 'aio', 'title-extractor']);
   assert.deepEqual(wf.jobs.build.strategy.matrix.arch, ['amd64', 'arm64']);
+});
+
+test('optional title inference ships on both native architectures without model weights or application secrets', () => {
+  const release = parseYaml(read('.github/workflows/release.yml'));
+  const worker = release.jobs.build.strategy.matrix.include.find((item: any) => item.service === 'title-extractor');
+  assert.equal(worker.image, 'ghcr.io/angelosha/uchiyomi');
+  assert.match(worker.license, /Apache-2\.0/);
+  const mergeRows = release.jobs.merge.strategy.matrix.include;
+  assert.equal(mergeRows.find((item: any) => item.service === 'title-extractor').tag_prefix, 'title-extractor-');
+  const targets = release.env.IMAGE_TAG_PREFIXES.split(' ').map((entry: string) => entry.split('='));
+  assert.deepEqual(targets, mergeRows.map((row: any) => [row.image, row.tag_prefix ?? '']), 'every versioned image must join the coherent latest gate');
+  assert.equal(new Set(targets.map((pair: string[]) => pair.join(':') + 'latest')).size, 4, 'the worker must never overwrite the app latest/version tags');
+  const promotion = release.jobs.latest.steps.find((step: any) => step.name.startsWith('Point latest')).run;
+  assert.match(promotion, /-t "\$img:\$\{prefix\}latest" "\$img:\$\{prefix\}\$\{GITHUB_REF_NAME\}"/);
+  const checkout = release.jobs.build.steps.find((step: any) => step.with?.repository === 'ymy-k/Hi-SAM');
+  assert.equal(checkout.with.ref, '69009434d4dba5541f228d8f5acb0754c333d417');
+  assert.equal(checkout.with['persist-credentials'], false);
+  const ci = parseYaml(read('.github/workflows/ci.yml')).jobs['title-extractor'];
+  assert.deepEqual(ci.strategy.matrix.include.map((item: any) => item.arch), ['amd64', 'arm64']);
+  assert.match(JSON.stringify(ci.steps), /test_\*\.py/);
+  assert.match(JSON.stringify(ci.steps), /--prepare-context/);
+  const overlay = parseYaml(read('deploy/docker-compose.title-extractor.yml'));
+  const service = overlay.services['title-extractor'];
+  assert.equal(service.image, '${TITLE_EXTRACTOR_IMAGE:-ghcr.io/angelosha/uchiyomi:title-extractor-v' + JSON.parse(read('bff/package.json')).version + '}');
+  assert.deepEqual(service.profiles, ['title-art']);
+  assert.equal(service.read_only, true);
+  assert.equal(service.ports, undefined);
+  assert.deepEqual(service.networks, ['title_extractor']);
+  assert.equal(overlay.networks.title_extractor.internal, true);
+  assert.equal(service.mem_limit, '4g');
+  assert.deepEqual(service.cap_drop, ['ALL']);
+  assert.equal(service.env_file, '.env.title-extractor');
+  assert.equal(overlay.services.uchiyomi.image, undefined, 'the overlay must not replace an existing pinned app image');
+  assert.ok(service.volumes.every((mount: string) => mount.endsWith(':/models:ro')));
+  assert.ok(!JSON.stringify(service).includes('/config') && !JSON.stringify(service).includes('/library'));
+  assert.match(read('.gitignore'), /^\.env\.title-extractor$/m);
+});
+
+test('latest promotion keeps optional worker tags separate from the public application tags', async () => {
+  const release = parseYaml(read('.github/workflows/release.yml'));
+  const directory = mkdtempSync(join(tmpdir(), 'title-release-'));
+  const log = join(directory, 'calls.jsonl');
+  // Exercise the actual shell with a local fake registry command; this never contacts a registry.
+  writeFileSync(join(directory, 'docker'), `#!${process.execPath}\nconst fs=require('fs');const args=process.argv.slice(2);fs.appendFileSync(process.env.TITLE_RELEASE_CALLS,JSON.stringify(args)+'\\n');if(args[2]==='inspect')console.log('Digest: sha256:${'a'.repeat(64)}');\n`, { mode: 0o755 });
+  try {
+    for (const step of release.jobs.latest.steps.filter((item: any) => item.run)) {
+      await new Promise<void>((resolve, reject) => execFile('bash', ['-c', step.run], {
+        cwd: directory, timeout: 10_000,
+        env: { ...process.env, PATH: directory + ':' + process.env.PATH, TITLE_RELEASE_CALLS: log,
+          IMAGE_TAG_PREFIXES: release.env.IMAGE_TAG_PREFIXES, GITHUB_REF_NAME: 'v0.102.0' },
+      }, (error) => error ? reject(error) : resolve()));
+    }
+    const calls = readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as string[]);
+    const creates = calls.filter((args) => args[2] === 'create');
+    assert.deepEqual(creates.map((args) => args.slice(4)), [
+      ['ghcr.io/angelosha/uchiyomi-bff:latest', 'ghcr.io/angelosha/uchiyomi-bff:v0.102.0'],
+      ['ghcr.io/angelosha/uchiyomi-web:latest', 'ghcr.io/angelosha/uchiyomi-web:v0.102.0'],
+      ['ghcr.io/angelosha/uchiyomi:latest', 'ghcr.io/angelosha/uchiyomi:v0.102.0'],
+      ['ghcr.io/angelosha/uchiyomi:title-extractor-latest', 'ghcr.io/angelosha/uchiyomi:title-extractor-v0.102.0'],
+    ]);
+    assert.equal(calls.filter((args) => args[2] === 'inspect').length, 8, 'verify both tags for all four images');
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test('a tag publishes a GitHub Release, not just images', () => {
@@ -96,14 +158,16 @@ test('dependencies and actions are watched weekly, grouped so CI is not run thir
   }
   assert.ok(d.updates.some((u: any) => u['package-ecosystem'] === 'github-actions'), 'actions are not watched');
   const docker = d.updates.filter((u: any) => u['package-ecosystem'] === 'docker').map((u: any) => u.directory).sort();
-  assert.deepEqual(docker, ['/', '/bff', '/web'], 'not every Dockerfile has its base image watched');
+  assert.deepEqual(docker, ['/', '/bff', '/services/title-extractor', '/web'], 'not every Dockerfile has its base image watched');
   // A Node major is taken deliberately, onto an even LTS line: never a weekly PR for an odd, short-lived release
   // (#73-#75 proposed node:25 after its end of life), and never @types/node ahead of the runtime (#62, #77).
   // Reintroduce by deleting either ignore rule from any one entry: the assertion names the directory.
   const ignores = (u: any, dep: string) =>
     (u.ignore ?? []).some((i: any) => i['dependency-name'] === dep && (i['update-types'] ?? []).includes('version-update:semver-major'));
-  for (const u of d.updates.filter((u: any) => u['package-ecosystem'] === 'docker'))
-    assert.ok(ignores(u, 'node'), `docker ${u.directory}: Node majors arrive as weekly PRs`);
+  for (const u of d.updates.filter((u: any) => u['package-ecosystem'] === 'docker')) {
+    const runtime = u.directory === '/services/title-extractor' ? 'python' : 'node';
+    assert.ok(ignores(u, runtime), `docker ${u.directory}: ${runtime} majors arrive as weekly PRs`);
+  }
   for (const u of d.updates.filter((u: any) => u['package-ecosystem'] === 'npm'))
     assert.ok(ignores(u, '@types/node'), `npm ${u.directory}: @types/node can run ahead of the Node runtime`);
   const cq = parseYaml(read('.github/workflows/codeql.yml'));

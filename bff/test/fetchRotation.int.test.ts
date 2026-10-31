@@ -130,7 +130,9 @@ async function jobDone(folder: string): Promise<any> {
   for (let i = 0; i < 300; i++) {
     await sleep(50);
     job = (await app.inject({ method: 'GET', url: '/api/sources/jobs', headers: { authorization: adminTok } })).json().content.find((x: any) => x.folder === folder);
-    if (job && job.status !== 'downloading') return job;
+    // A refused page marks the card as error before the job queues the remaining chapters for the scout.
+    // Wait for the real writer lifecycle too, so assertions and fixture cleanup cannot outrun that handoff.
+    if (job && job.status !== 'downloading' && !(await import('../src/routes/sources')).jobBusy(folder)) return job;
   }
   return job;
 }

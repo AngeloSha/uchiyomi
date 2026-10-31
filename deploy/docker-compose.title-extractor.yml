@@ -1,0 +1,38 @@
+# Optional overlay for deploy/docker-compose.yml, copied beside that file.
+# See services/title-extractor/README.md for model/OCR staging and the private token file.
+# Nothing in this overlay enables automatic discovery, nightly work or automatic application.
+services:
+  uchiyomi:
+    env_file: .env.title-extractor
+    environment:
+      TITLE_EXTRACTOR_URL: http://title-extractor:3081
+      TITLE_EXTRACTOR_OCR_DIR: /title-extractor-ocr
+    volumes:
+      - ${TITLE_EXTRACTOR_DATA:?Set TITLE_EXTRACTOR_DATA to the absolute staged data directory}/ocr:/title-extractor-ocr:ro
+    networks: [uchiyomi_app, title_extractor]
+
+  title-extractor:
+    profiles: [title-art]
+    image: ${TITLE_EXTRACTOR_IMAGE:-ghcr.io/angelosha/uchiyomi:title-extractor-v0.102.2}
+    restart: unless-stopped
+    env_file: .env.title-extractor
+    environment:
+      INFERENCE_THREADS: "3"
+    volumes:
+      - ${TITLE_EXTRACTOR_DATA:?Set TITLE_EXTRACTOR_DATA to the absolute staged data directory}/models:/models:ro
+    networks: [title_extractor]
+    read_only: true
+    tmpfs:
+      - /tmp:size=134217728,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 4g
+    cpus: 3
+    pids_limit: 256
+    stop_grace_period: 20s
+    labels:
+      - com.centurylinklabs.watchtower.enable=false
+
+networks:
+  title_extractor:
+    internal: true

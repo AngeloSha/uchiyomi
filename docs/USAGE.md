@@ -627,6 +627,61 @@ its own copy, so the cover survives the source changing or going away. **Upload 
 a picture from the device instead. The new cover shows at once on every card of this device, not after the browser's
 day-long copy of the old one runs out.
 
+### Hero title artwork
+
+On a computer, the home carousel and a manga's series-page hero can show its own transparent title logo. Without a
+logo, the title uses a readable style matched to its genres and cover colours. On a phone (and any screen under 1024
+pixels wide) the cover itself is the hero and already carries its lettering, so the hero shows that readable title
+instead of the logo, and the logo is not downloaded (since v0.102.2). A logo in the original language, or one whose
+language is not known, keeps the readable manga title underneath it.
+
+**Admin → Settings → Series & chapters → Automatic title logos** enables background logo lookup. It is off until enabled.
+Only a series with a checked or manually confirmed AniList manga link is looked up; the server uses that ID to find
+matching artwork on Wikidata and Wikimedia Commons, and keeps its own copy. A title alone is not enough to choose a
+logo. The library's automatic online-lookup opt-out is respected, as is **Use the first page** for automatic artwork.
+Opening a hero never waits for the lookup: it shows the styled title while work runs, and keeps that title when
+there is no reliable logo. A provider outage leaves any cached picture available.
+
+When automatic title logos are enabled, the server also checks the eligible library in the background; opening
+each manga is not required. It resumes after restarts and retries temporary failures after the artwork provider's
+requested pause. The progress panel beside the setting separates checked titles, ready logos, completed searches
+with no match, retries, titles not checked yet, and missing manga links. **Scan library** checks work that is due;
+**Retry no matches** also repeats eligible completed searches that found nothing. Neither action overrides a
+library's online-lookup preference or an admin's artwork choice. A missing manga link needs confirmation through
+the existing manga-link controls before automatic logo matching can use it.
+
+The lookup accepts matching transparent Commons PNG originals as well as rendered thumbnails. If an exact manga
+entry has no logo field, bounded artwork discovery can use a canonical Wikipedia page to verify the candidate
+against that same manga identity. Filename similarity alone never selects the artwork.
+
+In **Edit details → Art → Title logo**, an admin can:
+
+- Upload a transparent PNG or WebP, or use **From a link**, to choose a logo explicitly.
+- Use **Find again** to request a fresh match for a series in automatic mode. This explicit action can look online
+  even when automatic lookup is off for the server or library.
+- Choose **Use styled title** and a style, including a plain title. That choice stops automatic logo lookup for the
+  series until it is reset.
+- Choose **Reset to automatic** to clear a manual choice. A custom logo remains in charge until it is reset; a
+  background result cannot overwrite a later manual edit.
+
+The preview includes the artwork's source and attribution when supplied. Uploaded and downloaded logos are kept with
+the server's configuration and included in configuration backups. Changing a title logo leaves the manga's cover,
+chapter files and reading progress in place.
+
+With the optional local extraction service installed, **Extract from cover** prepares a transparent title preview.
+Choose the title area, exclude credits, and use Restore or Erase to correct its edges before applying it.
+
+**Automatically extract cover titles** is a separate, default-off nightly option for existing and new manga.
+For a checked manga link with online lookups enabled, it waits for the online logo search first; only a completed
+no-match result allows cover extraction. Provider errors stay queued until retry is allowed. Series without a checked
+link, or with online lookups disabled, can still receive local previews without an online search.
+
+**Apply cover titles that pass checks** is also off by default. It requires complete-title and image checks; uncertain
+results stay for review. The panel shows whether automatic applying is on, online-search progress, and why previews
+need review. A preview may have several reasons. Manual artwork and corrected drafts remain protected.
+See [Nightly cover titles](cover-title-batch.md) for scheduling, retry and retention details. The standalone
+[cover-lettering trial](../scripts/title-art/README.md) remains available for operators testing local covers.
+
 ### Sources & translations
 
 Under the title, every series carries one muted line that says where its chapters come from. On a phone it
@@ -1920,9 +1975,11 @@ translated once per language and kept, so reading it again costs nothing.
   about six seconds); source rows show *Searching…*, empty, failed, disabled or cooling-down states while
   the rest arrive. Repeating the same search continues the in-flight work and a recent term opens from the
   five-minute cache. Results are still filtered for the signed-in account, including its age limit.
+  Results come in each source's own relevance order, so the *Newest*/*Popular* toggle is hidden while they are up;
+  the × in the search box, or searching with the box empty, goes back to browsing and brings it back.
   With one source chosen in the chip, a search asks **only that source** and the chip stays on screen while
   the results are up, so you can see the search is narrowed and clear it with its × (which searches every
-  source again). Switching the toggle to *Newest* or *Popular* goes back to browsing.
+  source again).
   A search on one source (the one chosen, or the only one you have) **keeps going as you scroll** (since v0.96.0,
   [#331](https://github.com/AngeloSha/uchiyomi/issues/331)): a site answers its search a page at a time (BatCave ten
   at a time, 209 for *Star Trek*), and the next page loads as you near the end of the wall, up to 30 pages. Every

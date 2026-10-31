@@ -68,7 +68,7 @@ test('Home\'s hero on a phone is its slide\'s cover too, filling it; a computer 
   // `wide ?`): this fails.
   const hero = readFileSync(join(__dirname, '..', 'components/HeroCarousel.tsx'), 'utf8');
   assert.match(hero, /\{wide \? <HeroArt series=\{cur\} hero className="absolute inset-0" \/> : <PhoneHeroCover id=\{cur\.id\} version=\{cur\.artVersion\} still=\{reduced\} \/>\}/);
-  assert.match(hero, /data-home-hero\s+className="[^"]*\bh-\[min\(150vw,82svh\)\][^"]*lg:h-\[64vh\]/, 'the phone hero is not the cover\'s shape');
+  assert.match(hero, /data-home-hero\s+className="[^"]*\bh-\[min\(150vw,82svh\)\][^"]*lg:h-\[72vh\]/, 'the phone hero is not the cover\'s shape');
   // A phone fades only the foot, where the title and keys are; the desktop's wash across the art is a computer's.
   assert.match(hero, /<div className="absolute inset-0 hidden bg-linear-to-r [^"]*lg:block" \/>/);
   assert.match(hero, /<div className="absolute inset-x-0 bottom-0 h-\[65%\] bg-linear-to-t [^"]*lg:hidden" \/>/);
@@ -76,6 +76,17 @@ test('Home\'s hero on a phone is its slide\'s cover too, filling it; a computer 
   assert.match(hero, /im\.src = wide \? backdropSources\([^)]*\)\[0\] : img\.seriesThumb\(nxt\.id, nxt\.artVersion, 1600\);/);
   // Home's skeleton holds the same height, so the page does not jump when the hero arrives.
   const home = readFileSync(join(__dirname, '..', 'app/page.tsx'), 'utf8');
-  assert.match(home, /skeleton bleed-lg under-topbar under-phone-header h-\[min\(150vw,82svh\)\] lg:h-\[62vh\]/);
+  assert.match(home, /skeleton bleed-lg under-topbar under-phone-header h-\[min\(150vw,82svh\)\] lg:h-\[72vh\]/);
 });
 
+test('a phone shows the styled title over its cover, never the logo, and does not poll for one (v0.102.2)', () => {
+  // The owner: the cover is already the hero on a phone, so the title logo is a computer's. Reintroduce the logo on a
+  // phone (drop `logo={false}` or `logo={wide}`): this fails, and titleArtWalk.mjs counts a logo request at 390 px.
+  assert.match(hero, /<HeroTitle series=\{series \?\? \{ id, name: title, metadata: \{\} \}\} title=\{title\} headingRef=\{heroTitleRef\} logo=\{false\} \/>/);
+  assert.match(hero, /<HeroTitle series=\{series \?\? \{ id, name: title, metadata: \{\} \}\} title=\{title\} logo=\{wide\} \/>/);
+  const carousel = readFileSync(join(__dirname, '..', 'components/HeroCarousel.tsx'), 'utf8');
+  assert.match(carousel, /<HeroTitle series=\{cur\} logo=\{wide\} \/>/);
+  assert.match(page, /useTitleArtPolling\(id, series \? \[series\] : \[\], refetchTitleArt, authStatus !== 'offline' && wide\);/);
+  const home = readFileSync(join(__dirname, '..', 'app/page.tsx'), 'utf8');
+  assert.match(home, /useTitleArtPolling\('featured', featured\?\.content \?\? \[\], refetchTitleArt, authStatus !== 'offline' && wideHero\);/);
+});

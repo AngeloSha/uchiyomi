@@ -1,0 +1,6 @@
+# Isolated optional trial, never installed in the application image.
+# First install CPU torch/torchvision from https://download.pytorch.org/whl/cpu (see README).
+numpy==2.2.6
+pillow==13.0.0
+einops==0.8.1
+opencv-python-headless==4.12.0.88
