@@ -97,10 +97,11 @@ import { paceLevel, rateKeyOf, restLeft } from '../lib/pace';
 import { haveNumbers } from '../lib/libraryNumbers';
 import { heldBy, isRange, rangeEnd, rawRangeEnd } from '../lib/chapterRanges';
 import {
-  addNumbering, numberingFor, numberedChapters, stampAddNumbering, registerBusyProbe, onRenumbered, POSTING_ORDER_REFUSAL,
+  addNumbering, numberingFor, numberedChapters, readsByTitles, stampAddNumbering, registerBusyProbe, onRenumbered, POSTING_ORDER_REFUSAL,
   type NumberingChoice,
 } from '../lib/numbering';
 import { numKey } from '../lib/postingOrder';
+import { titleNumbered } from '../lib/titleNumbers';
 import { groupStats } from '../lib/groupStats';
 import { fetchAniListArt, TREND_COUNTRIES, type TrendCountry } from '../lib/anilist';
 import { trendingFor } from '../lib/trending';
@@ -2660,7 +2661,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const p = new Params();
     const rows = await q<any>(
       `SELECT s.id, s.title, s.folder, s.source_id, s.source_series_id, s.summary, s.author, s.genres, s.web, s.status,
-              s.chapter_floor, s.scanlator_prefs, s.numbering, s.numbering_source
+              s.chapter_floor, s.scanlator_prefs, s.numbering, s.numbering_source, s.numbering_note
          FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${visible('s', vc(req), p)}`, p.values,
     ).then((r) => r, () => null);
     if (rows === null) return reply.code(503).send({ error: 'unavailable' });
@@ -2763,6 +2764,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const { s, seriesId, have, allowed } = o;
     const plan = st.plan;
     const posting = s.numbering === 'posting_order' && (!s.numbering_source || s.numbering_source === s.source_id);
+    // The source a series numbered by its chapter titles was numbered by (#379); for any other series, its own.
+    const titlesSource = s.numbering === 'titles' ? (s.numbering_source ?? s.source_id) : s.source_id;
     // The title, up to SEARCH_NAMES of the series' other names (v0.49.1, lib/altTitles.ts) and the typed name, in
     // that order, one key each. An other name is matched EXACTLY (exactHit), never by pickBest's containment and
     // word-overlap tiers: those are what a sequel listed among the names would pass. The three-source stop below
@@ -2802,6 +2805,13 @@ export default async function sourceRoutes(app: FastifyInstance) {
           // The series' own source, in the numbers the series keeps (#116): a posting-order series holds chapter
           // 20, and the source's own list calls that post 2. Read-only -- the check is what persists new posts.
           if (posting && f.pinned && raw.length) raw = await numberedChapters({ seriesId, sourceId: f.source }, raw);
+          // By the chapter titles (#379), as the check reads each source (lib/numbering.ts readsByTitles): read raw, a
+          // series numbered so was offered its own source's count, the posts after its last chapter by their old numbers.
+          // Reintroduce by reading `raw` as it came: "Find missing reads a source by its titles" in
+          // titleNumbering.int.test.ts lists the series' own source as 1 to 36, chapters 31 to 36 new.
+          else if (raw.length && readsByTitles(s, raw, { numberingSource: f.source === titlesSource, sourceCounts: !!s.numbering_note?.titles })) {
+            raw = titleNumbered(raw);
+          }
         }
         // One copy per number BEFORE the list is assessed or stored in the plan. `authorise` filters the
         // stored list by number, so a plan holding two copies of chapter 5 would answer a fill of [5] with
@@ -3921,11 +3931,14 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // the dialog's "120 chapters" is the 120 the add lands and not the 200 rows the source listed.
     const chosen = chooseReleases(chapters, prefs).releases;
     const nums = chosen.map((c) => c.number);
-    const other = n.applied === 'posting_order' ? raw : numberingFor(raw, 'posting_order').chapters;
-    const altNums = n.detect.verdict === 'none' ? [] : chooseReleases(other, prefs).releases.map((c) => c.number);
+    // The other reading, for the switch: the source's own numbers when the add renumbers (by posting order, or by the
+    // chapter titles, #379), else posting order when the detector has something to say.
+    const other = n.applied !== 'source' ? raw : n.detect.verdict !== 'none' ? numberingFor(raw, 'posting_order').chapters : [];
+    const altNums = chooseReleases(other, prefs).releases.map((c) => c.number);
     const numbering = {
       verdict: n.detect.verdict, ...(n.detect.reason ? { reason: n.detect.reason } : {}), applied: n.applied, ordered: n.detect.ordered,
       posts: n.detect.posts, numbers: n.detect.numbers, biggest: n.detect.biggest, examples: n.detect.examples,
+      ...(n.applied === 'titles' ? { titles: { specials: n.titles.specials, moved: n.titles.moved, example: n.titles.example } } : {}),
       alt: altNums.length ? { count: altNums.length, first: Math.min(...altNums), last: Math.max(...altNums) } : null,
       ...(isSwAdapterId(src.id) ? { extSourceId: src.id.slice(SW_PREFIX.length) } : {}),
     };
@@ -3965,7 +3978,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
       // "Archive the rest slowly" (#117): what the selection leaves is queued for the slow archive.
       archive: z.boolean().optional(),
       // #116: the add dialog's numbering switch. Absent is `auto`, what every caller before v0.49.0 meant.
-      numbering: z.enum(['auto', 'source', 'posting_order']).optional(),
+      numbering: z.enum(['auto', 'source', 'posting_order', 'titles']).optional(),
       // v0.52.0 (#72): add it as a language edition of the series `of` (lib/editions.ts). Codes are checked by the
       // add (canonLang); these bounds only keep the strings strings.
       edition: z.object({

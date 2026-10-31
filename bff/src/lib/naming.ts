@@ -195,6 +195,20 @@ const CHAPTER_WORD = String.raw`(?:(?:ch(?:apter|ap)?|episode|ep|capítulo|capit
 // After the number, the separators between it and a real name.
 const SEPARATOR = String.raw`\s*(?:[:.\-–—|~]+\s*)?`;
 
+// The number a title starts with, after an optional chapter word ("24. The Other Side", "Ep. 24", "第24話"), and only
+// when it stands alone: "1st Anniversary", "3D Special" and "10k Followers" start with no chapter number.
+const LEADING = new RegExp(String.raw`^${CHAPTER_WORD}(?:第\s*)?#?\s*(\d+(?:\.\d+)?)(?:\s*(?:話|话|章|回|화|편))?(?=$|[\s.,:;!?\-–—|~)\]])`, 'iu');
+
+/**
+ * The chapter number a title starts with, as its creator wrote it -- "24. The Other Side" is 24, "Episode 7: Rain" 7 --
+ * or null when it starts with none ("Caption Contest!", "Q&A Announcement!"). lib/titleNumbers.ts reads a series by
+ * it when its source counts every post, specials included (#379).
+ */
+export function leadingNumber(title: string | undefined | null): number | null {
+  const m = LEADING.exec((title ?? '').trim());
+  return m ? parseFloat(m[1]) : null;
+}
+
 /**
  * The chapter's own name, when the source gave one: what is left once the volume, the chapter word and the
  * number are taken off the front. Null when nothing is left -- the title only said the number again.

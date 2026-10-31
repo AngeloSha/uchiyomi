@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4523
+    "strings": 4531
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -4526,5 +4526,13 @@
   "Lettering may be missing": "Возможно, отсутствуют буквы",
   "Low contrast": "Низкий контраст",
   "Checks unavailable": "Проверки недоступны",
-  "Other checks need review": "Требуются другие проверки"
+  "Other checks need review": "Требуются другие проверки",
+  "Numbered by the chapter titles": "Пронумеровано по названиям глав",
+  "Number by the chapter titles": "Нумеровать по названиям глав",
+  "{source} counts its specials as chapters, so its chapter numbers run ahead of their titles (it numbers “{title}” {number}).": "{source} считает спецвыпуски главами, поэтому номера глав опережают номера в их названиях («{title}» у него под номером {number}).",
+  "{source} counts its specials as chapters, so its chapter numbers run ahead of their titles.": "{source} считает спецвыпуски главами, поэтому номера глав опережают номера в их названиях.",
+  "Each chapter here has the number in its title, and each special comes just after the chapter before it.": "Здесь у каждой главы номер из её названия, а каждый спецвыпуск идёт сразу после предыдущей главы.",
+  "{name} counts its specials as chapters, so its chapter numbers run ahead of their titles (it numbers “{title}” {number})": "{name} считает спецвыпуски главами, поэтому номера глав опережают номера в их названиях («{title}» у него под номером {number})",
+  "{name} counts its specials as chapters, so its chapter numbers run ahead of their titles": "{name} считает спецвыпуски главами, поэтому номера глав опережают номера в их названиях",
+  "numbering them by their titles waits for your review.": "нумерация по названиям ждёт вашей проверки."
 }

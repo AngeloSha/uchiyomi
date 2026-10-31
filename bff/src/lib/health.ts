@@ -688,8 +688,8 @@ const NUMBERED_SHOWN_MS = 14 * DAY_MS;
 async function numberingCheck(): Promise<HealthCheck | null> {
   const rows = await q<{
     id: string; title: string; source_name: string | null; source_id: string | null;
-    numbering: 'source' | 'posting_order' | null; numbering_by: 'auto' | 'manual' | null; numbering_source: string | null;
-    numbering_pending: 'posting_order' | 'source' | 'remap' | null; numbering_note: NumberingNote | null;
+    numbering: 'source' | 'posting_order' | 'titles' | null; numbering_by: 'auto' | 'manual' | null; numbering_source: string | null;
+    numbering_pending: 'posting_order' | 'titles' | 'source' | 'remap' | null; numbering_note: NumberingNote | null;
     journal: boolean; changed_at: string | null;
   }>(
     `SELECT ls.id, ls.title, ls.source AS source_name, ls.source_id, ls.numbering, ls.numbering_by, ls.numbering_source,
@@ -733,6 +733,11 @@ async function numberingCheck(): Promise<HealthCheck | null> {
       item = auto
         ? { ...base, ...detailOf([shared, say('numbering.reviewWaits'), held]), actions: ['renumber', 'keep_numbers'] }
         : { ...base, ...detailOf([say('numbering.askedWaits'), held]), actions: ['renumber'] };
+    } else if (r.numbering_pending === 'titles') {
+      // #379: the source counts its specials as chapters. "Keep the source's numbers" is the admin's to say, as for posting order.
+      const ex = note?.titles?.example;
+      item = { ...base, ...detailOf([say('numbering.titles', { name, ...(ex ? { title: ex.title, number: ex.from } : {}) }), say('numbering.titlesWaits'), held]),
+        actions: ['renumber', 'keep_numbers'] };
     } else if (r.numbering_pending === 'source') {
       item = { ...base, ...detailOf([say('numbering.sourceWaits', { name }), held]), actions: ['renumber'] };
     } else if (r.numbering === 'posting_order' && auto) {

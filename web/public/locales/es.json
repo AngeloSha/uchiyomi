@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4523
+    "strings": 4531
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -4526,5 +4526,13 @@
   "Lettering may be missing": "Podrían faltar partes de las letras",
   "Low contrast": "Bajo contraste",
   "Checks unavailable": "Comprobaciones no disponibles",
-  "Other checks need review": "Otras comprobaciones requieren revisión"
+  "Other checks need review": "Otras comprobaciones requieren revisión",
+  "Numbered by the chapter titles": "Numerada por los títulos de los capítulos",
+  "Number by the chapter titles": "Numerar por los títulos de los capítulos",
+  "{source} counts its specials as chapters, so its chapter numbers run ahead of their titles (it numbers “{title}” {number}).": "{source} cuenta sus especiales como capítulos, así que sus números de capítulo van por delante de los de sus títulos (numera «{title}» como {number}).",
+  "{source} counts its specials as chapters, so its chapter numbers run ahead of their titles.": "{source} cuenta sus especiales como capítulos, así que sus números de capítulo van por delante de los de sus títulos.",
+  "Each chapter here has the number in its title, and each special comes just after the chapter before it.": "Aquí cada capítulo lleva el número de su título, y cada especial va justo después del capítulo anterior.",
+  "{name} counts its specials as chapters, so its chapter numbers run ahead of their titles (it numbers “{title}” {number})": "{name} cuenta sus especiales como capítulos, así que sus números de capítulo van por delante de los de sus títulos (numera «{title}» como {number})",
+  "{name} counts its specials as chapters, so its chapter numbers run ahead of their titles": "{name} cuenta sus especiales como capítulos, así que sus números de capítulo van por delante de los de sus títulos",
+  "numbering them by their titles waits for your review.": "numerarlos por sus títulos está pendiente de tu revisión."
 }

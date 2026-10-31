@@ -51,7 +51,7 @@ export function NumberingSheet({ seriesId, mode, onClose, onConfirm }: {
   // The change the plan is about: asked for, or the one the route picked for `next`.
   const m: RenumberMode | undefined = mode === 'next' ? data?.mode : mode;
   const title = m === 'source' ? tr('Use the source’s numbers') : m === 'remap' ? tr('Renumber to the source’s new numbers')
-    : m === 'posting_order' ? tr('Number by posting order') : tr('Review renumbering');
+    : m === 'posting_order' ? tr('Number by posting order') : m === 'titles' ? tr('Number by the chapter titles') : tr('Review renumbering');
   const plan = data?.plan;
   const counts = plan ? planCounts(plan) : null;
   const moving = (plan?.moves ?? []).filter((x) => x.via !== 'none' && (x.to !== x.from || x.file !== x.fromFile));

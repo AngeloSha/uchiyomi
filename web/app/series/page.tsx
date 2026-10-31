@@ -2190,8 +2190,9 @@ function SeriesInner() {
           onReplace={(copy) => { const b = chapterSheet.book!; setChapterSheet(null); setReplacing({ book: b, copy }); }}
           // Sheet for sheet, never stacked: the versions sheet closes and the plan opens.
           // Not while a change waits for review (a remap, an undo): the notice above the list offers that plan, and
-          // confirming posting order here would overwrite it with a plan built on the wrong numbers.
-          onNumbering={isAdmin && listing?.numbering?.mode !== 'posting_order' && !listing?.numbering?.pending
+          // confirming posting order here would overwrite it with a plan built on the wrong numbers. Nor on a series
+          // numbered by its chapter titles (#379): its versions are other sources' copies of one chapter.
+          onNumbering={isAdmin && listing?.numbering?.mode !== 'posting_order' && listing?.numbering?.mode !== 'titles' && !listing?.numbering?.pending
             ? () => { setChapterSheet(null); setNumberingSheet('posting_order'); } : undefined}
           onClose={() => setChapterSheet(null)} />
       )}

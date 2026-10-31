@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4523
+    "strings": 4531
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4526,5 +4526,13 @@
   "Lettering may be missing": "文字可能有缺失",
   "Low contrast": "对比度低",
   "Checks unavailable": "检查暂不可用",
-  "Other checks need review": "其他检查需要审核"
+  "Other checks need review": "其他检查需要审核",
+  "Numbered by the chapter titles": "按章节标题编号",
+  "Number by the chapter titles": "按章节标题编号",
+  "{source} counts its specials as chapters, so its chapter numbers run ahead of their titles (it numbers “{title}” {number}).": "{source} 把特别篇也算作章节，因此它的章节编号比标题里的编号大（它把“{title}”编为 {number}）。",
+  "{source} counts its specials as chapters, so its chapter numbers run ahead of their titles.": "{source} 把特别篇也算作章节，因此它的章节编号比标题里的编号大。",
+  "Each chapter here has the number in its title, and each special comes just after the chapter before it.": "这里每一章都使用其标题中的编号，每个特别篇紧跟在它前一章之后。",
+  "{name} counts its specials as chapters, so its chapter numbers run ahead of their titles (it numbers “{title}” {number})": "{name} 把特别篇也算作章节，因此它的章节编号比标题里的编号大（它把“{title}”编为 {number}）",
+  "{name} counts its specials as chapters, so its chapter numbers run ahead of their titles": "{name} 把特别篇也算作章节，因此它的章节编号比标题里的编号大",
+  "numbering them by their titles waits for your review.": "按标题为它们编号正等待你的审核。"
 }
