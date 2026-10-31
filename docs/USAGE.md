@@ -1492,6 +1492,42 @@ second source, searching other sites for its gaps, borrowing chapter names and f
 with that reason — the sources it already followed stay, and are simply not asked. Health's *Chapter numbering*
 lists every series waiting for a review (section 8).
 
+### Chapter numbering: when a source counts its specials as chapters
+
+Since v0.103.1 ([#379](https://github.com/AngeloSha/uchiyomi/issues/379)). Some sources number a post by its place
+in the series, specials included. On Tapas, *24. The Other Side* comes after three specials, so the source numbers
+it 27, and *Caption Contest!* just after it 28: every chapter after the first special was numbered past the number
+in its own title. Such a series is numbered **by the chapter titles** instead:
+
+- each chapter gets the number its title starts with: *24. The Other Side* is Ch. 24;
+- each special stays in the list, just after the chapter before it: *Caption Contest!* is Ch. 24.01, a second
+  special there 24.02. A special never takes or shifts a chapter's number.
+
+**How it is noticed.** Each source's list is judged on its own: at least 12 posts with a number each, counted one
+post at a time, most titles starting with a chapter number, at least one special, and chapters the source numbers
+ahead of their titles. A number in a special's title that is out of step with the chapters, such as *100
+Subscribers!* or *2023 Recap*, does not make it a chapter. Tapas's own *Show episode number in chapter name*
+(`27 - 24. The Other Side`) and the 🔒 on a locked episode are read past. Nothing is stored: a post's number comes
+from the posts before it, so a new post never moves an earlier one. Deleting a special moves a second special after
+the same chapter from 24.02 to 24.01, and a creator who changes the number in a title moves that chapter. Titles that
+start counting again each season do not fit this reading (a later season's chapters would read as specials): keep
+the source's numbers for such a series.
+
+**Adding, reviewing, undoing** work as for posting order above. A series you add is numbered this way at once, and
+the add dialog says *Numbered by the chapter titles* and why: *Tapas counts its specials as chapters, so its chapter
+numbers run ahead of their titles (it numbers “24. The Other Side” 27).* **Keep the source's numbers** adds it the old
+way. A series already in your library is never renamed on its own: its page says *Chapter numbers need a review*,
+nothing new downloads for it, and **Review renumbering** opens the plan, *Number by the chapter titles*, for an admin
+to confirm. Files are renamed in place, as above. Afterwards the notice reads *Numbered by the chapter titles*, with
+**Use the source's numbers** to undo it.
+
+**Other sources keep working.** Unlike posting order, the numbers in the titles are the creator's, and other sites
+use them too, so a series numbered this way still follows other sources, fills gaps and borrows names from them. A
+second source that counts its specials the same way is read by its titles as well, for new chapters and for *Find
+missing chapters*, unless the series keeps its main source's own counted numbers. Chapters already downloaded from
+such a source keep their numbers; **Replace from another source…** swaps in the right copy where one holds a different
+chapter.
+
 ### Filtering the chapter list
 
 **Filter**, the chip beside *Oldest/Newest*, opens *Filter chapters*: under *Translated by*, **All** and one
@@ -2053,6 +2089,10 @@ translated once per language and kept, so reading it again costs nothing.
   the note's heading (*Keeping the source's own numbers*), the count, the range and the *First* / *Latest* choices
   follow the switch. On a weaker sign the note reads *Some posts share a chapter number* and the switch is **Number
   by posting order**. An admin also gets **Source settings**, the extension's own settings (section 7).
+- **Numbered by the chapter titles** (since v0.103.1): when the source counts its specials as chapters (Tapas), the
+  note says so and names the newest chapter it numbers ahead of its title. Each chapter is added at the number in
+  its title, and each special just after the chapter before it (section 4, *Chapter numbering: when a source counts
+  its specials as chapters*); **Keep the source's numbers** adds it the old way.
 - **Read a chapter first** (since v0.47.0, from a pull request by @Squeaks72): under **Add to library**, this
   opens the title straight from the source without adding it. Pick a chapter from its list — one copy per
   number, the one an add would take — scroll it, and step to the previous or next one; **Add to library** is
@@ -2824,8 +2864,9 @@ answering*, or *is off*, instead of "over the source limit".
 
 **Chapter numbering** (since v0.49.0, [#116](https://github.com/AngeloSha/uchiyomi/issues/116)) lists, by name, the
 series whose numbering needs an admin (section 4, *Chapter numbering*). Most are held — nothing new downloads for
-them until an admin decides: a source that numbers many different posts the same was found under them (**Review
-renumbering** or **Keep the source's numbers**, the same choice as on the series page); an admin's choice, a
+them until an admin decides: a source that numbers many different posts the same, or since v0.103.1 one that counts
+its specials as chapters, was found under them (**Review renumbering** or **Keep the source's numbers**, the same
+choice as on the series page); an admin's choice, a
 renumbering or its undo, waits to be applied, or an extension setting changed the source's numbers (**Review
 renumbering**); or a renumbering is being carried out, or was cut off by a restart, which the series' next check
 finishes, so that row has no key. A weaker sign on a series in the source's numbers is a finding too, with the same
@@ -4128,6 +4169,11 @@ posts one chapter number. Since v0.49.0 such a series is numbered by posting ord
 numbering*): one you add now is numbered as it is added, and one already in your library waits for an admin's
 review on its page. The Webtoons extension's own *Use sequential chapter numbering*, under **Settings** in its sheet in
 **Admin → Sources**, is the other way to the same numbers, and changing it asks for the same review.
+
+**Chapters after a Q&A or another special are numbered higher than their titles say.** Its source counts every post as a chapter,
+specials included (Tapas). Since v0.103.1 such a series is numbered by its chapter titles instead (section 4,
+*Chapter numbering: when a source counts its specials as chapters*): a special stays in the list just after the
+chapter before it (24.01), and one already in your library waits for an admin's review on its page.
 
 **A series says *Chapter numbers need a review* and gets no new chapters.** That is on purpose: its files still
 carry the source's old numbers, and a chapter fetched now would land under a number the plan is about to move. An
