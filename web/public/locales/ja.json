@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4541
+    "strings": 4552
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -3295,6 +3295,8 @@
   "{n} matches checked": "{n} 件の照合を確認",
   "1 removed as another work": "別の作品だった 1 件を削除",
   "{n} removed as another work": "別の作品だった {n} 件を削除",
+  "1 moved to the right AniList entry": "正しい AniList の項目へ 1 件を移動",
+  "{n} moved to the right AniList entry": "正しい AniList の項目へ {n} 件を移動",
   "AniList or MangaDex did not answer: tried again at the next run": "AniList または MangaDex が応答しませんでした：次回の実行で再試行します",
   "Use the first page": "最初のページを使う",
   "The first page, by your choice: nothing found online replaces it.": "最初のページ（選択済み）：オンラインで見つかったものに置き換わることはありません。",
@@ -4476,6 +4478,7 @@
   "This preview has expired. Create a new one.": "このプレビューの有効期限が切れました。新しく作成してください。",
   "The title could not be separated from the cover. Adjust the title area and try again.": "表紙からタイトルを分離できませんでした。タイトル範囲を調整して、もう一度お試しください。",
   "From the cover": "表紙から抽出",
+  "Uchiyomi logo library": "Uchiyomi ロゴライブラリ",
   "Fine-tune title": "タイトルを微調整",
   "Erase": "消す",
   "Move": "移動",
@@ -4544,5 +4547,13 @@
   "Lettering may be missing": "文字が一部欠けている可能性",
   "Low contrast": "コントラストが低い",
   "Checks unavailable": "確認を利用できません",
-  "Other checks need review": "その他の確認が必要"
+  "Other checks need review": "その他の確認が必要",
+  "Numbered by the chapter titles": "話のタイトルで番号付け",
+  "Number by the chapter titles": "話のタイトルで番号を付ける",
+  "{source} counts its specials as chapters, so its chapter numbers run ahead of their titles (it numbers “{title}” {number}).": "{source} は番外編も話として数えるため、話数がタイトルの番号より先に進んでいます（「{title}」を {number} としています）。",
+  "{source} counts its specials as chapters, so its chapter numbers run ahead of their titles.": "{source} は番外編も話として数えるため、話数がタイトルの番号より先に進んでいます。",
+  "Each chapter here has the number in its title, and each special comes just after the chapter before it.": "ここでは各話にタイトルの番号が付き、番外編はその直前の話のすぐ後に並びます。",
+  "{name} counts its specials as chapters, so its chapter numbers run ahead of their titles (it numbers “{title}” {number})": "{name} は番外編も話として数えるため、話数がタイトルの番号より先に進んでいます（「{title}」を {number} としています）",
+  "{name} counts its specials as chapters, so its chapter numbers run ahead of their titles": "{name} は番外編も話として数えるため、話数がタイトルの番号より先に進んでいます",
+  "numbering them by their titles waits for your review.": "タイトルでの番号付けはあなたの確認待ちです。"
 }

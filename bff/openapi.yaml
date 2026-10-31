@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.102.2
+  version: 0.103.1
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -434,7 +434,7 @@ components:
         attribution:
           type: [object, "null"]
           properties:
-            source: { type: string, enum: [Wikimedia Commons, Cover lettering] }
+            source: { type: string, enum: [Uchiyomi logo library, Wikimedia Commons, Cover lettering] }
             sourceUrl: { type: [string, "null"] }
             artist: { type: [string, "null"] }
             license: { type: [string, "null"] }
@@ -2652,8 +2652,9 @@ paths:
         ticked read without it being here (POST /api/series/{id}/listing-progress). A chapter matches its
         listing number by its override-aware number, so a chapter an admin renumbered is not also a ghost.
         `numbering` (v0.49.0, #116) says how the series is numbered and why: { mode (null = automatic, source,
-        posting_order), by (auto, manual), pending (posting_order, source, remap: a change waiting for an
-        admin), note (the detector's last verdict), changedAt, sourceName, extSourceId? }.
+        posting_order, titles since #379), by (auto, manual), pending (posting_order, titles, source, remap: a
+        change waiting for an admin), note (the detector's last verdict; `titles` { posts, specials, moved,
+        example } when the source counts its specials as chapters), changedAt, sourceName, extSourceId? }.
       parameters:
         - name: id
           in: path
@@ -4545,7 +4546,9 @@ paths:
         chapter list (no second source call), with `onDisk` 0 since nothing is on disk yet; `versions` is how
         many numbers the source lists in more than one copy. `numbering` (v0.49.0, #116) is the detector's word
         on the listing: { verdict (strong, hint, none), applied (posting_order when the add will number the
-        posts 1..K in posting order, else source), ordered, posts, numbers, biggest { number, posts }, examples,
+        posts 1..K in posting order; titles when the source counts its specials as chapters and the add numbers
+        each chapter by its title, each special just after the chapter before it, #379; else source), ordered,
+        posts, numbers, biggest { number, posts }, examples, titles? { specials, moved, example { title, from, to } },
         alt { count, first, last } (the other reading, for the dialog's switch), extSourceId? }; `count`,
         `first` and `last` follow `applied`. Since v0.49.1, when the source and id are some series' main source,
         the other names its description lists are kept for that series (GET /api/admin/series/{id}/alt-titles).
@@ -4811,11 +4814,13 @@ paths:
                   type: boolean
                 numbering:
                   type: string
-                  enum: [auto, source, posting_order]
+                  enum: [auto, source, posting_order, titles]
                   description: >-
                     How to number the series (v0.49.0, #116). `auto` (the default) numbers by posting order when
-                    the source gives many different posts one number; `source` keeps the source's numbers;
-                    `posting_order` numbers the posts 1..K whatever the detector says. `alsoFollow` is ignored
+                    the source gives many different posts one number, and by the chapter titles when it counts its
+                    specials as chapters (#379); `source` keeps the source's numbers; `posting_order` numbers the
+                    posts 1..K whatever the detector says; `titles` numbers each chapter by its title, each special
+                    just after the chapter before it. `alsoFollow` is ignored
                     under posting order. A folder that already holds chapters is never renumbered by an add: it
                     is added in the source's numbers with a renumbering pending, for an admin to review (unless
                     the series kept an assignment for this source, when it was removed and is added back).
@@ -8585,7 +8590,8 @@ paths:
                   automatic_title_logos:
                     type: boolean
                     description: >-
-                      Automatic linked-manga logo lookups through Wikidata and Wikimedia Commons. Off by default;
+                      Automatic linked-manga logo lookups: the Uchiyomi logo library first (TITLE_LOGO_LIBRARY_URL,
+                      since v0.103.0), then Wikidata and Wikimedia Commons. Off by default;
                       library lookup opt-outs and first-page-only art choices also suppress automatic requests.
                   automatic_cover_title_generation:
                     type: boolean
@@ -9376,8 +9382,10 @@ paths:
             a preview -- a scan, then a look for every live chapter's own file -- and changes nothing; its
             progress and plan are on GET /api/admin/tasks/rescan/status. `matches` (since v0.55.7, "Check online
             matches") holds every automatic AniList link and every cover and banner found by a title search to the
-            title check again, detached; its last run is the `matches` entry of GET /api/admin/tasks
-            ({matches, removed, links, art, unanswered, stopped?, ms}), audited as `library.match_check`.
+            title check again, detached -- since v0.103.1 a link named as its series only by a synonym moves to the
+            entry a title search names so by its own title; its last run is the `matches` entry of GET
+            /api/admin/tasks ({matches, removed, moved, links, art, unanswered, stopped?, ms}), audited as
+            `library.match_check`.
           schema:
             type: string
             enum: [scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify, repair, rescan, matches]
@@ -10559,7 +10567,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [posting_order, source, remap]
+            enum: [posting_order, titles, source, remap]
       security:
         - bearer: []
       responses:
@@ -10582,7 +10590,7 @@ paths:
       operationId: postApiAdminSeriesIdNumbering
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. `auto` hands the
-        series back to the detector. `posting_order` and `source` without `confirm` answer `needs_confirm` with
+        series back to the detector. `posting_order`, `titles` (#379) and `source` without `confirm` answer `needs_confirm` with
         the plan and change nothing; with it they rename the files in place (book ids, reading progress,
         bookmarks and notes are kept) and answer `applied`. Choosing the numbering the series already has
         (Keep the source's numbers on a series waiting for review) renames nothing and answers `unchanged`.
@@ -10608,7 +10616,7 @@ paths:
               type: object
               required: [mode]
               properties:
-                mode: { type: string, enum: [auto, source, posting_order, remap] }
+                mode: { type: string, enum: [auto, source, posting_order, titles, remap] }
                 confirm: { type: boolean }
       security:
         - bearer: []

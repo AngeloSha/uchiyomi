@@ -153,6 +153,11 @@ const EN = {
   'numbering.askedWaits': () => 'Numbering by posting order, as asked, waits to be applied.',
   'numbering.sourceWaits': ({ name }: { name: string | null }) => `Going back to ${name ?? 'its source'}'s own numbers waits to be applied.`,
   'numbering.since': ({ at }: { at: string }) => `numbered by posting order since ${day(at)}.`,
+  // #379: a source that counts its specials as chapters (lib/titleNumbers.ts), with the newest chapter it moves when known.
+  'numbering.titles': ({ name, title, number }: { name: string | null; title?: string | null; number?: number | null }) =>
+    `${name ?? 'Its source'} counts its specials as chapters, so its chapter numbers run ahead of their titles` +
+    (title && number != null ? ` (it numbers “${title}” ${number})` : ''),
+  'numbering.titlesWaits': () => 'numbering them by their titles waits for your review.',
 
   // ---- v0.81.0, the scout (lib/sourceScout.ts) on a Health row: when it last looked for the series on other sources,
   // how many it asked, and what came of it. `source` is the source it followed, by name.

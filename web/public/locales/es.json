@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4541
+    "strings": 4552
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -3295,6 +3295,8 @@
   "{n} matches checked": "{n} coincidencias comprobadas",
   "1 removed as another work": "1 quitada por ser otra obra",
   "{n} removed as another work": "{n} quitadas por ser otra obra",
+  "1 moved to the right AniList entry": "1 movida a la entrada correcta de AniList",
+  "{n} moved to the right AniList entry": "{n} movidas a la entrada correcta de AniList",
   "AniList or MangaDex did not answer: tried again at the next run": "AniList o MangaDex no respondió: se reintenta en la próxima ejecución",
   "Use the first page": "Usar la primera página",
   "The first page, by your choice: nothing found online replaces it.": "La primera página, por tu elección: nada que se encuentre en línea la reemplaza.",
@@ -4476,6 +4478,7 @@
   "This preview has expired. Create a new one.": "Esta vista previa ha caducado. Crea otra.",
   "The title could not be separated from the cover. Adjust the title area and try again.": "No se pudo separar el título de la portada. Ajusta el área del título e inténtalo de nuevo.",
   "From the cover": "De la portada",
+  "Uchiyomi logo library": "Biblioteca de logotipos de Uchiyomi",
   "Fine-tune title": "Ajustar el título",
   "Erase": "Borrar",
   "Move": "Mover",
@@ -4544,5 +4547,13 @@
   "Lettering may be missing": "Podrían faltar partes de las letras",
   "Low contrast": "Bajo contraste",
   "Checks unavailable": "Comprobaciones no disponibles",
-  "Other checks need review": "Otras comprobaciones requieren revisión"
+  "Other checks need review": "Otras comprobaciones requieren revisión",
+  "Numbered by the chapter titles": "Numerada por los títulos de los capítulos",
+  "Number by the chapter titles": "Numerar por los títulos de los capítulos",
+  "{source} counts its specials as chapters, so its chapter numbers run ahead of their titles (it numbers “{title}” {number}).": "{source} cuenta sus especiales como capítulos, así que sus números de capítulo van por delante de los de sus títulos (numera «{title}» como {number}).",
+  "{source} counts its specials as chapters, so its chapter numbers run ahead of their titles.": "{source} cuenta sus especiales como capítulos, así que sus números de capítulo van por delante de los de sus títulos.",
+  "Each chapter here has the number in its title, and each special comes just after the chapter before it.": "Aquí cada capítulo lleva el número de su título, y cada especial va justo después del capítulo anterior.",
+  "{name} counts its specials as chapters, so its chapter numbers run ahead of their titles (it numbers “{title}” {number})": "{name} cuenta sus especiales como capítulos, así que sus números de capítulo van por delante de los de sus títulos (numera «{title}» como {number})",
+  "{name} counts its specials as chapters, so its chapter numbers run ahead of their titles": "{name} cuenta sus especiales como capítulos, así que sus números de capítulo van por delante de los de sus títulos",
+  "numbering them by their titles waits for your review.": "numerarlos por sus títulos está pendiente de tu revisión."
 }

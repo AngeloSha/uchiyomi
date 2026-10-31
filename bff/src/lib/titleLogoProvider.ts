@@ -11,11 +11,12 @@ export interface TitleLogoCandidate {
   language: string | null;
   showReadableTitle: boolean;
   attribution: {
-    provider: 'wikimedia'; pageUrl: string; fileName: string;
+    provider: 'wikimedia' | 'library'; pageUrl: string; fileName: string;
     author: string | null; license: string | null; licenseUrl: string | null;
   };
 }
-export type TitleLogoLookupResult = { kind: 'found'; candidate: TitleLogoCandidate } | { kind: 'missing' };
+/** `libraryAttempt` (v0.103.0): the logo library entry this lookup tried, so the scanner offers each one once. */
+export type TitleLogoLookupResult = ({ kind: 'found'; candidate: TitleLogoCandidate } | { kind: 'missing' }) & { libraryAttempt?: string | null };
 export interface TitleLogoLookupOptions {
   /** Only an explicit administrator's Find logo action; queued/implicit lookups keep the background maxlag policy. */
   interactive?: boolean;

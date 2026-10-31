@@ -26,6 +26,10 @@
 // download log moved through the same map. The transaction clears the journal; a journal still there on the
 // next check is finished from where it stopped (resumeRenumber), and until then the scan leaves the folder
 // alone (library.ts).
+//
+// #379 adds a third numbering through the same doors: by the chapter titles, for a source that counts every
+// post as a chapter, its specials too (lib/titleNumbers.ts). Its numbers are the chapters' own, so unlike posting order
+// it keeps the other sources: a follower that counts its specials the same way is read by its titles as well.
 import { randomBytes } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { q, one, tx } from './db';
@@ -38,6 +42,7 @@ import {
   type SharedNumbering, type PostNumber, type PlanBook, type PlanPost, type PlanMove, type RenumberMode,
   type RenumberPlan, type PostingAssignment,
 } from './postingOrder';
+import { detectTitleNumbering, titleNumbered, type TitleNumbering } from './titleNumbers';
 import { withScansHeld } from './library';
 import { renameRetry } from './fsAtomic';
 import { containedPath, writePreflight } from './fsGuard';
@@ -52,8 +57,8 @@ import { say, saidOf, type Part, type Said } from './said';
 import { isRange } from './chapterRanges';
 import { moveHidden } from './hiddenChapters';
 
-/** How a series' chapters are numbered: by the source, or by posting order. NULL in the row is "automatic". */
-export type NumberingMode = 'source' | 'posting_order';
+/** How a series' chapters are numbered: by the source, by posting order, or by the chapter titles. NULL in the row is "automatic". */
+export type NumberingMode = 'source' | 'posting_order' | 'titles';
 /** What an add or an admin asks for: `auto` lets the detector decide. */
 export type NumberingChoice = 'auto' | NumberingMode;
 
@@ -77,15 +82,20 @@ export interface NumberingNote {
   extras: number;
   biggest: SharedNumbering['biggest'];
   examples: string[];
+  /** #379: present when the source counts its specials as chapters (lib/titleNumbers.ts's strong verdict). */
+  titles?: Omit<TitleNumbering, 'verdict'>;
   source: string;
   at?: string;
 }
 
 export const NUMBERING_COLUMNS = 'numbering, numbering_by, numbering_source, numbering_pending, numbering_note, renumber_plan';
 
-const noteOf = (d: SharedNumbering, source: string): NumberingNote => ({
+const noteOf = (d: SharedNumbering, source: string, t?: TitleNumbering): NumberingNote => ({
   verdict: d.verdict, ...(d.reason ? { reason: d.reason } : {}), ordered: d.ordered, posts: d.posts, numbers: d.numbers,
-  extras: d.extras, biggest: d.biggest, examples: d.examples, source,
+  extras: d.extras, biggest: d.biggest, examples: d.examples,
+  // Only when it fires, so a note the titles never spoke on reads exactly as it did before (sameNote writes nothing).
+  ...(t?.verdict === 'strong' ? { titles: { posts: t.posts, specials: t.specials, moved: t.moved, example: t.example } } : {}),
+  source,
 });
 const sameNote = (a: NumberingNote | null | undefined, b: NumberingNote): boolean => {
   if (!a) return false;
@@ -100,14 +110,23 @@ const sameNote = (a: NumberingNote | null | undefined, b: NumberingNote): boolea
  * numbers by posting order only on the detector's STRONG verdict (which requires the source's own order);
  * `posting_order` is a person's explicit choice and applies to any listing. The result is 1..K -- what the
  * same listing gets as its first stored assignment, so the add's numbers are the ones the series keeps.
+ * `auto` numbers by the chapter titles on lib/titleNumbers.ts's strong verdict, as `titles` does on any listing (#379).
+ * Reintroduce by leaving the titles out: "an add keeps each chapter at its own number" in titleNumbering.int.test.ts
+ * counts the reporter's 30 chapters and 6 specials as chapters 1 to 36, as v0.102 did.
  */
 export function numberingFor<T extends SourceChapter>(raw: readonly T[], want: NumberingChoice = 'auto'):
-  { chapters: T[]; detect: SharedNumbering; applied: NumberingMode; assignment?: PostingAssignment<T> } {
+  { chapters: T[]; detect: SharedNumbering; titles: TitleNumbering; applied: NumberingMode; assignment?: PostingAssignment<T> } {
   const detect = detectSharedNumbering(raw);
+  const titles = detectTitleNumbering(raw);
   const posting = raw.length > 0 && (want === 'posting_order' || (want === 'auto' && detect.verdict === 'strong'));
-  if (!posting) return { chapters: [...raw], detect, applied: 'source' };
+  if (!posting) {
+    if (raw.length > 0 && (want === 'titles' || (want === 'auto' && titles.verdict === 'strong'))) {
+      return { chapters: titleNumbered(raw), detect, titles, applied: 'titles' };
+    }
+    return { chapters: [...raw], detect, titles, applied: 'source' };
+  }
   const assignment = assignPostingNumbers(postingSequence(raw));
-  return { chapters: assignment.numbered, detect, applied: 'posting_order', assignment };
+  return { chapters: assignment.numbered, detect, titles, applied: 'posting_order', assignment };
 }
 
 const isoOf = (v: unknown): string | null => {
@@ -198,6 +217,21 @@ export async function numberedChapters<T extends SourceChapter>(
   return a.numbered;
 }
 
+/**
+ * #379: is one source's listing read by its chapter titles (lib/titleNumbers.ts) for this series? The source the series
+ * is numbered by, when it is numbered so. Any other, when it counts its specials as chapters and the series uses the
+ * chapters' own numbers -- not under posting order, and not while the numbering source counts its specials too and the
+ * series keeps that count (`sourceCounts`: an admin's "Keep the source's numbers", or a renumber waiting for review).
+ * The check and Find missing read every source by it, so the two never number one post apart.
+ */
+export function readsByTitles(
+  s: { numbering: string | null }, list: readonly SourceChapter[], o: { numberingSource: boolean; sourceCounts: boolean },
+): boolean {
+  if (s.numbering === 'posting_order') return false;
+  if (o.numberingSource) return s.numbering === 'titles';
+  return (s.numbering === 'titles' || !o.sourceCounts) && detectTitleNumbering(list).verdict === 'strong';
+}
+
 /** Is this series numbered by posting order: the refusals (hunt, auto-follow, borrowed names, follow) ask it. */
 export async function postingOrderSeries(seriesId: string): Promise<boolean> {
   const r = await one<{ numbering: string | null }>('SELECT numbering FROM lib_series WHERE id = $1', [seriesId]).catch(() => null);
@@ -219,19 +253,27 @@ export const POSTING_ORDER_REFUSAL = say('numbering.postingRefusal').text;
  * changed, and a series left to the detector (numbering NULL, never set by hand) marked for review when the
  * verdict turns STRONG -- or unmarked when a verdict it was marked for has gone away before anyone confirmed it.
  * A manual choice is never overridden: an admin who kept the source's numbers has said so.
+ *
+ * The same for the chapter titles (#379): a source that counts its specials as chapters (lib/titleNumbers.ts) marks the
+ * series for review as `titles`. Posting order goes first: it is for many posts on one number, and the titles' verdict
+ * needs one number per post, so the two never both fire on one listing.
  */
 export async function decideNumbering(s: { id: string } & NumberingRow, sourceId: string, raw: readonly SourceChapter[]): Promise<NumberingRow> {
   const d = detectSharedNumbering(raw);
-  const note = noteOf(d, sourceId);
+  const t = detectTitleNumbering(raw);
+  const note = noteOf(d, sourceId, t);
   const next: NumberingRow = { ...s };
   let dirty = false;
   if (!sameNote(s.numbering_note, note)) { next.numbering_note = { ...note, at: new Date().toISOString() }; dirty = true; }
   const free = s.numbering == null && s.numbering_by !== 'manual';
-  if (free && !s.numbering_pending && d.verdict === 'strong') {
-    next.numbering_pending = 'posting_order';
+  const proposal: RenumberMode | null = d.verdict === 'strong' ? 'posting_order' : t.verdict === 'strong' ? 'titles' : null;
+  if (free && !s.numbering_pending && proposal) {
+    next.numbering_pending = proposal;
     next.numbering_source = sourceId;
     dirty = true;
-  } else if (free && s.numbering_pending === 'posting_order' && d.verdict !== 'strong') {
+  } else if (free && (s.numbering_pending === 'posting_order' || s.numbering_pending === 'titles') && s.numbering_pending !== proposal) {
+    // The verdict it was marked for has gone before anyone confirmed it. Reintroduce by clearing only posting order's:
+    // "a proposal whose verdict has gone is withdrawn" in titleNumbering.int.test.ts finds the series still held.
     next.numbering_pending = null;
     dirty = true;
   }
@@ -355,6 +397,26 @@ async function buildRenumber(s: SeriesForPlan, sourceId: string, raw: readonly S
     rows = a.rows;
     posts = a.rows.map((r) => ({ postId: r.postId, number: r.number, from: r.sourceNumber ?? null, title: r.title, publishedAt: r.publishedAt }));
     after = { numbering: 'posting_order', by: s.numbering_by === 'manual' ? 'manual' : 'auto', source: sourceId };
+  } else if (mode === 'titles' || (mode === 'source' && s.numbering === 'titles')) {
+    // #379: by the chapter titles (lib/titleNumbers.ts), and back. Nothing is stored -- each post's number is read from
+    // the listing as it stands -- so both ways are the live listing read both ways: the files at the source's numbers
+    // move to their titles' numbers, or back. A book's candidates are the posts at its number in the reading it is in.
+    // Reintroduce by planning the undo from storedPosts as posting order's is (there are none): "the undo goes back to
+    // the source's numbers" in titleNumbering.int.test.ts parks the file that carries no stamp of its post.
+    const read = titleNumbered(raw);
+    const there = mode === 'titles';
+    posts = read.map((c) => {
+      const titled = numKey(c.number);
+      const own = numKey(c.sourceNumber ?? c.number);
+      return { postId: c.sourceId, number: there ? titled : own, from: there ? own : titled, title: c.title, publishedAt: c.publishedAt };
+    });
+    if (there) {
+      after = { numbering: 'titles', by: s.numbering_by === 'manual' ? 'manual' : 'auto', source: sourceId };
+    } else {
+      const prefs = await effectivePrefsFor(await readSeriesPrefs(s.id).catch(() => null), 0);
+      keep = new Map(chooseReleases(raw.map((c) => ({ ...c, source: sourceId })), prefs).releases.map((c) => [numKey(c.number), c.sourceId]));
+      after = { numbering: 'source', by: 'manual', source: null };
+    }
   } else if (mode === 'source') {
     // Back to the source's numbers: each stored post to the number the source gives it NOW (or gave it, for a
     // post it no longer lists), each parked book to the number its file had before it was parked.
@@ -371,7 +433,11 @@ async function buildRenumber(s: SeriesForPlan, sourceId: string, raw: readonly S
     keep = new Map(chooseReleases(raw.map((c) => ({ ...c, source: sourceId })), prefs).releases.map((c) => [numKey(c.number), c.sourceId]));
     after = { numbering: 'source', by: 'manual', source: null };
   } else {
-    posts = raw.map((c) => ({ postId: c.sourceId, number: numKey(c.number), from: null, title: c.title, publishedAt: c.publishedAt }));
+    // A remap. A series numbered by its titles is remapped onto its titles' numbers as the source now lists them, never
+    // the source's raw ones: an extension setting that rewrites the titles (Tapas's "Show episode number in chapter
+    // name") then moves nothing, and settles by itself (settleNumbering's noop).
+    posts = (s.numbering === 'titles' ? titleNumbered(raw) : raw)
+      .map((c) => ({ postId: c.sourceId, number: numKey(c.number), from: null, title: c.title, publishedAt: c.publishedAt }));
     after = { numbering: s.numbering, by: s.numbering_by, source: s.numbering_source };
   }
 
@@ -818,7 +884,7 @@ export async function planFor(seriesId: string, mode: RenumberMode): Promise<{ p
   const s = await one<SeriesForPlan & { source_id: string | null; source_series_id: string | null }>(
     `SELECT id, title, folder, chapter_floor, source_id, source_series_id, ${NUMBERING_COLUMNS} FROM lib_series WHERE id = $1`, [seriesId]);
   if (!s) return null;
-  const sourceId = s.numbering === 'posting_order' && s.numbering_source ? s.numbering_source : s.source_id;
+  const sourceId = (s.numbering === 'posting_order' || s.numbering === 'titles') && s.numbering_source ? s.numbering_source : s.source_id;
   const ref = sourceId === s.source_id ? s.source_series_id : (await one<{ source_series_id: string }>(
     'SELECT source_series_id FROM series_sources WHERE series_id = $1 AND source_id = $2', [seriesId, sourceId]))?.source_series_id;
   const adapter = sourceId ? getSource(sourceId) : null;
@@ -940,7 +1006,8 @@ export async function addNumbering<T extends SourceChapter>(
   raw: readonly T[], want: NumberingChoice, ctx: { folder: string; sourceId: string; existingId?: string | null },
 ): Promise<{ chapters: T[]; applied: NumberingMode; decision: AddNumbering; detect: SharedNumbering }> {
   const detect = detectSharedNumbering(raw);
-  const note = { ...noteOf(detect, ctx.sourceId), at: new Date().toISOString() };
+  const titles = detectTitleNumbering(raw);
+  const note = { ...noteOf(detect, ctx.sourceId, titles), at: new Date().toISOString() };
   const row = ctx.existingId
     ? await one<NumberingRow>(`SELECT ${NUMBERING_COLUMNS} FROM lib_series WHERE id = $1`, [ctx.existingId]).catch(() => null) : null;
   const stored = ctx.existingId ? await storedPosts(ctx.existingId, ctx.sourceId).catch(() => []) : [];
@@ -965,6 +1032,28 @@ export async function addNumbering<T extends SourceChapter>(
     // Asked for the source's numbers on a series whose files are in posting numbers: the undo is a plan.
     const a = assignPostingNumbers(postingSequence(raw), stored);
     return { chapters: a.numbered, applied: 'posting_order', detect, decision: { ...kept, source: row.numbering_source, pending: 'source', note } };
+  }
+  // #379, by the chapter titles, through the same doors: a new series at once; books on disk in the source's numbers are
+  // a plan for an admin; a row numbered by its titles before (removed and added back) is in title numbers already --
+  // from the same source, or else a remap to look at -- and asked for the source's numbers, its undo is a plan.
+  // Reintroduce by numbering a folder that holds books at once: "added back over its old files" in
+  // titleNumbering.int.test.ts finds it numbered by the titles over files still at the source's numbers, nothing to review.
+  const byTitles = raw.length > 0 && want !== 'source' && (want === 'titles'
+    || (want === 'auto' && (row?.numbering === 'titles' || (row?.numbering_by !== 'manual' && titles.verdict === 'strong'))));
+  if (byTitles) {
+    if (books && row?.numbering !== 'titles') {
+      return { chapters: [...raw], applied: 'source', detect, decision: { ...kept, source: ctx.sourceId, pending: 'titles', note } };
+    }
+    const moved = books && !!row?.numbering_source && row.numbering_source !== ctx.sourceId;
+    return {
+      chapters: titleNumbered(raw), applied: 'titles', detect,
+      decision: {
+        numbering: 'titles', by: want === 'titles' ? 'manual' : (row?.numbering_by ?? 'auto'), source: ctx.sourceId, pending: moved ? 'remap' : null, note,
+      },
+    };
+  }
+  if (row?.numbering === 'titles' && books) {
+    return { chapters: titleNumbered(raw), applied: 'titles', detect, decision: { ...kept, source: row.numbering_source, pending: 'source', note } };
   }
   return {
     chapters: [...raw], applied: 'source', detect,

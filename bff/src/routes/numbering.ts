@@ -141,7 +141,7 @@ export default async function numberingRoutes(app: FastifyInstance) {
 
   // ---- one series' numbering ----
 
-  const modes = ['posting_order', 'source', 'remap'] as const;
+  const modes = ['posting_order', 'titles', 'source', 'remap'] as const;
   app.get('/api/admin/series/:id/numbering', async (req, reply) => {
     const { id } = req.params as { id: string };
     const { mode: asked } = req.query as { mode?: string };
@@ -150,14 +150,15 @@ export default async function numberingRoutes(app: FastifyInstance) {
       `SELECT s.numbering, s.numbering_pending FROM lib_series s WHERE s.id = $1 AND ${visibleToAll('s')}`, [id]);
     if (!s) return reply.code(404).send({ error: 'not_found' });
     // What the page would ask about: the change waiting for review, else the other numbering.
-    const mode: RenumberMode = (asked as RenumberMode | undefined) ?? s.numbering_pending ?? (s.numbering === 'posting_order' ? 'source' : 'posting_order');
+    const mode: RenumberMode = (asked as RenumberMode | undefined) ?? s.numbering_pending
+      ?? (s.numbering === 'posting_order' || s.numbering === 'titles' ? 'source' : 'posting_order');
     const p = await planFor(id, mode).catch(() => null);
     if (!p) return reply.code(502).send(refusal('unreachable', say('renumber.unreachable')));
     return { mode, plan: p.plan, tracker: p.tracker, numbering: await numberingSummary(id) };
   });
 
   const numberingBody = z.object({
-    mode: z.enum(['auto', 'source', 'posting_order', 'remap']),
+    mode: z.enum(['auto', 'source', 'posting_order', 'titles', 'remap']),
     confirm: z.boolean().optional(),
   });
   app.post('/api/admin/series/:id/numbering', async (req, reply) => {

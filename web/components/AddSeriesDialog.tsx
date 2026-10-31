@@ -26,7 +26,7 @@ import { PreviewReader } from '@/components/PreviewReader';
 import { ARCHIVE_PACE, archiveAddLine, archiveSwitchHelp, type EnqueueOutcome } from '@/lib/archive';
 import { useServerDownloads } from '@/lib/useServerDownloads';
 import { useAuth } from '@/lib/auth';
-import { addNoticeHeading, addNumberingView, numLabel, type DetailNumbering } from '@/lib/numbering';
+import { addNoticeHeading, addNumberingView, numLabel, titlesLine, type DetailNumbering } from '@/lib/numbering';
 import { extensionSettingsHref } from '@/lib/sourcePrefs';
 import { baseOf, codeLabel, editionLangPreset, languageChoices, openingLanguage } from '@/lib/editions';
 import { MANGADEX_LANGUAGES_HREF } from '@/lib/mangadexLangs';
@@ -1015,6 +1015,7 @@ function EditionNotice({ title, held, lang, onLang, askOfLang, ofLang, onOfLang,
  * The add dialog's numbering notice (#116): shown only when the detector has something to say and there is another
  * reading to switch to. Under a STRONG verdict the add numbers the posts by posting order -- "226 chapters instead
  * of 13 numbers with versions" -- and the switch keeps the source's numbers; under a HINT it offers posting order.
+ * A source that counts its specials as chapters (#379) is numbered by the chapter titles, with the same switch.
  * A text block with an accent start-edge rule, not a badge.
  */
 function AddNumberingNotice({ n, count, view, flipped, sourceName, admin, onFlip }: {
@@ -1028,24 +1029,26 @@ function AddNumberingNotice({ n, count, view, flipped, sourceName, admin, onFlip
   onFlip: (v: boolean) => void;
 }) {
   const strong = view.offer === 'keep';
+  const titles = n.applied === 'titles';
   // The two readings side by side, whichever is shown: posts counted one by one, numbers with their versions.
   const posts = strong ? count : n.alt!.count;
   const numbers = strong ? n.alt!.count : count;
   const big = n.biggest;
   return (
-    <div data-add-numbering={strong ? 'strong' : 'hint'} className="mt-2 border-s-2 border-accent/60 bg-accent/5 py-2 pe-2.5 ps-2.5">
+    <div data-add-numbering={titles ? 'titles' : strong ? 'strong' : 'hint'} className="mt-2 border-s-2 border-accent/60 bg-accent/5 py-2 pe-2.5 ps-2.5">
       {/* The reading the add will use, as the counts are: switched to the source's numbers, it no longer says
           "Numbered by posting order" above its own switch (the e2e walk's shot). */}
       <p className="text-[12px] font-semibold text-fog-100" data-add-numbering-heading>{addNoticeHeading(view)}</p>
       <p className="mt-0.5 text-[11px] leading-relaxed text-fog-400">
-        {strong
+        {titles ? titlesLine(sourceName, n.titles) : strong
           ? (big && big.posts > 1
             ? tr('{source} gives many different posts the same chapter number ({posts} posts are all numbered {number}).', { source: sourceName, posts: big.posts, number: numLabel(big.number) })
             : tr('{source} gives many different posts the same chapter number.', { source: sourceName }))
           : tr('If they are different chapters rather than versions of one, number them by posting order.')}
       </p>
-      {/* The two readings side by side, whichever the switch shows: the count the add lands, and the other. */}
-      {strong && (
+      {/* The two readings side by side, whichever the switch shows: the count the add lands, and the other. By the
+          titles both count every post, so there is nothing to set side by side. */}
+      {strong && !titles && (
         // Counted in words ("226 chapters by posting order"): a bare "Posting order: 226" read as a position.
         <p className="mt-0.5 text-[11px] tabular-nums text-fog-300" data-add-numbering-counts data-posts={posts} data-numbers={numbers}>
           {posts === 1

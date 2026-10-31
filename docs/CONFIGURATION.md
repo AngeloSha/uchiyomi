@@ -140,6 +140,14 @@ to anything.
 Set `UCHIYOMI_PING_URL` to point the count somewhere else — at your own collector if you run a fork — or to
 an empty string to make sure it can never send anything regardless of the setting.
 
+**Automatic title logos** — *off by default* (Admin → Settings → Series & chapters). Once a day the server reads the
+[Uchiyomi logo library](https://github.com/AngeloSha/uchiyomi-title-logos)'s `index.json` from GitHub, and for a manga
+whose confirmed AniList id the index lists, downloads that one logo and checks it against the SHA-256 the index names.
+GitHub sees your IP address and which logo files are fetched. For manga the library does not have, the server asks
+Wikidata and Wikimedia Commons by the same AniList id. A library whose automatic online lookup is off is never looked up.
+Set `TITLE_LOGO_LIBRARY_URL` to read the library from a mirror (an https address holding the same `index.json` and
+`logos/` files), or to an empty string to turn the library off; Wikimedia is still asked while the switch is on.
+
 **Translate pages** — *off, and nothing downloaded, until an admin presses Download* (Admin → Settings → Server).
 Download fetches the translation engine once: the pack from this project's GitHub releases (`translate-v1`) and the
 model from Hugging Face, each file checked against a SHA-256 pinned in the app. Translating runs on your server: pages,

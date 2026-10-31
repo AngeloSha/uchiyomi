@@ -13,7 +13,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { Sheet } from '../components/ui';
 import {
   CHECKING_NOW, addNoticeHeading, addNumberingView, noticeKind, numberingOutcome, planCounts, planErrorText, numLabel, pendingLine, refusalText,
-  type DetailNumbering, type NumberingSummary, type RenumberPlan,
+  titlesLine, type DetailNumbering, type NumberingSummary, type RenumberPlan,
 } from '../lib/numbering';
 import { prefControl, prefErrorText, prefSummary, toggleChoice, needsRenumberConfirm, entryLabel, extensionSettingsHref } from '../lib/sourcePrefs';
 import { copyTitlesDiffer, postsShareNumber, normCopyTitle } from '../lib/versions';
@@ -36,17 +36,42 @@ const STRONG: DetailNumbering = {
 test('the add dialog shows and sends the numbering its switch chose', () => {
   const d = { count: 226, first: 1, last: 226, numbering: STRONG };
   // Untouched: the server's own decision stands, and `auto` says so.
-  assert.deepEqual(addNumberingView(d, false), { count: 226, first: 1, last: 226, posting: true, send: 'auto', offer: 'keep' });
+  assert.deepEqual(addNumberingView(d, false), { count: 226, first: 1, last: 226, posting: true, titles: false, send: 'auto', offer: 'keep' });
   // Reintroduce by counting `d` whatever the switch says: "Keep the source's numbers" reads 226 chapters still.
-  assert.deepEqual(addNumberingView(d, true), { count: 13, first: 1, last: 8, posting: false, send: 'source', offer: 'keep' },
+  assert.deepEqual(addNumberingView(d, true), { count: 13, first: 1, last: 8, posting: false, titles: false, send: 'source', offer: 'keep' },
     'keeping the source\'s numbers shows its 13 numbers and asks for them');
   // A hint numbers nothing by itself; the switch asks for posting order and shows its count.
   const hint = { count: 20, first: 1, last: 20, numbering: { ...STRONG, verdict: 'hint' as const, applied: 'source' as const, alt: { count: 34, first: 1, last: 34 } } };
-  assert.deepEqual(addNumberingView(hint, false), { count: 20, first: 1, last: 20, posting: false, send: 'auto', offer: 'number' });
-  assert.deepEqual(addNumberingView(hint, true), { count: 34, first: 1, last: 34, posting: true, send: 'posting_order', offer: 'number' });
+  assert.deepEqual(addNumberingView(hint, false), { count: 20, first: 1, last: 20, posting: false, titles: false, send: 'auto', offer: 'number' });
+  assert.deepEqual(addNumberingView(hint, true), { count: 34, first: 1, last: 34, posting: true, titles: false, send: 'posting_order', offer: 'number' });
   // Nothing to say, or an older server: no switch, and nothing sent but `auto`.
   assert.equal(addNumberingView({ count: 5, first: 1, last: 5, numbering: { ...STRONG, verdict: 'none', applied: 'source', alt: null } }, true).offer, null);
-  assert.deepEqual(addNumberingView({ count: 5, first: 1, last: 5 }, true), { count: 5, first: 1, last: 5, posting: false, send: 'auto', offer: null });
+  assert.deepEqual(addNumberingView({ count: 5, first: 1, last: 5 }, true), { count: 5, first: 1, last: 5, posting: false, titles: false, send: 'auto', offer: null });
+});
+
+// #379, Tapas as the detail answers it: every post counted, the chapters at their titles' numbers and the specials
+// between them, the shared-numbers verdict `none` -- and the source's own count under `alt`.
+const TITLES: DetailNumbering = {
+  verdict: 'none', applied: 'titles', ordered: true, posts: 36, numbers: 36, biggest: null, examples: [],
+  alt: { count: 36, first: 1, last: 36 }, titles: { specials: 6, moved: 25, example: { title: '30. Lights Out', from: 35, to: 30 } },
+  extSourceId: '7000000000000037901',
+};
+
+test('the add dialog numbers a source that counts its specials by the titles, and its switch keeps the source\'s numbers', () => {
+  const d = { count: 36, first: 1, last: 30.01, numbering: TITLES };
+  assert.deepEqual(addNumberingView(d, false), { count: 36, first: 1, last: 30.01, posting: false, titles: true, send: 'auto', offer: 'keep' });
+  assert.deepEqual(addNumberingView(d, true), { count: 36, first: 1, last: 36, posting: false, titles: false, send: 'source', offer: 'keep' },
+    'switched, it is the source\'s numbers, never posting order');
+  assert.equal(addNoticeHeading(addNumberingView(d, false)), 'Numbered by the chapter titles');
+  assert.equal(addNoticeHeading(addNumberingView(d, true)), 'Keeping the source’s own numbers');
+  // Other sources are followed as usual: the titles' numbers are the ones other sites use.
+  assert.equal(addNumberingView(d, false).posting, false);
+  assert.equal(titlesLine('Tapas', TITLES.titles),
+    'Tapas counts its specials as chapters, so its chapter numbers run ahead of their titles (it numbers “30. Lights Out” 35).');
+  assert.equal(titlesLine('Tapas', null), 'Tapas counts its specials as chapters, so its chapter numbers run ahead of their titles.');
+  const src = code(read('components/AddSeriesDialog.tsx'));
+  assert.match(src, /\{titles \? titlesLine\(sourceName, n\.titles\) : strong/, 'the notice does not say why the add numbers by the titles');
+  assert.match(src, /\{strong && !titles && \(/, 'the posting-order counts line is drawn under the titles');
 });
 
 test('the add dialog\'s notice heading names the reading the add will use, not the one switched off', () => {
@@ -101,6 +126,10 @@ test('the series page\'s notice says what was done or what waits, and to whom', 
   // own numbers moved.
   assert.equal(noticeKind({ ...base, pending: 'remap' }), 'remap', 'a remap is its own notice');
   assert.equal(noticeKind({ ...base, mode: 'posting_order', by: 'auto', note }), 'applied');
+  // #379: a series numbered by its chapter titles says so, and a proposal to number it so waits like posting order's.
+  assert.equal(noticeKind({ ...base, mode: 'titles', by: 'auto' }), 'applied');
+  assert.equal(noticeKind({ ...base, pending: 'titles' }), 'review');
+  assert.equal(noticeKind({ ...base, pending: 'source', mode: 'titles' }), 'review');
   assert.equal(noticeKind({ ...base, note: { ...note, verdict: 'hint' } }), 'hint');
   // An admin who kept the source's numbers said so: no nagging.
   assert.equal(noticeKind({ ...base, mode: 'source', by: 'manual', note }), null);
@@ -115,10 +144,13 @@ test('the series page\'s notice says what was done or what waits, and to whom', 
   assert.match(page, /onNumbering=\{isAdmin && [^}]*\? \(\) => \{ setChapterSheet\(null\); setNumberingSheet\('posting_order'\); \} : undefined\}/);
   // Not while another change waits (a remap, an undo): confirming posting order there overwrote the queued remap with a
   // plan built on the source's new numbers. Reintroduce by dropping the `pending` clause: this fails.
-  assert.match(page, /onNumbering=\{isAdmin && listing\?\.numbering\?\.mode !== 'posting_order' && !listing\?\.numbering\?\.pending\s/,
-    'the versions sheet offers posting order while another change waits');
+  assert.match(page, /onNumbering=\{isAdmin && listing\?\.numbering\?\.mode !== 'posting_order' && listing\?\.numbering\?\.mode !== 'titles' && !listing\?\.numbering\?\.pending\s/,
+    'the versions sheet offers posting order while another change waits, or on a series numbered by its titles');
   const notice = code(read('components/NumberingNotice.tsx'));
   assert.match(notice, /\{isAdmin \? \(/, 'the keys are not the admin\'s alone');
+  // Reintroduce by wording every review as posting order's: a titles proposal says "gives many different posts the same number".
+  assert.match(notice, /const why = n\.pending === 'titles' \? titlesLine\(source, n\.note\?\.titles\) : shared;/, 'a titles review is said as shared numbers');
+  assert.match(notice, /kind === 'applied' && n\.mode === 'titles'/, 'a series numbered by its titles says it is numbered by posting order');
 });
 
 test('the plan sheet counts what moves before it lists it', () => {
