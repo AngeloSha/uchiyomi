@@ -629,9 +629,11 @@ day-long copy of the old one runs out.
 
 ### Hero title artwork
 
-The home carousel and a manga's series-page hero can show its own transparent title logo. Without a logo, the title
-uses a readable style matched to its genres and cover colours. The same treatment fits a phone and a computer. A
-logo in the original language, or one whose language is not known, keeps the readable manga title underneath it.
+On a computer, the home carousel and a manga's series-page hero can show its own transparent title logo. Without a
+logo, the title uses a readable style matched to its genres and cover colours. On a phone (and any screen under 1024
+pixels wide) the cover itself is the hero and already carries its lettering, so the hero shows that readable title
+instead of the logo, and the logo is not downloaded (since v0.102.2). A logo in the original language, or one whose
+language is not known, keeps the readable manga title underneath it.
 
 **Admin → Settings → Series & chapters → Automatic title logos** enables background logo lookup. It is off until enabled.
 Only a series with a checked or manually confirmed AniList manga link is looked up; the server uses that ID to find

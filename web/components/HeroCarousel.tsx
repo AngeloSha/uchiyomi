@@ -118,7 +118,8 @@ export function HeroCarousel({ slides }: { slides: Series[] }) {
           </Link>
           <div data-home-hero-copy className="min-w-0 flex-1 max-w-2xl">
             <span data-home-hero-badge className="mb-2 inline-flex items-center gap-1.5 rounded-md bg-white/10 px-2.5 py-1 text-2xs font-semibold uppercase tracking-wider text-fog-100 backdrop-blur rtl:tracking-normal">★ {tr('Daily pick')}</span>
-            <HeroTitle series={cur} />
+            {/* A phone's hero is the cover, lettering and all: the title logo is a computer's (HeroTitle `logo`). */}
+            <HeroTitle series={cur} logo={wide} />
             <div data-home-hero-meta className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fog-300 lg:text-sm">
               {cur.metadata?.status && <span className="capitalize text-fog-200">{statusText(cur.metadata.status)}</span>}
               <span>· {tr('{n} ch', { n: cur.booksCount })}</span>

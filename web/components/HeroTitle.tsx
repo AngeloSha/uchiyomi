@@ -4,16 +4,22 @@ import type { Series } from '@/lib/types';
 import { titleArtAccent, titleArtStyle, titleLogoUrl, titleLogoNeedsCaption, titleNeedsNaturalScript } from '@/lib/titleArt';
 
 /** One title identity across both heroes. The readable name remains the heading when artwork carries its lettering. */
-export function HeroTitle({ series, title = series.metadata?.title || series.name, headingRef, className = '', as = 'h1', previewUrl }: {
+export function HeroTitle({ series, title = series.metadata?.title || series.name, headingRef, className = '', as = 'h1', previewUrl, logo: showLogo = true }: {
   series: Pick<Series, 'id' | 'name' | 'metadata' | 'titleArt' | 'color'>;
   title?: string; headingRef?: Ref<HTMLHeadingElement>; className?: string; as?: 'h1' | 'div';
   /** An authenticated in-memory cutout for the admin preview only. It never becomes a stored artwork URL. */
   previewUrl?: string;
+  /**
+   * v0.102.2: whether the title logo may be drawn at all. Off where the cover itself is the hero (under 1024 px: the
+   * heroes pass `useWideViewport()`): the cover already carries its lettering, so the styled title shows instead, and no
+   * logo is downloaded. Reintroduce by ignoring it: titleArt.test.ts finds an <img> in a phone's hero.
+   */
+  logo?: boolean;
 }) {
   const [failed, setFailed] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<string | null>(null);
   const preview = previewUrl?.startsWith('blob:') ? previewUrl : null;
-  const url = preview ?? titleLogoUrl(series.id, series.titleArt);
+  const url = showLogo ? preview ?? titleLogoUrl(series.id, series.titleArt) : null;
   const candidate = url && failed !== url ? url : null;
   const logo = candidate && loaded === candidate ? candidate : null;
   const style = titleArtStyle(series.metadata?.genres, series.titleArt?.style);
