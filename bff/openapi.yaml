@@ -434,7 +434,7 @@ components:
         attribution:
           type: [object, "null"]
           properties:
-            source: { type: string, enum: [Wikimedia Commons, Cover lettering] }
+            source: { type: string, enum: [Uchiyomi logo library, Wikimedia Commons, Cover lettering] }
             sourceUrl: { type: [string, "null"] }
             artist: { type: [string, "null"] }
             license: { type: [string, "null"] }
@@ -8585,7 +8585,8 @@ paths:
                   automatic_title_logos:
                     type: boolean
                     description: >-
-                      Automatic linked-manga logo lookups through Wikidata and Wikimedia Commons. Off by default;
+                      Automatic linked-manga logo lookups: the Uchiyomi logo library first (TITLE_LOGO_LIBRARY_URL,
+                      since v0.103.0), then Wikidata and Wikimedia Commons. Off by default;
                       library lookup opt-outs and first-page-only art choices also suppress automatic requests.
                   automatic_cover_title_generation:
                     type: boolean

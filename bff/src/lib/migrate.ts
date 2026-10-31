@@ -2189,6 +2189,8 @@ CREATE TABLE IF NOT EXISTS series_title_art (
 );
 ALTER TABLE series_title_art ADD COLUMN IF NOT EXISTS auto_cover_key text;
 ALTER TABLE series_title_art ADD COLUMN IF NOT EXISTS custom_attribution jsonb;
+-- v0.103.0: the logo library entry (anilistId:sha256) last tried, so each new or reworked logo is tried once.
+ALTER TABLE series_title_art ADD COLUMN IF NOT EXISTS library_attempt text;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

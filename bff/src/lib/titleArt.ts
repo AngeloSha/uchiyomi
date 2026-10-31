@@ -12,6 +12,7 @@ import { withAniListMutation, type AniListAuthority, type ScopedQuery } from './
 import { runtime } from './runtime';
 import { fetchPublic } from './safeFetch';
 import { lookupTitleLogo } from './titleLogoProvider';
+import { titleLogoLibrary, type LibraryEntry } from './titleLogoLibrary';
 import { coverSelectionKey, coverSelectionSql } from './coverSelection';
 
 export const TITLE_STYLES = ['auto', 'action', 'fantasy', 'scifi', 'soft', 'noir', 'plain'] as const;
@@ -19,7 +20,7 @@ export type TitleStyle = typeof TITLE_STYLES[number];
 export type TitleMode = 'automatic' | 'custom' | 'text';
 export type TitleStatus = 'ready' | 'pending' | 'missing' | 'error' | 'disabled';
 export interface TitleAttribution {
-  source: 'Wikimedia Commons' | 'Cover lettering'; sourceUrl: string | null; artist: string | null; license: string | null; licenseUrl: string | null;
+  source: 'Uchiyomi logo library' | 'Wikimedia Commons' | 'Cover lettering'; sourceUrl: string | null; artist: string | null; license: string | null; licenseUrl: string | null;
 }
 export interface TitleArt {
   mode: TitleMode; style: TitleStyle; status: TitleStatus; version: number; logoUrl: string | null;
@@ -32,7 +33,7 @@ interface ArtRow {
   auto_language: 'en' | 'original' | null; auto_caption: boolean | null; auto_attribution: TitleAttribution | null;
   auto_manual: boolean | null;
   lookup_status: 'ready' | 'missing' | 'error' | null; lookup_anilist_id: string | null; retry_at: Date | string | null;
-  auto_cover_key: string | null; cover_selection: unknown;
+  auto_cover_key: string | null; cover_selection: unknown; library_attempt: string | null;
   linked_anilist_id: string | null; online: boolean; library_online: boolean; first_page: boolean;
 }
 
@@ -113,10 +114,30 @@ let draining: Promise<void> | null = null;
 let activeJob: Job | null = null;
 let queuePaceMs = PACE_MS;
 let automaticGeneration = 0;
-let provider: typeof lookupTitleLogo = (...args) => lookupTitleLogo(...args);
+let library = titleLogoLibrary;
+let wikimedia: typeof lookupTitleLogo = (...args) => lookupTitleLogo(...args);
+/** The curated logo library answers first (v0.103.0); Wikimedia only when it has no usable logo for this manga. */
+const libraryThenWikimedia: typeof lookupTitleLogo = async (anilistId, options) => {
+  const answer = await library.lookup(anilistId);
+  if (answer.candidate) return { kind: 'found', candidate: answer.candidate, libraryAttempt: answer.attempt };
+  return { ...(await wikimedia(anilistId, options)), libraryAttempt: answer.attempt };
+};
+let provider: typeof lookupTitleLogo = libraryThenWikimedia;
 /** A transport seam for deterministic provider/privacy/race tests; no production caller changes it. */
 export function setTitleLogoLookupForTests(lookup?: typeof lookupTitleLogo): void {
-  provider = lookup ?? ((...args) => lookupTitleLogo(...args));
+  provider = lookup ?? libraryThenWikimedia;
+}
+/** The same seam one level down: stand-ins for the library and Wikimedia behind the real precedence. */
+export function setTitleLogoSourcesForTests(sources: { library?: typeof titleLogoLibrary; wikimedia?: typeof lookupTitleLogo } = {}): void {
+  library = sources.library ?? titleLogoLibrary;
+  wikimedia = sources.wikimedia ?? ((...args) => lookupTitleLogo(...args));
+  provider = libraryThenWikimedia;
+}
+export const titleLogoLibraryInUse = () => library;
+/** A library logo this manga has not tried yet (new, or reworked since) is due despite a saved logo or a recent miss. */
+function libraryOffers(r: ArtRow, listed: Map<string, LibraryEntry> | null): boolean {
+  const entry = r.linked_anilist_id ? listed?.get(r.linked_anilist_id) : undefined;
+  return !!entry && r.library_attempt !== `${r.linked_anilist_id}:${entry.sha256}`;
 }
 export const titleLogoQueueState = () => ({ ids: [...pending.keys()], active: activeJob !== null, capacity: MAX_PENDING });
 /** A test clock seam: production always uses the same conservative 2.2-second pace. */
@@ -291,14 +312,16 @@ export async function refreshTitleLogo(id: string, viewer: ViewCtx): Promise<Tit
 
 export async function queueTitleLogos(ids: string[], authority: AniListAuthority = 'automatic'): Promise<void> {
   const generation = automaticGeneration;
+  const listed = library.snapshot();
   for (const r of await rowsFor(ids)) {
     if (runtime.stopping || (authority === 'automatic' && generation !== automaticGeneration)) break;
     if ((r.mode ?? 'automatic') !== 'automatic' || !validId(r.linked_anilist_id)) continue;
     if (r.lookup_status === 'error' && r.lookup_anilist_id === r.linked_anilist_id && r.retry_at && new Date(r.retry_at).getTime() > Date.now()) continue;
     if (authority === 'automatic') {
       if (!r.online || !r.library_online || r.first_page) continue;
-      if (!r.auto_cover_key && r.auto_anilist_id === r.linked_anilist_id && r.auto_file && await assetAvailable(r.auto_file)) continue;
-      if (r.lookup_anilist_id === r.linked_anilist_id && r.retry_at && new Date(r.retry_at).getTime() > Date.now()) continue;
+      const offered = libraryOffers(r, listed);
+      if (!offered && !r.auto_cover_key && r.auto_anilist_id === r.linked_anilist_id && r.auto_file && await assetAvailable(r.auto_file)) continue;
+      if (!offered && r.lookup_anilist_id === r.linked_anilist_id && r.retry_at && new Date(r.retry_at).getTime() > Date.now()) continue;
     }
     const old = pending.get(r.id);
     if (old && (authority === 'automatic' || old === activeJob)) continue;
@@ -371,19 +394,23 @@ async function runJob(job: Job): Promise<void> {
     if (runtime.stopping || cancelled() || row.mode !== 'automatic' || nversion(row.version) !== job.version) return;
     if (found?.kind === 'found' && bytes) {
       const file = await putAsset(id, bytes); const c = found.candidate;
-      const attribution: TitleAttribution = { source: 'Wikimedia Commons', sourceUrl: c.attribution.pageUrl,
-        artist: c.attribution.author, license: c.attribution.license, licenseUrl: c.attribution.licenseUrl };
+      const attribution: TitleAttribution = c.attribution.provider === 'library'
+        ? { source: 'Uchiyomi logo library', sourceUrl: c.attribution.pageUrl, artist: null, license: null, licenseUrl: null }
+        : { source: 'Wikimedia Commons', sourceUrl: c.attribution.pageUrl,
+          artist: c.attribution.author, license: c.attribution.license, licenseUrl: c.attribution.licenseUrl };
       if (runtime.stopping || cancelled()) return;
       await qq(`UPDATE series_title_art SET auto_file=$2, auto_anilist_id=$3, auto_language=$4, auto_caption=$5,
-        auto_attribution=$6, lookup_anilist_id=$3, lookup_status='ready', retry_at=NULL, version=$7, auto_manual=$8, auto_cover_key=NULL, updated_at=now()
+        auto_attribution=$6, lookup_anilist_id=$3, lookup_status='ready', retry_at=NULL, version=$7, auto_manual=$8, auto_cover_key=NULL,
+        library_attempt=COALESCE($9, library_attempt), updated_at=now()
         WHERE series_id=$1`, [id, file, job.anilistId, c.language == null ? null : c.language === 'en' ? 'en' : 'original', c.showReadableTitle,
-        JSON.stringify(attribution), nextVersion(row.version), job.authority === 'manual']);
+        JSON.stringify(attribution), nextVersion(row.version), job.authority === 'manual', found.libraryAttempt ?? null]);
     } else {
       const supplied = Number((failure as any)?.retryAfterMs);
       const retry = failure ? Math.max(ERROR_MS,
         Number.isSafeInteger(supplied) && supplied >= 0 && supplied <= 8_000_000_000_000_000 - Date.now() ? supplied : ERROR_MS) : MISS_MS;
-      await qq(`UPDATE series_title_art SET lookup_anilist_id=$2, lookup_status=$3, retry_at=now()+($4::bigint*interval '1 millisecond'), updated_at=now()
-        WHERE series_id=$1`, [id, job.anilistId, failure ? 'error' : 'missing', retry]);
+      await qq(`UPDATE series_title_art SET lookup_anilist_id=$2, lookup_status=$3, retry_at=now()+($4::bigint*interval '1 millisecond'),
+        library_attempt=COALESCE($5, library_attempt), updated_at=now()
+        WHERE series_id=$1`, [id, job.anilistId, failure ? 'error' : 'missing', retry, found?.libraryAttempt ?? null]);
     }
   });
   await collectCurrentAssets(job.id);
