@@ -102,7 +102,7 @@ test('a name cannot climb out of the series folder', { skip }, async () => {
 });
 
 test('an upload under a new title starts a series of its own', { skip }, async () => {
-  const r = await post(`/api/admin/library/upload?title=${encodeURIComponent('Upload Test New')}&name=${encodeURIComponent('Vol 1.cbz')}`, await cbz());
+  const r = await post(`/api/library/upload?title=${encodeURIComponent('Upload Test New')}&name=${encodeURIComponent('Vol 1.cbz')}`, await cbz());
   assert.equal(r.statusCode, 200, r.body);
   const j = r.json();
   const [s] = await q(`SELECT folder FROM lib_series WHERE id = $1`, [j.seriesId]);

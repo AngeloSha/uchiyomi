@@ -14,7 +14,7 @@ export type UploadTarget = { seriesId: string } | { title: string };
 const urlFor = (to: UploadTarget, name: string): string =>
   'seriesId' in to
     ? `/api/admin/series/${encodeURIComponent(to.seriesId)}/upload?name=${encodeURIComponent(name)}`
-    : `/api/admin/library/upload?title=${encodeURIComponent(to.title)}&name=${encodeURIComponent(name)}`;
+    : `/api/library/upload?title=${encodeURIComponent(to.title)}&name=${encodeURIComponent(name)}`;
 
 export const uploadChapter = (to: UploadTarget, f: File): Promise<Uploaded> =>
   api<Uploaded>(urlFor(to, f.name), { method: 'POST', body: f, headers: { 'content-type': 'application/octet-stream' } });

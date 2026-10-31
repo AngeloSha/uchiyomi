@@ -1,6 +1,6 @@
 'use client';
 // Uploading chapter files by hand (lib/chapterUpload.ts): Edit details → Files for a series already here, and the
-// admin Library panel for a series that is not here yet.
+// Upload a series page for a series that is not here yet.
 import { useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
@@ -48,7 +48,7 @@ export function UploadChaptersRow({ seriesId, onSaved }: { seriesId: string; onS
   );
 }
 
-/** Admin → Library: a series that is not here yet, started from its files. */
+/** The Upload a series page (app/upload/page.tsx): a series that is not here yet, started from its files. */
 export function UploadSeriesSection() {
   const uid = useId();
   const input = useRef<HTMLInputElement>(null);
@@ -59,8 +59,7 @@ export function UploadSeriesSection() {
   });
   const ready = !!title.trim() && !at;
   return (
-    <section className="full" data-upload-series>
-      <h3 className="mb-1 font-display text-base font-semibold">{tr('Upload a series')}</h3>
+    <section data-upload-series>
       <p className="mb-3 max-w-prose text-xs leading-relaxed text-fog-500">
         {tr('For a series no source has, when you already have its chapters. The files go into the download folder, under Uploads, and the chapter number is read from each file name.')}
       </p>

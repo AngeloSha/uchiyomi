@@ -12118,7 +12118,7 @@ paths:
           description: The download disk is at its MIN_FREE_GB floor (`disk_full`)
         "404":
           description: Not found, or not visible to this account
-  /api/admin/library/upload:
+  /api/library/upload:
     post:
       tags:
         - admin

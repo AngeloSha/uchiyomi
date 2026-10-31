@@ -3,7 +3,7 @@
  * carries (or one that is gone), where nothing could ever download it.
  *
  *   POST /api/admin/series/:id/upload?name=<file name>       into that series' folder
- *   POST /api/admin/library/upload?title=<series>&name=<file> into a new series' folder (Uploads/<title>)
+ *   POST /api/library/upload?title=<series>&name=<file>       into a new series' folder (Uploads/<title>)
  *
  * The body is the file itself (application/octet-stream), streamed to disk: a volume is hundreds of megabytes, and the
  * base64-in-JSON the art upload uses would hold all of it, and a third more, in memory. The parser that hands the
@@ -20,8 +20,9 @@
  * sweep reaps and the scanner never reads as a chapter), checked to be the archive its extension says, then renamed into
  * place, and a scan indexes it. The chapter's number is read from its file name, as for every file the scan meets.
  *
- * Registered from inside routes/admin.ts, after its `authenticate` + `requireAdmin` hooks, so every route here is
- * admin-only structurally.
+ * The series route is registered from inside routes/admin.ts, after its `authenticate` + `requireAdmin` hooks, so it
+ * is admin-only structurally. Starting a new series is its own plugin (uploadSeriesRoutes, from server.ts): an admin,
+ * or a member an admin gave `perms.canUploadManually`.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createWriteStream, promises as fs } from 'fs';
@@ -31,7 +32,7 @@ import { Transform, type Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { z } from 'zod';
 import { one } from '../lib/db';
-import { userIdOf } from '../lib/auth';
+import { actsAsAdmin, authenticate, userIdOf } from '../lib/auth';
 import { logAudit } from '../lib/audit';
 import { DL_ROOT, persistScan } from '../lib/library';
 import { MIN_FREE_GB, freeBytes, sanitize } from '../lib/downloader';
@@ -153,8 +154,23 @@ export default async function uploadRoutes(app: FastifyInstance) {
     await logAudit('series.upload', { userId: userIdOf(req), detail: { id: s.id, file: r.rel, bytes: r.bytes }, req });
     return { ok: true, file: r.rel, bookId: book?.id ?? null, number: book?.number ?? null };
   });
+}
 
-  app.post('/api/admin/library/upload', async (req, reply) => {
+/** Whether the account may start a series from its own files: an admin, or a member with `canUploadManually` (opt-in). */
+async function mayUpload(req: FastifyRequest): Promise<boolean> {
+  if (actsAsAdmin(req)) return true;
+  const me = await one<{ perms: { canUploadManually?: boolean } | null }>('SELECT perms FROM users WHERE id = $1', [userIdOf(req)]);
+  return me?.perms?.canUploadManually === true;
+}
+
+export async function uploadSeriesRoutes(app: FastifyInstance) {
+  app.addHook('preHandler', authenticate);
+  app.addHook('preHandler', async (req, reply) => {
+    if (!(await mayUpload(req))) return reply.code(403).send({ error: 'forbidden', message: 'Uploading needs an admin to allow it.' });
+  });
+  app.addContentTypeParser('application/octet-stream', (_req, payload, done) => done(null, payload));
+
+  app.post('/api/library/upload', async (req, reply) => {
     const p = z.object({ title: z.string().trim().min(1).max(300), name: NAME }).safeParse(req.query);
     if (!p.success) return reply.code(400).send({ error: 'bad_request' });
     const name = uploadName(p.data.name);

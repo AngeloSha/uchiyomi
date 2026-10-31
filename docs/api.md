@@ -1896,7 +1896,7 @@ POST   /api/admin/sources/reload  GET    /api/admin/sources/custom
 POST   /api/admin/sources/custom  DELETE /api/admin/sources/custom/:id
 PATCH  /api/admin/sources/custom/:id
 PUT    /api/admin/series/:id/art  PUT    /api/admin/series/:id/meta
-POST   /api/admin/series/:id/upload POST   /api/admin/library/upload
+POST   /api/admin/series/:id/upload POST   /api/library/upload
 POST   /api/admin/series/:id/hero/shuffle
 PATCH  /api/admin/series/:id      DELETE /api/admin/series/:id
 POST   /api/admin/series/:id/editions DELETE /api/admin/series/:id/edition

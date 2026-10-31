@@ -17,7 +17,6 @@ import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
 import { IcChevronLeft, IcChevronRight, IcTrash, IcPlus, IcRefresh, IcX, IcGrid, IcShield, IcRows, IcGlobe, IcSparkle, IcUsers, IcUser, IcClock } from '@/components/icons';
 import { LibraryFolders } from '@/components/LibraryFolders';
-import { UploadSeriesSection } from '@/components/ChapterUpload';
 import { addFolder, foldersOf, heldByOthers, heldByText, previewQuery, previewText, sameFolders, toggleFolder, typedFolder } from '@/lib/libraryFolders';
 import { CardProgress, HealthCardActions, HealthRow, hasCardActions, scanState, scanWorking } from '@/components/HealthActions';
 import { FixEverythingDialog, FixEverythingKey, LastFixLine, SafeRepairLine } from '@/components/FixEverythingDialog';
@@ -605,6 +604,8 @@ function Members() {
                   {u.role !== 'admin' && u.local_open && u.password_login && !ssoOnly && <button onClick={() => patch(u, { removePassword: true }, tr('Password removed'))} className="btn-key">{tr('Remove password')}</button>}
                   {u.role !== 'admin' && u.kind !== 'open' && <button onClick={() => patch(u, { perms: { ...u.perms, canManageProfiles: !u.perms?.canManageProfiles } }, tr('Permission updated'))}
                     aria-pressed={!!u.perms?.canManageProfiles} className={`btn-key ${u.perms?.canManageProfiles ? 'btn-key-accent' : ''}`}>{tr('Can make profiles')}</button>}
+                  {u.role !== 'admin' && <button onClick={() => patch(u, { perms: { ...u.perms, canUploadManually: !u.perms?.canUploadManually } }, tr('Permission updated'))}
+                    aria-pressed={!!u.perms?.canUploadManually} className={`btn-key ${u.perms?.canUploadManually ? 'btn-key-accent' : ''}`}>{tr('Can upload series')}</button>}
                   {/* Library access. "All libraries" is the ABSENCE of grant rows, not a full set of them, so a
                       library added next month is visible to unrestricted accounts without editing anyone. */}
                   {u.role !== 'admin' && <LibraryAccess granted={u.libraries ?? null} onSaved={inval}
@@ -1817,7 +1818,6 @@ function LibraryPanel() {
   return (
     <div className="board">
       <LibrariesSection />
-      <UploadSeriesSection />
       {purge && (
         <ConfirmDialog
           title={tr('Delete the files for “{title}”?', { title: iso(purge.title) })}
