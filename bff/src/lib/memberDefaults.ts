@@ -24,12 +24,12 @@ import { NO_LIBRARIES } from './visibility';
 /** A query as `tx` hands one to its callback; `q` is one too. */
 export type Query = <R = any>(text: string, params?: any[]) => Promise<R[]>;
 
-// The permissions that are actually enforced: canDownload (sources.ts, adding a series) and canManageProfiles (POST
-// /api/profiles: making profiles that open at home). A flag that is toggleable and checked nowhere is worse than no
+// The permissions that are actually enforced: canDownload (sources.ts, adding a series), canManageProfiles (POST
+// /api/profiles: making profiles that open at home) and canUploadManually (POST /api/library/upload, routes/upload.ts). A flag that is toggleable and checked nowhere is worse than no
 // flag, so there are no others. What a new member starts with is the download one only: who may make profiles is an
 // admin's choice, member by member.
 const downloadPerm = z.object({ canDownload: z.boolean().optional() });
-export const permsShape = downloadPerm.extend({ canManageProfiles: z.boolean().optional() });
+export const permsShape = downloadPerm.extend({ canManageProfiles: z.boolean().optional(), canUploadManually: z.boolean().optional() });
 
 /**
  * The new-member defaults on PATCH /api/admin/settings: a member's own fields on PATCH /api/admin/users/:id, each optional,

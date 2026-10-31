@@ -96,6 +96,12 @@ export function canDownload(user: { role?: string; perms?: Record<string, boolea
   return user.role === 'admin' || user.perms?.canDownload !== false;
 }
 
+/** Starting a series from uploaded files: admins, and members an admin allowed (opt-in, off by default). */
+export function canUploadManually(user: { role?: string; perms?: Record<string, boolean> } | null | undefined): boolean {
+  if (!user) return false;
+  return user.role === 'admin' || user.perms?.canUploadManually === true;
+}
+
 function applyAccent(settings?: Record<string, any>) {
   const hex: string | undefined = settings?.accent;
   if (hex && /^#?[0-9a-fA-F]{6}$/.test(hex)) {

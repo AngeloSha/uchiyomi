@@ -128,6 +128,8 @@ async function desktopExchange(): Promise<SessionResult> {
 interface Opts {
   method?: string;
   json?: unknown;
+  /** A body sent as it is, for a route that takes the bytes themselves (a chapter upload): ignored beside `json`. */
+  body?: BodyInit;
   signal?: AbortSignal;
   headers?: Record<string, string>;
 }
@@ -148,8 +150,8 @@ const isRefusal = async (res: Response): Promise<boolean> => REFUSAL.test(await 
 async function raw(path: string, opts: Opts, retry: boolean): Promise<Response> {
   const headers = new Headers(opts.headers || {});
   if (accessToken) headers.set('authorization', `Bearer ${accessToken}`);
-  const body = opts.json !== undefined ? JSON.stringify(opts.json) : undefined;
-  if (body) headers.set('content-type', 'application/json');
+  const body = opts.json !== undefined ? JSON.stringify(opts.json) : opts.body;
+  if (opts.json !== undefined) headers.set('content-type', 'application/json');
 
   // The one place the 18+ reveal is attached, so no caller has to remember it and no listing can quietly
   // forget. It rides in the URL rather than a header on purpose -- see lib/adult.ts.

@@ -48,6 +48,8 @@ async function registeredRoutes(): Promise<Set<string>> {
   for (const mod of ['auth', 'admin', 'notify', 'catalog', 'images', 'personal', 'recommendations', 'downloads', 'sources', 'translate', 'comments', 'opds', 'komgaCompat']) {
     await app.register((await import(`../src/routes/${mod}`)).default);
   }
+  // Starting a series from uploads: its own plugin beside admin's (server.ts).
+  await app.register((await import('../src/routes/upload')).uploadSeriesRoutes);
   await app.ready();
   await app.close();
   seen.add('GET /livez');

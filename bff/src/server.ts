@@ -61,6 +61,7 @@ import { registerApiDocs } from './lib/apiDocs';
 import { appVersion } from './lib/appVersion';
 import { buildPayload, installFacts, sendPing } from './lib/installPing';
 import authRoutes from './routes/auth';
+import { uploadSeriesRoutes } from './routes/upload';
 import { trustProxyProblems, trustProxyWarnings } from './lib/auth';
 import { loadNetworkSettings, localNetworksProblems, localNetworksWarnings, networkConfig, trustsPeer } from './lib/clientAddr';
 import adminRoutes, { sweepImportBatches } from './routes/admin';
@@ -261,6 +262,8 @@ async function main() {
   await app.register(adminRoutes);
   // Notification targets (#70): admin-only, with its own hooks, like admin.ts.
   await app.register(notifyRoutes);
+  // Starting a series from uploaded files: admins, and members with canUploadManually (routes/upload.ts).
+  await app.register(uploadSeriesRoutes);
   await app.register(catalogRoutes);
   await app.register(imageRoutes);
   await app.register(personalRoutes);

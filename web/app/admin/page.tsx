@@ -604,6 +604,8 @@ function Members() {
                   {u.role !== 'admin' && u.local_open && u.password_login && !ssoOnly && <button onClick={() => patch(u, { removePassword: true }, tr('Password removed'))} className="btn-key">{tr('Remove password')}</button>}
                   {u.role !== 'admin' && u.kind !== 'open' && <button onClick={() => patch(u, { perms: { ...u.perms, canManageProfiles: !u.perms?.canManageProfiles } }, tr('Permission updated'))}
                     aria-pressed={!!u.perms?.canManageProfiles} className={`btn-key ${u.perms?.canManageProfiles ? 'btn-key-accent' : ''}`}>{tr('Can make profiles')}</button>}
+                  {u.role !== 'admin' && <button onClick={() => patch(u, { perms: { ...u.perms, canUploadManually: !u.perms?.canUploadManually } }, tr('Permission updated'))}
+                    aria-pressed={!!u.perms?.canUploadManually} className={`btn-key ${u.perms?.canUploadManually ? 'btn-key-accent' : ''}`}>{tr('Can upload series')}</button>}
                   {/* Library access. "All libraries" is the ABSENCE of grant rows, not a full set of them, so a
                       library added next month is visible to unrestricted accounts without editing anyone. */}
                   {u.role !== 'admin' && <LibraryAccess granted={u.libraries ?? null} onSaved={inval}
