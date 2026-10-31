@@ -13,7 +13,7 @@ services:
 
   title-extractor:
     profiles: [title-art]
-    image: ${TITLE_EXTRACTOR_IMAGE:-ghcr.io/angelosha/uchiyomi:title-extractor-v0.102.2}
+    image: ${TITLE_EXTRACTOR_IMAGE:-ghcr.io/angelosha/uchiyomi:title-extractor-v0.103.0}
     restart: unless-stopped
     env_file: .env.title-extractor
     environment:

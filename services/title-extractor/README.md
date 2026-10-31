@@ -32,7 +32,7 @@ not qualify for automatic publication. Earlier drafts without an immutable raw m
 
 Application releases also publish `ghcr.io/angelosha/uchiyomi:title-extractor-v<VERSION>` for native Linux amd64 and arm64.
 These distinct tags reuse the existing public package; the app retains its normal version and `latest` tags.
-The overlay pins v0.102.2; choose `title-extractor-latest` explicitly only when you intend rolling worker upgrades.
+The overlay pins v0.103.0; choose `title-extractor-latest` explicitly only when you intend rolling worker upgrades.
 The image contains the CPU runtime and pinned Hi-SAM source, including its upstream Apache-2.0 license at
 `/opt/hi-sam/LICENSE`; Uchiyomi's MPL-2.0 license and component notice are in `/service`. It contains **no model
 checkpoints, OCR pack, cover images, application credentials or library files**. It downloads nothing at runtime.
@@ -47,7 +47,7 @@ Stage data outside the source checkout. Put these lines in the existing `.env`, 
 
 ```dotenv
 TITLE_EXTRACTOR_DATA=/absolute/path/to/title-art-data
-TITLE_EXTRACTOR_IMAGE=ghcr.io/angelosha/uchiyomi:title-extractor-v0.102.2
+TITLE_EXTRACTOR_IMAGE=ghcr.io/angelosha/uchiyomi:title-extractor-v0.103.0
 ```
 
 Set the same absolute `TITLE_EXTRACTOR_DATA` path in your setup shell, then create its two directories:

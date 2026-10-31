@@ -636,9 +636,11 @@ instead of the logo, and the logo is not downloaded (since v0.102.2). A logo in 
 language is not known, keeps the readable manga title underneath it.
 
 **Admin → Settings → Series & chapters → Automatic title logos** enables background logo lookup. It is off until enabled.
-Only a series with a checked or manually confirmed AniList manga link is looked up; the server uses that ID to find
-matching artwork on Wikidata and Wikimedia Commons, and keeps its own copy. A title alone is not enough to choose a
-logo. The library's automatic online-lookup opt-out is respected, as is **Use the first page** for automatic artwork.
+Only a series with a checked or manually confirmed AniList manga link is looked up. The server first asks the
+[Uchiyomi logo library](https://github.com/AngeloSha/uchiyomi-title-logos) by that ID: logos picked and cut out by hand
+from official covers, one per manga, each used only when its file matches the SHA-256 the library lists (since
+v0.103.0). Without a library logo, it finds matching artwork on Wikidata and Wikimedia Commons. Either way it keeps its
+own copy. A title alone is not enough to choose a logo. The library's automatic online-lookup opt-out is respected, as is **Use the first page** for automatic artwork.
 Opening a hero never waits for the lookup: it shows the styled title while work runs, and keeps that title when
 there is no reliable logo. A provider outage leaves any cached picture available.
 
@@ -647,7 +649,9 @@ each manga is not required. It resumes after restarts and retries temporary fail
 requested pause. The progress panel beside the setting separates checked titles, ready logos, completed searches
 with no match, retries, titles not checked yet, and missing manga links. **Scan library** checks work that is due;
 **Retry no matches** also repeats eligible completed searches that found nothing. Neither action overrides a
-library's online-lookup preference or an admin's artwork choice. A missing manga link needs confirmation through
+library's online-lookup preference or an admin's artwork choice. A manga that gains a logo in the library gets it on the
+next background check, even after an earlier search found nothing or found a Wikimedia logo, and a logo reworked in the
+library replaces the old copy; an admin's own logo or choice of text is never replaced. A missing manga link needs confirmation through
 the existing manga-link controls before automatic logo matching can use it.
 
 The lookup accepts matching transparent Commons PNG originals as well as rendered thumbnails. If an exact manga

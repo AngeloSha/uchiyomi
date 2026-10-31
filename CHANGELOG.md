@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.103.0 — 2026-10-31
+
+**Title logos from the Uchiyomi logo library: picked and cut out by hand, one per manga, for every server.**
+
+### The Uchiyomi logo library
+
+- **Automatic title logos come first from the [Uchiyomi logo library](https://github.com/AngeloSha/uchiyomi-title-logos)**:
+  title logos picked and cut out by hand from official covers, one per AniList manga. A server with one of those manga
+  shows its logo on computers without any cover processing. Wikidata and Wikimedia Commons are still asked for manga
+  the library does not have.
+- **Every file is checked before it is used.** The library's index names each logo's SHA-256; a file that does not match
+  is never shown.
+- **Logos keep up with the library.** A manga that gains a library logo gets it on the next background check, even
+  after an earlier search found nothing or found a Wikimedia logo, and a logo reworked in the library replaces the old
+  copy. An admin's own logo, or a choice of text, is never replaced.
+- **Same switch as before:** Admin → Settings → Series & chapters → Automatic title logos (off by default), and a
+  library's online-lookup opt-out still applies. The series editor names the library as the logo's source, with a link.
+
+### Upgrading
+
+- Nothing to do. `TITLE_LOGO_LIBRARY_URL` reads the library from a mirror, or, set empty, turns it off
+  ([CONFIGURATION.md](docs/CONFIGURATION.md#what-leaves-your-server)).
+
 ## v0.102.2 — 2026-10-31
 
 **Title logos are a computer's: on a phone the cover is the hero, so it shows the title instead.**
