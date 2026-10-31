@@ -2191,6 +2191,19 @@ ALTER TABLE series_title_art ADD COLUMN IF NOT EXISTS auto_cover_key text;
 ALTER TABLE series_title_art ADD COLUMN IF NOT EXISTS custom_attribution jsonb;
 -- v0.103.0: the logo library entry (anilistId:sha256) last tried, so each new or reworked logo is tried once.
 ALTER TABLE series_title_art ADD COLUMN IF NOT EXISTS library_attempt text;
+
+-- v0.103.1: an automatic AniList link named as its series by nothing but a synonym gives way to the entry named so by its
+-- own title (lib/anilist.ts fetchAniListArt, lib/matchCheck.ts). Both additive, with defaults: v0.103.0 boots on this
+-- schema and never names them.
+--
+-- rev: how many times a moved link replaced the cover and banner its old entry gave the series. The pictures made from
+-- a series' art are cached by the series, not by the address (routes/images.ts), so a new address under the old key would
+-- serve the old picture for good; the key carries rev once it is past 0, so every picture cached before stays warm.
+ALTER TABLE series_art ADD COLUMN IF NOT EXISTS rev integer NOT NULL DEFAULT 0;
+-- match_check_rule: the rule the background recheck last held every automatic link to (lib/matchCheck.ts MATCH_RULE).
+-- 1 is v0.55.7's, under which every link stored before was checked; below the current rule, the next background pass
+-- holds every automatic link to it once, checked or not.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS match_check_rule smallint NOT NULL DEFAULT 1;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

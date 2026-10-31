@@ -33,7 +33,8 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const AdmZip = require('adm-zip');
 
-const FOLDERS = { morgan: 'Zzz Om Morgan Lost', sasaki: 'Zzz Om Sasaki to Miyano', first: 'Zzz Om First Page', hunt: 'Zzz Om Hunt', privacy: 'Zzz Om Private', dupA: 'Zzz Om Dup A', dupB: 'Zzz Om Dup B' };
+const FOLDERS = { morgan: 'Zzz Om Morgan Lost', sasaki: 'Zzz Om Sasaki to Miyano', first: 'Zzz Om First Page', hunt: 'Zzz Om Hunt', privacy: 'Zzz Om Private', dupA: 'Zzz Om Dup A', dupB: 'Zzz Om Dup B',
+  pick: 'Zzz Om Pick Me Up', pickNew: 'Zzz Om Pick Me Up Again' };
 const ID: Record<keyof typeof FOLDERS | 'addMiss' | 'addHit' | 'addPrivate' | 'addMoving', string> = {} as any;
 const ADMIN = 'om-admin';
 // The art hosts: a literal public address, so the cover proxy's SSRF guard needs no DNS to let the fake answer.
@@ -41,6 +42,18 @@ const RED = 'https://1.1.1.1/om/red.png';
 const BLUE = 'https://1.1.1.1/om/blue.png';
 const MANGA_COVER = 'https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx9001-om.jpg';
 const MANGA_BANNER = 'https://s4.anilist.co/file/anilistcdn/media/manga/banner/9001-om.jpg';
+// v0.103.1: an anthology whose synonyms carry both Pick Me Up folders' names -- on AniList's servers, so its pictures are
+// known to be its own -- and the manhwa whose own titles they are, its pictures blue.
+const ANTHOLOGY_COVER = 'https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx9101-om.jpg';
+const ANTHOLOGY_BANNER = 'https://s4.anilist.co/file/anilistcdn/media/manga/banner/9101-om.jpg';
+const ANTHOLOGY = {
+  id: 9101, type: 'MANGA', title: { romaji: 'Zzz Om Gekka Bijin', english: null, native: null }, synonyms: ['Zzz Om Yaei', 'Zzz Om Pick Me Up', 'Zzz Om Pick Me Up Again'],
+  countryOfOrigin: 'JP', coverImage: { extraLarge: ANTHOLOGY_COVER }, bannerImage: ANTHOLOGY_BANNER, relations: { edges: [] },
+};
+const MANHWA = {
+  id: 9102, type: 'MANGA', title: { romaji: 'Zzz Om Pick Me Up Again', english: 'Zzz Om Pick Me Up', native: null }, synonyms: [],
+  countryOfOrigin: 'KR', coverImage: { extraLarge: BLUE }, bannerImage: BLUE, relations: { edges: [] },
+};
 
 let app: any, q: any, sharp: any;
 let adminAuth: Record<string, string> = {}, adminCookie = '';
@@ -59,6 +72,8 @@ function aniListAnswer(s: string): unknown {
   if (s === 'Zzz Om Sasaki to Miyano' || s === 'Zzz Om Add Hit' || s === 'Zzz Om Add Private' || s === 'Zzz Om Add Moving') {
     return { ...sasaki, title: { ...sasaki.title, english: s } };
   }
+  // The search's first answer for Pick Me Up is the anthology, as it is on AniList.
+  if (s === FOLDERS.pick || s === FOLDERS.pickNew) return ANTHOLOGY;
   // SEARCH_MATCH's best guess for a title AniList does not have: somebody else's manga.
   if (s.startsWith('Zzz Om')) return { ...sasaki, id: 9002, title: { romaji: 'Sasaki to Miyano', english: 'Sasaki and Miyano', native: null } };
   return null;
@@ -75,6 +90,13 @@ function fakeNetwork() {
       if (/type:ANIME/.test(body.query)) {
         return Response.json({ data: { Media: s.startsWith('Zzz Om') ? { title: { romaji: 'Sasaki and Miyano: Graduation' }, synonyms: [], bannerImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/77-x.jpg' } : null } });
       }
+      // v0.103.1: the online-match check's entries by id, and the search's next answers -- for Pick Me Up, the anthology
+      // and then the manhwa. Nothing else is known by id, as before.
+      if (/\bid_in\b/.test(body.query)) {
+        const known = [ANTHOLOGY, MANHWA].filter((m) => (body.variables?.ids ?? []).includes(m.id));
+        return Response.json({ data: { Page: { media: known } } });
+      }
+      if (/Page\(/.test(body.query)) return Response.json({ data: { Page: { media: s === FOLDERS.pick || s === FOLDERS.pickNew ? [ANTHOLOGY, MANHWA] : [] } } });
       return Response.json({ data: { Media: aniListAnswer(s) } });
     }
     if (url.hostname === 'kitsu.io') {
@@ -441,4 +463,33 @@ test('Health groups only links known to be the series\'; an unchecked automatic 
   // A person's link counts as it stands.
   await q(`UPDATE series_trackers SET checked_at = NULL, linked_by = (SELECT id FROM users WHERE username = $2) WHERE series_id = ANY($1)`, [[ID.dupA, ID.dupB], ADMIN]);
   assert.ok(await findingOf('duplicates', 'anilist:om-dup'), "a person's links are not grouped");
+});
+
+test("a name that is only a synonym gives way to an entry's own title: a new lookup links the manhwa, and a stored link moves with its pictures", { skip }, async () => {
+  // A new lookup (routes/images.ts backdropRecipe): AniList's search answers the anthology, whose synonyms carry the name;
+  // its next answers carry the manhwa named so by its own title, and that is what the series gets. Reintroduce by keeping
+  // the first answer (lib/anilist.ts fetchAniListArt): the anthology's banner is stored and the series linked to it.
+  assert.equal((await img(`/img/series/${ID.pickNew}/backdrop`)).statusCode, 200);
+  const fresh = await art(ID.pickNew);
+  assert.deepEqual([fresh?.banner, fresh?.cover], [BLUE, BLUE], "the anthology's art was stored for a name that is only one of its synonyms");
+  assert.equal((await link(ID.pickNew))?.external_id, '9102', 'the series was linked to the anthology');
+
+  // A stored link, as every release before left one: the anthology's, checked, with its pictures. The pictures made from
+  // them are cached under the series' keys -- here its first page, as the anthology's own cannot be fetched in a test.
+  await q(`INSERT INTO series_trackers (series_id, provider, external_id, title, checked_at) VALUES ($1, 'anilist', '9101', 'Zzz Om Gekka Bijin', now())`, [ID.pick]);
+  await q(`INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1, $2, $3, now())`, [ID.pick, ANTHOLOGY_BANNER, ANTHOLOGY_COVER]);
+  const thumb = async () => colourOf((await img(`/img/series/${ID.pick}/thumb`)).rawPayload);
+  const banner = async () => colourOf((await img(`/img/series/${ID.pick}/backdrop?style=banner`)).rawPayload);
+  assert.equal(await thumb(), 'green');
+  assert.equal(await banner(), 'green');
+  // The upgrade's pass (lib/matchCheck.ts): the link was checked under the rule before, so it is looked at once more.
+  await q(`UPDATE server_settings SET match_check_rule = 1 WHERE id = 1`);
+  const { checkMatches } = await import('../src/lib/matchCheck');
+  const r = await checkMatches({ info() {}, warn() {} });
+  assert.equal(r.moved, 1);
+  assert.equal((await link(ID.pick))?.external_id, '9102', 'the stored link stayed on the anthology');
+  // Reintroduce by keying the pictures on the series alone (no `rev` in serveLibSeriesThumb / backdropRecipe): the picture
+  // made from the anthology's cover is served for the manhwa's.
+  assert.equal(await thumb(), 'blue', "the cover made from the anthology's was served after the link moved");
+  assert.equal(await banner(), 'blue', "the banner made from the anthology's was served after the link moved");
 });

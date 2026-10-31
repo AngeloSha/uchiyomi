@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { namesMatch, nameKey, titleKey, aniListMediaOf, mangaDexIdOf } from '../src/lib/onlineMatch';
-import { fetchAniListArt, fetchAnimeBanner, fetchAniListEntries } from '../src/lib/anilist';
+import { fetchAniListArt, fetchAniListByOwnTitle, fetchAnimeBanner, fetchAniListEntries } from '../src/lib/anilist';
 import { fetchKitsuBanner } from '../src/lib/kitsu';
 import { mangadexTitles, _setMangadexPacing, _resetMangadexLimiter } from '../src/lib/sources/mangadex';
 
@@ -100,6 +100,72 @@ test("AniList's art is kept only from an entry named as the series is; another w
   assert.deepEqual(await fetchAniListArt('Nothing Like It', ['Nothing Like It']), { banner: null, cover: null, mediaId: null, mediaTitle: null, country: null, titles: [] });
 });
 
+/**
+ * AniList answering the art lookup's two searches: `first` for the search (`Media`), `page` for its next answers (`Page`,
+ * v0.103.1) -- or that status, for a Page request that fails. Records what it was asked.
+ */
+function fakeSearches(first: unknown, page: unknown[], asked: any[] = [], pageStatus = 200) {
+  globalThis.fetch = (async (url: any, init?: RequestInit) => {
+    assert.equal(new URL(String(url)).host, 'graphql.anilist.co', `unexpected request in a test: ${url}`);
+    const body = JSON.parse(String(init?.body ?? '{}'));
+    asked.push(body);
+    if (/Page\(/.test(body.query)) return pageStatus === 200 ? json({ data: { Page: { media: page } } }) : json({}, pageStatus);
+    return json({ data: { Media: first } });
+  }) as typeof fetch;
+  return asked;
+}
+
+test("a synonym gives way to an entry's own title: the search's next answers are looked at, once, and only then", async (t) => {
+  t.after(() => { globalThis.fetch = realFetch; });
+  const cdn = (kind: 'cover' | 'banner', id: number) => `https://s4.anilist.co/file/anilistcdn/media/manga/${kind === 'cover' ? 'cover/large/bx' : 'banner/'}${id}-x.jpg`;
+  // The live case, 2026-10-31: AniList's search answers "Pick Me Up" with an 18+ anthology one of whose eighteen synonyms
+  // is a story of that name; the manhwa, whose own title it is, comes second.
+  const anthology = {
+    id: 94792, title: { romaji: 'Gekka Bijin', english: null, native: 'ゲッカビジン' },
+    synonyms: ['My Dear Cow', 'Yaei', 'Pick Me Up', 'A Queen of the Night'], countryOfOrigin: 'JP',
+    coverImage: { extraLarge: cdn('cover', 94792) }, bannerImage: cdn('banner', 94792), relations: { edges: [] },
+  };
+  const manhwa = {
+    id: 159441, title: { romaji: 'Pick Me Up!', english: 'Pick Me Up', native: '픽 미 업!' }, synonyms: ['Pick Me Up, Infinite Gacha'],
+    countryOfOrigin: 'KR', coverImage: { extraLarge: cdn('cover', 159441) }, bannerImage: cdn('banner', 159441), relations: { edges: [] },
+  };
+  const other = { ...manhwa, id: 1, title: { romaji: 'Pick Me Up Later', english: null, native: null }, synonyms: [] };
+  const asked = fakeSearches(anthology, [anthology, other, manhwa]);
+  // Reintroduce by keeping the first answer (no ownTitlesOf check in fetchAniListArt): the anthology is linked.
+  const hit = await fetchAniListArt('Pick Me Up', ['Pick Me Up']);
+  assert.equal(hit.mediaId, 159441, 'the anthology that lists the name as a synonym was linked over the manhwa it is the title of');
+  assert.deepEqual([hit.cover, hit.banner, hit.country, hit.mediaTitle], [cdn('cover', 159441), cdn('banner', 159441), 'KR', 'Pick Me Up']);
+  assert.deepEqual(hit.titles, ['Pick Me Up!', 'Pick Me Up', '픽 미 업!', 'Pick Me Up, Infinite Gacha'], "the direction and type are learned from the anthology's names");
+  assert.equal(asked.length, 2);
+  assert.match(asked[1].query, /^query\(\$s:String\)\{Page\(perPage:6\)\{media\(search:\$s,type:MANGA,format_not_in:\[NOVEL\],sort:SEARCH_MATCH\)/,
+    'the next answers are not the same search, six of them, without light novels');
+  assert.equal(asked[1].variables.s, 'Pick Me Up', 'asked by the title the first search was');
+
+  // An entry named so by its own title answers in one request, the request it always was: the fakes that answer
+  // `data.Media` alone (the browser walk's, the other suites') never see the second.
+  const once = fakeSearches(manhwa, []);
+  assert.equal((await fetchAniListArt('Pick Me Up', ['Pick Me Up'])).mediaId, 159441);
+  assert.equal(once.length, 1, 'an entry named by its own title asked for more answers');
+  assert.doesNotMatch(once[0].query, /Page\(/);
+
+  // None of the next answers is named so by its own title: the synonym's entry stands, as it did.
+  fakeSearches(anthology, [anthology, other]);
+  assert.equal((await fetchAniListArt('Pick Me Up', ['Pick Me Up'])).mediaId, 94792, 'a synonym with nothing better was refused');
+  // The next answers fail: thrown, as the first search's failure is, so the caller stores no link it would never recheck.
+  fakeSearches(anthology, [], [], 500);
+  await assert.rejects(fetchAniListArt('Pick Me Up', ['Pick Me Up']), /anilist 500/, "a failed second search kept the synonym's entry");
+
+  // The recheck's half (lib/matchCheck.ts): the entry named so by its own title, or null; a failure thrown.
+  const recheck = fakeSearches(null, [anthology, manhwa]);
+  assert.equal((await fetchAniListByOwnTitle('Pick Me Up', ['Pick Me Up']))?.mediaId, 159441);
+  assert.equal(recheck.length, 1, 'the recheck searched twice');
+  assert.match(recheck[0].query, /Page\(perPage:6\)/);
+  fakeSearches(null, [anthology]);
+  assert.equal(await fetchAniListByOwnTitle('Pick Me Up', ['Pick Me Up']), null);
+  fakeSearches(null, [], [], 503);
+  await assert.rejects(fetchAniListByOwnTitle('Pick Me Up', ['Pick Me Up']), /anilist 503/);
+});
+
 test("the anime search's banner is kept only from an anime named as the series is", async (t) => {
   t.after(() => { globalThis.fetch = realFetch; });
   const asked = fakeAniList({ title: { romaji: 'Tokyo Ghoul:re', english: 'Tokyo Ghoul:re' }, synonyms: [], bannerImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/1-x.jpg' });
@@ -136,7 +202,7 @@ test("AniList's entries by id: manga and anime, every name, what each is related
   assert.doesNotMatch(bodies[0].query, /type:MANGA/, 'an anime banner\'s entry would never be answered');
   assert.deepEqual(bodies[0].variables.ids, [1, 2, 3], 'an id asked twice');
   assert.deepEqual([...out.keys()], [1, 3], 'an id AniList does not answer for is absent');
-  assert.deepEqual(out.get(3), { id: 3, type: 'ANIME', titles: ['Romaji 3', 'Syn 3'], related: [{ id: 1, type: 'MANGA' }] });
+  assert.deepEqual(out.get(3), { id: 3, type: 'ANIME', titles: ['Romaji 3', 'Syn 3'], own: ['Romaji 3'], related: [{ id: 1, type: 'MANGA' }] });
   globalThis.fetch = (async () => json({}, 500)) as typeof fetch;
   await assert.rejects(fetchAniListEntries([1]), /anilist 500/, 'a failure read as "no answers"');
 });

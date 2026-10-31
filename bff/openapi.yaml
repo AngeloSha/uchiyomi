@@ -9377,8 +9377,10 @@ paths:
             a preview -- a scan, then a look for every live chapter's own file -- and changes nothing; its
             progress and plan are on GET /api/admin/tasks/rescan/status. `matches` (since v0.55.7, "Check online
             matches") holds every automatic AniList link and every cover and banner found by a title search to the
-            title check again, detached; its last run is the `matches` entry of GET /api/admin/tasks
-            ({matches, removed, links, art, unanswered, stopped?, ms}), audited as `library.match_check`.
+            title check again, detached -- since v0.103.1 a link named as its series only by a synonym moves to the
+            entry a title search names so by its own title; its last run is the `matches` entry of GET
+            /api/admin/tasks ({matches, removed, moved, links, art, unanswered, stopped?, ms}), audited as
+            `library.match_check`.
           schema:
             type: string
             enum: [scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify, repair, rescan, matches]
