@@ -607,10 +607,16 @@ entry's names — its romaji, English or native title, or a synonym — is exact
 title you set in *Edit details*, its *Other names* (below), with case, accents, punctuation and bracketed asides set
 aside, and a leading *The*, *A* or *An* ignored when at least six letters remain. A name that merely contains the
 series' name is another work: *Morgan Lost: Dark Novels* is not *Morgan Lost*.
+Since v0.103.1 a synonym is the last resort: synonyms are anyone's to add on AniList, and an anthology lists every story
+in it (*Pick Me Up* had been linked to an 18+ anthology with a story of that name). When an entry matches only by a
+synonym, AniList's next few answers are looked at, and the entry that has the name as its own title wins.
 The same rule picks the AniList entry a series is linked to for tracker sync (section 10), and the art backfill under
 **Admin → Art** follows it too. What was matched before v0.55.7 is checked again in the background
 (**Admin → Settings → Maintenance → Check online matches**, section 8): a link to another work is removed, and a cover or banner that
-came from another work is cleared, so the series shows its source's cover or its own first page.
+came from another work is cleared, so the series shows its source's cover or its own first page. After the upgrade to
+v0.103.1 every automatic link is checked once more, and one that matched only by a synonym moves to the entry named so
+by its own title, with the cover, banner and reading direction its old entry gave the series. A link you made is never
+moved.
 
 In **Edit details** (the art column, or the *Art* tab on a phone) the cover has **Upload**, **From a link** and **⋯**:
 

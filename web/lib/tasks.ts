@@ -169,12 +169,16 @@ export function taskResult(r: any): string {
   // held to the title check, checked, and how many were another work's and went. `matches` is the key -- not `checked`,
   // which is Verify's, below. A run a service stopped leads, for the verify's reason: the counts after it are partial.
   // Reintroduce by keying it on `checked`: "a recheck is not read as a verify run" finds "checked, none missing".
+  // `moved` (v0.103.1): links named as their series only by a synonym, moved to the entry named so by its own title --
+  // the one sign on the page that the upgrade's pass put Pick Me Up right. Absent from a result before it: none.
   if (typeof r.matches === 'number') {
     const bits: string[] = [];
     if (r.stopped === 'unavailable') bits.push(tr('AniList or MangaDex did not answer: tried again at the next run'));
     bits.push(r.matches === 1 ? tr('1 match checked') : tr('{n} matches checked', { n: r.matches }));
     const removed = r.removed ?? 0;
     if (removed) bits.push(removed === 1 ? tr('1 removed as another work') : tr('{n} removed as another work', { n: removed }));
+    const moved = r.moved ?? 0;
+    if (moved) bits.push(moved === 1 ? tr('1 moved to the right AniList entry') : tr('{n} moved to the right AniList entry', { n: moved }));
     return ` \u00b7 ${bits.join(', ')}`;
   }
   // "Fingerprint library files" (v0.55.7): what its last pass did. It runs in the background after a boot, every six

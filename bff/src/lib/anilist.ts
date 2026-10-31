@@ -32,11 +32,21 @@ const POST = (body: unknown): RequestInit => ({
 // `countryOfOrigin` rides along for the series' reading direction (lib/readingDirection.ts), with every title
 // the entry goes by so the direction is taken only from an entry that is visibly the series searched for
 // (directionFromAniListMatch): the same match, the same request, no extra rate cost.
-const QUERY = `query($s:String){Media(search:$s,type:MANGA,sort:SEARCH_MATCH){id title{romaji english native}synonyms countryOfOrigin coverImage{extraLarge}bannerImage relations{edges{node{type bannerImage}}}}}`;
+const FIELDS = 'id title{romaji english native}synonyms countryOfOrigin coverImage{extraLarge}bannerImage relations{edges{node{type bannerImage}}}';
+const QUERY = `query($s:String){Media(search:$s,type:MANGA,sort:SEARCH_MATCH){${FIELDS}}}`;
+// The same search's first six answers, with the same fields, never a light novel (they are type MANGA on AniList): asked
+// only when its first answer is named as the series by nothing but a synonym (fetchAniListArt).
+const OWN_TITLE = `query($s:String){Page(perPage:6){media(search:$s,type:MANGA,format_not_in:[NOVEL],sort:SEARCH_MATCH){${FIELDS}}}}`;
 
 /** Every name an entry goes by: its three titles and its synonyms. */
 function titlesOf(m: any): string[] {
-  return [m?.title?.romaji, m?.title?.english, m?.title?.native, ...(Array.isArray(m?.synonyms) ? m.synonyms : [])]
+  return [...ownTitlesOf(m), ...(Array.isArray(m?.synonyms) ? m.synonyms : [])]
+    .filter((t): t is string => typeof t === 'string' && !!t.trim());
+}
+
+/** An entry's own three titles -- romaji, English, native -- without the synonyms anyone may add to it. */
+function ownTitlesOf(m: any): string[] {
+  return [m?.title?.romaji, m?.title?.english, m?.title?.native]
     .filter((t): t is string => typeof t === 'string' && !!t.trim());
 }
 
@@ -70,6 +80,15 @@ export interface AniListArt {
  * does not ask again on every view (v0.55.7, #168: a comic with no online source took a manga's cover and banner, and
  * the manga's AniList link). Reintroduce by returning the entry unchecked: "another work's answer is a miss" in
  * onlineMatch.int.test.ts stores the manga's cover.
+ *
+ * An answer named as the series by nothing but a synonym is the last resort (v0.103.1): synonyms are anyone's to add,
+ * and an anthology lists every story in it. "Pick Me Up" answered the 18+ anthology Gekka Bijin, one of whose eighteen
+ * synonyms is a story of that name, ahead of the manhwa "Pick Me Up!" -- and the series took the anthology's cover,
+ * banner and link. So the search's next answers are looked at then, one more request and only then, and the first named
+ * as the series by its OWN title (romaji, English, native) is the series; the synonym's entry stands only when none is.
+ * A failure of that request throws as the first one's does: a link stored from it is held as checked, and would not be
+ * looked at again. Reintroduce by keeping the first answer: "a synonym gives way to an entry's own title" in
+ * onlineMatch.test.ts links the anthology.
  */
 export async function fetchAniListArt(rawTitle: string, names: readonly string[]): Promise<AniListArt> {
   const s = clean(rawTitle);
@@ -83,6 +102,12 @@ export async function fetchAniListArt(rawTitle: string, names: readonly string[]
   if (m && !namesMatch(names, titlesOf(m))) {
     return { banner: null, cover: null, refused: { id: Number.isInteger(m.id) ? m.id : null, title: m.title?.english || m.title?.romaji || null } };
   }
+  if (m && !namesMatch(names, ownTitlesOf(m))) return artOf((await byOwnTitle(s, names, ASK)) ?? m);
+  return artOf(m);
+}
+
+/** What the art lookup keeps of an entry: its art, id, name, country and every name; nulls for no entry. */
+function artOf(m: any): AniListArt {
   // banner priority: the manga's own, else its anime adaptation's (same request, no extra rate cost)
   const relBanner = (m?.relations?.edges ?? [])
     .map((e: any) => e?.node)
@@ -95,6 +120,33 @@ export async function fetchAniListArt(rawTitle: string, names: readonly string[]
     country: typeof m?.countryOfOrigin === 'string' ? m.countryOfOrigin : null,
     titles: titlesOf(m),
   };
+}
+
+/**
+ * The first of a title search's answers (`s`, cleaned) named as the series by one of its own titles, or null when none
+ * is. Read through readCapped (lib/safeFetch.ts): six entries with their relations, never past MEDIA_MAX_BYTES. Throws on
+ * a failure, as the search it follows does.
+ */
+async function byOwnTitle(s: string, names: readonly string[], opts: AniListFetchOptions): Promise<any | null> {
+  const r = await anilistFetch(ANILIST, POST({ query: OWN_TITLE, variables: { s } }), opts);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`anilist ${r.status}`);
+  const j: any = JSON.parse((await readCapped(r, MEDIA_MAX_BYTES)).toString('utf8'));
+  const media: any[] = Array.isArray(j?.data?.Page?.media) ? j.data.Page.media : [];
+  return media.find((m) => Number.isInteger(m?.id) && namesMatch(names, ownTitlesOf(m))) ?? null;
+}
+
+/**
+ * The entry a title search names as the series by its own title -- its art, id, name, country and every name -- or null
+ * when none is: for an automatic link the series is named by only through a synonym (lib/matchCheck.ts), the recheck's
+ * half of fetchAniListArt's rule. In the background, so it waits its turn behind a 429 (BATCH); anything else throws, and
+ * the caller decides nothing.
+ */
+export async function fetchAniListByOwnTitle(rawTitle: string, names: readonly string[]): Promise<AniListArt | null> {
+  const s = clean(rawTitle);
+  if (!s) return null;
+  const m = await byOwnTitle(s, names, BATCH);
+  return m ? artOf(m) : null;
 }
 
 const COUNTRIES = `query($ids:[Int]){Page(perPage:50){media(id_in:$ids,type:MANGA){id countryOfOrigin title{romaji english native}synonyms}}}`;
@@ -211,6 +263,8 @@ export interface AniListEntry {
   id: number;
   type: 'MANGA' | 'ANIME';
   titles: string[];
+  /** Of those, its own three titles, without the synonyms: what a link named only by a synonym is told apart by. */
+  own: string[];
   /** The related entries (an anime's source manga, a manga's adaptations): id and type. */
   related: Array<{ id: number; type: 'MANGA' | 'ANIME' }>;
 }
@@ -233,7 +287,7 @@ export async function fetchAniListEntries(ids: number[]): Promise<Map<number, An
       const t = typeOf(e?.node?.type);
       return Number.isInteger(e?.node?.id) && t ? [{ id: e.node.id as number, type: t }] : [];
     });
-    out.set(m.id, { id: m.id, type, titles: titlesOf(m), related });
+    out.set(m.id, { id: m.id, type, titles: titlesOf(m), own: ownTitlesOf(m), related });
   });
   return out;
 }

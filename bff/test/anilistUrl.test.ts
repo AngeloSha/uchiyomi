@@ -30,7 +30,9 @@ test('every AniList lookup goes where ANILIST_API_URL says, with its trailing sl
     // v0.61.0: the trending rails by country, and the related works and recommendations.
     await al.fetchTrending('JP', 1);
     await al.fetchAniListRelated([970002]);
-    assert.equal(asked.length, 8, JSON.stringify(asked));
+    // v0.103.1: the search's next answers, for a link named only by a synonym.
+    await al.fetchAniListByOwnTitle('Walk Nightfall', ['Walk Nightfall']);
+    assert.equal(asked.length, 9, JSON.stringify(asked));
     assert.deepEqual([...new Set(asked)], ['http://anilist.example/graphql'], 'every AniList lookup goes where ANILIST_API_URL says');
   } finally {
     globalThis.fetch = realFetch;
