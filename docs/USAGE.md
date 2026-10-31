@@ -325,6 +325,21 @@ page, under the hero — in full above You, a slimmer band above the rest; on a 
 screen: tap a row to open its page, under a band of the same art, and Back returns to the list. A row marked *This
 device* is kept by this browser only; every other setting follows your account.
 
+### Upload a series
+
+For a series no source carries, when you already have its chapters as files: **Upload a series** in the Library's
+header (the arrow-up key on a phone) opens a page of its own. Give it a title, choose the files (.cbz, .cbr, .zip, .rar,
+.pdf or .epub, as many as you like), and **Upload**. The files go into the download folder under `Uploads/<title>`, one
+after another in name order, and the library scan makes them a series. The chapter number is read from each file name,
+as for every file the scan meets (see *How a chapter's number is read* below), so name them like `Chapter 12.cbz`.
+
+- A title already in the library is refused before anything is written: pick another.
+- Nothing is overwritten, and a file whose contents are not the archive its name says is refused. One refused file
+  does not stop the rest.
+- Each file can be up to `UPLOAD_MAX_MB` (2 GB by default), and uploads stop at the download disk's `MIN_FREE_GB` floor.
+- Admins can always upload. A member needs **Can upload series**, which an admin turns on per member under
+  **Admin → Members**. It is off by default.
+
 ### What counts as a chapter
 
 Point `LIBRARY_PATH` at what you already have. A chapter can be any of:

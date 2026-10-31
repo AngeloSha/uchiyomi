@@ -12291,9 +12291,9 @@ paths:
   /api/library/upload:
     post:
       tags:
-        - admin
+        - library
       summary: Start a series from an uploaded chapter file.
-      operationId: postApiAdminLibraryUpload
+      operationId: postApiLibraryUpload
       description: >-
         Requires an admin account, or a member an admin gave `canUploadManually`. The body is the file itself (.cbz, .cbr,
         .zip, .rar, .pdf or .epub), streamed into `Uploads/<title>` under the download folder, then the library is scanned;
