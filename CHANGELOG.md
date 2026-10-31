@@ -11,6 +11,12 @@
   keep their logos as before. This applies to any screen under 1024 pixels wide, where the cover replaces the banner.
 - **A phone no longer downloads title logos** or keeps checking for one that is still being looked up.
 
+### Also
+
+- **Discover hides *Newest* and *Popular* while search results are up** ([#376](https://github.com/AngeloSha/uchiyomi/pull/376),
+  from @Calvin-Davidson). Results come in each source's own order, so the toggle did nothing but throw the search away.
+  Searching with an empty box now goes back to browsing, like the ×.
+
 ### Upgrading
 
 - Nothing to do.
