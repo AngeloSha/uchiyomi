@@ -8,6 +8,7 @@ import { clearShownOnce } from './shownOnce';
 import { applyReduceEffects, restoreReduceEffects } from './effects';
 import { applyTone, restoreTone } from './tone';
 import { flushOutbox } from './downloads';
+import { usesNativeCache } from './native';
 import { setAdultShown } from './adult';
 import { isDesktop, serverReachableHint, untilReachable } from './desktop';
 import { t as tr } from './i18n';
@@ -117,6 +118,7 @@ function applyAccent(settings?: Record<string, any>) {
  */
 /** Tell the worker who is signed in, so background sync files queued reading against the right account. */
 async function tellWorkerUser(userId: string | null): Promise<void> {
+  if (usesNativeCache()) return;
   try {
     const reg = await Promise.race([
       navigator.serviceWorker?.ready,
@@ -127,6 +129,7 @@ async function tellWorkerUser(userId: string | null): Promise<void> {
 }
 
 async function purgeAccountCaches(): Promise<void> {
+  if (usesNativeCache()) return;
   try {
     // `serviceWorker.ready` resolves only once a worker is ACTIVE, and never at all if registration failed or
     // has not happened yet -- so awaiting it bare would hang sign-in on exactly the browsers where there is

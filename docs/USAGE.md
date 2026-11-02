@@ -4,6 +4,7 @@
 
 Everything you can do in Uchiyomi, screen by screen. To install it see [INSTALL.md](INSTALL.md); for
 environment variables see [CONFIGURATION.md](CONFIGURATION.md).
+For the experimental iPhone wrapper, offline preparation, and Xcode/AltStore installation, see [IOS.md](IOS.md).
 
 - [1. First run & setup](#1-first-run--setup)
 - [2. Signing in](#2-signing-in)

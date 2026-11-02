@@ -162,14 +162,14 @@ test('the profile settings and connections hide what only other devices use', ()
   // render there -- but the window IS the installed app. Reintroduce by dropping `|| inDesktopWindow()`:
   // "Install Uchiyomi shows inside the desktop app" fails.
   const device = settings.slice(settings.indexOf('function DeviceSection('));
-  assert.match(device, /setStandalone\(window\.matchMedia\('\(display-mode: standalone\)'\)\.matches \|\| \(navigator as any\)\.standalone === true \|\| inDesktopWindow\(\)\);/, 'Install Uchiyomi shows inside the desktop app');
+  assert.match(device, /setStandalone\(window\.matchMedia\('\(display-mode: standalone\)'\)\.matches \|\| \(navigator as any\)\.standalone === true \|\| inDesktopWindow\(\) \|\| usesNativeCache\(\)\);/, 'Install Uchiyomi shows inside the desktop or iOS app');
   assert.match(device, /\{!standalone && \(\s*<Row id="install" stacked label=\{tr\('Install Uchiyomi'\)\}>/, 'the install row is no longer gated on standalone');
   // ...and the window has no push service (Electron ships none): the push switch there could only fail with
   // "The browser did not grant it." (V2 review). Reintroduce by rendering the SwitchRow whatever `inApp` says:
   // "the push switch is offered inside the desktop app" fails; by dropping `!inApp &&` from `supported`: "push
   // counts as supported inside the desktop app" fails.
   assert.match(device, /const \[inApp\] = useState\(\(\) => inDesktopWindow\(\)\);/, 'the device section no longer asks whether it is inside the desktop app');
-  assert.match(device, /const \[supported\] = useState\(\(\) => !inApp && typeof window !== 'undefined'/, 'push counts as supported inside the desktop app');
+  assert.match(device, /const \[supported\] = useState\(\(\) => !inApp && !usesNativeCache\(\) && typeof window !== 'undefined'/, 'push counts as supported inside the desktop or iOS app');
   assert.match(device, /\{enabledSrv && \(inApp \? \(\s*<Row id="chapter-alerts" stacked label=\{tr\('New-chapter alerts'\)\}>\s*<p[^>]*>\{tr\('The desktop app cannot receive push notifications\./, 'the push switch is offered inside the desktop app');
   // The server's own row is unchanged in a browser.
   assert.match(device, /\) : \(\s*<SwitchRow id="chapter-alerts" device label=\{tr\('New-chapter alerts'\)\}\s*help=\{supported \? tr\('Get a push notification when one of your favorites gets a new chapter, or when someone comments on a chapter you commented on\.'\) : tr\('Not supported on this browser\.'\)\}\s*on=\{on\} disabled=\{!supported\} onChange=\{toggle\} \/>/, 'the browser\'s push switch changed');

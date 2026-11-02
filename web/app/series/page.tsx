@@ -1,4 +1,5 @@
 'use client';
+import { publicServerURL } from '@/lib/native';
 import { ScrollRail, CARD_RAIL } from '@/components/ScrollRail';
 import { Children, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
@@ -1718,7 +1719,7 @@ function SeriesInner() {
   });
   const copyLink = async () => {
     try {
-      await navigator.clipboard.writeText(new URL(seriesHref, window.location.href).toString());
+      await navigator.clipboard.writeText(publicServerURL(seriesHref, window.location.href));
       toast(tr('Link copied'), 'success');
     } catch { toast(tr('Could not copy the link'), 'error'); }
   };

@@ -29,6 +29,7 @@ import {
 import type { PageView } from '@/components/ConsoleLayout';
 import { ModeArt, RepeatedArt, ThemeArt, ToneArt, WideArt } from '@/components/settingsArt';
 import { inDesktopWindow, isDesktop } from '@/lib/desktop';
+import { usesNativeCache } from '@/lib/native';
 import { useIncognito } from '@/components/IncognitoBanner';
 import { INCOGNITO_TEXT } from '@/lib/incognito';
 import { COMMENTS_TEXT, talkWantedOf } from '@/lib/comments';
@@ -567,7 +568,8 @@ function DeviceSection() {
   // service: Electron ships none, so the switch could only ever fail with "The browser did not grant it." There
   // the row says where new-chapter alerts come from instead (V2 review, v0.45.0).
   const [inApp] = useState(() => inDesktopWindow());
-  const [supported] = useState(() => !inApp && typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window);
+  const [native] = useState(usesNativeCache);
+  const [supported] = useState(() => !inApp && !usesNativeCache() && typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window);
   const [enabledSrv, setEnabledSrv] = useState(false);
   const [key, setKey] = useState('');
   const [on, setOn] = useState(false);
@@ -582,7 +584,7 @@ function DeviceSection() {
       try {
         const k = await api<{ enabled: boolean; key: string }>('/api/push/key');
         setEnabledSrv(k.enabled); setKey(k.key);
-        if (k.enabled && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+        if (k.enabled && supported && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
           const reg = await navigator.serviceWorker.ready;
           setOn(!!(await reg.pushManager.getSubscription()));
         }
@@ -639,7 +641,7 @@ function DeviceSection() {
     setCanInstall(!!(window as any).__yomiInstall);
     setIsIOS(/iphone|ipad|ipod/i.test(navigator.userAgent));
     // Uchiyomi Desktop's window (either mode) is an installed app already: nothing to install from it.
-    setStandalone(window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone === true || inDesktopWindow());
+    setStandalone(window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone === true || inDesktopWindow() || usesNativeCache());
   }, []);
 
   const install = async () => {
@@ -652,7 +654,7 @@ function DeviceSection() {
   };
 
   // Nothing to decide here: push is not configured on the server and the app is already installed.
-  if (!enabledSrv && standalone) return null;
+  if (native || (!enabledSrv && standalone)) return null;
 
   return (
     <RowGroup id="device" title={tr('Alerts and app')}>

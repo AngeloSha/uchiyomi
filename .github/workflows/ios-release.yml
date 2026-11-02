@@ -1,0 +1,164 @@
+name: iOS beta
+
+on:
+  pull_request:
+    paths:
+      - 'ios/**'
+      - 'web/**'
+      - '.github/workflows/ios-release.yml'
+  push:
+    tags: ['ios-v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Native version for an unpublished build (MAJOR.MINOR.PATCH)'
+        required: true
+        default: '0.1.0'
+        type: string
+
+permissions:
+  contents: read
+
+# Serialize release + Pages publication together. An older run cannot replace a newer feed.
+concurrency:
+  group: ios-${{ github.event_name == 'push' && 'publication' || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 35
+    env:
+      # Explicit toolchain, independent of the runner's changing default.
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+      UCHI_SIMULATOR_DEVICE_TYPE: com.apple.CoreSimulator.SimDeviceType.iPhone-Duo
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Verify toolchain and distribution rules
+        run: |
+          xcodebuild -version
+          python3 -m unittest discover -s ios/Tests/Distribution -v
+          node --test ios/scripts/manifest.test.mjs
+      - name: Native core tests
+        run: bash ios/scripts/test-core.sh
+      - name: Package without Apple credentials
+        env:
+          UCHI_PACKAGE_MODE: altstore
+          REQUESTED_VERSION: ${{ inputs.version || '0.1.0' }}
+        run: |
+          # Above existing prototype build numbers; a rerun keeps the same build identity.
+          export UCHI_BUILD_NUMBER=$((1000 + GITHUB_RUN_NUMBER))
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            export UCHI_RELEASE_TAG="$GITHUB_REF_NAME"
+          else
+            export UCHI_VERSION="$REQUESTED_VERSION"
+          fi
+          bash ios/scripts/package.sh ios/build/ci
+      # Build the test-only frontend after recording the clean native source tree:
+      # Next may regenerate tracked TypeScript config, and no web files ship in the IPA.
+      - name: Build frontend fixture and test native adapters
+        working-directory: web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          node --import tsx --test test/nativeHost.test.ts test/desktopSurfaces.test.ts
+      - name: Real WebKit and lifecycle tests
+        run: bash ios/scripts/test-webview.sh ios/build/WebViewCI
+      - name: Generate an unpublished source preview
+        env:
+          REPOSITORY: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          repo_name="${REPOSITORY#*/}"
+          python3 ios/scripts/altstore-source.py --records-dir ios/build/ci \
+            --repository "$REPOSITORY" --base-url "https://${OWNER}.github.io/${repo_name}" \
+            --output ios/build/source-preview
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ios-altstore-candidate
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            ios/build/ci/*.ipa
+            ios/build/ci/release.json
+            ios/build/ci/SHA256SUMS
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ios-source-preview
+          path: ios/build/source-preview/
+          retention-days: 14
+      - name: Preserve failure logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-failure-logs
+          path: |
+            ios/build/ci/archive.log
+            ios/build/WebViewCI/test.log
+            ios/build/WebViewCI/tests.xcresult/
+            ios/build/WebViewCI/auth.xcresult/
+          retention-days: 7
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/ios-v')
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: ios-altstore-candidate
+          path: ios/build/publish
+      - name: Publish immutable beta assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: python3 ios/scripts/publish-release.py --directory ios/build/publish --repository "$REPOSITORY" --tag "$TAG"
+
+  source:
+    if: vars.IOS_ALTSTORE_PUBLISH == 'true'
+    needs: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Get the configured Pages URL
+        id: pages
+        uses: actions/configure-pages@v5
+      - name: Verify every advertised public release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          BASE_URL: ${{ steps.pages.outputs.base_url }}
+        run: |
+          python3 ios/scripts/fetch-releases.py --repository "$REPOSITORY" --output ios/build/published
+          python3 ios/scripts/altstore-source.py --records-dir ios/build/published \
+            --repository "$REPOSITORY" --base-url "$BASE_URL" --output ios/build/pages
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: ios/build/pages
+      - name: Publish the beta source
+        id: deploy
+        uses: actions/deploy-pages@v4

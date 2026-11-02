@@ -1,4 +1,5 @@
 'use client';
+import { publicServerURL } from '@/lib/native';
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -53,7 +54,7 @@ export function useSeriesMenu(series: Series) {
     {
       label: tr('Copy link'),
       onSelect: async () => {
-        try { await navigator.clipboard.writeText(new URL(href, window.location.href).toString()); toast(tr('Link copied'), 'success'); }
+        try { await navigator.clipboard.writeText(publicServerURL(href, window.location.href)); toast(tr('Link copied'), 'success'); }
         catch { toast(tr('Could not copy the link'), 'error'); }
       },
     },

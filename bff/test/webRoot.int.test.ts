@@ -30,6 +30,10 @@ async function buildExport(): Promise<string> {
   await writeFile(join(root, 'index.html'), '<!doctype html><title>shell</title>');
   await writeFile(join(root, 'sw.js'), '// service worker');
   await writeFile(join(root, 'manifest.webmanifest'), '{"name":"Uchiyomi"}');
+  await writeFile(join(root, 'mobile-assets.json'), '{"schemaVersion":1,"buildId":"fixture"}');
+  await mkdir(join(root, 'reader'), { recursive: true });
+  await writeFile(join(root, 'reader/index.html'), '<!doctype html><title>reader</title>');
+  await writeFile(join(root, 'reader/index.txt'), 'fixture next route payload');
   await mkdir(join(root, '_next/static/chunks'), { recursive: true });
   await writeFile(join(root, '_next/static/chunks/app.js'), 'console.log(1)');
   // Two sizes on purpose: compression has a 1 KB threshold, so a fixture that only has tiny files would
@@ -239,6 +243,22 @@ test('the web app served from the API process', async (t) => {
         'browsers ignore a manifest served as the wrong type, and the PWA stops being installable');
     });
 
+    await t.test('native asset inventory is JSON and supports cache revalidation', async () => {
+      const r = await app.inject({ method: 'GET', url: '/mobile-assets.json' });
+      assert.equal(r.statusCode, 200);
+      assert.match(String(r.headers['content-type']), /application\/json/);
+      assert.equal(r.headers['cache-control'], 'no-cache');
+      assert.equal(r.json().schemaVersion, 1);
+      assert.ok(r.headers.etag);
+      const unchanged = await app.inject({ method: 'GET', url: '/mobile-assets.json', headers: { 'if-none-match': String(r.headers.etag) } });
+      assert.equal(unchanged.statusCode, 304);
+      const reader = await app.inject({ method: 'GET', url: '/reader/?book=fixture' });
+      assert.match(reader.body, /<title>reader<\/title>/);
+      const payload = await app.inject({ method: 'GET', url: '/reader/index.txt?_rsc=fixture' });
+      assert.match(String(payload.headers['content-type']), /text\/plain/);
+      assert.equal(payload.body, 'fixture next route payload');
+    });
+
     await t.test('a write to an unknown path is not answered with a page', async () => {
       const r = await app.inject({ method: 'POST', url: '/whatever' });
       assert.equal(r.statusCode, 404);
@@ -268,5 +288,21 @@ test('with WEB_ROOT unset the API is unchanged', async () => {
     assert.equal(ok.statusCode, 200);
   } finally {
     await app.close();
+  }
+});
+
+
+test('a missing native inventory never becomes a successful HTML shell', async () => {
+  const root = await buildExport();
+  await rm(join(root, 'mobile-assets.json'));
+  const app = await makeApp(root);
+  try {
+    const r = await app.inject({ method: 'GET', url: '/mobile-assets.json' });
+    assert.equal(r.statusCode, 404);
+    assert.deepEqual(r.json(), { error: 'not_found' });
+  } finally {
+    await app.close();
+    await rm(root, { recursive: true, force: true });
+    delete process.env.WEB_ROOT;
   }
 });
