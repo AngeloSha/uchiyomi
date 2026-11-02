@@ -18,6 +18,7 @@
 import puppeteer from 'puppeteer';
 import { mkdirSync, writeFileSync } from 'fs';
 import { networkCuts } from './networkCut.mjs';
+import { sheetNavigationWalk } from './sheetNavigationWalk.mjs';
 
 const BASE = process.env.BASE || 'http://127.0.0.1:18140';
 const USER = process.env.E2E_USER || 'e2e';
@@ -287,6 +288,8 @@ try {
     await sleep(3000);
     await shot('series');
     ((await page.evaluate(() => (document.body.innerText || '').length)) > 60) ? ok('series page opened') : bad('series page is blank');
+
+    await sheetNavigationWalk({ page, base: BASE, seriesHref, ok, bad, shot });
 
     await page.evaluate(() => {
       [...document.querySelectorAll('button,a')].find((b) => /start reading|continue/i.test(b.innerText || ''))?.click();
