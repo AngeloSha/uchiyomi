@@ -136,7 +136,7 @@ test('More as a sheet: headed groups of rows, the notes door a link, every row w
   assert.match(html, /data-remove-series=""[^>]*>.*?Remove from library<\/span>/);
   assert.match(html, /class="[^"]*text-rose-300[^"]*"[^>]*data-menu-item="remove-series"/, 'Remove from library is not in red');
   // Over the bottom nav: its last row is not under the bar on a phone.
-  assert.match(html, /pb-\[calc\(5\.5rem\+env\(safe-area-inset-bottom\)\)\]/, 'the sheet does not clear the bottom nav');
+  assert.match(html, /pb-\[calc\(5\.75rem\+env\(safe-area-inset-bottom\)\)\]/, 'the sheet does not clear the bottom nav');
 });
 
 test('the page: four keys under the button, More by width, the sheet closed before its action, the counts asked on opening', () => {

@@ -134,6 +134,9 @@ jobs:
       - name: Install browser tooling
         working-directory: ./web
         run: npm ci --no-audit --no-fund
+      - name: Mobile sheets clear the floating navigation
+        working-directory: ./web
+        run: node --import tsx --test test/e2e/sheetNavigation.test.ts
       - name: Build the exact browser AIO image once
         run: docker build -f Dockerfile.aio -t uchiyomi:e2e-ci .
       - name: Bring it up and drive it

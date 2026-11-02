@@ -422,6 +422,7 @@ Extensions without creator search support are left out. The chosen field stays i
   *Rename folder* and *Remove from library*. *Move library* files the series under another library (or *Automatic —
   follow the folder*, which hands it back to the folder rule); no files move, and the choice survives the next scan.
   An admin's right-click or ⋯ menu on a series card has it too. On a computer it opens as a menu, on a phone as a sheet.
+  Scroll the sheet to reach every action; its last row stays above the floating navigation, including on wider mobile screens.
 
   ![The series page's More menu, open: Reading, Chapters, Share and Admin groups](shots/series-more.webp)
 - Click any chapter to read it; the ⬇ on a chapter saves just that one to this device. Toggle

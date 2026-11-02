@@ -1990,9 +1990,9 @@ function SeriesInner() {
   // at z-40 in the root context -- so whatever z-index this div carries, the nav paints on top of it. With
   // seven chips wrapping to three rows at 390 px, Fetch, Fetch again, Delete from server and Cancel all sat
   // behind the nav and elementFromPoint returned the nav for every one of them. On phones the bar therefore
-  // sits at the nav's top edge: 5.75rem plus the safe-area inset (the nav measures 92 px at 390 px; the
-  // Sheet's 5.5rem `overBottomNav` value tucks under the bar's own bottom padding and would overlap by 4 px
-  // here). From lg up the nav is hidden and the bar goes back to the bottom. Reintroduce by changing the
+  // sits at the nav's top edge: 5.75rem plus the safe-area inset (the nav measures 92 px at 390 px, also
+  // cleared by Sheet's `overBottomNav` padding). From lg up the nav is hidden and the bar goes back to
+  // the bottom. Reintroduce by changing the
   // bottom class back to `bottom-0` and picking every row on a phone: only the first row of chips is
   // tappable.
   //

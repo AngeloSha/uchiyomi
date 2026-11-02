@@ -116,7 +116,8 @@ export function Sheet({ title, onClose, overBottomNav, action, footer, wrapTitle
    * ⚠️ Off by default because this was written for the reader, which hides the whole shell -- there is no
    * nav bar there to clear. Opened from a page that HAS one, the default padding puts the last rows of the
    * sheet underneath it: on the library's filters that made the final genre unreachable, on a phone, with
-   * nothing on screen to suggest anything was missing. 5.5rem is the bar plus its own safe-area inset.
+   * nothing on screen to suggest anything was missing. 5.75rem clears the bar and its bottom padding;
+   * keep that clearance until lg, when BottomNav hides (including wider phones and unfolded screens).
    */
   overBottomNav?: boolean;
   /**
@@ -160,7 +161,7 @@ export function Sheet({ title, onClose, overBottomNav, action, footer, wrapTitle
         className={`glass flex w-full flex-col rounded-t-3xl border border-ink-700 pt-4
                    sm:mb-6 sm:max-w-xl sm:rounded-3xl ${footer ? 'max-h-[85vh]' : 'max-h-[75vh]'} ${
                      overBottomNav
-                       ? 'pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:pb-[max(1rem,env(safe-area-inset-bottom))]'
+                       ? 'pb-[calc(5.75rem+env(safe-area-inset-bottom))] lg:pb-[max(1rem,env(safe-area-inset-bottom))]'
                        : 'pb-[max(1rem,env(safe-area-inset-bottom))]'
                    }`}
       >
