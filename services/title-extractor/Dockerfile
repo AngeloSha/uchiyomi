@@ -1,4 +1,4 @@
-FROM python:3.12-slim-bookworm
+FROM python:3.15-slim-bookworm
 LABEL org.uchiyomi.hi-sam-revision="69009434d4dba5541f228d8f5acb0754c333d417"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TORCH_FORCE_WEIGHTS_ONLY_LOAD=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=3
 RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 libglib2.0-0 \
