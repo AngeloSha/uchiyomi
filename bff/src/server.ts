@@ -168,6 +168,10 @@ async function main() {
     // than the list, so a save on the settings page is in force at the next request (lib/clientAddr.ts trustsPeer).
     trustProxy: isDesktop() ? false : trustsPeer,
     bodyLimit: 2 * 1024 * 1024,
+    // Job cards are keyed by their download folder, and a URL-encoded folder path with
+    // a long title goes past Fastify's 100-char default before the route can answer
+    // (max_param_length). 4096 leaves room for any library-relative path.
+    maxParamLength: 4096,
   });
 
   await app.register(helmet, { contentSecurityPolicy: false, crossOriginResourcePolicy: false });
