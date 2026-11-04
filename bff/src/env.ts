@@ -117,6 +117,8 @@ const schema = z.object({
   TITLE_EXTRACTOR_TOKEN: z.string().default(''),
   TITLE_EXTRACTOR_OCR_DIR: z.string().default(''),
   TITLE_EXTRACTOR_CALIBRATION_FILE: z.string().default(''),
+  // The Uchiyomi logo library (v0.103.0, lib/titleLogoLibrary.ts): unset = the project's library, empty = off.
+  TITLE_LOGO_LIBRARY_URL: z.string().optional(),
   DATABASE_URL: z.string().min(1),
   KOMGA_BASE_URL: z.string().url().default('http://komga:25600'),
   KOMGA_API_KEY: z.string().default(''), // only needed when LIBRARY_BACKEND=komga; owned mode ignores it

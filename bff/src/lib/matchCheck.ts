@@ -16,6 +16,10 @@
 //     shows its source's cover if it has one, else its own first page, and its banner is made from its pages
 //     (lib/autoHero.ts). An adaptation's banner (the anime of a manga with none of its own, which the art lookup
 //     takes) also stands when the anime is related to a manga named as the series is.
+// What it moves (v0.103.1): an automatic link whose entry is named as the series by nothing but a synonym, to the entry
+// a title search names so by its own title, when there is one (lib/anilist.ts fetchAniListArt says why) -- with the
+// floors, as a removal drops them, the cover and banner the old entry gave the series, and the direction and type its
+// country taught (moveLink). With none, the synonym's entry stays the series'.
 // What it never touches: a link a person made (linked_by: an import from someone's tracker list), an admin's own art
 // (series_overrides), a cover the series' source supplied (another server, or MangaDex's cover of a series whose
 // source IS that MangaDex title), and anything it could not ask about. An entry the service no longer answers for is
@@ -25,14 +29,29 @@
 // Resumable by row: checked_at (series_trackers, series_art) is stamped as each verdict is written, and NULL is what
 // is left to do, so a restart in the middle takes up where it stopped. AniList is asked fifty ids a request, paced as
 // every AniList job here is (lib/anilist.ts), MangaDex a hundred, through its own limiter: the owner's 194 links and
-// their art are a handful of requests.
-import { q } from './db';
+// their art are a handful of requests. A link named only by a synonym costs one title search more.
+//
+// A rule that changes reaches the links checked under the old one by MATCH_RULE: the first background pass after the
+// upgrade holds every automatic link to it once, checked or not, and only then goes back to what is unchecked.
+import { q, one } from './db';
 import { logAudit } from './audit';
-import { fetchAniListEntries, type AniListEntry } from './anilist';
+import { fetchAniListEntries, fetchAniListByOwnTitle, type AniListArt, type AniListEntry } from './anilist';
 import { mangadexTitles } from './sources/mangadex';
 import { namesOfMany } from './altTitles';
 import { aniListMediaOf, mangaDexIdOf, namesMatch, type AniListMedia } from './onlineMatch';
-import { withAniListMutation, type AniListAuthority } from './anilistPolicy';
+import { withAniListMutation, type AniListAuthority, type ScopedQuery } from './anilistPolicy';
+import { learnDirectionWith, directionFromAniListMatch } from './readingDirection';
+import { learnTypeFromAniListWith } from './seriesType';
+
+/**
+ * The rule automatic links are held to, by number: 1 a name of the entry -- a synonym too -- is a name of the series
+ * (v0.55.7); 2 a synonym gives way to an entry named so by its own title (v0.103.1). server_settings.match_check_rule
+ * is the one the background pass last held every automatic link to; below this, the next pass holds them all to it
+ * again -- those in a library whose AniList lookups are off excepted, as ever (Run now holds every library's). Raise it
+ * with the rule. Reintroduce by leaving the checked links alone: "an upgrade moves a link checked when a synonym was
+ * enough" in matchCheck.int.test.ts finds the anthology still linked.
+ */
+export const MATCH_RULE = 2;
 
 type Log = { info: (m: string) => void; warn: (m: string) => void };
 
@@ -44,6 +63,11 @@ export interface MatchCheckResult {
   matches: number;
   /** Of those, the ones that were another work's: links removed and pictures cleared, together. */
   removed: number;
+  /**
+   * Of the links, the ones named as the series only by a synonym that moved to the entry named so by its own title
+   * (v0.103.1): counted among `links.checked`, not among `removed`.
+   */
+  moved: number;
   /** Automatic AniList links checked, and removed. */
   links: { checked: number; removed: number };
   /** Covers and banners found by a title search, checked, and cleared. */
@@ -93,13 +117,16 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
   const t0 = Date.now();
   const all = !!opts.all;
   const authority: AniListAuthority = all ? 'manual' : 'automatic';
-  const out: MatchCheckResult = { matches: 0, removed: 0, links: { checked: 0, removed: 0 }, art: { checked: 0, cleared: 0 }, unanswered: 0, ms: 0 };
+  const out: MatchCheckResult = { matches: 0, removed: 0, moved: 0, links: { checked: 0, removed: 0 }, art: { checked: 0, cleared: 0 }, unanswered: 0, ms: 0 };
+  // Every automatic link, checked or not, when they were checked under an older rule (MATCH_RULE). Only the links: the
+  // rule for a picture did not change, and a link that moves takes the pictures its old entry gave with it.
+  const behind = !all && ((await one<{ rule: number }>('SELECT match_check_rule AS rule FROM server_settings WHERE id = 1'))?.rule ?? MATCH_RULE) < MATCH_RULE;
   const links = await q<{ series_id: string; external_id: string }>(
     `SELECT t.series_id, t.external_id FROM series_trackers t JOIN lib_series s ON s.id = t.series_id
        JOIN libraries l ON l.id = s.library_id
       WHERE ($1 OR l.anilist_lookup) AND t.provider = 'anilist' AND t.linked_by IS NULL
-        AND t.external_id ~ '^[0-9]{1,10}$' AND ($1 OR t.checked_at IS NULL)
-      ORDER BY t.series_id`, [all]);
+        AND t.external_id ~ '^[0-9]{1,10}$' AND ($1 OR $2 OR t.checked_at IS NULL)
+      ORDER BY t.series_id`, [all, behind]);
   // `own`: the ids the series has on its sources, main and followed -- a MangaDex cover of one of them is the source's.
   const arts = await q<{ series_id: string; banner: string | null; cover: string | null; own: string[] }>(
     `SELECT a.series_id, a.banner, a.cover,
@@ -126,6 +153,7 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
   // “title enrichment not completed” state; only the title lookup itself may turn that into a cached miss. Marking it
   // here consumed the retry before a newly enabled library had ever sent the title.
   if (!links.length && !fields.length) {
+    if (all || behind) await ruleHeld();
     out.ms = Date.now() - t0;
     return out;
   }
@@ -176,6 +204,9 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
   }
 
   const removed: Array<{ id: string; title: string | null; anilist?: number; was?: string | null; cleared?: Field }> = [];
+  const moves: Array<{ id: string; title: string | null; from: number; to: number; was: string | null; now: string | null }> = [];
+  // A title search that failed: the links named only by a synonym after it wait, as they are, for the next run.
+  let searchDown = false;
 
   // The links. A verdict is written only where AniList answered at all.
   if (entries) {
@@ -185,6 +216,32 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
       const id = Number(l.external_id);
       const e = entries.get(id);
       const mine = namesOfSeries(l.series_id);
+      // Named as the series by nothing but a synonym: the entry a search by its title names so by its OWN title is the
+      // series', and the link moves there (lib/anilist.ts fetchAniListArt says why). None: the synonym's entry stands,
+      // checked below. A search that fails decides nothing for this link or the next ones named so.
+      if (e && namesMatch(mine, e.titles) && !namesMatch(mine, e.own)) {
+        if (searchDown) continue;
+        let better: AniListArt | null = null;
+        try {
+          // The series' title leaves the server here: its library must still allow that, as for the ids above.
+          if (!(await currentlyAllowed([l.series_id], all)).has(l.series_id)) continue;
+          better = await fetchAniListByOwnTitle(mine[0], mine);
+        } catch (err) {
+          searchDown = true;
+          out.stopped = 'unavailable';
+          log.warn(`matches: AniList's search did not answer (${(err as Error)?.message || err}); the links named only by a synonym are checked at the next run`);
+          continue;
+        }
+        if (better?.mediaId && better.mediaId !== id) {
+          const to = better;
+          const applied = await withAniListMutation({ id: l.series_id }, authority, (qq, seriesId) => moveLink(qq, seriesId, l.external_id, e, to, mine));
+          if (!applied.applied || !applied.value) continue;
+          out.links.checked++;
+          out.moved++;
+          if (moves.length < AUDIT_NAMED) moves.push({ id: l.series_id, title: mine[0] ?? null, from: id, to: to.mediaId!, was: e.titles[0] ?? null, now: to.mediaTitle ?? null });
+          continue;
+        }
+      }
       if (!e) {
         const applied = await withAniListMutation({ id: l.series_id }, authority, async (qq, seriesId) => {
           const rows = await qq(
@@ -292,16 +349,68 @@ export async function checkMatches(log: Log, opts: { all?: boolean } = {}): Prom
 
   out.matches = out.links.checked + out.art.checked;
   out.removed = out.links.removed + out.art.cleared;
+  // Every automatic link was held to the rule unless a service stopped the run: the next pass asks what is unchecked.
+  if ((all || behind) && !out.stopped) await ruleHeld();
   out.ms = Date.now() - t0;
-  log.info(`matches: ${out.links.checked} AniList link(s) checked, ${out.links.removed} removed as another work's; `
+  log.info(`matches: ${out.links.checked} AniList link(s) checked, ${out.links.removed} removed as another work's`
+    + (out.moved ? `, ${out.moved} moved to the entry named as the series` : '') + '; '
     + `${out.art.checked} cover(s) and banner(s) checked, ${out.art.cleared} cleared`
     + (out.unanswered ? `; ${out.unanswered} no longer known online, kept` : '') + (out.stopped ? ' (stopped: a service did not answer)' : ''));
   if (out.matches || out.unanswered || out.stopped) {
     await logAudit('library.match_check', {
-      detail: { links: out.links, art: out.art, unanswered: out.unanswered, ...(out.stopped ? { stopped: out.stopped } : {}), ...(all ? { all } : {}), removed },
+      detail: { links: out.links, art: out.art, unanswered: out.unanswered, ...(out.stopped ? { stopped: out.stopped } : {}), ...(all ? { all } : {}), removed,
+        ...(out.moved ? { moved: out.moved, moves } : {}) },
     });
   }
   return out;
+}
+
+/** Every automatic link has been held to MATCH_RULE: the background pass goes back to what is unchecked. */
+async function ruleHeld(): Promise<void> {
+  await q('UPDATE server_settings SET match_check_rule = $1 WHERE id = 1 AND match_check_rule < $1', [MATCH_RULE]);
+}
+
+/**
+ * Move an automatic link from `from` (stored as `fromId`), the entry that names the series only by a synonym, to `to`,
+ * the one a title search names it so by its own title (lib/anilist.ts fetchAniListByOwnTitle), as one policy-locked act
+ * (withAniListMutation):
+ *   * the link -- only while it is still the automatic link to `from` it was when it was read, or nothing moves: a person
+ *     may have linked the series meanwhile;
+ *   * the floors progress pushes recorded against `from`, which are about another work, as a removal drops them;
+ *   * the cover and the banner `from` gave the series (its own, or the banner of an anime related to it) become `to`'s,
+ *     and an empty one is filled from `to`, as the lookup fills a row: what the series would show had the search
+ *     answered `to` first. A cover from anywhere else stays. The row's `rev` goes up, because the pictures made from it
+ *     are cached by the series, not by the address (routes/images.ts), and the old ones would be served for good;
+ *   * the reading direction and type `from`'s country taught, learned again from `to`'s: the same signal may correct
+ *     itself (lib/readingDirection.ts learnDirection). A stronger one -- the source's, the file's -- stays.
+ * Answers whether the link moved. Reintroduce by moving the link alone: "an upgrade moves a link checked when a synonym
+ * was enough" in matchCheck.int.test.ts finds the anthology's banner.
+ */
+async function moveLink(qq: ScopedQuery, seriesId: string, fromId: string, from: AniListEntry, to: AniListArt, names: string[]): Promise<boolean> {
+  const link = await qq(
+    `UPDATE series_trackers SET external_id = $3, title = $4, updated_at = now(), checked_at = now()
+      WHERE series_id = $1 AND provider = 'anilist' AND external_id = $2 AND linked_by IS NULL
+      RETURNING 1`,
+    [seriesId, fromId, String(to.mediaId), to.mediaTitle ?? null],
+  );
+  if (!link.length) return false;
+  await qq(`DELETE FROM tracker_progress WHERE series_id = $1 AND provider = 'anilist'`, [seriesId]);
+  const [art] = await qq<{ banner: string | null; cover: string | null }>('SELECT banner, cover FROM series_art WHERE series_id = $1 FOR UPDATE', [seriesId]);
+  if (art) {
+    const fromOld = (url: string | null) => {
+      const m = aniListMediaOf(url);
+      return !!m && (m.type === 'MANGA' ? m.id === from.id : from.related.some((r) => r.type === 'ANIME' && r.id === m.id));
+    };
+    const banner = !art.banner || fromOld(art.banner) ? to.banner : art.banner;
+    const cover = !art.cover || fromOld(art.cover) ? to.cover : art.cover;
+    if (banner !== art.banner || cover !== art.cover) {
+      await qq(`UPDATE series_art SET banner = $2, cover = $3, rev = rev + 1, fetched_at = now(), checked_at = now() WHERE series_id = $1`,
+        [seriesId, banner, cover]);
+    }
+  }
+  await learnDirectionWith(qq, { id: seriesId }, directionFromAniListMatch(names, to), 'anilist');
+  await learnTypeFromAniListWith(qq, { id: seriesId }, names, to);
+  return true;
 }
 
 /**

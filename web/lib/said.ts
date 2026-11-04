@@ -293,6 +293,13 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'numbering.askedWaits': () => tr('Numbering by posting order, as asked, waits to be applied.'),
   'numbering.sourceWaits': (p) => opensOnOwnWords(p, tr('Going back to {name}\'s own numbers waits to be applied.', { name: sourceNameMid(p) })),
   'numbering.since': (p) => tr('numbered by posting order since {date}.', { date: dayText(p.at) }),
+  // #379: a source that counts its specials as chapters, with the newest chapter it numbers ahead of its title when sent.
+  'numbering.titles': (p) => (str(p, 'title') && p.number != null
+    ? tr('{name} counts its specials as chapters, so its chapter numbers run ahead of their titles (it numbers “{title}” {number})', {
+      name: sourceName(p), title: str(p, 'title'), number: num(p, 'number'),
+    })
+    : tr('{name} counts its specials as chapters, so its chapter numbers run ahead of their titles', { name: sourceName(p) })),
+  'numbering.titlesWaits': () => tr('numbering them by their titles waits for your review.'),
   // v0.81.0: what the scout (bff lib/sourceScout.ts) last did for the series on a Health row.
   'scout.following': (p) => (num(p, 'n') === 1
     ? tr('Searched 1 other source on {date}: now also using {source}', { date: dayText(p.at), source: str(p, 'source') })

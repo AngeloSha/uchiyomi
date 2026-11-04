@@ -377,10 +377,11 @@ function rowOf(c: SourceChapter, n: number): PostNumber {
 
 /**
  * posting_order: the files are at the source's numbers and move to posting numbers.
- * source:        the undo; the files are at posting numbers and go back to the source's.
+ * titles:        the files are at the source's numbers and move to the numbers their titles give (#379, lib/titleNumbers.ts).
+ * source:        the undo; the files are at posting (or title) numbers and go back to the source's.
  * remap:         the source changed its own numbers under the files (an extension preference flipped).
  */
-export type RenumberMode = 'posting_order' | 'source' | 'remap';
+export type RenumberMode = 'posting_order' | 'titles' | 'source' | 'remap';
 
 /**
  * How a book was matched to its post, strongest first. id: the file's own stamp (lib_books.source_chapter_id).
@@ -563,9 +564,9 @@ function namedForms(name: string | null | undefined, n: number): string[] {
  * all books -- every stamp before any name, every name before any date -- so a weak guess never takes a post
  * that a stronger one needed. A post goes to at most one book per root.
  *
- * Candidates: for 'posting_order' the posts whose SOURCE number is the book's number (only they can be the
- * file written for it); for 'source' the posts at the book's posting number; for 'remap' every post, since
- * the source renumbered them all.
+ * Candidates: for 'posting_order' and 'titles' the posts whose SOURCE number is the book's number (only they can be
+ * the file written for it); for 'source' the posts at the book's posting (or title) number; for 'remap' every post,
+ * since the source renumbered them all.
  *
  * A book an admin replaced with Replace… (`pickedAt` with no audited pick) carries the number's title and date
  * over another copy's pages, so its name and date are not evidence; it falls through to the listing.

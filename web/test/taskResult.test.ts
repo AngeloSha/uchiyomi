@@ -304,6 +304,11 @@ test('the online-match recheck says what it checked and what went, and is never 
   assert.equal(taskResult(r), ' · 194 matches checked, 7 removed as another work', 'the recheck has no line of its own');
   assert.equal(taskResult({ ...r, matches: 1, removed: 1 }), ' · 1 match checked, 1 removed as another work', 'a count of one is not singular');
   assert.equal(taskResult({ ...r, matches: 3, removed: 0 }), ' · 3 matches checked', 'nothing removed is said by saying nothing more');
+  // v0.103.1: a link named only by a synonym, moved to the series' own entry, is said; none is said by saying nothing.
+  // Reintroduce by dropping the `moved` bit: the upgrade's pass that put a series right reads as if it did nothing.
+  assert.equal(taskResult({ ...r, matches: 215, removed: 0, moved: 1 }), ' · 215 matches checked, 1 moved to the right AniList entry', 'a moved link is not said');
+  assert.equal(taskResult({ ...r, moved: 2 }), ' · 194 matches checked, 7 removed as another work, 2 moved to the right AniList entry');
+  assert.equal(taskResult({ ...r, moved: 0 }), ' · 194 matches checked, 7 removed as another work');
   // A run AniList or MangaDex stopped leads with that: the counts after it are partial.
   assert.equal(taskResult({ ...r, matches: 0, removed: 0, stopped: 'unavailable' }),
     ' · AniList or MangaDex did not answer: tried again at the next run, 0 matches checked');

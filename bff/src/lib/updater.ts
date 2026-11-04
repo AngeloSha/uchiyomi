@@ -25,11 +25,12 @@ import { languageRulesFor } from './copyLanguage';
 import { beginRun, endRun, stopRequested, type RunCard } from './downloadJobs';
 import { say } from './said';
 import { withOrigin } from './downloadActivity';
-import { decideNumbering, folderBusy, numberedChapters, renumberRunning, resumeRenumber, settleNumbering, NUMBERING_COLUMNS, type Settled } from './numbering';
+import { decideNumbering, folderBusy, numberedChapters, readsByTitles, renumberRunning, resumeRenumber, settleNumbering, NUMBERING_COLUMNS, type Settled } from './numbering';
 import { aliasParts, partRulesApply } from './partAlias';
 import { atHiddenNumber, isListedNotice } from './noticeChapters';
 import { hiddenNumbersOf } from './hiddenChapters';
 import { numKey } from './postingOrder';
+import { detectTitleNumbering, titleNumbered } from './titleNumbers';
 import { seriesHidesNotices } from './noticeSettings';
 import { heldBy, rangeEnd, rawRangeEnd } from './chapterRanges';
 import { isDue, refreshRadar } from './releaseRadar';
@@ -337,7 +338,9 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   // post as a version of ours. The followers stay followed; they are just not merged while this lasts.
   // Reintroduce by keeping `followed` whole: "followers are not merged under posting order" in
   // numbering.int.test.ts finds the follower asked for its list ("a follower is not even asked").
-  const numberingSource: string | null = s.numbering === 'posting_order' ? (s.numbering_source ?? s.source_id) : s.source_id;
+  // A series numbered by its chapter titles (#379) reads them on the source it was numbered by, which stays that source
+  // after another is made the main one; it keeps its followers.
+  const numberingSource: string | null = s.numbering === 'posting_order' || s.numbering === 'titles' ? (s.numbering_source ?? s.source_id) : s.source_id;
   if (s.numbering === 'posting_order') followed = followed.filter((f) => f.source === numberingSource);
   if (!followed.length) return nothing(s.title, 'unrouted');
 
@@ -380,6 +383,8 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   const stale = new Map<string, 'cooling' | 'threw'>();
   // The numbering source's own list, untouched: what the detector judges and what posting numbers are given to.
   let rawNumbering: SourceChapter[] | null = null;
+  // Every answering source's own list, untouched, in the order asked: a list read by its titles (#379) is read whole.
+  const lists = new Map<string, SourceChapter[]>();
   for (const f of followed) {
     // The queue was built from monitored rows, but Unmonitor can be pressed while earlier series/sources run.
     // Re-read immediately before every new listing request; after one source answered, stop rather than ask
@@ -404,6 +409,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
     if (list.length) { void noteStage(f.source, 'chapters', 'ok'); fresh.add(f.source); }
     answered++;
     if (f.source === numberingSource) rawNumbering = list;
+    lists.set(f.source, list);
     // Copied, not annotated in place: an adapter may hand back the very array its detail cache holds, and
     // a `source` written onto those objects would be there for every later caller of the cache.
     for (const c of list) tagged.push({ ...c, source: f.source });
@@ -461,6 +467,22 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
     // moment ago started this run in source numbers, with the followers' copies already in hand.
     const numbered = await numberedChapters({ seriesId, sourceId: numberingSource, persist: true }, rawNumbering);
     tagged = numbered.map((c) => ({ ...c, source: numberingSource }));
+  }
+  // The lists read by their chapter titles (#379, lib/titleNumbers.ts): the numbering source of a series numbered so,
+  // and a follower that counts its specials as chapters while the series uses the chapters' own numbers -- that is,
+  // unless its main counts its specials too and the series keeps that count (an admin's "Keep the source's numbers", or
+  // a renumber still waiting for review); a main that did not answer this run is judged by its last verdict (its note).
+  // Every other list as it came. Reintroduce by reading the numbering source
+  // alone: "a follower that counts its specials" in titleNumbering.int.test.ts finds its "24. The Other Side" a version
+  // of chapter 27. By leaving the numbering source as it came: "the plan, then an admin's confirmation" finds the check
+  // after the renames listing the source's numbers again.
+  if (!posting) {
+    const sourceCounts = rawNumbering ? detectTitleNumbering(rawNumbering).verdict === 'strong' : !!s.numbering_note?.titles;
+    const read = new Map<string, SourceChapter[]>();
+    for (const [source, list] of lists) {
+      if (readsByTitles(s, list, { numberingSource: source === numberingSource, sourceCounts })) read.set(source, titleNumbered(list));
+    }
+    if (read.size) tagged = [...lists].flatMap(([source, list]) => (read.get(source) ?? list).map((c) => ({ ...c, source })));
   }
 
   // One copy per number out of everything listed, by the release preferences: the series' own over the

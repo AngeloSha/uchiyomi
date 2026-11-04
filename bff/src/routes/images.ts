@@ -396,9 +396,9 @@ async function backdropRecipe(id: string, style: 'hero' | 'banner' | null, ar: H
   // here, and the banner made from its pages -- and nothing online is looked up or shown for it. Reintroduce by reading
   // series_art for it: "the first page, chosen, keeps online art away" in onlineMatch.int.test.ts finds the stored
   // banner's variant.
-  let art: { banner: string | null; cover: string | null; checked_at: Date | null } | null = ovr?.cover === FIRST_PAGE
+  let art: { banner: string | null; cover: string | null; checked_at: Date | null; rev?: number } | null = ovr?.cover === FIRST_PAGE
     ? { banner: null, cover: null, checked_at: new Date() }
-    : await one<{ banner: string | null; cover: string | null; checked_at: Date | null }>('SELECT banner, cover, checked_at FROM series_art WHERE series_id = $1', [id]);
+    : await one<{ banner: string | null; cover: string | null; checked_at: Date | null; rev: number }>('SELECT banner, cover, checked_at, rev FROM series_art WHERE series_id = $1', [id]);
   // An opted-out add may still have its source cover.  That row is deliberately unchecked: once its current library
   // allows automatic enrichment, look up the missing online banner without replacing the source's own cover.
   if (!art || (!art.banner && !art.checked_at)) {
@@ -431,13 +431,13 @@ async function backdropRecipe(id: string, style: 'hero' | 'banner' | null, ar: H
         // one decision. A refused transaction stores no negative result, so enabling later can take the lookup up.
         const applied = await withAniListMutation({ id }, 'automatic', async (qq, seriesId) => {
           // checked_at: held to the title check as it was stored (lib/matchCheck.ts rechecks a row only while it is NULL).
-          const stored = await qq<{ banner: string | null; cover: string | null; checked_at: Date | null }>(
+          const stored = await qq<{ banner: string | null; cover: string | null; checked_at: Date | null; rev: number }>(
             `INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1, $2, $3, now())
              ON CONFLICT (series_id) DO UPDATE SET
                banner = COALESCE(series_art.banner, EXCLUDED.banner),
                cover = COALESCE(series_art.cover, EXCLUDED.cover),
                fetched_at = now(), checked_at = now()
-             RETURNING banner, cover, checked_at`,
+             RETURNING banner, cover, checked_at, rev`,
             [seriesId, fetched.banner, fetched.cover],
           );
           // The same match also anchors tracker sync and carries the weakest direction/type evidence.
@@ -451,8 +451,8 @@ async function backdropRecipe(id: string, style: 'hero' | 'banner' | null, ar: H
         if (applied.applied) {
           art = applied.value ?? { banner: art?.banner ?? fetched.banner, cover: art?.cover ?? fetched.cover, checked_at: new Date() };
         } else {
-          art = await one<{ banner: string | null; cover: string | null; checked_at: Date | null }>(
-            'SELECT banner, cover, checked_at FROM series_art WHERE series_id = $1', [id],
+          art = await one<{ banner: string | null; cover: string | null; checked_at: Date | null; rev: number }>(
+            'SELECT banner, cover, checked_at, rev FROM series_art WHERE series_id = $1', [id],
           ) ?? art ?? { banner: null, cover: null, checked_at: null };
         }
       } catch {
@@ -469,8 +469,10 @@ async function backdropRecipe(id: string, style: 'hero' | 'banner' | null, ar: H
   // The look the art in hand would get: the hero shows a banner OR a cover sharp (only the no-art first page stays
   // ambient), the series page only a real banner -- a cover blown up to a banner's frame stays the blurred wash.
   const planned = backdropLook(style, { hasUrl: !!url, fromBanner: !!art.banner });
+  // `rev` (v0.103.1): the art was replaced under the same series -- a link moved to the series' own AniList entry
+  // (lib/matchCheck.ts moveLink) -- and the picture made from the old one must not answer for it. 0 keeps the key it was.
   const variant = url
-    ? `artw${planned === 'hero' ? `7h${ar}` : planned === 'banner' ? '8b' : '6'}:${id}:${art.banner ? 'b' : 'c'}`
+    ? `artw${planned === 'hero' ? `7h${ar}` : planned === 'banner' ? '8b' : '6'}:${id}:${art.banner ? 'b' : 'c'}${art.rev ? `:r${art.rev}` : ''}`
     : `artw6:${id}:p`;
   const srcRow = await one<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1', [id]);
   return {
@@ -681,10 +683,11 @@ export const serveLibSeriesThumb = async (req: FastifyRequest, reply: FastifyRep
       return { buffer, contentType: 'image/webp' };
     });
   }
-  const art = await one<{ cover: string | null; source_id: string | null }>(
-    'SELECT a.cover, s.source_id FROM series_art a LEFT JOIN lib_series s ON s.id = a.series_id WHERE a.series_id = $1', [id]);
+  const art = await one<{ cover: string | null; source_id: string | null; rev: number }>(
+    'SELECT a.cover, s.source_id, a.rev FROM series_art a LEFT JOIN lib_series s ON s.id = a.series_id WHERE a.series_id = $1', [id]);
   if (art?.cover) {
-    return serveImage(req, reply, `lib-sthumb:${id}:c${wk}`, async () => {
+    // `rev`: a cover replaced under the same series (backdropRecipe says why) is a new key; 0 keeps the one it was.
+    return serveImage(req, reply, `lib-sthumb:${id}:c${art.rev ? `:r${art.rev}` : ''}${wk}`, async () => {
       // remote cover first; on ANY failure (hotlink CDN, dead link, timeout) fall back to the first page
       const input = await seriesCoverInput(id, vc(req));
       storeColor(id, input);

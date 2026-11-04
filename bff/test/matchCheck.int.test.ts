@@ -4,7 +4,8 @@
 // touches, how it resumes, and how it reaches Admin → Tasks.
 //
 // AniList and MangaDex are fakes at globalThis.fetch that answer by id, as the real ones do, and count what they were
-// asked: nothing here reaches the network. Skipped automatically unless TEST_DATABASE_URL is set.
+// asked -- and AniList a title search, for a link named only by a synonym (v0.103.1): nothing here reaches the network.
+// Skipped automatically unless TEST_DATABASE_URL is set.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -36,17 +37,27 @@ const ENTRIES: Record<number, { type: 'MANGA' | 'ANIME'; title: Record<string, s
   702: { type: 'MANGA', title: { english: 'Zzz Mc Anime Banner' } },
   703: { type: 'ANIME', title: { romaji: 'Other Anime' }, related: [{ id: 704, type: 'MANGA' }] },
   704: { type: 'MANGA', title: { romaji: 'Other Manga' } },
+  // v0.103.1, the live case: an anthology one of whose stories bears the series' name, with an anime of its own; and the
+  // manhwa whose own title the name is.
+  591: { type: 'MANGA', title: { romaji: 'Zzz Mc Gekka Bijin', native: 'ゲッカビジン' }, synonyms: ['Zzz Mc Yaei', 'Zzz Mc Pick Me Up', 'Zzz Mc A Queen'],
+    related: [{ id: 791, type: 'ANIME' }] },
+  592: { type: 'MANGA', title: { romaji: 'Zzz Mc Pick Me Up!', english: 'Zzz Mc Pick Me Up' } },
+};
+/** AniList's answers to a title search (lib/anilist.ts OWN_TITLE), by the title asked: the anthology first, as AniList answers. */
+const SEARCH: Record<string, Array<{ id: number; country: string }>> = {
+  'Zzz Mc Pick Me Up': [{ id: 591, country: 'JP' }, { id: 592, country: 'KR' }],
 };
 
 const S = {
   wrong: 's_mc_wrong', druid: 's_mc_druid', alt: 's_mc_alt', edEs: 's_mc_ed_es', edEn: 's_mc_ed_en', human: 's_mc_human',
   gone: 's_mc_gone', anime: 's_mc_anime', wrongAnime: 's_mc_wrong_anime', md: 's_mc_md', ownMd: 's_mc_own_md', src: 's_mc_src',
-  later: 's_mc_later', private: 's_mc_private',
+  later: 's_mc_later', private: 's_mc_private', pick: 's_mc_pick', pickSrc: 's_mc_pick_src', pickHuman: 's_mc_pick_human', pickLate: 's_mc_pick_late', pickRace: 's_mc_pick_race',
 };
 const TITLE: Record<string, string> = {
   wrong: 'Zzz Mc Morgan Lost', druid: 'Zzz Mc Seoul Station Druid', alt: 'Zzz Mc Scanned Name', edEs: 'Zzz Mc Edicion', edEn: 'Zzz Mc Edition',
   human: 'Zzz Mc Human', gone: 'Zzz Mc Gone Entry', anime: 'Zzz Mc Anime Banner', wrongAnime: 'Zzz Mc Wrong Anime', md: 'Zzz Mc MangaDex Cover',
   ownMd: 'Zzz Mc Own MangaDex', src: 'Zzz Mc Source Cover', later: 'Zzz Mc Later', private: 'Zzz Mc Private',
+  pick: 'Zzz Mc Pick Me Up', pickSrc: 'Zzz Mc Pick Me Up', pickHuman: 'Zzz Mc Pick Me Up', pickLate: 'Zzz Mc Pick Me Up', pickRace: 'Zzz Mc Pick Me Up',
 };
 const USER = 'mc-reader';
 
@@ -55,14 +66,26 @@ const realFetch = globalThis.fetch;
 /** Every id AniList was asked about, request by request; and MangaDex's. */
 const alAsked: number[][] = [];
 const mdAsked: string[][] = [];
+/** Every title AniList was searched by (v0.103.1). */
+const alSearched: string[] = [];
 let aniListDown = false;
+let searchDown = false;
 
 function fakeNetwork() {
   globalThis.fetch = (async (input: any, init?: RequestInit) => {
     const url = new URL(String(input?.url ?? input));
     if (url.host === 'graphql.anilist.co') {
       if (aniListDown) return new Response('{}', { status: 500 });
-      const ids: number[] = JSON.parse(String(init?.body ?? '{}'))?.variables?.ids ?? [];
+      const body = JSON.parse(String(init?.body ?? '{}'));
+      if (typeof body?.variables?.s === 'string') {
+        if (searchDown) return new Response('{}', { status: 500 });
+        alSearched.push(body.variables.s);
+        const media = (SEARCH[body.variables.s] ?? []).map(({ id, country }) => ({
+          id, title: { romaji: null, english: null, native: null, ...ENTRIES[id].title }, synonyms: ENTRIES[id].synonyms ?? [],
+          countryOfOrigin: country, coverImage: { extraLarge: cover(id) }, bannerImage: banner(id), relations: { edges: [] } }));
+        return Response.json({ data: { Page: { media } } });
+      }
+      const ids: number[] = body?.variables?.ids ?? [];
       alAsked.push(ids);
       const media = ids.filter((id) => ENTRIES[id]).map((id) => {
         const e = ENTRIES[id];
@@ -196,9 +219,9 @@ test('every unchecked match is held to the title check: another work goes, the s
 
 test('a second pass asks nothing: every verdict was written as it was reached', { skip }, async () => {
   const { checkMatches } = await import('../src/lib/matchCheck');
-  const before = [alAsked.length, mdAsked.length];
+  const before = [alAsked.length, mdAsked.length, alSearched.length];
   const r = await checkMatches(log);
-  assert.deepEqual([alAsked.length, mdAsked.length], before, 'a checked match was asked about again');
+  assert.deepEqual([alAsked.length, mdAsked.length, alSearched.length], before, 'a checked match was asked about again');
   assert.equal(r.matches, 0);
 });
 
@@ -343,4 +366,124 @@ test('Admin → Tasks: listed, Run now checks every automatic match again, and i
   const s = (await q(`SELECT match_check_last_run, match_check_last_result FROM server_settings WHERE id = 1`))[0];
   assert.ok(s.match_check_last_run);
   assert.equal(s.match_check_last_result?.matches, row.lastResult.matches);
+});
+
+/** A link, its art, a floor and a direction as v0.55.7 to v0.103.0 left them for a series named by a synonym: all checked. */
+async function seedPick(s: string, opts: { linkedBy?: string | null; banner?: string | null; cover?: string | null; direction?: [string, string] } = {}) {
+  await q(`INSERT INTO series_trackers (series_id, provider, external_id, title, linked_by, checked_at)
+           VALUES ($1, 'anilist', '591', 'Zzz Mc Gekka Bijin', $2, now() - interval '1 day')`, [s, opts.linkedBy ?? null]);
+  await q(`INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1, $2, $3, now() - interval '1 day')`,
+    [s, opts.banner === undefined ? banner(791, 'anime') : opts.banner, opts.cover === undefined ? cover(591) : opts.cover]);
+  await q(`INSERT INTO tracker_progress (user_id, series_id, provider, chapters) VALUES ($1, $2, 'anilist', 30)`, [userId, s]);
+  const [direction, from] = opts.direction ?? ['RIGHT_TO_LEFT', 'anilist'];
+  await q(`UPDATE lib_series SET reading_direction = $2, reading_direction_from = $3, series_type = 'manga', series_type_from = 'anilist' WHERE id = $1`,
+    [s, direction, from]);
+}
+const metaOf = async (id: string) => (await q(`SELECT reading_direction AS d, reading_direction_from AS df, series_type AS t, series_type_from AS tf FROM lib_series WHERE id = $1`, [id]))[0];
+const ruleNow = async () => (await q(`SELECT match_check_rule AS rule FROM server_settings WHERE id = 1`))[0]?.rule;
+
+test('an upgrade moves a link checked when a synonym was enough, with what the old entry gave; a person\'s link stays', { skip }, async () => {
+  const { checkMatches, MATCH_RULE } = await import('../src/lib/matchCheck');
+  // Pick Me Up as the live server holds it: linked to the anthology, its cover, the banner of the anthology's anime, a
+  // floor, and the anthology's Japan read right to left. A copy whose cover is its source's, with no banner and the
+  // source's word on the direction. And a person's link to the same entry under the same name.
+  await seedPick(S.pick);
+  await seedPick(S.pickSrc, { banner: null, cover: 'https://example.org/covers/pick.jpg', direction: ['LEFT_TO_RIGHT', 'source'] });
+  await seedPick(S.pickHuman, { linkedBy: userId });
+  const was = await linkOf(S.pick);
+  // An install upgraded from the rule before: every one of those links was checked under it.
+  await q(`UPDATE server_settings SET match_check_rule = 1 WHERE id = 1`);
+  const searched = alSearched.length;
+  const r = await checkMatches(log);
+
+  // Reintroduce by leaving the checked links alone (no `behind` in checkMatches): the anthology is still linked.
+  const l = await linkOf(S.pick);
+  assert.equal(l?.external_id, '592', 'the anthology is still linked: the upgrade did not look at a link checked under the old rule');
+  assert.equal(l.linked_by, null, 'still an automatic link');
+  assert.ok(l.checked_at > was.checked_at, 'the moved link was not marked checked');
+  assert.ok(alSearched.slice(searched).includes(TITLE.pick), 'AniList was not searched by the series\' title');
+  // Reintroduce by moving the link alone (moveLink without its DELETE): the floor about the anthology holds back the manhwa.
+  assert.deepEqual(await q(`SELECT 1 FROM tracker_progress WHERE series_id = $1`, [S.pick]), [], "the floor pushed against the anthology was kept");
+  // Reintroduce by moving the link alone (moveLink without the art): the anthology's anime banner and its cover stay.
+  const a = (await q(`SELECT banner, cover, rev, checked_at FROM series_art WHERE series_id = $1`, [S.pick]))[0];
+  assert.deepEqual([a.banner, a.cover], [banner(592), cover(592)], "the old entry's pictures stayed on the series");
+  assert.equal(a.rev, 1, 'the pictures made from the old art would be served under the same key');
+  // Reintroduce by moving the link alone (no learnDirectionWith in moveLink): the manhwa reads right to left.
+  assert.deepEqual(await metaOf(S.pick), { d: 'WEBTOON', df: 'anilist', t: 'manhwa', tf: 'anilist' }, "the anthology's country still sets the direction and type");
+  // The copy: its source's cover and its source's direction stay; the banner it had none of is the manhwa's.
+  const src = (await q(`SELECT banner, cover, rev FROM series_art WHERE series_id = $1`, [S.pickSrc]))[0];
+  assert.equal((await linkOf(S.pickSrc))?.external_id, '592');
+  assert.deepEqual([src.banner, src.cover, src.rev], [banner(592), 'https://example.org/covers/pick.jpg', 1], "a source's cover was replaced, or an empty banner left empty");
+  assert.deepEqual(await metaOf(S.pickSrc), { d: 'LEFT_TO_RIGHT', df: 'source', t: 'manhwa', tf: 'anilist' }, "AniList overrode the source's direction");
+  // A person's link is not the check's: the same name, the same entry, and nothing moves.
+  const h = await linkOf(S.pickHuman);
+  assert.deepEqual([h?.external_id, h?.linked_by], ['591', userId], "a person's link was moved");
+  assert.equal((await q(`SELECT chapters FROM tracker_progress WHERE series_id = $1`, [S.pickHuman]))[0]?.chapters, 30, "a person's link lost its floor");
+  assert.equal((await q(`SELECT cover FROM series_art WHERE series_id = $1`, [S.pickHuman]))[0]?.cover, cover(591), "a person's link lost its art");
+  // A link named only by a synonym with no entry named so by its own title stays: the druid (502) has only its synonym.
+  assert.equal((await linkOf(S.druid))?.external_id, '502', 'a synonym with nothing better was moved or removed');
+
+  assert.equal(r.moved, 2);
+  assert.equal(r.stopped, undefined);
+  const audit = (await q(`SELECT detail FROM audit_log WHERE event = 'library.match_check' ORDER BY at DESC LIMIT 1`))[0]?.detail;
+  assert.ok(audit?.moves?.some((x: any) => x.id === S.pick && x.from === 591 && x.to === 592 && x.was === 'Zzz Mc Gekka Bijin'), 'the audit log does not name the move');
+  // The rule is held: the next background pass is back to what is unchecked, and asks nothing.
+  assert.equal(await ruleNow(), MATCH_RULE);
+  const before = [alAsked.length, alSearched.length];
+  assert.equal((await checkMatches(log)).matches, 0);
+  assert.deepEqual([alAsked.length, alSearched.length], before, 'a pass after the upgrade asked AniList again');
+});
+
+test("a search that does not answer moves nothing, and the upgrade's pass is taken up by the next run", { skip }, async () => {
+  const { checkMatches, MATCH_RULE } = await import('../src/lib/matchCheck');
+  await seedPick(S.pickLate);
+  const was = await linkOf(S.pickLate);
+  await q(`UPDATE server_settings SET match_check_rule = 1 WHERE id = 1`);
+  searchDown = true;
+  try {
+    const r = await checkMatches(log);
+    assert.equal(r.stopped, 'unavailable');
+    // Reintroduce by reading a failed search as "nothing better" (return null from the catch): the link is stamped and the
+    // rule held, and the anthology stays linked for good.
+    const l = await linkOf(S.pickLate);
+    assert.deepEqual([l?.external_id, l?.checked_at?.getTime()], ['591', was.checked_at.getTime()],
+      'a link named only by a synonym was decided while the search did not answer');
+    assert.equal(await ruleNow(), 1, 'the rule was held although a link was never searched for');
+  } finally {
+    searchDown = false;
+  }
+  await checkMatches(log);
+  assert.equal((await linkOf(S.pickLate))?.external_id, '592', 'the next run did not take up the move');
+  assert.equal(await ruleNow(), MATCH_RULE);
+});
+
+test('a person who links the series while AniList is answering keeps their link: nothing moves', { skip }, async () => {
+  const { checkMatches } = await import('../src/lib/matchCheck');
+  const { setAniListMutationHooks } = await import('../src/lib/anilistPolicy');
+  await seedPick(S.pickRace);
+  await q(`UPDATE server_settings SET match_check_rule = 1 WHERE id = 1`);
+  let linked = false;
+  setAniListMutationHooks({
+    async beforeLock(where) {
+      if (!('id' in where) || where.id !== S.pickRace || linked) return;
+      linked = true;
+      await q(`UPDATE series_trackers SET linked_by = $2 WHERE series_id = $1 AND provider = 'anilist'`, [S.pickRace, userId]);
+    },
+  });
+  let r: Awaited<ReturnType<typeof checkMatches>>;
+  try {
+    r = await checkMatches(log);
+  } finally {
+    setAniListMutationHooks();
+  }
+  assert.equal(linked, true, 'the check did not reach the move');
+  // Reintroduce by moving whatever link the series has (no `linked_by IS NULL` in moveLink's UPDATE): the person's link
+  // to the anthology is the manhwa's, and their floor is gone.
+  const l = await linkOf(S.pickRace);
+  assert.deepEqual([l?.external_id, l?.linked_by], ['591', userId], 'a link a person made while the check was answering was moved');
+  assert.equal((await q(`SELECT chapters FROM tracker_progress WHERE series_id = $1`, [S.pickRace]))[0]?.chapters, 30, "the person's floor went");
+  assert.equal((await q(`SELECT cover FROM series_art WHERE series_id = $1`, [S.pickRace]))[0]?.cover, cover(591), "the person's series lost its art");
+  const audit = (await q(`SELECT detail FROM audit_log WHERE event = 'library.match_check' ORDER BY at DESC LIMIT 1`))[0]?.detail;
+  assert.ok(!(audit?.moves ?? []).some((x: any) => x.id === S.pickRace), 'a move that did not happen is in the audit log');
+  assert.equal(typeof r!.moved, 'number');
 });

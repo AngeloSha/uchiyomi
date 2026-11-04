@@ -11,6 +11,9 @@
 //   POST /   GraphQL, told apart by the query the app sends:
 //            Media(search, type:MANGA)   the art lookup: the entry the table holds under that title, else 404 as
 //                                        AniList answers a search with no match;
+//            Page(...) search, art       the art lookup's next answers (v0.103.1), asked only when its first answer
+//                                        names the series by a synonym alone: the table's entry, as the art lookup
+//                                        selects it, if any;
 //            Media(search, type:ANIME)   the anime banner lookup: always 404;
 //            Page(...) search            the Art picker's candidates: the table's entry for the title, if any;
 //            Page(...) TRENDING_DESC     Discover's trending rails, by `variables.country` (v0.61.0): what POST
@@ -158,6 +161,12 @@ const server = http.createServer(async (req, res) => {
     if (/\bid_in\b/.test(q)) {
       const ids = Array.isArray(variables.ids) ? variables.ids : [];
       return answer('ids', 200, { data: { Page: { media: ids.map(byId).filter(Boolean).map(asListed) } } }, { ids });
+    }
+    // v0.103.1: the art lookup's next answers (bff lib/anilist.ts OWN_TITLE), which leave novels out as WORKS below does:
+    // told apart by the art fields they ask for.
+    if (/Page\(/.test(q) && /search:\$s/.test(q) && /countryOfOrigin/.test(q)) {
+      const m = bySearch(variables.s);
+      return answer('more', 200, { data: { Page: { media: m ? [asSearched(m)] : [] } } }, { s: variables.s });
     }
     // v0.56.0: Discover's identity lookup (bff lib/anilist.ts WORKS), told apart by its novel filter: the entry, with its id
     // and every name, for the app to keep only when one of them IS the name it asked about.

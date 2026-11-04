@@ -7,7 +7,8 @@
 // that way is numbered at once and the notice says why its numbers are not the source's. A series ALREADY in a
 // library is never renamed unattended (the owner's rule for v0.49.0): it is held -- nothing downloads -- until an
 // admin opens the plan (NumberingSheet) and confirms it, or keeps the source's numbers. The same hold follows an
-// extension setting that moved the source's numbers under the files (`remap`).
+// extension setting that moved the source's numbers under the files (`remap`). A source that counts its specials as
+// chapters (#379, Tapas) is numbered by its chapter titles the same way: proposed, reviewed, applied, undone.
 //
 // Members read the sentence; the keys are the admin's (the routes behind them are admin-only). A text block with
 // a start-edge rule in the tone of what it says, rectangular keys -- no badge, no capsule.
@@ -18,7 +19,7 @@ import { api } from '@/lib/api';
 import { t as tr } from '@/lib/i18n';
 import { useToast } from '@/components/Toast';
 import { msgOf } from '@/components/ConfirmDialog';
-import { noticeKind, numLabel, type NumberingAnswer, type NumberingSummary, type RenumberMode } from '@/lib/numbering';
+import { noticeKind, numLabel, titlesLine, type NumberingAnswer, type NumberingSummary, type RenumberMode } from '@/lib/numbering';
 import { extensionSettingsHref } from '@/lib/sourcePrefs';
 import { activeLocale } from '@/lib/format';
 
@@ -72,7 +73,9 @@ export function NumberingNotice({ seriesId, numbering, isAdmin, onReview }: {
   } else if (kind === 'review') {
     tone = 'amber';
     heading = tr('Chapter numbers need a review');
-    body = `${shared} ${tr('The chapters here still use the source’s numbers, and new ones wait until the renumbering is reviewed.')}`;
+    // What the review is about: the source's shared numbers (posting order), or its counted specials (the titles).
+    const why = n.pending === 'titles' ? titlesLine(source, n.note?.titles) : shared;
+    body = `${why} ${tr('The chapters here still use the source’s numbers, and new ones wait until the renumbering is reviewed.')}`;
     keys = [
       { label: tr('Review renumbering'), run: () => onReview(n.pending ?? 'posting_order'), primary: true },
       { label: tr('Keep the source’s numbers'), run: () => void keep() },
@@ -84,6 +87,11 @@ export function NumberingNotice({ seriesId, numbering, isAdmin, onReview }: {
     // how This source numbers" in every language (i18n pass 2).
     body = tr('{source} numbers its chapters differently after a change to an extension setting. The files here still carry the old numbers, and new chapters wait until the renumbering is reviewed.', { source });
     keys = [{ label: tr('Review renumbering'), run: () => onReview('remap'), primary: true }];
+  } else if (kind === 'applied' && n.mode === 'titles') {
+    tone = 'accent';
+    heading = tr('Numbered by the chapter titles');
+    body = `${titlesLine(source, n.note?.titles)} ${tr('Each chapter here has the number in its title, and each special comes just after the chapter before it.')}`;
+    keys = [{ label: tr('Use the source’s numbers'), run: () => onReview('source') }];
   } else if (kind === 'applied') {
     tone = 'accent';
     heading = n.changedAt

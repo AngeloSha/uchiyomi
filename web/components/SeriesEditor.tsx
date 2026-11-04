@@ -668,6 +668,9 @@ const carriesFiles = (e: DragEvent) => [...(e.dataTransfer?.types ?? [])].includ
 const webLink = (s: string): boolean => {
   try { const u = new URL(s); return u.protocol === 'http:' || u.protocol === 'https:'; } catch { return false; }
 };
+/** Where a title logo came from, in the reader's words; Wikimedia Commons keeps its own name. */
+const titleArtSource = (source: string): string => source === 'Cover lettering' ? tr('From the cover')
+  : source === 'Uchiyomi logo library' ? tr('Uchiyomi logo library') : source;
 
 /**
  * A refusal in the reader's words. The art route answers in English with a code (bff routes/admin.ts): a file that
@@ -882,8 +885,8 @@ function ArtPanel({ id, series, onSaved, onNewBanner }: { id: string; series: Se
         </p>
         {series.titleArt?.attribution && <div className="mt-2 space-y-1 text-[11px] text-fog-400">
           {series.titleArt.attribution.sourceUrl && webLink(series.titleArt.attribution.sourceUrl)
-            ? <a href={series.titleArt.attribution.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-accent underline">{series.titleArt.attribution.source}</a>
-            : <p>{series.titleArt.attribution.source === 'Cover lettering' ? tr('From the cover') : series.titleArt.attribution.source}</p>}
+            ? <a href={series.titleArt.attribution.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-accent underline">{titleArtSource(series.titleArt.attribution.source)}</a>
+            : <p>{titleArtSource(series.titleArt.attribution.source)}</p>}
           {series.titleArt.attribution.artist && <p>{series.titleArt.attribution.artist}</p>}
           {series.titleArt.attribution.license && (series.titleArt.attribution.licenseUrl && webLink(series.titleArt.attribution.licenseUrl)
             ? <a href={series.titleArt.attribution.licenseUrl} target="_blank" rel="noopener noreferrer" className="block underline">{series.titleArt.attribution.license}</a>

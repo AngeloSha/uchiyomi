@@ -1245,8 +1245,8 @@ async function scanOnce(): Promise<ScanResult> {
 
 /**
  * The number setBookDates and setBookMeta match a landing to, as SQL over `lib_books b` and `lib_series s`: the raw
- * lib_books.number (see setBookDates for why), except on a series numbered by posting order (#116), where it is
- * the override-aware one. There a book in a root the renumber could not rename keeps the SOURCE's number as its
+ * lib_books.number (see setBookDates for why), except on a series numbered by posting order (#116) or by its chapter
+ * titles (#379), where it is the override-aware one. There a book in a root the renumber could not rename keeps the SOURCE's number as its
  * raw number (another post's, now) and its own post's in book_overrides (lib/numbering.ts); matched raw, the
  * landing of post 2 re-stamped the read-only post 21 with post 2's chapter id, name, group and date -- and the
  * chapter id is the evidence every later remap trusts first (#116 review). Reintroduce the raw match: "a chapter in
@@ -1256,7 +1256,7 @@ async function scanOnce(): Promise<ScanResult> {
  * the range test: "a landing stamps the chapter it is, never a range file" in chapterRanges.int.test.ts finds the
  * file stamped with chapter 1's group.
  */
-const BOOK_NUMBER = `(CASE WHEN s.numbering = 'posting_order'
+const BOOK_NUMBER = `(CASE WHEN s.numbering IN ('posting_order', 'titles')
   THEN COALESCE((SELECT o.number FROM book_overrides o WHERE o.book_id = b.id), b.number) ELSE b.number END)`;
 
 /**

@@ -391,7 +391,7 @@ export async function replaceListing(seriesId: string, rows: ListingRow[]): Prom
      * (library.ts setBookMeta) is the file's own and clears the mark; the borrowed-name cleanup leaves it alone.
      * Reintroduce by writing NULL: "the chapter's own name is never replaced" in borrowNames.int.test.ts finds no
      * mark on the healed name.
-     * The number is the override-aware one under posting order, as setBookMeta's (lib/library.ts BOOK_NUMBER):
+     * The number is the override-aware one under posting order and the titles (#379), as setBookMeta's (lib/library.ts BOOK_NUMBER):
      * the listing's numbers are posts' there, and a book the renumber could not rename keeps another post's
      * number as its raw one.
      * ⚠️ Nothing is healed while the series' numbering is in question (a change pending, or a renumber's journal):
@@ -417,7 +417,7 @@ export async function replaceListing(seriesId: string, rows: ListingRow[]): Prom
         `UPDATE lib_books b SET chapter_name = v.name, chapter_name_source = $2, updated_at = now()
            FROM (VALUES ${values.join(',')}) AS v(n, name), lib_series s
           WHERE b.series_id = $1 AND s.id = b.series_id
-            AND (CASE WHEN s.numbering = 'posting_order'
+            AND (CASE WHEN s.numbering IN ('posting_order', 'titles')
                       THEN COALESCE((SELECT o.number FROM book_overrides o WHERE o.book_id = b.id), b.number) ELSE b.number END) = v.n
             -- A file holding a range (lib/chapterRanges.ts) is not the chapter its start lists: no name of one
             -- (chapterRanges.int.test.ts: "a range file took the name of the chapter its start lists").
