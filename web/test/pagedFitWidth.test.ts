@@ -45,9 +45,10 @@ test('Page fit defaults to the whole page, survives a round trip, and junk reads
   assert.ok(!(LOOK_KEYS as readonly string[]).includes('pagedFit'), 'not a title\'s look: one setting for every title');
 });
 
-test('the reader only lays a page out fit-wide in paged mode, unzoomed, and the sheet shows the choice only there', () => {
+test('the reader only lays a page out fit-wide in paged mode, scrolls it at any zoom, and the sheet shows the choice only there', () => {
   const page = read('app/reader/page.tsx');
-  assert.match(page, /prefs\.pagedFit === 'width' && zoom === 1/, 'the slide needs Fit width AND no zoom (a zoomed page is panned by panBy)');
+  assert.match(page, /const fitWide = prefs\.pagedFit === 'width' && !!only/, 'the slide needs Fit width and one ordinary page');
+  assert.match(page, /closest\?\.\('\[data-fit-wide\]'\)/, 'a Fit width slide scrolls itself at zoom: panBy leaves it alone');
   assert.match(page, /fitWide: prefs\.pagedFit === 'width'/, 'the fetched width follows the layout');
   const sheet = read('components/ReaderSettings.tsx');
   assert.match(sheet, /prefs\.mode === 'paged' && \(\s*<Row label=\{tr\('Page fit'\)\}/, 'Page fit is shown in paged mode only');

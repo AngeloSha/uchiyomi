@@ -78,8 +78,8 @@ const PROBE = 0.4;
 const PREFETCH = { pages: 6, pixels: 48e6 };
 /** Page fit → Fit width (#398): the height a slide's page may take, which is none -- the slide scrolls. */
 const FIT_WIDE_H = 1e6;
-/** The scrolling slide of Fit width; a lone child (a page shorter than the slide) is centred, a taller one scrolls from its top. */
-const FIT_WIDE_CLASS = 'hide-scrollbar flex h-full w-full touch-pan-x touch-pan-y flex-col items-center overflow-y-auto overflow-x-hidden [&>:only-child]:my-auto';
+/** The scrolling slide of Fit width; a lone child (a page smaller than the slide) is centred, a bigger one scrolls from its top left. */
+const FIT_WIDE_CLASS = 'hide-scrollbar flex h-full w-full touch-pan-x touch-pan-y flex-col items-start overflow-auto [&>:only-child]:m-auto';
 /**
  * How tall a collapsed page is. Enough to read as a band OF SOMETHING -- you can see it is a credit page --
  * without being tall enough to interrupt a scroll. A sibling of DIVIDER_H, and reserved the same way.
@@ -1750,7 +1750,8 @@ function ReaderInner() {
       const p = [...pointers.current.values()];
       const dist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
       setZoom(Math.max(1, Math.min(3, pinch.current.zoom * (dist / pinch.current.dist))));
-    } else if (zoom > 1 && prefs.mode === 'paged' && pointers.current.size === 1) {
+    } else if (zoom > 1 && prefs.mode === 'paged' && pointers.current.size === 1 && !(e.target as HTMLElement).closest?.('[data-fit-wide]')) {
+      // (A Fit width slide scrolls itself -- #398 -- so panBy leaves it alone.)
       // A zoomed page is dragged around under the finger. The track itself cannot scroll sideways to do it: that
       // is what turns the page, and a swipe on a page you are looking closely at must not.
       panBy(e.clientX - before.x, e.clientY - before.y);
@@ -1842,6 +1843,10 @@ function ReaderInner() {
     el.style.setProperty('--pan-x', `${x}px`);
     el.style.setProperty('--pan-y', `${y}px`);
   };
+  // Fit width (#398): a zoom widens the page inside its scrolling slide, so keep the middle of it in view.
+  useEffect(() => {
+    scrollRef.current?.querySelectorAll<HTMLElement>('[data-fit-wide]').forEach((el) => { el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2; });
+  }, [zoom]);
   // A new page, or the zoom put away, starts centred; a changed zoom keeps the drag inside its new reach.
   useEffect(() => {
     pan.current = { x: 0, y: 0 };
@@ -2245,10 +2250,11 @@ function ReaderInner() {
             // v0.61.0: one half of a wide page (Wide pages → Split) is a slide of its own, keyed apart from its twin.
             const halfOf = half[s];
             // #398, Page fit → Fit width: a single, ordinary, unzoomed page is as wide as the slide and the slide scrolls
-            // up and down to read it. Everything else -- a pair, a split or turned wide page, a placeholder, a zoomed page
-            // (dragged by panBy) -- keeps fitting whole, as it always has.
+            // up and down to read it, and sideways once zoomed (the zoom widens the page inside the slide; this box scrolls
+            // it, so panBy stays out of it). Everything else -- a pair, a split or turned wide page, a placeholder --
+            // keeps fitting whole, as it always has.
             const only = idxs.length === 1 ? flat[idxs[0]] : null;
-            const fitWide = prefs.pagedFit === 'width' && zoom === 1 && !!only && !only.missing && !halfOf && !turnedPair
+            const fitWide = prefs.pagedFit === 'width' && !!only && !only.missing && !halfOf && !turnedPair
               && !(wideMode === 'rotate' && isWide(only));
             return (
               <div key={halfOf ? `${flat[idxs[0]].key}:${halfOf}` : flat[slideIdxs[0]].key} data-joined={isJoined || undefined}
@@ -2261,7 +2267,7 @@ function ReaderInner() {
                     ? FIT_WIDE_CLASS
                     : `flex h-full w-full items-center justify-center${isJoined ? '' : ' gap-1'}`} dir={isJoined ? 'ltr' : undefined}
                   data-lenis-prevent={fitWide ? true : undefined} data-fit-wide={fitWide || undefined}
-                  style={zoom > 1 ? { translate: 'var(--pan-x, 0px) var(--pan-y, 0px)' } : undefined}>
+                  style={zoom > 1 && !fitWide ? { translate: 'var(--pan-x, 0px) var(--pan-y, 0px)' } : undefined}>
                 {turnedPair ? (
                   // Both pages, or neither: half a spread turned on its side is no page at all.
                   shown.every((i) => activeSet.has(i) && srcFor(i) && flat[i].width && flat[i].height)
@@ -2306,8 +2312,8 @@ function ReaderInner() {
                     const w = p.width || box?.w;
                     const h = p.height || box?.h;
                     if (!(w && h)) {
-                      return <SlidePending onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} zoom={zoom} onLoaded={loaded} filter={imgFilter}
-                        className={fitWide ? 'my-auto h-auto w-full shrink-0' : `max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`} />;
+                      return <SlidePending onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} zoom={fitWide ? 1 : zoom} onLoaded={loaded} filter={imgFilter}
+                        className={fitWide ? 'h-auto w-full max-w-none shrink-0' : `max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`} />;
                     }
                     let region: Region = box?.all ?? WHOLE;
                     let pending = box === undefined;
@@ -2321,13 +2327,13 @@ function ReaderInner() {
                     }
                     // Half the slide each, less half the gap -- a joined spread has none.
                     return <SlideRegion onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={w} height={h}
-                      region={region} area={shown.length === 2 ? { w: area.w / 2 - (isJoined ? 0 : 2), h: area.h } : fitWide ? { w: area.w, h: FIT_WIDE_H } : area} zoom={zoom}
+                      region={region} area={shown.length === 2 ? { w: area.w / 2 - (isJoined ? 0 : 2), h: area.h } : fitWide ? { w: area.w * zoom, h: FIT_WIDE_H } : area} zoom={fitWide ? 1 : zoom}
                       pending={pending} onLoaded={loaded} filter={imgFilter} trimmed={region.l} />;
                   }
                   return (
                     <ReaderImg onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })}
-                      className={fitWide ? 'my-auto h-auto w-full shrink-0' : `max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`}
-                      style={{ transform: zoom !== 1 ? `scale(${zoom})` : undefined }} filter={imgFilter} />
+                      className={fitWide ? 'h-auto max-w-none shrink-0' : `max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`}
+                      style={fitWide ? { width: `${zoom * 100}%` } : { transform: zoom !== 1 ? `scale(${zoom})` : undefined }} filter={imgFilter} />
                   );
                 })}
                 </div>
