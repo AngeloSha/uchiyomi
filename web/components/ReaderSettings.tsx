@@ -356,14 +356,41 @@ export function ReaderSettings({
           </>
         )}
 
-        <Row label={tr('Fit')}>
-          <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => set({ fitWidth: true })}
-              className={`rounded-2xl border py-3 text-sm ${prefs.fitWidth ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{tr('Fit width')}</button>
-            <button onClick={() => set({ fitWidth: false })}
-              className={`rounded-2xl border py-3 text-sm ${!prefs.fitWidth ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{tr('Original')}</button>
-          </div>
-        </Row>
+        {/* The webtoon column's width (reader/page.tsx colW). Paged mode has Page fit below instead: shown there too, this
+            row did nothing, beside a second Fit width that did (#398). */}
+        {prefs.mode !== 'paged' && (
+          <Row label={tr('Fit')}>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => set({ fitWidth: true })}
+                className={`rounded-2xl border py-3 text-sm ${prefs.fitWidth ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{tr('Fit width')}</button>
+              <button onClick={() => set({ fitWidth: false })}
+                className={`rounded-2xl border py-3 text-sm ${!prefs.fitWidth ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{tr('Original')}</button>
+            </div>
+          </Row>
+        )}
+
+        {/* #398: paged mode only -- the page whole on the screen (as it always was), or as wide as the screen with the
+            page scrolling up and down when it is taller, and how much of the width it takes on this device. */}
+        {prefs.mode === 'paged' && (
+          <Row label={tr('Page fit')}>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => set({ pagedFit: 'page' })}
+                className={`rounded-2xl border py-3 text-sm ${prefs.pagedFit === 'page' ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{tr('Whole page')}</button>
+              <button onClick={() => set({ pagedFit: 'width' })}
+                className={`rounded-2xl border py-3 text-sm ${prefs.pagedFit === 'width' ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{tr('Fit width')}</button>
+            </div>
+            <p className="mt-2 text-[11px] leading-snug text-fog-500">{tr('Fit width makes a tall page as wide as the screen; scroll up and down to read it.')}</p>
+          </Row>
+        )}
+        {prefs.mode === 'paged' && prefs.pagedFit === 'width' && (
+          <Row label={`${tr('Page width')} · ${tr('This device')} · ${device.pagedWidth}%`}>
+            <input type="range" min={COLUMN_WIDTH.min} max={COLUMN_WIDTH.max} step={COLUMN_WIDTH.step} value={device.pagedWidth}
+              aria-label={`${tr('Page width')} · ${tr('This device')}`} aria-valuetext={`${device.pagedWidth}%`}
+              onChange={(e) => setDevice({ pagedWidth: Number(e.target.value) })}
+              className="w-full accent-[rgb(var(--accent))]" />
+            <p className="mt-2 text-[11px] leading-snug text-fog-500">{tr('A share of the screen width: a narrower page for a wide screen, with less scrolling.')}</p>
+          </Row>
+        )}
 
         {/* #234: each page at the width it is drawn at rather than as scanned, on this device. Off until chosen: every page
             as scanned is the reader as it always was. */}

@@ -1,0 +1,68 @@
+// Paged mode, Page fit → Fit width (#398): a single page as wide as the slide, scrolled when it is taller, and the
+// default -- the whole page on the screen -- left exactly as it was.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { fitBox } from '../lib/readerCrop';
+import { drawnWidth } from '../lib/readerFit';
+import { DEFAULT_PREFS, LOOK_KEYS, migratePrefs } from '../lib/readerPrefs';
+import { DEFAULT_DEVICE, migrateDevicePrefs } from '../lib/readerDevice';
+
+const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8').replace(/\r\n/g, '\n');
+
+test('the whole page is still as tall as the screen', () => {
+  // A 800 x 2400 strip-like page on a 390 x 844 phone held upright.
+  const whole = fitBox(800, 2400, 390, 844);
+  assert.equal(Math.round(whole.height), 844, 'the whole page: as tall as the screen');
+  assert.ok(whole.width < 390);
+});
+
+test('a fit-wide slide asks for the slide width; the default layout still asks for the contained width', () => {
+  const slide = { mode: 'slide' as const, w: 1280, h: 800, zoom: 1, pair: false, half: false, rotate: false, crop: false };
+  const portrait = { width: 800, height: 1200 };
+  assert.equal(Math.round(drawnWidth(portrait, slide)), 533, 'a computer: as tall as the screen, as before');
+  assert.equal(drawnWidth(portrait, { ...slide, fitWide: 1 }), 1280, 'fit width: as wide as the slide');
+  assert.equal(drawnWidth(portrait, { ...slide, fitWide: undefined }), drawnWidth(portrait, slide));
+  // Page width: the share of the slide's width the page is drawn at, and so asked for.
+  assert.equal(drawnWidth(portrait, { ...slide, fitWide: 0.5 }), 640, 'half the width');
+  assert.equal(drawnWidth(portrait, { ...slide, fitWide: 0.5, zoom: 2 }), 1280, 'half the width, zoomed twice');
+  // A pair, a split page and a turned page keep fitting whole.
+  assert.equal(Math.round(drawnWidth(portrait, { ...slide, pair: true, fitWide: 1 })), 533);
+  assert.equal(drawnWidth(portrait, { ...slide, half: true, fitWide: 1 }), drawnWidth(portrait, { ...slide, half: true }));
+  assert.equal(drawnWidth(portrait, { ...slide, rotate: true, fitWide: 1 }), drawnWidth(portrait, { ...slide, rotate: true }));
+  // A page of unknown size is as wide as it may be either way.
+  assert.equal(drawnWidth({}, { ...slide, fitWide: 1 }), 1280);
+  // The zoom still multiplies it.
+  assert.equal(drawnWidth(portrait, { ...slide, fitWide: 1, zoom: 2 }), 2560);
+});
+
+test('Page fit defaults to the whole page, survives a round trip, and junk reads as the default', () => {
+  assert.equal(DEFAULT_PREFS.pagedFit, 'page');
+  assert.equal(migratePrefs({}).pagedFit, 'page', 'an older row has none');
+  assert.equal(migratePrefs({ pagedFit: 'width' }).pagedFit, 'width');
+  assert.equal(migratePrefs({ pagedFit: 'banana' }).pagedFit, 'page');
+  assert.equal(migratePrefs({ pagedFit: 7 }).pagedFit, 'page');
+  assert.ok(!(LOOK_KEYS as readonly string[]).includes('pagedFit'), 'not a title\'s look: one setting for every title');
+});
+
+test('Page width is this device\'s: the whole width by default, a 5 % step of 30-100, anything else the default', () => {
+  assert.equal(DEFAULT_DEVICE.pagedWidth, 100);
+  assert.equal(migrateDevicePrefs({}).pagedWidth, 100, 'an older device has none');
+  assert.equal(migrateDevicePrefs({ pagedWidth: 55 }).pagedWidth, 55);
+  assert.equal(migrateDevicePrefs({ pagedWidth: 52 }).pagedWidth, 50, 'rounded to a step');
+  for (const junk of [10, 140, '60', null, NaN]) assert.equal(migrateDevicePrefs({ pagedWidth: junk }).pagedWidth, 100, String(junk));
+  assert.equal(migrateDevicePrefs({ columnWidth: 40 }).pagedWidth, 100, 'apart from the webtoon column width');
+});
+
+test('the reader only lays a page out fit-wide in paged mode, scrolls it at any zoom, and the sheet shows the choice only there', () => {
+  const page = read('app/reader/page.tsx');
+  assert.match(page, /const fitWide = prefs\.pagedFit === 'width' && !!only/, 'the slide needs Fit width and one ordinary page');
+  assert.match(page, /closest\?\.\('\[data-fit-wide\]'\)/, 'a Fit width slide scrolls itself at zoom: panBy leaves it alone');
+  assert.match(page, /fitWide: prefs\.pagedFit === 'width' \? device\.pagedWidth \/ 100/, 'the fetched width follows the layout, Page width in it');
+  assert.match(page, /const wideShare = \(device\.pagedWidth \/ 100\) \* zoom/, 'the drawn width is Page width by the zoom');
+  const sheet = read('components/ReaderSettings.tsx');
+  assert.match(sheet, /prefs\.mode === 'paged' && \(\s*<Row label=\{tr\('Page fit'\)\}/, 'Page fit is shown in paged mode only');
+  assert.match(sheet, /prefs\.mode === 'paged' && prefs\.pagedFit === 'width' && \(\s*<Row label=\{`\$\{tr\('Page width'\)\}/, 'Page width only under Fit width');
+  assert.match(sheet, /prefs\.mode !== 'paged' && \(\s*<Row label=\{tr\('Fit'\)\}/, 'the column\'s Fit row is not shown in paged mode, where it does nothing');
+});

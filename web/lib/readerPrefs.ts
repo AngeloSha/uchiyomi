@@ -24,6 +24,8 @@ const JUNK_MODES: readonly JunkPages[] = ['show', 'collapse', 'hide'];
  * ever read left to right.
  */
 export type PagedDirection = 'ltr' | 'rtl' | 'series';
+export type PagedFit = 'page' | 'width';
+const PAGED_FITS: readonly PagedFit[] = ['page', 'width'];
 const PAGED_DIRECTIONS: readonly PagedDirection[] = ['ltr', 'rtl', 'series'];
 
 export interface ReaderPrefs {
@@ -78,6 +80,15 @@ export interface ReaderPrefs {
    * title whose own memory and source default hold no mode. Off by default; synced, not a look.
    */
   autoMode: boolean;
+  /**
+   * Paged mode only: how a single page is sized in its slide (#398). `page` -- the default, and the reader as it always
+   * was -- fits the WHOLE page on the screen, so a tall page is scaled to the screen's height. `width` fits the page to
+   * the slide's width instead (or the share of it Page width gives, a setting of this device: lib/readerDevice.ts
+   * pagedWidth) and the slide scrolls up and down to read a page taller than the screen; a zoom widens the page inside
+   * the slide, which then scrolls sideways too. A pair and a split or turned wide page keep fitting whole. One setting
+   * for every title, synced, not a look.
+   */
+  pagedFit: PagedFit;
 }
 
 const WIDE_PAGES: readonly WidePages[] = ['whole', 'split', 'rotate'];
@@ -98,6 +109,7 @@ export const DEFAULT_PREFS: ReaderPrefs = {
   cropBorders: false,
   joinSplit: false,
   autoMode: false,
+  pagedFit: 'page',
 };
 
 const KEY = 'yomi_reader_prefs';
@@ -148,6 +160,8 @@ export function migratePrefs(raw: unknown): ReaderPrefs {
   // #229: the same -- only a real `true` joins; an older row, or junk, reads as off.
   if (p.joinSplit !== true) p.joinSplit = false;
   if (p.autoMode !== true) p.autoMode = false;
+  // #398: anything but a known value (an older row has none) is the default, which is today's reader.
+  if (!PAGED_FITS.includes(p.pagedFit)) p.pagedFit = DEFAULT_PREFS.pagedFit;
   p.skipJunk = p.junkPages !== 'show';
   return p;
 }

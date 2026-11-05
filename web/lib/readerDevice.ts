@@ -38,6 +38,13 @@ export interface DevicePrefs {
    * does what Tap zones says, the middle shows the controls, the reader as it always was -- until chosen.
    */
   tapFocus: boolean;
+  /**
+   * Paged mode, Page fit -> Fit width (#398): how wide a single page is drawn, as a share of the screen's width, in percent.
+   * A phone wants the whole width; a wide monitor about half, where the whole width makes a page several screens tall.
+   * Same range and step as the column width, kept apart from it: the webtoon column and a paged page want different
+   * shares on the same screen. 100 is Fit width as it first came.
+   */
+  pagedWidth: number;
 }
 
 /** Column width's range and step, in percent: the sheet's slider and what a stored value is cleaned to. */
@@ -58,6 +65,7 @@ export const DEFAULT_DEVICE: DevicePrefs = {
   columnWidth: COLUMN_WIDTH.max,
   fitPages: false,
   tapFocus: false,
+  pagedWidth: COLUMN_WIDTH.max,
 };
 
 export const DEVICE_KEY = 'yomi_reader_device';
@@ -75,6 +83,7 @@ export function migrateDevicePrefs(raw: unknown): DevicePrefs {
     columnWidth: cleanColumnWidth(r.columnWidth),
     fitPages: r.fitPages === true,
     tapFocus: r.tapFocus === true,
+    pagedWidth: cleanColumnWidth(r.pagedWidth),
   };
 }
 
