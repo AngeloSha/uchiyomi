@@ -266,7 +266,11 @@ test('GET /api/collections?seriesId= says which picked lists already hold that s
   await call('lst-owner', 'DELETE', `/api/collections/${withIt.id}/items/s_lst_a1`);
   const after = (await call('lst-owner', 'GET', '/api/collections?seriesId=s_lst_a1')).json().content as any[];
   assert.equal(after.find((r) => r.id === withIt.id).has, false);
-  // Another member's list never leaks in, and the flag is absent without the parameter.
+  // Another member's list -- holding the same series -- never leaks in, and the flag is absent without the parameter.
+  const theirs = await create('lst-full', { name: 'Lst Theirs too' });
+  await call('lst-full', 'POST', `/api/collections/${theirs.id}/items`, { seriesId: 's_lst_a1' });
+  const mine = (await call('lst-owner', 'GET', '/api/collections?seriesId=s_lst_a1')).json().content as any[];
+  assert.ok(mine.every((r) => r.id !== theirs.id), "another member's list is not this member's to tick");
   const plain = (await call('lst-owner', 'GET', '/api/collections')).json().content as any[];
   assert.ok(plain.every((r) => !('has' in r)));
 });

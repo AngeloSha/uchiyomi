@@ -105,22 +105,30 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
     queryKey: ['collections', 'for-series', seriesId],
     queryFn: () => api<{ content: CollectionRow[] }>(`/api/collections?seriesId=${encodeURIComponent(seriesId)}`),
   });
-  const changed = (c: CollectionRow) => {
-    qc.invalidateQueries({ queryKey: ['collections'] });
-    qc.invalidateQueries({ queryKey: ['collection', c.id] });
-  };
+  const mine = ['collections', 'for-series', seriesId];
+  // Every answer that counts this list: the sheet's own (a prefix of it), the plain one, the list itself, and every
+  // list's card on Home and Lists (['lists-all'], lib/lists.ts), whose count and covers just changed.
+  const changed = (c: CollectionRow) => Promise.all([
+    qc.invalidateQueries({ queryKey: ['collections'] }),
+    qc.invalidateQueries({ queryKey: ['collection', c.id] }),
+    qc.invalidateQueries({ queryKey: ['lists-all'] }),
+  ]);
   const toggle = async (c: CollectionRow) => {
     if (busyId) return;
     setBusyId(c.id);
     try {
       if (c.has) {
         await api(`/api/collections/${c.id}/items/${encodeURIComponent(seriesId)}`, { method: 'DELETE' });
-        toast(tr('Removed from “{name}”', { name: `⁨${c.name}⁩` }), 'success');
+        toast(tr('Removed from “{name}”', { name: `\u2068${c.name}\u2069` }), 'success');
       } else {
         await api(`/api/collections/${c.id}/items`, { json: { seriesId } });
-        toast(tr('Added to “{name}”', { name: `⁨${c.name}⁩` }), 'success');
+        toast(tr('Added to “{name}”', { name: `\u2068${c.name}\u2069` }), 'success');
       }
-      changed(c);
+      // The tick flips at once, before the refetch lands: a second tap meanwhile read the old tick and repeated the change.
+      qc.setQueryData<{ content: CollectionRow[] }>(mine, (d) => d && {
+        content: d.content.map((l) => (l.id === c.id ? { ...l, has: !c.has, item_count: Math.max(0, l.item_count + (c.has ? -1 : 1)) } : l)),
+      });
+      await changed(c);
     } catch { toast(tr('Failed'), 'error'); }
     finally { setBusyId(null); }
   };
@@ -130,7 +138,7 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
     try {
       const c = await api<CollectionRow>('/api/collections', { json: { name: n } });
       await api(`/api/collections/${c.id}/items`, { json: { seriesId } });
-      toast(tr('Added to “{name}”', { name: `⁨${c.name}⁩` }), 'success');
+      toast(tr('Added to “{name}”', { name: `\u2068${c.name}\u2069` }), 'success');
       changed(c);
       onClose();
     } catch { toast(tr('Could not create the list'), 'error'); }
