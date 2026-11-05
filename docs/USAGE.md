@@ -192,7 +192,7 @@ the page, cards, sheets, the sidebar and a phone browser's own bar included, and
 It is saved to your account like the accent colour; the sign-in screen stays black.
 
 **Lists** are your own shelves — *Plan to read*, *Reading now*, anything. Make one under **Lists** with **New**, and
-add series to it from a series page with the **List** key under the reading button (*Add to list*). A list shows its series with the Library's covers
+add series to it from a series page with the **List** key under the reading button (*Add to list*). The sheet ticks the lists that already contain the series: tick one to add it, or untick it to remove it. It stays open so you can change several lists, then press **Done**. Only your hand-picked lists appear; smart lists follow their filters and shared lists belong to their owner. A list shows its series with the Library's covers
 (since v0.55.7, [#164](https://github.com/AngeloSha/uchiyomi/discussions/164)): the unread count, the **NEW** ribbon and
 the favourite heart, counted from your own reading. **Sort by** orders it: **Your order** (the list as you arranged it,
 the default), **A–Z**, **Z–A**, **Last read** (what you read most recently first), **Most unread** and **Latest chapter**
@@ -324,6 +324,34 @@ foot. The box above the list finds any page or setting by name and opens it. On 
 page, under the hero — in full above You, a slimmer band above the rest; on a phone the hero and the list are the first
 screen: tap a row to open its page, under a band of the same art, and Back returns to the list. A row marked *This
 device* is kept by this browser only; every other setting follows your account.
+
+### Upload a series
+
+For a series no source carries, when you already have its chapters as files: **Upload a series** in the Library's
+header (the arrow-up key on a phone) opens a page of its own. Give it a title, choose the files (.cbz, .cbr, .zip, .rar,
+.pdf or .epub, as many as you like), and **Upload**. The files go into the download folder under `Uploads/<title>`, one
+after another in name order, and the library scan makes them a series. The chapter number is read from each file name,
+as for every file the scan meets (see *How a chapter's number is read* below), so name them like `Chapter 12.cbz`.
+
+- A title already in the library is refused before anything is written: pick another.
+- Nothing is overwritten, and a file whose contents are not the archive its name says is refused. One refused file
+  does not stop the rest.
+- ZIP/CBZ/EPUB files can be up to `UPLOAD_MAX_MB` (2 GB by default); PDF and RAR/CBR files are capped at 128 MiB because those readers load the whole file. The archive index and its first page must be readable. Uploads also stop at the download disk's `MIN_FREE_GB` floor, including uploads without a declared size.
+- Admins can always upload. A member needs **Can upload series**, which an admin turns on per member under
+  **Admin → Members**. It is off by default.
+
+To fill missing chapters of an existing series, open its **More → Upload chapters** action. The same permission is
+required, and members can upload only into a series they may open. The files land in that series' download folder;
+existing files and the read-only library are preserved. A stored file whose scan is pending is reported separately:
+run a library scan before retrying it. Two uploads can run at once; a series being changed by another task waits.
+
+### Local cover and banner files
+
+Put `cover.webp`, `cover.png`, `cover.jpg`, `cover.jpeg` or `cover.avif` beside the series' chapter files, or inside its
+`artwork/` folder. The same names with `banner` supply its banner. A library scan validates and caches the images;
+changes and removals appear on the next scan. Read-only library folders work. An explicit artwork upload, image link
+or first-page choice takes precedence; these files take precedence over automatically found artwork. Original files
+are never changed.
 
 ### What counts as a chapter
 
@@ -1798,6 +1826,7 @@ not to you: an e-ink tablet wants E-ink, the phone beside it does not.
   double pages* off. It is saved for your account only -- nobody else's reader changes -- follows you to your other
   devices and into chapters you download, and the server looking at the chapter again leaves it alone; a chapter whose file is replaced by one with
   another page count starts afresh.
+- **Page fit** (account, paged mode): **Whole page** keeps the complete page within the screen and remains the default. **Fit width** fills the slide width and lets you scroll vertically inside that page; swipe sideways or use the normal page keys to turn pages. Zoom, right-to-left order, cropped borders and split or rotated spreads keep working. This is separate from webtoon scroll's **Fit** choice.
 - **Column width** (this device, since v0.74.0): in webtoon scroll, narrows the column of pages to between 30 % and
   100 % of what *Fit width* or *Original* gives (steps of 5 %). A phone wants 100 %, a wide monitor a narrower strip. Like
   the other *this device* settings it is kept in this browser only, so your other screens are unaffected.
@@ -2527,6 +2556,14 @@ chapters, chapters that downloaded as one or two images, the same title sitting 
 numbers that can't be real, series waiting for a renumbering review, any source that is failing or blocked, and the
 extension engine. Each check says what it found and what it cannot see. Hit **Re-check** to run them again. Since
 v0.49.1 the page says the server's findings in your language, with dates and times in your own time zone.
+
+A short chapter is not a finding when it is short on purpose: a half-chapter (*12.5*, usually an author's notice), and
+a chapter whose title names a special — *Q&A Announcement!*, *Giveaway!*, *Author's Note*, *Bonus Illustration*, a
+hiatus notice. Those are counted on the card (*2 specials left out*) instead of listed, and the nightly repair does
+not hunt other sources for longer copies of them. The whole title has to say so, and its creator must not have
+numbered it: *The Announcement*, *Bonus Round* and *82. Announcement* are episodes and are still checked, as is a
+chapter whose title only says its number. (*Chapter 82: Q&A* can still be a special: sources write *Chapter 82* in
+front of every post.)
 
 Since v0.55.10 a chapter stitched into one or two long strips (its images together at least ten times as tall as they
 are wide) is a whole chapter, not a short one: Health measures such a chapter's pages once, as the reader does, and

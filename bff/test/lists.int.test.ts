@@ -285,3 +285,26 @@ test("a list's card gets its first covers: the viewer's own view, in the list's 
     await q("DELETE FROM lib_series WHERE id = 's_lst_a3'");
   }
 });
+
+
+test("series membership lists contain only the caller's editable lists and track removals", { skip }, async () => {
+  const picked = await create('lst-owner', { name: 'Membership picked' });
+  const other = await create('lst-full', { name: 'Membership other', shared: true });
+  const smart = await create('lst-owner', { name: 'Membership smart', query: ROMANCE_UNREAD });
+  try {
+    const url = '/api/collections?seriesId=s_lst_a1';
+    let rows = (await call('lst-owner', 'GET', url)).json().content;
+    assert.equal(rows.find((r: any) => r.id === picked.id)?.contains, false);
+    assert.ok(!rows.some((r: any) => r.id === other.id || r.id === smart.id));
+    assert.equal((await call('lst-owner', 'POST', `/api/collections/${picked.id}/items`, { seriesId: 's_lst_a1' })).statusCode, 200);
+    rows = (await call('lst-owner', 'GET', url)).json().content;
+    assert.equal(rows.find((r: any) => r.id === picked.id).contains, true);
+    assert.equal((await call('lst-owner', 'DELETE', `/api/collections/${picked.id}/items/s_lst_a1`)).statusCode, 200);
+    rows = (await call('lst-owner', 'GET', url)).json().content;
+    assert.equal(rows.find((r: any) => r.id === picked.id).contains, false);
+    assert.equal((await call('lst-lib', 'GET', '/api/collections?seriesId=s_lst_b1')).statusCode, 404);
+    assert.equal((await call('lst-owner', 'GET', '/api/collections?seriesId=missing')).statusCode, 404);
+  } finally {
+    for (const id of [picked.id, other.id, smart.id]) await q('DELETE FROM collections WHERE id = $1', [id]);
+  }
+});

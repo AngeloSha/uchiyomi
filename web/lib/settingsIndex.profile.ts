@@ -59,6 +59,7 @@ export const PROFILE_SETTINGS: SettingsIndex = {
     { id: 'reader-theme', cat: 'reading', label: 'Theme', keywords: ['amoled', 'paper', 'sepia', 'gray', 'grey', 'page colour', 'cream', 'off-white'] },
     { id: 'comments', cat: 'reading', label: 'Comments and reactions', when: ['web', 'talk'], keywords: ['comments', 'reactions', 'emoji', 'talk', 'discussion', 'household', 'hide comments', 'turn off comments'] },
     { id: 'fit', cat: 'reading', label: 'Fit', keywords: ['fit width', 'original size', 'zoom'] },
+    { id: 'paged-fit', cat: 'reading', label: 'Page fit', keywords: ['paged', 'whole page', 'fit width', 'vertical scroll'] },
     { id: 'wide-pages', cat: 'reading', label: 'Wide pages', keywords: ['double page', 'spread', 'landscape', 'rotate', 'split'] },
     { id: 'repeated-pages', cat: 'reading', label: 'Repeated pages', keywords: ['credits', 'ads', 'adverts', 'junk pages', 'recruitment'] },
     { id: 'reading-direction', cat: 'reading', more: 'reading-more', label: 'Reading direction', keywords: ['right to left', 'left to right', 'rtl', 'manga direction'] },

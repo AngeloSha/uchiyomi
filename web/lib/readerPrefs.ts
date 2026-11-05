@@ -32,6 +32,8 @@ export interface ReaderPrefs {
   mode: 'vertical' | 'paged';
   autoScroll: number; // px/frame, 0 = off
   fitWidth: boolean;
+  /** Paged mode: fill the slide width and scroll inside it. Whole-page fitting remains the default. */
+  pagedFitWidth: boolean;
   theme: ReaderTheme;
   spread: boolean; // paged mode: two pages side by side (manga double-page convention)
   /**
@@ -90,6 +92,7 @@ export const DEFAULT_PREFS: ReaderPrefs = {
   mode: 'vertical',
   autoScroll: 0,
   fitWidth: true,
+  pagedFitWidth: false,
   theme: 'amoled',
   spread: false,
   pagedDirection: 'series',
@@ -148,6 +151,7 @@ export function migratePrefs(raw: unknown): ReaderPrefs {
   // #229: the same -- only a real `true` joins; an older row, or junk, reads as off.
   if (p.joinSplit !== true) p.joinSplit = false;
   if (p.autoMode !== true) p.autoMode = false;
+  if (p.pagedFitWidth !== true) p.pagedFitWidth = false;
   p.skipJunk = p.junkPages !== 'show';
   return p;
 }

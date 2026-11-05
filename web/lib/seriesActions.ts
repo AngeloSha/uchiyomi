@@ -13,7 +13,7 @@ import { t as tr } from './i18n';
 
 export type SeriesActionId =
   | 'notes' | 'markAllRead' | 'markAllUnread'
-  | 'findMissing' | 'hidden' | 'archive' | 'checkNew'
+  | 'findMissing' | 'hidden' | 'archive' | 'checkNew' | 'upload'
   | 'copyLink' | 'openTab'
   | 'edit' | 'cover' | 'move' | 'newBanner' | 'rename' | 'remove';
 
@@ -44,6 +44,8 @@ export interface SeriesActionsInput {
   isAdmin: boolean;
   /** `canDownload(user)`: Find missing chapters and the slow archive. */
   mayDownload: boolean;
+  /** Admin or an explicitly permitted uploader; enforced again by the upload route. */
+  mayUpload?: boolean;
   booksCount: number;
   /** The page's own `mayArchive` (something to archive, no archive on it yet). */
   mayArchive: boolean;
@@ -88,6 +90,7 @@ export function seriesActionGroups(x: SeriesActionsInput): SeriesActionGroup[] {
     ] : []),
   ];
   const chapters: SeriesAction[] = [
+    ...(x.mayUpload ? [{ id: 'upload' as const, label: tr('Upload chapters'), hook: 'upload-chapters', disabled: offline }] : []),
     // Refused below three chapters by the route itself, so not offered there.
     ...(x.mayDownload && x.booksCount >= 3 ? [{ id: 'findMissing' as const, label: tr('Find missing chapters'), disabled: offline }] : []),
     // #240: an admin's way back to the numbers hidden from this series, only while there is one -- a series with nothing

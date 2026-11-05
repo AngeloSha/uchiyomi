@@ -179,6 +179,10 @@ const EN = {
     '"Fix" replaces the chapter only if another source has a longer copy; "It\'s fine" records that it really is ' +
     'this short, and the nightly stops looking at it.',
   'short.detail': ({ number, pages }: { number: number; pages: number }) => `Chapter ${number} has ${pages} page${s(pages, '', 's')}`,
+  'short.specials': ({ n }: { n: number }) => `${n} special${s(n, '', 's')} left out`,
+  'short.specialNote': () =>
+    "A chapter whose title names a special (a Q&A, a giveaway, an announcement, an author's note, bonus art) is " +
+    'left out too: those are meant to be short.',
 
   // ---- Chapters that would not download
   'failures.live': ({ n, m }: { n: number; m: number }) => `${n} chapter${s(n, '', 's')} across ${m} source${s(m, '', 's')} keep failing`,

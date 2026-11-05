@@ -53,3 +53,7 @@ export function placeMenu(
   top = Math.max(margin, Math.min(top, viewport.h - size.h - margin));
   return { left, top };
 }
+
+/** A queued final page-scroll event does not move a newly opened menu. Inner panels always dismiss it. */
+export const menuScrollMoved = (page: boolean, from: { x: number; y: number }, to: { x: number; y: number }): boolean =>
+  !page || from.x !== to.x || from.y !== to.y;

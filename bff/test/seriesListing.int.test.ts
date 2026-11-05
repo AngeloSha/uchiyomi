@@ -418,3 +418,23 @@ test('a series deleted while its listing is written: both finish, and neither is
     await q('DELETE FROM lib_series WHERE id = $1', [G]).catch(() => {});
   }
 });
+
+test('blocked deleted chapters hide by id while their history and live files remain', { skip }, async () => {
+  const { listingFor } = await import('../src/lib/seriesListing');
+  const id = 's_lst_blocked_deleted';
+  await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ($1,'test','Deleted group display',$1)`, [id]);
+  try {
+    for (const n of [1, 2, 3, 4, 5]) {
+      await q(`INSERT INTO lib_books (id,series_id,source,file,title,number,pruned_at,number_end)
+        VALUES ($1,$2,'test',$3,$3,$4::real,CASE WHEN $4::real=2 THEN NULL ELSE now() END,CASE WHEN $4::real=5 THEN 7 ELSE NULL END)`,
+        [`${id}_${n}`, id, `${id}/${n}.cbz`, n]);
+    }
+    for (const n of [1, 2, 3, 5]) await q(`INSERT INTO series_listing (series_id,number,source_id,chosen,status)
+      VALUES ($1,$2,'test','{}',$3)`, [id, n, n === 3 ? 'available' : 'blocked']);
+    const listed = await listingFor(id, { floor:null,admin:false });
+    assert.deepEqual(listed.blockedDeletedBookIds, [`${id}_1`]);
+    assert.equal((await q('SELECT count(*)::int AS n FROM lib_books WHERE series_id=$1', [id]))[0].n, 5, 'tombstones are preserved');
+    await q(`UPDATE series_listing SET status='available' WHERE series_id=$1`, [id]);
+    assert.deepEqual((await listingFor(id, { floor:null,admin:false })).blockedDeletedBookIds, [], 'unblock restores display immediately');
+  } finally { await q('DELETE FROM lib_series WHERE id=$1', [id]); }
+});

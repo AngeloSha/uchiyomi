@@ -2679,6 +2679,10 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Ghost"
+                  blockedDeletedBookIds:
+                    type: array
+                    items: { type: string }
+                    description: Deleted chapter ids whose current listing copies are all blocked; their progress rows remain stored.
                   archive:
                     type: [object, "null"]
                     description: >-
@@ -5656,6 +5660,12 @@ paths:
         series THIS caller may see, at most four, in the list's own order -- the covers its card shows.
       operationId: getApiCollections
       parameters:
+        - name: seriesId
+          in: query
+          required: false
+          description: Add contains=true/false for this visible series to the caller's own manual lists only.
+          schema:
+            type: string
         - name: adult
           in: query
           required: false
@@ -12296,6 +12306,78 @@ paths:
           description: Not found, or not visible to this account
         "413":
           description: The body is over the limit (a picture over 11 MB)
+  /api/library/upload:
+    post:
+      tags:
+        - library
+      summary: Upload a chapter into a new or visible existing series.
+      operationId: postApiLibraryUpload
+      description: >-
+        Requires an admin account, or a member an admin gave `canUploadManually`. The body is the file itself (.cbz, .cbr,
+        .zip, .rar, .pdf or .epub), streamed into `Uploads/<title>` under the download folder, then the library is scanned;
+        start a new series with `title` and `fresh=1`, then send its returned `seriesId` for later files.
+        An existing series requires `seriesId` and current viewer access. Files are published atomically without
+        replacing existing files, under the shared writer claim. The archive index and its first page are validated.
+        PDF/RAR uploads are also capped at 128 MiB. At most two uploads run together.
+      parameters:
+        - name: fresh
+          in: query
+          required: false
+          description: '`1` on a run''s first file: refuse with 409 `taken` when a series by that title is already here.'
+          schema:
+            type: string
+            enum: ['1']
+        - name: seriesId
+          in: query
+          required: false
+          description: Existing visible series to receive chapters; cannot be combined with title/fresh.
+          schema:
+            type: string
+        - name: title
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: name
+          in: query
+          required: true
+          description: The file's name, extension included; the chapter number is read from it.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK. `file` is where it was stored, relative to the download folder; `bookId` and `number` are the chapter the scan made of it.
+        "202":
+          description: File stored, but indexing is pending (`indexed=false`). Run a library scan before retrying.
+        "400":
+          description: >-
+            Malformed parameter, a name the scanner would not read as a chapter (`bad_type`), bytes that are not the
+            archive the name says (`bad_file`), or an empty body (`empty`)
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Existing series not found or not visible to this account.
+        "409":
+          description: A file of that name is already there (`exists`), or the series cannot take one now
+        "429":
+          description: Two uploads are already active.
+        "413":
+          description: The file is over UPLOAD_MAX_MB or its format-specific reader limit (`too_large`)
+        "415":
+          description: Send raw application/octet-stream bytes, not JSON.
+        "507":
+          description: The download disk is at its MIN_FREE_GB floor (`disk_full`)
   /api/admin/title-extraction/capabilities:
     get:
       tags: [admin]

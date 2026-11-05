@@ -441,6 +441,9 @@ function ReadingSection({ prefs, set }: { prefs: ReaderPrefs; set: (p: Partial<R
         <SegmentedRow id="fit" label={tr('Fit')} value={prefs.fitWidth ? 'width' : 'original'}
           options={[{ value: 'width', label: tr('Fit width') }, { value: 'original', label: tr('Original') }]}
           onChange={(v) => set({ fitWidth: v === 'width' })} />
+        <SegmentedRow id="paged-fit" label={tr('Page fit')} value={prefs.pagedFitWidth ? 'width' : 'whole'}
+          options={[{ value: 'whole', label: tr('Whole page') }, { value: 'width', label: tr('Fit width') }]}
+          onChange={(v) => set({ pagedFitWidth: v === 'width' })} />
         {/* v0.61.0: what a double-page spread becomes on a screen held upright. */}
         <ChoiceRow id="wide-pages" label={tr('Wide pages')} value={prefs.widePages} onChange={(widePages) => set({ widePages })}
           help={tr('On a screen held upright, a double-page spread can be split into its two pages, or turned on its side to fill the screen.')}

@@ -897,7 +897,7 @@ function ReaderInner() {
     // One page of the pair brought into frame (#232/#261) is drawn alone; a joined spread turned on its side (#229, Wide
     // pages -> Rotate) is one picture twice a page wide, turned, of which this page is half.
     const pair = shown.length === 2 && focus?.slide !== s;
-    const slide = { mode: 'slide' as const, w: area.w || window.innerWidth, h: area.h || window.innerHeight, zoom, half: !!half[s], crop: prefs.cropBorders };
+    const slide = { mode: 'slide' as const, widthOnly: prefs.pagedFitWidth, w: area.w || window.innerWidth, h: area.h || window.innerHeight, zoom, half: !!half[s], crop: prefs.cropBorders };
     if (pair && joined[s] && wideMode === 'rotate' && p.width && p.height) {
       return drawnWidth({ width: 2 * p.width, height: p.height }, { ...slide, pair: false, rotate: true }) / 2;
     }
@@ -1830,6 +1830,12 @@ function ReaderInner() {
   const panBy = (dx: number, dy: number) => {
     const el = scrollRef.current;
     if (!el) return;
+    if (prefs.pagedFitWidth) {
+      const index = Math.round(Math.abs(el.scrollLeft) / Math.max(1, el.clientWidth));
+      const pane = el.querySelector<HTMLElement>(`[data-paged-scroll="${index}"]`);
+      if (pane) { pane.scrollLeft -= dx; pane.scrollTop -= dy; }
+      return;
+    }
     const mx = ((zoom - 1) * el.clientWidth) / 2;
     const my = ((zoom - 1) * el.clientHeight) / 2;
     const x = Math.max(-mx, Math.min(mx, pan.current.x + dx));
@@ -1845,6 +1851,27 @@ function ReaderInner() {
     scrollRef.current?.style.removeProperty('--pan-y');
   }, [current, prefs.mode]);
   useEffect(() => { if (zoom <= 1) { pan.current = { x: 0, y: 0 }; scrollRef.current?.style.removeProperty('--pan-x'); scrollRef.current?.style.removeProperty('--pan-y'); } else panBy(0, 0); }, [zoom]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A page opens at its top. Zoom grows the actual scrollable picture, with its horizontal centre still in view.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || prefs.mode !== 'paged' || !prefs.pagedFitWidth) return;
+    const index = Math.round(Math.abs(el.scrollLeft) / Math.max(1, el.clientWidth));
+    const pane = el.querySelector<HTMLElement>(`[data-paged-scroll="${index}"]`);
+    if (pane) { pane.scrollTop = 0; pane.scrollLeft = (pane.scrollWidth - pane.clientWidth) / 2; }
+  }, [current, prefs.mode, prefs.pagedFitWidth]);
+  const beforeWidthZoom = useRef(zoom);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const before = beforeWidthZoom.current; beforeWidthZoom.current = zoom;
+    if (!el || prefs.mode !== 'paged' || !prefs.pagedFitWidth || before === zoom) return;
+    const index = Math.round(Math.abs(el.scrollLeft) / Math.max(1, el.clientWidth));
+    const pane = el.querySelector<HTMLElement>(`[data-paged-scroll="${index}"]`);
+    if (pane) {
+      pane.scrollTop = (pane.scrollTop + pane.clientHeight / 2) * zoom / before - pane.clientHeight / 2;
+      pane.scrollLeft = (pane.scrollWidth - pane.clientWidth) / 2;
+    }
+  }, [zoom, prefs.mode, prefs.pagedFitWidth]);
 
   /** The slide the paged track is on, the way `onScroll` reads it -- an RTL track counts in negative px. */
   const slideNow = () => {
@@ -2224,7 +2251,7 @@ function ReaderInner() {
       ) : (
         <div ref={scrollRef} data-lenis-prevent onScroll={onScroll} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd} onDoubleClick={onTrackDoubleClick} {...menuBind}
           dir={pagedRtl ? 'rtl' : 'ltr'}
-          className={`hide-scrollbar flex h-screen-d snap-x snap-mandatory overflow-y-hidden overscroll-x-contain ${zoom > 1 ? 'touch-none overflow-x-hidden' : 'touch-pan-x overflow-x-auto'}`} style={{ filter: THEME_FILTER[prefs.theme] }}>
+          className={`hide-scrollbar flex h-screen-d snap-x snap-mandatory overflow-y-hidden overscroll-x-contain ${zoom > 1 ? 'touch-none overflow-x-hidden' : prefs.pagedFitWidth ? 'touch-pan-x touch-pan-y overflow-x-auto' : 'touch-pan-x overflow-x-auto'}`} style={{ filter: THEME_FILTER[prefs.theme] }}>
           {slides.map((slideIdxs, s) => {
             // One page of the pair brought into frame (#232/#261, `focus`): the slide holds just it, and everything below
             // lays it out as a single page.
@@ -2240,18 +2267,22 @@ function ReaderInner() {
             const turnedPair = isJoined && wideMode === 'rotate';
             // v0.61.0: one half of a wide page (Wide pages → Split) is a slide of its own, keyed apart from its twin.
             const halfOf = half[s];
+            const widthOnly = prefs.pagedFitWidth;
+            const pageArea = widthOnly ? { w: area.w * zoom, h: area.h } : area;
+            const pageZoom = widthOnly ? 1 : zoom;
             return (
               <div key={halfOf ? `${flat[idxs[0]].key}:${halfOf}` : flat[slideIdxs[0]].key} data-joined={isJoined || undefined}
-                className="relative h-full w-full shrink-0 snap-center snap-always overflow-hidden">
+                data-lenis-prevent dir={widthOnly ? 'ltr' : undefined} data-paged-scroll={widthOnly ? s : undefined}
+                className={`relative h-full w-full shrink-0 snap-center snap-always ${widthOnly ? 'hide-scrollbar overflow-y-auto overscroll-y-contain' : 'overflow-hidden'}`}>
                 {/* The clip stays put and the page inside it is what a zoomed drag moves (panBy): a zoomed page used to spill
                     over its neighbours, and could not be dragged to its edges at all. */}
-                <div className={`flex h-full w-full items-center justify-center${isJoined ? '' : ' gap-1'}`} dir={isJoined ? 'ltr' : undefined}
-                  style={zoom > 1 ? { translate: 'var(--pan-x, 0px) var(--pan-y, 0px)' } : undefined}>
+                <div className={`flex ${widthOnly ? 'min-h-full items-start' : 'h-full items-center'} w-full justify-center${isJoined ? '' : ' gap-1'}`} dir={isJoined || !pagedRtl ? 'ltr' : 'rtl'}
+                  style={widthOnly ? { width: `${zoom * 100}%` } : zoom > 1 ? { translate: 'var(--pan-x, 0px) var(--pan-y, 0px)' } : undefined}>
                 {turnedPair ? (
                   // Both pages, or neither: half a spread turned on its side is no page at all.
                   shown.every((i) => activeSet.has(i) && srcFor(i) && flat[i].width && flat[i].height)
                     ? <SlideTurnedPair onRetry={refreshEditedPages} pages={shown.map((i) => ({ src: srcFor(i)!, alt: tr('Page {n}', { n: flat[i].number }), width: flat[i].width!, height: flat[i].height! }))}
-                        area={area} zoom={zoom} filter={imgFilter} />
+                        area={pageArea} zoom={pageZoom} widthOnly={widthOnly} filter={imgFilter} />
                     : shown.map((i) => <span key={flat[i].key} className="text-ink-600">{flat[i].number}</span>)
                 ) : shown.map((i) => {
                   const p = flat[i];
@@ -2262,9 +2293,9 @@ function ReaderInner() {
                   // would overflow the slide. Ordinary pages keep the bare <img>, byte for byte as before.
                   if (p.missing) {
                     return (
-                      <div key={p.key} className={`relative flex h-full items-center justify-center ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`}
-                        style={{ transform: zoom !== 1 ? `scale(${zoom})` : undefined }}>
-                        <ReaderImg onRetry={refreshEditedPages} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} className="max-h-full object-contain" filter={imgFilter} />
+                      <div key={p.key} className={`relative flex ${widthOnly ? 'h-auto' : 'h-full'} items-center justify-center ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`}
+                        style={widthOnly ? { width: idxs.length === 2 ? '50%' : '100%' } : { transform: zoom !== 1 ? `scale(${zoom})` : undefined }}>
+                        <ReaderImg onRetry={refreshEditedPages} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} className={widthOnly ? 'block h-auto w-full max-w-none' : 'max-h-full object-contain'} filter={imgFilter} />
                         <MissingCaption number={p.number} source={sourceNameOf(chapters[p.ci]?.sourceId)} dir={uiDir} />
                       </div>
                     );
@@ -2280,23 +2311,23 @@ function ReaderInner() {
                   if (halfOf && p.width && p.height) {
                     return <SlideRegion onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={p.width} height={p.height}
                       region={cropOn ? halfCrop(halfOf, box?.all ?? WHOLE) : halfOf === 'left' ? LEFT_HALF : RIGHT_HALF}
-                      half={halfOf} area={area} zoom={zoom} pending={cropOn && box === undefined} onLoaded={loaded}
+                      half={halfOf} area={pageArea} zoom={pageZoom} widthOnly={widthOnly} pending={cropOn && box === undefined} onLoaded={loaded}
                       filter={imgFilter} trimmed={cropOn ? (box?.all ?? WHOLE).l : undefined} />;
                   }
                   if (wideMode === 'rotate' && idxs.length === 1 && isWide(p)) {
                     return <SlideTurned onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={p.width!} height={p.height!}
-                      area={area} zoom={zoom} filter={imgFilter} />;
+                      area={pageArea} zoom={pageZoom} widthOnly={widthOnly} filter={imgFilter} />;
                   }
-                  if (cropOn) {
+                  if (cropOn || widthOnly) {
                     const w = p.width || box?.w;
                     const h = p.height || box?.h;
                     if (!(w && h)) {
-                      return <SlidePending onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} zoom={zoom} onLoaded={loaded} filter={imgFilter}
-                        className={`max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`} />;
+                      return <SlidePending onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} zoom={pageZoom} onLoaded={loaded} filter={imgFilter}
+                        className={widthOnly ? `block h-auto shrink-0 ${idxs.length === 2 ? 'w-1/2' : 'w-full'}` : `max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`} />;
                     }
                     let region: Region = box?.all ?? WHOLE;
-                    let pending = box === undefined;
-                    if (shown.length === 2) {
+                    let pending = cropOn && box === undefined;
+                    if (shown.length === 2 && cropOn) {
                       // By where the pages SIT, left then right (pairOnScreen): the gutter is the left page's right side and
                       // the right page's left side, and on a right-to-left track the first page drawn is the right one.
                       const sits = pairOnScreen(s) ?? shown;
@@ -2306,7 +2337,7 @@ function ReaderInner() {
                     }
                     // Half the slide each, less half the gap -- a joined spread has none.
                     return <SlideRegion onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={w} height={h}
-                      region={region} area={shown.length === 2 ? { w: area.w / 2 - (isJoined ? 0 : 2), h: area.h } : area} zoom={zoom}
+                      region={region} area={shown.length === 2 ? { w: pageArea.w / 2 - (isJoined ? 0 : 2), h: pageArea.h } : pageArea} zoom={pageZoom} widthOnly={widthOnly}
                       pending={pending} onLoaded={loaded} filter={imgFilter} trimmed={region.l} />;
                   }
                   return (

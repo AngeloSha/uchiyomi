@@ -191,8 +191,8 @@ export const ReaderPageRow = memo(function ReaderPageRow({
  * `pending`: Crop page borders is on and this page's margins are not known yet. The page is not shown until they are,
  * or until 300 ms after it loaded -- then it is shown whole rather than not at all. Opacity, at once: no new motion.
  */
-export function SlideRegion({ src, alt, width, height, region, area, zoom, pending, half, filter, trimmed, onLoaded, onRetry }: {
-  src: string; alt: string; width: number; height: number; region: Region; area: { w: number; h: number }; zoom: number;
+export function SlideRegion({ src, alt, width, height, region, area, zoom, widthOnly, pending, half, filter, trimmed, onLoaded, onRetry }: {
+  src: string; alt: string; width: number; height: number; region: Region; area: { w: number; h: number }; zoom: number; widthOnly?: boolean;
   pending?: boolean; half?: Exclude<Half, null>; filter?: string;
   /** The page's own left trim, while Crop page borders is on: `data-crop`, which the browser walk reads. */
   trimmed?: number;
@@ -201,7 +201,7 @@ export function SlideRegion({ src, alt, width, height, region, area, zoom, pendi
 }) {
   const late = useLate(src, !!pending);
   const st = cropStyle(region);
-  const fit = fitBox(width * st.sx, height * st.sy, area.w, area.h);
+  const fit = fitBox(width * st.sx, height * st.sy, area.w, area.h, widthOnly);
   return (
     // ⚠️ `dir="ltr"`: the picture's left and right, not the track's. On a right-to-left track an image too wide for its
     // box overflows to the LEFT, so a half or a crop showed the wrong part of the page (seen in a browser: the right
@@ -271,11 +271,18 @@ export function measurePage(img: HTMLImageElement): { all: Region; sides: Region
  * and zoomed like any page. ⚠️ Centred as a flex item of the slide, never with `inset-0 m-auto`: until it is turned the
  * box is wider than the slide, auto margins never go below zero, and it sat against one edge (seen in a browser).
  */
-export function SlideTurned({ src, alt, width, height, area, zoom, filter, onRetry }: {
-  src: string; alt: string; width: number; height: number; area: { w: number; h: number }; zoom: number; filter?: string; onRetry?: ReaderImageRetry;
+export function SlideTurned({ src, alt, width, height, area, zoom, widthOnly, filter, onRetry }: {
+  src: string; alt: string; width: number; height: number; area: { w: number; h: number }; zoom: number; widthOnly?: boolean; filter?: string; onRetry?: ReaderImageRetry;
 }) {
   // Turned, the page stands `height` wide and `width` tall: fit THAT, then draw the box the other way round.
-  const fit = fitBox(height, width, area.w, area.h);
+  const fit = fitBox(height, width, area.w, area.h, widthOnly);
+  if (widthOnly) return (
+    <div dir="ltr" className="flex shrink-0 items-center justify-center" style={{ width: fit.width, height: fit.height }}>
+      <div data-rotated className="shrink-0" style={{ width: fit.height, height: fit.width, transform: 'rotate(90deg)' }}>
+        <ReaderImg onRetry={onRetry} src={src} alt={alt} className="block h-full w-full max-w-none" filter={filter} />
+      </div>
+    </div>
+  );
   return (
     <div data-rotated className="shrink-0"
       style={{ width: fit.height, height: fit.width, transform: `rotate(90deg)${zoom !== 1 ? ` scale(${zoom})` : ''}` }}>
@@ -289,14 +296,22 @@ export function SlideTurned({ src, alt, width, height, area, zoom, filter, onRet
  * SlideTurned turns one in a single file: the two pages side by side, `pages[0]` on the left as drawn, at one height, in a
  * box of the spread's shape sized so that once turned a quarter it fits the slide.
  */
-export function SlideTurnedPair({ pages, area, zoom, filter, onRetry }: {
-  pages: Array<{ src: string; alt: string; width: number; height: number }>; area: { w: number; h: number }; zoom: number; filter?: string; onRetry?: ReaderImageRetry;
+export function SlideTurnedPair({ pages, area, zoom, widthOnly, filter, onRetry }: {
+  pages: Array<{ src: string; alt: string; width: number; height: number }>; area: { w: number; h: number }; zoom: number; widthOnly?: boolean; filter?: string; onRetry?: ReaderImageRetry;
 }) {
   // At the first page's height: the second's width scaled to it. The detector only joins pages within 2 % of each other.
   const h = pages[0].height;
   const widths = pages.map((p) => p.width * (h / p.height));
   const w = widths[0] + widths[1];
-  const fit = fitBox(h, w, area.w, area.h);
+  const fit = fitBox(h, w, area.w, area.h, widthOnly);
+  if (widthOnly) return (
+    <div dir="ltr" className="flex shrink-0 items-center justify-center" style={{ width: fit.width, height: fit.height }}>
+      <div data-rotated data-joined-turned dir="ltr" className="flex shrink-0" style={{ width: fit.height, height: fit.width, transform: 'rotate(90deg)' }}>
+        {pages.map((p, k) => <ReaderImg onRetry={onRetry} key={p.src} src={p.src} alt={p.alt} className="block h-full max-w-none" filter={filter}
+          style={{ width: `${(widths[k] / w) * 100}%` }} />)}
+      </div>
+    </div>
+  );
   return (
     <div data-rotated data-joined-turned dir="ltr" className="flex shrink-0"
       style={{ width: fit.height, height: fit.width, transform: `rotate(90deg)${zoom !== 1 ? ` scale(${zoom})` : ''}` }}>

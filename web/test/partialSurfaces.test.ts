@@ -46,7 +46,7 @@ test('the reader captions a missing page in both renderers, and the caption is n
   assert.match(paged, /if \(p\.missing\) \{[\s\S]*?<MissingCaption number=\{p\.number\} source=\{sourceNameOf\(/, 'the paged slide draws no caption on a missing page');
   // In the slide the caption needs a box of its own, with a definite height, or the image's max-h-full is
   // no limit at all and the page overflows the viewport. Reintroduce by dropping `h-full` from that box.
-  assert.match(paged, /<div key=\{p\.key\} className=\{`relative flex h-full items-center justify-center/, 'the paged caption box has no definite height');
+  assert.match(paged, /<div key=\{p\.key\} className=\{`relative flex \$\{widthOnly \? 'h-auto' : 'h-full'\} items-center justify-center/, 'the paged caption box has no definite height');
   // The caption itself: passive, both sentences, the source named only when there is a name.
   const cap = between(rowFile, 'function MissingCaption(', '\n}\n', 'MissingCaption');
   assert.match(cap, /pointer-events-none/, 'the caption takes taps -- the chrome toggle and double-tap zoom stop working over a missing page');

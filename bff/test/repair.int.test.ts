@@ -1400,3 +1400,17 @@ test('the nightly cannot delete, merge or renumber anything', { skip }, () => {
       + 'confirms, because they are the ones this project cannot undo.');
   }
 });
+
+test('nightly short repair leaves titled specials alone but an explicit Fix still checks them', { skip }, async () => {
+  const id = await shortBook(3);
+  await q(`UPDATE lib_books SET chapter_name='Q&A Announcement!' WHERE id=$1`, [id]);
+  pagesFor.set(cid(A, T.short, 3), 2);
+  pagesFor.set(cid(B, T.short, 3), 12);
+  const unattended = await runRepair(undefined, { only: ['short'], userId: null });
+  assert.equal(unattended.short.looked, 0);
+  assert.equal((await book(id)).pages, 2);
+  assert.deepEqual(pageCalls, [], 'no search for a longer copy of a named special');
+  const manual = await runRepair(undefined, { only: ['short'], bookId: id, userId: null });
+  assert.equal(manual.short.looked, 1);
+  assert.equal(manual.short.replaced, 1, 'an explicit repair retains its ordinary safeguards');
+});

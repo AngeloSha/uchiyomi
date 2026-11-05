@@ -147,6 +147,10 @@ export const IcMore = (p: P) => (
 export const IcImport = (p: P) => (
   <svg {...base(p)}><path d="M12 3v10" /><path d="m8 9.5 4 4 4-4" /><path d="M3.5 14H8l1.5 2.5h5L16 14h4.5" /><path d="M3.5 14v4.5A2.5 2.5 0 0 0 6 21h12a2.5 2.5 0 0 0 2.5-2.5V14" /></svg>
 );
+// Upload a series: an arrow up out of a tray, the import's mirror -- files from this device, not a list.
+export const IcUpload = (p: P) => (
+  <svg {...base(p)}><path d="M12 14V3" /><path d="m8 7 4-4 4 4" /><path d="M3.5 14v4.5A2.5 2.5 0 0 0 6 21h12a2.5 2.5 0 0 0 2.5-2.5V14" /></svg>
+);
 export const IcFilter = (p: P) => (
   <svg {...base(p)}><path d="M4 5h16" /><path d="M7 12h10" /><path d="M10 19h4" /></svg>
 );

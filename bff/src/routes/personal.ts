@@ -359,9 +359,21 @@ export default async function personalRoutes(app: FastifyInstance) {
   // No `scope`: the caller's own hand-picked lists with the stored count, as before v0.61.0 -- the series page's "Add to
   // collection" sheet offers these, and an older client reads them. `scope=all`: theirs of both kinds and the
   // household's shared ones, counted for this viewer (lib/lists.ts listsFor).
-  app.get('/api/collections', async (req) => {
-    const { scope } = req.query as { scope?: string };
-    return { content: await listsFor(userIdOf(req), vc(req), scope === 'all' ? 'all' : 'manual') };
+  app.get('/api/collections', async (req, reply) => {
+    const query = z.object({ scope: z.string().optional(), seriesId: z.string().min(1).max(200).optional() }).safeParse(req.query);
+    if (!query.success) return reply.code(400).send({ error: 'bad_request' });
+    const { scope, seriesId } = query.data;
+    // Membership is exposed only for a series this viewer may open, and only for their own editable lists.
+    if (seriesId && !(await komga.series(vc(req), seriesId).catch(() => null))) {
+      return reply.code(404).send({ error: 'not_found' });
+    }
+    const content = await listsFor(userIdOf(req), vc(req), seriesId ? 'manual' : scope === 'all' ? 'all' : 'manual');
+    if (!seriesId) return { content };
+    const memberships = await q<{ collection_id: string }>(
+      `SELECT ci.collection_id FROM collection_items ci JOIN collections c ON c.id = ci.collection_id
+        WHERE ci.series_id = $1 AND c.user_id = $2 AND c.query IS NULL`, [seriesId, userIdOf(req)]);
+    const contains = new Set(memberships.map((item) => item.collection_id));
+    return { content: content.map((list) => ({ ...list, contains: contains.has(list.id) })) };
   });
 
   app.post('/api/collections', async (req, reply) => {

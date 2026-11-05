@@ -157,7 +157,7 @@ export function ConfirmDialog({
         <>
           <div className="mb-1 mt-4 flex items-center justify-between gap-2">
             <label className="text-xs font-semibold uppercase tracking-wider text-fog-500">
-              {before}<span className="text-fog-200">{confirmText}</span>{after}
+              {before}<span className="normal-case text-fog-200">{confirmText}</span>{after}
             </label>
             {canCopy && (
               <button

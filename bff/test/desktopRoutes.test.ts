@@ -80,6 +80,7 @@ async function desktopApp() {
     if (isDesktop() && (mod === 'opds' || mod === 'komgaCompat')) continue; // server.ts: `if (!isDesktop())`
     await app.register((await import(`../src/routes/${mod}`)).default);
   }
+  await app.register((await import('../src/routes/upload')).uploadSeriesRoutes);
   const table = new Set(seen); // before the web root, whose per-file static routes are not API
   await registerWebRoot(app);
   await app.ready();

@@ -428,6 +428,8 @@ export interface Ghost {
 }
 
 export interface Listing {
+  /** Deleted single-chapter rows whose every known source copy is blocked. The progress/history row is retained. */
+  blockedDeletedBookIds?: string[];
   /** When the updater last wrote this list, or null when it never has. Stale beats empty, so the age is shown. */
   checkedAt: string | null;
   content: Ghost[];
