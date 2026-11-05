@@ -192,7 +192,7 @@ the page, cards, sheets, the sidebar and a phone browser's own bar included, and
 It is saved to your account like the accent colour; the sign-in screen stays black.
 
 **Lists** are your own shelves — *Plan to read*, *Reading now*, anything. Make one under **Lists** with **New**, and
-add series to it from a series page with the **List** key under the reading button (*Add to list*). A list shows its series with the Library's covers
+add series to it from a series page with the **List** key under the reading button (*Add to list*). The sheet ticks the lists that already hold the series: tap a ticked one to take the series off it again, an unticked one to add it. A list shows its series with the Library's covers
 (since v0.55.7, [#164](https://github.com/AngeloSha/uchiyomi/discussions/164)): the unread count, the **NEW** ribbon and
 the favourite heart, counted from your own reading. **Sort by** orders it: **Your order** (the list as you arranged it,
 the default), **A–Z**, **Z–A**, **Last read** (what you read most recently first), **Most unread** and **Latest chapter**

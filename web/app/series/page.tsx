@@ -87,32 +87,52 @@ const markingText = (n: number) => (n === 1 ? tr('Marking 1 chapter read…') : 
 // The one field style the page's own small dialogs share (Add to collection, Edit chapter).
 const fld = 'w-full rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2 text-sm text-fog-100 outline-hidden transition focus:border-accent/60';
 
-interface CollectionRow { id: string; name: string; accent: string | null; item_count: number }
+interface CollectionRow { id: string; name: string; accent: string | null; item_count: number; has?: boolean }
 
 /**
- * "Add to list": pick an existing list or create one inline. The shared Modal since the UI refresh (it was a hand-rolled
- * overlay): Escape closes it, focus starts in it and goes back to the List key, and it clears a phone's nav bar.
+ * "Add to list": every hand-picked list with a tick on the ones that already hold this series. A tap toggles: an
+ * unticked list gets the series, a ticked one gives it up (DELETE .../items/:seriesId, the route the list's own Edit
+ * uses), so a series added to the wrong list is undone from where it was added. Or create a list inline. The shared
+ * Modal since the UI refresh (it was a hand-rolled overlay): Escape closes it, focus starts in it and goes back to the
+ * List key, and it clears a phone's nav bar. The sheet stays open after a toggle so several lists can be changed at once.
  */
 function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () => void }) {
   const toast = useToast();
   const qc = useQueryClient();
   const [name, setName] = useState('');
-  const { data, isLoading } = useQuery({ queryKey: ['collections'], queryFn: () => api<{ content: CollectionRow[] }>('/api/collections') });
-  const add = async (c: CollectionRow) => {
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const { data, isLoading } = useQuery({
+    queryKey: ['collections', 'for-series', seriesId],
+    queryFn: () => api<{ content: CollectionRow[] }>(`/api/collections?seriesId=${encodeURIComponent(seriesId)}`),
+  });
+  const changed = (c: CollectionRow) => {
+    qc.invalidateQueries({ queryKey: ['collections'] });
+    qc.invalidateQueries({ queryKey: ['collection', c.id] });
+  };
+  const toggle = async (c: CollectionRow) => {
+    if (busyId) return;
+    setBusyId(c.id);
     try {
-      await api(`/api/collections/${c.id}/items`, { json: { seriesId } });
-      toast(tr('Added to “{name}”', { name: `\u2068${c.name}\u2069` }), 'success');
-      qc.invalidateQueries({ queryKey: ['collections'] });
-      qc.invalidateQueries({ queryKey: ['collection', c.id] });
-      onClose();
+      if (c.has) {
+        await api(`/api/collections/${c.id}/items/${encodeURIComponent(seriesId)}`, { method: 'DELETE' });
+        toast(tr('Removed from “{name}”', { name: `⁨${c.name}⁩` }), 'success');
+      } else {
+        await api(`/api/collections/${c.id}/items`, { json: { seriesId } });
+        toast(tr('Added to “{name}”', { name: `⁨${c.name}⁩` }), 'success');
+      }
+      changed(c);
     } catch { toast(tr('Failed'), 'error'); }
+    finally { setBusyId(null); }
   };
   const createAndAdd = async () => {
     const n = name.trim();
     if (!n) return;
     try {
       const c = await api<CollectionRow>('/api/collections', { json: { name: n } });
-      await add(c);
+      await api(`/api/collections/${c.id}/items`, { json: { seriesId } });
+      toast(tr('Added to “{name}”', { name: `⁨${c.name}⁩` }), 'success');
+      changed(c);
+      onClose();
     } catch { toast(tr('Could not create the list'), 'error'); }
   };
   return (
@@ -122,11 +142,12 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
       ) : (
         <div data-lenis-prevent className="max-h-64 space-y-1.5 overflow-y-auto">
           {(data?.content ?? []).map((c) => (
-            <button key={c.id} onClick={() => add(c)}
-              className="flex w-full items-center gap-2.5 rounded-xl border border-ink-700 px-3 py-2.5 text-start transition hover:border-accent/50">
+            <button key={c.id} onClick={() => toggle(c)} role="checkbox" aria-checked={!!c.has} disabled={busyId === c.id}
+              className={`flex w-full items-center gap-2.5 rounded-xl border px-3 py-2.5 text-start transition hover:border-accent/50 disabled:opacity-60 ${c.has ? 'border-accent/60 bg-accent-soft' : 'border-ink-700'}`}>
               <span aria-hidden className="h-4 w-1.5 shrink-0 rounded-full" style={{ background: safeColor(c.accent, 'rgb(var(--accent))') }} />
               <span className="min-w-0 truncate text-sm text-fog-100">{c.name}</span>
               <span className="ms-auto shrink-0 text-[11px] text-fog-500">{c.item_count}</span>
+              <span aria-hidden className={`w-4 shrink-0 text-center text-sm ${c.has ? 'text-accent' : 'text-transparent'}`}>✓</span>
             </button>
           ))}
           {!(data?.content ?? []).length && <p className="py-2 text-center text-xs text-fog-500">{tr('No lists yet — create one below.')}</p>}

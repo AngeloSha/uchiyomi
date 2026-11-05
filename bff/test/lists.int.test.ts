@@ -253,6 +253,24 @@ test('GET /api/collections without a scope is what it always was', { skip }, asy
   assert.deepEqual(Object.keys(raw).sort(), ['accent', 'id', 'item_count', 'name', 'sort_order']);
 });
 
+test('GET /api/collections?seriesId= says which picked lists already hold that series', { skip }, async () => {
+  const withIt = await create('lst-owner', { name: 'Lst Has it' });
+  const without = await create('lst-owner', { name: 'Lst Lacks it' });
+  await create('lst-owner', { name: 'Lst Smart too', query: { v: 1, sort: 'az' } });
+  await call('lst-owner', 'POST', `/api/collections/${withIt.id}/items`, { seriesId: 's_lst_a1' });
+  const rows = (await call('lst-owner', 'GET', '/api/collections?seriesId=s_lst_a1')).json().content as any[];
+  assert.equal(rows.find((r) => r.id === withIt.id).has, true);
+  assert.equal(rows.find((r) => r.id === without.id).has, false);
+  assert.ok(rows.every((r) => !r.name.includes('Smart too')), 'a smart list has no hand-picked membership to tick');
+  // Unticking is the existing item route; the flag follows it.
+  await call('lst-owner', 'DELETE', `/api/collections/${withIt.id}/items/s_lst_a1`);
+  const after = (await call('lst-owner', 'GET', '/api/collections?seriesId=s_lst_a1')).json().content as any[];
+  assert.equal(after.find((r) => r.id === withIt.id).has, false);
+  // Another member's list never leaks in, and the flag is absent without the parameter.
+  const plain = (await call('lst-owner', 'GET', '/api/collections')).json().content as any[];
+  assert.ok(plain.every((r) => !('has' in r)));
+});
+
 test("a list's card gets its first covers: the viewer's own view, in the list's order, four at most", { skip }, async () => {
   // UI refresh: GET /api/collections?scope=all carries `preview`, the ids Lists draws as the card's covers. Reintroduce
   // by aggregating the hand-picked ids without the visibility join (`browsable`): the 18+ series shows on the card while

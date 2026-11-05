@@ -360,8 +360,16 @@ export default async function personalRoutes(app: FastifyInstance) {
   // collection" sheet offers these, and an older client reads them. `scope=all`: theirs of both kinds and the
   // household's shared ones, counted for this viewer (lib/lists.ts listsFor).
   app.get('/api/collections', async (req) => {
-    const { scope } = req.query as { scope?: string };
-    return { content: await listsFor(userIdOf(req), vc(req), scope === 'all' ? 'all' : 'manual') };
+    const { scope, seriesId } = req.query as { scope?: string; seriesId?: string };
+    const content = await listsFor(userIdOf(req), vc(req), scope === 'all' ? 'all' : 'manual');
+    // `seriesId` (the series page's "Add to list" sheet): each list also says whether it already holds that series, as
+    // `has`, so the sheet can show it ticked and untick to remove. Without it the answer is as it always was.
+    if (!seriesId) return { content };
+    const held = new Set((await q<{ collection_id: string }>(
+      'SELECT collection_id FROM collection_items WHERE series_id = $1 AND collection_id = ANY($2::uuid[])',
+      [seriesId, content.map((l) => l.id)],
+    )).map((r) => r.collection_id));
+    return { content: content.map((l) => ({ ...l, has: held.has(l.id) })) };
   });
 
   app.post('/api/collections', async (req, reply) => {
