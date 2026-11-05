@@ -83,8 +83,10 @@ export interface ReaderPrefs {
   /**
    * Paged mode only: how a single page is sized in its slide (#398). `page` -- the default, and the reader as it always
    * was -- fits the WHOLE page on the screen, so a tall page is scaled to the screen's height. `width` fits the page to
-   * the slide's width instead and the slide scrolls up and down to read a page taller than the screen. A pair, a split
-   * or turned wide page and a zoomed page keep fitting whole. One setting for every title, synced, not a look.
+   * the slide's width instead (or the share of it Page width gives, a setting of this device: lib/readerDevice.ts
+   * pagedWidth) and the slide scrolls up and down to read a page taller than the screen; a zoom widens the page inside
+   * the slide, which then scrolls sideways too. A pair and a split or turned wide page keep fitting whole. One setting
+   * for every title, synced, not a look.
    */
   pagedFit: PagedFit;
 }

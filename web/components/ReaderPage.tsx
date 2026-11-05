@@ -217,13 +217,16 @@ export function SlideRegion({ src, alt, width, height, region, area, zoom, pendi
  * A page of the paged track whose size is not known yet, while Crop page borders is on: drawn as it always was, hidden
  * until its margins are measured (or 300 ms after it loaded, as SlideRegion), so it is not seen whole and then cropped.
  */
-export function SlidePending({ src, alt, className, zoom, filter, onLoaded, onRetry }: {
-  src: string; alt: string; className: string; zoom: number; filter?: string; onLoaded?: (img: HTMLImageElement) => void; onRetry?: ReaderImageRetry;
+export function SlidePending({ src, alt, className, zoom, width, filter, onLoaded, onRetry }: {
+  src: string; alt: string; className: string; zoom: number;
+  /** A CSS width to draw it at (Page fit → Fit width, #398): the zoom is then in it, not a scale. */
+  width?: string;
+  filter?: string; onLoaded?: (img: HTMLImageElement) => void; onRetry?: ReaderImageRetry;
 }) {
   const late = useLate(src, true);
   return (
     <ReaderImg onRetry={onRetry} src={src} alt={alt} className={className} filter={filter} onLoaded={late.wrap(onLoaded)}
-      style={{ transform: zoom !== 1 ? `scale(${zoom})` : undefined, opacity: late.on ? undefined : 0 }} />
+      style={{ width, transform: zoom !== 1 ? `scale(${zoom})` : undefined, opacity: late.on ? undefined : 0 }} />
   );
 }
 

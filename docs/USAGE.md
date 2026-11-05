@@ -1803,10 +1803,14 @@ not to you: an e-ink tablet wants E-ink, the phone beside it does not.
   the other *this device* settings it is kept in this browser only, so your other screens are unaffected.
 - **Page fit** (paged mode only): *Whole page* is the default and the reader as it always was, each page
   scaled to fit the whole screen. *Fit width* makes a single page as wide as the screen and lets the page scroll up and
-  down to read what is taller than the screen; a swipe sideways still turns the page. The zoom works as usual: it
-  widens the page, which then scrolls sideways as well. A pair of pages and a wide page split or turned on its side
-  keep fitting whole. The slide opens each page at its top and the page keys still turn pages (they do not scroll
-  within one). One setting for every title, saved to your account.
+  down to read what is taller than the screen; a swipe sideways still turns the page. **Page width** (this device,
+  under Fit width) narrows the page to between 30 % and 100 % of the screen's width, in steps of 5 %: a phone wants
+  100 %, a wide monitor about half, where the whole width makes one page several screens tall. The zoom works as
+  usual: it widens the page, which then scrolls sideways as well. Space, ↓ and Page Down read down a tall page before
+  they turn it (↑, Shift+Space and Page Up back up; going back opens the page before at its foot); ← and → turn the
+  page straight away. A pair of pages and a wide page split or turned on its side keep fitting whole. Page fit is one
+  setting for every title, saved to your account; in paged mode it replaces the webtoon column's **Fit** row, which is
+  not shown there.
 - **Colour filter** (this device): *Invert* (light pages turned dark, colours kept), *Grayscale* and *E-ink* (grey with
   more contrast, and every page turn jumps instead of sliding, which e-ink screens draw badly). It is laid over the
   pages only; the reader's own cards and buttons are unchanged, and the theme works as before.

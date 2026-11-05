@@ -76,7 +76,10 @@ const WINDOW_AHEAD = 6;
 const PROBE = 0.4;
 /** What the webtoon column fetches ahead of its window, as bytes only (lib/readerWindow.ts prefetchList). */
 const PREFETCH = { pages: 6, pixels: 48e6 };
-/** Page fit → Fit width (#398): the height a slide's page may take, which is none -- the slide scrolls. */
+/**
+ * Page fit → Fit width (#398): the height a slide's page may take, which is none -- the slide scrolls. SlideRegion fits
+ * its region into the box it is given, so a box this tall makes the width the only bound, cropped margins included.
+ */
 const FIT_WIDE_H = 1e6;
 /** The scrolling slide of Fit width; a lone child (a page smaller than the slide) is centred, a bigger one scrolls from its top left. */
 const FIT_WIDE_CLASS = 'hide-scrollbar flex h-full w-full touch-pan-x touch-pan-y flex-col items-start overflow-auto [&>:only-child]:m-auto';
@@ -901,7 +904,7 @@ function ReaderInner() {
     // One page of the pair brought into frame (#232/#261) is drawn alone; a joined spread turned on its side (#229, Wide
     // pages -> Rotate) is one picture twice a page wide, turned, of which this page is half.
     const pair = shown.length === 2 && focus?.slide !== s;
-    const slide = { mode: 'slide' as const, w: area.w || window.innerWidth, h: area.h || window.innerHeight, zoom, half: !!half[s], crop: prefs.cropBorders, fitWide: prefs.pagedFit === 'width' };
+    const slide = { mode: 'slide' as const, w: area.w || window.innerWidth, h: area.h || window.innerHeight, zoom, half: !!half[s], crop: prefs.cropBorders, fitWide: prefs.pagedFit === 'width' ? device.pagedWidth / 100 : undefined };
     if (pair && joined[s] && wideMode === 'rotate' && p.width && p.height) {
       return drawnWidth({ width: 2 * p.width, height: p.height }, { ...slide, pair: false, rotate: true }) / 2;
     }
@@ -1644,7 +1647,19 @@ function ReaderInner() {
         // page's FIRST half, so from its second half the next press went back to the half already on screen.
         const last = Math.max(0, el.children.length - 1); // page slides, then Up Next / the failure card
         const from = slideNow();
+        // Page fit → Fit width (#398): next and back read DOWN a page taller than the screen first, most of a screen a
+        // press like the webtoon column, and turn the page once at its end. The page to the left or the right turns.
+        const tall = action === 'next' || action === 'prev' ? el.children[from]?.querySelector<HTMLElement>('[data-fit-wide]') : null;
+        if (tall) {
+          const room = d > 0 ? tall.scrollHeight - tall.clientHeight - tall.scrollTop : tall.scrollTop;
+          if (room > 1) { tall.scrollBy({ top: d * tall.clientHeight * 0.88, behavior }); return; }
+        }
         const to = Math.max(0, Math.min(last, from + d));
+        // Back onto a page read down: it opens at its foot, where reading it left off.
+        if (action === 'prev' && to !== from) {
+          const back = el.children[to]?.querySelector<HTMLElement>('[data-fit-wide]');
+          if (back) back.scrollTop = back.scrollHeight;
+        }
         if (o.tap) acted.current = { kind: 'turn', slide: from, at: Date.now() };
         lastMoved.current = Date.now(); // before the first scroll event arrives
         el.scrollTo({ left: trackSign * to * (el.clientWidth || window.innerWidth), behavior });
@@ -1843,9 +1858,18 @@ function ReaderInner() {
     el.style.setProperty('--pan-x', `${x}px`);
     el.style.setProperty('--pan-y', `${y}px`);
   };
-  // Fit width (#398): a zoom widens the page inside its scrolling slide, so keep the middle of it in view.
-  useEffect(() => {
-    scrollRef.current?.querySelectorAll<HTMLElement>('[data-fit-wide]').forEach((el) => { el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2; });
+  // Fit width (#398): a zoom widens the page inside its scrolling slide, so the point in the middle of the screen stays
+  // there -- both ways: a page grown taller kept its scrollTop and showed some other part of the page, and centring
+  // sideways on every step of a pinch threw away where the reader had scrolled to. Before paint, so nothing jumps.
+  const zoomWas = useRef(zoom);
+  useLayoutEffect(() => {
+    const k = zoom / zoomWas.current;
+    zoomWas.current = zoom;
+    if (k === 1) return;
+    scrollRef.current?.querySelectorAll<HTMLElement>('[data-fit-wide]').forEach((el) => {
+      el.scrollLeft = (el.scrollLeft + el.clientWidth / 2) * k - el.clientWidth / 2;
+      el.scrollTop = (el.scrollTop + el.clientHeight / 2) * k - el.clientHeight / 2;
+    });
   }, [zoom]);
   // A new page, or the zoom put away, starts centred; a changed zoom keeps the drag inside its new reach.
   useEffect(() => {
@@ -2249,13 +2273,15 @@ function ReaderInner() {
             const turnedPair = isJoined && wideMode === 'rotate';
             // v0.61.0: one half of a wide page (Wide pages → Split) is a slide of its own, keyed apart from its twin.
             const halfOf = half[s];
-            // #398, Page fit → Fit width: a single, ordinary, unzoomed page is as wide as the slide and the slide scrolls
-            // up and down to read it, and sideways once zoomed (the zoom widens the page inside the slide; this box scrolls
-            // it, so panBy stays out of it). Everything else -- a pair, a split or turned wide page, a placeholder --
-            // keeps fitting whole, as it always has.
+            // #398, Page fit → Fit width: a single, ordinary page is as wide as the slide (or Page width's share of it,
+            // centred) and the slide scrolls up and down to read it, and sideways once zoomed (the zoom widens the page
+            // inside the slide; this box scrolls it, so panBy stays out of it). Everything else -- a pair, a split or
+            // turned wide page, a placeholder -- keeps fitting whole, as it always has.
             const only = idxs.length === 1 ? flat[idxs[0]] : null;
             const fitWide = prefs.pagedFit === 'width' && !!only && !only.missing && !halfOf && !turnedPair
               && !(wideMode === 'rotate' && isWide(only));
+            // The share of the slide's width the page is drawn at: Page width (this device) by the zoom.
+            const wideShare = (device.pagedWidth / 100) * zoom;
             return (
               <div key={halfOf ? `${flat[idxs[0]].key}:${halfOf}` : flat[slideIdxs[0]].key} data-joined={isJoined || undefined}
                 className="relative h-full w-full shrink-0 snap-center snap-always overflow-hidden">
@@ -2313,7 +2339,8 @@ function ReaderInner() {
                     const h = p.height || box?.h;
                     if (!(w && h)) {
                       return <SlidePending onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} zoom={fitWide ? 1 : zoom} onLoaded={loaded} filter={imgFilter}
-                        className={fitWide ? 'h-auto w-full max-w-none shrink-0' : `max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`} />;
+                        width={fitWide ? `${wideShare * 100}%` : undefined}
+                        className={fitWide ? 'h-auto max-w-none shrink-0' : `max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`} />;
                     }
                     let region: Region = box?.all ?? WHOLE;
                     let pending = box === undefined;
@@ -2327,13 +2354,13 @@ function ReaderInner() {
                     }
                     // Half the slide each, less half the gap -- a joined spread has none.
                     return <SlideRegion onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={w} height={h}
-                      region={region} area={shown.length === 2 ? { w: area.w / 2 - (isJoined ? 0 : 2), h: area.h } : fitWide ? { w: area.w * zoom, h: FIT_WIDE_H } : area} zoom={fitWide ? 1 : zoom}
+                      region={region} area={shown.length === 2 ? { w: area.w / 2 - (isJoined ? 0 : 2), h: area.h } : fitWide ? { w: area.w * wideShare, h: FIT_WIDE_H } : area} zoom={fitWide ? 1 : zoom}
                       pending={pending} onLoaded={loaded} filter={imgFilter} trimmed={region.l} />;
                   }
                   return (
                     <ReaderImg onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })}
                       className={fitWide ? 'h-auto max-w-none shrink-0' : `max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`}
-                      style={fitWide ? { width: `${zoom * 100}%` } : { transform: zoom !== 1 ? `scale(${zoom})` : undefined }} filter={imgFilter} />
+                      style={fitWide ? { width: `${wideShare * 100}%` } : { transform: zoom !== 1 ? `scale(${zoom})` : undefined }} filter={imgFilter} />
                   );
                 })}
                 </div>

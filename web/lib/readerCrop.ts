@@ -45,15 +45,6 @@ export function fitBox(aw: number, ah: number, w: number, h: number): { width: n
   return { width: aw * s, height: ah * s };
 }
 
-/**
- * The box of aspect `aw` : `ah` that is `w` wide, however tall that makes it (Reader → Page fit → Fit width, #398): a
- * page taller than the screen is then scrolled, not shrunk. Zero for an empty or unmeasured box.
- */
-export function fitWidthBox(aw: number, ah: number, w: number): { width: number; height: number } {
-  if (!(aw > 0 && ah > 0 && w > 0)) return { width: 0, height: 0 };
-  return { width: w, height: (w * ah) / aw };
-}
-
 // ---- finding the margins (Reader → Crop page borders) ----
 
 /** A corner counts as paper when every channel is at least this light, or as a black border when none is above DARK. */
