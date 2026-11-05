@@ -1,5 +1,61 @@
 # Changelog
 
+## v0.104.0 — 2026-11-05
+
+**Upload new series or missing chapters, keep artwork beside your files, and improve the reader, lists and source controls.**
+
+### Chapter uploads and local artwork
+
+- **Upload a series**, or use **More → Upload chapters** on an existing series ([#375](https://github.com/AngeloSha/uchiyomi/issues/375),
+  building on **Calvin-Davidson**'s [#384](https://github.com/AngeloSha/uchiyomi/pull/384)). Admins can upload; members need the
+  new **Can upload series** permission, off by default, and may only add files to series they can open. Files stream to
+  the download folder, are checked as readable archives, and never overwrite existing files. Later files are bound to
+  the series the first upload created. Interrupted uploads leave no partial chapter; pending indexing is reported.
+- **Local covers and banners** ([#389](https://github.com/AngeloSha/uchiyomi/issues/389), **OnePieceSunny**): put `cover.jpg`,
+  `banner.jpg` or supported WebP/PNG/JPEG/AVIF equivalents beside the chapters, or in their `artwork/` folder. A library
+  scan validates and caches them, including from read-only libraries, and notices replacements or removals. An explicit
+  artwork choice keeps priority; local files take priority over automatic artwork. Original files are left intact.
+
+### Reader and list controls
+
+- **Paged → Page fit → Fit width** fills the slide and scrolls vertically within the page, including cropped, split,
+  rotated and paired pages. Zoom and right-to-left reading work with it. **Whole page** remains the default and the
+  webtoon Fit setting keeps its own choice ([#398](https://github.com/AngeloSha/uchiyomi/issues/398), **Forgitusername**).
+- **List** on a series now ticks the lists it belongs to. Tick to add, untick to remove, then press **Done**; the sheet
+  stays open for several changes. Only your hand-picked lists appear. Failed writes keep the previous membership
+  ([#399](https://github.com/AngeloSha/uchiyomi/issues/399), **Forgitusername**).
+- Typed confirmations show titles in their real casing ([#381](https://github.com/AngeloSha/uchiyomi/pull/381)), and opening
+  a menu stops smooth-scroll momentum so it stays open ([#388](https://github.com/AngeloSha/uchiyomi/pull/388)), both from
+  **Calvin-Davidson**. A real scroll still dismisses the menu.
+- Mobile sheet actions and pinned footers clear the navigation through the full mobile/tablet breakpoint, including
+  safe-area insets ([#391](https://github.com/AngeloSha/uchiyomi/pull/391), **nVitius**).
+
+### Health and download controls
+
+- Titled Q&As, giveaways, author notes and other short specials are left out of **Suspiciously short chapters** and
+  unattended short-chapter repair ([#386](https://github.com/AngeloSha/uchiyomi/issues/386),
+  [#387](https://github.com/AngeloSha/uchiyomi/pull/387), **Calvin-Davidson**). Story titles that merely mention a special's
+  word remain checked. Detection uses title wording, so a real episode named only “Announcement” without a creator
+  number can still be treated as a special; **Fix** on an individual chapter remains available.
+- A deleted chapter whose every known source copy is blocked leaves the chapter shelf
+  ([#396](https://github.com/AngeloSha/uchiyomi/issues/396), **TIGamingTV**). Reading history and progress stay intact,
+  a saved offline copy remains readable, and unblocking a copy makes the row available again.
+- **Dismiss** and **Cancel** work for source jobs with long encoded folder names
+  ([#397](https://github.com/AngeloSha/uchiyomi/pull/397), **Baine**).
+- Dependency patches from Dependabot [#392](https://github.com/AngeloSha/uchiyomi/pull/392),
+  [#393](https://github.com/AngeloSha/uchiyomi/pull/393) and [#394](https://github.com/AngeloSha/uchiyomi/pull/394):
+  Fastify compression/cookies/JWT/static, motion, IndexedDB test support and Electron 45.1.0.
+
+### Upgrading
+
+- Existing members keep upload permission off. Uploads respect `MIN_FREE_GB`; ZIP/CBZ/EPUB use `UPLOAD_MAX_MB`
+  (2 GB by default), while PDF and RAR/CBR are capped at 128 MiB. Uploads go to the writable download folder.
+- Split-container installs stream chapter uploads through nginx without its ordinary 1 MiB API limit; application
+  size, disk-space and permission checks still apply.
+- New artwork-cache metadata and upload permission storage are additive. Existing manual artwork and reader choices
+  retain priority. The optional title extractor keeps Python 3.12 and its existing models.
+- The Umbrel package pins the already published v0.103.1 image until this release's verified digest is available.
+
 ## v0.103.1 — 2026-10-31
 
 **A special no longer shifts the chapter numbers after it, and a series is no longer linked to an AniList entry that
