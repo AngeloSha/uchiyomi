@@ -105,22 +105,18 @@ test('the static export is compressed, as nginx compressed it', async (t) => {
       assert.ok(r.body.length > 8000, 'the identity response should be the full file');
     });
 
-    await t.test('the 1 KB threshold does NOT apply to static files, and that is fine', async () => {
-      // Worth pinning because it is surprising and I got it wrong first: @fastify/static streams, so there
-      // is no Content-Length for @fastify/compress to compare the threshold against, and it compresses
-      // regardless of size. nginx's `gzip_min_length 1024` did skip small files. A 14-byte chunk comes back
-      // as 34 bytes of gzip framing -- worse than sending it raw, and completely immaterial.
-      //
-      // The threshold is not pointless: buffered JSON replies DO carry a Content-Length, so it still keeps
-      // small API responses uncompressed. This asserts the real behaviour so nobody "fixes" a passing test
-      // into a false one later.
+    await t.test('the 1 KB threshold keeps small static files uncompressed', async () => {
+      // @fastify/send 4.2 supplies the file length before compression, so static files now honor the same
+      // threshold as buffered responses. Keep the exact body and length: compression framing would make
+      // this tiny chunk larger. The large-file test above still requires gzip when it is useful.
       const r = await app.inject({
         method: 'GET', url: '/_next/static/chunks/app.js',
         headers: { 'accept-encoding': 'gzip' },
       });
       assert.equal(r.statusCode, 200);
-      assert.equal(r.headers['content-length'], undefined, 'static is streamed; if this ever gains a length, the threshold starts applying');
-      assert.equal(r.headers['content-encoding'], 'gzip');
+      assert.equal(r.body, 'console.log(1)');
+      assert.equal(r.headers['content-length'], String(Buffer.byteLength(r.body)));
+      assert.equal(r.headers['content-encoding'], undefined);
     });
 
     await t.test('the cache-control contract survives compression', async () => {

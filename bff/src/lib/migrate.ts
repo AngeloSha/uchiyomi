@@ -176,6 +176,14 @@ CREATE TABLE IF NOT EXISTS lib_series (
   cover_book_id text,
   scanned_at    timestamptz NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS series_local_art (
+  series_id text NOT NULL REFERENCES lib_series(id) ON DELETE CASCADE,
+  root text NOT NULL, folder text NOT NULL, priority integer NOT NULL,
+  cover_file text, cover_stamp text, banner_file text, banner_stamp text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (series_id, root, folder)
+);
+
 CREATE TABLE IF NOT EXISTS lib_books (
   id         text PRIMARY KEY,
   series_id  text NOT NULL REFERENCES lib_series(id) ON DELETE CASCADE,

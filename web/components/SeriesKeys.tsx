@@ -11,7 +11,7 @@ import { t as tr } from '@/lib/i18n';
 import type { SeriesActionGroup, SeriesActionId } from '@/lib/seriesActions';
 import type { MenuItem } from './ContextMenu';
 import { Sheet } from './ui';
-import { IcCheck, IcHeart, IcHourglass, IcMoments, IcMore, IcPencil, IcRefresh, IcTrash } from './icons';
+import { IcUpload, IcCheck, IcHeart, IcHourglass, IcMoments, IcMore, IcPencil, IcRefresh, IcTrash } from './icons';
 
 type Glyph = { size?: number; className?: string };
 /** The icons' own stroke style (components/icons.tsx `base`), for the few glyphs only this page draws. */
@@ -40,6 +40,7 @@ export function ActionIcon({ id, size = 16 }: { id: SeriesActionId; size?: numbe
     case 'notes': return <IcMoments {...p} />;
     case 'markAllRead': return <IcCheck {...p} />;
     case 'markAllUnread': return <IcUnread size={size} />;
+    case 'upload': return <IcUpload {...p} />;
     case 'findMissing': return <IcFindMissing size={size} />;
     case 'archive': return <IcHourglass {...p} />;
     case 'checkNew': return <IcRefresh {...p} />;

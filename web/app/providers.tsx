@@ -8,6 +8,7 @@ import { AuthProvider } from '@/lib/auth';
 import { ToastProvider } from '@/components/Toast';
 import { I18nProvider } from '@/lib/I18nProvider';
 import { flushOutbox } from '@/lib/downloads';
+import { setSmoothScroll } from '@/lib/smoothScroll';
 
 export function Providers({ children }: { children: ReactNode }) {
   const [qc] = useState(
@@ -74,6 +75,7 @@ export function Providers({ children }: { children: ReactNode }) {
     if (reduceEffects || effectsReduced()) return;
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const lenis = new Lenis({ duration: 1.05, smoothWheel: true });
+    setSmoothScroll(lenis);
     // Lenis animates nothing but a wheel turn (touch scrolls natively), so a device with no mouse or trackpad starts the
     // frame loop at its first wheel, never before. A phone ran this requestAnimationFrame every frame of every page -- the
     // reader's included -- for nothing: a main-thread wake-up 60 or 120 times a second that only ever returned. A mouse
@@ -92,6 +94,7 @@ export function Providers({ children }: { children: ReactNode }) {
       window.removeEventListener('wheel', start);
       fine.removeEventListener('change', start);
       cancelAnimationFrame(raf);
+      setSmoothScroll(null);
       lenis.destroy();
     };
   }, [reduceEffects]);

@@ -52,6 +52,7 @@ import { catalogRootUnavailable } from './catalogRootGuard';
 import { countPages } from './pageCount';
 import { haveNumbers } from './libraryNumbers';
 import { atHiddenNumber } from './noticeChapters';
+import { specialName } from './specialChapters';
 import { numberHiddenNow } from './hiddenChapters';
 import { archiveHoles, type ArchiveHoles } from './archiveBoundaries';
 import { DL_ROOT, persistScan, setBookDates, setBookMeta } from './library';
@@ -886,6 +887,8 @@ type ShortBook = {
   web: string | null; status: string | null;
   /** The reader's and Health's page-size cache (lib_books.page_dims), read by longStrip(): null until measured. */
   page_dims: PageDim[] | null;
+  /** The chapter's titles, read by specialName(): its own name, the file's title, the listing's for its number. */
+  chapter_name: string | null; book_title: string | null; listed_title: string | null;
 };
 
 /** The hunt verdicts that PROVE nothing else has this chapter. `cooldown` is silence, not an answer. */
@@ -959,8 +962,10 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
   const cap = opts.bookId ? REPAIR_SHORT_MAX : opts.autofix ? UNCAPPED : REPAIR_SHORT_MAX;
   const rows0 = await q<ShortBook>(
     `SELECT b.id, b.series_id, b.number::float8 AS number, b.pages, b.root, b.file, b.source_id, b.page_dims,
-            s.title, s.folder, s.summary, s.author, s.genres, s.web, s.status
+            s.title, s.folder, s.summary, s.author, s.genres, s.web, s.status,
+            b.chapter_name, b.title AS book_title, sl.title AS listed_title
        FROM lib_books b JOIN lib_series s ON s.id = b.series_id AND ${visibleToAll('s')}
+       LEFT JOIN series_listing sl ON sl.series_id = b.series_id AND sl.number = b.number
       WHERE b.pages BETWEEN 1 AND 2 AND b.number = floor(b.number)
         AND b.pruned_at IS NULL AND b.short_confirmed_at IS NULL AND b.missing_pages IS NULL
         AND b.root = $1 AND b.file = s.folder || '/Chapter ' || (b.number::int)::text || '.cbz'
@@ -974,7 +979,11 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
   // the LIMIT mean "twenty candidates"); this is the answer. If the two ever disagree -- a rename of the
   // downloader's layout, a locale that formats a number differently -- this one wins, and it fails in the
   // safe direction: a chapter skipped, never somebody's read-library file replaced.
-  const named = rows0.filter((b) => b.file === chapterFileRel(b.folder, Number(b.number)));
+  // ...and a chapter titled as a special (a Q&A, a giveaway, an author's note) is short on purpose: Health leaves it out
+  // (lib/specialChapters.ts), so the unattended pass does too, rather than hunting other sources for a longer copy that
+  // does not exist. A Fix pressed on one is a person asking, and still runs.
+  const named = rows0.filter((b) => b.file === chapterFileRel(b.folder, Number(b.number))
+    && (opts.bookId || !specialName(Number(b.number), b.chapter_name, b.book_title, b.listed_title)));
   // ...and a chapter stitched into one or two long strips is left alone (v0.60.1, found in Squeaks72's fork): that is
   // what the series IS, not a failed download -- the rule Health has reported by since v0.55.10 (lib/longStrip.ts), which
   // this step never asked. So the nightly hunted other sources for intact webtoon chapters Health no longer showed, and

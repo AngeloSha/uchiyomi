@@ -316,6 +316,8 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'short.none': () => tr('No truncated chapters found'),
   'short.quiet': (p) => (num(p, 'n') === 1 ? tr('1 confirmed short at the source') : tr('{n} confirmed short at the source', { n: num(p, 'n') })),
   'short.note': () => tr('Counted nightly by the repair task, which opens the chapter files nobody has read yet, so this is no longer limited to chapters someone has opened. Half-chapters are excluded since author notices really are one page. "Fix" replaces the chapter only if another source has a longer copy; "It\'s fine" records that it really is this short, and the nightly stops looking at it.'),
+  'short.specials': (p) => (num(p, 'n') === 1 ? tr('1 special left out') : tr('{n} specials left out', { n: num(p, 'n') })),
+  'short.specialNote': () => tr('A chapter whose title names a special (a Q&A, a giveaway, an announcement, an author\'s note, bonus art) is left out too: those are meant to be short.'),
   'short.detail': (p) => (num(p, 'pages') === 1
     ? tr('Chapter {number} has 1 page', { number: num(p, 'number') })
     : tr('Chapter {number} has {n} pages', { number: num(p, 'number'), n: num(p, 'pages') })),

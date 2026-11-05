@@ -31,7 +31,7 @@ import { reasonText, type Said } from '@/lib/said';
 import { offlineOutcome } from '@/lib/notices';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
 import { normGroup } from '@/lib/scanlators';
-import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, countsAsBehind, MARK_CHUNK, heldBy, lastOf, wholesHeld, prunedWords, deliberatelyDeleted, ghostOfDeleted, type Row } from '@/lib/chapterRows';
+import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, countsAsBehind, MARK_CHUNK, heldBy, lastOf, wholesHeld, prunedWords, deliberatelyDeleted, ghostOfDeleted, withoutBlockedDeleted, type Row } from '@/lib/chapterRows';
 import { chParam, landingNumber } from '@/lib/healthLinks';
 import { effectsReduced } from '@/lib/effects';
 import { clampPage, numberingSpan, pageCount, pageLabel, pageOf, pageSizeFor, pageSlice } from '@/lib/chapterPages';
@@ -87,46 +87,69 @@ const markingText = (n: number) => (n === 1 ? tr('Marking 1 chapter read…') : 
 // The one field style the page's own small dialogs share (Add to collection, Edit chapter).
 const fld = 'w-full rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2 text-sm text-fog-100 outline-hidden transition focus:border-accent/60';
 
-interface CollectionRow { id: string; name: string; accent: string | null; item_count: number }
+interface CollectionRow { id: string; name: string; accent: string | null; item_count: number; contains?: boolean }
 
-/**
- * "Add to list": pick an existing list or create one inline. The shared Modal since the UI refresh (it was a hand-rolled
- * overlay): Escape closes it, focus starts in it and goes back to the List key, and it clears a phone's nav bar.
- */
+/** The server lists only this account's hand-picked lists, with membership checked for the visible series. */
 function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () => void }) {
   const toast = useToast();
   const qc = useQueryClient();
   const [name, setName] = useState('');
-  const { data, isLoading } = useQuery({ queryKey: ['collections'], queryFn: () => api<{ content: CollectionRow[] }>('/api/collections') });
-  const add = async (c: CollectionRow) => {
-    try {
-      await api(`/api/collections/${c.id}/items`, { json: { seriesId } });
-      toast(tr('Added to “{name}”', { name: `\u2068${c.name}\u2069` }), 'success');
-      qc.invalidateQueries({ queryKey: ['collections'] });
-      qc.invalidateQueries({ queryKey: ['collection', c.id] });
-      onClose();
-    } catch { toast(tr('Failed'), 'error'); }
+  const [saving, setSaving] = useState(false);
+  const inFlight = useRef(false);
+  const queryKey = ['collections', 'membership', seriesId];
+  const { data, isLoading, isError, refetch } = useQuery({ queryKey: ['collections', 'membership', seriesId],
+    queryFn: () => api<{ content: CollectionRow[] }>(`/api/collections?seriesId=${encodeURIComponent(seriesId)}`) });
+  const changed = (c: CollectionRow, contains: boolean) => {
+    qc.setQueryData<{ content: CollectionRow[] }>(queryKey, (old) => ({ content: (old?.content ?? []).map((row) => row.id === c.id
+      ? { ...row, contains, item_count: Math.max(0, Number(row.item_count) + (contains ? 1 : -1)) } : row) }));
+    for (const key of [['collections'], ['lists-all'], ['collection', c.id], ['home']]) qc.invalidateQueries({ queryKey: key });
+    toast(tr(contains ? 'Added to “{name}”' : 'Removed from “{name}”', { name: `\u2068${c.name}\u2069` }), 'success');
+  };
+  const saveMembership = async (c: CollectionRow, contains: boolean) => {
+    await api(contains ? `/api/collections/${c.id}/items` : `/api/collections/${c.id}/items/${encodeURIComponent(seriesId)}`,
+      contains ? { json: { seriesId } } : { method: 'DELETE' });
+    changed(c, contains);
+  };
+  const toggle = async (c: CollectionRow) => {
+    // Claim synchronously: two taps before React paints must not issue competing writes.
+    if (inFlight.current || typeof c.contains !== 'boolean') return;
+    inFlight.current = true; setSaving(true);
+    try { await saveMembership(c, !c.contains); }
+    catch { toast(tr('Failed'), 'error'); }
+    finally { inFlight.current = false; setSaving(false); }
   };
   const createAndAdd = async () => {
     const n = name.trim();
-    if (!n) return;
+    if (!n || inFlight.current) return;
+    inFlight.current = true; setSaving(true);
     try {
       const c = await api<CollectionRow>('/api/collections', { json: { name: n } });
-      await add(c);
+      qc.setQueryData<{ content: CollectionRow[] }>(queryKey, (old) => ({ content: [...(old?.content ?? []), { ...c, contains: false }] }));
+      setName('');
+      // If adding fails, keep the newly created empty list visible and retryable.
+      try { await saveMembership(c, true); } catch { toast(tr('Failed'), 'error'); }
     } catch { toast(tr('Could not create the list'), 'error'); }
+    finally { inFlight.current = false; setSaving(false); }
   };
   return (
     <Modal title={tr('Add to list')} onClose={onClose} fieldFocus={false}>
-      {isLoading ? (
-        <div className="skeleton h-24 rounded-xl" />
+      <p className="mb-3 text-xs text-fog-400">{tr('Tick a list to add this series; untick it to remove it.')}</p>
+      {isLoading ? <div className="skeleton h-24 rounded-xl" /> : isError ? (
+        <div className="py-3 text-sm text-fog-400">{tr('Could not load lists')}
+          <button type="button" className="chip ms-2" onClick={() => void refetch()}>{tr('Try again')}</button>
+        </div>
       ) : (
         <div data-lenis-prevent className="max-h-64 space-y-1.5 overflow-y-auto">
           {(data?.content ?? []).map((c) => (
-            <button key={c.id} onClick={() => add(c)}
-              className="flex w-full items-center gap-2.5 rounded-xl border border-ink-700 px-3 py-2.5 text-start transition hover:border-accent/50">
+            <button key={c.id} type="button" role="checkbox" aria-checked={c.contains === true} disabled={saving || typeof c.contains !== 'boolean'}
+              data-list-membership={c.id} onClick={() => void toggle(c)}
+              className="flex w-full items-center gap-2.5 rounded-xl border border-ink-700 px-3 py-2.5 text-start transition hover:border-accent/50 disabled:opacity-50">
               <span aria-hidden className="h-4 w-1.5 shrink-0 rounded-full" style={{ background: safeColor(c.accent, 'rgb(var(--accent))') }} />
               <span className="min-w-0 truncate text-sm text-fog-100">{c.name}</span>
               <span className="ms-auto shrink-0 text-[11px] text-fog-500">{c.item_count}</span>
+              <span aria-hidden className={`grid h-5 w-5 shrink-0 place-items-center rounded border ${c.contains ? 'border-accent bg-accent-soft text-accent' : 'border-ink-600'}`}>
+                {c.contains && <IcCheck width={13} height={13} />}
+              </span>
             </button>
           ))}
           {!(data?.content ?? []).length && <p className="py-2 text-center text-xs text-fog-500">{tr('No lists yet — create one below.')}</p>}
@@ -134,9 +157,10 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
       )}
       <div className="mt-3 flex gap-2 border-t border-ink-800 pt-3">
         <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && createAndAdd()}
-          placeholder={tr('New list…')} className={`${fld} flex-1`} />
-        <button onClick={createAndAdd} disabled={!name.trim()} className="btn-accent px-3 text-xs disabled:opacity-50">{tr('Create')}</button>
+          maxLength={120} disabled={saving} aria-label={tr('New list…')} placeholder={tr('New list…')} className={`${fld} flex-1`} />
+        <button type="button" onClick={() => void createAndAdd()} disabled={!name.trim() || saving} className="btn-accent px-3 text-xs disabled:opacity-50">{tr('Create')}</button>
       </div>
+      <div className="mt-3 flex justify-end"><button type="button" className="btn-ghost px-3 py-2 text-sm" onClick={onClose}>{tr('Done')}</button></div>
     </Modal>
   );
 }
@@ -989,8 +1013,9 @@ function SeriesInner() {
   // chapter rows and joins the ghosts (chapterRows.ts ghostOfDeleted) -- unless this device saved a copy, which keeps
   // it a chapter you can open. The dedupe above still counts it, so a listed ghost on its number is not drawn twice.
   const asGhost = useCallback((b: Book) => listing?.deletedAsGhosts === true && deliberatelyDeleted(b) && !downloaded.has(b.id), [listing?.deletedAsGhosts, downloaded]);
-  const rowBooks = useMemo(() => allBooks.filter((b) => !asGhost(b)), [allBooks, asGhost]);
-  const deletedGhosts = useMemo(() => allBooks.filter(asGhost).map(ghostOfDeleted), [allBooks, asGhost]);
+  const visibleBooks = useMemo(() => withoutBlockedDeleted(allBooks, listing?.blockedDeletedBookIds ?? [], downloaded), [allBooks, listing?.blockedDeletedBookIds, downloaded]);
+  const rowBooks = useMemo(() => visibleBooks.filter((b) => !asGhost(b)), [visibleBooks, asGhost]);
+  const deletedGhosts = useMemo(() => visibleBooks.filter(asGhost).map(ghostOfDeleted), [visibleBooks, asGhost]);
   const visibleGhosts = useMemo(() => (showGhosts ? [...ghosts.filter((g) => !haveNumbers.has(g.number)), ...deletedGhosts] : []), [showGhosts, ghosts, haveNumbers, deletedGhosts]);
   // The names the filter offers: the groups route's, or -- when it answered with nothing (a series scanned
   // from disk, a route that is not there) -- whatever the chapters on disk name, so a hand-built library
@@ -1723,7 +1748,7 @@ function SeriesInner() {
     } catch { toast(tr('Could not copy the link'), 'error'); }
   };
   const moreGroups = seriesActionGroups({
-    isAdmin, mayDownload: canDownload(user), booksCount: series?.booksCount ?? 0, mayArchive,
+    isAdmin, mayDownload: canDownload(user), mayUpload: isAdmin || user?.perms?.canUploadManually === true, booksCount: series?.booksCount ?? 0, mayArchive,
     autoHero: !!series?.autoHero, hasFolder: !!series?.folder, offline: authStatus === 'offline', notes: notesCounts,
     hiddenChapters: series?.hiddenChapters ?? 0,
     busy: { checkNew: checking, archive: acting, newBanner: busyAdmin },
@@ -1733,6 +1758,7 @@ function SeriesInner() {
       case 'notes': router.push(notesHref); break;
       case 'markAllRead': void markAllRead(); break;
       case 'markAllUnread': void markAllUnread(); break;
+      case 'upload': router.push(`/upload/?seriesId=${encodeURIComponent(id)}`); break;
       case 'findMissing': setFindingMissing(true); break;
       case 'hidden': setShowHidden(true); break;
       case 'archive': void archiveSlowly(); break;
@@ -1990,9 +2016,9 @@ function SeriesInner() {
   // at z-40 in the root context -- so whatever z-index this div carries, the nav paints on top of it. With
   // seven chips wrapping to three rows at 390 px, Fetch, Fetch again, Delete from server and Cancel all sat
   // behind the nav and elementFromPoint returned the nav for every one of them. On phones the bar therefore
-  // sits at the nav's top edge: 5.75rem plus the safe-area inset (the nav measures 92 px at 390 px; the
-  // Sheet's 5.5rem `overBottomNav` value tucks under the bar's own bottom padding and would overlap by 4 px
-  // here). From lg up the nav is hidden and the bar goes back to the bottom. Reintroduce by changing the
+  // sits at the nav's top edge: 5.75rem plus the safe-area inset (the nav measures 92 px at 390 px, also
+  // cleared by Sheet's `overBottomNav` padding). From lg up the nav is hidden and the bar goes back to
+  // the bottom. Reintroduce by changing the
   // bottom class back to `bottom-0` and picking every row on a phone: only the first row of chips is
   // tappable.
   //

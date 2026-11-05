@@ -18,6 +18,8 @@
 import puppeteer from 'puppeteer';
 import { mkdirSync, writeFileSync } from 'fs';
 import { networkCuts } from './networkCut.mjs';
+import { sheetNavigationWalk } from './sheetNavigationWalk.mjs';
+import { collectionMembershipWalk, pagedFitWalk, manualUploadWalk } from './reviewFrontendWalk.mjs';
 
 const BASE = process.env.BASE || 'http://127.0.0.1:18140';
 const USER = process.env.E2E_USER || 'e2e';
@@ -288,6 +290,11 @@ try {
     await shot('series');
     ((await page.evaluate(() => (document.body.innerText || '').length)) > 60) ? ok('series page opened') : bad('series page is blank');
 
+    await sheetNavigationWalk({ page, base: BASE, seriesHref, ok, bad, shot });
+    await collectionMembershipWalk({ page, base: BASE, token: await login(USER, PASS), seriesHref, ok, bad, shot });
+    await manualUploadWalk({ page, base: BASE, token: await login(USER, PASS), ok, bad, shot });
+    await page.goto(BASE + seriesHref, { waitUntil: 'networkidle2', timeout: 60000 });
+
     await page.evaluate(() => {
       [...document.querySelectorAll('button,a')].find((b) => /start reading|continue/i.test(b.innerText || ''))?.click();
     });
@@ -299,6 +306,7 @@ try {
     decoded.length
       ? ok(`reader decoded ${decoded.length}/${imgs.length} page(s)`)
       : bad(`no page image decoded (${imgs.length} candidates) — the reader shows nothing`);
+    await pagedFitWalk({ page, base: BASE, token: await login(USER, PASS), seriesHref, bookId: new URL(page.url()).searchParams.get('book'), ok, bad, shot });
   }
 
   // ------------------------------------------------- moments: save a page, find it again, jump back to it

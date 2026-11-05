@@ -58,7 +58,7 @@ test('deleted ghosts are rows before the switch and stay rows: never folded behi
 test('the series page turns them into ghost rows only under the switch, and keeps a copy saved on this device a chapter', () => {
   const src = readFileSync(join(__dirname, '..', 'app/series/page.tsx'), 'utf8');
   assert.match(src, /listing\?\.deletedAsGhosts === true && deliberatelyDeleted\(b\) && !downloaded\.has\(b\.id\)/);
-  assert.match(src, /allBooks\.filter\(asGhost\)\.map\(ghostOfDeleted\)/);
+  assert.match(src, /visibleBooks\.filter\(asGhost\)\.map\(ghostOfDeleted\)/);
   assert.match(src, /group === ALL_GROUPS \? rowBooks : rowBooks\.filter/, 'the deleted chapters are still drawn as chapter rows');
   assert.match(src, /ghosts\.length > 0 \|\| deletedGhosts\.length > 0/, 'deleted-only series still expose the ghost control');
 });
