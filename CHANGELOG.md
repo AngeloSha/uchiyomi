@@ -45,6 +45,8 @@
 - Dependency patches from Dependabot [#392](https://github.com/AngeloSha/uchiyomi/pull/392),
   [#393](https://github.com/AngeloSha/uchiyomi/pull/393) and [#394](https://github.com/AngeloSha/uchiyomi/pull/394):
   Fastify compression/cookies/JWT/static, motion, IndexedDB test support and Electron 45.1.0.
+- Patch the static server's `glob` dependency to 14.0.2, fixing cancellation that could continue filesystem traversal
+  after a timeout ([GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4)).
 
 ### Upgrading
 
