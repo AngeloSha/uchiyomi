@@ -12,6 +12,7 @@ import { chapterOutcome } from '@/lib/readerState';
 import { openableChapters } from '@/lib/chapterRows';
 import { buildFlow, startIndex, renderWindow } from '@/lib/readerFlow';
 import { drawnWidth, fitWidth, neverSofter } from '@/lib/readerFit';
+import { pagedScrollStep, zoomedScrollOffset } from '@/lib/readerPagedScroll';
 import { AHEAD_SCREENS, APPEND_SCREENS, BEHIND_SCREENS, KEEP_SCREENS, MAX_WINDOW_PAGES, anchorAt, nearEnd, prefetchList, screenRange, scrollTopFor, windowSet, type IndexRange } from '@/lib/readerWindow';
 import { isCatch, readTap, undoLeft, undoWindow, type TapZone } from '@/lib/readerGesture';
 import { PAGE_ACTIONS, READER_ACTIONS, actionForKey, keyMapFor, type ReaderAction } from '@/lib/readerKeys';
@@ -210,7 +211,17 @@ function ReaderInner() {
   /** The colour filter over every page IMAGE (never the column, the track or a card), and how a move moves under it. */
   const imgFilter = COLOR_FILTER[device.colorFilter];
   const behavior = glide(device.colorFilter);
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoomState] = useState(1);
+  const widthZoomAnchor = useRef<{ pane: HTMLElement; slide: number; page: number; focusedPage?: number; zoom: number; x: number; y: number } | null>(null);
+  const setZoom = (next: number) => {
+    // A smaller image can clamp DOM scroll offsets before layout effects run. Capture the old point first.
+    const el = scrollRef.current;
+    const slide = el ? Math.round(Math.abs(el.scrollLeft) / Math.max(1, el.clientWidth)) : -1;
+    const pane = prefs.mode === 'paged' && prefs.pagedFitWidth
+      ? el?.querySelector<HTMLElement>(`[data-paged-scroll="${slide}"]`) : null;
+    widthZoomAnchor.current = pane ? { pane, slide, page: current, focusedPage: focus?.page, zoom, x: pane.scrollLeft, y: pane.scrollTop } : null;
+    setZoomState(next);
+  };
   // Shift pairs by one page, the title's memory like the zoom (lib/readerSpread.ts pairSlides `shift`).
   const [spreadShift, setSpreadShift] = useState(false);
   // Translated pages (v0.85.0, lib/readerTranslate.ts): the title's memory like the shift, offered only while the server
@@ -1626,6 +1637,12 @@ function ReaderInner() {
     const el = scrollRef.current;
     if (PAGE_ACTIONS.has(action)) {
       if (!el) return;
+      // Vertical reading keys finish a tall page first; physical left/right and tap zones still turn its slide.
+      if (prefs.mode === 'paged' && prefs.pagedFitWidth && !o.tap) {
+        const pane = el.querySelector<HTMLElement>(`[data-paged-scroll="${slideNow()}"]`);
+        const step = pane ? pagedScrollStep(action, pane) : 0;
+        if (pane && step) { pane.scrollBy({ top: step, behavior }); return; }
+      }
       // One page of a pair in frame (#261): a turn toward the pair's other page goes there first.
       if (prefs.mode === 'paged' && stepFocus(action, o)) return;
       // Next and back are reading order, whichever way the pages run. The page to the left or the right is PHYSICAL,
@@ -1852,24 +1869,27 @@ function ReaderInner() {
   }, [current, prefs.mode]);
   useEffect(() => { if (zoom <= 1) { pan.current = { x: 0, y: 0 }; scrollRef.current?.style.removeProperty('--pan-x'); scrollRef.current?.style.removeProperty('--pan-y'); } else panBy(0, 0); }, [zoom]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // A page opens at its top. Zoom grows the actual scrollable picture, with its horizontal centre still in view.
+  // A page opens at its top; subsequent zooms preserve the image point at the viewport's centre on both axes.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || prefs.mode !== 'paged' || !prefs.pagedFitWidth) return;
     const index = Math.round(Math.abs(el.scrollLeft) / Math.max(1, el.clientWidth));
     const pane = el.querySelector<HTMLElement>(`[data-paged-scroll="${index}"]`);
     if (pane) { pane.scrollTop = 0; pane.scrollLeft = (pane.scrollWidth - pane.clientWidth) / 2; }
-  }, [current, prefs.mode, prefs.pagedFitWidth]);
+  }, [current, focus?.page, prefs.mode, prefs.pagedFitWidth]);
   const beforeWidthZoom = useRef(zoom);
   useLayoutEffect(() => {
     const el = scrollRef.current;
     const before = beforeWidthZoom.current; beforeWidthZoom.current = zoom;
+    const anchor = widthZoomAnchor.current; widthZoomAnchor.current = null;
     if (!el || prefs.mode !== 'paged' || !prefs.pagedFitWidth || before === zoom) return;
     const index = Math.round(Math.abs(el.scrollLeft) / Math.max(1, el.clientWidth));
     const pane = el.querySelector<HTMLElement>(`[data-paged-scroll="${index}"]`);
     if (pane) {
-      pane.scrollTop = (pane.scrollTop + pane.clientHeight / 2) * zoom / before - pane.clientHeight / 2;
-      pane.scrollLeft = (pane.scrollWidth - pane.clientWidth) / 2;
+      const saved = anchor?.pane === pane && anchor.slide === index && anchor.page === current
+        && anchor.focusedPage === focus?.page && anchor.zoom === before ? anchor : null;
+      pane.scrollTop = zoomedScrollOffset(saved?.y ?? pane.scrollTop, pane.clientHeight, before, zoom);
+      pane.scrollLeft = zoomedScrollOffset(saved?.x ?? pane.scrollLeft, pane.clientWidth, before, zoom);
     }
   }, [zoom, prefs.mode, prefs.pagedFitWidth]);
 

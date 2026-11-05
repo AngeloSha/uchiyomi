@@ -19,8 +19,10 @@
 ### Reader and list controls
 
 - **Paged → Page fit → Fit width** fills the slide and scrolls vertically within the page, including cropped, split,
-  rotated and paired pages. Zoom and right-to-left reading work with it. **Whole page** remains the default and the
-  webtoon Fit setting keeps its own choice ([#398](https://github.com/AngeloSha/uchiyomi/issues/398), **Forgitusername**).
+  rotated and paired pages. Vertical reading keys finish tall pages before turning, including a focused page of a
+  spread. Zoom keeps the reading position after panning, including when zooming out. **Whole page** remains the default
+  and the webtoon Fit setting keeps its own choice ([#398](https://github.com/AngeloSha/uchiyomi/issues/398),
+  with keyboard/zoom improvements building on [#401](https://github.com/AngeloSha/uchiyomi/pull/401), **Forgitusername**).
 - **List** on a series now ticks the lists it belongs to. Tick to add, untick to remove, then press **Done**; the sheet
   stays open for several changes. Only your hand-picked lists appear. Failed writes keep the previous membership
   ([#399](https://github.com/AngeloSha/uchiyomi/issues/399), **Forgitusername**).
