@@ -43,7 +43,9 @@ export type FitLayout =
    * A slide of the paged track, `w` x `h`: the page on its own, one of a `pair`, one `half` of a wide page split in two,
    * or `rotate`d on its side; scaled by `zoom`.
    */
-  | { mode: 'slide'; w: number; h: number; zoom: number; pair: boolean; half: boolean; rotate: boolean; crop: boolean };
+  | { mode: 'slide'; w: number; h: number; zoom: number; pair: boolean; half: boolean; rotate: boolean; crop: boolean;
+      /** Page fit → Fit width (#398): a single page is as wide as the slide, however tall that makes it. */
+      fitWide?: boolean };
 
 type Dims = { width?: number | null; height?: number | null };
 const known = (p: Dims): p is { width: number; height: number } =>
@@ -68,6 +70,7 @@ export function drawnWidth(page: Dims, l: FitLayout): number {
     ? 2 * containWidth(pw / 2, ph, l.w, l.h)
     : l.rotate
       ? containWidth(ph, pw, l.w, l.h) * (pw / ph)
+      : l.fitWide && !l.pair ? box
       : containWidth(pw, ph, box, l.h);
   return shown * l.zoom * grow;
 }

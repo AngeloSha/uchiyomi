@@ -76,6 +76,10 @@ const WINDOW_AHEAD = 6;
 const PROBE = 0.4;
 /** What the webtoon column fetches ahead of its window, as bytes only (lib/readerWindow.ts prefetchList). */
 const PREFETCH = { pages: 6, pixels: 48e6 };
+/** Page fit → Fit width (#398): the height a slide's page may take, which is none -- the slide scrolls. */
+const FIT_WIDE_H = 1e6;
+/** The scrolling slide of Fit width; a lone child (a page shorter than the slide) is centred, a taller one scrolls from its top. */
+const FIT_WIDE_CLASS = 'hide-scrollbar flex h-full w-full touch-pan-x touch-pan-y flex-col items-center overflow-y-auto overflow-x-hidden [&>:only-child]:my-auto';
 /**
  * How tall a collapsed page is. Enough to read as a band OF SOMETHING -- you can see it is a credit page --
  * without being tall enough to interrupt a scroll. A sibling of DIVIDER_H, and reserved the same way.
@@ -897,7 +901,7 @@ function ReaderInner() {
     // One page of the pair brought into frame (#232/#261) is drawn alone; a joined spread turned on its side (#229, Wide
     // pages -> Rotate) is one picture twice a page wide, turned, of which this page is half.
     const pair = shown.length === 2 && focus?.slide !== s;
-    const slide = { mode: 'slide' as const, w: area.w || window.innerWidth, h: area.h || window.innerHeight, zoom, half: !!half[s], crop: prefs.cropBorders };
+    const slide = { mode: 'slide' as const, w: area.w || window.innerWidth, h: area.h || window.innerHeight, zoom, half: !!half[s], crop: prefs.cropBorders, fitWide: prefs.pagedFit === 'width' };
     if (pair && joined[s] && wideMode === 'rotate' && p.width && p.height) {
       return drawnWidth({ width: 2 * p.width, height: p.height }, { ...slide, pair: false, rotate: true }) / 2;
     }
@@ -2240,12 +2244,23 @@ function ReaderInner() {
             const turnedPair = isJoined && wideMode === 'rotate';
             // v0.61.0: one half of a wide page (Wide pages → Split) is a slide of its own, keyed apart from its twin.
             const halfOf = half[s];
+            // #398, Page fit → Fit width: a single, ordinary, unzoomed page is as wide as the slide and the slide scrolls
+            // up and down to read it. Everything else -- a pair, a split or turned wide page, a placeholder, a zoomed page
+            // (dragged by panBy) -- keeps fitting whole, as it always has.
+            const only = idxs.length === 1 ? flat[idxs[0]] : null;
+            const fitWide = prefs.pagedFit === 'width' && zoom === 1 && !!only && !only.missing && !halfOf && !turnedPair
+              && !(wideMode === 'rotate' && isWide(only));
             return (
               <div key={halfOf ? `${flat[idxs[0]].key}:${halfOf}` : flat[slideIdxs[0]].key} data-joined={isJoined || undefined}
                 className="relative h-full w-full shrink-0 snap-center snap-always overflow-hidden">
                 {/* The clip stays put and the page inside it is what a zoomed drag moves (panBy): a zoomed page used to spill
                     over its neighbours, and could not be dragged to its edges at all. */}
-                <div className={`flex h-full w-full items-center justify-center${isJoined ? '' : ' gap-1'}`} dir={isJoined ? 'ltr' : undefined}
+                {/* Fit width (#398): this box scrolls up and down; sideways it cannot, so a swipe across it still turns the page
+                    (touch-pan-x pan-y: the track's own touch-action stops at this scroll container). */}
+                <div className={fitWide
+                    ? FIT_WIDE_CLASS
+                    : `flex h-full w-full items-center justify-center${isJoined ? '' : ' gap-1'}`} dir={isJoined ? 'ltr' : undefined}
+                  data-lenis-prevent={fitWide ? true : undefined} data-fit-wide={fitWide || undefined}
                   style={zoom > 1 ? { translate: 'var(--pan-x, 0px) var(--pan-y, 0px)' } : undefined}>
                 {turnedPair ? (
                   // Both pages, or neither: half a spread turned on its side is no page at all.
@@ -2292,7 +2307,7 @@ function ReaderInner() {
                     const h = p.height || box?.h;
                     if (!(w && h)) {
                       return <SlidePending onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} zoom={zoom} onLoaded={loaded} filter={imgFilter}
-                        className={`max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`} />;
+                        className={fitWide ? 'my-auto h-auto w-full shrink-0' : `max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`} />;
                     }
                     let region: Region = box?.all ?? WHOLE;
                     let pending = box === undefined;
@@ -2306,12 +2321,12 @@ function ReaderInner() {
                     }
                     // Half the slide each, less half the gap -- a joined spread has none.
                     return <SlideRegion onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={w} height={h}
-                      region={region} area={shown.length === 2 ? { w: area.w / 2 - (isJoined ? 0 : 2), h: area.h } : area} zoom={zoom}
+                      region={region} area={shown.length === 2 ? { w: area.w / 2 - (isJoined ? 0 : 2), h: area.h } : fitWide ? { w: area.w, h: FIT_WIDE_H } : area} zoom={zoom}
                       pending={pending} onLoaded={loaded} filter={imgFilter} trimmed={region.l} />;
                   }
                   return (
                     <ReaderImg onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })}
-                      className={`max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`}
+                      className={fitWide ? 'my-auto h-auto w-full shrink-0' : `max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`}
                       style={{ transform: zoom !== 1 ? `scale(${zoom})` : undefined }} filter={imgFilter} />
                   );
                 })}

@@ -365,6 +365,20 @@ export function ReaderSettings({
           </div>
         </Row>
 
+        {/* #398: paged mode only -- the page whole on the screen (as it always was), or as wide as the screen with the
+            page scrolling up and down when it is taller. Fit above is the webtoon column's. */}
+        {prefs.mode === 'paged' && (
+          <Row label={tr('Page fit')}>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => set({ pagedFit: 'page' })}
+                className={`rounded-2xl border py-3 text-sm ${prefs.pagedFit === 'page' ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{tr('Whole page')}</button>
+              <button onClick={() => set({ pagedFit: 'width' })}
+                className={`rounded-2xl border py-3 text-sm ${prefs.pagedFit === 'width' ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{tr('Fit width')}</button>
+            </div>
+            <p className="mt-2 text-[11px] leading-snug text-fog-500">{tr('Fit width makes a tall page as wide as the screen; scroll up and down to read it.')}</p>
+          </Row>
+        )}
+
         {/* #234: each page at the width it is drawn at rather than as scanned, on this device. Off until chosen: every page
             as scanned is the reader as it always was. */}
         <div className="py-3">
