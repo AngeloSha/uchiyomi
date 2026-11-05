@@ -1645,15 +1645,15 @@ function ReaderInner() {
         // stacked on a smooth scroll still in flight, so two quick presses (or a held key) landed one or two
         // pages on. And from the slide ON SCREEN (v0.61.0, F4), as a tap always did: `slideOf[current]` is a split
         // page's FIRST half, so from its second half the next press went back to the half already on screen.
-        const last = Math.max(0, el.children.length - 1); // page slides, then Up Next / the failure card
-        const from = slideNow();
         // Page fit → Fit width (#398): next and back read DOWN a page taller than the screen first, most of a screen a
         // press like the webtoon column, and turn the page once at its end. The page to the left or the right turns.
-        const tall = action === 'next' || action === 'prev' ? el.children[from]?.querySelector<HTMLElement>('[data-fit-wide]') : null;
+        const tall = action === 'next' || action === 'prev' ? el.children[slideNow()]?.querySelector<HTMLElement>('[data-fit-wide]') : null;
         if (tall) {
           const room = d > 0 ? tall.scrollHeight - tall.clientHeight - tall.scrollTop : tall.scrollTop;
           if (room > 1) { tall.scrollBy({ top: d * tall.clientHeight * 0.88, behavior }); return; }
         }
+        const last = Math.max(0, el.children.length - 1); // page slides, then Up Next / the failure card
+        const from = slideNow();
         const to = Math.max(0, Math.min(last, from + d));
         // Back onto a page read down: it opens at its foot, where reading it left off.
         if (action === 'prev' && to !== from) {
@@ -1765,11 +1765,11 @@ function ReaderInner() {
       const p = [...pointers.current.values()];
       const dist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
       setZoom(Math.max(1, Math.min(3, pinch.current.zoom * (dist / pinch.current.dist))));
-    } else if (zoom > 1 && prefs.mode === 'paged' && pointers.current.size === 1 && !(e.target as HTMLElement).closest?.('[data-fit-wide]')) {
-      // (A Fit width slide scrolls itself -- #398 -- so panBy leaves it alone.)
+    } else if (zoom > 1 && prefs.mode === 'paged' && pointers.current.size === 1) {
       // A zoomed page is dragged around under the finger. The track itself cannot scroll sideways to do it: that
       // is what turns the page, and a swipe on a page you are looking closely at must not.
-      panBy(e.clientX - before.x, e.clientY - before.y);
+      // (A Fit width slide scrolls itself -- #398 -- so panBy leaves it alone.)
+      if (!(e.target as HTMLElement).closest?.('[data-fit-wide]')) panBy(e.clientX - before.x, e.clientY - before.y);
     }
   };
   const onPointerEnd = (e: React.PointerEvent) => {
