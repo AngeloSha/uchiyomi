@@ -257,6 +257,7 @@ test('the 18+ filter hides named genres and sources, and nothing else', { skip }
       assert.ok(!(await ids('/api/sources')).includes(NAMED_SRC), 'the named source is still listed');
       assert.ok((await ids('/api/sources')).includes(CLEAN_SRC), 'the filter took the clean source too');
       assert.ok((await ids('/api/sources?adult=1')).includes(NAMED_SRC), 'the reveal did not bring it back');
+      assert.ok((await ids('/api/sources?adult=1&adult=1')).includes(NAMED_SRC), 'a duplicate adult param must still reveal');
 
       const before = { ...asked };
       const r = await app.inject({ method: 'GET', url: '/api/sources/search-all?q=Zzzafhidden', headers });
