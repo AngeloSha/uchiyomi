@@ -222,7 +222,10 @@ async function boot() {
   return { app, headers, uid };
 }
 
-async function waitForState(app: any, headers: any, id: string, states: string[], timeoutMs = 8000) {
+// 20 s, not 8: a batch resolves through fake sources in well under a second, but on a loaded machine (a CI runner, or this
+// suite beside a browser walk) "a /resume and a POST inside the same window" timed out at 8 s now and then. Only a failure
+// waits the whole time.
+async function waitForState(app: any, headers: any, id: string, states: string[], timeoutMs = 20000) {
   const start = Date.now();
   for (;;) {
     const r = await app.inject({ method: 'GET', url: `/api/admin/import/batches/${id}`, headers });
