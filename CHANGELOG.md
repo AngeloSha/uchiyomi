@@ -1,5 +1,76 @@
 # Changelog
 
+## v0.105.0 — 2026-11-07
+
+**Looking for one series' sources searches every source, a server only adults use can stop hiding 18+, an import never
+adds a second copy of what you have, and the series page keeps its order.**
+
+### Every source, when you look for a series' sources
+
+- **Add more sources** on a series and **Change** in an import search every source your account may use
+  ([#405](https://github.com/AngeloSha/uchiyomi/issues/405), **StrayaJake**; [#412](https://github.com/AngeloSha/uchiyomi/issues/412),
+  **Wolf92s**; with **Baine**'s [#407](https://github.com/AngeloSha/uchiyomi/pull/407)). With **Show 18+** on, the request
+  carried the 18+ flag twice, which hid every source an extension calls adult — on many servers nearly all of them — and
+  with it off they were hidden on purpose, so these tools often searched four sources of twenty-five and found nothing.
+  An account's age limit still applies.
+- **Up to 25 sources per series** ([#413](https://github.com/AngeloSha/uchiyomi/issues/413), **Wolf92s**), ten before:
+  **Admin → Settings → Downloads → More options → Other sources per series**. The first three are asked at every library
+  update; the rest are backups, asked once a day while the series has nothing missing, so a long list of them does not make
+  every update longer. A series that is missing chapters asks them all, and so does **Check now**. When a series is full,
+  the message says where the number is set.
+- A title an extension rates only with a genre tag counts as 18+ when the tag says **Erotica** or **Pornographic**, the
+  way a MangaDex title rated so does: for **Show 18+**, for age limits, in listings, by link and on add, where it is stored
+  18+ (thanks to **globalteddy**).
+
+### A server only adults use
+
+- **Admin → Settings → Series & chapters → Hide 18+ until someone shows it** ([#406](https://github.com/AngeloSha/uchiyomi/issues/406),
+  **StrayaJake**). On by default, as every server has been. Switched off, nothing is hidden for anyone — in the web app,
+  OPDS readers and the Komga API alike — and **Show 18+**, the line above the page and the 18+ filter's genres go away.
+  Age limits on accounts still apply: they are a permission, not this switch.
+
+### Importing
+
+- **No second copy of a tracker entry** ([#410](https://github.com/AngeloSha/uchiyomi/issues/410), **julieminer**). An
+  entry a series here is already linked to — by you, by an earlier import or by the online check — is that series, even
+  under another title: it reads *Already in your library* and is not added again. Before, a series added from a source
+  that spells it differently was offered again by the next import of the same list, and added twice.
+- **How many are left.** A list with more than 500 titles not in your library says how many come after them —
+  *(first 500 not in your library kept; 312 more after them: import again for those)*.
+- **Tracker lists are read up to 2,000 entries** (501 before), so importing a long AniList, MyAnimeList or Kitsu list
+  again reaches the titles after the first 500, as a backup's import does.
+- **A skipped title stays skipped** the next time you import the same list; picking a match for it in **Change**
+  un-skips it.
+- **Back** on an import's review goes back to the import list, in the page and in the browser
+  ([#409](https://github.com/AngeloSha/uchiyomi/issues/409), **julieminer**).
+
+### Series page, reader and uploads
+
+- **Oldest / Newest** on the series page is kept for every series, on every device you sign in on
+  ([#408](https://github.com/AngeloSha/uchiyomi/issues/408), **julieminer**).
+- **Title artwork** settings (automatic title logos and cover titles) are on **Admin → Art**, above the covers and
+  banners they sit beside ([#411](https://github.com/AngeloSha/uchiyomi/issues/411), **julieminer**).
+- In paged **Fit width**, going back a page opens it at its foot, where you left it
+  ([#401](https://github.com/AngeloSha/uchiyomi/pull/401), **Forgitusername**).
+- Uploads ([#375](https://github.com/AngeloSha/uchiyomi/issues/375)): the files that could not be stored stay in the list
+  for another try, the series page and the Library show what landed at once, the page names the series the files go
+  into, and every refusal is said in your language.
+
+### Upkeep
+
+- Dependency updates from Dependabot [#403](https://github.com/AngeloSha/uchiyomi/pull/403) (Fastify 5.12.8 and its
+  plugins, with the @fastify/cors security release 11.4.0) and [#404](https://github.com/AngeloSha/uchiyomi/pull/404)
+  (Next.js 16.4.4, React Query, Motion and Tailwind CSS).
+- Four tests that a slow or small CI runner could fail now wait for what they check, or say what disk they need.
+- Dependabot no longer proposes Python versions the optional title extractor cannot build on
+  ([#395](https://github.com/AngeloSha/uchiyomi/pull/395)).
+
+### Upgrading
+
+- Nothing to do. The new columns and table are additive (the server's 18+ switch, on by default; an import's count of
+  what is left; the remembered skips), and v0.104.0 runs on the new schema if you roll back.
+- The Umbrel package pins v0.104.0.
+
 ## v0.104.0 — 2026-11-05
 
 **Upload new series or missing chapters, keep artwork beside your files, and improve the reader, lists and source controls.**

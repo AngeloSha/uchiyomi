@@ -103,7 +103,7 @@ export const ADMIN_SETTINGS: SettingsIndex = {
     { id: 'mangadex-languages', cat: 'downloads', label: 'MangaDex languages', keywords: ['mangadex', 'languages', 'translations'] },
     { id: 'sources-per-series', cat: 'downloads', more: 'downloads-more', label: 'Other sources per series',
       keywords: ['more sources', 'followed sources', 'sources per series', 'multiple sources', 'follow limit', 'MAX_FOLLOWED_SOURCES'],
-      help: 'How many sources besides its main one a series may follow, whether you add them or Uchiyomi finds them. 3 by default. Each one is one more chapter list to ask for at every library update.' },
+      help: 'How many sources besides its main one a series may follow, whether you add them or Uchiyomi finds them. 3 by default. The first 3 are asked at every library update; the others are backups, asked once a day while the series has nothing missing.' },
     { id: 'smart-checks', cat: 'downloads', more: 'downloads-more', label: 'Smart update checks', keywords: ['quiet series', 'check less often', 'release radar', 'sweep'] },
 
     // ---- Maintenance ----

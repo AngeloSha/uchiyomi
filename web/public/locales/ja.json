@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4565
+    "strings": 4571
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -846,7 +846,6 @@
   "No match found": "一致が見つかりません",
   "Nobody has that title yet.": "その作品を持っているソースはまだありません。",
   "Nothing here.": "ここには何もありません。",
-  "Only the first 500 titles were kept.": "最初の 500 作品だけを保持しました。",
   "Open imports": "進行中の取り込み",
   "Pasted titles": "貼り付けたタイトル",
   "Ready to review": "確認待ち",
@@ -905,7 +904,6 @@
   "Load list": "リストを読み込む",
   "1 novel skipped": "小説1件をスキップ",
   "{n} novels skipped": "小説{n}件をスキップ",
-  "(first 500 kept)": "（先頭500件のみ）",
   "(first 500 not in your library kept; import again for the rest)": "（ライブラリにない先頭500件のみ。残りはもう一度取り込んでください）",
   "Only the first 500 titles not already in your library were kept. Once they are in, import the same list again for the rest.": "ライブラリにまだない最初の 500 作品だけを保持しました。それらを追加したら、同じリストをもう一度取り込むと残りが読み込まれます。",
   "matched under its other name": "別名で一致",
@@ -3858,8 +3856,6 @@
   "{name} calls it “{title}”, which is not this series’ title or one of its other names. If the cover and the chapters show it is the same work, attach it anyway.": "{name} ではこれを「{title}」と呼んでいますが、このシリーズのタイトルでも別名でもありません。表紙と話から同じ作品だと分かるなら、それでも追加してください。",
   "{name} did not say what that title is. Try again in a minute.": "{name} からそのタイトルの情報が返ってきませんでした。1 分ほどしてからもう一度お試しください。",
   "{name} is cooling down after errors, so it is not asked anything right now. Try again later.": "{name} はエラーのあとクールダウン中のため、今は問い合わせていません。あとでもう一度お試しください。",
-  "This series already follows 1 other source, as many as it may. Remove one first, or move the series to this source.": "このシリーズはすでに上限の 1 件の追加ソースを追跡しています。先に 1 件外すか、シリーズをこのソースに移してください。",
-  "This series already follows {n} other sources, as many as it may. Remove one first, or move the series to this source.": "このシリーズはすでに上限の {n} 件の追加ソースを追跡しています。先に 1 件外すか、シリーズをこのソースに移してください。",
   "This series has no main source to detach.": "このシリーズには外せるメインソースがありません。",
   "Change cover": "表紙を変更",
   "Use this cover": "この表紙を使う",
@@ -4168,7 +4164,6 @@
   "Join these two pages again": "この2ページをもう一度つなげる",
   "already following as many as it may": "すでに上限まで追跡中",
   "Other sources per series": "シリーズごとの追加ソース",
-  "How many sources besides its main one a series may follow, whether you add them or Uchiyomi finds them. 3 by default. Each one is one more chapter list to ask for at every library update.": "メインのソース以外に、シリーズが追跡できるソースの数です。自分で追加したものも Uchiyomi が見つけたものも含みます。既定は 3。1 つ増えるごとに、ライブラリの更新のたびに取得する章リストが 1 つ増えます。",
   "Each badge you earn unlocks a frame. Everyone in your household sees the one you wear.": "バッジを獲得するたびにフレームが 1 つ解放されます。つけたフレームは家族全員に見えます。",
   "Unlocked with {badge}": "「{badge}」で解放済み",
   "Unlocks with {badge}": "「{badge}」で解放",
@@ -4568,5 +4563,16 @@
   "Upload chapters": "チャプターをアップロード",
   "Add chapter files to this series. Existing files are never overwritten. The chapter number is read from each file name.": "このシリーズにチャプターファイルを追加します。既存のファイルは上書きしません。チャプター番号は各ファイル名から読み取ります。",
   "{name} was stored, but indexing is pending. Run a library scan before retrying.": "{name} は保存されましたが、索引への登録は保留中です。再試行する前にライブラリをスキャンしてください。",
-  "Could not load series": "シリーズを読み込めませんでした"
+  "Could not load series": "シリーズを読み込めませんでした",
+  "Hide 18+ until someone shows it": "誰かが表示するまで18禁を隠す",
+  "18+ titles, libraries and sources stay out of sight until someone taps Show 18+. Turn this off if only adults use this server: nothing is hidden, and Show 18+ goes away. Age limits on accounts still apply.": "18禁のタイトル・ライブラリ・ソースは、誰かが「18禁を表示」をタップするまで表示されません。このサーバーを大人だけが使うならオフにしてください。何も隠されなくなり、「18禁を表示」もなくなります。アカウントの年齢制限は引き続き適用されます。",
+  "Title artwork": "タイトルアートワーク",
+  "How many sources besides its main one a series may follow, whether you add them or Uchiyomi finds them. 3 by default. The first 3 are asked at every library update; the others are backups, asked once a day while the series has nothing missing.": "メインのソース以外に、シリーズが追跡できるソースの数です。自分で追加したものも Uchiyomi が見つけたものも含みます。既定は 3。最初の 3 件はライブラリの更新のたびに確認し、残りは予備として、シリーズに欠けているものがない間は 1 日 1 回確認します。",
+  "Add chapter files to “{title}”. Existing files are never overwritten. The chapter number is read from each file name.": "「{title}」にチャプターファイルを追加します。既存のファイルは上書きしません。チャプター番号は各ファイル名から読み取ります。",
+  "Another task is changing this series. Try again in a moment.": "別の処理がこのシリーズを変更中です。少ししてからもう一度お試しください。",
+  "Two uploads are already running. Try again when one finishes.": "すでに 2 件のアップロードが進行中です。どちらかが終わってからもう一度お試しください。",
+  "(first 500 not in your library kept; {n} more after them: import again for those)": "（ライブラリにない先頭500件のみ。その後にさらに {n} 件あります。もう一度取り込んでください）",
+  "The first 500 titles not already in your library were kept, and {n} more come after them. Once these are in, import the same list again for the rest.": "ライブラリにまだない最初の 500 作品を保持しました。その後にさらに {n} 作品あります。これらを追加したら、同じリストをもう一度取り込むと残りが読み込まれます。",
+  "This series already follows 1 other source, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.": "このシリーズはすでに、このサーバーで許可されている上限の 1 件の追加ソースを追跡しています。先に 1 件外すか、シリーズをこのソースに移すか、管理 → 設定 → ダウンロード → その他の設定 → シリーズごとの追加ソース で上限を増やしてください。",
+  "This series already follows {n} other sources, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.": "このシリーズはすでに、このサーバーで許可されている上限の {n} 件の追加ソースを追跡しています。先に 1 件外すか、シリーズをこのソースに移すか、管理 → 設定 → ダウンロード → その他の設定 → シリーズごとの追加ソース で上限を増やしてください。"
 }

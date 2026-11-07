@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4565
+    "strings": 4571
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -846,7 +846,6 @@
   "No match found": "Aucune correspondance trouvée",
   "Nobody has that title yet.": "Personne n’a encore ce titre.",
   "Nothing here.": "Rien ici.",
-  "Only the first 500 titles were kept.": "Seuls les 500 premiers titres ont été conservés.",
   "Open imports": "Importations en cours",
   "Pasted titles": "Titres collés",
   "Ready to review": "Prêt à vérifier",
@@ -905,7 +904,6 @@
   "Load list": "Charger la liste",
   "1 novel skipped": "1 roman ignoré",
   "{n} novels skipped": "{n} romans ignorés",
-  "(first 500 kept)": "(les 500 premiers conservés)",
   "(first 500 not in your library kept; import again for the rest)": "(les 500 premiers absents de votre bibliothèque conservés ; importez à nouveau pour le reste)",
   "Only the first 500 titles not already in your library were kept. Once they are in, import the same list again for the rest.": "Seuls les 500 premiers titres absents de votre bibliothèque ont été conservés. Une fois qu’ils y sont, importez à nouveau la même liste pour le reste.",
   "matched under its other name": "trouvé sous son autre nom",
@@ -3858,8 +3856,6 @@
   "{name} calls it “{title}”, which is not this series’ title or one of its other names. If the cover and the chapters show it is the same work, attach it anyway.": "{name} l’appelle « {title} », qui n’est ni le titre de cette série ni l’un de ses autres noms. Si la couverture et les chapitres montrent que c’est la même œuvre, associez-la quand même.",
   "{name} did not say what that title is. Try again in a minute.": "{name} n’a pas indiqué quel est ce titre. Réessayez dans une minute.",
   "{name} is cooling down after errors, so it is not asked anything right now. Try again later.": "{name} est en pause après des erreurs : rien ne lui est demandé pour l’instant. Réessayez plus tard.",
-  "This series already follows 1 other source, as many as it may. Remove one first, or move the series to this source.": "Cette série suit déjà 1 autre source, le maximum autorisé. Retirez-en une d’abord, ou déplacez la série vers cette source.",
-  "This series already follows {n} other sources, as many as it may. Remove one first, or move the series to this source.": "Cette série suit déjà {n} autres sources, le maximum autorisé. Retirez-en une d’abord, ou déplacez la série vers cette source.",
   "This series has no main source to detach.": "Cette série n’a pas de source principale à détacher.",
   "Change cover": "Changer la couverture",
   "Use this cover": "Utiliser cette couverture",
@@ -4168,7 +4164,6 @@
   "Join these two pages again": "Réunir de nouveau ces deux pages",
   "already following as many as it may": "autant de sources que permis sont déjà suivies",
   "Other sources per series": "Autres sources par série",
-  "How many sources besides its main one a series may follow, whether you add them or Uchiyomi finds them. 3 by default. Each one is one more chapter list to ask for at every library update.": "Le nombre de sources, en plus de la principale, qu’une série peut suivre, que vous les ajoutiez ou qu’Uchiyomi les trouve. 3 par défaut. Chacune est une liste de chapitres de plus à demander à chaque mise à jour de la bibliothèque.",
   "Each badge you earn unlocks a frame. Everyone in your household sees the one you wear.": "Chaque badge obtenu débloque un cadre. Tout le foyer voit celui que vous portez.",
   "Unlocked with {badge}": "Débloqué avec « {badge} »",
   "Unlocks with {badge}": "Se débloque avec « {badge} »",
@@ -4568,5 +4563,16 @@
   "Upload chapters": "Importer des chapitres",
   "Add chapter files to this series. Existing files are never overwritten. The chapter number is read from each file name.": "Ajoutez des fichiers de chapitres à cette série. Les fichiers existants ne sont jamais écrasés. Le numéro de chapitre est lu dans le nom de chaque fichier.",
   "{name} was stored, but indexing is pending. Run a library scan before retrying.": "{name} a été enregistré, mais son indexation est en attente. Lancez une analyse de la bibliothèque avant de réessayer.",
-  "Could not load series": "Impossible de charger la série"
+  "Could not load series": "Impossible de charger la série",
+  "Hide 18+ until someone shows it": "Masquer le 18+ jusqu’à ce que quelqu’un l’affiche",
+  "18+ titles, libraries and sources stay out of sight until someone taps Show 18+. Turn this off if only adults use this server: nothing is hidden, and Show 18+ goes away. Age limits on accounts still apply.": "Les titres, bibliothèques et sources 18+ restent cachés jusqu’à ce que quelqu’un touche « Afficher 18+ ». Désactivez ceci si seuls des adultes utilisent ce serveur : rien n’est masqué et « Afficher 18+ » disparaît. Les limites d’âge des comptes s’appliquent toujours.",
+  "Title artwork": "Visuels de titre",
+  "How many sources besides its main one a series may follow, whether you add them or Uchiyomi finds them. 3 by default. The first 3 are asked at every library update; the others are backups, asked once a day while the series has nothing missing.": "Le nombre de sources, en plus de la principale, qu’une série peut suivre, que vous les ajoutiez ou qu’Uchiyomi les trouve. 3 par défaut. Les 3 premières sont interrogées à chaque mise à jour de la bibliothèque ; les autres sont des secours, interrogées une fois par jour tant qu’il ne manque rien à la série.",
+  "Add chapter files to “{title}”. Existing files are never overwritten. The chapter number is read from each file name.": "Ajoutez des fichiers de chapitres à « {title} ». Les fichiers existants ne sont jamais écrasés. Le numéro de chapitre est lu dans le nom de chaque fichier.",
+  "Another task is changing this series. Try again in a moment.": "Une autre tâche modifie cette série. Réessayez dans un instant.",
+  "Two uploads are already running. Try again when one finishes.": "Deux envois sont déjà en cours. Réessayez quand l’un d’eux est terminé.",
+  "(first 500 not in your library kept; {n} more after them: import again for those)": "(les 500 premiers absents de votre bibliothèque conservés ; {n} autres suivent : importez à nouveau pour ceux-là)",
+  "The first 500 titles not already in your library were kept, and {n} more come after them. Once these are in, import the same list again for the rest.": "Les 500 premiers titres absents de votre bibliothèque ont été conservés, et {n} autres suivent. Une fois ceux-ci ajoutés, importez à nouveau la même liste pour le reste.",
+  "This series already follows 1 other source, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.": "Cette série suit déjà 1 autre source, le maximum que ce serveur autorise. Retirez-en une d’abord, déplacez la série vers cette source, ou autorisez-en davantage dans Administration → Paramètres → Téléchargements → Plus d’options → Autres sources par série.",
+  "This series already follows {n} other sources, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.": "Cette série suit déjà {n} autres sources, le maximum que ce serveur autorise. Retirez-en une d’abord, déplacez la série vers cette source, ou autorisez-en davantage dans Administration → Paramètres → Téléchargements → Plus d’options → Autres sources par série."
 }

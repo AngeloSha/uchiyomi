@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4565
+    "strings": 4571
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -846,7 +846,6 @@
   "No match found": "Совпадение не найдено",
   "Nobody has that title yet.": "Этого тайтла пока нет ни у кого.",
   "Nothing here.": "Здесь ничего нет.",
-  "Only the first 500 titles were kept.": "Сохранены только первые 500 названий.",
   "Open imports": "Незавершённые импорты",
   "Pasted titles": "Вставленные названия",
   "Ready to review": "Готово к проверке",
@@ -905,7 +904,6 @@
   "Load list": "Загрузить список",
   "1 novel skipped": "1 новелла пропущена",
   "{n} novels skipped": "Пропущено новелл: {n}",
-  "(first 500 kept)": "(оставлены первые 500)",
   "(first 500 not in your library kept; import again for the rest)": "(оставлены первые 500, которых нет в вашей библиотеке; для остальных импортируйте ещё раз)",
   "Only the first 500 titles not already in your library were kept. Once they are in, import the same list again for the rest.": "Сохранены только первые 500 названий, которых ещё нет в вашей библиотеке. Когда они будут добавлены, импортируйте тот же список ещё раз, чтобы получить остальные.",
   "matched under its other name": "найдено под другим названием",
@@ -3858,8 +3856,6 @@
   "{name} calls it “{title}”, which is not this series’ title or one of its other names. If the cover and the chapters show it is the same work, attach it anyway.": "{name} называет его «{title}» — это не название этой серии и не одно из её других названий. Если обложка и главы показывают, что это то же произведение, всё равно подключите его.",
   "{name} did not say what that title is. Try again in a minute.": "{name} не сообщил, что это за серия. Попробуйте снова через минуту.",
   "{name} is cooling down after errors, so it is not asked anything right now. Try again later.": "{name} на паузе после ошибок, поэтому сейчас к нему не обращаются. Попробуйте позже.",
-  "This series already follows 1 other source, as many as it may. Remove one first, or move the series to this source.": "Эта серия уже отслеживает 1 другой источник — это максимум. Сначала уберите один или перенесите серию на этот источник.",
-  "This series already follows {n} other sources, as many as it may. Remove one first, or move the series to this source.": "Эта серия уже отслеживает другие источники ({n}) — это максимум. Сначала уберите один или перенесите серию на этот источник.",
   "This series has no main source to detach.": "У этой серии нет основного источника, который можно отключить.",
   "Change cover": "Сменить обложку",
   "Use this cover": "Использовать эту обложку",
@@ -4168,7 +4164,6 @@
   "Join these two pages again": "Снова склеить эти две страницы",
   "already following as many as it may": "уже отслеживается максимум",
   "Other sources per series": "Других источников на серию",
-  "How many sources besides its main one a series may follow, whether you add them or Uchiyomi finds them. 3 by default. Each one is one more chapter list to ask for at every library update.": "Сколько источников, кроме основного, может отслеживать серия — добавленных вами или найденных Uchiyomi. По умолчанию 3. Каждый источник — ещё один список глав, который запрашивается при каждом обновлении библиотеки.",
   "Each badge you earn unlocks a frame. Everyone in your household sees the one you wear.": "Каждый полученный значок открывает рамку. Выбранную рамку видят все домашние.",
   "Unlocked with {badge}": "Открыта значком «{badge}»",
   "Unlocks with {badge}": "Откроется значком «{badge}»",
@@ -4568,5 +4563,16 @@
   "Upload chapters": "Загрузить главы",
   "Add chapter files to this series. Existing files are never overwritten. The chapter number is read from each file name.": "Добавьте файлы глав в эту серию. Существующие файлы никогда не перезаписываются. Номер главы считывается из имени каждого файла.",
   "{name} was stored, but indexing is pending. Run a library scan before retrying.": "Файл {name} сохранён, но индексация ещё не завершена. Перед повторной попыткой запустите сканирование библиотеки.",
-  "Could not load series": "Не удалось загрузить серию"
+  "Could not load series": "Не удалось загрузить серию",
+  "Hide 18+ until someone shows it": "Скрывать 18+, пока кто-нибудь не покажет",
+  "18+ titles, libraries and sources stay out of sight until someone taps Show 18+. Turn this off if only adults use this server: nothing is hidden, and Show 18+ goes away. Age limits on accounts still apply.": "Тайтлы, библиотеки и источники 18+ скрыты, пока кто-нибудь не нажмёт «Показать 18+». Выключите это, если сервером пользуются только взрослые: ничего не будет скрыто, а «Показать 18+» исчезнет. Возрастные ограничения аккаунтов продолжают действовать.",
+  "Title artwork": "Оформление названий",
+  "How many sources besides its main one a series may follow, whether you add them or Uchiyomi finds them. 3 by default. The first 3 are asked at every library update; the others are backups, asked once a day while the series has nothing missing.": "Сколько источников, кроме основного, может отслеживать серия — добавленных вами или найденных Uchiyomi. По умолчанию 3. Первые 3 опрашиваются при каждом обновлении библиотеки; остальные — запасные, их опрашивают раз в день, пока в серии ничего не пропущено.",
+  "Add chapter files to “{title}”. Existing files are never overwritten. The chapter number is read from each file name.": "Добавьте файлы глав в «{title}». Существующие файлы никогда не перезаписываются. Номер главы считывается из имени каждого файла.",
+  "Another task is changing this series. Try again in a moment.": "Другая задача сейчас меняет эту серию. Попробуйте ещё раз чуть позже.",
+  "Two uploads are already running. Try again when one finishes.": "Уже идут две загрузки. Попробуйте ещё раз, когда одна из них закончится.",
+  "(first 500 not in your library kept; {n} more after them: import again for those)": "(оставлены первые 500, которых нет в вашей библиотеке; после них ещё {n}: для них импортируйте ещё раз)",
+  "The first 500 titles not already in your library were kept, and {n} more come after them. Once these are in, import the same list again for the rest.": "Сохранены первые 500 названий, которых ещё нет в вашей библиотеке, а после них идут ещё {n}. Когда эти будут добавлены, импортируйте тот же список ещё раз, чтобы получить остальные.",
+  "This series already follows 1 other source, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.": "Эта серия уже отслеживает 1 другой источник — больше этот сервер не разрешает. Сначала уберите один, перенесите серию на этот источник или разрешите больше в разделе Администрирование → Настройки → Загрузки → Другие настройки → Других источников на серию.",
+  "This series already follows {n} other sources, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.": "Эта серия уже отслеживает другие источники ({n}) — больше этот сервер не разрешает. Сначала уберите один, перенесите серию на этот источник или разрешите больше в разделе Администрирование → Настройки → Загрузки → Другие настройки → Других источников на серию."
 }

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4565
+    "strings": 4571
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -846,7 +846,6 @@
   "No match found": "لم يُعثر على مطابقة",
   "Nobody has that title yet.": "لا أحد لديه هذا العنوان بعد.",
   "Nothing here.": "لا شيء هنا.",
-  "Only the first 500 titles were kept.": "احتُفظ بأول 500 عنوان فقط.",
   "Open imports": "عمليات استيراد مفتوحة",
   "Pasted titles": "عناوين ملصوقة",
   "Ready to review": "جاهز للمراجعة",
@@ -905,7 +904,6 @@
   "Load list": "تحميل القائمة",
   "1 novel skipped": "تم تخطّي رواية واحدة",
   "{n} novels skipped": "الروايات المتخطّاة: {n}",
-  "(first 500 kept)": "(تم الاحتفاظ بأول 500)",
   "(first 500 not in your library kept; import again for the rest)": "(تم الاحتفاظ بأول 500 غير موجودة في مكتبتك؛ استورد مجددًا لجلب البقية)",
   "Only the first 500 titles not already in your library were kept. Once they are in, import the same list again for the rest.": "احتُفظ فقط بأول 500 عنوان ليست في مكتبتك بالفعل. بعد إضافتها، استورد القائمة نفسها مجددًا لجلب البقية.",
   "matched under its other name": "تمت مطابقته باسمه الآخر",
@@ -3858,8 +3856,6 @@
   "{name} calls it “{title}”, which is not this series’ title or one of its other names. If the cover and the chapters show it is the same work, attach it anyway.": "يسمّيه {name} «{title}»، وهذا ليس عنوان هذه السلسلة ولا أحد أسمائها الأخرى. إن أظهر الغلاف والفصول أنه العمل نفسه، فاربطه على أي حال.",
   "{name} did not say what that title is. Try again in a minute.": "لم يذكر {name} ما هذا العنوان. حاول مجددًا بعد دقيقة.",
   "{name} is cooling down after errors, so it is not asked anything right now. Try again later.": "{name} في فترة تهدئة بعد أخطاء، لذا لا يُسأل عن شيء الآن. حاول لاحقًا.",
-  "This series already follows 1 other source, as many as it may. Remove one first, or move the series to this source.": "تتابع هذه السلسلة مصدرًا آخر واحدًا، وهو الحد الأقصى. أزِل واحدًا أولًا، أو انقل السلسلة إلى هذا المصدر.",
-  "This series already follows {n} other sources, as many as it may. Remove one first, or move the series to this source.": "تتابع هذه السلسلة مصادر أخرى عددها {n}، وهو الحد الأقصى. أزِل واحدًا أولًا، أو انقل السلسلة إلى هذا المصدر.",
   "This series has no main source to detach.": "ليس لهذه السلسلة مصدر رئيسي لفصله.",
   "Change cover": "تغيير الغلاف",
   "Use this cover": "استخدم هذا الغلاف",
@@ -4168,7 +4164,6 @@
   "Join these two pages again": "ضمّ هاتين الصفحتين من جديد",
   "already following as many as it may": "يُتابَع الحد الأقصى من المصادر بالفعل",
   "Other sources per series": "المصادر الأخرى لكل سلسلة",
-  "How many sources besides its main one a series may follow, whether you add them or Uchiyomi finds them. 3 by default. Each one is one more chapter list to ask for at every library update.": "كم مصدرًا غير مصدرها الرئيسي يمكن أن تتابعه السلسلة، سواء أضفتها أنت أو وجدها Uchiyomi. القيمة الافتراضية 3. كل مصدر يعني قائمة فصول إضافية تُطلب في كل تحديث للمكتبة.",
   "Each badge you earn unlocks a frame. Everyone in your household sees the one you wear.": "كل وسام تحصل عليه يفتح إطارًا، ويرى أهل البيت جميعًا الإطار الذي تضعه.",
   "Unlocked with {badge}": "فُتح بوسام «{badge}»",
   "Unlocks with {badge}": "يُفتح بوسام «{badge}»",
@@ -4568,5 +4563,16 @@
   "Upload chapters": "رفع فصول",
   "Add chapter files to this series. Existing files are never overwritten. The chapter number is read from each file name.": "أضف ملفات فصول إلى هذه السلسلة. لن تُستبدل الملفات الموجودة أبدًا. يُستخرج رقم الفصل من اسم كل ملف.",
   "{name} was stored, but indexing is pending. Run a library scan before retrying.": "حُفظ {name}، لكن فهرسته لم تكتمل بعد. شغّل فحص المكتبة قبل المحاولة مجددًا.",
-  "Could not load series": "تعذّر تحميل السلسلة"
+  "Could not load series": "تعذّر تحميل السلسلة",
+  "Hide 18+ until someone shows it": "إخفاء محتوى +18 حتى يُظهره أحد",
+  "18+ titles, libraries and sources stay out of sight until someone taps Show 18+. Turn this off if only adults use this server: nothing is hidden, and Show 18+ goes away. Age limits on accounts still apply.": "تبقى عناوين ومكتبات ومصادر +18 مخفية حتى ينقر أحد على «إظهار +18». أوقف هذا إذا كان البالغون وحدهم يستخدمون هذا الخادم: لن يُخفى شيء، ويختفي «إظهار +18». تبقى حدود العمر على الحسابات سارية.",
+  "Title artwork": "رسوم العناوين",
+  "How many sources besides its main one a series may follow, whether you add them or Uchiyomi finds them. 3 by default. The first 3 are asked at every library update; the others are backups, asked once a day while the series has nothing missing.": "كم مصدرًا غير مصدرها الرئيسي يمكن أن تتابعه السلسلة، سواء أضفتها أنت أو وجدها Uchiyomi. القيمة الافتراضية 3. تُسأل المصادر الثلاثة الأولى في كل تحديث للمكتبة؛ والبقية احتياطية، تُسأل مرة في اليوم ما دامت السلسلة لا ينقصها شيء.",
+  "Add chapter files to “{title}”. Existing files are never overwritten. The chapter number is read from each file name.": "أضف ملفات فصول إلى «{title}». لن تُستبدل الملفات الموجودة أبدًا. يُستخرج رقم الفصل من اسم كل ملف.",
+  "Another task is changing this series. Try again in a moment.": "هناك مهمة أخرى تعدّل هذه السلسلة. حاول مجددًا بعد قليل.",
+  "Two uploads are already running. Try again when one finishes.": "هناك عمليتا رفع جاريتان بالفعل. حاول مجددًا عندما تنتهي إحداهما.",
+  "(first 500 not in your library kept; {n} more after them: import again for those)": "(تم الاحتفاظ بأول 500 غير موجودة في مكتبتك؛ وبعدها {n} أخرى: استورد مجددًا لجلبها)",
+  "The first 500 titles not already in your library were kept, and {n} more come after them. Once these are in, import the same list again for the rest.": "احتُفظ بأول 500 عنوان ليست في مكتبتك بالفعل، وبعدها {n} أخرى. بعد إضافة هذه، استورد القائمة نفسها مجددًا لجلب البقية.",
+  "This series already follows 1 other source, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.": "تتابع هذه السلسلة مصدرًا آخر واحدًا، وهو أقصى ما يسمح به هذا الخادم. أزِل واحدًا أولًا، أو انقل السلسلة إلى هذا المصدر، أو اسمح بالمزيد من الإدارة ← الإعدادات ← التنزيلات ← خيارات أخرى ← المصادر الأخرى لكل سلسلة.",
+  "This series already follows {n} other sources, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.": "تتابع هذه السلسلة مصادر أخرى عددها {n}، وهو أقصى ما يسمح به هذا الخادم. أزِل واحدًا أولًا، أو انقل السلسلة إلى هذا المصدر، أو اسمح بالمزيد من الإدارة ← الإعدادات ← التنزيلات ← خيارات أخرى ← المصادر الأخرى لكل سلسلة."
 }
