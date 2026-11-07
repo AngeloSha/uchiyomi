@@ -95,6 +95,11 @@ export async function pagedFitWalk({ page, base, token, seriesHref, bookId, ok, 
       await page.keyboard.press('PageDown'); await waitSlide(1); await sleep(200);
       ok('PageDown turns the slide after reaching the bottom');
       await page.keyboard.press('PageUp'); await waitSlide(0); await sleep(200);
+      // #401: back to a width-fitted page is back to its foot, where it was left -- never its top again.
+      const back = await position();
+      back.y >= back.height - back.viewportHeight - 4
+        ? ok(`going back opens the previous page at its foot (${rtl ? 'RTL' : 'LTR'})`)
+        : bad(`going back opened the page away from its foot (${rtl ? 'RTL' : 'LTR'}): ${JSON.stringify(back)}`);
       await page.keyboard.press(rtl ? 'ArrowLeft' : 'ArrowRight'); await waitSlide(1); await sleep(200);
       ok(`physical arrow still turns immediately (${rtl ? 'RTL' : 'LTR'})`);
       await page.keyboard.press(rtl ? 'ArrowRight' : 'ArrowLeft'); await waitSlide(0); await sleep(200);
