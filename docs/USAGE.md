@@ -1829,6 +1829,9 @@ not to you: an e-ink tablet wants E-ink, the phone beside it does not.
   devices and into chapters you download, and the server looking at the chapter again leaves it alone; a chapter whose file is replaced by one with
   another page count starts afresh.
 - **Page fit** (account, paged mode): **Whole page** keeps the complete page within the screen and remains the default. **Fit width** fills the slide width and lets you scroll vertically inside that page; swipe sideways or use the normal page keys to turn pages. Zoom, right-to-left order, cropped borders and split or rotated spreads keep working. This is separate from webtoon scroll's **Fit** choice.
+  Space, ↓ and Page Down read down a tall page before they turn it (Shift+Space, ↑ and Page Up read up), and since
+  v0.105.0 going back a page opens it at its foot, where you left it, rather than at its top
+  ([#401](https://github.com/AngeloSha/uchiyomi/pull/401), @Forgitusername).
 - **Column width** (this device, since v0.74.0): in webtoon scroll, narrows the column of pages to between 30 % and
   100 % of what *Fit width* or *Original* gives (steps of 5 %). A phone wants 100 %, a wide monitor a narrower strip. Like
   the other *this device* settings it is kept in this browser only, so your other screens are unaffected.

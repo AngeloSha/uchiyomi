@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pagedScrollStep, zoomedScrollOffset } from '../lib/readerPagedScroll';
+import { pagedOpenOffset, pagedScrollStep, zoomedScrollOffset } from '../lib/readerPagedScroll';
 import { actionForKey, keyMapFor } from '../lib/readerKeys';
 
 test('vertical paged keys read a tall page before turning, regardless of its horizontal reading direction', () => {
@@ -52,4 +52,19 @@ test('the paged reader uses the visible pane for keys and both zoom axes without
   assert.match(src, /anchor\?\.pane === pane && anchor\.slide === index && anchor\.page === current\s*&& anchor\.focusedPage === focus\?\.page && anchor\.zoom === before/, 'a new page or focused partner cannot reuse an old snapshot');
   assert.match(src, /pane\.scrollTop = zoomedScrollOffset\(saved\?\.y \?\? pane\.scrollTop, pane\.clientHeight, before, zoom\);/);
   assert.match(src, /pane\.scrollLeft = zoomedScrollOffset\(saved\?\.x \?\? pane\.scrollLeft, pane\.clientWidth, before, zoom\);/);
+});
+
+test('going back to a width-fitted page opens it at its foot, going forward at its top (#401)', () => {
+  // From @Forgitusername's #401. Reintroduce `pane.scrollTop = 0` for every arrival: the page read last opens at its top
+  // again, and reading backwards means scrolling down through it to find where it was left.
+  assert.equal(pagedOpenOffset({ scrollHeight: 3000, clientHeight: 800 }, true), 2200);
+  assert.equal(pagedOpenOffset({ scrollHeight: 3000, clientHeight: 800 }, false), 0);
+  assert.equal(pagedOpenOffset({ scrollHeight: 600, clientHeight: 800 }, true), 0, 'a page shorter than the screen has no foot to go to');
+  const src = readFileSync(join(__dirname, '..', 'app/reader/page.tsx'), 'utf8');
+  assert.match(src, /if \(d < 0 && to !== from && prefs\.pagedFitWidth\) \{\s*openAtFoot\.current = \{ slide: to, at: Date\.now\(\) \};/, 'a turn back does not mark its page');
+  assert.match(src, /if \(back\) back\.scrollTop = pagedOpenOffset\(back, true\);/, 'the page is not at its foot before it glides in');
+  assert.match(src, /const foot = fresh && mark!\.slide === index && \(mark!\.page === undefined \|\| mark!\.page === focus\?\.page\);/);
+  assert.match(src, /if \(pane\) \{ pane\.scrollTop = pagedOpenOffset\(pane, foot\);/, 'the arrival does not read the mark');
+  assert.match(src, /if \(prefs\.pagedFitWidth && idxs\.indexOf\(to\) < idxs\.indexOf\(focus\.page\)\) openAtFoot\.current = \{ slide: s, page: to, at: Date\.now\(\) \};/,
+    'back to the earlier page of a pair opens it at its top');
 });

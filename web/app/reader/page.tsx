@@ -12,7 +12,7 @@ import { chapterOutcome } from '@/lib/readerState';
 import { openableChapters } from '@/lib/chapterRows';
 import { buildFlow, startIndex, renderWindow } from '@/lib/readerFlow';
 import { drawnWidth, fitWidth, neverSofter } from '@/lib/readerFit';
-import { pagedScrollStep, zoomedScrollOffset } from '@/lib/readerPagedScroll';
+import { pagedOpenOffset, pagedScrollStep, zoomedScrollOffset } from '@/lib/readerPagedScroll';
 import { AHEAD_SCREENS, APPEND_SCREENS, BEHIND_SCREENS, KEEP_SCREENS, MAX_WINDOW_PAGES, anchorAt, nearEnd, prefetchList, screenRange, scrollTopFor, windowSet, type IndexRange } from '@/lib/readerWindow';
 import { isCatch, readTap, undoLeft, undoWindow, type TapZone } from '@/lib/readerGesture';
 import { PAGE_ACTIONS, READER_ACTIONS, actionForKey, keyMapFor, type ReaderAction } from '@/lib/readerKeys';
@@ -213,6 +213,9 @@ function ReaderInner() {
   const behavior = glide(device.colorFilter);
   const [zoom, setZoomState] = useState(1);
   const widthZoomAnchor = useRef<{ pane: HTMLElement; slide: number; page: number; focusedPage?: number; zoom: number; x: number; y: number } | null>(null);
+  // A turn back in reading order under Fit width (#401): the slide (and the focused page of a pair) it went back to, which
+  // opens at its foot. The turn's own mark, for a moment only, so a later swipe or jump to that page opens at its top.
+  const openAtFoot = useRef<{ slide: number; page?: number; at: number } | null>(null);
   const setZoom = (next: number) => {
     // A smaller image can clamp DOM scroll offsets before layout effects run. Capture the old point first.
     const el = scrollRef.current;
@@ -1658,6 +1661,13 @@ function ReaderInner() {
         const last = Math.max(0, el.children.length - 1); // page slides, then Up Next / the failure card
         const from = slideNow();
         const to = Math.max(0, Math.min(last, from + d));
+        // Back in reading order to a width-fitted page (#401, @Forgitusername): it opens at its foot, where it was left,
+        // placed there before the glide so it does not jump once it lands. Forward still opens a page at its top.
+        if (d < 0 && to !== from && prefs.pagedFitWidth) {
+          openAtFoot.current = { slide: to, at: Date.now() };
+          const back = el.querySelector<HTMLElement>(`[data-paged-scroll="${to}"]`);
+          if (back) back.scrollTop = pagedOpenOffset(back, true);
+        }
         if (o.tap) acted.current = { kind: 'turn', slide: from, at: Date.now() };
         lastMoved.current = Date.now(); // before the first scroll event arrives
         el.scrollTo({ left: trackSign * to * (el.clientWidth || window.innerWidth), behavior });
@@ -1869,13 +1879,18 @@ function ReaderInner() {
   }, [current, prefs.mode]);
   useEffect(() => { if (zoom <= 1) { pan.current = { x: 0, y: 0 }; scrollRef.current?.style.removeProperty('--pan-x'); scrollRef.current?.style.removeProperty('--pan-y'); } else panBy(0, 0); }, [zoom]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // A page opens at its top; subsequent zooms preserve the image point at the viewport's centre on both axes.
+  // A page opens at its top -- or at its foot when reading went back to it (#401) -- and subsequent zooms preserve the
+  // image point at the viewport's centre on both axes.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || prefs.mode !== 'paged' || !prefs.pagedFitWidth) return;
     const index = Math.round(Math.abs(el.scrollLeft) / Math.max(1, el.clientWidth));
     const pane = el.querySelector<HTMLElement>(`[data-paged-scroll="${index}"]`);
-    if (pane) { pane.scrollTop = 0; pane.scrollLeft = (pane.scrollWidth - pane.clientWidth) / 2; }
+    const mark = openAtFoot.current;
+    const fresh = !!mark && Date.now() - mark.at < 2000;
+    const foot = fresh && mark!.slide === index && (mark!.page === undefined || mark!.page === focus?.page);
+    if (foot || !fresh) openAtFoot.current = null;
+    if (pane) { pane.scrollTop = pagedOpenOffset(pane, foot); pane.scrollLeft = (pane.scrollWidth - pane.clientWidth) / 2; }
   }, [current, focus?.page, prefs.mode, prefs.pagedFitWidth]);
   const beforeWidthZoom = useRef(zoom);
   useLayoutEffect(() => {
@@ -1944,6 +1959,8 @@ function ReaderInner() {
       : idxs[idxs.indexOf(focus.page) + (action === 'next' ? 1 : -1)];
     if (to === undefined) return false;
     if (o.tap) acted.current = { kind: 'focus', prev: focus, at: Date.now() };
+    // Back to the pair's earlier page in reading order opens it at its foot (#401), as a turn back does.
+    if (prefs.pagedFitWidth && idxs.indexOf(to) < idxs.indexOf(focus.page)) openAtFoot.current = { slide: s, page: to, at: Date.now() };
     setFocus({ slide: s, page: to });
     return true;
   };
