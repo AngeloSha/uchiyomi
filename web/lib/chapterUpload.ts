@@ -35,11 +35,18 @@ export function uploadRefusal(e: unknown, name: string): string {
   if (code === 'empty') return tr('{name} is empty.', { name });
   if (code === 'too_large' || (e instanceof ApiError && e.status === 413)) return tr('{name} is too large to upload.', { name });
   if (code === 'disk_full') return tr('The download folder is out of space.');
+  // The route's other refusals carry English sentences (#375): said here in the reader's words instead.
+  // 409 busy: a merge or a repair holds the series; 429: two uploads are going already.
+  if (code === 'busy' && e instanceof ApiError && e.status === 409) return tr('Another task is changing this series. Try again in a moment.');
+  if (code === 'busy' || (e instanceof ApiError && e.status === 429)) return tr('Two uploads are already running. Try again when one finishes.');
+  if (code === 'forbidden' || (e instanceof ApiError && e.status === 403)) return tr('Your account is not allowed to upload series.');
+  if (code) return tr('Could not upload {name}', { name });
   if (message) return message;
   return tr('Could not upload {name}', { name });
 }
 
-export interface UploadRun { done: number; failed: string[]; seriesId: string | null; taken?: boolean }
+/** `failed` says why, in the reader's words; `failedFiles` names them, so the list keeps exactly those for another try. */
+export interface UploadRun { done: number; failed: string[]; failedFiles: string[]; seriesId: string | null; taken?: boolean }
 
 /**
  * Every file, one after another, in name order (Chapter 2 before Chapter 10 is the scanner's business: it reads the
@@ -47,7 +54,7 @@ export interface UploadRun { done: number; failed: string[]; seriesId: string | 
  */
 export async function uploadAll(to: UploadTarget, files: File[], onFile?: (i: number, f: File) => void): Promise<UploadRun> {
   const sorted = [...files].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-  const run: UploadRun = { done: 0, failed: [], seriesId: null };
+  const run: UploadRun = { done: 0, failed: [], failedFiles: [], seriesId: null };
   for (const [i, f] of sorted.entries()) {
     onFile?.(i, f);
     // A new series' title is checked on its first file only; the rest join what that one made.
@@ -64,6 +71,7 @@ export async function uploadAll(to: UploadTarget, files: File[], onFile?: (i: nu
       // A title already here stops the run: nothing of it was written, and the rest would only be refused too.
       if ('title' in here && here.fresh && e instanceof ApiError && e.status === 409 && e.body.includes('"taken"')) { run.taken = true; break; }
       run.failed.push(uploadRefusal(e, f.name));
+      run.failedFiles.push(f.name);
     }
   }
   return run;

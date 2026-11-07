@@ -19,7 +19,11 @@ function useUpload(onDone: (run: UploadRun) => void) {
     setAt({ i: 0, n: files.length });
     const run = await uploadAll(to, files, (i) => setAt({ i, n: files.length }));
     setAt(null);
-    if (run.seriesId) for (const k of [['series-listing', run.seriesId], ['series', run.seriesId]]) qc.invalidateQueries({ queryKey: k });
+    // Everything that lists what was just stored: the series' own rows (its chapter list is `series-books`, not only its
+    // listing), and the Library and Home a new series joins (#375). Without the chapter rows a fast upload left the
+    // series page as it was until its cache aged out.
+    if (run.seriesId) for (const k of [['series-listing', run.seriesId], ['series', run.seriesId], ['series-books', run.seriesId]]) qc.invalidateQueries({ queryKey: k });
+    if (run.done) for (const k of [['library'], ['home']]) qc.invalidateQueries({ queryKey: k });
     if (run.done) toast(run.done === 1 ? tr('Uploaded 1 file') : tr('Uploaded {n} files', { n: run.done }), 'success');
     for (const m of run.failed) toast(m, 'error');
     onDone(run);
@@ -41,16 +45,29 @@ export function UploadSeriesSection({ seriesId, seriesTitle }: { seriesId?: stri
   const [takenTitle, setTakenTitle] = useState<string | null>(null);
   const { at, start } = useUpload((run) => {
     if (run.taken) setTakenTitle(title.trim());
-    if (run.done && run.seriesId) { setMade({ id: run.seriesId, title: seriesTitle || title.trim() }); setTitle(''); setFiles([]); }
+    if (run.done && run.seriesId) {
+      if (!made || made.id !== run.seriesId) setMade({ id: run.seriesId, title: seriesTitle || title.trim() || made?.title || '' });
+      setTitle('');
+    }
+    // The files that were not stored stay listed, so a second try needs no picking again; the rest leave (#375).
+    if (run.done || run.failedFiles.length) setFiles((had) => had.filter((f) => run.failedFiles.includes(f.name)));
   });
   const taken = !!takenTitle && takenTitle === title.trim();
-  const ready = (!!seriesId || !!title.trim()) && !taken && files.length > 0 && !at;
+  // A new series made by this page takes the next files, unless a new title was typed: a retry of the files that
+  // failed goes into it rather than asking for its title again and being refused as taken.
+  const into = seriesId || (!title.trim() && made ? made.id : '');
+  const intoTitle = seriesId ? seriesTitle : made?.title;
+  const ready = (!!into || !!title.trim()) && !taken && files.length > 0 && !at;
   const add = (more: File[]) => setFiles((had) => [...had, ...more.filter((f) => !had.some((h) => h.name === f.name))]
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })));
   return (
     <section data-upload-series>
       <p className="mb-3 max-w-prose text-xs leading-relaxed text-fog-500">
-        {seriesId ? tr('Add chapter files to this series. Existing files are never overwritten. The chapter number is read from each file name.') : tr('For a series no source has, when you already have its chapters. The files go into the download folder, under Uploads, and the chapter number is read from each file name.')}
+        {into
+          // Named, so the page says which series the files go into (#375): this series, or the one this page just made.
+          ? (intoTitle ? tr('Add chapter files to “{title}”. Existing files are never overwritten. The chapter number is read from each file name.', { title: intoTitle })
+            : tr('Add chapter files to this series. Existing files are never overwritten. The chapter number is read from each file name.'))
+          : tr('For a series no source has, when you already have its chapters. The files go into the download folder, under Uploads, and the chapter number is read from each file name.')}
       </p>
       {!seriesId && <><label htmlFor={uid} className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Title')}</label>
       <input id={uid} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} dir="auto" disabled={!!at}
@@ -77,7 +94,7 @@ export function UploadSeriesSection({ seriesId, seriesTitle }: { seriesId?: stri
         </ul>
       )}
 
-      <button type="button" onClick={() => void start(seriesId ? { seriesId } : { title: title.trim(), fresh: true }, files)} disabled={!ready} className="btn-accent mt-4 w-full sm:w-auto disabled:opacity-50" data-upload-start>
+      <button type="button" onClick={() => void start(into ? { seriesId: into } : { title: title.trim(), fresh: true }, files)} disabled={!ready} className="btn-accent mt-4 w-full sm:w-auto disabled:opacity-50" data-upload-start>
         {at && <ProgressRing progress="spin" size={14} />}
         {at ? progressText(at) : tr('Upload')}
       </button>
