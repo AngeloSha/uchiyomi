@@ -45,6 +45,15 @@ test('the Sources sheet offers Add more sources, and the main source detaches af
   assert.match(mig, /search-all\?groupBy=source/);
 });
 
+test('the source sheet leaves adult=1 to api(), once', async () => {
+  const { readFileSync } = await import('node:fs');
+  for (const f of ['MigrateSourceSheet.tsx', 'SourceSearchPages.tsx']) {
+    const src = readFileSync(new URL(`../components/${f}`, import.meta.url), 'utf8');
+    // api() already appends adult=1; withAdult here makes it adult=1&adult=1, which hideAdult reads as an array, not '1'.
+    assert.doesNotMatch(src, /withAdult\(/, `${f} adds adult=1 on top of api()`);
+  }
+});
+
 test('the server is asked to check the pick: no title of ours is sent, and Attach anyway answers title_differs', async () => {
   const { readFileSync } = await import('node:fs');
   const mig = readFileSync(new URL('../components/MigrateSourceSheet.tsx', import.meta.url), 'utf8');

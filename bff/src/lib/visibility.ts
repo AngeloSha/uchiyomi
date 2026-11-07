@@ -321,8 +321,11 @@ export function browsable(alias: string, ctx: ViewCtx, p: Params): string {
  * Absent means hidden. That is the default for anything that cannot ask -- an OPDS reader, a bare curl --
  * and it is the right default: a client that does not know about the filter should not defeat it.
  */
-export const hideAdult = (req: { query?: unknown }): boolean =>
-  (req.query as { adult?: string } | undefined)?.adult !== '1';
+export const hideAdult = (req: { query?: unknown }): boolean => {
+  const adult = (req.query as { adult?: string | string[] } | undefined)?.adult;
+  // A duplicate `?adult=1` parses as an array; an old client sends one because it wrapped the URL twice.
+  return !(adult === '1' || (Array.isArray(adult) && adult.includes('1')));
+};
 
 /**
  * Which of these series ids may be listed to this viewer.
