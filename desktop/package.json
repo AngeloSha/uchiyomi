@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "@types/node": "24.19.2",
-    "electron": "45.1.0",
+    "electron": "45.2.3",
     "electron-builder": "26.18.0",
     "puppeteer-core": "25.16.0",
     "tsx": "4.23.15",
