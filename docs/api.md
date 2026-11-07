@@ -2110,15 +2110,19 @@ importer accepts `oldest` and `newest` only — `none` is the add dialog's).
 with a match-review step in between, and is what the admin UI uses — the plain importer above adds the
 first cross-source hit with no review and stays for scripted callers. `POST .../batches` takes the same
 `dataUrl`/`mangadexList`/`titles` intake as `/api/admin/import/parse`, starts matching in the background
-(one batch resolves at a time server-wide) and returns `{batchId, total, truncated, skippedNovels}`. It
+(one batch resolves at a time server-wide) and returns `{batchId, total, truncated, skippedNovels, leftOver}`. It
 searches at most 500 titles; since v0.51.0 the titles the library already holds are kept as skipped rows and
 do not count toward them, so `total` can be more than 500, and `truncated` says more titles not owned
-remained, which importing the same list again picks up once these are in. A
+remained, which importing the same list again picks up once these are in. Since v0.105.0 `leftOver` says how
+many (null when not counted: a batch from before, or a tracker read that stopped at its own cap), a title skipped
+in an earlier import of the list starts skipped and does not count either (remembered by its tracker id, else its
+title, until a pick un-skips it), and a tracker row whose entry a series here is already linked to (by a person or
+the check) is that series: owned at intake, and `status: already` at `/run` rather than a second copy. A
 fourth intake, `{origin: 'tracker', tracker: 'anilist' | 'myanimelist' | 'kitsu', statuses?: ('reading' |
 'plan_to_read' | 'completed' | 'on_hold' | 'dropped')[]}`, reads the requesting admin's OWN connected
 account (the connection `GET /api/trackers` shows for them, never another member's; `statuses` defaults to
-reading + plan_to_read) — up to 501 entries, of which the batch keeps 500 (`truncated` when the read hit the
-cap); light novels are dropped and counted as `skippedNovels` — both figures are also stored on the batch
+reading + plan_to_read) — up to 2001 entries since v0.105.0 (501 before), of which the batch keeps the first 500 not
+owned (`truncated` when the read hit the cap or more came after them); light novels are dropped and counted as `skippedNovels` — both figures are also stored on the batch
 row, as `skippedNovels` and `truncated` on every batch `GET` returns; entries are deduped by their id and
 by the normalised form of every name they go by, and each row carries `tracker`, `external_id`,
 `alt_titles` (romaji and synonyms, at most three, never an abbreviation whose normalised form is shorter
@@ -2189,7 +2193,7 @@ next GET -- `review` with its unreached rows still ready, or `done` when every r
 `review` batch a run has been through with nothing left waiting (every remaining row skipped) is closed to
 `done` on GET as well, while one nothing was ever imported through (every title already owned) stays
 `review`. `GET /api/admin/import/batches` lists every batch newest first (`{content: [{id, origin, tracker,
-state, total, resolved, added, already, failed, skippedNovels, truncated, created_at, updated_at, stale}]}`,
+state, total, resolved, added, already, failed, skippedNovels, truncated, leftOver, created_at, updated_at, stale}]}`,
 no rows; `tracker` names the service a tracker batch was read from, null otherwise; `skippedNovels` (the
 novels a tracker read dropped, 0 for the other origins) and `truncated` (the intake kept 500 of a longer
 list, or the tracker read hit its cap) are the intake's own answer, kept on the row so a later view of the

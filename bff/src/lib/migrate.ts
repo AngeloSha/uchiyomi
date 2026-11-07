@@ -2217,6 +2217,16 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS match_check_rule smallint N
 -- an existing install behaves exactly as before; an admin whose server only adults use turns it off. Additive: v0.104.0
 -- boots on this schema and never reads it.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS adult_hiding boolean NOT NULL DEFAULT true;
+
+-- v0.105.0 (#410): how many titles not in the library came after an import's first 500, so the page can say how many are
+-- left (NULL: not counted, before v0.105.0 or when a tracker read stopped at its own cap). And the titles someone skipped
+-- in an import, so the next import of the same list leaves them skipped: a tracker entry by its id, anything else by its
+-- title key (routes/admin.ts importSkipKey). Both additive: v0.104.0 boots on this schema and never reads them.
+ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS left_over integer;
+CREATE TABLE IF NOT EXISTS import_skips (
+  key        text PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

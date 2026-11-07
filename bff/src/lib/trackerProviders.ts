@@ -79,8 +79,13 @@ export interface LibraryEntry {
   adult?: boolean;
   genres?: string[];
 }
-/** How many entries one intake reads at most: the review batch keeps 500, one more says "truncated". */
-export const TRACKER_LIST_MAX = 501;
+/**
+ * How many entries one intake reads at most. The review batch keeps the first 500 titles not already in the library, the
+ * way a backup's does; reading well past that is what lets the next import of the same list reach the titles after them
+ * (#410): at 501 every import read the same first 501, by then mostly owned, and never got further. One more than a round
+ * number says "the list may go on".
+ */
+export const TRACKER_LIST_MAX = 2001;
 
 /**
  * The server's canonical title key, byte-for-byte the `norm` of routes/sources.ts. Not imported from there

@@ -255,17 +255,19 @@ test('a run status reads as a sentence, and a duplicate reads as "already in you
   assert.doesNotMatch(src, /runStatusLabel[\s\S]{0,900}tr\([a-z]/, 'runStatusLabel passes a variable to tr(), which no locale file can see');
 });
 
-test('a list cut at the 500 says how to get the rest, and a tracker read keeps its words', () => {
-  // Discussion #121 (v0.51.0): a backup, a MangaDex list or a paste keeps its first 500 titles NOT in the library,
-  // so importing it again once they are in picks up the rest. Reintroduce by returning the tracker's words for every
-  // origin: the backup's note reads "(first 500 kept)" again.
-  assert.match(truncatedWords('backup').note, /import again for the rest/, 'the note does not say how to get the rest');
-  assert.match(truncatedWords('paste').toast, /import the same list again for the rest/, 'the toast does not say how to get the rest');
-  assert.equal(truncatedWords('tracker').note, '(first 500 kept)', 'a tracker read stops at its own cap, which reading it again does not get past');
+test('a list cut at the 500 says how to get the rest, and how many are left (#410)', () => {
+  // Discussion #121 (v0.51.0): every intake keeps its first 500 titles NOT in the library, so importing it again once they
+  // are in picks up the rest -- a tracker read too since v0.105.0, which reads far past 500. Reintroduce the count's
+  // absence: the note with a count reads no number.
+  assert.match(truncatedWords().note, /import again for the rest/, 'the note does not say how to get the rest');
+  assert.match(truncatedWords(null).toast, /import the same list again for the rest/, 'the toast does not say how to get the rest');
+  assert.match(truncatedWords(312).note, /312 more after them/, 'the note does not say how many are left');
+  assert.match(truncatedWords(312).toast, /312 more come after them/);
+  assert.match(truncatedWords(0).note, /import again for the rest/, 'no count without one to give');
   const src = code(read('app/admin/import/page.tsx'));
-  assert.match(src, /parts\.push\(truncatedWords\(n\.origin\)\.note\)/, 'the review headline does not use the words');
-  assert.match(src, /toast\(truncatedWords\(origin\)\.toast, 'info'\)/, 'the intake toast does not use the words');
-  assert.match(src, /truncated: batch\.truncated \?\? intakeNote\?\.truncated \?\? false, origin: batch\.origin \}/, 'the note is not told where the batch came from');
+  assert.match(src, /parts\.push\(truncatedWords\(n\.leftOver\)\.note\)/, 'the review headline does not use the words');
+  assert.match(src, /toast\(truncatedWords\(r\.leftOver\)\.toast, 'info'\)/, 'the intake toast does not use the words');
+  assert.match(src, /leftOver: batch\.leftOver \?\? intakeNote\?\.leftOver \?\? null \}/, 'the note is not told how many are left');
 });
 
 test('Select all “same source as before” takes the exact pairs only', () => {
@@ -609,7 +611,7 @@ test('the intake note comes from the batch row, so a reload or an Open-imports t
   // uses the intake's answer only until the first GET (and on an older server). Reintroduce by reading
   // `noteText(intakeNote)` alone: "the note is read from page state, not the batch" fails.
   const src = code(read('app/admin/import/page.tsx'));
-  assert.match(src, /const note = noteText\(batch\s*\? \{ skippedNovels: batch\.skippedNovels \?\? intakeNote\?\.skippedNovels \?\? 0, truncated: batch\.truncated \?\? intakeNote\?\.truncated \?\? false, origin: batch\.origin \}\s*: null\);/, 'the note is read from page state, not the batch');
+  assert.match(src, /const note = noteText\(batch\s*\? \{ skippedNovels: batch\.skippedNovels \?\? intakeNote\?\.skippedNovels \?\? 0, truncated: batch\.truncated \?\? intakeNote\?\.truncated \?\? false, origin: batch\.origin,\s*leftOver: batch\.leftOver \?\? intakeNote\?\.leftOver \?\? null \}\s*: null\);/, 'the note is read from page state, not the batch');
   assert.match(read('lib/importBatch.ts'), /skippedNovels\?: number;\s*truncated\?: boolean;/, 'ImportBatch does not type the fields');
 });
 

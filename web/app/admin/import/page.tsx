@@ -64,7 +64,7 @@ type ListStatus = (typeof LIST_STATUSES)[number]['id'];
  * reload or an Open-imports tap keeps the line; the intake's own answer only seeds the first render, before
  * the batch has been read. The toast says the cut once.
  */
-interface IntakeNote { skippedNovels: number; truncated: boolean; origin?: ImportOrigin | null }
+interface IntakeNote { skippedNovels: number; truncated: boolean; origin?: ImportOrigin | null; leftOver?: number | null }
 
 /** The dim sentence of the not-connected state; also what a `not_connected` refusal falls back to. */
 const NOT_CONNECTED = () =>
@@ -244,8 +244,8 @@ function noteText(n: IntakeNote | null): string | null {
   if (!n) return null;
   const parts: string[] = [];
   if (n.skippedNovels > 0) parts.push(n.skippedNovels === 1 ? tr('1 novel skipped') : tr('{n} novels skipped', { n: n.skippedNovels }));
-  // v0.51.0: the words say how to get the rest, but for a tracker read (lib/importBatch.ts truncatedWords).
-  if (n.truncated) parts.push(truncatedWords(n.origin).note);
+  // v0.51.0: the words say how to get the rest, and since v0.105.0 how many are left (lib/importBatch.ts truncatedWords).
+  if (n.truncated) parts.push(truncatedWords(n.leftOver).note);
   return parts.length ? parts.join(' ') : null;
 }
 
@@ -520,10 +520,10 @@ function ImportWizardInner() {
   const start = async (body: Record<string, unknown>) => {
     setStarting(true);
     try {
-      const r = await api<{ batchId: string; total: number; truncated: boolean; skippedNovels?: number }>('/api/admin/import/batches', { json: body });
+      const r = await api<{ batchId: string; total: number; truncated: boolean; skippedNovels?: number; leftOver?: number | null }>('/api/admin/import/batches', { json: body });
       const origin = body.origin === 'tracker' ? 'tracker' : null;
-      if (r.truncated) toast(truncatedWords(origin).toast, 'info');
-      setIntakeNote({ skippedNovels: r.skippedNovels ?? 0, truncated: !!r.truncated, origin });
+      if (r.truncated) toast(truncatedWords(r.leftOver).toast, 'info');
+      setIntakeNote({ skippedNovels: r.skippedNovels ?? 0, truncated: !!r.truncated, origin, leftOver: r.leftOver ?? null });
       setBatchId(r.batchId);
       fromIntake.current = true;
       router.push(`/admin/import/?batch=${r.batchId}`);
@@ -725,7 +725,8 @@ function ImportWizardInner() {
   // until the first GET has landed (and for an older server that does not send the fields). `intakeNote` is
   // cleared on every batch switch, so a note from a previous batch never follows the person to the next one.
   const note = noteText(batch
-    ? { skippedNovels: batch.skippedNovels ?? intakeNote?.skippedNovels ?? 0, truncated: batch.truncated ?? intakeNote?.truncated ?? false, origin: batch.origin }
+    ? { skippedNovels: batch.skippedNovels ?? intakeNote?.skippedNovels ?? 0, truncated: batch.truncated ?? intakeNote?.truncated ?? false, origin: batch.origin,
+        leftOver: batch.leftOver ?? intakeNote?.leftOver ?? null }
     : null);
 
   return (

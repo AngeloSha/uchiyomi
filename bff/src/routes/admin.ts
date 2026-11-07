@@ -82,7 +82,7 @@ import { keepRestricted, memberDefaults, memberDefaultsShape, permsShape, saveMe
 import { FOLLOW_LIMIT_MAX, followerLimit, forgetFollowerLimit } from '../lib/followLimit';
 import { borrowNamesFor, clearBorrowedNames } from '../lib/borrowNames';
 import { clearAutoDetails, fillDetailsFromSources, fillDetailsOn } from '../lib/autoDetails';
-import { lookupsChanged } from '../lib/discoverIdentity';
+import { lookupsChanged, libraryChanged } from '../lib/discoverIdentity';
 import { sanitiseNoticeTypes, visibleBookCount } from '../lib/noticeChapters';
 import { seriesHidesNotices, hiddenCount, refreshNoticesActive } from '../lib/noticeSettings';
 import { HIDE_MAX, hideNumbers, hiddenChapters, unhideNumbers } from '../lib/hiddenChapters';
@@ -127,7 +127,7 @@ import { titlesFromMangadexList, entriesFromMangadexList } from '../lib/mangadex
 import { MANGADEX_LANGS, canonLang, editionLang, mdLang, setUnstatedLang } from '../lib/lang';
 import { cleanMangadexLangs, mangadexLangs, setMangadexLangs, syncMangadexSources } from '../lib/sources/mangadexLangs';
 import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner, type AniListArt } from '../lib/anilist';
-import { namesMatch } from '../lib/onlineMatch';
+import { namesMatch, nameKey } from '../lib/onlineMatch';
 import { READING_DIRECTIONS } from '../lib/komgaDto';
 import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
 import { fetchKitsuBanner } from '../lib/kitsu';
@@ -185,6 +185,8 @@ interface ImportBatchRow {
   total: number; resolved: number; added: number; already: number; failed: number;
   /** The intake's note about the read (migrate.ts): novels dropped, and whether the list was cut at 500. */
   skipped_novels: number; truncated: boolean;
+  /** How many titles not in the library came after the 500 (#410); null when not counted. */
+  left_over: number | null;
   created_at: string; updated_at: string;
 }
 /**
@@ -192,9 +194,9 @@ interface ImportBatchRow {
  * (`skippedNovels`, `truncated`), so the page reads one shape whether it came from the POST or from a later
  * GET, and the snake-case column does not ride along as a second copy of the same number.
  */
-function batchDto<T extends ImportBatchRow>(row: T): Omit<T, 'skipped_novels'> & { skippedNovels: number } {
-  const { skipped_novels: skippedNovels, ...rest } = row;
-  return { ...rest, skippedNovels };
+function batchDto<T extends ImportBatchRow>(row: T): Omit<T, 'skipped_novels' | 'left_over'> & { skippedNovels: number; leftOver: number | null } {
+  const { skipped_novels: skippedNovels, left_over: leftOver, ...rest } = row;
+  return { ...rest, skippedNovels, leftOver: leftOver ?? null };
 }
 interface ImportCandidateRow {
   id: string; batch_id: string; ord: number; backup_title: string;
@@ -246,6 +248,34 @@ async function linkImportedSeries(
   for (const sib of siblings) await linkSeries(sib.id, row.external_id, row.backup_title, userId, provider);
   await seedTrackerFloor(userId, seriesId, provider, row.progress ?? 0);
   return true;
+}
+
+/**
+ * The key a skipped import row is remembered by (#410, @julieminer), so the next import of the same list leaves it
+ * skipped: a tracker entry by its id, anything else by its title key (lib/onlineMatch.ts nameKey, which reads every
+ * script). Null when the title has no key at all, and then nothing is remembered.
+ */
+function importSkipKey(row: { tracker?: string | null; external_id?: string | null; backup_title: string }): string | null {
+  if (row.tracker && row.external_id) return `t:${row.tracker}:${row.external_id}`;
+  const k = nameKey(row.backup_title);
+  return k ? `n:${k}` : null;
+}
+
+/**
+ * The series here already linked to each of these entries of one tracker (#410): only a link a person made or the
+ * check confirmed (the rule lib/discoverIdentity.ts reads), and only to a series still in the library. Its id and who
+ * linked it, by external id; the oldest series when two carry the same entry.
+ */
+async function seriesLinkedTo(provider: string, externalIds: string[]): Promise<Map<string, { id: string; by: string | null }>> {
+  const out = new Map<string, { id: string; by: string | null }>();
+  if (!externalIds.length) return out;
+  for (const r of await q<{ external_id: string; series_id: string; linked_by: string | null }>(
+    `SELECT DISTINCT ON (t.external_id) t.external_id, t.series_id, t.linked_by::text AS linked_by
+       FROM series_trackers t JOIN lib_series s ON s.id = t.series_id
+      WHERE t.provider = $1 AND t.external_id = ANY($2) AND (t.linked_by IS NOT NULL OR t.checked_at IS NOT NULL) AND ${visibleToAll('s')}
+      ORDER BY t.external_id, s.created_at, s.id`, [provider, externalIds],
+  )) out.set(r.external_id, { id: r.series_id, by: r.linked_by });
+  return out;
 }
 
 /** How a tracker read ends: entries for the batch, or an answer the route sends as-is. */
@@ -4638,7 +4668,15 @@ export default async function adminRoutes(app: FastifyInstance) {
       // way the resolve pass keeps `matched_via`: an AniList synonym is user-contributed and can be a generic
       // word, so a row linked through one must be able to say "matched under its other name" rather than
       // present the link as self-evident.
-      const ownedBy = (e: IntakeEntry): { id: string; via: string | null } | null => {
+      // A tracker entry a series here is already linked to IS that series (#410, @julieminer). By its title alone, a
+      // series added from a source that spells it otherwise -- the pick someone made in Change, say -- read as not owned,
+      // and the next import of the same list added a second copy and linked both to the one entry.
+      const linkedTo = tracker
+        ? await seriesLinkedTo(tracker, [...new Set(entries.map((e) => e.externalId).filter((x): x is string => !!x))])
+        : new Map<string, { id: string; by: string | null }>();
+      const ownedBy = (e: IntakeEntry): { id: string; via: string | null; linkedBy?: string | null } | null => {
+        const link = e.externalId ? linkedTo.get(e.externalId) : undefined;
+        if (link) return { id: link.id, via: null, linkedBy: link.by };
         const exact = have.get(norm(e.title));
         if (exact) return { id: exact, via: null };
         for (const a of e.altTitles ?? []) {
@@ -4656,17 +4694,32 @@ export default async function adminRoutes(app: FastifyInstance) {
       // tracker read keeps its own cap besides (TRACKER_LIST_MAX, `capped`).
       // Reintroduce by cutting at the 500th ENTRY again: "titles already in the library do not count toward
       // the 500" in importBatch.int.test.ts keeps 500 rows, not 503.
+      // A title someone skipped in an earlier import of this list (#410) is skipped again, and like an owned one it is not
+      // searched and does not count toward the 500. The ones after the cut are counted, not dropped unseen (`leftOver`), so
+      // the page can say how many are left; not when a tracker read stopped at its own cap, which leaves it unknown.
+      // Reintroduce by breaking out of the loop at the cut again: "says how many are left" in importBatch.int.test.ts reads null.
+      const allOwned = entries.map(ownedBy);
+      const keys = entries.map((e, i) => (allOwned[i] ? null : importSkipKey({ tracker: e.tracker ?? null, external_id: e.externalId ?? null, backup_title: e.title })));
+      const askedKeys = [...new Set(keys.filter((k): k is string => !!k))];
+      const remembered = new Set(askedKeys.length
+        ? (await q<{ key: string }>('SELECT key FROM import_skips WHERE key = ANY($1)', [askedKeys])).map((r) => r.key)
+        : []);
+      const skippedBefore = keys.map((k) => !!k && remembered.has(k));
       let toSearch = 0;
       let cut = entries.length;
+      let after = 0;
       for (let i = 0; i < entries.length; i++) {
-        if (ownedBy(entries[i])) continue;
-        if (++toSearch > 500) { cut = i; break; }
+        if (allOwned[i] || skippedBefore[i]) continue;
+        if (++toSearch > 500) { if (cut === entries.length) cut = i; after++; }
       }
       const truncated = capped || cut < entries.length;
+      const leftOver = capped ? null : after;
       entries = entries.slice(0, cut);
-      const owned = entries.map(ownedBy);
+      const owned = allOwned.slice(0, cut);
+      const skipped = skippedBefore.slice(0, cut);
       const inLib = owned.map((o) => !!o);
-      const initialResolved = inLib.filter(Boolean).length; // already-owned rows never enter the resolve loop
+      // already-owned and remembered-skip rows never enter the resolve loop
+      const initialResolved = inLib.filter(Boolean).length + skipped.filter(Boolean).length;
       // An owned tracker row is finished the moment it is linked: it reads `already`, the batch counts it
       // under `already`, and the review row can say "linked for progress sync". Owned rows of the other
       // intakes keep a NULL status, so a backup whose every title is owned still stays open to be looked at.
@@ -4675,9 +4728,9 @@ export default async function adminRoutes(app: FastifyInstance) {
       // `skipped_novels` and `truncated` ride on the row, not only in this answer: the page that started
       // the intake is not always the page that shows its done line (a reload, an Open-imports tap).
       const batch = await one<{ id: string }>(
-        `INSERT INTO import_batches (user_id, origin, tracker, state, total, resolved, already, skipped_novels, truncated)
-         VALUES ($1,$2,$3,'resolving',$4,$5,$6,$7,$8) RETURNING id`,
-        [userId, origin, tracker, entries.length, initialResolved, linkedAtIntake.filter(Boolean).length, skippedNovels, truncated],
+        `INSERT INTO import_batches (user_id, origin, tracker, state, total, resolved, already, skipped_novels, truncated, left_over)
+         VALUES ($1,$2,$3,'resolving',$4,$5,$6,$7,$8,$9) RETURNING id`,
+        [userId, origin, tracker, entries.length, initialResolved, linkedAtIntake.filter(Boolean).length, skippedNovels, truncated, leftOver],
       );
       const batchId = batch!.id;
       // One round trip for up to 500 rows via unnest, rather than 500 sequential INSERTs. ⚠️ `alt_titles`
@@ -4686,10 +4739,10 @@ export default async function adminRoutes(app: FastifyInstance) {
       await q(
         `INSERT INTO import_candidates (batch_id, ord, backup_title, backup_source_id_unsigned, backup_source_id_signed, backup_url, in_library, decision,
                                         tracker, external_id, alt_titles, progress, status, matched_via)
-         SELECT $1, o, t, su, ss, u, il, CASE WHEN il THEN 'skip' ELSE 'unresolved' END,
+         SELECT $1, o, t, su, ss, u, il, CASE WHEN il OR sk THEN 'skip' ELSE 'unresolved' END,
                 tr, ex, ARRAY(SELECT jsonb_array_elements_text(x.al))::text[], pr, st, mv
          FROM unnest($2::int[], $3::text[], $4::text[], $5::text[], $6::text[], $7::boolean[],
-                     $8::text[], $9::text[], $10::jsonb[], $11::int[], $12::text[], $13::text[]) AS x(o, t, su, ss, u, il, tr, ex, al, pr, st, mv)`,
+                     $8::text[], $9::text[], $10::jsonb[], $11::int[], $12::text[], $13::text[], $14::boolean[]) AS x(o, t, su, ss, u, il, tr, ex, al, pr, st, mv, sk)`,
         [
           batchId,
           entries.map((_, i) => i),
@@ -4704,12 +4757,15 @@ export default async function adminRoutes(app: FastifyInstance) {
           entries.map((e) => (e.tracker ? e.progress ?? 0 : null)),
           linkedAtIntake.map((l) => (l ? 'already' : null)),
           owned.map((o) => o?.via ?? null),
+          skipped,
         ],
       );
       let linked = 0;
       for (let i = 0; i < entries.length; i++) {
         if (!linkedAtIntake[i]) continue;
         const e = entries[i];
+        // Linked by this account already, on an earlier import: link and floor are its own, and stand.
+        if (owned[i]!.linkedBy && owned[i]!.linkedBy === userId) { linked++; continue; }
         await linkImportedSeries({ tracker: e.tracker!, external_id: e.externalId!, backup_title: e.title, progress: e.progress ?? null }, owned[i]!.id, userId);
         linked++;
       }
@@ -4719,7 +4775,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       });
       void resolveBatch(batchId).catch(() => {});
       started = true;
-      return { batchId, total: entries.length, truncated, skippedNovels };
+      return { batchId, total: entries.length, truncated, skippedNovels, leftOver };
     } finally {
       if (!started && resolvingBatch === 'pending') resolvingBatch = null;
     }
@@ -4803,14 +4859,18 @@ export default async function adminRoutes(app: FastifyInstance) {
       .safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
 
-    const row = await one<{ id: string; batch_id: string; auto_source_id: string | null }>(
-      'SELECT id, batch_id, auto_source_id FROM import_candidates WHERE id = $1',
+    const row = await one<{ id: string; batch_id: string; auto_source_id: string | null; tracker: string | null; external_id: string | null; backup_title: string }>(
+      'SELECT id, batch_id, auto_source_id, tracker, external_id, backup_title FROM import_candidates WHERE id = $1',
       [cid],
     );
     if (!row) return reply.code(404).send({ error: 'not_found' });
+    // A skip is remembered for the next import of the same list, and a pick forgets it (#410, @julieminer).
+    const skipKey = importSkipKey(row);
+    if (skipKey && b.data.decision !== 'skip') await q('DELETE FROM import_skips WHERE key = $1', [skipKey]);
 
     if (b.data.decision === 'skip') {
       await q(`UPDATE import_candidates SET decision = 'skip' WHERE id = $1`, [cid]);
+      if (skipKey) await q('INSERT INTO import_skips (key) VALUES ($1) ON CONFLICT (key) DO NOTHING', [skipKey]);
       // Skipping the last open row is how a batch with leftovers gets finished: nothing else will run
       // over it again (`/run` answers nothing_to_import), so the batch closes here or not at all.
       await closeBatchIfSettled(row.batch_id);
@@ -4930,11 +4990,27 @@ export default async function adminRoutes(app: FastifyInstance) {
         for (const row of rows) {
           if (aborted.has(id)) return; // discarded mid-run: the batch is gone, stop adding for it
           try {
+            // A tracker row whose entry a series here is already linked to has that series (#410): never a second copy
+            // of it from another source. Asked per row, so a row an earlier import -- or an earlier row of this run --
+            // added since the intake counts too. Reintroduce by going straight to the add: "the same entry twice" in
+            // importBatch.int.test.ts finds two series.
+            if (row.tracker && row.external_id) {
+              const held = (await seriesLinkedTo(row.tracker, [row.external_id])).get(row.external_id);
+              if (held) {
+                await q(`UPDATE import_candidates SET status = 'already' WHERE id = $1`, [row.id]);
+                await q(`UPDATE import_batches SET already = already + 1, updated_at = now() WHERE id = $1`, [id]);
+                if (held.by !== owner) await linkImportedSeries(row, held.id, owner).catch(() => false);
+                continue;
+              }
+            }
             const r = await addSeriesFromSource({ source: row.match_source, sourceId: row.match_source_id, autoUpdate: b.data.autoUpdate, chapterFrom: 'none' });
             // `nothing: true` is the 'none' path's own signal for "a fresh row was created" (routes/sources.ts)
             // -- `chapters` is always 0 under chapterFrom:'none', so the old `chapters > 0` test that told a
             // fresh add from an existing one would have called EVERY add here "already", including the first.
             if (r.ok && r.nothing) {
+              // The library index the add's duplicate check reads (lib/discoverIdentity.ts heldFor) is rebuilt at most once a
+              // minute: told at once, so the next row of this run sees the series this one added.
+              libraryChanged();
               // The other spellings the list carried (a tracker's romaji and synonyms) become the new series' own
               // other names (v0.49.1, lib/altTitles.ts): the searches for other sources ask under them. Only for a
               // series this import added, and before the row reads `added`; best effort, never failing the add.

@@ -3386,9 +3386,11 @@ ways:
   everywhere, the romaji and synonyms the service knows — except abbreviations (*AoT*, *SnK*, *MHA*), which
   are never used as search terms, because three letters are contained in almost any title. Light novels
   are skipped — every tracker keeps them on the "manga" list, and a novel would match its own adaptation —
-  and the done line counts them (*· {n} novels skipped*). The review keeps 500 rows; a longer list says
-  *(first 500 kept)*, so bring a large account over one list at a time; both notes are kept on the batch,
-  so a reload or *Open imports* shows them too. Nothing is written to the tracker, and only your own
+  and the done line counts them (*· {n} novels skipped*). Up to 2,000 entries are read (since v0.105.0; 500 before),
+  and a list with more than 500 titles not in your library works like a long backup, below: load it again once
+  the first 500 are in. Both notes are kept on the batch, so a reload or *Open imports* shows them too. An entry
+  a series here is already linked to — by you, by an earlier import or by the online check — is that series, even
+  under another title: it reads *Already in your library* and is never added a second time (#410). Nothing is written to the tracker, and only your own
   connection is read, never another admin's. A token the service rejects switches that connection off and
   says so, exactly as a failed push does; a token that has merely lapsed is reported before the service is
   asked and the connection is left in place. Either way, reconnect under Profile and load again.
@@ -3398,8 +3400,10 @@ on the source it came from first, when you have that source installed, and only 
 address is the backup's own counts as that exact entry; otherwise the usual title rules decide, and a title
 none of them is confident about stays unmatched rather than being given the first thing the source
 answered. One import looks up at most 500 titles; titles already in your library do not count toward them (they
-are listed, skipped), so a longer backup, MangaDex list or paste says *(first 500 not in your library kept;
-import again for the rest)*, and once those are in, importing the same list again brings the next ones. Matching
+are listed, skipped), so a longer list says how many come after them — *(first 500 not in your library kept; 312
+more after them: import again for those)* — and once those are in, importing the same list again brings the next
+ones. A title you skipped stays skipped the next time you import the same list (since v0.105.0, #410), so a list
+does not have to be gone through twice; **Change** and picking a match for it un-skips it for good. Matching
 a long list takes a few minutes, because each title is looked up on its source; you can
 leave the page and come back (the batch is saved, and the intake card lists the **open imports** — every
 admin's, on an install with more than one — so none is lost when the tab closes). A batch a server restart

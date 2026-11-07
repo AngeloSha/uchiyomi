@@ -207,6 +207,8 @@ async function boot() {
   const sourceRoutes = (await import('../src/routes/sources')).default;
   const catalogRoutes = (await import('../src/routes/catalog')).default;
   await q('DELETE FROM users WHERE username = $1', [USER]);
+  // Every test starts with no skip remembered (#410): one test's skips are no other test's business, and several reuse a title.
+  await q('DELETE FROM import_skips').catch(() => {});
   const uid = (await q<{ id: string }>(
     `INSERT INTO users (username, display_name, password_hash, role, auth_kind, perms, max_age_rating)
      VALUES ($1,$1,'x','admin','password','{}',NULL) RETURNING id`, [USER]))[0].id;
@@ -463,6 +465,10 @@ test('titles already in the library do not count toward the 500', { skip }, asyn
     assert.equal(r.statusCode, 200, r.body);
     batchId = r.json().batchId;
     assert.deepEqual([r.json().total, r.json().truncated], [503, true], 'the owned titles ride along uncounted, and the 501st new one is left for the next import');
+    // #410: and says how many are left after the 500 -- here the one. Reintroduce by breaking out of the cut loop again:
+    // the count reads 0.
+    assert.equal(r.json().leftOver, 1, 'how many come after the 500');
+    assert.equal((await q<{ left_over: number }>('SELECT left_over FROM import_batches WHERE id = $1', [batchId]))[0].left_over, 1, 'stored for the page');
     const rows = await q<{ backup_title: string; in_library: boolean }>(
       'SELECT backup_title, in_library FROM import_candidates WHERE batch_id = $1 ORDER BY ord', [batchId]);
     assert.deepEqual(rows.filter((x) => x.in_library).map((x) => x.backup_title), ['Owned Long List A', 'Owned Long List B', 'Owned Long List C']);
@@ -1183,7 +1189,7 @@ test('a tracker list becomes a batch: novels skipped, duplicates folded, alt tit
     assert.equal(r.statusCode, 200, r.body);
     batchIds.push(r.json().batchId);
     assert.deepEqual([r.json().total, r.json().skippedNovels, r.json().truncated], [3, 1, false]);
-    assert.deepEqual(listCalls, [{ token: `tok-${T36}`, statuses: ['reading', 'plan_to_read'], max: 501 }], 'the saved token, unsealed, and exactly the lists asked for');
+    assert.deepEqual(listCalls, [{ token: `tok-${T36}`, statuses: ['reading', 'plan_to_read'], max: 2001 }], 'the saved token, unsealed, and exactly the lists asked for');
     const batch = (await q('SELECT origin, tracker FROM import_batches WHERE id = $1', [batchIds[0]]))[0];
     assert.deepEqual([batch.origin, batch.tracker], ['tracker', 'anilist']);
     const rows = await q('SELECT backup_title, tracker, external_id, alt_titles, progress FROM import_candidates WHERE batch_id = $1 ORDER BY ord', [batchIds[0]]);
@@ -1211,17 +1217,25 @@ test('a tracker list becomes a batch: novels skipped, duplicates folded, alt tit
     });
 
     await t.test('a read that hit the cap keeps 500 rows and says so, even when novels brought it under', async () => {
-      // Reintroduce by computing `truncated` from the kept rows alone (`entries.length > 500`): 501 read with one
-      // novel among them keeps 500 and claims the list was read whole.
+      // Reintroduce by computing `truncated` from the kept rows alone (`entries.length > 500`): a full read with one
+      // novel among them keeps 500 and claims the list was read whole. A read that stopped at its cap leaves how many
+      // remain unknown (`leftOver` null); one that did not says it (#410).
       restore();
-      const big = await stubAniList(async () => Array.from({ length: 501 }, (_, i) => entry(`bulk-${i}`, `Bulk Title ${i}`, i === 7 ? { format: 'novel' } : {})));
+      const big = await stubAniList(async (_t, opts) => Array.from({ length: opts.max }, (_, i) => entry(`bulk-${i}`, `Bulk Title ${i}`, i === 7 ? { format: 'novel' } : {})));
       try {
         const r2 = await trackerIntake(app, headers);
         assert.equal(r2.statusCode, 200, r2.body);
-        assert.deepEqual([r2.json().total, r2.json().truncated, r2.json().skippedNovels], [500, true, 1]);
+        assert.deepEqual([r2.json().total, r2.json().truncated, r2.json().skippedNovels, r2.json().leftOver], [500, true, 1, null]);
         // Discard at once: DELETE stops the resolve loop before its next row, and 500 searches are not the point.
         await app.inject({ method: 'DELETE', url: `/api/admin/import/batches/${r2.json().batchId}`, headers });
       } finally { big(); }
+      const mid = await stubAniList(async () => Array.from({ length: 620 }, (_, i) => entry(`mid-${i}`, `Middle Title ${i}`)));
+      try {
+        const r3 = await trackerIntake(app, headers);
+        assert.equal(r3.statusCode, 200, r3.body);
+        assert.deepEqual([r3.json().total, r3.json().truncated, r3.json().leftOver], [500, true, 120], 'a list longer than 500 but read whole says how many are left');
+        await app.inject({ method: 'DELETE', url: `/api/admin/import/batches/${r3.json().batchId}`, headers });
+      } finally { mid(); }
     });
   } finally {
     restore();
@@ -1380,6 +1394,85 @@ test('an imported title is linked and floored at run', { skip }, async () => {
     if (batchId) await q('DELETE FROM import_batches WHERE id = $1', [batchId]);
     await q(`DELETE FROM lib_series WHERE source_series_id = 'fm-t1'`);
     await cleanupTracker(uid);
+    await app.close();
+  }
+});
+
+test('the same entry twice: a series linked to the entry is that series, at intake and at /run (#410)', { skip }, async () => {
+  // Reintroduce by dropping `linkedTo` from ownedBy in POST /batches: the row reads not owned under the library's other
+  // spelling and is offered again. Reintroduce the /run half by going straight to the add: the row whose entry was
+  // linked after its intake is added a second time, from another source.
+  globalThis.fetch = pixelFetch;
+  const { app, headers, uid } = await boot();
+  const { newSeriesId } = await import('../src/lib/ids');
+  const held = newSeriesId();
+  const late = newSeriesId();
+  const restore = await stubAniList(async () => [
+    entry('held', 'Tracker Spelling One', { progress: 4 }),
+    entry('late', 'Tracker Manga One', { progress: 12 }),
+  ]);
+  let batchId = '';
+  try {
+    // The library holds the first under ANOTHER spelling -- an earlier import's Change pick -- linked to the entry by a person.
+    await q(`INSERT INTO lib_series (id, source, title, folder, books_count) VALUES ($1,'Other','Library Spelling One',$1,1)`, [held]);
+    await q(`INSERT INTO series_trackers (series_id, provider, external_id, title, linked_by) VALUES ($1,'anilist',$2,'Tracker Spelling One',$3)`, [held, `${T36}-held`, uid]);
+    await connectAniList(uid);
+    const r = await trackerIntake(app, headers);
+    assert.equal(r.statusCode, 200, r.body);
+    batchId = r.json().batchId;
+    const review = await waitForState(app, headers, batchId, ['review']);
+    const owned = review.items.find((i: any) => i.backup_title === 'Tracker Spelling One');
+    assert.deepEqual([owned.in_library, owned.decision, owned.status], [true, 'skip', 'already'], 'the entry\'s series is owned at intake');
+    const ready = review.items.find((i: any) => i.backup_title === 'Tracker Manga One');
+    assert.deepEqual([ready.status, ready.decision], [null, 'auto'], 'PREMISE: the other row is matched and ready');
+    // Between the intake and Import, that entry gets a series of its own, under another title.
+    await q(`INSERT INTO lib_series (id, source, title, folder, books_count) VALUES ($1,'Other','Late Library Spelling',$1,1)`, [late]);
+    await q(`INSERT INTO series_trackers (series_id, provider, external_id, title, linked_by) VALUES ($1,'anilist',$2,'Tracker Manga One',$3)`, [late, `${T36}-late`, uid]);
+    const run = await app.inject({ method: 'POST', url: `/api/admin/import/batches/${batchId}/run`, headers });
+    assert.equal(run.statusCode, 200, run.body);
+    const done = await waitForState(app, headers, batchId, ['done']);
+    assert.equal(done.items.find((i: any) => i.backup_title === 'Tracker Manga One').status, 'already', 'the row reads as the series already here');
+    assert.equal((await q<{ n: number }>(`SELECT count(*)::int AS n FROM lib_series WHERE source_series_id = 'fm-t1'`))[0].n, 0, 'a second copy was added from the source');
+  } finally {
+    restore();
+    if (batchId) await q('DELETE FROM import_batches WHERE id = $1', [batchId]);
+    await q('DELETE FROM lib_series WHERE id = ANY($1)', [[held, late]]);
+    await q(`DELETE FROM lib_series WHERE source_series_id = 'fm-t1'`);
+    await cleanupTracker(uid);
+    await app.close();
+  }
+});
+
+test('a skip is remembered for the next import of the same list, and a pick forgets it (#410)', { skip }, async () => {
+  // Reintroduce by dropping the import_skips read from POST /batches: the second import offers the skipped title again,
+  // and every skip has to be made once more. Reintroduce the forgetting by dropping the DELETE from the PATCH: the
+  // third import still reads skipped after a person picked a match for it.
+  const { app, headers } = await boot();
+  const { nameKey } = await import('../src/lib/onlineMatch');
+  const title = 'Skipped Once Remembered Twice';
+  const batchIds: string[] = [];
+  const intake = async () => {
+    const r = await app.inject({ method: 'POST', url: '/api/admin/import/batches', headers, payload: { titles: [title] } });
+    assert.equal(r.statusCode, 200, r.body);
+    batchIds.push(r.json().batchId);
+    return waitForState(app, headers, r.json().batchId, ['review', 'done']);
+  };
+  try {
+    const first = await intake();
+    assert.notEqual(first.items[0].decision, 'skip', 'PREMISE: the title is offered');
+    const skip = await app.inject({ method: 'PATCH', url: `/api/admin/import/candidates/${first.items[0].id}`, headers, payload: { decision: 'skip' } });
+    assert.equal(skip.statusCode, 200, skip.body);
+    const second = await intake();
+    assert.deepEqual([second.items[0].decision, second.items[0].in_library], ['skip', false], 'skipped again, without being in the library');
+    assert.equal(second.batch.resolved, second.batch.total, 'a remembered skip is settled at once, never searched');
+    const pick = await app.inject({ method: 'PATCH', url: `/api/admin/import/candidates/${second.items[0].id}`, headers,
+      payload: { decision: 'manual', source: 'fm', sourceId: 't1', title: 'Tracker Manga One' } });
+    assert.equal(pick.statusCode, 200, pick.body);
+    const third = await intake();
+    assert.notEqual(third.items[0].decision, 'skip', 'a pick did not forget the skip');
+  } finally {
+    for (const id of batchIds) await q('DELETE FROM import_batches WHERE id = $1', [id]);
+    await q('DELETE FROM import_skips WHERE key = $1', [`n:${nameKey(title)}`]);
     await app.close();
   }
 });

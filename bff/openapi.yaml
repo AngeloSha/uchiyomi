@@ -14051,7 +14051,7 @@ paths:
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Up to 50
         batches in every state, newest first, as `{content: [{id, origin, tracker, state, total, resolved,
-        added, already, failed, skippedNovels, truncated, created_at, updated_at, stale}]}` — `origin` is
+        added, already, failed, skippedNovels, truncated, leftOver, created_at, updated_at, stale}]}` — `origin` is
         `backup`, `mangadex`, `paste` or `tracker`, and `tracker` names the service (`anilist`, `myanimelist`,
         `kitsu`, `mangaupdates`) for a tracker batch, null otherwise; `skippedNovels` (integer: the novels a tracker read
         dropped, 0 for the other origins) and `truncated` (boolean: the intake kept the first 500 titles not
@@ -14093,13 +14093,18 @@ paths:
         since v0.51.0 the titles the library already holds are kept as skipped rows and do not count toward
         them, so `total` can be more than 500, and `truncated` says more titles not owned remained, which
         importing the same list again picks up once these are in. Answers `{batchId, total, truncated,
-        skippedNovels}`.
+        skippedNovels, leftOver}`: since v0.105.0 `leftOver` counts the titles not owned after the cut (null when not
+        counted, as when a tracker read stopped at its own cap). A title skipped in an earlier import of the list starts
+        skipped and does not count (remembered by its tracker id, else its title, until a pick un-skips it), and a
+        tracker row whose entry a series here is already linked to (by a person or the check) is owned at intake and
+        reads `status: already` at /run instead of being added again.
 
 
         The fourth intake, `origin: 'tracker'`, reads the requesting admin's OWN connected AniList /
         MyAnimeList / Kitsu account (the connection GET /api/trackers shows for them; never another member's)
-        for the lists named in `statuses` (Reading + Plan to read when omitted). Up to 501 entries are read;
-        the batch keeps 500 and reports `truncated` when the read hit the cap. Light novels are dropped and
+        for the lists named in `statuses` (Reading + Plan to read when omitted). Up to 2001 entries are read
+        (501 before v0.105.0); the batch keeps the first 500 not owned and reports `truncated` when the read hit the
+        cap or more came after them. Light novels are dropped and
         counted as `skippedNovels` (a novel resolves to its manga adaptation on every source, and would link
         the novel entry to the manga); both figures are stored on the batch row and come back as
         `skippedNovels` and `truncated` on every batch GET. Entries are deduped by their id on the service
