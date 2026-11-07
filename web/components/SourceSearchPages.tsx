@@ -2,6 +2,7 @@
 import type { ReactNode } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { revealed } from '@/lib/adult';
 import { t as tr } from '@/lib/i18n';
 
 interface Result { sourceId: string; title: string; coverUrl?: string }
@@ -10,7 +11,8 @@ interface Result { sourceId: string; title: string; coverUrl?: string }
 export function SourceSearchPages<T extends Result>({ source, query, initial, pageable, children }: {
   source: string; query: string; initial: T[]; pageable: boolean; children: (results: T[]) => ReactNode;
 }) {
-  const url = `/api/sources/search?source=${encodeURIComponent(source)}&q=${encodeURIComponent(query)}`;
+  // Only the admin's sheets page through a source (Add more sources, the import's Change): with every source asked.
+  const url = revealed(`/api/sources/search?source=${encodeURIComponent(source)}&q=${encodeURIComponent(query)}`);
   const pages = useInfiniteQuery({
     queryKey: ['manual-source-pages', url], enabled: false, initialPageParam: 2,
     queryFn: ({ pageParam, signal }) => api<{ content: T[] }>(`${url}&page=${pageParam}`, { signal }),

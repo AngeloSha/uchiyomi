@@ -328,6 +328,17 @@ test('a link to a batch that no longer exists goes back to the intake card and s
   assert.match(src, /const startOver = \(\) => \{[\s\S]{0,400}qc\.invalidateQueries\(\{ queryKey: \['import-batches'\] \}\);[\s\S]{0,80}router\.replace\('\/admin\/import\/'\);/, 'startOver does not refresh the list and the URL');
 });
 
+test('a batch is a page of its own: Back, the browser\'s or the header\'s, returns to the intake (#409)', () => {
+  // Reintroduce router.replace in start or openBatch: the batch overwrites the intake's entry, and the browser's Back
+  // leaves the import (or does nothing in a new tab). Reintroduce the header's router.push('/admin/'): it jumps past
+  // the intake to the admin console.
+  const src = code(read('app/admin/import/page.tsx'));
+  assert.match(src, /fromIntake\.current = true;\s*router\.push\(`\/admin\/import\/\?batch=\$\{r\.batchId\}`\);/, 'a started batch replaces the intake');
+  assert.match(src, /const openBatch = \(id: string\) => \{[^}]*fromIntake\.current = true; router\.push\(`\/admin\/import\/\?batch=\$\{id\}`\);/, 'an opened batch replaces the intake');
+  assert.match(src, /const back = \(\) => \{\s*if \(!batchId\) router\.push\('\/admin\/'\);\s*else if \(fromIntake\.current\) router\.back\(\);\s*else router\.push\('\/admin\/import\/'\);/);
+  assert.match(src, /<button onClick=\{back\}[^>]*aria-label=\{tr\('Back'\)\}>/, "the header's Back is not the import's own");
+});
+
 test('an interrupted batch in Open imports reads as interrupted, not as matching', () => {
   // The list route computes `stale` like the GET route; without reading it the card said "Matching…
   // 12/40" after a restart while nothing was matching. Reintroduce by rendering batchStateLabel(b.state)

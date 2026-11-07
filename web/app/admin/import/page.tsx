@@ -16,6 +16,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
+import { revealed } from '@/lib/adult';
 import { useAuth } from '@/lib/auth';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
@@ -499,6 +500,16 @@ function ImportWizardInner() {
 
   const [batchId, setBatchId] = useState<string | null>(params.get('batch'));
   useEffect(() => { setBatchId(params.get('batch')); }, [params]);
+  // A batch is a page of its own in the history (#409, @julieminer): opened or started from the intake, it is PUSHED, so
+  // the browser's Back returns to the intake, and so does the header's (router.back(), never a second entry). Reached any
+  // other way -- a link, a bookmark, a new tab -- the header's Back goes up to the intake all the same. They were
+  // replaced: Back left the import altogether, or did nothing at all when the batch was the first page of the tab.
+  const fromIntake = useRef(false);
+  const back = () => {
+    if (!batchId) router.push('/admin/');
+    else if (fromIntake.current) router.back();
+    else router.push('/admin/import/');
+  };
 
   const backupRef = useRef<HTMLInputElement>(null);
   const [mdUrl, setMdUrl] = useState('');
@@ -514,7 +525,8 @@ function ImportWizardInner() {
       if (r.truncated) toast(truncatedWords(origin).toast, 'info');
       setIntakeNote({ skippedNovels: r.skippedNovels ?? 0, truncated: !!r.truncated, origin });
       setBatchId(r.batchId);
-      router.replace(`/admin/import/?batch=${r.batchId}`);
+      fromIntake.current = true;
+      router.push(`/admin/import/?batch=${r.batchId}`);
     } catch (e: any) {
       // The tracker intake's own refusals, each in the person's words rather than the server's. A rejected
       // token is the one that needs a trip to Profile; a service that did not answer is a retry; a
@@ -548,9 +560,11 @@ function ImportWizardInner() {
     if (titles.length) start({ titles });
   };
 
+  // Every source this account may use, so a match on an adult one is named, not shown as its id (#405); its own key, so a
+  // revealed list is never the one Discover reads.
   const { data: sourcesData } = useQuery({
-    queryKey: ['sources'],
-    queryFn: () => api<{ content: Src[] }>('/api/sources'),
+    queryKey: ['sources', 'all'],
+    queryFn: () => api<{ content: Src[] }>(revealed('/api/sources')),
     staleTime: 30_000,
   });
   const sourceName = (id: string | null): string => (id && sourcesData?.content.find((s) => s.id === id)?.name) || id || '';
@@ -701,7 +715,7 @@ function ImportWizardInner() {
     } catch (e: any) { toast(msgOf(e, tr('Could not discard this import')), 'error'); }
     setDiscardBusy(false);
   };
-  const openBatch = (id: string) => { setIntakeNote(null); setBatchId(id); router.replace(`/admin/import/?batch=${id}`); };
+  const openBatch = (id: string) => { setIntakeNote(null); setBatchId(id); fromIntake.current = true; router.push(`/admin/import/?batch=${id}`); };
   const closeEditor = () => { setEditing(null); qc.invalidateQueries({ queryKey: ['import-batch', batchId] }); };
 
   if (!isAdmin) return <div className="flex min-h-screen-d items-center justify-center text-fog-400">{tr('Admins only.')}</div>;
@@ -717,7 +731,7 @@ function ImportWizardInner() {
   return (
     <div className="min-h-screen-d px-4 pb-10 pt-4 lg:px-0">
       <div className="mb-4 flex items-center gap-2">
-        <button onClick={() => router.push('/admin/')} className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-fog-400 hover:text-fog-100" aria-label={tr('Back')}>
+        <button onClick={back} className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-fog-400 hover:text-fog-100" aria-label={tr('Back')}>
           <IcChevronLeft width={18} height={18} className="rtl:rotate-180" />
         </button>
         <h1 className="min-w-0 truncate font-display text-lg font-semibold text-fog-50">{tr('Import & review matches')}</h1>

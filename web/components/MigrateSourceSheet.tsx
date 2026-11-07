@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
+import { revealed } from '@/lib/adult';
 import { Sheet, Img } from '@/components/ui';
 import { ScrollRail } from '@/components/ScrollRail';
 import { SourceIcon } from '@/components/SourcePicker';
@@ -80,7 +81,7 @@ export function MigrateSourceSheet({ id, title, attached, mainId, listed, onDone
   const srcs = useQuery({
     // Under a key of its own: this list is sorted for the sheet, and must not be the one Discover reads.
     queryKey: ['sources', 'migrate'],
-    queryFn: () => api<{ content: Src[] }>('/api/sources'),
+    queryFn: () => api<{ content: Src[] }>(revealed('/api/sources')),
     staleTime: 60_000,
   });
   // A to Z by name, so a source can be found by eye in a list of fifty; the server's order is install order. Never a
@@ -105,7 +106,7 @@ export function MigrateSourceSheet({ id, title, attached, mainId, listed, onDone
   const { data, isFetching, error } = useQuery({
     queryKey: ['migrate-search', debounced, only],
     queryFn: ({ signal, queryKey, client }) => api<{ content: SourceGroup[] } & SearchProgress>(
-      `/api/sources/search-all?groupBy=source&q=${encodeURIComponent(debounced)}${only ? `&sources=${encodeURIComponent(only)}` : ''}&wait=${searchWait(client.getQueryState(queryKey)?.dataUpdateCount ?? 0)}`,
+      revealed(`/api/sources/search-all?groupBy=source&q=${encodeURIComponent(debounced)}${only ? `&sources=${encodeURIComponent(only)}` : ''}&wait=${searchWait(client.getQueryState(queryKey)?.dataUpdateCount ?? 0)}`),
       { signal },
     ),
     enabled: debounced.length >= 2,
@@ -115,7 +116,7 @@ export function MigrateSourceSheet({ id, title, attached, mainId, listed, onDone
   const progress = searchProgressLine(data);
   const detail = useQuery({
     queryKey: ['migrate-detail', pick?.source, pick?.sourceId],
-    queryFn: () => api<Detail>(`/api/sources/detail?source=${encodeURIComponent(pick!.source)}&sourceId=${encodeURIComponent(pick!.sourceId)}`),
+    queryFn: () => api<Detail>(revealed(`/api/sources/detail?source=${encodeURIComponent(pick!.source)}&sourceId=${encodeURIComponent(pick!.sourceId)}`)),
     enabled: !!pick,
     staleTime: 60_000,
   });
