@@ -81,5 +81,8 @@ updates:
     directory: /services/title-extractor
     schedule: { interval: weekly, day: monday }
     ignore:
+      # The interpreter's minor moves with the wheels pinned beside it (the Dockerfile's torch and torchvision, and
+      # requirements.txt) and with ci.yml's python-version: torch 2.8 has no wheel past CPython 3.13, so #395's
+      # 3.12 -> 3.15 could not even build. A Python minor is a deliberate step with its model stack; patches still arrive.
       - dependency-name: python
-        update-types: ["version-update:semver-major"]
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
