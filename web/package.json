@@ -17,11 +17,11 @@
     "test:i18n": "node test/e2e/i18n.mjs"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.105.3",
-    "framer-motion": "^14.9.0",
+    "@tanstack/react-query": "^5.106.0",
+    "framer-motion": "^14.9.1",
     "idb": "^8.0.4",
     "lenis": "^1.3.27",
-    "next": "16.4.4",
+    "next": "16.4.5",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
