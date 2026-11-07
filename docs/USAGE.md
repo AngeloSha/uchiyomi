@@ -921,10 +921,13 @@ sources it already follows are kept but not asked, and a new follow is refused w
   searched for this; only the sources the dialog already found are asked, each for its page and chapter list.
 
 **How many** (since v0.89.0, #305). A series follows up to three sources besides its main one. An admin can allow
-more, up to ten, or fewer, in **Admin → Settings → Downloads → More options → Other sources per series**; the number
-counts the sources you follow and the ones Uchiyomi finds on its own alike. Each one is one more chapter list asked for
-at every library update, so more sources per series make each update longer. Lowering it unfollows nothing: a series
-that follows more keeps its sources, and follows no new one while it is over the number.
+more, up to 25 since v0.105.0 (ten before), or fewer, in **Admin → Settings → Downloads → More options → Other sources
+per series**; the number counts the sources you follow and the ones Uchiyomi finds on its own alike. The first three
+it follows are asked at every library update. The rest are its backups
+([#413](https://github.com/AngeloSha/uchiyomi/issues/413)): while the series has nothing missing they are asked once a
+day, so a long list of them does not make every update longer; once it is missing chapters, or when nothing ahead of
+them answers, they are asked like the others, and **Check now** asks them all. Lowering the number unfollows nothing: a
+series that follows more keeps its sources, and follows no new one while it is over the number.
 
 **In the series' language only** (since v0.52.0). A series follows sources in its own language: the add dialog's
 check, the hunt for a missing chapter and Find other sources never follow a source in another, and Find missing

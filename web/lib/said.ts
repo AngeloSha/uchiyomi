@@ -837,8 +837,8 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'attach.unreachable': (p) => tr('{name} did not say what that title is. Try again in a minute.', { name: str(p, 'name') }),
   'attach.cooling': (p) => tr('{name} is cooling down after errors, so it is not asked anything right now. Try again later.', { name: str(p, 'name') }),
   'attach.cap': (p) => (num(p, 'n') === 1
-    ? tr('This series already follows 1 other source, as many as it may. Remove one first, or move the series to this source.')
-    : tr('This series already follows {n} other sources, as many as it may. Remove one first, or move the series to this source.', { n: num(p, 'n') })),
+    ? tr('This series already follows 1 other source, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.')
+    : tr('This series already follows {n} other sources, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.', { n: num(p, 'n') })),
   'detach.noMain': () => tr('This series has no main source to detach.'),
   // A source retired, or a site removed, while some series still has it as its main source (bff lib/retireSource.ts).
   'retire.inUse': (p) => (num(p, 'n') === 1

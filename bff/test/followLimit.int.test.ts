@@ -1,5 +1,5 @@
 // v0.89.0 (#305, TIGamingTV: "more sources per series, more to search from"): how many other sources a series may follow
-// is the admin's choice, Admin -> Settings -> Other sources per series (lib/followLimit.ts), 1 to 10. Until one is picked
+// is the admin's choice, Admin -> Settings -> Other sources per series (lib/followLimit.ts), 1 to 25 (10 before v0.105.0). Until one is picked
 // it is MAX_FOLLOWED_SOURCES, or three. Driven through the real settings route and the one count every follow is written
 // under (lib/autoFollow.ts followJudged): Find other sources, the scout, the hunt and a follow by hand all go through it.
 //
@@ -71,13 +71,13 @@ const settings = async () => (await app.inject({ method: 'GET', url: '/api/admin
 const patch = (payload: unknown, who = ADMIN) => app.inject({ method: 'PATCH', url: '/api/admin/settings', headers: H[who], payload });
 const followers = async () => Number((await q('SELECT count(*)::int AS n FROM series_sources WHERE series_id = $1', [SER]))[0].n);
 
-test('the admin picks how many other sources a series may follow, 1 to 10; lowering it unfollows nothing', { skip }, async () => {
+test('the admin picks how many other sources a series may follow, 1 to 25; lowering it unfollows nothing', { skip }, async () => {
   const { followJudged } = await import('../src/lib/autoFollow');
   const follow = (i: number) => followJudged(SER, { source: src(i), name: src(i), sourceSeriesId: `${src(i)}-series`, theirTitle: 'Followed Far', coverage: null });
 
   const before = await settings();
   assert.equal(before.followerLimit, 3, 'PREMISE: three while nothing is picked and the env says nothing');
-  assert.equal(before.followerLimitMax, 10);
+  assert.equal(before.followerLimitMax, 25);
   for (let i = 1; i <= 3; i++) assert.equal(await follow(i), 'inserted');
   assert.equal(await follow(4), 'cap', 'PREMISE: the fourth is over the default');
 
@@ -93,8 +93,8 @@ test('the admin picks how many other sources a series may follow, 1 to 10; lower
   assert.equal(await followers(), 5, 'lowering the number unfollows nothing');
   assert.equal(await follow(6), 'cap');
 
-  // Ten at most, a whole number, and only an admin's to pick. A refused value writes nothing.
-  for (const bad of [0, 11, 2.5, '4', null]) {
+  // 25 at most (10 before v0.105.0), a whole number, and only an admin's to pick. A refused value writes nothing.
+  for (const bad of [0, 26, 2.5, '4', null]) {
     assert.equal((await patch({ maxFollowedSources: bad })).statusCode, 400, `refused: ${JSON.stringify(bad)}`);
   }
   assert.equal((await patch({ maxFollowedSources: 10 }, MEMBER)).statusCode, 403);
@@ -106,5 +106,5 @@ test('the admin picks how many other sources a series may follow, 1 to 10; lower
   assert.equal((await patch({ maxFollowedSources: 10 })).statusCode, 200);
   assert.ok((await q('SELECT next_at <= now() AS due FROM series_scout WHERE series_id = $1', [SER]))[0].due, 'a full series is looked at again');
   for (let i = 6; i <= 10; i++) assert.equal(await follow(i), 'inserted');
-  assert.equal(await follow(11), 'cap', 'ten is the most');
+  assert.equal(await follow(11), 'cap', 'ten, the number picked, is the most');
 });

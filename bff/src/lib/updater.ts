@@ -63,6 +63,12 @@ export type UpdateOutcome =
  * loop is sequential with a 1.5s pause, so every series behind it waited on undici's 300s default.
  */
 export const LIST_TIMEOUT = Number(process.env.UPDATER_LIST_TIMEOUT_MS) || 20_000;
+/**
+ * #413: how many of a series' followers are asked at every scheduled update (in the order they were added); the rest are
+ * its backups, asked at most once a day while it has nothing missing (BACKUP_EVERY_MS). See the follower loop.
+ */
+export const BACKUP_FRESH = 3;
+export const BACKUP_EVERY_MS = 24 * 3600_000;
 
 /**
  * Attempts (added + failed) one sweep may spend before it stops and says so.
@@ -95,7 +101,7 @@ export type SweepStop = 'budget' | 'disk' | 'shutdown' | 'cancelled' | 'yield';
  * When the first of these sources, which did not answer this run, can be asked again (v0.79.0, `finish_after`): a cooling
  * one at the end of its cooldown; one that threw, or is resting (Fix everything's run-long pause), a finishing interval on.
  */
-async function staleUntil(stale: ReadonlyMap<string, 'cooling' | 'threw'>): Promise<Date> {
+async function staleUntil(stale: ReadonlyMap<string, 'cooling' | 'threw' | 'resting'>): Promise<Date> {
   const soon = Date.now() + FINISH_MINUTES * 60_000;
   const cooling = [...stale].filter(([, why]) => why === 'cooling').map(([id]) => id);
   const rows = cooling.length
@@ -288,6 +294,7 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
 
 async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): Promise<UpdateResult> {
   let s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status,chapter_floor,scanlator_prefs,source_prefs,auto_update,
+    source_checked_at,source_missing,finish_missing,finish_after,
     ${NUMBERING_COLUMNS}, ${ARCHIVE_BOUNDARY} FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
   if (!s) return nothing('', 'gone');
   // This is the common boundary for direct Check/update calls as well as background refreshes. Route-level
@@ -324,13 +331,14 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   // Health page promises when it lists such a series as reference rather than frozen. Only a series with
   // nothing loaded at all is unrouted. A row naming the primary's own adapter would list it twice: the
   // follow route refuses one, but a row older than that rule must not double the listing.
-  const extras = await q<{ source_id: string; source_series_id: string }>(
-    'SELECT source_id, source_series_id FROM series_sources WHERE series_id = $1 ORDER BY created_at, source_id', [seriesId],
+  const extras = await q<{ source_id: string; source_series_id: string; checked_at: string | null }>(
+    'SELECT source_id, source_series_id, checked_at FROM series_sources WHERE series_id = $1 ORDER BY created_at, source_id', [seriesId],
   ).catch(() => []);
-  let followed = [
+  let followed: Array<{ source: string; ref: string; primary: boolean; checkedAt?: string | null }> = [
     ...(s.source_id && s.source_series_id && getSource(s.source_id)
       ? [{ source: s.source_id as string, ref: s.source_series_id as string, primary: true }] : []),
-    ...extras.filter((e) => e.source_id !== s.source_id && getSource(e.source_id)).map((e) => ({ source: e.source_id, ref: e.source_series_id, primary: false })),
+    ...extras.filter((e) => e.source_id !== s.source_id && getSource(e.source_id))
+      .map((e) => ({ source: e.source_id, ref: e.source_series_id, primary: false, checkedAt: e.checked_at })),
   ];
   // Numbered by posting order: the series takes its chapters from the source whose posts were numbered and from
   // nowhere else. A follower's chapter 20 is its own chapter 20 -- another site numbers these posts its own way,
@@ -380,7 +388,22 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
   // not be asked or did not answer (`stale`: cooling, resting, a throw or our own timeout). A stale source's chapters are
   // still its chapters -- see the merge after the parts rules below.
   const fresh = new Set<string>();
-  const stale = new Map<string, 'cooling' | 'threw'>();
+  const stale = new Map<string, 'cooling' | 'threw' | 'resting'>();
+  // #413 (@Wolf92s): past the first BACKUP_FRESH, a follower is a backup. A scheduled run over a series with nothing missing
+  // asks one at most once a day rather than at every update: its stored chapters stand as an unasked source's do (`stale`,
+  // 'resting'), so nothing it lists goes. A series that is behind asks every one, every time; a run in which nothing ahead
+  // answered asks the backups in turn until one does. That lets a series follow many sources without every sweep asking each.
+  // Reintroduce by asking every follower: "a caught-up series asks its backups once a day" in updater.int.test.ts finds the
+  // backup asked again.
+  const behind = !s.source_checked_at || Number(s.finish_missing ?? s.source_missing ?? 0) > 0
+    || (s.finish_after != null && new Date(s.finish_after).getTime() <= Date.now());
+  const backups = new Set<string>();
+  if (opts.unattended && !behind) {
+    for (const f of followed.filter((x) => !x.primary).slice(BACKUP_FRESH)) {
+      const at = f.checkedAt ? new Date(f.checkedAt).getTime() : NaN;
+      if (Number.isFinite(at) && Date.now() - at < BACKUP_EVERY_MS) backups.add(f.source);
+    }
+  }
   // The numbering source's own list, untouched: what the detector judges and what posting numbers are given to.
   let rawNumbering: SourceChapter[] | null = null;
   // Every answering source's own list, untouched, in the order asked: a list read by its titles (#379) is read whole.
@@ -392,6 +415,7 @@ async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): 
     if (opts.unattended && !(await seriesIsMonitored(seriesId))) {
       return { ...nothing(s.title, 'paused'), asked: askedSource };
     }
+    if (answered > 0 && backups.has(f.source)) { stale.set(f.source, 'resting'); continue; }
     if (opts.resting?.(f.source) || await blockedNow(f.source)) { blocked++; stale.set(f.source, 'cooling'); continue; }
     // Looked up again after the awaits above: an extension refresh can unregister an adapter between
     // building the list and asking it, and that is a source that did not answer, not a crash.

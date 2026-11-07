@@ -20,10 +20,11 @@ test('three unless the operator says otherwise', async () => {
   assert.equal(followLimit('2'), 2, 'the old default, set on purpose');
 });
 
-test('a number is taken whole, between 1 and 10', async () => {
+test('a number is taken whole, between 1 and 25', async () => {
   const { FOLLOW_LIMIT_MAX, followLimit } = await load();
-  // Every follower is one more chapter list per sweep for every series. Reintroduce a ceiling of 20: '500' reads 20.
-  assert.equal(FOLLOW_LIMIT_MAX, 10);
+  // 25 since v0.105.0 (#413): past three, a follower is a backup asked once a day (lib/updater.ts). Reintroduce a ceiling
+  // of 20: '500' reads 20.
+  assert.equal(FOLLOW_LIMIT_MAX, 25);
   assert.equal(followLimit('5'), 5);
   assert.equal(followLimit('3.9'), 3);
   assert.equal(followLimit('1'), 1);
@@ -31,6 +32,8 @@ test('a number is taken whole, between 1 and 10', async () => {
   assert.equal(followLimit('6'), 6);
   assert.equal(followLimit('7'), 7, 'past the old ceiling of six');
   assert.equal(followLimit('10'), 10);
-  assert.equal(followLimit('11'), 10);
-  assert.equal(followLimit('500'), 10);
+  assert.equal(followLimit('11'), 11, 'past the old ceiling of ten');
+  assert.equal(followLimit('25'), 25);
+  assert.equal(followLimit('26'), 25);
+  assert.equal(followLimit('500'), 25);
 });

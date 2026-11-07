@@ -633,7 +633,7 @@ function SchedulesSection({ data, save }: { data: any; save: Save }) {
               MAX_FOLLOWED_SOURCES alone set it -- that number is what the menu shows until one is picked. The help says the
               cost: each one is a chapter list asked for at every update. */}
           <SelectRow id="sources-per-series" label={tr('Other sources per series')}
-            help={tr('How many sources besides its main one a series may follow, whether you add them or Uchiyomi finds them. 3 by default. Each one is one more chapter list to ask for at every library update.')}
+            help={tr('How many sources besides its main one a series may follow, whether you add them or Uchiyomi finds them. 3 by default. The first 3 are asked at every library update; the others are backups, asked once a day while the series has nothing missing.')}
             value={String(data.followerLimit ?? 3)}
             options={Array.from({ length: data.followerLimitMax ?? 10 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }))}
             onChange={(v) => save({ maxFollowedSources: Number(v) })} />

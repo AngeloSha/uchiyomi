@@ -639,9 +639,10 @@ const EN = {
     `${name} calls it “${title}”, which is not this series’ title or one of its other names. If the cover and the chapters show it is the same work, attach it anyway.`,
   'attach.unreachable': ({ name }: { name: string }) => `${name} did not say what that title is. Try again in a minute.`,
   'attach.cooling': ({ name }: { name: string }) => `${name} is cooling down after errors, so it is not asked anything right now. Try again later.`,
+  // #413: and where the number is set, for the admin whose sheet this is.
   'attach.cap': ({ n }: { n: number }) => (n === 1
-    ? 'This series already follows 1 other source, as many as it may. Remove one first, or move the series to this source.'
-    : `This series already follows ${n} other sources, as many as it may. Remove one first, or move the series to this source.`),
+    ? 'This series already follows 1 other source, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.'
+    : `This series already follows ${n} other sources, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.`),
   'detach.noMain': () => 'This series has no main source to detach.',
   // A source retired, or a site removed, while some series still has it as its main source (v0.54.0, lib/retireSource.ts).
   'retire.inUse': ({ n }: { n: number }) => `It is the main source of ${n} series. Replace it first.`,

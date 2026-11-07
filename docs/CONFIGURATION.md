@@ -514,10 +514,11 @@ rarely needed:
   `AUTOFIX_MAX_MINUTES` is spent, and the next run continues down the list. `0` switches its extensions phase off. A
   package that carries none of the series it was searched for is removed again at once, and is not tried for those
   series again for a month.
-- `MAX_FOLLOWED_SOURCES` (default `3`, 1 to 10): how many sources besides the main one a series may follow, by hand or
+- `MAX_FOLLOWED_SOURCES` (default `3`, 1 to 25): how many sources besides the main one a series may follow, by hand or
   automatically, until an admin picks a number. Since v0.89.0 that is a menu in the app, **Admin → Settings → Downloads
-  → More options → Other sources per series** (1 to 10), and this is only its starting value. Each one is another
-  chapter list read on every update. A source that is broken, switched off or no longer installed does not count
+  → More options → Other sources per series** (1 to 25 since v0.105.0, 1 to 10 before), and this is only its starting
+  value. The first three are asked on every update; since v0.105.0 the rest are backups, asked once a day while the
+  series has nothing missing and on every update while it does (#413). A source that is broken, switched off or no longer installed does not count
   toward it for the sources Uchiyomi adds on its own.
 - `MIN_FREE_GB` (default `10`): refuse to start a download when the download disk has less than this free.
   `0` disables the floor. Fails open if free space cannot be measured.

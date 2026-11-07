@@ -1,20 +1,21 @@
 /**
- * How many OTHER sources a series may follow besides its main one: 1 to 10, 3 by default.
+ * How many OTHER sources a series may follow besides its main one: 1 to 25, 3 by default.
  *
  * Two until v0.80.0, when the scout (lib/sourceScout.ts) began following sources on its own: a series stuck on a site
  * that rate-limits it needs room for a source on another image server, and a broken follower no longer counts against
  * the automatic follows (sourceStanding.ts notCarrying). An operator's knob in the env (`MAX_FOLLOWED_SOURCES`, 1 to 6)
  * until v0.89.0 (#305, TIGamingTV: "more sources per series, more to search from"), when it became the admin's choice:
  * Admin -> Settings -> Getting chapters -> Other sources per series (`server_settings.max_followed_sources`). The env's
- * number is still read, as the starting value while no choice is saved. Ten at most: every follower is one more chapter
- * list asked for on every library update, for every series, which the menu's help says.
+ * number is still read, as the starting value while no choice is saved. Ten at most until v0.105.0 (#413, Wolf92s: "a
+ * ton of sources as backup"), when it became 25: past the first three, a follower is a backup, asked once a day while
+ * the series has nothing missing (lib/updater.ts BACKUP_FRESH), so a long list of them does not make every sweep longer.
  */
 import { one } from './db';
 
-export const FOLLOW_LIMIT_MAX = 10;
+export const FOLLOW_LIMIT_MAX = 25;
 export const FOLLOW_LIMIT_DEFAULT = 3;
 
-/** A number taken whole and held between 1 and 10; anything that is not a number (or 0) is nothing set: three. */
+/** A number taken whole and held between 1 and 25; anything that is not a number (or 0) is nothing set: three. */
 const clamp = (n: number): number => Math.min(FOLLOW_LIMIT_MAX, Math.max(1, Math.floor(n || FOLLOW_LIMIT_DEFAULT)));
 
 /** The env's number (`MAX_FOLLOWED_SOURCES`): the limit while the admin has not picked one. */
