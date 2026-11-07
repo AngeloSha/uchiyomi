@@ -76,7 +76,7 @@ import { titleExtractionCapabilities } from '../lib/titleExtraction';
 import { titleExtractionBatchTick } from '../lib/titleExtractionBatch';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
-import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, applyAdultSources, rateSourceAdult, MAX_ADULT_SOURCES, browsableIds, nameableIds, viewCtxFor, visible, Params, hideAdult, ADULT_RATING } from '../lib/visibility';
+import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, applyAdultSources, applyAdultHiding, rateSourceAdult, MAX_ADULT_SOURCES, browsableIds, nameableIds, viewCtxFor, visible, Params, hideAdult, ADULT_RATING } from '../lib/visibility';
 import { cleanSourceOrder, invalidateSourcePrefs } from '../lib/sourcePrefs';
 import { keepRestricted, memberDefaults, memberDefaultsShape, permsShape, saveMemberDefaults } from '../lib/memberDefaults';
 import { FOLLOW_LIMIT_MAX, followerLimit, forgetFollowerLimit } from '../lib/followLimit';
@@ -645,7 +645,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- server settings ----
   const SETTINGS_COLS = 'server_name, allow_registration, local_pick, automatic_title_logos, automatic_cover_titles, automatic_cover_title_generation, automatic_cover_title_apply, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, backup_enabled, auto_follow_on_failure, '
-    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, fill_details, discover_lookups, '
+    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, adult_hiding, source_prefs, group_upgrade, borrow_names, fill_details, discover_lookups, '
     + 'mangadex_langs, unstated_lang, hide_notice_types, deleted_as_ghosts, update_smart, finish_downloads, '
     + ARCHIVE_SETTINGS_COLS;
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
@@ -793,6 +793,11 @@ export default async function adminRoutes(app: FastifyInstance) {
        */
       adultGenres: z.array(z.string().min(1).max(60)).max(60).optional(),
       adultSources: z.array(z.string().min(1).max(120)).max(200).optional(),
+      /**
+       * Whether this server hides 18+ until someone shows it (#406, lib/visibility.ts adultHidingOn). Off: nothing is
+       * hidden for anyone and the web app drops Show 18+; an account's age limit still holds.
+       */
+      adultHiding: z.boolean().optional(),
       /**
        * Source ids, most preferred first (lib/sourcePrefs.ts): which copy of a chapter the server does not
        * have yet is taken, when a series follows more than one source. Checked by shape, not against the
@@ -977,9 +982,14 @@ export default async function adminRoutes(app: FastifyInstance) {
       // The permission's own copy (sourceRatedAdult), at once: the next request of a capped account is refused them.
       applyAdultSources(list);
     }
+    if (b.adultHiding !== undefined) {
+      await q('UPDATE server_settings SET adult_hiding = $1, updated_at = now() WHERE id = 1', [b.adultHiding]);
+      // In memory at once, as the Adult only rating: the next request is answered by the new switch.
+      applyAdultHiding(b.adultHiding);
+    }
     // The view context caches these for a few seconds; a save must take effect on the next request,
     // not whenever that window happens to lapse.
-    if (b.adultGenres !== undefined || b.adultSources !== undefined) invalidateAdultFilter();
+    if (b.adultGenres !== undefined || b.adultSources !== undefined || b.adultHiding !== undefined) invalidateAdultFilter();
     if (b.groupUpgrade !== undefined) await q('UPDATE server_settings SET group_upgrade = $1, updated_at = now() WHERE id = 1', [b.groupUpgrade]);
     if (b.discoverLookups !== undefined) {
       await q('UPDATE server_settings SET discover_lookups = $1, updated_at = now() WHERE id = 1', [b.discoverLookups]);

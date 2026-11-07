@@ -669,7 +669,8 @@ pixels wide) the cover itself is the hero and already carries its lettering, so 
 instead of the logo, and the logo is not downloaded (since v0.102.2). A logo in the original language, or one whose
 language is not known, keeps the readable manga title underneath it.
 
-**Admin → Settings → Series & chapters → Automatic title logos** enables background logo lookup. It is off until enabled.
+**Admin → Art → Automatic title logos** enables background logo lookup (until v0.105.0 it sat under Settings → Series &
+chapters; both title artwork switches now sit on the Art page, above the covers and banners). It is off until enabled.
 Only a series with a checked or manually confirmed AniList manga link is looked up. The server first asks the
 [Uchiyomi logo library](https://github.com/AngeloSha/uchiyomi-title-logos) by that ID: logos picked and cut out by hand
 from official covers, one per manga, each used only when its file matches the SHA-256 the library lists (since
@@ -3249,7 +3250,8 @@ request goes to that site at all. The **Show 18+** button is on Discover too —
 sources*, where it stays while you search — and brings the lot back for the rest of the browser session.
 It appears there whenever something is being hidden, so an install with adult providers and no 18+ shelf
 still has the switch. Since v0.55.4 the search also leaves out 18+ titles from providers that are not 18+ themselves
-while the reveal is off — a MangaDex title rated erotica, a result carrying one of the genres below — and with it on,
+while the reveal is off — a MangaDex title rated erotica, a title an extension tags *Erotica* or *Pornographic* (since
+v0.105.0), a result carrying one of the genres below — and with it on,
 its *Hide 18+* and *18+ only* chips (section 6) sort them out. Three things are deliberately left alone, because you named them yourself: opening a
 provider's own page for a title, adding it, and *Find missing chapters* on a series whose own source is
 adult. Hiding those would stop a series you already own from being filled, which is breaking the library
@@ -3279,6 +3281,12 @@ adult; and with **Show 18+** off it leaves Discover, search and the latest and p
 library keep their own ratings. Nothing rates a source *below* its extension's flag: that would open a whole site to
 accounts limited below 18. The 18+ filter's old *Sources to treat as adult* chips were the same list, so a source you
 had ticked there is rated Adult only now — and, since v0.73.0, refused to accounts limited below 18.
+
+**A server only adults use can stop hiding 18+** (since v0.105.0, [#406](https://github.com/AngeloSha/uchiyomi/issues/406)
+from @StrayaJake): switch off **Admin → Settings → Series & chapters → Hide 18+ until someone shows it**. Then nothing is
+hidden for anyone — in the web app, OPDS readers and the Komga API alike — and the **Show 18+** button, the line above the
+page and the 18+ filter's genres go away. Age limits are a different thing and still apply: an account whose limit is below
+18 sees only what its limit allows. It is on by default, so an existing server behaves as before.
 
 **Access.** **Access** on a library row lists who can open it. One thing worth knowing: a member with no
 limits set can open every library, including ones you add later. Unticking them here is what turns that into

@@ -10,7 +10,7 @@ import { otherTitlesFor } from '../lib/otherTitles';
 import { content as komga, NATIVE_PROGRESS, OWNED } from '../lib/backend';
 import { UnsupportedFilter, owned } from '../lib/ownedCatalog';
 import { cleanDescription } from '../lib/htmlText';
-import { viewCtxFor, SYSTEM_CTX, type ViewCtx, hideAdult, browsableIds, browsable, Params, adultFilterConfigured, seriesVisible } from '../lib/visibility';
+import { viewCtxFor, SYSTEM_CTX, type ViewCtx, hideAdult, browsableIds, browsable, Params, adultFilterConfigured, adultHidingOn, seriesVisible } from '../lib/visibility';
 
 /** The viewer attached by the preHandler above. */
 const vc = (req: FastifyRequest): ViewCtx => (req as any).viewCtx as ViewCtx;
@@ -179,9 +179,11 @@ export default async function catalogRoutes(app: FastifyInstance) {
   // toggle renders only where there is something to reveal, and `/api/libraries` can only say that about
   // libraries -- so without this, an install whose only adult content is a genre on the 18+ filter hid it
   // with no off switch on the Library or Home page. A boolean, never the lists themselves.
+  // `hiding` (#406): whether this server hides 18+ at all. Off, there is nothing to reveal, `configured` is false, and
+  // the web app drops every Show 18+ button and the banner.
   app.get('/api/adult-filter', async (req) => {
     const ctx = await viewCtxFor(userIdOf(req), roleOf(req), { hideAdult: true });
-    return { configured: adultFilterConfigured(ctx) };
+    return { configured: adultFilterConfigured(ctx), hiding: adultHidingOn() };
   });
 
   // No re-sort. SQL already ordered these by the database collation; sorting again in JS is byte order, so

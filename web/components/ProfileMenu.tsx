@@ -13,7 +13,7 @@ import { useReduceEffects } from '@/lib/useReduceEffects';
 import { Avatar } from './Avatar';
 import { ProfileSwitcher } from './ProfileSwitcher';
 import { useIncognito } from './IncognitoBanner';
-import { useLibraries, useAdultShown, useAdultFilterConfigured } from './AdultToggle';
+import { useLibraries, useAdultShown, useAdultFilterConfigured, useAdultHiding } from './AdultToggle';
 import { Row, SwitchRow } from './settings';
 import { Switch } from './Switch';
 import { OnBody, Sheet, useRtl } from './ui';
@@ -32,7 +32,8 @@ export function QuickSettings({ onClose, onSwitch }: { onClose: () => void; onSw
   const { data: libs } = useLibraries();
   const filterConfigured = useAdultFilterConfigured();
   const adultOn = useAdultShown();
-  const showAdult = filterConfigured || (libs ?? []).some((l) => l.adult);
+  // Never on a server that hides nothing (#406).
+  const showAdult = useAdultHiding() && (filterConfigured || (libs ?? []).some((l) => l.adult));
   const link = 'rounded-lg px-2 py-1.5 text-sm text-fog-200 hover:bg-ink-800/70 hover:text-fog-50';
   const router = useRouter();
   /**

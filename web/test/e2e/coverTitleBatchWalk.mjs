@@ -37,7 +37,7 @@ try{
  page.on('pageerror',e=>errors.push(e.message));
  const click=async(s)=>{await page.waitForSelector(s,{visible:true});await page.waitForFunction(sel=>{const n=document.querySelector(sel);return n&&!n.disabled},{},s);await page.$eval(s,n=>n.scrollIntoView({block:'center'}));await page.click(s)};
  const section='#automatic-cover-titles',run='[data-cover-title-action="run"]';
- await page.goto(BASE+'/admin/?tab=series&section=automatic-cover-titles',{waitUntil:'networkidle2'});await page.waitForSelector(section+' [data-cover-title-batch]');
+ await page.goto(BASE+'/admin/?tab=art&section=automatic-cover-titles',{waitUntil:'networkidle2'});await page.waitForSelector(section+' [data-cover-title-batch]');
  await page.waitForFunction(()=>{const b=document.querySelector('[data-cover-title-action="run"]');return b&&!b.disabled});
  const switches=section+' button[role="switch"]';
  assert.deepEqual(await page.$$eval(switches,n=>n.map(x=>({on:x.getAttribute('aria-checked'),disabled:x.disabled}))),[{on:'false',disabled:false},{on:'false',disabled:true}]);

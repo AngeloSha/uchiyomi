@@ -1,4 +1,4 @@
-Automatic cover titles are configured under **Admin → Series & chapters → Automatically extract cover titles**. Both switches are off on a new server.
+Automatic cover titles are configured under **Admin → Art → Automatically extract cover titles**. Both switches are off on a new server.
 
 Turn on **Automatically extract cover titles** to process existing and newly added manga covers every night. The panel shows the server's schedule and next run. Local preview generation does not require a manga link. Uploaded artwork, styled-title choices and existing original title logos are kept; chapter-page covers are skipped.
 

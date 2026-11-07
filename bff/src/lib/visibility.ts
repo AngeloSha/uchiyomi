@@ -180,11 +180,12 @@ const ADULT_CACHE_MS = 15_000;
 export function invalidateAdultFilter(): void { adultCache = null; }
 export async function adultFilter(): Promise<{ genres: string[]; sources: string[] }> {
   if (adultCache && Date.now() - adultCache.at < ADULT_CACHE_MS) return adultCache;
-  const row = await one<{ adult_genres: unknown; adult_sources: unknown }>(
-    'SELECT adult_genres, adult_sources FROM server_settings WHERE id = 1').catch(() => null);
+  const row = await one<{ adult_genres: unknown; adult_sources: unknown; adult_hiding: unknown }>(
+    'SELECT adult_genres, adult_sources, adult_hiding FROM server_settings WHERE id = 1').catch(() => null);
   // The same column is the Adult only rating that `sourceAllowedFor` refuses by (v0.73.0): every read refreshes that
-  // copy too, so it cannot drift from what is stored. A failed read leaves it as it was, never empty.
-  if (row) applyAdultSources(row.adult_sources);
+  // copy too, so it cannot drift from what is stored. A failed read leaves it as it was, never empty. So does the
+  // server's own switch (#406).
+  if (row) { applyAdultSources(row.adult_sources); applyAdultHiding(row.adult_hiding); }
   adultCache = {
     at: Date.now(),
     genres: sanitiseAdultList(row?.adult_genres),
@@ -217,9 +218,22 @@ export function applyAdultSources(stored: unknown): void {
 
 /** Read the stored list into the in-memory copy. Throws when the read fails, so boot can say so; the copy is then kept. */
 export async function loadAdultSources(): Promise<void> {
-  const row = await one<{ adult_sources: unknown }>('SELECT adult_sources FROM server_settings WHERE id = 1');
+  const row = await one<{ adult_sources: unknown; adult_hiding: unknown }>('SELECT adult_sources, adult_hiding FROM server_settings WHERE id = 1');
   applyAdultSources(row?.adult_sources);
+  applyAdultHiding(row?.adult_hiding);
 }
+
+/**
+ * Whether this server hides 18+ until someone shows it (#406, @StrayaJake): `server_settings.adult_hiding`, on unless an
+ * admin turned it off. Off is for a server only adults use: every request is answered as though Show 18+ were on -- the
+ * web app, OPDS readers and the Komga API alike -- and the web app drops the Show 18+ button. An age limit still holds,
+ * because that is a permission (`maxAgeRating`, `sourceAllowedFor`) and never read from here. Held in memory, as the
+ * Adult only rating beside it, because `hideAdult` is synchronous: loaded at boot, replaced on every write and on every
+ * read of the 18+ lists. Anything but a stored `false` hides, so a boot that could not read it keeps hiding.
+ */
+let adultHiding = true;
+export function applyAdultHiding(stored: unknown): void { adultHiding = stored !== false; }
+export function adultHidingOn(): boolean { return adultHiding; }
 
 /** Whether the admin rated this source Adult only. By id, lowercased, as the list is stored. */
 export function sourceRatedAdult(src: { id?: string } | null | undefined): boolean {
@@ -322,6 +336,9 @@ export function browsable(alias: string, ctx: ViewCtx, p: Params): string {
  * and it is the right default: a client that does not know about the filter should not defeat it.
  */
 export const hideAdult = (req: { query?: unknown }): boolean => {
+  // A server that does not hide 18+ (#406) answers every request as revealed. Reintroduce by reading the query alone:
+  // "with the server's 18+ hiding off" in adultFilter.int.test.ts finds the adult source hidden.
+  if (!adultHiding) return false;
   const adult = (req.query as { adult?: string | string[] } | undefined)?.adult;
   // A duplicate `?adult=1` parses as an array; an old client sends one because it wrapped the URL twice.
   return !(adult === '1' || (Array.isArray(adult) && adult.includes('1')));
@@ -491,7 +508,9 @@ export async function viewCtxFor(
    */
   opts?: { hideAdult?: boolean },
 ): Promise<ViewCtx> {
-  const hideAdultLibraries = !!opts?.hideAdult;
+  // Through the server's switch too (#406), for the callers that decide without a request's query: OPDS's own
+  // Show 18+, /api/adult-filter's question.
+  const hideAdultLibraries = !!opts?.hideAdult && adultHiding;
   // Komga mode has its own libraries and its own restrictions, enforced by Komga. Do not pretend to enforce
   // a model this backend does not have. Only an EXPLICIT 'komga' takes this branch: with `!== 'owned'` an
   // unset or misspelled variable handed every account an unrestricted context on the path that governs page

@@ -24,7 +24,7 @@ import { useToast } from '@/components/Toast';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Switch } from '@/components/Switch';
 import { OnBody } from '@/components/ui';
-import { IcBell, IcDownload, IcFilter, IcRefresh, IcSettings } from '@/components/icons';
+import { IcBell, IcDownload, IcFilter, IcRefresh, IcSettings, IcSparkle } from '@/components/icons';
 import {
   Disclosure, EditorSheet, MoreOptions, NumberRow, Row, RowBlock, RowGroup, SaveState, Segmented, SelectRow, SummaryRow,
   SwitchRow, TextRow, useAutosave, useEditor,
@@ -108,6 +108,9 @@ export function useAdminSettingsViews(extra: Partial<Record<string, ReactNode>> 
       pane: ready(data && <SchedulesSection data={data} save={save} />, 'downloads') },
     maintenance: { icon: <IcRefresh width={18} height={18} />, tint: 'bg-amber-500/15 text-amber-300', summary: phrase(about.maintenance), description: about.maintenance,
       pane: ready(data && <MaintenanceSection data={data} save={save} />, 'maintenance') },
+    // v0.105.0 (#411): the title artwork switches on top, and below them the page's own covers and banners (`extra.art`).
+    art: { icon: <IcSparkle width={18} height={18} />, tint: 'bg-pink-500/15 text-pink-300', summary: tr('Covers and banners'),
+      pane: ready(data && <ArtSection data={data} save={save} />, 'art') },
     // v0.43.0 (#70): webhook, Home Assistant, ntfy and Discord targets. Its rows and its one dialog live in their own
     // file; it reads its own endpoint.
     notifications: { icon: <IcBell width={18} height={18} />, tint: 'bg-rose-500/15 text-rose-300', summary: phrase(about.notifications), description: about.notifications,
@@ -166,6 +169,21 @@ function NoticeChaptersSection({ data, save }: { data: any; save: Save }) {
         </div>
       </EditorSheet>
     </>
+  );
+}
+
+/**
+ * The server's own 18+ switch (#406, @StrayaJake). On, as every server has been: 18+ stays out of sight until someone taps
+ * Show 18+. Off, for a server only adults use: nothing is hidden for anyone, and Show 18+ and its banner go away (bff
+ * lib/visibility.ts adultHidingOn). An account's age limit still holds -- it is a permission, on the member. Every query
+ * is dropped after a save, because the switch changes what a dozen listings answer, as Show 18+ does.
+ */
+function AdultHidingRow({ data, save }: { data: any; save: Save }) {
+  const qc = useQueryClient();
+  return (
+    <SwitchRow id="adult-hiding" label={tr('Hide 18+ until someone shows it')} on={data.adult_hiding !== false}
+      help={tr('18+ titles, libraries and sources stay out of sight until someone taps Show 18+. Turn this off if only adults use this server: nothing is hidden, and Show 18+ goes away. Age limits on accounts still apply.')}
+      onChange={(next) => save({ adultHiding: next }).then(() => qc.invalidateQueries())} />
   );
 }
 
@@ -509,12 +527,36 @@ function ServerSection({ data, save }: { data: any; save: Save }) {
 /**
  * Series & chapters: what members see of a series and its chapters, and what is looked up online for it.
  */
+/**
+ * Admin → Art's switches (#411, @julieminer): the title artwork jobs, above the covers and banners they sit beside. They
+ * were under Series & chapters → From the internet until v0.105.0. A link to either row by its id still arrives here,
+ * because the console finds a row by id, not by page.
+ */
+function ArtSection({ data, save }: { data: any; save: Save }) {
+  return (
+    <RowGroup title={tr('Title artwork')}>
+      <RowBlock id="automatic-title-logos">
+        <SwitchRow label={tr('Automatic title logos')}
+          help={tr('Find original manga title artwork using confirmed manga links. Titles without artwork use styled text; your uploaded artwork always wins.')}
+          on={data.automatic_title_logos === true} onChange={(next) => save({ automaticTitleLogos: next })} />
+        <TitleLogoScan enabled={data.automatic_title_logos === true} />
+      </RowBlock>
+      <RowBlock id="automatic-cover-titles">
+        <AutomaticCoverTitles enabled={data.automatic_cover_title_generation === true} save={(next) => save({ automaticCoverTitleGeneration: next })}
+          applyEnabled={data.automatic_cover_title_apply === true} saveApply={(next) => save({ automaticCoverTitleApply: next })} />
+      </RowBlock>
+    </RowGroup>
+  );
+}
+
 function SeriesSection({ data, save }: { data: any; save: Save }) {
   return (
     <>
       <RowGroup title={tr('Shown to members')}>
         <NoticeChaptersSection data={data} save={save} />
-        <AdultFilterSection data={data} save={save} />
+        <AdultHidingRow data={data} save={save} />
+        {/* The genre list only decides what is hidden, so it goes while nothing is. */}
+        {data.adult_hiding !== false && <AdultFilterSection data={data} save={save} />}
         {/* Display only (bff lib/deletedGhosts.ts): a deleted chapter keeps its row, its progress and its place; it is
             drawn as a chapter not here yet instead of "Deleted from the server". A file Verify found missing is not one:
             the sweep fetches those back, and they keep their own look. */}
@@ -534,16 +576,6 @@ function SeriesSection({ data, save }: { data: any; save: Save }) {
       </RowGroup>
 
       <RowGroup title={tr('From the internet')}>
-        <RowBlock id="automatic-title-logos">
-          <SwitchRow label={tr('Automatic title logos')}
-            help={tr('Find original manga title artwork using confirmed manga links. Titles without artwork use styled text; your uploaded artwork always wins.')}
-            on={data.automatic_title_logos === true} onChange={(next) => save({ automaticTitleLogos: next })} />
-          <TitleLogoScan enabled={data.automatic_title_logos === true} />
-        </RowBlock>
-        <RowBlock id="automatic-cover-titles">
-          <AutomaticCoverTitles enabled={data.automatic_cover_title_generation === true} save={(next) => save({ automaticCoverTitleGeneration: next })}
-            applyEnabled={data.automatic_cover_title_apply === true} saveApply={(next) => save({ automaticCoverTitleApply: next })} />
-        </RowBlock>
         {/* v0.73.0 (#257 and #245 from @Squeaks72): the nightly repair's ninth step. Off by default: it asks sources about
             series, and AniList's text is English. What it fills in sits below a series' own details, never over them. */}
         <SwitchRow id="fill-details" label={tr('Fill in missing details')}

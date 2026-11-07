@@ -31,7 +31,7 @@ export const ADMIN_SETTINGS: SettingsIndex = {
     { id: 'library', label: 'Libraries', group: 'Library',
       keywords: ['library', 'folders', 'hidden series', 'removed series', 'restore', 'age rating'] },
     { id: 'sources', label: 'Sources', group: 'Library', keywords: ['providers', 'extensions', 'mangadex', 'sites', 'add a site', 'repositories'] },
-    { id: 'art', label: 'Art', group: 'Library', keywords: ['covers', 'artwork', 'banners', 'images'] },
+    { id: 'art', label: 'Art', group: 'Library', keywords: ['covers', 'artwork', 'banners', 'images', 'title logos', 'cover titles', 'title artwork'] },
     // Uchiyomi Desktop is one person: no other accounts, no other sessions (lib/desktop.ts).
     { id: 'members', label: 'Members', group: 'People', when: ['web'], keywords: ['users', 'accounts', 'people', 'roles', 'age limit', 'reset password'] },
     { id: 'sessions', label: 'Sessions', group: 'People', when: ['web'], keywords: ['devices', 'signed in', 'logins'] },
@@ -68,15 +68,18 @@ export const ADMIN_SETTINGS: SettingsIndex = {
     { id: 'notice-chapters', cat: 'series', label: 'Notice chapters',
       keywords: ['notices', 'announcements', 'hiatus', 'short chapters'] },
     { id: 'notice-short-only', cat: 'series', label: 'Only hide short ones (3 pages or fewer)', editor: 'notice-chapters' },
+    { id: 'adult-hiding', cat: 'series', label: 'Hide 18+ until someone shows it', keywords: ['adult', 'nsfw', '18+', 'show 18+', 'adults only'] },
     { id: 'adult-filter', cat: 'series', label: '18+ filter', keywords: ['adult', 'nsfw', 'mature', 'show 18+', 'genres'] },
     { id: 'deleted-ghosts', cat: 'series', label: 'Show deleted chapters as ghosts', keywords: ['deleted chapters', 'ghost', 'fetch again'] },
-    { id: 'automatic-title-logos', cat: 'series', label: 'Automatic title logos', keywords: ['manga', 'logo', 'title artwork', 'wikimedia', 'anilist', 'hero'] },
-    { id: 'automatic-cover-titles', cat: 'series', label: 'Automatically extract cover titles', keywords: ['cover', 'extract', 'title', 'preview', 'logo', 'local'] },
     { id: 'fill-details', cat: 'series', label: 'Fill in missing details', keywords: ['anilist', 'metadata', 'description', 'author', 'cover'] },
     { id: 'borrow-names', cat: 'series', label: 'Borrow chapter names from other sources', keywords: ['chapter titles', 'chapter names'] },
     { id: 'discover-lookups', cat: 'series', label: 'Match Discover titles online', keywords: ['discover', 'anilist', 'mangadex', 'mangaupdates', 'duplicates'] },
     { id: 'mihon-missing', cat: 'series', more: 'series-more', label: 'Show missing chapters in Mihon', when: ['web'],
       keywords: ['komga', 'ghost chapters', 'tachiyomi', 'trackers'] },
+
+    // ---- Art (v0.105.0, #411: the title artwork jobs beside the covers and banners) ----
+    { id: 'automatic-title-logos', cat: 'art', label: 'Automatic title logos', keywords: ['manga', 'logo', 'title artwork', 'wikimedia', 'anilist', 'hero'] },
+    { id: 'automatic-cover-titles', cat: 'art', label: 'Automatically extract cover titles', keywords: ['cover', 'extract', 'title', 'preview', 'logo', 'local'] },
 
     // ---- Downloads ----
     { id: 'update-interval', cat: 'downloads', label: 'Library update interval', keywords: ['update interval', 'schedule', 'how often', 'check for new chapters'],

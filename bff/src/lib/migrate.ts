@@ -2212,6 +2212,11 @@ ALTER TABLE series_art ADD COLUMN IF NOT EXISTS rev integer NOT NULL DEFAULT 0;
 -- 1 is v0.55.7's, under which every link stored before was checked; below the current rule, the next background pass
 -- holds every automatic link to it once, checked or not.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS match_check_rule smallint NOT NULL DEFAULT 1;
+
+-- v0.105.0 (#406): whether this server hides 18+ until someone shows it (lib/visibility.ts adultHidingOn). On by default, so
+-- an existing install behaves exactly as before; an admin whose server only adults use turns it off. Additive: v0.104.0
+-- boots on this schema and never reads it.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS adult_hiding boolean NOT NULL DEFAULT true;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

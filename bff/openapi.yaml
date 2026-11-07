@@ -1941,7 +1941,9 @@ paths:
         `configured` is true when Admin → Settings → 18+ filter lists at least one genre or source
         (adult_genres / adult_sources), i.e. when "Show 18+" would reveal something even on an install with
         no library rated 18+. Only the flag is returned, never the lists. Always false for an account whose
-        age limit is below 18, which is never offered the reveal. Does not depend on `adult`.
+        age limit is below 18, which is never offered the reveal. Does not depend on `adult`. `hiding` is the
+        server's own switch (adultHiding on PATCH /api/admin/settings): false when this server hides nothing, so
+        a client offers no reveal at all; `configured` is then false too.
       security:
         - bearer: []
       responses:
@@ -1951,9 +1953,11 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [configured]
+                required: [configured, hiding]
                 properties:
                   configured:
+                    type: boolean
+                  hiding:
                     type: boolean
         "401":
           description: Not authenticated
@@ -8673,6 +8677,9 @@ paths:
                     items:
                       type: string
                     description: The source ids rated Adult only, lowercased. See adultSources on PATCH.
+                  adult_hiding:
+                    type: boolean
+                    description: Whether this server hides 18+ until someone shows it. See adultHiding on PATCH.
                   source_prefs:
                     $ref: "#/components/schemas/SourceOrder"
                   group_upgrade:
@@ -8891,6 +8898,14 @@ paths:
                     type: string
                     minLength: 1
                     maxLength: 120
+                adultHiding:
+                  type: boolean
+                  description: >-
+                    Whether this server hides 18+ until someone shows it. On by default: 18+ libraries, titles
+                    and sources stay off the listings of a request without adult=1. Off, for a server only adults
+                    use: every request is answered as though it carried adult=1 (the web app, OPDS readers and
+                    the Komga API alike), and /api/adult-filter answers hiding false so the web app drops Show
+                    18+. An account's age limit still holds: it is a permission, not this switch.
                 sourcePrefs:
                   description: >-
                     The server-wide source order, replaced whole. When a series follows more than one

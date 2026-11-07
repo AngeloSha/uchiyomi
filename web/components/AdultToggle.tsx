@@ -26,13 +26,25 @@ export function useLibraries() {
  * Discover passes its hidden-source count. A yes/no only: the lists themselves are admin settings. Always
  * asked without `adult=1`, and the answer does not depend on the reveal, so it has one key.
  */
-export function useAdultFilterConfigured(): boolean {
+function useAdultFilter() {
   const { data } = useQuery({
     queryKey: ['adult-filter'],
-    queryFn: () => api<{ configured: boolean }>('/api/adult-filter'),
+    queryFn: () => api<{ configured: boolean; hiding?: boolean }>('/api/adult-filter'),
     staleTime: 5 * 60 * 1000,
   });
-  return data?.configured === true;
+  return data;
+}
+export function useAdultFilterConfigured(): boolean {
+  return useAdultFilter()?.configured === true;
+}
+
+/**
+ * Whether this server hides 18+ at all (#406): an admin turns it off for a server only adults use (Admin → Settings →
+ * Hide 18+ until someone shows it). Off, there is nothing to reveal, so Show 18+ and the banner render nothing anywhere.
+ * Hiding until the server has answered, so nothing flashes in and out on a server that does hide.
+ */
+export function useAdultHiding(): boolean {
+  return useAdultFilter()?.hiding !== false;
 }
 
 /** Whether 18+ is currently revealed, kept in sync with the cookie another tab may have changed. */
@@ -74,7 +86,9 @@ export function AdultToggle({ className = '', alsoWhen = false }: { className?: 
   const qc = useQueryClient();
   const { data: libs } = useLibraries();
   const on = useAdultShown();
+  const hiding = useAdultHiding();
 
+  if (!hiding) return null;
   if (!alsoWhen && !(libs ?? []).some((l) => l.adult)) return null;
 
   return (
@@ -110,6 +124,8 @@ export function AdultBannerShown() {
   const qc = useQueryClient();
   const { data: libs } = useLibraries();
   const filter = useAdultFilterConfigured();
+  const hiding = useAdultHiding();
+  if (!hiding) return null;
   if (!(libs ?? []).some((l) => l.adult) && !filter) return null;
   return (
     <div data-adult-banner className="flex items-center justify-center gap-2 bg-ink-800 px-4 py-1.5 text-[11px] text-fog-300 lg:ps-[calc(var(--rail-w)+1rem)]">
