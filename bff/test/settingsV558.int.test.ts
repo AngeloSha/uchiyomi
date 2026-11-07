@@ -58,6 +58,10 @@ test('v0.55.8 personal settings contracts', { skip }, async () => {
     assert.equal(soon.statusCode, 200, soon.body);
     assert.equal(soon.json().librarySort, 'soon');
     assert.equal((await put({ librarySort: 'unread' })).statusCode, 200);
+    // v0.105.0 (#408): the series page's chapter order, saved for every series.
+    const order = await put({ chapterOrder: 'newest' });
+    assert.equal(order.statusCode, 200, order.body);
+    assert.equal(order.json().chapterOrder, 'newest');
     assert.equal(saved.showAllChapters, true);
     assert.deepEqual(saved.homeCollections, [owned[1], owned[0]], 'deduplicated without changing order');
     assert.deepEqual(saved.futureSetting, { kept: true }, 'unknown settings remain forwards-compatible');
@@ -66,6 +70,8 @@ test('v0.55.8 personal settings contracts', { skip }, async () => {
       { librarySort: 'oldest' },
       // v0.60.0: a sort order other than asc or desc. Reintroduce by accepting anything: saved, 200.
       { librarySortDir: 'sideways' },
+      // v0.105.0 (#408): a chapter order other than oldest or newest. Reintroduce by accepting anything: saved, 200.
+      { chapterOrder: 'shuffled' },
       { showAllChapters: 'yes' },
       { homeCollections: owned },
       { homeCollections: [foreign] },

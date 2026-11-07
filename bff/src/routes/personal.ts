@@ -1231,6 +1231,13 @@ export default async function personalRoutes(app: FastifyInstance) {
       if (!dir.success) return reply.code(400).send({ error: 'bad_settings', message: 'Choose High to low or Low to high.' });
       data.librarySortDir = dir.data;
     }
+    // v0.105.0 (#408): the series page's chapter order for every series (web/lib/chapterOrder.ts), Oldest or Newest first.
+    // Reintroduce by accepting anything: "a chapter order other than oldest or newest" in settingsV558.int.test.ts saves it.
+    if ('chapterOrder' in data) {
+      const order = z.enum(['oldest', 'newest']).safeParse(data.chapterOrder);
+      if (!order.success) return reply.code(400).send({ error: 'bad_settings', message: 'Choose Oldest or Newest first.' });
+      data.chapterOrder = order.data;
+    }
     // v0.69.1: the avatar is painted for other members (web/components/Avatar.tsx), its colour into an inline background,
     // where a stored `url(https://…)` made every viewer's browser fetch a URL the member chose. A hex colour and a short
     // emoji, or nothing. Reintroduce by accepting any object: "an avatar colour must be a hex colour" in

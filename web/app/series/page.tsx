@@ -36,6 +36,7 @@ import { chParam, landingNumber } from '@/lib/healthLinks';
 import { effectsReduced } from '@/lib/effects';
 import { clampPage, numberingSpan, pageCount, pageLabel, pageOf, pageSizeFor, pageSlice } from '@/lib/chapterPages';
 import { openRuns, showAllChaptersOn } from '@/lib/showAllChapters';
+import { chapterOrderAsc } from '@/lib/chapterOrder';
 import { buttonsClass, compactChaptersOn, dotHide, rowClass, thumbHide } from '@/lib/compactChapters';
 import { chapterRowsClass, chapterViewOn, setChapterView, type ChapterView } from '@/lib/chapterView';
 import { OtherTitles } from '@/components/OtherTitles';
@@ -780,13 +781,21 @@ function SeriesInner() {
   const router = useRouter();
   const qc = useQueryClient();
   const toast = useToast();
-  const { isAdmin, user, status: authStatus } = useAuth();
+  const { isAdmin, user, status: authStatus, setSettings } = useAuth();
   const [editChapter, setEditChapter] = useState<Book | null>(null);
   // Edit details, open on a tab: Details from its key, Reading from the Sources sheet's language Change.
   const [editing, setEditing] = useState<EditTab | null>(null);
   const [collecting, setCollecting] = useState(false);
   const [findingMissing, setFindingMissing] = useState(false);
-  const [asc, setAsc] = useState(true);
+  // The chapter order is the account's (#408, lib/chapterOrder.ts): a tap is the order for every series, on every device.
+  // Applied at once; a refused save leaves the order on screen and says so -- turning it back under the reader's hand
+  // would be worse -- and the next sign-in reads what the server holds.
+  const asc = chapterOrderAsc(user?.settings);
+  const flipOrder = () => {
+    const chapterOrder = asc ? 'newest' : 'oldest';
+    setSettings({ chapterOrder });
+    void api('/api/settings', { method: 'PUT', json: { chapterOrder } }).catch(() => toast(tr('Could not save'), 'error'));
+  };
   const [downloaded, setDownloaded] = useState<Set<string>>(new Set());
   const [showSummary, setShowSummary] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
@@ -1887,7 +1896,7 @@ function SeriesInner() {
             opens a sheet -- and they sat in a row of capsules right under the squared four keys. */}
         <div data-chapter-toolbar className="flex flex-wrap items-center gap-1.5">
           <button onClick={markAllRead} className="btn-key">{tr('Mark all read')}</button>
-          <button onClick={() => setAsc((a) => !a)} className="btn-key">{asc ? tr('Oldest') : tr('Newest')}</button>
+          <button onClick={flipOrder} className="btn-key">{asc ? tr('Oldest') : tr('Newest')}</button>
           {/* The group filter and the ghost switch live in a sheet; the count of active choices is a tiny
               badge on the chip, not ` · {n}` text, which is what pushed the row past 358 px. Rendered only
               when there is something to filter by. */}

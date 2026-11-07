@@ -453,7 +453,8 @@ Extensions without creator search support are left out. The chosen field stays i
 
   ![The series page's More menu, open: Reading, Chapters, Share and Admin groups](shots/series-more.webp)
 - Click any chapter to read it; the ⬇ on a chapter saves just that one to this device. Toggle
-  **Oldest/Newest** to flip the order.
+  **Oldest/Newest** to flip the order; since v0.105.0 the order you pick is kept for every series, on every device
+  you sign in on ([#408](https://github.com/AngeloSha/uchiyomi/issues/408)).
 - **Mark all read** does what it says to every chapter of the series; **Filter** narrows the list to one
   translation group or hides the grey rows; **Select** picks chapters one by one for the actions described
   in *Selecting chapters* below.
