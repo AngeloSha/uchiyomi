@@ -46,7 +46,7 @@ import { scheduleHealthSummaryRefresh } from './healthSummary';
 import { standingOf, standingRows } from './sourceStanding';
 import { refileFailures } from './chapterFailures';
 import { switchMainSource, type OldMain, type MainRefused } from './mainSource';
-import { adultContentRating } from './ageRating';
+import { adultSourceSeries } from './ageRating';
 import { budgetFor } from './sources/budget';
 import { say, type Part } from './said';
 
@@ -130,13 +130,13 @@ export async function attachManual(seriesId: string, pick: AttachPick, as: 'foll
   // ---- the pair, from the source itself ----
   // Reintroduce by storing the request's title and skipping the lookup: "a pick whose own title is another work is refused
   // until the person insists" in manualAttach.int.test.ts attaches it.
-  let found: { title?: string; contentRating?: string } | null = null;
+  let found: { title?: string; contentRating?: string; genres?: string[] } | null = null;
   try {
     found = await bounded(src.getSeries(pick.sourceSeriesId), budgetFor(src, ATTACH_LOOKUP_MS));
   } catch { found = null; }
   const theirTitle = found?.title?.trim() || '';
   if (!theirTitle) return no('unreachable', say('attach.unreachable', { name: src.name }));
-  const adult = adultContentRating(found?.contentRating);
+  const adult = adultSourceSeries(found);
   // The add's per-title age rule: MangaDex as a whole is not an adult source, its erotica is.
   if (adult && opts.ctx.maxAgeRating !== null && opts.ctx.maxAgeRating < ADULT_RATING) return no('source_unavailable', say('main.unavailable'));
   const match = titleMatch(theirTitle, { title: pre.title, altTitles: await altTitlesFor(seriesId) });

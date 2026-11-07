@@ -18,7 +18,7 @@ import { pagePace, paceLevel, noteDownloaded, notePageHosts, noteRateLimited, ra
 import { drawGap } from './archivePace';
 import { pageName, placeholderPng, PARTIAL_MANIFEST, type PartialManifest } from './partial';
 import { realContainedPath } from './fsGuard';
-import { adultContentRating } from './ageRating';
+import { adultSourceSeries } from './ageRating';
 import { MAX_PAGE_BYTES } from './archiveCaps';
 import { fetchFollowingPublic, readCapped } from './safeFetch';
 import { isSwAdapterId } from './sources/suwayomi/sources';
@@ -78,7 +78,7 @@ function comicInfo(d: { series: string; number: number; title?: string; summary?
     `  <Genre>${esc((d.genres || []).join(', '))}</Genre>`,
     // A title its source rates adults-only, in the tag parseComicInfoAgeRating reads back as 18: the scan then keeps
     // the series' age_rating from the files alone, and so does Komga or Kavita reading this folder.
-    ...(adultContentRating(d.contentRating) ? ['  <AgeRating>Adults Only 18+</AgeRating>'] : []),
+    ...(adultSourceSeries(d) ? ['  <AgeRating>Adults Only 18+</AgeRating>'] : []),
     `  <Web>${esc(d.web)}</Web>`,
     `  <ty:PublishingStatusTachiyomi xmlns:ty="http://www.w3.org/2001/XMLSchema">${esc(d.status)}</ty:PublishingStatusTachiyomi>`,
     '</ComicInfo>',

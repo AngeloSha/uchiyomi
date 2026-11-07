@@ -7,6 +7,7 @@
 // source-native identifier. So a series' sourceId here is Suwayomi's manga id. That is stable for as long as
 // Suwayomi's database lives; wiping it orphans the routing, same as uninstalling an extension would.
 import { UNNUMBERED, type SourceAdapter, type SourceSeries, type SourceChapter } from '../types';
+import { taggedContentRating } from '../../ageRating';
 import { gql as defaultGql, suwayomiUrl, suwayomiImageHeaders, onEngineOrigin, type Gql } from './client';
 import { OPS } from './operations';
 import { needsBrowserCheck, passSiteCheck, siteWasOpened } from './siteSessions';
@@ -153,13 +154,18 @@ function prettyStatus(s?: string | null): string | undefined {
 function toSeries(m: RemoteManga, adapterId: string): SourceSeries | null {
   // A row without an id can't be routed back to Suwayomi, and one without a title is not a real result.
   if (m?.id == null || !m.title?.trim()) return null;
+  const genres = Array.isArray(m.genre) ? m.genre.filter((g) => typeof g === 'string' && g.trim()) : undefined;
+  const contentRating = taggedContentRating(genres);
   return {
     sourceId: String(m.id),
     source: adapterId,
     title: m.title.trim(),
     summary: m.description?.trim() || undefined,
     author: m.author?.trim() || m.artist?.trim() || undefined,
-    genres: Array.isArray(m.genre) ? m.genre.filter((g) => typeof g === 'string' && g.trim()) : undefined,
+    genres,
+    // An extension that rates each title only by a genre tag (Safe, Suggestive, Erotica, Pornographic): the tag is the
+    // title's rating, as MangaDex's contentRating is, so the 18+ filter and the age cap see it.
+    ...(contentRating ? { contentRating } : {}),
     status: prettyStatus(m.status),
     // Suwayomi proxies covers through itself, so make the path absolute against its origin.
     coverUrl: m.thumbnailUrl ? suwayomiUrl(m.thumbnailUrl) : undefined,

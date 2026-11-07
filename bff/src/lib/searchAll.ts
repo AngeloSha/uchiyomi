@@ -22,6 +22,7 @@ import { SOLVER_CONCURRENCY } from './sources/flaresolverr';
 import { scanOrder } from './scanOrder';
 import { classify, noteStage, reportFail, reportSlow, reportTimely, type SourceHealth } from './sourceHealth';
 import { canonLang } from './lang';
+import { adultSourceSeries, taggedContentRating } from './ageRating';
 
 /** An env knob: a finite number at or above `min`, else the default. An empty string is unset. */
 const knob = (name: string, def: number, min = 0): number => {
@@ -372,13 +373,14 @@ export function ratingOf(
   item: Pick<SourceSeries, 'genres' | 'contentRating'>, src: { id?: string; isNsfw?: boolean } | null | undefined, lists: AdultLists,
 ): Judged | undefined {
   if (src?.id && lists.sources.includes(String(src.id).toLowerCase())) return 'adult';
-  if (item.contentRating === 'erotica' || item.contentRating === 'pornographic') return 'adult';
+  if (adultSourceSeries(item)) return 'adult';
   const fold = (g: string) => g.trim().toLowerCase();
   const adult = new Set(lists.genres.map(fold).filter(Boolean));
   const genres = (Array.isArray(item.genres) ? item.genres : []).filter((g): g is string => typeof g === 'string').map(fold).filter(Boolean);
   if (genres.some((g) => adult.has(g))) return 'adult';
   if (src?.isNsfw) return 'flagged';
-  if (item.contentRating === 'safe' || item.contentRating === 'suggestive') return 'safe';
+  const rated = item.contentRating ?? taggedContentRating(item.genres);
+  if (rated === 'safe' || rated === 'suggestive') return 'safe';
   if (genres.length && adult.size) return 'safe';
   return undefined;
 }

@@ -46,9 +46,32 @@ export const MAX_AGE = 18;
 /**
  * A source's own per-title rating that means adults only (MangaDex's contentRating). The same rule search-all's
  * ratingOf applies; used where a title is added or listed by id, since MangaDex as a whole is not an adult source.
+ * Read without case or spaces, as an extension's tag may be written.
  */
 export function adultContentRating(rating: string | null | undefined): boolean {
-  return rating === 'erotica' || rating === 'pornographic';
+  const value = typeof rating === 'string' ? rating.trim().toLowerCase() : '';
+  return value === 'erotica' || value === 'pornographic';
+}
+
+/**
+ * A per-title rating some engine extensions give only as a genre tag (`Safe`, `Suggestive`, `Erotica`, `Pornographic`), while
+ * the extension itself declares nothing because most of its catalogue is for everyone. Only an exact tag counts, and the most
+ * restrictive one wins: a title tagged both Safe and Pornographic is Pornographic. Reintroduce by reading the first tag:
+ * "extension rating tags become per-title ratings" in suwayomiAdapter.test.ts finds it Safe.
+ */
+export function taggedContentRating(genres: readonly unknown[] | null | undefined): 'safe' | 'suggestive' | 'erotica' | 'pornographic' | undefined {
+  const tags = new Set((Array.isArray(genres) ? genres : []).filter((g): g is string => typeof g === 'string').map((g) => g.trim().toLowerCase()));
+  return (['pornographic', 'erotica', 'suggestive', 'safe'] as const).find((r) => tags.has(r));
+}
+
+/**
+ * Whether a source's title is for adults only, by its own rating or, when it gives none, by a rating tag in its genres. The
+ * age cap's per-title half: an account capped below 18 is never shown, given or attached such a title, whichever adapter
+ * it came from.
+ */
+export function adultSourceSeries(item: { contentRating?: string | null; genres?: readonly unknown[] | null } | null | undefined): boolean {
+  if (!item) return false;
+  return adultContentRating(item.contentRating) || adultContentRating(taggedContentRating(item.genres));
 }
 
 /** Parse ComicInfo's AgeRating into a minimum age, or null when it says nothing useful. */
