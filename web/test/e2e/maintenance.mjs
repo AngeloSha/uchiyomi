@@ -13,11 +13,14 @@ const consoleErrors = [];
 const serverErrors = [];
 let expectedRepositoryError = false;
 let step = 0;
+let page;
 const ok = (label) => console.log(`[ ok ] ${label}`);
 const bad = (label) => { failures.push(label); console.error(`[FAIL] ${label}`); };
 const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'] });
 try {
-  const page = await browser.newPage();
+  page = await browser.newPage();
+  // API fixtures belong to this page; a service worker's own fetches bypass page-level interception.
+  await page.setBypassServiceWorker(true);
   page.on('pageerror', (error) => consoleErrors.push(error.message));
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
@@ -41,6 +44,10 @@ try {
   await errorDetailsWalk({ page, base, ok, bad, shot });
   expectedRepositoryError = false;
 } catch (error) {
+  if (page && !page.isClosed()) {
+    await page.screenshot({ path: `${out}/failure.png` }).catch(() => {});
+    writeFileSync(`${out}/failure-page.txt`, `${page.url()}\n${await page.$eval('body', (element) => element.innerText).catch(() => '')}`);
+  }
   bad(error.stack || error.message);
 } finally {
   await browser.close();

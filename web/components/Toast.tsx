@@ -75,7 +75,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 /**
  * Rendered here, beside the app rather than inside AppShell's <main>: everything in <main> -- every dialog
  * -- is under the bottom nav (z-40, a root-level layer), and a notice docked in the nav band has to be over
- * it. z-[60] is above the navs and below the command palette (z-[70]), which is anchored at the top.
+ * it. z-[65] also clears portalled sheets (z-[60]); at the same level a later sheet intercepted notice actions.
+ * The command palette remains above notices (z-[70]), anchored at the top.
  */
 function NoticeViewport({ items, said, onDismiss, onDetails }: { items: Notice[]; said: Said; onDismiss: (id: number) => void; onDetails: (notice: Notice) => void }) {
   // Both hooks on every render and in this order: `a() || b()` would skip the second whenever the first is
@@ -100,7 +101,7 @@ function NoticeViewport({ items, said, onDismiss, onDetails }: { items: Notice[]
       <div className="sr-only" role="alert" aria-live="assertive" aria-atomic="true">{said.assertive}</div>
       {/* Named only while it holds something: an empty landmark is a stop on the way to nothing. */}
       <section data-notices data-place={place} aria-label={shown.length ? tr('Notifications') : undefined} style={style}
-        className={`pointer-events-none fixed inset-x-0 bottom-[var(--notice-bottom)] z-[60] flex flex-col items-center gap-2 ${band ? 'px-4' : 'px-3'} lg:start-auto lg:end-6 lg:bottom-[var(--notice-bottom-lg)] lg:items-stretch lg:px-0 ${wideWidth(place, layers.dialog)}`}>
+        className={`pointer-events-none fixed inset-x-0 bottom-[var(--notice-bottom)] z-[65] flex flex-col items-center gap-2 ${band ? 'px-4' : 'px-3'} lg:start-auto lg:end-6 lg:bottom-[var(--notice-bottom-lg)] lg:items-stretch lg:px-0 ${wideWidth(place, layers.dialog)}`}>
         <AnimatePresence initial={false}>
           {shown.map((n) => (
             <NoticeCard key={n.id} n={n} place={place} reduced={reduced} still={!!still} onDismiss={onDismiss} onDetails={onDetails} />

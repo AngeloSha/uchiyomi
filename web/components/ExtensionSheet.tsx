@@ -221,7 +221,7 @@ export function ExtensionSection({ ext, status, hiddenLangs, actions, onLanguage
             className="group flex w-full items-center justify-between gap-3 py-3.5 text-start">
             <span className="min-w-0 truncate text-sm text-fog-200 group-hover:text-fog-50">
               {tr('Settings')}
-              {settingsLang !== undefined && <span className="ms-2 text-[12px] text-fog-500">{tr('for {language}', { language: settingsLang })}</span>}
+              {settingsLang !== undefined && <span className="ms-2 text-[12px] text-fog-500">{sites ? tr('for {source}', { source: settingsLang }) : tr('for {language}', { language: settingsLang })}</span>}
             </span>
             {/* It turns with the section, at once: no motion. */}
             <IcChevronRight aria-hidden width={16} height={16} className={`shrink-0 text-fog-500 ${settingsOpen ? 'rotate-90' : 'rtl:-scale-x-100'}`} />

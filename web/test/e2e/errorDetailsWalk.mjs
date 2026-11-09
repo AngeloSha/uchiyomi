@@ -43,7 +43,13 @@ export async function errorDetailsWalk({ page, base, ok = () => {}, bad = messag
       const notice = await page.$eval('[data-notice="error"]', el => el.textContent);
       assert.doesNotMatch(notice, /IllegalStateException|FixtureExtension\.kt|fixture-private/);
       ok(`error notice has a short summary (${rtl ? 'RTL/reduced motion' : 'mobile'})`);
-      await page.click('[data-notice-details]');
+      await page.waitForFunction(() => {
+        const button = document.querySelector('[data-notice-details]');
+        if (!button || Number(getComputedStyle(button.closest('[data-notice]')).opacity) < 0.99) return false;
+        const rect = button.getBoundingClientRect();
+        return button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+      });
+      await page.tap('[data-notice-details]');
       await page.waitForSelector('[data-error-details-text]', { visible: true });
       const diagnostic = await page.$eval('[data-error-details-text]', el => el.value);
       assert.ok(diagnostic.includes(trace));
@@ -94,7 +100,10 @@ export async function errorDetailsWalk({ page, base, ok = () => {}, bad = messag
       assert.ok(await page.$('[data-repos-sheet]'));
       ok('Escape closes only the error details and retains the repository sheet');
     }
-  } catch (error) { bad(`error details regression: ${error.stack || error.message}`); }
+  } catch (error) {
+    await shot('error-details-failure').catch(() => {});
+    bad(`error details regression: ${error.stack || error.message}`);
+  }
   finally {
     page.off('request', intercept);
     await page.setRequestInterception(false);

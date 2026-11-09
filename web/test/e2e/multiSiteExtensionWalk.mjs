@@ -68,17 +68,17 @@ export async function multiSiteExtensionWalk({ page, base, check = (label, resul
   await page.setRequestInterception(true);
   page.on('request', intercept);
   const search = async (query) => page.locator('[data-ext-langs-search]').fill(query);
-  const shown = () => page.$$eval('[data-ext-lang]', (rows) => rows.map((r) => r.getAttribute('data-ext-lang')));
+  const shown = () => page.$$eval('[data-ext-langs] [data-ext-lang]', (rows) => rows.map((r) => r.getAttribute('data-ext-lang')));
   const showIds = async (query, expected) => {
     await search(query);
-    await page.waitForFunction((ids) => JSON.stringify([...document.querySelectorAll('[data-ext-lang]')].map((r) => r.getAttribute('data-ext-lang'))) === JSON.stringify(ids), {}, expected);
+    await page.waitForFunction((ids) => JSON.stringify([...document.querySelectorAll('[data-ext-langs] [data-ext-lang]')].map((r) => r.getAttribute('data-ext-lang'))) === JSON.stringify(ids), {}, expected);
   };
   const openBundle = async () => {
     await page.goto(`${base}/admin/?tab=Sources&view=add`, { waitUntil: 'networkidle2' });
     await page.waitForSelector(`[data-ext-item="${BUNDLE}"] [data-ext-open]`, { visible: true });
     await page.click(`[data-ext-item="${BUNDLE}"] [data-ext-open]`);
     await page.waitForSelector(`[data-source-sheet="${BUNDLE}"]`, { visible: true });
-    await page.waitForFunction(() => document.querySelectorAll('[data-ext-lang]').length === 840);
+    await page.waitForFunction(() => document.querySelectorAll('[data-ext-langs] [data-ext-lang]').length === 840);
   };
   const previousLocale = await page.evaluate(() => localStorage.getItem('uchiyomi.lang'));
   const previousViewport = page.viewport();
@@ -142,7 +142,7 @@ export async function multiSiteExtensionWalk({ page, base, check = (label, resul
     await page.waitForSelector(`[data-ext-item="${NORMAL}"] [data-ext-open]`);
     await page.click(`[data-ext-item="${NORMAL}"] [data-ext-open]`);
     await page.waitForSelector('[data-source-sheet="sw:800000001"]');
-    const normal = await page.$$eval('[data-ext-lang] bdi', (rows) => rows.map((el) => el.textContent));
+    const normal = await page.$$eval('[data-ext-langs] [data-ext-lang] bdi', (rows) => rows.map((el) => el.textContent));
     check('ordinary extensions retain language rows and their existing source controls', JSON.stringify(normal) === JSON.stringify(['English', 'Spanish']) && !!await page.$('[data-source-status]') && !!await page.$('[data-ext-turn-on]') && !await page.$('[data-ext-site-for]'), JSON.stringify(normal));
   } finally {
     await page.evaluate((locale) => { if (locale === null) localStorage.removeItem('uchiyomi.lang'); else localStorage.setItem('uchiyomi.lang', locale); }, previousLocale);
