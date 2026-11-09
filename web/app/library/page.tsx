@@ -9,13 +9,13 @@ import { api, ApiError } from '@/lib/api';
 import { Page, Series } from '@/lib/types';
 import { SeriesRow, SeriesTile } from '@/components/cards';
 import { sortValue } from '@/lib/sortValue';
-import { IcSearch, IcPlus, IcImport } from '@/components/icons';
+import { IcSearch, IcPlus, IcImport, IcUpload } from '@/components/icons';
 import { PullToRefresh } from '@/components/PullToRefresh';
 import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from '@/components/Toast';
 import { Modal, ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { MoveToLibrary } from '@/components/MoveToLibrary';
-import { useAuth, canDownload } from '@/lib/auth';
+import { useAuth, canDownload, canUploadManually } from '@/lib/auth';
 import { AdultToggle, useAdultFilterConfigured, useAdultShown, useLibraries } from '@/components/AdultToggle';
 import { LibraryFilters, NO_SOURCE, READ_STATES, STATUSES, useLibrarySources } from '@/components/LibraryFilters';
 import { LibrarySortSheet, LibraryToolbar } from '@/components/LibraryToolbar';
@@ -56,6 +56,7 @@ function LibraryInner() {
   const params = useSearchParams();
   const router = useRouter();
   const { isAdmin, user, status: authStatus, setSettings } = useAuth();
+  const mayUpload = authStatus === 'authed' && canUploadManually(user);
   const validSort = (v: unknown): v is string => typeof v === 'string' && SORTS.some((s) => s.key === v);
   const urlSort = params.get('sort');
   // A sort in a shared URL controls this visit only.  With none (or old/junk input), the account's explicit
@@ -589,6 +590,12 @@ function LibraryInner() {
                 <IcImport width={15} height={15} aria-hidden />{tr('Import a list')}
               </Link>
             )}
+            {/* Beside the import, and like it a page of its own (app/upload/page.tsx): a series no source carries. */}
+            {mayUpload && (
+              <Link href="/upload/" data-library-upload className="btn-key hidden lg:inline-flex">
+                <IcUpload width={15} height={15} aria-hidden />{tr('Upload a series')}
+              </Link>
+            )}
             {/* Search and Add live in the top bar on a wide screen, so they are phone-only here. This search is the whole
                 app's (series, sources, places); the toolbar's field below searches the shelf. */}
             <Link href="/search" className="grid h-10 w-10 place-items-center rounded-full border border-ink-700 bg-ink-850/70 text-fog-300 lg:hidden">
@@ -598,6 +605,12 @@ function LibraryInner() {
               <Link href="/admin/import/" data-library-import title={tr('Import a list')} aria-label={tr('Import a list')}
                 className="grid h-10 w-10 place-items-center rounded-full border border-ink-700 bg-ink-850/70 text-fog-300 lg:hidden">
                 <IcImport width={19} height={19} />
+              </Link>
+            )}
+            {mayUpload && (
+              <Link href="/upload/" data-library-upload title={tr('Upload a series')} aria-label={tr('Upload a series')}
+                className="grid h-10 w-10 place-items-center rounded-full border border-ink-700 bg-ink-850/70 text-fog-300 lg:hidden">
+                <IcUpload width={19} height={19} />
               </Link>
             )}
             {canDownload(user) && (

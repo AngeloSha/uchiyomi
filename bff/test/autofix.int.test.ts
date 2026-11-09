@@ -9,7 +9,7 @@ import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { istreveliaPosts, webtoonsNumbers } from './fixtures/fakeSuwayomi';
@@ -309,6 +309,14 @@ test('Fix everything: one run over a library with something wrong on every card'
         [`b_${S[k]}_${n + part}`, S[k], `${folderOf(k)}/Chapter ${n + part}.cbz`, n + part, k === 'twiceShort' ? 6 : 4, DL, GOOD]);
       cbz(join(DL, `${folderOf(k)}/Chapter ${n + part}.cbz`), k === 'twiceShort' ? 6 : 4, T[k]);
     }
+  }
+  // Disk times as the rows say, since the run's scan reads them back over the rows (lib/library.ts): files written a few
+  // milliseconds apart could share one coarse clock tick, and "saved twice" -- a later copy's first file strictly after the
+  // kept copy's last -- then found nothing to prune (a CI flake, Nov 2026).
+  for (const [k, n] of [['twice', 5], ['twiceShort', 7], ['twiceMark', 5], ['twicePartial', 5]] as const) {
+    utimesSync(join(DL, `${folderOf(k)}/Chapter 1.cbz`), 0.5, 0.5);
+    utimesSync(join(DL, `${folderOf(k)}/Chapter ${n}.cbz`), 1, 1);
+    for (const part of [0.1, 0.2]) utimesSync(join(DL, `${folderOf(k)}/Chapter ${n + part}.cbz`), 2, 2);
   }
   await q(`INSERT INTO bookmarks (user_id, book_id, series_id, page, note) VALUES ($1,$2,$3,1,'mine')`, [adminId, `b_${S.twiceMark}_5.1`, S.twiceMark]);
   await q(`UPDATE lib_books SET missing_pages = '{2,3}' WHERE id = $1`, [`b_${S.twicePartial}_5`]);

@@ -176,6 +176,14 @@ CREATE TABLE IF NOT EXISTS lib_series (
   cover_book_id text,
   scanned_at    timestamptz NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS series_local_art (
+  series_id text NOT NULL REFERENCES lib_series(id) ON DELETE CASCADE,
+  root text NOT NULL, folder text NOT NULL, priority integer NOT NULL,
+  cover_file text, cover_stamp text, banner_file text, banner_stamp text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (series_id, root, folder)
+);
+
 CREATE TABLE IF NOT EXISTS lib_books (
   id         text PRIMARY KEY,
   series_id  text NOT NULL REFERENCES lib_series(id) ON DELETE CASCADE,
@@ -2204,6 +2212,21 @@ ALTER TABLE series_art ADD COLUMN IF NOT EXISTS rev integer NOT NULL DEFAULT 0;
 -- 1 is v0.55.7's, under which every link stored before was checked; below the current rule, the next background pass
 -- holds every automatic link to it once, checked or not.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS match_check_rule smallint NOT NULL DEFAULT 1;
+
+-- v0.105.0 (#406): whether this server hides 18+ until someone shows it (lib/visibility.ts adultHidingOn). On by default, so
+-- an existing install behaves exactly as before; an admin whose server only adults use turns it off. Additive: v0.104.0
+-- boots on this schema and never reads it.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS adult_hiding boolean NOT NULL DEFAULT true;
+
+-- v0.105.0 (#410): how many titles not in the library came after an import's first 500, so the page can say how many are
+-- left (NULL: not counted, before v0.105.0 or when a tracker read stopped at its own cap). And the titles someone skipped
+-- in an import, so the next import of the same list leaves them skipped: a tracker entry by its id, anything else by its
+-- title key (routes/admin.ts importSkipKey). Both additive: v0.104.0 boots on this schema and never reads them.
+ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS left_over integer;
+CREATE TABLE IF NOT EXISTS import_skips (
+  key        text PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

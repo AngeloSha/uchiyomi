@@ -36,6 +36,28 @@ const TITLES: Record<string, { title: string; contentRating: 'erotica' | 'safe' 
 };
 const card = (sid: string) => ({ sourceId: sid, source: SRC, title: TITLES[sid].title, contentRating: TITLES[sid].contentRating });
 
+/**
+ * An engine extension that rates each title only by a genre tag and declares nothing itself, so sourceAllowedFor lets a
+ * capped account in, as MangaDex: the tag is the title's rating (lib/ageRating.ts adultSourceSeries).
+ */
+const TAGGED = 'age-tagged-src';
+const TAGGED_TITLES: Record<string, { title: string; genres: string[] }> = {
+  [`${TAGGED}-x`]: { title: 'Tagged Explicit Tale', genres: ['Romance', ' PORNOGRAPHIC '] },
+  [`${TAGGED}-s`]: { title: 'Tagged Safe Tale', genres: ['Safe', 'Drama'] },
+};
+const taggedCard = (sid: string) => ({ sourceId: sid, source: TAGGED, ...TAGGED_TITLES[sid] });
+function tagged() {
+  return {
+    id: TAGGED, name: 'Age Tagged Source',
+    async search() { return Object.keys(TAGGED_TITLES).map(taggedCard); },
+    async latest() { return Object.keys(TAGGED_TITLES).map(taggedCard); },
+    async popular() { return Object.keys(TAGGED_TITLES).map(taggedCard); },
+    async getSeries(sid: string) { return taggedCard(sid); },
+    async listChapters() { return [1].map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `t${n}`, pages: 1 })); },
+    async getPageUrls(chId: string) { return [`https://example.invalid/${chId}/p1.png`]; },
+  };
+}
+
 /** MangaDex-shaped: not an adult source, but every title carries the source's own rating. */
 function rated() {
   return {
@@ -60,6 +82,7 @@ before(async () => {
   ({ addSeriesFromSource } = (await import('../src/routes/sources')) as any);
   await migrate();
   registerAdapter(rated() as any);
+  registerAdapter(tagged() as any);
   await q('DELETE FROM users WHERE username = ANY($1)', [[CAPPED, ADULT]]);
   const mk = async (name: string, cap: number | null) => (await q(
     `INSERT INTO users (username, display_name, password_hash, role, auth_kind, perms, max_age_rating)
@@ -78,7 +101,7 @@ after(async () => {
   if (root) rmSync(root, { recursive: true, force: true });
   if (!DSN) return;
   await app?.close();
-  await q(`DELETE FROM lib_series WHERE source_id = $1`, [SRC]).catch(() => {});
+  await q(`DELETE FROM lib_series WHERE source_id = ANY($1)`, [[SRC, TAGGED]]).catch(() => {});
   await q('DELETE FROM users WHERE username = ANY($1)', [[CAPPED, ADULT]]).catch(() => {});
 });
 
@@ -119,4 +142,27 @@ test('a capped account is refused the erotica title by id, on detail and on add'
   assert.equal(add.statusCode, 403, add.body);
   const adultDetail = await app.inject({ method: 'GET', url: `/api/sources/detail?source=${SRC}&sourceId=${SRC}-x`, headers: as(adult) });
   assert.equal(adultDetail.statusCode, 200, 'the adult control opens it');
+});
+
+test("a title its extension tags Pornographic is 18+: left out for a capped account, refused by id, stored 18+", { skip }, async () => {
+  // Reintroduce by reading only contentRating in ratedForViewer (routes/sources.ts): the capped listings find the
+  // tagged title; in the detail check: 200; in addSeriesFromSource's addedAgeRating: null.
+  for (const path of ['/api/sources/search?q=tale&', '/api/sources/latest?', '/api/sources/popular?']) {
+    const c = await app.inject({ method: 'GET', url: `${path}source=${TAGGED}&adult=1`, headers: as(capped) });
+    assert.equal(c.statusCode, 200, `${path} ${c.body}`);
+    assert.deepEqual(titlesOf(c), ['Tagged Safe Tale'], `${path} listed a Pornographic-tagged title to a capped account`);
+    const a = await app.inject({ method: 'GET', url: `${path}source=${TAGGED}&adult=1`, headers: as(adult) });
+    assert.deepEqual(titlesOf(a), ['Tagged Explicit Tale', 'Tagged Safe Tale'], `${path}: the adult control`);
+    const off = await app.inject({ method: 'GET', url: `${path}source=${TAGGED}`, headers: as(adult) });
+    assert.deepEqual(titlesOf(off), ['Tagged Safe Tale'], `${path}: Show 18+ off`);
+  }
+  const d = await app.inject({ method: 'GET', url: `/api/sources/detail?source=${TAGGED}&sourceId=${TAGGED}-x`, headers: as(capped) });
+  assert.equal(d.statusCode, 403, d.body);
+  const add = await app.inject({ method: 'POST', url: '/api/sources/add', headers: as(capped),
+    payload: { source: TAGGED, sourceId: `${TAGGED}-x`, chapterFrom: 'none' } });
+  assert.equal(add.statusCode, 403, add.body);
+  const ok = await addSeriesFromSource({ source: TAGGED, sourceId: `${TAGGED}-x`, chapterFrom: 'none', wait: true });
+  assert.equal(ok.ok, true, JSON.stringify(ok));
+  const [row] = await q(`SELECT age_rating FROM lib_series WHERE source_id = $1 AND source_series_id = $2`, [TAGGED, `${TAGGED}-x`]);
+  assert.equal(row?.age_rating, 18, 'the add stores the tagged title 18+');
 });

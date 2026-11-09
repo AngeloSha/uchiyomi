@@ -34,7 +34,8 @@ export interface SourceSeries {
   /**
    * How the source itself rates the title, when it does (v0.55.4, #158): MangaDex's `contentRating`. Discover's search
    * reads it for its 18+ filter (lib/searchAll.ts ratingOf): erotica and pornographic are 18+, safe and suggestive are
-   * not. Absent for every scraped site and extension, which say nothing per title.
+   * not. Absent for every scraped site; an engine extension's own rating tag among its genres is read as one
+   * (lib/ageRating.ts taggedContentRating).
    */
   contentRating?: 'safe' | 'suggestive' | 'erotica' | 'pornographic';
 }

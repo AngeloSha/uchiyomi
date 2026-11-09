@@ -560,6 +560,8 @@ export function heroEligible(alias: string): string {
   return `${s}.books_count > 0
     AND (EXISTS (SELECT 1 FROM series_art ha WHERE ha.series_id = ${s}.id AND COALESCE(ha.banner, '') = '')
          OR EXISTS (SELECT 1 FROM series_overrides hf WHERE hf.series_id = ${s}.id AND hf.cover = '${FIRST_PAGE}'))
+    AND (NOT EXISTS (SELECT 1 FROM series_local_art hlc WHERE hlc.series_id = ${s}.id AND hlc.banner_file IS NOT NULL)
+         OR EXISTS (SELECT 1 FROM series_overrides hlp WHERE hlp.series_id = ${s}.id AND hlp.cover = '${FIRST_PAGE}'))
     AND NOT EXISTS (SELECT 1 FROM series_overrides ho WHERE ho.series_id = ${s}.id
                      AND (ho.banner IS NOT NULL OR ho.age_rating >= ${ADULT_RATING}))
     AND COALESCE(${s}.age_rating, 0) < ${ADULT_RATING}

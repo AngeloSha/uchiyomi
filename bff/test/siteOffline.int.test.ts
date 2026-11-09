@@ -20,9 +20,11 @@ if (DSN) {
   process.env.SOURCE_TEST_TIMEOUT_MS = '3000';
   // The shared withTimeout leaves its timer armed until it fires; a solver-fronted engine's budget is 90 s by default,
   // which would hold the process that long after the last test.
-  process.env.SOLVER_BUDGET_MS = '2000';
-  process.env.UPDATER_LIST_TIMEOUT_MS = '2000';
-  process.env.SOURCE_LATEST_TIMEOUT_MS = '2000';
+  // 8 s, not 2: on a slow CI runner the site's name took long enough to look up that the sweep hit its own budget, which
+  // is no evidence about the site at all, and no health row was written (Nov 2026).
+  process.env.SOLVER_BUDGET_MS = '8000';
+  process.env.UPDATER_LIST_TIMEOUT_MS = '8000';
+  process.env.SOURCE_LATEST_TIMEOUT_MS = '8000';
   process.env.UCHIYOMI_PING_URL = '';
 }
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
@@ -95,6 +97,15 @@ after(async () => {
 });
 
 const health = async () => (await q('SELECT * FROM source_health WHERE source_id = $1', [AQUA]))[0];
+/** noteStage writes its row detached: waited for, rather than a fixed pause a slow runner can outlast. */
+const healthWhen = async (ok: (h: any) => boolean, ms = 5000) => {
+  const until = Date.now() + ms;
+  for (;;) {
+    const h = await health();
+    if ((h && ok(h)) || Date.now() > until) return h;
+    await new Promise((res) => setTimeout(res, 50));
+  }
+};
 
 test('the sweep takes the notice for a source that did not answer: the listing stands, the evidence says site_offline', { skip }, async () => {
   const { updateSeries } = await import('../src/lib/updater');
@@ -106,8 +117,8 @@ test('the sweep takes the notice for a source that did not answer: the listing s
   assert.equal((await q('SELECT count(*)::int AS n FROM series_listing WHERE series_id = $1', [SERIES]))[0].n, 10, 'the listing stands');
   const [row] = await q('SELECT source_chapters FROM lib_series WHERE id = $1', [SERIES]);
   assert.notEqual(row.source_chapters, 0, 'no "the source lists nothing" stamped over the series');
-  await new Promise((res) => setTimeout(res, 100)); // noteStage is detached
-  const h = await health();
+  const h = await healthWhen((x) => !!x.stages?.chapters); // noteStage is detached
+  assert.ok(h, 'no health row for the source');
   // Reintroduce by dropping the kind from noteStage (sourceHealth.ts): the kind reads 'error'.
   assert.equal(h.stages.chapters.kind, 'site_offline');
   assert.equal(h.stages.chapters.error, NOTICE);
@@ -119,8 +130,7 @@ test("Discover's newest listing counts no empty streak for the notice, and Healt
   const r = await app.inject({ method: 'GET', url: `/api/sources/latest?source=${AQUA}&adult=1`, headers: adminAuth });
   assert.equal(r.statusCode, 200);
   assert.deepEqual(r.json().content, []);
-  await new Promise((res) => setTimeout(res, 100));
-  const h = await health();
+  const h = await healthWhen((x) => x.last_error === NOTICE);
   // Reintroduce by answering [] for the notice (Madara's `listing`): reportLatest counts empty_streak 1.
   assert.equal(h.empty_streak, 0);
   assert.equal(h.last_error, NOTICE);

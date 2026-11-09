@@ -356,13 +356,18 @@ export function ReaderSettings({
           </>
         )}
 
-        <Row label={tr('Fit')}>
+        <Row label={tr(prefs.mode === 'paged' ? 'Page fit' : 'Fit')}>
           <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => set({ fitWidth: true })}
-              className={`rounded-2xl border py-3 text-sm ${prefs.fitWidth ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{tr('Fit width')}</button>
-            <button onClick={() => set({ fitWidth: false })}
-              className={`rounded-2xl border py-3 text-sm ${!prefs.fitWidth ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{tr('Original')}</button>
+            {(prefs.mode === 'paged' ? [false, true] : [true, false]).map((width) => {
+              const on = prefs.mode === 'paged' ? prefs.pagedFitWidth === width : prefs.fitWidth === width;
+              return <button key={String(width)} aria-pressed={on}
+                onClick={() => set(prefs.mode === 'paged' ? { pagedFitWidth: width } : { fitWidth: width })}
+                className={`rounded-2xl border py-3 text-sm ${on ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>
+                {tr(width ? 'Fit width' : prefs.mode === 'paged' ? 'Whole page' : 'Original')}
+              </button>;
+            })}
           </div>
+          {prefs.mode === 'paged' && prefs.pagedFitWidth && <p className="mt-2 text-[11px] text-fog-500">{tr('Scroll vertically within each page. Swipe sideways to turn the page.')}</p>}
         </Row>
 
         {/* #234: each page at the width it is drawn at rather than as scanned, on this device. Off until chosen: every page

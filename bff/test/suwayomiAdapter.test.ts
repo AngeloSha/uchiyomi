@@ -59,6 +59,25 @@ test('search maps a source manga list onto series', async () => {
   assert.equal(s.url, undefined, 'realUrl is the web link and stays separate from the path');
 });
 
+test('extension rating tags become per-title ratings, with adult tags winning conflicting safe tags', async () => {
+  // From @globalteddy's fork: an extension that rates each title only by a genre tag, while declaring nothing itself.
+  // Reintroduce by dropping contentRating from toSeries: every rating below reads undefined, and a capped account's
+  // Latest and search list the Pornographic title (ageRatingOnAdd.int.test.ts has the route half).
+  const { makeSuwayomiAdapter } = await load();
+  const a = makeSuwayomiAdapter(LOCAL, fakeGql({ fetchSourceManga: { fetchSourceManga: { mangas: [
+    { id: 1, title: 'Safe title', genre: ['Action', 'SAFE'] },
+    { id: 2, title: 'Suggestive title', genre: [' Suggestive '] },
+    { id: 3, title: 'Erotica title', genre: ['EROTICA'] },
+    { id: 4, title: 'Explicit title', genre: ['Safe', ' PORNOGRAPHIC '] },
+    { id: 5, title: 'Ordinary title', genre: ['Drama'] },
+    { id: 6, title: 'Lookalike title', genre: ['Pornographic Art Club', 'Eroticas'] },
+  ] } } }));
+  assert.deepEqual((await a.search('title')).map((s) => s.contentRating),
+    ['safe', 'suggestive', 'erotica', 'pornographic', undefined, undefined]);
+  // The tags stay genres: the admin's 18+ genre list and the series page read them as they always did.
+  assert.deepEqual((await a.search('title'))[3].genres, ['Safe', ' PORNOGRAPHIC ']);
+});
+
 test('adapter ids are namespaced so they can never collide with a built-in or custom site', async () => {
   const { makeSuwayomiAdapter, swAdapterId, isSwAdapterId } = await load();
   assert.equal(swAdapterId('0'), 'sw:0');

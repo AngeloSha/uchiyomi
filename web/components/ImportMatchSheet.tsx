@@ -22,6 +22,7 @@ import type { Src } from '@/lib/sourceGroups';
 import { searchPoll, searchProgressLine, searchWait, type SearchProgress } from '@/lib/searchPoll';
 import { matchPreview } from '@/lib/matchPreview';
 import { SourceSearchPages } from '@/components/SourceSearchPages';
+import { revealed } from '@/lib/adult';
 
 interface SourceResult {
   source: string; sourceId: string; title: string; coverUrl?: string; inLibrary?: boolean;
@@ -117,7 +118,7 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
   const { data, isFetching, error } = useQuery({
     queryKey: ['import-search-source', debounced],
     queryFn: ({ signal, queryKey, client }) => api<{ content: SourceGroup[] } & SearchProgress>(
-      `/api/sources/search-all?groupBy=source&q=${encodeURIComponent(debounced)}&wait=${searchWait(client.getQueryState(queryKey)?.dataUpdateCount ?? 0)}`,
+      revealed(`/api/sources/search-all?groupBy=source&q=${encodeURIComponent(debounced)}&wait=${searchWait(client.getQueryState(queryKey)?.dataUpdateCount ?? 0)}`),
       { signal },
     ),
     enabled: debounced.length >= 2,
@@ -127,9 +128,11 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
   const progress = searchProgressLine(data);
 
   // Source display names for the preview cards -- the candidate row only carries the source id.
+  // Every source, so an adult one is named rather than shown as its id (#405); its own key, so a revealed list is never
+  // the one Discover reads.
   const { data: sourcesData } = useQuery({
-    queryKey: ['sources'],
-    queryFn: () => api<{ content: Src[] }>('/api/sources'),
+    queryKey: ['sources', 'all'],
+    queryFn: () => api<{ content: Src[] }>(revealed('/api/sources')),
     staleTime: 30_000,
   });
   const sourceName = (id: string | null | undefined): string => (id && sourcesData?.content.find((s) => s.id === id)?.name) || id || '';

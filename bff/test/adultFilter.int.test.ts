@@ -58,7 +58,7 @@ function fakeSource(id: string, name: string) {
 test('the 18+ filter hides named genres and sources, and nothing else', { skip }, async (t) => {
   const { migrate } = await import('../src/lib/migrate');
   const { q } = await import('../src/lib/db');
-  const { invalidateAdultFilter } = await import('../src/lib/visibility');
+  const { invalidateAdultFilter, applyAdultHiding } = await import('../src/lib/visibility');
   const Fastify = (await import('fastify')).default;
   const jwt = (await import('@fastify/jwt')).default;
   const { registerAdapter } = await import('../src/lib/sources');
@@ -81,7 +81,8 @@ test('the 18+ filter hides named genres and sources, and nothing else', { skip }
     await q('DELETE FROM libraries WHERE id = $1', [LIB]).catch(() => {});
     await q('DELETE FROM users WHERE username = ANY($1)', [[ADMIN, MEMBER, CAPPED]]).catch(() => {});
     // Shared database: leaving a list behind would quietly change what every later suite's listings return.
-    await q(`UPDATE server_settings SET adult_genres = '[]'::jsonb, adult_sources = '[]'::jsonb WHERE id = 1`).catch(() => {});
+    await q(`UPDATE server_settings SET adult_genres = '[]'::jsonb, adult_sources = '[]'::jsonb, adult_hiding = true WHERE id = 1`).catch(() => {});
+    applyAdultHiding(true);
     invalidateAdultFilter();
   };
   await cleanup();
@@ -148,8 +149,8 @@ test('the 18+ filter hides named genres and sources, and nothing else', { skip }
       const r = await app.inject({ method: 'GET', url: '/api/adult-filter',
         headers: { authorization: `Bearer ${app.jwt.sign({ sub: id, role })}` } });
       assert.equal(r.statusCode, 200, r.body);
-      // Only the flag crosses the wire: the lists are admin settings.
-      assert.deepEqual(Object.keys(r.json()), ['configured']);
+      // Only the flags cross the wire, never the lists: they are admin settings. `hiding` is the server's own switch (#406).
+      assert.deepEqual(Object.keys(r.json()), ['configured', 'hiding']);
       return r.json().configured as boolean;
     };
 
@@ -257,6 +258,7 @@ test('the 18+ filter hides named genres and sources, and nothing else', { skip }
       assert.ok(!(await ids('/api/sources')).includes(NAMED_SRC), 'the named source is still listed');
       assert.ok((await ids('/api/sources')).includes(CLEAN_SRC), 'the filter took the clean source too');
       assert.ok((await ids('/api/sources?adult=1')).includes(NAMED_SRC), 'the reveal did not bring it back');
+      assert.ok((await ids('/api/sources?adult=1&adult=1')).includes(NAMED_SRC), 'a duplicate adult param must still reveal');
 
       const before = { ...asked };
       const r = await app.inject({ method: 'GET', url: '/api/sources/search-all?q=Zzzafhidden', headers });
@@ -282,6 +284,31 @@ test('the 18+ filter hides named genres and sources, and nothing else', { skip }
       // With the list empty again, genres prove nothing either way.
       await patch({ adultGenres: [] });
       assert.deepEqual(await search('&adult=1'), ['Zzzafgenre clean:?', 'Zzzafgenre tagged:?']);
+    });
+
+    await t.test("with the server's 18+ hiding off (#406), nothing is hidden, and an age limit still holds", async () => {
+      // Reintroduce by reading the query alone in hideAdult: the named source and the genre's series stay hidden.
+      await patch({ adultGenres: ['ZzzAF Ecchi'], adultSources: [NAMED_SRC], adultHiding: false });
+      const settings = await app.inject({ method: 'GET', url: '/api/admin/settings', headers });
+      assert.equal(settings.json().adult_hiding, false, 'the switch is stored and read back');
+      assert.deepEqual(await listed(), [...SERIES].sort(), 'a series with a genre on the list is listed without adult=1');
+      const ids = async (url: string, h: Record<string, string> = headers) =>
+        ((await app.inject({ method: 'GET', url, headers: h })).json().content as Array<{ id: string }>).map((s) => s.id);
+      assert.ok((await ids('/api/sources')).includes(NAMED_SRC), 'a source rated Adult only is listed without adult=1');
+      const before = { ...asked };
+      await app.inject({ method: 'GET', url: '/api/sources/search-all?q=Zzzafopen', headers });
+      assert.equal(asked[NAMED_SRC] - before[NAMED_SRC], 1, 'the fan-out asks it too');
+      // The web app drops Show 18+: there is nothing to reveal.
+      const member_ = { authorization: `Bearer ${app.jwt.sign({ sub: member, role: 'user' })}` };
+      assert.deepEqual((await app.inject({ method: 'GET', url: '/api/adult-filter', headers: member_ })).json(), { configured: false, hiding: false });
+      // The age limit is a permission, never this switch: the capped account is still refused the Adult only source.
+      const capped_ = { authorization: `Bearer ${app.jwt.sign({ sub: capped, role: 'user' })}` };
+      assert.ok(!(await ids('/api/sources', capped_)).includes(NAMED_SRC), 'a capped account reached a source rated Adult only');
+      assert.ok((await ids('/api/sources', capped_)).includes(CLEAN_SRC), 'PREMISE: the capped account lists sources');
+      // Back on, as it was.
+      await patch({ adultHiding: true });
+      assert.ok(!(await ids('/api/sources')).includes(NAMED_SRC), 'switched back on, the source is hidden again');
+      assert.equal((await app.inject({ method: 'GET', url: '/api/adult-filter', headers: member_ })).json().hiding, true);
     });
   } finally {
     await app.close();

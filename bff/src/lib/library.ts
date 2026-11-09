@@ -7,6 +7,7 @@ import sharp from 'sharp';
 import { q, one, tx } from './db';
 import { newSeriesId, newBookId } from './ids';
 import { env } from '../env';
+import { localArtFilename, refreshLocalSeriesArt } from './localSeriesArt';
 import { fingerprintChapter } from './fingerprint';
 import { findRematch, applyRematch, logRematch, MIN_BOOKS } from './rematch';
 import { naturalCmp, chapterName, numberByRule, NAME_RULE } from './naming';
@@ -218,7 +219,13 @@ export async function listChapters(folderAbs: string, opts: {
     else if (e.kind === 'file' && /\.epub$/i.test(e.name)) {
       if ((await epubPages(join(folderAbs, e.name))).length) out.push(e.name);
     }
-    else if (e.kind === 'dir' && !SKIP_DIR.test(e.name) && (await isImageChapterDir(join(folderAbs, e.name), fsx))) out.push(e.name);
+    else if (e.kind === 'dir' && !SKIP_DIR.test(e.name)) {
+      if (e.name.toLowerCase() === 'artwork') {
+        const names = await fsx.readdirNames(join(folderAbs, e.name)).catch(() => [] as string[]);
+        if (names.length && names.every(n => n.startsWith('.') || localArtFilename(n))) continue;
+      }
+      if (await isImageChapterDir(join(folderAbs, e.name), fsx)) out.push(e.name);
+    }
   }
   return out.sort(naturalCmp);
 }
@@ -300,8 +307,8 @@ async function readArchive(path: string): Promise<{ xml: string; pages: number }
 }
 
 /** Sorted image page names inside a chapter (CBZ/CBR/folder) — used by the page server. */
-export async function cbzPages(path: string): Promise<string[]> {
-  const k = chapterKind(path);
+export async function cbzPages(path: string, formatName: string = path): Promise<string[]> {
+  const k = chapterKind(formatName);
   if (k === 'pdf') return pdfPages(path);
   if (k === 'epub') return epubPages(path);   // already in spine order; do NOT re-sort
   if (k === 'dir') return regularFiles(path, (n) => IMG.test(n), naturalCmp);
@@ -316,8 +323,8 @@ export async function cbzPages(path: string): Promise<string[]> {
 }
 
 /** Raw bytes of a single page (CBZ/CBR/folder) — used by the page server. */
-export async function cbzEntry(path: string, name: string): Promise<Buffer> {
-  const k = chapterKind(path);
+export async function cbzEntry(path: string, name: string, formatName: string = path): Promise<Buffer> {
+  const k = chapterKind(formatName);
   if (k === 'pdf') return pdfPageBytes(path, pdfPageIndex(name));
   if (k === 'dir') return readRegularFile(path, name);
   if (k === 'rar') return rarExtract(await rarExtractor(path), name);
@@ -1198,7 +1205,9 @@ async function scanOnce(): Promise<ScanResult> {
           );
           return id;
         });
-        void seriesId;
+        // A local-art failure never loses an indexed chapter or changes provider artwork.
+        await refreshLocalSeriesArt(seriesId, root, folderRel, root === DL_ROOT ? 1 : 0)
+          .catch(e => console.warn('[scan] local artwork:', String((e as Error)?.message || e).slice(0, 120)));
       } catch (e) {
         skippedTotal++;
         const error = String((e as Error)?.message || e).slice(0, 300);

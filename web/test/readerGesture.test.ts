@@ -199,7 +199,7 @@ test('the reader wires these: a caught fling, a flushed first tap, a pan, the ch
   assert.match(src, /if \(lastPointer\.current !== 'mouse'\) return;/, 'a touch double-tap raised dblclick and zoomed a second time');
   // A zoomed paged page is dragged, not scrolled (scrolling is what turns the page).
   assert.match(src, /else if \(zoom > 1 && prefs\.mode === 'paged' && pointers\.current\.size === 1\) \{/);
-  assert.match(src, /zoom > 1 \? 'touch-none overflow-x-hidden' : 'touch-pan-x overflow-x-auto'/);
+  assert.match(src, /zoom > 1 \? 'touch-none overflow-x-hidden' : prefs\.pagedFitWidth \? 'touch-pan-x touch-pan-y overflow-x-auto' : 'touch-pan-x overflow-x-auto'/);
   // Crossing into another chapter in paged mode says so.
   assert.match(src, /setChapterNote\(activeChapter\?\.title \|\| tr\('Next chapter'\)\);/);
   assert.match(src, /was === null \|\| was === id \|\| prefs\.mode !== 'paged'/);

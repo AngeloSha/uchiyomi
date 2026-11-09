@@ -39,9 +39,9 @@ export function cropStyle(region: Region): { sx: number; sy: number; img: { widt
 }
 
 /** The largest box of aspect `aw` : `ah` that fits inside `w` x `h`. Zero for an empty or unmeasured box. */
-export function fitBox(aw: number, ah: number, w: number, h: number): { width: number; height: number } {
+export function fitBox(aw: number, ah: number, w: number, h: number, widthOnly = false): { width: number; height: number } {
   if (!(aw > 0 && ah > 0 && w > 0 && h > 0)) return { width: 0, height: 0 };
-  const s = Math.min(w / aw, h / ah);
+  const s = widthOnly ? w / aw : Math.min(w / aw, h / ah);
   return { width: aw * s, height: ah * s };
 }
 

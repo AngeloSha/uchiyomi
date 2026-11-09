@@ -2,7 +2,9 @@
 // the source loader capture when they load; today they happen to import env (which imports this first) before
 // reading anything, but that order is an accident this line stops relying on. A no-op on a server.
 import './lib/desktop';
+import { uploadSeriesRoutes } from './routes/upload';
 import Fastify from 'fastify';
+import { APP_ROUTER_OPTIONS } from './lib/httpLimits';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
@@ -168,6 +170,7 @@ async function main() {
     // than the list, so a save on the settings page is in force at the next request (lib/clientAddr.ts trustsPeer).
     trustProxy: isDesktop() ? false : trustsPeer,
     bodyLimit: 2 * 1024 * 1024,
+    routerOptions: APP_ROUTER_OPTIONS,
   });
 
   await app.register(helmet, { contentSecurityPolicy: false, crossOriginResourcePolicy: false });
@@ -266,6 +269,7 @@ async function main() {
   await app.register(personalRoutes);
   await app.register(recommendationRoutes);
   await app.register(downloadRoutes);
+  await app.register(uploadSeriesRoutes);
   await app.register(sourceRoutes);
   // Translated pages (v0.85.0): answers "off" until an admin downloads the engine and turns it on. Hidden on desktop
   // (DESKTOP_HIDDEN_ROUTES), whose server runs inside the app, where the engine's processes cannot (docs/DESKTOP.md).

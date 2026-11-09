@@ -15,7 +15,7 @@ import { shownDeviceName } from '@/lib/device';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
-import { IcChevronLeft, IcChevronRight, IcTrash, IcPlus, IcRefresh, IcX, IcGrid, IcShield, IcRows, IcGlobe, IcSparkle, IcUsers, IcUser, IcClock } from '@/components/icons';
+import { IcChevronLeft, IcChevronRight, IcTrash, IcPlus, IcRefresh, IcX, IcGrid, IcShield, IcRows, IcGlobe, IcUsers, IcUser, IcClock } from '@/components/icons';
 import { LibraryFolders } from '@/components/LibraryFolders';
 import { addFolder, foldersOf, heldByOthers, heldByText, previewQuery, previewText, sameFolders, toggleFolder, typedFolder } from '@/lib/libraryFolders';
 import { CardProgress, HealthCardActions, HealthRow, hasCardActions, scanState, scanWorking } from '@/components/HealthActions';
@@ -88,6 +88,8 @@ function AdminInner() {
   const desktop = isDesktop();
   // Maintenance's Run now, after its settings: what was the Tasks tab (v0.88.0).
   const settings = useAdminSettingsViews({
+    // Art's covers and banners, under its title artwork switches (v0.105.0, #411).
+    art: <ArtReview />,
     maintenance: (
       <section id="tasks" className="col-span-full min-w-0 scroll-mt-4 lg:scroll-mt-20" aria-labelledby="tasks-title">
         <h3 id="tasks-title" className="mb-1.5 px-1 text-[13px] font-semibold text-fog-300">{tr('Tasks')}</h3>
@@ -114,8 +116,6 @@ function AdminInner() {
       summary: tr('Folders, age ratings and who can open them'), pane: <LibraryPanel /> },
     sources: { icon: <IcGlobe width={18} height={18} />, tint: 'bg-cyan-500/15 text-cyan-300',
       summary: tr('Sites and extensions'), pane: <SourcesPanel /> },
-    art: { icon: <IcSparkle width={18} height={18} />, tint: 'bg-pink-500/15 text-pink-300',
-      summary: tr('Covers and banners'), pane: <ArtReview /> },
     members: { icon: <IcUsers width={18} height={18} />, tint: 'bg-teal-500/15 text-teal-300',
       summary: stats ? (stats.members === 1 ? tr('1 member') : tr('{n} members', { n: stats.members })) : undefined, pane: <Members /> },
     sessions: { icon: <IcUser width={18} height={18} />, tint: 'bg-blue-500/15 text-blue-300',
@@ -604,6 +604,8 @@ function Members() {
                   {u.role !== 'admin' && u.local_open && u.password_login && !ssoOnly && <button onClick={() => patch(u, { removePassword: true }, tr('Password removed'))} className="btn-key">{tr('Remove password')}</button>}
                   {u.role !== 'admin' && u.kind !== 'open' && <button onClick={() => patch(u, { perms: { ...u.perms, canManageProfiles: !u.perms?.canManageProfiles } }, tr('Permission updated'))}
                     aria-pressed={!!u.perms?.canManageProfiles} className={`btn-key ${u.perms?.canManageProfiles ? 'btn-key-accent' : ''}`}>{tr('Can make profiles')}</button>}
+                  {u.role !== 'admin' && <button onClick={() => patch(u, { perms: { ...u.perms, canUploadManually: !u.perms?.canUploadManually } }, tr('Permission updated'))}
+                    aria-pressed={!!u.perms?.canUploadManually} className={`btn-key ${u.perms?.canUploadManually ? 'btn-key-accent' : ''}`}>{tr('Can upload series')}</button>}
                   {/* Library access. "All libraries" is the ABSENCE of grant rows, not a full set of them, so a
                       library added next month is visible to unrestricted accounts without editing anyone. */}
                   {u.role !== 'admin' && <LibraryAccess granted={u.libraries ?? null} onSaved={inval}

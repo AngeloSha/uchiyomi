@@ -19,6 +19,7 @@ import type { Stats } from 'fs';
 import { q, one, tx } from './db';
 import { artFile } from './seriesArt';
 import { dropTitleArt } from './titleArt';
+import { dropLocalSeriesArt } from './localSeriesArt';
 import { dropTitleExtractions } from './titleExtraction';
 import { caseVariantOnDisk } from './caseVariant';
 import { allWritable, containedPath, realContainedPath, rootUnavailable, statOrGone, writePreflight, type Writability } from './fsGuard';
@@ -54,6 +55,7 @@ export const getSeriesRow = (id: string) =>
 async function dropArt(id: string): Promise<void> {
   await dropTitleExtractions(id).catch(() => {});
   await dropTitleArt(id).catch(() => {});
+  await dropLocalSeriesArt(id).catch(() => {});
   await q(`DELETE FROM series_art WHERE series_id = $1`, [id]).catch(() => {});
   await q(`DELETE FROM series_overrides WHERE series_id = $1`, [id]).catch(() => {});
   for (const kind of ['cover', 'banner', 'page'] as const) {
@@ -593,7 +595,7 @@ const BOOK_KEYED_USER_TABLES = ['read_progress', 'reading_events', 'bookmarks', 
 const BOOK_KEYED_TABLES = [...BOOK_KEYED_USER_TABLES, 'book_overrides', 'page_hashes', 'page_translations', 'chapter_comments', 'chapter_reactions', 'spread_marks'] as const;
 /** Every table keyed on the series id. lib_books and lib_series themselves come last, on their own. */
 const SERIES_KEYED_TABLES = [
-  'favorites', 'collection_items', 'ratings', 'series_colors', 'series_art', 'series_title_art', 'series_seen', 'series_trackers',
+  'favorites', 'collection_items', 'ratings', 'series_colors', 'series_art', 'series_local_art', 'series_title_art', 'series_seen', 'series_trackers',
   'series_title_extractions', 'series_title_extraction_state', 'series_title_extraction_history', 'title_extraction_items',
   'series_overrides', 'notes', 'series_sources', 'series_listing', 'chapter_failures', 'tracker_progress',
   'reading_events', 'offline_downloads', 'bookmarks', 'listing_progress',
@@ -1276,6 +1278,10 @@ export async function renameSeriesFolder(id: string, newFolder: string): Promise
   }
 
   await tx(async (qq) => {
+    // The cached local artwork moves with its source folder. A stale destination candidate
+    // cannot abort the catalog transaction after the actual directories were already renamed.
+    await qq('DELETE FROM series_local_art WHERE series_id=$1 AND folder=$2', [id,dest]);
+    await qq('UPDATE series_local_art SET folder=$2 WHERE series_id=$1 AND folder=$3', [id,dest,row.folder]);
     await qq('UPDATE lib_series SET folder_prev = folder, folder = $2 WHERE id = $1', [id, dest]);
     await qq(
       `UPDATE lib_books SET file = $2 || substring(file from length($3) + 1), updated_at = now()

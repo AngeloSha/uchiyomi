@@ -116,8 +116,10 @@ test('the 18+ reveal still renders on Library and Home when only the 18+ filter 
   // `alsoWhen={adultFilter}` from either page: "has no second reason" fails for it; by reading the flag from
   // anything but `/api/adult-filter`: "the hook" fails.
   const hook = code(read('components/AdultToggle.tsx'));
-  assert.match(hook, /export function useAdultFilterConfigured\(\): boolean \{[\s\S]*?queryKey: \['adult-filter'\][\s\S]*?api<\{ configured: boolean \}>\('\/api\/adult-filter'\)[\s\S]*?return data\?\.configured === true;/,
+  // One query behind both hooks since #406 (useAdultHiding reads the server's switch from the same answer).
+  assert.match(hook, /function useAdultFilter\(\) \{[\s\S]*?queryKey: \['adult-filter'\][\s\S]*?api<\{ configured: boolean; hiding\?: boolean \}>\('\/api\/adult-filter'\)/,
     'the hook no longer asks /api/adult-filter');
+  assert.match(hook, /export function useAdultFilterConfigured\(\): boolean \{\s*return useAdultFilter\(\)\?\.configured === true;/);
   for (const [file, tag] of [['app/page.tsx', '<AdultToggle className="shrink-0" alsoWhen={adultFilter} />'], ['app/library/page.tsx', '<AdultToggle alsoWhen={adultFilter} />']]) {
     const src = code(read(file));
     assert.ok(src.includes('const adultFilter = useAdultFilterConfigured();'), `${file} does not ask whether the filter is configured`);
@@ -126,4 +128,15 @@ test('the 18+ reveal still renders on Library and Home when only the 18+ filter 
   // A save that changes the lists must refresh the answer, or the switch appears (or goes) only after
   // five minutes.
   assert.match(section(), /qc\.invalidateQueries\(\{ queryKey: \['adult-filter'\] \}\)/, 'a save does not refresh the reveal');
+});
+
+test("the server's own switch saves adultHiding, and the genre list goes while nothing is hidden (#406)", () => {
+  // Reintroduce by rendering AdultFilterSection unconditionally: the genres that only decide what is hidden stay on
+  // screen while the server hides nothing.
+  const src = code(read('components/AdminSettings.tsx'));
+  const row = src.slice(src.indexOf('function AdultHidingRow('), src.indexOf('function AdultFilterSection('));
+  assert.ok(row.length > 0, 'no AdultHidingRow');
+  assert.match(row, /save\(\{ adultHiding: next \}\)\.then\(\(\) => qc\.invalidateQueries\(\)\)/, 'a save that leaves every listing stale');
+  assert.match(row, /on=\{data\.adult_hiding !== false\}/, 'a server from before the switch reads as hiding');
+  assert.match(src, /<AdultHidingRow data=\{data\} save=\{save\} \/>[\s\S]{0,40}?\{data\.adult_hiding !== false && <AdultFilterSection data=\{data\} save=\{save\} \/>\}/);
 });

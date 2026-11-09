@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.103.1
+  version: 0.105.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -1941,7 +1941,9 @@ paths:
         `configured` is true when Admin → Settings → 18+ filter lists at least one genre or source
         (adult_genres / adult_sources), i.e. when "Show 18+" would reveal something even on an install with
         no library rated 18+. Only the flag is returned, never the lists. Always false for an account whose
-        age limit is below 18, which is never offered the reveal. Does not depend on `adult`.
+        age limit is below 18, which is never offered the reveal. Does not depend on `adult`. `hiding` is the
+        server's own switch (adultHiding on PATCH /api/admin/settings): false when this server hides nothing, so
+        a client offers no reveal at all; `configured` is then false too.
       security:
         - bearer: []
       responses:
@@ -1951,9 +1953,11 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [configured]
+                required: [configured, hiding]
                 properties:
                   configured:
+                    type: boolean
+                  hiding:
                     type: boolean
         "401":
           description: Not authenticated
@@ -2679,6 +2683,10 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Ghost"
+                  blockedDeletedBookIds:
+                    type: array
+                    items: { type: string }
+                    description: Deleted chapter ids whose current listing copies are all blocked; their progress rows remain stored.
                   archive:
                     type: [object, "null"]
                     description: >-
@@ -5656,6 +5664,12 @@ paths:
         series THIS caller may see, at most four, in the list's own order -- the covers its card shows.
       operationId: getApiCollections
       parameters:
+        - name: seriesId
+          in: query
+          required: false
+          description: Add contains=true/false for this visible series to the caller's own manual lists only.
+          schema:
+            type: string
         - name: adult
           in: query
           required: false
@@ -8663,6 +8677,9 @@ paths:
                     items:
                       type: string
                     description: The source ids rated Adult only, lowercased. See adultSources on PATCH.
+                  adult_hiding:
+                    type: boolean
+                    description: Whether this server hides 18+ until someone shows it. See adultHiding on PATCH.
                   source_prefs:
                     $ref: "#/components/schemas/SourceOrder"
                   group_upgrade:
@@ -8881,6 +8898,14 @@ paths:
                     type: string
                     minLength: 1
                     maxLength: 120
+                adultHiding:
+                  type: boolean
+                  description: >-
+                    Whether this server hides 18+ until someone shows it. On by default: 18+ libraries, titles
+                    and sources stay off the listings of a request without adult=1. Off, for a server only adults
+                    use: every request is answered as though it carried adult=1 (the web app, OPDS readers and
+                    the Komga API alike), and /api/adult-filter answers hiding false so the web app drops Show
+                    18+. An account's age limit still holds: it is a permission, not this switch.
                 sourcePrefs:
                   description: >-
                     The server-wide source order, replaced whole. When a series follows more than one
@@ -12296,6 +12321,78 @@ paths:
           description: Not found, or not visible to this account
         "413":
           description: The body is over the limit (a picture over 11 MB)
+  /api/library/upload:
+    post:
+      tags:
+        - library
+      summary: Upload a chapter into a new or visible existing series.
+      operationId: postApiLibraryUpload
+      description: >-
+        Requires an admin account, or a member an admin gave `canUploadManually`. The body is the file itself (.cbz, .cbr,
+        .zip, .rar, .pdf or .epub), streamed into `Uploads/<title>` under the download folder, then the library is scanned;
+        start a new series with `title` and `fresh=1`, then send its returned `seriesId` for later files.
+        An existing series requires `seriesId` and current viewer access. Files are published atomically without
+        replacing existing files, under the shared writer claim. The archive index and its first page are validated.
+        PDF/RAR uploads are also capped at 128 MiB. At most two uploads run together.
+      parameters:
+        - name: fresh
+          in: query
+          required: false
+          description: '`1` on a run''s first file: refuse with 409 `taken` when a series by that title is already here.'
+          schema:
+            type: string
+            enum: ['1']
+        - name: seriesId
+          in: query
+          required: false
+          description: Existing visible series to receive chapters; cannot be combined with title/fresh.
+          schema:
+            type: string
+        - name: title
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: name
+          in: query
+          required: true
+          description: The file's name, extension included; the chapter number is read from it.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK. `file` is where it was stored, relative to the download folder; `bookId` and `number` are the chapter the scan made of it.
+        "202":
+          description: File stored, but indexing is pending (`indexed=false`). Run a library scan before retrying.
+        "400":
+          description: >-
+            Malformed parameter, a name the scanner would not read as a chapter (`bad_type`), bytes that are not the
+            archive the name says (`bad_file`), or an empty body (`empty`)
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Existing series not found or not visible to this account.
+        "409":
+          description: A file of that name is already there (`exists`), or the series cannot take one now
+        "429":
+          description: Two uploads are already active.
+        "413":
+          description: The file is over UPLOAD_MAX_MB or its format-specific reader limit (`too_large`)
+        "415":
+          description: Send raw application/octet-stream bytes, not JSON.
+        "507":
+          description: The download disk is at its MIN_FREE_GB floor (`disk_full`)
   /api/admin/title-extraction/capabilities:
     get:
       tags: [admin]
@@ -13954,7 +14051,7 @@ paths:
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Up to 50
         batches in every state, newest first, as `{content: [{id, origin, tracker, state, total, resolved,
-        added, already, failed, skippedNovels, truncated, created_at, updated_at, stale}]}` — `origin` is
+        added, already, failed, skippedNovels, truncated, leftOver, created_at, updated_at, stale}]}` — `origin` is
         `backup`, `mangadex`, `paste` or `tracker`, and `tracker` names the service (`anilist`, `myanimelist`,
         `kitsu`, `mangaupdates`) for a tracker batch, null otherwise; `skippedNovels` (integer: the novels a tracker read
         dropped, 0 for the other origins) and `truncated` (boolean: the intake kept the first 500 titles not
@@ -13996,13 +14093,18 @@ paths:
         since v0.51.0 the titles the library already holds are kept as skipped rows and do not count toward
         them, so `total` can be more than 500, and `truncated` says more titles not owned remained, which
         importing the same list again picks up once these are in. Answers `{batchId, total, truncated,
-        skippedNovels}`.
+        skippedNovels, leftOver}`: since v0.105.0 `leftOver` counts the titles not owned after the cut (null when not
+        counted, as when a tracker read stopped at its own cap). A title skipped in an earlier import of the list starts
+        skipped and does not count (remembered by its tracker id, else its title, until a pick un-skips it), and a
+        tracker row whose entry a series here is already linked to (by a person or the check) is owned at intake and
+        reads `status: already` at /run instead of being added again.
 
 
         The fourth intake, `origin: 'tracker'`, reads the requesting admin's OWN connected AniList /
         MyAnimeList / Kitsu account (the connection GET /api/trackers shows for them; never another member's)
-        for the lists named in `statuses` (Reading + Plan to read when omitted). Up to 501 entries are read;
-        the batch keeps 500 and reports `truncated` when the read hit the cap. Light novels are dropped and
+        for the lists named in `statuses` (Reading + Plan to read when omitted). Up to 2001 entries are read
+        (501 before v0.105.0); the batch keeps the first 500 not owned and reports `truncated` when the read hit the
+        cap or more came after them. Light novels are dropped and
         counted as `skippedNovels` (a novel resolves to its manga adaptation on every source, and would link
         the novel entry to the manga); both figures are stored on the batch row and come back as
         `skippedNovels` and `truncated` on every batch GET. Entries are deduped by their id on the service

@@ -26,6 +26,7 @@ import { fetchPublicHop } from '../lib/publicConnection';
 import { suwayomiUrl, suwayomiBase, suwayomiImageHeaders, onEngineOrigin } from '../lib/sources/suwayomi/client';
 import { fetchPublic, readCapped, withoutCredentials, MAX_COVER_BYTES, MAX_ICON_BYTES, MAX_HTML_BYTES } from '../lib/safeFetch';
 import { env } from '../env';
+import { readLocalSeriesArt } from '../lib/localSeriesArt';
 import { basename, join, resolve, sep } from 'path';
 import { readFile, stat } from 'fs/promises';
 import { q, one } from '../lib/db';
@@ -392,6 +393,15 @@ async function backdropRecipe(id: string, style: 'hero' | 'banner' | null, ar: H
       },
     };
   }
+  const localBanner = ovr?.cover === FIRST_PAGE ? null : await readLocalSeriesArt(id, 'banner');
+  if (localBanner) {
+    const look = backdropLook(style, { hasUrl: true, fromBanner: true });
+    return {
+      variant: `local-banner:${id}:${localBanner.version}:${style ?? 'ambient'}:${ar}`,
+      producer: async () => ({ buffer: look === 'hero' ? await heroSharp(localBanner.bytes, ar)
+        : look === 'banner' ? await bannerSharp(localBanner.bytes) : await ambientComposite(localBanner.bytes), contentType: 'image/webp' }),
+    };
+  }
   // Use the first page (v0.55.7, lib/seriesArt.ts FIRST_PAGE): the series' art is its own pages -- the first page's wash
   // here, and the banner made from its pages -- and nothing online is looked up or shown for it. Reintroduce by reading
   // series_art for it: "the first page, chosen, keeps online art away" in onlineMatch.int.test.ts finds the stored
@@ -464,6 +474,15 @@ async function backdropRecipe(id: string, style: 'hero' | 'banner' | null, ar: H
   // reached -- gets the one made from its pages soon, in the background (lib/autoHero.ts queueHero: one at a time,
   // paced, standing aside for a sweep, a repair or the source check; a no-op for one made, tried lately or not
   // eligible). Nothing here waits on it: the payload offers it once it is made.
+  const localCover = !ovr?.cover && !art.banner ? await readLocalSeriesArt(id, 'cover') : null;
+  if (localCover) {
+    const look = backdropLook(style, { hasUrl: true, fromBanner: false });
+    return {
+      variant: `local-cover:${id}:${localCover.version}:${style ?? 'ambient'}:${ar}`,
+      producer: async () => ({ buffer: look === 'hero' ? await heroSharp(localCover.bytes, ar)
+        : await ambientComposite(localCover.bytes), contentType: 'image/webp' }),
+    };
+  }
   if (!art.banner) queueHero(id);
   const url = art.banner || art.cover;
   // The look the art in hand would get: the hero shows a banner OR a cover sharp (only the no-art first page stays
@@ -683,6 +702,11 @@ export const serveLibSeriesThumb = async (req: FastifyRequest, reply: FastifyRep
       return { buffer, contentType: 'image/webp' };
     });
   }
+  const localCover = await readLocalSeriesArt(id, 'cover');
+  if (localCover) return serveImage(req, reply, `lib-sthumb:${id}:local:${localCover.version}${wk}`, async () => {
+    storeColor(id, localCover.bytes);
+    return { buffer: await thumbWebp(localCover.bytes, w, 80), contentType: 'image/webp' };
+  });
   const art = await one<{ cover: string | null; source_id: string | null; rev: number }>(
     'SELECT a.cover, s.source_id, a.rev FROM series_art a LEFT JOIN lib_series s ON s.id = a.series_id WHERE a.series_id = $1', [id]);
   if (art?.cover) {
@@ -715,6 +739,8 @@ export async function seriesCoverInput(id: string, ctx: ViewCtx): Promise<Buffer
   if (ovr?.cover) {
     try { return await fetchCoverImage(ovr.cover); } catch { return firstPageInput(id, ctx); }
   }
+  const local = await readLocalSeriesArt(id, 'cover');
+  if (local) return local.bytes;
   const art = await one<{ cover: string | null; source_id: string | null }>(
     'SELECT a.cover,s.source_id FROM series_art a JOIN lib_series s ON s.id=a.series_id WHERE a.series_id=$1', [id]);
   if (art?.cover) {

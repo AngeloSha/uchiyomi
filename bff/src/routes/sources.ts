@@ -147,7 +147,7 @@ import {
   visibleToAll, viewCtxFor, sourceAllowedFor, sourceBrowsableFor, browsable, visible, seriesVisible, Params, type ViewCtx, hideAdult, adultFilter,
   ADULT_RATING,
 } from '../lib/visibility';
-import { adultContentRating } from '../lib/ageRating';
+import { adultSourceSeries } from '../lib/ageRating';
 // v0.52.0 (#72): language editions of one work, and the language model they stand on.
 import { editionFolder, linkEdition, workRows, type WorkRow } from '../lib/editions';
 import { effectiveLang, sourceLanguage } from '../lib/seriesLang';
@@ -1492,7 +1492,7 @@ export async function addSeriesFromSource(opts: {
   // which the add dialog calls seconds earlier for the very same two things: without that, opening the
   // dialog and pressing Add paid for four challenge solves to learn two facts.
   const { series, chapters: listed } = await seriesAndChapters(src, sourceId);
-  if (opts.refuseAdultTitle && adultContentRating(series?.contentRating)) {
+  if (opts.refuseAdultTitle && adultSourceSeries(series)) {
     return { ok: false, status: 403, error: 'forbidden', message: 'That source is not available on this account.' };
   }
   // No title, no add. This used to fall back to the literal string 'Series', which becomes the folder --
@@ -1696,7 +1696,7 @@ export async function addSeriesFromSource(opts: {
   // rating is never lowered, and an admin's override still wins in visible(). Every chapter's ComicInfo carries it
   // too (downloader.ts), so a rescan from the files keeps it. Reintroduce by writing NULL: "a MangaDex title rated
   // erotica is stored 18+" in ageRatingOnAdd.int.test.ts reads null.
-  const addedAgeRating = adultContentRating(series?.contentRating) ? ADULT_RATING : null;
+  const addedAgeRating = adultSourceSeries(series) ? ADULT_RATING : null;
 
   /**
    * "Nothing yet": the series is created and followed, and no chapter is fetched.
@@ -2424,8 +2424,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
    * child's account. Reintroduce by returning `items`: "a capped account's MangaDex listing leaves erotica out" in
    * ageRatingOnAdd.int.test.ts lists it.
    */
-  const ratedForViewer = <T extends { contentRating?: string }>(req: FastifyRequest, items: T[]): T[] =>
-    cappedBelowAdult(req) || vc(req).hideAdultLibraries ? items.filter((r) => !adultContentRating(r.contentRating)) : items;
+  const ratedForViewer = <T extends { contentRating?: string; genres?: string[] }>(req: FastifyRequest, items: T[]): T[] =>
+    cappedBelowAdult(req) || vc(req).hideAdultLibraries ? items.filter((r) => !adultSourceSeries(r)) : items;
   /** The sources this viewer may reach, in registry order. This is the ACCESS rule and nothing else. */
   const reachable = (req: FastifyRequest): SourceAdapter[] =>
     listSources().filter((s) => sourceAllowedFor(s, vc(req).maxAgeRating));
@@ -3918,7 +3918,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // Through the shared lookup so the add that usually follows this reuses it rather than re-solving.
     const { series, chapters: raw } = await seriesAndChapters(src, sourceId);
     // The cap's per-title half, as the add below applies it: the chip does not apply here (named, not surfaced).
-    if (cappedBelowAdult(req) && adultContentRating(series?.contentRating)) return denySource(reply);
+    if (cappedBelowAdult(req) && adultSourceSeries(series)) return denySource(reply);
     // Numbered as the add will number them (#116, lib/numbering.ts): a source that gives many different posts one
     // number is counted in posting order, 1..K, and `numbering` says so -- with the other reading's count under
     // `alt`, for the dialog's "Keep the source's numbers" switch. The cache keeps the raw list: it is shared.

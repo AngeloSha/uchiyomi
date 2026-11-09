@@ -12,6 +12,7 @@ import { chapterOutcome } from '@/lib/readerState';
 import { openableChapters } from '@/lib/chapterRows';
 import { buildFlow, startIndex, renderWindow } from '@/lib/readerFlow';
 import { drawnWidth, fitWidth, neverSofter } from '@/lib/readerFit';
+import { pagedOpenOffset, pagedScrollStep, zoomedScrollOffset } from '@/lib/readerPagedScroll';
 import { AHEAD_SCREENS, APPEND_SCREENS, BEHIND_SCREENS, KEEP_SCREENS, MAX_WINDOW_PAGES, anchorAt, nearEnd, prefetchList, screenRange, scrollTopFor, windowSet, type IndexRange } from '@/lib/readerWindow';
 import { isCatch, readTap, undoLeft, undoWindow, type TapZone } from '@/lib/readerGesture';
 import { PAGE_ACTIONS, READER_ACTIONS, actionForKey, keyMapFor, type ReaderAction } from '@/lib/readerKeys';
@@ -210,7 +211,20 @@ function ReaderInner() {
   /** The colour filter over every page IMAGE (never the column, the track or a card), and how a move moves under it. */
   const imgFilter = COLOR_FILTER[device.colorFilter];
   const behavior = glide(device.colorFilter);
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoomState] = useState(1);
+  const widthZoomAnchor = useRef<{ pane: HTMLElement; slide: number; page: number; focusedPage?: number; zoom: number; x: number; y: number } | null>(null);
+  // A turn back in reading order under Fit width (#401): the slide (and the focused page of a pair) it went back to, which
+  // opens at its foot. The turn's own mark, for a moment only, so a later swipe or jump to that page opens at its top.
+  const openAtFoot = useRef<{ slide: number; page?: number; at: number } | null>(null);
+  const setZoom = (next: number) => {
+    // A smaller image can clamp DOM scroll offsets before layout effects run. Capture the old point first.
+    const el = scrollRef.current;
+    const slide = el ? Math.round(Math.abs(el.scrollLeft) / Math.max(1, el.clientWidth)) : -1;
+    const pane = prefs.mode === 'paged' && prefs.pagedFitWidth
+      ? el?.querySelector<HTMLElement>(`[data-paged-scroll="${slide}"]`) : null;
+    widthZoomAnchor.current = pane ? { pane, slide, page: current, focusedPage: focus?.page, zoom, x: pane.scrollLeft, y: pane.scrollTop } : null;
+    setZoomState(next);
+  };
   // Shift pairs by one page, the title's memory like the zoom (lib/readerSpread.ts pairSlides `shift`).
   const [spreadShift, setSpreadShift] = useState(false);
   // Translated pages (v0.85.0, lib/readerTranslate.ts): the title's memory like the shift, offered only while the server
@@ -897,7 +911,7 @@ function ReaderInner() {
     // One page of the pair brought into frame (#232/#261) is drawn alone; a joined spread turned on its side (#229, Wide
     // pages -> Rotate) is one picture twice a page wide, turned, of which this page is half.
     const pair = shown.length === 2 && focus?.slide !== s;
-    const slide = { mode: 'slide' as const, w: area.w || window.innerWidth, h: area.h || window.innerHeight, zoom, half: !!half[s], crop: prefs.cropBorders };
+    const slide = { mode: 'slide' as const, widthOnly: prefs.pagedFitWidth, w: area.w || window.innerWidth, h: area.h || window.innerHeight, zoom, half: !!half[s], crop: prefs.cropBorders };
     if (pair && joined[s] && wideMode === 'rotate' && p.width && p.height) {
       return drawnWidth({ width: 2 * p.width, height: p.height }, { ...slide, pair: false, rotate: true }) / 2;
     }
@@ -1626,6 +1640,12 @@ function ReaderInner() {
     const el = scrollRef.current;
     if (PAGE_ACTIONS.has(action)) {
       if (!el) return;
+      // Vertical reading keys finish a tall page first; physical left/right and tap zones still turn its slide.
+      if (prefs.mode === 'paged' && prefs.pagedFitWidth && !o.tap) {
+        const pane = el.querySelector<HTMLElement>(`[data-paged-scroll="${slideNow()}"]`);
+        const step = pane ? pagedScrollStep(action, pane) : 0;
+        if (pane && step) { pane.scrollBy({ top: step, behavior }); return; }
+      }
       // One page of a pair in frame (#261): a turn toward the pair's other page goes there first.
       if (prefs.mode === 'paged' && stepFocus(action, o)) return;
       // Next and back are reading order, whichever way the pages run. The page to the left or the right is PHYSICAL,
@@ -1641,6 +1661,13 @@ function ReaderInner() {
         const last = Math.max(0, el.children.length - 1); // page slides, then Up Next / the failure card
         const from = slideNow();
         const to = Math.max(0, Math.min(last, from + d));
+        // Back in reading order to a width-fitted page (#401, @Forgitusername): it opens at its foot, where it was left,
+        // placed there before the glide so it does not jump once it lands. Forward still opens a page at its top.
+        if (d < 0 && to !== from && prefs.pagedFitWidth) {
+          openAtFoot.current = { slide: to, at: Date.now() };
+          const back = el.querySelector<HTMLElement>(`[data-paged-scroll="${to}"]`);
+          if (back) back.scrollTop = pagedOpenOffset(back, true);
+        }
         if (o.tap) acted.current = { kind: 'turn', slide: from, at: Date.now() };
         lastMoved.current = Date.now(); // before the first scroll event arrives
         el.scrollTo({ left: trackSign * to * (el.clientWidth || window.innerWidth), behavior });
@@ -1830,6 +1857,12 @@ function ReaderInner() {
   const panBy = (dx: number, dy: number) => {
     const el = scrollRef.current;
     if (!el) return;
+    if (prefs.pagedFitWidth) {
+      const index = Math.round(Math.abs(el.scrollLeft) / Math.max(1, el.clientWidth));
+      const pane = el.querySelector<HTMLElement>(`[data-paged-scroll="${index}"]`);
+      if (pane) { pane.scrollLeft -= dx; pane.scrollTop -= dy; }
+      return;
+    }
     const mx = ((zoom - 1) * el.clientWidth) / 2;
     const my = ((zoom - 1) * el.clientHeight) / 2;
     const x = Math.max(-mx, Math.min(mx, pan.current.x + dx));
@@ -1845,6 +1878,35 @@ function ReaderInner() {
     scrollRef.current?.style.removeProperty('--pan-y');
   }, [current, prefs.mode]);
   useEffect(() => { if (zoom <= 1) { pan.current = { x: 0, y: 0 }; scrollRef.current?.style.removeProperty('--pan-x'); scrollRef.current?.style.removeProperty('--pan-y'); } else panBy(0, 0); }, [zoom]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A page opens at its top -- or at its foot when reading went back to it (#401) -- and subsequent zooms preserve the
+  // image point at the viewport's centre on both axes.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || prefs.mode !== 'paged' || !prefs.pagedFitWidth) return;
+    const index = Math.round(Math.abs(el.scrollLeft) / Math.max(1, el.clientWidth));
+    const pane = el.querySelector<HTMLElement>(`[data-paged-scroll="${index}"]`);
+    const mark = openAtFoot.current;
+    const fresh = !!mark && Date.now() - mark.at < 2000;
+    const foot = fresh && mark!.slide === index && (mark!.page === undefined || mark!.page === focus?.page);
+    if (foot || !fresh) openAtFoot.current = null;
+    if (pane) { pane.scrollTop = pagedOpenOffset(pane, foot); pane.scrollLeft = (pane.scrollWidth - pane.clientWidth) / 2; }
+  }, [current, focus?.page, prefs.mode, prefs.pagedFitWidth]);
+  const beforeWidthZoom = useRef(zoom);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const before = beforeWidthZoom.current; beforeWidthZoom.current = zoom;
+    const anchor = widthZoomAnchor.current; widthZoomAnchor.current = null;
+    if (!el || prefs.mode !== 'paged' || !prefs.pagedFitWidth || before === zoom) return;
+    const index = Math.round(Math.abs(el.scrollLeft) / Math.max(1, el.clientWidth));
+    const pane = el.querySelector<HTMLElement>(`[data-paged-scroll="${index}"]`);
+    if (pane) {
+      const saved = anchor?.pane === pane && anchor.slide === index && anchor.page === current
+        && anchor.focusedPage === focus?.page && anchor.zoom === before ? anchor : null;
+      pane.scrollTop = zoomedScrollOffset(saved?.y ?? pane.scrollTop, pane.clientHeight, before, zoom);
+      pane.scrollLeft = zoomedScrollOffset(saved?.x ?? pane.scrollLeft, pane.clientWidth, before, zoom);
+    }
+  }, [zoom, prefs.mode, prefs.pagedFitWidth]);
 
   /** The slide the paged track is on, the way `onScroll` reads it -- an RTL track counts in negative px. */
   const slideNow = () => {
@@ -1897,6 +1959,8 @@ function ReaderInner() {
       : idxs[idxs.indexOf(focus.page) + (action === 'next' ? 1 : -1)];
     if (to === undefined) return false;
     if (o.tap) acted.current = { kind: 'focus', prev: focus, at: Date.now() };
+    // Back to the pair's earlier page in reading order opens it at its foot (#401), as a turn back does.
+    if (prefs.pagedFitWidth && idxs.indexOf(to) < idxs.indexOf(focus.page)) openAtFoot.current = { slide: s, page: to, at: Date.now() };
     setFocus({ slide: s, page: to });
     return true;
   };
@@ -2224,7 +2288,7 @@ function ReaderInner() {
       ) : (
         <div ref={scrollRef} data-lenis-prevent onScroll={onScroll} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd} onDoubleClick={onTrackDoubleClick} {...menuBind}
           dir={pagedRtl ? 'rtl' : 'ltr'}
-          className={`hide-scrollbar flex h-screen-d snap-x snap-mandatory overflow-y-hidden overscroll-x-contain ${zoom > 1 ? 'touch-none overflow-x-hidden' : 'touch-pan-x overflow-x-auto'}`} style={{ filter: THEME_FILTER[prefs.theme] }}>
+          className={`hide-scrollbar flex h-screen-d snap-x snap-mandatory overflow-y-hidden overscroll-x-contain ${zoom > 1 ? 'touch-none overflow-x-hidden' : prefs.pagedFitWidth ? 'touch-pan-x touch-pan-y overflow-x-auto' : 'touch-pan-x overflow-x-auto'}`} style={{ filter: THEME_FILTER[prefs.theme] }}>
           {slides.map((slideIdxs, s) => {
             // One page of the pair brought into frame (#232/#261, `focus`): the slide holds just it, and everything below
             // lays it out as a single page.
@@ -2240,18 +2304,22 @@ function ReaderInner() {
             const turnedPair = isJoined && wideMode === 'rotate';
             // v0.61.0: one half of a wide page (Wide pages → Split) is a slide of its own, keyed apart from its twin.
             const halfOf = half[s];
+            const widthOnly = prefs.pagedFitWidth;
+            const pageArea = widthOnly ? { w: area.w * zoom, h: area.h } : area;
+            const pageZoom = widthOnly ? 1 : zoom;
             return (
               <div key={halfOf ? `${flat[idxs[0]].key}:${halfOf}` : flat[slideIdxs[0]].key} data-joined={isJoined || undefined}
-                className="relative h-full w-full shrink-0 snap-center snap-always overflow-hidden">
+                data-lenis-prevent dir={widthOnly ? 'ltr' : undefined} data-paged-scroll={widthOnly ? s : undefined}
+                className={`relative h-full w-full shrink-0 snap-center snap-always ${widthOnly ? 'hide-scrollbar overflow-y-auto overscroll-y-contain' : 'overflow-hidden'}`}>
                 {/* The clip stays put and the page inside it is what a zoomed drag moves (panBy): a zoomed page used to spill
                     over its neighbours, and could not be dragged to its edges at all. */}
-                <div className={`flex h-full w-full items-center justify-center${isJoined ? '' : ' gap-1'}`} dir={isJoined ? 'ltr' : undefined}
-                  style={zoom > 1 ? { translate: 'var(--pan-x, 0px) var(--pan-y, 0px)' } : undefined}>
+                <div className={`flex ${widthOnly ? 'min-h-full items-start' : 'h-full items-center'} w-full justify-center${isJoined ? '' : ' gap-1'}`} dir={isJoined || !pagedRtl ? 'ltr' : 'rtl'}
+                  style={widthOnly ? { width: `${zoom * 100}%` } : zoom > 1 ? { translate: 'var(--pan-x, 0px) var(--pan-y, 0px)' } : undefined}>
                 {turnedPair ? (
                   // Both pages, or neither: half a spread turned on its side is no page at all.
                   shown.every((i) => activeSet.has(i) && srcFor(i) && flat[i].width && flat[i].height)
                     ? <SlideTurnedPair onRetry={refreshEditedPages} pages={shown.map((i) => ({ src: srcFor(i)!, alt: tr('Page {n}', { n: flat[i].number }), width: flat[i].width!, height: flat[i].height! }))}
-                        area={area} zoom={zoom} filter={imgFilter} />
+                        area={pageArea} zoom={pageZoom} widthOnly={widthOnly} filter={imgFilter} />
                     : shown.map((i) => <span key={flat[i].key} className="text-ink-600">{flat[i].number}</span>)
                 ) : shown.map((i) => {
                   const p = flat[i];
@@ -2262,9 +2330,9 @@ function ReaderInner() {
                   // would overflow the slide. Ordinary pages keep the bare <img>, byte for byte as before.
                   if (p.missing) {
                     return (
-                      <div key={p.key} className={`relative flex h-full items-center justify-center ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`}
-                        style={{ transform: zoom !== 1 ? `scale(${zoom})` : undefined }}>
-                        <ReaderImg onRetry={refreshEditedPages} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} className="max-h-full object-contain" filter={imgFilter} />
+                      <div key={p.key} className={`relative flex ${widthOnly ? 'h-auto' : 'h-full'} items-center justify-center ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`}
+                        style={widthOnly ? { width: idxs.length === 2 ? '50%' : '100%' } : { transform: zoom !== 1 ? `scale(${zoom})` : undefined }}>
+                        <ReaderImg onRetry={refreshEditedPages} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} className={widthOnly ? 'block h-auto w-full max-w-none' : 'max-h-full object-contain'} filter={imgFilter} />
                         <MissingCaption number={p.number} source={sourceNameOf(chapters[p.ci]?.sourceId)} dir={uiDir} />
                       </div>
                     );
@@ -2280,23 +2348,23 @@ function ReaderInner() {
                   if (halfOf && p.width && p.height) {
                     return <SlideRegion onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={p.width} height={p.height}
                       region={cropOn ? halfCrop(halfOf, box?.all ?? WHOLE) : halfOf === 'left' ? LEFT_HALF : RIGHT_HALF}
-                      half={halfOf} area={area} zoom={zoom} pending={cropOn && box === undefined} onLoaded={loaded}
+                      half={halfOf} area={pageArea} zoom={pageZoom} widthOnly={widthOnly} pending={cropOn && box === undefined} onLoaded={loaded}
                       filter={imgFilter} trimmed={cropOn ? (box?.all ?? WHOLE).l : undefined} />;
                   }
                   if (wideMode === 'rotate' && idxs.length === 1 && isWide(p)) {
                     return <SlideTurned onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={p.width!} height={p.height!}
-                      area={area} zoom={zoom} filter={imgFilter} />;
+                      area={pageArea} zoom={pageZoom} widthOnly={widthOnly} filter={imgFilter} />;
                   }
-                  if (cropOn) {
+                  if (cropOn || widthOnly) {
                     const w = p.width || box?.w;
                     const h = p.height || box?.h;
                     if (!(w && h)) {
-                      return <SlidePending onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} zoom={zoom} onLoaded={loaded} filter={imgFilter}
-                        className={`max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`} />;
+                      return <SlidePending onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} zoom={pageZoom} onLoaded={loaded} filter={imgFilter}
+                        className={widthOnly ? `block h-auto shrink-0 ${idxs.length === 2 ? 'w-1/2' : 'w-full'}` : `max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`} />;
                     }
                     let region: Region = box?.all ?? WHOLE;
-                    let pending = box === undefined;
-                    if (shown.length === 2) {
+                    let pending = cropOn && box === undefined;
+                    if (shown.length === 2 && cropOn) {
                       // By where the pages SIT, left then right (pairOnScreen): the gutter is the left page's right side and
                       // the right page's left side, and on a right-to-left track the first page drawn is the right one.
                       const sits = pairOnScreen(s) ?? shown;
@@ -2306,7 +2374,7 @@ function ReaderInner() {
                     }
                     // Half the slide each, less half the gap -- a joined spread has none.
                     return <SlideRegion onRetry={refreshEditedPages} key={p.key} src={srcFor(i)!} alt={tr('Page {n}', { n: p.number })} width={w} height={h}
-                      region={region} area={shown.length === 2 ? { w: area.w / 2 - (isJoined ? 0 : 2), h: area.h } : area} zoom={zoom}
+                      region={region} area={shown.length === 2 ? { w: pageArea.w / 2 - (isJoined ? 0 : 2), h: pageArea.h } : pageArea} zoom={pageZoom} widthOnly={widthOnly}
                       pending={pending} onLoaded={loaded} filter={imgFilter} trimmed={region.l} />;
                   }
                   return (

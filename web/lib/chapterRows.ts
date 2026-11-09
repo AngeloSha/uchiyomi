@@ -334,3 +334,9 @@ export function ghostOfDeleted(b: Book): Ghost {
     ...(b.readProgress?.completed ? { read: true } : {}),
   };
 }
+
+/** Hide blocked tombstones only from the chapter shelf; a saved offline copy remains readable. */
+export function withoutBlockedDeleted<T extends Pick<Book, 'id' | 'pruned'>>(books: readonly T[], blocked: readonly string[], offline: ReadonlySet<string>): T[] {
+  const ids = new Set(blocked);
+  return books.filter((book) => !book.pruned || !ids.has(book.id) || offline.has(book.id));
+}

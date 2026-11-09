@@ -1015,6 +1015,42 @@ test('a chapter stitched into long strips is not short', { skip: DSN ? false : '
   }
 });
 
+const S_SPECIAL = 's_health_special';
+
+/**
+ * A chapter titled as a special -- a Q&A, a giveaway, an author's note -- is short on purpose, as a half-chapter notice
+ * is (lib/specialChapters.ts), whichever title says so: its own name, the file's, or the listing's for its number. Counted
+ * in the summary, not listed. Reintroduce by dropping the specialName() test in shortChapters(): chapters 2-4 are listed.
+ */
+test('a chapter titled as a special is not short', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await migrate();
+  await q('DELETE FROM lib_series WHERE id = $1', [S_SPECIAL]);
+  await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ($1,'test','Special Fixture',$1)`, [S_SPECIAL]);
+  const book = (n: number, title: string, name: string | null = null) =>
+    q(`INSERT INTO lib_books (id, series_id, source, file, title, chapter_name, number, pages) VALUES ($1,$2,'test',$3,$4,$5,$6,1)`,
+      [`b_${S_SPECIAL}_${n}`, S_SPECIAL, `${S_SPECIAL}/Ch ${n}.cbz`, title, name, n]);
+  await book(1, 'Chapter 1');
+  await book(2, 'Chapter 2', 'Q&A Announcement!');
+  await book(3, 'Chapter 3: Giveaway!');
+  await book(4, 'Chapter 4');
+  await q(`INSERT INTO series_listing (series_id, number, title, source_id, chosen) VALUES ($1, 4, $2, 'test', '{}')`,
+    [S_SPECIAL, "Chapter 4 - Author's Note"]);
+  try {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'short-chapters');
+    const listed = (n: number) => c.items.some((i: any) => i.bookId === `b_${S_SPECIAL}_${n}`);
+    assert.ok(listed(1), 'a chapter whose title only says its number is still short');
+    assert.equal(listed(2), false, 'its own name');
+    assert.equal(listed(3), false, "the file's title");
+    assert.equal(listed(4), false, "the listing's title");
+    assert.match(c.summary, /\d+ specials left out/);
+  } finally {
+    await q('DELETE FROM lib_series WHERE id = $1', [S_SPECIAL]);
+  }
+});
+
 /**
  * "It keeps taking longer than 15 s" is about browsing today (v0.55.10, lib/sourceHealth.ts slowStreakNow): one evening's
  * slow searches through a busy solver held four sources on the card for six days of fast answers. Reintroduce by reading

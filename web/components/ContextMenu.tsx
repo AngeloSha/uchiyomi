@@ -4,7 +4,8 @@ import {
   Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState,
   type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode,
 } from 'react';
-import { contextMenusOn, placeMenu, wantsOwnMenu, LONG_PRESS_MS, LONG_PRESS_SLOP } from '@/lib/contextMenus';
+import { contextMenusOn, placeMenu, wantsOwnMenu, menuScrollMoved, LONG_PRESS_MS, LONG_PRESS_SLOP } from '@/lib/contextMenus';
+import { haltSmoothScroll } from '@/lib/smoothScroll';
 
 // One menu, opened four ways (#100). lib/contextMenus.ts says when the browser's own menu is left alone.
 //
@@ -54,15 +55,21 @@ function Menu({ items, at, label, onClose }: { items: MenuItem[]; at: At; label:
   ) ?? [])];
   useEffect(() => { if (pos) enabled()[0]?.focus(); }, [pos]);
 
-  // Anything that moves the page under a menu makes its position a lie.
+  // Anything that moves the page under a menu makes its position a lie. A page scroll counts only once the page has
+  // moved from where it opened: the glide openAt stopped can still deliver its last frame's scroll event after this.
   useEffect(() => {
     const away = () => onClose(false);
+    const from = { x: window.scrollX, y: window.scrollY };
+    const onScroll = (e: Event) => {
+      if (!menuScrollMoved(e.target === document || e.target === window, from, { x: window.scrollX, y: window.scrollY })) return;
+      away();
+    };
     window.addEventListener('resize', away);
-    window.addEventListener('scroll', away, true);
+    window.addEventListener('scroll', onScroll, true);
     window.addEventListener('blur', away);
     return () => {
       window.removeEventListener('resize', away);
-      window.removeEventListener('scroll', away, true);
+      window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('blur', away);
     };
   }, [onClose]);
@@ -135,7 +142,7 @@ export function useContextMenu(getItems: () => MenuItem[], { label }: { label: s
     setAt(null);
     if (refocus) trigger.current?.focus?.();
   }, []);
-  const openAt = (point: At, el: HTMLElement | null) => { trigger.current = el; setAt(point); };
+  const openAt = (point: At, el: HTMLElement | null) => { haltSmoothScroll(); trigger.current = el; setAt(point); };
   /** Under an element, end-aligned: the ⋯ button's place, and the keyboard's. */
   const openFrom = (el: HTMLElement) => {
     const r = el.getBoundingClientRect();

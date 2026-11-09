@@ -1,5 +1,136 @@
 # Changelog
 
+## v0.105.0 — 2026-11-07
+
+**Looking for one series' sources searches every source, a server only adults use can stop hiding 18+, an import never
+adds a second copy of what you have, and the series page keeps its order.**
+
+### Every source, when you look for a series' sources
+
+- **Add more sources** on a series and **Change** in an import search every source your account may use
+  ([#405](https://github.com/AngeloSha/uchiyomi/issues/405), **StrayaJake**; [#412](https://github.com/AngeloSha/uchiyomi/issues/412),
+  **Wolf92s**; with **Baine**'s [#407](https://github.com/AngeloSha/uchiyomi/pull/407)). With **Show 18+** on, the request
+  carried the 18+ flag twice, which hid every source an extension calls adult — on many servers nearly all of them — and
+  with it off they were hidden on purpose, so these tools often searched four sources of twenty-five and found nothing.
+  An account's age limit still applies.
+- **Up to 25 sources per series** ([#413](https://github.com/AngeloSha/uchiyomi/issues/413), **Wolf92s**), ten before:
+  **Admin → Settings → Downloads → More options → Other sources per series**. The first three are asked at every library
+  update; the rest are backups, asked once a day while the series has nothing missing, so a long list of them does not make
+  every update longer. A series that is missing chapters asks them all, and so does **Check now**. When a series is full,
+  the message says where the number is set.
+- A title an extension rates only with a genre tag counts as 18+ when the tag says **Erotica** or **Pornographic**, the
+  way a MangaDex title rated so does: for **Show 18+**, for age limits, in listings, by link and on add, where it is stored
+  18+ (thanks to **globalteddy**).
+
+### A server only adults use
+
+- **Admin → Settings → Series & chapters → Hide 18+ until someone shows it** ([#406](https://github.com/AngeloSha/uchiyomi/issues/406),
+  **StrayaJake**). On by default, as every server has been. Switched off, nothing is hidden for anyone — in the web app,
+  OPDS readers and the Komga API alike — and **Show 18+**, the line above the page and the 18+ filter's genres go away.
+  Age limits on accounts still apply: they are a permission, not this switch.
+
+### Importing
+
+- **No second copy of a tracker entry** ([#410](https://github.com/AngeloSha/uchiyomi/issues/410), **julieminer**). An
+  entry a series here is already linked to — by you, by an earlier import or by the online check — is that series, even
+  under another title: it reads *Already in your library* and is not added again. Before, a series added from a source
+  that spells it differently was offered again by the next import of the same list, and added twice.
+- **How many are left.** A list with more than 500 titles not in your library says how many come after them —
+  *(first 500 not in your library kept; 312 more after them: import again for those)*.
+- **Tracker lists are read up to 2,000 entries** (501 before), so importing a long AniList, MyAnimeList or Kitsu list
+  again reaches the titles after the first 500, as a backup's import does.
+- **A skipped title stays skipped** the next time you import the same list; picking a match for it in **Change**
+  un-skips it.
+- **Back** on an import's review goes back to the import list, in the page and in the browser
+  ([#409](https://github.com/AngeloSha/uchiyomi/issues/409), **julieminer**).
+
+### Series page, reader and uploads
+
+- **Oldest / Newest** on the series page is kept for every series, on every device you sign in on
+  ([#408](https://github.com/AngeloSha/uchiyomi/issues/408), **julieminer**).
+- **Title artwork** settings (automatic title logos and cover titles) are on **Admin → Art**, above the covers and
+  banners they sit beside ([#411](https://github.com/AngeloSha/uchiyomi/issues/411), **julieminer**).
+- In paged **Fit width**, going back a page opens it at its foot, where you left it
+  ([#401](https://github.com/AngeloSha/uchiyomi/pull/401), **Forgitusername**).
+- Uploads ([#375](https://github.com/AngeloSha/uchiyomi/issues/375)): the files that could not be stored stay in the list
+  for another try, the series page and the Library show what landed at once, the page names the series the files go
+  into, and every refusal is said in your language.
+
+### Upkeep
+
+- Dependency updates from Dependabot [#403](https://github.com/AngeloSha/uchiyomi/pull/403) (Fastify 5.12.8 and its
+  plugins, with the @fastify/cors security release 11.4.0) and [#404](https://github.com/AngeloSha/uchiyomi/pull/404)
+  (Next.js 16.4.4, React Query, Motion and Tailwind CSS).
+- Four tests that a slow or small CI runner could fail now wait for what they check, or say what disk they need.
+- Dependabot no longer proposes Python versions the optional title extractor cannot build on
+  ([#395](https://github.com/AngeloSha/uchiyomi/pull/395)).
+
+### Upgrading
+
+- Nothing to do. The new columns and table are additive (the server's 18+ switch, on by default; an import's count of
+  what is left; the remembered skips), and v0.104.0 runs on the new schema if you roll back.
+- The Umbrel package pins v0.104.0.
+
+## v0.104.0 — 2026-11-05
+
+**Upload new series or missing chapters, keep artwork beside your files, and improve the reader, lists and source controls.**
+
+### Chapter uploads and local artwork
+
+- **Upload a series**, or use **More → Upload chapters** on an existing series ([#375](https://github.com/AngeloSha/uchiyomi/issues/375),
+  building on **Calvin-Davidson**'s [#384](https://github.com/AngeloSha/uchiyomi/pull/384)). Admins can upload; members need the
+  new **Can upload series** permission, off by default, and may only add files to series they can open. Files stream to
+  the download folder, are checked as readable archives, and never overwrite existing files. Later files are bound to
+  the series the first upload created. Interrupted uploads leave no partial chapter; pending indexing is reported.
+- **Local covers and banners** ([#389](https://github.com/AngeloSha/uchiyomi/issues/389), **OnePieceSunny**): put `cover.jpg`,
+  `banner.jpg` or supported WebP/PNG/JPEG/AVIF equivalents beside the chapters, or in their `artwork/` folder. A library
+  scan validates and caches them, including from read-only libraries, and notices replacements or removals. An explicit
+  artwork choice keeps priority; local files take priority over automatic artwork. Original files are left intact.
+
+### Reader and list controls
+
+- **Paged → Page fit → Fit width** fills the slide and scrolls vertically within the page, including cropped, split,
+  rotated and paired pages. Vertical reading keys finish tall pages before turning, including a focused page of a
+  spread. Zoom keeps the reading position after panning, including when zooming out. **Whole page** remains the default
+  and the webtoon Fit setting keeps its own choice ([#398](https://github.com/AngeloSha/uchiyomi/issues/398),
+  with keyboard/zoom improvements building on [#401](https://github.com/AngeloSha/uchiyomi/pull/401), **Forgitusername**).
+- **List** on a series now ticks the lists it belongs to. Tick to add, untick to remove, then press **Done**; the sheet
+  stays open for several changes. Only your hand-picked lists appear. Failed writes keep the previous membership
+  ([#399](https://github.com/AngeloSha/uchiyomi/issues/399), **Forgitusername**).
+- Typed confirmations show titles in their real casing ([#381](https://github.com/AngeloSha/uchiyomi/pull/381)), and opening
+  a menu stops smooth-scroll momentum so it stays open ([#388](https://github.com/AngeloSha/uchiyomi/pull/388)), both from
+  **Calvin-Davidson**. A real scroll still dismisses the menu.
+- Mobile sheet actions and pinned footers clear the navigation through the full mobile/tablet breakpoint, including
+  safe-area insets ([#391](https://github.com/AngeloSha/uchiyomi/pull/391), **nVitius**).
+
+### Health and download controls
+
+- Titled Q&As, giveaways, author notes and other short specials are left out of **Suspiciously short chapters** and
+  unattended short-chapter repair ([#386](https://github.com/AngeloSha/uchiyomi/issues/386),
+  [#387](https://github.com/AngeloSha/uchiyomi/pull/387), **Calvin-Davidson**). Story titles that merely mention a special's
+  word remain checked. Detection uses title wording, so a real episode named only “Announcement” without a creator
+  number can still be treated as a special; **Fix** on an individual chapter remains available.
+- A deleted chapter whose every known source copy is blocked leaves the chapter shelf
+  ([#396](https://github.com/AngeloSha/uchiyomi/issues/396), **TIGamingTV**). Reading history and progress stay intact,
+  a saved offline copy remains readable, and unblocking a copy makes the row available again.
+- **Dismiss** and **Cancel** work for source jobs with long encoded folder names
+  ([#397](https://github.com/AngeloSha/uchiyomi/pull/397), **Baine**).
+- Dependency patches from Dependabot [#392](https://github.com/AngeloSha/uchiyomi/pull/392),
+  [#393](https://github.com/AngeloSha/uchiyomi/pull/393) and [#394](https://github.com/AngeloSha/uchiyomi/pull/394):
+  Fastify compression/cookies/JWT/static, motion, IndexedDB test support and Electron 45.1.0.
+- Patch the static server's `glob` dependency to 14.0.2, fixing cancellation that could continue filesystem traversal
+  after a timeout ([GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4)).
+
+### Upgrading
+
+- Existing members keep upload permission off. Uploads respect `MIN_FREE_GB`; ZIP/CBZ/EPUB use `UPLOAD_MAX_MB`
+  (2 GB by default), while PDF and RAR/CBR are capped at 128 MiB. Uploads go to the writable download folder.
+- Split-container installs stream chapter uploads through nginx without its ordinary 1 MiB API limit; application
+  size, disk-space and permission checks still apply.
+- New artwork-cache metadata and upload permission storage are additive. Existing manual artwork and reader choices
+  retain priority. The optional title extractor keeps Python 3.12 and its existing models.
+- The Umbrel package pins the already published v0.103.1 image until this release's verified digest is available.
+
 ## v0.103.1 — 2026-10-31
 
 **A special no longer shifts the chapter numbers after it, and a series is no longer linked to an AniList entry that

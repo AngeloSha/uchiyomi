@@ -58,5 +58,18 @@ export function setAdultShown(on: boolean): void {
  */
 export function withAdult(path: string): string {
   if (!adultShown()) return path;
-  return `${path}${path.includes('?') ? '&' : '?'}adult=1`;
+  return revealed(path);
+}
+
+/** A URL that already asks with the reveal. Never twice: two copies arrive as an array (#407). */
+const ASKS = /[?&]adult=1(?:&|$)/;
+
+/**
+ * A URL that asks with the reveal ON, whatever this browser has it set to, and exactly once, so `api()` adding its own
+ * changes nothing. For the admin's tools that look for one series' sources, where tidying away the adult ones hid the
+ * very sources people were looking for (#405, #412): Add more sources, the import's Change and the source names beside
+ * it, as Admin → Settings' pickers already ask. The age limit still holds: the server applies it whatever this says.
+ */
+export function revealed(path: string): string {
+  return ASKS.test(path) ? path : `${path}${path.includes('?') ? '&' : '?'}adult=1`;
 }

@@ -30,12 +30,35 @@ test('the home hero and every page that asks for no style are as they were', () 
   assert.equal(backdropLook(null, { hasUrl: true, fromBanner: true }), 'ambient', 'no style is the wash, banner or not (the admin header)');
 });
 
-test('the backdrop route takes style=banner and draws both of its paths by backdropLook', () => {
+test('the backdrop route draws manual, local and fetched artwork by its provenance', () => {
   // Reintroduce by dropping `|| asked === 'banner'` from the route: the style never reaches the recipe, and "the route
-  // takes style=banner" fails; draw the override banner by `hero` alone again and "both paths" fails.
+  // takes style=banner" fails. Check each branch so a new artwork source cannot hide a missing or incorrect recipe.
   const src = readFileSync(join(__dirname, '..', 'src', 'routes', 'images.ts'), 'utf8');
   assert.match(src, /const style = asked === 'hero' \|\| asked === 'banner' \? asked : null;/, 'the route takes style=banner');
   const recipe = src.slice(src.indexOf('async function backdropRecipe('), src.indexOf('export async function warmHeroBackdrops('));
-  assert.equal((recipe.match(/const look = backdropLook\(style, /g) ?? []).length, 2, 'both paths (an admin\'s banner and the fetched art) draw by backdropLook');
-  assert.equal((recipe.match(/look === 'banner' \? await bannerSharp\(input\)/g) ?? []).length, 2);
+  const branch = (start: string, end?: string) => {
+    const from = recipe.indexOf(start);
+    const to = end ? recipe.indexOf(end, from + start.length) : recipe.length;
+    assert.ok(from >= 0 && to > from, `artwork branch exists: ${start}`);
+    return recipe.slice(from, to);
+  };
+  const manual = branch('if (ovr?.banner)', 'const localBanner =');
+  assert.match(manual, /let fromBanner = true;/);
+  assert.match(manual, /input = await firstPageInput\(id, ctx\); fromBanner = false;/, 'a failed manual banner becomes a page');
+  assert.match(manual, /const look = backdropLook\(style, \{ hasUrl: true, fromBanner \}\);/);
+  assert.match(manual, /look === 'banner' \? await bannerSharp\(input\) : await ambientComposite\(input\)/);
+
+  const localBanner = branch('if (localBanner)', 'let art:');
+  assert.match(localBanner, /const look = backdropLook\(style, \{ hasUrl: true, fromBanner: true \}\);/);
+  assert.match(localBanner, /look === 'banner' \? await bannerSharp\(localBanner.bytes\) : await ambientComposite\(localBanner.bytes\)/);
+
+  const localCover = branch('if (localCover)', 'if (!art.banner) queueHero(id);');
+  assert.match(localCover, /const look = backdropLook\(style, \{ hasUrl: true, fromBanner: false \}\);/);
+  assert.match(localCover, /look === 'hero' \? await heroSharp\(localCover.bytes, ar\)\s*: await ambientComposite\(localCover.bytes\)/, 'a local cover stays ambient in banner mode');
+
+  const fetched = branch('const srcRow =');
+  assert.match(fetched, /input = await fetchCoverImage\(url, srcRow\?\.source_id \|\| undefined\);\s*fetched = true;/);
+  assert.match(fetched, /catch \{\s*input = await firstPageInput\(id, ctx\);\s*\}/, 'unavailable remote art falls back to a page');
+  assert.match(fetched, /const look = backdropLook\(style, \{ hasUrl: !!url, fromBanner: fetched && !!art.banner \}\);/);
+  assert.match(fetched, /look === 'banner' \? await bannerSharp\(input\) : await ambientComposite\(input\)/);
 });

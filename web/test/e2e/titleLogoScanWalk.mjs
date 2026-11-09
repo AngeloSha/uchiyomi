@@ -76,7 +76,7 @@ try {
   });
   await page.setBypassServiceWorker(true);
   await page.setViewport({ width: 1440, height: 1000 });
-  await page.goto(BASE + '/admin/?tab=series&section=automatic-title-logos', { waitUntil: 'networkidle2' });
+  await page.goto(BASE + '/admin/?tab=art&section=automatic-title-logos', { waitUntil: 'networkidle2' });
   await page.waitForSelector('[data-title-logo-count="missing"]', { visible: true });
   const compareCounts = async (expected) => {
     for (const key of ['checked', 'ready', 'missing', 'error', 'unchecked', 'needsLink']) {

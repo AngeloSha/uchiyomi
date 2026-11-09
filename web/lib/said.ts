@@ -316,6 +316,8 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'short.none': () => tr('No truncated chapters found'),
   'short.quiet': (p) => (num(p, 'n') === 1 ? tr('1 confirmed short at the source') : tr('{n} confirmed short at the source', { n: num(p, 'n') })),
   'short.note': () => tr('Counted nightly by the repair task, which opens the chapter files nobody has read yet, so this is no longer limited to chapters someone has opened. Half-chapters are excluded since author notices really are one page. "Fix" replaces the chapter only if another source has a longer copy; "It\'s fine" records that it really is this short, and the nightly stops looking at it.'),
+  'short.specials': (p) => (num(p, 'n') === 1 ? tr('1 special left out') : tr('{n} specials left out', { n: num(p, 'n') })),
+  'short.specialNote': () => tr('A chapter whose title names a special (a Q&A, a giveaway, an announcement, an author\'s note, bonus art) is left out too: those are meant to be short.'),
   'short.detail': (p) => (num(p, 'pages') === 1
     ? tr('Chapter {number} has 1 page', { number: num(p, 'number') })
     : tr('Chapter {number} has {n} pages', { number: num(p, 'number'), n: num(p, 'pages') })),
@@ -835,8 +837,8 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'attach.unreachable': (p) => tr('{name} did not say what that title is. Try again in a minute.', { name: str(p, 'name') }),
   'attach.cooling': (p) => tr('{name} is cooling down after errors, so it is not asked anything right now. Try again later.', { name: str(p, 'name') }),
   'attach.cap': (p) => (num(p, 'n') === 1
-    ? tr('This series already follows 1 other source, as many as it may. Remove one first, or move the series to this source.')
-    : tr('This series already follows {n} other sources, as many as it may. Remove one first, or move the series to this source.', { n: num(p, 'n') })),
+    ? tr('This series already follows 1 other source, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.')
+    : tr('This series already follows {n} other sources, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.', { n: num(p, 'n') })),
   'detach.noMain': () => tr('This series has no main source to detach.'),
   // A source retired, or a site removed, while some series still has it as its main source (bff lib/retireSource.ts).
   'retire.inUse': (p) => (num(p, 'n') === 1

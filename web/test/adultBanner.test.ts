@@ -16,7 +16,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setActiveLocale } from '../lib/format';
 import { setActiveDict } from '../lib/i18n';
-import { AdultBannerShown, type LibraryRow } from '../components/AdultToggle';
+import { AdultBannerShown, AdultToggle, type LibraryRow } from '../components/AdultToggle';
 
 (globalThis as { React?: unknown }).React = React;
 setActiveLocale('en');
@@ -28,10 +28,10 @@ const code = (src: string): string => src.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').r
   .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
 
 /** The banner with the reveal on, for an account holding `libs` and meeting the 18+ filter or not. */
-const banner = (libs: LibraryRow[] | undefined, configured: boolean) => {
+const banner = (libs: LibraryRow[] | undefined, configured: boolean, hiding = true) => {
   const qc = new QueryClient();
   if (libs) qc.setQueryData(['libraries'], libs);
-  qc.setQueryData(['adult-filter'], { configured });
+  qc.setQueryData(['adult-filter'], { configured, hiding });
   return renderToStaticMarkup(createElement(QueryClientProvider, { client: qc }, createElement(AdultBannerShown)));
 };
 
@@ -80,4 +80,22 @@ test('its line is translated in all eight languages, not English copies', () => 
     const v = d['18+ titles are showing.'];
     assert.ok(v && v !== '18+ titles are showing.', `${lang}: ${v}`);
   }
+});
+
+test("a server that hides nothing (#406) has no Show 18+ and no banner", () => {
+  // Admin → Settings → Hide 18+ until someone shows it, off: /api/adult-filter answers hiding false. Reintroduce by
+  // dropping useAdultHiding from AdultToggle, the banner or the profile menu: each renders over a server where the
+  // reveal reveals nothing.
+  const adultLib: LibraryRow[] = [{ id: 'l1', name: 'Adult', adult: true }];
+  assert.equal(banner(adultLib, true, false), '', 'the banner over a server that hides nothing');
+  const toggle = (hiding: boolean | undefined) => {
+    const qc = new QueryClient();
+    qc.setQueryData(['libraries'], adultLib);
+    qc.setQueryData(['adult-filter'], hiding === undefined ? { configured: true } : { configured: true, hiding });
+    return renderToStaticMarkup(createElement(QueryClientProvider, { client: qc }, createElement(AdultToggle, { alsoWhen: true })));
+  };
+  assert.equal(toggle(false), '', 'Show 18+ on a server that hides nothing');
+  assert.match(toggle(true), /Show 18\+/, 'PREMISE: the chip on a server that hides');
+  assert.match(toggle(undefined), /Show 18\+/, 'a server from before the switch, which hides');
+  assert.match(code(read('components/ProfileMenu.tsx')), /const showAdult = useAdultHiding\(\) && \(/, 'the profile menu offers Show 18+ regardless');
 });
