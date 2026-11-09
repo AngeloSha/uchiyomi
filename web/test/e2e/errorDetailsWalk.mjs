@@ -38,7 +38,7 @@ export async function errorDetailsWalk({ page, base, ok = () => {}, bad = messag
       await page.click('[data-ext-repos]');
       await page.waitForSelector('[data-repos-sheet] input', { visible: true });
       await page.type('[data-repos-sheet] input', 'https://fixture.invalid/test/index.min.json');
-      await page.$eval('[data-repo-form]', form => [...form.querySelectorAll('button')].find(button => button.textContent.trim() === 'Add').click());
+      await page.click('[data-repos-sheet] [data-repo-form] button');
       await page.waitForSelector('[data-notice-details]', { visible: true });
       const notice = await page.$eval('[data-notice="error"]', el => el.textContent);
       assert.doesNotMatch(notice, /IllegalStateException|FixtureExtension\.kt|fixture-private/);
