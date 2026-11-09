@@ -26,6 +26,13 @@ export interface EngineOp {
 const op = (name: string, doc: string, optional = false): EngineOp =>
   Object.freeze(optional ? { name, doc, optional } : { name, doc });
 
+// Authentication is opt-in transport setup, not an operation every adapter sends. These documents still
+// validate against the captured supported schemas alongside ALL_OPS.
+export const AUTH_OPS = {
+  login: op('login', 'mutation($input:LoginInput!){login(input:$input){accessToken refreshToken}}'),
+  refreshToken: op('refreshToken', 'mutation($input:RefreshTokenInput!){refreshToken(input:$input){accessToken}}'),
+} as const;
+
 // `sourceId`: which extension source the manga belongs to. Engine manga ids are global, so an adapter checks it (v0.69.1).
 const MANGA_FIELDS = 'id title thumbnailUrl realUrl url description author artist genre status sourceId';
 /**

@@ -265,7 +265,7 @@ const RULES: Array<[RegExp, (c: RuleCtx) => Diagnosis]> = [
     return D('upstream_down', 'The extension server did not answer.',
       auth
         ? fixed('fix.engineLogin', forDesktop(
-          "The extension engine refused Uchiyomi's login. Set SUWAYOMI_USERNAME and SUWAYOMI_PASSWORD to the engine's own basic-auth user and password (or turn its auth off), then restart Uchiyomi.",
+          "The extension engine refused Uchiyomi's login. Set SUWAYOMI_AUTH_MODE to match the engine, and SUWAYOMI_USERNAME and SUWAYOMI_PASSWORD to its login, then restart Uchiyomi.",
           "Uchiyomi's extension engine refused Uchiyomi's own login. Quit and reopen Uchiyomi to restart both.",
         ))
         : fixed('fix.engineDown', forDesktop(

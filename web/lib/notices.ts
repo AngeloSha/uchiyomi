@@ -38,6 +38,8 @@ export interface NoticeOpts {
    * a list. Following it dismisses the notice.
    */
   link?: { href: string; label: string };
+  /** Plain diagnostic text opened separately, so scrolling and selection never drag a notice away. */
+  details?: string;
 }
 
 export interface Notice {
@@ -51,6 +53,7 @@ export interface Notice {
   key?: string;
   /** Where its key goes (NoticeOpts.link). */
   link?: { href: string; label: string };
+  details?: string;
   /** Moved by a merge or a replacement: restarts the card's clock and its hairline. */
   bump: number;
 }
@@ -81,7 +84,7 @@ export function noticeDuration(msg: string, type: NoticeType): number {
  * moves to the newest place: it is the latest word, and the latest word is the one a dialog lets show.
  */
 export function pushNotice(list: readonly Notice[], next: Omit<Notice, 'count' | 'bump'>): Notice[] {
-  const same = list.findIndex((n) => (next.key ? n.key === next.key : !n.key && n.msg === next.msg && n.type === next.type));
+  const same = list.findIndex((n) => (next.key ? n.key === next.key : !n.key && n.msg === next.msg && n.type === next.type && n.details === next.details));
   if (same >= 0) {
     const old = list[same];
     const merged: Notice = next.key

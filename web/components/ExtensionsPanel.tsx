@@ -22,7 +22,7 @@ import {
   type BrowseFilters, type CatalogExt, type CatalogPage,
 } from '@/lib/extensions';
 import { useToast } from '@/components/Toast';
-import { msgOf } from '@/components/ConfirmDialog';
+import { errorNoticeOf, msgOf } from '@/components/ConfirmDialog';
 import { Switch } from '@/components/Switch';
 import { ProgressRing } from '@/components/ProgressRing';
 import { StatusMark } from '@/components/StatusMark';
@@ -80,10 +80,10 @@ export function useExtensionActions() {
       await refreshAll();
       return r;
     } catch (err) {
-      toast(msgOf(err, action === 'uninstall' ? tr('Could not remove {name}', { name })
+      toast(...errorNoticeOf(err, action === 'uninstall' ? tr('Could not remove {name}', { name })
         : action === 'update' ? tr('Could not update {name}', { name })
         : action === 'enable' ? tr('Could not turn on {name}', { name })
-        : tr('Could not add {name}', { name })), 'error');
+        : tr('Could not add {name}', { name })));
       return null;
     } finally {
       mark(e.pkgName, null);
@@ -103,12 +103,12 @@ export function useExtensionActions() {
       const n = r.updated.length;
       const updated = n === 1 ? tr('Updated 1 extension') : tr('Updated {n} extensions', { n });
       if (r.failed.length) {
-        const why = tr('Could not update {name}: {reason}', { name: `⁨${r.failed[0].name}⁩`, reason: `⁨${r.failed[0].reason}⁩` });
-        toast(n ? `${updated} · ${why}` : why, 'error');
+        const why = tr('Could not update {name}', { name: `⁨${r.failed[0].name}⁩` });
+        toast(...errorNoticeOf({ errors: r.failed.map((failed) => ({ message: failed.name, reason: failed.reason })) }, n ? `${updated} · ${why}` : why));
       } else {
         toast(n ? updated : tr('Everything is already up to date'), 'success');
       }
-    } catch (err) { toast(msgOf(err, tr('Could not update extensions')), 'error'); }
+    } catch (err) { toast(...errorNoticeOf(err, tr('Could not update extensions'))); }
     mark('__updateall', null);
   };
 
@@ -123,7 +123,7 @@ export function useExtensionActions() {
       toast(r.count === 1 ? tr('Refreshed — 1 extension available') : tr('Refreshed — {n} extensions available', { n: r.count }), 'success');
     } catch (err) {
       setRefreshError(reasonLine(msgOf(err, '')));
-      toast(tr('Could not refresh the list'), 'error');
+      toast(...errorNoticeOf(err, tr('Could not refresh the list')));
     }
     mark('__refresh', null);
   };

@@ -1090,7 +1090,7 @@ const WORDS: Record<string, (p: P) => string | null> = {
     : tr('The extension engine\'s own Cloudflare bypass is switched off. On the Suwayomi engine\'s container (uchiyomi-suwayomi in the shipped compose files) set FLARESOLVERR_ENABLED=true and FLARESOLVERR_URL to the same solver address Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the shipped files), then recreate it. The v0.37.0 compose files already set both, so an upgrade that recreates the engine is the fix there.')),
   'fix.engineLogin': () => (isDesktop()
     ? tr('Uchiyomi\'s extension engine refused Uchiyomi\'s own login. Quit and reopen Uchiyomi to restart both.')
-    : tr('The extension engine refused Uchiyomi\'s login. Set SUWAYOMI_USERNAME and SUWAYOMI_PASSWORD to the engine\'s own basic-auth user and password (or turn its auth off), then restart Uchiyomi.')),
+    : tr('The extension engine refused Uchiyomi\'s login. Set SUWAYOMI_AUTH_MODE to match the engine, and SUWAYOMI_USERNAME and SUWAYOMI_PASSWORD to its login, then restart Uchiyomi.')),
   'fix.engineDown': () => (isDesktop()
     ? tr('This is Uchiyomi\'s extension engine, not the site. Quit and reopen Uchiyomi to restart it.')
     : tr('This is the Suwayomi extension server, not the site. Check that container.')),

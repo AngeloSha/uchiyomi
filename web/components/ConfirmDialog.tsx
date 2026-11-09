@@ -13,6 +13,8 @@ import { saidText } from '@/lib/said';
 import { confirmsTitle } from '@/lib/confirmTitle';
 import { useLayer } from '@/lib/layers';
 
+export { errorNoticeOf } from '@/lib/errorDetails';
+
 export function Modal({
   title,
   onClose,

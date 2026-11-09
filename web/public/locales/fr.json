@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4571
+    "strings": 4578
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -1933,7 +1933,6 @@
   "The extension engine isn't using Uchiyomi's built-in Cloudflare helper. Quit and reopen Uchiyomi to restart it.": "Le moteur d’extensions n’utilise pas l’assistant Cloudflare intégré d’Uchiyomi. Quittez puis rouvrez Uchiyomi pour le redémarrer.",
   "The extension engine's own Cloudflare bypass is switched off. On the Suwayomi engine's container (uchiyomi-suwayomi in the shipped compose files) set FLARESOLVERR_ENABLED=true and FLARESOLVERR_URL to the same solver address Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the shipped files), then recreate it. The v0.37.0 compose files already set both, so an upgrade that recreates the engine is the fix there.": "Le contournement Cloudflare propre au moteur d’extensions est désactivé. Sur le conteneur du moteur Suwayomi (uchiyomi-suwayomi dans les fichiers compose fournis), définissez FLARESOLVERR_ENABLED=true et réglez FLARESOLVERR_URL sur la même adresse de solveur que celle qu’utilise Uchiyomi (http://uchiyomi-flaresolverr:8191 dans les fichiers fournis), puis recréez-le. Les fichiers compose de la v0.37.0 définissent déjà les deux : une mise à jour qui recrée le moteur suffit alors.",
   "Uchiyomi's extension engine refused Uchiyomi's own login. Quit and reopen Uchiyomi to restart both.": "Le moteur d’extensions d’Uchiyomi a refusé la connexion d’Uchiyomi lui-même. Quittez puis rouvrez Uchiyomi pour redémarrer les deux.",
-  "The extension engine refused Uchiyomi's login. Set SUWAYOMI_USERNAME and SUWAYOMI_PASSWORD to the engine's own basic-auth user and password (or turn its auth off), then restart Uchiyomi.": "Le moteur d’extensions a refusé la connexion d’Uchiyomi. Réglez SUWAYOMI_USERNAME et SUWAYOMI_PASSWORD sur l’utilisateur et le mot de passe basic-auth du moteur (ou désactivez son authentification), puis redémarrez Uchiyomi.",
   "This is Uchiyomi's extension engine, not the site. Quit and reopen Uchiyomi to restart it.": "Le problème vient du moteur d’extensions d’Uchiyomi, pas du site. Quittez puis rouvrez Uchiyomi pour le redémarrer.",
   "This is the Suwayomi extension server, not the site. Check that container.": "Le problème vient du serveur d’extensions Suwayomi, pas du site. Vérifiez ce conteneur.",
   "The extension engine did not answer in time.": "Le moteur d’extensions n’a pas répondu à temps.",
@@ -2729,6 +2728,7 @@
   "Could not read the extension list": "Impossible de lire la liste des extensions",
   "Could not turn on {name}": "Impossible d’activer {name}",
   "Each language is its own source; turn on the ones you read.": "Chaque langue est une source à part ; activez celles que vous lisez.",
+  "Each site is its own source; turn on the ones you read.": "Chaque site est une source à part ; activez ceux que vous lisez.",
   "Each language keeps its own settings.": "Chaque langue a ses propres réglages.",
   "Extensions get past Cloudflare through Uchiyomi’s helper.": "Les extensions passent Cloudflare grâce à l’assistant d’Uchiyomi.",
   "Find one in Browse and install it with one press. Its sources are on at once, ready to search from Discover.": "Trouvez-en une dans Parcourir et installez-la d’une pression. Ses sources sont activées aussitôt, prêtes pour la recherche dans Découvrir.",
@@ -4574,5 +4574,12 @@
   "(first 500 not in your library kept; {n} more after them: import again for those)": "(les 500 premiers absents de votre bibliothèque conservés ; {n} autres suivent : importez à nouveau pour ceux-là)",
   "The first 500 titles not already in your library were kept, and {n} more come after them. Once these are in, import the same list again for the rest.": "Les 500 premiers titres absents de votre bibliothèque ont été conservés, et {n} autres suivent. Une fois ceux-ci ajoutés, importez à nouveau la même liste pour le reste.",
   "This series already follows 1 other source, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.": "Cette série suit déjà 1 autre source, le maximum que ce serveur autorise. Retirez-en une d’abord, déplacez la série vers cette source, ou autorisez-en davantage dans Administration → Paramètres → Téléchargements → Plus d’options → Autres sources par série.",
-  "This series already follows {n} other sources, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.": "Cette série suit déjà {n} autres sources, le maximum que ce serveur autorise. Retirez-en une d’abord, déplacez la série vers cette source, ou autorisez-en davantage dans Administration → Paramètres → Téléchargements → Plus d’options → Autres sources par série."
+  "This series already follows {n} other sources, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.": "Cette série suit déjà {n} autres sources, le maximum que ce serveur autorise. Retirez-en une d’abord, déplacez la série vers cette source, ou autorisez-en davantage dans Administration → Paramètres → Téléchargements → Plus d’options → Autres sources par série.",
+  "Choose a source": "Choisir une source",
+  "Each source keeps its own settings.": "Chaque source conserve ses propres réglages.",
+  "Technical details": "Détails techniques",
+  "Copy error": "Copier l’erreur",
+  "Select text": "Sélectionner le texte",
+  "Could not copy automatically. The text is selected; copy it using your device’s controls.": "Impossible de copier automatiquement. Le texte est sélectionné ; copiez-le avec les commandes de votre appareil.",
+  "The extension engine refused Uchiyomi's login. Set SUWAYOMI_AUTH_MODE to match the engine, and SUWAYOMI_USERNAME and SUWAYOMI_PASSWORD to its login, then restart Uchiyomi.": "Le moteur d’extensions a refusé la connexion d’Uchiyomi. Réglez SUWAYOMI_AUTH_MODE selon le mode du moteur, puis SUWAYOMI_USERNAME et SUWAYOMI_PASSWORD selon ses identifiants. Redémarrez ensuite Uchiyomi."
 }

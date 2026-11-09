@@ -22,6 +22,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { t as tr } from '@/lib/i18n';
 import { isDesktop } from '@/lib/desktop';
+import { numberText } from '@/lib/format';
 import { diagnosisReason } from '@/lib/said';
 import { useTicker } from '@/lib/ticker';
 import { testClock, type TestAnswer } from '@/lib/sourceEvidence';
@@ -30,7 +31,7 @@ import {
   usedBy, usedByLink, type OverviewSource, type SheetKey, type SourceEvidenceRow, type SourcesOverview,
 } from '@/lib/sourcesPanel';
 import { extSourceIdOf } from '@/lib/sourcePrefs';
-import { extLanguagesText, type ExtStatus, type InstalledExt } from '@/lib/extensions';
+import { extLanguagesText, sourcesAreSites, type ExtStatus, type InstalledExt } from '@/lib/extensions';
 import { Sheet } from '@/components/ui';
 import { msgOf } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/Toast';
@@ -53,6 +54,9 @@ export function resolveTarget(target: SheetTarget, sources: readonly OverviewSou
   { source: OverviewSource | null; ext: InstalledExt | null } {
   if ('pkg' in target) {
     const ext = installed.find((e) => e.pkgName === target.pkg) ?? null;
+    // A set of sites (Nyora-Sources: 840 of them) is about the extension, not one site: its sheet is headed by the
+    // extension's name and icon. One source per language, its first is the extension in all but language.
+    if (ext && sourcesAreSites(ext)) return { source: null, ext };
     // Its first source switched on, else its first: the one a person most likely reads.
     const first = ext ? (ext.sources.find((s) => s.enabled) ?? ext.sources[0]) : null;
     return { source: first ? sources.find((s) => s.id === `sw:${first.id}`) ?? null : null, ext };
@@ -227,7 +231,11 @@ export function SourceSheet({ target, overview, evidence, testMs, status, action
       lead={s ? <SourceTile id={s.id} name={s.name} icon={s.icon} tone={says!.tone === 'ok' ? 'info' : says!.tone} dim={says!.tone === 'off'} size={52} />
         : ext ? <ExtIcon url={ext.iconUrl} name={ext.name} size={52} /> : undefined}
       subtitle={s ? <><span><Facts items={sheetFacts(s)} /></span>{ext && <ExtTags e={ext} />}</>
-        : ext ? <><span><Facts items={[ext.versionName ? `v${ext.versionName}` : null, extLanguagesText(ext)]} /></span><ExtTags e={ext} /></> : undefined}
+        : ext ? <><span><Facts items={[
+          ext.versionName ? `v${ext.versionName}` : null,
+          sourcesAreSites(ext) ? tr('{n} sources', { n: numberText(ext.sources.length) }) : null,
+          extLanguagesText(ext),
+        ]} /></span><ExtTags e={ext} /></> : undefined}
       action={ext ? <ExtensionUpdateKey ext={ext} actions={actions} /> : undefined}
       footer={footer}>
       <div className="space-y-4 pb-3" data-source-card={s?.id ?? ''} data-source-sheet={s?.id ?? ext?.pkgName ?? ''}>
@@ -343,7 +351,7 @@ export function SourceSheet({ target, overview, evidence, testMs, status, action
         {(s?.kind === 'extension' || (!s && ext)) && (
           <div className="border-t border-ink-800/70 pt-3">
             {ext && status && engineReady ? (
-              <ExtensionSection ext={ext} status={status} hiddenLangs={hiddenLangs} actions={actions} onLanguages={onLanguages}
+              <ExtensionSection key={s?.id ?? ext.pkgName} ext={ext} status={status} hiddenLangs={hiddenLangs} actions={actions} onLanguages={onLanguages}
                 offByAdmin={offByAdmin} settingsFor={extSourceIdOf(s?.id)} settingsOpen={'id' in target && !!target.settings} />
             ) : (
               <p className="text-[12px] text-fog-500">{engineReady ? tr('This extension is no longer installed.') : tr('The extension engine isn’t answering')}</p>

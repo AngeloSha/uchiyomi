@@ -23,7 +23,7 @@ import { MAX_PAGE_BYTES } from './archiveCaps';
 import { fetchFollowingPublic, readCapped } from './safeFetch';
 import { isSwAdapterId } from './sources/suwayomi/sources';
 import { numKey } from './postingOrder';
-import { onEngineOrigin } from './sources/suwayomi/client';
+import { onEngineOrigin, suwayomiFetch } from './sources/suwayomi/client';
 
 /**
  * A title as a folder name.
@@ -490,14 +490,16 @@ export async function fetchPages(src: SourceAdapter, urls: string[], indices: nu
     if (cf?.cookie) headers.cookie = cf.cookie;
     // Source-declared extra headers (e.g. auth for a source that proxies its own images). Declared as a
     // capability rather than keyed off the adapter id, so the core never special-cases a particular source.
-    Object.assign(headers, typeof src.imageHeaders === 'function' ? src.imageHeaders(u) : src.imageHeaders ?? {});
+    const signal = AbortSignal.timeout(45000);
     try {
+      Object.assign(headers, typeof src.imageHeaders === 'function' ? await src.imageHeaders(u, signal) : src.imageHeaders ?? {});
       // Every hop on the public internet, the page read within MAX_PAGE_BYTES (lib/safeFetch.ts). A page URL is
       // whatever the site's HTML or API named, and this followed redirects with no check: the audit had a site's
       // loopback URL fetched and the internal service's answer stored as a member-readable page. The engine's own page
       // proxy URLs are private by design and are exempt on their first hop, for an engine source only.
-      const r = await fetchFollowingPublic(u, { headers, signal: AbortSignal.timeout(45000) }, {
+      const r = await fetchFollowingPublic(u, { headers, signal }, {
         exemptFirst: (t) => !!src.localImages || (isSwAdapterId(src.id) && onEngineOrigin(t)),
+        fetchFirst: isSwAdapterId(src.id) ? suwayomiFetch : undefined,
       });
       if (!r.ok) {
         if (r.status >= 400) worst = Math.max(worst, r.status);

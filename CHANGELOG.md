@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.106.0 — 2026-11-09
+
+**Find individual sites inside large extensions, inspect errors on a phone, and connect to Suwayomi's newer login modes.**
+
+### Sources and error details
+
+- Extensions containing several sites in the same language show each site's name and language, with a searchable
+  source list and the extension's own heading and counts ([#421](https://github.com/AngeloSha/uchiyomi/pull/421),
+  **Calvin-Davidson**). Search accepts site names and language names or codes. Opening a site from a multi-site
+  extension asks which site to open; each site's settings stay separate.
+  Large multi-site extensions start with their sites off so you can choose them; updates preserve those choices.
+- Failed extension actions show a short explanation and **Details** ([#418](https://github.com/AngeloSha/uchiyomi/issues/418),
+  **Calvin-Davidson**). Technical details remain open while you scroll, select or copy them. **Copy error** copies the
+  diagnostic; when automatic copying is unavailable, the text can be selected and copied using the device's controls.
+
+### Suwayomi authentication
+
+- External Suwayomi servers can use **Simple Login** or **UI Login**, as well as Basic Auth or no authentication
+  ([#419](https://github.com/AngeloSha/uchiyomi/issues/419), **himsin**). Set `SUWAYOMI_AUTH_MODE` to `simple` or `ui_login`
+  and keep the engine's user name and password in the existing variables. Uchiyomi manages sessions and token renewal
+  on the server for searches, images, downloads and the engine browser.
+- The default, `auto`, preserves existing behavior: Basic Auth when an engine user name is configured, otherwise no
+  authentication. This setting does not change the engine's own configuration or readers' Uchiyomi accounts.
+
+### Upkeep and upgrading
+
+- Dependency updates from Dependabot [#416](https://github.com/AngeloSha/uchiyomi/pull/416),
+  [#417](https://github.com/AngeloSha/uchiyomi/pull/417) and [#420](https://github.com/AngeloSha/uchiyomi/pull/420):
+  Next.js 16.4.5, React Query, Motion, Electron 45.2.3, Fastify plugins and Undici 8.12.4.
+- The import/resume concurrency test holds the resolver at an explicit boundary and stubs unrelated public-network
+  searches, preserving its checks that concurrent requests start only one loop.
+- No database migration. Existing artwork and extraction settings keep their behavior; title extraction models are
+  unchanged. The Umbrel package pins the published v0.105.0 image.
+
 ## v0.105.0 — 2026-11-07
 
 **Looking for one series' sources searches every source, a server only adults use can stop hiding 18+, an import never

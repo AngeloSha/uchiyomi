@@ -256,7 +256,7 @@ test('an Open in WebView answer gets one quiet visit and one more try', async (t
       assert.equal(opened.length - before, 1, 'neither opened a page');
     });
 
-    await t.test('a source whose site an admin opened gets a visit on ANY failure: BatCave\'s guard, run out, is a plain 404', async () => {
+    await t.test('a source whose site an admin opened gets a visit on a website failure: BatCave\'s guard, run out, is a plain 404', async () => {
       site.resetSiteChecks();
       site.setSitesOpened(['7422']);
       const before = opened.length;

@@ -589,6 +589,7 @@ it starts, which only the app knows.
 | `EXTENSION_ENGINE` | `1` | `0` doesn't run the bundled engine: Compose scales it to zero, and the app treats extensions as off. Read by both, from the same `.env` line. Compose only accepts `0` or `1` here (it is the engine's replica count, and any other value stops `docker compose up` for the whole stack); the app also reads `off`, `false` and `no`, for setups that don't pass the line to Compose. Only applies while `SUWAYOMI_URL` names the bundled container (`uchiyomi-suwayomi`, or `yomi-suwayomi` in the development stack). |
 | `SUWAYOMI_URL` | the bundled engine | Where the extension engine is. Empty turns the feature off (in the v0.49.0 compose files and later). A trailing slash (or two), a query string or a fragment on this value is ignored; the scheme, host, port and any sub-path are what count. |
 | `SUWAYOMI_USERNAME` / `SUWAYOMI_PASSWORD` | empty | The engine's user name and password, when it asks for them: the Unraid template's engine does since v0.73.0 ([A password on the engine](#a-password-on-the-engine)). Sent only to `SUWAYOMI_URL`. |
+| `SUWAYOMI_AUTH_MODE` | `auto` | `auto` keeps existing behavior: Basic Auth when a user name is configured, otherwise no authentication. Choose `none`, `basic`, `simple` (Suwayomi Simple Login), or `ui_login` (Suwayomi token login) to match your engine. The same engine user name and password are used. |
 | `SUWAYOMI_MAX_SOURCES` | `25` | Ceiling on how many extension sources register at once. The sources a series reads through register first, then the rest; since v0.59.0 a source switched off in Health registers last of all, so it never holds a slot a working source needs, and switching one off or on there while the limit is full applies at once. |
 | `SUWAYOMI_PAGE_CONCURRENCY` | `4` | Pages of one chapter fetched from the engine at once (1-8). The engine rate-limits the site itself, so extension downloads skip the one-at-a-time pacing that scraped sites need; a 429 from the engine drops back to one for the rest of the chapter. |
 | `SOURCE_LATEST_TIMEOUT_MS` | `8000` | How long one source gets to answer "what's new" on Discover before it is given up on and marked unhealthy. A source that keeps overrunning it is diagnosed *answers, but more slowly than it is given* — since v0.37.0 by the admin *Test* button and the daily source check too, not only Discover's health view — and the fix sentence names this budget. |
@@ -711,3 +712,15 @@ redistributes an extension, and ships no default repository — so nothing is fe
 choose a source for it.
 
 What you point it at, and whether that is lawful where you live, is your call and your responsibility.
+
+### Other engine login modes
+
+For an external Suwayomi server using **Simple Login**, set `SUWAYOMI_AUTH_MODE=simple`. For **UI Login**, set
+`SUWAYOMI_AUTH_MODE=ui_login`. Keep `SUWAYOMI_USERNAME` and `SUWAYOMI_PASSWORD` set to that engine account, then restart
+Uchiyomi. Existing installs can leave `auto`: it preserves their Basic Auth or no-auth connection. Changing this option
+does not change authentication settings on the engine itself.
+
+Uchiyomi signs in and renews the engine session or token on the server; readers keep using their Uchiyomi accounts.
+Use a dedicated engine account with permission to manage the extensions and sources Uchiyomi uses. The engine login
+is shared by this Uchiyomi server, rather than mapping each reader to a separate Suwayomi account. Keep the engine
+connection private or use HTTPS. Engine credentials are only sent to the configured engine.

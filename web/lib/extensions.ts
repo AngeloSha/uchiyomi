@@ -51,7 +51,7 @@ export interface CatalogPage {
   langs: string[];
 }
 
-/** One row of GET /api/admin/extensions/sources: a source an installed extension provides, one per language. */
+/** One row of GET /api/admin/extensions/sources: a site or language edition an installed extension provides. */
 export interface ExtSource {
   id: string;
   name: string;
@@ -117,8 +117,36 @@ export function extLanguageName(code: string | null): string {
   return languageName(code);
 }
 
+/**
+ * Whether an extension's sources are sites rather than languages: two or more of them share a language. Mihon's
+ * convention is one source per language, and the sheet names each row by it; a multi-site APK (Nyora-Sources: 128 sites,
+ * every one English) then drew 128 rows reading "English". Those rows are named by the source instead.
+ */
+export function sourcesAreSites(e: { sources: readonly Pick<ExtSource, 'lang'>[] }): boolean {
+  return new Set(e.sources.map((s) => s.lang)).size < e.sources.length;
+}
+
+/** A source's row name in its extension's sheet: its language, or its own name when the extension is a set of sites. */
+export const extSourceLabel = (s: Pick<ExtSource, 'name' | 'lang'>, sites: boolean): string =>
+  (sites && s.name.trim() ? s.name : extLanguageName(s.lang));
+
 /** The short tag a language wears on an installed row: the code, upper-cased, as Mihon prints it. */
 export const langTag = (code: string | null): string => (code ? code.toUpperCase() : '—');
+
+/** A named choice or switch also says the edition, so the same site in two languages stays distinguishable. */
+export const extSourceOptionLabel = (s: Pick<ExtSource, 'name' | 'lang'>, sites: boolean): string =>
+  sites ? `${extSourceLabel(s, true)} · ${langTag(s.lang)}` : extSourceLabel(s, false);
+
+/** Search site names, language names and language codes together. Each word may match a different part. */
+export function filterExtSources<T extends Pick<ExtSource, 'name' | 'lang'>>(sources: readonly T[], query: string): readonly T[] {
+  const fold = (text: string) => text.normalize('NFKC').toLocaleLowerCase();
+  const words = fold(query).trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return sources;
+  return sources.filter((s) => {
+    const text = fold(`${s.name} ${s.lang ?? ''} ${extLanguageName(s.lang)}`);
+    return words.every((word) => text.includes(word));
+  });
+}
 
 /**
  * The installed extensions, each with its sources, in the order the list shows them: an update waiting first, then
@@ -138,7 +166,7 @@ export function installedList(exts: readonly CatalogExt[], sources: readonly Ext
   return exts
     .filter((e) => e.installed)
     .map((e) => {
-      const own = [...(byPkg.get(e.pkgName) ?? [])].sort((a, b) => named(a).localeCompare(named(b)) || a.id.localeCompare(b.id));
+      const own = [...(byPkg.get(e.pkgName) ?? [])].sort((a, b) => named(a).localeCompare(named(b)) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
       return {
         ...e,
         sources: own,

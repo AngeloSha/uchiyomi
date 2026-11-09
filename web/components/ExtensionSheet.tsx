@@ -23,13 +23,13 @@ import { t as tr } from '@/lib/i18n';
 import { sentenceGap } from '@/lib/jobs';
 import { adultShown } from '@/lib/adult';
 import {
-  extLanguageName, langTag, languageProblem, languagesOnText, nearSourceLimit, needsTurningOn, overLimitText,
-  sourceHealth, type ExtSource, type ExtStatus, type InstalledExt,
+  extSourceLabel, extSourceOptionLabel, filterExtSources, langTag, languageProblem, languagesOnText, nearSourceLimit, needsTurningOn, overLimitText,
+  sourceHealth, sourcesAreSites, type ExtSource, type ExtStatus, type InstalledExt,
 } from '@/lib/extensions';
 import type { AdminSourceRow, SrcStatus } from '@/lib/providerGroups';
 import { Switch } from '@/components/Switch';
 import { useToast } from '@/components/Toast';
-import { msgOf } from '@/components/ConfirmDialog';
+import { errorNoticeOf } from '@/components/ConfirmDialog';
 import { ProgressRing } from '@/components/ProgressRing';
 import { StatusMark } from '@/components/StatusMark';
 import { IcChevronRight, IcGlobe } from '@/components/icons';
@@ -97,22 +97,33 @@ export function ExtensionSection({ ext, status, hiddenLangs, actions, onLanguage
   const [settingsOpen, setSettingsOpen] = useState(!!openFirst);
   // v0.91.0 (#314): the site of the source the sheet is about, in the engine's own browser (components/SiteBrowserSheet).
   const [siteOpen, setSiteOpen] = useState(false);
+  const [sitePicked, setSitePicked] = useState<string | null>(null);
   const busy = actions.busy[ext.pkgName];
   const off = needsTurningOn(ext);
   const over = overLimitText(status.skipped, status.cap);
   const across = tr('Across all extensions: {n} of {max} sources on.', { n: status.enabled ?? 0, max: status.cap ?? 0 });
-  const settingsLang = ext.sources.length > 1 ? ext.sources.find((s) => s.id === settingsOf)?.lang : undefined;
+  // A multi-site extension (several sources in one language): its rows are named by source, and a long list is searchable.
+  const sites = sourcesAreSites(ext);
+  const settingsSource = ext.sources.length > 1 ? ext.sources.find((s) => s.id === settingsOf) : undefined;
+  const settingsLang = settingsSource ? extSourceOptionLabel(settingsSource, sites) : undefined;
+  // Opening a bundle is not opening its first site. Require a deliberate choice there; a source's own sheet
+  // already names the target, and an ordinary language extension keeps its existing first-language behavior.
+  const siteSource = ext.sources.find((s) => s.id === sitePicked)
+    ?? ext.sources.find((s) => s.id === settingsFor)
+    ?? (!sites ? ext.sources.find((s) => s.id === settingsOf) : undefined);
+  const [query, setQuery] = useState('');
+  const shown = filterExtSources(ext.sources, query);
 
   /** One language on or off: that source alone, by id. The switch is the list's, so it waits for the list. */
   const toggle = async (s: ExtSource, on: boolean) => {
     setSwitching(s.id);
-    const lang = extLanguageName(s.lang);
+    const lang = extSourceLabel(s, sites);
     try {
       await api('/api/admin/extensions/sources/bulk', { json: { ids: [s.id], enabled: on } });
       void qc.invalidateQueries({ queryKey: ['admin-sources'] });
       await actions.refreshAll();
     } catch (e) {
-      toast(msgOf(e, on ? tr('Could not show {lang}', { lang }) : tr('Could not hide {lang}', { lang })), 'error');
+      toast(...errorNoticeOf(e, on ? tr('Could not show {lang}', { lang }) : tr('Could not hide {lang}', { lang })));
     }
     setSwitching(null);
   };
@@ -121,34 +132,41 @@ export function ExtensionSection({ ext, status, hiddenLangs, actions, onLanguage
     <div className="space-y-4" data-ext-sheet={ext.pkgName}>
       <section aria-labelledby="ext-sheet-langs">
         <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-3 gap-y-2">
-          <h3 id="ext-sheet-langs" className="text-[11px] font-semibold uppercase tracking-wider text-fog-500 rtl:tracking-normal">{tr('Languages')}</h3>
+          <h3 id="ext-sheet-langs" className="text-[11px] font-semibold uppercase tracking-wider text-fog-500 rtl:tracking-normal">{sites ? tr('Sources') : tr('Languages')}</h3>
           <span className="flex items-center gap-2.5">
             {ext.sources.length > 0 && <span className="text-[12px] tabular-nums text-fog-500">{languagesOnText(ext.on, ext.sources.length)}</span>}
             {/* None on -- installed in the engine's own page, or every language switched off: one press, here. */}
-            {off && (
+            {off && !sites && (
               <button type="button" onClick={() => void actions.act(ext, 'enable')} disabled={!!busy} className={`btn-key btn-key-accent ${busyKey(busy === 'enable')}`} data-ext-turn-on>
                 {busy === 'enable' ? <Busy tone="muted">{tr('Turning on…')}</Busy> : tr('Turn on its sources')}
               </button>
             )}
           </span>
         </div>
-        <p className="mt-1 text-[12px] leading-relaxed text-fog-400">{tr('Each language is its own source; turn on the ones you read.')}</p>
+        <p className="mt-1 text-[12px] leading-relaxed text-fog-400">{sites ? tr('Each site is its own source; turn on the ones you read.') : tr('Each language is its own source; turn on the ones you read.')}</p>
+        {ext.sources.length > 12 && (
+          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={tr('Search sources…')} aria-label={tr('Search sources…')}
+            autoCapitalize="none" autoCorrect="off" spellCheck={false}
+            className="field mt-3 w-full" data-ext-langs-search />
+        )}
         {!ext.sources.length ? (
           <p className="py-3 text-sm text-fog-500">{tr('This extension provides no source.')}</p>
+        ) : !shown.length ? (
+          <p className="py-3 text-sm text-fog-500">{tr('Nothing matches that search.')}</p>
         ) : (
           <ul className="mt-3 divide-y divide-ink-800/70 overflow-hidden rounded-2xl border border-ink-700/60 bg-ink-900/40" data-ext-langs>
-            {ext.sources.map((s) => {
+            {shown.map((s) => {
               // An admin's switch off over an extension's switch on: said, rather than a switch that reads "on".
               const adminOff = s.enabled && !!offByAdmin?.has(s.id);
               const problem = adminOff ? { tone: 'off' as const, label: tr('Turned off') } : languageProblem(sourceHealth(s, reg, rows));
               const hidden = !!s.lang && hiddenLangs.includes(s.lang);
               return (
                 <li key={s.id} data-ext-lang={s.id} data-on={s.enabled || undefined} className="flex min-w-0 items-center gap-3 px-3.5 py-2.5">
-                  <span aria-hidden className={`w-12 shrink-0 whitespace-nowrap rounded-[4px] px-1 text-center text-[10px] font-semibold leading-[18px] tracking-wide ${s.enabled ? 'bg-accent-soft text-accent' : 'bg-ink-800 text-fog-500'}`}>
+                  <span aria-hidden dir="ltr" className={`w-12 shrink-0 whitespace-nowrap rounded-[4px] px-1 text-center text-[10px] font-semibold leading-[18px] tracking-wide ${s.enabled ? 'bg-accent-soft text-accent' : 'bg-ink-800 text-fog-500'}`}>
                     {langTag(s.lang)}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm text-fog-100">{extLanguageName(s.lang)}</p>
+                    <p className="truncate text-sm text-fog-100"><bdi dir="auto">{extSourceLabel(s, sites)}</bdi></p>
                     {(problem || hidden) && (
                       <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-fog-500" data-ext-lang-problem>
                         {problem && <StatusMark tone={problem.tone} label={problem.label} size="xs" />}
@@ -158,7 +176,7 @@ export function ExtensionSection({ ext, status, hiddenLangs, actions, onLanguage
                     )}
                   </div>
                   {switching === s.id && <ProgressRing progress="spin" size={14} tone="muted" />}
-                  <Switch on={s.enabled} disabled={switching === s.id || !!busy} label={extLanguageName(s.lang)} onChange={(v) => void toggle(s, v)} />
+                  <Switch on={s.enabled} disabled={switching === s.id || !!busy} label={extSourceOptionLabel(s, sites)} onChange={(v) => void toggle(s, v)} />
                 </li>
               );
             })}
@@ -175,15 +193,24 @@ export function ExtensionSection({ ext, status, hiddenLangs, actions, onLanguage
 
       {/* v0.91.0 (#314): Mihon's "Open in WebView" -- sign in on the site, or pass its check, in the engine's own browser. */}
       {settingsOf && (
-        <section aria-labelledby="ext-sheet-site" className="flex items-start gap-3 border-t border-ink-800/70 pt-3.5" data-ext-site>
+        <section aria-labelledby="ext-sheet-site" className="flex flex-wrap items-start gap-3 border-t border-ink-800/70 pt-3.5" data-ext-site>
           <div className="min-w-0 flex-1">
             <h3 id="ext-sheet-site" className="text-sm text-fog-200">{tr('Sign in on the site')}</h3>
             <p className="mt-1 text-[12px] leading-relaxed text-fog-400">{tr(SITE_TEXT[1])}</p>
+            {sites && !settingsFor ? (
+              <label className="mt-2 block">
+                <span className="mb-1 block text-[12px] text-fog-400">{tr('Source')}</span>
+                <select value={siteSource?.id ?? ''} onChange={(e) => setSitePicked(e.target.value || null)} className="field w-full min-w-0" data-ext-site-for>
+                  <option value="" disabled>{tr('Choose a source')}</option>
+                  {ext.sources.map((s) => <option key={s.id} value={s.id}>{extSourceOptionLabel(s, sites)}</option>)}
+                </select>
+              </label>
+            ) : sites && siteSource ? <p className="mt-1 text-[12px] text-fog-200" data-ext-site-name><bdi dir="auto">{extSourceOptionLabel(siteSource, sites)}</bdi></p> : null}
           </div>
-          <button type="button" className="btn-key shrink-0" onClick={() => setSiteOpen(true)} data-ext-open-site>
+          <button type="button" className="btn-key shrink-0" disabled={!siteSource} onClick={() => setSiteOpen(true)} data-ext-open-site>
             <IcGlobe width={14} height={14} aria-hidden />{tr(SITE_TEXT[0])}
           </button>
-          {siteOpen && <SiteBrowserSheet sourceId={settingsOf} name={ext.name} onClose={() => setSiteOpen(false)} />}
+          {siteOpen && siteSource && <SiteBrowserSheet sourceId={siteSource.id} name={sites ? extSourceOptionLabel(siteSource, sites) : ext.name} onClose={() => setSiteOpen(false)} />}
         </section>
       )}
 
@@ -194,14 +221,14 @@ export function ExtensionSection({ ext, status, hiddenLangs, actions, onLanguage
             className="group flex w-full items-center justify-between gap-3 py-3.5 text-start">
             <span className="min-w-0 truncate text-sm text-fog-200 group-hover:text-fog-50">
               {tr('Settings')}
-              {settingsLang !== undefined && <span className="ms-2 text-[12px] text-fog-500">{tr('for {language}', { language: extLanguageName(settingsLang) })}</span>}
+              {settingsLang !== undefined && <span className="ms-2 text-[12px] text-fog-500">{tr('for {language}', { language: settingsLang })}</span>}
             </span>
             {/* It turns with the section, at once: no motion. */}
             <IcChevronRight aria-hidden width={16} height={16} className={`shrink-0 text-fog-500 ${settingsOpen ? 'rotate-90' : 'rtl:-scale-x-100'}`} />
           </button>
           {settingsOpen && (
             <div id="ext-sheet-settings-body" className="pb-2">
-              <ExtensionSettingsBody sourceId={settingsOf} onSourceId={setSettingsOf} note />
+              <ExtensionSettingsBody key={settingsOf} sourceId={settingsOf} onSourceId={setSettingsOf} note />
             </div>
           )}
         </section>

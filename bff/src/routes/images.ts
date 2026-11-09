@@ -23,7 +23,7 @@ import { fetchPages } from '../lib/downloader';
 import { previewPageList, copyPageList, isRefusal } from './sources';
 import { assertPublicHost, isBlockedHost, BlockedAddress } from '../lib/ssrfGuard';
 import { fetchPublicHop } from '../lib/publicConnection';
-import { suwayomiUrl, suwayomiBase, suwayomiImageHeaders, onEngineOrigin } from '../lib/sources/suwayomi/client';
+import { suwayomiUrl, suwayomiBase, suwayomiFetch, onEngineOrigin } from '../lib/sources/suwayomi/client';
 import { fetchPublic, readCapped, withoutCredentials, MAX_COVER_BYTES, MAX_ICON_BYTES, MAX_HTML_BYTES } from '../lib/safeFetch';
 import { env } from '../env';
 import { readLocalSeriesArt } from '../lib/localSeriesArt';
@@ -189,7 +189,7 @@ export async function fetchCoverImage(u: string, source?: string, opts: { caller
   // by dropping `redirect: 'error'`: engineRedirect.test.ts's redirect case is followed instead of refused.
   const engineTarget = engineCoverUrl(u);
   if (engineTarget) {
-    const r = await fetch(engineTarget, { headers: suwayomiImageHeaders(), redirect: 'error', signal: AbortSignal.timeout(20000) })
+    const r = await suwayomiFetch(engineTarget, { redirect: 'error', signal: AbortSignal.timeout(20000) })
       .catch(() => { throw Object.assign(new Error('cover'), { statusCode: 502 }); });
     if (!r.ok) throw Object.assign(new Error('cover'), { statusCode: 502 });
     return readCapped(r, MAX_COVER_BYTES).catch(() => { throw Object.assign(new Error('cover'), { statusCode: 502 }); });
@@ -211,7 +211,7 @@ export async function fetchCoverImage(u: string, source?: string, opts: { caller
   }
   const src = source ? getSource(source) : null;
   const staticReferer = typeof src?.imageReferer === 'string' ? src.imageReferer : undefined;
-  const extras = typeof src?.imageHeaders === 'function' ? src.imageHeaders(u) : src?.imageHeaders ?? {};
+  const extras = typeof src?.imageHeaders === 'function' ? await src.imageHeaders(u) : src?.imageHeaders ?? {};
   const sourceHeaders: Record<string, string> = {
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
     accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
@@ -1107,8 +1107,7 @@ export default async function imageRoutes(app: FastifyInstance) {
     // the package name lands in a URL path, so allow only what a package name can actually contain
     if (!/^[A-Za-z0-9._-]{1,200}$/.test(pkgName)) return reply.code(400).send({ error: 'bad' });
     return serveImage(req, reply, `swicon:${pkgName}`, async () => {
-      const r = await fetch(suwayomiUrl(`/api/v1/extension/icon/${pkgName}`), {
-        headers: suwayomiImageHeaders(),
+      const r = await suwayomiFetch(suwayomiUrl(`/api/v1/extension/icon/${pkgName}`), {
         signal: AbortSignal.timeout(15000),
       });
       if (!r.ok) throw new Error(`extension icon ${r.status}`);
@@ -1276,7 +1275,7 @@ async function sourceIconBytes(src: { id: string; iconUrl?: string; base?: strin
     const abs = /^https?:/i.test(src.iconUrl) ? src.iconUrl : suwayomiUrl(src.iconUrl);
     if (onEngineOrigin(abs)) {
       try {
-        const r = await fetch(abs, { headers: { 'user-agent': ICON_UA, ...suwayomiImageHeaders() }, redirect: 'error', signal: AbortSignal.timeout(8000) });
+        const r = await suwayomiFetch(abs, { headers: { 'user-agent': ICON_UA }, redirect: 'error', signal: AbortSignal.timeout(8000) });
         const buf = r.ok ? await readCapped(r, MAX_ICON_BYTES) : null;
         if (isIcon(buf)) return buf;
       } catch { /* fall through to the site's own icon */ }

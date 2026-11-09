@@ -34,6 +34,8 @@ import { TONE_EDGE } from '@/lib/status';
 import { t as tr } from '@/lib/i18n';
 import { StatusEdge, StatusGlyph } from './StatusMark';
 import { IcX } from './icons';
+import { ErrorDetailsDialog } from './ErrorDetailsDialog';
+import { redactDiagnostic } from '@/lib/errorDetails';
 
 /** What useToast() returns. Two arguments as it always took; the third is optional (lib/notices.ts NoticeOpts). */
 export type Push = (msg: string, type?: NoticeType, opts?: NoticeOpts) => void;
@@ -47,12 +49,14 @@ interface Said { polite: string; assertive: string }
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<Notice[]>([]);
   const [said, setSaid] = useState<Said>({ polite: '', assertive: '' });
+  const [details, setDetails] = useState<{ summary: string; text: string } | null>(null);
   const seq = useRef(0);
   const push = useCallback<Push>((msg, type = 'info', opts = {}) => {
     const id = ++seq.current;
     setItems((s) => pushNotice(s, {
       id, msg, type, busy: !!opts.busy, duration: opts.duration ?? noticeDuration(msg, type), key: opts.key,
       ...(opts.link ? { link: opts.link } : {}),
+      ...(opts.details ? { details: redactDiagnostic(opts.details) } : {}),
     }));
     // An error interrupts; the rest wait for a pause in what the screen reader is saying.
     setSaid((s) => (type === 'error' ? { ...s, assertive: announceText(s.assertive, msg) } : { ...s, polite: announceText(s.polite, msg) }));
@@ -62,7 +66,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={push}>
       {children}
-      <NoticeViewport items={items} said={said} onDismiss={dismiss} />
+      <NoticeViewport items={items} said={said} onDismiss={dismiss} onDetails={(notice) => setDetails({ summary: notice.msg, text: notice.details! })} />
+      {details && <ErrorDetailsDialog summary={details.summary} details={details.text} onClose={() => setDetails(null)} />}
     </Ctx.Provider>
   );
 }
@@ -72,7 +77,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
  * -- is under the bottom nav (z-40, a root-level layer), and a notice docked in the nav band has to be over
  * it. z-[60] is above the navs and below the command palette (z-[70]), which is anchored at the top.
  */
-function NoticeViewport({ items, said, onDismiss }: { items: Notice[]; said: Said; onDismiss: (id: number) => void }) {
+function NoticeViewport({ items, said, onDismiss, onDetails }: { items: Notice[]; said: Said; onDismiss: (id: number) => void; onDetails: (notice: Notice) => void }) {
   // Both hooks on every render and in this order: `a() || b()` would skip the second whenever the first is
   // true, and a hook that is sometimes not called breaks every hook after it.
   const plain = useReduceEffects();
@@ -98,7 +103,7 @@ function NoticeViewport({ items, said, onDismiss }: { items: Notice[]; said: Sai
         className={`pointer-events-none fixed inset-x-0 bottom-[var(--notice-bottom)] z-[60] flex flex-col items-center gap-2 ${band ? 'px-4' : 'px-3'} lg:start-auto lg:end-6 lg:bottom-[var(--notice-bottom-lg)] lg:items-stretch lg:px-0 ${wideWidth(place, layers.dialog)}`}>
         <AnimatePresence initial={false}>
           {shown.map((n) => (
-            <NoticeCard key={n.id} n={n} place={place} reduced={reduced} still={!!still} onDismiss={onDismiss} />
+            <NoticeCard key={n.id} n={n} place={place} reduced={reduced} still={!!still} onDismiss={onDismiss} onDetails={onDetails} />
           ))}
         </AnimatePresence>
       </section>
@@ -136,12 +141,13 @@ function useNoticeClock(ms: number, bump: number, paused: boolean, onEnd: () => 
   useEffect(() => () => clock.current?.pause(), []);
 }
 
-function NoticeCard({ n, place, reduced, still, onDismiss }: {
+function NoticeCard({ n, place, reduced, still, onDismiss, onDetails }: {
   n: Notice;
   place: NoticePlace;
   reduced: boolean;
   still: boolean;
   onDismiss: (id: number) => void;
+  onDetails: (notice: Notice) => void;
 }) {
   const [hover, setHover] = useState(false);
   const [focus, setFocus] = useState(false);
@@ -197,6 +203,8 @@ function NoticeCard({ n, place, reduced, still, onDismiss }: {
           {n.link && (
             <Link href={n.link.href} onClick={() => onDismiss(n.id)} className="btn-key mt-2" data-notice-link>{n.link.label}</Link>
           )}
+          {n.details && <button type="button" className="btn-key mt-2" data-notice-details
+            onPointerDown={(event) => event.stopPropagation()} onClick={() => onDetails(n)}>{tr('Details')}</button>}
         </div>
         <button type="button" onClick={() => onDismiss(n.id)} aria-label={tr('Dismiss')}
           className="-my-1.5 grid h-8 w-8 place-items-center rounded-md text-fog-500 transition hover:bg-ink-800 hover:text-fog-100">

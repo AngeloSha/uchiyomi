@@ -137,7 +137,7 @@ const SERVER_ARMS = [
   // v0.55.3: a solver still busy after its tries and the backup (trawl's own 429).
   "lib/sourceDiagnosis.ts: 'The Cloudflare solver stayed busy: every browser it has was in use, however long Uchiyomi waited. It catches up by itself; if it keeps happening, give it more browsers (trawl: BROWSER_POOL_SIZE), or let Uchiyomi ask fewer pages of it at once (SOLVER_CONCURRENCY).'",
   "lib/sourceDiagnosis.ts: \"The extension engine's own Cloudflare bypass is switched off. On the Suwayomi engine's container (uchiyomi-suwayomi in the shipped compose files) set FLARESOLVERR_ENABLED=true and FLARESOLVERR_URL to the same solver address Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the shipped files), then recreate it. The v0.37.0 compose files already set both, so an upgrade that recreates the engine is the fix there.\"",
-  "lib/sourceDiagnosis.ts: \"The extension engine refused Uchiyomi's login. Set SUWAYOMI_USERNAME and SUWAYOMI_PASSWORD to the engine's own basic-auth user and password (or turn its auth off), then restart Uchiyomi.\"",
+  "lib/sourceDiagnosis.ts: \"The extension engine refused Uchiyomi's login. Set SUWAYOMI_AUTH_MODE to match the engine, and SUWAYOMI_USERNAME and SUWAYOMI_PASSWORD to its login, then restart Uchiyomi.\"",
   "lib/sourceDiagnosis.ts: 'This is the Suwayomi extension server, not the site. Check that container.'",
   // The engine upgrade: an engine that refuses Uchiyomi's queries (engine_incompatible).
   "lib/sourceDiagnosis.ts: \"The extension engine refused Uchiyomi's request: it is older or newer than the version this Uchiyomi works with. Health → Extension engine says which, and how to change it.\"",

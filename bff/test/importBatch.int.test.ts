@@ -1006,8 +1006,15 @@ test('a batch nothing was ever imported through is not closed on view', { skip }
 });
 
 test('a /resume and a POST inside the same window start one resolve loop, not two', { skip }, async (t) => {
+  const priorFetch = globalThis.fetch;
+  // This tests our runner guard, not a public source's availability. A name no fake knows must not
+  // wait for the real MangaDex search timeout, which made completion depend on the CI network.
+  globalThis.fetch = (async () => new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } })) as typeof fetch;
   const { app, headers } = await boot();
   const ids: string[] = [];
+  let releaseSearch = () => {};
+  const holdSearch = () => { searchGate = new Promise<void>((resolve) => { releaseSearch = resolve; }); };
+  const finishSearch = () => { searchGate = undefined; releaseSearch(); };
   try {
     const r = await app.inject({ method: 'POST', url: '/api/admin/import/batches', headers, payload: { titles: ['Fake Manga', 'Nobody Has This One'] } });
     assert.equal(r.statusCode, 200, r.body);
@@ -1015,7 +1022,7 @@ test('a /resume and a POST inside the same window start one resolve loop, not tw
     await waitForState(app, headers, ids[0], ['review']);
     // A restart mid-pass: the batch reads resolving, nobody in this process is resolving it.
     await q(`UPDATE import_batches SET state = 'resolving' WHERE id = $1`, [ids[0]]);
-    searchDelayMs = 200; // so whichever loop starts is still searching when the other request is judged
+    holdSearch(); // keep whichever loop starts in-flight until both requests have been judged
 
     await t.test('the loser answers busy', async () => {
       // Reintroduce by deleting `resolvingBatch = id` in /resume (checking the guard, then awaiting the
@@ -1030,26 +1037,28 @@ test('a /resume and a POST inside the same window start one resolve loop, not tw
       assert.equal([resume, post].find((x) => x.statusCode === 409)!.json().error, 'busy');
     });
 
-    searchDelayMs = 0;
-    for (const id of ids) await waitForState(app, headers, id, ['review'], 10_000);
+    finishSearch();
+    for (const id of ids) await waitForState(app, headers, id, ['review']);
 
     await t.test('two Resume taps on the same stale batch both answer ok, and start one loop', async () => {
       // Reintroduce by claiming `'pending'` in /resume instead of the batch's own id: the second tap sees a
       // guard that is not its id and answers 409 "another import is already resolving" about itself.
       await q(`UPDATE import_batches SET state = 'resolving' WHERE id = $1`, [ids[0]]);
-      searchDelayMs = 200;
+      holdSearch();
       const before = searchCalls;
       const [r1, r2] = await Promise.all([
         app.inject({ method: 'POST', url: `/api/admin/import/batches/${ids[0]}/resume`, headers }),
         app.inject({ method: 'POST', url: `/api/admin/import/batches/${ids[0]}/resume`, headers }),
       ]);
       assert.deepEqual([r1.statusCode, r2.statusCode], [200, 200], `${r1.body} / ${r2.body}`);
-      searchDelayMs = 0;
-      await waitForState(app, headers, ids[0], ['review'], 10_000);
+      await waitUntil(() => searchCalls > before, 'the resumed loop to enter its gated search');
+      finishSearch();
+      await waitForState(app, headers, ids[0], ['review']);
       assert.equal(searchCalls - before, 1, 'the one unresolved title was searched once, not once per tap');
     });
   } finally {
-    searchDelayMs = 0;
+    finishSearch();
+    globalThis.fetch = priorFetch;
     for (const id of ids) await q('DELETE FROM import_batches WHERE id = $1', [id]);
     await app.close();
   }

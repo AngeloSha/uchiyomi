@@ -63,13 +63,13 @@ test('the input asks for the address Mihon users have, and the help says where M
   assert.match(form, /inputMode="url" dir="ltr"/, 'the address field follows the page\'s direction');
 });
 
-test('the toast says what the server said, in the viewer\'s language, and counts only this repository', () => {
+test('the toast keeps a localized refusal with server diagnostics behind Details, and counts only this repository', () => {
   // Reintroduce by `const why = msgOf(e, tr('Could not add that repository'))` in addRepo: "every code the route sends
   // is translated" still passes but "addRepo shows the server's refusal" fails; by dropping a `case` from repoAddError:
   // "…has no translated line" fails, naming the code; by deleting the `{repoError && …}` line: "the refusal outlives
   // the toast" fails.
   const add = slice(form, 'const addRepo = async', 'return (');
-  assert.match(add, /catch \(e: unknown\) \{\s*const why = repoAddError\(e\);\s*setRepoError\(why\);\s*toast\(why, 'error'\);\s*\}/, 'addRepo shows the server\'s refusal');
+  assert.match(add, /catch \(e: unknown\) \{\s*const why = repoAddError\(e, false\);\s*setRepoError\(why\);\s*toast\(\.\.\.errorNoticeOf\(e, why\)\);\s*\}/, 'addRepo does not retain the refusal and offer the original failure through Details');
   assert.match(form, /\{repoError && !addingRepo && \(\s*<p role="alert"[^>]*>\{repoError\}<\/p>/, 'the refusal outlives the toast');
   assert.match(form, /onChange=\{\(e\) => \{ setRepoUrl\(e\.target\.value\); setRepoError\(null\); \}\}/, 'an old refusal stays up while the address is being fixed');
   assert.match(add, /api<\{ url: string; corrected: boolean; added: number \}>/, 'the success toast reads something other than `added`');
@@ -83,7 +83,7 @@ test('the toast says what the server said, in the viewer\'s language, and counts
   for (const m of slice(lib, 'export const REPO_MESSAGES = {', '} as const;').matchAll(/^\s+([a-z_]+):/gm)) codes.add(m[1]);
   assert.ok(codes.size >= 6, `only ${codes.size} codes found in the route -- the scan is broken`);
   for (const c of codes) assert.match(helper, new RegExp(`case '${c}':`), `the server's '${c}' has no translated line`);
-  assert.match(helper, /default: return msgOf\(e, tr\('Could not add that repository'\)\);/, 'an unknown code does not fall back to the server\'s own message');
+  assert.match(helper, /default: return includeTechnical \? msgOf\(e, tr\('Could not add that repository'\)\) : tr\('Could not add that repository'\);/, 'the compatibility helper lost its server fallback, or the summary still displays raw diagnostics');
 });
 
 test('a repository change asks again for everything it can move', () => {

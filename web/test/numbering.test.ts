@@ -263,7 +263,7 @@ test('the numbering route\'s two busy answers and its missing plan are each said
     'a coded refused apply is said as its English');
   const settings = code(read('components/ExtensionSettings.tsx'));
   assert.match(settings, /\{prefErrorText\(error, tr\('The extension engine did not answer\. Try again in a moment\.'\)\)\}/, 'the settings sheet shows the server\'s English');
-  assert.match(settings, /toast\(prefErrorText\(e, tr\('Could not change that setting'\)\), 'error'\)/);
+  assert.match(settings, /toast\(\.\.\.errorNoticeOf\(e, prefErrorText\(e, tr\('Could not change that setting'\)\)\)\)/);
   // The renumber warning names no {source}: a name the engine did not send read "from  that uses", and "its numbers"
   // read as posting order's too (i18n pass 2). Reintroduce the {source} sentence: the second assertion names it.
   assert.match(settings, /tr\('Changing this renumbers every series that uses this source’s own numbers \(\{count\}\)\.', \{\s*count:/);
@@ -362,12 +362,12 @@ test('the settings sheet writes by key, warns in the row, and asks its second wo
   assert.match(code(read('components/SourceSheet.tsx')), /settingsOpen=\{'id' in target && !!target\.settings\}/, 'the sheet opens on its languages, not its settings');
   // Reintroduce by dropping the Settings section from the sheet: an installed extension has no way to its settings.
   const sheet = code(read('components/ExtensionSheet.tsx'));
-  assert.match(sheet, /<ExtensionSettingsBody sourceId=\{settingsOf\} onSourceId=\{setSettingsOf\} note \/>/, 'an installed extension has no settings');
+  assert.match(sheet, /<ExtensionSettingsBody key=\{settingsOf\} sourceId=\{settingsOf\} onSourceId=\{setSettingsOf\} note \/>/, 'an installed extension has no settings');
   // One extension, several sources: the picker says whose settings these are, by language, and that each keeps its
   // own -- a "Source" select read as choosing the language the extension reads in (#121). Reintroduce the old label:
   // this fails.
   assert.match(src, /\{tr\('Settings for'\)\}<\/span>\s*<select [^\n]*data-ext-settings-for>/, 'the language picker does not say it picks whose settings these are');
-  assert.match(src, /\{tr\('Each language keeps its own settings\.'\)\}/);
+  assert.match(src, /sites \? tr\('Each source keeps its own settings\.'\) : tr\('Each language keeps its own settings\.'\)/);
   assert.doesNotMatch(src, /tr\('Source'\)/, 'the settings picker is labelled "Source" again');
 });
 

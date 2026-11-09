@@ -167,7 +167,8 @@ export function withoutCredentials(headers: Record<string, string>, also: Iterab
 export async function fetchFollowingPublic(
   url: string,
   init: { headers: Record<string, string>; signal: AbortSignal },
-  opts: { exemptFirst?: (u: URL) => boolean; maxHops?: number } = {},
+  opts: { exemptFirst?: (u: URL) => boolean; maxHops?: number;
+    fetchFirst?: (u: URL, init: RequestInit) => Promise<Response> } = {},
 ): Promise<Response> {
   let target = new URL(url);
   const first = target.origin;
@@ -178,7 +179,7 @@ export async function fetchFollowingPublic(
     // The trusted engine exemption applies to exactly the first hop. Every public hop uses a dispatcher
     // whose connection lookup validates the actual socket address, even when the preflight cache is stale.
     const r = hop === 0 && opts.exemptFirst?.(target)
-      ? await fetch(target, { headers, redirect: 'manual', signal: init.signal })
+      ? await (opts.fetchFirst ?? fetch)(target, { headers, redirect: 'manual', signal: init.signal })
       : await fetchPublicHop(target, { headers, signal: init.signal });
     if (r.status < 300 || r.status > 399 || r.status === 304) return r;
     const loc = r.headers.get('location');

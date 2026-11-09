@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4571
+    "strings": 4578
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -1933,7 +1933,6 @@
   "The extension engine isn't using Uchiyomi's built-in Cloudflare helper. Quit and reopen Uchiyomi to restart it.": "Движок расширений не использует встроенный помощник Cloudflare в Uchiyomi. Закройте и снова откройте Uchiyomi, чтобы перезапустить его.",
   "The extension engine's own Cloudflare bypass is switched off. On the Suwayomi engine's container (uchiyomi-suwayomi in the shipped compose files) set FLARESOLVERR_ENABLED=true and FLARESOLVERR_URL to the same solver address Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the shipped files), then recreate it. The v0.37.0 compose files already set both, so an upgrade that recreates the engine is the fix there.": "Собственный обход Cloudflare у движка расширений выключен. В контейнере движка Suwayomi (uchiyomi-suwayomi в поставляемых compose-файлах) задайте FLARESOLVERR_ENABLED=true, а в FLARESOLVERR_URL укажите тот же адрес решателя, что использует Uchiyomi (http://uchiyomi-flaresolverr:8191 в поставляемых файлах), затем пересоздайте контейнер. В compose-файлах v0.37.0 оба параметра уже заданы, так что там достаточно обновления, которое пересоздаёт движок.",
   "Uchiyomi's extension engine refused Uchiyomi's own login. Quit and reopen Uchiyomi to restart both.": "Движок расширений Uchiyomi не принял собственный вход Uchiyomi. Закройте и снова откройте Uchiyomi, чтобы перезапустить оба.",
-  "The extension engine refused Uchiyomi's login. Set SUWAYOMI_USERNAME and SUWAYOMI_PASSWORD to the engine's own basic-auth user and password (or turn its auth off), then restart Uchiyomi.": "Движок расширений не принял вход Uchiyomi. Укажите в SUWAYOMI_USERNAME и SUWAYOMI_PASSWORD имя пользователя и пароль basic-auth самого движка (или отключите в нём аутентификацию), затем перезапустите Uchiyomi.",
   "This is Uchiyomi's extension engine, not the site. Quit and reopen Uchiyomi to restart it.": "Дело в движке расширений Uchiyomi, а не в сайте. Закройте и снова откройте Uchiyomi, чтобы перезапустить его.",
   "This is the Suwayomi extension server, not the site. Check that container.": "Дело в сервере расширений Suwayomi, а не в сайте. Проверьте этот контейнер.",
   "The extension engine did not answer in time.": "Движок расширений не ответил вовремя.",
@@ -2729,6 +2728,7 @@
   "Could not read the extension list": "Не удалось прочитать список расширений",
   "Could not turn on {name}": "Не удалось включить {name}",
   "Each language is its own source; turn on the ones you read.": "Каждый язык — отдельный источник; включите те, на которых читаете.",
+  "Each site is its own source; turn on the ones you read.": "Каждый сайт — отдельный источник; включите те, что читаете.",
   "Each language keeps its own settings.": "У каждого языка свои настройки.",
   "Extensions get past Cloudflare through Uchiyomi’s helper.": "Расширения проходят Cloudflare через помощник Uchiyomi.",
   "Find one in Browse and install it with one press. Its sources are on at once, ready to search from Discover.": "Найдите расширение в каталоге и установите его одним нажатием. Его источники сразу включатся, и по ним можно будет искать в «Обзоре источников».",
@@ -4574,5 +4574,12 @@
   "(first 500 not in your library kept; {n} more after them: import again for those)": "(оставлены первые 500, которых нет в вашей библиотеке; после них ещё {n}: для них импортируйте ещё раз)",
   "The first 500 titles not already in your library were kept, and {n} more come after them. Once these are in, import the same list again for the rest.": "Сохранены первые 500 названий, которых ещё нет в вашей библиотеке, а после них идут ещё {n}. Когда эти будут добавлены, импортируйте тот же список ещё раз, чтобы получить остальные.",
   "This series already follows 1 other source, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.": "Эта серия уже отслеживает 1 другой источник — больше этот сервер не разрешает. Сначала уберите один, перенесите серию на этот источник или разрешите больше в разделе Администрирование → Настройки → Загрузки → Другие настройки → Других источников на серию.",
-  "This series already follows {n} other sources, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.": "Эта серия уже отслеживает другие источники ({n}) — больше этот сервер не разрешает. Сначала уберите один, перенесите серию на этот источник или разрешите больше в разделе Администрирование → Настройки → Загрузки → Другие настройки → Других источников на серию."
+  "This series already follows {n} other sources, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.": "Эта серия уже отслеживает другие источники ({n}) — больше этот сервер не разрешает. Сначала уберите один, перенесите серию на этот источник или разрешите больше в разделе Администрирование → Настройки → Загрузки → Другие настройки → Других источников на серию.",
+  "Choose a source": "Выберите источник",
+  "Each source keeps its own settings.": "Каждый источник сохраняет свои настройки.",
+  "Technical details": "Технические подробности",
+  "Copy error": "Скопировать ошибку",
+  "Select text": "Выделить текст",
+  "Could not copy automatically. The text is selected; copy it using your device’s controls.": "Не удалось скопировать автоматически. Текст выделен; скопируйте его средствами устройства.",
+  "The extension engine refused Uchiyomi's login. Set SUWAYOMI_AUTH_MODE to match the engine, and SUWAYOMI_USERNAME and SUWAYOMI_PASSWORD to its login, then restart Uchiyomi.": "Движок расширений отклонил вход Uchiyomi. Установите SUWAYOMI_AUTH_MODE в соответствии с режимом движка, а SUWAYOMI_USERNAME и SUWAYOMI_PASSWORD — в соответствии с его учётными данными. Затем перезапустите Uchiyomi."
 }
