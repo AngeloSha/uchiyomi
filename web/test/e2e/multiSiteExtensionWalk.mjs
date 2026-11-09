@@ -16,6 +16,8 @@ export async function multiSiteExtensionWalk({ page, base, check = (label, resul
   sources.push({ id: '800000001', name: 'Ordinary (EN)', lang: 'en', enabled: false, nsfw: false, pkgName: NORMAL, used: 0 },
     { id: '800000002', name: 'Ordinary (ES)', lang: 'es', enabled: false, nsfw: false, pkgName: NORMAL, used: 0 });
   const extensions = [extension(BUNDLE, 'Many Sites Fixture'), extension(NORMAL, 'Ordinary Fixture')];
+  extensions[0].installed = false;
+  const installedSources = () => sources.filter((source) => extensions.some((ext) => ext.pkgName === source.pkgName && ext.installed));
   const writes = [];
   const siteOpens = [];
   const preferences = new Map();
@@ -27,11 +29,14 @@ export async function multiSiteExtensionWalk({ page, base, check = (label, resul
       { key: 'compact', type: 'switch', title: 'Fixture compact view', value: preferences.get(id)?.compact ?? false,
         default: false, enabled: true, visible: true, numbering: false, summary: null },
     ] });
-  const overview = () => ({ sources: sources.map((s) => ({ id: `sw:${s.id}`, name: s.name, lang: s.lang, pkgName: s.pkgName,
+  const overview = () => ({ sources: installedSources().map((s) => ({ id: `sw:${s.id}`, name: s.name, lang: s.lang, pkgName: s.pkgName,
     kind: 'extension', standing: s.enabled ? 'usable' : 'off', offBy: s.enabled ? null : 'extension', state: s.enabled ? 'ok' : 'off',
     main: 0, followed: 0, withBackup: 0, icon: false })), attention: { replace: [], failingUnused: [], updates: 0 } });
-  const catalog = () => ({ content: extensions, total: 2, matched: 2, shown: 2, installed: 2, updatable: 0,
-    hiddenAdult: 0, adultTotal: 0, langs: ['all'] });
+  const catalog = (params) => {
+    const content = params.get('installed') === 'true' ? extensions.filter((ext) => ext.installed) : extensions;
+    return { content, total: 2, matched: content.length, shown: content.length, installed: extensions.filter((ext) => ext.installed).length,
+      updatable: 0, hiddenAdult: 0, adultTotal: 0, langs: ['all'] };
+  };
   const intercept = async (req) => {
     if (req.isInterceptResolutionHandled()) return;
     const u = new URL(req.url());
@@ -39,12 +44,17 @@ export async function multiSiteExtensionWalk({ page, base, check = (label, resul
     const path = u.pathname;
     const answer = (body, contentType = 'application/json') => req.respond({ status: 200, contentType, body: typeof body === 'string' ? body : JSON.stringify(body) });
     if (path === '/api/admin/extensions/status') return answer({ configured: true, reachable: true, version: '2.3.2243', enabled: sources.filter((s) => s.enabled).length, cap: 25 });
-    if (path === '/api/admin/extensions/catalog') return answer(catalog());
-    if (path === '/api/admin/extensions/sources') return answer({ content: u.searchParams.has('pkg') ? sources.filter((s) => s.pkgName === u.searchParams.get('pkg')) : sources, reachable: true, hiddenLangs: [] });
+    if (path === '/api/admin/extensions/catalog') return answer(catalog(u.searchParams));
+    if (path === `/api/admin/extensions/catalog/${BUNDLE}` && req.method() === 'POST') {
+      const body = JSON.parse(req.postData()); assert.equal(body.action, 'install');
+      writes.push({ path, body }); extensions[0].installed = true;
+      return answer({ sources: 840, on: 0, hidden: 0, registered: 0 });
+    }
+    if (path === '/api/admin/extensions/sources') return answer({ content: u.searchParams.has('pkg') ? installedSources().filter((s) => s.pkgName === u.searchParams.get('pkg')) : installedSources(), reachable: true, hiddenLangs: [] });
     if (path === '/api/admin/extensions/repos') return answer({ content: [] });
     if (path === '/api/admin/sources/overview') return answer(overview());
     if (path === '/api/admin/sources') return answer({ content: [], testMs: 100 });
-    if (path === '/api/sources') return answer({ content: sources.filter((s) => s.enabled).map((s) => ({ id: `sw:${s.id}`, name: s.name, status: 'ok' })) });
+    if (path === '/api/sources') return answer({ content: installedSources().filter((s) => s.enabled).map((s) => ({ id: `sw:${s.id}`, name: s.name, status: 'ok' })) });
     if (path === '/api/admin/extensions/sources/bulk') {
       const body = JSON.parse(req.postData()); writes.push({ path, body });
       for (const s of sources) if (body.ids.includes(s.id)) s.enabled = body.enabled;
@@ -83,6 +93,24 @@ export async function multiSiteExtensionWalk({ page, base, check = (label, resul
   const previousLocale = await page.evaluate(() => localStorage.getItem('uchiyomi.lang'));
   const previousViewport = page.viewport();
   try {
+    await page.evaluate(() => localStorage.setItem('uchiyomi.lang', 'en'));
+    await page.setViewport({ width: 1280, height: 900 });
+    await page.goto(`${base}/admin/?tab=Sources&view=add`, { waitUntil: 'networkidle2' });
+    await page.waitForSelector(`[data-ext-item="${BUNDLE}"] [data-ext-install]`, { visible: true });
+    await page.click(`[data-ext-item="${BUNDLE}"] [data-ext-install]`);
+    await page.waitForSelector('[data-notice="success"]', { visible: true });
+    const installedNotice = await page.$eval('[data-notice="success"]', (el) => el.textContent);
+    check('installing a bundle reports it was added without claiming disabled sources are ready to search',
+      installedNotice.includes('Added') && installedNotice.includes('Many Sites Fixture') && !/ready to search/.test(installedNotice), installedNotice);
+    await page.waitForSelector(`[data-source-sheet="${BUNDLE}"]`, { visible: true });
+    await page.waitForFunction(() => document.querySelectorAll('[data-ext-langs] [data-ext-lang]').length === 840);
+    check('install opens all 840 source choices with every site still switched off', sources.every((s) => !s.enabled)
+      && await page.$$eval('[data-ext-langs] [role="switch"]', (items) => items.length === 840 && items.every((el) => el.getAttribute('aria-checked') === 'false')));
+    check('bundle installation is one explicitly intercepted action', writes.length === 1 && writes[0].path === `/api/admin/extensions/catalog/${BUNDLE}`
+      && JSON.stringify(writes[0].body) === JSON.stringify({ action: 'install' }), JSON.stringify(writes));
+    await shot('multisite-new-install-all-off');
+    await page.keyboard.press('Escape');
+    await page.waitForSelector(`[data-source-sheet="${BUNDLE}"]`, { hidden: true });
     for (const [locale, width] of [['en', 1280], ['en', 390], ['ar', 390]]) {
       await page.evaluate((locale) => localStorage.setItem('uchiyomi.lang', locale), locale);
       await page.setViewport({ width, height: 900 });

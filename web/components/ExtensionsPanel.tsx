@@ -67,14 +67,17 @@ export function useExtensionActions() {
     const name = `⁨${e.name}⁩`;
     try {
       const r = await api<{ sources: number; on?: number; hidden?: number }>(`/api/admin/extensions/catalog/${encodeURIComponent(e.pkgName)}`, { json: { action } });
+      // `sources` counts everything provided, including a bundle's unchosen sites. Only the enabled
+      // count is ready for use; older servers that omit it keep their original install wording.
+      const on = r.on ?? r.sources;
       const leftOff = !r.hidden ? ''
         : r.hidden === 1 ? tr('1 source left off (hidden languages)') : tr('{n} sources left off (hidden languages)', { n: r.hidden });
       const said = action === 'uninstall' ? tr('Removed {name}', { name })
         : action === 'update' ? tr('Updated {name}', { name })
         : action === 'enable'
           ? (r.on === 1 ? tr('Turned on {name} — 1 source ready to search', { name }) : tr('Turned on {name} — {n} sources ready to search', { name, n: r.on ?? 0 }))
-          : r.sources === 1 ? tr('Added {name} — 1 source ready to search', { name })
-          : r.sources ? tr('Added {name} — {n} sources ready to search', { name, n: r.sources })
+          : on === 1 ? tr('Added {name} — 1 source ready to search', { name })
+          : on ? tr('Added {name} — {n} sources ready to search', { name, n: on })
           : tr('Added {name}', { name });
       toast(leftOff ? `${said} · ${leftOff}` : said, 'success');
       await refreshAll();
