@@ -2265,7 +2265,9 @@ a row in normal use, within the last week and while nothing has put the source i
 switched off are folded away at the end, under **Switched off**. A row with one thing to do has its key (**Turn
 on**, for a switched-off source that series still use); every row opens the source's sheet. An extension that
 ships one source per language is one row per language: switch off the languages you do not read (in a source's
-sheet, or for every extension at once with **Languages**) and they fold away.
+sheet, or for every extension at once with **Languages**) and they fold away. An extension that bundles many
+sites in one language lists them by site instead: its sheet is headed by the extension,
+counts its sources and languages, and its **Sources** list has a search box once it is longer than twelve.
 
 **Needs attention**, above the list, appears only while something needs you, one row each:
 
