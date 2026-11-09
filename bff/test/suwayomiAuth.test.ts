@@ -32,14 +32,14 @@ before(async () => {
     if (path === '/engine/login.html') {
       if (req.method === 'GET') {
         if (legacyForm) { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<input type="text" name="user"/>'); return; }
-        res.writeHead(200, { 'set-cookie': 'JSESSIONID=initial; Path=/engine; HttpOnly; SameSite=Strict', 'content-type': 'text/html' });
+        res.writeHead(200, { 'set-cookie': 'JSESSIONID=initial; Path=/engine; HttpOnly; Secure; SameSite=Strict', 'content-type': 'text/html' });
         res.end('<input type="hidden" name="csrf-token" value="csrf-123"/>'); return;
       }
       loginCount++;
       const fields = new URLSearchParams(body);
       assert.equal(req.headers.cookie, legacyForm ? undefined : 'JSESSIONID=initial');
       assert.equal(fields.get('user'), 'engine-user'); assert.equal(fields.get('pass'), 'engine-pass'); assert.equal(fields.get('csrf-token'), legacyForm ? null : 'csrf-123');
-      res.writeHead(loginStatus === 200 ? 303 : loginStatus, { location: loginRedirect, 'set-cookie': `JSESSIONID=${sessionOverride || session}; Path=/engine; HttpOnly` });
+      res.writeHead(loginStatus === 200 ? 303 : loginStatus, { location: loginRedirect, 'set-cookie': `JSESSIONID=${sessionOverride || session}; Path=/engine; HttpOnly; Secure` });
       res.end(); return;
     }
     if (path === '/engine/api/graphql') {
@@ -196,6 +196,21 @@ test('engine redirects stay unfollowed, and other origins cannot trigger login o
   pageRedirect = 'https://attacker.invalid/private';
   assert.equal((await auth.fetch(`${base}/api/v1/page`)).status, 302);
   assert.equal(records.length, 2); assert.ok(records.every((r) => r.path.startsWith('/engine/')));
+});
+
+test('a rebuilt engine request preserves its encoded path and query, while dropping the fragment', async () => {
+  const auth = configured('ui_login');
+  assert.equal((await auth.fetch(`${base}/api/v1/manga/part%20one/thumbnail?width=960&fit=1#not-on-the-wire`)).status, 200);
+  assert.equal(records.at(-1)?.path, '/engine/api/v1/manga/part%20one/thumbnail?width=960&fit=1');
+  assert.equal(records.at(-1)?.auth, `Bearer ${token}`);
+});
+
+test('engine-looking userinfo and near-match hosts fail before login or any request', async () => {
+  const auth = configured('ui_login');
+  const userinfo = new URL(`${base}/api/v1/page`); userinfo.username = 'other-user'; userinfo.password = 'other-secret';
+  await assert.rejects(auth.fetch(userinfo), /refusing credentials/);
+  await assert.rejects(auth.fetch(base.replace('127.0.0.1', '127.0.0.1.attacker.invalid') + '/api/v1/page'), /refusing credentials/);
+  assert.equal(loginCount, 0); assert.equal(records.length, 0);
 });
 
 test('login refusal hides upstream bodies and passwords', async () => {

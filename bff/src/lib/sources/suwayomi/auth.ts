@@ -49,11 +49,17 @@ export class EngineAuth {
   }
 
   private target(raw: string | URL): URL {
-    const url = new URL(raw);
-    if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.origin !== new URL(this.config.base).origin) {
+    const candidate = new URL(raw);
+    const trusted = new URL(this.config.base);
+    if (!/^https?:$/.test(candidate.protocol) || candidate.username || candidate.password || candidate.origin !== trusted.origin) {
       throw new Error('suwayomi: refusing credentials outside the configured engine');
     }
-    return url;
+    // Rebuild from the operator's address: only a path and query can come from a source/caller. The
+    // request destination never inherits their scheme, host, port, userinfo or fragment.
+    trusted.pathname = candidate.pathname;
+    trusted.search = candidate.search;
+    trusted.hash = '';
+    return trusted;
   }
 
   async headers(signal?: AbortSignal | null): Promise<Record<string, string>> {
