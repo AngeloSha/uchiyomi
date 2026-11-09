@@ -490,7 +490,7 @@ test('a line of facts isolates each one, so a version never takes an Arabic coun
   assert.equal(html, '<bdi>v1.4.79</bdi> · <bdi>6 لغات</bdi>');
   const sheet = code(read('components/SourceSheet.tsx'));
   assert.match(sheet, /subtitle=\{s \? <><span><Facts items=\{sheetFacts\(s\)\} \/><\/span>\{ext && <ExtTags e=\{ext\} \/>\}<\/>/, 'the sheet\'s facts are one string');
-  assert.match(sheet, /: ext \? <><span><Facts items=\{\[ext\.versionName \? `v\$\{ext\.versionName\}` : null, extLanguagesText\(ext\)\]\} \/><\/span><ExtTags e=\{ext\} \/><\/>/);
+  assert.match(sheet, /: ext \? <><span><Facts items=\{\[\s*ext\.versionName \? `v\$\{ext\.versionName\}` : null,[^\]]*extLanguagesText\(ext\),?\s*\]\} \/><\/span><ExtTags e=\{ext\} \/><\/>/);
   const panel = code(read('components/ExtensionsPanel.tsx'));
   assert.equal((panel.match(/<Facts items=\{\[/g) ?? []).length, 1, 'a Browse row\'s facts are one string');
   // Your sources' rows: each fact in its own <bdi>.
@@ -511,4 +511,12 @@ test('a multi-site extension names its rows by source, not by a language they al
   assert.equal(extSourceLabel(sites[0], true), 'Asura');
   assert.equal(extSourceLabel(src('5', ' ', 'en'), true), extLanguageName('en'), 'a nameless source falls back to its language');
   assert.equal(sourcesAreSites({ sources: [sites[0]] }), false);
+});
+
+test('a set of sites opened by its extension is headed by the extension, not its first site', () => {
+  const sheet = code(read('components/SourceSheet.tsx'));
+  const resolve = slice(sheet, 'export function resolveTarget(', 'function ageNote(');
+  assert.match(resolve, /if \(ext && sourcesAreSites\(ext\)\) return \{ source: null, ext \};/, 'a site set borrows its first source\'s head');
+  assert.ok(resolve.indexOf('sourcesAreSites(ext)') < resolve.indexOf('const first ='), 'the first source is picked before the site set is recognised');
+  assert.match(sheet, /sourcesAreSites\(ext\) \? tr\('\{n\} sources', \{ n: numberText\(ext\.sources\.length\) \}\) : null,/, 'the head does not count the sites');
 });
