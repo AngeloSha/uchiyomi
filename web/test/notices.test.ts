@@ -422,6 +422,8 @@ test('the viewport is over the bottom nav: rendered beside the app, not inside <
   const palette = code(read('components/CommandPalette.tsx'));
   const notices = zOf(toast, /<section data-notices/);
   assert.ok(notices > zOf(nav, /<nav /), `the notices are under the bottom nav (z ${notices})`);
+  const sheet = code(read('components/ui.tsx'));
+  assert.ok(notices > zOf(sheet, /<div className="fixed inset-0 z-\[\d+\] flex items-end/), 'a portalled sheet intercepts the notice actions');
   // The palette is anchored at the top and is the one layer over the notices.
   assert.ok(notices < zOf(palette, /\{open && \(\s*<motion\.div /), 'the notices are over the command palette');
   const provider = toast.slice(toast.indexOf('export function ToastProvider('));

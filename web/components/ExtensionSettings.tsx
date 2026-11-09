@@ -33,12 +33,13 @@ import { t as tr } from '@/lib/i18n';
 import { Sheet } from '@/components/ui';
 import { Switch } from '@/components/Switch';
 import { useToast } from '@/components/Toast';
+import { errorNoticeOf } from '@/components/ConfirmDialog';
 import {
   needsRenumberConfirm, prefControl, prefErrorText, prefSummary, toggleChoice,
   type PrefValue, type PrefWriteAnswer, type SourcePref, type SourcePrefsAnswer,
 } from '@/lib/sourcePrefs';
 import { joinSentences, sentenceGap } from '@/lib/jobs';
-import { extLanguageName } from '@/lib/extensions';
+import { extSourceOptionLabel, sourcesAreSites } from '@/lib/extensions';
 
 /** What the sheet opens on: one source (the deep link), or one extension, whose first source it picks. */
 export type SettingsTarget = { sourceId: string; name?: string } | { pkgName: string; name?: string };
@@ -95,7 +96,7 @@ export function ExtensionSettings({ target, onClose }: { target: SettingsTarget;
       {pkgSources && !pkgSources.content.length && (
         <p className="py-4 text-sm text-fog-500">{tr('This extension provides no source.')}</p>
       )}
-      {sourceId && <ExtensionSettingsBody sourceId={sourceId} onSourceId={setSourceId} />}
+      {sourceId && <ExtensionSettingsBody key={sourceId} sourceId={sourceId} onSourceId={setSourceId} />}
     </Sheet>,
     document.body,
   );
@@ -132,7 +133,7 @@ export function ExtensionSettingsBody({ sourceId, onSourceId, note = false }: {
       else if (r.changed) toast(tr('Saved'), 'success');
       if (pref.type === 'text') setTexts((t) => { const { [pref.key]: _gone, ...rest } = t; return rest; });
     } catch (e) {
-      toast(prefErrorText(e, tr('Could not change that setting')), 'error');
+      toast(...errorNoticeOf(e, prefErrorText(e, tr('Could not change that setting'))));
     }
     setSaving(null);
   };
@@ -144,9 +145,7 @@ export function ExtensionSettingsBody({ sourceId, onSourceId, note = false }: {
 
   const prefs = (data?.preferences ?? []).filter((p) => prefControl(p) !== 'hidden');
   const siblings = data?.siblings ?? [];
-  // A language's name, and the source's own name beside it only where two sources share one language.
-  const shared = new Set(siblings.map((s) => s.lang).filter((l, i, a) => a.indexOf(l) !== i));
-  const optionText = (s: { name: string; lang: string | null }) => (shared.has(s.lang) ? `${extLanguageName(s.lang)} · ${s.name}` : extLanguageName(s.lang));
+  const sites = sourcesAreSites({ sources: siblings });
 
   return (
     <div data-ext-settings-body={sourceId}>
@@ -154,10 +153,10 @@ export function ExtensionSettingsBody({ sourceId, onSourceId, note = false }: {
       {siblings.length > 1 && (
         <label className="mb-3 block">
           <span className="mb-1 block text-[12px] text-fog-400">{tr('Settings for')}</span>
-          <select value={sourceId} onChange={(e) => { setPending(null); onSourceId(e.target.value); }} className="field" data-ext-settings-for>
-            {siblings.map((s) => <option key={s.id} value={s.id}>{optionText(s)}</option>)}
+          <select value={sourceId} onChange={(e) => { setPending(null); onSourceId(e.target.value); }} disabled={!!saving || !!pending} className="field w-full min-w-0" data-ext-settings-for>
+            {siblings.map((s) => <option key={s.id} value={s.id}>{extSourceOptionLabel(s, sites)}</option>)}
           </select>
-          <span className="mt-1 block text-[11px] leading-relaxed text-fog-500">{tr('Each language keeps its own settings.')}</span>
+          <span className="mt-1 block text-[11px] leading-relaxed text-fog-500">{sites ? tr('Each source keeps its own settings.') : tr('Each language keeps its own settings.')}</span>
         </label>
       )}
 

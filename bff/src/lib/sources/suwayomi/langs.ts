@@ -62,27 +62,32 @@ export async function setSourcesEnabled({ ids = [], langs = [], enabled }: BulkA
 }
 
 /**
- * Record the sources an extension provides, switched on unless their language is hidden (or `enable` is
- * false, on uninstall). This is the install loop that used to live in the route, moved here so the hidden
- * rule has one home and one test.
+ * Record an extension's sources. Ordinary language editions start on unless hidden; a bundle of sites
+ * starts with its new sites off for an explicit choice. Updating preserves every existing source's switch,
+ * including a deliberate exception to a hidden language. Uninstall and backup trials still turn them off.
  */
 export async function adoptExtensionSources(
   provided: Array<{ id: string; name: string; lang: string | null; nsfw?: boolean }>,
   enable: boolean,
+  options: { preserveExisting?: boolean } = {},
 ): Promise<{ on: number; hidden: number }> {
   const hidden = new Set(enable ? await getHiddenLangs() : []);
+  const sites = new Set(provided.map((s) => s.lang)).size < provided.length;
+  const preserve = enable && (!!options.preserveExisting || sites);
   let on = 0;
   let left = 0;
   for (const s of provided) {
-    const want = enable && !(s.lang && hidden.has(s.lang));
-    if (want) on++;
-    else if (enable) left++;
-    await q(
+    const hiddenLanguage = !!s.lang && hidden.has(s.lang);
+    const want = enable && !sites && !hiddenLanguage;
+    const rows = await q<{ enabled: boolean }>(
       `INSERT INTO suwayomi_sources (source_id, name, lang, nsfw, enabled) VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT (source_id) DO UPDATE SET enabled = EXCLUDED.enabled, name = EXCLUDED.name,
-         lang = EXCLUDED.lang, nsfw = EXCLUDED.nsfw`,
-      [s.id, s.name, s.lang, !!s.nsfw, want],
-    ).catch(() => {});
+       ON CONFLICT (source_id) DO UPDATE SET enabled = CASE WHEN $6 THEN suwayomi_sources.enabled ELSE EXCLUDED.enabled END,
+         name = EXCLUDED.name, lang = EXCLUDED.lang, nsfw = EXCLUDED.nsfw
+       RETURNING enabled`,
+      [s.id, s.name, s.lang, !!s.nsfw, want, preserve],
+    );
+    if (rows[0]?.enabled) on++;
+    else if (enable && hiddenLanguage) left++;
   }
   return { on, hidden: left };
 }

@@ -7,7 +7,7 @@
 // `resize`, `event` (mouse, wheel and keys, in the page's CSS pixels) and `paste`. Out: `render` (a PNG, as a JSON array
 // of bytes), `addressChange`, `load`, `statusChange` and `consoleMessage`. ⚠️ One browser, one client: a second client
 // closes the first ("Other client connected"), so siteSessions.ts keeps one page at a time.
-import { suwayomiBase, suwayomiImageHeaders } from './client';
+import { suwayomiBase, suwayomiBrowserHeaders } from './client';
 
 /** What the page sends back, as far as Uchiyomi uses it. */
 export interface BrowserEvents {
@@ -50,7 +50,7 @@ export type BrowserOpener = (events: BrowserEvents) => Promise<EngineBrowser>;
 
 /** The engine's browser socket: its `/api/v1/webview`, on the engine's own address. */
 export function engineBrowserUrl(base: string = suwayomiBase()): string {
-  const u = new URL('/api/v1/webview', base.endsWith('/') ? base : `${base}/`);
+  const u = new URL('api/v1/webview', base.endsWith('/') ? base : `${base}/`);
   u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
   return u.toString();
 }
@@ -62,10 +62,14 @@ const CLOSE_MS = 5_000;
  * Connect to the engine's browser. Rejects when the engine has no browser to offer -- an external engine without
  * Suwayomi v2's WebView, or one that refuses the login -- so the caller can say so instead of waiting.
  */
-export const openEngineBrowser: BrowserOpener = (events) =>
-  new Promise((resolve, reject) => {
-    // Node's WebSocket is undici's, which takes the engine's Basic login as a header (WebSocketInit.headers).
-    const ws = new WebSocket(engineBrowserUrl(), { headers: suwayomiImageHeaders() });
+export const openEngineBrowser: BrowserOpener = async (events) => {
+  const deadline = Date.now() + CONNECT_MS;
+  const headers = await suwayomiBrowserHeaders(AbortSignal.timeout(CONNECT_MS));
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error('The extension engine did not open its browser.');
+  return new Promise((resolve, reject) => {
+    // Header authentication avoids putting access tokens in a socket URL or log.
+    const ws = new WebSocket(engineBrowserUrl(), { headers });
     let opened = false;
     let closed = false;
     let onClosed: (() => void) | null = null;
@@ -74,7 +78,7 @@ export const openEngineBrowser: BrowserOpener = (events) =>
         try { ws.close(); } catch { /* never opened */ }
         reject(new Error('The extension engine did not open its browser.'));
       }
-    }, CONNECT_MS);
+    }, remaining);
 
     ws.addEventListener('open', () => {
       opened = true;
@@ -111,3 +115,4 @@ export const openEngineBrowser: BrowserOpener = (events) =>
     });
     ws.addEventListener('error', () => { /* `close` follows and says what happened */ });
   });
+};

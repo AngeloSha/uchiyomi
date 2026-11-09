@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4571
+    "strings": 4579
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -1933,7 +1933,6 @@
   "The extension engine isn't using Uchiyomi's built-in Cloudflare helper. Quit and reopen Uchiyomi to restart it.": "扩展引擎没有使用 Uchiyomi 内置的 Cloudflare 助手。请退出并重新打开 Uchiyomi 来重启它。",
   "The extension engine's own Cloudflare bypass is switched off. On the Suwayomi engine's container (uchiyomi-suwayomi in the shipped compose files) set FLARESOLVERR_ENABLED=true and FLARESOLVERR_URL to the same solver address Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the shipped files), then recreate it. The v0.37.0 compose files already set both, so an upgrade that recreates the engine is the fix there.": "扩展引擎自身的 Cloudflare 绕过功能已关闭。请在 Suwayomi 引擎的容器（随附的 compose 文件中为 uchiyomi-suwayomi）上设置 FLARESOLVERR_ENABLED=true，并把 FLARESOLVERR_URL 设为 Uchiyomi 所用的同一个求解器地址（随附文件中为 http://uchiyomi-flaresolverr:8191），然后重新创建该容器。v0.37.0 的 compose 文件已经设置了这两项，因此那种情况下，升级并重新创建引擎即可解决。",
   "Uchiyomi's extension engine refused Uchiyomi's own login. Quit and reopen Uchiyomi to restart both.": "Uchiyomi 的扩展引擎拒绝了 Uchiyomi 自己的登录。请退出并重新打开 Uchiyomi 来重启两者。",
-  "The extension engine refused Uchiyomi's login. Set SUWAYOMI_USERNAME and SUWAYOMI_PASSWORD to the engine's own basic-auth user and password (or turn its auth off), then restart Uchiyomi.": "扩展引擎拒绝了 Uchiyomi 的登录。请把 SUWAYOMI_USERNAME 和 SUWAYOMI_PASSWORD 设为引擎自己的 basic-auth 用户名和密码（或关闭它的认证），然后重启 Uchiyomi。",
   "This is Uchiyomi's extension engine, not the site. Quit and reopen Uchiyomi to restart it.": "问题出在 Uchiyomi 的扩展引擎，而不是网站。请退出并重新打开 Uchiyomi 来重启它。",
   "This is the Suwayomi extension server, not the site. Check that container.": "问题出在 Suwayomi 扩展服务器，而不是网站。请检查那个容器。",
   "The extension engine did not answer in time.": "扩展引擎没有及时响应。",
@@ -2729,6 +2728,7 @@
   "Could not read the extension list": "无法读取扩展列表",
   "Could not turn on {name}": "无法开启 {name}",
   "Each language is its own source; turn on the ones you read.": "每种语言都是单独的来源；开启你会读的语言即可。",
+  "Each site is its own source; turn on the ones you read.": "每个站点都是独立的来源；打开你阅读的那些。",
   "Each language keeps its own settings.": "每种语言各有自己的设置。",
   "Extensions get past Cloudflare through Uchiyomi’s helper.": "扩展通过 Uchiyomi 的助手绕过 Cloudflare。",
   "Find one in Browse and install it with one press. Its sources are on at once, ready to search from Discover.": "在“浏览”中找到扩展，一键即可安装。它的来源会立即开启，可在“发现”中搜索。",
@@ -4574,5 +4574,13 @@
   "(first 500 not in your library kept; {n} more after them: import again for those)": "（仅保留前 500 个不在你的书库中的标题；之后还有 {n} 个：再次导入即可处理它们）",
   "The first 500 titles not already in your library were kept, and {n} more come after them. Once these are in, import the same list again for the rest.": "已保留前 500 个尚未在你的书库中的标题，之后还有 {n} 个。添加完这些后，再次导入同一列表即可处理其余的。",
   "This series already follows 1 other source, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.": "此系列已追踪 1 个其他来源，已达本服务器允许的上限。请先移除一个、把系列移到此来源，或在 管理 → 设置 → 下载 → 更多选项 → 每个系列的其他来源数 中提高上限。",
-  "This series already follows {n} other sources, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.": "此系列已追踪 {n} 个其他来源，已达本服务器允许的上限。请先移除一个、把系列移到此来源，或在 管理 → 设置 → 下载 → 更多选项 → 每个系列的其他来源数 中提高上限。"
+  "This series already follows {n} other sources, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.": "此系列已追踪 {n} 个其他来源，已达本服务器允许的上限。请先移除一个、把系列移到此来源，或在 管理 → 设置 → 下载 → 更多选项 → 每个系列的其他来源数 中提高上限。",
+  "Choose a source": "选择来源",
+  "Each source keeps its own settings.": "每个来源保留各自的设置。",
+  "Technical details": "技术详情",
+  "Copy error": "复制错误",
+  "Select text": "选择文本",
+  "Could not copy automatically. The text is selected; copy it using your device’s controls.": "无法自动复制。文本已选中，请使用设备的复制功能。",
+  "The extension engine refused Uchiyomi's login. Set SUWAYOMI_AUTH_MODE to match the engine, and SUWAYOMI_USERNAME and SUWAYOMI_PASSWORD to its login, then restart Uchiyomi.": "扩展引擎拒绝了 Uchiyomi 的登录。请将 SUWAYOMI_AUTH_MODE 设置为引擎使用的认证方式，将 SUWAYOMI_USERNAME 和 SUWAYOMI_PASSWORD 设置为其登录凭据，然后重启 Uchiyomi。",
+  "for {source}": "用于 {source}"
 }

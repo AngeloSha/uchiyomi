@@ -67,11 +67,11 @@ test('a real engine answers everything Uchiyomi asks of it', { skip }, async (t)
     }
     const pages = await a.getPageUrls(chapters[0].sourceId);
     assert.ok(pages.length >= 1, 'no pages');
-    const page = await fetch(pages[0], { headers: client.suwayomiImageHeaders() });
+    const page = await client.suwayomiFetch(pages[0]);
     assert.equal(page.status, 200, `a page: ${pages[0]}`);
     assert.match(page.headers.get('content-type') ?? '', /^image\//);
     assert.ok(hit!.coverUrl, 'no cover');
-    const cover = await fetch(hit!.coverUrl!, { headers: client.suwayomiImageHeaders() });
+    const cover = await client.suwayomiFetch(hit!.coverUrl!);
     assert.equal(cover.status, 200, `the cover: ${hit!.coverUrl}`);
   });
 

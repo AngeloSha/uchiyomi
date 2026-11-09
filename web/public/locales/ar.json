@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4571
+    "strings": 4579
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -1933,7 +1933,6 @@
   "The extension engine isn't using Uchiyomi's built-in Cloudflare helper. Quit and reopen Uchiyomi to restart it.": "محرّك الإضافات لا يستخدم مساعد Cloudflare المدمج في Uchiyomi. أغلق Uchiyomi وأعد فتحه لإعادة تشغيله.",
   "The extension engine's own Cloudflare bypass is switched off. On the Suwayomi engine's container (uchiyomi-suwayomi in the shipped compose files) set FLARESOLVERR_ENABLED=true and FLARESOLVERR_URL to the same solver address Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the shipped files), then recreate it. The v0.37.0 compose files already set both, so an upgrade that recreates the engine is the fix there.": "خاصية تجاوز Cloudflare في محرّك الإضافات نفسه معطّلة. في حاوية محرّك Suwayomi (uchiyomi-suwayomi في ملفات compose المرفقة) اضبط FLARESOLVERR_ENABLED=true، واضبط FLARESOLVERR_URL على عنوان أداة الحل نفسه الذي يستخدمه Uchiyomi (http://uchiyomi-flaresolverr:8191 في الملفات المرفقة)، ثم أعد إنشاءها. ملفات compose في v0.37.0 تضبط الاثنين بالفعل، لذا فالحل هناك ترقيةٌ تعيد إنشاء المحرّك.",
   "Uchiyomi's extension engine refused Uchiyomi's own login. Quit and reopen Uchiyomi to restart both.": "رفض محرّك إضافات Uchiyomi تسجيل دخول Uchiyomi نفسه. أغلق Uchiyomi وأعد فتحه لإعادة تشغيل الاثنين.",
-  "The extension engine refused Uchiyomi's login. Set SUWAYOMI_USERNAME and SUWAYOMI_PASSWORD to the engine's own basic-auth user and password (or turn its auth off), then restart Uchiyomi.": "رفض محرّك الإضافات تسجيل دخول Uchiyomi. اضبط SUWAYOMI_USERNAME وSUWAYOMI_PASSWORD على اسم المستخدم وكلمة المرور الخاصين بالمصادقة الأساسية (basic-auth) في المحرّك نفسه (أو عطّل المصادقة فيه)، ثم أعد تشغيل Uchiyomi.",
   "This is Uchiyomi's extension engine, not the site. Quit and reopen Uchiyomi to restart it.": "المشكلة في محرّك إضافات Uchiyomi، لا في الموقع. أغلق Uchiyomi وأعد فتحه لإعادة تشغيله.",
   "This is the Suwayomi extension server, not the site. Check that container.": "المشكلة في خادم إضافات Suwayomi، لا في الموقع. تحقّق من تلك الحاوية.",
   "The extension engine did not answer in time.": "لم يستجب محرّك الإضافات في الوقت المحدد.",
@@ -2729,6 +2728,7 @@
   "Could not read the extension list": "تعذّرت قراءة قائمة الإضافات",
   "Could not turn on {name}": "تعذّر تفعيل {name}",
   "Each language is its own source; turn on the ones you read.": "كل لغة مصدر مستقل؛ فعّل اللغات التي تقرأ بها.",
+  "Each site is its own source; turn on the ones you read.": "كل موقع مصدر مستقل؛ شغّل المواقع التي تقرأ منها.",
   "Each language keeps its own settings.": "لكل لغة إعداداتها الخاصة.",
   "Extensions get past Cloudflare through Uchiyomi’s helper.": "تتجاوز الإضافات حماية Cloudflare عبر مساعد Uchiyomi.",
   "Find one in Browse and install it with one press. Its sources are on at once, ready to search from Discover.": "ابحث عن إضافة في «تصفّح» وثبّتها بضغطة واحدة. تُفعَّل مصادرها فورًا وتصبح جاهزة للبحث من «اكتشف».",
@@ -4574,5 +4574,13 @@
   "(first 500 not in your library kept; {n} more after them: import again for those)": "(تم الاحتفاظ بأول 500 غير موجودة في مكتبتك؛ وبعدها {n} أخرى: استورد مجددًا لجلبها)",
   "The first 500 titles not already in your library were kept, and {n} more come after them. Once these are in, import the same list again for the rest.": "احتُفظ بأول 500 عنوان ليست في مكتبتك بالفعل، وبعدها {n} أخرى. بعد إضافة هذه، استورد القائمة نفسها مجددًا لجلب البقية.",
   "This series already follows 1 other source, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.": "تتابع هذه السلسلة مصدرًا آخر واحدًا، وهو أقصى ما يسمح به هذا الخادم. أزِل واحدًا أولًا، أو انقل السلسلة إلى هذا المصدر، أو اسمح بالمزيد في الإدارة ← الإعدادات ← التنزيلات ← خيارات أخرى ← المصادر الأخرى لكل سلسلة.",
-  "This series already follows {n} other sources, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.": "تتابع هذه السلسلة مصادر أخرى عددها {n}، وهو أقصى ما يسمح به هذا الخادم. أزِل واحدًا أولًا، أو انقل السلسلة إلى هذا المصدر، أو اسمح بالمزيد في الإدارة ← الإعدادات ← التنزيلات ← خيارات أخرى ← المصادر الأخرى لكل سلسلة."
+  "This series already follows {n} other sources, as many as this server allows. Remove one first, move the series to this source, or allow more in Admin → Settings → Downloads → More options → Other sources per series.": "تتابع هذه السلسلة مصادر أخرى عددها {n}، وهو أقصى ما يسمح به هذا الخادم. أزِل واحدًا أولًا، أو انقل السلسلة إلى هذا المصدر، أو اسمح بالمزيد في الإدارة ← الإعدادات ← التنزيلات ← خيارات أخرى ← المصادر الأخرى لكل سلسلة.",
+  "Choose a source": "اختر مصدرًا",
+  "Each source keeps its own settings.": "يحتفظ كل مصدر بإعداداته الخاصة.",
+  "Technical details": "التفاصيل التقنية",
+  "Copy error": "نسخ الخطأ",
+  "Select text": "تحديد النص",
+  "Could not copy automatically. The text is selected; copy it using your device’s controls.": "تعذّر النسخ تلقائيًا. تم تحديد النص؛ انسخه باستخدام أدوات جهازك.",
+  "The extension engine refused Uchiyomi's login. Set SUWAYOMI_AUTH_MODE to match the engine, and SUWAYOMI_USERNAME and SUWAYOMI_PASSWORD to its login, then restart Uchiyomi.": "رفض محرّك الإضافات تسجيل دخول Uchiyomi. اضبط SUWAYOMI_AUTH_MODE ليتوافق مع المحرّك، وSUWAYOMI_USERNAME وSUWAYOMI_PASSWORD على بيانات تسجيل دخوله، ثم أعد تشغيل Uchiyomi.",
+  "for {source}": "لـ {source}"
 }

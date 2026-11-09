@@ -10,7 +10,7 @@ import { api, type ApiError } from '@/lib/api';
 import { t as tr } from '@/lib/i18n';
 import { Sheet } from '@/components/ui';
 import { useToast } from '@/components/Toast';
-import { msgOf } from '@/components/ConfirmDialog';
+import { errorNoticeOf, msgOf } from '@/components/ConfirmDialog';
 import { Busy, busyKey } from '@/components/ExtensionBits';
 
 /**
@@ -21,10 +21,10 @@ import { Busy, busyKey } from '@/components/ExtensionBits';
  * useful words in the toast -- is appended as it came. An unknown code shows the server's message as it is.
  * ⚠️ Until v0.45.0 the add read neither: every refusal was "Could not add that repository".
  */
-export function repoAddError(e: unknown): string {
+export function repoAddError(e: unknown, includeTechnical = true): string {
   let j: { error?: string; reason?: string; removed?: boolean } = {};
   try { j = JSON.parse((e as ApiError)?.body || '{}'); } catch { /* not JSON: the generic line below */ }
-  const said = j.reason ? ` ${tr('The engine said: {reason}', { reason: j.reason })}` : '';
+  const said = includeTechnical && j.reason ? ` ${tr('The engine said: {reason}', { reason: j.reason })}` : '';
   switch (j.error) {
     case 'bad_url': return tr('That doesn’t look like a repository address. It usually ends in index.min.json.');
     case 'github_page': return tr('That is a GitHub page, not the repository itself. Paste the repository’s index.min.json link instead.');
@@ -32,9 +32,9 @@ export function repoAddError(e: unknown): string {
     case 'empty':
       return tr('That address gave no extensions, so it was not kept. Check that it is the repository’s index.min.json link, not a web page — or it may only list extensions you already have.')
         + said + (j.removed === false ? ` ${tr('It could not be taken back out — press Remove next to it.')}` : '');
-    case 'engine_refused': return tr('The extension engine refused that address: {reason}', { reason: j.reason ?? '' });
-    case 'unreachable': return tr('Could not reach the extension engine: {reason}', { reason: j.reason ?? '' });
-    default: return msgOf(e, tr('Could not add that repository'));
+    case 'engine_refused': return includeTechnical ? tr('The extension engine refused that address: {reason}', { reason: j.reason ?? '' }) : tr('Could not add that repository');
+    case 'unreachable': return includeTechnical ? tr('Could not reach the extension engine: {reason}', { reason: j.reason ?? '' }) : tr('The extension engine did not answer. Try again in a moment.');
+    default: return includeTechnical ? msgOf(e, tr('Could not add that repository')) : tr('Could not add that repository');
   }
 }
 
@@ -67,9 +67,9 @@ export function RepoForm({ onAdded }: { onAdded?: () => void }) {
         + (r.corrected ? ` · ${tr('saved as {file}', { file })}` : ''), 'success');
       onAdded?.();
     } catch (e: unknown) {
-      const why = repoAddError(e);
+      const why = repoAddError(e, false);
       setRepoError(why);
-      toast(why, 'error');
+      toast(...errorNoticeOf(e, why));
     }
     setAddingRepo(false);
   };
@@ -110,7 +110,7 @@ export function ReposSheet({ repos, onClose }: { repos: string[]; onClose: () =>
       await api('/api/admin/extensions/repos', { method: 'DELETE', json: { url } });
       for (const queryKey of REPO_KEYS) void qc.invalidateQueries({ queryKey: [...queryKey] });
       toast(tr('Repository removed'), 'success');
-    } catch (e: unknown) { toast(msgOf(e, tr('Could not remove it')), 'error'); }
+    } catch (e: unknown) { toast(...errorNoticeOf(e, tr('Could not remove it'))); }
     setRemoving(null);
   };
   return (

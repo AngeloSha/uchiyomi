@@ -141,7 +141,7 @@ export interface SourceAdapter {
   /** Referer to send when fetching page/cover images (string, or derived from the chapter url). */
   imageReferer?: string | ((chapterUrl: string) => string);
   /** Extra headers for page/cover image fetches — e.g. auth for a source that proxies its own images. */
-  imageHeaders?: Record<string, string> | ((imageUrl: string) => Record<string, string>);
+  imageHeaders?: Record<string, string> | ((imageUrl: string, signal?: AbortSignal) => Record<string, string> | Promise<Record<string, string>>);
   /**
    * How many pages of one chapter may be in flight at once. Default 1.
    *

@@ -167,6 +167,9 @@ jobs:
       - name: Schedule cover titles and review generated artwork
         working-directory: ./web
         run: node test/e2e/coverTitleBatchWalk.mjs
+      - name: Source bundles and scrollable error details
+        working-directory: ./web
+        run: node test/e2e/maintenance.mjs
       # Machine-assisted translation fails in two ways a unit test cannot see: a string longer than its
       # container, and a right-to-left language rendered inside a left-to-right frame. Both need a browser.
       - name: Every language renders, and Arabic mirrors
@@ -205,6 +208,7 @@ jobs:
             web/test/e2e/shots-title-extraction/
             web/test/e2e/shots-title-mask/
             web/test/e2e/shots-cover-title-batch/
+            web/test/e2e/shots-maintenance/
             web/test/e2e/shots-v558/
           retention-days: 7
 

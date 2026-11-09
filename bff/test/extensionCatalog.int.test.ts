@@ -15,10 +15,15 @@ const DSN = process.env.TEST_DATABASE_URL;
 const SERIES = ['s_xc_one', 's_xc_two', 's_xc_gone'];
 /** The made-up repository: past CATALOG_PAGE_MAX however many of its 18+ extensions are hidden. */
 const REPO_SIZE = 600;
+const SITE_BUNDLE = 'fixture.extension.multisite';
+const SITE_IDS = ['900000001', '900000002', '900000003', '900000004'];
 
 async function setup() {
   const { startFakeSuwayomi, catalogueSeed, catalogueExtensions, SOURCE_IDS, PKG } = await import('./fixtures/fakeSuwayomi');
   const seed = catalogueSeed(REPO_SIZE);
+  seed.extensions.push({ pkgName: SITE_BUNDLE, name: 'Many Sites', lang: 'all', versionName: '1.0.0', installed: false, isNsfw: false });
+  seed.sources.push(...SITE_IDS.map((id, i) => ({ id, name: `Bundle Site ${i + 1}`, lang: i === 2 ? 'es' : 'en', pkgName: SITE_BUNDLE,
+    supportsLatest: true, isNsfw: false, mangas: [] })));
   const fake = await startFakeSuwayomi({ seed: seed as any });
   // ⚠️ Before anything from src: env.ts reads these once.
   process.env.DATABASE_URL = DSN;
@@ -288,6 +293,79 @@ test('Admin → Extensions on a repository the size of a real one', { skip: DSN 
       } finally {
         fake.extension(PKG.mangaBall).hasUpdate = false;
         forgetUpdates();
+      }
+    });
+
+    await t.test('a bundle starts off for individual choices, and manual or scheduled updates preserve them', async () => {
+      await q('DELETE FROM suwayomi_sources WHERE source_id = ANY($1)', [SITE_IDS]);
+      await q(`UPDATE server_settings SET hidden_langs = '["es"]' WHERE id = 1`);
+      try {
+        const installed = await post(`/api/admin/extensions/catalog/${SITE_BUNDLE}`, { action: 'install' });
+        assert.equal(installed.statusCode, 200, installed.body);
+        assert.equal(installed.json().sources, 4);
+        assert.equal(installed.json().on, 0, 'install does not silently enable every bundled site');
+        assert.equal(installed.json().hidden, 1, 'only the hidden language is counted as hidden, not all unchosen sites');
+        let now = await rows();
+        assert.deepEqual(SITE_IDS.map((id) => now[id]), [false, false, false, false]);
+
+        // Two explicit choices, including a deliberate exception to a hidden language. Another site stays off.
+        const choices = await post('/api/admin/extensions/sources/bulk', { ids: [SITE_IDS[0], SITE_IDS[2]], enabled: true });
+        assert.equal(choices.statusCode, 200, choices.body);
+        assert.deepEqual(choices.json().hiddenLangs, ['es'], 'choosing one site never changes the language preference');
+        await q('DELETE FROM suwayomi_sources WHERE source_id = $1', [SITE_IDS[3]]);
+        fake.source(SITE_IDS[1]).name = 'Updated Bundle Site';
+        fake.extension(SITE_BUNDLE).hasUpdate = true;
+        const updated = await post(`/api/admin/extensions/catalog/${SITE_BUNDLE}`, { action: 'update' });
+        assert.equal(updated.statusCode, 200, updated.body);
+        assert.equal(updated.json().on, 2, 'the response counts the switches actually kept');
+        now = await rows();
+        assert.deepEqual(SITE_IDS.map((id) => now[id]), [true, false, true, false], 'update keeps both choices, leaves a newly discovered site off');
+        assert.equal((await q<{ name: string }>('SELECT name FROM suwayomi_sources WHERE source_id = $1', [SITE_IDS[1]]))[0].name, 'Updated Bundle Site (EN)', 'source metadata still updates through registration');
+
+        // Update all uses the same runExtensionCheck pipeline as the scheduled job, including its actual reloadAll.
+        await q('DELETE FROM suwayomi_sources WHERE source_id = $1', [SITE_IDS[3]]);
+        fake.extension(SITE_BUNDLE).hasUpdate = true;
+        const scheduled = await post('/api/admin/extensions/update-all', {});
+        assert.equal(scheduled.statusCode, 200, scheduled.body);
+        assert.ok(scheduled.json().updated.includes('Many Sites'), scheduled.body);
+        assert.equal(scheduled.json().reloaded, true);
+        now = await rows();
+        assert.deepEqual(SITE_IDS.map((id) => now[id]), [true, false, true, false], 'scheduled updater preserves choices and registers new sites off');
+      } finally {
+        fake.extension(SITE_BUNDLE).installed = false;
+        fake.extension(SITE_BUNDLE).hasUpdate = false;
+        await q('DELETE FROM suwayomi_sources WHERE source_id = ANY($1)', [SITE_IDS]);
+        await q(`UPDATE server_settings SET hidden_langs = '[]' WHERE id = 1`);
+      }
+    });
+
+    await t.test('an ordinary language extension keeps its install defaults and update respects later choices', async () => {
+      const ordinary = made.extensions.find((e) => !e.isNsfw && e.lang === 'all')!;
+      const provided = made.sources.filter((s) => s.pkgName === ordinary.pkgName);
+      assert.ok(provided.length > 1 && new Set(provided.map((s) => s.lang)).size === provided.length);
+      const ids = provided.map((s) => s.id);
+      const [first, hidden] = provided;
+      await q('DELETE FROM suwayomi_sources WHERE source_id = ANY($1)', [ids]);
+      await q('UPDATE server_settings SET hidden_langs = $1::jsonb WHERE id = 1', [JSON.stringify([hidden.lang])]);
+      try {
+        const installed = await post(`/api/admin/extensions/catalog/${ordinary.pkgName}`, { action: 'install' });
+        assert.equal(installed.statusCode, 200, installed.body);
+        let now = await rows();
+        assert.equal(now[first.id], true, 'ordinary unhidden language starts on');
+        assert.equal(now[hidden.id], false, 'ordinary hidden language starts off');
+        await post('/api/admin/extensions/sources/bulk', { ids: [first.id], enabled: false });
+        await post('/api/admin/extensions/sources/bulk', { ids: [hidden.id], enabled: true });
+        fake.extension(ordinary.pkgName).hasUpdate = true;
+        const updated = await post(`/api/admin/extensions/catalog/${ordinary.pkgName}`, { action: 'update' });
+        assert.equal(updated.statusCode, 200, updated.body);
+        now = await rows();
+        assert.equal(now[first.id], false, 'update does not undo a language switched off by hand');
+        assert.equal(now[hidden.id], true, 'update does not undo a hidden-language exception switched on by hand');
+      } finally {
+        fake.extension(ordinary.pkgName).installed = false;
+        fake.extension(ordinary.pkgName).hasUpdate = false;
+        await q('DELETE FROM suwayomi_sources WHERE source_id = ANY($1)', [ids]);
+        await q(`UPDATE server_settings SET hidden_langs = '[]' WHERE id = 1`);
       }
     });
 

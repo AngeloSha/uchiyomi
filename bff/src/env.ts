@@ -172,6 +172,7 @@ const schema = z.object({
   EXTENSION_ENGINE: z.string().optional().transform(engineSwitchOn),
   SUWAYOMI_USERNAME: z.string().default(''),
   SUWAYOMI_PASSWORD: z.string().default(''),
+  SUWAYOMI_AUTH_MODE: z.enum(['auto', 'none', 'basic', 'simple', 'ui_login']).default('auto'),
   // Suwayomi can expose hundreds of sources; cross-source search fans out to every REGISTERED source, so
   // registration is opt-in per source and additionally capped here.
   SUWAYOMI_MAX_SOURCES: z.coerce.number().int().min(1).max(500).default(25),

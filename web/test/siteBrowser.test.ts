@@ -43,9 +43,9 @@ test('the sheet: keys stay on the page, a finger taps or scrolls, and leaving it
   assert.match(sheet, /onPaste=\{\(e\) => \{ e\.preventDefault\(\); const t = e\.clipboardData\.getData\('text'\); if \(t\) send\(\{ type: 'paste'/,
     'pasting a password reaches the page');
   const ext = read('components/ExtensionSheet.tsx');
-  assert.match(ext, /<button type="button" className="btn-key shrink-0" onClick=\{\(\) => setSiteOpen\(true\)\} data-ext-open-site>/);
-  assert.match(ext, /\{siteOpen && <SiteBrowserSheet sourceId=\{settingsOf\} name=\{ext\.name\} onClose=\{\(\) => setSiteOpen\(false\)\} \/>\}/,
-    'it opens the site of the source the sheet is about');
+  assert.match(ext, /<button type="button" className="btn-key shrink-0" disabled=\{!siteSource\} onClick=\{\(\) => setSiteOpen\(true\)\} data-ext-open-site>/);
+  assert.match(ext, /\{siteOpen && siteSource && <SiteBrowserSheet sourceId=\{siteSource\.id\} name=\{sites \? extSourceOptionLabel\(siteSource, sites\) : ext\.name\} onClose=\{\(\) => setSiteOpen\(false\)\} \/>\}/,
+    'it opens the named source, never an arbitrary first site in a bundle');
   assert.equal(SITE_TEXT[0], 'Open site');
 });
 

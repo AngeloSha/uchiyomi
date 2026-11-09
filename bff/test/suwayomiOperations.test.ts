@@ -45,13 +45,13 @@ test('every document is valid on every engine from the oldest supported up, with
   // Reintroduce by selecting a deprecated member again (`isNsfw` beside `contentWarning` in OPS.sources): "uses
   // deprecated SourceType.isNsfw" fails. Select one an engine does not have (`codename` in aboutServer): its
   // FieldUndefined fails, naming the engine.
-  const { ALL_OPS } = await import('../src/lib/sources/suwayomi/operations');
+  const { ALL_OPS, AUTH_OPS } = await import('../src/lib/sources/suwayomi/operations');
   const list = await schemas();
   assert.ok(list.length >= 2, `PREMISE: the v2.3.2243 and v2.4.2366 captures are both here (${list.map((s) => s.file).join(', ')})`);
   if (process.env.SUWAYOMI_EXTRA_SCHEMA) assert.ok(list.some((s) => s.file.endsWith(process.env.SUWAYOMI_EXTRA_SCHEMA!.split('/').pop()!)), 'SUWAYOMI_EXTRA_SCHEMA was not read');
   assert.ok(ALL_OPS.length >= 20, `PREMISE: the registry holds every document (${ALL_OPS.length})`);
   for (const { file, schema, version } of list) {
-    for (const op of ALL_OPS) {
+    for (const op of [...ALL_OPS, ...Object.values(AUTH_OPS)]) {
       const deprecated: string[] = [];
       const errors = validate(schema, parse(op.doc), deprecated).map((e: { message: string }) => e.message);
       assert.deepEqual(errors, [], `${op.name} is refused by ${version} (${file})`);

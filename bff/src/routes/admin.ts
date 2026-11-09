@@ -4121,11 +4121,11 @@ export default async function adminRoutes(app: FastifyInstance) {
       }
       await logAudit(`extension.${action}`, { userId: userIdOf(req), detail: { pkgName }, req });
 
-      // Installing an extension and then having to hunt for its sources in a second list is exactly the
-      // friction this feature exists to remove, so switch them on (or off) as part of the same action --
-      // except the ones in a language the operator has hidden, which stay off and are counted back.
+      // Ordinary language editions start on unless hidden. Bundles of sites open on their source choices,
+      // with new sites off; an update preserves every source's existing switch rather than enabling the
+      // whole bundle again. Explicit "Turn on its sources" above remains a separate deliberate operation.
       const provided = enable ? await sourcesOfExtension(pkgName).catch(() => []) : priorSources;
-      const adopted = await adoptExtensionSources(provided, enable);
+      const adopted = await adoptExtensionSources(provided, enable, { preserveExisting: action === 'update' });
       if (action === 'install') {
         // The admin's now, a backup's row or a refusal of theirs forgotten (v0.82.0); and the extension check's copy
         // says installed, so its next look does not call the extension new.

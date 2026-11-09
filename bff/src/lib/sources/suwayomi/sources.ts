@@ -8,7 +8,8 @@
 // Suwayomi's database lives; wiping it orphans the routing, same as uninstalling an extension would.
 import { UNNUMBERED, type SourceAdapter, type SourceSeries, type SourceChapter } from '../types';
 import { taggedContentRating } from '../../ageRating';
-import { gql as defaultGql, suwayomiUrl, suwayomiImageHeaders, onEngineOrigin, type Gql } from './client';
+import { gql as defaultGql, suwayomiUrl, suwayomiImageHeaders, onEngineOrigin, EngineRefusedError, type Gql, type GqlError } from './client';
+import { EngineAuthError } from './auth';
 import { OPS } from './operations';
 import { needsBrowserCheck, passSiteCheck, siteWasOpened } from './siteSessions';
 import { env } from '../../../env';
@@ -244,6 +245,9 @@ export function makeSuwayomiAdapter(remote: RemoteSource, gqlRun: Gql = defaultG
     try {
       return await gqlRun<T>(doc, vars, timeoutMs);
     } catch (e) {
+      // Website cookies cannot fix the engine's own login, permissions or schema. In particular a
+      // partially executed GraphQL mutation must not be replayed by the quiet-WebView retry either.
+      if (e instanceof EngineAuthError || e instanceof EngineRefusedError || [401, 403].includes((e as GqlError)?.status ?? 0)) throw e;
       const home = remote.homeUrl?.trim();
       if (!home || !(needsBrowserCheck(e) || siteWasOpened(remote.id)) || !(await passSiteCheck(remote.id, home))) throw e;
       return gqlRun<T>(doc, vars, timeoutMs);
@@ -285,7 +289,7 @@ export function makeSuwayomiAdapter(remote: RemoteSource, gqlRun: Gql = defaultG
     // the URL it is about to fetch, and some of those URLs are not the engine's: the cover proxy's `?u=` is the
     // caller's, so this used to hand the engine's Basic credentials to any host a member named. Reintroduce by
     // returning suwayomiImageHeaders() for every URL: outboundGuard.test.ts sees the login offered to another host.
-    imageHeaders: (url: string) => (onEngineOrigin(url) ? suwayomiImageHeaders() : {}),
+    imageHeaders: (url: string, signal?: AbortSignal) => (onEngineOrigin(url) ? suwayomiImageHeaders(signal) : {}),
     // Pages are fetched from the engine, not the site, so they may overlap and need no gap of their own;
     // see the doc comment above and SUWAYOMI_PAGE_CONCURRENCY in env.ts.
     pageConcurrency: env.SUWAYOMI_PAGE_CONCURRENCY,

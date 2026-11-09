@@ -9,6 +9,7 @@
 import { env } from '../../../env';
 import { isRefusalMessage } from './enginePin';
 import { OPS, opOf } from './operations';
+import { EngineAuth, EngineAuthError } from './auth';
 
 export interface GqlError extends Error {
   status?: number;
@@ -59,11 +60,31 @@ export function onEngineOrigin(u: string | URL, engine: string | undefined = env
   try { return new URL(String(u)).origin === new URL(engine).origin; } catch { return false; }
 }
 
-/** Headers for fetching an image back off Suwayomi (it proxies covers and pages through itself). */
-export function suwayomiImageHeaders(): Record<string, string> {
-  return env.SUWAYOMI_USERNAME
-    ? { authorization: 'Basic ' + Buffer.from(`${env.SUWAYOMI_USERNAME}:${env.SUWAYOMI_PASSWORD}`).toString('base64') }
-    : {};
+let authentication: EngineAuth | undefined;
+function engineAuth(): EngineAuth {
+  return authentication ??= new EngineAuth({ base: suwayomiBase(), mode: env.SUWAYOMI_AUTH_MODE,
+    username: env.SUWAYOMI_USERNAME, password: env.SUWAYOMI_PASSWORD });
+}
+
+/** Fresh engine credentials, shared by HTTP and WebView. Never forwarded to a source's website. */
+export const suwayomiImageHeaders = (signal?: AbortSignal | null): Promise<Record<string, string>> => engineAuth().headers(signal);
+
+/** Authenticated first hop on the engine only. Redirects remain visible to each caller's existing guard. */
+export const suwayomiFetch = (url: string | URL, init: RequestInit = {}, retryAuth?: boolean): Promise<Response> =>
+  engineAuth().fetch(url, init, retryAuth);
+
+/** The WebView rejects a revoked session only after its socket upgrades. Probe the side-effect-free
+ * RequireUser-protected about endpoint first, so a restarted engine's lost session renews over HTTP401.
+ * Verified on v2.3.2243/v2.4.2366 and upstream SettingsController.kt; no extra call for legacy none/basic.
+ */
+export async function suwayomiBrowserHeaders(signal: AbortSignal): Promise<Record<string, string>> {
+  const auth = engineAuth();
+  if (auth.mode === 'simple' || auth.mode === 'ui_login') {
+    const response = await auth.fetch(suwayomiUrl('/api/v1/settings/about'), { signal });
+    await response.body?.cancel().catch(() => {});
+    if (!response.ok) throw new EngineAuthError(response.status, 'the extension engine refused its browser login');
+  }
+  return auth.headers(signal);
 }
 
 /**
@@ -129,6 +150,7 @@ export const engineAnswered = (): boolean => answered;
  * `cause` is kept, so a caller that reads `e.cause.code` (the fake engine's own test does) still can.
  */
 function transportError(e: any, timeoutMs: number): Error {
+  if (e instanceof EngineAuthError) return e;
   if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
     return new Error(`suwayomi timeout after ${timeoutMs}ms`, { cause: e });
   }
@@ -189,19 +211,29 @@ function refused(j: { data?: unknown; errors?: Array<{ message?: string }> }): b
  * old chapter list as a fresh one, and nothing would ever record the failure.
  */
 export async function gql<T = unknown>(query: string, variables: Record<string, unknown> = {}, timeoutMs = 30000): Promise<T> {
+  return runGql<T>(query, variables, timeoutMs, AbortSignal.timeout(timeoutMs));
+}
+
+async function runGql<T>(query: string, variables: Record<string, unknown>, timeoutMs: number, signal: AbortSignal, retried = false): Promise<T> {
   if (!suwayomiConfigured()) throw new Error('suwayomi is not configured');
+  const doc = query.replace(/#[^\n]*/g, '').trimStart();
+  const readOnly = doc.startsWith('{') || /^query\b/.test(doc);
   let r: Response;
   try {
-    r = await fetch(suwayomiUrl('/api/graphql'), {
+    r = await suwayomiFetch(suwayomiUrl('/api/graphql'), {
       method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json', ...suwayomiImageHeaders() },
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify({ query, variables }),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+      signal,
+    }, false); // runGql owns the single retry budget, including HTTP-200 RequireAuth refusals
   } catch (e) {
     throw transportError(e, timeoutMs);
   }
   if (!r.ok) {
+    if (r.status === 401 && readOnly && !retried && (engineAuth().mode === 'simple' || engineAuth().mode === 'ui_login')) {
+      await r.body?.cancel().catch(() => {});
+      return runGql(query, variables, timeoutMs, signal, true);
+    }
     const e: GqlError = new Error(`suwayomi ${r.status}`);
     e.status = r.status;
     throw e;
@@ -218,6 +250,19 @@ export async function gql<T = unknown>(query: string, variables: Record<string, 
   }
   const op = opOf(query);
   if (j && typeof j === 'object' && j.errors?.length) {
+    // graphql-java can report RequireAuth's refusal as HTTP 200. A mutation may contain several fields;
+    // never replay it, even when another field failed authentication. Only a wholly rejected query retries.
+    const authError = (e: { message?: string }) => /^(?:Exception while fetching data \([^\n]*\) : )?Unauthorized\.?$/i.test(e.message ?? '');
+    const authOnly = j.errors.every(authError)
+      && (j.data == null || (typeof j.data === 'object' && Object.values(j.data).every((v) => v == null)));
+    if (j.errors.some(authError) && (engineAuth().mode === 'simple' || engineAuth().mode === 'ui_login')) {
+      engineAuth().rejected(r);
+      if (authOnly && readOnly && !retried) return runGql(query, variables, timeoutMs, signal, true);
+      throw new EngineAuthError(401, 'the extension engine refused its configured login');
+    }
+    if (j.errors.some((e) => /^(?:Exception while fetching data \([^\n]*\) : )?Forbidden\.?$/i.test(e.message ?? ''))) {
+      throw new EngineAuthError(403, 'the extension engine account does not permit this operation');
+    }
     const message = j.errors[0]?.message || 'graphql error';
     if (refused(j)) {
       // Reintroduce by recording an optional operation too: "an engine without the Cloudflare setting is not an
