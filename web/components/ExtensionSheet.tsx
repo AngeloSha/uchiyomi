@@ -23,8 +23,8 @@ import { t as tr } from '@/lib/i18n';
 import { sentenceGap } from '@/lib/jobs';
 import { adultShown } from '@/lib/adult';
 import {
-  extLanguageName, langTag, languageProblem, languagesOnText, nearSourceLimit, needsTurningOn, overLimitText,
-  sourceHealth, type ExtSource, type ExtStatus, type InstalledExt,
+  extSourceLabel, langTag, languageProblem, languagesOnText, nearSourceLimit, needsTurningOn, overLimitText,
+  sourceHealth, sourcesAreSites, type ExtSource, type ExtStatus, type InstalledExt,
 } from '@/lib/extensions';
 import type { AdminSourceRow, SrcStatus } from '@/lib/providerGroups';
 import { Switch } from '@/components/Switch';
@@ -101,12 +101,18 @@ export function ExtensionSection({ ext, status, hiddenLangs, actions, onLanguage
   const off = needsTurningOn(ext);
   const over = overLimitText(status.skipped, status.cap);
   const across = tr('Across all extensions: {n} of {max} sources on.', { n: status.enabled ?? 0, max: status.cap ?? 0 });
-  const settingsLang = ext.sources.length > 1 ? ext.sources.find((s) => s.id === settingsOf)?.lang : undefined;
+  // A multi-site extension (several sources in one language): its rows are named by source, and a long list is searchable.
+  const sites = sourcesAreSites(ext);
+  const settingsSource = ext.sources.length > 1 ? ext.sources.find((s) => s.id === settingsOf) : undefined;
+  const settingsLang = settingsSource ? extSourceLabel(settingsSource, sites) : undefined;
+  const [query, setQuery] = useState('');
+  const needle = query.trim().toLocaleLowerCase();
+  const shown = needle ? ext.sources.filter((s) => extSourceLabel(s, sites).toLocaleLowerCase().includes(needle)) : ext.sources;
 
   /** One language on or off: that source alone, by id. The switch is the list's, so it waits for the list. */
   const toggle = async (s: ExtSource, on: boolean) => {
     setSwitching(s.id);
-    const lang = extLanguageName(s.lang);
+    const lang = extSourceLabel(s, sites);
     try {
       await api('/api/admin/extensions/sources/bulk', { json: { ids: [s.id], enabled: on } });
       void qc.invalidateQueries({ queryKey: ['admin-sources'] });
@@ -121,7 +127,7 @@ export function ExtensionSection({ ext, status, hiddenLangs, actions, onLanguage
     <div className="space-y-4" data-ext-sheet={ext.pkgName}>
       <section aria-labelledby="ext-sheet-langs">
         <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-3 gap-y-2">
-          <h3 id="ext-sheet-langs" className="text-[11px] font-semibold uppercase tracking-wider text-fog-500 rtl:tracking-normal">{tr('Languages')}</h3>
+          <h3 id="ext-sheet-langs" className="text-[11px] font-semibold uppercase tracking-wider text-fog-500 rtl:tracking-normal">{sites ? tr('Sources') : tr('Languages')}</h3>
           <span className="flex items-center gap-2.5">
             {ext.sources.length > 0 && <span className="text-[12px] tabular-nums text-fog-500">{languagesOnText(ext.on, ext.sources.length)}</span>}
             {/* None on -- installed in the engine's own page, or every language switched off: one press, here. */}
@@ -132,12 +138,18 @@ export function ExtensionSection({ ext, status, hiddenLangs, actions, onLanguage
             )}
           </span>
         </div>
-        <p className="mt-1 text-[12px] leading-relaxed text-fog-400">{tr('Each language is its own source; turn on the ones you read.')}</p>
+        <p className="mt-1 text-[12px] leading-relaxed text-fog-400">{sites ? tr('Each site is its own source; turn on the ones you read.') : tr('Each language is its own source; turn on the ones you read.')}</p>
+        {ext.sources.length > 12 && (
+          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={tr('Search')} aria-label={tr('Search')}
+            className="field mt-3 w-full" data-ext-langs-search />
+        )}
         {!ext.sources.length ? (
           <p className="py-3 text-sm text-fog-500">{tr('This extension provides no source.')}</p>
+        ) : !shown.length ? (
+          <p className="py-3 text-sm text-fog-500">{tr('Nothing matches that search.')}</p>
         ) : (
           <ul className="mt-3 divide-y divide-ink-800/70 overflow-hidden rounded-2xl border border-ink-700/60 bg-ink-900/40" data-ext-langs>
-            {ext.sources.map((s) => {
+            {shown.map((s) => {
               // An admin's switch off over an extension's switch on: said, rather than a switch that reads "on".
               const adminOff = s.enabled && !!offByAdmin?.has(s.id);
               const problem = adminOff ? { tone: 'off' as const, label: tr('Turned off') } : languageProblem(sourceHealth(s, reg, rows));
@@ -148,7 +160,7 @@ export function ExtensionSection({ ext, status, hiddenLangs, actions, onLanguage
                     {langTag(s.lang)}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm text-fog-100">{extLanguageName(s.lang)}</p>
+                    <p className="truncate text-sm text-fog-100">{extSourceLabel(s, sites)}</p>
                     {(problem || hidden) && (
                       <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-fog-500" data-ext-lang-problem>
                         {problem && <StatusMark tone={problem.tone} label={problem.label} size="xs" />}
@@ -158,7 +170,7 @@ export function ExtensionSection({ ext, status, hiddenLangs, actions, onLanguage
                     )}
                   </div>
                   {switching === s.id && <ProgressRing progress="spin" size={14} tone="muted" />}
-                  <Switch on={s.enabled} disabled={switching === s.id || !!busy} label={extLanguageName(s.lang)} onChange={(v) => void toggle(s, v)} />
+                  <Switch on={s.enabled} disabled={switching === s.id || !!busy} label={extSourceLabel(s, sites)} onChange={(v) => void toggle(s, v)} />
                 </li>
               );
             })}
@@ -194,7 +206,7 @@ export function ExtensionSection({ ext, status, hiddenLangs, actions, onLanguage
             className="group flex w-full items-center justify-between gap-3 py-3.5 text-start">
             <span className="min-w-0 truncate text-sm text-fog-200 group-hover:text-fog-50">
               {tr('Settings')}
-              {settingsLang !== undefined && <span className="ms-2 text-[12px] text-fog-500">{tr('for {language}', { language: extLanguageName(settingsLang) })}</span>}
+              {settingsLang !== undefined && <span className="ms-2 text-[12px] text-fog-500">{tr('for {language}', { language: settingsLang })}</span>}
             </span>
             {/* It turns with the section, at once: no motion. */}
             <IcChevronRight aria-hidden width={16} height={16} className={`shrink-0 text-fog-500 ${settingsOpen ? 'rotate-90' : 'rtl:-scale-x-100'}`} />

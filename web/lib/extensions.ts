@@ -117,6 +117,19 @@ export function extLanguageName(code: string | null): string {
   return languageName(code);
 }
 
+/**
+ * Whether an extension's sources are sites rather than languages: two or more of them share a language. Mihon's
+ * convention is one source per language, and the sheet names each row by it; a multi-site APK (Nyora-Sources: 128 sites,
+ * every one English) then drew 128 rows reading "English". Those rows are named by the source instead.
+ */
+export function sourcesAreSites(e: Pick<InstalledExt, 'sources'>): boolean {
+  return new Set(e.sources.map((s) => s.lang)).size < e.sources.length;
+}
+
+/** A source's row name in its extension's sheet: its language, or its own name when the extension is a set of sites. */
+export const extSourceLabel = (s: Pick<ExtSource, 'name' | 'lang'>, sites: boolean): string =>
+  (sites && s.name.trim() ? s.name : extLanguageName(s.lang));
+
 /** The short tag a language wears on an installed row: the code, upper-cased, as Mihon prints it. */
 export const langTag = (code: string | null): string => (code ? code.toUpperCase() : '—');
 
@@ -138,7 +151,7 @@ export function installedList(exts: readonly CatalogExt[], sources: readonly Ext
   return exts
     .filter((e) => e.installed)
     .map((e) => {
-      const own = [...(byPkg.get(e.pkgName) ?? [])].sort((a, b) => named(a).localeCompare(named(b)) || a.id.localeCompare(b.id));
+      const own = [...(byPkg.get(e.pkgName) ?? [])].sort((a, b) => named(a).localeCompare(named(b)) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
       return {
         ...e,
         sources: own,

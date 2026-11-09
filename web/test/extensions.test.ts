@@ -24,7 +24,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { setActiveLocale } from '../lib/format';
 import { Facts } from '../components/ExtensionBits';
 import {
-  BROWSE_PAGE, LOCAL_SOURCE_LANG, NO_FILTERS, catalogQuery, engineLine, engineMeta, extLanguageName, extLanguagesText, helperLine,
+  BROWSE_PAGE, LOCAL_SOURCE_LANG, NO_FILTERS, catalogQuery, engineLine, engineMeta, extLanguageName, extLanguagesText, extSourceLabel, sourcesAreSites, helperLine,
   installedList, languageOptions, languageProblem, languagesOnText, nearSourceLimit, needsTurningOn,
   nextOffset, overLimitText, reasonLine, sourceHealth, sourcesOnText, versionText,
   type CatalogExt, type ExtSource,
@@ -229,8 +229,8 @@ test('an extension\'s languages are switches, one source each, said to be just t
   // switch holds for most of a minute while the site is probed, and this fails.
   assert.match(sheet, /api\('\/api\/admin\/extensions\/sources\/bulk', \{ json: \{ ids: \[s\.id\], enabled: on \} \}\)/, 'a language switch is not that one source');
   assert.doesNotMatch(sheet, /extensions\/sources\/\$\{/, 'a switch waits on the smoke test');
-  assert.match(sheet, /\{tr\('Each language is its own source; turn on the ones you read\.'\)\}/, 'the sheet does not say what a language switch is');
-  assert.match(sheet, /<Switch on=\{s\.enabled\} disabled=\{switching === s\.id \|\| !!busy\} label=\{extLanguageName\(s\.lang\)\}/, 'a language has no switch, or one without its name');
+  assert.match(sheet, /\{sites \? tr\('Each site is its own source; turn on the ones you read\.'\) : tr\('Each language is its own source; turn on the ones you read\.'\)\}/, 'the sheet does not say what a language switch is');
+  assert.match(sheet, /<Switch on=\{s\.enabled\} disabled=\{switching === s\.id \|\| !!busy\} label=\{extSourceLabel\(s, sites\)\}/, 'a language has no switch, or one without its name');
   // The limit is said where a switch can cross it.
   assert.match(sheet, /const across = tr\('Across all extensions: \{n\} of \{max\} sources on\.', \{ n: status\.enabled \?\? 0, max: status\.cap \?\? 0 \}\);/);
   assert.match(sheet, /data-ext-sheet-cap>\s*\{across\}/, 'the source limit is not said beside the switches');
@@ -340,8 +340,9 @@ test('an extension\'s Settings are closed until asked for, or linked to', () => 
   assert.match(sheet, /aria-expanded=\{settingsOpen\} aria-controls="ext-sheet-settings-body"/, 'the disclosure does not say whether it is open');
   assert.match(sheet, /\{settingsOpen && \(\s*<div id="ext-sheet-settings-body"[^>]*>\s*<ExtensionSettingsBody sourceId=\{settingsOf\}/, 'the settings show while the disclosure is closed');
   assert.equal((sheet.match(/<ExtensionSettingsBody\b/g) ?? []).length, 1, 'the settings are drawn outside their disclosure');
-  // With several languages the closed row says whose settings it opens on.
-  assert.match(sheet, /tr\('for \{language\}', \{ language: extLanguageName\(settingsLang\) \}\)/);
+  // With several languages (or sites) the closed row says whose settings it opens on.
+  assert.match(sheet, /const settingsLang = settingsSource \? extSourceLabel\(settingsSource, sites\) : undefined;/);
+  assert.match(sheet, /tr\('for \{language\}', \{ language: settingsLang \}\)/);
   // The chevron turns at once: round 2 adds no motion.
   const toggle = slice(sheet, 'data-ext-settings-toggle', '</button>');
   assert.doesNotMatch(toggle, /transition|duration-|animate-/, 'the disclosure animates');
@@ -496,4 +497,18 @@ test('a line of facts isolates each one, so a version never takes an Arabic coun
   const sources = code(read('components/SourcesPanel.tsx'));
   assert.match(slice(sources, 'function SourceRow(', 'function AddSources('), /\{facts\.map\(\(f\) => <span key=\{f\}> · <bdi>\{f\}<\/bdi><\/span>\)\}/, 'a source row\'s facts are one string');
   assert.doesNotMatch(panel + sheet + sources + code(read('components/ExtensionSheet.tsx')), /\.filter\(Boolean\)\.join\(' · '\)/, 'facts are joined into one string again');
+});
+
+test('a multi-site extension names its rows by source, not by a language they all share', () => {
+  const src = (id: string, name: string, lang: string | null) => ({ id, name, lang, nsfw: false, enabled: true, pkgName: 'p' });
+  // Mihon's one source per language: rows read as languages.
+  const perLang = [src('1', 'MangaDex (EN)', 'en'), src('2', 'MangaDex (ES)', 'es')];
+  assert.equal(sourcesAreSites({ sources: perLang }), false);
+  assert.equal(extSourceLabel(perLang[0], false), extLanguageName('en'));
+  // Nyora-Sources: many sites, every one English -- 128 rows of "English" before.
+  const sites = [src('3', 'Asura', 'en'), src('4', 'Flame', 'en')];
+  assert.equal(sourcesAreSites({ sources: sites }), true);
+  assert.equal(extSourceLabel(sites[0], true), 'Asura');
+  assert.equal(extSourceLabel(src('5', ' ', 'en'), true), extLanguageName('en'), 'a nameless source falls back to its language');
+  assert.equal(sourcesAreSites({ sources: [sites[0]] }), false);
 });

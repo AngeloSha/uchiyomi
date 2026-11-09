@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4571
+    "strings": 4572
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -2729,6 +2729,7 @@
   "Could not read the extension list": "无法读取扩展列表",
   "Could not turn on {name}": "无法开启 {name}",
   "Each language is its own source; turn on the ones you read.": "每种语言都是单独的来源；开启你会读的语言即可。",
+  "Each site is its own source; turn on the ones you read.": "每个站点都是独立的来源；打开你阅读的那些。",
   "Each language keeps its own settings.": "每种语言各有自己的设置。",
   "Extensions get past Cloudflare through Uchiyomi’s helper.": "扩展通过 Uchiyomi 的助手绕过 Cloudflare。",
   "Find one in Browse and install it with one press. Its sources are on at once, ready to search from Discover.": "在“浏览”中找到扩展，一键即可安装。它的来源会立即开启，可在“发现”中搜索。",
