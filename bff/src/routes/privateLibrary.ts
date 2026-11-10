@@ -34,8 +34,14 @@ export async function privateResponseHeaders(req: FastifyRequest, reply: Fastify
   if (privateContent) reply.header('X-Uchiyomi-Private', '1');
   if (privateContent || privacyMetadata) {
     reply.header('Cache-Control', 'private, no-store');
-    const vary=String(reply.getHeader('Vary') ?? '').split(',').map(v=>v.trim()).filter(Boolean);
-    reply.header('Vary', [...new Set([...vary,'Authorization','Cookie'])].join(', '));
+    // Dormant older workers ignore Cache-Control and blindly Cache.put images. HttpOnly cookies are
+    // absent from their Request.headers, so Vary: Cookie cannot separate two accounts' native cache
+    // lookups. Vary:* makes Cache.put reject the private response in every worker version.
+    if(privateContent)reply.header('Vary','*');
+    else{
+      const vary=String(reply.getHeader('Vary') ?? '').split(',').map(v=>v.trim()).filter(Boolean);
+      reply.header('Vary', [...new Set([...vary,'Authorization','Cookie'])].join(', '));
+    }
   }
 }
 

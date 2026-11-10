@@ -93,6 +93,7 @@ test('two accounts cannot name private libraries or access titles, manifests, im
     const denied=await app.inject({url,headers:as(b)});assert.equal(denied.statusCode,404,`${url}: ${denied.body}`);
     const allowed=await app.inject({url,headers:as(a)});assert.equal(allowed.statusCode,200,`${url}: ${allowed.body}`);
     assert.equal(allowed.headers['x-uchiyomi-private'],'1');assert.match(allowed.headers['cache-control'],/no-store/);
+    assert.equal(allowed.headers.vary,'*','all private data rejects native Cache.put, including dormant older workers');
   }
   for(const url of [`/img/books/${privateBook}/page/1`,`/img/lib/books/${privateBook}/page/1`]){
     const denied=await app.inject({url,headers:cookie(b)});assert.equal(denied.statusCode,404,`${url}: ${denied.body}`);
@@ -125,6 +126,7 @@ test('defaults remain shared; opting in affects only later additions and rejects
   assert.equal(preferences.headers['x-uchiyomi-private'],undefined,'shared-only preference reads never activate the private cache barrier');
   const privatePreferences=await app.inject({url:'/api/personal/privacy',headers:as(a)});
   assert.equal(privatePreferences.headers['x-uchiyomi-private'],'1','actual private content still activates the barrier on preference reads');
+  assert.equal(privatePreferences.headers.vary,'*','private-owned metadata cannot enter a legacy worker cache');
   const enabled=await app.inject({method:'PUT',url:'/api/personal/privacy',headers:as(b),payload:{defaultPrivate:true}});
   assert.match(enabled.headers['cache-control'],/no-store/);
   assert.equal(enabled.headers['x-uchiyomi-private'],undefined,'a private default without private content/history does not disable shared implicit caching');
@@ -237,7 +239,7 @@ test('privacy response classification failure disables implicit caching',{skip},
   await (await import('../src/routes/privateLibrary')).privateResponseHeaders({url:'/api/history',viewCtx:{userId:'invalid-uuid'}} as any,
     {header(name:string,value:unknown){headers.set(name,value);return this;},getHeader(name:string){return headers.get(name);}} as any);
   assert.equal(headers.get('X-Uchiyomi-Private'),'1');assert.match(String(headers.get('Cache-Control')),/no-store/);
-  assert.match(String(headers.get('Vary')),/Accept-Encoding/);
+  assert.equal(headers.get('Vary'),'*','classification failure replaces weaker existing Vary fields with universal cache rejection');
 });
 
 

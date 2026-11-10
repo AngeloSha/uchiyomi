@@ -12,9 +12,10 @@ const url=new URL(base);
 assert.ok(url.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(url.hostname),'disposable loopback preview required');
 const out=process.env.OUT||'/tmp/uchiyomi-private-library-walk';mkdirSync(out,{recursive:true});
 const nonce=randomUUID().replaceAll('-','');
+const nativeProbeCache='uchi-private-native-cache-'+nonce;
 const title=`Private browser fixture ${nonce}`,password=`Fixture-${randomBytes(24).toString('base64url')}-A9`;
 const accounts=[],checks=[],failures=[],consoleErrors=[],serverErrors=[],expectedNetworkResponses=[],authResponses=[],expectedErrors=new Set();
-let browser,page,adminToken,ownerToken,otherToken,owner,other,seriesId,bookId,loginAttempt=-1,offline=false,step=0,authTransition=true;
+let browser,page,adminToken,ownerToken,otherToken,owner,other,seriesId,bookId,loginAttempt=-1,offline=false,step=0,authTransition=true,nativeOwnerProbe,nativeOtherProbe;
 const check=(name,condition,detail='')=>{checks.push({name,pass:!!condition,...(!condition?{detail}:{} )});console.log(`[${condition?'PASS':'FAIL'}] ${name}${!condition?' '+detail:''}`);if(!condition)failures.push(name);};
 const shot=async name=>page.screenshot({path:`${out}/${String(++step).padStart(2,'0')}-${name}.png`,waitForFonts:false});
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -113,6 +114,14 @@ try{
   for(const path of [`/api/series/${seriesId}`,`/api/books/${bookId}/download-manifest`,`/img/books/${bookId}/page/1`]){
     const response=await uiRequest(path);check('owner receives private, uncached '+path.split('/').slice(1,3).join('/'),response.status===200&&response.headers['x-uchiyomi-private']==='1'&&/no-store/.test(response.headers['cache-control']||''));
   }
+  // Native Cache.put is exactly what older workers call without checking Cache-Control. Keep SW
+  // enabled: this separate fixture cache probes browser enforcement, not the new worker's own filter.
+  nativeOwnerProbe=await page.evaluate(async({bookId,name})=>{
+    const request=new Request(`/img/books/${bookId}/page/1`,{credentials:'include'}),response=await fetch(request),cache=await caches.open(name);
+    let rejected=false,error='';try{await cache.put(request,response.clone());}catch(cause){rejected=true;error=cause.name;}
+    return{status:response.status,vary:response.headers.get('vary'),privateHeader:response.headers.get('x-uchiyomi-private'),cookie:request.headers.get('cookie'),authorization:request.headers.get('authorization'),rejected,error,entries:(await cache.keys()).length};
+  },{bookId,name:nativeProbeCache});
+  check('private cookie-only images reject native Cache.put even in legacy workers',nativeOwnerProbe.status===200&&nativeOwnerProbe.privateHeader==='1'&&nativeOwnerProbe.vary?.split(',').some(value=>value.trim()==='*')&&nativeOwnerProbe.cookie===null&&nativeOwnerProbe.authorization===null&&nativeOwnerProbe.rejected&&nativeOwnerProbe.error==='TypeError'&&nativeOwnerProbe.entries===0);
   await page.goto(`${base}/series/?id=${seriesId}`,{waitUntil:'networkidle2'});await page.waitForSelector('[data-series-privacy]');
   check('member owner sees private controls',(await page.$eval('[data-series-privacy]',el=>el.innerText)).includes('Private library'));
   await clickText('Manage private copy');await page.waitForSelector(`[data-private-copy="${seriesId}"]`);
@@ -146,6 +155,11 @@ try{
   for(const path of [`/api/series/${seriesId}`,`/api/series/${seriesId}/privacy`,`/api/books/${bookId}/download-manifest`,`/img/books/${bookId}/page/1`]){
     const response=await uiRequest(path,{token:otherToken,expected:404});check('other account cannot open '+path.split('/').slice(1,3).join('/'),response.status===404);
   }
+  nativeOtherProbe=await page.evaluate(async({bookId,name})=>{
+    const request=new Request(`/img/books/${bookId}/page/1`,{credentials:'include'}),response=await fetch(request),cached=await(await caches.open(name)).match(request);
+    return{status:response.status,cookie:request.headers.get('cookie'),authorization:request.headers.get('authorization'),cachedBytes:cached?(await cached.arrayBuffer()).byteLength:0};
+  },{bookId,name:nativeProbeCache});
+  check('other real account cookies cannot recover private bytes through native Cache.match',nativeOtherProbe.status===404&&nativeOtherProbe.cookie===null&&nativeOtherProbe.authorization===null&&nativeOtherProbe.cachedBytes===0);
   check('other account does not receive owner management rows',!(await uiRequest('/api/personal/private-series',{token:otherToken})).data.content.some(row=>row.id===seriesId));
   await page.goto(base+'/library/?view=downloads',{waitUntil:'networkidle2'});
   check('account switch keeps private title out of offline library UI',!(await page.$eval('body',el=>el.innerText)).includes(title));
@@ -164,6 +178,7 @@ try{
 }catch(error){failures.push(error.stack||error.message);console.error(error.stack||error.message);if(page&&!page.isClosed()){await shot('failure').catch(()=>{});writeFileSync(`${out}/failure-page.txt`,`${page.url()}\n${await page.$eval('body',el=>el.innerText).catch(()=> '')}`);}}
 finally{
   if(page&&offline)await page.setOfflineMode(false).catch(()=>{});
+  if(page&&!page.isClosed())await page.evaluate(name=>caches.delete(name),nativeProbeCache).catch(()=>{});
   // Stop the app's ordinary authenticated polling before deleting its fixture account. A deliberate
   // account deletion is cleanup, not evidence of an unexpected runtime authorization failure.
   await browser?.close();
@@ -185,7 +200,7 @@ finally{
       expectedNetworkResponses.push('unauthenticated document bootstrap401: '+url);consoleErrors.splice(i,1);
     }
   }
-  const result={base,image:process.env.E2E_IMAGE||null,checks,failures,consoleErrors,observedConsoleErrors,serverErrors,expectedNetworkResponses,authResponses,fixtures:{owner:owner?.id,other:other?.id,seriesId,bookId},serviceWorkerBypass:false};
+  const result={base,image:process.env.E2E_IMAGE||null,checks,failures,consoleErrors,observedConsoleErrors,serverErrors,expectedNetworkResponses,authResponses,nativeCache:{owner:nativeOwnerProbe,other:nativeOtherProbe},fixtures:{owner:owner?.id,other:other?.id,seriesId,bookId},serviceWorkerBypass:false};
   writeFileSync(`${out}/result.json`,JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({checks:checks.length,passed:checks.filter(check=>check.pass).length,failures,consoleErrors,serverErrors}));
   process.exitCode=failures.length||consoleErrors.length||serverErrors.length?1:0;
 }

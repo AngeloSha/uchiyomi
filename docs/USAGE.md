@@ -4036,6 +4036,8 @@ needs the server (Discover, search, adding series, the admin panel) is dimmed ra
 there is nothing behind it until you reconnect. The moment you do, the banner clears and any reading you did
 offline is sent up.
 
+Private responses cannot enter the browser’s implicit caches, including an older worker’s image cache during an upgrade. Explicit offline downloads remain available only to their owner.
+
 Downloads and queued reading stay bound to the account that started them. Switching accounts stops an
 unfinished save or sync; completed downloads and that account’s pending reading remain available when
 they sign back in. Older browser progress entries that contain no recorded account are retained locally
