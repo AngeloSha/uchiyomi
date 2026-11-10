@@ -52,6 +52,8 @@ export async function privateAdminContentGuard(req:FastifyRequest,reply:FastifyR
     const lease=claimPrivateContentRead(rows.map(r=>r.id));
     if(!lease)return reply.code(404).send({error:'not_found'});
     reply.raw.once('finish',()=>lease.release());reply.raw.once('close',()=>lease.release());
+    // A route that itself changes privacy (admin make-private) must drop its own read lease first, or it fences itself out.
+    (req as any).privateReadLease=lease;
   }
   if((await forbiddenIds(ids,uid)).size)return reply.code(404).send({error:'not_found'});
   (req as any).privateAdminGuarded=true;

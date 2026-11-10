@@ -1219,7 +1219,11 @@ async function rootProven(root: string, seriesId: string, present: number, absen
  * default and is a deliberate-refusal guesser (two chapters minimum, ambiguity refuses); when Uchiyomi
  * performs the rename it knows the mapping exactly, so guessing it back would be strictly worse.
  */
-export async function renameSeriesFolder(id: string, newFolder: string): Promise<{ ok: true } | FileOpRefusal> {
+export async function renameSeriesFolder(
+  id: string, newFolder: string,
+  /** Admin filing of a SHARED folder into this user's private namespace; the only cross-namespace move allowed. */
+  opts: { intoPrivateOf?: string; outOfPrivateOf?: string } = {},
+): Promise<{ ok: true } | FileOpRefusal> {
   const row = await one<{ folder: string; library_id: string; is_private: boolean; owner_user_id: string | null }>(
     'SELECT folder, library_id, is_private, owner_user_id FROM lib_series WHERE id = $1', [id],
   );
@@ -1227,7 +1231,12 @@ export async function renameSeriesFolder(id: string, newFolder: string): Promise
 
   const typed = toStoredRel(newFolder).replace(/^\/+|\/+$/g, '').trim();
   if (!typed || typed === row.folder) return { ok: false, reason: 'Choose a different folder name.' };
-  if (privateFolderOwner(row.folder) !== privateFolderOwner(typed) || (reservedPrivateFolder(typed) && !privateFolderOwner(typed))) return {ok:false,reason:'A private storage folder must remain in its owner’s namespace.'};
+  const filing = !!opts.intoPrivateOf && !reservedPrivateFolder(row.folder) && !row.is_private
+    && privateFolderOwner(typed) === opts.intoPrivateOf.toLowerCase();
+  // ...and its reverse: publishing one owner's private folder into the shared tree (never into another private one).
+  const publishing = !!opts.outOfPrivateOf && privateFolderOwner(row.folder) === opts.outOfPrivateOf.toLowerCase()
+    && !reservedPrivateFolder(typed);
+  if (!filing && !publishing &&(privateFolderOwner(row.folder) !== privateFolderOwner(typed) || (reservedPrivateFolder(typed) && !privateFolderOwner(typed)))) return {ok:false,reason:'A private storage folder must remain in its owner’s namespace.'};
 
   const roots = await rootsOf(id);
   if (!roots.length) return { ok: false, reason: 'That series has no files on disk.' };

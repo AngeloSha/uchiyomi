@@ -359,6 +359,40 @@ test('ids and reading progress survive a rename', { skip }, async () => {
   assert.equal((await q('SELECT id FROM lib_series WHERE id = $1', [S])).length, 1, 'the series id changed');
 });
 
+const PRIV_OWNER = '0b6a8f4e-3c1d-4e2a-9f7b-5d6c7e8f9a0b';
+
+test('a plain rename never crosses into a private namespace', { skip }, async () => {
+  await seed(true);
+  const r = await renameSeriesFolder(S, `_private/${PRIV_OWNER}/Berserk`);
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /namespace/i);
+  assert.ok(await exists(join(ROOT, FOLDER, 'ch1.cbz')), 'a refused filing moved files');
+});
+
+test('admin filing moves a shared folder into the named owner’s private namespace only', { skip }, async () => {
+  await seed(true);
+  const wrong = await renameSeriesFolder(S, `_private/${PRIV_OWNER}/Berserk`, { intoPrivateOf: '11111111-2222-4333-8444-555555555555' });
+  assert.equal(wrong.ok, false, 'filing into someone other than the named owner was allowed');
+  const r = await renameSeriesFolder(S, `_private/${PRIV_OWNER}/Berserk`, { intoPrivateOf: PRIV_OWNER });
+  assert.equal(r.ok, true, r.ok ? '' : r.reason);
+  assert.ok(await exists(join(ROOT, `_private/${PRIV_OWNER}/Berserk/ch1.cbz`)));
+  assert.ok(await exists(join(DL, `_private/${PRIV_OWNER}/Berserk/ch2.cbz`)), 'the second root was left behind');
+  const files = await q<{ file: string }>('SELECT file FROM lib_books WHERE series_id = $1', [S]);
+  assert.ok(files.every((f) => f.file.startsWith(`_private/${PRIV_OWNER}/Berserk/`)));
+});
+
+test('publishing moves a private folder back into the shared tree, and nowhere private', { skip }, async () => {
+  await seed(true);
+  const into = await renameSeriesFolder(S, `_private/${PRIV_OWNER}/Berserk`, { intoPrivateOf: PRIV_OWNER });
+  assert.equal(into.ok, true, into.ok ? '' : into.reason);
+  const other = await renameSeriesFolder(S, '_private/11111111-2222-4333-8444-555555555555/Berserk', { outOfPrivateOf: PRIV_OWNER });
+  assert.equal(other.ok, false, 'publishing let the folder land in another private namespace');
+  const out = await renameSeriesFolder(S, 'T!fo/Berserk', { outOfPrivateOf: PRIV_OWNER });
+  assert.equal(out.ok, true, out.ok ? '' : out.reason);
+  assert.ok(await exists(join(ROOT, 'T!fo/Berserk/ch1.cbz')));
+  assert.ok(await exists(join(DL, 'T!fo/Berserk/ch2.cbz')));
+});
+
 test('a rename is refused when the destination already exists', { skip }, async () => {
   await seed(true);
   await mkdir(join(DL, 'T!fo/Taken'), { recursive: true });

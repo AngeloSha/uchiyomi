@@ -1,4 +1,5 @@
 'use client';
+import { moveSeriesToLibrary } from '@/lib/moveSeries';
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -68,7 +69,7 @@ export function useSeriesMenu(series: Series) {
       onSelect: async () => {
         try {
           await api(`/api/admin/series/${encodeURIComponent(series.id)}/check`, { method: 'POST', json: {} });
-          toast(tr('Checking for new chapters…'), 'info', { busy: true });
+          toast(tr('Checking for new chaptersâ€¦'), 'info', { busy: true });
         } catch { toast(tr('Could not do that'), 'error'); }
       },
     }] : []),
@@ -86,7 +87,7 @@ export function useSeriesMenu(series: Series) {
     <MoveToLibrary n={1} busy={moveBusy} onClose={() => setMoving(false)} onPick={async (libraryId) => {
       setMoveBusy(true);
       try {
-        await api(`/api/admin/series/${encodeURIComponent(series.id)}/library`, { json: { libraryId } });
+        await moveSeriesToLibrary(series.id, libraryId);
         toast(tr('1 series updated'), 'success');
         settle();
       } catch { toast(tr('Could not do that'), 'error'); }

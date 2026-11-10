@@ -15,6 +15,7 @@ import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from '@/components/Toast';
 import { Modal, ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { MoveToLibrary } from '@/components/MoveToLibrary';
+import { moveManyToLibrary } from '@/lib/moveSeries';
 import { useAuth, canDownload, canUploadManually } from '@/lib/auth';
 import { AdultToggle, useAdultFilterConfigured, useAdultShown, useLibraries } from '@/components/AdultToggle';
 import { LibraryFilters, NO_SOURCE, READ_STATES, STATUSES, useLibrarySources } from '@/components/LibraryFilters';
@@ -315,10 +316,11 @@ function LibraryInner() {
     qc.invalidateQueries({ queryKey: ['home'] });
   };
 
-  const bulk = async (path: string, extra: Record<string, unknown>) => {
+  const bulk = async (path: string, extra: Record<string, unknown>,
+    run?: (ids: string[]) => Promise<{ applied: number; skipped: { id: string }[] }>) => {
     setActing(true);
     try {
-      const r = await api<{ applied: number; skipped: { id: string }[] }>(path, {
+      const r = run ? await run([...picked]) : await api<{ applied: number; skipped: { id: string }[] }>(path, {
         json: { seriesIds: [...picked], ...extra },
       });
       // Say what was skipped rather than silently applying to fewer than were selected. Each count its own pair of
@@ -938,7 +940,7 @@ function LibraryInner() {
           onClose={() => setMoving(false)}
           onPick={async (libraryId) => {
             setMoving(false);
-            await bulk('/api/admin/series/library', { libraryId });
+            await bulk('/api/admin/series/library', { libraryId }, (ids) => moveManyToLibrary(ids, libraryId));
           }}
         />
       )}

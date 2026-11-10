@@ -117,7 +117,9 @@ import { prepareCleanup, cleanupPreview, cleanupConfirmation, purgeLeftovers, pu
 import { mainUses, retireSource } from '../lib/retireSource';
 import { sourcesOverview } from '../lib/sourcesOverview';
 import { titlesFromBackup, entriesFromBackup, type BackupEntry } from '../lib/tachibk';
-import { resolveAddScope, scopeSql, samePrivacyDomainSql, ContentScopeError, deleteAccountPreservingPrivate, type AddScope } from '../lib/contentScope';
+import { resolveAddScope, scopeSql, samePrivacyDomainSql, ContentScopeError, deleteAccountPreservingPrivate, ensurePrivateLibrary, privateBackendSupported, privateFolderOwner, reservedPrivateFolder, type AddScope } from '../lib/contentScope';
+import { claimPrivateContentChange } from '../lib/privateFence';
+import { syncSeriesPrivacy } from '../lib/trackers';
 import { normalizeImportEntries, trackerLinksOf, importSkipKeys, type ImportEntry } from '../lib/importMetadata';
 import { linkSeries, seedTrackerFloor, rememberTrackerPrivacy, TOKEN_EXPIRED, TOKEN_REJECTED, TOKEN_UNREADABLE } from '../lib/trackers';
 import { ADAPTERS, PROVIDERS, LIST_STATUSES, TRACKER_LIST_MAX, type Provider, type LibraryEntry } from '../lib/trackerProviders';
@@ -3189,6 +3191,98 @@ export default async function adminRoutes(app: FastifyInstance) {
       await logAudit('series.rename_folder', { userId: userIdOf(req), detail: { id, folder: b.data.folder }, req });
       return r;
     } finally { claim.release(); }
+  });
+
+  /**
+   * File a SHARED series into one user's private library, as an admin.
+   *
+   * The library move routes refuse this (use_privacy_action) because privacy is not just a column: the scanner
+   * derives a private owner from the `_private/<uid>/` namespace on disk. So this moves the folder into that
+   * namespace first (every root or none, renameSeriesFolder) and only then flips ownership/is_private/library
+   * in one transaction, mirroring PUT /api/series/:id/privacy's checks.
+   */
+  app.post('/api/admin/series/:id/make-private', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.strictObject({ userId: z.string().uuid() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!privateBackendSupported()) return reply.code(409).send({ error: 'private_backend_unsupported' });
+    const owner = b.data.userId.toLowerCase();
+    const user = await one<{ disabled: boolean }>('SELECT disabled FROM users WHERE id=$1', [owner]);
+    if (!user) return reply.code(404).send({ error: 'no_such_user' });
+    const row = await one<{ folder: string; is_private: boolean; work_id: string | null; merged_into: string | null; source_id: string | null; source_series_id: string | null }>(
+      'SELECT folder,is_private,work_id,merged_into,source_id,source_series_id FROM lib_series WHERE id=$1', [id]);
+    if (!row || row.merged_into) return reply.code(404).send({ error: 'not_found' });
+    if (row.is_private) return reply.code(409).send({ error: 'already_private' });
+    if (row.work_id) return reply.code(409).send({ error: 'edition_privacy_conflict' });
+
+    let scope: AddScope;
+    try { scope = await ensurePrivateLibrary(owner); }
+    catch (e) { if (e instanceof ContentScopeError) return reply.code(e.statusCode).send({ error: e.code }); throw e; }
+    const dest = `${scope.folderPrefix}/${row.folder.slice(row.folder.lastIndexOf('/') + 1)}`;
+    if (await one(`SELECT 1 FROM lib_series WHERE id<>$1 AND (folder=$2 OR (library_id=$3 AND source_id=$4 AND source_series_id=$5
+      AND merged_into IS NULL AND deleted_at IS NULL)) LIMIT 1`, [id, dest, scope.libraryId, row.source_id, row.source_series_id]))
+      return reply.code(409).send({ error: 'privacy_destination_conflict' });
+
+    // The admin guard holds a read lease on this very series for the request; only OTHER readers should block.
+    (req as any).privateReadLease?.release();
+    const lease = claimPrivateContentChange(id);
+    if (!lease) return reply.code(409).send({ error: 'busy', message: 'That series is open somewhere else. Try again in a moment.' });
+    const claim = claimSeriesWriter([id], [row.folder, dest]);
+    if (!claim) { lease.release(); return reply.code(409).send({ error: 'busy', message: 'Another task is changing that folder.' }); }
+    try {
+      const moved = await renameSeriesFolder(id, dest, { intoPrivateOf: owner });
+      if (!moved.ok) return reply.code(409).send({ error: 'refused', message: moved.reason, fix: moved.fix });
+      await q(`UPDATE lib_series SET owner_user_id=$2,is_private=true,library_id=$3,library_pinned=true WHERE id=$1`,
+        [id, owner, scope.libraryId]);
+      libraryChanged();
+      await logAudit('series.admin_make_private', { userId: userIdOf(req), detail: { id, ownerUserId: owner, folder: dest }, req });
+      void syncSeriesPrivacy(owner, id).catch(() => {});
+      return { ok: true, libraryId: scope.libraryId, folder: dest };
+    } finally { claim.release(); lease.release(); }
+  });
+
+  /**
+   * The way back: publish a private series into a shared library. The folder leaves `_private/<uid>/` first
+   * (or the scanner would re-derive it as private), then the row is flipped the way PUT /api/series/:id/privacy
+   * does it: is_private off, owner kept, private_published_at stamped so historical private reads stay private.
+   * The admin guard already 404s another user's private series, so this only reaches series the admin may see.
+   */
+  app.post('/api/admin/series/:id/make-shared', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.strictObject({ libraryId: z.string().min(1).max(64) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const row = await one<{ folder: string; is_private: boolean; owner_user_id: string | null; work_id: string | null; merged_into: string | null; source_id: string | null; source_series_id: string | null }>(
+      'SELECT folder,is_private,owner_user_id,work_id,merged_into,source_id,source_series_id FROM lib_series WHERE id=$1', [id]);
+    if (!row || row.merged_into) return reply.code(404).send({ error: 'not_found' });
+    if (!row.is_private) return reply.code(409).send({ error: 'not_private' });
+    if (row.work_id) return reply.code(409).send({ error: 'edition_privacy_conflict' });
+    const owner = privateFolderOwner(row.folder);
+    if (!owner) return reply.code(409).send({ error: 'privacy_copy_required' });
+    const lib = await one<{ path: string; owner_user_id: string | null; managed_private: boolean }>(
+      'SELECT path,owner_user_id,managed_private FROM libraries WHERE id=$1', [b.data.libraryId]);
+    if (!lib) return reply.code(404).send({ error: 'no_such_library' });
+    if (lib.managed_private || lib.owner_user_id || reservedPrivateFolder(lib.path)) return reply.code(409).send({ error: 'use_privacy_action' });
+    const base = row.folder.slice(row.folder.lastIndexOf('/') + 1);
+    const prefix = trimTrailingSlashes(lib.path ?? '');
+    const dest = prefix ? `${prefix}/${base}` : base;
+    if (await one(`SELECT 1 FROM lib_series WHERE id<>$1 AND (folder=$2 OR (library_id=$3 AND NOT is_private AND source_id=$4 AND source_series_id=$5
+      AND merged_into IS NULL AND deleted_at IS NULL)) LIMIT 1`, [id, dest, b.data.libraryId, row.source_id, row.source_series_id]))
+      return reply.code(409).send({ error: 'privacy_destination_conflict' });
+
+    (req as any).privateReadLease?.release();
+    const lease = claimPrivateContentChange(id);
+    if (!lease) return reply.code(409).send({ error: 'busy', message: 'That series is open somewhere else. Try again in a moment.' });
+    const claim = claimSeriesWriter([id], [row.folder, dest]);
+    if (!claim) { lease.release(); return reply.code(409).send({ error: 'busy', message: 'Another task is changing that folder.' }); }
+    try {
+      const moved = await renameSeriesFolder(id, dest, { outOfPrivateOf: owner });
+      if (!moved.ok) return reply.code(409).send({ error: 'refused', message: moved.reason, fix: moved.fix });
+      await q(`UPDATE lib_series SET is_private=false,library_id=$2,library_pinned=true,
+        private_published_at=COALESCE(private_published_at,now()) WHERE id=$1`, [id, b.data.libraryId]);
+      libraryChanged();
+      await logAudit('series.admin_make_shared', { userId: userIdOf(req), detail: { id, libraryId: b.data.libraryId, folder: dest }, req });
+      return { ok: true, libraryId: b.data.libraryId, folder: dest };
+    } finally { claim.release(); lease.release(); }
   });
 
   /** The 409 for a folder another library holds: which folder, and whose, named in the message too. */
