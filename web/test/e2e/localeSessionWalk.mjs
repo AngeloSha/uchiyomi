@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {randomBytes,randomUUID}from'node:crypto';
 import {mkdirSync,writeFileSync}from'node:fs';
 import {fixtureLogin,waitForLoginCooldown}from'./loginCooldown.mjs';
+import {plannedOfflineEvidence}from'./plannedOfflineEvidence.mjs';
 
 const base=process.env.BASE||'http://127.0.0.1:18330';
 const parsed=new URL(base);
@@ -12,7 +13,7 @@ assert.ok(parsed.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(
 const out=process.env.OUT||'/tmp/uchiyomi-locale-session';mkdirSync(out,{recursive:true});
 const nonce=randomUUID().replaceAll('-',''),password=`Locale-${randomBytes(24).toString('base64url')}-A9`;
 const accounts=[],checks=[],failures=[],consoleErrors=[],serverErrors=[],expectedNetwork=[],settingsRequests=[],authRequests=[];
-const held=[],dictionaryDeliveries=[];let holdDictionary=false,browser,page,adminToken,first,second,tokenA,tokenB,offline=false,loginAttempt=-1,step=0;
+const held=[],dictionaryDeliveries=[];let holdDictionary=false,browser,page,adminToken,first,second,tokenA,tokenB,offline=false,loginAttempt=-1,step=0,offlineEvidence;
 const check=(name,pass,detail='')=>{checks.push({name,pass:!!pass,...(!pass?{detail}:{})});console.log(`[${pass?'PASS':'FAIL'}] ${name}${!pass?' '+detail:''}`);if(!pass)failures.push(name);};
 const shot=name=>page.screenshot({path:`${out}/${String(++step).padStart(2,'0')}-${name}.png`,waitForFonts:false});
 async function api(path,{method='GET',body,token=adminToken}={}){
@@ -59,11 +60,11 @@ try{
   assert.equal((await api('/api/settings',{token:tokenB,method:'PUT',body:{lang:'de'}})).status,200);
   browser=await puppeteer.launch({headless:true,args:['--no-sandbox','--disable-dev-shm-usage','--disable-gpu']});
   page=await browser.newPage();await page.setViewport({width:1280,height:900});
+  offlineEvidence=plannedOfflineEvidence(page,()=>offline,()=>checks.at(-1)?.name||'setup');
   page.on('pageerror',error=>consoleErrors.push(error.message));
   page.on('console',message=>{if(message.type()!=='error')return;const text=message.text(),url=message.location()?.url||'';
     if(/401/.test(text)&&[base+'/auth/refresh',base+'/auth/me'].includes(url)){expectedNetwork.push('anonymous auth refusal: '+url);return;}
     if(loginAttempt===0&&/429/.test(text)&&url===base+'/auth/login'){expectedNetwork.push('advertised sign-in cooldown');return;}
-    if(offline&&/net::ERR_(?:INTERNET_DISCONNECTED|FAILED)/.test(text)&&url.startsWith(base+'/')){expectedNetwork.push('deliberate offline: '+url);return;}
     consoleErrors.push(text+' '+url);
   });
   page.on('response',response=>{if(response.status()>=500)serverErrors.push(response.status()+' '+response.url());});
@@ -125,10 +126,12 @@ try{
   page.off('request',intercept);await page.setRequestInterception(false);await page.setBypassServiceWorker(false);
   const savedEnglishAgain=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/settings'&&response.request().method()==='PUT');
   await selectLanguage('en');assert.equal((await savedEnglishAgain).status(),200);await locale('en');
-  const switched=page.waitForResponse(response=>new URL(response.url()).pathname==='/auth/switch'&&response.request().method()==='POST');void switched.catch(()=>{});
+  const switched=page.waitForResponse(response=>new URL(response.url()).pathname==='/auth/switch'&&response.request().method()==='POST').then(response=>({status:response.status()}));void switched.catch(()=>{});
+  const restored=page.waitForResponse(response=>new URL(response.url()).pathname==='/auth/refresh'&&response.status()===200).then(response=>response.json());void restored.catch(()=>{});
   await page.locator('[data-topbar] [aria-label="You"]').click();await clickText('Switch profile');await clickText(second.display_name||second.displayName||`Locale profile ${nonce}`,'[data-switch-profile]');
-  const switchResponse=await switched;assert.equal(switchResponse.status(),200);assert.equal((await switchResponse.json()).user.id,second.id);
+  const switchResponse=await switched;assert.equal(switchResponse.status,200);
   await page.waitForFunction(()=>window.__localeSessionDocument===undefined,{timeout:30000});
+  assert.equal((await restored).user.id,second.id,'actual replacement-document session belongs to B');
   check('account switch replaces the previous JavaScript document',true);await locale('de');
   check('profile switch adopts the second account saved language and direction',await page.evaluate(()=>document.documentElement.dir==='ltr'&&localStorage.getItem('uchiyomi.lang')==='de'));
   check('previous-account language choices were never submitted as the next account',(await api('/api/settings',{token:tokenA})).data.lang==='en'&&(await api('/api/settings',{token:tokenB})).data.lang==='de');
@@ -148,7 +151,9 @@ finally{
   holdDictionary=false;for(const request of held)if(!request.isInterceptResolutionHandled())await request.continue().catch(()=>{});
   await browser?.close();
   for(const account of [...accounts].reverse())try{const response=await api('/api/admin/users/'+account.id,{method:'DELETE'});assert.equal(response.status,200,JSON.stringify(response.data));}catch(error){failures.push('fixture-only cleanup '+account.id+': '+error.message);}
-  const result={base,image:process.env.E2E_IMAGE||null,checks,failures,consoleErrors,serverErrors,expectedNetwork,settingsRequests,authRequests,
+  const observedConsoleErrors=[...consoleErrors];
+  for(let i=consoleErrors.length-1;i>=0;i--)if(offlineEvidence?.take(consoleErrors[i])){expectedNetwork.push('correlated planned offline request: '+consoleErrors[i]);consoleErrors.splice(i,1);}
+  const result={base,image:process.env.E2E_IMAGE||null,checks,failures,consoleErrors,observedConsoleErrors,serverErrors,expectedNetwork,plannedOfflineFailures:offlineEvidence?.failures||[],settingsRequests,authRequests,
     dictionaryDelay:{actualRequests:held.length,deliveries:dictionaryDeliveries,responsesMocked:false,serviceWorkerBypassedOnlyForDelay:true},fixtures:{first:first?.id,second:second?.id}};
   writeFileSync(`${out}/result.json`,JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({checks:checks.length,passed:checks.filter(check=>check.pass).length,failures,consoleErrors,serverErrors}));
   process.exitCode=failures.length||consoleErrors.length||serverErrors.length?1:0;

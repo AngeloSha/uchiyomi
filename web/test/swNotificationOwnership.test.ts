@@ -6,7 +6,7 @@ import vm from'node:vm';
 const source=readFileSync(new URL('../public/sw.js',import.meta.url),'utf8');
 const deferred=<T>()=>{let resolve!:(value:T)=>void;const promise=new Promise<T>(done=>{resolve=done;});return{promise,resolve};};
 function fixture(store=new Map<string,Map<string,Response>>()){
-  const handlers:Record<string,Function>={},notifications:any[]=[],navigated:string[]=[],state:any={matchWait:null,showWait:null,failPut:false};
+  const handlers:Record<string,Function>={},notifications:any[]=[],navigated:string[]=[],state:any={matchWait:null,showWait:null,getWait:null,failPut:false,claimed:0,timers:null};
   const caches={
     keys:async()=>[...store.keys()],delete:async(name:string)=>store.delete(name),
     open:async(name:string)=>{if(!store.has(name))store.set(name,new Map());const entries=store.get(name)!;return{
@@ -17,15 +17,18 @@ function fixture(store=new Map<string,Map<string,Response>>()){
     };},
   };
   const registration={
-    getNotifications:async()=>notifications.filter(notification=>!notification.closed),
+    getNotifications:async()=>{if(state.getWait)await state.getWait.promise;return notifications.filter(notification=>!notification.closed);},
     showNotification:async(title:string,options:any)=>{if(state.showWait)await state.showWait.promise;notifications.push({title,...options,closed:false,close(){this.closed=true;}});},
   };
-  const clients={matchAll:async()=>[],openWindow:async(url:string)=>{navigated.push(url);},claim:async()=>{}};
-  const context:any={URL,Response,Request,Date,Math,JSON,Promise,TypeError,setTimeout,clearTimeout,location:{origin:'https://fixture.test'},caches,clients,
+  const clients={matchAll:async()=>[],openWindow:async(url:string)=>{navigated.push(url);},claim:async()=>{state.claimed++;}};
+  const context:any={URL,Response,Request,Date,Math,JSON,Promise,TypeError,
+    setTimeout:(callback:Function,ms:number)=>state.timers ? state.timers.push(callback) : setTimeout(callback as ()=>void,ms),
+    clearTimeout:(timer:any)=>{if(!state.timers)clearTimeout(timer);},location:{origin:'https://fixture.test'},caches,clients,
     self:{addEventListener:(name:string,handler:Function)=>{handlers[name]=handler;},registration,clients,skipWaiting(){}},fetch:async()=>new Response('{}')};
   vm.createContext(context);vm.runInContext(source,context);
   async function event(name:string,event:any){let pending:Promise<any>|undefined;handlers[name]({...event,waitUntil:(promise:Promise<any>)=>{pending=promise;}});await pending;}
   return{store,state,context,notifications,navigated,event,
+    cleanup:()=>vm.runInContext('closeOtherNotifications()',context) as Promise<void>,
     owner:(userId:string|null)=>event('message',{data:userId?{type:'yomi-user',userId}:{type:'yomi-signout'}}),
     push:(data:any)=>event('push',{data:{json:()=>({title:'Uchiyomi',body:'Open Uchiyomi to check your updates.',url:'/',tag:'uchiyomi-update',recipientId:data.recipientId,
       recipientContent:{title:data.title||'Fixture update',body:data.body||'A new chapter is available',url:data.url||'/',tag:data.tag}})}}),
@@ -45,9 +48,34 @@ test('addressed top-only and malformed nested payloads never display or fall bac
 });
 test('account switch and signout close previous and unlabeled notifications',async()=>{
   const f=fixture();await f.owner('A');await f.push({recipientId:'A',title:'A private'});
-  f.notifications.push({data:{},closed:false,close(){this.closed=true;}});await f.owner('B');assert.ok(f.notifications.every(notification=>notification.closed));
+  f.notifications.push({data:{},closed:false,close(){this.closed=true;}});await f.owner('B');await f.cleanup();assert.ok(f.notifications.every(notification=>notification.closed));
   await f.push({recipientId:'A',title:'queued A private'});assert.equal(f.notifications.length,2);
-  await f.push({recipientId:'B',title:'B private'});await f.owner(null);assert.ok(f.notifications.every(notification=>notification.closed));await f.push({recipientId:'B',title:'late B'});assert.equal(f.notifications.length,3);
+  await f.push({recipientId:'B',title:'B private'});await f.owner(null);await f.cleanup();assert.ok(f.notifications.every(notification=>notification.closed));await f.push({recipientId:'B',title:'late B'});assert.equal(f.notifications.length,3);
+});
+
+async function promptly<T>(promise:Promise<T>,label:string):Promise<T>{
+  let timer:ReturnType<typeof setTimeout>|undefined;
+  try{return await Promise.race([promise,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(Error(label)),100);})]);}
+  finally{clearTimeout(timer);}
+}
+test('a stalled native notification API cannot hold worker activation, owner reset or API responses',async()=>{
+  const f=fixture();f.state.getWait=deferred<void>();f.state.timers=[];
+  await promptly(f.event('activate',{}),'native notifications blocked activation');assert.equal(f.state.claimed,1);
+  await promptly(f.owner('A'),'native notifications blocked the account cache barrier');
+  const response=await promptly(vm.runInContext("networkFirst(new Request('https://fixture.test/api/history'),API,300)",f.context) as Promise<Response>,'native notifications blocked an API response');
+  assert.equal(await response.text(),'{}');assert.equal(vm.runInContext('ownerHint',f.context),'A');
+});
+test('OS cleanup has a deadline and a late old query preserves current-owner notifications',async()=>{
+  const f=fixture();await f.owner('A');await f.push({recipientId:'A',title:'A private'});await f.cleanup();
+  f.state.getWait=deferred<void>();f.state.timers=[];
+  const oldCleanup=f.cleanup();await new Promise(resolve=>setImmediate(resolve));
+  assert.ok(f.state.timers.length>0,'cleanup installs a deadline');
+  for(const expire of f.state.timers.splice(0))expire();
+  await promptly(oldCleanup,'cleanup did not stop awaiting its stalled native query');
+  await promptly(f.owner('B'),'late cleanup retained the old account barrier');await f.push({recipientId:'B',title:'B current'});
+  f.state.getWait.resolve();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.notifications[0].closed,true,'the previous owner is removed when the OS finally answers');
+  assert.equal(f.notifications[1].closed,false,'a late query must not close the newly selected owner’s legitimate notification');
 });
 test('worker restart restores notification recipient without authorizing runtime caches',async()=>{
   const first=fixture();await first.owner('A');const restarted=fixture(first.store);

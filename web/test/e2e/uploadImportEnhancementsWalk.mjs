@@ -51,9 +51,20 @@ export async function uploadImportEnhancementsWalk({page,base,check=(name,ok)=>a
     check('raster thumbnails render readable bounded pixels without image URLs',await page.$eval('[data-image-pages] canvas',canvas=>{const pixel=canvas.getContext('2d').getImageData(10,10,1,1).data;return canvas.width===72 && canvas.height===96 && pixel[0]>240 && pixel[1]<20 && pixel[2]<20 && pixel[3]===255; }));
     await shot('upload-image-pages-mobile-en');
     await page.click('[data-image-pages] li:first-child [data-image-down]');
-    await page.click('[data-upload-start]');await page.waitForFunction(()=>document.body.textContent.includes('page2.png') && !document.querySelector('[data-upload-start]')?.disabled);
+    const uploadResponse=status=>page.waitForResponse(response=>{
+      const url=new URL(response.url());
+      return url.origin===new URL(base).origin && url.pathname==='/api/library/upload'
+        && response.request().method()==='POST' && response.status()===status;
+    });
+    // The filenames and enabled button already exist before the first POST.
+    // Await its actual refusal and rendered error before attempting the retry.
+    await Promise.all([uploadResponse(400),page.click('[data-upload-start]')]);
+    await page.waitForFunction(()=>[...document.querySelectorAll('[data-notice="error"]')]
+      .some(notice=>notice.textContent.includes('Could not read image') && notice.textContent.includes('page2.png'))
+      && document.querySelector('[data-upload-start]')?.disabled===false);
     check('failed image chapter leaves all pages selected for retry',await page.$$eval('[data-image-pages] li',els=>els.length)===2);
-    await page.click('[data-upload-start]');await page.waitForFunction(()=>document.querySelectorAll('[data-image-pages] li').length===0);
+    await Promise.all([uploadResponse(200),page.click('[data-upload-start]')]);
+    await page.waitForFunction(()=>document.querySelectorAll('[data-image-pages] li').length===0);
     const uploads=writes.filter(w=>w.kind==='upload');
     check('image retry posts multipart to the selected scope and chapter',uploads.length===2 && uploads.every(w=>w.query.images==='1' && w.query.visibility==='shared' && w.query.name==='Chapter 7.cbz' && w.contentType.startsWith('multipart/form-data;')));
     check('manual page order is the actual multipart order',uploads.every(w=>w.payload?.indexOf('page10.png')>=0 && w.payload.indexOf('page10.png')<w.payload.indexOf('page2.png')));

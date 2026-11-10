@@ -116,11 +116,18 @@ async function knownNotificationOwner() {
   }catch(_){if(epoch===accountEpoch)notificationOwner=null;}
   return notificationOwner??null;
 }
-async function closeOtherNotifications(owner) {
+async function closeOtherNotifications() {
+  let timer;
   try{
-    const notifications=await self.registration.getNotifications();
-    for(const notification of notifications)if(!owner || notification.data?.recipientId!==owner)notification.close();
+    // Electron can leave getNotifications pending forever. OS cleanup is optional: it must not hold
+    // activation or the account's API/cache barrier. If it finishes late, judge against the CURRENT owner.
+    const cleanup=Promise.resolve().then(()=>self.registration.getNotifications()).then(notifications=>{
+      const owner=notificationOwner??null;
+      for(const notification of notifications)if(!owner || notification.data?.recipientId!==owner)notification.close();
+    });
+    await Promise.race([cleanup,new Promise(resolve=>{timer=setTimeout(resolve,1000);})]);
   }catch(_){/* unavailable notification API; delivery itself remains owner checked */}
+  finally{clearTimeout(timer);}
 }
 function announceNotificationOwner(owner) {
   notificationOwner=owner;
@@ -135,8 +142,8 @@ function announceNotificationOwner(owner) {
       try{await caches.delete(NOTIFICATION_STATE);}catch(_){}
       if(notificationOwner===owner)notificationOwner=null;
     }
-    await closeOtherNotifications(notificationOwner??null);
   });
+  void notificationUpdates.then(()=>closeOtherNotifications());
   return notificationUpdates;
 }
 
@@ -182,8 +189,9 @@ self.addEventListener('activate', (e) => {
     (async () => {
       const keys = await caches.keys();
       await Promise.all(keys.filter((k) => k!==NOTIFICATION_STATE&&!k.endsWith(VERSION)).map((k) => caches.delete(k)));
-      await closeOtherNotifications(await knownNotificationOwner());
       await self.clients.claim();
+      // Restore/clean the OS tray independently; no optional notification API may prevent worker control.
+      void knownNotificationOwner().then(()=>closeOtherNotifications());
     })(),
   );
 });
@@ -383,7 +391,7 @@ self.addEventListener('push', (event) => {
       body:content.body,icon:'/icons/icon-192.png',badge:'/icons/icon-192.png',tag:content.tag,
       data:{url:content.url,recipientId:owner},
     });
-    if(epoch!==accountEpoch || notificationOwner!==owner)await closeOtherNotifications(notificationOwner??null);
+    if(epoch!==accountEpoch || notificationOwner!==owner)await closeOtherNotifications();
   })());
 });
 

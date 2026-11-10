@@ -6,6 +6,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { fixtureLogin, waitForLoginCooldown } from './loginCooldown.mjs';
+import { plannedOfflineEvidence } from './plannedOfflineEvidence.mjs';
 
 const base=process.env.BASE||'http://127.0.0.1:18310';
 const url=new URL(base);
@@ -15,7 +16,7 @@ const nonce=randomUUID().replaceAll('-','');
 const nativeProbeCache='uchi-private-native-cache-'+nonce;
 const title=`Private browser fixture ${nonce}`,password=`Fixture-${randomBytes(24).toString('base64url')}-A9`;
 const accounts=[],checks=[],failures=[],consoleErrors=[],serverErrors=[],expectedNetworkResponses=[],authResponses=[],expectedErrors=new Set();
-let browser,page,adminToken,ownerToken,otherToken,owner,other,seriesId,bookId,loginAttempt=-1,offline=false,step=0,authTransition=true,nativeOwnerProbe,nativeOtherProbe;
+let browser,page,adminToken,ownerToken,otherToken,owner,other,seriesId,bookId,loginAttempt=-1,offline=false,step=0,authTransition=true,nativeOwnerProbe,nativeOtherProbe,offlineEvidence;
 const check=(name,condition,detail='')=>{checks.push({name,pass:!!condition,...(!condition?{detail}:{} )});console.log(`[${condition?'PASS':'FAIL'}] ${name}${!condition?' '+detail:''}`);if(!condition)failures.push(name);};
 const shot=async name=>page.screenshot({path:`${out}/${String(++step).padStart(2,'0')}-${name}.png`,waitForFonts:false});
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -84,13 +85,11 @@ try{
   }
   [owner,other]=accounts;
   browser=await puppeteer.launch({headless:true,args:['--no-sandbox','--disable-dev-shm-usage','--disable-gpu']});page=await browser.newPage();await page.setViewport({width:1280,height:900});
+  offlineEvidence=plannedOfflineEvidence(page,()=>offline,()=>checks.at(-1)?.name||'setup');
   page.on('pageerror',error=>consoleErrors.push(error.message));
   page.on('console',message=>{if(message.type()!=='error')return;const location=message.location()?.url||'',text=message.text();
     if(/401/.test(text)&&[base+'/auth/me',base+'/auth/refresh'].includes(location))return;
     if(authTransition&&/401/.test(text)&&location===base+'/api/settings'){expectedNetworkResponses.push('anonymous settings401 during auth transition');return;}
-    if(offline&&/net::ERR_(?:INTERNET_DISCONNECTED|FAILED)/.test(text)&&location.startsWith(base+'/')){
-      expectedNetworkResponses.push('deliberate offline phase: '+location);return;
-    }
     if(loginAttempt===0&&/429/.test(text)&&location===base+'/auth/login')return;
     if(expectedErrors.has(location)&&/Failed to load resource/.test(text))return;
     consoleErrors.push(`${text} ${location}`);
@@ -196,11 +195,14 @@ finally{
   // A refused authenticated request, runtime exception or server error always remains a failure.
   const observedConsoleErrors=[...consoleErrors];
   for(let i=consoleErrors.length-1;i>=0;i--){const message=consoleErrors[i],url=message.split(' ').at(-1);
+    if(offlineEvidence?.take(message)){
+      expectedNetworkResponses.push('correlated planned offline request: '+message);consoleErrors.splice(i,1);continue;
+    }
     if(/status of 401/.test(message)&&authResponses.some(response=>response.url===url&&!response.hadAuthorization)){
       expectedNetworkResponses.push('unauthenticated document bootstrap401: '+url);consoleErrors.splice(i,1);
     }
   }
-  const result={base,image:process.env.E2E_IMAGE||null,checks,failures,consoleErrors,observedConsoleErrors,serverErrors,expectedNetworkResponses,authResponses,nativeCache:{owner:nativeOwnerProbe,other:nativeOtherProbe},fixtures:{owner:owner?.id,other:other?.id,seriesId,bookId},serviceWorkerBypass:false};
+  const result={base,image:process.env.E2E_IMAGE||null,checks,failures,consoleErrors,observedConsoleErrors,serverErrors,expectedNetworkResponses,authResponses,plannedOfflineFailures:offlineEvidence?.failures||[],nativeCache:{owner:nativeOwnerProbe,other:nativeOtherProbe},fixtures:{owner:owner?.id,other:other?.id,seriesId,bookId},serviceWorkerBypass:false};
   writeFileSync(`${out}/result.json`,JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({checks:checks.length,passed:checks.filter(check=>check.pass).length,failures,consoleErrors,serverErrors}));
   process.exitCode=failures.length||consoleErrors.length||serverErrors.length?1:0;
 }
