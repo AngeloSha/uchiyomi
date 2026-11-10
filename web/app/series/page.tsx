@@ -2263,7 +2263,7 @@ function SeriesInner() {
         />
       )}
       {moving && (
-        <MoveToLibrary n={1} busy={moveBusy} onClose={() => setMoving(false)} onPick={async (libraryId) => {
+        <MoveToLibrary n={1} busy={moveBusy} current={series ? { libraryId: series.libraryId } : undefined} onClose={() => setMoving(false)} onPick={async (libraryId) => {
           setMoveBusy(true);
           try {
             await api(`/api/admin/series/${encodeURIComponent(id)}/library`, { json: { libraryId } });

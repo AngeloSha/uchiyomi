@@ -13,8 +13,9 @@ import { foldersOf } from '@/lib/libraryFolders';
  * stays where the scanner found it. Picking a library pins the choice, so a rescan or a newly created library
  * whose path contains these folders will not quietly undo it.
  */
-export function MoveToLibrary({ n, busy, onClose, onPick }: {
+export function MoveToLibrary({ n, busy, onClose, onPick, current }: {
   n: number; busy: boolean; onClose: () => void; onPick: (libraryId: string | null) => void;
+  current?: { libraryId: string };
 }) {
   const { data } = useQuery({
     queryKey: ['admin-libraries'],
@@ -23,20 +24,28 @@ export function MoveToLibrary({ n, busy, onClose, onPick }: {
   return (
     <Modal title={n === 1 ? tr('File this series') : tr('File {n} series', { n })} onClose={onClose}>
       <div className="space-y-1">
-        {(data?.content ?? []).map((l) => (
-          <button key={l.id} disabled={busy} onClick={() => onPick(l.id)}
-            className="flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-start hover:bg-ink-800/60 disabled:opacity-50">
-            <span className="min-w-0">
-              <span className="block truncate text-sm text-fog-100">{l.name}</span>
-              <LibraryFolders paths={foldersOf(l)} className="text-[11px] text-fog-500" />
-            </span>
-            {l.age_rating != null && <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">{l.age_rating}+</span>}
+        {(data?.content ?? []).map((l) => {
+          const here = current?.libraryId === l.id;
+          return (
+            <button key={l.id} disabled={busy} onClick={() => onPick(l.id)} aria-current={here ? 'true' : undefined}
+              className={`flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-start hover:bg-ink-800/60 disabled:opacity-50}`}>
+              <span className="min-w-0">
+                <span className="block truncate text-sm text-fog-100">{l.name}</span>
+                <LibraryFolders paths={foldersOf(l)} className="text-[11px] text-fog-500" />
+              </span>
+              <span className="flex shrink-0 items-center gap-1.5">
+                {l.age_rating != null && <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">{l.age_rating}+</span>}
+                {here && <span className="rounded bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                  {tr('Current')}
+                </span>}
+              </span>
+            </button>
+          );
+        })}
+          <button disabled={busy} onClick={() => onPick(null)}
+                  className="mt-2 w-full rounded-lg border border-ink-700 px-2.5 py-2 text-sm text-fog-400 hover:text-fog-200 disabled:opacity-50">
+              {tr('Automatic — follow the folder')}
           </button>
-        ))}
-        <button disabled={busy} onClick={() => onPick(null)}
-          className="mt-2 w-full rounded-lg border border-ink-700 px-2.5 py-2 text-sm text-fog-400 hover:text-fog-200 disabled:opacity-50">
-          {tr('Automatic — follow the folder')}
-        </button>
       </div>
       <p className="mt-3 text-[11px] leading-relaxed text-fog-600">{n === 1
         ? tr('No files move. This only changes which library this series appears in, and it survives the next scan.')

@@ -83,7 +83,7 @@ export function useSeriesMenu(series: Series) {
   const menu = useContextMenu(items, { label: series.metadata?.title || series.name });
   // Portalled out of the card, as the menu is: a card is tilted and clipped, and a fixed dialog inside it would be too.
   const picker = moving && typeof document !== 'undefined' ? createPortal(
-    <MoveToLibrary n={1} busy={moveBusy} onClose={() => setMoving(false)} onPick={async (libraryId) => {
+    <MoveToLibrary n={1} busy={moveBusy} current={{ libraryId: series.libraryId }} onClose={() => setMoving(false)} onPick={async (libraryId) => {
       setMoveBusy(true);
       try {
         await api(`/api/admin/series/${encodeURIComponent(series.id)}/library`, { json: { libraryId } });
