@@ -86,7 +86,7 @@ function watch(p) {
   p.on('response', (response) => { if (response.status() >= 500) serverErrors.push(`${response.status()} ${response.url()}`); });
   p.on('request', (request) => { const u = new URL(request.url()); if (u.origin === new URL(base).origin && u.pathname.startsWith('/api/')) apiRequests.push({ path: u.pathname, method: request.method(), page: p === page ? 'owner' : 'other' }); });
 }
-const art = (genre) => `https://yomi.servershelf.com/art/bg/${genre}.webp`;
+const art = (genre) => new URL(`/art/bg/${genre}.webp`, base).href;
 const title = (kind) => `Discover Walk ${kind} ${nonce.slice(0, 6)}`;
 const make = (id, kind, country, genre, status = 'RELEASING', cover = art(genre.toLowerCase())) => ({ id, title: title(kind), cover, coverXL: cover, banner: cover,
   description: `The ${kind} story has a verified catalog synopsis.`, genres: [genre], score: 83, chapters: status === 'FINISHED' ? 24 : null, status, country });

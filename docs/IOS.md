@@ -1,8 +1,8 @@
 # Uchiyomi for iPhone and iPad
 
-This private candidate integrates the SwiftUI/WKWebView client from [PR #390](https://github.com/AngeloSha/uchiyomi/pull/390) with UchiYomi v0.107's private libraries and account isolation. The native app prepares a verified copy of its server's web reader for offline launch. The IPA contains no server frontend, library, Apple credentials or personal signing profile.
+This experimental source beta integrates the SwiftUI/WKWebView client from [PR #390](https://github.com/AngeloSha/uchiyomi/pull/390) with UchiYomi v0.107's private libraries and account isolation. The native app prepares a verified copy of its server's web reader for offline launch. The IPA contains no server frontend, library, Apple credentials or personal signing profile.
 
-**Current acceptance:** protocol-2 integration, unsigned Linux packaging and server/browser tests are separate from physical-device verification. Earlier contributor builds do not verify this candidate. Keep this candidate private until the owner has installed and tested it and explicitly approved publication. No GitHub workflow or release is enabled by these instructions.
+**Current acceptance:** on November 10, 2026, the owner reported successful installation and basic operation on an iPhone and approved publishing the source. Protocol-2 integration, unsigned Linux packaging and server/browser tests do not establish every device behavior. The extended device checklist below, including offline reboot, account switching and in-place updates, remains pending. Earlier contributor builds do not verify this beta. No binary release or publishing workflow is enabled by these instructions.
 
 ## Compatible server
 
@@ -14,14 +14,14 @@ Protocol 2 requires v0.107's owner fencing and private-response contract. A prot
 
 Custom static-file overrides (for example a mounted login background) must be copied into the private export before regenerating its manifest. A runtime file whose bytes differ from the generated inventory is correctly rejected during native preparation. Keep personal artwork outside tracked source and preserve its mounts when deploying.
 
-## Private build on Linux or Windows/WSL
+## Unsigned build on Linux or Windows/WSL
 
 Use pinned **xtool 1.24.0**, the matching official Linux Swift toolchain, and an iOS SDK from Apple's Xcode archive. Windows builds use WSL. Download the Xcode `.xip` through Apple's authenticated browser flow and leave the archive intact; SDK extraction runs on Linux. Apple sign-in, two-factor prompts and agreement acceptance belong to the owner. No Apple credentials are needed by the build-only command.
 
 The installed server toolchain and SDK should live on the data disk. Its activation script must set `PATH`, temporary directories and Swift/XDG caches there. No SDK or generated build belongs in Git. Then run:
 
 ```sh
-# Activate your private Swift/xtool installation first.
+# Activate your local Swift/xtool installation first.
 UCHI_IOS_BUILD=2026111001 bash ios/scripts/build-linux.sh /absolute/data/path/ios-candidate-2026111001
 ```
 
@@ -29,11 +29,11 @@ The script stages copies of the canonical App/Core sources as one Swift Package,
 
 Outputs include the private IPA, `native-source.json` and `candidate.json`. The inspector checks ZIP paths, arm64 iOS Mach-O target, actual iOS SDK (27.1 or newer), application identity, networking policy and absence of personal provisioning/test bundles/bundled frontend. Its metadata deliberately leaves signature and physical-device verification false. Compilation/packaging success is not proof of correct iPhone runtime behavior.
 
-The Xcode project remains available for developers who have a Mac. Configure signing locally in ignored `ios/Local.xcconfig`; do not commit or transfer signing keys. Existing macOS packaging scripts remain available, but their historical distribution commands do not authorize publishing this private candidate.
+The Xcode project remains available for developers who have a Mac. Configure signing locally in ignored `ios/Local.xcconfig`; do not commit or transfer signing keys. Existing macOS packaging scripts remain available; source publication does not enable their historical distribution commands or publish a binary release.
 
 ## Install and use
 
-Install the private IPA with AltStore Classic on Windows, letting AltStore sign it with your own Apple account. Keep that account and the effective installed app identity stable for subsequent in-place updates. The unsigned IPA is not directly installable as a developer-signed app. Follow [AltStore's installation and refresh guidance](https://faq.altstore.io/altstore-classic/your-altstore).
+Install your unsigned IPA with AltStore Classic on Windows, letting AltStore sign it with your own Apple account. Keep that account and the effective installed app identity stable for subsequent in-place updates. The unsigned IPA is not directly installable as a developer-signed app. Follow [AltStore's installation and refresh guidance](https://faq.altstore.io/altstore-classic/your-altstore).
 
 1. Enter the compatible server's HTTPS origin and choose **Connect to server**.
 2. Sign in to UchiYomi. The wrapper does not store your password; each server has an isolated Keychain cookie jar and persistent WebKit data store.
@@ -78,4 +78,4 @@ Record the IPA checksum, build number and effective signing identity with these 
 - Install a higher-numbered candidate **in place**, without uninstalling. Keep downloaded pages, server profiles, session and a distinct unsynced offline position.
 - Exercise a frontend update, failed/interrupted preparation and recovery; downloaded chapters and owner-scoped outbox remain. An older protocol-1 UI must never become the fallback.
 
-Only after these checks and owner approval should a public release or source feed be prepared. Historical contributor evidence remains in `ios/PROTOTYPE.md` and the upstream PR for provenance; none of it sets this candidate's verification flags.
+The source beta is approved for publication. Complete these extended checks and obtain release approval before preparing a public IPA release or AltStore source feed. Historical contributor evidence remains in `ios/PROTOTYPE.md` and the upstream PR for provenance; none of it sets this beta's verification flags.
