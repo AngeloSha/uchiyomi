@@ -70,6 +70,7 @@ import catalogRoutes from './routes/catalog';
 import imageRoutes, { authorizeImageRequest } from './routes/images';
 import personalRoutes from './routes/personal';
 import recommendationRoutes from './routes/recommendations';
+import discoveryHubRoutes from './routes/discoveryHub';
 import downloadRoutes from './routes/downloads';
 import sourceRoutes, { jobBusy } from './routes/sources';
 import opdsRoutes from './routes/opds';
@@ -294,6 +295,7 @@ async function main() {
   await app.register(personalRoutes);
   await app.register(privateLibraryRoutes);
   await app.register(recommendationRoutes);
+  await app.register(discoveryHubRoutes);
   await app.register(downloadRoutes);
   await app.register(uploadSeriesRoutes);
   await app.register(sourceRoutes);

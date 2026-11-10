@@ -19,6 +19,7 @@ environment variables see [CONFIGURATION.md](CONFIGURATION.md).
 - [12. Backups & restore](#12-backups--restore)
 - [13. Troubleshooting & FAQ](#13-troubleshooting--faq)
 - [14. Uchiyomi Desktop](#14-uchiyomi-desktop) — the Windows and macOS app (beta), now in [its own guide](DESKTOP.md)
+- [Uchiyomi for iPhone and iPad](IOS.md) — private beta setup, offline reading and device acceptance
 
 ---
 
@@ -2025,23 +2026,19 @@ translated once per language and kept, so reading it again costs nothing.
 
 **Discover** is how you add new series to your library.
 
-- **The hero** at the top: what is trending in manhwa right now, with AniList's art, that you don't already have. **Find
-  and add** looks it up on your sources. It moves on every five seconds; the **Pause** key holds it, and on a phone you
-  swipe between them. Since v0.98.0 the server keeps the trending lists, so the hero is there at once, after a restart
-  too, and while it is on its way its space is held so nothing below it jumps.
-- **The wall comes first** (since v0.98.0): right under the search, with Discover's rows inside it while you browse.
-  - **Recommended for you**, right after the first row of covers, in a band of its own across the page (since v0.99.0;
-    a plain row after the first two rows in v0.98.0). The top pick's art glows behind it (on a computer, the art of the
-    card you point at), the covers of the series you read sit beside *Because you read…*, and the top pick is a big
-    card saying why it is there, with **Find and add**; the rest follow in a row you swipe. It holds what your
-    connected trackers suggest (see section 10) and what AniList's readers recommend after the series you read here
-    lately (*Because you read …*, since v0.61.0; since v0.98.0 from your last five, one from each in turn). Each card
-    says why it is there: the service that suggested it, or the cover of the series you read. A title is one card
-    however many of them name it, and what you already have is left out. A card searches your sources for it.
-  - **Trending manhwa**, **Trending manga** and **Trending manhua** (since v0.61.0), every four rows after it: what is
-    trending on AniList that you don't already have, the first ten with their rank, as on Home's Top 10.
-  - A row waits after the wall until the wall has filled that far, so nothing you are looking at moves. A search shows
-    its results alone.
+- **For you** is a personal reading hub. The hero mixes manga, manhwa and manhua; recommendations explain which recent
+  read or connected tracker suggested them. Genre and completion filters and themed collections use known catalog
+  metadata only. A completed work does not promise every chapter is available from a source.
+- **Preview a title** for its synopsis and known metadata before choosing **Find a source**. Chapter samples and source
+  selection use the existing preview reader and add dialog. Browsing does not start a source search for every card.
+- **Save for later** keeps a title in your personal Discover list across devices, without adding it to your library or
+  downloading chapters. **Not interested** hides it from your recommendations and trending picks; undo it or reset hidden
+  picks without losing saved titles. These choices belong to your account and follow its age and 18+ settings.
+- **Surprise me** opens a permitted title from the current filtered picks. It does not make an extra online request.
+- **Sources** keeps the Newest/Popular wall, source picker, progressive results and cross-source search. Discover remembers
+  the last tab you chose. Searching from a series link still opens the source results directly.
+- The hero keeps **Pause** and phone swipe controls. Reduced motion keeps the art still, and loading placeholders reserve
+  space so late answers do not shift content under your finger.
 - A Discover link with `?q=` opens on that search: `/discover/?q=solo%20leveling`. The series page's Related row
   uses it for a work you don't have.
 - **Newest / Popular:** the wall under the heading is what your sources published most recently, or what is

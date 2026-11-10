@@ -96,8 +96,7 @@ test('the scan actually finds the keys it is meant to police', () => {
   // A regex that silently matched nothing would make the test above pass forever. Two known-good pairings.
   const found = pairs();
   assert.ok(found.size > 8, `expected the app's query keys to be found, got ${found.size}`);
-  // v0.61.0: Discover's trending is one key per country of origin; Korea's -- the hero's -- is the literal one (the others
-  // are keyed by the country variable, which the scan skips). Updated deliberately from ['discover-trending'].
-  assert.deepEqual([...(found.get("['discover-trending', 'KR']") ?? new Map()).keys()], ['/api/discover/trending']);
+  // Discover's catalog keys now include account and reveal variables, so use two constant endpoint pairs here.
+  assert.deepEqual([...(found.get("['adult-filter']") ?? new Map()).keys()], ['/api/adult-filter']);
   assert.deepEqual([...(found.get("['libraries']") ?? new Map()).keys()], ['/api/libraries']);
 });

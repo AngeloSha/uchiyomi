@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build && node scripts/mobile-assets.mjs out",
     "start": "next start",
     "test": "node --import tsx --test \"test/*.test.ts\"",
     "test:e2e": "bash test/e2e/up.sh",

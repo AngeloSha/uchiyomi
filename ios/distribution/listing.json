@@ -1,0 +1,10 @@
+{
+  "name": "Uchiyomi",
+  "sourceName": "Uchiyomi iOS Beta",
+  "bundleIdentifier": "com.uchiyomi.reader",
+  "developerName": "Uchiyomi contributors",
+  "subtitle": "Your manga library, available offline.",
+  "localizedDescription": "A native iPhone and iPad client for your own compatible Uchiyomi server. Connect over HTTPS, sign in, and download chapters for offline reading. Requires a server with mobile-assets.json support; older upstream servers need the compatible frontend changes. This beta is distributed through AltStore Classic. Device and update acceptance is still in progress.",
+  "tintColor": "7C5CFF",
+  "category": "entertainment"
+}

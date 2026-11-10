@@ -176,63 +176,35 @@ test('Discover reads ?q= once, inside a Suspense boundary, opens on that search,
   assert.match(inner, /setMode\('search'\);\s*writeQ\(next\);/, 'a search does not write its term');
   assert.match(inner, /const backToNewest = \(\) => \{ setQ\(''\); setMode\('newest'\); writeQ\(''\); \};/, 'back to Newest leaves ?q= behind');
   // An account the server refuses is not asked, even when the address says to search.
-  assert.match(inner, /enabled: mode === 'search' && !!term && mayAdd,/);
+  assert.match(inner, /enabled: tabReady && tab === 'sources' && mode === 'search' && !!term && mayAdd,/);
 });
 
-test('Discover\'s rows sit inside the wall: the picks\' band, then manhwa, manga and manhua through one rail (v0.98.0, v0.99.0)', () => {
+test('Discover keeps personal catalog queries separate from the source browser and isolates their cache by account/reveal', () => {
   const src = code(read('app/discover/page.tsx'));
-  // The countries are the server's (bff lib/anilist.ts TREND_COUNTRIES), each with its own words declared for the
-  // translators, in the same order.
+  const hub = code(read('components/DiscoveryHub.tsx'));
   assert.match(src, /const TREND_RAILS = \['KR', 'JP', 'CN'\] as const;/);
   assert.match(read('../bff/src/lib/anilist.ts'), /export const TREND_COUNTRIES = \['KR', 'JP', 'CN'\] as const;/);
-  assert.match(src, /const TREND_LABELS = keys\('Trending manhwa', 'Trending manga', 'Trending manhua'\);/);
-  assert.match(src, /const ROWS = \['foryou', \.\.\.TREND_RAILS\] as const;/, 'the picks row is not the first of the rows');
-  // One key per country: Korea's, the hero's, as a literal (queryKeys.test.ts holds it to its endpoint); the others by
-  // the country they ask for, while browsing, once Korea's is in. Reintroduce a shared key: Japan's answer paints Korea's row.
-  assert.match(src, /queryKey: \['discover-trending', 'KR'\],\s*queryFn: \(\) => api<\{ content: Trending\[\]; pending\?: boolean \}>\('\/api\/discover\/trending\?country=KR'\),/);
-  assert.match(src, /queries: TREND_RAILS\.slice\(1\)\.map\(\(country\) => \(\{\s*queryKey: \['discover-trending', country\],\s*queryFn: \(\) => api<\{ content: Trending\[\]; pending\?: boolean \}>\(`\/api\/discover\/trending\?country=\$\{country\}`\),\s*enabled: mayAdd && mode === 'newest' && heroSettled,/);
-  assert.match(src, /queryKey: \['discover-because'\],\s*queryFn: \(\) => api<[^>]*>\('\/api\/discover\/because'\),\s*enabled: mayAdd && mode === 'newest' && heroSettled,/);
-  // The hero's answer first: everything below the fold waits for it.
-  assert.match(src, /const heroSettled = !trendQ\.isPending;/);
-  // The rows: inside the wall, cut where they go (lib/shelves.ts weave), while browsing only, each only with something on
-  // it, and once every row's first answer is in -- a row arriving late would take a place another already stood in.
-  assert.match(src, /const rowKeys: RowKey\[\] = mode === 'newest' && rowsReady\s*\? ROWS\.filter/);
-  assert.match(src, /const rowsReady = heroSettled && !recsQ\.isPending && !becauseQ\.isPending && moreTrending\.every\(\(m\) => !m\.isPending\);/);
-  // Each row keeps its place, and one that comes late goes below what is on screen (lib/shelves.ts placeRows); the places
-  // start again with the wall itself. Reintroduce `weave(…, rowKeys)` from scratch each render: a late row moves the wall.
-  assert.match(src, /placedRef\.current\.placed = placeRows\(placedRef\.current\.placed, rowKeys, shownRef\.current, cols\);/);
-  assert.match(src, /useEffect\(\(\) => \{ if \(cols >= 1\) shownRef\.current = wall\.items\.length; \}\);/);
-  assert.match(src, /const wallKey = `\$\{mode\}\|\$\{listMode\}\|\$\{selected \?\? ''\}`;/);
-  assert.match(src, /const \{ parts: wallParts, after: rowsAfter \} = weave\(wall\.items\.length, cols, placedRef\.current\.placed\);/);
-  const woven = src.indexOf('{wallParts.slice(0, -1).map((part, n) => (part.kind === \'row\' ? rowOf(part.key) : (');
-  const heading = src.indexOf("{mode === 'search' ? tr('Results across your sources')");
-  const sentinel = src.indexOf('<div ref={sentinel} className="h-16" />');
-  const waiting = src.indexOf('{rowsAfter.map(rowOf)}');
-  assert.ok(heading > 0 && woven > heading, 'the rows are not inside the wall');
-  assert.ok(sentinel > woven && waiting > sentinel, 'the rows the wall has not reached do not wait after it');
-  // No row above the wall any more: the header is followed by the picker. Reintroduce a row there: this fails.
-  const header = src.indexOf('</header>');
-  const picker = src.indexOf('<SourcePicker');
-  const between = src.slice(header, picker);
-  assert.ok(!between.includes('<AniListRail') && !between.includes('<ForYouBand') && !between.includes('rowOf'), 'a row sits above the wall again');
-  // And a row is drawn in two places only: in its place inside the wall, or waiting after it.
-  assert.equal((src.match(/\browOf\b/g) ?? []).length, 3, 'a row is drawn somewhere other than inside the wall or after it');
-  // The picks name their read, isolated in the sentence; the trending rows rank their first ten.
-  assert.match(src, /tr\('Because you read \{title\}', \{ title: `\\u2068\$\{pk\.from\.because\}\\u2069` \}\)/, 'the title is not isolated');
-  assert.match(src, /<TrendingCard t=\{t\} onPick=\{pickRail\} rank=\{rank <= RANKED \? rank : undefined\} \/>/);
-  // Every trending row is the one AniListRail, and its one ScrollRail (rails.test.ts holds the count); the picks are their
-  // own band since v0.99.0 (components/ForYouBand.tsx, forYouBand.test.ts). Reintroduce the picks through AniListRail: the
-  // owner's "hiding inside, barely noticeable" row of covers is back.
-  assert.equal((src.match(/<AniListRail\b/g) ?? []).length, 1);
-  assert.match(src, /function AniListRail\([\s\S]*?<ScrollRail label=\{title\}/);
-  assert.match(src, /key === 'foryou' \? \(\s*<ForYouBand key=\{key\} picks=\{picks\} whyOf=\{whyOf\} onPick=\{pickRail\} \/>/, 'the picks are not their own band');
-  // A card opens the add dialog, and an added card leaves its row -- the row it came from, by its AniList entry, and only
-  // that one: the ref is forgotten when the dialog closes. Reintroduce the bare setSeed: the card stays.
-  assert.match(src, /const pickRail = \(t: \{ id\?: number \| null; title: string \}\) => \{ fromKey\.current = null; fromRail\.current = railKey\(t\); setSeed\(\{ kind: 'trending', title: t\.title \}\); \};/);
+  assert.match(src, /queryKey: \['discover-trending', 'KR', user\?\.id, adultOn\]/);
+  assert.match(src, /queryKey: \['discover-trending', country, user\?\.id, adultOn\]/);
+  assert.match(src, /queryKey: \['discover-because', user\?\.id, adultOn\]/);
+  assert.match(src, /queryKey: \['discover-recommendations', user\?\.id, adultOn\]/);
+  assert.match(src, /enabled: mayAdd && tabReady && tab === 'for-you'/);
+  assert.match(src, /tabReady && tab === 'for-you' && user\?\.id && <section role="tabpanel"/);
+  assert.match(src, /tabReady && tab === 'sources' && <section role="tabpanel"/);
+  const sourcePanel = src.slice(src.indexOf("{tabReady && tab === 'sources' && <section"));
+  assert.match(sourcePanel, /<SourceLatest/);
+  assert.doesNotMatch(sourcePanel, /<ForYouBand|<DiscoverHero|<DiscoveryHub/, 'personal rails must not push down the source feed');
+  assert.match(hub, /<ForYouBand picks=\{filteredPicks\}/);
+  assert.match(hub, /mixCatalog\(groups\.map/);
+  // A title preview precedes explicit source finding; opening a catalog card alone must not scrape sources.
+  assert.match(hub, /<DiscoverHero[^>]*onPick=\{\(t\) => setPreview\(t as DiscoveryItem\)\}/);
+  assert.match(hub, /onFind\(item\)/);
+  assert.match(src, /onFind=\{pickRail\}/);
+  assert.match(src, /tr\('Because you read \{title\}', \{ title: `\\u2068\$\{pk\.from\.because\}\\u2069` \}\)/);
+  assert.match(src, /fromRail\.current = railKey\(t\)/);
   assert.match(src, /useEffect\(\(\) => \{ if \(!seed\) fromRail\.current = null; \}, \[seed\]\);/);
-  assert.match(src, /const railCard = fromRail\.current;\s*if \(railCard\) setRailAdded\(\(prev\) => new Set\(prev\)\.add\(railCard\)\);/);
-  assert.match(src, /\.filter\(\(pk\) => !railAdded\.has\(railKey\(pk\)\)\)/, 'an added pick stays on its row');
-  assert.match(src, /\.filter\(\(\{ t \}\) => !railAdded\.has\(railKey\(t\)\)\)/, 'an added trending card stays on its row');
+  assert.match(src, /if \(railCard\) setRailAdded\(\(prev\) => new Set\(prev\)\.add\(railCard\)\)/);
+  assert.match(src, /\.filter\(\(t\) => !railAdded\.has\(railKey\(t\)\)\)/, 'an added catalog title remains in the hub');
 });
 
 test('the new words are in all eight languages, and none is an English copy', () => {

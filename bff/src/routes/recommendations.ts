@@ -7,6 +7,7 @@ import { viewCtxFor, hideAdult } from '../lib/visibility';
 import { recommendationsFor } from '../lib/trackerRecs';
 import { normTitle } from '../lib/trackerProviders';
 import { heldFor, libraryIndex, noIndex } from '../lib/discoverIdentity';
+import { withoutHiddenDiscover } from '../lib/discoveryHub';
 
 export default async function recommendationRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
@@ -30,6 +31,7 @@ export default async function recommendationRoutes(app: FastifyInstance) {
 
   app.get('/api/discover/recommendations', async (req, reply) => {
     reply.header('cache-control', 'no-store');
+    reply.header('vary', '*');
     // The viewer as every Discover rail judges them: the age cap, the 18+ reveal, the admin's adult genres and the
     // libraries they may browse (lib/trackerRecs.ts viewerJudge and its local seeds).
     const ctx = await viewCtxFor(userIdOf(req), roleOf(req), { hideAdult: hideAdult(req) });
@@ -40,12 +42,12 @@ export default async function recommendationRoutes(app: FastifyInstance) {
       // id to go on here -- a suggestion is a title, not a listing -- so the name is the whole of the evidence. A
       // library that cannot be read holds nothing, and nothing is left out.
       inLibrary: async (titles) => {
-        const idx = await libraryIndex().catch(() => noIndex());
+        const idx = await libraryIndex(ctx).catch(() => noIndex());
         const held = new Set<string>();
         for (const t of titles) if (heldFor(idx, { source: '', sourceId: '', title: t }).length) held.add(normTitle(t));
         return held;
       },
     });
-    return out;
+    return { ...out, content: await withoutHiddenDiscover(userIdOf(req), out.content) };
   });
 }
