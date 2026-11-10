@@ -82,7 +82,7 @@ test('the burst does not grow: four sources asking at once, on every page, and a
   assert.match(page, /setUpTo\(\(prev\) => \(\(prev\[id\] \?\? 0\) >= at \? prev : \{ \.\.\.prev, \[id\]: at \}\)\);/, 'a settle does not record the page it answered');
   assert.match(page, /const answered = answeredPage\(budget\.map\(\(s\) => kOf\(s\.id\)\), upTo, page\);\s*const gate = WALL_IN_FLIGHT \+ answered;/,
     'the gate does not count the page being fetched');
-  assert.match(page, /const canPage = mode === 'newest' && answered >= budget\.length && budget\.length > 0 && page < 5;/,
+  assert.match(page, /const canPage = tab === 'sources' && mode === 'newest' && answered >= budget\.length && budget\.length > 0 && page < 5;/,
     'a page starts while the last one is still being asked: the sources the gate had not reached are skipped');
   assert.match(code(read('components/SourcePicker.tsx')),
     /if \(isSuccess\) onSettled\(key, data\?\.content \?\? \[\], true, page\);\s*else if \(isError\) onSettled\(key, \[\], false, page\);/,

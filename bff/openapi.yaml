@@ -4445,6 +4445,100 @@ paths:
           description: Not authenticated
         "403":
           description: This account may not add series
+  /api/discover/state:
+    get:
+      tags: [sources]
+      summary: Read this account's Discover tab, saved cards and hidden work keys.
+      operationId: getApiDiscoverState
+      security: [{bearer: []}]
+      description: >-
+        Returns {tab, saved, hidden}. The default tab is for-you. Saved cards contain trusted cached title/art/known
+        metadata and are filtered for the caller's current adult settings. Hidden contains canonical keys and known
+        title aliases. Authentication and the add-series permission are required. Private, no-store; Vary:*.
+      responses:
+        "200": {description: Account-owned Discover state}
+        "401": {description: Not authenticated}
+        "403": {description: This account may not add series}
+    patch:
+      tags: [sources]
+      summary: Remember this account's Discover tab without replacing other settings.
+      operationId: patchApiDiscoverState
+      security: [{bearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [tab]
+              properties:
+                tab: {type: string, enum: [for-you, sources]}
+      responses:
+        "200": {description: The remembered tab}
+        "400": {description: Invalid tab or body}
+        "401": {description: Not authenticated}
+        "403": {description: This account may not add series or the API token is read-only}
+  /api/discover/items/{key}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        description: AniList key al:id or Unicode-normalized title fallback t:titlekey.
+        schema: {type: string, minLength: 3, maxLength: 602}
+    put:
+      tags: [sources]
+      summary: Save or hide a Discover work for this account only.
+      operationId: putApiDiscoverItem
+      security: [{bearer: []}]
+      description: >-
+        At least one saved/hidden boolean is required. They are independent. The optional item title is a hint only;
+        authoritative metadata/rating comes from existing catalog caches. No external call, library addition or
+        download occurs. Up to 1000 saved/hidden choices per account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                saved: {type: boolean}
+                hidden: {type: boolean}
+                item:
+                  type: object
+                  required: [title]
+                  additionalProperties: true
+                  properties:
+                    title: {type: string, minLength: 1, maxLength: 600}
+      responses:
+        "200": {description: Updated key and saved/hidden booleans}
+        "400": {description: Invalid key or body}
+        "401": {description: Not authenticated}
+        "403": {description: This account may not add series or the API token is read-only}
+        "404": {description: The title is unknown or not permitted to save}
+        "409": {description: This account's Discover list is full}
+    delete:
+      tags: [sources]
+      summary: Clear both saved and hidden choices for one work in this account.
+      operationId: deleteApiDiscoverItem
+      security: [{bearer: []}]
+      responses:
+        "200": {description: Choice removed or already absent}
+        "400": {description: Invalid key}
+        "401": {description: Not authenticated}
+        "403": {description: This account may not add series or the API token is read-only}
+  /api/discover/hidden:
+    delete:
+      tags: [sources]
+      summary: Reset this account's hidden Discover picks while retaining saved titles.
+      operationId: deleteApiDiscoverHidden
+      security: [{bearer: []}]
+      responses:
+        "200": {description: Hidden choices reset}
+        "401": {description: Not authenticated}
+        "403": {description: This account may not add series or the API token is read-only}
   /api/discover/works:
     get:
       tags:

@@ -36,7 +36,7 @@ const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 const key = (m: string, p: string) => `${m.toUpperCase()} ${p}`;
 const toOpenApi = (p: string) => p.replace(/:([A-Za-z]+)/g, '{$1}');
 const SHARING = ['opds', 'komgaCompat', 'kosync', 'externalReaders'];
-const ROUTES = ['auth', 'admin', 'notify', 'catalog', 'images', 'personal', 'privateLibrary', 'recommendations', 'downloads', 'upload', 'sources', 'translate', 'comments', ...SHARING];
+const ROUTES = ['auth', 'admin', 'notify', 'catalog', 'images', 'personal', 'privateLibrary', 'recommendations', 'discoveryHub', 'downloads', 'upload', 'sources', 'translate', 'comments', ...SHARING];
 
 /**
  * The OFF table: openapi.yaml's operations plus the two inline routes. openapiCoverage.test.ts proves this IS
@@ -130,6 +130,26 @@ test('the desktop route table = the server table - external-reader APIs + POST /
   assert.deepEqual(sorted([...expected].filter((r) => !table.has(r))), [], 'server routes the desktop app lost');
   // Only sharing APIs are excluded; owner-private management remains available to the desktop's account.
   assert.deepEqual(sorted([...sharing].filter((r) => !/^\w+ \/(opds|api\/v[12]|api\/external-readers)\b/.test(r))), []);
+});
+
+test('desktop Discover preferences require authentication and reject foreign hosts', async () => {
+  const { app } = await desktopApp();
+  try {
+    const token = app.jwt.sign({ sub: UUID, role: 'admin' });
+    for (const [method, url] of [
+      ['GET', '/api/discover/state'], ['PATCH', '/api/discover/state'],
+      ['PUT', '/api/discover/items/al:1'], ['DELETE', '/api/discover/items/al:1'],
+      ['DELETE', '/api/discover/hidden'],
+    ]) {
+      const request = { method: method as any, url, ...(method === 'PATCH' || method === 'PUT' ? { payload: {} } : {}) };
+      const anonymous = await app.inject({ ...request, headers: { host: HOST } });
+      assert.equal(anonymous.statusCode, 401, `${method} ${url} must require authentication`);
+      for (const authorization of [undefined, `Bearer ${token}`]) {
+        const foreign = await app.inject({ ...request, headers: { host: `rebind.evil.test:${PORT}`, ...(authorization ? { authorization } : {}) } });
+        assert.equal(foreign.statusCode, 421, `${method} ${url} must reject a foreign host before authentication`);
+      }
+    }
+  } finally { await app.close(); }
 });
 
 test('every hidden route answers 404 JSON on desktop, even to a valid admin', async () => {

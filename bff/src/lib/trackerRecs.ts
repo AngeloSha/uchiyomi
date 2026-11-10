@@ -180,6 +180,7 @@ async function withLocalSignals(userId: string, provider: Provider, entries: Lib
       WHERE st.provider = ${prov}
         AND (st.linked_by IS NOT NULL OR st.checked_at IS NOT NULL)
         AND ${browsable('s', ctx, p)}
+        AND NOT s.is_private AND NOT l.managed_private
         AND (r.stars IS NOT NULL OR EXISTS (SELECT 1 FROM read_progress rp WHERE rp.user_id = ${uid} AND rp.series_id = st.series_id AND rp.completed))`,
     p.values as any[]).catch(() => []);
   if (!rows.length) return entries;
@@ -303,7 +304,8 @@ export function viewerJudge(ctx: ViewCtx): (it: { adult?: boolean | null; genres
 /** A person's seeds for one service, as this viewer may have them: their list with what they did here, judged, best first. */
 async function seedsFor(userId: string, provider: Provider, entries: LibraryEntry[], ctx: ViewCtx): Promise<LibraryEntry[]> {
   const ok = viewerJudge(ctx);
-  return pickSeeds((await withLocalSignals(userId, provider, entries, ctx)).filter(ok), SEED_COUNT[provider] ?? 5);
+  // A private list entry or private local read is not a reason to send its identity back to a service for more work.
+  return pickSeeds((await withLocalSignals(userId, provider, entries, ctx)).filter((entry) => !entry.private && ok(entry)), SEED_COUNT[provider] ?? 5);
 }
 
 async function refresh(userId: string, c: Conn, ctx: ViewCtx): Promise<void> {

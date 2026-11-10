@@ -341,3 +341,33 @@ test('a series from a library taken away neither seeds nor is named; nor one who
     assert.ok(!calls.some((c) => /Media\(id:51/.test(c.body?.query ?? '')), 'its AniList id was sent from a library that looks nothing up');
   } finally { delete RECS[50]; delete RECS[51]; }
 });
+
+test('private tracker entries and private local reads never seed external recommendation requests', { skip }, async () => {
+  const { q, mk, connect } = await setup();
+  const { recommendationsFor } = await import('../src/lib/trackerRecs');
+  const u = await mk('recs-private');
+  await connect(u, 'anilist');
+  await q(`INSERT INTO tracker_list_cache(user_id,provider,entries,fetched_at) VALUES($1,'anilist',$2::jsonb,now())`, [u,
+    JSON.stringify([{ externalId: '1976543001', title: 'Private tracker seed', altTitles: [], status: 'completed', progress: 80, score: 10, format: 'manga', adult: false, private: true }])]);
+  await lib('lib_recs_private');
+  await q(`INSERT INTO lib_series(id,source,title,folder,library_id,is_private,owner_user_id)
+    VALUES('s_recs_private','test','Private local seed','s_recs_private','lib_recs_private',true,$1)`, [u]);
+  await q(`INSERT INTO series_trackers(series_id,provider,external_id,title,checked_at)
+    VALUES('s_recs_private','anilist','1976543002','Private local seed',now())`);
+  await q(`INSERT INTO ratings(user_id,series_id,stars) VALUES($1,'s_recs_private',5)`, [u]);
+  for (let n = 1; n <= 12; n++) {
+    await q(`INSERT INTO lib_books(id,series_id,source,file,number) VALUES($1,'s_recs_private','test',$2,$3)`, [`b_recs_private_${n}`, `/recs/private/${n}.cbz`, n]);
+    await q(`INSERT INTO read_progress(user_id,book_id,series_id,page,completed,is_private) VALUES($1,$2,'s_recs_private',0,true,true)`, [u, `b_recs_private_${n}`]);
+  }
+  try {
+    reset(anilistRoute());
+    const answer = await recommendationsFor(u, { ctx: OPEN(u), inLibrary: noLib });
+    assert.deepEqual(answer.content, []);
+    assert.equal(calls.length, 0, 'neither private identity is sent to a service');
+    assert.equal(answer.sources[0]?.seeds, 0);
+  } finally {
+    await q(`DELETE FROM lib_series WHERE id='s_recs_private'`);
+    await q(`DELETE FROM libraries WHERE id='lib_recs_private'`);
+    await q('DELETE FROM users WHERE id=$1', [u]);
+  }
+});

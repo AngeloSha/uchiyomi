@@ -65,9 +65,10 @@ test('the page asks again only while the server is still pulling, and only a doz
   assert.equal(typeof heroPoll({ pending: true }, 1), 'number');
   // Reintroduce the poll without a limit: AniList slow today turns an open tab into a request every five seconds.
   assert.equal(heroPoll({ pending: true }, HERO_POLL_MAX), false);
-  // The page holds the stand-in only while it would still ask.
-  assert.match(code(read('app/discover/page.tsx')),
-    /const heroWaiting = trendQ\.isPending\s*\|\| heroPoll\(trending, qc\.getQueryState\(\['discover-trending', 'KR'\]\)\?\.dataUpdateCount \?\? 0\) !== false;/);
+  // Every country's initial answer holds its place; an empty pending country follows the same bounded poll.
+  const page = code(read('app/discover/page.tsx'));
+  assert.match(page, /const heroWaiting = \[trendQ, \.\.\.moreTrending\]\.some\(\(query, i\) => query\.isPending/);
+  assert.match(page, /heroPoll\(query\.data, qc\.getQueryState\(\['discover-trending', TREND_RAILS\[i\], user\?\.id, adultOn\]\)/);
 });
 
 test('it moves as Home\'s does: segments that fill, a Pause key, a crossfade, and a phone\'s cover drifting -- still under either setting', () => {
