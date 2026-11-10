@@ -37,7 +37,7 @@ const WEEK = 60 * 60 * 24 * 7;
  */
 function cacheControl(urlPath: string): string {
   if (urlPath === '/sw.js') return 'no-cache, no-store, must-revalidate';
-  if (urlPath === '/manifest.webmanifest') return 'no-cache';
+  if (urlPath === '/manifest.webmanifest' || urlPath === '/mobile-assets.json') return 'no-cache';
   if (urlPath.startsWith('/_next/static/')) return `public, max-age=${YEAR}, immutable`;
   if (urlPath.startsWith('/icons/')) return `public, max-age=${WEEK}`;
   return 'no-cache';
@@ -109,7 +109,7 @@ export async function registerWebRoot(app: FastifyInstance): Promise<void> {
   app.setNotFoundHandler(async (req, reply) => {
     // Never swallow an API 404 into the app shell: a client expecting JSON must not receive HTML.
     const p = req.url.split('?')[0];
-    if (/^\/(api|auth|img|opds|healthz)\b/.test(p)) {
+    if (p === '/mobile-assets.json' || /^\/(api|auth|img|opds|healthz)\b/.test(p)) {
       return reply.code(404).send({ error: 'not_found' });
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') {

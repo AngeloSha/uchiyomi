@@ -57,7 +57,7 @@ test('the search is a query keyed on the submitted term, not on the field', () =
   // still start apart from any typing). Updated deliberately from `useState('')`, which this pinned before Discover read
   // the address; v610Related.test.ts pins how the arrival is read.
   assert.match(src, /const \[term, setTerm\] = useState\(arrivedQ\)/, 'there is no separate submitted term');
-  assert.match(src, /enabled: mode === 'search' && !!term/, 'the search runs outside search mode or with an empty term');
+  assert.match(src, /enabled: tabReady && tab === 'sources' && mode === 'search' && !!term/, 'the search runs outside search mode or with an empty term');
   assert.doesNotMatch(src, /setSearchHits|setSearching|useState<SourceItem\[\]>\(\[\]\)/, 'the imperative search is back');
   assert.doesNotMatch(src, /await api<\{ content: SearchGroup\[\] \}>/, 'the search is awaited in a handler again');
 });

@@ -1,0 +1,6 @@
+// Override these in ios/Local.xcconfig (ignored) or in xcodebuild arguments.
+PRODUCT_BUNDLE_IDENTIFIER = com.uchiyomi.reader
+UCHI_TEST_BUNDLE_IDENTIFIER = com.uchiyomi.reader.webview-tests
+CODE_SIGN_STYLE = Automatic
+DEVELOPMENT_TEAM =
+#include? "../Local.xcconfig"

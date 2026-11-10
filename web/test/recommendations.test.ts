@@ -32,12 +32,12 @@ test('Discover asks for suggestions while browsing only, draws the row only with
   // the row has cards.
   const { readFileSync } = require('node:fs') as typeof import('node:fs');
   const page = readFileSync(new URL('../app/discover/page.tsx', import.meta.url), 'utf8');
-  assert.match(page, /queryKey: \['discover-recommendations'\],\s*queryFn: \(\) => api<Recommendations>\('\/api\/discover\/recommendations'\),\s*enabled: mayAdd && mode === 'newest' && heroSettled,/,
+  assert.match(page, /queryKey: \['discover-recommendations', user\?\.id, adultOn\],\s*queryFn: \(\) => api<Recommendations>\('\/api\/discover\/recommendations'\),\s*enabled: mayAdd && tabReady && tab === 'for-you' && heroSettled,/,
     'it asks when the page may not add, or while searching');
   // Reintroduce the poll without its limit: a slow service turns an open tab into a request every few seconds.
   assert.match(page, /refetchInterval: \(qy\) => pollAfter\(qy\.state\.data, qy\.state\.dataUpdateCount\),/);
-  assert.match(page, /ROWS\.filter\(\(k\) => \(k === 'foryou' \? picks\.length : trendRails\[TREND_RAILS\.indexOf\(k\)\]\.length\) > 0\)/,
-    'a row without a card is drawn');
+  const hub = readFileSync(new URL('../components/DiscoveryHub.tsx', import.meta.url), 'utf8');
+  assert.match(hub, /filteredPicks\.length > 0 && <ForYouBand picks=\{filteredPicks\}/, 'an empty or hidden recommendation band is drawn');
   // The read's title is isolated in the sentence, as Home's rail does it. Reintroduce `{ title: pk.from.because }`: this fails.
   assert.match(page, /tr\('Because you read \{title\}', \{ title: `\\u2068\$\{pk\.from\.because\}\\u2069` \}\)/, 'the read\'s title is not isolated');
 });

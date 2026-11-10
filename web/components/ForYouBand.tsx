@@ -26,7 +26,7 @@ const keyOf = (p: Pick): string => (p.id != null ? `al:${p.id}` : `t:${p.title}`
  * The glow is still -- a big blurred layer that moved would be re-blurred every frame on a phone -- and only its crossfade
  * steps aside under Reduce effects or reduced motion; the look stays.
  */
-export function ForYouBand({ picks, whyOf, onPick }: { picks: Pick[]; whyOf: (pk: Pick) => CardWhy; onPick: (pk: Pick) => void }) {
+export function ForYouBand({ picks, whyOf, onPick, actionLabel }: { picks: Pick[]; whyOf: (pk: Pick) => CardWhy; onPick: (pk: Pick) => void; actionLabel?: string }) {
   // Both hooks on every render and in this order (effects.test.ts).
   const plain = useReduceEffects();
   const still = useReducedMotion();
@@ -96,7 +96,7 @@ export function ForYouBand({ picks, whyOf, onPick }: { picks: Pick[]; whyOf: (pk
       {/* A phone: the top pick across the width, the row under it edge to edge. A computer: the top pick on the content
           edge, the row beside it running to the window's. */}
       <div className="bleed-pad mt-5 lg:mt-7 lg:flex lg:items-start lg:gap-6 lg:pe-0">
-        <PickSpotlight pk={top} why={whyOf(top)} onPick={onPick} />
+        <PickSpotlight pk={top} why={whyOf(top)} onPick={onPick} actionLabel={actionLabel} />
         {rest.length > 0 && (
           <div className="-mx-4 mt-4 lg:mx-0 lg:mt-0 lg:min-w-0 lg:flex-1">
             <ScrollRail label={tr('Recommended for you')}
@@ -118,7 +118,7 @@ export function ForYouBand({ picks, whyOf, onPick }: { picks: Pick[]; whyOf: (pk
 }
 
 /** The top pick, big: its cover, its name, why it is here, and the key that finds it on your sources. */
-function PickSpotlight({ pk, why, onPick }: { pk: Pick; why: CardWhy; onPick: (pk: Pick) => void }) {
+function PickSpotlight({ pk, why, onPick, actionLabel }: { pk: Pick; why: CardWhy; onPick: (pk: Pick) => void; actionLabel?: string }) {
   return (
     <button type="button" onClick={() => onPick(pk)} title={why.tip} data-foryou-spotlight
       className="group flex w-full items-center gap-4 rounded-3xl border border-white/10 bg-ink-950/45 p-3 text-start backdrop-blur-md transition hover:border-white/20 sm:max-w-[34rem] lg:w-[28rem] lg:shrink-0 lg:gap-5 lg:p-4">
@@ -143,7 +143,7 @@ function PickSpotlight({ pk, why, onPick }: { pk: Pick; why: CardWhy; onPick: (p
           </span>
         )}
         <span className="btn-accent mt-4 w-fit px-4 py-2.5 text-sm">
-          <IcPlus width={16} height={16} />{tr('Find and add')}
+          <IcPlus width={16} height={16} />{actionLabel ?? tr('Find and add')}
         </span>
       </span>
     </button>

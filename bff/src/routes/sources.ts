@@ -4,6 +4,7 @@ import { resolveAddScope, scopeForSeries, scopeSql, folderForScope, defaultPriva
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
+import { withoutHiddenDiscover } from '../lib/discoveryHub';
 import { actsAsAdmin, authenticate, userIdOf, roleOf } from '../lib/auth';
 import { getSource, listSources, isSwAdapterId, SW_PREFIX, swAdapterId, withTimeout } from '../lib/sources';
 import { MANGADEX_GROUP } from '../lib/sources/mangadex';
@@ -3822,6 +3823,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
   // what this route always answered), JP (manga) or CN (manhua), v0.61.0.
   app.get('/api/discover/trending', async (req, reply) => {
     reply.header('cache-control', 'no-store'); // never let a stale/empty copy get pinned client-side
+    reply.header('vary', '*'); // feedback and account visibility make this answer personal
     const asked = (req.query as { country?: unknown }).country;
     const country = (asked === undefined ? 'KR' : typeof asked === 'string' ? asked.toUpperCase() : '') as TrendCountry;
     if (!TREND_COUNTRIES.includes(country)) return reply.code(400).send({ error: 'bad_request', message: 'country is one of KR, JP, CN' });
@@ -3847,7 +3849,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
         || (t.id != null && (idx.byWork.get(`al:${t.id}`)?.length ?? 0) > 0);
       return !held && adultOk({ adult: false, genres: t.genres }, ctx) && !seen.has(k) && (seen.add(k), true);
     });
-    return { content: out.slice(0, TREND_KEEP), pending: false };
+    return { content: (await withoutHiddenDiscover(userIdOf(req), out)).slice(0, TREND_KEEP), pending: false };
   });
 
   /**
@@ -3857,7 +3859,14 @@ export default async function sourceRoutes(app: FastifyInstance) {
    * the first of them (null with nothing to show), as a page from before v0.98.0 reads it. Behind this file's canDownload
    * hook, as everything on Discover is: it is a list of things to add. Reads the table only, never AniList.
    */
-  app.get('/api/discover/because', async (req) => becauseYouRead(userIdOf(req), vc(req)));
+  app.get('/api/discover/because', async (req, reply) => {
+    reply.header('cache-control', 'no-store');
+    reply.header('vary', '*');
+    const answer = await becauseYouRead(userIdOf(req), vc(req));
+    const content = await withoutHiddenDiscover(userIdOf(req), answer.content);
+    const seeds = answer.seeds.filter((seed) => content.some((it) => it.because.id === seed.id));
+    return { ...answer, content, seeds, seed: seeds[0] ?? null };
+  });
 
   /**
    * What the page's work keys are now (v0.56.0, lib/discoverIdentity.ts currentWork). Discover's wall and search ask again

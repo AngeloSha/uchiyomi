@@ -19,7 +19,7 @@ const source=transformSync(readFileSync(join(__dirname,'../lib/auth.tsx'),'utf8'
 const A={id:'transition-owner-a',username:'a',displayName:'A',role:'user',settings:{}};
 const B={id:'transition-owner-b',username:'b',displayName:'B',role:'user',settings:{}};
 function deferred<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(r=>{resolve=r;});return{promise,resolve};}
-function provider(options:{flush?:()=>Promise<number>;previous?:typeof A|null;purgeFailure?:boolean}={}){
+function provider(options:{flush?:()=>Promise<number>;previous?:typeof A|null;purgeFailure?:boolean;native?:boolean}={}){
   const previous=options.previous===undefined?A:options.previous;
   const ready=deferred<any>(),purging=deferred<void>(),events:string[]=[],state:any[]=[previous?'authed':'anon',previous,null];
   const leases:Array<()=>void>=[];
@@ -41,6 +41,7 @@ function provider(options:{flush?:()=>Promise<number>;previous?:typeof A|null;pu
     './effects':{applyReduceEffects:()=>{},restoreReduceEffects:()=>{}},'./tone':{applyTone:()=>{},restoreTone:()=>{}},
     './downloads':{flushOutbox:async()=>{events.push(`flush:${client.getCurrentUser()}:${client.getAccessToken()}`);return options.flush?options.flush():0;}},
     './adult':{setAdultShown:()=>events.push('adult-hidden')},
+    './native':{usesNativeCache:()=>options.native===true},
     './desktop':{isDesktop:()=>false,serverReachableHint:()=>true,untilReachable:(fn:any)=>fn()},'./i18n':{t:(text:string)=>text},
   };
   const module={exports:{} as any};
@@ -195,6 +196,24 @@ for(const method of ['logout','leave'] as const){
       reply.resolve(new Response('{}',{headers:{'content-type':'application/json'}}));await leaving;
       assert.equal(client.getCurrentUser(),B.id);assert.equal(client.getAccessToken(),'credential-b');
       assert.equal(harness.reloads(),0);assert.ok(!harness.events.includes('purge'));
+    }finally{harness.destroyDocument();globalThis.fetch=oldFetch;}
+  });
+}
+
+for(const method of ['login','switchProfile'] as const){
+  test(`${method}: native account replacement preserves the owner fence without a service worker`,async()=>{
+    client.setCurrentUser(A.id);client.setAccessToken('credential-a');
+    const harness=provider({native:true}),oldFetch=globalThis.fetch;
+    globalThis.fetch=(async()=>response()) as typeof fetch;
+    try{
+      const result=method==='login'?await harness.auth.login('b','fixture-password'):await harness.auth.switchProfile(B.id);
+      assert.equal(result.ok,true);
+      assert.equal(harness.reloads(),1);
+      assert.equal(client.getCurrentUser(),null);assert.equal(client.getAccessToken(),null);
+      assert.equal(harness.state[0],'loading');assert.equal(harness.state[1],null);
+      assert.ok(harness.events.includes(`persist:${B.id}:null:null`),'trusted offline identity is saved only for the new document');
+      assert.ok(!harness.events.includes('token:credential-b')&&!harness.events.includes(`identity:${B.id}`));
+      await assert.rejects(()=>client.api('/api/stale-native-form',{json:{old:true}}),(error:any)=>error instanceof client.ApiError&&error.status===409);
     }finally{harness.destroyDocument();globalThis.fetch=oldFetch;}
   });
 }
