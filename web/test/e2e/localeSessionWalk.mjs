@@ -21,8 +21,10 @@ async function api(path,{method='GET',body,token=adminToken}={}){
   const text=await response.text();let data;try{data=JSON.parse(text);}catch{data=text;}return{status:response.status,data};
 }
 async function clickText(text,selector='button'){
-  for(const button of await page.$$(selector))if(await button.isVisible()&&await button.evaluate((node,text)=>node.textContent?.trim()===text,text)){
-    await page.waitForFunction(node=>!node.disabled,{timeout:30000},button);await button.click();return;
+  await page.waitForFunction((text,selector)=>[...document.querySelectorAll(selector)].some(node=>node.getClientRects().length>0&&!node.disabled&&
+    (node.textContent?.trim()===text||[...node.querySelectorAll('span')].some(span=>span.textContent?.trim()===text))),{timeout:30000},text,selector);
+  for(const button of await page.$$(selector))if(await button.isVisible()&&await button.evaluate((node,text)=>node.textContent?.trim()===text||[...node.querySelectorAll('span')].some(span=>span.textContent?.trim()===text),text)){
+    await button.asLocator().click();return;
   }
   throw new Error('No visible button '+text);
 }
@@ -110,6 +112,7 @@ try{
   assert.ok(held.length,'the race must hold an actual uncached dictionary request');
   await page.evaluate(nonce=>{window.__localeSessionDocument=nonce;},nonce);
   const switched=page.waitForResponse(response=>new URL(response.url()).pathname==='/auth/switch'&&response.request().method()==='POST');
+  void switched.catch(()=>{});
   await page.locator('[data-topbar] [aria-label="You"]').click();await clickText('Switch profile');await clickText(second.display_name||second.displayName||`Locale profile ${nonce}`,'[data-switch-profile]');
   const switchResponse=await switched;assert.equal(switchResponse.status(),200);assert.equal((await switchResponse.json()).user.id,second.id);
   await page.waitForFunction(()=>window.__localeSessionDocument===undefined,{timeout:30000});

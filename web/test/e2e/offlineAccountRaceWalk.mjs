@@ -22,8 +22,10 @@ async function raw(path,{token=adminToken,method='GET',body}={}){
   const text=await response.text();let data;try{data=JSON.parse(text);}catch{data=text;}return{status:response.status,data};
 }
 async function clickText(text,selector='button'){
-  for(const button of await page.$$(selector))if(await button.isVisible()&&await button.evaluate((node,text)=>node.textContent?.trim()===text,text)){
-    await page.waitForFunction(node=>!node.disabled,{timeout:30000},button);await button.click();return;
+  await page.waitForFunction((text,selector)=>[...document.querySelectorAll(selector)].some(node=>node.getClientRects().length>0&&!node.disabled&&
+    (node.textContent?.trim()===text||[...node.querySelectorAll('span')].some(span=>span.textContent?.trim()===text))),{timeout:30000},text,selector);
+  for(const button of await page.$$(selector))if(await button.isVisible()&&await button.evaluate((node,text)=>node.textContent?.trim()===text||[...node.querySelectorAll('span')].some(span=>span.textContent?.trim()===text),text)){
+    await button.asLocator().click();return;
   }
   throw new Error('No visible button '+text);
 }
@@ -54,6 +56,7 @@ async function upload(number,count){
 async function records(){return page.evaluate(async()=>{
   const db=await new Promise((resolve,reject)=>{const request=indexedDB.open('yomi-offline');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
   try{
+    if(!db.objectStoreNames.contains('chapters')||!db.objectStoreNames.contains('pages'))return{chapters:[],pages:[]};
     const [chapters,keys,blobs]=await new Promise((resolve,reject)=>{
       const tx=db.transaction(['chapters','pages'],'readonly'),c=tx.objectStore('chapters').getAll(),k=tx.objectStore('pages').getAllKeys(),v=tx.objectStore('pages').getAll();
       tx.oncomplete=()=>resolve([c.result,k.result,v.result]);tx.onerror=()=>reject(tx.error);
@@ -98,6 +101,7 @@ try{
   await page.evaluate(nonce=>{window.__offlineRaceDocument=nonce;},nonce);
   const switched=page.waitForResponse(response=>new URL(response.url()).pathname==='/auth/switch'&&response.request().method()==='POST');
   const restored=page.waitForResponse(response=>new URL(response.url()).pathname==='/auth/refresh'&&response.status()===200);
+  void switched.catch(()=>{});void restored.catch(()=>{});
   await page.locator('[data-topbar] [aria-label="You"]').click();await clickText('Switch profile');await clickText(other.display_name||other.displayName||`Offline profile ${nonce}`,'[data-switch-profile]');
   const accepted=await switched;assert.equal(accepted.status(),200);assert.equal((await accepted.json()).user.id,other.id);
   await page.waitForFunction(()=>window.__offlineRaceDocument===undefined,{timeout:30000});await page.waitForSelector('[data-topbar]',{visible:true});assert.equal((await(await restored).json()).user.id,other.id);
@@ -113,6 +117,7 @@ try{
   await page.goto(base+'/library/?view=downloads',{waitUntil:'networkidle2'});check('B offline library does not display A private title',!(await page.$eval('body',node=>node.innerText)).includes(title));await shot('b-downloads-isolated');
   await page.evaluate(async()=>{await navigator.serviceWorker.ready;});await page.reload({waitUntil:'networkidle2'});check('real service worker is restored after the pause test',await page.evaluate(()=>!!navigator.serviceWorker.controller));
   offline=true;await page.setOfflineMode(true);await page.reload({waitUntil:'domcontentloaded'});await page.waitForSelector('[data-topbar]');
+  check('offline cold boot restores B own identity',await page.evaluate(id=>JSON.parse(localStorage.getItem('uchiyomi.offlineUser')||'null')?.id===id,other.id));
   check('B offline cold boot does not inherit A private title',!(await page.$eval('body',node=>node.innerText)).includes(title));await shot('b-offline-isolated');
 }catch(error){failures.push(error.stack||error.message);console.error(error.stack||error.message);if(page&&!page.isClosed()){await shot('failure').catch(()=>{});writeFileSync(`${out}/failure-page.txt`,page.url()+'\n'+await page.$eval('body',node=>node.innerText).catch(()=>''));}}
 finally{
