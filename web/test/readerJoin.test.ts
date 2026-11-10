@@ -123,8 +123,8 @@ test('only a joined spread loses the gap down the middle; every other pair keeps
 
 test('the page list asks for spreads only with joining on, and a join found late keeps the page being read', () => {
   const src = code(read('app/reader/page.tsx'));
-  assert.match(src, /const first = await loadChapter\(bookId, loadPrefs\(\)\.joinSplit\);/);
-  assert.match(src, /const ch = await loadChapter\(next\.id, prefs\.joinSplit\);/);
+  assert.match(src, /const first = await loadChapter\(bookId, loadPrefs\(\)\.joinSplit,\s*user\?\.id\?\?null\);/, 'initial chapter keeps joining and the initiating account');
+  assert.match(src, /const ch = await loadChapter\(next\.id, prefs\.joinSplit,\s*user\?\.id\?\?null\);/, 'next chapter keeps joining and the initiating account');
   assert.match(src, /\/pages\$\{spreads \? '\?spreads=1' : ''\}/);
   assert.match(src, /joinSplit: prefs\.joinSplit \}\)/, 'pairSlides is not told whether joining is on');
   // The joins effect: two slides made one before the page being read would otherwise move the reader a page on.

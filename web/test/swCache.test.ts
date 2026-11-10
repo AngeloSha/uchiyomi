@@ -66,16 +66,17 @@ function loadSw(owner: string | null = 'test-owner') {
   if (owner) handlers.message({ data: { type: 'yomi-user', userId: owner }, waitUntil: () => {} });
   return { handlers, store, ctx };
 }
+const runtimeCaches=(store:Map<string,Map<string,any>>)=>[...store].filter(([name])=>/^yomi-(?:api|img)-/.test(name)).map(([,cache])=>cache);
 
 test('private responses purge implicit caches and never enter the runtime store', async () => {
   const { handlers, store, ctx } = loadSw();
   await doFetch(handlers, 'https://yomi.test/api/home');
   ctx.fetch = async () => new Response('private-title', { headers: { 'x-uchiyomi-private': '1', 'cache-control': 'private, no-store' } });
   await doFetch(handlers, 'https://yomi.test/api/series/private');
-  assert.ok([...store.values()].every((cache) => cache.size === 0));
+  assert.ok(runtimeCaches(store).every((cache) => cache.size === 0));
   ctx.fetch = async () => new Response('another-private-answer');
   await doFetch(handlers, 'https://yomi.test/api/history');
-  assert.ok([...store.values()].every((cache) => cache.size === 0), 'private account stays outside implicit caching');
+  assert.ok(runtimeCaches(store).every((cache) => cache.size === 0), 'private account stays outside implicit caching');
 });
 
 test('an old account response finishing after sign-out cannot refill caches', async () => {
@@ -92,7 +93,7 @@ test('an old account response finishing after sign-out cannot refill caches', as
   await Promise.all(waits);
   finish(new Response('previous-account-history'));
   await pending;
-  assert.ok([...store.values()].every((cache) => cache.size === 0));
+  assert.ok(runtimeCaches(store).every((cache) => cache.size === 0));
 });
 
 test('a worker without an authenticated owner cannot replay a previous session cache', async () => {
@@ -110,7 +111,7 @@ test('a no-store response does not disable ordinary offline cache for the whole 
   await doFetch(handlers, 'https://yomi.test/api/personal/settings');
   ctx.fetch = async () => new Response('public-library');
   await doFetch(handlers, 'https://yomi.test/api/library');
-  assert.equal([...store.values()].reduce((count, cache) => count + cache.size, 0), 1);
+  assert.equal(runtimeCaches(store).reduce((count, cache) => count + cache.size, 0), 1);
 });
 
 /** Drive the fetch handler the way the browser does, and hand back what it responded with. */

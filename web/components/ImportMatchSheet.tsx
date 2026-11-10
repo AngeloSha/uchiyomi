@@ -23,6 +23,7 @@ import { searchPoll, searchProgressLine, searchWait, type SearchProgress } from 
 import { matchPreview } from '@/lib/matchPreview';
 import { SourceSearchPages } from '@/components/SourceSearchPages';
 import { revealed } from '@/lib/adult';
+import { useAuth } from '@/lib/auth';
 
 interface SourceResult {
   source: string; sourceId: string; title: string; coverUrl?: string; inLibrary?: boolean;
@@ -101,6 +102,7 @@ export function ImportMatchSheet({ batchId, candidate, onClose, origin }: {
   onClose: () => void;
   origin?: ImportOrigin;
 }) {
+  const ownerId = useAuth().user?.id ?? null;
   const toast = useToast();
   const qc = useQueryClient();
   const [term, setTerm] = useState(candidate.backup_title);
@@ -156,7 +158,7 @@ export function ImportMatchSheet({ batchId, candidate, onClose, origin }: {
   const delta = currentDetail.data && pendingDetail.data ? pendingDetail.data.count - currentDetail.data.count : null;
 
   const patch = async (body: Record<string, unknown>) => {
-    await api(`/api/admin/import/candidates/${candidate.id}`, { method: 'PATCH', json: body });
+    await api(`/api/admin/import/candidates/${candidate.id}`, { method: 'PATCH', json: body, expectedOwnerId: ownerId });
     await qc.invalidateQueries({ queryKey: ['import-batch', batchId] });
   };
 

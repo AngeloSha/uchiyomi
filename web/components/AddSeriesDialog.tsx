@@ -177,8 +177,8 @@ const CHAPTER_PRESETS = [10, 25, 50, 100, 200];
  */
 const DETAIL_STALE_MS = 10 * 60_000;
 /** One source's series and chapter list. The signal is the query's, so a pick abandoned mid-flight is cancelled. */
-const fetchDetail = (p: Pick<Provider, 'source' | 'sourceId'>, signal?: AbortSignal, visibility?: ContentVisibility) =>
-  api<Detail>(`/api/sources/detail?source=${encodeURIComponent(p.source)}&sourceId=${encodeURIComponent(p.sourceId)}${visibility ? `&visibility=${visibility}` : ''}`, { signal });
+const fetchDetail = (p: Pick<Provider, 'source' | 'sourceId'>, signal?: AbortSignal, visibility?: ContentVisibility, expectedOwnerId?: string | null) =>
+  api<Detail>(`/api/sources/detail?source=${encodeURIComponent(p.source)}&sourceId=${encodeURIComponent(p.sourceId)}${visibility ? `&visibility=${visibility}` : ''}`, { signal, expectedOwnerId });
 
 /** Never render a swept-up <style>/<script> block as a description. The BFF guards this too. */
 const looksCss = (s: string) =>
@@ -260,7 +260,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   // Reintroduce by dropping `refetchOnMount`: "the language list is asked again" in addSeriesDialog.test.ts fails.
   const candQ = useQuery({
     queryKey: ['edition-candidates', edSeed?.of],
-    queryFn: () => api<EditionCandidates>(`/api/sources/edition-candidates?seriesId=${encodeURIComponent(edSeed!.of)}`),
+    queryFn: () => api<EditionCandidates>(`/api/sources/edition-candidates?seriesId=${encodeURIComponent(edSeed!.of)}`, { expectedOwnerId: contentScope.ownerId }),
     enabled: !!edSeed, staleTime: 60_000, refetchOnMount: 'always', retry: false,
   });
   /**
@@ -273,7 +273,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   // The search in that language: the work's title and other names, on just those sources (the server's budget).
   const edSearch = useQuery({
     queryKey: ['edition-candidates', edSeed?.of, edPick],
-    queryFn: () => api<{ providers: Provider[] }>(`/api/sources/edition-candidates?seriesId=${encodeURIComponent(edSeed!.of)}&lang=${encodeURIComponent(edPick!)}`),
+    queryFn: () => api<{ providers: Provider[] }>(`/api/sources/edition-candidates?seriesId=${encodeURIComponent(edSeed!.of)}&lang=${encodeURIComponent(edPick!)}`, { expectedOwnerId: contentScope.ownerId }),
     enabled: !!edSeed && !!edPick, staleTime: 5 * 60_000, retry: false,
   });
   /** The server's offer on a duplicate: the same title, in a language the library does not hold it in. */
@@ -307,7 +307,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   // only one told whether a language is stated -- "The copy you have is in", asked when it is not.
   const ofQ = useQuery({
     queryKey: ['series', held?.of],
-    queryFn: () => api<Series>(`/api/series/${encodeURIComponent(held!.of)}`),
+    queryFn: () => api<Series>(`/api/series/${encodeURIComponent(held!.of)}`, { expectedOwnerId: contentScope.ownerId }),
     enabled: asEdition && !!held?.of, staleTime: 60_000, retry: false,
   });
   const heldLangs = held?.langs.length ? held.langs
@@ -361,7 +361,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
     if (seed.kind !== 'trending') return;
     const mine = ++want.current;
     setLoading(true);
-    api<{ content: Provider[] }>(`/api/sources/find?q=${encodeURIComponent(seed.title)}&sources=${encodeURIComponent(sources.join(','))}`)
+    api<{ content: Provider[] }>(`/api/sources/find?q=${encodeURIComponent(seed.title)}&sources=${encodeURIComponent(sources.join(','))}`, { expectedOwnerId: contentScope.ownerId })
       .then((r) => { if (mine === want.current) { setProviders(r.content); if (r.content.length === 1) setPicked(r.content[0]); } })
       .catch(() => { if (mine === want.current) setProviders([]); })
       .finally(() => { if (mine === want.current) setLoading(false); });
@@ -380,7 +380,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   const detailQ = useQuery({
     // ⚠️ The same shape as the pre-warm's key below, or the pre-warm warms nothing.
     queryKey: ['src-detail', picked?.source, picked?.sourceId, contentScope.ownerId, detailVisibility],
-    queryFn: ({ signal }) => fetchDetail(picked!, signal, detailVisibility),
+    queryFn: ({ signal }) => fetchDetail(picked!, signal, detailVisibility, contentScope.ownerId),
     enabled: !!picked && scopeReady,
     staleTime: DETAIL_STALE_MS,
     retry: false,
@@ -397,7 +397,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   useEffect(() => {
     if (seed.kind !== 'group' || seed.providers.length < 2 || !scopeReady) return;
     for (const p of seed.providers.slice(0, 2)) {
-      qc.prefetchQuery({ queryKey: ['src-detail', p.source, p.sourceId, contentScope.ownerId, detailVisibility], queryFn: ({ signal }) => fetchDetail(p, signal, detailVisibility), staleTime: DETAIL_STALE_MS, retry: false });
+      qc.prefetchQuery({ queryKey: ['src-detail', p.source, p.sourceId, contentScope.ownerId, detailVisibility], queryFn: ({ signal }) => fetchDetail(p, signal, detailVisibility, contentScope.ownerId), staleTime: DETAIL_STALE_MS, retry: false });
     }
   }, [seed, qc, scopeReady, contentScope.ownerId, detailVisibility]);
 
@@ -408,7 +408,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   // 2 s rhythm as before.
   const { data: jobs } = useQuery({
     queryKey: ['source-jobs'],
-    queryFn: () => api<{ content: Job[] }>('/api/sources/jobs'),
+    queryFn: () => api<{ content: Job[] }>('/api/sources/jobs', { expectedOwnerId: contentScope.ownerId }),
     enabled: !!done && (!done.nothing || sentFollow > 0),
     refetchInterval: (q) => {
       if (!done) return false;
@@ -452,6 +452,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
     const numbering = view?.send ?? 'auto';
     try {
       const r = await api<AddAnswer>('/api/sources/add', {
+        expectedOwnerId: contentScope.ownerId,
         json: {
           source: picked.source, sourceId: picked.sourceId, chapterCount, chapterFrom, autoUpdate, force, alsoFollow: alsoFollowBody, numbering,
           ...(!edSeed ? { visibility: contentScope.visibility } : {}),
@@ -507,7 +508,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
       // cover filling, pointed at by `folder` (v0.49.0). Until then this went to the Offline tab -- this
       // device's copies, where a server download had no business -- and on desktop, which hides that tab,
       // to the library, where nothing showed until the first chapter was in. One view serves both builds now.
-      const p = await api<Page<Series>>('/api/series/search', { json: { fullTextSearch: done.title, size: 5 } });
+      const p = await api<Page<Series>>('/api/series/search', { expectedOwnerId: contentScope.ownerId, json: { fullTextSearch: done.title, size: 5 } });
       const hit = p.content.find((s) => normTitle(s.metadata?.title || s.name) === normTitle(done.title));
       qc.invalidateQueries({ queryKey: ['library'] });
       router.push(hit ? `/series/?id=${hit.id}` : downloadsHref(done.folder));

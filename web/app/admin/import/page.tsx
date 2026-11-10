@@ -15,7 +15,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, ApiError } from '@/lib/api';
+import { api, ApiError, getCurrentUser } from '@/lib/api';
 import { revealed } from '@/lib/adult';
 import { useAuth } from '@/lib/auth';
 import { useToast } from '@/components/Toast';
@@ -35,7 +35,7 @@ import { useTrackers, usableTrackers, brokenTrackers } from '@/lib/trackerHealth
 import {
   needsAttention, confidenceLabel, confidenceColor, matchTitleDiffers, matchedViaAlt, openBatches, batchStateLabel, batchOriginLabel,
   runStatusLabel, runStatusColor, linkedCount, linkedLine, truncatedWords, sameSourcePair, alreadyImported,
-  filterImportRows, importRowState, selectableImport, readyImport, trackerProgressLine,
+  filterImportRows, importRowState, selectableImport, readyImport, trackerProgressLine, readImportBackup,
   type ImportFilter, type ImportBatch, type ImportBatchSummary, type ImportCandidate, type ImportOrigin,
 } from '@/lib/importBatch';
 
@@ -511,7 +511,8 @@ function RunCard({ batch, items, runIds, runTotal, note, onStartOver }: {
 function ImportWizardInner() {
   const router = useRouter();
   const params = useSearchParams();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
+  const ownerId = user?.id ?? null;
   const toast = useToast();
   const qc = useQueryClient();
 
@@ -535,11 +536,13 @@ function ImportWizardInner() {
   const scope=useContentScope();
   const [intakeNote, setIntakeNote] = useState<IntakeNote | null>(null);
 
-  const start = async (body: Record<string, unknown>) => {
+  const start = async (body: Record<string, unknown>, expectedOwnerId = ownerId) => {
+    if(!expectedOwnerId || getCurrentUser() !== expectedOwnerId) return;
     if(!body.continueFrom && !scope.ready) return;
     setStarting(true);
     try {
-      const r = await api<{ batchId: string; total: number; truncated: boolean; skippedNovels?: number; leftOver?: number | null }>('/api/admin/import/batches', { json: body.continueFrom ? body : {...body,visibility:scope.visibility} });
+      const r = await api<{ batchId: string; total: number; truncated: boolean; skippedNovels?: number; leftOver?: number | null }>('/api/admin/import/batches', { json: body.continueFrom ? body : {...body,visibility:scope.visibility}, expectedOwnerId });
+      if(getCurrentUser() !== expectedOwnerId) return;
       const origin = body.origin === 'tracker' ? 'tracker' : null;
       if (r.truncated) toast(truncatedWords(r.leftOver).toast, 'info');
       setIntakeNote({ skippedNovels: r.skippedNovels ?? 0, truncated: !!r.truncated, origin, leftOver: r.leftOver ?? null });
@@ -547,6 +550,7 @@ function ImportWizardInner() {
       fromIntake.current = true;
       router.push(`/admin/import/?batch=${r.batchId}`);
     } catch (e: any) {
+      if(getCurrentUser() !== expectedOwnerId) return;
       // The tracker intake's own refusals, each in the person's words rather than the server's. A rejected
       // token is the one that needs a trip to Profile; a service that did not answer is a retry; a
       // connection dropped since the card loaded (another tab disconnected it) is the not-connected line
@@ -563,16 +567,13 @@ function ImportWizardInner() {
   };
   const startFromTracker = (tracker: string, statuses: ListStatus[]) => start({ origin: 'tracker', tracker, statuses });
   const startFromFile = async (f: File) => {
+    const expectedOwnerId = ownerId;
+    if(!expectedOwnerId || getCurrentUser() !== expectedOwnerId) return;
     if (f.size > 10 * 1024 * 1024) { toast(tr('That file is unusually large (max ~10 MB)'), 'error'); return; }
     try {
-      const dataUrl = await new Promise<string>((res, rej) => {
-        const rd = new FileReader();
-        rd.onload = () => res(String(rd.result));
-        rd.onerror = () => rej(new Error('read'));
-        rd.readAsDataURL(f);
-      });
-      await start({ dataUrl });
-    } catch { toast(tr('Could not read that file'), 'error'); }
+      const dataUrl = await readImportBackup(f, expectedOwnerId);
+      await start({ dataUrl }, expectedOwnerId);
+    } catch { if(getCurrentUser() === expectedOwnerId) toast(tr('Could not read that file'), 'error'); }
   };
   const startFromMangadex = () => start({ mangadexList: mdUrl.trim() });
   const startFromPaste = () => {
@@ -673,7 +674,7 @@ function ImportWizardInner() {
 
   const resume = async () => {
     if (!batchId) return;
-    try { await api(`/api/admin/import/batches/${batchId}/resume`, { method: 'POST' }); refetch(); }
+    try { await api(`/api/admin/import/batches/${batchId}/resume`, { method: 'POST', expectedOwnerId: ownerId }); refetch(); }
     catch (e: any) { toast(msgOf(e, tr('Could not resume')), 'error'); }
   };
   const toggleSelected = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -684,7 +685,7 @@ function ImportWizardInner() {
   const skipSelected=async()=> {
     if(!batchId || !selectedVisible.size) return;
     setRunning(true);
-    try { await api(`/api/admin/import/batches/${batchId}/skip`,{method:'POST',json:{candidateIds:[...selectedVisible]}}); setSelected(new Set()); await refetch(); }
+    try { await api(`/api/admin/import/batches/${batchId}/skip`,{method:'POST',json:{candidateIds:[...selectedVisible]},expectedOwnerId:ownerId}); setSelected(new Set()); await refetch(); }
     catch(error) { toast(msgOf(error,tr('Could not skip selected titles')),'error'); }
     setRunning(false);
   };
@@ -695,7 +696,7 @@ function ImportWizardInner() {
     const ids = items.filter((c) => selectedReady.has(c.id)).map((c) => c.id);
     setRunning(true);
     try {
-      const r = await api<{ ok: boolean; total: number }>(`/api/admin/import/batches/${batchId}/run`, { method: 'POST', json: { candidateIds: ids } });
+      const r = await api<{ ok: boolean; total: number }>(`/api/admin/import/batches/${batchId}/run`, { method: 'POST', json: { candidateIds: ids }, expectedOwnerId: ownerId });
       setRunIds(new Set(ids));
       setRunTotal(typeof r?.total === 'number' ? r.total : ids.length);
       setSelected(new Set());
@@ -727,7 +728,7 @@ function ImportWizardInner() {
     if (!batchId) return;
     setDiscardBusy(true);
     try {
-      await api(`/api/admin/import/batches/${batchId}`, { method: 'DELETE' });
+      await api(`/api/admin/import/batches/${batchId}`, { method: 'DELETE', expectedOwnerId: ownerId });
       qc.removeQueries({ queryKey: ['import-batch', batchId] });
       toast(tr('Import discarded'), 'success');
       setDiscarding(false);

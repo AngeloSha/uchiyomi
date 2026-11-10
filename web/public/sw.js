@@ -36,6 +36,9 @@ const SHELL = `yomi-shell-${VERSION}`;
 const STATIC = `yomi-static-${VERSION}`;
 const IMG = `yomi-img-${VERSION}`;
 const API = `yomi-api-${VERSION}`;
+// Durable notification routing only: this is NEVER used to authorize API/image cache reads.
+const NOTIFICATION_STATE = 'yomi-notification-owner-v1';
+const NOTIFICATION_OWNER_URL = new URL('/.uchiyomi-notification-owner',location.origin).href;
 const IMG_MAX = 1000;
 // The API cache had no cap at all. The reader alone stores three distinct URLs per chapter (/api/books/:id,
 // /api/books/:id/pages, and the series' book list), none of which ever repeat, so across a library this size
@@ -99,12 +102,49 @@ let ownerHint = null;
 let accountEpoch = 0;
 let privateCacheBlocked = false;
 let accountReset = Promise.resolve();
+let notificationOwner;
+let notificationUpdates = Promise.resolve();
+
+async function knownNotificationOwner() {
+  if(notificationOwner!==undefined)return notificationOwner;
+  const epoch=accountEpoch;
+  try{
+    const cache=await caches.open(NOTIFICATION_STATE),response=await cache.match(NOTIFICATION_OWNER_URL);
+    const stored=response ? (await response.json()).userId : null;
+    if(epoch!==accountEpoch)return notificationOwner??null;
+    notificationOwner=typeof stored==='string'&&stored.length>0&&stored.length<=128?stored:null;
+  }catch(_){if(epoch===accountEpoch)notificationOwner=null;}
+  return notificationOwner??null;
+}
+async function closeOtherNotifications(owner) {
+  try{
+    const notifications=await self.registration.getNotifications();
+    for(const notification of notifications)if(!owner || notification.data?.recipientId!==owner)notification.close();
+  }catch(_){/* unavailable notification API; delivery itself remains owner checked */}
+}
+function announceNotificationOwner(owner) {
+  notificationOwner=owner;
+  notificationUpdates=notificationUpdates.catch(()=>{}).then(async()=>{
+    try{
+      const cache=await caches.open(NOTIFICATION_STATE);
+      // Remove the old recipient before replacing it, so a quota failure cannot retain that account.
+      await cache.delete(NOTIFICATION_OWNER_URL);
+      await cache.put(NOTIFICATION_OWNER_URL,new Response(JSON.stringify({userId:owner}),{headers:{'content-type':'application/json','cache-control':'no-store'}}));
+    }catch(_){
+      // A failed durable write must not leave a previous account's owner available after worker restart.
+      try{await caches.delete(NOTIFICATION_STATE);}catch(_){}
+      if(notificationOwner===owner)notificationOwner=null;
+    }
+    await closeOtherNotifications(notificationOwner??null);
+  });
+  return notificationUpdates;
+}
 
 function resetAccount(owner) {
   accountEpoch++;
   ownerHint = owner;
   privateCacheBlocked = false;
-  accountReset = clearAccountCaches().catch(() => { privateCacheBlocked = true; });
+  accountReset = Promise.all([clearAccountCaches().catch(() => { privateCacheBlocked = true; }),announceNotificationOwner(owner)]).then(()=>{});
   return accountReset;
 }
 
@@ -141,7 +181,8 @@ self.addEventListener('activate', (e) => {
   e.waitUntil(
     (async () => {
       const keys = await caches.keys();
-      await Promise.all(keys.filter((k) => !k.endsWith(VERSION)).map((k) => caches.delete(k)));
+      await Promise.all(keys.filter((k) => k!==NOTIFICATION_STATE&&!k.endsWith(VERSION)).map((k) => caches.delete(k)));
+      await closeOtherNotifications(await knownNotificationOwner());
       await self.clients.claim();
     })(),
   );
@@ -330,16 +371,20 @@ self.addEventListener('fetch', (e) => {
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch (_) {}
-  const title = data.title || 'Uchiyomi';
-  event.waitUntil(
-    self.registration.showNotification(title, {
-      body: data.body || 'A new chapter is available',
-      icon: '/icons/icon-192.png',
-      badge: '/icons/icon-192.png',
-      tag: data.tag,
-      data: { url: data.url || '/' },
-    }),
-  );
+  event.waitUntil((async()=>{
+    const epoch=accountEpoch;
+    await notificationUpdates;
+    const owner=await knownNotificationOwner();
+    if(!owner || data?.recipientId!==owner || epoch!==accountEpoch)return;
+    const content=data.recipientContent;
+    if(!content || typeof content!=='object' || Array.isArray(content) || typeof content.title!=='string' || !content.title ||
+      typeof content.body!=='string' || typeof content.url!=='string' || !content.url || (content.tag!==undefined&&typeof content.tag!=='string'))return;
+    await self.registration.showNotification(content.title, {
+      body:content.body,icon:'/icons/icon-192.png',badge:'/icons/icon-192.png',tag:content.tag,
+      data:{url:content.url,recipientId:owner},
+    });
+    if(epoch!==accountEpoch || notificationOwner!==owner)await closeOtherNotifications(notificationOwner??null);
+  })());
 });
 
 self.addEventListener('notificationclick', (event) => {
@@ -347,7 +392,12 @@ self.addEventListener('notificationclick', (event) => {
   const target = (event.notification.data && event.notification.data.url) || '/';
   event.waitUntil(
     (async () => {
+      const epoch=accountEpoch;
+      await notificationUpdates;
+      const owner=await knownNotificationOwner();
+      if(!owner || event.notification.data?.recipientId!==owner || epoch!==accountEpoch)return;
       const all = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+      if(epoch!==accountEpoch || notificationOwner!==owner)return;
       for (const c of all) {
         if ('focus' in c) { try { await c.navigate(target); } catch (_) {} return c.focus(); }
       }
@@ -362,15 +412,20 @@ self.addEventListener('pushsubscriptionchange', (event) => {
   event.waitUntil(
     (async () => {
       try {
+        const epoch=accountEpoch;
+        await notificationUpdates;
+        const me=await knownNotificationOwner();
+        if(!me || accountEpoch!==epoch)return;
         const key = event.oldSubscription && event.oldSubscription.options && event.oldSubscription.options.applicationServerKey;
         if (!key) return;
         const sub = await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
-        const token = await freshAccessToken();
-        if (!token) return;
+        if(notificationOwner!==me || accountEpoch!==epoch)return;
+        const session = await freshAccessToken();
+        if (!session || session.userId!==me || notificationOwner!==me || accountEpoch!==epoch) return;
         const j = sub.toJSON();
         await fetch('/api/push/subscribe', {
           method: 'POST',
-          headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
           body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys }),
         });
       } catch (_) { /* next Profile visit re-subscribes by hand */ }
@@ -387,7 +442,8 @@ async function freshAccessToken() {
   try {
     const r = await fetch('/auth/refresh', { method: 'POST', credentials: 'include' });
     if (!r.ok) return null;
-    return (await r.json()).accessToken || null;
+    const session=await r.json();
+    return session.accessToken && session.user?.id ? {token:session.accessToken,userId:session.user.id} : null;
   } catch (_) { return null; }
 }
 // This connection MUST be closed on every path out.
@@ -411,27 +467,30 @@ async function flushOutboxSW() {
   }
 }
 
-async function flushOutboxWith(db) {
+async function flushOutboxWith(db,me=ownerHint,epoch=accountEpoch) {
+  if(!me || ownerHint!==me || accountEpoch!==epoch)return;
   if (!db.objectStoreNames.contains('outbox')) return;
   const ro = db.transaction('outbox', 'readonly').objectStore('outbox');
   let keys, vals;
   try { [keys, vals] = await Promise.all([reqp(ro.getAllKeys()), reqp(ro.getAll())]); } catch (_) { return; }
   if (!vals || !vals.length) return;
-  const token = await freshAccessToken();
-  if (!token) return;
+  if(!vals.some(ev=>ev.userId===me))return;
+  const session = await freshAccessToken();
+  if (!session || session.userId!==me || ownerHint!==me || accountEpoch!==epoch) return;
   for (let i = 0; i < vals.length; i++) {
     const ev = vals[i];
-    // Events carry an owner since v0.11.1. The worker cannot know who is signed in, and `freshAccessToken`
-    // authenticates as whoever holds the refresh cookie, so an event stamped with a different account is
-    // left for the app to flush when that person is actually signed in.
-    if (ev.userId && ev.userId !== ownerHint) continue;
+    if(ownerHint!==me || accountEpoch!==epoch)return;
+    // Unknown legacy ownership is never guessed. Both the actual refreshed user and the page's owner
+    // hint must agree with the immutable queue owner before sending any reading.
+    if (ev.userId !== me) continue;
     try {
       const r = await fetch(`/api/books/${ev.bookId}/progress`, {
         method: 'PUT',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
         // v0.61.0: a page read under Incognito reading says so, whenever the queue flushes (lib/incognito.ts).
         body: JSON.stringify({ page: ev.page, completed: ev.completed, seriesId: ev.seriesId, deviceId: ev.deviceId, at: ev.ts, ...(ev.incognito ? { incognito: true } : {}) }),
       });
+      if(ownerHint!==me || accountEpoch!==epoch)return;
       // success or permanent rejection -> drop the entry; transient failures stay queued
       if (r.ok || (r.status >= 400 && r.status < 500 && r.status !== 401 && r.status !== 429)) {
         const rw = db.transaction('outbox', 'readwrite');

@@ -168,7 +168,9 @@ test('signing out ends the offline grace', () => {
   assert.match(s, /clearOfflineIdentity\(\)/, 'nothing clears the saved identity');
   const clear = s.slice(s.indexOf('const clearLocalSession'));
   assert.match(clear.slice(0, 600), /clearOfflineIdentity\(\)/, 'clearLocalSession does not drop the identity');
-  assert.match(s, /const logout[\s\S]{0,900}clearLocalSession\(\)/, 'logout does not go through clearLocalSession');
+  const logout=s.slice(s.indexOf('const logout'),s.indexOf('const setSettings'));
+  assert.match(logout,/beginAccountTransition\(\);[\s\S]*?await clearLocalSession\('loading'\);\s*window\.location\.reload\(\);/,
+    'logout must clear the saved identity and replace its fenced document');
 });
 
 test('a rejected session goes to sign-in, and cannot reach the reader', () => {

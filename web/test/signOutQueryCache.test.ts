@@ -36,8 +36,11 @@ test('forgetAccountData clears the query cache and the worker caches', () => {
 test('sign-out, sign-in and sign-up all forget the last account', () => {
   // Reintroduce by calling purgeAccountCaches() alone in any of them: that path keeps the query cache.
   assert.match(slice(auth, 'const clearLocalSession = async', 'useEffect('), /await forgetAccountData\(\);/, 'sign-out keeps the cache');
-  assert.match(slice(auth, 'const login = async', 'const firstRunSetup'), /await forgetAccountData\(\);[^\n]*\n\s*setAccessToken/, 'sign-in keeps the cache');
-  assert.match(slice(auth, 'const register = async', 'const logout'), /await forgetAccountData\(\);\s*setAccessToken/, 'sign-up keeps the cache');
+  assert.match(slice(auth, 'const login = async', 'const firstRunSetup'), /await replaceAuthedSession\(res\);/, 'sign-in skips the fenced purge');
+  assert.match(slice(auth, 'const register = async', 'const logout'), /await replaceAuthedSession\(res\);/, 'sign-up skips the fenced purge');
+  assert.match(slice(auth, 'const firstRunSetup = async', 'const register'), /await replaceAuthedSession\(res\);/, 'first-run setup skips the fenced purge');
+  assert.match(slice(auth,'const replaceAuthedSession = async','useEffect('),/await forgetAccountData\(\);[\s\S]*?setAccessToken\(res\.accessToken\);\s*adoptAuthed\(res\.user,res\.refreshExpiresAt\);/,
+    'the shared session helper keeps the cache or yields between credential/identity adoption');
 });
 
 test('clear() is what empties it: a cached answer is gone, not just stale', () => {

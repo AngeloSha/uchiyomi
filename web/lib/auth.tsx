@@ -1,7 +1,7 @@
 'use client';
 import { createContext, useContext, useEffect, useRef, useState, Fragment, ReactNode } from 'react';
 import { QueryClientContext } from '@tanstack/react-query';
-import { api, ApiError, refreshSession, setAccessToken, setCurrentUser } from './api';
+import { api, ApiError, beginAccountTransition, getCurrentUser, refreshSession, setAccessToken, setCurrentUser } from './api';
 import { readOfflineIdentity, writeOfflineIdentity, clearOfflineIdentity, OfflineIdentity } from './offlineIdentity';
 import { deviceId, deviceName } from './device';
 import { clearShownOnce } from './shownOnce';
@@ -221,7 +221,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * forgetting it in one of the two would leave the next person on a shared tablet holding the previous
    * person's identity -- and with it, the key to their downloads.
    */
-  const clearLocalSession = async () => {
+  const clearLocalSession = async (nextStatus:'anon'|'loading'='anon') => {
     setAccessToken(null);
     setCurrentUser(null);
     shownUser.current = null;
@@ -238,12 +238,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // The tone likewise: the sign-in screen is OLED, and the next person's offline launch does not inherit this one's.
     applyTone(null);
     setUser(null);
-    setStatus('anon');
+    setStatus(nextStatus);
     // Secrets the server only ever sends once are held outside React so a remount cannot destroy them.
     // That store has to end with the session, or a shared machine hands the next person a live token.
     clearShownOnce();
     void tellWorkerUser(null);
     await forgetAccountData();
+  };
+
+  /**
+   * The server accepted an intentional account change. Fence retained callbacks
+   * synchronously before the cache purge can yield, and remove the previous
+   * account from both imperative stores and React. A failed switch never reaches
+   * this point, so it leaves the previous screen/session intact.
+   */
+  const beginOwnedAccountChange = () => {
+    const release = beginAccountTransition();
+    setAccessToken(null);
+    setCurrentUser(null);
+    shownUser.current = null;
+    clearOfflineIdentity();
+    clearShownOnce();
+    setUser(null);
+    setStatus('loading');
+    void tellWorkerUser(null);
+    return release;
+  };
+
+  const replaceAuthedSession = async (res: {accessToken:string;user:User;refreshExpiresAt?:number}, resetAdult=false) => {
+    const previousOwner=getCurrentUser();
+    const replacingDocument=previousOwner!==null && previousOwner!==res.user.id;
+    const release=beginOwnedAccountChange();
+    // Once the cookie belongs to a different owner, even a failed cache purge
+    // must not release the old document to discover that owner's session.
+    const holdUntilReload=replacingDocument;
+    try {
+      await forgetAccountData();
+      if(resetAdult)setAdultShown(false);
+      if(replacingDocument){
+        // A's document must never acquire B's credential or global identity:
+        // even an unreviewed delayed callback remains powerless until reload.
+        writeOfflineIdentity(res.user,res.refreshExpiresAt);
+        channel.current?.postMessage({type:'switched',userId:res.user.id});
+        window.location.reload();
+        return true;
+      }
+      // No await between the token and identity adoption: no retained callback
+      // may observe the new credential paired with the previous account.
+      setAccessToken(res.accessToken);
+      adoptAuthed(res.user,res.refreshExpiresAt);
+      return false;
+    } finally { if(!holdUntilReload)release(); }
   };
 
   useEffect(() => {
@@ -327,10 +372,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await api<{ accessToken: string; user: User; refreshExpiresAt?: number }>('/auth/login', {
         json: { username, password, code, deviceId: deviceId(), deviceName: deviceName(), ...(remember ? { remember: true } : {}) },
       });
-      await forgetAccountData(); // whoever used this device last does not get to answer this account's requests
-      setAccessToken(res.accessToken);
-      // After the purge, never before: the identity write must not be the thing the purge sweeps away.
-      adoptAuthed(res.user, res.refreshExpiresAt);
+      await replaceAuthedSession(res);
       return { ok: true };
     } catch (e: any) {
       let body: any = {};
@@ -354,8 +396,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const firstRunSetup = async (username: string, password: string): Promise<{ ok: boolean; error?: string }> => {
     try {
       const res = await api<{ accessToken: string; user: User; refreshExpiresAt?: number }>('/api/setup', { json: { username, password } });
-      setAccessToken(res.accessToken);
-      adoptAuthed(res.user, res.refreshExpiresAt);
+      await replaceAuthedSession(res);
       return { ok: true };
     } catch (e: any) {
       let body: any = {};
@@ -385,9 +426,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await api<{ accessToken: string; user: User; refreshExpiresAt?: number }>('/auth/register', {
         json: { username, password, deviceId: deviceId(), deviceName: deviceName() },
       });
-      await forgetAccountData();
-      setAccessToken(res.accessToken);
-      adoptAuthed(res.user, res.refreshExpiresAt);
+      await replaceAuthedSession(res);
       return { ok: true };
     } catch (e: any) {
       let body: any = {};
@@ -415,10 +454,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * does not inherit it; and the other tabs are told. Reintroduce a step out of order: web/test/profileSwitch.test.ts.
    */
   const changeProfile = async (path: '/auth/switch' | '/auth/resume' | '/auth/profile-login', profileId: string): Promise<{ ok: boolean; error?: string }> => {
+    const expectedOwnerId=getCurrentUser();
     await flushOutbox().catch(() => 0);
     let res: { accessToken: string; user: User; refreshExpiresAt?: number };
     try {
-      res = await api(path, { json: { profileId } });
+      res = await api(path, { json: { profileId }, expectedOwnerId });
     } catch (e: any) {
       let body: any = {};
       try { body = JSON.parse(e?.body || '{}'); } catch {}
@@ -429,11 +469,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           : tr('Could not switch profile'),
       };
     }
-    await forgetAccountData();
-    setAdultShown(false);
-    setAccessToken(res.accessToken);
-    adoptAuthed(res.user, res.refreshExpiresAt);
-    channel.current?.postMessage({ type: 'switched', userId: res.user.id });
+    const replacingDocument=await replaceAuthedSession(res,true);
+    if(!replacingDocument)channel.current?.postMessage({ type: 'switched', userId: res.user.id });
     return { ok: true };
   };
   const switchProfile = (profileId: string) => changeProfile('/auth/switch', profileId);
@@ -447,9 +484,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * goes first, while the profile's session still answers.
    */
   const backToOwner = async (): Promise<boolean> => {
+    const expectedOwnerId=getCurrentUser();
     await flushOutbox().catch(() => 0);
-    const r = await fetch('/auth/desktop', { method: 'POST', credentials: 'include' }).catch(() => null);
-    if (!r?.ok) return false;
+    try { await api('/auth/desktop', { method: 'POST', expectedOwnerId }); }
+    catch { return false; }
+    // The cookie now belongs to the owner. Keep this document fenced through
+    // navigation; it must never issue a retained profile callback as the owner.
+    beginOwnedAccountChange();
     await forgetAccountData();
     setAdultShown(false);
     window.location.reload();
@@ -458,21 +499,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   /** Sign in as someone else: an account this device remembers is put aside rather than ended (bff POST /auth/leave). */
   const leave = async () => {
-    try { await api('/auth/leave', { method: 'POST' }); } catch {}
-    await clearLocalSession();
+    const expectedOwnerId=getCurrentUser();
+    if(expectedOwnerId===null)return;
+    try { await api('/auth/leave', { method: 'POST', expectedOwnerId }); } catch {}
+    if(getCurrentUser()!==expectedOwnerId)return;
+    beginAccountTransition(); // Held until the old account's document is gone.
+    await clearLocalSession('loading');
+    window.location.reload();
   };
 
   const logout = async () => {
+    const expectedOwnerId=getCurrentUser();
+    if(expectedOwnerId===null)return;
     try {
-      await api('/auth/logout', { method: 'POST' });
+      await api('/auth/logout', { method: 'POST', expectedOwnerId });
     } catch {}
+    if(getCurrentUser()!==expectedOwnerId)return;
+    beginAccountTransition(); // A future sign-in starts in a fresh document.
     // ⚠️ Signing out ENDS THE OFFLINE GRACE. `clearLocalSession` drops the saved identity, so the next cold
     // boot on this device -- online or not -- gets the sign-in screen, and the downloads in IndexedDB become
     // unaddressable again because nothing knows their owner. The chapters are deliberately left where they
     // are: they are scoped by owner, not secret, and signing back in makes them readable again without a
     // re-download. Reintroduce by clearing the session without the identity, and the next person to pick up
     // the tablet inherits the previous person's offline library.
-    await clearLocalSession();
+    await clearLocalSession('loading');
+    window.location.reload();
   };
 
   const setSettings = (partial: Record<string, any>) => {

@@ -47,15 +47,15 @@ test('the detail is a query keyed on the pick, fresh for ten minutes, never retr
   // fetch: "the detail is fetched in an effect again" fails (the trending find keeps its ONE counter).
   const src = code(read(DIALOG));
   assert.match(src, /queryKey: \['src-detail', picked\?\.source, picked\?\.sourceId, contentScope\.ownerId, detailVisibility\]/, 'the detail must distinguish source, account and private/shared copies');
-  assert.match(src, /queryFn: \(\{ signal \}\) => fetchDetail\(picked!, signal, detailVisibility\)/, 'the detail queryFn must pass cancellation and visibility');
+  assert.match(src, /queryFn: \(\{ signal \}\) => fetchDetail\(picked!, signal, detailVisibility, contentScope\.ownerId\)/, 'the detail queryFn must bind cancellation, visibility and the original account');
   assert.match(src, /enabled: !!picked && scopeReady/, 'the detail query runs without a pick or known privacy choice');
   assert.match(src, /staleTime: DETAIL_STALE_MS/, 'the detail is not held fresh');
   assert.match(src, /const DETAIL_STALE_MS = 10 \* 60_000;/, 'the detail freshness is not ten minutes');
   assert.match(src, /retry: false/, 'a failed detail is retried');
-  assert.match(src, /const fetchDetail = \(p: Pick<Provider, 'source' \| 'sourceId'>, signal\?: AbortSignal, visibility\?: ContentVisibility\)/, 'fetchDetail must accept the selected copy visibility');
+  assert.match(src, /const fetchDetail = \(p: Pick<Provider, 'source' \| 'sourceId'>, signal\?: AbortSignal, visibility\?: ContentVisibility, expectedOwnerId\?: string \| null\)/, 'fetchDetail must accept selected visibility and the original account');
   assert.match(src, /source=\$\{encodeURIComponent\(p\.source\)\}&sourceId=\$\{encodeURIComponent\(p\.sourceId\)\}/, 'source identity must stay encoded');
   assert.match(src, /visibility=\$\{visibility\}/, 'the server must receive the copy visibility');
-  assert.match(src, /\{ signal \}\);/, 'fetchDetail dropped cancellation');
+  assert.match(src, /\{ signal, expectedOwnerId \}\);/, 'fetchDetail dropped cancellation or account binding');
   assert.equal(src.match(/\+\+want\.current/g)?.length, 1, 'the detail is fetched in an effect again (a second request counter)');
   assert.doesNotMatch(src, /setDetail\(/, 'the detail is React state again');
 });
@@ -70,7 +70,7 @@ test('a group with a choice pre-warms its first two providers as it opens', () =
   const warm = src.slice(src.indexOf("if (seed.kind !== 'group' || seed.providers.length < 2 || !scopeReady) return;"));
   assert.notEqual(warm, src, 'the pre-warm is not gated on a group with more than one provider');
   assert.match(warm, /for \(const p of seed\.providers\.slice\(0, 2\)\) \{/, 'every provider is pre-warmed, or none');
-  assert.match(warm, /qc\.prefetchQuery\(\{ queryKey: \['src-detail', p\.source, p\.sourceId, contentScope\.ownerId, detailVisibility\], queryFn: \(\{ signal \}\) => fetchDetail\(p, signal, detailVisibility\), staleTime: DETAIL_STALE_MS, retry: false \}\)/, 'pre-warm must use the same account/visibility key and cancellation');
+  assert.match(warm, /qc\.prefetchQuery\(\{ queryKey: \['src-detail', p\.source, p\.sourceId, contentScope\.ownerId, detailVisibility\], queryFn: \(\{ signal \}\) => fetchDetail\(p, signal, detailVisibility, contentScope\.ownerId\), staleTime: DETAIL_STALE_MS, retry: false \}\)/, 'pre-warm must bind the same account/visibility key and original account');
   // Account/visibility changes need a new answer; choosing another provider must not restart pre-warming.
   assert.match(warm, /\}, \[seed, qc, scopeReady, contentScope\.ownerId, detailVisibility\]\);/, 'pre-warm dependencies must follow the content scope, not the pick');
 });

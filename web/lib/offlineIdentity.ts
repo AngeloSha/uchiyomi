@@ -25,8 +25,8 @@
  *   1. It has to be SYNCHRONOUS. `api.ts` explains that `currentUserId` must be answerable without awaiting
  *      anything, because `loadChapter` consults the offline store before any request is in flight. An async
  *      identity leaves a window where `owner()` is `'anon'` -- and an `'anon'` stamp on a queued progress
- *      event is unrecoverable: `downloads.ts` and `sw.js` both skip events whose owner does not match, and
- *      the carve-out for pre-v2 records only forgives an ABSENT owner, not a wrong one.
+ *      event is unattributable: `downloads.ts` and `sw.js` retain unknown-owner events without replaying them
+ *      and send known-owner events only for that same authenticated account.
  *   2. It has to be synchronously CLEARABLE on sign-out. Deleting from IndexedDB can block indefinitely --
  *      that is the entire subject of `offlineBlocked.test.ts` -- and an identity that might not be
  *      deletable on a shared tablet is the leak this file is supposed to prevent.

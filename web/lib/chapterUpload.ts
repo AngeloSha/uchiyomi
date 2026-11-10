@@ -1,6 +1,6 @@
 // Chapter files uploaded by hand (bff routes/upload.ts): for a series no source carries, whose chapters are
 // already on the admin's own disk. One file per request, the file itself as the body, one after another.
-import { api, ApiError } from './api';
+import { api, ApiError, getCurrentUser } from './api';
 import { t as tr } from './i18n';
 
 /** What the scanner reads as a chapter, for the file picker. The server checks it again, and the bytes too. */
@@ -16,8 +16,8 @@ const urlFor = (to: UploadTarget, name: string): string =>
     ? `seriesId=${encodeURIComponent(to.seriesId)}`
     : `title=${encodeURIComponent(to.title)}&fresh=1${to.visibility ? `&visibility=${to.visibility}` : ''}${to.libraryId ? `&libraryId=${encodeURIComponent(to.libraryId)}` : ''}`}`;
 
-export const uploadChapter = (to: UploadTarget, f: File): Promise<Uploaded> =>
-  api<Uploaded>(urlFor(to, f.name), { method: 'POST', body: f, headers: { 'content-type': 'application/octet-stream' } });
+export const uploadChapter = (to: UploadTarget, f: File, expectedOwnerId = getCurrentUser()): Promise<Uploaded> =>
+  api<Uploaded>(urlFor(to, f.name), { method: 'POST', body: f, headers: { 'content-type': 'application/octet-stream' }, expectedOwnerId });
 
 export const IMAGE_ACCEPT = '.jpg,.jpeg,.png,.webp,.gif,.avif';
 export const IMAGE_MAX_PAGES = 2000;
@@ -60,10 +60,10 @@ export function orderedImagePages(files: File[]): { pages: File[]; ignored: numb
   return { pages: pages.sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true })), ignored: files.length - pages.length,
     multipleFolders: parents.size > 1, duplicateNames: new Set(pages.map(f => f.name.toLowerCase())).size !== pages.length };
 }
-export async function uploadImageChapter(to: UploadTarget, name: string, pages: File[]): Promise<Uploaded> {
+export async function uploadImageChapter(to: UploadTarget, name: string, pages: File[], expectedOwnerId = getCurrentUser()): Promise<Uploaded> {
   const body = new FormData();
   for (const page of pages) body.append('pages', page, page.name);
-  return api<Uploaded>(urlFor(to, name.replace(/\.cbz$/i, '') + '.cbz') + '&images=1', { method: 'POST', body });
+  return api<Uploaded>(urlFor(to, name.replace(/\.cbz$/i, '') + '.cbz') + '&images=1', { method: 'POST', body, expectedOwnerId });
 }
 
 /** A refusal in the reader's words: the route answers with a code and an English message. */
@@ -98,21 +98,23 @@ export function uploadRefusal(e: unknown, name: string): string {
 }
 
 /** `failed` says why, in the reader's words; `failedFiles` names them, so the list keeps exactly those for another try. */
-export interface UploadRun { done: number; failed: string[]; failedFiles: string[]; seriesId: string | null; taken?: boolean }
+export interface UploadRun { done: number; failed: string[]; failedFiles: string[]; seriesId: string | null; taken?: boolean; cancelled?: boolean }
 
 /**
  * Every file, one after another, in name order (Chapter 2 before Chapter 10 is the scanner's business: it reads the
  * number from the name). A refusal is kept and the run goes on, so one bad file does not cost the rest.
  */
-export async function uploadAll(to: UploadTarget, files: File[], onFile?: (i: number, f: File) => void): Promise<UploadRun> {
+export async function uploadAll(to: UploadTarget, files: File[], onFile?: (i: number, f: File) => void, expectedOwnerId = getCurrentUser()): Promise<UploadRun> {
   const sorted = [...files].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
   const run: UploadRun = { done: 0, failed: [], failedFiles: [], seriesId: null };
   for (const [i, f] of sorted.entries()) {
+    // Capture once for the whole queue: a later file must never inherit a newly active account.
+    if (getCurrentUser() !== expectedOwnerId) { run.cancelled = true; break; }
     onFile?.(i, f);
     // A new series' title is checked on its first file only; the rest join what that one made.
     const here: UploadTarget = run.seriesId ? { seriesId: run.seriesId } : to;
     try {
-      const r = await uploadChapter(here, f);
+      const r = await uploadChapter(here, f, expectedOwnerId);
       run.done++;
       if (r.seriesId) run.seriesId = r.seriesId;
       if (r.indexed === false) {
@@ -120,6 +122,7 @@ export async function uploadAll(to: UploadTarget, files: File[], onFile?: (i: nu
         if (!run.seriesId) break;
       }
     } catch (e) {
+      if (getCurrentUser() !== expectedOwnerId || e instanceof ApiError && e.status === 409 && /"account_changed"/.test(e.body)) { run.cancelled = true; break; }
       // A title already here stops the run: nothing of it was written, and the rest would only be refused too.
       if ('title' in here && here.fresh && e instanceof ApiError && e.status === 409 && e.body.includes('"taken"')) { run.taken = true; break; }
       run.failed.push(uploadRefusal(e, f.name));

@@ -118,11 +118,11 @@ export function Providers({ children }: { children: ReactNode }) {
 
   return (
     <QueryClientProvider client={qc}>
-      <I18nProvider>
-        <ToastProvider>
-          <AuthProvider>{children}</AuthProvider>
-        </ToastProvider>
-      </I18nProvider>
+      <AuthProvider>
+        <I18nProvider>
+          <ToastProvider>{children}</ToastProvider>
+        </I18nProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

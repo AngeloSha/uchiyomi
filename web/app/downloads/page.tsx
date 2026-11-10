@@ -52,7 +52,7 @@ export default function DownloadsPage() {
   if (desktop) return null;
 
   const remove = async (bookId: string) => {
-    await deleteDownload(bookId);
+    await deleteDownload(bookId,user?.id??null);
     refresh();
   };
 
@@ -61,13 +61,13 @@ export default function DownloadsPage() {
   const deleted = (n: number) => (n === 1 ? tr('Deleted 1 chapter') : tr('Deleted {n} chapters', { n }));
 
   const removeSeries = async (seriesId: string) => {
-    const n = await deleteSeriesDownloads(seriesId);
+    const n = await deleteSeriesDownloads(seriesId,user?.id??null);
     toast(deleted(n), 'success');
     refresh();
   };
 
   const removeAll = async () => {
-    const n = await clearAllDownloads();
+    const n = await clearAllDownloads(user?.id??null);
     toast(deleted(n), 'success');
     refresh();
   };

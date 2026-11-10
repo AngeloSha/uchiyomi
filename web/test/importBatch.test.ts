@@ -117,7 +117,7 @@ test('a batch can be discarded from every live state, and it is a DELETE', () =>
   // review nobody wanted to finish, could only be left to the sweep. Reintroduce by removing the `canDiscard`
   // button from the header, or by turning the request into a POST to /cancel.
   const src = code(read('app/admin/import/page.tsx'));
-  assert.match(src, /api\(`\/api\/admin\/import\/batches\/\$\{batchId\}`, \{ method: 'DELETE' \}\)/, 'Discard does not DELETE the batch');
+  assert.match(src, /api\(`\/api\/admin\/import\/batches\/\$\{batchId\}`, \{ method: 'DELETE', expectedOwnerId: ownerId \}\)/, 'Discard must DELETE only under the account that owns this review');
   assert.match(src, /const canDiscard = !!batch && batch\.state !== 'done' && batch\.state !== 'cancelled'/, 'Discard is not offered in resolving, review AND importing');
   assert.match(src, /\{canDiscard && \([\s\S]{0,200}setDiscarding\(true\)/, 'the header has no Discard button');
   // Destructive, so through the shared ConfirmDialog -- never window.confirm, and never opened over the

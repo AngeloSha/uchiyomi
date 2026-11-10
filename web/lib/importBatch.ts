@@ -4,6 +4,25 @@
 // the admin members list) rather than translating to camelCase.
 import { t as tr } from './i18n';
 import { normTitle } from './normTitle';
+import { ApiError, getCurrentUser } from './api';
+
+/** A backup can finish reading after its form has gone away. Keep its bytes under the initiating account. */
+export function readImportBackup(file: File, expectedOwnerId: string | null): Promise<string> {
+  const assertOwner = () => {
+    if (getCurrentUser() !== expectedOwnerId) throw new ApiError(409, '{"error":"account_changed"}');
+  };
+  return new Promise((resolve, reject) => {
+    try {
+      assertOwner();
+      const reader = new FileReader();
+      reader.onload = () => {
+        try { assertOwner(); resolve(String(reader.result)); } catch (error) { reject(error); }
+      };
+      reader.onerror = () => reject(new Error('read'));
+      reader.readAsDataURL(file);
+    } catch (error) { reject(error); }
+  });
+}
 
 /** `tracker` (v0.36.0) is the reading list of an AniList / MyAnimeList / Kitsu account connected under Profile. */
 export type ImportOrigin = 'backup' | 'mangadex' | 'paste' | 'tracker';

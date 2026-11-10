@@ -3750,6 +3750,11 @@ shared destination and confirmation; it keeps the series and files rather than m
 private reading activity stays private after sharing or deleting a title. Private AniList entries remain private,
 and private writes to trackers that cannot enforce privacy are suppressed.
 
+Changing accounts or signing out loads the app afresh. Pending uploads, imports and offline activity keep their
+original owner; saved downloads are not transferred to the next account. Browser notifications display detailed
+content only for their addressed account. A browser worker from an older version receives generic notification
+text until you reopen the updated app.
+
 This protects accounts from one another in the application. Your server operator still controls the database,
 files and backups. **Do not downgrade this database to a version before v0.107.0:** those versions do not enforce
 these privacy columns. Keep a backup before upgrading and use a forward fix if an upgrade needs repair.
@@ -4030,6 +4035,11 @@ screen and it goes straight to **Offline**, with a banner naming the account it 
 needs the server (Discover, search, adding series, the admin panel) is dimmed rather than hidden, because
 there is nothing behind it until you reconnect. The moment you do, the banner clears and any reading you did
 offline is sent up.
+
+Downloads and queued reading stay bound to the account that started them. Switching accounts stops an
+unfinished save or sync; completed downloads and that account’s pending reading remain available when
+they sign back in. Older browser progress entries that contain no recorded account are retained locally
+but are not sent automatically: Uchiyomi cannot safely guess who read them.
 
 Two things worth knowing about that:
 

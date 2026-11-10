@@ -44,28 +44,39 @@ let currentUserId: string | null = readOfflineIdentity()?.id ?? null;
 let identityEpoch = 0;
 // A changed refresh identity requires a fresh document: no retained form or request may act as that person.
 let identityBlocked = false;
+const accountTransitions = new Set<symbol>();
+
+/** Fence accepted account changes while caches and the old UI are being cleared. */
+export function beginAccountTransition(): () => void {
+  const transition = Symbol();
+  accountTransitions.add(transition);
+  identityEpoch++;
+  return () => { accountTransitions.delete(transition); };
+}
 
 export function setAccessToken(t: string | null) {
   accessToken = t;
 }
 export function getAccessToken() {
-  return identityBlocked ? null : accessToken;
+  return identityBlocked || accountTransitions.size ? null : accessToken;
 }
 export function setCurrentUser(id: string | null) {
   if (id !== currentUserId) identityEpoch++;
   currentUserId = id;
 }
 export function getCurrentUser() {
-  return currentUserId;
+  return identityBlocked || accountTransitions.size ? null : currentUserId;
 }
 
 function acceptRefreshedIdentity(id: string) {
+  const previousOwner = currentUserId;
   const changed = currentUserId !== null && currentUserId !== id;
   setCurrentUser(id);
   if (!changed) return;
   identityBlocked = true;
   accessToken = null;
-  clearOfflineIdentity();
+  // Another tab may already have saved the new account. Only clear this document's old identity.
+  if (readOfflineIdentity()?.id === previousOwner) clearOfflineIdentity();
   if (typeof window !== 'undefined') window.dispatchEvent(new Event('yomi-account-changed'));
 }
 
@@ -92,22 +103,28 @@ export class ApiError extends Error {
  * they must share one request rather than race to rotate the token three times.
  */
 export async function refreshSession(): Promise<SessionResult> {
+  if (accountTransitions.size || identityBlocked) return { kind: 'unreachable' };
   if (!refreshing) {
+    const epoch = identityEpoch;
+    const current = () => !accountTransitions.size && !identityBlocked && identityEpoch === epoch;
     refreshing = fetch('/auth/refresh', { method: 'POST', credentials: 'include' })
       .then(async (r): Promise<SessionResult> => {
+        if (!current()) return { kind: 'unreachable' };
         // Uchiyomi Desktop: a refresh cookie that is gone or no longer matches (60 days, a cleared cookie
         // store, a restored backup) is exchanged again in the SAME singleton, so the sign-in screen never
         // appears there. Only in the shell's own window: the marker is the one thing a browser tab on the
         // same port cannot have, and without the shell's header the exchange would only 401 anyway.
-        if (r.status === 401 && desktopShell()) return desktopExchange();
+        if (r.status === 401 && desktopShell()) return desktopExchange(epoch);
         if (r.status === 401 || r.status === 403) {
           // `local_only`: a profile that opens at home, refreshed from outside it -- the sign-in screen says so. Every
           // other refusal is the bare answer it always was.
           const body = (await r.json().catch(() => null)) as { error?: string } | null;
+          if (!current()) return { kind: 'unreachable' };
           return body?.error === 'local_only' ? { kind: 'rejected', reason: 'local_only' } : { kind: 'rejected' };
         }
         if (!r.ok) return { kind: 'unreachable' };
         const j = await r.json();
+        if (!current()) return { kind: 'unreachable' };
         accessToken = j.accessToken;
         if (j.user?.id) acceptRefreshedIdentity(j.user.id);
         noteServerDesktop(j.desktop);
@@ -132,11 +149,14 @@ export async function refreshSession(): Promise<SessionResult> {
  * splash retries: that is the server restarting, not a verdict. Reintroduce by returning `unreachable` for a
  * 401 and the window retries a refused exchange forever instead of showing DesktopReconnect.
  */
-async function desktopExchange(): Promise<SessionResult> {
+async function desktopExchange(epoch: number): Promise<SessionResult> {
   const r = await fetch('/auth/desktop', { method: 'POST', credentials: 'include' });
+  const current = () => !accountTransitions.size && !identityBlocked && identityEpoch === epoch;
+  if (!current()) return { kind: 'unreachable' };
   if (r.status === 401 || r.status === 403 || r.status === 404) return { kind: 'rejected' };
   if (!r.ok) return { kind: 'unreachable' };
   const j = await r.json();
+  if (!current()) return { kind: 'unreachable' };
   accessToken = j.accessToken;
   if (j.user?.id) acceptRefreshedIdentity(j.user.id);
   noteServerDesktop(j.desktop);
@@ -150,6 +170,8 @@ interface Opts {
   body?: BodyInit;
   signal?: AbortSignal;
   headers?: Record<string, string>;
+  /** Bind delayed or multi-request work to the account that started it. Never sent to the server. */
+  expectedOwnerId?: string | null;
 }
 
 /**
@@ -165,9 +187,14 @@ interface Opts {
 const REFUSAL = /"error"\s*:\s*"(?:wrong_password|totp_invalid)"/;
 const isRefusal = async (res: Response): Promise<boolean> => REFUSAL.test(await res.clone().text().catch(() => ''));
 
+interface ScopedResponse { response: Response; owner: string | null; epoch: number }
+function assertAccount(owner: string | null, epoch: number): void {
+  if (identityBlocked || accountTransitions.size || currentUserId !== owner || identityEpoch !== epoch) throw accountChangedError();
+}
 async function raw(path: string, opts: Opts, retry: boolean,
-  owner = currentUserId, epoch = identityEpoch): Promise<Response> {
-  if (identityBlocked || currentUserId !== owner || identityEpoch !== epoch) throw accountChangedError();
+  owner = opts.expectedOwnerId === undefined ? currentUserId : opts.expectedOwnerId,
+  epoch = identityEpoch): Promise<ScopedResponse> {
+  assertAccount(owner, epoch);
   const headers = new Headers(opts.headers || {});
   if (accessToken) headers.set('authorization', `Bearer ${accessToken}`);
   const body = opts.json !== undefined ? JSON.stringify(opts.json) : opts.body;
@@ -182,26 +209,33 @@ async function raw(path: string, opts: Opts, retry: boolean,
     credentials: 'include',
     signal: opts.signal,
   });
-  if (identityBlocked || currentUserId !== owner || identityEpoch !== epoch) throw accountChangedError();
+  assertAccount(owner, epoch);
 
   if (res.status === 401 && retry && !(await isRefusal(res))) {
     const r = await refreshSession();
     if (r.kind === 'authed') {
-      if (identityBlocked || !owner || r.user.id !== owner || currentUserId !== owner || identityEpoch !== epoch) {
+      if (identityBlocked || accountTransitions.size || !owner || r.user.id !== owner || currentUserId !== owner || identityEpoch !== epoch) {
         throw accountChangedError();
       }
       return raw(path, opts, false, owner, epoch);
     }
   }
-  return res;
+  assertAccount(owner, epoch);
+  return { response: res, owner, epoch };
 }
 
 export async function api<T = any>(path: string, opts: Opts = {}): Promise<T> {
-  const res = await raw(path, opts, true);
-  if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => ''));
-  if (res.status === 204) return undefined as T;
+  const scoped = await raw(path, opts, true), res = scoped.response;
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    assertAccount(scoped.owner, scoped.epoch);
+    throw new ApiError(res.status, body);
+  }
+  if (res.status === 204) { assertAccount(scoped.owner, scoped.epoch); return undefined as T; }
   const ct = res.headers.get('content-type') || '';
-  return (ct.includes('application/json') ? await res.json() : await res.text()) as T;
+  const data = ct.includes('application/json') ? await res.json() : await res.text();
+  assertAccount(scoped.owner, scoped.epoch);
+  return data as T;
 }
 
 /**
@@ -209,10 +243,16 @@ export async function api<T = any>(path: string, opts: Opts = {}): Promise<T> {
  * page list's `x-spreads` (#229) -- the list stays the plain array every other caller reads.
  */
 export async function apiWithHeaders<T = any>(path: string, opts: Opts = {}): Promise<{ data: T; headers: Headers }> {
-  const res = await raw(path, opts, true);
-  if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => ''));
+  const scoped = await raw(path, opts, true), res = scoped.response;
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    assertAccount(scoped.owner, scoped.epoch);
+    throw new ApiError(res.status, body);
+  }
   const ct = res.headers.get('content-type') || '';
-  return { data: (ct.includes('application/json') ? await res.json() : await res.text()) as T, headers: res.headers };
+  const data = ct.includes('application/json') ? await res.json() : await res.text();
+  assertAccount(scoped.owner, scoped.epoch);
+  return { data: data as T, headers: res.headers };
 }
 
 /**
@@ -220,8 +260,13 @@ export async function apiWithHeaders<T = any>(path: string, opts: Opts = {}): Pr
  * lib/siteBrowser.ts) reads it line by line. Signed in and refreshed exactly like `api`.
  */
 export async function apiResponse(path: string, opts: Opts = {}): Promise<Response> {
-  const res = await raw(path, opts, true);
-  if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => ''));
+  const scoped = await raw(path, opts, true), res = scoped.response;
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    assertAccount(scoped.owner, scoped.epoch);
+    throw new ApiError(res.status, body);
+  }
+  assertAccount(scoped.owner, scoped.epoch);
   return res;
 }
 

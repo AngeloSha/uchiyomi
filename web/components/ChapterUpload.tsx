@@ -9,22 +9,28 @@ import { CHAPTER_ACCEPT, IMAGE_ACCEPT, IMAGE_MAX_PAGES, orderedImagePages, image
 import { useToast } from './Toast';
 import { ProgressRing } from './ProgressRing';
 import { ContentScopePicker, useContentScope } from './ContentScopePicker';
+import { useAuth } from '@/lib/auth';
+import { getCurrentUser } from '@/lib/api';
 
 /** Run the files, saying how far along it is, and say how it went. */
 function useUpload(onDone: (run: UploadRun) => void) {
+  const ownerId = useAuth().user?.id ?? null;
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const toast = useToast();
   const qc = useQueryClient();
   const [at, setAt] = useState<{ i: number; n: number } | null>(null);
   const start = async (to: UploadTarget, files: File[], imageChapter?: string) => {
-    if (!files.length) return;
+    if (!files.length || !mounted.current || !ownerId || getCurrentUser() !== ownerId) return;
     setAt({ i: 0, n: imageChapter ? 1 : files.length });
     let run: UploadRun;
     if (imageChapter) {
       try {
-        const r = await uploadImageChapter(to, imageChapter, files);
+        const r = await uploadImageChapter(to, imageChapter, files, ownerId);
         run = { done: 1, failed: r.indexed === false ? [tr('{name} was stored, but indexing is pending. Run a library scan before retrying.', { name: imageChapter })] : [], failedFiles: [], seriesId: r.seriesId ?? null };
       } catch (error) { run = { done: 0, failed: [uploadRefusal(error, imageChapter)], failedFiles: files.map(f => f.name), seriesId: null }; }
-    } else run = await uploadAll(to, files, (i) => setAt({ i, n: files.length }));
+    } else run = await uploadAll(to, files, (i) => setAt({ i, n: files.length }), ownerId);
+    if (!mounted.current || getCurrentUser() !== ownerId || run.cancelled) return;
     setAt(null);
     // Everything that lists what was just stored: the series' own rows (its chapter list is `series-books`, not only its
     // listing), and the Library and Home a new series joins (#375). Without the chapter rows a fast upload left the
