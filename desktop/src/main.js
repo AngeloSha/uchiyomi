@@ -364,8 +364,10 @@ async function runApp() {
   appMode = start.mode;
   log.info(`mode: ${start.mode}${'probe' in start ? ' (--server-url)' : ''}`);
   createTray();
-  createWindow(!hidden);
   try {
+    // Electron's loadURL promise also observes failures from an unfinished earlier main-frame load.
+    // Finish the shell page first: its late ERR_ABORTED must not replace an already loaded app with an error.
+    await createWindow(!hidden);
     if (start.mode === 'standalone') return await runStandalone();
     installCertCheck(session.defaultSession);
     /** @type {{ origin: string, name: string } | null} */
@@ -381,7 +383,7 @@ async function runApp() {
     if (!sv) {
       const choice = await firstLaunch(pre);
       appMode = choice.mode;
-      replaceWindow();
+      await replaceWindow();
       if (choice.mode === 'standalone') return await runStandalone();
       sv = choice.server;
     }
@@ -831,12 +833,13 @@ const retired = new WeakSet();
 function replaceWindow() {
   const old = win;
   const bounds = old && !old.isDestroyed() ? old.getBounds() : null;
-  createWindow(true, bounds);
-  if (!old || old.isDestroyed()) return;
+  const loaded = createWindow(true, bounds);
+  if (!old || old.isDestroyed()) return loaded;
   retired.add(old);
   const gone = () => { if (!old.isDestroyed()) old.destroy(); };
   win?.once('ready-to-show', gone);
   setTimeout(gone, 5000).unref?.();
+  return loaded;
 }
 
 /** @param {boolean} show @param {Electron.Rectangle | null} [bounds] */
@@ -925,7 +928,7 @@ function createWindow(show, bounds = null) {
   // The window asks for nothing a manga reader needs (camera, location, notifications through the web API...).
   // Fullscreen for the reader is the one permission it uses.
   wc.session.setPermissionRequestHandler((_wc, perm, cb) => cb(perm === 'fullscreen' || perm === 'clipboard-sanitized-write'));
-  void w.loadFile(path.join(__dirname, 'loading.html'));
+  return w.loadFile(path.join(__dirname, 'loading.html'));
 }
 
 /** The origin the window may show: the local bff's (standalone) or the person's server's (server mode). */
