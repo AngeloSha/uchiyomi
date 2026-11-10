@@ -1,9 +1,9 @@
-// On desktop, the hidden routes answer 404 and the route table is the server's minus OPDS and the Komga API,
+// On desktop, the hidden routes answer 404 and the route table is the server's minus external-reader APIs,
 // plus the sign-in handshake -- nothing else moves.
 //
 // Builds the app the way openapiCoverage.test.ts does (the real route plugins, in server.ts's order), with the
 // desktop switch ON and the guard installed where server.ts installs it. desktopSwitchHygiene.test.ts pins that
-// server.ts really does skip exactly those two plugins and install exactly this guard.
+// server.ts really does skip the sharing plugins and install exactly this guard.
 //
 // No database for the table and the 404s: the guard answers before any handler runs. The one check that needs
 // a handler to run (`/api/push/key`) is skipped unless TEST_DATABASE_URL is set.
@@ -35,7 +35,8 @@ const REPO = join(__dirname, '..', '..');
 const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 const key = (m: string, p: string) => `${m.toUpperCase()} ${p}`;
 const toOpenApi = (p: string) => p.replace(/:([A-Za-z]+)/g, '{$1}');
-const ROUTES = ['auth', 'admin', 'notify', 'catalog', 'images', 'personal', 'recommendations', 'downloads', 'sources', 'translate', 'comments', 'opds', 'komgaCompat'];
+const SHARING = ['opds', 'komgaCompat', 'kosync', 'externalReaders'];
+const ROUTES = ['auth', 'admin', 'notify', 'catalog', 'images', 'personal', 'privateLibrary', 'recommendations', 'downloads', 'upload', 'sources', 'translate', 'comments', ...SHARING];
 
 /**
  * The OFF table: openapi.yaml's operations plus the two inline routes. openapiCoverage.test.ts proves this IS
@@ -77,17 +78,17 @@ async function desktopApp() {
   app.get('/livez', async () => ({ ok: true }));
   app.get('/healthz', async () => ({ ok: true }));
   for (const mod of ROUTES) {
-    if (isDesktop() && (mod === 'opds' || mod === 'komgaCompat')) continue; // server.ts: `if (!isDesktop())`
-    await app.register((await import(`../src/routes/${mod}`)).default);
+    if (isDesktop() && SHARING.includes(mod)) continue; // server.ts: `if (!isDesktop())`
+    const routes = await import(`../src/routes/${mod}`);
+    await app.register(mod === 'upload' ? routes.uploadSeriesRoutes : routes.default);
   }
-  await app.register((await import('../src/routes/upload')).uploadSeriesRoutes);
   const table = new Set(seen); // before the web root, whose per-file static routes are not API
   await registerWebRoot(app);
   await app.ready();
   return { app, table };
 }
 
-/** What the OPDS and Komga-compatible plugins register (they are not switch-dependent themselves). */
+/** What the external-reader plugins register (server.ts excludes them from desktop). */
 async function sharingRoutes(): Promise<Set<string>> {
   const Fastify = (await import('fastify')).default;
   const jwt = (await import('@fastify/jwt')).default;
@@ -96,7 +97,7 @@ async function sharingRoutes(): Promise<Set<string>> {
   const seen = collector(app);
   await app.register(cookie);
   await app.register(jwt, { secret: process.env.JWT_SECRET! });
-  for (const mod of ['opds', 'komgaCompat']) await app.register((await import(`../src/routes/${mod}`)).default);
+  for (const mod of SHARING) await app.register((await import(`../src/routes/${mod}`)).default);
   await app.ready();
   await app.close();
   return seen;
@@ -115,20 +116,20 @@ test('every hidden route is a real route of the server build', async () => {
   assert.equal(new Set(DESKTOP_HIDDEN_ROUTES).size, DESKTOP_HIDDEN_ROUTES.length, 'a hidden route is listed twice');
 });
 
-test('the desktop route table = the server table - OPDS - Komga API + POST /auth/desktop', async () => {
+test('the desktop route table = the server table - external-reader APIs + POST /auth/desktop', async () => {
   const { app, table } = await desktopApp();
   await app.close();
   const off = offTable();
   const sharing = await sharingRoutes();
-  assert.ok(sharing.size >= 20, `only ${sharing.size} OPDS/Komga routes found -- did a plugin fail to load?`);
+  assert.ok(sharing.size >= 26, `only ${sharing.size} external-reader routes found -- did a plugin fail to load?`);
   const expected = new Set([...off].filter((r) => !sharing.has(r)));
   expected.add('POST /auth/desktop');
   // Reintroduce by registering a route only when isDesktop() anywhere else, or by skipping another plugin on
   // desktop: the diff names it.
   assert.deepEqual(sorted([...table].filter((r) => !expected.has(r))), [], 'routes only the desktop app has');
   assert.deepEqual(sorted([...expected].filter((r) => !table.has(r))), [], 'server routes the desktop app lost');
-  // And the sharing routes really are OPDS and the Komga API, nothing else of the server's.
-  assert.deepEqual(sorted([...sharing].filter((r) => !/^\w+ \/(opds|api\/v[12])\b/.test(r))), []);
+  // Only sharing APIs are excluded; owner-private management remains available to the desktop's account.
+  assert.deepEqual(sorted([...sharing].filter((r) => !/^\w+ \/(opds|api\/v[12]|api\/external-readers)\b/.test(r))), []);
 });
 
 test('every hidden route answers 404 JSON on desktop, even to a valid admin', async () => {
@@ -155,13 +156,26 @@ test('every hidden route answers 404 JSON on desktop, even to a valid admin', as
   } finally { await app.close(); }
 });
 
-test('OPDS and the Komga-compatible API do not exist on desktop', async () => {
+test('external-reader APIs do not exist on desktop and never fall through to the app shell', async () => {
   const { app } = await desktopApp();
   try {
     for (const url of ['/opds', '/opds/v1.2/catalog', '/api/v1/libraries', '/api/v2/users/me']) {
       const res = await app.inject({ method: 'GET', url, headers: { host: HOST } });
       assert.equal(res.statusCode, 404, url);
       assert.deepEqual(res.json(), { error: 'not_found' }, `${url} fell through to the app shell`);
+    }
+    const external = sorted([...await sharingRoutes()].filter(r => / \/api\/(?:v1\/kosync\/|external-readers$)/.test(r)));
+    assert.equal(external.length, 6, 'all KOReader and external-reader settings operations must be exercised');
+    const token=app.jwt.sign({sub:UUID,role:'admin'});
+    for(const operation of external){
+      const[method,template]=operation.split(' '),url=template.replace('{document}','0'.repeat(32));
+      for(const authenticated of [false,true])for(const m of method==='GET'?['GET','HEAD']:[method]){
+        const response=await app.inject({method:m as any,url,headers:{host:HOST,...(authenticated?{authorization:`Bearer ${token}`}:{})},
+          ...(['GET','HEAD'].includes(m)?{}:{payload:{}})});
+        assert.equal(response.statusCode,404,`${operation}, authenticated=${authenticated}`);
+        assert.match(String(response.headers['content-type']),/application\/json/);
+        if(m!=='HEAD')assert.deepEqual(response.json(),{error:'not_found'},`${operation} fell through to the app shell or authentication`);
+      }
     }
   } finally { await app.close(); }
 });
