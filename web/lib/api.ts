@@ -2,7 +2,7 @@
 // cookie silently re-mints it (and the image cookie) on 401 or app launch.
 
 import { withAdult } from './adult';
-import { readOfflineIdentity } from './offlineIdentity';
+import { readOfflineIdentity, clearOfflineIdentity } from './offlineIdentity';
 import { desktopShell, noteServerDesktop } from './desktop';
 
 /**
@@ -41,19 +41,37 @@ let refreshing: Promise<SessionResult> | null = null;
  * The value is still only ever WRITTEN after the server has confirmed who you are; see `offlineIdentity.ts`.
  */
 let currentUserId: string | null = readOfflineIdentity()?.id ?? null;
+let identityEpoch = 0;
+// A changed refresh identity requires a fresh document: no retained form or request may act as that person.
+let identityBlocked = false;
 
 export function setAccessToken(t: string | null) {
   accessToken = t;
 }
 export function getAccessToken() {
-  return accessToken;
+  return identityBlocked ? null : accessToken;
 }
 export function setCurrentUser(id: string | null) {
+  if (id !== currentUserId) identityEpoch++;
   currentUserId = id;
 }
 export function getCurrentUser() {
   return currentUserId;
 }
+
+function acceptRefreshedIdentity(id: string) {
+  const changed = currentUserId !== null && currentUserId !== id;
+  setCurrentUser(id);
+  if (!changed) return;
+  identityBlocked = true;
+  accessToken = null;
+  clearOfflineIdentity();
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('yomi-account-changed'));
+}
+
+const accountChangedError = () => new ApiError(409, JSON.stringify({
+  error: 'account_changed', message: 'The active account changed. Reload to continue.',
+}));
 
 export class ApiError extends Error {
   constructor(public status: number, public body: string) {
@@ -91,7 +109,7 @@ export async function refreshSession(): Promise<SessionResult> {
         if (!r.ok) return { kind: 'unreachable' };
         const j = await r.json();
         accessToken = j.accessToken;
-        if (j.user?.id) currentUserId = j.user.id;
+        if (j.user?.id) acceptRefreshedIdentity(j.user.id);
         noteServerDesktop(j.desktop);
         return { kind: 'authed', user: j.user, refreshExpiresAt: j.refreshExpiresAt };
       })
@@ -120,7 +138,7 @@ async function desktopExchange(): Promise<SessionResult> {
   if (!r.ok) return { kind: 'unreachable' };
   const j = await r.json();
   accessToken = j.accessToken;
-  if (j.user?.id) currentUserId = j.user.id;
+  if (j.user?.id) acceptRefreshedIdentity(j.user.id);
   noteServerDesktop(j.desktop);
   return { kind: 'authed', user: j.user, refreshExpiresAt: j.refreshExpiresAt };
 }
@@ -147,7 +165,9 @@ interface Opts {
 const REFUSAL = /"error"\s*:\s*"(?:wrong_password|totp_invalid)"/;
 const isRefusal = async (res: Response): Promise<boolean> => REFUSAL.test(await res.clone().text().catch(() => ''));
 
-async function raw(path: string, opts: Opts, retry: boolean): Promise<Response> {
+async function raw(path: string, opts: Opts, retry: boolean,
+  owner = currentUserId, epoch = identityEpoch): Promise<Response> {
+  if (identityBlocked || currentUserId !== owner || identityEpoch !== epoch) throw accountChangedError();
   const headers = new Headers(opts.headers || {});
   if (accessToken) headers.set('authorization', `Bearer ${accessToken}`);
   const body = opts.json !== undefined ? JSON.stringify(opts.json) : opts.body;
@@ -162,10 +182,16 @@ async function raw(path: string, opts: Opts, retry: boolean): Promise<Response> 
     credentials: 'include',
     signal: opts.signal,
   });
+  if (identityBlocked || currentUserId !== owner || identityEpoch !== epoch) throw accountChangedError();
 
   if (res.status === 401 && retry && !(await isRefusal(res))) {
     const r = await refreshSession();
-    if (r.kind === 'authed') return raw(path, opts, false);
+    if (r.kind === 'authed') {
+      if (identityBlocked || !owner || r.user.id !== owner || currentUserId !== owner || identityEpoch !== epoch) {
+        throw accountChangedError();
+      }
+      return raw(path, opts, false, owner, epoch);
+    }
   }
   return res;
 }

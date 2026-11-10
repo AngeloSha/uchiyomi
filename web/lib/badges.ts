@@ -7,7 +7,7 @@
 import { keys, t as tr } from './i18n';
 
 /** What a badge is measured on: GET /api/stats' `chapters_completed` and `longestStreak`. */
-export interface BadgeStats { chapters_completed: number; longestStreak: number }
+export interface BadgeStats { chapters_completed: number; badgeChapters?: number; longestStreak: number }
 
 // Rendered as `tr(b.label)`, so the labels are declared. See lib/i18n.ts.
 const LABELS = keys('Reader', 'Bookworm', 'On a roll', 'Centurion', 'Devoted', 'Legend');
@@ -56,7 +56,7 @@ export const frameName = (f: AvatarFrame): string => tr(FRAME_NAMES[FRAMES.index
 export const badgeOfFrame = (f: AvatarFrame): Badge => BADGES.find((b) => b.metal === f)!;
 
 /** Where the reader stands on a badge's measure. */
-export const badgeHave = (b: Badge, s: BadgeStats): number => (b.kind === 'chapters' ? s.chapters_completed : s.longestStreak);
+export const badgeHave = (b: Badge, s: BadgeStats): number => (b.kind === 'chapters' ? (s.badgeChapters ?? s.chapters_completed) : s.longestStreak);
 export const badgeEarned = (b: Badge, s: BadgeStats): boolean => badgeHave(b, s) >= b.goal;
 
 /**

@@ -1,5 +1,5 @@
 'use client';
-import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, Fragment, ReactNode } from 'react';
 import { QueryClientContext } from '@tanstack/react-query';
 import { api, ApiError, refreshSession, setAccessToken, setCurrentUser } from './api';
 import { readOfflineIdentity, writeOfflineIdentity, clearOfflineIdentity, OfflineIdentity } from './offlineIdentity';
@@ -301,6 +301,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     timer.current = setInterval(revalidate, 12 * 60 * 1000);
     const onVisible = () => { if (document.visibilityState === 'visible') void revalidate(); };
     window.addEventListener('online', revalidate);
+    const onAccountChanged = () => { void clearLocalSession().then(() => window.location.reload()); };
+    window.addEventListener('yomi-account-changed', onAccountChanged);
     document.addEventListener('visibilitychange', onVisible);
     // A switch in another tab of this browser says so at once, rather than at this tab's next refresh.
     if (typeof BroadcastChannel !== 'undefined') {
@@ -315,6 +317,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       channel.current = null;
       clearInterval(timer.current);
       window.removeEventListener('online', revalidate);
+      window.removeEventListener('yomi-account-changed', onAccountChanged);
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, []);
@@ -498,7 +501,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <Ctx.Provider value={{ status, user, isAdmin: user?.role === 'admin', login, firstRunSetup, register, logout, setSettings, setAvatar, setTotpEnabled, switchProfile, resumeProfile, pickProfile, leave, backToOwner, signedOutWhy, desktop: isDesktop(), reconnect }}>
-      {children}
+      <Fragment key={user?.id ?? 'anonymous'}>{children}</Fragment>
     </Ctx.Provider>
   );
 }

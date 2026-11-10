@@ -30,6 +30,8 @@ import { addNoticeHeading, addNumberingView, numLabel, titlesLine, type DetailNu
 import { extensionSettingsHref } from '@/lib/sourcePrefs';
 import { baseOf, codeLabel, editionLangPreset, languageChoices, openingLanguage } from '@/lib/editions';
 import { MANGADEX_LANGUAGES_HREF } from '@/lib/mangadexLangs';
+import { ContentScopePicker, useContentScope } from '@/components/ContentScopePicker';
+import type { ContentVisibility } from '@/lib/contentScope';
 
 export interface Provider {
   source: string; name: string; sourceId: string; title: string; coverUrl?: string;
@@ -175,8 +177,8 @@ const CHAPTER_PRESETS = [10, 25, 50, 100, 200];
  */
 const DETAIL_STALE_MS = 10 * 60_000;
 /** One source's series and chapter list. The signal is the query's, so a pick abandoned mid-flight is cancelled. */
-const fetchDetail = (p: Pick<Provider, 'source' | 'sourceId'>, signal?: AbortSignal) =>
-  api<Detail>(`/api/sources/detail?source=${encodeURIComponent(p.source)}&sourceId=${encodeURIComponent(p.sourceId)}`, { signal });
+const fetchDetail = (p: Pick<Provider, 'source' | 'sourceId'>, signal?: AbortSignal, visibility?: ContentVisibility) =>
+  api<Detail>(`/api/sources/detail?source=${encodeURIComponent(p.source)}&sourceId=${encodeURIComponent(p.sourceId)}${visibility ? `&visibility=${visibility}` : ''}`, { signal });
 
 /** Never render a swept-up <style>/<script> block as a description. The BFF guards this too. */
 const looksCss = (s: string) =>
@@ -209,6 +211,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   const toast = useToast();
   const router = useRouter();
   const qc = useQueryClient();
+  const contentScope = useContentScope();
 
   const [providers, setProviders] = useState<Provider[] | null>(seed.kind === 'group' ? seed.providers : null);
   const [picked, setPicked] = useState<Provider | null>(
@@ -250,6 +253,8 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   // (`library`); and the server, answering a duplicate whose source is in a language the library does not hold the
   // title in, brings its offer.
   const edSeed = seed.kind === 'edition' ? seed : null;
+  const scopeReady = !!edSeed || contentScope.ready;
+  const detailVisibility = edSeed ? undefined : contentScope.visibility;
   // The languages the sources offer, asked again each time the dialog opens: a MangaDex language switched on in
   // Admin -> Sources a minute ago (its "Turn on more" link below) is a row the next time, not after a reload.
   // Reintroduce by dropping `refetchOnMount`: "the language list is asked again" in addSeriesDialog.test.ts fails.
@@ -283,8 +288,8 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   const held: { of: string; langs: string[] } | null = offer ? { of: offer.of, langs: offer.heldLangs }
     : anotherOf ? { of: anotherOf, langs: [] }
     : edSeed ? { of: edSeed.of, langs: (candQ.data?.held ?? []).map((h) => h.lang) }
-    : (seed.kind === 'result' || seed.kind === 'group') && seed.library ? { of: seed.library.seriesId, langs: seed.library.langs }
-    : findHeld ? { of: findHeld.librarySeriesId!, langs: findHeld.libraryLangs! }
+    : detailVisibility !== 'private' && (seed.kind === 'result' || seed.kind === 'group') && seed.library ? { of: seed.library.seriesId, langs: seed.library.langs }
+    : detailVisibility !== 'private' && findHeld ? { of: findHeld.librarySeriesId!, langs: findHeld.libraryLangs! }
     : null;
   // Whether this add makes an edition: when the dialog began from one, or the picked provider is in a language the
   // library does not hold the title in. The duplicate prompt's "It is in another language" turns it on for the pick,
@@ -312,6 +317,10 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   const ofLang = ofLangChoice ?? ofQ.data?.lang ?? '';
   /** The server's refusal of the edition: the language is taken, a removed edition holds it, or it must be said. */
   const [edRefusal, setEdRefusal] = useState<{ error: 'edition_exists' | 'edition_hidden' | 'edition_lang'; lang: string; id?: string } | null>(null);
+  const scopeControl = { ...contentScope, setVisibility: (next: ContentVisibility) => {
+    contentScope.setVisibility(next);
+    setDup(null); setOffer(null); setAnotherOf(null); setEditionFor(null); setEdLangFor(null); setEdRefusal(null);
+  } };
 
   // ---- also follow the other sources (v0.36.0, #49) ----
   // The candidates are the sources this dialog ALREADY found for the title (a trending search, or the
@@ -370,9 +379,9 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
    */
   const detailQ = useQuery({
     // ⚠️ The same shape as the pre-warm's key below, or the pre-warm warms nothing.
-    queryKey: ['src-detail', picked?.source, picked?.sourceId],
-    queryFn: ({ signal }) => fetchDetail(picked!, signal),
-    enabled: !!picked,
+    queryKey: ['src-detail', picked?.source, picked?.sourceId, contentScope.ownerId, detailVisibility],
+    queryFn: ({ signal }) => fetchDetail(picked!, signal, detailVisibility),
+    enabled: !!picked && scopeReady,
     staleTime: DETAIL_STALE_MS,
     retry: false,
   });
@@ -386,11 +395,11 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   // the query above joins it). Two, not all: each is a live request to a site, and the list is ranked, so
   // the first two are where nearly every tap lands. A group of one picks itself and needs no pre-warm.
   useEffect(() => {
-    if (seed.kind !== 'group' || seed.providers.length < 2) return;
+    if (seed.kind !== 'group' || seed.providers.length < 2 || !scopeReady) return;
     for (const p of seed.providers.slice(0, 2)) {
-      qc.prefetchQuery({ queryKey: ['src-detail', p.source, p.sourceId], queryFn: ({ signal }) => fetchDetail(p, signal), staleTime: DETAIL_STALE_MS, retry: false });
+      qc.prefetchQuery({ queryKey: ['src-detail', p.source, p.sourceId, contentScope.ownerId, detailVisibility], queryFn: ({ signal }) => fetchDetail(p, signal, detailVisibility), staleTime: DETAIL_STALE_MS, retry: false });
     }
-  }, [seed, qc]);
+  }, [seed, qc, scopeReady, contentScope.ownerId, detailVisibility]);
 
   // Only while the dialog is showing a live download -- or, since v0.36.0, while an auto-follow it asked
   // for is still being judged: a "nothing yet" add starts no download, but with candidates sent the server
@@ -427,7 +436,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   const perHour = downloads?.archive?.perHour ?? ARCHIVE_PACE.perHour;
 
   const add = async (force = false) => {
-    if (!picked) return;
+    if (!picked || !scopeReady) return;
     setAdding(true); setDup(null); setEdRefusal(null);
     // An edition names the series it joins, its own language when known, and the language of the copy the library
     // has when the dialog asked (bff routes/sources.ts). `force` is "add it on its own", never an edition.
@@ -445,6 +454,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
       const r = await api<AddAnswer>('/api/sources/add', {
         json: {
           source: picked.source, sourceId: picked.sourceId, chapterCount, chapterFrom, autoUpdate, force, alsoFollow: alsoFollowBody, numbering,
+          ...(!edSeed ? { visibility: contentScope.visibility } : {}),
           ...(archiving ? { archive: true } : {}), ...(editionBody ? { edition: editionBody } : {}),
         },
         // The client has never set a timeout anywhere, so the only bound was the proxy's 120s -- which
@@ -658,6 +668,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
     const inLang = edPick && edPick !== 'unstated' ? languageName(edPick) : null;
     return (
       <Modal title={edSeed ? tr('Add a language') : title} onClose={onClose}>
+        {!edSeed && <div className="mb-4"><ContentScopePicker scope={scopeControl} /></div>}
         {/* The edition's search: what it is a language of, and the way back to the other languages. */}
         {edSeed && (
           <p className="-mt-2 mb-3 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm text-fog-400">
@@ -739,6 +750,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
             className="aspect-[2/3] w-28 rounded-xl border border-ink-700 sm:w-40" />
         </div>
         <div className="min-w-0 flex-1">
+          {!edSeed && <div className="mb-4"><ContentScopePicker scope={scopeControl} disabled={adding} /></div>}
           {/* Where it comes from, named with its favicon, before anything else about it -- and the way
               back to the other providers as a small chip, only when there are any. */}
           <p className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fog-500">
@@ -916,7 +928,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
           )}
 
           {/* Disabled until the chapter list is here: the count and the from/none choice go in the request. */}
-          <button onClick={() => add(!!dup && !asEdition)} disabled={adding || !detail || needsLang} className="btn-accent mt-4 w-full py-2.5 text-sm disabled:opacity-50">
+          <button onClick={() => add(!!dup && !asEdition)} disabled={adding || !detail || needsLang || !scopeReady} className="btn-accent mt-4 w-full py-2.5 text-sm disabled:opacity-50">
             {adding ? tr('Working…')
               : asEdition ? (edLang ? tr('Add the {language} edition', { language: languageName(edLang) }) : tr('Choose its language'))
               : dup ? tr('Add anyway') : tr('Add to library')}
@@ -938,8 +950,8 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
           sourceId={picked.sourceId}
           title={picked.title || title}
           onClose={() => setPreviewing(false)}
-          canAdd={!adding && !!detail && !needsLang}
-          onAdd={() => { if (adding || !detail || needsLang) return; setPreviewing(false); void add(!!dup && !asEdition); }}
+          canAdd={!adding && !!detail && !needsLang && scopeReady}
+          onAdd={() => { if (adding || !detail || needsLang || !scopeReady) return; setPreviewing(false); void add(!!dup && !asEdition); }}
         />
       )}
     </Modal>

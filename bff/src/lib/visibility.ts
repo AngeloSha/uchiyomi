@@ -14,6 +14,8 @@ import { noticeBook } from './noticeChapters';
 import { genresByIdOf } from './autoDetailsSql';
 
 export interface ViewCtx {
+  /** Only trusted background code receives SYSTEM_CTX. Authentication never creates this capability. */
+  readonly system?: boolean;
   /** null only for background work that legitimately sees everything: the scanner, the hero pre-warmer. */
   readonly userId: string | null;
   /**
@@ -76,7 +78,16 @@ export class Params {
 /** The predicate. `alias` is the lib_series alias in the query being built. */
 export function visible(alias: string, ctx: ViewCtx, p: Params): string {
   const parts = [`${alias}.deleted_at IS NULL`, `${alias}.merged_into IS NULL`];
-  if (ctx.libraryIds) parts.push(`${alias}.library_id = ANY(${p.add([...ctx.libraryIds])})`);
+  const own = ctx.userId && (!ctx.system || ctx.libraryIds) ? `${alias}.owner_user_id=${p.add(ctx.userId)}::uuid` : 'FALSE';
+  if (!ctx.system) {
+    parts.push(`(NOT ${alias}.is_private OR ${own})`);
+    parts.push(`NOT EXISTS (SELECT 1 FROM libraries private_lib WHERE private_lib.id=${alias}.library_id AND private_lib.managed_private
+      AND private_lib.owner_user_id IS DISTINCT FROM ${ctx.userId ? p.add(ctx.userId) + '::uuid' : 'NULL::uuid'})`);
+  }
+  if (ctx.libraryIds) {
+    const granted = `${alias}.library_id = ANY(${p.add([...ctx.libraryIds])})`;
+    parts.push(!ctx.libraryIds.length || ctx.libraryIds.includes(NO_LIBRARIES) ? granted : `(${granted} OR (${alias}.is_private AND ${own}))`);
+  }
   if (ctx.maxAgeRating !== null) {
     // The admin's override wins over what the scan read, like every other piece of series metadata. This is
     // a correlated subquery rather than a join because `visible()` is applied wherever `lib_series` appears
@@ -123,11 +134,14 @@ export function visible(alias: string, ctx: ViewCtx, p: Params): string {
 export const NO_LIBRARIES = '';
 
 export const SYSTEM_CTX: ViewCtx = {
+  system: true,
   userId: null, libraryIds: null, maxAgeRating: null,
   // Background work and admin reporting count what is there, not what someone wants on screen.
   hideAdultLibraries: false,
   adultGenres: [], adultSources: [],
 };
+/** Public egress/background notifications deliberately have no private-content capability. */
+export const SHARED_CTX: ViewCtx = { ...SYSTEM_CTX, system: false };
 
 /**
  * The configured genre list, tidied: trimmed, de-duplicated case-blind, at most 60 characters each, no control
@@ -396,7 +410,7 @@ export async function nameableIds(ids: readonly string[], ctx: ViewCtx): Promise
   const p = new Params();
   const arr = p.add(list);
   const rows = await q<{ id: string }>(
-    `SELECT s.id FROM (SELECT id, library_id, age_rating, genres, NULL::timestamptz AS deleted_at, NULL::text AS merged_into
+    `SELECT s.id FROM (SELECT id, library_id, owner_user_id, is_private, age_rating, genres, NULL::timestamptz AS deleted_at, NULL::text AS merged_into
                          FROM lib_series WHERE id = ANY(${arr})) s
       WHERE ${browsable('s', ctx, p)}`,
     p.values as any[],
@@ -523,7 +537,7 @@ export async function viewCtxFor(
   const { genres: adultGenres, sources: adultSources } = hideAdultLibraries
     ? await adultFilter()
     : { genres: [] as string[], sources: [] as string[] };
-  if (!userId || role === 'admin') {
+  if (!userId) {
     return { userId, libraryIds: null, maxAgeRating: null, hideAdultLibraries, adultGenres, adultSources };
   }
   // Deliberately NOT caught. Both restrictions are expressed by a NON-null value, so any fallback here is a
@@ -544,6 +558,7 @@ export async function viewCtxFor(
   // sees nothing. Without this a vanished row read as null for BOTH restrictions -- the same "fallback to
   // unrestricted" as above, with the deleted grants widening the viewer to every library and no age cap.
   if (!cap || cap.disabled) return { userId, libraryIds: [], maxAgeRating: 0, hideAdultLibraries, adultGenres, adultSources };
+  if (role === 'admin') return {userId,libraryIds:null,maxAgeRating:null,hideAdultLibraries,adultGenres,adultSources};
   // A capped account is refused the sources rated Adult only from the in-memory copy (sourceRatedAdult). A boot that
   // could not read it leaves it empty, which would let this account in: read it first, and fail as the reads above do.
   if (cap.max_age_rating !== null && cap.max_age_rating < ADULT_RATING && !ratedAdultRead) await loadAdultSources();

@@ -48,7 +48,7 @@ test('the "Now:" title is held to the series it names, and with none it goes', (
   assert.equal(at({ title: 'Plain + Adult', seriesIds: ['s-plain', 's-adult'] })!.title, undefined, 'Now: a duplicate pair with an 18+ copy');
   assert.equal(at({ title: 'Plain' })!.title, undefined, 'Now: a title with no ids is not named');
   assert.equal(at({ title: 'Plain', seriesIds: [] })!.title, undefined, 'Now: a title the repair gave no series for is not named');
-  assert.deepEqual({ ...at({ title: 'Adult', seriesIds: ['s-adult'], done: 1, of: 3 }) }, { title: undefined, seriesIds: ['s-adult'], done: 1, of: 3 },
+  assert.deepEqual({ ...at({ title: 'Adult', seriesIds: ['s-adult'], done: 1, of: 3 }) }, { title: undefined, seriesIds: undefined, done: 1, of: 3 },
     'how far it is keeps');
 });
 

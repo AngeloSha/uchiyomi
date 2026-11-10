@@ -5,6 +5,7 @@ import type { Stats } from 'fs';
 import { join } from 'path';
 import sharp from 'sharp';
 import { q, one, tx } from './db';
+import { privateScopeForFolder } from './contentScope';
 import { newSeriesId, newBookId } from './ids';
 import { env } from '../env';
 import { localArtFilename, refreshLocalSeriesArt } from './localSeriesArt';
@@ -1001,8 +1002,9 @@ async function scanOnce(): Promise<ScanResult> {
         // belong to: unordered, the deleted twin could come back first and the `continue` below skipped the
         // folder for good. Reintroduce by dropping the ORDER BY: "a deleted twin does not hide the live row"
         // in scanResilience.int.test.ts finds its books missing.
-        const known = await one<{ id: string; deleted_at: string | null; merged_into: string | null; library_id: string; renumbering: boolean; info_read: string | null }>(
-          `SELECT id, deleted_at, merged_into, library_id, renumber_plan IS NOT NULL AS renumbering, info_read FROM lib_series WHERE folder = $1
+        const privateScope = await privateScopeForFolder(folderRel);
+        const known = await one<{ id: string; deleted_at: string | null; merged_into: string | null; library_id: string; owner_user_id: string | null; is_private: boolean; renumbering: boolean; info_read: string | null }>(
+          `SELECT id, deleted_at, merged_into, library_id, owner_user_id, is_private, renumber_plan IS NOT NULL AS renumbering, info_read FROM lib_series WHERE folder = $1
             ORDER BY (deleted_at IS NOT NULL), (merged_into IS NOT NULL), created_at LIMIT 1`,
           [folderRel],
         );
@@ -1014,9 +1016,14 @@ async function scanOnce(): Promise<ScanResult> {
         // new id, with none of the reading history -- for every file that moved. Its next check finishes the
         // journal; until then the folder is left exactly as it is.
         if (known?.renumbering) continue;
+        if (privateScope && known && known.owner_user_id !== privateScope.ownerUserId) continue;
         // Merged away: its files belong to the survivor now. Without this the books get pulled back out by
         // `ON CONFLICT (root, file) DO UPDATE SET series_id = EXCLUDED.series_id` and the merge silently undoes.
         const mergeTarget = known?.merged_into || null;
+        if(mergeTarget && known){
+          const target=await one<{is_private:boolean;owner_user_id:string|null}>('SELECT is_private,owner_user_id FROM lib_series WHERE id=$1',[mergeTarget]);
+          if(!target || target.is_private!==known.is_private || known.is_private && target.owner_user_id!==known.owner_user_id) continue;
+        }
 
         // Only a folder with no row of its own can be a move. Anything already known is the normal path.
         // ⚠️ `!known`, the half of that rule the line below once lacked (v0.55.7, #150). A known folder that took in
@@ -1027,7 +1034,7 @@ async function scanOnce(): Promise<ScanResult> {
         // rematched onto another" in rematch.int.test.ts finds the folder skipped.
         let rematched: { id: string; oldFolder: string } | null = null;
         if (env.LIBRARY_REMATCH !== 'off' && !known && !seenFolders.has(folderRel)) {
-          rematched = await tryRematch(folderRel, folderAbs, files, root, onDisk, libraryIdFor(folderRel, libs));
+          rematched = await tryRematch(folderRel, folderAbs, files, root, onDisk, privateScope?.libraryId ?? libraryIdFor(folderRel, libs));
         }
 
         // The first file's stat, when the series' info was looked at below: the chapter loop reuses it.
@@ -1068,8 +1075,8 @@ async function scanOnce(): Promise<ScanResult> {
               // reassigned, made the conflict target miss and mint a second row with a new id -- which is
               // the one thing that strands everyone's reading progress. Reassignment is a deliberate UPDATE.
               `INSERT INTO lib_series (id, source, title, summary, author, status, genres, web, folder, books_count, library_id, age_rating,
-                                       reading_direction, reading_direction_from, scanned_at, info_read)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now(), $15)
+                                       reading_direction, reading_direction_from, scanned_at, info_read, owner_user_id, is_private)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now(), $15,$16,$17)
                ON CONFLICT (library_id, folder) DO UPDATE SET source=EXCLUDED.source, title=EXCLUDED.title, summary=EXCLUDED.summary,
                  author=EXCLUDED.author, status=EXCLUDED.status, genres=EXCLUDED.genres, web=EXCLUDED.web,
                  -- Never overwrite a rating we have with one we do not: a chapter whose ComicInfo omits
@@ -1084,16 +1091,17 @@ async function scanOnce(): Promise<ScanResult> {
                  scanned_at=now(), info_read=EXCLUDED.info_read
                RETURNING id`,
               [
-                newSeriesId(), srcName, field(firstXml, 'Series') || folderRel.split('/').pop()!, cleanSummary(field(firstXml, 'Summary')),
+                newSeriesId(), privateScope ? (folderRel.split('/')[2] ?? srcName) : srcName, field(firstXml, 'Series') || folderRel.split('/').pop()!, cleanSummary(field(firstXml, 'Summary')),
                 field(firstXml, 'Writer'), cleanStatus(field(firstXml, 'PublishingStatusTachiyomi') || field(firstXml, 'PublishingStatus')),
                 // Without a site's genre menu (lib/genres.ts): files a page-wide read wrote before v0.55.5 still carry one.
                 cleanGenres((field(firstXml, 'Genre') || '').split(',')),
                 field(firstXml, 'Web'), folderRel, files.length,
-                known?.library_id ?? libraryIdFor(folderRel, libs),
+                known?.library_id ?? privateScope?.libraryId ?? libraryIdFor(folderRel, libs),
                 parseComicInfoAgeRating(field(firstXml, 'AgeRating')),
                 directionFromComicInfo(field(firstXml, 'Manga')),
                 directionFromComicInfo(field(firstXml, 'Manga')) ? 'comicinfo' : null,
                 read.ok ? infoRead : null,
+                known?.owner_user_id ?? privateScope?.ownerUserId ?? null, known?.is_private ?? !!privateScope,
               ],
             );
             id = rows[0].id;

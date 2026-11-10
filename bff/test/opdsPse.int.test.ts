@@ -103,7 +103,7 @@ async function setup() {
   const cappedToken = await auth.issueOpdsToken(capped);
   const as = (t: string, u = USER) => ({ authorization: basic(u, t) });
   const jwtFor = (id: string) => ({ authorization: `Bearer ${app.jwt.sign({ sub: id, role: 'user' })}` });
-  return { app, q, auth, sharp, uid, capped, token, cappedToken, as, jwtFor };
+  return { app, q, auth, sharp, uid, capped, token, cappedToken, as, jwtFor, p0, p1, book };
 }
 
 async function teardown(app: any, q: any) {
@@ -119,7 +119,7 @@ const attr = (xml: string, name: string) => xml.match(new RegExp(`${name}="([^"]
 const entryFor = (xml: string, id: string) => xml.split('<entry>').find((e) => e.includes(`:${id}</id>`)) || '';
 
 test('what an OPDS reader is told is true, and it can stream pages', { skip }, async (t) => {
-  const { app, q, auth, sharp, capped, token, cappedToken, as, jwtFor, uid } = await setup();
+  const { app, q, auth, sharp, capped, token, cappedToken, as, jwtFor, uid, p0, p1, book } = await setup();
   try {
     await t.test('THE STREAM LINK: literal template, real page count, this reader\'s own progress', async () => {
       const r = await app.inject({ method: 'GET', url: `/opds/series/${S_MAIN}`, headers: as(token) });
@@ -193,6 +193,39 @@ test('what an OPDS reader is told is true, and it can stream pages', { skip }, a
       assert.equal(feedUpdated, FIXED_AT, 'the feed carries the newest of its entries, not now');
       const series = await app.inject({ method: 'GET', url: `/opds/series?q=Pse%20Main`, headers: as(token) });
       assert.match(entryFor(series.body, S_MAIN), /<updated>2026-03-04T05:06:07\.000Z<\/updated>/, 'a series carries its newest chapter time (latest_mtime)');
+    });
+
+    await t.test('prefetch estimates are opt-in and never completion, events or explicit places', async () => {
+      const count=async(table:string)=>(await q<{n:number}>(`SELECT count(*)::int AS n FROM ${table} WHERE user_id=$1`,[uid]))[0].n;
+      const beforeEvents=await count('reading_events');
+      await app.inject({url:`/opds/book/${B_ZERO}/page/0`,headers:as(token)});
+      assert.equal(await count('opds_estimated_bookmarks'),0);
+      await q(`INSERT INTO app_settings(user_id,data) VALUES($1,'{"opdsEstimatedBookmarks":true}') ON CONFLICT(user_id) DO UPDATE SET data=app_settings.data||EXCLUDED.data`,[uid]);
+      await app.inject({url:`/opds/book/${B_ZERO}/page/0?maxWidth=300`,headers:as(token)});
+      await app.inject({method:'HEAD',url:`/opds/book/${B_ZERO}/page/0`,headers:as(token)});
+      assert.equal(await count('opds_estimated_bookmarks'),0,'thumbnails and HEAD do not estimate');
+      assert.equal((await app.inject({url:`/opds/book/${B_ZERO}/page/999`,headers:as(token)})).statusCode,404);
+      await app.inject({url:`/opds/book/${B_ZERO}/page/0`,headers:as(token)});
+      await app.inject({url:`/opds/book/${B_ZERO}/page/1`,headers:as(token)});
+      for(let i=0;i<30;i++){const r=await q<{page:number}>('SELECT page FROM opds_estimated_bookmarks WHERE user_id=$1 AND book_id=$2',[uid,B_ZERO]);if(r[0]?.page===2)break;await new Promise(r=>setTimeout(r,10));}
+      assert.equal((await q<{page:number}>('SELECT page FROM opds_estimated_bookmarks WHERE user_id=$1 AND book_id=$2',[uid,B_ZERO]))[0].page,2);
+      assert.equal((await q('SELECT * FROM read_progress WHERE user_id=$1 AND book_id=$2',[uid,B_ZERO])).length,0);
+      assert.equal(await count('reading_events'),beforeEvents);
+      assert.match(entryFor((await app.inject({url:`/opds/series/${S_MAIN}`,headers:as(token)})).body,B_ZERO),/pse:lastRead="2"/);
+      await q('INSERT INTO read_progress(user_id,book_id,series_id,page) VALUES($1,$2,$3,1)',[uid,B_ZERO,S_MAIN]);
+      assert.match(entryFor((await app.inject({url:`/opds/series/${S_MAIN}`,headers:as(token)})).body,B_ZERO),/pse:lastRead="1"/,'explicit position wins');
+      await q('DELETE FROM read_progress WHERE user_id=$1 AND book_id=$2',[uid,B_ZERO]);
+    });
+    await t.test('loose-image exports have deterministic bytes and the exact KOReader binary hash',async()=>{
+      const {partialBufferMd5,bookFileSignature}=await import('../src/lib/koreaderHash');
+      const folder=join(TMP,'lib','loose');mkdirSync(folder);
+      writeFileSync(join(folder,'001.png'),p0);writeFileSync(join(folder,'002.png'),p1);
+      await book('b_pse_loose',S_MAIN,'loose',2);
+      const first=await app.inject({url:'/opds/book/b_pse_loose/file',headers:as(token)});
+      const second=await app.inject({url:'/opds/book/b_pse_loose/file',headers:as(token)});
+      assert.equal(first.statusCode,200);assert.deepEqual(first.rawPayload,second.rawPayload);
+      const hash=(await q<{digest:string;signature:string}>("SELECT digest,signature FROM koreader_hashes WHERE book_id='b_pse_loose'"))[0];
+      assert.equal(hash.digest,partialBufferMd5(first.rawPayload));assert.equal(hash.signature,await bookFileSignature(folder));
     });
 
     await t.test('FACETS: offered with counts, applied on request, and carried onto the next page', async () => {

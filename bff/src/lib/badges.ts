@@ -53,14 +53,14 @@ export function computeStreaks(days: string[]): { current: number; longest: numb
 /** The days, UTC, on which `uid` finished a chapter: what both streaks are counted over. */
 export async function finishedDays(uid: string): Promise<string[]> {
   return (await q<{ d: string }>(
-    `SELECT DISTINCT to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS d FROM reading_events WHERE user_id = $1 AND completed = true`,
+    `SELECT DISTINCT to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS d FROM reading_events WHERE user_id = $1 AND origin = 'web' AND completed = true`,
     [uid],
   )).map((r) => r.d);
 }
 
 /** The frames `uid` may wear: those of the badges earned, measured as /api/stats measures them for the profile. */
 export async function earnedFrames(uid: string): Promise<Set<AvatarFrame>> {
-  const row = await one<{ n: number }>('SELECT chapters_completed::int AS n FROM reading_stats WHERE user_id = $1', [uid]);
+  const row = await one<{ n: number }>("SELECT count(DISTINCT book_id)::int AS n FROM reading_events WHERE user_id=$1 AND origin='web' AND completed", [uid]);
   const chapters = Number(row?.n ?? 0);
   const longest = computeStreaks(await finishedDays(uid)).longest;
   return new Set(BADGE_RULES.filter((b) => (b.kind === 'chapters' ? chapters : longest) >= b.goal).map((b) => b.frame));

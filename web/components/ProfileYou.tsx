@@ -35,6 +35,8 @@ export const CARD = 'card grad-border p-4';
 
 export interface Stats {
   chapters_completed: number;
+  /** Chapter badges exclude count-only external sync events. */
+  badgeChapters?: number;
   days?: number;
   first_read_at?: string | null;
   series_touched: number;

@@ -38,6 +38,10 @@ export interface ImportBatch {
   truncated?: boolean;
   /** How many titles not in the library came after the 500 (#410); null when not counted. */
   leftOver?: number | null;
+  remainingCount?: number;
+  nextBatchId?: string | null;
+  canContinue?: boolean;
+  content_scope?: { visibility: 'shared' | 'private'; libraryId: string } | null;
 }
 
 /** One row of GET /api/admin/import/batches: enough to name a batch on the intake card and open it. */
@@ -51,6 +55,7 @@ export interface ImportBatchSummary {
   added: number;
   failed: number;
   created_at: string;
+  remainingCount?: number; canContinue?: boolean;
   /** Computed by the list route like the GET route's: `resolving` with nobody actually resolving it. */
   stale?: boolean;
 }
@@ -61,7 +66,7 @@ export interface ImportBatchSummary {
  * history log rather than the "you left this one half-way" reminder it is for.
  */
 export const openBatches = (list: ImportBatchSummary[]): ImportBatchSummary[] =>
-  list.filter((b) => b.state !== 'done' && b.state !== 'cancelled');
+  list.filter((b) => b.state !== 'cancelled' && (b.state !== 'done' || b.canContinue));
 
 export interface ImportCandidate {
   id: string;
@@ -97,6 +102,42 @@ export interface ImportCandidate {
    * for the titles a person already holds -- the common case for an established library.
    */
   linked?: boolean | null;
+  progress?: number | null;
+  tracker_links?: Array<{ provider: string; externalId: string; title: string; progress: number; private: boolean }>;
+  ambiguous?: boolean;
+  content_scope?: { visibility: 'private' | 'shared'; libraryId: string } | null;
+}
+
+export type ImportRowState = 'same_source' | 'exact' | 'contains' | 'fuzzy' | 'manual' | 'unmatched' | 'skipped' | 'owned' | 'failed';
+export type ImportFilter = ImportRowState | 'all' | 'attention';
+export function importRowState(c: ImportCandidate): ImportRowState {
+  if (alreadyImported(c)) return 'owned';
+  if (c.status) return 'failed';
+  if (c.decision === 'skip') return 'skipped';
+  if (c.decision === 'manual') return 'manual';
+  if (c.decision === 'unresolved' || !c.match_source_id) return 'unmatched';
+  return c.confidence ?? 'unmatched';
+}
+export const selectableImport = (c: ImportCandidate): boolean => !c.status && !c.in_library;
+export const readyImport = (c: ImportCandidate): boolean => selectableImport(c) && !!c.match_source_id
+  && (c.decision === 'manual' || (c.decision === 'auto' && !c.ambiguous));
+export function filterImportRows(items: ImportCandidate[], filter: ImportFilter, source: string, query: string): ImportCandidate[] {
+  const term = query.normalize('NFKC').trim().toLowerCase();
+  return items.filter(c => (filter === 'all' || (filter === 'attention' ? needsAttention(c) : importRowState(c) === filter))
+    && (!source || (source === '__none' ? !c.match_source : c.match_source === source))
+    && (!term || [c.backup_title, c.match_title, ...(c.alt_titles ?? [])].some(t => t?.normalize('NFKC').toLowerCase().includes(term))));
+}
+export function importProvenance(c: ImportCandidate): string {
+  if (c.decision === 'manual') return tr('Picked by you');
+  if (c.confidence === 'same_source') return tr('Matched the source and address from your backup');
+  if (c.matched_via) return tr('Found using “{title}”', { title: c.matched_via });
+  if (c.decision === 'auto') return tr('Found by matching the original title');
+  return '';
+}
+export function trackerProgressLine(provider: string, n: number, backup = false): string {
+  const tracker = ({anilist:'AniList',myanimelist:'MyAnimeList',kitsu:'Kitsu',mangaupdates:'MangaUpdates'} as Record<string,string>)[provider] ?? provider;
+  return backup ? (n===1 ? tr('Read in backup on {tracker}: 1 chapter',{tracker}) : tr('Read in backup on {tracker}: {n} chapters',{tracker,n}))
+    : (n===1 ? tr('Read on {tracker}: 1 chapter',{tracker}) : tr('Read on {tracker}: {n} chapters',{tracker,n}));
 }
 
 /** Every spelling a row may legitimately have been matched under: the backup title first, then the tracker's alternates. */
@@ -175,9 +216,11 @@ export function containsDiverges(backupTitle: string, matchTitle: string | null)
  * ⚠️ Reintroduce by testing `containsDiverges(c.backup_title, c.match_title)` alone.
  */
 export function needsAttention(c: ImportCandidate): boolean {
+  if (c.in_library || c.status) return false;
   if (c.decision === 'skip') return false;
   if (c.decision === 'unresolved') return true; // once the batch is out of 'resolving', this means "no match found"
   if (c.decision !== 'auto') return false; // a manual pick was already looked at by a person
+  if (c.ambiguous) return true;
   if (c.confidence === 'fuzzy') return true;
   return c.confidence === 'contains' && titleVariants(c).every((t) => containsDiverges(t, c.match_title));
 }
@@ -281,15 +324,16 @@ export const alreadyImported = (c: ImportCandidate): boolean =>
  * Reintroduce the count's absence: "a list cut at the 500 says how many are left" in importBatch.test.ts reads no number.
  */
 export function truncatedWords(leftOver?: number | null): { note: string; toast: string } {
-  if (typeof leftOver === 'number' && leftOver > 0) {
-    return {
-      note: tr('(first 500 not in your library kept; {n} more after them: import again for those)', { n: leftOver }),
-      toast: tr('The first 500 titles not already in your library were kept, and {n} more come after them. Once these are in, import the same list again for the rest.', { n: leftOver }),
-    };
-  }
+  if (typeof leftOver === 'number' && leftOver > 0) return leftOver===1 ? {
+    note:tr('(1 title after this batch)'),
+    toast:tr('Review this batch, then choose Continue with next batch for 1 title.'),
+  } : {
+    note:tr('({n} titles after this batch)',{n:leftOver}),
+    toast:tr('Review this batch, then choose Continue with next batch for {n} titles.',{n:leftOver}),
+  };
   return {
-    note: tr('(first 500 not in your library kept; import again for the rest)'),
-    toast: tr('Only the first 500 titles not already in your library were kept. Once they are in, import the same list again for the rest.'),
+    note:tr('(the source list was limited; more titles may exist)'),
+    toast:tr('Review the saved batches. The source list limit means this may not be the whole list.'),
   };
 }
 
@@ -325,6 +369,7 @@ export function runStatusLabel(status: string, linked = false): string {
     case 'already':
     case 'duplicate': return tr('Already in your library');
     case 'no_chapters': return tr('No readable chapters on this source');
+    case 'tracker_conflict': return tr('Tracker links point to different titles. Review those links before importing.');
     case 'disabled': return tr('That source is switched off');
     case 'blocked': return tr('The source is blocking us right now');
     case 'undownloadable': return tr('Nothing could be fetched from this source');

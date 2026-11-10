@@ -18,6 +18,7 @@ export interface InsightSeries {
   recent: number; thisMonth: number; prevMonth: number;
 }
 export interface InsightsPayload {
+  externalReads?:Array<{origin:string;chapters:number}>;
   now: string;
   bestDay: { day: string; chapters: number } | null;
   bestWeek: { start: string; chapters: number } | null;

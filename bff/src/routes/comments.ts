@@ -71,7 +71,7 @@ export default async function commentRoutes(app: FastifyInstance) {
     // chapterComments.int.test.ts finds a comment written.
     if (await incognitoOn(uid)) return reply.code(403).send(INCOGNITO);
     const row = await one<{ id: string; created_at: Date; display_name: string | null; username: string | null; avatar: unknown }>(
-      `WITH c AS (INSERT INTO chapter_comments (book_id, user_id, body, page) VALUES ($1, $2, $3, $4) RETURNING id, created_at)
+      `WITH c AS (INSERT INTO chapter_comments (book_id, user_id, body, page,is_private) VALUES ($1, $2, $3, $4,EXISTS(SELECT 1 FROM lib_books b JOIN lib_series s ON s.id=b.series_id WHERE b.id=$1 AND s.is_private)) RETURNING id, created_at)
        SELECT c.id, c.created_at, u.display_name, u.username, u.avatar FROM c, users u WHERE u.id = $2`,
       [id, uid, body, b.data.page ?? null],
     );
@@ -97,8 +97,8 @@ export default async function commentRoutes(app: FastifyInstance) {
   /** A comment, when it is this caller's to see: its chapter must still be theirs to open. */
   const commentOf = async (req: FastifyRequest, id: string) => {
     if (!UUID.test(id)) return null;
-    const row = await one<{ id: string; user_id: string; book_id: string }>('SELECT id, user_id, book_id FROM chapter_comments WHERE id = $1', [id]);
-    if (!row || !(await chapterOf(req, row.book_id))) return null;
+    const row = await one<{ id: string; user_id: string; book_id: string; is_private:boolean }>('SELECT id, user_id, book_id,is_private FROM chapter_comments WHERE id = $1', [id]);
+    if (!row || (row.is_private && row.user_id!==userIdOf(req)) || !(await chapterOf(req, row.book_id))) return null;
     return row;
   };
 
@@ -139,8 +139,8 @@ export default async function commentRoutes(app: FastifyInstance) {
     const uid = userIdOf(req);
     if (await incognitoOn(uid)) return reply.code(403).send(INCOGNITO);
     await q(
-      `INSERT INTO chapter_reactions (book_id, user_id, emoji) VALUES ($1, $2, $3)
-       ON CONFLICT (book_id, user_id) DO UPDATE SET emoji = EXCLUDED.emoji, created_at = now()`,
+      `INSERT INTO chapter_reactions (book_id, user_id, emoji,is_private) VALUES ($1, $2, $3,EXISTS(SELECT 1 FROM lib_books b JOIN lib_series s ON s.id=b.series_id WHERE b.id=$1 AND s.is_private))
+       ON CONFLICT (book_id, user_id) DO UPDATE SET emoji = EXCLUDED.emoji, created_at = now(), is_private=chapter_reactions.is_private OR EXCLUDED.is_private`,
       [id, uid, emoji],
     );
     return { emoji };
@@ -157,7 +157,7 @@ export default async function commentRoutes(app: FastifyInstance) {
   app.get('/api/series/:id/comments', async (req, reply) => {
     const { id } = req.params as { id: string };
     try { await komga.series(vc(req), id); } catch { return reply.code(404).send(NOT_FOUND); }
-    const [on, content] = await Promise.all([talkOnFor(userIdOf(req)), seriesTalk(id)]);
+    const [on, content] = await Promise.all([talkOnFor(userIdOf(req)), seriesTalk(id,userIdOf(req))]);
     return { on, content };
   });
 }

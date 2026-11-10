@@ -604,27 +604,29 @@ async function commit(seriesId: string, j: Journal): Promise<void> {
     // Failures were counted against the old numbers: chapter 2's three failures are not post 20's.
     await qq('DELETE FROM chapter_failures WHERE series_id = $1', [seriesId]);
     // Read marks on chapters this server does not hold follow their post; one with no post to follow goes.
-    const marks = await qq<{ user_id: string; number: number; completed_at: Date; source: string }>(
-      'SELECT user_id, number::float8 AS number, completed_at, source FROM listing_progress WHERE series_id = $1', [seriesId]);
+    type Mark={user_id:string;number:number;completed_at:Date;source:string;is_private:boolean;incognito:boolean};
+    const marks = await qq<Mark>(
+      'SELECT user_id, number::float8 AS number, completed_at, source, is_private, incognito FROM listing_progress WHERE series_id = $1', [seriesId]);
     if (marks.length) {
-      const out = new Map<string, { user_id: string; number: number; completed_at: Date; source: string }>();
+      const out = new Map<string, Mark>();
       for (const m of marks) {
         const to = markMap.get(numKey(Number(m.number)));
         if (to === undefined) continue;
         const k = `${m.user_id}\u0000${to}`;
         const had = out.get(k);
-        if (!had || new Date(m.completed_at) < new Date(had.completed_at)) out.set(k, { ...m, number: to });
+        const earlier=!had || new Date(m.completed_at)<new Date(had.completed_at)?m:had;
+        out.set(k,{...earlier,number:to,is_private:m.is_private || !!had?.is_private,incognito:m.incognito && (had?.incognito ?? true)});
       }
       await qq('DELETE FROM listing_progress WHERE series_id = $1', [seriesId]);
       const list = [...out.values()];
       for (let i = 0; i < list.length; i += 1000) {
         const params: unknown[] = [seriesId];
         const values = list.slice(i, i + 1000).map((m) => {
-          params.push(m.user_id, m.number, m.completed_at, m.source);
-          const b = params.length - 4;
-          return `($${b + 1}::uuid, $1, $${b + 2}::real, $${b + 3}::timestamptz, $${b + 4})`;
+          params.push(m.user_id, m.number, m.completed_at, m.source, m.is_private, m.incognito);
+          const b = params.length - 6;
+          return `($${b + 1}::uuid, $1, $${b + 2}::real, $${b + 3}::timestamptz, $${b + 4}, $${b + 5}, $${b + 6})`;
         });
-        await qq(`INSERT INTO listing_progress (user_id, series_id, number, completed_at, source) VALUES ${values.join(',')}`, params as any[]);
+        await qq(`INSERT INTO listing_progress (user_id, series_id, number, completed_at, source, is_private, incognito) VALUES ${values.join(',')}`, params as any[]);
       }
     }
     // The numbers an admin hid (#240, lib/hiddenChapters.ts) follow their posts as the marks do; one with no place goes.

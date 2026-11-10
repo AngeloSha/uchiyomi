@@ -1,3 +1,4 @@
+import { privateAdminContentGuard, privateAdminResponse } from '../lib/privateAdmin';
 import { hash } from '@node-rs/argon2';
 import { isIP } from 'node:net';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -76,13 +77,13 @@ import { titleExtractionCapabilities } from '../lib/titleExtraction';
 import { titleExtractionBatchTick } from '../lib/titleExtractionBatch';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
-import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, applyAdultSources, applyAdultHiding, rateSourceAdult, MAX_ADULT_SOURCES, browsableIds, nameableIds, viewCtxFor, visible, Params, hideAdult, ADULT_RATING } from '../lib/visibility';
+import { NO_LIBRARIES, SHARED_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, applyAdultSources, applyAdultHiding, rateSourceAdult, MAX_ADULT_SOURCES, browsableIds, nameableIds, viewCtxFor, visible, Params, hideAdult, ADULT_RATING } from '../lib/visibility';
 import { cleanSourceOrder, invalidateSourcePrefs } from '../lib/sourcePrefs';
 import { keepRestricted, memberDefaults, memberDefaultsShape, permsShape, saveMemberDefaults } from '../lib/memberDefaults';
 import { FOLLOW_LIMIT_MAX, followerLimit, forgetFollowerLimit } from '../lib/followLimit';
 import { borrowNamesFor, clearBorrowedNames } from '../lib/borrowNames';
 import { clearAutoDetails, fillDetailsFromSources, fillDetailsOn } from '../lib/autoDetails';
-import { lookupsChanged, libraryChanged } from '../lib/discoverIdentity';
+import { lookupsChanged, libraryChanged, libraryRevision } from '../lib/discoverIdentity';
 import { sanitiseNoticeTypes, visibleBookCount } from '../lib/noticeChapters';
 import { seriesHidesNotices, hiddenCount, refreshNoticesActive } from '../lib/noticeSettings';
 import { HIDE_MAX, hideNumbers, hiddenChapters, unhideNumbers } from '../lib/hiddenChapters';
@@ -116,7 +117,9 @@ import { prepareCleanup, cleanupPreview, cleanupConfirmation, purgeLeftovers, pu
 import { mainUses, retireSource } from '../lib/retireSource';
 import { sourcesOverview } from '../lib/sourcesOverview';
 import { titlesFromBackup, entriesFromBackup, type BackupEntry } from '../lib/tachibk';
-import { linkSeries, seedTrackerFloor, TOKEN_EXPIRED, TOKEN_REJECTED, TOKEN_UNREADABLE } from '../lib/trackers';
+import { resolveAddScope, scopeSql, samePrivacyDomainSql, ContentScopeError, deleteAccountPreservingPrivate, type AddScope } from '../lib/contentScope';
+import { normalizeImportEntries, trackerLinksOf, importSkipKeys, type ImportEntry } from '../lib/importMetadata';
+import { linkSeries, seedTrackerFloor, rememberTrackerPrivacy, TOKEN_EXPIRED, TOKEN_REJECTED, TOKEN_UNREADABLE } from '../lib/trackers';
 import { ADAPTERS, PROVIDERS, LIST_STATUSES, TRACKER_LIST_MAX, type Provider, type LibraryEntry } from '../lib/trackerProviders';
 import { open as unseal } from '../lib/secretbox';
 import { findingOf, runHealthChecks } from '../lib/health';
@@ -141,8 +144,9 @@ import {
   readBulkChapterDeleteRun, requestBulkChapterDeleteCancel, startBulkChapterDelete,
 } from '../lib/bulkChapterDelete';
 
-type ImportJob = { running: boolean; total: number; done: number; added: number; already: number; notFound: number; failed: number; startedAt: number; details: Array<{ title: string; status: string; source?: string }> };
+type ImportJob = { ownerUserId:string; scope:AddScope; running: boolean; total: number; done: number; added: number; already: number; notFound: number; failed: number; startedAt: number; details: Array<{ title: string; status: string; source?: string }> };
 let importJob: ImportJob | null = null;
+let importStarting=false;
 
 /**
  * Reviewable import (backup / MangaDex list / paste → per-title match review → add), the fix for "import
@@ -187,6 +191,7 @@ interface ImportBatchRow {
   skipped_novels: number; truncated: boolean;
   /** How many titles not in the library came after the 500 (#410); null when not counted. */
   left_over: number | null;
+  content_scope: AddScope | null; remaining_entries: ImportEntry[]; remaining_count?: number; next_batch_id: string | null;
   created_at: string; updated_at: string;
 }
 /**
@@ -194,9 +199,9 @@ interface ImportBatchRow {
  * (`skippedNovels`, `truncated`), so the page reads one shape whether it came from the POST or from a later
  * GET, and the snake-case column does not ride along as a second copy of the same number.
  */
-function batchDto<T extends ImportBatchRow>(row: T): Omit<T, 'skipped_novels' | 'left_over'> & { skippedNovels: number; leftOver: number | null } {
-  const { skipped_novels: skippedNovels, left_over: leftOver, ...rest } = row;
-  return { ...rest, skippedNovels, leftOver: leftOver ?? null };
+function batchDto<T extends ImportBatchRow>(row: T): Omit<T, 'skipped_novels' | 'left_over' | 'remaining_entries' | 'remaining_count'> & { skippedNovels: number; leftOver: number | null; remainingCount:number; nextBatchId:string|null; canContinue:boolean } {
+  const { skipped_novels: skippedNovels, left_over: leftOver, remaining_entries, remaining_count, ...rest } = row;
+  return { ...rest, skippedNovels, leftOver: leftOver ?? null, remainingCount:remaining_entries?.length ?? remaining_count ?? 0, nextBatchId:row.next_batch_id ?? null, canContinue:!!row.next_batch_id || (row.state==='done' && (remaining_entries?.length ?? remaining_count ?? 0)>0) };
 }
 interface ImportCandidateRow {
   id: string; batch_id: string; ord: number; backup_title: string;
@@ -207,6 +212,7 @@ interface ImportCandidateRow {
   status: string | null;
   /** Tracker rows only (migrate.ts says what each is for); null / empty on the other intakes. */
   tracker: string | null; external_id: string | null; alt_titles: string[]; matched_via: string | null; progress: number | null;
+  tracker_links?: unknown; ambiguous?: boolean; content_scope?:AddScope|null;
 }
 
 /**
@@ -214,12 +220,7 @@ interface ImportCandidateRow {
  * backup does not. Local to this file rather than widening `BackupEntry` in lib/tachibk.ts, which is the
  * shape of ONE file format and should not grow fields no backup carries.
  */
-type IntakeEntry = BackupEntry & {
-  altTitles?: string[];
-  tracker?: Provider;
-  externalId?: string;
-  progress?: number;
-};
+type IntakeEntry = ImportEntry;
 
 /**
  * Link an imported (or already-owned) series to the tracker entry its row came from, and record how far
@@ -233,32 +234,35 @@ type IntakeEntry = BackupEntry & {
  * the import.
  */
 async function linkImportedSeries(
-  row: { tracker: string | null; external_id: string | null; backup_title: string; progress: number | null },
-  seriesId: string,
-  userId: string,
+  row: { tracker: string | null; external_id: string | null; backup_title: string; progress: number | null; tracker_links?: unknown },
+  seriesId: string, userId: string, scope: AddScope, backup = false,
 ): Promise<boolean> {
-  if (!row.tracker || !row.external_id || !PROVIDERS.includes(row.tracker as Provider)) return false;
-  const provider = row.tracker as Provider;
-  await linkSeries(seriesId, row.external_id, row.backup_title, userId, provider);
-  // Every language edition of its work is the same entry (v0.52.0): linked too, so progress syncs from whichever is
-  // read. The floor is seeded once, here: lib/trackers.ts pushOne holds the entry's floor over all of them.
+  const links = trackerLinksOf(row);
+  const conflicts = new Set(links.filter(l => links.some(o => o.provider === l.provider && o.externalId !== l.externalId)).map(l => l.provider));
+  const p = new Params();
+  const sid = p.add(seriesId);
+  const scoped = scopeSql('o', scope, p);
   const siblings = await q<{ id: string }>(
-    `SELECT o.id FROM lib_series s JOIN lib_series o ON o.work_id = s.work_id AND o.id <> s.id
-      WHERE s.id = $1 AND s.work_id IS NOT NULL AND o.merged_into IS NULL`, [seriesId]).catch(() => [] as Array<{ id: string }>);
-  for (const sib of siblings) await linkSeries(sib.id, row.external_id, row.backup_title, userId, provider);
-  await seedTrackerFloor(userId, seriesId, provider, row.progress ?? 0);
-  return true;
-}
-
-/**
- * The key a skipped import row is remembered by (#410, @julieminer), so the next import of the same list leaves it
- * skipped: a tracker entry by its id, anything else by its title key (lib/onlineMatch.ts nameKey, which reads every
- * script). Null when the title has no key at all, and then nothing is remembered.
- */
-function importSkipKey(row: { tracker?: string | null; external_id?: string | null; backup_title: string }): string | null {
-  if (row.tracker && row.external_id) return `t:${row.tracker}:${row.external_id}`;
-  const k = nameKey(row.backup_title);
-  return k ? `n:${k}` : null;
+    `SELECT o.id FROM lib_series s JOIN lib_series o ON o.work_id=s.work_id AND o.id<>s.id
+      WHERE s.id=${sid} AND s.work_id IS NOT NULL AND o.merged_into IS NULL AND o.deleted_at IS NULL AND ${scoped}`, p.values);
+  let linked = false;
+  for (const link of links) {
+    if (conflicts.has(link.provider)) continue;
+    let primaryLinked=false;
+    for (const id of [seriesId, ...siblings.map(s => s.id)]) {
+      const previous = await one<{ external_id: string; linked_by: string | null }>('SELECT external_id,linked_by FROM series_trackers WHERE series_id=$1 AND provider=$2', [id,link.provider]);
+      if (previous?.linked_by && previous.external_id !== link.externalId) continue;
+      await rememberTrackerPrivacy(userId,link.provider,link.externalId,link.private || scope.visibility === 'private');
+      await linkSeries(id,link.externalId,link.title || row.backup_title,userId,link.provider);
+      if(id===seriesId) primaryLinked=true;
+      linked = true;
+    }
+    if(primaryLinked) {
+      const old = backup ? await one<{ chapters: number }>('SELECT chapters FROM tracker_progress WHERE user_id=$1 AND series_id=$2 AND provider=$3',[userId,seriesId,link.provider]) : null;
+      await seedTrackerFloor(userId,seriesId,link.provider,Math.max(link.progress,old?.chapters ?? 0));
+    }
+  }
+  return linked;
 }
 
 /**
@@ -266,14 +270,16 @@ function importSkipKey(row: { tracker?: string | null; external_id?: string | nu
  * check confirmed (the rule lib/discoverIdentity.ts reads), and only to a series still in the library. Its id and who
  * linked it, by external id; the oldest series when two carry the same entry.
  */
-async function seriesLinkedTo(provider: string, externalIds: string[]): Promise<Map<string, { id: string; by: string | null }>> {
+async function seriesLinkedTo(provider: string, externalIds: string[], scope: AddScope): Promise<Map<string, { id: string; by: string | null }>> {
   const out = new Map<string, { id: string; by: string | null }>();
   if (!externalIds.length) return out;
+  const p = new Params(); const providerParam=p.add(provider), ids=p.add(externalIds);
+  const scoped=scopeSql('s',scope,p);
   for (const r of await q<{ external_id: string; series_id: string; linked_by: string | null }>(
     `SELECT DISTINCT ON (t.external_id) t.external_id, t.series_id, t.linked_by::text AS linked_by
        FROM series_trackers t JOIN lib_series s ON s.id = t.series_id
-      WHERE t.provider = $1 AND t.external_id = ANY($2) AND (t.linked_by IS NOT NULL OR t.checked_at IS NOT NULL) AND ${visibleToAll('s')}
-      ORDER BY t.external_id, s.created_at, s.id`, [provider, externalIds],
+      WHERE t.provider = ${providerParam} AND t.external_id = ANY(${ids}) AND (t.linked_by IS NOT NULL OR t.checked_at IS NOT NULL) AND s.deleted_at IS NULL AND s.merged_into IS NULL AND ${scoped}
+      ORDER BY t.external_id, s.created_at, s.id`, p.values,
   )) out.set(r.external_id, { id: r.series_id, by: r.linked_by });
   return out;
 }
@@ -369,7 +375,7 @@ async function readTrackerList(userId: string, provider: Provider, statuses: (ty
     if (names.some((n) => seenNames.has(n))) continue;
     seenIds.add(e.externalId);
     for (const n of names) seenNames.add(n);
-    entries.push({ title, altTitles, tracker: provider, externalId: e.externalId, progress: Math.max(0, Math.floor(e.progress || 0)) });
+    entries.push({ title, altTitles, tracker: provider, externalId: e.externalId, progress: Math.max(0, Math.floor(e.progress || 0)), ...(e.private===true ? {private:true} : {}) });
   }
   // `capped`: the read stopped at the cap, so the list may hold more than was seen -- reported as
   // truncated even when novels and duplicates brought the kept rows under 500.
@@ -417,9 +423,9 @@ async function resolveBatch(batchId: string): Promise<void> {
               `UPDATE import_candidates SET decision = 'auto', confidence = $2,
                  match_source = $3, match_source_id = $4, match_title = $5, match_cover = $6,
                  auto_source = $3, auto_source_id = $4, auto_title = $5, auto_cover = $6, auto_confidence = $2,
-                 matched_via = $7
+                 matched_via = $7, auto_matched_via = $7, auto_ambiguous = ambiguous OR $8, ambiguous = ambiguous OR $8
                WHERE id = $1`,
-              [row.id, m.confidence, m.source, m.sourceId, m.title, m.coverUrl ?? null, m.matchedVia ?? null],
+              [row.id, m.confidence, m.source, m.sourceId, m.title, m.coverUrl ?? null, m.matchedVia ?? null, !!m.ambiguous],
             );
           }
         } catch { /* leave unresolved — surfaces as "no match found" once the batch reaches review */ }
@@ -456,7 +462,7 @@ async function closeBatchIfSettled(batchId: string): Promise<ImportBatchRow | nu
   return one<ImportBatchRow>(
     `UPDATE import_batches SET state = 'done', updated_at = now()
       WHERE id = $1 AND state = 'review'
-        AND EXISTS (SELECT 1 FROM import_candidates WHERE batch_id = $1 AND status IS NOT NULL)
+        AND (EXISTS (SELECT 1 FROM import_candidates WHERE batch_id = $1 AND status IS NOT NULL) OR jsonb_array_length(remaining_entries)>0)
         AND NOT EXISTS (SELECT 1 FROM import_candidates WHERE batch_id = $1 AND status IS NULL AND decision <> 'skip')
       RETURNING *`,
     [batchId],
@@ -555,7 +561,7 @@ let artJob: ArtJob | null = null;
 // per-series "check for new chapters" runs, so the UI can poll instead of blocking on a long download
 const seriesChecks = new Map<string, { running: boolean; added?: number; waiting?: number; error?: string; startedAt?: number; finishedAt?: number }>();
 // The known-group list for GET /api/admin/scanlators, memoised for KNOWN_GROUPS_TTL (see the route).
-let knownGroups: { at: number; content: Array<{ name: string; onDisk: number; listed: number; series: number }> } | null = null;
+let knownGroups: { at: number; revision:number; content: Array<{ name: string; onDisk: number; listed: number; series: number }> } | null = null;
 const KNOWN_GROUPS_TTL = 30_000;
 
 /**
@@ -579,9 +585,9 @@ async function nameable(req: FastifyRequest, ids: string[]): Promise<Set<string>
   return nameableIds(ids, await viewCtxFor(userIdOf(req), roleOf(req), { hideAdult: hideAdult(req) }));
 }
 const scrubTarget = (t: RunTarget, ok: Set<string>): RunTarget =>
-  (t.seriesId && !ok.has(t.seriesId) ? { ...t, label: undefined } : t);
+  (t.seriesId && !ok.has(t.seriesId) ? { ...t, seriesId:undefined, label: undefined } : t);
 const scrubSkips = (skips: RepairSkip[] | undefined, ok: Set<string>): RepairSkip[] =>
-  (skips ?? []).map((k) => (k.target?.seriesId && !ok.has(k.target.seriesId) ? { ...k, target: { ...k.target, title: undefined } } : k));
+  (skips ?? []).map((k) => (k.target?.seriesId && !ok.has(k.target.seriesId) ? { ...k, target: { ...k.target, seriesId:undefined, bookId:undefined, title: undefined } } : k));
 /** The series a stored result's skips name, for `listable`. */
 const skipIds = (r: { skips?: RepairSkip[] } | null | undefined) => (r?.skips ?? []).map((k) => k.target?.seriesId);
 /**
@@ -605,6 +611,8 @@ const COVER_LOOKUP_MS = 15_000;
 export default async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
   app.addHook('preHandler', requireAdmin);
+  app.addHook('preHandler',privateAdminContentGuard);
+  app.addHook('preSerialization',privateAdminResponse);
   // #116's extension settings and numbering routes: a child of this plugin, so the two hooks above gate them.
   await app.register(numberingRoutes);
   // v0.49.1: a series' other names and Find other sources, the same way (routes/findSources.ts).
@@ -660,7 +668,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     // Each account's `kind` (lib/profiles.ts) and who manages it, for the profiles that open at home.
     content: (await q<ProfileRow & Record<string, unknown>>(`SELECT u.id, u.username, u.display_name, u.role, u.avatar, u.created_at, u.disabled, u.perms, u.totp_enabled,
         u.max_age_rating, u.oidc_sub IS NOT NULL AS sso, u.password_login, u.local_open, u.managed_by, u.auth_kind,
-        (SELECT max(created_at) FROM reading_events e WHERE e.user_id = u.id) AS last_active,
+        (SELECT max(created_at) FROM reading_events e WHERE e.user_id = u.id AND NOT e.is_private AND e.origin='web' AND NOT EXISTS(SELECT 1 FROM lib_series ps WHERE ps.id=e.series_id AND ps.is_private)) AS last_active,
         -- NULL, not an empty array, when unrestricted: the UI must tell "every library, including ones
         -- added later" apart from "exactly these", and an empty array is a real setting meaning nothing.
         -- The NO_LIBRARIES marker is a row rather than a library, so it is filtered out of the list while
@@ -1304,7 +1312,7 @@ export default async function adminRoutes(app: FastifyInstance) {
         ...rest,
         mine: !!by && by === me,
         target: scrubTarget(target, ok),
-        current: current?.seriesId && !ok.has(current.seriesId) ? { ...current, title: undefined } : current,
+        current: current?.seriesId && !ok.has(current.seriesId) ? { ...current, seriesId:undefined, title: undefined } : current,
         skips: scrubSkips(skips, ok),
       };
     }
@@ -1345,11 +1353,11 @@ export default async function adminRoutes(app: FastifyInstance) {
     // (integration-1 review). The page never reads them; a script that wants them asks with "Show 18+" on.
     // Reintroduce by sending them as stored: "an admin who hides 18+ reads no adult title" in
     // repairRoutes.int.test.ts finds the title in the history.
-    const noNotes = hideAdult(req);
+    const noNotes = true; // Legacy free-text notes have no ownership provenance, even with adult content revealed.
     // A Fix everything run's record (v0.55.0) names series in its lines, by title: since v0.55.1 each line with the ids of
     // the series it names, held to them as its own routes hold it (lib/autofix.ts scrubAutofixRecord), since Recent
     // repairs reads it from here.
-    const named = noNotes ? await nameable(req, content.flatMap((r) => (r.kind === 'autofix' ? autofixSeriesIds(r.result) : []))) : undefined;
+    const named = await nameable(req, content.flatMap((r) => (r.kind === 'autofix' ? autofixSeriesIds(r.result) : [])));
     return {
       content: content.map((r) => ({
         ...r,
@@ -1784,7 +1792,7 @@ export default async function adminRoutes(app: FastifyInstance) {
    * right, not live: a group that appears tonight is in the list tomorrow morning either way.
    */
   app.get('/api/admin/scanlators', async () => {
-    if (knownGroups && Date.now() - knownGroups.at < KNOWN_GROUPS_TTL) return { content: knownGroups.content };
+    if (knownGroups && knownGroups.revision===libraryRevision() && Date.now() - knownGroups.at < KNOWN_GROUPS_TTL) return { content: knownGroups.content };
     const groups = new Map<string, { name: string; onDisk: number; listed: number; series: Set<string> }>();
     const entry = (name: string) => {
       const key = normGroup(name);
@@ -1795,14 +1803,14 @@ export default async function adminRoutes(app: FastifyInstance) {
     };
     const onDisk = await q<{ scanlator: string; series_id: string; n: number }>(
       `SELECT b.scanlator, b.series_id, count(*)::int AS n FROM lib_books b JOIN lib_series s ON s.id = b.series_id
-        WHERE b.scanlator IS NOT NULL AND ${visibleToAll('s')} GROUP BY 1, 2`);
+        WHERE b.scanlator IS NOT NULL AND ${visible('s',SHARED_CTX,new Params())} GROUP BY 1, 2`);
     for (const r of onDisk) for (const name of groupsOf({ scanlator: r.scanlator })) {
       const g = entry(name);
       if (g) { g.onDisk += r.n; g.series.add(r.series_id); }
     }
     const listed = await q<{ name: string; series_id: string; n: number }>(
       `SELECT g AS name, l.series_id, count(*)::int AS n FROM series_listing l JOIN lib_series s ON s.id = l.series_id, unnest(l.groups) AS g
-        WHERE ${visibleToAll('s')} GROUP BY 1, 2`).catch(() => []);
+        WHERE ${visible('s',SHARED_CTX,new Params())} GROUP BY 1, 2`).catch(() => []);
     for (const r of listed) {
       const g = entry(r.name);
       if (g) { g.listed += r.n; g.series.add(r.series_id); }
@@ -1810,7 +1818,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     const content = [...groups.values()]
       .map((g) => ({ name: g.name, onDisk: g.onDisk, listed: g.listed, series: g.series.size }))
       .sort((a, b) => (b.onDisk + b.listed) - (a.onDisk + a.listed) || a.name.localeCompare(b.name));
-    knownGroups = { at: Date.now(), content };
+    knownGroups = { at: Date.now(), revision:libraryRevision(), content };
     return { content };
   });
 
@@ -1951,7 +1959,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (!(await followGuard(id))(source)) {
       const theirs = sourceLanguage(source);
       const ours = (await seriesLanguage(id)).lang;
-      const existing = await editionFollowing(id, source, SYSTEM_CTX);
+      const existing = await editionFollowing(id, source, await viewCtxFor(userIdOf(req),roleOf(req)));
       const said = existing
         ? say('follow.languageDiffersEdition', { theirs, ours, edition: existing.lang })
         : say('follow.languageDiffers', { theirs, ours });
@@ -2570,7 +2578,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       await qq(
         `INSERT INTO series_overrides (series_id, age_rating, adult_exempt)
          SELECT o.id, $2, $3 FROM lib_series s JOIN lib_series o ON o.work_id = s.work_id AND o.id <> s.id
-          WHERE s.id = $1 AND s.work_id IS NOT NULL
+          WHERE s.id = $1 AND s.work_id IS NOT NULL AND ${samePrivacyDomainSql('s','o')}
          ON CONFLICT (series_id) DO UPDATE SET age_rating = EXCLUDED.age_rating,
            adult_exempt = COALESCE(EXCLUDED.adult_exempt, series_overrides.adult_exempt), updated_at = now()`,
         [id, b.data.ageRating ?? null, b.data.adultExempt ?? null],
@@ -3111,6 +3119,8 @@ export default async function adminRoutes(app: FastifyInstance) {
 
     const series = await one<{ folder: string }>('SELECT folder FROM lib_series WHERE id = $1', [id]);
     if (!series) return reply.code(404).send({ error: 'not_found' });
+    if (await one('SELECT 1 FROM lib_series WHERE id=$1 AND is_private',[id])) return reply.code(409).send({error:'use_privacy_action'});
+    if (b.data.libraryId && await one('SELECT 1 FROM libraries WHERE id=$1 AND managed_private',[b.data.libraryId])) return reply.code(409).send({error:'use_privacy_action'});
 
     if (b.data.libraryId === null) {
       const libs = await libraryRows();
@@ -3142,6 +3152,8 @@ export default async function adminRoutes(app: FastifyInstance) {
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
 
+    if (await one('SELECT 1 FROM lib_series WHERE id=ANY($1) AND is_private',[b.data.seriesIds])) return reply.code(409).send({error:'use_privacy_action'});
+    if (b.data.libraryId && await one('SELECT 1 FROM libraries WHERE id=$1 AND managed_private',[b.data.libraryId])) return reply.code(409).send({error:'use_privacy_action'});
     const found = await q<{ id: string; folder: string }>(
       'SELECT id, folder FROM lib_series WHERE id = ANY($1)', [b.data.seriesIds]);
     const skipped = b.data.seriesIds.filter((id) => !found.some((f) => f.id === id)).map((id) => ({ id }));
@@ -3396,6 +3408,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       members: z.array(z.string()).optional(),
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    if ((b.data.path !== undefined || b.data.paths !== undefined || b.data.members !== undefined) && await one('SELECT 1 FROM libraries WHERE id=$1 AND managed_private',[id])) return reply.code(409).send({error:'managed_private_library'});
 
     // Folders are checked before anything is written, so a refused save changes nothing.
     const raw = id === 'lib' ? null : b.data.paths ?? (b.data.path !== undefined ? [b.data.path] : null);
@@ -3480,6 +3493,7 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   app.delete('/api/admin/libraries/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
+    if (await one('SELECT 1 FROM libraries WHERE id=$1 AND managed_private',[id])) return reply.code(409).send({error:'managed_private_library'});
     if (id === 'lib') {
       return reply.code(400).send({ error: 'cannot_delete', message: 'The default library cannot be removed.' });
     }
@@ -3772,7 +3786,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       enabled: z.boolean(),
     }).refine((v) => (v.ids?.length ?? 0) + (v.langs?.length ?? 0) > 0, { message: 'ids or langs' }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
-    if (needExt(reply)) return;
+    if (needExt(reply)) return reply;
     const { ids = [], langs = [] } = b.data;
     // A source of an extension installed in the engine's own page since the last registration has no row yet, and
     // the switch below only flips rows: recorded first, or switching it on was a quiet no-op (v0.53.0).
@@ -3831,7 +3845,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const b = z.object(SITE_SIZE).safeParse(req.body ?? {});
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
-    if (needExt(reply)) return;
+    if (needExt(reply)) return reply;
     const remote = await listRemoteSources().catch(() => null);
     if (!remote) return reply.code(503).send({ error: 'engine_unreachable', message: 'The extension engine is not answering.' });
     const s = remote.find((x) => String(x.id) === id);
@@ -3958,7 +3972,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   // repositories THEY configured, and that server does the fetching and installing. No repository URL ships
   // in this codebase and nothing is fetched until one is added.
   app.get('/api/admin/extensions/catalog', async (req, reply) => {
-    if (needExt(reply)) return;
+    if (needExt(reply)) return reply;
     const { q: term, lang, installed, nsfw, updates, offset: rawOffset, limit: rawLimit } = req.query as {
       q?: string; lang?: string; installed?: string; nsfw?: string; updates?: string; offset?: string; limit?: string;
     };
@@ -4027,7 +4041,7 @@ export default async function adminRoutes(app: FastifyInstance) {
    * operator nothing they can act on.
    */
   app.post('/api/admin/extensions/update-all', async (req, reply) => {
-    if (needExt(reply)) return;
+    if (needExt(reply)) return reply;
     if (extState.running) return reply.code(409).send({ error: 'busy', message: 'An extension check is already running.' });
     // Behind another install or removal (v0.82.0), as an install is: it waits for it, and says so past two minutes.
     const got = await withInstallLock('admin', () => runExtensionCheck({ forceUpdate: true }), 2 * 60_000);
@@ -4045,7 +4059,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/admin/extensions/refresh', async (req, reply) => {
-    if (needExt(reply)) return;
+    if (needExt(reply)) return reply;
     try {
       const n = await refreshExtensions();
       await logAudit('extension.refresh', { userId: userIdOf(req), detail: { count: n }, req });
@@ -4062,7 +4076,7 @@ export default async function adminRoutes(app: FastifyInstance) {
    * address: on desktop that carries the in-app helper's token.
    */
   app.post('/api/admin/extensions/solver', async (req, reply) => {
-    if (needExt(reply)) return;
+    if (needExt(reply)) return reply;
     const r = await connectEngineSolver();
     if (!r.ok) return reply.code(r.status).send({ error: r.error, message: r.message });
     await logAudit('extension.solver', { userId: userIdOf(req), detail: r.audit, req });
@@ -4070,7 +4084,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/admin/extensions/catalog/:pkgName', async (req, reply) => {
-    if (needExt(reply)) return;
+    if (needExt(reply)) return reply;
     const { pkgName } = req.params as { pkgName: string };
     const b = z.object({ action: z.enum(['install', 'uninstall', 'update', 'enable', 'keep']) }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
@@ -4161,7 +4175,7 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // ---- extension repositories ----
   app.get('/api/admin/extensions/repos', async (req, reply) => {
-    if (needExt(reply)) return;
+    if (needExt(reply)) return reply;
     try {
       return { content: await getRepos() };
     } catch (e) {
@@ -4207,7 +4221,7 @@ export default async function adminRoutes(app: FastifyInstance) {
    * answered. The answers -- 400, 409, 422, 502 and their bodies -- are what they were.
    */
   app.post('/api/admin/extensions/repos', async (req, reply) => {
-    if (needExt(reply)) return;
+    if (needExt(reply)) return reply;
     const b = z.object({ url: z.string().max(2000) }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_url', message: REPO_MESSAGES.bad_url });
     const parsed = parseRepoInput(b.data.url);
@@ -4316,7 +4330,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
 
   app.delete('/api/admin/extensions/repos', async (req, reply) => {
-    if (needExt(reply)) return;
+    if (needExt(reply)) return reply;
     const b = z.object({ url: z.string().min(1).max(2000) }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     // ⚠️ The same trap as the add: never act on a failed read. Each store goes by the engine's own spelling of its
@@ -4405,9 +4419,8 @@ export default async function adminRoutes(app: FastifyInstance) {
   /** The run going now, and the newest finished one: what the Health page polls every two seconds while one runs. */
   app.get('/api/admin/health/autofix', async (req) => {
     const st = await autofixState();
-    const hide = hideAdult(req);
-    const named = hide ? await nameable(req, [...autofixSeriesIds(st.run), ...autofixSeriesIds(st.last)]) : undefined;
-    return { run: scrubAutofixRun(st.run, hide, named), last: scrubAutofixRun(st.last, hide, named) };
+    const named = await nameable(req, [...autofixSeriesIds(st.run), ...autofixSeriesIds(st.last)]);
+    return { run: scrubAutofixRun(st.run, true, named), last: scrubAutofixRun(st.last, true, named) };
   });
   /** One run, live or kept (repair_runs keeps them as it keeps repairs); 404 when none has that id. */
   app.get('/api/admin/health/autofix/:runId', async (req, reply) => {
@@ -4415,8 +4428,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (!runId || runId.length > 64) return reply.code(400).send({ error: 'bad_request' });
     const r = await autofixRun(runId);
     if (!r) return reply.code(404).send({ error: 'not_found' });
-    const hide = hideAdult(req);
-    return scrubAutofixRun(r, hide, hide ? await nameable(req, autofixSeriesIds(r)) : undefined);
+    return scrubAutofixRun(r, true, await nameable(req, autofixSeriesIds(r)));
   });
   /**
    * Stop the run at its next safe point -- between series, steps, sources or pairs, never inside a merge, a delete or a
@@ -4476,10 +4488,15 @@ export default async function adminRoutes(app: FastifyInstance) {
         dataUrl: z.string().optional(),
         // a public MangaDex list URL or id
         mangadexList: z.string().optional(),
+        visibility:z.enum(['shared','private']).optional(),libraryId:z.string().max(100).optional(),
       })
       .safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
 
+    const viewer=await viewCtxFor(userIdOf(req),roleOf(req));
+    let scope:AddScope;
+    try {scope=await resolveAddScope(viewer,{visibility:b.data.visibility,libraryId:b.data.libraryId},'import');}
+    catch(error){if(error instanceof ContentScopeError)return reply.code(error.statusCode).send({error:error.code});throw error;}
     let titles: string[] = [];
     let origin = '';
     try {
@@ -4499,23 +4516,29 @@ export default async function adminRoutes(app: FastifyInstance) {
     }
 
     // flag what's already here so the admin isn't re-importing their own library
-    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series')).map((r) => norm(r.title)));
+    const p=new Params(),shown=visible('s',viewer,p)+' AND '+scopeSql('s',scope,p);
+    const have = new Set((await q<{ title: string }>(`SELECT s.title FROM lib_series s WHERE ${shown}`,p.values)).map((r) => norm(r.title)));
     const items = titles.slice(0, 500).map((title) => ({ title, inLibrary: have.has(norm(title)) }));
     return { origin, total: titles.length, truncated: titles.length > 500, items };
   });
 
   // ---- bulk import: paste a list of titles, match each to a source, add it ----
   app.post('/api/admin/import', async (req, reply) => {
-    if (importJob?.running) return reply.code(409).send({ error: 'busy', message: 'An import is already running.' });
+    if (importJob?.running || importStarting) return reply.code(409).send({ error: 'busy', message: 'An import is already running.' });
     const b = z.object({
       titles: z.array(z.string()).min(1).max(500), autoUpdate: z.boolean().optional(),
       chapterCount: z.number().int().positive().optional(), chapterFrom: z.enum(['oldest', 'newest']).optional(),
+      visibility:z.enum(['shared','private']).optional(),libraryId:z.string().max(100).optional(),
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Paste at least one title.' });
     const titles = [...new Set(b.data.titles.map((t) => t.replace(/^[-*•\d.\s]+/, '').trim()).filter(Boolean))].slice(0, 500);
     if (!titles.length) return reply.code(400).send({ error: 'bad_request', message: 'No titles found.' });
-    const job: ImportJob = { running: true, total: titles.length, done: 0, added: 0, already: 0, notFound: 0, failed: 0, startedAt: Date.now(), details: [] };
-    importJob = job;
+    const ownerUserId=userIdOf(req);
+    let scope:AddScope; importStarting=true;
+    try {scope=await resolveAddScope(await viewCtxFor(ownerUserId,roleOf(req)),{visibility:b.data.visibility,libraryId:b.data.libraryId},'import');}
+    catch(error){importStarting=false;if(error instanceof ContentScopeError)return reply.code(error.statusCode).send({error:error.code});throw error;}
+    const job: ImportJob = { ownerUserId,scope,running: true, total: titles.length, done: 0, added: 0, already: 0, notFound: 0, failed: 0, startedAt: Date.now(), details: [] };
+    importJob = job; importStarting=false;
     await logAudit('import.start', { userId: userIdOf(req), detail: { count: titles.length }, req });
     void (async () => {
       for (const title of titles) {
@@ -4523,7 +4546,7 @@ export default async function adminRoutes(app: FastifyInstance) {
           const m = await findBestMatch(title);
           if (!m) { job.notFound++; job.details.push({ title, status: 'not_found' }); }
           else {
-            const r = await addSeriesFromSource({ source: m.source, sourceId: m.sourceId, autoUpdate: b.data.autoUpdate, chapterCount: b.data.chapterCount, chapterFrom: b.data.chapterFrom });
+            const r = await addSeriesFromSource({ source: m.source, sourceId: m.sourceId, autoUpdate: b.data.autoUpdate, chapterCount: b.data.chapterCount, chapterFrom: b.data.chapterFrom,scope,userId:ownerUserId });
             if (r.ok && (r.chapters ?? 0) > 0) { job.added++; job.details.push({ title, status: 'added', source: m.source }); }
             else if (r.ok) { job.already++; job.details.push({ title, status: 'already', source: m.source }); }
             else { job.failed++; job.details.push({ title, status: r.error || 'failed', source: m.source }); }
@@ -4535,7 +4558,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     })();
     return { ok: true, total: titles.length };
   });
-  app.get('/api/admin/import/status', async () => ({ job: importJob }));
+  app.get('/api/admin/import/status', async (req) => ({ job: importJob?.ownerUserId===userIdOf(req) ? importJob : null }));
 
   // ---- reviewable import: parse into a batch, resolve matches in the background, let the admin correct
   // them, THEN add. Same three intakes as /import/parse above, but every title gets its own row that the
@@ -4551,14 +4574,35 @@ export default async function adminRoutes(app: FastifyInstance) {
     return r.data;
   };
 
+  const importScope = async (req: FastifyRequest, batch: ImportBatchRow): Promise<AddScope> => {
+    if(batch.user_id !== userIdOf(req)) throw new ContentScopeError(404,'not_found');
+    return resolveAddScope(await viewCtxFor(userIdOf(req),roleOf(req)),
+      {visibility:batch.content_scope?.visibility ?? 'shared',libraryId:batch.content_scope?.libraryId},'import');
+  };
+  const candidateScopes = (viewer:Parameters<typeof resolveAddScope>[0],base:AddScope) => {
+    const cached=new Map<string,Promise<AddScope>>([[base.key,Promise.resolve(base)]]);
+    return (row:{content_scope?:AddScope|null}):Promise<AddScope> => {
+      const target=row.content_scope ?? base;
+      const key=target.visibility==='private' ? `private:${viewer.userId}` : `shared:${target.libraryId}`;
+      if(target.visibility==='private' && target.ownerUserId!==viewer.userId) throw new ContentScopeError(403,'forbidden');
+      if(target.visibility==='shared' && key!==base.key) throw new ContentScopeError(403,'forbidden');
+      if(!cached.has(key)) cached.set(key,resolveAddScope(viewer,{visibility:target.visibility,libraryId:target.libraryId},'import'));
+      return cached.get(key)!;
+    };
+  };
+  const scopeReply = (error: unknown, reply: FastifyReply) => {
+    if(error instanceof ContentScopeError) { reply.code(error.statusCode).send({error:error.code}); return true; }
+    return false;
+  };
+
   // Newest first, every state: the web's "Open imports" list is how a batch whose tab was closed is found
   // again (a `review` batch is otherwise reachable only by its own URL), and a finished one stays listed
   // until the sweep removes it so the admin can still read its counts. Rows are not returned -- a batch
   // can carry 500 of them and this is a summary; GET /batches/:id has them.
-  app.get('/api/admin/import/batches', async () => {
+  app.get('/api/admin/import/batches', async (req) => {
     const rows = await q<ImportBatchRow>(
-      `SELECT id, origin, tracker, state, total, resolved, added, already, failed, skipped_novels, truncated, created_at, updated_at
-         FROM import_batches ORDER BY created_at DESC LIMIT 50`,
+      `SELECT id, origin, tracker, state, total, resolved, added, already, failed, skipped_novels, truncated, content_scope, next_batch_id, jsonb_array_length(remaining_entries) AS remaining_count, created_at, updated_at
+         FROM import_batches WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50`, [userIdOf(req)],
     );
     // The same `stale` GET /batches/:id reports, for the same reason: a batch left `resolving` by a
     // restart otherwise read "Matching… 12/40" on the intake card when nobody was matching anything, and
@@ -4580,7 +4624,9 @@ export default async function adminRoutes(app: FastifyInstance) {
         .object({
           dataUrl: z.string().optional(),
           mangadexList: z.string().optional(),
-          titles: z.array(z.string()).optional(),
+          titles: z.array(z.string().max(1000)).max(10000).optional(),
+          visibility: z.enum(['shared','private']).optional(), libraryId: z.string().max(100).optional(),
+          continueFrom: z.string().uuid().optional(),
           // The fourth intake: `origin: 'tracker'` names it, `tracker` says which service, `statuses` which
           // of the person's lists to read (at least one; Reading + Plan to read when omitted, the two a
           // reader most wants brought over).
@@ -4592,13 +4638,33 @@ export default async function adminRoutes(app: FastifyInstance) {
       if (!b.success) return reply.code(400).send({ error: 'bad_request' });
 
       const userId = userIdOf(req);
+      const ctx = await viewCtxFor(userId, roleOf(req));
+      let parent: ImportBatchRow | null = null;
+      if (b.data.continueFrom) {
+        parent = await one<ImportBatchRow>('SELECT * FROM import_batches WHERE id=$1 AND user_id=$2',[b.data.continueFrom,userId]);
+        if (!parent) return reply.code(404).send({error:'not_found'});
+        if (parent.next_batch_id) {
+          const next=await one<{total:number}>('SELECT total FROM import_batches WHERE id=$1 AND user_id=$2',[parent.next_batch_id,userId]);
+          if (next) return {batchId:parent.next_batch_id,total:next.total,truncated:false};
+        }
+        if (parent.state !== 'done') return reply.code(409).send({error:'review_remaining'});
+        if (!parent.remaining_entries?.length) return reply.code(409).send({error:'no_more_entries'});
+      }
+      let scope: AddScope;
+      try {
+        scope=await resolveAddScope(ctx,parent ? {visibility:parent.content_scope?.visibility ?? 'shared',libraryId:parent.content_scope?.libraryId} : {visibility:b.data.visibility,libraryId:b.data.libraryId},'import');
+      } catch(error) { if(error instanceof ContentScopeError) return reply.code(error.statusCode).send({error:error.code}); throw error; }
       let entries: IntakeEntry[] = [];
       let origin: 'backup' | 'mangadex' | 'paste' | 'tracker';
       let tracker: Provider | null = null;
       let skippedNovels = 0;
       let capped = false;
       try {
-        if (b.data.origin === 'tracker' || b.data.tracker) {
+        if (parent) {
+          entries=normalizeImportEntries(parent.remaining_entries);
+          origin=parent.origin as typeof origin; tracker=parent.tracker as Provider | null;
+          capped=parent.truncated && parent.left_over === null;
+        } else if (b.data.origin === 'tracker' || b.data.tracker) {
           if (!b.data.tracker) return reply.code(400).send({ error: 'bad_request', message: 'Say which tracker to read: anilist, myanimelist or kitsu.' });
           tracker = b.data.tracker;
           const read = await readTrackerList(userId, tracker, b.data.statuses ?? ['reading', 'plan_to_read']);
@@ -4634,6 +4700,15 @@ export default async function adminRoutes(app: FastifyInstance) {
         return reply.code(422).send({ error: 'parse_failed', message: (e as Error)?.message || 'Could not read that.' });
       }
       if (!entries.length) return reply.code(400).send({ error: 'bad_request', message: 'No titles found.' });
+      try { entries=normalizeImportEntries(entries); } catch { return reply.code(422).send({error:'too_many_titles'}); }
+      let privateScope: AddScope | null=scope.visibility==='private' ? scope : null;
+      if(!privateScope && entries.some(e=>e.private || trackerLinksOf(e).some(t=>t.private))) {
+        try {privateScope=await resolveAddScope(ctx,{visibility:'private'},'import');}
+        catch(error){if(error instanceof ContentScopeError)return reply.code(error.statusCode).send({error:error.code});throw error;}
+      }
+      const entryScope=(e:IntakeEntry):AddScope=>(e.private || trackerLinksOf(e).some(t=>t.private)) ? privateScope! : scope;
+      const scopes=[...new Map(entries.map(e=>{const target=entryScope(e);return [target.key,target];})).values()];
+
 
       // Flag what's already here up front so the review screen can default those rows to skipped, visibly.
       // The map carries the series id because a tracker row the library already holds is LINKED right here
@@ -4651,17 +4726,22 @@ export default async function adminRoutes(app: FastifyInstance) {
       // holds the chapters; and only while the survivor is itself visible, because a survivor hidden since
       // is the deleted case above under another name. The rank column keeps the survivor's own title
       // ahead of a merged title that happens to normalise the same (the first hit wins below).
-      const have = new Map<string, string>();
-      // Oldest first within a rank (v0.52.0): a title held in two language editions maps to the original, every time,
-      // rather than to whichever row the planner happened to read first.
+      const haveByScope=new Map<string,Map<string,string>>();
+      for(const target of scopes) {
+        const have=new Map<string,string>();
+        const ownedParams=new Params();
+        const shownS=visible('s',ctx,ownedParams)+' AND '+scopeSql('s',target,ownedParams);
+        const shownT=visible('t',ctx,ownedParams)+' AND '+scopeSql('t',target,ownedParams);
       for (const r of await q<{ id: string; title: string }>(
-        `SELECT s.id, s.title, 0 AS rank, s.created_at FROM lib_series s WHERE ${visibleToAll('s')}
+        `SELECT s.id, s.title, 0 AS rank, s.created_at FROM lib_series s WHERE ${shownS}
          UNION ALL
-         SELECT t.id, m.title, 1 AS rank, t.created_at FROM lib_series m JOIN lib_series t ON t.id = m.merged_into WHERE ${visibleToAll('t')}
-         ORDER BY rank, created_at, id`,
+         SELECT t.id, m.title, 1 AS rank, t.created_at FROM lib_series m JOIN lib_series t ON t.id = m.merged_into WHERE ${shownT} AND ${samePrivacyDomainSql('m','t')}
+         ORDER BY rank, created_at, id`, ownedParams.values,
       )) {
-        const k = norm(r.title);
-        if (k && !have.has(k)) have.set(k, r.id);
+
+        const k=norm(r.title);if(k && !have.has(k))have.set(k,r.id);
+        }
+        haveByScope.set(target.key,have);
       }
       // A title the library holds under one of the entry's OTHER names counts as owned too: the same
       // work, spelled the way the source that added it spells it. Which name it was is kept (`via`), the
@@ -4671,11 +4751,18 @@ export default async function adminRoutes(app: FastifyInstance) {
       // A tracker entry a series here is already linked to IS that series (#410, @julieminer). By its title alone, a
       // series added from a source that spells it otherwise -- the pick someone made in Change, say -- read as not owned,
       // and the next import of the same list added a second copy and linked both to the one entry.
-      const linkedTo = tracker
-        ? await seriesLinkedTo(tracker, [...new Set(entries.map((e) => e.externalId).filter((x): x is string => !!x))])
-        : new Map<string, { id: string; by: string | null }>();
+      const linkedTo = new Map<string, {id:string;by:string|null}>();
+      for (const target of scopes) for (const provider of PROVIDERS) {
+        const ids=entries.filter(e=>entryScope(e).key===target.key).flatMap(e=>trackerLinksOf(e).filter(l=>l.provider===provider).map(l=>l.externalId));
+        for (const [id,value] of await seriesLinkedTo(provider,[...new Set(ids)],target)) linkedTo.set(target.key+'|'+provider+':'+id,value);
+      }
       const ownedBy = (e: IntakeEntry): { id: string; via: string | null; linkedBy?: string | null } | null => {
-        const link = e.externalId ? linkedTo.get(e.externalId) : undefined;
+        const target=entryScope(e),have=haveByScope.get(target.key)!;
+        const links=trackerLinksOf(e);
+        if (links.some(l=>links.some(o=>l.provider===o.provider && l.externalId!==o.externalId))) return null;
+        const held=links.map(l=>linkedTo.get(target.key+'|'+l.provider+':'+l.externalId)).filter((v):v is {id:string;by:string|null}=>!!v);
+        if(new Set(held.map(v=>v.id)).size>1) return null;
+        const link=held[0];
         if (link) return { id: link.id, via: null, linkedBy: link.by };
         const exact = have.get(norm(e.title));
         if (exact) return { id: exact, via: null };
@@ -4699,12 +4786,33 @@ export default async function adminRoutes(app: FastifyInstance) {
       // the page can say how many are left; not when a tracker read stopped at its own cap, which leaves it unknown.
       // Reintroduce by breaking out of the loop at the cut again: "says how many are left" in importBatch.int.test.ts reads null.
       const allOwned = entries.map(ownedBy);
-      const keys = entries.map((e, i) => (allOwned[i] ? null : importSkipKey({ tracker: e.tracker ?? null, external_id: e.externalId ?? null, backup_title: e.title })));
-      const askedKeys = [...new Set(keys.filter((k): k is string => !!k))];
-      const remembered = new Set(askedKeys.length
-        ? (await q<{ key: string }>('SELECT key FROM import_skips WHERE key = ANY($1)', [askedKeys])).map((r) => r.key)
-        : []);
-      const skippedBefore = keys.map((k) => !!k && remembered.has(k));
+      const keys = entries.map((e,i)=>allOwned[i] ? [] : importSkipKeys(e));
+      const rememberedByScope=new Map<string,Set<string>>();
+      for(const target of scopes) {
+      const scopedEntries=entries.filter(e=>entryScope(e).key===target.key);
+      const askedKeys=[...new Set(scopedEntries.flatMap(importSkipKeys))];
+      // Legacy skips were global. Attribute only decisions still tied to THIS owner's retained shared batch.
+      // Expired/unattributable rows remain untouched; copying them to every account would leak another reader's choices.
+      if(target.visibility==='shared' && askedKeys.length) {
+        const oldRows=await q<{backup_title:string;tracker:string|null;external_id:string|null}>(
+          `SELECT c.backup_title,c.tracker,c.external_id FROM import_candidates c JOIN import_batches b ON b.id=c.batch_id
+            WHERE b.user_id=$1 AND c.decision='skip' AND NOT c.in_library AND c.status IS NULL
+              AND ((b.content_scope IS NULL AND $2='shared:lib') OR b.content_scope->>'key'=$2)
+            ORDER BY b.created_at DESC LIMIT 10000`,[userId,target.key]);
+        const attributed=new Set(oldRows.map(r=>r.tracker && r.external_id ? `t:${r.tracker}:${r.external_id}` : `n:${nameKey(r.backup_title)}`));
+        const legacy=scopedEntries.flatMap(e=>trackerLinksOf(e).length ? importSkipKeys(e) : [`n:${nameKey(e.title)}`]).filter(k=>attributed.has(k));
+        const stored=new Set(legacy.length ? (await q<{key:string}>('SELECT key FROM import_skips WHERE key=ANY($1)',[[...new Set(legacy)]])).map(r=>r.key) : []);
+        const restored=[...new Set(scopedEntries.flatMap(e=> {
+          const old=trackerLinksOf(e).length ? importSkipKeys(e) : [`n:${nameKey(e.title)}`];
+          return old.some(k=>stored.has(k)) ? importSkipKeys(e) : [];
+        }))];
+        if(restored.length) await q('INSERT INTO import_scoped_skips(user_id,scope_key,key) SELECT $1,$2,unnest($3::text[]) ON CONFLICT DO NOTHING',[userId,target.key,restored]);
+      }
+      const remembered=new Set(askedKeys.length ? (await q<{key:string}>(
+        'SELECT key FROM import_scoped_skips WHERE user_id=$1 AND scope_key=$2 AND key=ANY($3)',[userId,target.key,askedKeys])).map(r=>r.key) : []);
+      rememberedByScope.set(target.key,remembered);
+      }
+      const skippedBefore=keys.map((ks,i)=>ks.some(k=>rememberedByScope.get(entryScope(entries[i]).key)?.has(k)));
       let toSearch = 0;
       let cut = entries.length;
       let after = 0;
@@ -4714,6 +4822,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       }
       const truncated = capped || cut < entries.length;
       const leftOver = capped ? null : after;
+      const remainingEntries=entries.slice(cut);
       entries = entries.slice(0, cut);
       const owned = allOwned.slice(0, cut);
       const skipped = skippedBefore.slice(0, cut);
@@ -4723,26 +4832,30 @@ export default async function adminRoutes(app: FastifyInstance) {
       // An owned tracker row is finished the moment it is linked: it reads `already`, the batch counts it
       // under `already`, and the review row can say "linked for progress sync". Owned rows of the other
       // intakes keep a NULL status, so a backup whose every title is owned still stays open to be looked at.
-      const linkedAtIntake = entries.map((e, i) => !!(tracker && e.externalId && owned[i]));
+      const linkedAtIntake = entries.map((e, i) => !!(trackerLinksOf(e).length && owned[i]));
 
       // `skipped_novels` and `truncated` ride on the row, not only in this answer: the page that started
       // the intake is not always the page that shows its done line (a reload, an Open-imports tap).
-      const batch = await one<{ id: string }>(
-        `INSERT INTO import_batches (user_id, origin, tracker, state, total, resolved, already, skipped_novels, truncated, left_over)
-         VALUES ($1,$2,$3,'resolving',$4,$5,$6,$7,$8,$9) RETURNING id`,
-        [userId, origin, tracker, entries.length, initialResolved, linkedAtIntake.filter(Boolean).length, skippedNovels, truncated, leftOver],
-      );
-      const batchId = batch!.id;
+      const batchId=await tx(async qq=> {
+      if(parent) {
+        const [locked]=await qq<{next_batch_id:string|null}>('SELECT next_batch_id FROM import_batches WHERE id=$1 AND user_id=$2 FOR UPDATE',[parent.id,userId]);
+        if(!locked || locked.next_batch_id) throw new Error('continuation_changed');
+      }
+      const [batch]=await qq<{id:string}>(
+        `INSERT INTO import_batches (user_id,origin,tracker,state,total,resolved,already,skipped_novels,truncated,left_over,content_scope,remaining_entries)
+         VALUES ($1,$2,$3,'resolving',$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb) RETURNING id`,
+        [userId,origin,tracker,entries.length,initialResolved,linkedAtIntake.filter(Boolean).length,skippedNovels,truncated,leftOver,JSON.stringify(scope),JSON.stringify(remainingEntries)]);
+      const batchId=batch.id;
       // One round trip for up to 500 rows via unnest, rather than 500 sequential INSERTs. ⚠️ `alt_titles`
       // rides as `jsonb[]` (one JSON array per row) unpacked per row in the SELECT: `unnest` over a `text[][]`
       // flattens it, and a plain `jsonb` cannot yield one array per row.
-      await q(
+      await qq(
         `INSERT INTO import_candidates (batch_id, ord, backup_title, backup_source_id_unsigned, backup_source_id_signed, backup_url, in_library, decision,
-                                        tracker, external_id, alt_titles, progress, status, matched_via)
+                                        tracker, external_id, alt_titles, progress, status, matched_via, tracker_links, ambiguous, content_scope)
          SELECT $1, o, t, su, ss, u, il, CASE WHEN il OR sk THEN 'skip' ELSE 'unresolved' END,
-                tr, ex, ARRAY(SELECT jsonb_array_elements_text(x.al))::text[], pr, st, mv
+                tr, ex, ARRAY(SELECT jsonb_array_elements_text(x.al))::text[], pr, st, mv, tl, am, cs
          FROM unnest($2::int[], $3::text[], $4::text[], $5::text[], $6::text[], $7::boolean[],
-                     $8::text[], $9::text[], $10::jsonb[], $11::int[], $12::text[], $13::text[], $14::boolean[]) AS x(o, t, su, ss, u, il, tr, ex, al, pr, st, mv, sk)`,
+                     $8::text[], $9::text[], $10::jsonb[], $11::int[], $12::text[], $13::text[], $14::boolean[], $15::jsonb[], $16::boolean[], $17::jsonb[]) AS x(o, t, su, ss, u, il, tr, ex, al, pr, st, mv, sk, tl, am, cs)`,
         [
           batchId,
           entries.map((_, i) => i),
@@ -4758,15 +4871,20 @@ export default async function adminRoutes(app: FastifyInstance) {
           linkedAtIntake.map((l) => (l ? 'already' : null)),
           owned.map((o) => o?.via ?? null),
           skipped,
+          entries.map(e=>JSON.stringify(trackerLinksOf(e))),
+          entries.map(e=>{const links=trackerLinksOf(e);return links.some(l=>links.some(o=>l.provider===o.provider && l.externalId!==o.externalId)) || new Set(links.map(l=>linkedTo.get(entryScope(e).key+'|'+l.provider+':'+l.externalId)?.id).filter(Boolean)).size>1;}),
+          entries.map(e=>JSON.stringify(entryScope(e))),
         ],
       );
+      if(parent) await qq('UPDATE import_batches SET next_batch_id=$2,updated_at=now() WHERE id=$1',[parent.id,batchId]);
+      return batchId;
+      });
       let linked = 0;
       for (let i = 0; i < entries.length; i++) {
         if (!linkedAtIntake[i]) continue;
         const e = entries[i];
         // Linked by this account already, on an earlier import: link and floor are its own, and stand.
-        if (owned[i]!.linkedBy && owned[i]!.linkedBy === userId) { linked++; continue; }
-        await linkImportedSeries({ tracker: e.tracker!, external_id: e.externalId!, backup_title: e.title, progress: e.progress ?? null }, owned[i]!.id, userId);
+        await linkImportedSeries({ tracker: e.tracker ?? null, external_id: e.externalId ?? null, backup_title: e.title, progress: e.progress ?? null, tracker_links:trackerLinksOf(e) }, owned[i]!.id, userId,entryScope(e),origin==='backup');
         linked++;
       }
       await logAudit('import.batch.start', {
@@ -4783,8 +4901,8 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   app.get('/api/admin/import/batches/:id', async (req, reply) => {
     const id = batchIdOf(req, reply);
-    if (!id) return;
-    let batch = await one<ImportBatchRow>('SELECT * FROM import_batches WHERE id = $1', [id]);
+    if (!id) return reply;
+    let batch = await one<ImportBatchRow>('SELECT * FROM import_batches WHERE id = $1 AND user_id=$2', [id,userIdOf(req)]);
     if (!batch) return reply.code(404).send({ error: 'not_found' });
     // An `importing` batch this process is not importing was stranded by a restart mid-run. Back to
     // `review`: the rows /run never reached still have no status and are still ready, and /run only ever
@@ -4811,11 +4929,18 @@ export default async function adminRoutes(app: FastifyInstance) {
     // a tracker row whose series carries this entry's id (linked at intake for an owned title, at /run for
     // an added one) reads "linked for progress sync"; a row whose link failed, or that was never run, does
     // not claim it.
+    let scope: AddScope;
+    try { scope=await importScope(req,batch); } catch(error) { if(scopeReply(error,reply)) return reply; throw error; }
+    const linkedParams=new Params(); const batchParam=linkedParams.add(id);
+    const fallbackVisibility=linkedParams.add(scope.visibility), fallbackLibrary=linkedParams.add(scope.libraryId), owner=linkedParams.add(userIdOf(req));
+    const rowVisibility=`COALESCE(c.content_scope->>'visibility',${fallbackVisibility})`, rowLibrary=`COALESCE(c.content_scope->>'libraryId',${fallbackLibrary})`;
+    const linkedScope=`((${rowVisibility}='private' AND s.is_private AND s.owner_user_id=${owner}::uuid) OR (${rowVisibility}='shared' AND NOT s.is_private AND s.library_id=${rowLibrary}))`;
     const items = await q<ImportCandidateRow & { linked: boolean }>(
-      `SELECT c.*, (c.tracker IS NOT NULL AND c.external_id IS NOT NULL AND EXISTS (
-                 SELECT 1 FROM series_trackers st WHERE st.provider = c.tracker AND st.external_id = c.external_id)) AS linked
-         FROM import_candidates c WHERE c.batch_id = $1 ORDER BY c.ord`, [id],
-    );
+      `SELECT c.*, EXISTS (SELECT 1 FROM series_trackers st JOIN lib_series s ON s.id=st.series_id
+        WHERE ${linkedScope} AND s.deleted_at IS NULL AND s.merged_into IS NULL AND
+        ((st.provider=c.tracker AND st.external_id=c.external_id) OR EXISTS
+          (SELECT 1 FROM jsonb_array_elements(c.tracker_links) l WHERE l->>'provider'=st.provider AND l->>'externalId'=st.external_id))) AS linked
+        FROM import_candidates c WHERE c.batch_id=${batchParam} ORDER BY c.ord`,linkedParams.values);
     // A batch stuck in 'resolving' with nobody actually resolving it (this process restarted mid-pass) is
     // stale: the UI offers Resume instead of a progress bar that will never move again.
     const stale = batch.state === 'resolving' && resolvingBatch !== id;
@@ -4824,8 +4949,11 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   app.post('/api/admin/import/batches/:id/resume', async (req, reply) => {
     const id = batchIdOf(req, reply);
-    if (!id) return;
-    if (resolvingBatch === id) return { ok: true }; // already running in this process, nothing to resume
+    if (!id) return reply;
+    if (resolvingBatch === id) {
+      if (!(await one('SELECT id FROM import_batches WHERE id=$1 AND user_id=$2',[id,userIdOf(req)]))) return reply.code(404).send({error:'not_found'});
+      return {ok:true};
+    } // already running in this process, nothing to resume
     if (resolvingBatch) return reply.code(409).send({ error: 'busy', message: 'Another import is already resolving.' });
     // Claimed synchronously, the way POST /batches claims `'pending'`: the SELECT below is one await, and a
     // /resume and a POST inside that window both passed their checks and both resolved -- two search loops
@@ -4835,7 +4963,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     resolvingBatch = id;
     let started = false;
     try {
-      const batch = await one<{ id: string; state: string }>('SELECT id, state FROM import_batches WHERE id = $1', [id]);
+      const batch = await one<{ id: string; state: string }>('SELECT id, state FROM import_batches WHERE id = $1 AND user_id=$2', [id,userIdOf(req)]);
       if (!batch) return reply.code(404).send({ error: 'not_found' });
       if (batch.state !== 'resolving') return reply.code(409).send({ error: 'not_resolving', message: 'This batch is not waiting to resolve.' });
       void resolveBatch(id).catch(() => {});
@@ -4846,58 +4974,65 @@ export default async function adminRoutes(app: FastifyInstance) {
     }
   });
 
-  app.patch('/api/admin/import/candidates/:cid', async (req, reply) => {
-    const cidParsed = uuidParam.safeParse((req.params as { cid?: string }).cid);
-    if (!cidParsed.success) return reply.code(404).send({ error: 'not_found' });
-    const cid = cidParsed.data;
-    const b = z
-      .discriminatedUnion('decision', [
-        z.object({ decision: z.literal('manual'), source: z.string().min(1), sourceId: z.string().min(1), title: z.string().min(1), coverUrl: z.string().optional() }),
-        z.object({ decision: z.literal('skip') }),
-        z.object({ decision: z.literal('auto') }),
-      ])
-      .safeParse(req.body);
-    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
-
-    const row = await one<{ id: string; batch_id: string; auto_source_id: string | null; tracker: string | null; external_id: string | null; backup_title: string }>(
-      'SELECT id, batch_id, auto_source_id, tracker, external_id, backup_title FROM import_candidates WHERE id = $1',
-      [cid],
-    );
-    if (!row) return reply.code(404).send({ error: 'not_found' });
-    // A skip is remembered for the next import of the same list, and a pick forgets it (#410, @julieminer).
-    const skipKey = importSkipKey(row);
-    if (skipKey && b.data.decision !== 'skip') await q('DELETE FROM import_skips WHERE key = $1', [skipKey]);
-
-    if (b.data.decision === 'skip') {
-      await q(`UPDATE import_candidates SET decision = 'skip' WHERE id = $1`, [cid]);
-      if (skipKey) await q('INSERT INTO import_skips (key) VALUES ($1) ON CONFLICT (key) DO NOTHING', [skipKey]);
-      // Skipping the last open row is how a batch with leftovers gets finished: nothing else will run
-      // over it again (`/run` answers nothing_to_import), so the batch closes here or not at all.
-      await closeBatchIfSettled(row.batch_id);
-    } else if (b.data.decision === 'auto') {
-      // "use the auto match" after a manual override — restores what the resolve pass actually found,
-      // never a fresh search, so this can't disagree with what the review row showed before it was edited.
-      if (!row.auto_source_id) return reply.code(409).send({ error: 'no_auto_match', message: 'There is no automatic match for this title.' });
-      await q(
-        `UPDATE import_candidates SET decision = 'auto', confidence = auto_confidence,
-           match_source = auto_source, match_source_id = auto_source_id, match_title = auto_title, match_cover = auto_cover
-         WHERE id = $1`,
-        [cid],
-      );
-    } else {
-      // `matched_via` names the alternate that found the CURRENT match, and a hand-picked one was found by
-      // a person: left in place, the row read "matched under its other name" about a match that no longer
-      // exists. (The auto branch above leaves it alone -- it belongs to the auto match, and a pick made after
-      // a manual detour simply loses the note; the amber verdict never depended on it.)
-      await q(
-        `UPDATE import_candidates SET decision = 'manual', confidence = NULL, matched_via = NULL,
-           match_source = $2, match_source_id = $3, match_title = $4, match_cover = $5
-         WHERE id = $1`,
-        [cid, b.data.source, b.data.sourceId, b.data.title, b.data.coverUrl ?? null],
-      );
-    }
-    await q(`UPDATE import_batches SET updated_at = now() WHERE id = $1`, [row.batch_id]).catch(() => {});
-    return { ok: true };
+  const applyImportDecision = async (req:FastifyRequest, batchId:string|null, ids:string[], body:
+    {decision:'skip'|'auto'|'manual';source?:string;sourceId?:string;title?:string;coverUrl?:string}) => {
+    const uid=userIdOf(req), viewer=await viewCtxFor(uid,roleOf(req));
+    return tx(async qq=> {
+      const [batch]=await qq<ImportBatchRow>(batchId
+        ? 'SELECT * FROM import_batches WHERE id=$1 AND user_id=$2 FOR UPDATE'
+        : 'SELECT b.* FROM import_batches b JOIN import_candidates c ON c.batch_id=b.id WHERE c.id=$1 AND b.user_id=$2 FOR UPDATE OF b',
+        [batchId ?? ids[0],uid]);
+      if(!batch) return {status:404,error:'not_found'};
+      if(batch.state!=='review') return {status:409,error:'busy'};
+      const scope=await resolveAddScope(viewer,{visibility:batch.content_scope?.visibility ?? 'shared',libraryId:batch.content_scope?.libraryId},'import');
+      const rows=await qq<ImportCandidateRow>('SELECT * FROM import_candidates WHERE batch_id=$1 AND id=ANY($2::uuid[]) FOR UPDATE',[batch.id,[...new Set(ids)]]);
+      if(rows.length!==new Set(ids).size) return {status:404,error:'not_found'};
+      if(body.decision==='skip' && rows.every(r=>r.in_library && r.decision==='skip' && !r.status)) return {status:200,batchId:batch.id,updated:0};
+      if(rows.some(r=>!!r.status || r.in_library)) return {status:409,error:'already_processed'};
+      if(body.decision==='auto' && rows.some(r=>!r.auto_source_id)) return {status:409,error:'no_auto_match'};
+      const rowScope=candidateScopes(viewer,scope);
+      for(const row of rows) {
+        const target=await rowScope(row);
+        const keys=importSkipKeys(row);
+        if(body.decision==='skip') {
+          await qq("UPDATE import_candidates SET decision='skip' WHERE id=$1",[row.id]);
+          if(keys.length) await qq('INSERT INTO import_scoped_skips(user_id,scope_key,key) SELECT $1,$2,unnest($3::text[]) ON CONFLICT DO NOTHING',[uid,target.key,keys]);
+        } else {
+          if(keys.length) await qq('DELETE FROM import_scoped_skips WHERE user_id=$1 AND scope_key=$2 AND key=ANY($3)',[uid,target.key,keys]);
+          if(body.decision==='auto') await qq(`UPDATE import_candidates SET decision='auto',confidence=auto_confidence,
+            matched_via=auto_matched_via,ambiguous=auto_ambiguous,match_source=auto_source,match_source_id=auto_source_id,match_title=auto_title,match_cover=auto_cover WHERE id=$1`,[row.id]);
+          else await qq(`UPDATE import_candidates SET decision='manual',confidence=NULL,matched_via=NULL,ambiguous=false,
+            match_source=$2,match_source_id=$3,match_title=$4,match_cover=$5 WHERE id=$1`,[row.id,body.source,body.sourceId,body.title,body.coverUrl ?? null]);
+        }
+      }
+      await qq('UPDATE import_batches SET updated_at=now() WHERE id=$1',[batch.id]);
+      return {status:200,batchId:batch.id,updated:rows.length};
+    });
+  };
+  app.patch('/api/admin/import/candidates/:cid',async(req,reply)=> {
+    const id=uuidParam.safeParse((req.params as {cid?:string}).cid);
+    const body=z.discriminatedUnion('decision',[
+      z.object({decision:z.literal('skip')}),z.object({decision:z.literal('auto')}),
+      z.object({decision:z.literal('manual'),source:z.string().min(1).max(200),sourceId:z.string().min(1).max(1000),title:z.string().min(1).max(300),coverUrl:z.string().max(4096).optional()})]).safeParse(req.body);
+    if(!id.success) return reply.code(404).send({error:'not_found'});
+    if(!body.success) return reply.code(400).send({error:'bad_request'});
+    try {
+      const result=await applyImportDecision(req,null,[id.data],body.data);
+      if(result.status!==200) return reply.code(result.status).send({error:result.error});
+      if(body.data.decision==='skip') await closeBatchIfSettled(result.batchId!);
+      return {ok:true};
+    } catch(error) { if(scopeReply(error,reply)) return reply; throw error; }
+  });
+  app.post('/api/admin/import/batches/:id/skip',async(req,reply)=> {
+    const id=batchIdOf(req,reply); if(!id) return reply;
+    const body=z.object({candidateIds:z.array(z.string().uuid()).min(1).max(500)}).strict().safeParse(req.body);
+    if(!body.success) return reply.code(400).send({error:'bad_request'});
+    try {
+      const result=await applyImportDecision(req,id,body.data.candidateIds,{decision:'skip'});
+      if(result.status!==200) return reply.code(result.status).send({error:result.error});
+      await closeBatchIfSettled(id);
+      return {ok:true,updated:result.updated};
+    } catch(error) { if(scopeReply(error,reply)) return reply; throw error; }
   });
 
   // ---- "Import selected" — add every selected, matched, not-yet-imported row. Adds only: chapterFrom is
@@ -4908,7 +5043,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   // added "nothing yet". ----
   app.post('/api/admin/import/batches/:id/run', async (req, reply) => {
     const id = batchIdOf(req, reply);
-    if (!id) return;
+    if (!id) return reply;
     const b = z
       .object({
         autoUpdate: z.boolean().optional(),
@@ -4925,8 +5060,11 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
 
     // `user_id` rides along because it is the account the tracker rows belong to (see `owner` below).
-    const batch = await one<{ id: string; state: string; user_id: string }>('SELECT id, state, user_id FROM import_batches WHERE id = $1', [id]);
+    const batch = await one<ImportBatchRow>('SELECT * FROM import_batches WHERE id = $1 AND user_id=$2', [id,userIdOf(req)]);
     if (!batch) return reply.code(404).send({ error: 'not_found' });
+    let scope:AddScope;
+    try { scope=await importScope(req,batch); } catch(error) { if(scopeReply(error,reply)) return reply; throw error; }
+    const rowScope=candidateScopes(await viewCtxFor(userIdOf(req),roleOf(req)),scope);
     if (batch.state === 'importing') return reply.code(409).send({ error: 'busy', message: 'This batch is already importing.' });
     if (batch.state === 'resolving') return reply.code(409).send({ error: 'still_resolving', message: 'Wait for matching to finish first.' });
 
@@ -4938,15 +5076,14 @@ export default async function adminRoutes(app: FastifyInstance) {
     // what is newly ready.
     // `tracker`, `external_id`, `backup_title` and `progress` ride along so a tracker row can be linked
     // (and floored) once its series exists, without a second read per row.
-    const rows = await q<{ id: string; match_source: string; match_source_id: string; tracker: string | null; external_id: string | null; backup_title: string; progress: number | null; alt_titles: string[] | null }>(
-      b.data.candidateIds
-        ? `SELECT id, match_source, match_source_id, tracker, external_id, backup_title, progress, alt_titles FROM import_candidates
-           WHERE batch_id = $1 AND decision IN ('auto','manual') AND match_source_id IS NOT NULL AND status IS NULL
+    const selectedQuery = b.data.candidateIds
+        ? `SELECT id, match_source, match_source_id, tracker, external_id, backup_title, progress, alt_titles, tracker_links, content_scope FROM import_candidates
+           WHERE batch_id = $1 AND decision IN ('auto','manual') AND (decision='manual' OR NOT ambiguous) AND match_source_id IS NOT NULL AND status IS NULL
              AND id = ANY($2) ORDER BY ord`
-        : `SELECT id, match_source, match_source_id, tracker, external_id, backup_title, progress, alt_titles FROM import_candidates
-           WHERE batch_id = $1 AND decision IN ('auto','manual') AND match_source_id IS NOT NULL AND status IS NULL ORDER BY ord`,
-      b.data.candidateIds ? [id, b.data.candidateIds] : [id],
-    );
+        : `SELECT id, match_source, match_source_id, tracker, external_id, backup_title, progress, alt_titles, tracker_links, content_scope FROM import_candidates
+           WHERE batch_id = $1 AND decision IN ('auto','manual') AND (decision='manual' OR NOT ambiguous) AND match_source_id IS NOT NULL AND status IS NULL ORDER BY ord`;
+    const selectedParams = b.data.candidateIds ? [id,b.data.candidateIds] : [id];
+    let rows = await q<{ id: string; match_source: string; match_source_id: string; tracker: string | null; external_id: string | null; backup_title: string; progress: number | null; alt_titles: string[] | null; tracker_links:unknown; content_scope:AddScope|null }>(selectedQuery,selectedParams);
     if (!rows.length) return reply.code(400).send({ error: 'nothing_to_import', message: 'Nothing selected is ready to import.' });
 
     // The state checks above are advisory; THIS is the guard. Two /run requests that both read `review`
@@ -4959,6 +5096,13 @@ export default async function adminRoutes(app: FastifyInstance) {
     );
     if (!claimed) return reply.code(409).send({ error: 'busy', message: 'This batch is already importing.' });
     importingBatches.add(id);
+    // Decisions take the same batch-row lock as this claim. Re-read AFTER it: a skip that won the race must not be imported.
+    rows=await q(selectedQuery,selectedParams);
+    if(!rows.length) {
+      importingBatches.delete(id);
+      await q("UPDATE import_batches SET state='review' WHERE id=$1 AND state='importing'",[id]);
+      return reply.code(400).send({error:'nothing_to_import'});
+    }
     // Captured here: the loop below outlives the request, and `req` must not be read from it.
     const userId = userIdOf(req);
     // ⚠️ The tracker link and its floor belong to the account whose LIST was read -- the batch's owner --
@@ -4974,12 +5118,15 @@ export default async function adminRoutes(app: FastifyInstance) {
      * id is looked up the way addSeriesFromSource itself found the row. Null when neither is known, and
      * then nothing is linked -- a link must never be guessed.
      */
-    const seriesIdOf = async (r: { folder?: string; existing?: { title: string; source?: string } }): Promise<string | null> => {
+    const seriesIdOf = async (r: { folder?: string; existing?: { title: string; source?: string } }, scope:AddScope): Promise<string | null> => {
+      const p=new Params();
       if (r.folder) {
-        return (await one<{ id: string }>(`SELECT s.id FROM lib_series s WHERE s.folder = $1 ORDER BY (${visibleToAll('s')}) DESC LIMIT 1`, [r.folder]))?.id ?? null;
+        const folder=p.add(r.folder),scoped=scopeSql('s',scope,p);
+        return (await one<{id:string}>(`SELECT s.id FROM lib_series s WHERE s.folder=${folder} AND ${scoped} AND s.deleted_at IS NULL AND s.merged_into IS NULL LIMIT 1`,p.values))?.id ?? null;
       }
       if (r.existing) {
-        return (await one<{ id: string }>(`SELECT s.id FROM lib_series s WHERE s.title = $1 AND s.source = $2 AND ${visibleToAll('s')} LIMIT 1`, [r.existing.title, r.existing.source ?? '']))?.id ?? null;
+        const title=p.add(r.existing.title),source=p.add(r.existing.source ?? ''),scoped=scopeSql('s',scope,p);
+        return (await one<{id:string}>(`SELECT s.id FROM lib_series s WHERE s.title=${title} AND s.source=${source} AND ${scoped} AND s.deleted_at IS NULL AND s.merged_into IS NULL LIMIT 1`,p.values))?.id ?? null;
       }
       return null;
     };
@@ -4990,20 +5137,29 @@ export default async function adminRoutes(app: FastifyInstance) {
         for (const row of rows) {
           if (aborted.has(id)) return; // discarded mid-run: the batch is gone, stop adding for it
           try {
+            const targetScope=await rowScope(row);
             // A tracker row whose entry a series here is already linked to has that series (#410): never a second copy
             // of it from another source. Asked per row, so a row an earlier import -- or an earlier row of this run --
             // added since the intake counts too. Reintroduce by going straight to the add: "the same entry twice" in
             // importBatch.int.test.ts finds two series.
-            if (row.tracker && row.external_id) {
-              const held = (await seriesLinkedTo(row.tracker, [row.external_id])).get(row.external_id);
-              if (held) {
-                await q(`UPDATE import_candidates SET status = 'already' WHERE id = $1`, [row.id]);
-                await q(`UPDATE import_batches SET already = already + 1, updated_at = now() WHERE id = $1`, [id]);
-                if (held.by !== owner) await linkImportedSeries(row, held.id, owner).catch(() => false);
-                continue;
-              }
+            const heldIds=new Map<string,{id:string;by:string|null}>();
+            for(const link of trackerLinksOf(row)) {
+              const held=(await seriesLinkedTo(link.provider,[link.externalId],targetScope)).get(link.externalId);
+              if(held) heldIds.set(held.id,held);
             }
-            const r = await addSeriesFromSource({ source: row.match_source, sourceId: row.match_source_id, autoUpdate: b.data.autoUpdate, chapterFrom: 'none' });
+            if(heldIds.size===1) {
+              const held=[...heldIds.values()][0];
+              await q(`UPDATE import_candidates SET status='already' WHERE id=$1`,[row.id]);
+              await q(`UPDATE import_batches SET already=already+1,updated_at=now() WHERE id=$1`,[id]);
+              await linkImportedSeries(row,held.id,owner,targetScope,batch.origin==='backup');
+              continue;
+            }
+            if(heldIds.size>1) {
+              await q("UPDATE import_candidates SET status='tracker_conflict' WHERE id=$1",[row.id]);
+              await q('UPDATE import_batches SET failed=failed+1,updated_at=now() WHERE id=$1',[id]);
+              continue;
+            }
+            const r = await addSeriesFromSource({ source: row.match_source, sourceId: row.match_source_id, autoUpdate: b.data.autoUpdate, chapterFrom: 'none', scope:targetScope, userId:owner });
             // `nothing: true` is the 'none' path's own signal for "a fresh row was created" (routes/sources.ts)
             // -- `chapters` is always 0 under chapterFrom:'none', so the old `chapters > 0` test that told a
             // fresh add from an existing one would have called EVERY add here "already", including the first.
@@ -5015,7 +5171,7 @@ export default async function adminRoutes(app: FastifyInstance) {
               // other names (v0.49.1, lib/altTitles.ts): the searches for other sources ask under them. Only for a
               // series this import added, and before the row reads `added`; best effort, never failing the add.
               if (row.alt_titles?.length) {
-                const sid = r.seriesId ?? await seriesIdOf(r).catch(() => null);
+                const sid = r.seriesId ?? await seriesIdOf(r,targetScope).catch(() => null);
                 if (sid) await recordAltTitles(sid, row.alt_titles, 'import', { userId }).catch(() => []);
               }
               await q(`UPDATE import_candidates SET status = 'added' WHERE id = $1`, [row.id]);
@@ -5037,10 +5193,10 @@ export default async function adminRoutes(app: FastifyInstance) {
             // Added, or the library had it: either way the series exists now, so a tracker row is linked to
             // the entry it came from and the OWNER's progress there becomes the owner's floor -- sync from
             // the first chapter, and never a push below what the tracker already holds.
-            if (row.tracker && (r.ok || r.error === 'duplicate')) {
+            if (trackerLinksOf(row).length && (r.ok || r.error === 'duplicate')) {
               try {
-                const sid = await seriesIdOf(r);
-                if (sid) await linkImportedSeries(row, sid, owner);
+                const sid = await seriesIdOf(r,targetScope);
+                if (sid) await linkImportedSeries(row, sid, owner,targetScope,batch.origin==='backup');
               } catch { /* the add stands and is already counted; the row simply reads unlinked */ }
             }
           } catch {
@@ -5070,14 +5226,15 @@ export default async function adminRoutes(app: FastifyInstance) {
   // in the sweep's IN-list only because the column comment in migrate.ts still names it.
   app.delete('/api/admin/import/batches/:id', async (req, reply) => {
     const id = batchIdOf(req, reply);
-    if (!id) return;
+    if (!id) return reply;
+    if (!(await one('SELECT id FROM import_batches WHERE id=$1 AND user_id=$2',[id,userIdOf(req)]))) return reply.code(404).send({error:'not_found'});
     // Does not wait on an in-flight loop: the row it is on finishes (its writes target rows the CASCADE just
     // removed and affect nothing) and the loop stops before the next one, because both check `aborted`.
     // `resolvingBatch` is released now rather than when that loop notices, so the admin can start the next
     // batch without waiting out a search timeout.
     if (resolvingBatch === id || importingBatches.has(id)) aborted.add(id);
     if (resolvingBatch === id) resolvingBatch = null;
-    const gone = await q<{ id: string }>('DELETE FROM import_batches WHERE id = $1 RETURNING id', [id]);
+    const gone = await q<{ id: string }>('DELETE FROM import_batches WHERE id = $1 AND user_id=$2 RETURNING id', [id,userIdOf(req)]);
     if (gone.length) await logAudit('import.batch.discard', { userId: userIdOf(req), detail: { batchId: id }, req });
     return { ok: true };
   });
@@ -5247,13 +5404,15 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  app.get('/api/admin/stats', async () => {
+  app.get('/api/admin/stats', async (req) => {
+    const viewer=await viewCtxFor(userIdOf(req),roleOf(req));
+    const bookParams=new Params(),backlogParams=new Params();
     const [libs, seriesPage, books, cb, members, backlog, activity] = await Promise.all([
-      komga.libraries(SYSTEM_CTX).catch(() => [] as any[]),
-      komga.searchSeries(SYSTEM_CTX, {}, 0, 1).catch(() => ({ totalElements: 0 } as any)),
+      komga.libraries(viewer).catch(() => [] as any[]),
+      komga.searchSeries(viewer, {}, 0, 1).catch(() => ({ totalElements: 0 } as any)),
       // v0.61.2 (#204): every chapter, as each series' booksCount counts them (a notice chapter the admin hides left out),
       // over the series seriesTotal counts. A dashboard reads one number instead of paging the series list to sum it.
-      one<{ c: number }>(`SELECT coalesce(sum(${visibleBookCount('s')}), 0)::int AS c FROM lib_series s WHERE ${visibleToAll('s')}`)
+      one<{ c: number }>(`SELECT coalesce(sum(${visibleBookCount('s')}), 0)::int AS c FROM lib_series s WHERE ${visible('s',viewer,bookParams)}`,bookParams.values)
         .catch(() => null),
       cacheBytes().catch(() => 0),
       one<{ c: number }>('SELECT count(*)::int AS c FROM users'),
@@ -5262,7 +5421,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       one<{ chapters: number; series: number }>(
         `SELECT coalesce(sum(s.source_missing), 0)::int AS chapters,
                 count(*) FILTER (WHERE s.source_missing > 0)::int AS series
-           FROM lib_series s WHERE s.auto_update AND ${visibleToAll('s')}`,
+           FROM lib_series s WHERE s.auto_update AND ${visible('s',viewer,backlogParams)}`,backlogParams.values,
       ).catch(() => null),
       q(
         // What each member last read, so the admin overview can show a person against the cover of the
@@ -5283,13 +5442,14 @@ export default async function adminRoutes(app: FastifyInstance) {
                 l.series_id AS last_series_id,
                 l.title     AS last_series_title
          FROM users u
-         LEFT JOIN reading_events e ON e.user_id = u.id
+         LEFT JOIN reading_events e ON e.user_id = u.id AND NOT e.is_private AND e.origin='web'
+           AND NOT EXISTS(SELECT 1 FROM lib_series ps WHERE ps.id=e.series_id AND ps.is_private)
          LEFT JOIN LATERAL (
            SELECT ev.series_id, COALESCE(o.title, s.title) AS title
              FROM reading_events ev
              JOIN lib_series s ON s.id = ev.series_id AND ${visibleToAll('s')}
              LEFT JOIN series_overrides o ON o.series_id = s.id
-            WHERE ev.user_id = u.id
+            WHERE ev.user_id = u.id AND NOT ev.is_private AND NOT s.is_private AND ev.origin='web'
             ORDER BY ev.created_at DESC
             LIMIT 1
          ) l ON true
@@ -5580,12 +5740,14 @@ export default async function adminRoutes(app: FastifyInstance) {
       `SELECT (SELECT count(*)::int FROM read_progress  WHERE user_id = $1) AS progress,
               (SELECT count(*)::int FROM reading_events WHERE user_id = $1) AS events,
               (SELECT count(*)::int FROM favorites      WHERE user_id = $1) AS favorites`, [id]).catch(() => null);
+    const deletion=await deleteAccountPreservingPrivate(id);
+    if (deletion === 'owned_content') return reply.code(409).send({error:'private_content_owned',message:'Remove this account’s owned series before deleting the account. Private content is never made public automatically.'});
+    if (deletion === 'not_found') return reply.code(404).send({error:'not_found'});
     await logAudit('user.delete', {
       userId: userIdOf(req),
       detail: { target: id, username: target.username, role: target.role, destroyed: lost ?? 'uncounted' },
       req,
     });
-    await q('DELETE FROM users WHERE id = $1', [id]);
     return reply.send({ ok: true });
   });
 }

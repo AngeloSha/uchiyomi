@@ -53,6 +53,7 @@ export function InsightCards({ data }: { data: InsightsPayload }) {
       <Mix data={data} />
       <Funnel data={data} now={now} />
       <Backlog data={data} />
+      <ExternalReadCounts counts={data.externalReads??[]} />
     </div>
   );
 }
@@ -208,4 +209,15 @@ function Backlog({ data }: { data: InsightsPayload }) {
       )}
     </Card>
   );
+}
+
+/** Sync supplies counts, never elapsed reading time. Keep these separate from the Studio's time-by-device. */
+const EXTERNAL_READER_NAMES:Record<string,string>={koreader:'KOReader',komga:'Komga'};
+function ExternalReadCounts({counts}:{counts:Array<{origin:string;chapters:number}>}){
+  counts=counts.filter(r=>r.chapters>0);
+  if(!counts.length)return null;
+  return <Card id="external-readers" title={tr('Reading in other apps')}>
+    {counts.map(r=><p key={r.origin} className="mt-2 flex justify-between text-sm"><span>{EXTERNAL_READER_NAMES[r.origin]??r.origin}</span><span>{bookCountText(r.chapters)}</span></p>)}
+    <p className="mt-3 text-xs text-fog-500">{tr('Dated when synced. Reading time is unavailable; these counts do not affect streaks or household rankings.')}</p>
+  </Card>;
 }

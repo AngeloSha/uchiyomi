@@ -464,13 +464,13 @@ test('an admin who hides 18+ reads no adult title in the repair\'s answers', { s
     // On the parsed field: the run's target label carries the title too, so a match anywhere in the body would pass
     // with the notes dropped for everyone (integration-2 review).
     const revealed = (await runs('?adult=1')).json().content.find((r: any) => r.id === planted[1].id);
-    assert.ok(String(revealed?.notes?.replaced?.[0] ?? '').includes(TITLE), 'the notes too, with the reveal on');
+    assert.equal(revealed?.notes,null,'raw historical notes have no owner provenance, even when adult content is revealed');
     // The Fix everything row: its lines that name no series stay for both, the ones that do only with the reveal on.
     const hiddenFix = (await runs(`?id=${planted[2].id}`)).json().content[0];
     assert.equal(hiddenFix?.result?.summary?.done?.[0]?.said?.code, 'autofix.done.merged', 'PREMISE: the Fix everything row is in the history');
     assert.deepEqual(hiddenFix.result.log, [], 'the history: a Fix everything run\'s log');
     const shownFix = (await runs(`?adult=1&id=${planted[2].id}`)).json().content[0];
-    assert.deepEqual(shownFix?.result?.summary?.done?.[0]?.items, [merged], 'a Fix everything run\'s lines, with the reveal on');
+    assert.deepEqual(shownFix?.result?.summary?.done?.[0]?.items, [], 'legacy titled lines without resource provenance stay hidden with adult content revealed');
   } finally {
     repairState.running = false;
     repairState.live = null;
@@ -532,8 +532,8 @@ test('Fix everything\'s lines are held to the series they name, for an admin who
     assert.equal(newest.last?.id, id, 'PREMISE: the planted run is the newest');
     assert.deepEqual(newest.last.log, [renumbered, merged, tested], 'the newest run');
     // The same admin with the reveal on reads every line, the 18+ ones and the old one included.
-    assert.deepEqual((await get(`/api/admin/tasks/repair/runs?adult=1&id=${id}`)).content[0].result.log, all, 'the reveal shows every line');
-    assert.deepEqual((await get(`/api/admin/health/autofix/${id}?adult=1`)).log, all);
+    assert.deepEqual((await get(`/api/admin/tasks/repair/runs?adult=1&id=${id}`)).content[0].result.log, [renumbered, merged, linked, deleted, tested], 'adult reveal preserves only proven nameable resource lines');
+    assert.deepEqual((await get(`/api/admin/health/autofix/${id}?adult=1`)).log, [renumbered, merged, linked, deleted, tested]);
   } finally {
     await q('DELETE FROM repair_runs WHERE id = $1', [id]);
     await q('DELETE FROM lib_series WHERE id = ANY($1)', [[AS, M, D]]);

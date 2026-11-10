@@ -345,6 +345,18 @@ required, and members can upload only into a series they may open. The files lan
 existing files and the read-only library are preserved. A stored file whose scan is pending is reported separately:
 run a library scan before retrying it. Two uploads can run at once; a series being changed by another task waits.
 
+### Upload loose images as one chapter
+
+In **Upload a series** or **Upload chapters**, choose the image option, select images or a folder, and check the
+page order before uploading. Give the chapter a name such as `Chapter 12`; the server validates each image and
+stores one CBZ, then indexes it like any other chapter. File names inside the CBZ follow the reviewed page order.
+Folder names do not become server paths. A corrupt page is refused with its name so you can replace it and retry.
+
+A chapter may contain up to 2,000 pages, each at most 64 MiB and 64 million decoded pixels; the complete upload
+must also fit `UPLOAD_MAX_MB` and the existing disk-space floor. Validation and staging run sequentially, and an
+interrupted upload does not replace an existing chapter. A stored chapter still waiting for indexing is reported
+separately so you can scan before retrying.
+
 ### Local cover and banner files
 
 Put `cover.webp`, `cover.png`, `cover.jpg`, `cover.jpeg` or `cover.avif` beside the series' chapter files, or inside its
@@ -3415,7 +3427,7 @@ ones. A title you skipped stays skipped the next time you import the same list (
 does not have to be gone through twice; **Change** and picking a match for it un-skips it for good. Matching
 a long list takes a few minutes, because each title is looked up on its source; you can
 leave the page and come back (the batch is saved, and the intake card lists the **open imports** — every
-admin's, on an install with more than one — so none is lost when the tab closes). A batch a server restart
+one owned by your account — so none is lost when the tab closes). A batch a server restart
 interrupted reads *Interrupted — resume* on that card and offers **Resume** when opened. **Discard** throws
 the batch away at any point, and one that sits in review for 30 days is dropped on its own.
 
@@ -3443,12 +3455,13 @@ look: anything unmatched, every *possible match*, and a *close match* that only 
 the two names differ by more than an edition tag such as *(Official)* or *Colored* — or where the longer
 name looks like a season, part, novel or spin-off of the shorter one, *Solo Leveling: Ragnarok* for *Solo
 Leveling*, which is a different work under a familiar name. **Hide already imported** hides the rows of titles
-your library holds, those it held before the import and those the import has added, so a long list brought over
-again shows only what is left to decide.
+your library holds, those it held before the import and those the import has added. State and source filters can
+show just unresolved titles or a particular provider; counts describe the rows in view. Match notes distinguish an
+exact alternate title, a weak suggestion and an ambiguous result. Ambiguous matches stay available for review.
 
-Nothing is added until you check some rows and press **Import selected — {n}**. **Select all** marks every
-row (a skipped or still-unmatched one is a harmless no-op); **Select ready to import** marks only the rows
-that found a match; and on a backup, **Select all “same source as before”** marks only the exact pairs, each
+Nothing is added until you check some rows and press **Import selected — {n}**. **Select all** marks eligible rows in the current
+filters; **Select ready to import** marks visible ready rows. **Skip selected** saves a skip for the selected
+visible rows; skipped rows can be brought back with **Change**. On a backup, **Select all “same source as before”** marks only the exact pairs, each
 entry found on its own extension at the address the backup stored. Every import here is a *Nothing yet* add — the title lands in your library with its
 listing and no chapter downloaded — so a few hundred titles is a few minutes of look-ups, not hours of
 fetching; new chapters arrive the normal way through auto-update, or fetch older ones by hand from each
@@ -3460,14 +3473,22 @@ imported or skipped, the batch is done and drops off the open-imports list by it
 
 A title that came from a tracker is linked to its entry there the moment it is added — the ones you already
 held were linked at intake — so the first chapter you finish syncs without a visit to the series page. The
-link, and the floor below, are the list owner's: batches are shared between admins, and whoever presses
-*Import selected* on yours, the entries are linked for you, not for them. And that first chapter never
+link, and the floor below, belong to the account that imported the list: saved batches and candidates are
+account-owned, and another admin cannot open or run your import. And that first chapter never
 rewinds your tracker: the import records how far the tracker already says you are in each series, for the
 account whose list was read, and a chapter finished at or below that is skipped quietly — nothing is sent
 and nothing is marked as an error, the tracker is simply ahead, or already there. Once you pass it a push
 goes out as usual. Every **Load list** takes the tracker's current number for each entry, whatever stood
 there before, so a correction you made on the tracker itself is taken by loading the list again; nothing
 is ever lowered on the tracker by this app on its own. See section 10.
+
+Large imports retain their remaining entries on the server. Once a batch is done, **Continue with next batch**
+opens the next part; reloading or pressing again does not create duplicate continuations. Each batch preserves its
+destination. The shared/private picker is a default: tracker or backup entries marked private use your private
+library even in a mixed batch. Existing shared and private copies stay independent. Supported tracker identifiers
+and imported progress floors are kept; the import does not send a lower progress number back to a tracker.
+Skip decisions apply to your account and destination. Historic skip records without a verifiable owner and scope
+are retained without assigning them to everyone's new imports.
 
 The unreviewed import — search your sources for each title and add the first good match directly — is no
 longer offered on the page; it survives as `POST /api/admin/import` for scripts (see
@@ -3711,6 +3732,28 @@ account for 15 minutes. Every sign-in is recorded in the admin audit feed.
 
 ---
 
+### Private libraries
+
+**Profile → General → Privacy → Make new additions private** sets this account's default; it starts off.
+The shared/private choice also appears when adding a series, uploading a new series or starting an import.
+Private copies use their own files and identities, so adding privately does not take over a shared copy.
+Accounts' age limits and download/upload permissions still apply. Private additions require the built-in library
+backend; delegated Komga storage does not support them.
+
+Only the owner can browse a private copy through the app, images, OPDS or content APIs. An admin's normal content
+requests follow the same rule. **My private copies → Manage** lets the owner pause updates, remove a copy while
+keeping files and progress, or restore it. Permanently deleting eligible removed copies requires typing their title;
+that operation is available only for never-shared copies whose files can safely be removed.
+
+A private copy's series page offers an explicit visibility change when its storage permits it. Sharing asks for a
+shared destination and confirmation; it keeps the series and files rather than merging with another copy. Historical
+private reading activity stays private after sharing or deleting a title. Private AniList entries remain private,
+and private writes to trackers that cannot enforce privacy are suppressed.
+
+This protects accounts from one another in the application. Your server operator still controls the database,
+files and backups. **Do not downgrade this database to a version before v0.107.0:** those versions do not enforce
+these privacy columns. Keep a backup before upgrading and use a forward fix if an upgrade needs repair.
+
 ### API tokens
 
 A normal sign-in expires every 15 minutes, which is fine for a browser and useless for a script. Under
@@ -3726,6 +3769,29 @@ Scopes only ever restrict: a read-only token gets a 403 on anything that changes
 token on a non-admin account still can't reach the admin API. See [docs/api.md](api.md) for the endpoints.
 
 ![API tokens](shots/crop-tokens.webp)
+
+### KOReader and other external readers
+
+Under **Profile → Connections → External readers**, use the KOReader sync address shown there
+(`https://your-server/api/v1/kosync`) as KOReader's custom progress-sync server. Create a read/write API token;
+use that token as the sync user name, with a nonempty password. Token expiry, revocation, library access and age
+limits are checked for each sync request. A read-only token can fetch a position but cannot update it.
+
+Use the original file downloaded from Uchiyomi: KOReader's partial-file MD5 must match. Newly scanned files are
+hashed locally in bounded background batches, so a new file may need a later explicit retry. Unknown or ambiguous
+hashes are refused rather than attached to a guessed book. Fixed-page files retain their page position; EPUB
+locations remain opaque, and only explicit whole-file completion completes an EPUB archive.
+
+Two separate switches start off:
+
+- **Count external reading** includes small, newly reported explicit completions from KOReader and the Komga API
+  in your personal chapter totals. Initial linking, bulk reports and retries do not count as new reading. These
+  counts add no minutes, sessions, streaks, badges or household leaderboard activity.
+- **Save estimated OPDS bookmarks** uses page-streaming requests as a rough resume hint. Prefetching can move this
+  hint: a page request does not prove that you read it and never creates a completion or a tracker update.
+
+Incognito keeps only your private position and suppresses reading events and tracker updates across readers.
+These server features require the built-in library backend.
 
 ### On a dashboard (Homepage)
 

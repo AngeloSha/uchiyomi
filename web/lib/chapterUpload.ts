@@ -9,30 +9,51 @@ export const CHAPTER_ACCEPT = '.cbz,.cbr,.zip,.rar,.pdf,.epub';
 export interface Uploaded { file: string; seriesId?: string | null; bookId: string | null; number: number | null; indexed?: boolean }
 
 /** Into a new series by its title (Uploads/<title> on the server). */
-export type UploadTarget = { title: string; fresh: true } | { seriesId: string };
+export type UploadTarget = { title: string; fresh: true; visibility?: 'shared' | 'private'; libraryId?: string } | { seriesId: string };
 
 const urlFor = (to: UploadTarget, name: string): string =>
   `/api/library/upload?name=${encodeURIComponent(name)}&${'seriesId' in to
     ? `seriesId=${encodeURIComponent(to.seriesId)}`
-    : `title=${encodeURIComponent(to.title)}&fresh=1`}`;
+    : `title=${encodeURIComponent(to.title)}&fresh=1${to.visibility ? `&visibility=${to.visibility}` : ''}${to.libraryId ? `&libraryId=${encodeURIComponent(to.libraryId)}` : ''}`}`;
 
 export const uploadChapter = (to: UploadTarget, f: File): Promise<Uploaded> =>
   api<Uploaded>(urlFor(to, f.name), { method: 'POST', body: f, headers: { 'content-type': 'application/octet-stream' } });
+
+export const IMAGE_ACCEPT = '.jpg,.jpeg,.png,.webp,.gif,.avif';
+export const IMAGE_MAX_PAGES = 2000;
+/** A folder denotes ONE chapter; flattening several nested chapter folders silently would lose chapter boundaries. */
+export function orderedImagePages(files: File[]): { pages: File[]; ignored: number; multipleFolders: boolean; duplicateNames: boolean } {
+  const pages = files.filter(f => /\.(jpe?g|png|webp|gif|avif)$/i.test(f.name)
+    && !(f.webkitRelativePath || f.name).split('/').some(p => p.startsWith('.')));
+  const parents = new Set(pages.map(f => (f.webkitRelativePath || '').split('/').slice(0, -1).join('/')).filter(Boolean));
+  return { pages: pages.sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true })), ignored: files.length - pages.length,
+    multipleFolders: parents.size > 1, duplicateNames: new Set(pages.map(f => f.name.toLowerCase())).size !== pages.length };
+}
+export async function uploadImageChapter(to: UploadTarget, name: string, pages: File[]): Promise<Uploaded> {
+  const body = new FormData();
+  for (const page of pages) body.append('pages', page, page.name);
+  return api<Uploaded>(urlFor(to, name.replace(/\.cbz$/i, '') + '.cbz') + '&images=1', { method: 'POST', body });
+}
 
 /** A refusal in the reader's words: the route answers with a code and an English message. */
 export function uploadRefusal(e: unknown, name: string): string {
   let code: string | null = null;
   let message: string | null = null;
+  let page: string | null = null;
   try {
     const b = e instanceof ApiError ? JSON.parse(e.body) : null;
     code = b?.error ?? null;
     message = b?.message ?? null;
+    page = typeof b?.page === 'string' ? b.page : null;
   } catch { /* not JSON: the plain failure */ }
   if (code === 'taken') return tr('A series by that title is already here. Pick another title.');
   if (code === 'exists') return tr('{name} is already in this series.', { name });
   if (code === 'bad_type') return tr('{name} is not a .cbz, .cbr, .zip, .rar, .pdf or .epub file.', { name });
   if (code === 'bad_file') return tr('{name} is not the kind of file its name says.', { name });
   if (code === 'empty') return tr('{name} is empty.', { name });
+  if (code === 'image_type') return tr('Choose JPG, PNG, WebP, GIF or AVIF pages.');
+  if (code === 'invalid_page') return page ? tr('Could not read image “{page}”. No chapter was stored.', {page}) : tr('One of the images could not be read. No chapter was stored.');
+  if (code === 'too_many_pages') return tr('A chapter can contain up to 2,000 images.');
   if (code === 'too_large' || (e instanceof ApiError && e.status === 413)) return tr('{name} is too large to upload.', { name });
   if (code === 'disk_full') return tr('The download folder is out of space.');
   // The route's other refusals carry English sentences (#375): said here in the reader's words instead.

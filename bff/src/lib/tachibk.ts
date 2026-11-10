@@ -1,7 +1,7 @@
 // Reader for Mihon / Tachiyomi library backups (.tachibk, formerly .proto.gz) — gzipped protobuf.
 //
-// We only need the manga title, Mihon's source id and its on-site url: Uchiyomi re-resolves each title
-// against the user's own configured sources, so chapters, tracking and categories never matter here. The
+// Read the manga title, Mihon's source id, its on-site URL and supported tracker identity/progress/privacy.
+// Uchiyomi resolves chapters against its own configured sources; chapter history and categories are skipped. The
 // source id is read too (not just skipped) so a title that came from an extension the user has installed
 // can be matched against that SAME source first, instead of blind title search across everything — see
 // `resolveCandidate` in routes/sources.ts. That lets us walk the wire format directly instead of taking a
@@ -56,10 +56,14 @@ function readVarintBig(buf: Buffer, pos: number): [bigint, number] {
 /** Advance past one field's payload, given its wire type. Returns the new position. */
 function skip(buf: Buffer, pos: number, wire: number): number {
   if (wire === WIRE_VARINT) return readVarint(buf, pos)[1];
-  if (wire === WIRE_I64) return pos + 8;
-  if (wire === WIRE_I32) return pos + 4;
+  if (wire === WIRE_I64 || wire === WIRE_I32) {
+    const end = pos + (wire === WIRE_I64 ? 8 : 4);
+    if (end > buf.length) throw new Error('truncated field');
+    return end;
+  }
   if (wire === WIRE_LEN) {
     const [len, p] = readVarint(buf, pos);
+    if (!Number.isSafeInteger(len) || p + len > buf.length) throw new Error('truncated field');
     return p + len;
   }
   throw new Error(`unsupported wire type ${wire}`);
@@ -82,6 +86,41 @@ export interface BackupEntry {
    * retitle -- the `same_source` tier rests on this field and on nothing else.
    */
   url?: string;
+  trackerLinks?: BackupTracker[];
+}
+
+export interface BackupTracker {
+  provider: 'myanimelist' | 'anilist' | 'kitsu' | 'mangaupdates';
+  externalId: string;
+  title: string;
+  progress: number;
+  private: boolean;
+}
+const TRACKERS: Record<number, BackupTracker['provider']> = { 1: 'myanimelist', 2: 'anilist', 3: 'kitsu', 7: 'mangaupdates' };
+
+/** Official BackupTracking schema. libraryId is account-specific and NEVER a manga identity. */
+function trackingOf(sub: Buffer): BackupTracker | null {
+  let pos = 0, sync = 0, legacy = 0n, modern = 0n, progress = 0, title = '', privateEntry = false;
+  while (pos < sub.length) {
+    const [key, at] = readVarint(sub, pos), field = key >>> 3, wire = key & 7;
+    const end = skip(sub, at, wire);
+    if (wire === WIRE_VARINT) {
+      if (field === 1) sync = readVarint(sub, at)[0];
+      else if (field === 3) legacy = readVarintBig(sub, at)[0];
+      else if (field === 100) modern = readVarintBig(sub, at)[0];
+      else if (field === 12) privateEntry = readVarint(sub, at)[0] !== 0;
+    } else if (field === 5 && wire === WIRE_LEN) {
+      const [len, start] = readVarint(sub, at);
+      if (len > 4096) throw new Error('tracking title too long');
+      title = sub.subarray(start, end).toString('utf8').trim().slice(0, 300);
+    } else if (field === 6 && wire === WIRE_I32) progress = sub.readFloatLE(at);
+    pos = end;
+  }
+  const id = legacy || modern; // same precedence as Mihon's getTrackImpl
+  const provider = TRACKERS[sync];
+  if (!provider || id <= 0n || id > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  return { provider, externalId: id.toString(), title,
+    progress: Number.isFinite(progress) ? Math.max(0, Math.min(2_147_483_647, Math.floor(progress))) : 0, private: privateEntry };
 }
 
 /** Pull `source` (1), `url` (2) and `title` (3) out of one serialized BackupManga message. */
@@ -91,10 +130,12 @@ function entryOfManga(sub: Buffer): BackupEntry | null {
   let url: string | undefined;
   let sourceIdUnsigned: string | undefined;
   let sourceIdSigned: string | undefined;
+  const trackerLinks: BackupTracker[] = [];
   while (pos < sub.length) {
     const [key, p1] = readVarint(sub, pos);
     const field = key >>> 3;
     const wire = key & 7;
+    const end = skip(sub, p1, wire);
     if (field === 1 && wire === WIRE_VARINT) {
       const [big, p2] = readVarintBig(sub, p1);
       sourceIdUnsigned = big.toString();
@@ -104,20 +145,30 @@ function entryOfManga(sub: Buffer): BackupEntry | null {
     }
     if (field === 2 && wire === WIRE_LEN) {
       const [len, p2] = readVarint(sub, p1);
+      if (len > 16384) throw new Error('url too long');
       url = sub.subarray(p2, p2 + len).toString('utf8');
       pos = p2 + len;
       continue;
     }
     if (field === 3 && wire === WIRE_LEN) {
       const [len, p2] = readVarint(sub, p1);
+      if (len > 4096) throw new Error('title too long');
       title = sub.subarray(p2, p2 + len).toString('utf8');
       pos = p2 + len;
       continue;
     }
-    pos = skip(sub, p1, wire);
+    if (field === 18 && wire === WIRE_LEN) {
+      const [, start] = readVarint(sub, p1);
+      const tracker = trackingOf(sub.subarray(start, end));
+      if (tracker && !trackerLinks.some(t => t.provider === tracker.provider && t.externalId === tracker.externalId)) {
+        if (trackerLinks.length >= 16) throw new Error('too many trackers');
+        trackerLinks.push(tracker);
+      }
+    }
+    pos = end;
   }
   if (!title) return null;
-  return { title, sourceIdUnsigned, sourceIdSigned, url };
+  return { title, sourceIdUnsigned, sourceIdSigned, url, ...(trackerLinks.length ? { trackerLinks } : {}) };
 }
 
 /**
@@ -152,24 +203,35 @@ export function entriesFromBackup(file: Buffer, maxInflatedBytes = MAX_INFLATED_
   }
 
   const entries: BackupEntry[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, number>();
   try {
     let pos = 0;
     while (pos < buf.length) {
       const [key, p1] = readVarint(buf, pos);
       const field = key >>> 3;
       const wire = key & 7;
+      const end = skip(buf, p1, wire);
       if (field === 1 && wire === WIRE_LEN) {
         const [len, p2] = readVarint(buf, p1);
         const entry = entryOfManga(buf.subarray(p2, p2 + len));
         const clean = entry?.title?.trim();
         if (entry && clean) {
           const k = clean.toLowerCase();
-          if (!seen.has(k)) { seen.add(k); entries.push({ ...entry, title: clean }); }
+          const previous = seen.get(k);
+          if (previous === undefined) { seen.set(k, entries.length); entries.push({ ...entry, title: clean }); }
+          else if (entry.trackerLinks?.length) {
+            const links = entries[previous].trackerLinks ?? [];
+            for (const link of entry.trackerLinks) {
+              const same = links.find(v => v.provider === link.provider && v.externalId === link.externalId);
+              if (same) { same.progress = Math.max(same.progress, link.progress); same.private ||= link.private; }
+              else { if (links.length >= 16) throw new Error('too many trackers'); links.push(link); }
+            }
+            entries[previous].trackerLinks = links;
+          }
         }
-        pos = p2 + len;
+        pos = end;
       } else {
-        pos = skip(buf, p1, wire);
+        pos = end;
       }
     }
   } catch {

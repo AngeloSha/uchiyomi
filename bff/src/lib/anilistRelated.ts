@@ -231,7 +231,7 @@ export async function relatedFor(seriesId: string, ctx: ViewCtx): Promise<{ look
   const items = (e.row?.relations ?? []).filter((it) => it.rel && (RELATIONS as readonly string[]).includes(it.rel));
   if (!items.length) return { lookups: true, content: [] };
   items.sort((a, b) => RELATIONS.indexOf(a.rel!) - RELATIONS.indexOf(b.rel!));
-  const idx = await libraryIndex();
+  const idx = await libraryIndex(ctx);
   const heldOf = items.map((it) => heldEntry(idx, it));
   const shown = await browsableIds(heldOf.flat().map((h) => h.id), ctx);
   const content: RelatedRow[] = [];
@@ -260,7 +260,7 @@ export async function heldRecs(seriesId: string, ctx: ViewCtx): Promise<string[]
   const e = await entryOf(seriesId);
   const recs = e?.row?.recs ?? [];
   if (!e || !recs.length) return [];
-  const idx = await libraryIndex();
+  const idx = await libraryIndex(ctx);
   const heldOf = recs.map((it) => heldEntry(idx, it));
   const shown = await browsableIds(heldOf.flat().map((h) => h.id), ctx);
   const out: string[] = [];
@@ -321,7 +321,7 @@ export async function becauseYouRead(userId: string, ctx: ViewCtx): Promise<{
     p.values as any[],
   );
   if (!seeds.length) return { seed: null, seeds: [], content: [] };
-  const idx = await libraryIndex();
+  const idx = await libraryIndex(ctx);
   // Reintroduce by keeping what is held: "Because you read leaves out what the server holds" in
   // anilistRelated.int.test.ts finds a held work on the row.
   const lists = seeds

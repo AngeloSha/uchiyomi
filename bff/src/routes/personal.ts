@@ -1,3 +1,4 @@
+import { deleteAccountPreservingPrivate } from '../lib/contentScope';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { hash } from '@node-rs/argon2';
 import rateLimit from '@fastify/rate-limit';
@@ -6,7 +7,7 @@ import { q, one, tx } from '../lib/db';
 // backend-agnostic content client: the owned library in owned mode, Komga otherwise. The old direct
 // `lib/komga` import silently nulled every series lookup here after the owned-library cutover.
 import { content as komga } from '../lib/backend';
-import { viewCtxFor, visible, browsable, browsableIds, Params, type ViewCtx, hideAdult, sourceAllowedFor } from '../lib/visibility';
+import { viewCtxFor, seriesVisible, visible, browsable, browsableIds, Params, type ViewCtx, hideAdult, sourceAllowedFor } from '../lib/visibility';
 import { getSource } from '../lib/sources';
 import { startBulkNewest, bulkNewestState } from '../lib/bulkNewest';
 // The download strip's "is a job running for this folder" lives with the strip, in routes/sources.ts, and
@@ -27,6 +28,7 @@ import { devicesOf, hourIn, lastDays, loadTimeline, summarize, validTz, yearRang
 import { listFor, ownListFor, listsFor, listItems, kindOf, ownerOf, type ListRow } from '../lib/lists';
 import { smartQuery, parseQuery } from '../lib/smartLists';
 import { insightsFor } from '../lib/readingInsights';
+import { externalReaderCounts } from '../lib/externalReading';
 import { FRAMES, badgeOfFrame, computeStreaks, earnedFrames, finishedDays } from '../lib/badges';
 import { favoriteOrder, orderFavorites } from '../lib/favorites';
 
@@ -260,8 +262,10 @@ export default async function personalRoutes(app: FastifyInstance) {
       `SELECT (SELECT count(*)::int FROM read_progress  WHERE user_id = $1) AS progress,
               (SELECT count(*)::int FROM reading_events WHERE user_id = $1) AS events,
               (SELECT count(*)::int FROM favorites      WHERE user_id = $1) AS favorites`, [id.data]).catch(() => null);
+    const deletion=await deleteAccountPreservingPrivate(id.data);
+    if (deletion === 'owned_content') return reply.code(409).send({error:'private_content_owned',message:'Remove this profile’s owned series before deleting the profile.'});
+    if (deletion === 'not_found') return reply.code(404).send({error:'not_found'});
     await logAudit('profile.delete', { userId: me, detail: { target: id.data, username: p.username, destroyed: lost ?? 'uncounted' }, req });
-    await q('DELETE FROM users WHERE id = $1', [id.data]);
     return { ok: true };
   });
 
@@ -721,6 +725,7 @@ export default async function personalRoutes(app: FastifyInstance) {
       total_events: 0,
       last_read_at: null,
     };
+    const badgeCount=await one<{n:number}>("SELECT count(DISTINCT book_id)::int AS n FROM reading_events WHERE user_id=$1 AND origin='web' AND completed",[uid]);
     // DENSE, and one definition of "a day".
     //
     // This used to `GROUP BY date_trunc(...)` and return only the days that had events, which the chart then
@@ -768,7 +773,7 @@ export default async function personalRoutes(app: FastifyInstance) {
     );
     const weekChapters = counts?.week ?? 0;
     const settings = ((await one<{ data: any }>('SELECT data FROM app_settings WHERE user_id = $1', [uid]))?.data) ?? {};
-    return { ...summary, days: windowDays, byDay, windowChapters: counts?.in_window ?? 0, first_read_at: firstRead, currentStreak: streaks.current, longestStreak: streaks.longest, weekChapters, weeklyGoal: settings.weeklyGoal ?? 0 };
+    return { ...summary, badgeChapters:badgeCount?.n??0, days: windowDays, byDay, windowChapters: counts?.in_window ?? 0, first_read_at: firstRead, currentStreak: streaks.current, longestStreak: streaks.longest, weekChapters, weeklyGoal: settings.weeklyGoal ?? 0 };
   });
 
   /**
@@ -813,7 +818,7 @@ export default async function personalRoutes(app: FastifyInstance) {
    * incognito reads are not in reading_events, so they are in none of it. Reintroduce `WHERE true` for browsable():
    * "a hidden 18+ series never appears" in readingInsights.int.test.ts lists it.
    */
-  app.get('/api/stats/insights', async (req) => insightsFor(userIdOf(req), vc(req)));
+  app.get('/api/stats/insights', async (req) => ({...await insightsFor(userIdOf(req), vc(req)), externalReads:await externalReaderCounts(userIdOf(req))}));
 
   /**
    * v0.61.0: this reader's pace through a series, for its page's "Catch up in ~2 hr" -- the median time of the chapters
@@ -974,13 +979,13 @@ export default async function personalRoutes(app: FastifyInstance) {
       // bulk-marking a backlog must not inflate streaks, the leaderboard or Wrapped. Same rule as the
       // `silent` flag in lib/progress.ts.
       await q(
-        `INSERT INTO read_progress (user_id, book_id, series_id, page, completed)
-         SELECT $1, b.id, b.series_id, COALESCE(b.pages, 0), true
+        `INSERT INTO read_progress (user_id, book_id, series_id, page, completed, is_private)
+         SELECT $1, b.id, b.series_id, COALESCE(b.pages, 0), true, EXISTS(SELECT 1 FROM lib_series s WHERE s.id=b.series_id AND s.is_private)
            FROM lib_books b WHERE b.series_id = ANY($2)
             -- What the reader sees: a notice chapter the admin hides (lib/noticeChapters.ts) is left as it was.
             AND NOT ${noticeBook('b.id')}
          ON CONFLICT (user_id, book_id) DO UPDATE
-           SET completed = true, page = GREATEST(read_progress.page, EXCLUDED.page), updated_at = now()`,
+           SET completed = true, page = GREATEST(read_progress.page, EXCLUDED.page), updated_at = now(), is_private=read_progress.is_private OR EXCLUDED.is_private`,
         [uid, live],
       );
       // One tracker push per series, not per chapter, after the write and fire-and-forget. The existing
@@ -1175,8 +1180,10 @@ export default async function personalRoutes(app: FastifyInstance) {
         WHERE rp.user_id = $1 AND rp.completed = true`,
       [uid],
     );
-    void (async () => { for (const r of rows) await pushSeriesProgress(uid, r.series_id).catch(() => {}); })();
-    return { ok: true, series: rows.length };
+    const visibleRows = [];
+    for (const row of rows) if (await seriesVisible(row.series_id, await viewCtxFor(uid,roleOf(req)))) visibleRows.push(row);
+    void (async () => { for (const r of visibleRows) await pushSeriesProgress(uid, r.series_id).catch(() => {}); })();
+    return { ok: true, series: visibleRows.length };
   });
 
   // Allow the next push for one series to go DOWN.
@@ -1193,6 +1200,7 @@ export default async function personalRoutes(app: FastifyInstance) {
     const { provider, seriesId } = req.params as { provider: string; seriesId: string };
     if (!isProvider(provider)) return reply.code(404).send({ error: 'unknown_provider' });
     const uid = userIdOf(req);
+    if (!(await seriesVisible(seriesId,await viewCtxFor(uid,roleOf(req))))) return reply.code(404).send({error:'not_found'});
     await clearTrackerFloor(uid, seriesId, provider);
     // `lower`: since v0.61.2 a push sends nothing to a service already at or past this chapter (pushStatus), and this
     // route is the one place a lower number is the point. Only for the provider asked about.
@@ -1267,6 +1275,9 @@ export default async function personalRoutes(app: FastifyInstance) {
     // v0.61.0, Incognito reading (lib/incognito.ts): the whole account's, read by the server on every progress write and
     // tracker push, so only a real boolean. Reintroduce by accepting anything: "Incognito must be on or off" in
     // incognito.int.test.ts saves "yes".
+    for(const key of ['externalReadingStats','opdsEstimatedBookmarks']) {
+      if(key in data&&typeof data[key]!=='boolean')return reply.code(400).send({error:'bad_settings',message:'External reader options must be on or off.'});
+    }
     if ('incognito' in data && typeof data.incognito !== 'boolean') {
       return reply.code(400).send({ error: 'bad_settings', message: 'Incognito reading must be on or off.' });
     }

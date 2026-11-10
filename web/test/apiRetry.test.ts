@@ -67,8 +67,47 @@ test('a bare 401 still earns the refresh and the retry', async () => {
   // reason the retry exists -- it must keep working, or every long-open tab signs itself out.
   calls.length = 0;
   firstBody = '{"error":"unauthorized"}';
+  apiMod.setCurrentUser('u1');
   const out = await apiMod.api('/api/settings', { method: 'PUT', json: { accent: '#7c5cff' } });
   assert.deepEqual(out, {}, 'the retried request did not return the second answer');
   assert.equal(calls.filter((c) => c === 'PUT /api/settings').length, 2, 'the request was not retried after the refresh');
   assert.equal(calls.filter((c) => c === 'POST /auth/refresh').length, 1, 'the session was not refreshed');
+});
+
+test('a response started by one account cannot populate the next account’s UI', async () => {
+  const original = globalThis.fetch;
+  let finish: (response: Response) => void = () => {};
+  apiMod.setCurrentUser('owner-a');
+  globalThis.fetch = (() => new Promise<Response>((resolve) => { finish = resolve; })) as typeof fetch;
+  try {
+    const result = apiMod.api('/api/history');
+    apiMod.setCurrentUser('owner-b');
+    finish(new Response('{"privateHistory":"owner-a"}', { headers: { 'content-type': 'application/json' } }));
+    await assert.rejects(result, (error: any) => error instanceof apiMod.ApiError && error.status === 409 && /account_changed/.test(error.body));
+  } finally { globalThis.fetch = original; }
+});
+
+test('a refreshed different account cannot receive a replayed upload or later stale-tab writes', async () => {
+  const original = globalThis.fetch;
+  const sent: string[] = [];
+  apiMod.setCurrentUser('owner-a');
+  apiMod.setAccessToken('token-a');
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const path = String(input).split('?')[0];
+    sent.push(`${init?.method ?? 'GET'} ${path}`);
+    if (path === '/auth/refresh') return new Response(JSON.stringify({ accessToken: 'token-b', user: { id: 'owner-b' } }), { headers: { 'content-type': 'application/json' } });
+    return new Response('{"error":"unauthorized"}', { status: 401 });
+  }) as typeof fetch;
+  try {
+    await assert.rejects(() => apiMod.api('/api/library/upload?visibility=private', { body: new Blob(['private-file']) }),
+      (error: any) => error instanceof apiMod.ApiError && error.status === 409 && /account_changed/.test(error.body));
+    assert.equal(sent.filter((entry) => entry === 'POST /api/library/upload').length, 1, 'private bytes were not replayed under owner-b');
+    const before = sent.length;
+    await assert.rejects(() => apiMod.api('/api/admin/import/batches', { json: { titles: ['old-tab-selection'] } }),
+      (error: any) => error instanceof apiMod.ApiError && /account_changed/.test(error.body));
+    assert.equal(sent.length, before, 'the stale tab stays blocked until a fresh document adopts the account');
+    assert.equal(apiMod.getAccessToken(), null);
+    await apiMod.refreshSession();
+    assert.equal(apiMod.getAccessToken(), null, 'a later refresh cannot expose the next account token to a stale document');
+  } finally { globalThis.fetch = original; }
 });

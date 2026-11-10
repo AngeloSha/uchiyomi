@@ -127,10 +127,11 @@ test('the server\'s word alone marks the page as desktop, and it sticks', async 
   // (it did, at the end of the file -- the reintroduction caught it).
   assert.equal(desk.isDesktop(), false, 'the page was already desktop before this test -- it would prove nothing');
   shell(false);
+  api.setCurrentUser(null); // Independent desktop document, rather than a cross-account refresh in the server fixture.
   answer = () => json(200, { ...DESKTOP_USER, desktop: true });
   assert.equal((await api.refreshSession()).kind, 'authed');
   assert.equal(desk.isDesktop(), true, 'the server\'s desktop flag was ignored');
-  answer = () => json(200, { accessToken: 'x', user: { id: 'u' } });
+  answer = () => json(200, { accessToken: 'x', user: DESKTOP_USER.user });
   await api.refreshSession();
   assert.equal(desk.isDesktop(), true, 'the flag did not stick');
   assert.equal(desk.desktopShell(), false, 'the server\'s word counterfeited the shell marker');

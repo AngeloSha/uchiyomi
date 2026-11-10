@@ -521,7 +521,7 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
     const b = z.object({ lastBookNumberSortRead: z.number().finite().min(0).max(1e9) }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'lastBookNumberSortRead must be a finite number between 0 and 1000000000.' });
     const n = b.data.lastBookNumberSortRead;
-    if (n <= 0) return reply.code(204).send();
+    if (n <= 0) { await markReadUpTo(uid(req), id, 0); return reply.code(204).send(); }
     // ⚠️ The push condition is "reading progress moved", not "a row was written". A bind marks every listed
     // ghost at or below the run this server just reported (#69), and counting those as a change fired one
     // remote mutation per bound series on the first refresh after the ghost switch was flipped, each one

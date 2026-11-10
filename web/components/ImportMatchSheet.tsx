@@ -17,7 +17,7 @@ import { msgOf } from '@/components/ConfirmDialog';
 import { IcCheck, IcSearch, IcX } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
 import { bookCountText } from '@/lib/format';
-import type { ImportCandidate } from '@/lib/importBatch';
+import { importProvenance, trackerProgressLine, type ImportCandidate, type ImportOrigin } from '@/lib/importBatch';
 import type { Src } from '@/lib/sourceGroups';
 import { searchPoll, searchProgressLine, searchWait, type SearchProgress } from '@/lib/searchPoll';
 import { matchPreview } from '@/lib/matchPreview';
@@ -95,10 +95,11 @@ function MiniCard({ label, title, coverUrl, sourceId, sourceLabel, count, loadin
   );
 }
 
-export function ImportMatchSheet({ batchId, candidate, onClose }: {
+export function ImportMatchSheet({ batchId, candidate, onClose, origin }: {
   batchId: string;
   candidate: ImportCandidate;
   onClose: () => void;
+  origin?: ImportOrigin;
 }) {
   const toast = useToast();
   const qc = useQueryClient();
@@ -184,6 +185,15 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
   };
 
   const groups = data?.content ?? [];
+  const provenance=importProvenance(candidate);
+  const trackerRows=candidate.tracker_links?.length ? candidate.tracker_links : candidate.tracker && candidate.progress != null ? [{provider:candidate.tracker,progress:candidate.progress}] : [];
+  const confirmCurrent=async()=> {
+    if(!candidate.match_source || !candidate.match_source_id) return;
+    setBusy('__confirm');
+    try { await patch({decision:'manual',source:candidate.match_source,sourceId:candidate.match_source_id,title:candidate.match_title || candidate.backup_title,coverUrl:candidate.match_cover || undefined}); onClose(); }
+    catch(error) { toast(msgOf(error,tr('Could not save that pick')),'error'); }
+    setBusy(null);
+  };
 
   // The pick comparison and its buttons live in the Sheet's pinned FOOTER, not in the scroller. They used to
   // sit in one sticky block with the search field, and at 390 px that block was 250-330 px of a 75 vh sheet:
@@ -194,6 +204,8 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
     <div className="space-y-2">
       {/* Long descriptions must not consume the result list or push the confirmation buttons off screen. */}
       <div className="max-h-[32svh] space-y-2 overflow-y-auto overscroll-contain" data-lenis-prevent data-match-comparison>
+      {provenance && <p className="text-[11px] text-fog-400" data-import-provenance>{provenance}</p>}
+      {trackerRows.map((link,i)=><p key={i} className="text-[11px] text-fog-400">{trackerProgressLine(link.provider,link.progress,origin==='backup')}</p>)}
       {candidate.match_source && candidate.match_source_id ? (
         <MiniCard label={tr('Currently selected')} title={candidate.match_title || candidate.backup_title}
           coverUrl={candidate.match_cover} sourceId={candidate.match_source!} sourceLabel={sourceName(candidate.match_source)}
@@ -232,6 +244,7 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
           </div>
       ) : (
         <div className="flex gap-2">
+          {candidate.ambiguous && candidate.decision==='auto' && <button type="button" onClick={confirmCurrent} disabled={!!busy} className="btn-accent flex-1 text-xs">{tr('Confirm this match')}</button>}
           <button onClick={skip} disabled={!!busy} className="chip flex-1 py-1.5 text-xs disabled:opacity-50">
             {busy === '__skip' ? tr('Working…') : tr('Skip this one')}
           </button>
@@ -266,6 +279,7 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
             </button>
           )}
         </div>
+        {!!candidate.alt_titles?.length && <div className="mt-2 flex flex-wrap gap-1" data-import-alternates>{[candidate.backup_title,...candidate.alt_titles].map(title=><button key={title} type="button" onClick={()=>setTerm(title)} className="chip max-w-full truncate text-[11px]" dir="auto">{title}</button>)}</div>}
       </div>
 
       {/* Who the search is still waiting on (#353): the rails below fill in as they answer. Polite, so a screen reader

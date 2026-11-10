@@ -11,7 +11,9 @@
 // lib_books.number)`: it is what lib/ownedCatalog's booksSrc hands the extension as `metadata.numberSort`, and
 // it is what lib/trackers' seriesProgressFor tells AniList. A different number on any one of the three would
 // mark the wrong chapters.
-import { q } from './db';
+import { q, tx } from './db';
+import { externalCompletions, externalLock, type ExternalCompletedBook } from './externalReading';
+import { incognitoOn } from './incognito';
 import { ViewCtx, seriesVisible } from './visibility';
 import { ghostsEnabled, ghostNumbers } from './komgaGhosts';
 import { continuousRun, marksByOrigin, mergeRun, realRows, reached } from './listingProgress';
@@ -199,28 +201,36 @@ export async function readProgressDetail(ctx: ViewCtx, userId: string, seriesId:
  * as it does for the GET; the write itself is keyed on series_id so it cannot reach another series' books.
  */
 export async function markReadUpTo(userId: string, seriesId: string, n: number): Promise<MarkUpToResult> {
-  if (!Number.isFinite(n) || n <= 0) return { changed: 0, ghostMarks: 0, ghostMarksAhead: 0 };
-  const rows = await q<{ book_id: string }>(
-    `INSERT INTO read_progress (user_id, book_id, series_id, page, completed)
-     SELECT $1, b.id, b.series_id, COALESCE(b.pages, 0), true
+  if (!Number.isFinite(n) || n < 0) return { changed: 0, ghostMarks: 0, ghostMarksAhead: 0 };
+  return tx(async qq => {
+  await externalLock(qq,userId);
+  const incognito = await incognitoOn(userId);
+  if(n===0){
+    await externalCompletions(qq,userId,'komga',seriesId,0,[],incognito);
+    return {changed:0,ghostMarks:0,ghostMarksAhead:0};
+  }
+  const rows = await qq<ExternalCompletedBook>(
+    `INSERT INTO read_progress (user_id, book_id, series_id, page, completed, incognito, is_private)
+     SELECT $1, b.id, b.series_id, COALESCE(b.pages, 0), true, $4, EXISTS(SELECT 1 FROM lib_series s WHERE s.id=b.series_id AND s.is_private)
        FROM lib_books b
        LEFT JOIN book_overrides ov ON ov.book_id = b.id
       WHERE b.series_id = $2 AND COALESCE(ov.number, b.number) <= $3::real
      ON CONFLICT (user_id, book_id) DO UPDATE
-       SET completed = true, page = GREATEST(read_progress.page, EXCLUDED.page), updated_at = now()
+       SET completed = true, page = GREATEST(read_progress.page, EXCLUDED.page), updated_at = now(), incognito = read_progress.incognito AND EXCLUDED.incognito, is_private = read_progress.is_private OR EXCLUDED.is_private
        WHERE NOT read_progress.completed
-     RETURNING book_id`,
-    [userId, seriesId, n],
+     RETURNING book_id,series_id,page`,
+    [userId, seriesId, n, incognito],
   );
   // The override-aware anti-join, as ghostNumbers draws the ghosts: a renumbered chapter is a real row here.
   // `done` is this reader's highest COMPLETED real chapter, computed after the upsert above so the rows this
   // very call moved count: a mark above it is progress no push has ever carried, a mark below it is an echo.
   const ghostRows = (await ghostsEnabled())
-    ? await q<{ marks: number; ahead: number }>(
+    ? await qq<{ marks: number; ahead: number }>(
         `WITH ins AS (
-           INSERT INTO listing_progress (user_id, series_id, number, source)
-           SELECT $1, l.series_id, l.number, 'komga'
+           INSERT INTO listing_progress (user_id, series_id, number, source, is_private, incognito)
+           SELECT $1, l.series_id, l.number, 'komga', s.is_private, $4
              FROM series_listing l
+             JOIN lib_series s ON s.id=l.series_id
             WHERE l.series_id = $2 AND l.number <= $3::real
               AND NOT EXISTS (
                 SELECT 1 FROM lib_books b
@@ -237,8 +247,10 @@ export async function markReadUpTo(userId: string, seriesId: string, n: number):
          )
          SELECT count(*)::int AS marks, count(*) FILTER (WHERE ins.number > done.n)::int AS ahead
            FROM ins, done`,
-        [userId, seriesId, n],
+        [userId, seriesId, n, incognito],
       )
     : [];
+  await externalCompletions(qq,userId,'komga',seriesId,n,rows,incognito);
   return { changed: rows.length, ghostMarks: ghostRows[0]?.marks ?? 0, ghostMarksAhead: ghostRows[0]?.ahead ?? 0 };
+  });
 }

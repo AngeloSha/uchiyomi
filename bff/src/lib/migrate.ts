@@ -6,6 +6,9 @@ import { typeFromGenres, SERIES_TYPE_FROM } from './seriesTypeSignals';
 import { cleanGenres } from './genres';
 import { REFILE_FAILURES_SQL } from './chapterFailures';
 import { ssoOnly } from './authMode';
+import { PRIVATE_LIBRARY_DDL } from './privateLibrarySchema';
+import { EXTERNAL_READER_DDL } from './externalReaderSchema';
+import { IMPORT_ENHANCEMENT_DDL } from './importEnhancementSchema';
 
 // NOTE: gen_random_uuid() is in Postgres core (v13+); no pgcrypto extension needed.
 // (The supabase/postgres image's event triggers reject CREATE EXTENSION under a custom role.)
@@ -2227,6 +2230,12 @@ CREATE TABLE IF NOT EXISTS import_skips (
   key        text PRIMARY KEY,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+${PRIVATE_LIBRARY_DDL}
+-- Preserve the original privacy of ghost progress until its actual chapter arrives.
+ALTER TABLE listing_progress ADD COLUMN IF NOT EXISTS is_private boolean NOT NULL DEFAULT false;
+ALTER TABLE listing_progress ADD COLUMN IF NOT EXISTS incognito boolean NOT NULL DEFAULT false;
+${EXTERNAL_READER_DDL}
+${IMPORT_ENHANCEMENT_DDL}
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

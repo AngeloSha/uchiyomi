@@ -260,6 +260,7 @@ test('an existing series is held for review, not renamed', { skip }, async () =>
 
 test('an admin\'s confirmation renumbers it in place: ids, progress, marks, floors and the log follow', { skip }, async () => {
   const before = await booksOf(S);
+  await q('UPDATE listing_progress SET is_private=true,incognito=true WHERE series_id=$1',[S]);
   // #240: Chapter 6.cbz (post 110) hidden, and the grey row at 4 (the listing's post 63).
   const { hideNumbers } = await import('../src/lib/hiddenChapters');
   await hideNumbers(S, [4, 6], { userId: adminId });
@@ -276,6 +277,8 @@ test('an admin\'s confirmation renumbers it in place: ids, progress, marks, floo
   // Reintroduce by dropping the listing_progress remap in commit(): the mark stays at 4, which is post 4 now.
   assert.deepEqual((await q('SELECT number::float8 AS n FROM listing_progress WHERE series_id = $1', [S])).map((x: any) => Number(x.n)), [63],
     'the mark on the ghost moved to its post');
+  assert.deepEqual(await q('SELECT is_private,incognito FROM listing_progress WHERE series_id=$1',[S]),[{is_private:true,incognito:true}],
+    'renumbering preserves the mark’s private and incognito provenance');
   // The hidden numbers moved the same way (lib/hiddenChapters.ts moveHidden). Reintroduce by dropping the call from
   // commit(): 4 and 6 stay hidden, which are posts 4 and 6 now, and the chapter hidden as 6 shows as 110.
   const hidden = async () => ((await q('SELECT hidden_numbers AS h FROM lib_series WHERE id = $1', [S]))[0].h as number[]).map(Number).sort((a, b) => a - b);

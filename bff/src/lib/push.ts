@@ -116,7 +116,9 @@ export async function notifyConversation(o: { bookId: string; authorId: string; 
   const users = await conversationRecipients(o.bookId, o.authorId);
   if (!users.length) return;
   const payload = conversationPush(o);
-  await Promise.all(users.map((u) => sendToUser(u, payload)));
+  await Promise.all(users.map(async (u) => {
+    if (await seriesVisible(o.seriesId,await viewCtxFor(u)).catch(()=>false)) await sendToUser(u,payload);
+  }));
 }
 
 /**

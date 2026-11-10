@@ -7,12 +7,13 @@
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createWriteStream, promises as fs } from 'fs';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { dirname, posix } from 'path';
 import { Transform, type Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { z } from 'zod';
 import { one } from '../lib/db';
+import { newSeriesId } from '../lib/ids';
 import { visible, Params, viewCtxFor } from '../lib/visibility';
 import { actsAsAdmin, authenticate, userIdOf, roleOf } from '../lib/auth';
 import { logAudit } from '../lib/audit';
@@ -24,6 +25,9 @@ import { claimWriterFolders } from '../lib/bulkNewest';
 import { folderBusy } from '../lib/numbering';
 import { runsInside } from '../lib/updater';
 import { scheduleHealthSummaryRefresh } from '../lib/healthSummary';
+import multipart from '@fastify/multipart';
+import { writeImageChapter, ImageChapterError } from '../lib/imageChapter';
+import { resolveAddScope, scopeForSeries, scopeSql, ContentScopeError, defaultPrivateFor, folderForScope } from '../lib/contentScope';
 
 /** The largest file an upload takes, in MB (UPLOAD_MAX_MB). A whole volume as one CBZ fits well inside the default. */
 const configuredMax = Number(process.env.UPLOAD_MAX_MB);
@@ -75,11 +79,11 @@ async function looksLike(abs: string, ext: string): Promise<boolean> {
   } finally { await fh.close(); }
 }
 
-type Refusal = { code: number; error: string; message: string };
-const refuse = (reply: FastifyReply, r: Refusal) => reply.code(r.code).send({ error: r.error, message: r.message });
+type Refusal = { code: number; error: string; message: string; page?: string };
+const refuse = (reply: FastifyReply, r: Refusal) => reply.code(r.code).send({ error: r.error, message: r.message, ...(r.page ? {page:r.page} : {}) });
 
 /** Stream the request body to <DL_ROOT>/<folder>/<name>; a refusal, or the stored path relative to DL_ROOT. */
-async function receive(req: FastifyRequest, folder: string, name: string): Promise<Refusal | { rel: string; bytes: number }> {
+async function receive(req: FastifyRequest, folder: string, name: string, images = false): Promise<Refusal | { rel: string; bytes: number }> {
   const declared = Number(req.headers['content-length']);
   const limit = /^(pdf|rar|cbr)$/.test(extOf(name)) ? Math.min(UPLOAD_MAX_BYTES, EAGER_READER_CAP) : UPLOAD_MAX_BYTES;
   if (declared > limit) return { code: 413, error: 'too_large', message: `Files up to ${Math.round(limit / 2 ** 20)} MB can be uploaded.` };
@@ -118,7 +122,12 @@ async function receive(req: FastifyRequest, folder: string, name: string): Promi
     },
   });
   try {
-    await pipeline(req.body as Readable, cap, createWriteStream(tmp, { flags: 'wx' }));
+    if (images) bytes = await writeImageChapter(req, tmp, limit, async () => {
+      if (MIN_FREE_GB <= 0) return;
+      const free = await freeBytes();
+      if (free === null || free < MIN_FREE_GB * 2 ** 30 + 1024 * 1024) throw Object.assign(new Error('disk_full'), { diskFull: true });
+    });
+    else await pipeline(req.body as Readable, cap, createWriteStream(tmp, { flags: 'wx' }));
     if (!bytes) throw Object.assign(new Error('empty'), { empty: true });
     if (!(await looksLike(tmp, extOf(name)))) throw Object.assign(new Error('bad_file'), { badFile: true });
     const pages = await cbzPages(tmp, name).catch(() => []);
@@ -137,7 +146,9 @@ async function receive(req: FastifyRequest, folder: string, name: string): Promi
     await fs.unlink(tmp).catch(() => {});
   } catch (e) {
     await fs.rm(tmp, { force: true }).catch(() => {});
+    if (e instanceof ImageChapterError) return { code: e.statusCode, error: e.code, message: e.page ? `Could not read image: ${e.page}` : e.code, ...(e.page ? {page:e.page} : {}) };
     const x = e as { tooLarge?: boolean; empty?: boolean; badFile?: boolean; exists?: boolean; diskFull?: boolean };
+    if ((e as NodeJS.ErrnoException).code === 'ENOSPC' || (e as NodeJS.ErrnoException).code === 'EDQUOT') x.diskFull = true;
     if (x.tooLarge) return { code: 413, error: 'too_large', message: `Files up to ${Math.round(limit / 2 ** 20)} MB can be uploaded.` };
     if (x.diskFull) return { code: 507, error: 'disk_full', message: 'The download folder is out of space.' };
     if (x.empty) return { code: 400, error: 'empty', message: 'That file is empty.' };
@@ -162,6 +173,7 @@ async function mayUpload(req: FastifyRequest): Promise<boolean> {
 }
 
 export async function uploadSeriesRoutes(app: FastifyInstance) {
+  await app.register(multipart);
   app.addHook('preHandler', authenticate);
   app.addHook('preHandler', async (req, reply) => {
     if (!(await mayUpload(req))) return reply.code(403).send({ error: 'forbidden', message: 'Uploading needs an admin to allow it.' });
@@ -170,17 +182,20 @@ export async function uploadSeriesRoutes(app: FastifyInstance) {
 
   let active = 0;
   app.post('/api/library/upload', async (req, reply) => {
-    if ((req.headers['content-type'] ?? '').split(';', 1)[0].trim().toLowerCase() !== 'application/octet-stream'
-      || typeof (req.body as Readable | undefined)?.pipe !== 'function') {
+    const images = (req.query as { images?: string }).images === '1';
+    if (images ? !req.isMultipart() : (req.headers['content-type'] ?? '').split(';', 1)[0].trim().toLowerCase() !== 'application/octet-stream'
+      || (!images && typeof (req.body as Readable | undefined)?.pipe !== 'function')) {
       return reply.code(415).send({ error: 'unsupported_media_type', message: 'Send the file as application/octet-stream.' });
     }
     const p = z.object({ title: z.string().trim().min(1).max(300).optional(), name: NAME,
-      fresh: z.literal('1').optional(), seriesId: z.string().min(1).max(200).optional() }).strict().safeParse(req.query);
+      fresh: z.literal('1').optional(), seriesId: z.string().min(1).max(200).optional(), images: z.literal('1').optional(),
+      visibility: z.enum(['shared', 'private']).optional(), libraryId: z.string().min(1).max(100).optional() }).strict().safeParse(req.query);
     if (!p.success || !(p.data.seriesId ? !p.data.title && !p.data.fresh : p.data.title && p.data.fresh)) {
       return reply.code(400).send({ error: 'bad_request', message: 'Choose a new title or an existing series.' });
     }
     const name = uploadName(p.data.name);
     if (!name) return refuse(reply, { code: 400, error: 'bad_type', message: 'Upload a .cbz, .cbr, .zip, .rar, .pdf or .epub file.' });
+    if (images && extOf(name) !== 'cbz') return reply.code(400).send({ error: 'bad_type' });
     if (active >= 2) return reply.code(429).send({ error: 'busy', message: 'Two uploads are already running. Try again when one finishes.' });
     const ctx = await viewCtxFor(userIdOf(req), roleOf(req));
     const params = new Params(); const shown = visible('s', ctx, params);
@@ -188,16 +203,40 @@ export async function uploadSeriesRoutes(app: FastifyInstance) {
     const known = idParam ? await one<{ id: string; folder: string }>(
       `SELECT s.id, s.folder FROM lib_series s WHERE s.id = ${idParam} AND ${shown}`, params.values as any[]) : null;
     if (p.data.seriesId && !known) return reply.code(404).send({ error: 'not_found' });
-    const folder = known?.folder ?? posix.join(UPLOAD_FOLDER, sanitize(p.data.title!));
+    const originalFolder = posix.join(UPLOAD_FOLDER, sanitize(p.data.title ?? ''));
+    let scope;
+    try {
+      const privateTarget = p.data.visibility === 'private' || (p.data.visibility === undefined && await defaultPrivateFor(userIdOf(req)));
+      scope = known ? await scopeForSeries(ctx, known.id, { write: true }) : await resolveAddScope(ctx, {
+        visibility: p.data.visibility,
+        libraryId: p.data.libraryId ?? (privateTarget ? undefined : libraryIdFor(originalFolder, await libraryRows())),
+      }, 'upload');
+    } catch (error) {
+      if (error instanceof ContentScopeError) return reply.code(error.statusCode).send({ error: error.code });
+      throw error;
+    }
+    if (!scope) return reply.code(404).send({ error: 'not_found' });
+    let folder = known?.folder ?? await folderForScope(scope, originalFolder);
+    if (!known) {
+      const collision = new Params(), destination = collision.add(folder);
+      if (await one(`SELECT 1 FROM lib_series s WHERE s.folder=${destination} AND NOT (${scopeSql('s',scope,collision)}) LIMIT 1`,collision.values)) {
+        // Publishing a private copy may retain its physical folder. Its next private copy needs its OWN folder.
+        folder += ` [${createHash('sha256').update(scope.key).digest('hex').slice(0,10)}]`;
+        const again = new Params(), retry = again.add(folder);
+        if (await one(`SELECT 1 FROM lib_series s WHERE s.folder=${retry} AND NOT (${scopeSql('s',scope,again)}) LIMIT 1`,again.values)) return reply.code(409).send({error:'privacy_destination_conflict'});
+      }
+    }
     // A new upload must land in a library this account can access. Existing series use the same viewer gate above.
     if (!known) {
-      const libraryId = libraryIdFor(folder, await libraryRows());
-      if (ctx.libraryIds && !ctx.libraryIds.includes(libraryId)) return reply.code(403).send({ error: 'forbidden' });
+      const libraryId = scope.libraryId;
+      if (scope.visibility === 'shared' && ctx.libraryIds && !ctx.libraryIds.includes(libraryId)) return reply.code(403).send({ error: 'forbidden' });
       const lib = await one<{ age_rating: number | null }>('SELECT age_rating FROM libraries WHERE id = $1', [libraryId]);
       if (ctx.maxAgeRating !== null && lib?.age_rating != null && lib.age_rating > ctx.maxAgeRating) {
         return reply.code(403).send({ error: 'forbidden' });
       }
-      if (await one(`SELECT 1 FROM lib_series WHERE folder = $1 OR lower(title) = lower($2) LIMIT 1`, [folder, p.data.title])) {
+      const unique = new Params();
+      const folderParam = unique.add(folder), titleParam = unique.add(p.data.title);
+      if (await one(`SELECT 1 FROM lib_series s WHERE (${scopeSql('s', scope, unique)}) AND (folder = ${folderParam} OR lower(title) = lower(${titleParam})) LIMIT 1`, unique.values as any[])) {
         return refuse(reply, { code: 409, error: 'taken', message: 'A series by that title is already here. Pick another title.' });
       }
     }
@@ -207,6 +246,17 @@ export async function uploadSeriesRoutes(app: FastifyInstance) {
     if (!claim) return reply.code(409).send({ error: 'busy', message: 'Another task is changing this series.' });
     active++;
     let reserved: string | null = null;
+    let reservedSeries: string | null = null;
+    let stored = false;
+    const discardUnpublished = async () => {
+      if (reservedSeries && !stored) {
+        await one(`DELETE FROM lib_series s WHERE id=$1 AND books_count=0
+          AND NOT EXISTS(SELECT 1 FROM lib_books b WHERE b.series_id=s.id) RETURNING id`, [reservedSeries])
+          .catch(error => req.log.warn({ err: error }, 'Failed upload reservation cleanup is pending.'));
+        reservedSeries = null;
+      }
+      if (reserved && !stored) await fs.rmdir(reserved).catch(() => {});
+    };
     try {
       if (!known) {
         await fs.mkdir(DL_ROOT, { recursive: true });
@@ -220,8 +270,19 @@ export async function uploadSeriesRoutes(app: FastifyInstance) {
           throw e;
         }
       }
-      const r = await receive(req, folder, name);
-      if ('error' in r) return refuse(reply, r);
+      if (!known) {
+        // Reserve the authenticated destination before the archive is published. A library's path mapping
+        // may be absent or change while a large request streams; the scanner must keep this chosen scope.
+        const pinned = libraryIdFor(folder, await libraryRows()) !== scope.libraryId;
+        const allocated = await one<{ id: string }>(`INSERT INTO lib_series
+          (id, source, title, folder, books_count, library_id, owner_user_id, is_private, library_pinned)
+          VALUES ($1,$2,$3,$4,0,$5,$6,$7,$8) RETURNING id`,
+        [newSeriesId(), UPLOAD_FOLDER, p.data.title, folder, scope.libraryId, scope.ownerUserId, scope.visibility === 'private', pinned]);
+        reservedSeries = allocated!.id;
+      }
+      const r = await receive(req, folder, name, images);
+      if ('error' in r) { await discardUnpublished(); return refuse(reply, r); }
+      stored = true;
       let scanFailed = false;
       await persistScan().catch((e) => { scanFailed = true; req.log.warn({ err: e }, 'Uploaded file was stored; indexing is pending.'); });
       scheduleHealthSummaryRefresh();
@@ -229,10 +290,13 @@ export async function uploadSeriesRoutes(app: FastifyInstance) {
       await logAudit('series.upload', { userId: userIdOf(req), detail: { id: book?.series_id ?? null, file: r.rel, bytes: r.bytes, created: !known }, req });
       // A stored file is never reported as an indexed chapter if its scan failed.
       if (!book || scanFailed) reply.code(202);
-      return { ok: true, indexed: !!book && !scanFailed, file: r.rel, seriesId: book?.series_id ?? known?.id ?? null,
+      return { ok: true, indexed: !!book && !scanFailed, file: r.rel, seriesId: book?.series_id ?? known?.id ?? reservedSeries ?? null,
         bookId: book?.id ?? null, number: book?.number ?? null };
+    } catch(error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOSPC' || (error as NodeJS.ErrnoException).code === 'EDQUOT') { await discardUnpublished(); return reply.code(507).send({error:'disk_full'}); }
+      throw error;
     } finally {
-      if (reserved) await fs.rmdir(reserved).catch(() => {}); // only remove our empty, failed reservation
+      await discardUnpublished();
       active--; claim.release();
     }
   });

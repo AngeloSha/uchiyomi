@@ -102,7 +102,7 @@ async function until(what: string, f: () => Promise<boolean> | boolean, ms = 15_
 }
 
 /** Every row this file makes, by id and by folder: a library scan mints its own ids for the folders it finds. */
-const OURS = `id LIKE 's_dv_%' OR folder LIKE 's_dv_%' OR folder LIKE 'dv-new/%' OR folder LIKE 'Zzz dv-%'`;
+const OURS = `id LIKE 's_dv_%' OR folder LIKE 's_dv_%' OR folder LIKE 'dv-new/%' OR folder LIKE 'Zzz dv-%' OR folder LIKE 'lib_dv_a/%'`;
 
 /**
  * Until no library scan has started for a moment. Every job here ends with a detached scan of its own, after
@@ -497,7 +497,7 @@ test('a starter keeps their own card when it lands where they cannot browse, tit
   const w = who();
   // The member adds; the series lands, and is then in library B, which they have no grant to (as when the
   // downloads library is one they cannot open, or the scan rates it above a cap).
-  const r = await app.inject({ method: 'POST', url: '/api/sources/add', headers: w.member, payload: { source: LANDS, sourceId: 'dv-lands' } });
+  const r = await app.inject({ method: 'POST', url: '/api/sources/add', headers: w.member, payload: { source: LANDS, sourceId: 'dv-lands', libraryId:LIB_A } });
   assert.equal(r.statusCode, 200, r.body);
   const folder = r.json().folder as string;
   await until('the add to finish', async () => (await cardOf(folder))?.status === 'done');

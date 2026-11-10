@@ -1,3 +1,4 @@
+import {samePrivacyDomainSql} from './contentScope';
 // The other names a series goes by, and the one rule for when two names are the same name (v0.49.1).
 //
 // The idea, the name list and the parsing are @TIGamingTV's (PR #119), rebuilt on the server's own parts.
@@ -186,7 +187,7 @@ export async function namesOfMany(ids: readonly string[], by: 'id' | 'folder' = 
   const rows = await q<{ key: string; name: string }>(
     `SELECT me.${by} AS key, x.name
        FROM lib_series me
-       JOIN lib_series m ON m.id = me.id OR (me.work_id IS NOT NULL AND m.work_id = me.work_id AND m.merged_into IS NULL)
+       JOIN lib_series m ON m.id = me.id OR (me.work_id IS NOT NULL AND m.work_id = me.work_id AND m.merged_into IS NULL AND ${samePrivacyDomainSql('me','m')})
        LEFT JOIN series_overrides o ON o.series_id = m.id
       CROSS JOIN LATERAL (
         VALUES (m.title, CASE WHEN m.id = me.id THEN 0 ELSE 3 END), (o.title, CASE WHEN m.id = me.id THEN 1 ELSE 3 END)

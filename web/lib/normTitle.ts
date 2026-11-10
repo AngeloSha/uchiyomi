@@ -7,4 +7,4 @@
  * of this rule would be two answers to "is this the same title". test/wall.test.ts holds the two regexes
  * against each other as text.
  */
-export const normTitle = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+export const normTitle = (s: string) => s.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, '');

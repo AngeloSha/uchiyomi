@@ -78,6 +78,32 @@ test('handles unicode titles', () => {
   assert.deepEqual(titlesFromBackup(backupOf(manga('鬼滅の刃'), manga('Café Ambré'))), ['鬼滅の刃', 'Café Ambré']);
 });
 
+const floatField=(field:number,n:number)=>{const b=Buffer.alloc(4);b.writeFloatLE(n);return Buffer.concat([tag(field,5),b]);};
+const tracking=(provider:number,id:bigint,progress:number,privateEntry=false)=>lenField(18,Buffer.concat([
+  varField(1,provider),varFieldBig(2,999999n),varFieldBig(100,id),strField(5,'Alternative tracker title'),floatField(6,progress),varField(12,privateEntry ? 1 : 0),
+]));
+test('reads multiple official Mihon tracker identities, progress and privacy without using account library IDs',()=> {
+  const raw=Buffer.concat([manga('Tracked manga'),tracking(1,17n,14.75),tracking(2,42n,150,true),tracking(3,14916n,5),tracking(7,1234n,0),tracking(6,999n,999)]);
+  const [entry]=entriesFromBackup(backupOf(raw));
+  assert.deepEqual(entry.trackerLinks?.map(t=>[t.provider,t.externalId,t.progress,t.private]),[
+    ['myanimelist','17',14,false],['anilist','42',150,true],['kitsu','14916',5,false],['mangaupdates','1234',0,false],
+  ]);
+  assert.equal(entry.trackerLinks?.[0].title,'Alternative tracker title');
+});
+test('legacy mediaIdInt takes Mihon precedence; malformed progress and unsafe tracker identities cannot seed progress',()=> {
+  const raw=Buffer.concat([manga('Legacy tracker'),lenField(18,Buffer.concat([varField(1,2),varFieldBig(2,99n),varField(3,17),varFieldBig(100,42n),floatField(6,NaN)])),tracking(1,9007199254740993n,10)]);
+  assert.deepEqual(entriesFromBackup(backupOf(raw))[0].trackerLinks?.map(t=>[t.externalId,t.progress]),[['17',0]]);
+});
+test('duplicate manga rows preserve supported tracker links and the strongest privacy requirement',()=> {
+  const raw=backupOf(Buffer.concat([manga('Repeated'),tracking(2,42n,10)]),Buffer.concat([manga('REPEATED'),tracking(2,42n,20,true),tracking(1,17n,18)]));
+  const entries=entriesFromBackup(raw);assert.equal(entries.length,1);
+  assert.deepEqual(entries[0].trackerLinks?.map(t=>[t.provider,t.progress,t.private]),[['anilist',20,true],['myanimelist',18,false]]);
+});
+test('truncated nested metadata is rejected instead of reading bytes outside its message',()=> {
+  const broken=Buffer.concat([manga('Broken'),tag(18,2),varint(999),Buffer.from([1])]);
+  assert.throws(()=>entriesFromBackup(backupOf(broken)),/could not read/);
+});
+
 test('rejects files that are not backups', () => {
   // Reintroduce by returning [] from entriesFromBackup when no entry was found, instead of throwing.
   assert.throws(() => titlesFromBackup(Buffer.from('not a backup at all')), /backup/i);

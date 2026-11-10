@@ -6,7 +6,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { setActiveDict } from '../lib/i18n';
 import { ApiError } from '../lib/api';
-import { uploadAll, uploadRefusal } from '../lib/chapterUpload';
+import { uploadAll, uploadRefusal, orderedImagePages, uploadImageChapter } from '../lib/chapterUpload';
 
 setActiveDict({});
 const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
@@ -48,4 +48,26 @@ test('the page keeps the files that failed, refreshes what lists the series, and
   assert.match(src, /if \(run\.done\) for \(const k of \[\['library'\], \['home'\]\]\) qc\.invalidateQueries/, 'Library and Home are not refreshed');
   assert.match(src, /const into = seriesId \|\| \(!title\.trim\(\) && made \? made\.id : ''\);/, 'a retry of a new series asks for its title again');
   assert.match(src, /tr\('Add chapter files to “\{title\}”\./, 'the page does not say which series');
+});
+
+test('image selection sorts page numbers, reports ignored files and refuses silent folder merging',()=> {
+  const files=['page10.png','page2.png','.hidden.jpg','readme.txt'].map(name=>new File([new Uint8Array([1])],name));
+  const chosen=orderedImagePages(files);assert.deepEqual(chosen.pages.map(f=>f.name),['page2.png','page10.png']);assert.equal(chosen.ignored,2);
+  const nested=['Chapter 1/page1.png','Chapter 2/page2.png'].map(path=>{const file=new File([new Uint8Array([1])],path.split('/').at(-1)!);Object.defineProperty(file,'webkitRelativePath',{value:path});return file;});
+  assert.equal(orderedImagePages(nested).multipleFolders,true);
+  assert.equal(orderedImagePages([files[0],files[0]]).duplicateNames,true);
+});
+test('image chapter uploads preserve the chosen multipart order and send selected privacy without an owner override',async()=> {
+  const original=globalThis.fetch;let request:{url:string;init:RequestInit}|undefined;
+  globalThis.fetch=(async(url:any,init:RequestInit)=>{request={url:String(url),init};return new Response(JSON.stringify({indexed:true,file:'x',seriesId:'s',bookId:'b',number:7}),{headers:{'content-type':'application/json'}});}) as typeof fetch;
+  try {
+    const pages=['page10.png','page2.png'].map(name=>new File([new Uint8Array([1])],name));
+    await uploadImageChapter({title:'New Private',fresh:true,visibility:'private'},'Chapter 7',pages);
+    const url=new URL(request!.url,'http://localhost');assert.equal(url.searchParams.get('visibility'),'private');assert.equal(url.searchParams.get('images'),'1');assert.equal(url.searchParams.get('name'),'Chapter 7.cbz');assert.equal(url.searchParams.has('ownerId'),false);
+    const data=request!.init.body as FormData;assert.deepEqual(data.getAll('pages').map(f=>(f as File).name),['page10.png','page2.png']);
+    assert.equal(new Headers(request!.init.headers).has('content-type'),false,'the browser must generate its own multipart boundary');
+  } finally {globalThis.fetch=original;}
+});
+test('an unreadable image refusal names the offending page without discarding the chapter silently',()=> {
+  assert.equal(uploadRefusal(refusal(400,{error:'invalid_page',page:'坏图.png'}),'Chapter 7'),'Could not read image “坏图.png”. No chapter was stored.');
 });

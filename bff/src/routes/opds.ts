@@ -23,6 +23,8 @@ import { noticeShown, visibleBookCount } from '../lib/noticeChapters';
 import { onDeckPicks } from '../lib/onDeck';
 import { listFor, listsFor, listItems, ownerOf } from '../lib/lists';
 import { favoriteOrder } from '../lib/favorites';
+import { externalReaderSettings, rememberOpdsEstimate } from '../lib/externalReading';
+import { bookFileSignature, partialBufferMd5, partialMd5, rememberKoreaderHash } from '../lib/koreaderHash';
 const AdmZip = require('adm-zip');
 
 const IMG = /\.(jpe?g|png|webp|gif|avif)$/i;
@@ -147,7 +149,7 @@ interface ChapterRow { id: string; title: string | null; number: number; pages: 
  * list and the Keep reading shelf). `series` heads the title on a shelf that mixes series.
  *
  * `{pageNumber}` and `{maxWidth}` are literal templates the reader fills in (OPDS-PSE 1.1), and the page number is
- * ZERO-based per that spec -- the same base as read_progress.page, so lastRead is passed through untouched. `esc()`
+ * ONE-based per that spec, like read_progress.page; the page request template itself is ZERO-based. `esc()`
  * leaves braces alone on purpose.
  */
 const chapterEntryXml = (b: ChapterRow, series = '') => {
@@ -179,6 +181,14 @@ async function countUnknownPages(books: ChapterRow[]): Promise<void> {
     b.pages = first.total;
     q('UPDATE lib_books SET pages=$1 WHERE id=$2 AND pages<>$1', [first.total, b.id]).catch(() => {});
   }));
+}
+
+/** Explicit positions win over inferred requests; estimates are used only when no real place exists. */
+async function estimatedPlaces(userId:string,books:ChapterRow[]):Promise<void>{
+  if(!books.length||!(await externalReaderSettings(userId)).opdsEstimatedBookmarks)return;
+  const rows=await q<{book_id:string;page:number;updated_at:string}>('SELECT book_id,page,updated_at FROM opds_estimated_bookmarks WHERE user_id=$1 AND book_id=ANY($2)',[userId,books.map(b=>b.id)]);
+  const byId=new Map(rows.map(r=>[r.book_id,r]));
+  for(const book of books){const r=byId.get(book.id);if(r&&book.last_page===null){book.last_page=r.page;book.last_at=r.updated_at;}}
 }
 
 export default async function opdsRoutes(app: FastifyInstance) {
@@ -360,6 +370,7 @@ export default async function opdsRoutes(app: FastifyInstance) {
           AND ${noticeShown('s', 'b', 'ov')}
         ORDER BY b.number ASC, b.file ASC`, bp.values as any[]);
     await countUnknownPages(books);
+    await estimatedPlaces(uidOf(req),books);
     const entries = books.map((b) => chapterEntryXml(b));
     const label = (await editionLabels([id], vc(req))).get(id) ?? '';
     return sendXml(reply, 'acq', feed({
@@ -390,6 +401,7 @@ export default async function opdsRoutes(app: FastifyInstance) {
     const byId = new Map(rows.map((b) => [b.id, b]));
     const books = picks.map((r) => byId.get(r.bookId)).filter((b): b is ChapterRow & { series_title: string } => !!b);
     await countUnknownPages(books);
+    await estimatedPlaces(uidOf(req),books);
     return sendXml(reply, 'acq', feed({
       id: 'yomi:opds:continue', title: 'Keep reading', self: '/opds/continue', kind: 'acq', up: '/opds',
       entries: books.map((b) => chapterEntryXml(b, b.series_title)),
@@ -471,12 +483,14 @@ export default async function opdsRoutes(app: FastifyInstance) {
         return { buffer, contentType: 'image/jpeg' };
       });
     }
-    return serveImage(req, reply, `lib-page:${id}:${pageNo + 1}`, async () => {
+    await serveImage(req, reply, `lib-page:${id}:${pageNo + 1}`, async () => {
       const page = await cbzPageAt(abs, pageNo);
       if (!page) throw Object.assign(new Error('no page'), { statusCode: 404 });
       q('UPDATE lib_books SET pages=$1 WHERE id=$2 AND pages<>$1', [page.total, id]).catch(() => {});
       return { buffer: page.bytes, contentType: pageCt(page.name) };
     });
+    if(req.method==='GET'&&reply.statusCode===200&&(req.query as Record<string,string>).maxWidth===undefined)await rememberOpdsEstimate(uidOf(req),id,pageNo+1).catch(()=>{});
+    return reply;
   });
 
   // download one chapter as a CBZ (streams the file; zips a loose-image folder on the fly)
@@ -492,14 +506,22 @@ export default async function opdsRoutes(app: FastifyInstance) {
     const base = (row.file.split('/').pop() || 'chapter').replace(/\.(cbr|zip|rar)$/i, '.cbz');
     reply.header('Content-Type', CBZ);
     if (st.isDirectory()) {
+      const signature=await bookFileSignature(abs);
       const zip = new AdmZip();
       // Regular files only, read without following a symlink and within the page cap (lib/archiveCaps.ts): addLocalFile
       // followed an entry named like an image out of the library -- the audit downloaded a jwt.secret this way.
-      for (const name of await regularFiles(abs, (n) => IMG.test(n))) zip.addFile(name, await readRegularFile(abs, name));
+      for (const name of (await regularFiles(abs, (n) => IMG.test(n))).sort()) {
+        zip.addFile(name,await readRegularFile(abs,name));
+        zip.getEntry(name).header.time=new Date('1980-01-01T00:00:00Z');
+      }
       reply.header('Content-Disposition', `attachment; filename="${esc(base)}.cbz"`);
-      return reply.send(zip.toBuffer());
+      const bytes=zip.toBuffer();
+      if(signature===await bookFileSignature(abs))await rememberKoreaderHash(id,signature,partialBufferMd5(bytes));
+      return reply.send(bytes);
     }
     reply.header('Content-Disposition', `attachment; filename="${esc(base)}"`);
+    const hash=await partialMd5(abs);
+    await rememberKoreaderHash(id,hash.signature,hash.digest);
     return reply.send(createReadStream(abs));
   });
 }
