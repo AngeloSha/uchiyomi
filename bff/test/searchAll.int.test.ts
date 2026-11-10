@@ -458,12 +458,36 @@ test('evicting pending entries cancels their queued source work', { skip }, asyn
 test("normTerm is the route's norm, title for title", { skip }, () => {
   // The entry key and the title grouping use the lib's copy; the library check uses the route's. Two rules
   // would be two answers to "is this the same title". The titles cover every class the rule strips (space,
-  // apostrophe, colon, hyphen, brackets, digits kept, non-Latin dropped), so letting any one of them through
+  // apostrophe, colon, hyphen, brackets, digits and every script kept), so letting any one of them through
   // on one side shows. Reintroduce by changing either regex (say, keeping `-` in normTerm): Re:Zero disagrees.
-  for (const t of ['Solo Leveling', "JoJo's Bizarre Adventure: Part 7", 'ONE PIECE!!', 'Re:Zero -Starting Life in Another World-', 'Kimetsu no Yaiba — 鬼滅の刃 (2019)']) {
+  for (const t of ['Solo Leveling', "JoJo's Bizarre Adventure: Part 7", 'ONE PIECE!!', 'Re:Zero -Starting Life in Another World-', 'Kimetsu no Yaiba — 鬼滅の刃 (2019)', '大魔導士', 'Ｓｏｌｏ Ｌｅｖｅｌｉｎｇ', 'Cafe\u0301 大魔導士']) {
     assert.equal(lib.normTerm(t), routes.norm(t), `the two rules disagree on "${t}"`);
   }
   assert.equal(lib.normTerm('SOLO LEVELING!'), 'sololeveling', 'the rule itself changed');
+});
+
+test('title search caches distinguish mixed-script identities while equivalent Unicode spellings reuse the result', {skip},async()=> {
+  const src=adapters[FAST],before=calls[FAST];lib.clearSearchCache();
+  try {
+    const first=await lib.searchAll('Café 大魔導士 １',[src],{waitMs:6000,health:await hmap()});
+    const other=await lib.searchAll('Café 鬼滅の刃 １',[src],{waitMs:6000,health:await hmap()});
+    assert.notEqual(first.per.get(FAST)?.items[0].title,other.per.get(FAST)?.items[0].title,'shared Latin fragments cannot reuse the other title’s cached identity');
+    assert.equal(calls[FAST]-before,2);
+    const equivalent=await lib.searchAll('Ｃａｆé 大魔導士 1',[src],{waitMs:6000,health:await hmap()});
+    assert.equal(equivalent.per.get(FAST)?.items[0].title,first.per.get(FAST)?.items[0].title);
+    assert.equal(calls[FAST]-before,2,'NFKC-equivalent spelling reuses the same title entry');
+  } finally {lib.clearSearchCache();}
+});
+
+test('title grouping keeps native lettering and independent entries from the same source', {skip},()=> {
+  const item=(source:string,sourceId:string,title:string)=>({source,sourceId,title});
+  const grouped=lib.groupByTitle(new Map([
+    [FAST,{state:'ok',items:[item(FAST,'native-a','大魔導士'),item(FAST,'native-b','鬼滅の刃'),item(FAST,'native-a-other','大魔導士')]}],
+    [SLOW1,{state:'ok',items:[item(SLOW1,'native-a-copy','大魔導士')]}],
+  ]),[adapters[FAST],adapters[SLOW1]]);
+  assert.equal(grouped.length,3,'native titles stay visible and distinct source entries are not silently folded');
+  assert.equal(grouped.find(g=>g.providers.some(p=>p.sourceId==='native-a'))?.providers.length,2,'an exact native title can still group across sources');
+  assert.equal(grouped.find(g=>g.providers.some(p=>p.sourceId==='native-a-other'))?.providers.length,1);
 });
 
 test('the detail lookup is one fetch for a pre-warm and the pick that joins it, then a cached answer', { skip }, async () => {

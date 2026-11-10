@@ -257,6 +257,66 @@ test('a merge carries the other names to the survivor', { skip }, async () => {
   assert.deepEqual(await q('SELECT norm FROM series_alt_titles WHERE series_id = $1', [S('gone')]), [], 'the names left the absorbed row');
 });
 
+test('alternate insertion excludes its accented own title under canonical Unicode spelling, without excluding a distinct Latin name', {skip},async()=> {
+  const {recordAltTitles}=await import('../src/lib/altTitles');await series('unicode-own','Pokémon Adventures');
+  const written=await recordAltTitles(S('unicode-own'),['Poke\u0301mon Adventures','Ｐｏｋéｍｏｎ Ａｄｖｅｎｔｕｒｅｓ','Pokmon Adventures'],'admin',{userId:adminId});
+  assert.deepEqual(written,['Pokmon Adventures'],'equivalent accented/NFKC names are its own title, while a genuinely distinct spelling remains an alternate');
+  assert.deepEqual(await q('SELECT norm,title FROM series_alt_titles WHERE series_id=$1',[S('unicode-own')]),[{norm:'pokmonadventures',title:'Pokmon Adventures'}]);
+});
+
+test('merging excludes canonical own-title spellings while preserving legacy alternate keys and tombstones unchanged', {skip},async()=> {
+  const {mergeSeries}=await import('../src/lib/libraryAdmin');await series('unicode-keep','Pokémon Adventures');await series('unicode-gone','Unicode Alias Donor');
+  await q(`INSERT INTO series_alt_titles(series_id,norm,title,origin,removed_at) VALUES
+    ($1,'pokmonadventures',$2,'import',NULL),($1,'anotherstrngname','Another Strāngé Name','description',NULL),
+    ($1,'removedlegacyname','Removed Legacy Name','description','2025-01-02T03:04:05Z')`,[S('unicode-gone'),'Ｐｏｋéｍｏｎ Ａｄｖｅｎｔｕｒｅｓ']);
+  await mergeSeries(S('unicode-gone'),S('unicode-keep'));
+  const rows=await q('SELECT norm,title,removed_at FROM series_alt_titles WHERE series_id=$1 ORDER BY norm',[S('unicode-keep')]);
+  assert.deepEqual(rows.map((r:any)=>[r.norm,r.title]),[['anotherstrngname','Another Strāngé Name'],['removedlegacyname','Removed Legacy Name']]);
+  assert.equal(new Date(rows[1].removed_at).toISOString(),'2025-01-02T03:04:05.000Z','removed names retain their original tombstone');
+  assert.deepEqual(await q('SELECT norm FROM series_alt_titles WHERE series_id=$1',[S('unicode-gone')]),[]);
+});
+
+test('legacy removed aliases stay removed under composed and NFKC spellings, and explicit admin reactivation keeps their old keys', {skip},async()=> {
+  const {recordAltTitles}=await import('../src/lib/altTitles');await series('legacy-tomb','Pokémon Adventures');
+  await q(`INSERT INTO series_alt_titles(series_id,norm,title,origin,removed_at) VALUES
+    ($1,'knigin','Königin','admin','2025-01-02T03:04:05Z'),
+    ($1,'queenchronicles','Queen Ⅳ Chronicles','admin','2025-01-02T03:04:05Z'),
+    ($1,'pokmonadventures','Pokémon Adventures','description','2025-01-02T03:04:05Z')`,[S('legacy-tomb')]);
+  const incoming=['Ko\u0308nigin','Queen IV Chronicles','Ｐｏｋéｍｏｎ Ａｄｖｅｎｔｕｒｅｓ'];
+  for(const origin of ['description','import'] as const)assert.deepEqual(await recordAltTitles(S('legacy-tomb'),incoming,origin),[],'automatic learning must honor historical tombstones by spelling');
+  assert.deepEqual(await recordAltTitles(S('legacy-tomb'),['Knigin'],'admin',{userId:adminId}),[],'a different spelling cannot rename an unrelated legacy-key tombstone');
+  assert.equal((await q('SELECT count(*)::int AS n FROM series_alt_titles WHERE series_id=$1 AND removed_at IS NOT NULL',[S('legacy-tomb')]))[0].n,3);
+  assert.deepEqual(await recordAltTitles(S('legacy-tomb'),incoming,'admin',{userId:adminId}),incoming.slice(0,2));
+  const rows=await q('SELECT norm,title,removed_at FROM series_alt_titles WHERE series_id=$1 ORDER BY norm',[S('legacy-tomb')]);
+  assert.deepEqual(rows.map((r:any)=>[r.norm,r.title,!!r.removed_at]),[
+    ['knigin',incoming[0],false],['pokmonadventures','Pokémon Adventures',true],['queenchronicles',incoming[1],false],
+  ],'manual reactivation preserves old keys, and an own-title equivalent remains removed');
+});
+
+test('an old alias key equal to the current main key is still judged by spelling before admin reactivation', {skip},async()=> {
+  const {recordAltTitles}=await import('../src/lib/altTitles');await series('legacy-own-key','Knigin');
+  await q(`INSERT INTO series_alt_titles(series_id,norm,title,origin,removed_at) VALUES($1,'knigin','Königin','admin',now())`,[S('legacy-own-key')]);
+  assert.deepEqual(await recordAltTitles(S('legacy-own-key'),['Knigin'],'admin',{userId:adminId}),[],'the actual own spelling is excluded first');
+  assert.deepEqual(await recordAltTitles(S('legacy-own-key'),['Königin'],'import'),[],'automatic intake still respects the removed alias');
+  assert.deepEqual(await recordAltTitles(S('legacy-own-key'),['Königin'],'admin',{userId:adminId}),['Königin'],'a storage-key collision does not make this different accented spelling the main title');
+  assert.deepEqual(await q('SELECT norm,title,removed_at FROM series_alt_titles WHERE series_id=$1',[S('legacy-own-key')]),[{norm:'knigin',title:'Königin',removed_at:null}]);
+});
+
+test('a merge cannot bypass destination legacy tombstones through different Unicode alias keys', {skip},async()=> {
+  const {mergeSeries}=await import('../src/lib/libraryAdmin');await series('legacy-keep','Legacy Merge Keep');await series('legacy-gone','Legacy Merge Donor');
+  await q(`INSERT INTO series_alt_titles(series_id,norm,title,origin,removed_at) VALUES
+    ($1,'knigin','Königin','admin','2025-01-02T03:04:05Z'),($1,'queenchronicles','Queen Ⅳ Chronicles','admin','2025-01-02T03:04:05Z'),
+    ($2,'königin','Königin','import',NULL),($2,'queenivchronicles','Queen IV Chronicles','import',NULL),
+    ($2,'independentname','Independent Name','description',NULL)`,[S('legacy-keep'),S('legacy-gone')]);
+  await mergeSeries(S('legacy-gone'),S('legacy-keep'));
+  const rows=await q('SELECT norm,title,origin,removed_at FROM series_alt_titles WHERE series_id=$1 ORDER BY norm',[S('legacy-keep')]);
+  assert.deepEqual(rows.map((r:any)=>[r.norm,r.title,r.origin,!!r.removed_at]),[
+    ['independentname','Independent Name','description',false],['knigin','Königin','admin',true],['queenchronicles','Queen Ⅳ Chronicles','admin',true],
+  ]);
+  for(const row of rows.filter((r:any)=>r.removed_at))assert.equal(new Date(row.removed_at).toISOString(),'2025-01-02T03:04:05.000Z');
+  assert.deepEqual(await q('SELECT norm FROM series_alt_titles WHERE series_id=$1',[S('legacy-gone')]),[]);
+});
+
 test('a match through an other name is measured both ways', { skip }, async () => {
   const { judgeCandidate } = await import('../src/lib/autoFollow');
   const numbers = R(1, 12);

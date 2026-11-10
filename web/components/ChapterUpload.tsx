@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { IcX } from './icons';
 import { t as tr } from '@/lib/i18n';
-import { CHAPTER_ACCEPT, IMAGE_ACCEPT, IMAGE_MAX_PAGES, orderedImagePages, uploadImageChapter, uploadRefusal, uploadAll, type UploadRun, type UploadTarget } from '@/lib/chapterUpload';
+import { CHAPTER_ACCEPT, IMAGE_ACCEPT, IMAGE_MAX_PAGES, orderedImagePages, imagePreviewBitmap, uploadImageChapter, uploadRefusal, uploadAll, type UploadRun, type UploadTarget } from '@/lib/chapterUpload';
 import { useToast } from './Toast';
 import { ProgressRing } from './ProgressRing';
 import { ContentScopePicker, useContentScope } from './ContentScopePicker';
@@ -39,9 +39,26 @@ function useUpload(onDone: (run: UploadRun) => void) {
 }
 
 function ImagePreview({ file }: { file: File }) {
-  const [src, setSrc] = useState('');
-  useEffect(() => { const url = URL.createObjectURL(file); setSrc(url); return () => URL.revokeObjectURL(url); }, [file]);
-  return src ? <img src={src} alt="" loading="lazy" className="h-12 w-9 shrink-0 rounded object-cover" /> : null;
+  const canvas=useRef<HTMLCanvasElement>(null);
+  useEffect(()=>{
+    const target=canvas.current;if(!target)return;
+    const cancelled=new AbortController();let started=false;
+    const paint=()=>{
+      if(started || cancelled.signal.aborted)return;started=true;
+      void imagePreviewBitmap(file,cancelled.signal).then(image=>{
+        if(!image)return;
+        try {if(!cancelled.signal.aborted)target.getContext('2d')?.drawImage(image,0,0,72,96);}
+        finally {image.close();}
+      });
+    };
+    // A chapter can have 2,000 pages; decode only thumbnails near the visible scroll area.
+    const observer=typeof IntersectionObserver==='undefined' ? null : new IntersectionObserver(entries=>{
+      if(entries.some(entry=>entry.isIntersecting)){observer?.disconnect();paint();}
+    },{rootMargin:'120px'});
+    if(observer)observer.observe(target);else paint();
+    return()=>{cancelled.abort();observer?.disconnect();};
+  },[file]);
+  return <canvas ref={canvas} width={72} height={96} aria-hidden="true" className="h-12 w-9 shrink-0 rounded bg-ink-800" />;
 }
 
 const progressText = (at: { i: number; n: number }) =>

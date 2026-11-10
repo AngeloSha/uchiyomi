@@ -118,8 +118,16 @@ test('orphan reserved folders fail closed instead of becoming shared library con
   await assert.rejects(()=>scopes.privateScopeForFolder('_private/00000000-0000-4000-8000-000000000001/Fixture/Title'),/orphan_private_folder/);
 });
 test('defaults remain shared; opting in affects only later additions and rejects a client owner',{skip},async()=>{
-  assert.equal((await app.inject({url:'/api/personal/privacy',headers:as(b)})).json().defaultPrivate,false);
+  const preferences=await app.inject({url:'/api/personal/privacy',headers:as(b)});
+  assert.equal(preferences.json().defaultPrivate,false);
+  assert.match(preferences.headers['cache-control'],/no-store/);
+  assert.match(preferences.headers.vary,/Authorization/);assert.match(preferences.headers.vary,/Cookie/);
+  assert.equal(preferences.headers['x-uchiyomi-private'],undefined,'shared-only preference reads never activate the private cache barrier');
+  const privatePreferences=await app.inject({url:'/api/personal/privacy',headers:as(a)});
+  assert.equal(privatePreferences.headers['x-uchiyomi-private'],'1','actual private content still activates the barrier on preference reads');
   const enabled=await app.inject({method:'PUT',url:'/api/personal/privacy',headers:as(b),payload:{defaultPrivate:true}});
+  assert.match(enabled.headers['cache-control'],/no-store/);
+  assert.equal(enabled.headers['x-uchiyomi-private'],undefined,'a private default without private content/history does not disable shared implicit caching');
   assert.equal(enabled.statusCode,200);assert.equal((await scopes.resolveAddScope(await vis.viewCtxFor(b))).ownerUserId,b);
   assert.equal((await scopes.resolveAddScope(await vis.viewCtxFor(b),{visibility:'shared'})).visibility,'shared');
   const spoof=await app.inject({method:'PUT',url:'/api/personal/privacy',headers:as(b),payload:{defaultPrivate:true,ownerUserId:a}});
@@ -199,6 +207,11 @@ test('source identity, title duplicates and language editions remain inside the 
   const freshPrivate=await add(a,'private');
   assert.notEqual(freshPrivate.folder,ownA.folder,'private add never writes into its published predecessor’s physical folder');
   assert.notEqual(freshPrivate.seriesId,ownA.seriesId);
+  const {createHash}=await import('node:crypto');
+  const {pairKey}=await import('../src/lib/discoverIdentity');
+  const suffix=createHash('sha256').update(`private:${a}\0${pairKey('private_fixture_source','entry')}`).digest('hex').slice(0,12);
+  assert.equal(freshPrivate.folder,`${ownA.folder} [${suffix}]`,'stable public scope identifiers preserve the existing collision namespace');
+  assert.equal((await add(a,'private')).seriesId,freshPrivate.seriesId,'the collision destination is idempotent');
   const publicIdx=await (await import('../src/lib/discoverIdentity')).libraryIndex(await vis.viewCtxFor(admin,'admin'));
   assert.ok(![...publicIdx.byName.values()].flat().some(row=>row.id===freshPrivate.seriesId || row.id===ownB.seriesId));
   const bad=await app.inject({url:'/api/sources/detail?source=private_fixture_source&sourceId=entry&visibility=invalid',headers:as(a)});

@@ -22,6 +22,7 @@ import { SOLVER_CONCURRENCY } from './sources/flaresolverr';
 import { scanOrder } from './scanOrder';
 import { classify, noteStage, reportFail, reportSlow, reportTimely, type SourceHealth } from './sourceHealth';
 import { canonLang } from './lang';
+import { normTitle } from './titleMatch';
 import { adultSourceSeries, taggedContentRating } from './ageRating';
 
 /** An env knob: a finite number at or above `min`, else the default. An empty string is unset. */
@@ -71,18 +72,14 @@ export interface SearchAnswer {
   startedAt: number;
 }
 
-/**
- * The route's `norm` (routes/sources.ts), copied rather than imported: this file must not import a route
- * module, and a test holds the two against each other on real titles so they cannot drift apart.
- */
-export const normTerm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, '');
+/** The canonical Unicode title key, shared with matching without importing a route module. */
+export const normTerm = normTitle;
 
 /**
  * The cache key for a term.
  *
- * ⚠️ Not `normTerm` alone: it strips everything that is not a-z0-9, so every Japanese, Korean or Cyrillic
- * title normalises to the EMPTY string and would share one entry -- the first such search would answer
- * every later one. Those fall back to the trimmed, lower-cased spelling.
+ * Lettering in every script uses the canonical key. A punctuation-only term still needs its own
+ * spelling rather than the empty key shared by all such searches.
  */
 const keyOf = (term: string): string => normTerm(term) || term.trim().toLowerCase();
 

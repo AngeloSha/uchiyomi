@@ -19,7 +19,10 @@ export async function privateResponseHeaders(req: FastifyRequest, reply: Fastify
   if (!/^\/(?:api\/|img\/|opds(?:\/|$)|komga(?:\/|$))/.test(req.url)) return;
   const uid = (req as any).viewCtx?.userId ?? (req as any).user?.sub;
   if (!uid) return;
-  let privateContent = req.url.split('?')[0].endsWith('/privacy');
+  // Preference/visibility metadata is never cacheable, but opening the scope
+  // picker alone must not activate the account's private-content cache barrier.
+  const privacyMetadata = req.url.split('?')[0].endsWith('/privacy');
+  let privateContent = false;
   try {
     const row=await one<{private_content:boolean}>(`SELECT EXISTS(SELECT 1 FROM lib_series WHERE owner_user_id=$1 AND is_private)
       OR EXISTS(SELECT 1 FROM reading_events WHERE user_id=$1 AND is_private)
@@ -28,8 +31,8 @@ export async function privateResponseHeaders(req: FastifyRequest, reply: Fastify
       OR EXISTS(SELECT 1 FROM chapter_reactions WHERE user_id=$1 AND is_private) AS private_content`,[uid]);
     privateContent ||= row?.private_content === true;
   } catch { privateContent=true; } // Classification failure must never turn on an implicit cache.
-  if (privateContent) {
-    reply.header('X-Uchiyomi-Private', '1');
+  if (privateContent) reply.header('X-Uchiyomi-Private', '1');
+  if (privateContent || privacyMetadata) {
     reply.header('Cache-Control', 'private, no-store');
     const vary=String(reply.getHeader('Vary') ?? '').split(',').map(v=>v.trim()).filter(Boolean);
     reply.header('Vary', [...new Set([...vary,'Authorization','Cookie'])].join(', '));

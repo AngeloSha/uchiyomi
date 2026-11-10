@@ -10,7 +10,7 @@ const candidate=(n,over={})=>({id:cid(n),batch_id:child,ord:n,backup_title:`Fixt
 export async function uploadImportEnhancementsWalk({page,base,check=(name,ok)=>assert.ok(ok,name),shot=async()=>{}}) {
   assert.ok(['localhost','127.0.0.1','[::1]'].includes(new URL(base).hostname),'fixture requires private loopback preview');
   const folder=await mkdtemp(join(tmpdir(),'uchi-upload-walk-'));
-  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==','base64');
+  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAE0lEQVQImWP4z8DwnwGM/zMwAAAf7gP9qS/A4gAAAABJRU5ErkJggg==','base64');
   for(const name of ['page10.png','page2.png'])await writeFile(join(folder,name),png);
   const rows=[candidate(11),candidate(12,{match_source:'other',confidence:'fuzzy'}),candidate(13,{decision:'unresolved',confidence:null,match_source:null,match_source_id:null,match_title:null}),candidate(14,{decision:'skip'}),candidate(15,{in_library:true,decision:'skip'}),candidate(16,{decision:'manual',confidence:null,match_source:'other',content_scope:{visibility:'private',libraryId:'private_fixture'}})];
   const writes=[];let uploadAttempts=0;
@@ -47,6 +47,9 @@ export async function uploadImportEnhancementsWalk({page,base,check=(name,ok)=>a
     await(await page.$('[data-image-pick]')).uploadFile(join(folder,'page10.png'),join(folder,'page2.png'));
     await page.waitForFunction(()=>document.querySelectorAll('[data-image-pages] li').length===2);
     check('image picker naturally orders pages before an explicit change',(await page.$eval('[data-image-pages] li',el=>el.textContent)).includes('page2.png'));
+    await page.waitForFunction(()=>{const canvas=document.querySelector('[data-image-pages] canvas');return canvas?.getContext('2d')?.getImageData(10,10,1,1).data[3]===255;});
+    check('raster thumbnails render readable bounded pixels without image URLs',await page.$eval('[data-image-pages] canvas',canvas=>{const pixel=canvas.getContext('2d').getImageData(10,10,1,1).data;return canvas.width===72 && canvas.height===96 && pixel[0]>240 && pixel[1]<20 && pixel[2]<20 && pixel[3]===255; }));
+    await shot('upload-image-pages-mobile-en');
     await page.click('[data-image-pages] li:first-child [data-image-down]');
     await page.click('[data-upload-start]');await page.waitForFunction(()=>document.body.textContent.includes('page2.png') && !document.querySelector('[data-upload-start]')?.disabled);
     check('failed image chapter leaves all pages selected for retry',await page.$$eval('[data-image-pages] li',els=>els.length)===2);
@@ -80,7 +83,7 @@ export async function uploadImportEnhancementsWalk({page,base,check=(name,ok)=>a
       await page.$eval('[data-import-row="17000000-0000-4000-8000-000000000016"]',el=>el.scrollIntoView({block:'center'}));
       await shot(`import-private-row-mobile-${locale}`);
     }
-    return {checks:12,writes:writes.length};
+    return {checks:13,writes:writes.length};
   } finally {
     page.off('request',intercept);await page.setRequestInterception(false);await page.evaluate(lang=>{if(lang===null)localStorage.removeItem('uchiyomi.lang');else localStorage.setItem('uchiyomi.lang',lang);},previousLocale);
     if(viewport)await page.setViewport(viewport);await rm(folder,{recursive:true,force:true});

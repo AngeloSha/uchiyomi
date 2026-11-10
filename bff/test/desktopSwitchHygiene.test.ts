@@ -257,7 +257,15 @@ test('the desktop-only filesystem rules sit behind isDesktop(), with the server 
   // Reintroduce by running the lower(folder) lookup on the server: two series whose titles differ only in case
   // (on a case-sensitive disk, two real folders) would be merged into one on add.
   const add = code(read('routes/sources.ts'));
-  assert.match(add, /let folder = edition \? editionFolder\(srcDir, title, edition\.lang\) : `\$\{srcDir\}\/\$\{sanitize\(title\)\}`;\s*if \(isDesktop\(\)\) \{\s*const stored = await one<\{ folder: string \}>\(\s*'SELECT folder FROM lib_series WHERE lower\(folder\) = lower\(\$1\)/);
+  assert.match(add, /let folder = edition \? editionFolder\(srcDir, title, edition\.lang\) : `\$\{srcDir\}\/\$\{sanitize\(title\)\}`;/);
+  // Ownership/destination resolution applies on both platforms before the
+  // desktop-only spelling pass. The lookup may only reuse its selected scope.
+  const scopedFolderAt=add.indexOf('await folderForScope(scope,folder)');
+  const desktopSpellingAt=add.indexOf('if (isDesktop()) {',scopedFolderAt);
+  assert.ok(scopedFolderAt>=0 && desktopSpellingAt>scopedFolderAt,'scope resolution must precede desktop spelling');
+  assert.match(add.slice(desktopSpellingAt), /^if \(isDesktop\(\)\) \{\s*const stored = await scopedOne<\{ folder: string \}>\(\s*'SELECT s\.folder FROM lib_series s WHERE lower\(s\.folder\) = lower\(\$1\) AND __SCOPE__[^\n]+\n\s*folder = stored\?\.folder \?\? await diskSpelling\(\[DL_ROOT, LIBRARY_ROOT\], folder\);\s*\}/,
+    'desktop spelling must retain both the scoped stored lookup and disk fallback inside isDesktop');
+  assert.equal(add.match(/lower\(s\.folder\) = lower\(\$1\)/g)?.length,1,'case-folded folder reuse must not run outside the desktop branch');
   // The source's folder is made Windows-safe on Windows only; a server keeps the name as it always stored it.
   // Reintroduce by using `src.name` raw: a custom site called `Site: EN` cannot be created as a folder on
   // Windows at all. Or by sanitizing everywhere: a Linux server's `A.B.` source moves to a new folder.

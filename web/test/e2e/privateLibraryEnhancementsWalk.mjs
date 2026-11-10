@@ -4,14 +4,15 @@ import puppeteer from 'puppeteer';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { fixtureLogin, waitForLoginCooldown } from './loginCooldown.mjs';
 
 const base=process.env.BASE||'http://127.0.0.1:18310';
 const url=new URL(base);
 assert.ok(url.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(url.hostname),'disposable loopback preview required');
 const out=process.env.OUT||'/tmp/uchiyomi-private-library-walk';mkdirSync(out,{recursive:true});
-const nonce=`${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`;
-const title=`Private browser fixture ${nonce}`,password='private-fixture-passw0rd-123';
+const nonce=randomUUID().replaceAll('-','');
+const title=`Private browser fixture ${nonce}`,password=`Fixture-${randomBytes(24).toString('base64url')}-A9`;
 const accounts=[],checks=[],failures=[],consoleErrors=[],serverErrors=[],expectedNetworkResponses=[],authResponses=[],expectedErrors=new Set();
 let browser,page,adminToken,ownerToken,otherToken,owner,other,seriesId,bookId,loginAttempt=-1,offline=false,step=0,authTransition=true;
 const check=(name,condition,detail='')=>{checks.push({name,pass:!!condition,...(!condition?{detail}:{} )});console.log(`[${condition?'PASS':'FAIL'}] ${name}${!condition?' '+detail:''}`);if(!condition)failures.push(name);};

@@ -221,7 +221,9 @@ export async function uploadSeriesRoutes(app: FastifyInstance) {
       const collision = new Params(), destination = collision.add(folder);
       if (await one(`SELECT 1 FROM lib_series s WHERE s.folder=${destination} AND NOT (${scopeSql('s',scope,collision)}) LIMIT 1`,collision.values)) {
         // Publishing a private copy may retain its physical folder. Its next private copy needs its OWN folder.
-        folder += ` [${createHash('sha256').update(scope.key).digest('hex').slice(0,10)}]`;
+        // Public owner/library identifiers form a stable folder namespace, never a password or credential.
+        const folderNamespace = scope.visibility === 'private' ? `private:${scope.ownerUserId}` : `shared:${scope.libraryId}`;
+        folder += ` [${createHash('sha256').update(folderNamespace).digest('hex').slice(0,10)}]`;
         const again = new Params(), retry = again.add(folder);
         if (await one(`SELECT 1 FROM lib_series s WHERE s.folder=${retry} AND NOT (${scopeSql('s',scope,again)}) LIMIT 1`,again.values)) return reply.code(409).send({error:'privacy_destination_conflict'});
       }

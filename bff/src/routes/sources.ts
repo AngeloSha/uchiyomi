@@ -1613,7 +1613,10 @@ export async function addSeriesFromSource(opts: {
   let existing = await shelfAt(folder);
   // Publishing retains physical paths. A later private add must not write into that now-shared folder.
   if (!existing && await one('SELECT 1 FROM lib_series WHERE folder=$1 LIMIT 1',[folder])) {
-    const suffix=createHash('sha256').update(scope.key+'\0'+pairKey(source!,sourceId!)).digest('hex').slice(0,12);
+    // Stable public identifiers distinguish storage namespaces; this digest is a
+    // deterministic folder suffix, with no credential or password material.
+    const namespace=scope.visibility==='private'?'private:'+scope.ownerUserId:'shared:'+scope.libraryId;
+    const suffix=createHash('sha256').update(namespace+'\0'+pairKey(source!,sourceId!)).digest('hex').slice(0,12);
     folder=`${folder} [${suffix}]`;
     existing=await shelfAt(folder);
     if (!existing && await one('SELECT 1 FROM lib_series WHERE folder=$1 LIMIT 1',[folder])) return {ok:false,status:409,error:'folder_collision'};

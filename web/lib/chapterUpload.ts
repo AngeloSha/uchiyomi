@@ -21,6 +21,37 @@ export const uploadChapter = (to: UploadTarget, f: File): Promise<Uploaded> =>
 
 export const IMAGE_ACCEPT = '.jpg,.jpeg,.png,.webp,.gif,.avif';
 export const IMAGE_MAX_PAGES = 2000;
+/** Raster bytes only: a renamed SVG/HTML document never reaches the thumbnail decoder. Server validation is authoritative. */
+export function isRasterPageHeader(bytes: Uint8Array): boolean {
+  const at=(offset:number,text:string)=>bytes.length>=offset+text.length && [...text].every((c,i)=>bytes[offset+i]===c.charCodeAt(0));
+  return bytes.length>=8 && (bytes[0]===0x89 && at(1,'PNG\r\n\x1a\n')
+    || bytes[0]===0xff && bytes[1]===0xd8 && bytes[2]===0xff
+    || at(0,'GIF87a') || at(0,'GIF89a') || at(0,'RIFF') && at(8,'WEBP')
+    || at(4,'ftyp') && (at(8,'avif') || at(8,'avis') || [16,20,24,28,32,36,40,44,48,52,56,60].some(i=>at(i,'avif') || at(i,'avis'))));
+}
+const previewQueue: Array<{file:File;signal?:AbortSignal;done:(image:ImageBitmap|null)=>void}>=[];
+let previewDecodes=0;
+function drainPreviews() {
+  while(previewDecodes<2 && previewQueue.length) {
+    const request=previewQueue.shift()!;
+    if(request.signal?.aborted){request.done(null);continue;}
+    previewDecodes++;
+    void (async()=>{
+      try {
+        if(request.file.size>64*1024*1024 || !isRasterPageHeader(new Uint8Array(await request.file.slice(0,64).arrayBuffer())) || request.signal?.aborted)return null;
+        // Native resizing bounds each returned bitmap; at most two decoders run, even during a fast scroll.
+        const image=await createImageBitmap(request.file,{resizeWidth:72,resizeHeight:96,resizeQuality:'high'});
+        if(request.signal?.aborted){image.close();return null;}
+        return image;
+      } catch {return null;}
+    })().then(request.done).finally(()=>{previewDecodes--;drainPreviews();});
+  }
+}
+export function imagePreviewBitmap(file:File,signal?:AbortSignal):Promise<ImageBitmap|null> {
+  if(typeof createImageBitmap!=='function' || signal?.aborted)return Promise.resolve(null);
+  return new Promise(done=>{previewQueue.push({file,signal,done});drainPreviews();});
+}
+
 /** A folder denotes ONE chapter; flattening several nested chapter folders silently would lose chapter boundaries. */
 export function orderedImagePages(files: File[]): { pages: File[]; ignored: number; multipleFolders: boolean; duplicateNames: boolean } {
   const pages = files.filter(f => /\.(jpe?g|png|webp|gif|avif)$/i.test(f.name)
