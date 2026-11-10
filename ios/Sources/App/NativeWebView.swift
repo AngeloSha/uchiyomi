@@ -21,19 +21,23 @@ enum NativeWebView {
             }
         }
     }
-    static func make(profile: ServerProfile, policy: GatewayPolicy, onReady: @escaping () -> Void = {}) async throws -> WKWebView {
+    static func make(profile: ServerProfile, policy: GatewayPolicy, navigation: NativeNavigationBridge? = nil, onReady: @escaping () -> Void = {}) async throws -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = WKWebsiteDataStore(forIdentifier: profile.id)
         configuration.limitsNavigationsToAppBoundDomains = true
         let marker: [String: Any] = ["platform": "ios", "protocolVersion": 2, "serverOrigin": profile.origin.absoluteString]
         let json = String(data: try JSONSerialization.data(withJSONObject: marker), encoding: .utf8)!
-        let script = "Object.defineProperty(window, 'uchiyomiNative', {value:Object.freeze(Object.assign(\(json), {ready:()=>window.webkit.messageHandlers.readerReady.postMessage(null)})), writable:false, configurable:false});"
+        let navigationScript = navigation == nil ? "" : NativeNavigationBridge.script
+        let navigationProperty = navigation == nil ? "" : ", navigation"
+        let script = "(() => { \(navigationScript) Object.defineProperty(window, 'uchiyomiNative', {value:Object.freeze(Object.assign(\(json), {ready:()=>window.webkit.messageHandlers.readerReady.postMessage(null)\(navigationProperty)})), writable:false, configurable:false}); })();"
+        if let navigation { configuration.userContentController.add(navigation, name: "navigation") }
         configuration.userContentController.add(NativeReadyHandler(origin: profile.localOrigin, ready: onReady), name: "readerReady")
         configuration.userContentController.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let cookie = HTTPCookie(properties: [.name: policy.cookieName, .value: policy.token,
             .domain: "localhost", .path: "/", HTTPCookiePropertyKey("HttpOnly"): "TRUE", HTTPCookiePropertyKey("SameSite"): "Strict"])!
         await configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
         let view = WKWebView(frame: .zero, configuration: configuration)
+        navigation?.attach(view)
         view.allowsBackForwardNavigationGestures = true
         view.isOpaque = false
         view.backgroundColor = .systemBackground

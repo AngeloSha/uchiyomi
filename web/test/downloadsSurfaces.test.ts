@@ -75,7 +75,8 @@ test('the Library ring: on the phone\'s Library tab, beside the desktop bell, ne
   const nav = code(read('components/BottomNav.tsx'));
   assert.match(nav, /const ringed = href === '\/library' && ring\.show;/, 'the ring is not on the Library tab alone');
   assert.match(nav, /\{ringed \? <LibraryTabIcon ring=\{ring\}><Icon width=\{22\} height=\{22\} \/><\/LibraryTabIcon> : <Icon width=\{22\} height=\{22\} \/>\}/);
-  assert.match(nav, /href: '\/library', label: NAV_LABELS\[1\]/, 'the Library tab no longer leads to the Library');
+  assert.match(code(read('lib/hostNavigation/model.ts')), /id: 'library', href: '\/library\/'/, 'the Library tab no longer leads to the Library');
+  assert.match(nav, /const items = PRIMARY_DESTINATIONS\.map/, 'the web tab does not use the shared destinations');
   const ringHook = code(read('lib/useServerDownloads.ts'));
   assert.match(ringHook, /return status === 'authed' && canDownload\(user\) \? ring : \{ \.\.\.ring, show: false, attention: false, count: 0 \};/, 'the Library tab wears the ring for a viewer who may not download');
   // UI refresh: the desktop's ring is the sidebar's Library item's (components/Sidebar.tsx), as the phone's is the bottom
@@ -117,7 +118,7 @@ test('no pill clearance is left: the select bars no longer make room for a pill 
   const series = code(read('app/series/page.tsx'));
   assert.doesNotMatch(series, /\bpe-36\b/, 'the series select bar still makes room for the pill');
   const lib = code(read('app/library/page.tsx'));
-  const bar = /bottom-\[calc\(5\.75rem\+env\(safe-area-inset-bottom\)\)\] z-40[^"]*"/.exec(lib)?.[0] ?? '';
+  const bar = /bottom-\[calc\(var\(--web-nav-offset,5\.75rem\)\+env\(safe-area-inset-bottom\)\)\] z-40[^"]*"/.exec(lib)?.[0] ?? '';
   assert.ok(bar, 'could not find the library select bar');
   assert.doesNotMatch(bar, /\bpb-8\b/, 'the library select bar still makes room for the pill');
 });

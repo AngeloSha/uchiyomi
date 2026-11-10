@@ -5,6 +5,7 @@ import { api, apiResponse, ApiError } from '@/lib/api';
 import { t as tr } from '@/lib/i18n';
 import type { Series } from '@/lib/types';
 import { useLayer } from '@/lib/layers';
+import { useHostNavigationActive } from '@/lib/hostNavigation/chrome';
 import {
   EXTRACTION_CAPABILITIES_KEY, EXTRACTION_CAPABILITIES_URL, extractionActive, extractionCanApply, extractionPoll,
   extractionProblem, extractionRoot, extractionSelectionChanged, extractionJobSelection, extractionPreviewPath, extractionPreviewDecoded, type TitleExtractionCapabilities, type TitleExtractionJob,
@@ -114,9 +115,10 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
   series: Series; capabilities: TitleExtractionCapabilities; opener: HTMLElement | null; onClose: () => void; onSaved: () => void;
   initialJobId?: string; onDiscarded?: () => void;
 }) {
-  useLayer('dialog', true, { navBandFree: true });
+  const hostNavigation = useHostNavigationActive();
   const qc = useQueryClient();
   const panel = useRef<HTMLDivElement>(null);
+  useLayer('dialog', true, { navBandFree: !hostNavigation, ref: hostNavigation ? panel : undefined });
   const root = extractionRoot(series.id);
   const [selection, setSelection] = useState<CoverTitleSelection>({ region: null, exclusions: [] });
   const [job, setJob] = useState<TitleExtractionJob | null>(null);
@@ -310,9 +312,9 @@ export function TitleExtractionDialog({ series, capabilities, opener, onClose, o
   }, []);
   const errorMessage = problem !== null ? extractionProblem(problem) : job?.error ? extractionProblem(job.error)
     : job?.status === 'rejected' ? extractionProblem('rejected') : job?.status === 'expired' ? extractionProblem('expired') : null;
-  return <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/80 p-3 pb-[calc(6rem+env(safe-area-inset-bottom))] lg:px-6 lg:pb-28 lg:pt-[5.5rem]" onClick={() => { if (operation !== 'apply') onClose(); }}>
+  return <div className="fixed inset-0 host-nav-overlay z-[55] flex items-center justify-center bg-black/80 p-3 pb-[calc(6rem+env(safe-area-inset-bottom))] lg:px-6 lg:pb-28 lg:pt-[5.5rem]" onClick={() => { if (operation !== 'apply') onClose(); }}>
     <div ref={panel} tabIndex={-1} role="dialog" aria-modal="true" aria-label={tr('Extract title from cover')} data-title-extraction-dialog
-      data-lenis-prevent className="flex max-h-[calc(100dvh-7rem-env(safe-area-inset-bottom))] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-ink-700 bg-ink-950 outline-hidden lg:max-h-[calc(100dvh-13rem)]"
+      data-lenis-prevent className="host-nav-dialog flex max-h-[calc(100dvh-7rem-env(safe-area-inset-bottom))] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-ink-700 bg-ink-950 outline-hidden lg:max-h-[calc(100dvh-13rem)]"
       onClick={(event) => event.stopPropagation()}>
       <div className="flex shrink-0 items-start justify-between gap-3 border-b border-ink-800 p-4">
         <div className="min-w-0"><h2 className="text-lg font-semibold text-fog-100">{tr('Extract title from cover')}</h2>

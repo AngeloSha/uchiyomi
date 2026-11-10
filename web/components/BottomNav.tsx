@@ -5,26 +5,16 @@ import { useRef } from 'react';
 import { motion } from 'framer-motion';
 import { IcHome, IcGrid, IcSearch, IcDownload, IcUser, IcPlus } from './icons';
 import { useAuth, canDownload } from '@/lib/auth';
-import { keys, t as tr } from '@/lib/i18n';
+import { t as tr } from '@/lib/i18n';
 import { isDesktop, DESKTOP_HIDDEN } from '@/lib/desktop';
 import { useLayer } from '@/lib/layers';
 import { useDownloadsRing } from '@/lib/useServerDownloads';
 import { LibraryTabIcon } from './DownloadsRing';
+import { PRIMARY_DESTINATIONS, selectedDestination } from '@/lib/hostNavigation/model';
 
-// `keys()` is the identity function; it exists so these reach the translation extractor, which
-// cannot see a label rendered as `tr(label)`. This nav shipped untranslated once already.
-// See lib/i18n.ts.
-const NAV_LABELS = keys('Home', 'Library', 'Search', 'Discover', 'Offline', 'You');
-const items = [
-  { href: '/', label: NAV_LABELS[0], Icon: IcHome, match: (p: string) => p === '/' },
-  { href: '/library', label: NAV_LABELS[1], Icon: IcGrid, match: (p: string) => p.startsWith('/library') || p.startsWith('/series') },
-  { href: '/search', label: NAV_LABELS[2], Icon: IcSearch, match: (p: string) => p.startsWith('/search') },
-  // Discover had no entry here at all, on a phone-first PWA, while being item five of five on the desktop
-  // nav. The page that adds new series was reachable only from a small + on the library page.
-  { href: '/discover', label: NAV_LABELS[3], Icon: IcPlus, match: (p: string) => p.startsWith('/discover') },
-  { href: '/downloads', label: NAV_LABELS[4], Icon: IcDownload, match: (p: string) => p.startsWith('/downloads') },
-  { href: '/profile', label: NAV_LABELS[5], Icon: IcUser, match: (p: string) => p.startsWith('/profile') || p.startsWith('/settings') || p.startsWith('/admin') },
-];
+// Labels and route selection are shared with the host navigation presentation model.
+const icons = { home: IcHome, library: IcGrid, search: IcSearch, discover: IcPlus, offline: IcDownload, profile: IcUser };
+const items = PRIMARY_DESTINATIONS.map(i => ({ ...i, href: i.href.replace(/\/$/, '') || '/', Icon: icons[i.id] }));
 
 export function BottomNav() {
   const path = usePathname();
@@ -51,8 +41,8 @@ export function BottomNav() {
     <nav className="safe-bottom fixed inset-x-0 bottom-0 z-40 lg:hidden">
       <div className="mx-auto max-w-2xl px-4 pb-2">
         <div ref={barRef} className="glass grad-border flex items-center justify-around rounded-3xl px-2 py-1.5 shadow-lift">
-          {shown.map(({ href, label, Icon, match }) => {
-            const active = match(path);
+          {shown.map(({ id, href, label, Icon }) => {
+            const active = selectedDestination(path) === id;
             const dead = offline && href !== '/downloads';
             const ringed = href === '/library' && ring.show;
             return (

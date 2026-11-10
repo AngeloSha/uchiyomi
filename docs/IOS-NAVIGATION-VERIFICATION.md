@@ -1,0 +1,43 @@
+# Native navigation port verification
+
+This port starts at upstream `b865032faf68d8cd88d88df10b8fa39186a64821` (merged #427), with the navigation delta from `feat/native-navigation`. It retains the merged protocol-2 privacy, account isolation, upload streaming, cache refusal/recovery and build paths. It does not add a publishing workflow or change the official application identifier.
+
+## Changes verified
+
+- A platform-neutral web controller negotiates optional navigation version 1. Its iOS adapter requires wrapper protocol 2; it does not support protocol-1 wrappers/frontends.
+- One WebKit view/store serves all destinations. Horizontal layouts use native tabs and More; a vertical system bar uses one top-aligned group with the secondary menu after You.
+- Web navigation and its reserved space disappear only after a successful handshake. Browser/PWA/desktop and protocol-2 pairs without navigation retain web controls.
+- Native actions respect the synchronous account-transition fence before React rerenders. Retired documents, profiles and navigation sessions cannot supply current state/actions.
+- Existing sheet, portal, fixed-action, notice and mobile navigation tests are retained. The cache-update WebKit fixture now expects a declared schema incompatibility to block saved UI, then checks retained chapters/identity/outbox after a compatible manifest returns.
+
+## Local verification, 2026-11-10
+
+Environment: Node 24.18.0, Xcode 27.2 (27B52), iOS 27.2 simulators, iOS deployment target 17.0. Commands run from the repository root unless noted.
+
+| Check | Result |
+| --- | --- |
+| `cd web && npm test` | 1,871 passed, no skips. Includes the protocol-2 adapter, platform-neutral controller, synchronous account fence and real profile-switcher portal tests. |
+| `cd web && npm run build` | Production export and type check passed: protocol 2, offline schema 2, 191 assets. |
+| `bash ios/scripts/test-core.sh` | 32 passed; the opt-in database-backed authentication case runs separately below. |
+| `bash ios/scripts/test-auth.sh` | Real password/TOTP refresh, relaunch and logout passed against disposable PostgreSQL. |
+| `bash ios/scripts/test-transport.sh` | 57 assertions passed against production HTTP framing, upload cleanup and privacy headers. |
+| `node --test ios/scripts/manifest.test.mjs` | Five passed. |
+| `python3 -m unittest discover -s ios/Tests/Distribution` | 26 passed. |
+| Generated `prepare-xtool.py` package, `xcodebuild -scheme Uchiyomi -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build` | Passed with the iOS SDK, including the Swift Package resource path and new navigation files. This is an Apple-toolchain compile, not a Linux/xtool IPA build. |
+| `UCHI_SIMULATOR_DEVICE_TYPE=com.apple.CoreSimulator.SimDeviceType.iPhone-Duo bash ios/scripts/test-webview.sh ios/build/navigation-v2-duo-final` | All five invocations passed. The opt-in physical installation fixture is skipped. Screenshots and measurements verify contiguous dock controls, top anchoring, content clearance and immersive mode. |
+
+The initial web invocation could not start localhost fixtures inside the sandbox; the complete host-access run passed after adding the new sheet-hook dependency to the existing portal test fixture. The first Duo run exposed the obsolete incompatible-schema fallback expectation described above; the corrected full run passed without relaxing the production policy or data-retention assertions.
+
+The conventional iPhone 18 Pro run (`ios/build/navigation-v2-phone-final`) also passed all five invocations. Each final simulator suite passed 14 required cases and skipped the existing opt-in physical installation fixture. Its first run had a WebKit `No such process found` startup error before the bridge assertions; one unchanged run on a fresh simulator passed. The final Duo run did not need a retry.
+
+The full disposable browser walk (`bash web/test/e2e/up.sh`, logs `/tmp/uchiyomi-navigation-v2-browser.log`) completed with zero application console/server errors and three assertions reported: two existing spread-partner scroll checks and the navigation Forward check. The latter was a test timing/canonical-path issue: the walk now waits for committed route state and treats the trailing slash consistently with its other routing checks. The final production frontend passed all 58 checks in the existing `hostNavigationWalk` (invoked directly against a separate disposable fixture); evidence is `/tmp/uchiyomi-navigation-v2-final-browser/result.json` and its generated screenshots.
+
+The two spread-partner scroll failures were reproduced by the unchanged `pagedFitWalk` against an unmodified export of merged main, with 25 other checks passing (`/tmp/uchiyomi-navigation-baseline-browser/result.json`). They occur before native navigation is activated and remain an upstream reader/test issue; this port does not change the reader. The full browser suite is therefore not recorded as green.
+
+Screenshots were generated by the existing browser and hosted XCTest rigs and inspected locally; no screenshots or private fixture data are added to the repository.
+
+## Device acceptance and delivery
+
+This combined candidate has not been physically accepted or published. Earlier experimental releases do not verify it. The current checks do not establish physical folding, inner/outer display transitions, VoiceOver, larger text, signing, offline reboot or in-place update retention.
+
+For the user's installation, update the server to a matching protocol-2 frontend/backend and then build/install the new app. Preserve that installation channel's bundle identifier and signing identity; the upstream source remains `com.uchiyomi.reader`. Complete the [physical checklist](HOST-NAVIGATION.md#physical-acceptance-for-each-candidate) and the protocol-2 [iOS acceptance checks](IOS.md#required-checks-on-this-exact-ipa), including account switching, offline position retention and subsequent sync.

@@ -153,7 +153,7 @@ export function noticeOffset(place: NoticePlace, l: Pick<Layers, 'toolbarHeight'
   switch (place) {
     case 'above-nav': return { phone: 'calc(6.25rem + env(safe-area-inset-bottom))', wide: '1.5rem' };
     case 'above-toolbar': return {
-      phone: `calc(5.75rem + env(safe-area-inset-bottom) + ${l.toolbarHeight}px + 0.5rem)`,
+      phone: `calc(var(--web-nav-offset,5.75rem) + env(safe-area-inset-bottom) + ${l.toolbarHeight}px + 0.5rem)`,
       wide: `calc(${l.toolbarHeight}px + 0.75rem)`,
     };
     case 'nav-band': return { phone: 'max(1.3rem, calc(env(safe-area-inset-bottom) + 0.9rem))', wide: '1.5rem' };

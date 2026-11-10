@@ -679,3 +679,14 @@ html.lenis, html.lenis body { height: auto; }
 @media (forced-colors: active) {
   .hero-title .hero-title-text { background: none; color: CanvasText; -webkit-text-fill-color: CanvasText; filter: none; text-shadow: none; }
 }
+
+/* The native container has already removed its bars from the web viewport. */
+html[data-host-navigation] {
+  --rail-w: 0px;
+  --topbar-h: 0px;
+  --web-nav-offset: 0px;
+}
+html[data-host-navigation] .host-nav-sheet { padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
+html[data-host-navigation] .host-nav-overlay { padding-top: 1rem; padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
+html[data-host-navigation] .host-nav-dialog { max-height: calc(100dvh - 2rem - env(safe-area-inset-bottom)); }
+html[data-host-navigation] .host-nav-editor-body { padding-bottom: 1.5rem; }

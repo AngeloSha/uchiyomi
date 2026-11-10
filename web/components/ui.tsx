@@ -5,6 +5,7 @@ import { backdropSources, genreBackdrop } from '@/lib/art';
 import { useReduceEffects } from '@/lib/effects';
 import { withCoverBust } from '@/lib/coverBust';
 import { useLayer } from '@/lib/layers';
+import { useHostNavigationActive } from '@/lib/hostNavigation/chrome';
 import { t as tr } from '@/lib/i18n';
 
 /** Series backdrop: the BFF composites a wide, blurred, darkened full-bleed ambient from the series art
@@ -130,10 +131,11 @@ export function Sheet({ title, onClose, overBottomNav, action, footer, wrapTitle
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const hostNavigation = useHostNavigationActive();
   // A dialog on the notices' layer stack (lib/layers.ts). Only an `overBottomNav` sheet leaves the nav band
   // free; the reader's sheets run to the bottom edge, so they hand over their panel to be measured and the
   // notices rise above it instead of sitting on its last rows.
-  useLayer('dialog', true, { navBandFree: !!overBottomNav, ref: overBottomNav ? undefined : panelRef });
+  useLayer('dialog', true, { navBandFree: !!overBottomNav && !hostNavigation, ref: overBottomNav && !hostNavigation ? undefined : panelRef });
   useEffect(() => {
     // An Escape a field inside already used -- a text row putting its edit back marks it handled (settings.tsx TextRow) --
     // is that and nothing more: closing on it too dropped the edit with the sheet (v0.86.0, the settings editors).
@@ -158,7 +160,7 @@ export function Sheet({ title, onClose, overBottomNav, action, footer, wrapTitle
       <div
         ref={panelRef}
         onClick={(e) => e.stopPropagation()}
-        className={`glass flex w-full flex-col rounded-t-3xl border border-ink-700 pt-4
+        className={`host-nav-sheet glass flex w-full flex-col rounded-t-3xl border border-ink-700 pt-4
                    sm:mb-6 sm:max-w-xl sm:rounded-3xl ${footer ? 'max-h-[85vh]' : 'max-h-[75vh]'} ${
                      overBottomNav
                        ? 'pb-[calc(5.75rem+env(safe-area-inset-bottom))] lg:pb-[max(1rem,env(safe-area-inset-bottom))]'

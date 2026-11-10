@@ -12,6 +12,7 @@ import { t as tr } from '@/lib/i18n';
 import { saidText } from '@/lib/said';
 import { confirmsTitle } from '@/lib/confirmTitle';
 import { useLayer } from '@/lib/layers';
+import { useHostNavigationActive } from '@/lib/hostNavigation/chrome';
 
 export { errorNoticeOf } from '@/lib/errorDetails';
 
@@ -33,10 +34,11 @@ export function Modal({
   fieldFocus?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const hostNavigation = useHostNavigationActive();
   const fieldFirst = useRef(fieldFocus);
   // On the notices' layer stack (lib/layers.ts), as a dialog that keeps the phone's nav band free -- see the
   // padding below -- so a notice can dock there instead of over this title.
-  useLayer('dialog', true, { navBandFree: true });
+  useLayer('dialog', true, { navBandFree: !hostNavigation, ref: hostNavigation ? ref : undefined });
   // Read through a ref so the effect below can depend on nothing. Callers pass `onClose={() => ...}`, a new
   // function identity on every render, so an effect depending on it re-ran after every keystroke.
   const closeRef = useRef(onClose);
@@ -73,14 +75,14 @@ export function Modal({
   // is capped at the viewport minus that band and the top padding (7.5 rem = 5.5 + 1 + 1); from `lg` up it
   // is the centred 88vh dialog it always was. The same 5.5 rem the Sheet's `overBottomNav` uses.
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] backdrop-blur-xs lg:pb-4" onClick={onClose}>
+    <div className="fixed inset-0 host-nav-overlay z-50 grid place-items-center bg-ink-950/70 p-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] backdrop-blur-xs lg:pb-4" onClick={onClose}>
       <div
         ref={ref}
         role="dialog"
         aria-modal="true"
         aria-label={title}
         data-lenis-prevent
-        className={`glass max-h-[calc(100dvh-7.5rem-env(safe-area-inset-bottom))] w-full lg:max-h-[88vh] ${wide ? 'max-w-lg' : 'max-w-md'} overflow-y-auto rounded-2xl border border-ink-700 p-5`}
+        className={`host-nav-dialog glass max-h-[calc(100dvh-7.5rem-env(safe-area-inset-bottom))] w-full lg:max-h-[88vh] ${wide ? 'max-w-lg' : 'max-w-md'} overflow-y-auto rounded-2xl border border-ink-700 p-5`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-start justify-between gap-3">

@@ -42,6 +42,14 @@ Install your unsigned IPA with AltStore Classic on Windows, letting AltStore sig
 
 Safari/PWA downloads live in separate storage. An expired offline identity or sign-out requires online sign-in again. Removing the app or its website data can remove local downloads; the server remains the durable library copy.
 
+## Native navigation
+
+With a navigation-capable protocol-2 frontend, Home, Library, Search, Discover, Offline and You use native controls. Horizontal layouts use system tabs and More overflow; when iOS supplies a vertical dock, the primary icons form one top-aligned group with the secondary menu after You. The same web view and reading session remain active through navigation and layout changes.
+
+The secondary menu provides Lists, Reading history, Moments, Updates, permitted Admin tools and Quick settings, alongside Servers and Reload. Primary controls hide while reading. Offline, network destinations are disabled and downloaded chapters remain accessible. Browsers and protocol-2 hosts/frontends without the optional navigation capability retain their web navigation. Protocol-1 frontends remain incompatible.
+
+See [Host navigation](HOST-NAVIGATION.md) for the platform-neutral web interface, lifecycle and geometry rules, and [port verification](IOS-NAVIGATION-VERIFICATION.md) for test evidence and remaining device checks.
+
 ## Server profiles, updates and recovery
 
 **… → Servers** selects, adds or removes server profiles. Every profile has its own stable local origin, UI cache, cookie jar and WebKit store. Switching cancels old requests and stops the previous web view. Removing a profile requires confirmation and removes only its local credentials/downloads/unsynced progress; reconnect first to sync progress you need to keep.

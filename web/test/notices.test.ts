@@ -191,7 +191,7 @@ test('the offsets: measured, from the bottom edge, and from lg up the corner', (
   // select bar's measured height is not in the offset" fails.
   const tb = noticeOffset('above-toolbar', L({ toolbarHeight: 104 }));
   assert.match(tb.phone, /\b104px\b/, 'the select bar\'s measured height is not in the offset');
-  assert.match(tb.phone, /5\.75rem \+ env\(safe-area-inset-bottom\)/, 'the offset over the select bar forgets the nav under it');
+  assert.match(tb.phone, /var\(--web-nav-offset,5\.75rem\) \+ env\(safe-area-inset-bottom\)/, 'the offset over the select bar must follow the active navigation geometry');
   assert.match(tb.wide, /\b104px\b/, 'from lg up (where the bar is at the very bottom) the notice sits on it');
   // Above the nav, 0.5 rem clear of where the select bars rest on it (5.75 rem).
   assert.match(noticeOffset('above-nav', L()).phone, /^calc\(6\.25rem \+ env\(safe-area-inset-bottom\)\)$/, 'the notice sits on the nav');
@@ -603,7 +603,7 @@ test('a sheet on a page with the bottom nav clears it; only the reader\'s sheets
   }
   assert.ok(sheets >= 10, `only ${sheets} <Sheet> tags found -- the scan is broken`);
   // The reader's sheets hand their panel over to be measured.
-  assert.match(code(read('components/ui.tsx')), /useLayer\('dialog', true, \{ navBandFree: !!overBottomNav, ref: overBottomNav \? undefined : panelRef \}\);/,
+  assert.match(code(read('components/ui.tsx')), /useLayer\('dialog', true, \{ navBandFree: !!overBottomNav && !hostNavigation, ref: overBottomNav && !hostNavigation \? undefined : panelRef \}\);/,
     'a reader sheet is not measured, so a notice sits on its last rows');
   assert.match(code(read('components/ui.tsx')), /<div\s+ref=\{panelRef\}/, 'the measured element is not the sheet\'s panel');
   const rs = code(read('components/ReaderSettings.tsx'));

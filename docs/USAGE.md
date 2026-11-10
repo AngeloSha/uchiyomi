@@ -169,6 +169,11 @@ pointer on it, or Tab into it, and it opens with their names. The top bar holds 
 profile; **Check for new chapters** is a key on **Updates**. On a phone the bar along the bottom has **Home**,
 **Library**, **Search**, **Discover**, **Offline** and **You**.
 
+In the [iOS client](IOS.md#native-navigation), a supporting frontend replaces the web navigation with native controls.
+iOS chooses tabs or a vertical dock; the dock groups the destination icons at the top with the **…** menu last.
+That menu includes Lists, Reading history, Moments, Updates, Quick settings, permitted Admin tools, Servers and Reload.
+Primary controls hide while reading, and Offline remains available without a connection.
+
 **Customize Home** (since v0.66.0): the key at the end of the greeting's line lists Home's rails — *Keep reading*,
 *For you*, *New episodes*, your lists and the rest — each with arrows to move it up or down (or drag a row to where it
 belongs, see *Dragging to reorder* below) and a switch to hide it.

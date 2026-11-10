@@ -177,11 +177,22 @@ final class CachedWebViewTests: XCTestCase {
             for failure in [ExportFixture.Failure.interrupted, .corrupt, .unsupportedSchema] {
                 remote = try ExportFixture(directory: export, revision: "rejected-\(failure)", failure: failure)
                 await model.choose(profile)
-                XCTAssertNil(model.error, "A failed update hid the saved reader")
-                XCTAssertNotNil(model.status)
+                if failure == .unsupportedSchema {
+                    // Protocol 2 refuses a declared incompatibility, including saved UI.
+                    // Reconnect to a compatible manifest before checking retained data.
+                    XCTAssertNotNil(model.error)
+                    XCTAssertNil(model.webView)
+                    XCTAssertFalse(model.canRecover)
+                    XCTAssertEqual(remote.assetReads, 0)
+                    remote = second
+                    await model.choose(profile)
+                    XCTAssertNil(model.error)
+                } else {
+                    XCTAssertNil(model.error, "A failed update hid the saved reader")
+                    XCTAssertNotNil(model.status)
+                }
                 let retainedUI = try await cache.load()
                 XCTAssertEqual(retainedUI?.manifest.buildId, updated.manifest.buildId)
-                if failure == .unsupportedSchema { XCTAssertEqual(remote.assetReads, 0) }
                 let retainedWeb = try await waitForReader()
                 let retainedData = try await retainedWeb.callAsyncJavaScript("""
                     const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('yomi-offline',2);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});
@@ -274,7 +285,9 @@ final class CachedWebViewTests: XCTestCase {
             stage = "sign-out control"; NSLog("Auth fixture: %@", stage)
             await model.choose(profile); web = try mountReader()
             try await waitFor(web, "document.body.innerText.includes('Offline fixture')")
-            _ = try await web.evaluateJavaScript("document.querySelector('button[aria-label=You]').click();true")
+            XCTAssertEqual(model.navigation?.auth, .offline)
+            XCTAssertEqual(model.navigation?.allows(.quickSettings), true)
+            model.navigationBridge?.request(.quickSettings)
             try await waitFor(web, "Array.from(document.querySelectorAll('button')).some(b => b.textContent.trim() === 'Sign out')")
             stage = "sign-out and relaunch"; NSLog("Auth fixture: %@", stage)
             _ = try await web.evaluateJavaScript("Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Sign out').click();true")
@@ -454,7 +467,7 @@ final class CachedWebViewTests: XCTestCase {
         throw ClientError.invalid("Timed out waiting for: " + expression)
     }
 
-    private static let seed = #"""
+    static let seed = #"""
     localStorage.setItem('uchiyomi.offlineUser', JSON.stringify({v:1,id:'ios-fixture',username:'fixture',displayName:'Offline Tester',role:'admin',exp:Date.now()+86400000}));
     const db = await new Promise((resolve, reject) => {
       const req = indexedDB.open('yomi-offline', 2);
@@ -482,7 +495,7 @@ final class CachedWebViewTests: XCTestCase {
     """#
 }
 
-private extension UIScreen {
+extension UIScreen {
     func screenshotForTest(window: UIWindow) -> UIImage {
         UIGraphicsImageRenderer(bounds: window.bounds).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
     }

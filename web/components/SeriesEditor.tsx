@@ -23,6 +23,7 @@ import { languageName } from '@/lib/format';
 import { languageChoices } from '@/lib/editions';
 import { numLabel } from '@/lib/numbering';
 import { useLayer } from '@/lib/layers';
+import { useHostNavigationActive } from '@/lib/hostNavigation/chrome';
 import { useReduceEffects } from '@/lib/effects';
 import { keys, t as tr } from '@/lib/i18n';
 import { bustCover } from '@/lib/coverBust';
@@ -146,7 +147,7 @@ export function SeriesEditor({ id, series, tab: opening = 'details', onClose, on
   // sheet's last rows scroll clear of the bar, from md to lg the panel ends above it, and from lg up it ends 7 rem
   // above the bottom edge, clear of the notices' corner (web/test/notices.test.ts holds that) -- and starts below
   // the top bar, which paints over everything in <main> as the bottom nav does.
-  useLayer('dialog', true, { navBandFree: true });
+  const hostNavigation = useHostNavigationActive();
   const uid = useId();
   const rtl = useRtl();
   const plain = useReduceEffects();
@@ -158,6 +159,7 @@ export function SeriesEditor({ id, series, tab: opening = 'details', onClose, on
   const saveMeta = (patch: Partial<SeriesMeta>) => saver.save(patch).then(() => { onSaved(); });
 
   const panelRef = useRef<HTMLDivElement>(null);
+  useLayer('dialog', true, { navBandFree: !hostNavigation, ref: hostNavigation ? panelRef : undefined });
   const bodyRef = useRef<HTMLDivElement>(null);
   // Read through a ref so the effect below runs once: callers pass a new `onClose` on every render.
   const closeRef = useRef(onClose);
@@ -218,7 +220,7 @@ export function SeriesEditor({ id, series, tab: opening = 'details', onClose, on
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-ink-950/70 backdrop-blur-xs md:items-center md:p-6 md:pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-28 lg:pt-[5.5rem]"
+      className="fixed inset-0 host-nav-overlay z-50 flex items-end justify-center bg-ink-950/70 backdrop-blur-xs md:items-center md:p-6 md:pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-28 lg:pt-[5.5rem]"
       onPointerDown={(e) => { downOnBackdrop.current = e.target === e.currentTarget; }}
       onClick={(e) => { if (e.target === e.currentTarget && (downOnBackdrop.current || e.detail === 0)) onClose(); }}
     >
@@ -229,7 +231,7 @@ export function SeriesEditor({ id, series, tab: opening = 'details', onClose, on
         aria-labelledby={`${uid}-title`}
         data-series-editor
         tabIndex={-1}
-        className="glass-strong flex h-[calc(100dvh-max(1.5rem,env(safe-area-inset-top)))] w-full min-w-0 flex-col overflow-hidden rounded-t-3xl border border-ink-700 shadow-lift md:h-full md:max-h-[86vh] outline-hidden md:max-w-[880px] md:rounded-3xl"
+        className="host-nav-dialog glass-strong flex h-[calc(100dvh-max(1.5rem,env(safe-area-inset-top)))] w-full min-w-0 flex-col overflow-hidden rounded-t-3xl border border-ink-700 shadow-lift md:h-full md:max-h-[86vh] outline-hidden md:max-w-[880px] md:rounded-3xl"
       >
         <SaveScope report={scope.report}>
           <div className="flex items-start gap-3 px-4 pt-4 md:px-6 md:pt-5">
@@ -272,7 +274,7 @@ export function SeriesEditor({ id, series, tab: opening = 'details', onClose, on
           </div>
 
           <div ref={bodyRef} data-lenis-prevent
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-4 md:px-6 md:pb-6 md:pt-5">
+            className="host-nav-editor-body min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-4 md:px-6 md:pb-6 md:pt-5">
             <div className="md:grid md:grid-cols-[15rem_minmax(0,1fr)] md:items-start md:gap-7">
               {/* The art: the start column from md up, the Art tab below it. */}
               <section id={`${uid}-art`} role={tab === 'art' ? 'tabpanel' : 'region'} aria-labelledby={tab === 'art' ? tabId('art') : undefined}

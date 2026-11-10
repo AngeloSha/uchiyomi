@@ -20,6 +20,7 @@ import { mkdirSync, writeFileSync } from 'fs';
 import { networkCuts } from './networkCut.mjs';
 import { sheetNavigationWalk } from './sheetNavigationWalk.mjs';
 import { collectionMembershipWalk, pagedFitWalk, manualUploadWalk } from './reviewFrontendWalk.mjs';
+import { hostNavigationWalk } from './hostNavigationWalk.mjs';
 
 const BASE = process.env.BASE || 'http://127.0.0.1:18140';
 const USER = process.env.E2E_USER || 'e2e';
@@ -1846,6 +1847,8 @@ try {
   if (!mf) bad('no <link rel=manifest> — the app is not installable');
   else if (mf.status !== 200) bad(`manifest returned ${mf.status}`);
   else ok(`manifest ok (${mf.body.name || mf.body.short_name})`);
+
+  await hostNavigationWalk({ page, BASE, ok, bad, shot, ensureSignedIn });
 
   // ------------------------------------------------------- signing out ends the offline grace
   //

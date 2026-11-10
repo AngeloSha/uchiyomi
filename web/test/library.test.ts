@@ -411,7 +411,7 @@ test('the select bar fits two rows on a phone and one at 1024 px: the admin acti
   // filter chips. Same 12 px words, same 12 px padding: the rows above hold. Reintroduce a chip: "a chip in the select
   // bar" fails, and noPills.test.ts scans the bar for any capsule.
   const src = read('app/library/page.tsx');
-  const bar = /bottom-\[calc\(5\.75rem\+env\(safe-area-inset-bottom\)\)\][\s\S]*?<\/div>\s*<\/div>\s*\)\}/.exec(src)?.[0] ?? '';
+  const bar = /bottom-\[calc\(var\(--web-nav-offset,5\.75rem\)\+env\(safe-area-inset-bottom\)\)\][\s\S]*?<\/div>\s*<\/div>\s*\)\}/.exec(src)?.[0] ?? '';
   assert.ok(bar.length > 200, 'could not find the select bar');
   assert.doesNotMatch(code(bar), /className=\{?[`"]chip\b/, 'a chip in the select bar');
   const phone = [...bar.matchAll(/className=\{?[`"](btn-key\b[^`"]*)[`"]\}?/g)].map((m) => m[1]).filter((c) => !/\bhidden lg:inline-flex\b/.test(c));

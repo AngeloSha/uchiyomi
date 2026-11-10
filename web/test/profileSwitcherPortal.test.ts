@@ -24,6 +24,7 @@ function load(path:string,modules:Record<string,any>){
 const ui=load('components/ui.tsx',{
   react:hooks,'react/jsx-runtime':jsxRuntime,'react-dom':ReactDOM,
   '@/lib/art':{},'@/lib/effects':{},'@/lib/coverBust':{},'@/lib/layers':{},'@/lib/i18n':{t:(value:string)=>value},
+  '@/lib/hostNavigation/chrome':{useHostNavigationActive:()=>false},
 });
 const switcher=load('components/ProfileSwitcher.tsx',{
   react:hooks,'react/jsx-runtime':jsxRuntime,'next/navigation':{useRouter:()=>({push(){}})},

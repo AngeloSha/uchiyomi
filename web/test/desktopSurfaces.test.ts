@@ -13,6 +13,7 @@ import { join } from 'path';
 import { DESKTOP_HIDDEN } from '../lib/desktop';
 import { offlineKeyShown } from '../lib/seriesActions';
 import { PROFILE_SETTINGS } from '../lib/settingsIndex.profile';
+import { PRIMARY_DESTINATIONS } from '../lib/hostNavigation/model';
 
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -219,7 +220,7 @@ test('"Save offline" and the Offline tab are hidden on desktop, and smart offlin
   // Reintroduce by adding it here: "the desktop app loses its downloads entry" fails.
   assert.deepEqual([...DESKTOP_HIDDEN.paletteKeys], ['downloads'], 'the desktop app loses its downloads entry');
   const nav = code(read('components/BottomNav.tsx'));
-  assert.match(nav, /href: '\/downloads'/, 'the Offline tab is gone from the server build too');
+  assert.equal(PRIMARY_DESTINATIONS.find(i => i.id === 'offline')?.href, '/downloads/', 'the Offline tab is gone from the server build too');
   assert.match(nav, /const shown = isDesktop\(\) \? allowed\.filter\(\(i\) => !\(DESKTOP_HIDDEN\.navHrefs as readonly string\[\]\)\.includes\(i\.href\)\) : allowed;/, 'the Offline tab shows on desktop');
   const pal = code(read('components/CommandPalette.tsx'));
   assert.match(pal, /key: 'downloads'/, 'the palette lost Offline downloads on the server build too');

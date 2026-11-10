@@ -803,7 +803,7 @@ function LibraryInner() {
           returns to the bottom. Reintroduce with `bottom-0`: on a 390 px phone the Cancel chip is under
           the nav. */}
       {series && selecting && picked.size > 0 && (
-        <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:start-[var(--rail-w)] lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(var(--web-nav-offset,5.75rem)+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:start-[var(--rail-w)] lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           {/* ⚠️ Two rows at 390 px, no more: a third row covers a third of the grid. Seven keys plus the
               count do not fit in two, so on a phone the admin actions live behind `More` (a Sheet). (The bar's
               bottom padding was `pb-8` until v0.49.0, clearance for the floating downloads pill, which is gone.)

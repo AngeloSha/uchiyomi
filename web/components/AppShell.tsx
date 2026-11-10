@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { useAuth } from '@/lib/auth';
+import { useAuth, canDownload } from '@/lib/auth';
 import { PALETTE_EVENT } from '@/lib/palette';
 import { runSmartOffline } from '@/lib/offlineSync';
 import { BottomNav } from './BottomNav';
@@ -20,6 +20,10 @@ import { IcWifiOff } from './icons';
 import { t as tr } from '@/lib/i18n';
 import { desktopShell, isDesktop } from '@/lib/desktop';
 import { useServerDownloads } from '@/lib/useServerDownloads';
+import { navRing } from '@/lib/serverDownloads';
+import { navigationPresentation } from '@/lib/hostNavigation/model';
+import { useHostNavigation } from '@/lib/hostNavigation/useHostNavigation';
+import { QuickSettingsSheet } from './ProfileMenu';
 import { IncognitoBanner, useIncognito } from './IncognitoBanner';
 import { AdultBanner } from './AdultToggle';
 import { usePrefetchSeriesOnClick } from '@/lib/seriesPrefetch';
@@ -67,11 +71,18 @@ function OfflineBanner({ name }: { name: string }) {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const { status, user } = useAuth();
+  const { status, user, isAdmin } = useAuth();
   const path = usePathname();
   const router = useRouter();
   const [palette, setPalette] = useState(false);
   const [paletteSeed, setPaletteSeed] = useState('');
+  const [quickSettings, setQuickSettings] = useState(false);
+  const { data: jobs } = useServerDownloads({ poll: true, enabled: !path.startsWith('/reader') });
+  const ring = navRing(jobs);
+  const nativeNavigation = useHostNavigation(navigationPresentation({
+    path, auth: status, downloader: canDownload(user), admin: isAdmin, ring,
+  }), { account: user?.id ?? null, path, navigate: href => router.push(href), quickSettings: () => setQuickSettings(true) });
+  useEffect(() => { setQuickSettings(false); }, [user?.id, status, path]);
   // The desktop's sidebar is mounted from lg up only: on a phone none of it is in the document (components/Sidebar.tsx).
   const wide = useWideViewport();
 
@@ -91,7 +102,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Downloads, the series band and Discover all read what this one asks, at the pace its answer sets. Here,
   // above every early return, because a hook must run on every render; off in the reader, which shows none of
   // it. It needs a signed-in viewer who may download, so offline it asks nothing.
-  useServerDownloads({ poll: true, enabled: !path.startsWith('/reader') });
   // Ctrl/Cmd+K, "/", or just typing, anywhere in the app (reader keeps its own keys; palette skipped there)
   usePaletteHotkeys(setPalette, status === 'authed' && !path.startsWith('/reader'), setPaletteSeed);
   // Incognito reading (v0.61.0): kept here, above every early return, so the reader's progress payload knows it on the
@@ -136,7 +146,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Reachable for `offline` as well as `authed`: a downloaded chapter is the whole point of opening the app
   // with no network, and everything the reader needs is already in IndexedDB.
   const immersive = path.startsWith('/reader');
-  if (immersive) return <>{children}</>;
+  if (immersive) return <>{children}{nativeNavigation && quickSettings && <QuickSettingsSheet onClose={() => setQuickSettings(false)} />}</>;
 
   // Offline, only the downloads are real. Everything else is built from the server.
   if (status === 'offline' && !path.startsWith('/downloads')) return <OfflineLanding />;
@@ -154,12 +164,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {status === 'authed' && <HealthBanner />}
         {status === 'authed' && <TrackerAlert />}
       </div>
-      <TopNav onSearchFocus={() => { setPaletteSeed(''); setPalette(true); }} />
-      {wide && <Sidebar />}
-      <main className="shell relative z-[1] pb-28 lg:pb-12">
+      {!nativeNavigation && <TopNav onSearchFocus={() => { setPaletteSeed(''); setPalette(true); }} />}
+      {!nativeNavigation && wide && <Sidebar />}
+      <main className={`shell relative z-[1] ${nativeNavigation ? 'pb-6' : 'pb-28 lg:pb-12'}`}>
         <PageTransition>{children}</PageTransition>
       </main>
-      <BottomNav />
+      {!nativeNavigation && <BottomNav />}
+      {nativeNavigation && quickSettings && <QuickSettingsSheet onClose={() => setQuickSettings(false)} />}
       {status === 'authed' && <CommandPalette open={palette} seed={paletteSeed} onClose={() => setPalette(false)} />}
     </>
   );

@@ -197,8 +197,8 @@ test('every dialog in the app is on the stack, and so are the nav and both selec
   for (const rel of Object.keys(NOT_DIALOGS)) assert.ok(overlays(code(read(rel))) > 0, `${rel} no longer has an overlay; drop it from NOT_DIALOGS`);
 
   // The dialogs that keep the phone's nav band free say so; the one that does not, doesn't.
-  assert.match(code(read('components/ConfirmDialog.tsx')), /useLayer\('dialog', true, \{ navBandFree: true \}\);/);
-  assert.match(code(read('components/ui.tsx')), /useLayer\('dialog', true, \{ navBandFree: !!overBottomNav, ref: overBottomNav \? undefined : panelRef \}\);/, 'a reader sheet claims the nav band is free');
+  assert.match(code(read('components/ConfirmDialog.tsx')), /useLayer\('dialog', true, \{ navBandFree: !hostNavigation, ref: hostNavigation \? ref : undefined \}\);/);
+  assert.match(code(read('components/ui.tsx')), /useLayer\('dialog', true, \{ navBandFree: !!overBottomNav && !hostNavigation, ref: overBottomNav && !hostNavigation \? undefined : panelRef \}\);/, 'a reader sheet claims the nav band is free');
   // The palette stays mounted while closed; registering it unconditionally would hold notices off a band
   // nothing is using.
   assert.match(code(read('components/CommandPalette.tsx')), /useLayer\('dialog', open\);/, 'the closed command palette counts as an open dialog');
@@ -207,7 +207,7 @@ test('every dialog in the app is on the stack, and so are the nav and both selec
   for (const [f, cond] of [['app/library/page.tsx', 'selecting && picked.size > 0'], ['app/series/page.tsx', 'selecting']] as const) {
     const src = code(read(f));
     assert.ok(src.includes(`useLayer('toolbar', ${cond}, { ref: toolbarRef });`), `${f}: the select bar is not on the stack while it shows`);
-    assert.match(src, /<div ref=\{toolbarRef\} className="fixed inset-x-0 bottom-\[calc\(5\.75rem/, `${f}: the measured element is not the select bar`);
+    assert.match(src, /<div ref=\{toolbarRef\} className="fixed inset-x-0 bottom-\[calc\(var\(--web-nav-offset,5\.75rem\)/, `${f}: the measured element is not the select bar`);
   }
   // The import page's sticky "Import selected" footer rests on the phone's nav like a select bar, so it is one
   // to the notices: without it an error from that very flow sat on the button for six seconds. Reintroduce by

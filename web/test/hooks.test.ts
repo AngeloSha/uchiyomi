@@ -59,6 +59,9 @@ function isWritten(h: string, w: { names: Set<string>; prefixes: string[] }): bo
  */
 const NOT_THE_APPS: Record<string, string> = {
   'data-e2e-rail': 'run.mjs marks the rail it found itself (el.dataset.e2eRail)',
+  'data-host-test-cancel': 'hostNavigationWalk marks the Cancel button it finds by its visible label',
+  'data-host-test-done': 'hostNavigationWalk marks the Filters footer it finds by its visible label',
+  'data-host-library-cancel': 'hostNavigationWalk marks the library toolbar action it finds by its visible label',
   'data-shot-from': 'capture.mjs marks the start of a band it crops',
   'data-shot-to': 'capture.mjs marks the end of a band it crops',
   'data-dir': 'desktop.mjs passes --data-dir to Electron; not a DOM hook',

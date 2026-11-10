@@ -101,7 +101,7 @@ test('the scan itself sees the app: inline keys, keys() arrays, and nothing from
   // image/* is not scanned" fails.
   const keys = appKeys();
   assert.ok(keys.size >= 1300, `only ${keys.size} keys found -- the scan is broken`);
-  assert.ok(keys.get('Library')?.has('components/BottomNav.tsx (keys)'), 'the bottom nav\'s keys() labels are not scanned');
+  assert.ok(keys.get('Library')?.has('lib/hostNavigation/model.ts (keys)'), 'the shared navigation keys() labels are not scanned');
   assert.ok(keys.get('Needs attention')?.has('lib/status.ts (keys)'), 'a keys() array in lib/ is not scanned');
   assert.ok(keys.has('Up to {n} minutes'), 'an inline tr() in lib/ is not scanned');
   assert.ok(keys.has('Not asked: enough other sources already list this series'), 'an inline tr() in components/ is not scanned');

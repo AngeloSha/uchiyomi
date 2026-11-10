@@ -55,7 +55,7 @@ export function useOutOfView(ref: RefObject<HTMLElement | null>, margin: string)
  * notices' layer stack as a measured toolbar (lib/layers.ts), so a notice rises above it rather than covering it, as it
  * does for the select bar.
  *
- * ⚠️ `bottom-[calc(5.75rem+env(safe-area-inset-bottom))]`, never `bottom-0`: this renders inside AppShell's <main>, its
+ * ⚠️ `bottom-[calc(var(--web-nav-offset,5.75rem)+env(safe-area-inset-bottom))]`, never `bottom-0`: this renders inside AppShell's <main>, its
  * own stacking context under the root-level nav, so at the bottom edge the nav would paint over it whatever its
  * z-index (the select bar's lesson, app/series/page.tsx). From lg up there is no nav, no bar, and the left column holds
  * the button in view.
@@ -77,7 +77,7 @@ export function ContinueBar({ shown, children }: { shown: boolean; children: Rea
           animate={{ opacity: 1, y: 0 }}
           exit={reduced ? undefined : { opacity: 0, y: 16 }}
           transition={reduced ? { duration: 0 } : { duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-          className="pointer-events-none fixed start-0 end-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 px-4 pb-2 lg:hidden">
+          className="pointer-events-none fixed start-0 end-0 bottom-[calc(var(--web-nav-offset,5.75rem)+env(safe-area-inset-bottom))] z-40 px-4 pb-2 lg:hidden">
           <div className="glass pointer-events-auto mx-auto flex max-w-2xl items-center gap-2 rounded-2xl p-2 shadow-lift">
             {children}
           </div>

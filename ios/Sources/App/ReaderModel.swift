@@ -8,6 +8,8 @@ final class ReaderModel: ObservableObject {
     @Published var error: String?
     @Published var status: String?
     @Published var webView: WKWebView?
+    @Published var navigation: ReaderNavigationPresentation?
+    private(set) var navigationBridge: NativeNavigationBridge?
     @Published var serverName = "Uchiyomi"
     @Published var busy = false
     @Published var downloadProgress: Double?
@@ -156,6 +158,7 @@ final class ReaderModel: ObservableObject {
     @discardableResult
     private func stopReader() async -> Bool {
         readerID = UUID(); activeUI = nil
+        navigationBridge?.retire(); navigationBridge = nil; navigation = nil
         dismissStatus()
         startupTask?.cancel(); startupTask = nil
         weak var retired = webView
@@ -226,7 +229,12 @@ final class ReaderModel: ObservableObject {
             let pending = try await cache.needsConfirmation()
             awaitingConfirmation = pending && ui.manifest.startupCheckVersion != 1
             let readerID = self.readerID
-            let view = try await NativeWebView.make(profile: selected, policy: gateway.policy) { [weak self] in
+            let bridge = NativeNavigationBridge(origin: selected.localOrigin) { [weak self] state in
+                guard let self, self.readerID == readerID else { return }
+                self.navigation = state
+            }
+            navigationBridge = bridge
+            let view = try await NativeWebView.make(profile: selected, policy: gateway.policy, navigation: bridge) { [weak self] in
                 Task { await self?.confirmUI(readerID: readerID) }
             }
             serverName = selected.origin.host ?? "Uchiyomi"
