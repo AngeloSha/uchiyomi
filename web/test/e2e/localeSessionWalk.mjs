@@ -110,41 +110,36 @@ try{
   await selectLanguage('ja');assert.equal((await savedJapanese).status(),200);
   for(let attempt=0;attempt<100&&held.length===0;attempt++)await new Promise(resolve=>setTimeout(resolve,25));
   assert.ok(held.length,'the race must hold an actual uncached dictionary request');
-  await page.evaluate(nonce=>{window.__localeSessionDocument=nonce;},nonce);
-  const switched=page.waitForResponse(response=>new URL(response.url()).pathname==='/auth/switch'&&response.request().method()==='POST');
-  void switched.catch(()=>{});
+  const documentMarker=randomUUID();await page.evaluate(value=>{window.__localeSessionDocument=value;},documentMarker);
+  const savedFrench=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/settings'&&response.request().method()==='PUT');
+  await selectLanguage('fr');assert.equal((await savedFrench).status(),200);await locale('fr');
+  check('a newer same-account language choice applies while the older dictionary is held',true);
+  holdDictionary=false;
+  for(const request of held){
+    const delivered=page.waitForResponse(response=>response.request()===request,{timeout:30000});void delivered.catch(()=>{});
+    await request.continue();const response=await delivered;assert.equal(response.status(),200);await response.buffer();
+    dictionaryDeliveries.push({outcome:'real earlier dictionary response completed in the same document'});
+  }
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  check('the real late dictionary cannot overwrite a newer same-account choice',await page.evaluate(value=>window.__localeSessionDocument===value&&document.documentElement.lang==='fr'&&document.documentElement.dir==='ltr'&&localStorage.getItem('uchiyomi.lang')==='fr',documentMarker));
+  page.off('request',intercept);await page.setRequestInterception(false);await page.setBypassServiceWorker(false);
+  const savedEnglishAgain=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/settings'&&response.request().method()==='PUT');
+  await selectLanguage('en');assert.equal((await savedEnglishAgain).status(),200);await locale('en');
+  const switched=page.waitForResponse(response=>new URL(response.url()).pathname==='/auth/switch'&&response.request().method()==='POST');void switched.catch(()=>{});
   await page.locator('[data-topbar] [aria-label="You"]').click();await clickText('Switch profile');await clickText(second.display_name||second.displayName||`Locale profile ${nonce}`,'[data-switch-profile]');
   const switchResponse=await switched;assert.equal(switchResponse.status(),200);assert.equal((await switchResponse.json()).user.id,second.id);
   await page.waitForFunction(()=>window.__localeSessionDocument===undefined,{timeout:30000});
-  check('account switch replaces the previous JavaScript document',true);
-  await locale('de');check('profile switch adopts the second account saved language before old dictionary returns',true);
-  const released=[...held];holdDictionary=false;
-  await Promise.all(released.map(async request=>{
-    if(request.failure()){dictionaryDeliveries.push({outcome:'canceled by document replacement',reason:request.failure().errorText});return;}
-    // Navigation may cancel the held A request, while a new document can have its own real ja request.
-    // Prove every surviving request finishes; cancellation is accepted only with an actual failure event.
-    let responseListener,failureListener,timer;
-    const completed=new Promise((resolve,reject)=>{
-      responseListener=response=>{if(response.request()===request)void response.buffer().then(()=>resolve({outcome:'real response completed'}),reject);};
-      failureListener=failed=>{if(failed===request)resolve({outcome:'canceled by document replacement',reason:failed.failure()?.errorText});};
-      page.on('response',responseListener);page.on('requestfailed',failureListener);timer=setTimeout(()=>reject(new Error('held dictionary neither completed nor canceled')),30000);
-    });
-    try{
-      try{await request.continue();}catch(error){if(request.failure()){dictionaryDeliveries.push({outcome:'canceled by document replacement',reason:request.failure().errorText});return;}throw error;}
-      dictionaryDeliveries.push(await completed);
-    }finally{clearTimeout(timer);page.off('response',responseListener);page.off('requestfailed',failureListener);}
-  }));
-  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
-  check('late previous-account dictionary cannot change the second account language or direction',await page.evaluate(()=>document.documentElement.lang==='de'&&document.documentElement.dir==='ltr'&&localStorage.getItem('uchiyomi.lang')==='de'));
-  check('previous-account language choice was never submitted as the next account',(await api('/api/settings',{token:tokenA})).data.lang==='ja'&&(await api('/api/settings',{token:tokenB})).data.lang==='de');
-  await shot('profile-switch-late-dictionary');
-  page.off('request',intercept);await page.setRequestInterception(false);await page.setBypassServiceWorker(false);
+  check('account switch replaces the previous JavaScript document',true);await locale('de');
+  check('profile switch adopts the second account saved language and direction',await page.evaluate(()=>document.documentElement.dir==='ltr'&&localStorage.getItem('uchiyomi.lang')==='de'));
+  check('previous-account language choices were never submitted as the next account',(await api('/api/settings',{token:tokenA})).data.lang==='en'&&(await api('/api/settings',{token:tokenB})).data.lang==='de');
+  await shot('profile-switch-owned-language');
   await page.goto(base+'/profile/?tab=settings',{waitUntil:'networkidle2'});await locale('de');await page.waitForSelector('#language select');await page.evaluate(async()=>{await navigator.serviceWorker.ready;});
   const beforeOffline=settingsRequests.filter(request=>request.method==='PUT').length;
-  offline=true;await page.setOfflineMode(true);await page.reload({waitUntil:'domcontentloaded'});await page.waitForSelector('#language select');
-  await selectLanguage('en');await locale('en');
-  check('offline language choice remains local without a settings write',settingsRequests.filter(request=>request.method==='PUT').length===beforeOffline);
-  await shot('offline-local-language');
+  offline=true;await page.setOfflineMode(true);await page.reload({waitUntil:'domcontentloaded'});await page.waitForSelector('[data-topbar]');await locale('de');
+  // Offline accounts intentionally enter Downloads; Settings is not an offline editing surface.
+  check('offline cold boot retains B saved locale on the supported Downloads surface',new URL(page.url()).pathname==='/downloads/'&&await page.evaluate(id=>JSON.parse(localStorage.getItem('uchiyomi.offlineUser')||'null')?.id===id,second.id));
+  check('offline boot never submits a preference change',settingsRequests.filter(request=>request.method==='PUT').length===beforeOffline);
+  await shot('offline-owned-language');
   await page.setOfflineMode(false);offline=false;await locale('de');
   check('same-account offline-to-online transition reloads the saved account language',true);
   check('online settings and every preference write have an authenticated owner',settingsRequests.filter(request=>!request.offline||request.method==='PUT').every(request=>request.subject===first.id||request.subject===second.id));

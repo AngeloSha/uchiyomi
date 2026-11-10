@@ -11,8 +11,8 @@ const base=process.env.BASE||'http://127.0.0.1:18330',parsed=new URL(base);
 assert.ok(parsed.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(parsed.hostname),'disposable loopback preview required');
 const out=process.env.OUT||'/tmp/uchiyomi-offline-account-race';mkdirSync(out,{recursive:true});
 const nonce=randomUUID().replaceAll('-',''),password=`Offline-${randomBytes(24).toString('base64url')}-A9`,title=`Offline race fixture ${nonce}`;
-const accounts=[],checks=[],failures=[],consoleErrors=[],serverErrors=[],expectedNetwork=[],race={responsesMocked:false,serviceWorkerBypassedOnlyForResponsePause:true};
-let browser,page,cdp,adminToken,owner,other,ownerToken,seriesId,completedBookId,pendingBookId,held,loginAttempt=-1,offline=false,step=0,holdResponse=false;
+const accounts=[],checks=[],failures=[],consoleErrors=[],serverErrors=[],expectedNetwork=[],privateRefusals=[],race={responsesMocked:false,serviceWorkerBypassedOnlyForResponsePause:true};
+let browser,page,cdp,adminToken,owner,other,ownerToken,seriesId,completedBookId,pendingBookId,held,loginAttempt=-1,offline=false,step=0,holdResponse=false,switchStarted=false,effectiveBVerified=false;
 const check=(name,pass,detail='')=>{checks.push({name,pass:!!pass,...(!pass?{detail}:{})});console.log(`[${pass?'PASS':'FAIL'}] ${name}${!pass?' '+detail:''}`);if(!pass)failures.push(name);};
 const shot=name=>page.screenshot({path:`${out}/${String(++step).padStart(2,'0')}-${name}.png`,waitForFonts:false});
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -49,7 +49,7 @@ function png(seed=0){
 }
 async function upload(number,count){
   const form=new FormData();for(let n=1;n<=count;n++)form.append('pages',new Blob([png(number*10+n)],{type:'image/png'}),String(n).padStart(3,'0')+'.png');
-  const query=new URLSearchParams({title,name:`Chapter ${number}.cbz`,images:'1',...(seriesId?{seriesId}:{fresh:'1',visibility:'private'})});
+  const query=new URLSearchParams({name:`Chapter ${number}.cbz`,images:'1',...(seriesId?{seriesId}:{title,fresh:'1',visibility:'private'})});
   const response=await raw('/api/library/upload?'+query,{token:ownerToken,method:'POST',body:form});assert.equal(response.status,200,JSON.stringify(response.data));assert.equal(response.data.indexed,true);
   assert.ok(response.data.file.startsWith(`_private/${owner.id}/`),'real upload remains owner-private');if(seriesId)assert.equal(response.data.seriesId,seriesId);return response.data;
 }
@@ -77,7 +77,14 @@ try{
     if(loginAttempt===0&&/429/.test(text)&&url===base+'/auth/login'){expectedNetwork.push('advertised sign-in cooldown');return;}
     if(offline&&/net::ERR_(?:INTERNET_DISCONNECTED|FAILED)/.test(text)&&url.startsWith(base+'/')){expectedNetwork.push('deliberate offline: '+url);return;}
     consoleErrors.push(text+' '+url);
-  });page.on('response',response=>{if(response.status()>=500)serverErrors.push(response.status()+' '+response.url());});
+  });page.on('response',response=>{
+    if(response.status()>=500)serverErrors.push(response.status()+' '+response.url());
+    const path=new URL(response.url()).pathname;
+    if(switchStarted&&response.status()===404&&response.request().method()==='GET'&&['', '/related','/comments','/listing','/groups'].some(suffix=>path===`/api/series/${seriesId}${suffix}`)){
+      let subject=null;try{subject=JSON.parse(Buffer.from((response.request().headers().authorization||'').replace(/^Bearer /,'').split('.')[1],'base64url')).sub||null;}catch{}
+      privateRefusals.push({url:response.url(),status:404,method:'GET',subject});
+    }
+  });
   await login(owner);await page.evaluate(async()=>{await navigator.serviceWorker.ready;});await page.reload({waitUntil:'networkidle2'});
   check('real service worker controls the initial app',await page.evaluate(()=>!!navigator.serviceWorker.controller));
   const first=await upload(1,1);seriesId=first.seriesId;completedBookId=first.bookId;
@@ -102,10 +109,13 @@ try{
   const switched=page.waitForResponse(response=>new URL(response.url()).pathname==='/auth/switch'&&response.request().method()==='POST');
   const restored=page.waitForResponse(response=>new URL(response.url()).pathname==='/auth/refresh'&&response.status()===200);
   void switched.catch(()=>{});void restored.catch(()=>{});
-  await page.locator('[data-topbar] [aria-label="You"]').click();await clickText('Switch profile');await clickText(other.display_name||other.displayName||`Offline profile ${nonce}`,'[data-switch-profile]');
+  await page.locator('[data-topbar] [aria-label="You"]').click();await clickText('Switch profile');switchStarted=true;await clickText(other.display_name||other.displayName||`Offline profile ${nonce}`,'[data-switch-profile]');
   const accepted=await switched;assert.equal(accepted.status(),200);assert.equal((await accepted.json()).user.id,other.id);
-  await page.waitForFunction(()=>window.__offlineRaceDocument===undefined,{timeout:30000});await page.waitForSelector('[data-topbar]',{visible:true});assert.equal((await(await restored).json()).user.id,other.id);
+  await page.waitForFunction(()=>window.__offlineRaceDocument===undefined,{timeout:30000});await page.waitForSelector('[data-topbar]',{visible:true});const bSession=await(await restored).json();assert.equal(bSession.user.id,other.id);effectiveBVerified=true;
   check('real profile switch installs B only in a fresh document',true);
+  const denied=await page.evaluate(async({path,token})=>{const response=await fetch(path,{headers:{authorization:`Bearer ${token}`}});return{status:response.status,data:await response.json()};},{path:`/api/series/${seriesId}`,token:bSession.accessToken});
+  race.directBRefusal=denied;
+  check('verified B is denied the direct private series ID without receiving private data',denied.status===404&&JSON.stringify(denied.data)===JSON.stringify({error:'series not found'}));
   holdResponse=false;try{await cdp.send('Fetch.continueRequest',{requestId:held.requestId});race.release='continued';}catch(error){race.release='canceled with old document';race.releaseError=error.message;}
   await cdp.send('Fetch.disable').catch(()=>{});await page.setBypassServiceWorker(false);await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   const after=await records();race.recordsAfterSwitch=after;
@@ -125,6 +135,10 @@ finally{
   await browser?.close();
   if(seriesId&&ownerToken)try{for(const action of ['remove','delete']){const response=await raw(`/api/series/${seriesId}/private-management`,{token:ownerToken,method:'POST',body:{action,...(action==='delete'?{confirmed:true}:{})}});assert.equal(response.status,200,`fixture content cleanup ${action}: ${JSON.stringify(response.data)}`);}}catch(error){failures.push(error.message);}
   for(const account of [...accounts].reverse())try{const response=await raw('/api/admin/users/'+account.id,{method:'DELETE'});assert.equal(response.status,200,'fixture account cleanup');}catch(error){failures.push(error.message);}
-  const result={base,image:process.env.E2E_IMAGE||null,checks,failures,consoleErrors,serverErrors,expectedNetwork,race,fixtures:{owner:owner?.id,other:other?.id,seriesId,completedBookId,pendingBookId}};
+  const observedConsoleErrors=[...consoleErrors];
+  for(let i=consoleErrors.length-1;i>=0;i--){const entry=consoleErrors[i];
+    if(effectiveBVerified&&/status of 404/.test(entry)&&privateRefusals.some(response=>response.subject===other.id&&entry.endsWith(' '+response.url))){expectedNetwork.push('verified B private-ID refusal: '+entry.split(' ').at(-1));consoleErrors.splice(i,1);}
+  }
+  const result={base,image:process.env.E2E_IMAGE||null,checks,failures,consoleErrors,observedConsoleErrors,serverErrors,expectedNetwork,privateRefusals,effectiveBVerified,race,fixtures:{owner:owner?.id,other:other?.id,seriesId,completedBookId,pendingBookId}};
   writeFileSync(`${out}/result.json`,JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({checks:checks.length,passed:checks.filter(check=>check.pass).length,failures,consoleErrors,serverErrors}));process.exitCode=failures.length||consoleErrors.length||serverErrors.length?1:0;
 }

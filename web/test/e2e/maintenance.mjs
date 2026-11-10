@@ -96,6 +96,24 @@ await new Promise((resolve) => {
     resolve();
   });
 });
+// Account/locale and interrupted-download races each need a clean document, worker and IndexedDB.
+// They forward real responses; targeted worker bypass is confined to their delayed asset/response step.
+for (const [script, directory, label] of [
+  ['localeSessionWalk.mjs', 'locale-session', 'Account-owned locale and real delayed dictionary acceptance'],
+  ['offlineAccountRaceWalk.mjs', 'offline-race', 'Interrupted private download across an actual account switch'],
+]) {
+  await new Promise((resolve) => {
+    const child = spawn(process.execPath, [fileURLToPath(new URL(`./${script}`, import.meta.url))], {
+      env: { ...process.env, BASE: base, OUT: `${out}/${directory}` }, stdio: 'inherit',
+    });
+    child.once('error', (error) => { bad(`${label} could not start: ${error.message}`); resolve(); });
+    child.once('close', (code, signal) => {
+      if (code === 0) ok(label);
+      else bad(`${label} failed (${signal || code})`);
+      resolve();
+    });
+  });
+}
 const result = { failures, consoleErrors, serverErrors };
 writeFileSync(`${out}/result.json`, JSON.stringify(result, null, 2) + '\n');
 console.log(JSON.stringify(result));
