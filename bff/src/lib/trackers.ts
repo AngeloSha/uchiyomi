@@ -13,7 +13,8 @@
 import { q, one } from './db';
 import { seal, open as unseal } from './secretbox';
 import { withGate } from './gate';
-import { ADAPTERS, PROVIDERS, verdictOf, type Provider, type PushStatus, type SeriesState } from './trackerProviders';
+import { ADAPTERS, PROVIDERS, verdictOf, type Provider, type PushStatus, type SeriesState, type TrackerAdapter } from './trackerProviders';
+import { viewCtxFor, seriesVisible } from './visibility';
 import { ghostsEnabled, ghostNumbers } from './komgaGhosts';
 import { continuousRun, marksFor, mergeRun, realRows } from './listingProgress';
 import { noticeShown } from './noticeChapters';
@@ -23,6 +24,61 @@ import { incognitoOn } from './incognito';
 import { isRateLimit } from './anilistLimit';
 import { RATE_LIMITED, isRateLimitedError } from './trackerPace';
 export type { Provider } from './trackerProviders';
+
+/** Imports retain private requirements without sending anything to the external account. */
+export async function rememberTrackerPrivacy(userId: string, provider: Provider, externalId: string, isPrivate = true): Promise<void> {
+  if (!isPrivate) return; // Never infer permission to make an external entry public.
+  await q(`INSERT INTO tracker_entry_privacy(user_id,provider,external_id) VALUES($1,$2,$3)
+    ON CONFLICT(user_id,provider,external_id) DO UPDATE SET required_private=true,updated_at=now()`, [userId,provider,externalId]);
+}
+export async function trackerPrivateRequired(userId: string, provider: Provider, externalId: string): Promise<boolean> {
+  const row = await one<{ required: boolean }>(`SELECT
+    EXISTS(SELECT 1 FROM tracker_entry_privacy WHERE user_id=$1 AND provider=$2 AND external_id=$3 AND required_private)
+    OR EXISTS(SELECT 1 FROM series_trackers t JOIN lib_series s ON s.id=t.series_id
+      WHERE t.provider=$2 AND t.external_id=$3 AND s.is_private AND s.owner_user_id=$1 AND s.merged_into IS NULL)
+    AS required`, [userId,provider,externalId]);
+  return row?.required === true;
+}
+async function markPrivateApplied(userId:string,provider:Provider,externalId:string):Promise<void> {
+  await q(`UPDATE tracker_entry_privacy SET sync_state='applied',last_error=NULL,updated_at=now()
+    WHERE user_id=$1 AND provider=$2 AND external_id=$3`,[userId,provider,externalId]);
+}
+async function protectPrivateEntry(userId: string, provider: Provider, externalId: string, token: string, adapter: TrackerAdapter): Promise<{ allowed: boolean; required: boolean }> {
+  const required = await trackerPrivateRequired(userId,provider,externalId);
+  if (!required) return { allowed:true,required:false };
+  await rememberTrackerPrivacy(userId,provider,externalId);
+  try {
+    if (!adapter.setPrivate) throw new Error('This tracker cannot guarantee private entries; synchronization was withheld.');
+    const state = await adapter.seriesState(token,externalId);
+    // A missing entry is created atomically private by setProgress, never briefly published.
+    if (state.entry && !state.entry.private && await adapter.setPrivate(token,externalId) !== true) throw new Error('Private entry was not confirmed');
+    if (state.entry) await q(`UPDATE tracker_entry_privacy SET sync_state='applied',last_error=NULL,updated_at=now()
+      WHERE user_id=$1 AND provider=$2 AND external_id=$3`,[userId,provider,externalId]);
+    return {allowed:true,required:true};
+  } catch {
+    const message = adapter.setPrivate ? 'Could not confirm private entry; synchronization was withheld.' : 'This tracker cannot guarantee private entries; synchronization was withheld.';
+    await q(`UPDATE tracker_entry_privacy SET sync_state='error',last_error=$4,updated_at=now()
+      WHERE user_id=$1 AND provider=$2 AND external_id=$3`,[userId,provider,externalId,message]);
+    await markError(userId,provider,message);
+    return {allowed:false,required:true};
+  }
+}
+/** Privacy-only synchronization is independent of chapter floors and planning preferences. */
+export async function syncSeriesPrivacy(userId: string, seriesId: string): Promise<void> {
+  if (!(await seriesVisible(seriesId,await viewCtxFor(userId)))) return;
+  const rows = await q<{provider:Provider;external_id:string;access_token:string;expires_at:string|null}>(`SELECT t.provider,t.external_id,c.access_token,c.expires_at
+    FROM series_trackers t JOIN user_trackers c ON c.provider=t.provider AND c.user_id=$1 AND c.enabled WHERE t.series_id=$2`,[userId,seriesId]);
+  for (const row of rows) {
+    const adapter = ADAPTERS[row.provider];
+    if (!adapter || !(await trackerPrivateRequired(userId,row.provider,row.external_id))) continue;
+    if (row.expires_at && new Date(row.expires_at).getTime()<Date.now()) continue;
+    const token=unseal(row.access_token);
+    if (!token) continue;
+    await withGate(`tracker:${userId}:${row.provider}`, async()=> {
+      if (await seriesVisible(seriesId,await viewCtxFor(userId))) await protectPrivateEntry(userId,row.provider,row.external_id,token,adapter);
+    },{concurrency:1,minGapMs:laneGapMs(row.provider)});
+  }
+}
 
 
 export interface TrackerStatus {
@@ -359,6 +415,8 @@ export function pushStatus(chapters: number, s: SeriesState, opts: { lower?: boo
  * its own high-water mark, and its own gate lane. `lower` names the one provider a resync may take DOWN.
  */
 export async function pushSeriesProgress(userId: string, seriesId: string, opts: { lower?: Provider } = {}): Promise<void> {
+  if (!(await seriesVisible(seriesId, await viewCtxFor(userId)))) return;
+  await syncSeriesPrivacy(userId,seriesId);
   const conns = await q<{ provider: Provider; access_token: string; expires_at: string | null }>(
     `SELECT provider, access_token, expires_at FROM user_trackers
       WHERE user_id = $1 AND enabled = true`,
@@ -449,11 +507,17 @@ async function pushOne(
   // quota instead (v0.73.0, lib/anilistLimit.ts), which every user's pushes and every other AniList job share.
   await withGate(`tracker:${userId}:${conn.provider}`, async () => {
     try {
+      if (!(await seriesVisible(seriesId,await viewCtxFor(userId)))) return;
+      const protection=await protectPrivateEntry(userId,conn.provider,link.external_id,token,adapter);
+      if (!protection.allowed) return;
       // What the service holds first (v0.61.2, #201): whether the series has ended, its chapter count, and this
       // account's entry -- pushStatus decides from those, never from the chapters on this server alone.
       const state = await adapter.seriesState(token, link.external_id);
       const status = pushStatus(chapters, state, { lower });
-      if (status) await adapter.setProgress(token, link.external_id, chapters, status, state);
+      if (status) {
+        await adapter.setProgress(token, link.external_id, chapters, status, state, protection.required ? {private:true} : undefined);
+        if (protection.required) await markPrivateApplied(userId,conn.provider,link.external_id);
+      }
       await q('UPDATE user_trackers SET last_sync_at = now(), last_error = NULL WHERE user_id=$1 AND provider=$2',
         [userId, conn.provider]);
       // The service is level or ahead and nothing was sent: no floor to raise, nothing this app said.
@@ -543,6 +607,8 @@ export async function planOnAddWanted(userId: string): Promise<boolean> {
  * alone" in planOnAdd.int.test.ts sees the planned status sent.
  */
 export async function planSeriesOnAdd(userId: string, seriesId: string): Promise<void> {
+  if (!(await seriesVisible(seriesId,await viewCtxFor(userId)))) return;
+  await syncSeriesPrivacy(userId,seriesId);
   if (!(await planOnAddWanted(userId))) return;
   if (await incognitoOn(userId)) return;
   const conns = await q<{ provider: Provider; access_token: string; expires_at: string | null }>(
@@ -575,9 +641,13 @@ async function planOne(
   }
   await withGate(`tracker:${userId}:${conn.provider}`, async () => {
     try {
+      if (!(await seriesVisible(seriesId,await viewCtxFor(userId)))) return;
+      const protection=await protectPrivateEntry(userId,conn.provider,link.external_id,token,adapter);
+      if (!protection.allowed) return;
       const state = await adapter.seriesState(token, link.external_id);
       if (state.entry) return; // on their list already, in whatever state they put it
-      await adapter.setProgress(token, link.external_id, 0, 'planning', state);
+      await adapter.setProgress(token, link.external_id, 0, 'planning', state, protection.required ? {private:true} : undefined);
+      if (protection.required) await markPrivateApplied(userId,conn.provider,link.external_id);
       await q('UPDATE user_trackers SET last_sync_at = now(), last_error = NULL WHERE user_id=$1 AND provider=$2',
         [userId, conn.provider]);
     } catch (e) {

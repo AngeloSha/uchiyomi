@@ -518,6 +518,8 @@ test('merge: marks carry to the survivor, the earliest time wins, and the chapte
   await q(`INSERT INTO listing_progress (user_id, series_id, number, completed_at) VALUES ($1,$2,4,$3)`, [users[0], A, tA]);
   await q(`INSERT INTO listing_progress (user_id, series_id, number, completed_at) VALUES ($1,$2,5,$3)`, [users[0], A, tLate]);
   await q(`INSERT INTO listing_progress (user_id, series_id, number, completed_at) VALUES ($1,$2,5,$3)`, [users[1], A, tA]);
+  await q('UPDATE listing_progress SET is_private=true,incognito=true WHERE series_id=$1',[A]);
+  await q('UPDATE listing_progress SET incognito=true WHERE series_id=$1 AND number=4',[B]);
   await q(`UPDATE server_settings SET komga_ghost_chapters = true WHERE id = 1`);
   try {
     assert.equal((await readProgressV2(SYSTEM_CTX, users[0], B))!.lastReadContinuousNumberSort, 5, 'before: five ticked ghosts');
@@ -531,6 +533,9 @@ test('merge: marks carry to the survivor, the earliest time wins, and the chapte
     assert.equal(new Date(mine[1].completed_at).getTime(), tB.getTime(), 'the earlier of the two marks on 5: the survivor\'s own');
     assert.deepEqual(marks.filter((m) => m.user_id === users[1]).map((m) => Number(m.number)), [5], "the other member's mark carried too");
     assert.equal(await rowsFor('listing_progress', 'series_id', [A]), 0, 'nothing left under the absorbed id');
+    assert.deepEqual(await q('SELECT is_private,incognito FROM listing_progress WHERE user_id=$1 AND series_id=$2 ORDER BY number',[users[0],B]),
+      [{is_private:true,incognito:true},{is_private:true,incognito:false}],
+      'merged ghost marks OR historical privacy and retain independent Incognito claims');
 
     const rp = await q<{ book_id: string; completed: boolean; updated_at: Date }>(
       `SELECT book_id, completed, updated_at FROM read_progress WHERE user_id = $1 AND series_id = $2 ORDER BY book_id`, [users[0], B]);
@@ -693,6 +698,27 @@ test('every table that names a series or a book is one the purge covers', { skip
   const uncovered = [...need].filter((t) => !views.has(t) && !covered.has(t));
   assert.deepEqual(uncovered, [], `forgetSeries does not purge: ${uncovered.join(', ')} -- add it to the table lists in libraryAdmin.ts`);
   assert.ok(need.size >= 20, `the schema probe found only ${need.size} tables; it is not looking at the right database`);
+});
+
+test('forget erases only its external document mappings, estimates and sync cursors', { skip }, async () => {
+  await series(S,'External forgotten',{deleted:true});await series(O,'External retained');
+  await book('b_fg_1',S,1,{pruned:'deleted'});await book('b_fg_o1',O,1);
+  for(const [sid,bid,doc]of [[S,'b_fg_1','0'.repeat(32)],[O,'b_fg_o1','1'.repeat(32)]]){
+    await q(`INSERT INTO koreader_hashes(book_id,signature,digest) VALUES($1,'fixture',$2)`,[bid,doc]);
+    await q(`INSERT INTO koreader_progress(user_id,document,book_id,progress,percentage,device) VALUES($1,$2,$3,'1',0.1,'reader')`,[users[0],doc,bid]);
+    await q(`INSERT INTO opds_estimated_bookmarks(user_id,book_id,page) VALUES($1,$2,1)`,[users[1],bid]);
+    await q(`INSERT INTO external_sync_baselines(user_id,origin,scope_key,cursor) VALUES($1,'komga',$2,1),($1,'koreader',$3,1)`,[users[0],sid,doc]);
+  }
+  const result=await admin.forgetSeries(S);assert.equal(result.ok,true);
+  assert.equal(result.users,2,'explicit and inferred personal positions count as erased personal data');
+  for(const table of ['koreader_hashes','koreader_progress','opds_estimated_bookmarks']){
+    assert.equal(await rowsFor(table,'book_id',['b_fg_1']),0,table);
+    assert.equal(await rowsFor(table,'book_id',['b_fg_o1']),1,'unrelated '+table+' retained');
+    assert.equal(result.rowsByTable[table],1);
+  }
+  assert.deepEqual((await q('SELECT scope_key FROM external_sync_baselines WHERE user_id=$1 ORDER BY scope_key',[users[0]])).map((r:any)=>r.scope_key),
+    ['1'.repeat(32),O].sort(),'unrelated protocol cursors retained');
+  await q('DELETE FROM external_sync_baselines WHERE user_id=$1',[users[0]]);
 });
 
 test('the assertion leaves the transaction by throwing, so a trip rolls the per-book deletes back', () => {

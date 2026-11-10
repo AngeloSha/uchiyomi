@@ -535,7 +535,7 @@ function scrubbed<R extends Scrubbable>(r: R, named: ReadonlySet<string>): R {
   const keep = (l: Said): boolean => !TITLED.has(l.code) || shown(l.params?.seriesIds);
   return {
     ...r,
-    ...(r.current ? { current: shown(r.current.seriesIds) ? r.current : { ...r.current, title: undefined } } : {}),
+    ...(r.current ? { current: shown(r.current.seriesIds) ? r.current : { ...r.current, title: undefined, seriesIds:undefined } } : {}),
     ...(r.log ? { log: r.log.filter(keep) } : {}),
     ...(r.summary ? { summary: { ...r.summary, done: r.summary.done.map((d) => (d.items ? { ...d, items: d.items.filter(keep) } : d)) } } : {}),
   };

@@ -1,3 +1,4 @@
+import { sameContentScope, samePrivacyDomainSql } from './contentScope';
 // Language editions of one work (v0.52.0, #72): Blue Lock in English and Blue Lock in Spanish as two series, each
 // with its own folder, sources, chapters and reading progress, linked by lib_series.work_id so the Library shows
 // one card for both, the series page and the reader switch between them, and a Komga or OPDS client can tell them
@@ -55,10 +56,10 @@ export async function linkEdition(seriesId: string, opts: { of: string; lang: st
   if (!lang || seriesId === opts.of) return 'gone';
   try {
     return await tx(async (qq) => {
-      const [o] = await qq<{ lang: string | null; work_id: string | null; source_id: string | null; deleted_at: string | null; merged_into: string | null }>(
-        'SELECT lang, work_id, source_id, deleted_at, merged_into FROM lib_series WHERE id = $1 FOR UPDATE', [opts.of]);
-      const [s] = await qq<{ work_id: string | null }>('SELECT work_id FROM lib_series WHERE id = $1 FOR UPDATE', [seriesId]);
-      if (!o || !s || o.merged_into || o.deleted_at) return 'gone' as const;
+      const [o] = await qq<{ lang: string | null; work_id: string | null; source_id: string | null; deleted_at: string | null; merged_into: string | null; library_id: string; owner_user_id: string | null; is_private: boolean }>(
+        'SELECT lang, work_id, source_id, deleted_at, merged_into, library_id, owner_user_id, is_private FROM lib_series WHERE id = $1 FOR UPDATE', [opts.of]);
+      const [s] = await qq<{ work_id: string | null; library_id: string; owner_user_id: string | null; is_private: boolean }>('SELECT work_id,library_id,owner_user_id,is_private FROM lib_series WHERE id = $1 FOR UPDATE', [seriesId]);
+      if (!o || !s || o.merged_into || o.deleted_at || !sameContentScope(o,s)) return 'gone' as const;
       const workId = o.work_id ?? randomUUID();
       const ofLang = canonLang(o.lang) ?? canonLang(opts.ofLang) ?? effectiveLang(null, o.source_id);
       await qq('UPDATE lib_series SET work_id = $2, lang = $3 WHERE id = $1', [opts.of, workId, ofLang]);
@@ -90,6 +91,7 @@ export async function copyRating(qq: Qq, from: string, to: string[]): Promise<vo
     `INSERT INTO series_overrides (series_id, age_rating, adult_exempt)
      SELECT t, o.age_rating, o.adult_exempt FROM series_overrides o, unnest($2::text[]) AS t
       WHERE o.series_id = $1 AND (o.age_rating IS NOT NULL OR o.adult_exempt IS NOT NULL)
+        AND EXISTS(SELECT 1 FROM lib_series scope_from,lib_series scope_to WHERE scope_from.id=$1 AND scope_to.id=t AND ${samePrivacyDomainSql('scope_from','scope_to')})
      ON CONFLICT (series_id) DO UPDATE SET
        age_rating = COALESCE(EXCLUDED.age_rating, series_overrides.age_rating),
        adult_exempt = COALESCE(EXCLUDED.adult_exempt, series_overrides.adult_exempt),
@@ -155,7 +157,8 @@ export async function editionInfo(id: string, ctx: ViewCtx, userId: string | nul
               WHERE rp.user_id = ${uid} AND rp.series_id = s.id AND rp.completed
                 AND ${noticeShown('s', 'b', 'ov')}) AS last_read
        FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
-      WHERE s.work_id = (SELECT w.work_id FROM lib_series w WHERE w.id = ${me}) AND ${visible('s', ctx, p)}
+      WHERE s.work_id = (SELECT w.work_id FROM lib_series w WHERE w.id = ${me})
+        AND EXISTS(SELECT 1 FROM lib_series scope_anchor WHERE scope_anchor.id=${me} AND ${samePrivacyDomainSql('s','scope_anchor')}) AND ${visible('s', ctx, p)}
       ORDER BY s.created_at, s.id`,
     p.values as any[],
   );
@@ -180,7 +183,7 @@ export async function editionFollowing(id: string, sourceId: string, ctx: ViewCt
   const me = p.add(id);
   const rows = await q<{ id: string; lang: string | null; source_id: string | null }>(
     `SELECT s.id, s.lang, s.source_id FROM lib_series s
-      WHERE s.work_id = (SELECT w.work_id FROM lib_series w WHERE w.id = ${me}) AND s.id <> ${me} AND ${visible('s', ctx, p)}
+      WHERE s.work_id = (SELECT w.work_id FROM lib_series w WHERE w.id = ${me}) AND s.id <> ${me} AND EXISTS(SELECT 1 FROM lib_series scope_anchor WHERE scope_anchor.id=${me} AND ${samePrivacyDomainSql('s','scope_anchor')}) AND ${visible('s', ctx, p)}
       ORDER BY s.created_at, s.id`,
     p.values as any[],
   );
@@ -203,7 +206,7 @@ export async function editionLabels(ids: readonly string[], ctx: ViewCtx): Promi
   const rows = await q<{ id: string; lang: string | null; source_id: string | null }>(
     `SELECT s.id, s.lang, s.source_id FROM lib_series s
       WHERE s.id = ANY(${arr}) AND s.work_id IS NOT NULL
-        AND EXISTS (SELECT 1 FROM lib_series o WHERE o.work_id = s.work_id AND o.id <> s.id AND ${visible('o', ctx, p)})`,
+        AND EXISTS (SELECT 1 FROM lib_series o WHERE o.work_id = s.work_id AND o.id <> s.id AND ${samePrivacyDomainSql('s','o')} AND ${visible('o', ctx, p)})`,
     p.values as any[],
   ).catch(() => [] as Array<{ id: string; lang: string | null; source_id: string | null }>);
   const out = new Map<string, string>();
@@ -227,6 +230,7 @@ export async function workRows(id: string, qq: Qq = q): Promise<WorkRow[]> {
     `SELECT s.id, COALESCE(o.title, s.title) AS title, s.lang, s.source_id, (s.deleted_at IS NOT NULL) AS hidden
        FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
       WHERE s.merged_into IS NULL
+        AND EXISTS(SELECT 1 FROM lib_series scope_anchor WHERE scope_anchor.id=$1 AND ${samePrivacyDomainSql('s','scope_anchor')})
         AND (s.id = $1 OR (s.work_id IS NOT NULL AND s.work_id = (SELECT w.work_id FROM lib_series w WHERE w.id = $1)))
       ORDER BY s.created_at, s.id`,
     [id],

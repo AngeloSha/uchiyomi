@@ -15,7 +15,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, ApiError } from '@/lib/api';
+import { api, ApiError, getCurrentUser } from '@/lib/api';
 import { revealed } from '@/lib/adult';
 import { useAuth } from '@/lib/auth';
 import { useToast } from '@/components/Toast';
@@ -24,6 +24,7 @@ import { Img, ProgressBar } from '@/components/ui';
 import { SourceIcon } from '@/components/SourcePicker';
 import { sourceCover } from '@/components/cards';
 import { ImportMatchSheet } from '@/components/ImportMatchSheet';
+import { ContentScopePicker, useContentScope } from '@/components/ContentScopePicker';
 import { IcChevronLeft } from '@/components/icons';
 import { relativeTime } from '@/lib/format';
 import { useLayer } from '@/lib/layers';
@@ -34,10 +35,11 @@ import { useTrackers, usableTrackers, brokenTrackers } from '@/lib/trackerHealth
 import {
   needsAttention, confidenceLabel, confidenceColor, matchTitleDiffers, matchedViaAlt, openBatches, batchStateLabel, batchOriginLabel,
   runStatusLabel, runStatusColor, linkedCount, linkedLine, truncatedWords, sameSourcePair, alreadyImported,
-  type ImportBatch, type ImportBatchSummary, type ImportCandidate, type ImportOrigin,
+  filterImportRows, importRowState, selectableImport, readyImport, trackerProgressLine, readImportBackup,
+  type ImportFilter, type ImportBatch, type ImportBatchSummary, type ImportCandidate, type ImportOrigin,
 } from '@/lib/importBatch';
 
-type Filter = 'all' | 'attention' | 'skipped';
+type Filter = ImportFilter;
 
 /**
  * The tracker's list buckets, in the order the checkboxes show them, each with its read-state word.
@@ -85,8 +87,9 @@ const NOT_CONNECTED = () =>
  * a tab away from it; the tab alone opened the right tab with the card ~430 px below the fold on a phone.
  * (It was `?tab=Reading` until v0.39.0 folded that tab's trackers into Connections.)
  */
-function TrackerIntake({ starting, onStart }: {
+function TrackerIntake({ starting, onStart, canStart }: {
   starting: boolean;
+  canStart: boolean;
   onStart: (tracker: string, statuses: ListStatus[]) => void;
 }) {
   const { data, isPending } = useTrackers({ staleTime: 30_000 });
@@ -137,7 +140,7 @@ function TrackerIntake({ starting, onStart }: {
                 {tr(s.label)}
               </label>
             ))}
-            <button type="button" onClick={() => sel && onStart(sel.provider, chosen)} disabled={starting || !sel || !chosen.length}
+            <button type="button" onClick={() => sel && onStart(sel.provider, chosen)} disabled={starting || !canStart || !sel || !chosen.length}
               className="btn-ghost ms-auto px-3 py-1 text-xs disabled:opacity-50">
               {starting ? tr('Starting…') : tr('Load list')}
             </button>
@@ -174,7 +177,7 @@ function OpenImports({ batches, onOpen }: { batches: ImportBatchSummary[]; onOpe
                   <span className="block truncate text-sm text-fog-100">{batchOriginLabel(b.origin, b.tracker)} · {counts}</span>
                   {/* `stale` is the list route's word for "resolving, and nobody is": after a restart the raw
                       state read "Matching… 12/40" on the intake card while nothing was matching. */}
-                  <span className="block truncate text-[11px] text-fog-500">{b.stale ? tr('Interrupted — resume') : batchStateLabel(b.state)} · {relativeTime(b.created_at)}</span>
+                  <span className="block truncate text-[11px] text-fog-500">{b.canContinue ? tr('More titles to review') : b.stale ? tr('Interrupted — resume') : batchStateLabel(b.state)} · {relativeTime(b.created_at)}</span>
                 </span>
                 <span className="chip shrink-0 text-xs">{tr('Open')}</span>
               </button>
@@ -186,11 +189,11 @@ function OpenImports({ batches, onOpen }: { batches: ImportBatchSummary[]; onOpe
   );
 }
 
-function IntakeCard({ backupRef, mdUrl, setMdUrl, pasted, setPasted, starting, open, onOpen, onFile, onMangadex, onPaste, onTracker }: {
+function IntakeCard({ backupRef, mdUrl, setMdUrl, pasted, setPasted, starting, canStart, open, onOpen, onFile, onMangadex, onPaste, onTracker }: {
   backupRef: React.RefObject<HTMLInputElement | null>;
   mdUrl: string; setMdUrl: (v: string) => void;
   pasted: string; setPasted: (v: string) => void;
-  starting: boolean;
+  starting: boolean; canStart:boolean;
   open: ImportBatchSummary[];
   onOpen: (id: string) => void;
   onFile: (f: File) => void;
@@ -201,7 +204,7 @@ function IntakeCard({ backupRef, mdUrl, setMdUrl, pasted, setPasted, starting, o
   return (
     <div className="card grad-border wide p-4">
       <OpenImports batches={open} onOpen={onOpen} />
-      <TrackerIntake starting={starting} onStart={onTracker} />
+      <TrackerIntake canStart={canStart} starting={starting} onStart={onTracker} />
 
       <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Bring your library over')}</p>
       {/* Names the button that commits, not a "Continue" this page never shows -- the wording was written
@@ -213,7 +216,7 @@ function IntakeCard({ backupRef, mdUrl, setMdUrl, pasted, setPasted, starting, o
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <input ref={backupRef} type="file" accept=".tachibk,.proto.gz,.gz" className="hidden"
           onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.currentTarget.value = ''; }} />
-        <button onClick={() => backupRef.current?.click()} disabled={starting} className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-50">
+        <button onClick={() => backupRef.current?.click()} disabled={starting || !canStart} className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-50">
           {tr('Mihon / Tachiyomi backup')}
         </button>
         <span className="text-[11px] text-fog-600">{tr('or')}</span>
@@ -221,15 +224,15 @@ function IntakeCard({ backupRef, mdUrl, setMdUrl, pasted, setPasted, starting, o
             55 px beside the backup button at 390 px, showing "publi" of its placeholder. */}
         <input value={mdUrl} onChange={(e) => setMdUrl(e.target.value)} placeholder={tr('public MangaDex list link')}
           autoCapitalize="none" className="field min-w-44 flex-1" />
-        <button onClick={onMangadex} disabled={starting || !mdUrl.trim()} className="chip text-xs disabled:opacity-50">{tr('Load')}</button>
+        <button onClick={onMangadex} disabled={starting || !canStart || !mdUrl.trim()} className="chip text-xs disabled:opacity-50">{tr('Load')}</button>
       </div>
       <p className="mb-2 text-[10px] text-fog-600">
-        {tr('A .tachibk backup stays on your server — only each entry\'s title, its source and its address on that source are read.')}
+        {tr('A .tachibk backup stays on your server. Titles, source addresses, tracker links, progress and privacy are read. Passwords and tokens are not imported.')}
       </p>
 
       <textarea value={pasted} onChange={(e) => setPasted(e.target.value)} rows={4}
         placeholder={tr('…or paste titles, one per line')} className="field resize-y" />
-      <button onClick={onPaste} disabled={starting || !pasted.trim()} className="btn-accent mt-2 w-full py-2 text-sm disabled:opacity-50">
+      <button onClick={onPaste} disabled={starting || !canStart || !pasted.trim()} className="btn-accent mt-2 w-full py-2 text-sm disabled:opacity-50">
         {starting ? tr('Starting…') : tr('Start matching')}
       </button>
     </div>
@@ -272,7 +275,7 @@ function ResolvingCard({ batch, note, onResume }: { batch: ImportBatch; note: st
 }
 
 /** A row can be selected for bulk import only while it has a match and has not already been run. */
-const isReady = (c: ImportCandidate): boolean => (c.decision === 'auto' || c.decision === 'manual') && !!c.match_source_id && !c.status;
+const isReady = readyImport;
 
 function ReviewRow({ c, sourceName, selected, onToggle, onEdit }: {
   c: ImportCandidate;
@@ -285,17 +288,20 @@ function ReviewRow({ c, sourceName, selected, onToggle, onEdit }: {
   const ready = isReady(c);
   const attention = needsAttention(c);
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-ink-800 bg-ink-900/40 p-2.5">
-      {ready ? (
+    <div data-import-row={c.id} className="flex items-center gap-3 rounded-xl border border-ink-800 bg-ink-900/40 p-2.5">
+      {selectableImport(c) ? (
         <input type="checkbox" checked={selected} onChange={() => onToggle(c.id)}
-          className="size-4 shrink-0 rounded border-ink-600 bg-ink-800 accent-accent" aria-label={tr('Select for import')} />
+          className="size-4 shrink-0 rounded border-ink-600 bg-ink-800 accent-accent" aria-label={tr('Select title')} />
       ) : (
         <span className="size-4 shrink-0" aria-hidden />
       )}
       <Img src={c.match_cover ? sourceCover(c.match_source || undefined, c.match_cover) : ''} alt=""
         fallbackSrc={c.match_cover || undefined} className="h-14 w-10 shrink-0 rounded" />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm text-fog-100">{c.backup_title}</p>
+        <p className="truncate text-sm text-fog-100" dir="auto">{c.backup_title}</p>
+        {c.content_scope?.visibility==='private' && <span className="text-[11px] text-accent">{tr('Private library')}</span>}
+        {(c.tracker_links?.length ? c.tracker_links : c.tracker && c.progress != null ? [{provider:c.tracker,progress:c.progress}] : []).map((link,i) =>
+          <p key={i} className="text-[11px] text-fog-500">{trackerProgressLine(link.provider,link.progress,!c.tracker)}</p>)}
         {/* What the title was matched TO, on every matched row. Without it "Solo Leveling · MangaDex · close
             match" read the same whether the pick was Solo Leveling or Solo Leveling: Ragnarok, and the only
             hint was a 40-px cover -- a wrong pick was invisible without opening the row. Dim when it is the
@@ -340,18 +346,19 @@ function ReviewRow({ c, sourceName, selected, onToggle, onEdit }: {
           <p className="text-[11px] text-amber-400">{tr('No match found')}</p>
         )}
       </div>
-      {!c.status && <button onClick={() => onEdit(c)} className="chip shrink-0 text-xs">{tr('Change')}</button>}
+      {c.ambiguous && c.decision === 'auto' && <span className="text-[11px] text-amber-300">{tr('Confirm this match')}</span>}
+      {!c.status && !c.in_library && <button onClick={() => onEdit(c)} className="chip shrink-0 text-xs">{tr('Change')}</button>}
     </div>
   );
 }
 
 function ReviewCard({
-  items, allCount, attentionCount, skippedCount, readyCount, sameSourceCount, selectedIds, note,
+  items, allCount, filterCount, attentionCount, skippedCount, readyCount, sameSourceCount, selectedIds, note,
   filter, setFilter, q, setQ, onEdit, onToggle, onSelectAll, onSelectReady, onSelectSameSource, onClearSelection, onRun, running, sourceName,
-  hideHere, setHideHere, hereCount,
+  hereCount, sourceFilter, setSourceFilter, sourceOptions, onSkip, importCount,
 }: {
   items: ImportCandidate[];
-  allCount: number; attentionCount: number; skippedCount: number; readyCount: number; sameSourceCount: number;
+  allCount: number; filterCount:number; attentionCount: number; skippedCount: number; readyCount: number; sameSourceCount: number;
   note: string | null;
   selectedIds: Set<string>;
   filter: Filter; setFilter: (f: Filter) => void;
@@ -365,7 +372,7 @@ function ReviewCard({
   onRun: () => void;
   running: boolean;
   sourceName: (id: string | null) => string;
-  hideHere: boolean; setHideHere: (on: boolean) => void; hereCount: number;
+  hereCount: number; sourceFilter:string; setSourceFilter:(v:string)=>void; sourceOptions:string[]; onSkip:()=>void; importCount:number;
 }) {
   // The sticky "Import selected" footer is a toolbar to the notices (lib/layers.ts): on a phone it rests on the
   // bottom nav, where a notice would otherwise sit on it -- and "Could not start the import" stays six seconds.
@@ -381,25 +388,34 @@ function ReviewCard({
       <p className="mb-3 text-[11px] text-fog-500">
         {tr('Selected titles are added to your library only — no chapters are downloaded, but each title is looked up on its source, so a long list takes a few minutes. New releases arrive through auto-update, or fetch older ones from the series page.')}
       </p>
+      <p className="mb-3 text-[11px] text-fog-500">{tr('The selected library is the default. Entries marked private by your tracker or backup stay in your private library.')}</p>
 
-      <div className="mb-2 flex flex-wrap gap-2">
-        <button onClick={() => setFilter('all')} className={`chip text-xs ${filter === 'all' ? 'chip-active' : ''}`}>{tr('All')} · {allCount}</button>
-        <button onClick={() => setFilter('attention')} className={`chip text-xs ${filter === 'attention' ? 'chip-active' : ''}`}>{tr('Needs attention')} · {attentionCount}</button>
-        <button onClick={() => setFilter('skipped')} className={`chip text-xs ${filter === 'skipped' ? 'chip-active' : ''}`}>{tr('Skipped')} · {skippedCount}</button>
-        {/* v0.51.0 (discussion #121): a long list imported again is mostly titles already here; a switch, on top of
-            the filter, leaves the titles still to decide. */}
-        {hereCount > 0 && (
-          <button onClick={() => setHideHere(!hideHere)} aria-pressed={hideHere} data-hide-imported
-            className={`chip text-xs ${hideHere ? 'chip-active' : ''}`}>{tr('Hide already imported')} · {hereCount}</button>
-        )}
+      <div className="mb-2 grid gap-2 sm:grid-cols-2">
+        <label className="text-xs text-fog-400">{tr('Match status')}
+          <select value={filter} onChange={e=>setFilter(e.target.value as Filter)} className="field mt-1 w-full" data-import-state>
+            <option value="all">{tr('All')} · {filterCount}</option>
+            <option value="attention">{tr('Needs attention')} · {attentionCount}</option>
+            <option value="same_source">{tr('same source as before')}</option><option value="exact">{tr('exact match')}</option>
+            <option value="contains">{tr('close match')}</option><option value="fuzzy">{tr('possible match')}</option>
+            <option value="manual">{tr('picked by hand')}</option><option value="skipped">{tr('Skipped')} · {skippedCount}</option>
+            <option value="owned">{tr('Already in your library')} · {hereCount}</option><option value="unmatched">{tr('No match found')}</option><option value="failed">{tr('Failed')}</option>
+          </select>
+        </label>
+        <label className="text-xs text-fog-400">{tr('Source')}
+          <select value={sourceFilter} onChange={e=>setSourceFilter(e.target.value)} className="field mt-1 w-full" data-import-source>
+            <option value="">{tr('All sources')}</option><option value="__none">{tr('No source')}</option>
+            {sourceOptions.map(id=><option key={id} value={id}>{sourceName(id)}</option>)}
+          </select>
+        </label>
       </div>
       <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tr('Filter by title…')} className="field mb-3" />
+      <p className="mb-2 text-[11px] text-fog-500">{tr('Selection applies to the current filter. Only confirmed matches can be imported.')}</p>
 
       {/* Bulk actions. "Select all" marks every row, including a skipped or still-unmatched one — Import
           selected then quietly imports only what is actually ready, so it is never a mistake to press. */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <button onClick={onSelectAll} className="chip text-xs">{tr('Select all')}</button>
-        <button onClick={onSelectReady} className="chip text-xs">{tr('Select ready to import')} · {readyCount}</button>
+        <button data-import-select-all onClick={onSelectAll} className="chip text-xs">{tr('Select all')}</button>
+        <button data-import-select-ready onClick={onSelectReady} className="chip text-xs">{tr('Select ready to import')} · {readyCount}</button>
         {/* v0.51.0 (discussion #121): the exact pairs -- each backup entry found on its own extension at its own
             address -- in one press. Only on a list that has any: a paste, a MangaDex list or a tracker never does. */}
         {sameSourceCount > 0 && (
@@ -408,6 +424,7 @@ function ReviewCard({
         {selectedIds.size > 0 && (
           <button onClick={onClearSelection} className="chip text-xs">{tr('Clear selection')}</button>
         )}
+        {selectedIds.size > 0 && <button type="button" onClick={onSkip} disabled={running} className="chip text-xs" data-import-skip>{tr('Skip selected')} · {selectedIds.size}</button>}
         <span className="ms-auto text-[11px] text-fog-500">{selectedText(selectedIds.size)}</span>
       </div>
 
@@ -419,9 +436,9 @@ function ReviewCard({
         ))}
       </div>
 
-      <div ref={footerRef} className="sticky bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-10 mt-4 lg:bottom-0 lg:pb-4">
-        <button onClick={onRun} disabled={running || selectedIds.size === 0} className="btn-accent w-full py-2.5 text-sm shadow-lift disabled:opacity-50">
-          {running ? tr('Starting…') : tr('Import selected — {n}', { n: selectedIds.size })}
+      <div ref={footerRef} className="sticky bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-10 -mx-2 mt-4 rounded-xl bg-ink-950 p-2 lg:bottom-0 lg:pb-4">
+        <button data-import-run onClick={onRun} disabled={running || importCount === 0} className="btn-accent w-full py-2.5 text-sm shadow-lift disabled:opacity-50">
+          {running ? tr('Starting…') : tr('Import selected — {n}', { n: importCount })}
         </button>
       </div>
     </div>
@@ -494,7 +511,8 @@ function RunCard({ batch, items, runIds, runTotal, note, onStartOver }: {
 function ImportWizardInner() {
   const router = useRouter();
   const params = useSearchParams();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
+  const ownerId = user?.id ?? null;
   const toast = useToast();
   const qc = useQueryClient();
 
@@ -515,12 +533,16 @@ function ImportWizardInner() {
   const [mdUrl, setMdUrl] = useState('');
   const [pasted, setPasted] = useState('');
   const [starting, setStarting] = useState(false);
+  const scope=useContentScope();
   const [intakeNote, setIntakeNote] = useState<IntakeNote | null>(null);
 
-  const start = async (body: Record<string, unknown>) => {
+  const start = async (body: Record<string, unknown>, expectedOwnerId = ownerId) => {
+    if(!expectedOwnerId || getCurrentUser() !== expectedOwnerId) return;
+    if(!body.continueFrom && !scope.ready) return;
     setStarting(true);
     try {
-      const r = await api<{ batchId: string; total: number; truncated: boolean; skippedNovels?: number; leftOver?: number | null }>('/api/admin/import/batches', { json: body });
+      const r = await api<{ batchId: string; total: number; truncated: boolean; skippedNovels?: number; leftOver?: number | null }>('/api/admin/import/batches', { json: body.continueFrom ? body : {...body,visibility:scope.visibility}, expectedOwnerId });
+      if(getCurrentUser() !== expectedOwnerId) return;
       const origin = body.origin === 'tracker' ? 'tracker' : null;
       if (r.truncated) toast(truncatedWords(r.leftOver).toast, 'info');
       setIntakeNote({ skippedNovels: r.skippedNovels ?? 0, truncated: !!r.truncated, origin, leftOver: r.leftOver ?? null });
@@ -528,6 +550,7 @@ function ImportWizardInner() {
       fromIntake.current = true;
       router.push(`/admin/import/?batch=${r.batchId}`);
     } catch (e: any) {
+      if(getCurrentUser() !== expectedOwnerId) return;
       // The tracker intake's own refusals, each in the person's words rather than the server's. A rejected
       // token is the one that needs a trip to Profile; a service that did not answer is a retry; a
       // connection dropped since the card loaded (another tab disconnected it) is the not-connected line
@@ -535,6 +558,7 @@ function ImportWizardInner() {
       let body: any = {};
       try { body = JSON.parse(e?.body || '{}'); } catch { /* not JSON */ }
       if (body.error === 'tracker_rejected') toast(tr('The tracker rejected the saved token — reconnect it under Profile'), 'error');
+      else if(body.error==='private_backend_unsupported') toast(tr('Private entries need the built-in library backend. Nothing was imported.'),'error');
       else if (body.error === 'tracker_unavailable') toast(tr('Could not read your list right now'), 'error');
       else if (body.error === 'not_connected') { qc.invalidateQueries({ queryKey: ['trackers'] }); toast(NOT_CONNECTED(), 'info'); }
       else toast(msgOf(e, tr('Could not start the import')), 'error');
@@ -543,16 +567,13 @@ function ImportWizardInner() {
   };
   const startFromTracker = (tracker: string, statuses: ListStatus[]) => start({ origin: 'tracker', tracker, statuses });
   const startFromFile = async (f: File) => {
+    const expectedOwnerId = ownerId;
+    if(!expectedOwnerId || getCurrentUser() !== expectedOwnerId) return;
     if (f.size > 10 * 1024 * 1024) { toast(tr('That file is unusually large (max ~10 MB)'), 'error'); return; }
     try {
-      const dataUrl = await new Promise<string>((res, rej) => {
-        const rd = new FileReader();
-        rd.onload = () => res(String(rd.result));
-        rd.onerror = () => rej(new Error('read'));
-        rd.readAsDataURL(f);
-      });
-      await start({ dataUrl });
-    } catch { toast(tr('Could not read that file'), 'error'); }
+      const dataUrl = await readImportBackup(f, expectedOwnerId);
+      await start({ dataUrl }, expectedOwnerId);
+    } catch { if(getCurrentUser() === expectedOwnerId) toast(tr('Could not read that file'), 'error'); }
   };
   const startFromMangadex = () => start({ mangadexList: mdUrl.trim() });
   const startFromPaste = () => {
@@ -607,7 +628,7 @@ function ImportWizardInner() {
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
   // v0.51.0 (discussion #121): Hide already imported. A view preference, so a fresh batch keeps it.
-  const [hideHere, setHideHere] = useState(false);
+  const [sourceFilter,setSourceFilter]=useState('');
   const [editing, setEditing] = useState<ImportCandidate | null>(null);
   const [running, setRunning] = useState(false);
   const [discarding, setDiscarding] = useState(false);
@@ -629,45 +650,45 @@ function ImportWizardInner() {
   useEffect(() => {
     setSelected((s) => {
       if (!s.size) return s;
-      const ready = new Set(items.filter(isReady).map((c) => c.id));
+      const ready = new Set(items.filter(selectableImport).map((c) => c.id));
       const kept = new Set([...s].filter((id) => ready.has(id)));
       return kept.size === s.size ? s : kept;
     });
   }, [items]);
 
-  const filtered = items.filter((c) => {
-    if (filter === 'attention' && !needsAttention(c)) return false;
-    if (filter === 'skipped' && c.decision !== 'skip') return false;
-    // Reintroduce by dropping this line: "Hide already imported hides the titles the library holds" in
-    // importBatch.test.ts finds the toggle wired to nothing.
-    if (hideHere && alreadyImported(c)) return false;
-    // Backup title OR matched title: a row that reads "Naruto → Boruto: Naruto Next Generations" is the
-    // one a person types "Boruto" to find, and the filter found nothing.
-    const needle = q.trim().toLowerCase();
-    if (needle && !c.backup_title.toLowerCase().includes(needle) && !(c.match_title || '').toLowerCase().includes(needle)) return false;
-    return true;
-  });
-  const attentionCount = items.filter(needsAttention).length;
-  const skippedCount = items.filter((c) => c.decision === 'skip').length;
-  const readyCount = items.filter(isReady).length;
-  const sameSourceCount = items.filter(sameSourcePair).length;
-  const hereCount = items.filter(alreadyImported).length;
+  const filtered=filterImportRows(items,filter,sourceFilter,q);
+  const sourceOptions=[...new Set(items.map(c=>c.match_source).filter((s):s is string=>!!s))];
+  const facetRows=filterImportRows(items,'all',sourceFilter,q);
+  const attentionCount = facetRows.filter(needsAttention).length;
+  const skippedCount = facetRows.filter((c) => importRowState(c) === 'skipped').length;
+  const readyCount = filtered.filter(isReady).length;
+  const sameSourceCount = filtered.filter(sameSourcePair).length;
+  const hereCount = facetRows.filter(alreadyImported).length;
   // The selection as it will be sent: only ready rows have a checkbox, so an id "Select all" put in for a
   // skipped or unmatched row is invisible on the list and must not be counted -- "8 selected" over five
   // checkboxes, then "Importing… 0/5", was the mismatch. One Set for the checkboxes, the count and /run.
-  const readyIds = new Set(items.filter(isReady).map((c) => c.id));
-  const selectedReady = new Set([...selected].filter((id) => readyIds.has(id)));
+  const readyIds = new Set(filtered.filter(isReady).map((c) => c.id));
+  const visibleIds=new Set(filtered.filter(selectableImport).map(c=>c.id));
+  const selectedVisible=new Set([...selected].filter(id=>visibleIds.has(id)));
+  const selectedReady = new Set([...selectedVisible].filter((id) => readyIds.has(id)));
 
   const resume = async () => {
     if (!batchId) return;
-    try { await api(`/api/admin/import/batches/${batchId}/resume`, { method: 'POST' }); refetch(); }
+    try { await api(`/api/admin/import/batches/${batchId}/resume`, { method: 'POST', expectedOwnerId: ownerId }); refetch(); }
     catch (e: any) { toast(msgOf(e, tr('Could not resume')), 'error'); }
   };
   const toggleSelected = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  const selectAll = () => setSelected(new Set(items.map((c) => c.id)));
-  const selectReady = () => setSelected(new Set(items.filter(isReady).map((c) => c.id)));
-  const selectSameSource = () => setSelected(new Set(items.filter(sameSourcePair).map((c) => c.id)));
+  const selectAll = () => setSelected(new Set(filtered.filter(selectableImport).map((c) => c.id)));
+  const selectReady = () => setSelected(new Set(filtered.filter(isReady).map((c) => c.id)));
+  const selectSameSource = () => setSelected(new Set(filtered.filter(sameSourcePair).map((c) => c.id)));
   const clearSelection = () => setSelected(new Set());
+  const skipSelected=async()=> {
+    if(!batchId || !selectedVisible.size) return;
+    setRunning(true);
+    try { await api(`/api/admin/import/batches/${batchId}/skip`,{method:'POST',json:{candidateIds:[...selectedVisible]},expectedOwnerId:ownerId}); setSelected(new Set()); await refetch(); }
+    catch(error) { toast(msgOf(error,tr('Could not skip selected titles')),'error'); }
+    setRunning(false);
+  };
   const runImport = async () => {
     if (!batchId || selectedReady.size === 0) return;
     // Only the ready rows among the selection go: "Select all" marks every row, and the server would drop
@@ -675,7 +696,7 @@ function ImportWizardInner() {
     const ids = items.filter((c) => selectedReady.has(c.id)).map((c) => c.id);
     setRunning(true);
     try {
-      const r = await api<{ ok: boolean; total: number }>(`/api/admin/import/batches/${batchId}/run`, { method: 'POST', json: { candidateIds: ids } });
+      const r = await api<{ ok: boolean; total: number }>(`/api/admin/import/batches/${batchId}/run`, { method: 'POST', json: { candidateIds: ids }, expectedOwnerId: ownerId });
       setRunIds(new Set(ids));
       setRunTotal(typeof r?.total === 'number' ? r.total : ids.length);
       setSelected(new Set());
@@ -685,7 +706,7 @@ function ImportWizardInner() {
   };
   const startOver = () => {
     setBatchId(null); setMdUrl(''); setPasted(''); setSelected(new Set()); setFilter('all'); setQ('');
-    setRunIds(null); setRunTotal(null); setIntakeNote(null);
+    setRunIds(null); setRunTotal(null); setIntakeNote(null); setSourceFilter('');
     qc.invalidateQueries({ queryKey: ['import-batches'] });
     router.replace('/admin/import/');
   };
@@ -707,7 +728,7 @@ function ImportWizardInner() {
     if (!batchId) return;
     setDiscardBusy(true);
     try {
-      await api(`/api/admin/import/batches/${batchId}`, { method: 'DELETE' });
+      await api(`/api/admin/import/batches/${batchId}`, { method: 'DELETE', expectedOwnerId: ownerId });
       qc.removeQueries({ queryKey: ['import-batch', batchId] });
       toast(tr('Import discarded'), 'success');
       setDiscarding(false);
@@ -742,24 +763,27 @@ function ImportWizardInner() {
           <button onClick={() => setDiscarding(true)} className="chip ms-auto shrink-0 text-xs">{tr('Discard')}</button>
         )}
       </div>
+      {batch?.content_scope && <p className="mb-3 text-xs text-fog-400">{batch.content_scope.visibility==='private' ? tr('Private library') : tr('Shared library')}</p>}
 
       {!batch ? (
-        <IntakeCard backupRef={backupRef} mdUrl={mdUrl} setMdUrl={setMdUrl} pasted={pasted} setPasted={setPasted}
-          starting={starting} open={open} onOpen={openBatch} onFile={startFromFile} onMangadex={startFromMangadex} onPaste={startFromPaste}
-          onTracker={startFromTracker} />
+        <><div className="card mb-3 p-4"><ContentScopePicker scope={scope} disabled={starting} /></div><IntakeCard backupRef={backupRef} mdUrl={mdUrl} setMdUrl={setMdUrl} pasted={pasted} setPasted={setPasted}
+          starting={starting} canStart={scope.ready} open={open} onOpen={openBatch} onFile={startFromFile} onMangadex={startFromMangadex} onPaste={startFromPaste}
+          onTracker={startFromTracker} /></>
       ) : batch.state === 'resolving' ? (
         <ResolvingCard batch={batch} note={note} onResume={resume} />
       ) : batch.state === 'review' ? (
-        <ReviewCard items={filtered} allCount={items.length} attentionCount={attentionCount} skippedCount={skippedCount}
-          readyCount={readyCount} sameSourceCount={sameSourceCount} selectedIds={selectedReady} note={note} filter={filter} setFilter={setFilter}
+        <ReviewCard items={filtered} allCount={items.length} filterCount={facetRows.length} attentionCount={attentionCount} skippedCount={skippedCount}
+          readyCount={readyCount} sameSourceCount={sameSourceCount} selectedIds={selectedVisible} note={note} filter={filter} setFilter={setFilter}
           q={q} setQ={setQ} onEdit={setEditing} onToggle={toggleSelected} onSelectAll={selectAll} onSelectReady={selectReady}
-          onSelectSameSource={selectSameSource} hideHere={hideHere} setHideHere={setHideHere} hereCount={hereCount}
+          onSelectSameSource={selectSameSource} hereCount={hereCount} sourceFilter={sourceFilter} setSourceFilter={setSourceFilter} sourceOptions={sourceOptions} onSkip={skipSelected} importCount={selectedReady.size}
           onClearSelection={clearSelection} onRun={runImport} running={running} sourceName={sourceName} />
       ) : (
-        <RunCard batch={batch} items={items} runIds={runIds} runTotal={runTotal} note={note} onStartOver={startOver} />
+        <><RunCard batch={batch} items={items} runIds={runIds} runTotal={runTotal} note={note} onStartOver={startOver} />
+        {batch.state==='done' && batch.canContinue && <button type="button" disabled={starting} className="btn-accent mt-3 w-full" data-import-continue
+          onClick={()=>void start({continueFrom:batch.id})}>{starting ? tr('Starting…') : tr('Continue with next batch')} · {batch.remainingCount ?? 0}</button>}</>
       )}
 
-      {editing && batchId && <ImportMatchSheet batchId={batchId} candidate={editing} onClose={closeEditor} />}
+      {editing && batchId && <ImportMatchSheet batchId={batchId} candidate={editing} origin={batch?.origin} onClose={closeEditor} />}
 
       {/* Never open while the match sheet is: ConfirmDialog is a z-50 Modal and the Sheet is z-60, so the
           dialog would paint under it. The Discard button lives in the page header, behind the sheet's

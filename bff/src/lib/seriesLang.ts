@@ -1,3 +1,4 @@
+import {samePrivacyDomainSql} from './contentScope';
 // The language of a series and of a source (v0.52.0), read from the database and the registry: the facts the rules
 // in lib/lang.ts are applied to. The same-language guard on every automatic follow (#123) and the editions of one
 // work (#72) both start here.
@@ -33,7 +34,7 @@ async function readLangRows(ids: readonly string[], qq: Qq): Promise<LangRow[]> 
   return qq<LangRow>(
     `SELECT s.id, s.lang, s.work_id, s.source_id,
             ARRAY(SELECT o.lang FROM lib_series o
-                   WHERE o.work_id = s.work_id AND o.id <> s.id AND o.merged_into IS NULL AND o.lang IS NOT NULL) AS siblings
+                   WHERE o.work_id = s.work_id AND o.id <> s.id AND o.merged_into IS NULL AND o.lang IS NOT NULL AND ${samePrivacyDomainSql('s','o')}) AS siblings
        FROM lib_series s WHERE s.id = ANY($1::text[])`,
     [[...ids]],
   );

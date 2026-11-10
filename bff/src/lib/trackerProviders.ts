@@ -41,7 +41,7 @@ export type PushStatus = 'reading' | 'completed' | 'rereading' | 'planning';
 export interface SeriesState {
   ended: boolean;
   total: number | null;
-  entry: { status: EntryStatus; progress: number } | null;
+  entry: { status: EntryStatus; progress: number; private?: boolean } | null;
   ref?: unknown;
 }
 
@@ -59,6 +59,7 @@ const progressOf = (v: unknown): number => Math.max(0, Math.floor(Number(v) || 0
  * lists carry light novels, which would otherwise resolve to their adaptation and be linked to the wrong work.
  */
 export interface LibraryEntry {
+  private?: boolean;
   externalId: string;
   title: string;
   altTitles: string[];
@@ -93,7 +94,7 @@ export const TRACKER_LIST_MAX = 2001;
  * cannot satisfy), and duplicated on purpose so the intake's dedupe and the matcher's scoring agree on what
  * "the same title" means. ⚠️ Change one and the other must follow.
  */
-export const normTitle = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, '');
+export const normTitle = (t: string) => t.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, '');
 
 /** A title field is only a title when something is left after trimming: MAL sends `""` for a missing English
  *  title and Kitsu sends `null`, and either would otherwise become the search term. */
@@ -170,7 +171,9 @@ export interface TrackerAdapter {
    * Push progress with the status pushStatus chose. `externalId` is whatever linkSeries stored for this provider, and
    * `state` the seriesState this push read, when there is one.
    */
-  setProgress(token: string, externalId: string, chapters: number, status: PushStatus, state?: SeriesState): Promise<void>;
+  setProgress(token: string, externalId: string, chapters: number, status: PushStatus, state?: SeriesState, options?: { private?: true }): Promise<void>;
+  /** Only adapters with verified entry-level privacy may receive private-content writes. */
+  setPrivate?(token: string, externalId: string): Promise<boolean>;
   /**
    * Read the account's own manga list, paged by our own offsets (never by following a URL the service hands
    * back) and capped at `max` entries. Throws `authFailed` on a rejected token exactly as setProgress does;
@@ -286,7 +289,7 @@ async function anilistCall(token: string, query: string, variables: Record<strin
 const ANILIST_LIST = `query($userId:Int,$statuses:[MediaListStatus],$chunk:Int,$perChunk:Int){
   MediaListCollection(userId:$userId,type:MANGA,status_in:$statuses,chunk:$chunk,perChunk:$perChunk,forceSingleCompletedList:true){
     hasNextChunk
-    lists{ isCustomList entries{ mediaId status progress score(format:POINT_10_DECIMAL) media{ id format isAdult genres title{ romaji english } synonyms } } }
+    lists{ isCustomList entries{ mediaId status progress private score(format:POINT_10_DECIMAL) media{ id format isAdult genres title{ romaji english } synonyms } } }
   }
 }`;
 const ANILIST_PER_CHUNK = 500;
@@ -308,9 +311,13 @@ const anilistFormat = (f: unknown): LibraryEntry['format'] =>
 const ANILIST_SAVE = `mutation($mediaId:Int,$progress:Int,$status:MediaListStatus){
   SaveMediaListEntry(mediaId:$mediaId, progress:$progress, status:$status){ id progress status }
 }`;
+const ANILIST_SAVE_PRIVATE = `mutation($mediaId:Int,$progress:Int,$status:MediaListStatus){
+  SaveMediaListEntry(mediaId:$mediaId, progress:$progress, status:$status, private:true){ id progress status private }
+}`;
+const ANILIST_PRIVATE_ONLY = `mutation($mediaId:Int){SaveMediaListEntry(mediaId:$mediaId,private:true){id private}}`;
 /** The series and this account's entry in one query (v0.61.2, #201): `mediaListEntry` is the token's own, null when the
  *  series is not on its list. `chapters` is null while AniList does not know the count, as for every running series. */
-const ANILIST_STATE = `query($id:Int){Media(id:$id,type:MANGA){status chapters mediaListEntry{status progress}}}`;
+const ANILIST_STATE = `query($id:Int){Media(id:$id,type:MANGA){status chapters mediaListEntry{status progress private}}}`;
 /** FINISHED and CANCELLED have ended; RELEASING, HIATUS and NOT_YET_RELEASED have more chapters to come. */
 const ANILIST_ENDED = new Set(['FINISHED', 'CANCELLED']);
 const ANILIST_PUSH: Record<PushStatus, string> = { reading: 'CURRENT', completed: 'COMPLETED', rereading: 'REPEATING', planning: 'PLANNING' };
@@ -357,6 +364,7 @@ export const anilistAdapter: TrackerAdapter = {
           seen.add(String(mediaId));
           out.push({
             externalId: String(mediaId), ...t, status,
+            ...(typeof e.private === 'boolean' ? {private:e.private} : {}),
             progress: Math.max(0, Math.floor(Number(e.progress) || 0)),
             format: anilistFormat(e.media?.format),
             ...(Number(e.score) > 0 ? { score: Number(e.score) } : {}),
@@ -378,15 +386,22 @@ export const anilistAdapter: TrackerAdapter = {
     return {
       ended: ANILIST_ENDED.has(String(m?.status)),
       total: positiveInt(m?.chapters),
-      entry: status ? { status, progress: progressOf(e.progress) } : null,
+      entry: status ? { status, progress: progressOf(e.progress), ...(typeof e.private === 'boolean' ? {private:e.private} : {}) } : null,
     };
   },
-  async setProgress(token, externalId, chapters, status) {
-    await anilistCall(token, ANILIST_SAVE, {
+  async setProgress(token, externalId, chapters, status, _state, options) {
+    const keepPrivate=options?.private === true || _state?.entry?.private === true;
+    const result = await anilistCall(token, keepPrivate ? ANILIST_SAVE_PRIVATE : ANILIST_SAVE, {
       mediaId: Number(externalId),
       progress: chapters,
       status: ANILIST_PUSH[status],
     }, PUSH_WAIT);
+    if (keepPrivate && result?.SaveMediaListEntry?.private !== true) throw new Error('AniList did not confirm private entry');
+  },
+  async setPrivate(token, externalId) {
+    const result = await anilistCall(token, ANILIST_PRIVATE_ONLY, {mediaId:Number(externalId)}, PUSH_WAIT);
+    if (result?.SaveMediaListEntry?.private !== true) throw new Error('AniList did not confirm private entry');
+    return true;
   },
 };
 

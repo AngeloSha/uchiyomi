@@ -23,6 +23,69 @@ const ALLOWED = new Map<string, string>([
   ['lib/migrate.ts', 'schema DDL and the orphan-quarantine migration, not a read path'],
 ]);
 
+/**
+ * Exact reviewed expressions, never whole route/module exemptions. Lifecycle
+ * collision checks and scoped propagation are not catalog reads. Discover's
+ * legacy shared held/count facts intentionally span shared grants; these two
+ * callers retain the actual userId so visible() still excludes other owners'
+ * private data, and nameableFor separately gates any disclosed IDs or names.
+ *
+ * Every entry must occur exactly once. A new query, broader viewer, removed
+ * scopeSql clause or duplicated copy therefore still fails this contract.
+ */
+const REVIEWED = [
+  {
+    file:'routes/admin.ts', kind:'predicate',
+    source:'WHERE s.id=${sid} AND s.work_id IS NOT NULL AND o.merged_into IS NULL AND o.deleted_at IS NULL AND ${scoped}',
+    why:'linkImportedSeries: exact scopeSql(o,authoritative AddScope) constrains sibling tracker propagation; active-row lifecycle check, not a viewer catalog',
+  },
+  {
+    file:'routes/privateLibrary.ts', kind:'predicate',
+    source:'AND (folder=$3 OR (source_id=$4 AND source_series_id=$5 AND merged_into IS NULL AND deleted_at IS NULL)) LIMIT 1',
+    why:'owner-only, leased transactional privacy move rejects occupied destinations, including rows the caller cannot browse; visible() would miss conflicts',
+  },
+  {
+    file:'routes/admin.ts', kind:'predicate',
+    source:'WHERE t.provider = ${providerParam} AND t.external_id = ANY(${ids}) AND (t.linked_by IS NOT NULL OR t.checked_at IS NOT NULL) AND s.deleted_at IS NULL AND s.merged_into IS NULL AND ${scoped}',
+    why:'seriesLinkedTo: import identity matching is confined by exact authoritative scopeSql; lifecycle excludes removed/absorbed matches',
+  },
+  {
+    file:'routes/admin.ts', kind:'predicate',
+    source:'WHERE ${linkedScope} AND s.deleted_at IS NULL AND s.merged_into IS NULL AND',
+    why:'owned import batch linked flag uses explicit per-candidate owner/private-or-shared library scope; no title/ID content is returned by this EXISTS',
+  },
+  {
+    file:'routes/admin.ts', kind:'predicate',
+    source:'SELECT s.id FROM lib_series s WHERE s.folder=${folder} AND ${scoped} AND s.deleted_at IS NULL AND s.merged_into IS NULL LIMIT 1',
+    why:'seriesIdOf: internal add result is resolved only in its exact AddScope before attaching tracker/floor provenance',
+  },
+  {
+    file:'routes/admin.ts', kind:'predicate',
+    source:'SELECT s.id FROM lib_series s WHERE s.title=${title} AND s.source=${source} AND ${scoped} AND s.deleted_at IS NULL AND s.merged_into IS NULL LIMIT 1',
+    why:'seriesIdOf duplicate fallback retains exact AddScope and excludes removed/absorbed rows; no global title-based merge is allowed',
+  },
+  {
+    file:'lib/discoverIdentity.ts', kind:'viewer',
+    source:'visibleIds(ids, {...ctx,libraryIds:null,maxAgeRating:null,hideAdultLibraries:false})',
+    why:'shared duplicate facts keep legacy scope while real caller identity remains mandatory for private ownership; disclosed IDs/names still use request nameability',
+  },
+  {
+    file:'routes/sources.ts', kind:'viewer',
+    source:"visible('s',{...vc(req),libraryIds:null,maxAgeRating:null},usedParams)",
+    why:'shared source usage counts retain legacy ranking facts while visible() uses the actual request user for private ownership',
+  },
+];
+
+function reviewedBody(rel:string, body:string, kind:'predicate'|'viewer'):string {
+  for (const reviewed of REVIEWED.filter(r=>r.file===rel && r.kind===kind)) {
+    const first=body.indexOf(reviewed.source);
+    assert.ok(first>=0,`stale reviewed exception (${reviewed.why})`);
+    assert.equal(body.indexOf(reviewed.source,first+reviewed.source.length),-1,`duplicated reviewed expression (${reviewed.why})`);
+    body=body.replace(reviewed.source,'/* exact reviewed lifecycle/facts expression */');
+  }
+  return body;
+}
+
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
@@ -37,7 +100,7 @@ test('the visibility predicate is written in exactly one place', () => {
   for (const file of walk(SRC)) {
     const rel = file.slice(SRC.length + 1);
     if (ALLOWED.has(rel)) continue;
-    const body = readFileSync(file, 'utf8');
+    const body = reviewedBody(rel,readFileSync(file, 'utf8'),'predicate');
     // Match the shape rather than one exact spelling, so a reformatted copy is still caught.
     if (/deleted_at\s+IS\s+NULL/i.test(body)) {
       const line = body.split('\n').findIndex((l) => /deleted_at\s+IS\s+NULL/i.test(l)) + 1;
@@ -60,7 +123,7 @@ test('nothing outside visibility.ts fabricates a viewer that sees everything', (
   for (const file of walk(SRC)) {
     const rel = file.slice(SRC.length + 1);
     if (rel === 'lib/visibility.ts') continue;
-    const body = readFileSync(file, 'utf8');
+    const body = reviewedBody(rel,readFileSync(file, 'utf8'),'viewer');
     if (/libraryIds\s*:\s*null/.test(body)) {
       const line = body.split('\n').findIndex((l) => /libraryIds\s*:\s*null/.test(l)) + 1;
       offenders.push(`${rel}:${line}`);

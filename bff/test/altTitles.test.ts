@@ -18,7 +18,7 @@ const { parseAltTitles, isLatinName, refuseName, exactHit, MIN_ALT_KEY } = requi
 const { titleMatch } = require('../src/lib/autoFollow') as typeof import('../src/lib/autoFollow');
 
 test('a Madara-style trailer is read, and only its Latin-script names are kept', () => {
-  // Reintroduce by dropping the isLatinName filter: the Korean name is kept (and normalises to '').
+  // Reintroduce by dropping the isLatinName filter: the Korean name is kept outside the learned-name script policy.
   const d = 'The weakest hunter of all mankind...\n\nAlternative Name: 나 혼자만 레벨업 ; Only I Level Up ; Na Honjaman Level Up ; Solo Leveling';
   assert.deepEqual(parseAltTitles(d), ['Only I Level Up', 'Na Honjaman Level Up', 'Solo Leveling']);
 });
@@ -78,7 +78,7 @@ test('Latin script means Latin letters, accents included', () => {
 });
 
 test('a typed name is refused for its script before its length, and a numeric name by its key alone', () => {
-  // A Korean name normalises to nothing; "too short" would send the admin looking for a longer spelling of it.
+  // The learned-name script policy is distinct from Unicode identity matching.
   assert.equal(refuseName('나 혼자만 레벨업'), 'non_latin');
   assert.equal(refuseName('Hero'), 'too_short');
   assert.equal(refuseName('H.E.R.O'), 'too_short', 'the key is what is compared: "hero"');

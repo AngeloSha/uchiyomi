@@ -7,7 +7,7 @@
 // Skipped unless TEST_DATABASE_URL is set.
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -285,8 +285,8 @@ test("the series page: its ghosts read 'archive' and it carries the archive's li
 
 test("the add dialog's 'archive the rest slowly'", { skip }, async () => {
   const h = H();
-  // The free member: a member granted only library A would add into the default library, which they cannot see,
-  // and an archive is only ever queued for a series its enqueuer may see (that answers not_found).
+  // An unrestricted member may use the default library; a member granted only
+  // library A must choose an allowed destination before any add/archive starts.
   const add = (sourceId: string, extra: Record<string, unknown>) => post('/api/sources/add', h.free, { source: ADD, sourceId, archive: true, ...extra });
   const idOf = async (sourceId: string) => (await one('SELECT id FROM lib_series WHERE folder = $1', [`AR ${ADD}/Added ${sourceId}`]))?.id as string | undefined;
   await q(`DELETE FROM lib_series WHERE folder LIKE 'AR ar-add/%'`);
@@ -299,9 +299,19 @@ test("the add dialog's 'archive the rest slowly'", { skip }, async () => {
   assert.ok(Math.abs(Number(noneRow.boundary) - 6.001) < 1e-4, 'the boundary is the nothing-yet floor');
   assert.equal(noneRow.direction, 'up');
   assert.equal(noneRow.added_by, ids.free);
-  // The granted-to-A member's add lands where they cannot see it: nothing is queued on their behalf.
+  // Scope authorization refuses the inaccessible default destination before a
+  // series, directory, archive or download job can be created.
   const walled = await post('/api/sources/add', h.member, { source: ADD, sourceId: 'walled1', chapterFrom: 'none', archive: true });
-  assert.equal(walled.json().archive, 'not_found');
+  assert.equal(walled.statusCode, 403, walled.body);
+  assert.equal(walled.json().code, 'forbidden', walled.body);
+  assert.equal(await idOf('walled1'), undefined);
+  assert.equal((await one('SELECT count(*)::int AS n FROM lib_series WHERE source_id=$1 AND source_series_id=$2', [ADD,'walled1'])).n, 0);
+  const walledFolder = `AR ${ADD}/Added walled1`;
+  assert.equal(existsSync(join(DL,walledFolder)), false);
+  assert.equal(jobBusy(walledFolder), false);
+  const jobs = await app.inject({url:'/api/sources/jobs',headers:h.admin});
+  assert.equal(jobs.statusCode,200,jobs.body);
+  assert.equal(jobs.body.includes('Added walled1'),false,'no archive/download card is created for the refused add');
 
   // Latest 2: the download answers first, and the rest is queued once chapter one is in and the listing written.
   const latest = await add('latest1', { chapterFrom: 'newest', chapterCount: 2 });

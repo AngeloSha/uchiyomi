@@ -142,18 +142,35 @@ async function removeCopy(keep: Copy, drop: Copy, dropFile: FileState): Promise<
   return tx(async (qq) => {
     const marked = await qq<{ n: number }>('SELECT count(*)::int AS n FROM bookmarks WHERE book_id = $1', [drop.id]);
     if (Number(marked[0]?.n) > 0) return 'bookmarked' as const;
+    // Explicit external sync uses this same account lock. Folding two already-counted physical copies must
+    // not race a retry into a duplicate completion, and must leave ordinary web page-turn history intact.
+    const readers=await qq<{user_id:string}>(`SELECT DISTINCT user_id FROM reading_events
+      WHERE book_id=ANY($1::text[]) AND origin IN ('komga','koreader') ORDER BY user_id`,[[drop.id,keep.id]]);
+    for(const reader of readers)await qq('SELECT pg_advisory_xact_lock(hashtextextended($1,718))',[reader.user_id]);
     await qq(
-      `INSERT INTO read_progress (user_id, book_id, series_id, page, completed, updated_at)
+      `INSERT INTO read_progress (user_id, book_id, series_id, page, completed, updated_at, is_private, incognito)
        SELECT user_id, $2, $3,
               CASE WHEN $4::int > 0 AND $5::int > 0 THEN LEAST($5::int - 1, (page * $5::int) / $4::int) ELSE page END,
-              completed, updated_at
+              completed, updated_at, is_private OR EXISTS(SELECT 1 FROM lib_series WHERE id=$3 AND is_private), incognito
          FROM read_progress WHERE book_id = $1
        ON CONFLICT (user_id, book_id) DO UPDATE SET
          completed = read_progress.completed OR EXCLUDED.completed,
          page = CASE WHEN EXCLUDED.updated_at > read_progress.updated_at THEN EXCLUDED.page ELSE read_progress.page END,
-         updated_at = GREATEST(read_progress.updated_at, EXCLUDED.updated_at)`,
+         updated_at = GREATEST(read_progress.updated_at, EXCLUDED.updated_at),
+         is_private=read_progress.is_private OR EXCLUDED.is_private,
+         incognito=read_progress.incognito AND EXCLUDED.incognito`,
       [drop.id, keep.id, keep.seriesId, drop.pages, keep.pages]);
     await qq('DELETE FROM read_progress WHERE book_id = $1', [drop.id]);
+    // External completions count the chapter once, even when both source copies had been read. Keep the
+    // earliest claim's actual reader/timestamp and the union of its immutable private provenance.
+    await qq(`UPDATE reading_events k SET
+      origin=CASE WHEN (d.created_at,d.id)<(k.created_at,k.id) THEN d.origin ELSE k.origin END,
+      device_id=CASE WHEN (d.created_at,d.id)<(k.created_at,k.id) THEN d.device_id ELSE k.device_id END,
+      created_at=LEAST(k.created_at,d.created_at),is_private=k.is_private OR d.is_private
+      FROM reading_events d WHERE d.book_id=$1 AND k.book_id=$2 AND d.user_id=k.user_id
+        AND d.origin IN ('komga','koreader') AND k.origin IN ('komga','koreader')`,[drop.id,keep.id]);
+    await qq(`DELETE FROM reading_events d USING reading_events k WHERE d.book_id=$1 AND k.book_id=$2
+      AND d.user_id=k.user_id AND d.origin IN ('komga','koreader') AND k.origin IN ('komga','koreader')`,[drop.id,keep.id]);
     await qq('UPDATE reading_events SET book_id = $2, series_id = $3 WHERE book_id = $1', [drop.id, keep.id, keep.seriesId]);
     await qq('UPDATE notes SET book_id = $2 WHERE book_id = $1', [drop.id, keep.id]);
     // v0.87.0: what the household said about the chapter goes with it to the copy that stays -- a comment's page scaled

@@ -61,10 +61,10 @@ Every server here reads CBZ, CBR, PDF and image EPUB, serves OPDS, can be read f
 | Smart lists (saved filters) | ✅ | ❌ | ✅ | ❌ | ❌ |
 | Finds chapter gaps and bad downloads, and fixes them | ✅ | ◐ broken files | ◐ broken files | ◐ gap markers | ◐ gap markers |
 | Backs itself up on a schedule | ✅ | ❌ | ✅ | ✅ | ✅ on the phone |
+| KOReader progress sync | ✅ original-file matching | ✅ | ✅ | ✅ | ❌ |
 | **Where Uchiyomi loses** | | | | | |
 | Reads text ebooks (reflowable EPUB) | ❌ on purpose | ✅ | ✅ | ❌ | ❌ |
 | Kobo device sync | ❌ | ✅ | ❌ planned | ❌ | ❌ |
-| KOReader progress sync | ❌ | ✅ | ✅ | ✅ | ❌ |
 
 **What the partial marks mean**
 
@@ -161,3 +161,5 @@ your translation, and repair a chapter instead of leaving it half-downloaded.
 [Upcoming](https://mihon.app/docs/faq/updates/upcoming) ·
 [reader settings](https://mihon.app/docs/guides/reader-settings) ·
 [backups](https://mihon.app/docs/guides/backups)
+
+Uchiyomi's KOReader row was updated for v0.107.0 (2026-11-10); the comparison dates for other projects above are unchanged. Kobo device sync remains unsupported.

@@ -59,7 +59,14 @@ async function sendToUser(userId: string, payload: object): Promise<void> {
   if (!enabled) return;
   const subs = await q<{ endpoint: string; p256dh: string; auth: string }>(
     'SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = $1', [userId]);
-  const body = JSON.stringify(payload);
+  // A dormant old worker ignores recipient ownership, so its familiar top-level
+  // fields must contain no account content. Updated workers check recipientId
+  // before opening the nested details. This also covers endpoints shared by A/B.
+  // Assign the trusted recipient LAST so no message payload can override it.
+  const body = JSON.stringify({
+    title: 'Uchiyomi', body: 'Open Uchiyomi to check your updates.', url: '/', tag: 'uchiyomi-update',
+    recipientContent: payload, recipientId: userId,
+  });
   await Promise.all(subs.map(async (s) => {
     try {
       await assertPushEndpoint(s.endpoint); // a refused endpoint throws here and is never dialled
@@ -116,7 +123,9 @@ export async function notifyConversation(o: { bookId: string; authorId: string; 
   const users = await conversationRecipients(o.bookId, o.authorId);
   if (!users.length) return;
   const payload = conversationPush(o);
-  await Promise.all(users.map((u) => sendToUser(u, payload)));
+  await Promise.all(users.map(async (u) => {
+    if (await seriesVisible(o.seriesId,await viewCtxFor(u)).catch(()=>false)) await sendToUser(u,payload);
+  }));
 }
 
 /**

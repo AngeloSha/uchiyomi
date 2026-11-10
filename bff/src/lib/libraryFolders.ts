@@ -1,3 +1,4 @@
+import { reservedPrivateFolder } from './contentScope';
 // Which library each series is in when a library's folders change: creating, re-pathing or removing one (v0.55.1, #148).
 //
 // A scan never moves a series it already knows (lib/library.ts persistScan keeps an existing row in its library, so it
@@ -30,7 +31,7 @@ export async function storedFolders(raw: string[]): Promise<string[] | null> {
   const out: string[] = [];
   for (const r of raw) {
     const typed = trimTrailingSlashes(toStoredRel(r).replace(/^\/+/, '')).trim();
-    if (!typed || typed.includes('..') || typed.startsWith('/')) return null;
+    if (!typed || typed.includes('..') || typed.startsWith('/') || reservedPrivateFolder(typed)) return null;
     const path = await diskSpelling([LIBRARY_ROOT, DL_ROOT], typed);
     if (!out.includes(path)) out.push(path);
   }

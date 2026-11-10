@@ -19,7 +19,7 @@
  * same way on purpose. The route's copy is held by wall.test.ts against the web's as text, so it cannot be
  * replaced by an import of this one; autoFollow.int.test.ts holds this one against the route's by value.
  */
-export const normTitle = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, '');
+export const normTitle = (t: string) => t.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, '');
 
 /** Words that carry no identity: a token-overlap match must not be earned by "the" and "of". */
 const STOP = new Set(['the', 'a', 'an', 'of', 'and', 'to', 'in', 'is', 'no', 'my', 'i', 'on', 'with', 'for']);
@@ -38,17 +38,18 @@ export type MatchConfidence = 'same_source' | 'exact' | 'contains' | 'fuzzy';
 export function pickBestScored<T extends { title: string }>(list: T[], term: string): { item: T; confidence: MatchConfidence } | null {
   if (!list.length) return null;
   const n = normTitle(term);
+  if (!n) return null;
   const exact = list.find((r) => normTitle(r.title) === n);
   if (exact) return { item: exact, confidence: 'exact' };
-  const sub = list.find((r) => { const t = normTitle(r.title); return t.length > 2 && (t.includes(n) || n.includes(t)); });
+  const sub = list.find((r) => { const t = normTitle(r.title); return n.length > 2 && t.length > 2 && (t.includes(n) || n.includes(t)); });
   if (sub) return { item: sub, confidence: 'contains' };
   // token overlap: most meaningful query words must appear in the title
-  const qw = term.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !STOP.has(w));
+  const qw = term.normalize('NFKC').toLowerCase().split(/[^\p{L}\p{M}\p{N}]+/u).filter((w) => w.length > 2 && !STOP.has(w));
   if (qw.length) {
     let best: T | null = null;
     let score = 0;
     for (const r of list) {
-      const tw = new Set(r.title.toLowerCase().split(/[^a-z0-9]+/));
+      const tw = new Set(r.title.normalize('NFKC').toLowerCase().split(/[^\p{L}\p{M}\p{N}]+/u));
       const hit = qw.filter((w) => tw.has(w)).length / qw.length;
       if (hit > score) { score = hit; best = r; }
     }

@@ -63,7 +63,7 @@ import { registerApiDocs } from './lib/apiDocs';
 import { appVersion } from './lib/appVersion';
 import { buildPayload, installFacts, sendPing } from './lib/installPing';
 import authRoutes from './routes/auth';
-import { trustProxyProblems, trustProxyWarnings } from './lib/auth';
+import { trustProxyProblems, trustProxyWarnings, authenticate, requireAdmin } from './lib/auth';
 import { loadNetworkSettings, localNetworksProblems, localNetworksWarnings, networkConfig, trustsPeer } from './lib/clientAddr';
 import adminRoutes, { sweepImportBatches } from './routes/admin';
 import catalogRoutes from './routes/catalog';
@@ -74,6 +74,10 @@ import downloadRoutes from './routes/downloads';
 import sourceRoutes, { jobBusy } from './routes/sources';
 import opdsRoutes from './routes/opds';
 import komgaCompatRoutes from './routes/komgaCompat';
+import kosyncRoutes from './routes/kosync';
+import externalReaderRoutes from './routes/externalReaders';
+import { privateLibraryRoutes, privateResponseHeaders } from './routes/privateLibrary';
+import { privateAdminContentGuard, privateAdminResponse } from './lib/privateAdmin';
 import notifyRoutes from './routes/notify';
 import translateRoutes from './routes/translate';
 import { stopEngine } from './lib/translate/engine';
@@ -162,7 +166,10 @@ async function main() {
 
   const app = Fastify({
     // LOG_LEVEL (env.ts logLevelOf): `info` in production unless the operator says otherwise.
-    logger: { level: logLevel },
+    logger: { level: logLevel, redact: [
+      'req.headers.authorization', 'req.headers.cookie',
+      'req.headers["x-auth-user"]', 'req.headers["x-auth-key"]',
+    ] },
     // Desktop: nothing sits in front of the app, so a forwarded-for header is only ever something a local
     // process made up. Elsewhere only the trusted proxies may set it (TRUST_PROXY, or Admin -> Settings): trusting every
     // peer let a client on the app port choose its own address for the rate limits. Reintroduce `true`:
@@ -181,6 +188,24 @@ async function main() {
   await app.register(cookie);
   await app.register(jwt, { secret: env.JWT_SECRET });
   await app.register(rateLimit, { global: false });
+  app.addHook('onSend', async (req, reply, payload) => {
+    await privateResponseHeaders(req, reply);
+    return payload;
+  });
+  // Content plugins cannot gain access to another account's private records merely by using an admin URL.
+  app.addHook('preHandler', async (req, reply) => {
+    if (!/^\/api\/admin(?:\/|$)/.test(req.url.split('?')[0])) return;
+    return authenticate(req, reply);
+  });
+  app.addHook('preHandler', async (req, reply) => {
+    if (!/^\/api\/admin(?:\/|$)/.test(req.url.split('?')[0])) return;
+    return requireAdmin(req, reply);
+  });
+  app.addHook('preHandler', async (req, reply) => {
+    if (!/^\/api\/admin(?:\/|$)/.test(req.url.split('?')[0])) return;
+    return privateAdminContentGuard(req, reply);
+  });
+  app.addHook('preSerialization', privateAdminResponse);
   /**
    * The single-container layout has no nginx in front of it, and nginx was the only thing compressing
    * anything: `gzip_types text/css application/javascript application/json image/svg+xml
@@ -257,7 +282,7 @@ async function main() {
   // owns it, and a plugin that forgets auth inherits it instead of escaping it.
   app.addHook('preHandler', async (req, reply) => {
     if (!req.url.startsWith('/img/')) return;
-    await authorizeImageRequest(app, req, reply);
+    return authorizeImageRequest(app, req, reply);
   });
 
   await app.register(authRoutes);
@@ -267,6 +292,7 @@ async function main() {
   await app.register(catalogRoutes);
   await app.register(imageRoutes);
   await app.register(personalRoutes);
+  await app.register(privateLibraryRoutes);
   await app.register(recommendationRoutes);
   await app.register(downloadRoutes);
   await app.register(uploadSeriesRoutes);
@@ -282,6 +308,8 @@ async function main() {
   // The Komga-compatible API for Mihon's Komga extension + tracker. Its own auth hook (API tokens and the
   // UCHIYOMI-SESSION cookie), encapsulated like OPDS: the cookie is honoured by these routes and nowhere else.
   if (!isDesktop()) await app.register(komgaCompatRoutes);
+  if (!isDesktop()) await app.register(kosyncRoutes);
+  if (!isDesktop()) await app.register(externalReaderRoutes);
   // The interactive API reference, BEFORE the web root: registerWebRoot installs the not-found handler that
   // serves the app shell for any unknown path, and a route added after it would still work, but its
   // static assets under /api/docs/ would not be found by the UI in the same way. Unauthenticated on

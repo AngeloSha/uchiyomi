@@ -112,17 +112,17 @@ export async function chapterTalk(bookId: string, uid: string): Promise<{ commen
     q<{ id: string; body: string; page: number | null; created_at: Date; edited_at: Date | null; uid: string; display_name: string | null; username: string | null; avatar: unknown }>(
       `SELECT c.id, c.body, c.page, c.created_at, c.edited_at, u.id AS uid, u.display_name, u.username, u.avatar
          FROM chapter_comments c JOIN users u ON u.id = c.user_id
-        WHERE c.book_id = $1
+        WHERE c.book_id = $1 AND (NOT c.is_private OR c.user_id=$2)
         ORDER BY c.created_at, c.id
         LIMIT ${COMMENTS_LIMIT}`,
-      [bookId],
+      [bookId,uid],
     ),
     q<{ emoji: string; uid: string; display_name: string | null; username: string | null; avatar: unknown }>(
       `SELECT r.emoji, u.id AS uid, u.display_name, u.username, u.avatar
          FROM chapter_reactions r JOIN users u ON u.id = r.user_id
-        WHERE r.book_id = $1
+        WHERE r.book_id = $1 AND (NOT r.is_private OR r.user_id=$2)
         ORDER BY r.created_at, u.id`,
-      [bookId],
+      [bookId,uid],
     ),
   ]);
   return {
@@ -153,17 +153,17 @@ export function topReactions(counts: ReadonlyMap<string, number>): Reaction[] {
  * The chapters of a series that have talk, with their counts: the series page's rows. Keyed on the chapters the series
  * holds NOW, so a merged series counts what moved into it. The caller has checked the series is the viewer's to see.
  */
-export async function seriesTalk(seriesId: string): Promise<ChapterTalkCount[]> {
+export async function seriesTalk(seriesId: string,uid?:string): Promise<ChapterTalkCount[]> {
   const [comments, reactions] = await Promise.all([
     q<{ book_id: string; n: number }>(
       `SELECT c.book_id, count(*)::int AS n FROM chapter_comments c JOIN lib_books b ON b.id = c.book_id
-        WHERE b.series_id = $1 GROUP BY c.book_id`,
-      [seriesId],
+        WHERE b.series_id = $1 AND (NOT c.is_private OR c.user_id=$2) GROUP BY c.book_id`,
+      [seriesId,uid??null],
     ),
     q<{ book_id: string; emoji: string; n: number }>(
       `SELECT r.book_id, r.emoji, count(*)::int AS n FROM chapter_reactions r JOIN lib_books b ON b.id = r.book_id
-        WHERE b.series_id = $1 GROUP BY r.book_id, r.emoji`,
-      [seriesId],
+        WHERE b.series_id = $1 AND (NOT r.is_private OR r.user_id=$2) GROUP BY r.book_id, r.emoji`,
+      [seriesId,uid??null],
     ),
   ]);
   const byBook = new Map<string, { comments: number; emoji: Map<string, number> }>();
@@ -196,7 +196,7 @@ export async function conversationRecipients(bookId: string, authorId: string): 
   // switched comments off is told there is none" in chapterComments.int.test.ts still alerts them.
   const people = await q<{ user_id: string; role: string }>(
     `SELECT DISTINCT c.user_id, u.role FROM chapter_comments c JOIN users u ON u.id = c.user_id
-      WHERE c.book_id = $1 AND c.user_id <> $2 AND NOT u.disabled
+      WHERE c.book_id = $1 AND NOT c.is_private AND c.user_id <> $2 AND NOT u.disabled
         AND NOT EXISTS (SELECT 1 FROM app_settings s WHERE s.user_id = c.user_id AND s.data->'comments' = 'false'::jsonb)`,
     [bookId, authorId],
   );

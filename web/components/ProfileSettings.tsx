@@ -34,6 +34,7 @@ import { INCOGNITO_TEXT } from '@/lib/incognito';
 import { COMMENTS_TEXT, talkWantedOf } from '@/lib/comments';
 import { TONES, toneOf, type Tone } from '@/lib/tone';
 import { useReduceEffects } from '@/lib/useReduceEffects';
+import { PrivateLibraryDefaults } from '@/components/ContentScopePicker';
 
 /**
  * The profile's settings pages: General · Appearance · Reading · This device (v0.86.0), rows of the profile's one list
@@ -212,6 +213,7 @@ function GeneralPane({ pointer }: { pointer: boolean }) {
       {/* v0.61.0: the account's, not this device's (lib/incognito.ts); the reader's sheet has the same switch. */}
       <RowGroup title={tr('Privacy')}>
         <SwitchRow id="incognito" label={tr(INCOGNITO_TEXT[0])} help={tr(INCOGNITO_TEXT[1])} on={incognito.on} onChange={incognito.set} />
+        <PrivateLibraryDefaults />
       </RowGroup>
     </>
   );

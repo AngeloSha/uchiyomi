@@ -174,7 +174,10 @@ test('the profile settings and connections hide what only other devices use', ()
   // The server's own row is unchanged in a browser.
   assert.match(device, /\) : \(\s*<SwitchRow id="chapter-alerts" device label=\{tr\('New-chapter alerts'\)\}\s*help=\{supported \? tr\('Get a push notification when one of your favorites gets a new chapter, or when someone comments on a chapter you commented on\.'\) : tr\('Not supported on this browser\.'\)\}\s*on=\{on\} disabled=\{!supported\} onChange=\{toggle\} \/>/, 'the browser\'s push switch changed');
   const conn = code(read('components/ProfileConnections.tsx'));
-  assert.match(conn, /<TrackerSection focus=\{focusTracking\} \/>\s*\{!desktop && <OpdsSection \/>\}\s*\{!desktop && <TokensSection \/>\}/, 'OPDS or API tokens show on desktop, or the trackers moved');
+  assert.match(conn, /<TrackerSection focus=\{focusTracking\} \/>/);
+  for (const name of ['OpdsSection','ExternalReaderSettings','TokensSection']) {
+    assert.match(conn,new RegExp('\\{!desktop && <'+name+' \\/>\\}'),name+' must stay server-only');
+  }
   for (const [f, src] of [['ProfileSettings', settings], ['ProfileConnections', conn]] as const) {
     assert.match(src, /const desktop = isDesktop\(\);/, `${f} does not decide from lib/desktop`);
   }

@@ -21,7 +21,7 @@ import { q, one } from '../db';
 import { open, seal } from '../secretbox';
 import { withGate } from '../gate';
 import { notifyAdmins } from '../push';
-import { browsableIds, SYSTEM_CTX, viewCtxFor, type ViewCtx } from '../visibility';
+import { browsableIds, SHARED_CTX, viewCtxFor, type ViewCtx } from '../visibility';
 import { wantsNews } from '../nextUp';
 import { buildRequest, discordText, type Kind, type Message, type TargetConfig, type TargetSecret } from './kinds';
 import { REASON_TEXT, sendRequest, type SendOptions, type SendResult } from './send';
@@ -238,7 +238,7 @@ export async function sendDigest(landed: ReadonlyArray<Landed>, opts: SendOption
     if (!series.length) return;
     let ctx: ViewCtx;
     try {
-      const who = t.user_id ? await viewCtxFor(t.user_id, t.user_role ?? 'user') : SYSTEM_CTX;
+      const who = t.user_id ? await viewCtxFor(t.user_id, t.user_role ?? 'user') : SHARED_CTX;
       ctx = { ...who, hideAdultLibraries: !t.include_adult };
     } catch { return; }
     const allowed = await browsableIds(series.map((s) => s.id), ctx); // empty on a failed query: sends nothing

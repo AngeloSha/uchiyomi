@@ -1,3 +1,4 @@
+import { sharedActivitySql } from '../lib/contentScope';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { q, one } from '../lib/db';
@@ -226,7 +227,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // so the rail quietly came back short for anyone who could not see one of the twelve -- and now also for
     // anyone hiding 18+.
     const rows = await q<{ series_id: string }>(
-      `SELECT series_id FROM reading_events WHERE created_at > now() - interval '14 days'
+      `SELECT e.series_id FROM reading_events e LEFT JOIN lib_series s ON s.id=e.series_id WHERE e.origin='web' AND ${sharedActivitySql('s','e')} AND e.created_at > now() - interval '14 days'
        GROUP BY series_id ORDER BY count(*) DESC LIMIT 60`,
     );
     const ok = await browsableIds(rows.map((r) => r.series_id), vc(req));
@@ -239,9 +240,9 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/leaderboard', async () => {
     const rows = await q(
       `SELECT u.id, u.display_name, u.username, u.avatar,
-              count(DISTINCT e.book_id) FILTER (WHERE e.completed AND e.created_at > now() - interval '7 days')::int AS week,
-              count(DISTINCT e.book_id) FILTER (WHERE e.completed)::int AS total
-       FROM users u LEFT JOIN reading_events e ON e.user_id = u.id
+              count(DISTINCT e.book_id) FILTER (WHERE e.origin='web' AND ${sharedActivitySql('s','e')} AND e.completed AND e.created_at > now() - interval '7 days')::int AS week,
+              count(DISTINCT e.book_id) FILTER (WHERE e.origin='web' AND ${sharedActivitySql('s','e')} AND e.completed)::int AS total
+       FROM users u LEFT JOIN reading_events e ON e.user_id = u.id LEFT JOIN lib_series s ON s.id=e.series_id
        GROUP BY u.id ORDER BY week DESC, total DESC`,
     );
     return { content: rows };

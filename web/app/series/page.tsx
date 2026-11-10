@@ -8,7 +8,7 @@ import { useArtUnderChrome } from '@/lib/overArt';
 import { useReduceEffects } from '@/lib/effects';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, img } from '@/lib/api';
+import { api, img,getCurrentUser } from '@/lib/api';
 import { Book, EditionRow, Ghost, Listing, Page, Series, VersionCopy, Versions } from '@/lib/types';
 import { bookCountText, chapterLabel, chapterName, isVolumeName, languageName, relativeTime, relativeTimeShort } from '@/lib/format';
 import { listDownloads, downloadChapter, deleteDownload } from '@/lib/downloads';
@@ -18,6 +18,7 @@ import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { MoveToLibrary } from '@/components/MoveToLibrary';
+import { SeriesPrivacyControls } from '@/components/SeriesPrivacyControls';
 import { useAuth, canDownload } from '@/lib/auth';
 import { IcChevronLeft, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcHourglass, IcGrid, IcRows, IcComment } from '@/components/icons';
 import { commentsLine, seriesTalkKey, talkWantedOf, type ChapterTalkCount } from '@/lib/comments';
@@ -1192,11 +1193,12 @@ function SeriesInner() {
   };
 
   const toggleDownload = async (bookId: string) => {
+    const actor=user?.id;if(!actor || getCurrentUser()!==actor)return;
     if (downloaded.has(bookId)) {
-      await deleteDownload(bookId);
+      await deleteDownload(bookId,actor);
       setDownloaded((s) => { const n = new Set(s); n.delete(bookId); return n; });
     } else {
-      await downloadChapter(bookId);
+      await downloadChapter(bookId,undefined,actor);
       setDownloaded((s) => new Set(s).add(bookId));
     }
   };
@@ -1204,10 +1206,13 @@ function SeriesInner() {
   // manual read-state changes go through the same progress endpoint the reader uses, but `silent`
   // so bulk-marking a backlog doesn't count as chapters "read this week" on the leaderboard
   const setRead = async (targets: Book[], completed: boolean) => {
+    const actor=user?.id;if(!actor || getCurrentUser()!==actor)return;
     for (const b of targets) {
+      if(getCurrentUser()!==actor)break;
       try {
         await api(`/api/books/${b.id}/progress`, {
           method: 'PUT',
+          expectedOwnerId:actor,
           json: { page: completed ? b.media.pagesCount || 1 : 0, completed, seriesId: id, silent: true },
         });
       } catch {}
@@ -1302,12 +1307,14 @@ function SeriesInner() {
   // learned it had stopped. offlineOutcome (lib/notices.ts) is the decision; notices.test.ts holds it and
   // fails on any flow that keys a success after its error.
   const saveOffline = async (todo: Book[]) => {
+    const actor=user?.id;if(!actor || getCurrentUser()!==actor)return;
     toast(todo.length === 1 ? tr('Saving 1 chapter offline…') : tr('Saving {n} chapters offline…', { n: todo.length }), 'info', { busy: true, key: 'save-offline' });
     let done = 0;
     let stopped = false;
     for (const b of todo) {
       try {
-        await downloadChapter(b.id);
+        await downloadChapter(b.id,undefined,actor);
+        if(getCurrentUser()!==actor)return;
         setDownloaded((s) => new Set(s).add(b.id));
         done++;
       } catch {
@@ -1829,6 +1836,7 @@ function SeriesInner() {
           attrs={{ 'aria-haspopup': 'dialog' }} />
         <MoreKey onOpen={openMore} open={moreOpen} menu={wide} />
       </div>
+      {series && <SeriesPrivacyControls id={series.id} isPrivate={series.isPrivate === true} />}
     </div>
   );
 

@@ -480,6 +480,33 @@ test('a mark reconciled onto a chapter the reader had started leaves the file', 
   }
 });
 
+test('private and incognito ghost provenance survives publication, later arrival and existing progress', { skip }, async () => {
+  const {markNumbers,reconcileListingProgress}=await import('../src/lib/listingProgress');
+  const sid='s_lp_private_history';
+  await q(`INSERT INTO lib_series(id,source,title,folder,library_id,is_private,owner_user_id)
+    VALUES($1,'T!lp','Private ghost','T!lp/Private ghost',$2,true,$3)`,[sid,LIB,readerId]);
+  await q(`INSERT INTO series_listing(series_id,number,title,source_id,chosen,status)
+    SELECT $1,n,'Chapter '||n,'src','{}'::jsonb,'available' FROM unnest(ARRAY[1,2,3,4]::real[])n`,[sid]);
+  await q(`INSERT INTO lib_books(id,series_id,source,file,number,root,pages)
+    VALUES('b_lp_private_4',$1,'T!lp','private-4.cbz',4,'/library',10)`,[sid]);
+  await q(`INSERT INTO app_settings(user_id,data) VALUES($1,'{"incognito":true}')
+    ON CONFLICT(user_id) DO UPDATE SET data=app_settings.data||EXCLUDED.data`,[readerId]);
+  await markNumbers(readerId,sid,[1,2,3,4]);
+  assert.deepEqual(await q('SELECT is_private,incognito FROM listing_progress WHERE user_id=$1 AND series_id=$2 ORDER BY number',[readerId,sid]),
+    Array.from({length:3},()=>({is_private:true,incognito:true})));
+  await q('UPDATE lib_series SET is_private=false WHERE id=$1',[sid]);
+  await q(`UPDATE app_settings SET data=data||'{"incognito":false}' WHERE user_id=$1`,[readerId]);
+  await q(`INSERT INTO lib_books(id,series_id,source,file,number,root,pages)
+    SELECT 'b_lp_private_'||n,$1,'T!lp','private-'||n||'.cbz',n,'/library',10 FROM unnest(ARRAY[1,2,3]::real[])n`,[sid]);
+  await q(`INSERT INTO read_progress(user_id,book_id,series_id,page,completed,is_private,incognito)
+    VALUES($1,'b_lp_private_2',$2,1,false,false,true),($1,'b_lp_private_3',$2,1,false,true,false)`,[readerId,sid]);
+  await reconcileListingProgress({seriesId:sid});
+  assert.deepEqual(await q('SELECT is_private,incognito FROM read_progress WHERE user_id=$1 AND series_id=$2 ORDER BY book_id',[readerId,sid]),
+    [{is_private:true,incognito:true},{is_private:true,incognito:true},{is_private:true,incognito:false},{is_private:true,incognito:true}],
+    'immutable privacy is OR, while an established public/incognito-off claim remains independent');
+  assert.equal((await q('SELECT count(*)::int n FROM reading_events WHERE series_id=$1',[sid]))[0].n,0,'marking never invents reading activity');
+});
+
 test('reconciliation matches the override-aware number', { skip }, async () => {
   // A chapter whose filename said 0 and that an admin renumbered to 4: a mark on 4 belongs to it.
   const dir = join(ROOT, 'dl', SCAN_FOLDER);

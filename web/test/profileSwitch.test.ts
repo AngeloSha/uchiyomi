@@ -41,9 +41,14 @@ test('a switch sends queued reading first, clears the caches only once the serve
   assert.ok(body.length > 0, 'there is no changeProfile');
   const at = (s: string) => { const i = body.indexOf(s); assert.ok(i >= 0, `changeProfile does not ${s}`); return i; };
   // Each step after the one before it. Reintroduce the purge ahead of the request: a refused switch blanks the screen.
-  const order = ['await flushOutbox()', 'api(path,', 'await forgetAccountData()', 'setAdultShown(false)',
-    'setAccessToken(res.accessToken)', 'adoptAuthed(res.user', "postMessage({ type: 'switched'"].map(at);
+  const order = ['await flushOutbox()', 'api(path,', 'await replaceAuthedSession(res,true)', "postMessage({ type: 'switched'"].map(at);
   assert.deepEqual(order, [...order].sort((a, b) => a - b), 'switchProfile does its steps out of order');
+  const replace=auth.slice(auth.indexOf('const replaceAuthedSession = async'),auth.indexOf('useEffect(',auth.indexOf('const replaceAuthedSession = async')));
+  assert.match(replace,/const release=beginOwnedAccountChange\(\);[\s\S]*?await forgetAccountData\(\);[\s\S]*?setAccessToken\(res\.accessToken\);\s*adoptAuthed\(res\.user,res\.refreshExpiresAt\);[\s\S]*?finally \{ if\(!holdUntilReload\)release\(\); \}/,
+    'the shared adoption helper must fence before purge and never release a known account replacement');
+  assert.match(replace,/const holdUntilReload=replacingDocument;/,'known owner changes stay fenced even if cache cleanup fails');
+  assert.match(replace,/if\(replacingDocument\)\{[\s\S]*?writeOfflineIdentity\(res\.user,res\.refreshExpiresAt\);[\s\S]*?window\.location\.reload\(\);\s*return true;/,
+    'known account changes persist the trusted identity and replace the entire old document');
   assert.match(body, /error: body\.error === 'local_only' \?/, 'a refusal from outside is not said as such');
   assert.match(body, /: body\.error === 'reauth' \?/, 'an admin remembered too long is not told to sign in again');
   // Both ways of changing person take the same steps.
@@ -117,7 +122,10 @@ test('Profile -> Account lists a member\'s own profiles only when an admin let i
 test('the sign-in screen remembers on request, and offers who this device remembers', () => {
   const auth = code(read('lib/auth.tsx'));
   assert.match(auth, /\.\.\.\(remember \? \{ remember: true \} : \{\}\)/, 'Remember on this device is not sent');
-  assert.match(auth, /const leave = async \(\) => \{\s*try \{ await api\('\/auth\/leave', \{ method: 'POST' \}\); \} catch \{\}\s*await clearLocalSession\(\);/);
+  const leave=auth.slice(auth.indexOf('const leave = async'),auth.indexOf('const logout = async'));
+  assert.match(leave,/api\('\/auth\/leave', \{ method: 'POST', expectedOwnerId \}\)/);
+  assert.match(leave,/beginAccountTransition\(\);[^\n]*\n\s*await clearLocalSession\('loading'\);\s*window\.location\.reload\(\);/,
+    'leaving an account must keep its old document fenced until replacement');
   const login = code(read('components/LoginScreen.tsx'));
   assert.match(login, /const r = await login\(username\.trim\(\) \|\| 'admin', pw, needTotp \? code\.trim\(\) : undefined, remember\);/);
   assert.match(login, /<input type="checkbox" checked=\{remember\}/);
@@ -138,7 +146,7 @@ test('Uchiyomi Desktop: profiles made in Profile -> Account, and back to the own
   assert.match(sw, /await backToOwner\(\)/);
   const auth = code(read('lib/auth.tsx'));
   const back = auth.slice(auth.indexOf('const backToOwner = async'), auth.indexOf('const leave = async'));
-  const order = ['await flushOutbox()', "fetch('/auth/desktop'", 'await forgetAccountData()', 'setAdultShown(false)', 'window.location.reload()']
+  const order = ['await flushOutbox()', "api('/auth/desktop'", 'await forgetAccountData()', 'setAdultShown(false)', 'window.location.reload()']
     .map((s) => { const i = back.indexOf(s); assert.ok(i >= 0, `backToOwner does not ${s}`); return i; });
   assert.deepEqual(order, [...order].sort((a, b) => a - b), 'backToOwner does its steps out of order');
   const account = code(read('components/ProfileAccount.tsx'));

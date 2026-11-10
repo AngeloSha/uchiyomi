@@ -185,6 +185,34 @@ test("a merge keeps the kept series' copy of a chapter both had, and what was re
   assert.equal(audit[0].detail.removed, 3);
 });
 
+test('colliding external completions fold once with earliest origin and immutable private progress', { skip }, async () => {
+  await series(KEEP,'Keep Tale',KEEP_DIR);
+  await series(GONE,'Gone Tale',GONE_DIR);
+  const kept=await book('xc_k2',KEEP,DL,KEEP_DIR,'Chapter 2.cbz',2,{pages:8});
+  const dropped=await book('xc_g2',GONE,DL,GONE_DIR,'Chapter 2.cbz',2,{pages:16});
+  await q(`INSERT INTO read_progress(user_id,book_id,series_id,page,completed,is_private,incognito)
+    VALUES($1,'xc_k2',$2,8,true,false,true),($1,'xc_g2',$3,16,true,true,true)`,[user,KEEP,GONE]);
+  await q(`INSERT INTO reading_events(user_id,book_id,series_id,page,completed,origin,device_id,created_at,is_private)
+    VALUES($1,'xc_g2',$2,16,true,'koreader','earlier-reader','2026-01-01',true),
+          ($1,'xc_k2',$3,8,true,'komga','later-reader','2026-01-02',false),
+          ($1,'xc_g2',$2,1,false,'web','phone','2026-01-03',false),
+          ($1,'xc_k2',$3,2,false,'web','web','2026-01-04',false)`,[user,GONE,KEEP]);
+  const beforeWeb=await q(`SELECT id,page,device_id,created_at,is_private FROM reading_events WHERE origin='web' AND user_id=$1 ORDER BY id`,[user]);
+  const result=await admin.mergeSeries(GONE,KEEP,{keepOnce:{userId:user}});
+  assert.equal(result.duplicates,1);
+  assert.equal(existsSync(kept),true);assert.equal(existsSync(dropped),false);
+  assert.deepEqual(await q('SELECT completed,is_private,incognito FROM read_progress WHERE user_id=$1 AND book_id=$2',[user,'xc_k2']),
+    [{completed:true,is_private:true,incognito:true}]);
+  const events=await q(`SELECT book_id,series_id,origin,device_id,created_at,is_private FROM reading_events WHERE user_id=$1 AND origin<>'web'`,[user]);
+  assert.equal(events.length,1,'physical editions do not count twice or violate the external uniqueness constraint');
+  assert.equal(events[0].book_id,'xc_k2');assert.equal(events[0].series_id,KEEP);
+  assert.equal(events[0].origin,'koreader');assert.equal(events[0].device_id,'earlier-reader');
+  assert.equal(new Date(events[0].created_at).toISOString(),'2026-01-01T00:00:00.000Z');
+  assert.equal(events[0].is_private,true);
+  assert.deepEqual(await q(`SELECT id,page,device_id,created_at,is_private FROM reading_events WHERE origin='web' AND user_id=$1 ORDER BY id`,[user]),beforeWeb,
+    'normal web page-turn timing and identity are preserved');
+});
+
 test("a dropped copy's comments and reactions follow the chapter", { skip }, async () => {
   // v0.87.0: what the household said about a chapter is about the chapter, not the file. The copy that goes takes its
   // row with it (CASCADE), so removeCopy carries the talk first: comments onto the kept copy, a page scaled as progress

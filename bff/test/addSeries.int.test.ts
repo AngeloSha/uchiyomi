@@ -975,14 +975,13 @@ test('POST /api/sources/add forwards the series id, and only to someone who may 
       assert.equal(r.json().seriesId, await idOfFolder(ANNOUNCED), r.body);
     });
 
-    await t.test('a member who cannot see the series is not given its id', async () => {
+    await t.test('a member cannot add into an ungranted shared library', async () => {
       // The id is a capability: every by-id route checks the viewer, and this route is where the viewer
       // lives. The rest of the answer is unchanged -- the add itself is theirs to make.
       const r = await app.inject({ method: 'POST', url: '/api/sources/add', headers: asMember,
         payload: { source: IDS, sourceId: `${IDS}-1`, chapterFrom: 'none' } });
-      assert.equal(r.statusCode, 200, r.body);
-      assert.equal(r.json().seriesId, undefined, `the id of a series in a library they were not granted: ${r.body}`);
-      assert.equal(r.json().chapters, 0, 'and the rest of the answer is what it always was');
+      assert.equal(r.statusCode, 403, r.body);
+      assert.equal(r.json().seriesId, undefined, `no inaccessible series identity is returned: ${r.body}`);
     });
 
     await t.test('the duplicate answer carries the id of the copy it found', async () => {
@@ -1005,9 +1004,8 @@ test('POST /api/sources/add forwards the series id, and only to someone who may 
       assert.equal(r.json().existing?.title, 'Announced Title', 'the wording the prompt is built from is unchanged');
       const m = await app.inject({ method: 'POST', url: '/api/sources/add', headers: asMember,
         payload: { source: 'add-dup', sourceId: 'add-dup-1' } });
-      assert.equal(m.statusCode, 409, m.body);
-      assert.equal(m.json().existing?.id, undefined, `a member is told it is a duplicate, not where it is: ${m.body}`);
-      assert.equal(m.json().existing?.title, 'Announced Title');
+      assert.equal(m.statusCode, 403, m.body);
+      assert.equal(m.json().existing, undefined, 'an ungranted destination is refused before duplicate information');
     });
 
     await t.test('a download add puts the series id on its job card once chapter one is scanned', async () => {

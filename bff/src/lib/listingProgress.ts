@@ -208,13 +208,17 @@ export async function markNumbers(userId: string, seriesId: string, numbers: num
     // `WHERE NOT completed` on the conflict branch: a chapter already read keeps its updated_at (Continue
     // Reading orders by it, and the cleanup's which-copy rule reads it) and is not counted as moved.
     const viaBook = await qq<{ book_id: string }>(
-      `INSERT INTO read_progress (user_id, book_id, series_id, page, completed)
-       SELECT $1, b.id, b.series_id, COALESCE(b.pages, 0), true
+      `INSERT INTO read_progress (user_id, book_id, series_id, page, completed, is_private, incognito)
+       SELECT $1, b.id, b.series_id, COALESCE(b.pages, 0), true, s.is_private,
+              EXISTS(SELECT 1 FROM app_settings WHERE user_id=$1 AND data->'incognito'='true'::jsonb)
          FROM lib_books b
+         JOIN lib_series s ON s.id=b.series_id
          LEFT JOIN book_overrides ov ON ov.book_id = b.id
         WHERE b.series_id = $2 AND COALESCE(ov.number, b.number) = ANY($3::real[])
        ON CONFLICT (user_id, book_id) DO UPDATE
-         SET completed = true, page = GREATEST(read_progress.page, EXCLUDED.page), updated_at = now()
+         SET completed = true, page = GREATEST(read_progress.page, EXCLUDED.page), updated_at = now(),
+             is_private=read_progress.is_private OR EXCLUDED.is_private,
+             incognito=read_progress.incognito AND EXCLUDED.incognito
          WHERE NOT read_progress.completed
        RETURNING book_id`,
       [userId, seriesId, numbers],
@@ -222,9 +226,11 @@ export async function markNumbers(userId: string, seriesId: string, numbers: num
     // ON CONFLICT DO NOTHING keeps the FIRST completed_at: the earliest claim is the one reconciliation has
     // to honour, and re-ticking a number must not make an older mark look new.
     const marked = await qq<{ number: number }>(
-      `INSERT INTO listing_progress (user_id, series_id, number, source)
-       SELECT $1, l.series_id, l.number, $4
+      `INSERT INTO listing_progress (user_id, series_id, number, source, is_private, incognito)
+       SELECT $1, l.series_id, l.number, $4, s.is_private,
+              EXISTS(SELECT 1 FROM app_settings WHERE user_id=$1 AND data->'incognito'='true'::jsonb)
          FROM series_listing l
+         JOIN lib_series s ON s.id=l.series_id
         WHERE l.series_id = $2 AND l.number = ANY($3::real[]) AND NOT ${HELD('l.series_id', 'l.number')}
        ON CONFLICT (user_id, series_id, number) DO NOTHING
        RETURNING number`,
@@ -314,19 +320,22 @@ export async function reconcileListingProgress(opts: { run?: Run; seriesId?: str
     const only = opts.seriesId ? 'AND lp.series_id = $1' : '';
     const params = opts.seriesId ? [opts.seriesId] : [];
     const moved = await qq(
-      `INSERT INTO read_progress (user_id, book_id, series_id, page, completed, updated_at)
+      `INSERT INTO read_progress (user_id, book_id, series_id, page, completed, updated_at, is_private, incognito)
        SELECT lp.user_id, b.id, b.series_id, COALESCE(b.pages, 0), true,
               CASE WHEN b.mtime > 0
                    THEN LEAST(lp.completed_at, to_timestamp(b.mtime / 1000.0) - interval '1 millisecond')
-                   ELSE lp.completed_at END
+                   ELSE lp.completed_at END, lp.is_private OR s.is_private, lp.incognito
          FROM listing_progress lp
          JOIN lib_books b ON b.series_id = lp.series_id
+         JOIN lib_series s ON s.id=b.series_id
          LEFT JOIN book_overrides ov ON ov.book_id = b.id
         WHERE COALESCE(ov.number, b.number) = lp.number AND ${rangeEnd('b', 'ov')} IS NULL ${only}
        ON CONFLICT (user_id, book_id) DO UPDATE
          SET completed = true,
              page = GREATEST(read_progress.page, EXCLUDED.page),
-             updated_at = LEAST(read_progress.updated_at, EXCLUDED.updated_at)
+             updated_at = LEAST(read_progress.updated_at, EXCLUDED.updated_at),
+             is_private=read_progress.is_private OR EXCLUDED.is_private,
+             incognito=read_progress.incognito AND EXCLUDED.incognito
          WHERE NOT read_progress.completed
        RETURNING 1`,
       params,

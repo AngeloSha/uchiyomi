@@ -6,7 +6,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { setActiveDict } from '../lib/i18n';
 import { ApiError } from '../lib/api';
-import { uploadAll, uploadRefusal } from '../lib/chapterUpload';
+import { uploadAll, uploadRefusal, orderedImagePages, uploadImageChapter, isRasterPageHeader, imagePreviewBitmap } from '../lib/chapterUpload';
 
 setActiveDict({});
 const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
@@ -48,4 +48,52 @@ test('the page keeps the files that failed, refreshes what lists the series, and
   assert.match(src, /if \(run\.done\) for \(const k of \[\['library'\], \['home'\]\]\) qc\.invalidateQueries/, 'Library and Home are not refreshed');
   assert.match(src, /const into = seriesId \|\| \(!title\.trim\(\) && made \? made\.id : ''\);/, 'a retry of a new series asks for its title again');
   assert.match(src, /tr\('Add chapter files to “\{title\}”\./, 'the page does not say which series');
+});
+
+test('image selection sorts page numbers, reports ignored files and refuses silent folder merging',()=> {
+  const files=['page10.png','page2.png','.hidden.jpg','readme.txt'].map(name=>new File([new Uint8Array([1])],name));
+  const chosen=orderedImagePages(files);assert.deepEqual(chosen.pages.map(f=>f.name),['page2.png','page10.png']);assert.equal(chosen.ignored,2);
+  const nested=['Chapter 1/page1.png','Chapter 2/page2.png'].map(path=>{const file=new File([new Uint8Array([1])],path.split('/').at(-1)!);Object.defineProperty(file,'webkitRelativePath',{value:path});return file;});
+  assert.equal(orderedImagePages(nested).multipleFolders,true);
+  assert.equal(orderedImagePages([files[0],files[0]]).duplicateNames,true);
+});
+test('image chapter uploads preserve the chosen multipart order and send selected privacy without an owner override',async()=> {
+  const original=globalThis.fetch;let request:{url:string;init:RequestInit}|undefined;
+  globalThis.fetch=(async(url:any,init:RequestInit)=>{request={url:String(url),init};return new Response(JSON.stringify({indexed:true,file:'x',seriesId:'s',bookId:'b',number:7}),{headers:{'content-type':'application/json'}});}) as typeof fetch;
+  try {
+    const pages=['page10.png','page2.png'].map(name=>new File([new Uint8Array([1])],name));
+    await uploadImageChapter({title:'New Private',fresh:true,visibility:'private'},'Chapter 7',pages);
+    const url=new URL(request!.url,'http://localhost');assert.equal(url.searchParams.get('visibility'),'private');assert.equal(url.searchParams.get('images'),'1');assert.equal(url.searchParams.get('name'),'Chapter 7.cbz');assert.equal(url.searchParams.has('ownerId'),false);
+    const data=request!.init.body as FormData;assert.deepEqual(data.getAll('pages').map(f=>(f as File).name),['page10.png','page2.png']);
+    assert.equal(new Headers(request!.init.headers).has('content-type'),false,'the browser must generate its own multipart boundary');
+  } finally {globalThis.fetch=original;}
+});
+test('an unreadable image refusal names the offending page without discarding the chapter silently',()=> {
+  assert.equal(uploadRefusal(refusal(400,{error:'invalid_page',page:'坏图.png'}),'Chapter 7'),'Could not read image “坏图.png”. No chapter was stored.');
+});
+
+
+test('preview headers accept supported raster formats and refuse active documents even with image filenames',()=> {
+  for(const bytes of [Buffer.from('89504e470d0a1a0a','hex'),Buffer.from('ffd8ff0000000000','hex'),Buffer.from('GIF89a00'),Buffer.from('RIFF0000WEBP'),Buffer.from('0000ftypavif0000')])assert.equal(isRasterPageHeader(bytes),true);
+  for(const text of ['<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>','<html><img src=x onerror=alert(1)>','data:image/svg+xml,<svg/>','not an image'])assert.equal(isRasterPageHeader(Buffer.from(text)),false);
+});
+
+test('thumbnail decoding is bounded, skips oversized or cancelled files, and closes an abandoned bitmap',async()=> {
+  const original=globalThis.createImageBitmap,png=new File([Buffer.from('89504e470d0a1a0a','hex')],'page.png');
+  const releases:Array<()=>void>=[],options:ImageBitmapOptions[]=[];let active=0,peak=0,closed=0;
+  globalThis.createImageBitmap=((_file:any,opts:ImageBitmapOptions)=>new Promise(resolve=>{
+    active++;peak=Math.max(peak,active);options.push(opts);let released=false;
+    releases.push(()=>{if(released)return;released=true;active--;resolve({width:72,height:96,close:()=>{closed++;}} as ImageBitmap);});
+  })) as typeof createImageBitmap;
+  const waitFor=async(n:number)=>{for(let i=0;i<100 && releases.length<n;i++)await new Promise(resolve=>setImmediate(resolve));assert.equal(releases.length,n);};
+  try {
+    const cancelled=new AbortController(),first=imagePreviewBitmap(png),second=imagePreviewBitmap(png),third=imagePreviewBitmap(png,cancelled.signal);
+    await waitFor(2);assert.equal(peak,2);cancelled.abort();releases[0]();releases[1]();
+    const images=await Promise.all([first,second,third]);assert.equal(images[2],null,'cancelled queued files never decode');images[0]!.close();images[1]!.close();
+    assert.deepEqual(options,[{resizeWidth:72,resizeHeight:96,resizeQuality:'high'},{resizeWidth:72,resizeHeight:96,resizeQuality:'high'}]);
+    const huge=new File([Buffer.from('89504e470d0a1a0a','hex')],'huge.png');Object.defineProperty(huge,'size',{value:64*1024*1024+1});
+    assert.equal(await imagePreviewBitmap(huge),null);assert.equal(await imagePreviewBitmap(new File(['<svg/>'],'renamed.png')),null);assert.equal(releases.length,2);
+    const departed=new AbortController(),pending=imagePreviewBitmap(png,departed.signal);await waitFor(3);departed.abort();releases[2]();
+    assert.equal(await pending,null);assert.equal(closed,3,'a bitmap that finishes after unmount is closed too');
+  } finally {for(const release of releases)release();globalThis.createImageBitmap=original;}
 });

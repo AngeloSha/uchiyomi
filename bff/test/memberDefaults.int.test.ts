@@ -334,7 +334,11 @@ test('PATCH refuses what a member\'s PATCH refuses, and writes nothing then', { 
 
 test('the first admin starts with everything, by setup or by SSO-only mode\'s first sign-in; the sign-ups after it do not', { skip }, async () => {
   // A new server, defaults already set (they live on server_settings, which outlives every account).
-  await q('TRUNCATE users CASCADE');
+  // Delete account rows while preserving the shared libraries/defaults. TRUNCATE
+  // CASCADE also empties libraries now that managed private libraries can own a
+  // user FK, even though every fixture library here has no owner.
+  await q('DELETE FROM users');
+  assert.ok(await one('SELECT id FROM libraries WHERE id=$1',[KIDS]),'the default shared library survives the account reset');
   const DEFAULTS = { libraries: [KIDS], maxAgeRating: 13, perms: { canDownload: false } };
   await q(`UPDATE server_settings SET new_member_libraries = $1, new_member_max_age_rating = 13, new_member_perms = '{"canDownload": false}' WHERE id = 1`, [[KIDS]]);
   const local = await appFor('local');
@@ -347,7 +351,7 @@ test('the first admin starts with everything, by setup or by SSO-only mode\'s fi
   } finally {
     await local.close();
   }
-  await q('TRUNCATE users CASCADE');
+  await q('DELETE FROM users');
   process.env.OIDC_BOOTSTRAP_ADMIN_SUB = 'first-sub';
   const sso = await appFor('oidc-only');
   try {

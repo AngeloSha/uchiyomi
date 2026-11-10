@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
-import { api, apiWithHeaders, img } from '@/lib/api';
+import { api, apiWithHeaders, img,getCurrentUser } from '@/lib/api';
 import { fetchAllBooks } from '@/lib/seriesBooks';
 import { chapterOutcome } from '@/lib/readerState';
 import { openableChapters } from '@/lib/chapterRows';
@@ -27,7 +27,7 @@ import { numLabel } from '@/lib/numbering';
 import { useToast } from '@/components/Toast';
 import { deviceId } from '@/lib/device';
 import { ReaderEndLabel, ReaderEndRadar } from '@/components/ReaderEndRadar';
-import { getOfflineChapter, getPageBlob, queueProgress, noteOfflineProgress, listSeriesDownloads, setOfflinePageJunk, setOfflineSpreadMarks } from '@/lib/downloads';
+import { getOfflineChapter, getPageBlob, queueProgress, noteOfflineProgress, listSeriesDownloads, setOfflinePageJunk, setOfflineSpreadMarks,offlineAccountChanged } from '@/lib/downloads';
 import { applyMarks, markOf, saveMark, spreadOptions, withMark, type SpreadMark, type SpreadOption } from '@/lib/spreadMarks';
 import { applyCover, clearCover } from '@/lib/theme';
 import { COLOR_FILTER, glide, loadDevicePrefs, saveDevicePrefs, type DevicePrefs } from '@/lib/readerDevice';
@@ -128,8 +128,8 @@ function usePortrait(): boolean {
  * A chapter's page list as the reader keeps it. `spreads` (#229): asked with ?spreads=1 by a reader who turned Join split
  * double pages on -- the pages a source cut from one spread then carry `join` -- and the server's word on them with it.
  */
-async function pageList(bookId: string, spreads: boolean): Promise<{ pages: PageDim[]; spreads?: Chapter['spreads'] }> {
-  const { data, headers } = await apiWithHeaders<PageInfo[]>(`/api/books/${bookId}/pages${spreads ? '?spreads=1' : ''}`);
+async function pageList(bookId: string, spreads: boolean,actor=getCurrentUser()): Promise<{ pages: PageDim[]; spreads?: Chapter['spreads'] }> {
+  const { data, headers } = await apiWithHeaders<PageInfo[]>(`/api/books/${bookId}/pages${spreads ? '?spreads=1' : ''}`,{expectedOwnerId:actor});
   const said = headers.get('x-spreads');
   return {
     pages: data.map((p) => ({ number: p.number, width: p.width ?? null, height: p.height ?? null, junk: p.junk, missing: p.missing, removed: p.removed, restorable: p.restorable, contentVersion: p.contentVersion, join: p.join, mark: p.mark })),
@@ -137,14 +137,16 @@ async function pageList(bookId: string, spreads: boolean): Promise<{ pages: Page
   };
 }
 
-async function loadChapter(bookId: string, spreads = false): Promise<Chapter | null> {
-  const off = await getOfflineChapter(bookId);
+async function loadChapter(bookId: string, spreads = false,actor=getCurrentUser()): Promise<Chapter | null> {
+  if(!actor || getCurrentUser()!==actor)return null;
+  const off = await getOfflineChapter(bookId,actor);
+  if(getCurrentUser()!==actor)return null;
   if (off) {
     return { id: bookId, seriesId: off.seriesId, seriesTitle: off.seriesTitle, title: off.title, pages: off.pages, offline: true, readingDirection: off.readingDirection };
   }
   try {
-    const b = await api<Book>(`/api/books/${bookId}`);
-    const list = await pageList(bookId, spreads);
+    const b = await api<Book>(`/api/books/${bookId}`,{expectedOwnerId:actor});
+    const list = await pageList(bookId, spreads,actor);
     return {
       id: bookId,
       seriesId: b.seriesId,
@@ -419,7 +421,7 @@ function ReaderInner() {
     blobUrls.current.forEach((u) => URL.revokeObjectURL(u));
     blobUrls.current.clear();
     (async () => {
-      const first = await loadChapter(bookId, loadPrefs().joinSplit);
+      const first = await loadChapter(bookId, loadPrefs().joinSplit,user?.id??null);
       if (!alive) return;
       setFailed(null);
       // Empty and absent are different sentences, and neither of them is silence.
@@ -446,7 +448,7 @@ function ReaderInner() {
           } catch { /* fall through to the offline copy */ }
         }
         if (!resolved && first.offline) {
-          const off = await getOfflineChapter(bookId);
+          const off = await getOfflineChapter(bookId,user?.id??null);
           if (off && !off.lastCompleted && off.lastPage) resolved = off.lastPage;
         }
         setStartPage(clamp(resolved || 1));
@@ -469,7 +471,7 @@ function ReaderInner() {
         // next/prev walked straight onto the tombstone and showed it in the middle of a series that was
         // otherwise all there. Stepped over here, EXCEPT when this device holds a copy: then the offline
         // record is the last one anywhere, and the reader consults it before the server, so it opens fine.
-        const saved = new Set((await listSeriesDownloads(first.seriesId).catch(() => [])).map((c) => c.bookId));
+        const saved = new Set((await listSeriesDownloads(first.seriesId,user?.id??null).catch(() => [])).map((c) => c.bookId));
         if (alive) {
           setChapterRefs(openableChapters(list.content, saved).map((b) => ({ id: b.id, label: chapterLabel(b) })));
           setRefsFrom('live');
@@ -479,7 +481,7 @@ function ReaderInner() {
         // Offline, this is the only list there is. Without it every downloaded chapter reported the end of the
         // series and prev/next were both dead, because an empty list reads as "there is no next chapter".
         try {
-          const local = await listSeriesDownloads(first.seriesId);
+          const local = await listSeriesDownloads(first.seriesId,user?.id??null);
           if (alive && local.length) {
             setChapterRefs(local.map((c) => ({ id: c.bookId, label: c.title || tr('Chapter {n}', { n: c.number }) })));
             setRefsFrom('offline');
@@ -867,7 +869,7 @@ function ReaderInner() {
         const it = flat[i];
         const ch = chapters[it.ci];
         if (ch?.offline && !map.has(it.key)) {
-          const blob = await getPageBlob(ch.id, it.number);
+          const blob = await getPageBlob(ch.id, it.number,user?.id??null);
           if (blob && alive) map.set(it.key, URL.createObjectURL(blob));
         }
       }
@@ -1229,7 +1231,7 @@ function ReaderInner() {
       // #180: where the track stands now, for the layout effect after `slides` to put it back.
       const hold = () => { appendAnchor.current = scrollRef.current ? { left: scrollRef.current.scrollLeft, at: Date.now() } : null; };
       if (!next) { noMore.current = true; await untilStill(lastMoved, rtlTrack); hold(); setEnded(true); appending.current = false; return; }
-      const ch = await loadChapter(next.id, prefs.joinSplit);
+      const ch = await loadChapter(next.id, prefs.joinSplit,user?.id??null);
       const outcome = chapterOutcome(ch);
       await untilStill(lastMoved, rtlTrack);
       hold();
@@ -1258,7 +1260,7 @@ function ReaderInner() {
       for (const c of due) {
         if (c.spreads === 'pending') spreadTries.current.set(c.id, tries(c.id) + 1);
         spreadAsking.current.add(c.id);
-        void pageList(c.id, true).then((list) => {
+        void pageList(c.id, true,user?.id??null).then((list) => {
           // Out of the asks before the answer goes in: the render it causes runs this effect again, and asks what is due.
           spreadAsking.current.delete(c.id);
           setChapters((cs) => cs.map((x) => (x.id === c.id && x.pages.length === list.pages.length
@@ -1279,14 +1281,17 @@ function ReaderInner() {
   /** Bumped when a tap's page turn can no longer be taken back, so the progress below is read again. */
   const [turnSettled, setTurnSettled] = useState(0);
   const sendProgress = useCallback((chId: string, sId: string, page: number, completed: boolean) => {
+    const actor=user?.id;if(!actor || getCurrentUser()!==actor)return;
     // `at` is what lets the server refuse a stale write. The offline outbox always sent it; the live path
     // never did, so every live ping took the "no timestamp" leg of the guard and applied unconditionally --
     // a desktop tab left open on chapter 3 could still rewind the phone that had read to chapter 9.
     const payload = { page, completed, seriesId: sId, deviceId: deviceId(), at: Date.now(), ...(incognitoRef.current ? { incognito: true } : {}) };
     // Alongside the write, not instead of it: this is what a downloaded chapter resumes from with no network.
-    void noteOfflineProgress(chId, page, completed);
-    api(`/api/books/${chId}/progress`, { method: 'PUT', json: payload }).catch(() => queueProgress({ bookId: chId, ...payload }));
-  }, []);
+    void noteOfflineProgress(chId, page, completed,actor);
+    api(`/api/books/${chId}/progress`, { method: 'PUT', json: payload,expectedOwnerId:actor }).catch(error=>{
+      if(!offlineAccountChanged(error)&&getCurrentUser()===actor)return queueProgress({ bookId: chId, ...payload },actor);
+    });
+  }, [user?.id]);
   useEffect(() => {
     if (!ready || !flat.length) return;
     // A tap's page turn is not reading until a double-click can no longer take it back (lib/readerGesture.ts).
@@ -1409,6 +1414,7 @@ function ReaderInner() {
    * server's answer too (setOfflineSpreadMarks), as it reads its own pages first.
    */
   const applySpread = (o: SpreadOption) => {
+    const actor=user?.id;if(!actor || getCurrentUser()!==actor)return;
     const ch = chapters[flat[current]?.ci ?? -1];
     if (!ch) return;
     const mark = markOf(o);
@@ -1418,7 +1424,7 @@ function ReaderInner() {
       : c)));
     put(withMark(before, o.first, mark));
     saveMark(ch.id, o.first, mark, ch.pages.length)
-      .then((marks) => { put(marks); void setOfflineSpreadMarks(ch.id, marks); })
+      .then((marks) => { if(getCurrentUser()!==actor)return;put(marks); void setOfflineSpreadMarks(ch.id, marks,actor); })
       .catch(() => { put(before); toast(tr('Could not save'), 'error'); });
   };
 
@@ -1440,7 +1446,7 @@ function ReaderInner() {
     const state = pageRefreshState.current;
     const online = state.chapters.filter((c) => !c.offline && (!bookId || c.id === bookId));
     if (!online.length) return;
-    const lists = await Promise.all(online.map(async (c) => ({ id: c.id, list: await pageList(c.id, state.joinSplit) })));
+    const lists = await Promise.all(online.map(async (c) => ({ id: c.id, list: await pageList(c.id, state.joinSplit,user?.id??null) })));
     // The reader may have moved during the request; preserve the page it is on when the new metadata arrives.
     const now = pageRefreshState.current;
     const at = now.flat[now.current];
@@ -1474,6 +1480,7 @@ function ReaderInner() {
    * page on the server and outranks the heuristic from then on.
    */
   const toggleJunk = useCallback((pageNumber: number, junk: boolean) => {
+    const actor=user?.id;if(!actor || getCurrentUser()!==actor)return;
     const ch = chapters[flat[current]?.ci ?? 0];
     if (!ch || ch.pages.find((p) => p.number === pageNumber)?.removed) return;
     const apply = (v: boolean) => setChapters((prev) => prev.map((c) => (c.id !== ch.id ? c : {
@@ -1483,10 +1490,10 @@ function ReaderInner() {
     // Nothing to reveal: the flow is rebuilt from the flag, so clearing it draws the page at full height on
     // the next render. In `hide` the page is put back the same way, by asking for it explicitly.
     if (!junk) setExpanded((prev) => new Set(prev).add(`${ch.id}:${pageNumber}`));
-    api(`/api/books/${ch.id}/pages/${pageNumber}/junk`, { method: 'PUT', json: { junk } })
-      .then(() => setOfflinePageJunk(ch.id, pageNumber, junk))
+    api(`/api/books/${ch.id}/pages/${pageNumber}/junk`, { method: 'PUT', json: { junk },expectedOwnerId:actor })
+      .then(() => setOfflinePageJunk(ch.id, pageNumber, junk,actor))
       .catch(() => apply(!junk));
-  }, [chapters, flat, current]);
+  }, [chapters, flat, current,user?.id]);
 
   /**
    * Thumbnails for the chapter being read, and nothing else -- see PageGrid for why.

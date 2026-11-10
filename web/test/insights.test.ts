@@ -135,3 +135,11 @@ test('Insights is its own page, from one request keyed on Show 18+, and the Stud
   // #249 wrote each day's count on the heatmap: 3-7 px glyphs on a phone. Reintroduce a <text> per cell: this fails.
   assert.doesNotMatch(read('components/charts/Heatmap.tsx'), /data-day-count|numbers\??:/);
 });
+
+test('external sync totals are chapter counts with time unavailable, rendered without another query',()=>{
+  const html=renderToStaticMarkup(createElement(InsightCards,{data:payload({externalReads:[{origin:'koreader',chapters:2},{origin:'komga',chapters:1}]})}));
+  assert.match(html,/data-insight="external-readers"/);
+  assert.match(html,/KOReader/);assert.match(html,/Komga/);
+  assert.match(html,/2 chapters/);assert.match(html,/1 chapter/);
+  assert.match(html,/Reading time is unavailable/);
+});

@@ -26,7 +26,7 @@ function page<T>(content: T[], total: number, p: number, size: number): Page<T> 
 // ⚠️ Every name here must ALSO be produced by the inner SELECT of `seriesSrcWith` below, which enumerates
 // its columns explicitly. Adding one to only one of the two makes EVERY series read fail with "column does
 // not exist" -- the series page, the library grid, search, the home rails, OPDS, all of it.
-const SERIES_COLS = 'id, title, summary, status, genres, author, age_rating, reading_direction, books_count, cover_book_id, web, created_at, latest_mtime, auto_update, library_id, library_pinned, source_chapters, source_missing, source_checked_at, source_id, lang, work_id';
+const SERIES_COLS = 'id, title, summary, status, genres, author, age_rating, reading_direction, books_count, cover_book_id, web, created_at, latest_mtime, auto_update, library_id, library_pinned, is_private, source_chapters, source_missing, source_checked_at, source_id, lang, work_id';
 
 /**
  * The one place a series is read from.
@@ -55,7 +55,7 @@ const seriesSrcWith = (gate: Gate, ctx: ViewCtx, p: Params, alias: string) => `(
          -- The stored count less the notice chapters this series hides (lib/noticeChapters.ts), so every badge,
          -- filter and sort over it, and the Komga-compatible series Mihon's tracker reads, counts what is listed.
          ${visibleBookCount('s')} AS books_count, s.cover_book_id, s.web, s.created_at, s.latest_mtime,
-         s.auto_update, s.library_id, s.library_pinned,
+         s.auto_update, s.library_id, s.library_pinned, s.is_private,
          -- What the source last said, so "how far behind is this?" is a column rather than a network call.
          -- Kept in step with SERIES_COLS above; see the warning there.
          s.source_chapters, s.source_missing, s.source_checked_at,
@@ -122,6 +122,7 @@ function seriesDto(r: any) {
   return {
     id: r.id,
     libraryId: r.library_id ?? 'lib',
+    isPrivate: r.is_private === true,
     // Whether an admin filed this series into that library by hand. Shown so the edit modal can say
     // "automatic" honestly rather than implying every placement was a decision someone made.
     libraryPinned: r.library_pinned === true,
@@ -559,12 +560,13 @@ const total = async (ctx: ViewCtx, where = 'TRUE', p = new Params(), cte = '', f
 
 export const owned = {
   libraries: async (ctx: ViewCtx) => {
-    const rows = await q<{ id: string; name: string; age_rating: number | null }>(
-      'SELECT id, name, age_rating FROM libraries ORDER BY sort_order, name',
-    );
+    const rows = await q<{ id: string; name: string; age_rating: number | null; owner_user_id: string | null }>(
+      'SELECT id, name, age_rating, owner_user_id FROM libraries ORDER BY sort_order, name');
     // A restricted viewer is told about the libraries they hold, not all of them: the list itself would
     // otherwise leak the existence and names of everything they cannot open.
-    const held = ctx.libraryIds ? rows.filter((r) => ctx.libraryIds!.includes(r.id)) : rows;
+    const held = rows.filter(r => (ctx.system || !r.owner_user_id || r.owner_user_id === ctx.userId)
+      && (!ctx.libraryIds || ctx.libraryIds.includes(r.id)
+        || (!ctx.libraryIds.includes('') && r.owner_user_id === ctx.userId)));
     // A library rated above this viewer's cap is one they can never open, so naming it is the same leak in
     // a different shape. This list had no notion of the age cap at all, which meant a 13+ account was shown
     // the name of the 18+ shelf and a tab that could only ever be empty.
@@ -750,7 +752,7 @@ export const owned = {
     // which unread, well-rated series that member had opened privately (v0.69.1). The viewer's own private places
     // still count -- they know what they opened. Reintroduce by dropping the incognito clause: "an Incognito read
     // leaves another member's Hidden gems alone" in gemsIncognito.int.test.ts sees the gem disappear.
-    const counts = `(NOT rp.incognito OR rp.user_id = ${p.add(ctx.userId ?? null)})`;
+    const counts = `((NOT rp.incognito AND NOT rp.is_private) OR rp.user_id = ${p.add(ctx.userId ?? null)})`;
     const rows = await q(
       `SELECT ${SERIES_COLS} FROM (
          SELECT DISTINCT ON (COALESCE(sv.work_id::text, sv.id)) sv.*, ${score} AS gem_score, ${pop} AS gem_pop

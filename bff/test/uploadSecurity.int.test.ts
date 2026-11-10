@@ -143,7 +143,7 @@ test('three requests admitted together through asynchronous title lookups never 
       await lock.query('SELECT pg_stat_clear_snapshot()');
       return Number((await lock.query(`SELECT count(*) AS n FROM pg_stat_activity
         WHERE datname=current_database() AND wait_event_type='Lock'
-        AND query LIKE 'SELECT 1 FROM lib_series WHERE folder%'`)).rows[0].n) === 3;
+        AND query LIKE 'SELECT 1 FROM lib_series s WHERE%'`)).rows[0].n) === 3;
     },
     'The three route title lookups did not reach the deterministic database barrier');
     await lock.query('COMMIT'); committed = true;

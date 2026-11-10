@@ -13,6 +13,7 @@ import { IcCloudDownload, IcPlus, IcRefresh } from '@/components/icons';
 import { Row, Section, SETTINGS_GRID, SwitchRow } from '@/components/settings';
 import { isDesktop } from '@/lib/desktop';
 import { connectProblem, testProblem, testSaid, tokenFromPaste, tokenSource, type TestResult } from '@/lib/trackerHelp';
+import { ExternalReaderSettings } from '@/components/ExternalReaderSettings';
 import { PLAN_ON_ADD_TEXT, planOnAddOf } from '@/lib/trackerPlan';
 
 /**
@@ -39,6 +40,7 @@ export function ProfileConnections({ focusTracking }: { focusTracking: boolean }
     <div className={SETTINGS_GRID}>
       <TrackerSection focus={focusTracking} />
       {!desktop && <OpdsSection />}
+      {!desktop && <ExternalReaderSettings />}
       {!desktop && <TokensSection />}
     </div>
   );

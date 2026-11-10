@@ -260,10 +260,10 @@ test('the title rule says WHICH tier matched, because a sequel passes the contai
 });
 
 test('the lib normalises titles exactly as routes/sources.ts norm() does', { skip }, () => {
-  // The lib cannot import the route, so the rule is repeated; this pins the two. Reintroduce by changing
-  // either regex.
-  for (const [a, b] of [['Followed-Tale!!', 'followed tale'], ['Naru to', 'NARUTO'], ["It's Here", 'its here'], ['Ø Zero', 'zero']]) {
-    assert.equal(titleMatches(a, { title: b }), norm(a) === norm(b), `${a} vs ${b}`);
+  // Compare the EXACT tier: titleMatches deliberately accepts containment too. Keeping Ø's identity now
+  // makes Ø Zero/zero a close match rather than an exact match; it must not be mistaken for normalization drift.
+  for (const [a, b] of [['Followed-Tale!!', 'followed tale'], ['Naru to', 'NARUTO'], ["It's Here", 'its here'], ['Ø Zero', 'zero'], ['大魔導士','別の漫画'], ['Ｓｏｌｏ','Solo']]) {
+    assert.equal(titleMatch(a, { title: b }) === 'exact', norm(a) === norm(b), `${a} vs ${b}`);
   }
 });
 

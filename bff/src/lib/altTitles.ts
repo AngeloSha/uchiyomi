@@ -1,3 +1,4 @@
+import {samePrivacyDomainSql} from './contentScope';
 // The other names a series goes by, and the one rule for when two names are the same name (v0.49.1).
 //
 // The idea, the name list and the parsing are @TIGamingTV's (PR #119), rebuilt on the server's own parts.
@@ -17,9 +18,9 @@
 // beside the manhwa. A match through an other name is also held to the numbering check both ways (autoFollow.ts
 // judgeCandidate), because an exact name is still only a name.
 //
-// Latin script only. Every other script normalises to the empty string under normTitle (letters and digits
-// a-z0-9), so a Korean or Japanese name could never be compared anyway -- and an empty key must never be allowed
-// to equal another empty key.
+// Learned and manually stored alternate names retain the Latin-script policy for established automatic
+// cross-source lookups. Main-title and tracker identity matching use Unicode; learned-script coverage is a
+// separate policy from the canonical key used to compare names.
 import { q } from './db';
 import { normTitle } from './titleMatch';
 
@@ -128,13 +129,12 @@ export function parseAltTitles(description: string | null | undefined): string[]
   return out;
 }
 
-/** Why a name an admin typed is not kept: no Latin letters to compare by, or a key under MIN_ALT_KEY. */
+/** Why a typed alternate is outside the learned-name policy: non-Latin script, or a key under MIN_ALT_KEY. */
 export type NameRefusal = 'non_latin' | 'too_short';
 
 /**
- * The route's check on a typed name. Script first: a Korean name normalises to nothing, and "too short" would send
- * the admin looking for a longer spelling of it. A name with no letters at all (a numeric title) is judged by its
- * key alone.
+ * Script policy is checked first so a non-Latin spelling gets that explicit explanation, rather than a request
+ * for a longer spelling. A name with no letters at all (a numeric title) is judged by its key alone.
  */
 export function refuseName(title: string): NameRefusal | null {
   if (/\p{L}/u.test(title) && !isLatinName(title)) return 'non_latin';
@@ -156,9 +156,11 @@ export function exactHit<T extends { title: string }>(list: T[], name: string): 
 
 export interface AltTitleRow { title: string; norm: string; origin: AltOrigin; added_by: string | null; created_at: Date | string }
 
-/** The series' own title as the database normalises it, for "a series' own title is not an OTHER name of it". */
-const OWN_KEY = (param: string) =>
-  `(SELECT regexp_replace(lower(s.title), '[^a-z0-9]+', '', 'g') FROM lib_series s WHERE s.id = ${param})`;
+/** Compare with the same Unicode rule as matching; SQL's old ASCII expression lost accented letters. */
+async function ownTitleKey(run: typeof q, seriesId: string): Promise<string|null> {
+  const [row]=await run<{title:string}>('SELECT title FROM lib_series WHERE id=$1',[seriesId]);
+  return row ? normTitle(row.title) : null;
+}
 
 /**
  * Every stored name of a series. A person's word first -- a name an admin typed, then a tracker's synonyms, then
@@ -186,7 +188,7 @@ export async function namesOfMany(ids: readonly string[], by: 'id' | 'folder' = 
   const rows = await q<{ key: string; name: string }>(
     `SELECT me.${by} AS key, x.name
        FROM lib_series me
-       JOIN lib_series m ON m.id = me.id OR (me.work_id IS NOT NULL AND m.work_id = me.work_id AND m.merged_into IS NULL)
+       JOIN lib_series m ON m.id = me.id OR (me.work_id IS NOT NULL AND m.work_id = me.work_id AND m.merged_into IS NULL AND ${samePrivacyDomainSql('me','m')})
        LEFT JOIN series_overrides o ON o.series_id = m.id
       CROSS JOIN LATERAL (
         VALUES (m.title, CASE WHEN m.id = me.id THEN 0 ELSE 3 END), (o.title, CASE WHEN m.id = me.id THEN 1 ELSE 3 END)
@@ -243,6 +245,28 @@ export async function recordAltTitles(
     rows.set(k, title);
   }
   if (!rows.size) return [];
+  const ownKey=await ownTitleKey(run,seriesId);
+  // Drop the own title BEFORE consulting historical keys: its old ASCII tombstone must not be reactivated.
+  for(const key of rows.keys())if(key===ownKey)rows.delete(key);
+  if(!rows.size)return [];
+  const existing=await run<{norm:string;title:string;removed_at:Date|null}>(
+    'SELECT norm,title,removed_at FROM series_alt_titles WHERE series_id=$1 ORDER BY created_at,norm',[seriesId]);
+  const byCanonical=new Map<string,typeof existing>();
+  for(const row of existing){const key=normTitle(row.title);byCanonical.set(key,[...byCanonical.get(key)??[],row]);}
+  const storedKeys=new Set(existing.map(row=>row.norm));
+  const writes=new Map<string,string>();
+  for(const [key,title] of rows){
+    const prior=byCanonical.get(key);
+    if(prior?.length){
+      // Automatic learning never revives a removed name. Explicit admin reactivation keeps its original row key.
+      if(origin!=='admin' || prior.some(row=>!row.removed_at))continue;
+      writes.set(prior[0].norm,title);
+    }else if(!storedKeys.has(key)){
+      // A legacy key can belong to a DIFFERENT spelling; never rename/reactivate that row through a key collision.
+      writes.set(key,title);
+    }
+  }
+  if(!writes.size)return [];
   const conflict = origin === 'admin'
     ? `DO UPDATE SET title = EXCLUDED.title, origin = 'admin', added_by = EXCLUDED.added_by, created_at = now(),
                      removed_at = NULL
@@ -251,9 +275,9 @@ export async function recordAltTitles(
   const written = await run<{ title: string }>(
     `INSERT INTO series_alt_titles (series_id, norm, title, origin, added_by)
      SELECT $1, x.n, x.t, $4, $5 FROM unnest($2::text[], $3::text[]) AS x(n, t)
-      WHERE EXISTS (SELECT 1 FROM lib_series s WHERE s.id = $1) AND x.n IS DISTINCT FROM ${OWN_KEY('$1')}
+      WHERE EXISTS (SELECT 1 FROM lib_series s WHERE s.id = $1)
      ON CONFLICT (series_id, norm) ${conflict} RETURNING title`,
-    [seriesId, [...rows.keys()], [...rows.values()], origin, opts.userId ?? null],
+    [seriesId, [...writes.keys()], [...writes.values()], origin, opts.userId ?? null],
   );
   return written.map((r) => r.title);
 }
@@ -288,12 +312,20 @@ export async function learnFromMainSource(sourceId: string, sourceSeriesId: stri
  * come back as the survivor's (as a live name, or from the survivor's own description).
  */
 export async function carryAltTitles(run: typeof q, fromId: string, intoId: string): Promise<void> {
+  const ownKey=await ownTitleKey(run,intoId);
+  // Destination decisions win by canonical spelling as well as stored key, including historical tombstones.
+  // Existing keys and timestamps remain untouched; this is a compatibility comparison, not a rekey.
+  const destination=new Set((await run<{title:string}>('SELECT title FROM series_alt_titles WHERE series_id=$1',[intoId]))
+    .map(row=>normTitle(row.title)));
+  const excluded=(await run<{norm:string;title:string}>(
+    'SELECT norm,title FROM series_alt_titles WHERE series_id=$1',[fromId]))
+    .filter(row=>normTitle(row.title)===ownKey || destination.has(normTitle(row.title))).map(row=>row.norm);
   await run(
     `INSERT INTO series_alt_titles (series_id, norm, title, origin, added_by, created_at, removed_at)
      SELECT $2, a.norm, a.title, a.origin, a.added_by, a.created_at, a.removed_at FROM series_alt_titles a
-      WHERE a.series_id = $1 AND a.norm IS DISTINCT FROM ${OWN_KEY('$2')}
+      WHERE a.series_id = $1 AND NOT (a.norm = ANY($3::text[]))
      ON CONFLICT (series_id, norm) DO NOTHING`,
-    [fromId, intoId],
+    [fromId, intoId, excluded],
   );
   await run('DELETE FROM series_alt_titles WHERE series_id = $1', [fromId]);
 }

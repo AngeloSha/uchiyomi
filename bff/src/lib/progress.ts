@@ -53,14 +53,15 @@ export async function writeProgress(w: ProgressWrite): Promise<void> {
   // offline rather than the last. Reintroduce by letting the INSERT take updated_at's default: "a chapter first read
   // offline resumes where the reader stopped" in offlineDates.int.test.ts finds page 3, not 25.
   await q(
-    `INSERT INTO read_progress (user_id, book_id, series_id, page, completed, updated_at, incognito)
-     VALUES ($1, $2, $3, $4, $5, COALESCE($7::timestamptz, now()), $8)
+    `INSERT INTO read_progress (user_id, book_id, series_id, page, completed, updated_at, incognito, is_private)
+     VALUES ($1, $2, $3, $4, $5, COALESCE($7::timestamptz, now()), $8, EXISTS(SELECT 1 FROM lib_series s WHERE s.id=$3 AND s.is_private))
      ON CONFLICT (user_id, book_id)
      DO UPDATE SET page = CASE WHEN $7::timestamptz IS NULL OR $7 >= read_progress.updated_at
                                THEN EXCLUDED.page ELSE read_progress.page END,
        completed = CASE WHEN $6 THEN EXCLUDED.completed ELSE (read_progress.completed OR EXCLUDED.completed) END,
        updated_at = GREATEST(read_progress.updated_at, COALESCE($7::timestamptz, now())),
-       incognito = read_progress.incognito AND EXCLUDED.incognito`,
+       incognito = read_progress.incognito AND EXCLUDED.incognito,
+       is_private = read_progress.is_private OR EXCLUDED.is_private`,
     [w.userId, w.bookId, w.seriesId, w.page, w.completed, !!w.silent, at, incognito],
   );
   // Incognito reading: the place above is kept, and nothing else -- no event, so history, streaks, Wrapped, the boards
@@ -68,8 +69,8 @@ export async function writeProgress(w: ProgressWrite): Promise<void> {
   // keeps its place and leaves no trace" in incognito.int.test.ts finds the event.
   if (!w.silent && !incognito) {
     await q(
-      `INSERT INTO reading_events (user_id, series_id, book_id, page, completed, device_id, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::timestamptz, now()))`,
+      `INSERT INTO reading_events (user_id, series_id, book_id, page, completed, device_id, created_at, is_private)
+       VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::timestamptz, now()), EXISTS(SELECT 1 FROM lib_series s WHERE s.id=$2 AND s.is_private))`,
       [w.userId, w.seriesId, w.bookId, w.page, w.completed, w.deviceId ?? null, at],
     );
   }

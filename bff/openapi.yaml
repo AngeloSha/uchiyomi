@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.106.0
+  version: 0.107.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -58,6 +58,16 @@ components:
         HTTP Basic where the password is the OPDS token from POST /api/opds/token. Refused (401) while the
         account is disabled, like every other credential of a disabled account; the token is not revoked and
         works again once the account is re-enabled.
+    kosyncUser:
+      type: apiKey
+      in: header
+      name: x-auth-user
+      description: A personal API token used as the KOReader username, only below /api/v1/kosync.
+    kosyncKey:
+      type: apiKey
+      in: header
+      name: x-auth-key
+      description: KOReader sends the MD5 of its dummy password; the API token in x-auth-user authenticates the account.
     imgCookie:
       type: apiKey
       in: cookie
@@ -12335,6 +12345,18 @@ paths:
         replacing existing files, under the shared writer claim. The archive index and its first page are validated.
         PDF/RAR uploads are also capped at 128 MiB. At most two uploads run together.
       parameters:
+        - name: images
+          in: query
+          schema: {type: string, enum: ['1']}
+          description: Send ordered multipart pages as one validated CBZ chapter.
+        - name: visibility
+          in: query
+          schema: {type: string, enum: [shared, private]}
+          description: New series only; defaults to the authenticated account preference.
+        - name: libraryId
+          in: query
+          schema: {type: string}
+          description: Allowed shared destination for a new series; private owners are inferred.
         - name: fresh
           in: query
           required: false
@@ -12362,6 +12384,18 @@ paths:
       requestBody:
         required: true
         content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [pages]
+              properties:
+                pages:
+                  type: array
+                  minItems: 1
+                  maxItems: 2000
+                  items: {type: string, format: binary}
+            encoding:
+              pages: {style: form, explode: true}
           application/octet-stream:
             schema:
               type: string
@@ -12390,7 +12424,7 @@ paths:
         "413":
           description: The file is over UPLOAD_MAX_MB or its format-specific reader limit (`too_large`)
         "415":
-          description: Send raw application/octet-stream bytes, not JSON.
+          description: Send application/octet-stream archives or multipart/form-data with images=1; JSON is not accepted.
         "507":
           description: The download disk is at its MIN_FREE_GB floor (`disk_full`)
   /api/admin/title-extraction/capabilities:
@@ -14137,6 +14171,17 @@ paths:
             schema:
               type: object
               properties:
+                continueFrom:
+                  type: string
+                  format: uuid
+                  description: Completed batch owned by this account; idempotently continue its saved remainder and scope.
+                visibility:
+                  type: string
+                  enum: [shared, private]
+                  description: Default destination; validated private tracker entries always stay private.
+                libraryId:
+                  type: string
+                  description: Allowed shared destination; private owners are inferred.
                 dataUrl:
                   type: string
                   description: A .tachibk/.proto.gz backup as a data URL (no multipart plugin; mirrors the art upload).
@@ -14361,8 +14406,7 @@ paths:
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. A
         `manual` pick clears the row's `matched_via` (a hand-picked match was found by nobody's alternate);
-        `auto` restores the resolve pass's suggestion and leaves `matched_via` as it is, so an auto → manual
-        → auto detour loses the note; `skip` on the last open row of a batch a run has been through closes
+        `auto` restores the resolve pass's suggestion, stored alternate-title provenance and ambiguity; `skip` on the last open row of a batch a run has been through closes
         the batch.
       parameters:
         - name: cid
@@ -15959,3 +16003,443 @@ paths:
           description: "forbidden -- the token is read-only."
         "404":
           description: Not found, or not visible to this account
+
+  /api/personal/privacy:
+    get:
+      tags:
+        - personal
+      summary: Read the account’s private-library default.
+      description: Reports supported, defaultPrivate and privateLibraryId. Existing defaults remain shared;
+        delegated library backends report unsupported.
+      operationId: getApiPersonalPrivacy
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Success; restricted to the authenticated account and its content scope.
+        "400":
+          description: Malformed or unsupported input.
+        "401":
+          description: Not authenticated or revoked credential.
+        "403":
+          description: Insufficient token scope, account permission or registration disabled.
+        "404":
+          description: Not found, not visible, or no unique available book matches the document.
+        "409":
+          description: A concurrent operation or content-scope safety rule prevents this change.
+    put:
+      tags:
+        - personal
+      summary: Change the account’s default destination for new additions.
+      description: Changes only future additions. Existing content is never reclassified. Explicit deny-all library
+        access is respected.
+      operationId: putApiPersonalPrivacy
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Success; restricted to the authenticated account and its content scope.
+        "400":
+          description: Malformed or unsupported input.
+        "401":
+          description: Not authenticated or revoked credential.
+        "403":
+          description: Insufficient token scope, account permission or registration disabled.
+        "404":
+          description: Not found, not visible, or no unique available book matches the document.
+        "409":
+          description: A concurrent operation or content-scope safety rule prevents this change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                defaultPrivate: &a1
+                  type: boolean
+              required:
+                - defaultPrivate
+  /api/personal/private-series:
+    get:
+      tags:
+        - personal
+      summary: List this account’s private copies, including removed copies.
+      description: Returns content rows with id,title,deleted,autoUpdate,canDelete. Other accounts’ copies and
+        inaccessible age-rated content are never included.
+      operationId: getApiPersonalPrivateSeries
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Success; restricted to the authenticated account and its content scope.
+        "400":
+          description: Malformed or unsupported input.
+        "401":
+          description: Not authenticated or revoked credential.
+        "403":
+          description: Insufficient token scope, account permission or registration disabled.
+        "404":
+          description: Not found, not visible, or no unique available book matches the document.
+        "409":
+          description: A concurrent operation or content-scope safety rule prevents this change.
+  /api/series/{id}/privacy:
+    get:
+      tags:
+        - personal
+      summary: Read this copy’s visibility and owner-management capability.
+      description: Returns isPrivate,owner,canChange. A private copy is visible only to its owner; a normal
+        administrator cannot use an ID to bypass privacy.
+      operationId: getApiSeriesIdPrivacy
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Success; restricted to the authenticated account and its content scope.
+        "400":
+          description: Malformed or unsupported input.
+        "401":
+          description: Not authenticated or revoked credential.
+        "403":
+          description: Insufficient token scope, account permission or registration disabled.
+        "404":
+          description: Not found, not visible, or no unique available book matches the document.
+        "409":
+          description: A concurrent operation or content-scope safety rule prevents this change.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+    put:
+      tags:
+        - personal
+      summary: Deliberately publish or re-private an owned copy.
+      description: Owner only. Preserves series/book IDs and files; refuses implicit work merges and unsafe shared
+        physical folders. Earlier private activity stays private. Never changes an AniList entry to public.
+      operationId: putApiSeriesIdPrivacy
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Success; restricted to the authenticated account and its content scope.
+        "400":
+          description: Malformed or unsupported input.
+        "401":
+          description: Not authenticated or revoked credential.
+        "403":
+          description: Insufficient token scope, account permission or registration disabled.
+        "404":
+          description: Not found, not visible, or no unique available book matches the document.
+        "409":
+          description: A concurrent operation or content-scope safety rule prevents this change.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                isPrivate: *a1
+                libraryId:
+                  type: string
+                  minLength: 1
+                  maxLength: 64
+              required:
+                - isPrivate
+  /api/series/{id}/private-management:
+    post:
+      tags:
+        - personal
+      summary: Manage an owned private copy without global administrator rights.
+      description: pause/resume controls updates; remove is reversible; restore retains progress. delete
+        additionally requires confirmed:true, an already removed never-published copy and safe owned files.
+      operationId: postApiSeriesIdPrivateManagement
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Success; restricted to the authenticated account and its content scope.
+        "400":
+          description: Malformed or unsupported input.
+        "401":
+          description: Not authenticated or revoked credential.
+        "403":
+          description: Insufficient token scope, account permission or registration disabled.
+        "404":
+          description: Not found, not visible, or no unique available book matches the document.
+        "409":
+          description: A concurrent operation or content-scope safety rule prevents this change.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                action:
+                  type: string
+                  enum:
+                    - pause
+                    - resume
+                    - remove
+                    - restore
+                    - delete
+                confirmed: *a1
+              required:
+                - action
+  /api/external-readers:
+    get:
+      tags:
+        - personal
+      summary: Read the account’s external-reader options.
+      description: Both externalReadingStats and opdsEstimatedBookmarks default off. External completions supply
+        counts only; page-fetch estimates do not constitute reading completion.
+      operationId: getApiExternalReaders
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Success; restricted to the authenticated account and its content scope.
+        "400":
+          description: Malformed or unsupported input.
+        "401":
+          description: Not authenticated or revoked credential.
+        "403":
+          description: Insufficient token scope, account permission or registration disabled.
+        "404":
+          description: Not found, not visible, or no unique available book matches the document.
+        "409":
+          description: A concurrent operation or content-scope safety rule prevents this change.
+    put:
+      tags:
+        - personal
+      summary: Save external-reader count and estimated-bookmark options.
+      description: Does not backfill historical events. External completions never invent duration or affect
+        streaks, badges or household rankings.
+      operationId: putApiExternalReaders
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Success; restricted to the authenticated account and its content scope.
+        "400":
+          description: Malformed or unsupported input.
+        "401":
+          description: Not authenticated or revoked credential.
+        "403":
+          description: Insufficient token scope, account permission or registration disabled.
+        "404":
+          description: Not found, not visible, or no unique available book matches the document.
+        "409":
+          description: A concurrent operation or content-scope safety rule prevents this change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                externalReadingStats: *a1
+                opdsEstimatedBookmarks: *a1
+              required:
+                - externalReadingStats
+                - opdsEstimatedBookmarks
+  /api/admin/import/batches/{id}/skip:
+    post:
+      tags:
+        - admin
+      summary: Skip selected rows in an owned review batch.
+      description: Transactional and guarded against a concurrent import run. Only candidate IDs from this account’s
+        reviewable batch are accepted; skip memory is keyed by account and effective content scope.
+      operationId: postApiAdminImportBatchesIdSkip
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Success; restricted to the authenticated account and its content scope.
+        "400":
+          description: Malformed or unsupported input.
+        "401":
+          description: Not authenticated or revoked credential.
+        "403":
+          description: Insufficient token scope, account permission or registration disabled.
+        "404":
+          description: Not found, not visible, or no unique available book matches the document.
+        "409":
+          description: A concurrent operation or content-scope safety rule prevents this change.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                candidateIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: string
+                    format: uuid
+              required:
+                - candidateIds
+  /api/v1/kosync/users/auth:
+    get:
+      tags:
+        - opds
+      summary: Verify KOReader API-token credentials.
+      description: Use a read/write personal API token as KOReader username (x-auth-user) and any dummy password
+        (the client sends its MD5 as x-auth-key). Returns {authorized:"OK"}. Account passwords and
+        registration are not supported.
+      operationId: getApiV1KosyncUsersAuth
+      security:
+        - kosyncUser: []
+          kosyncKey: []
+      responses:
+        "200":
+          description: Success; restricted to the authenticated account and its content scope.
+        "400":
+          description: Malformed or unsupported input.
+        "401":
+          description: Not authenticated or revoked credential.
+        "403":
+          description: Insufficient token scope, account permission or registration disabled.
+        "404":
+          description: Not found, not visible, or no unique available book matches the document.
+        "409":
+          description: A concurrent operation or content-scope safety rule prevents this change.
+  /api/v1/kosync/users/create:
+    post:
+      tags:
+        - opds
+      summary: Reject KOReader registration; use an existing API token.
+      description: Authenticated requests receive 403; create a scoped token in Uchiyomi and choose Login in
+        KOReader. This endpoint never creates accounts.
+      operationId: postApiV1KosyncUsersCreate
+      security:
+        - kosyncUser: []
+          kosyncKey: []
+      responses:
+        "400":
+          description: Malformed or unsupported input.
+        "401":
+          description: Not authenticated or revoked credential.
+        "403":
+          description: Insufficient token scope, account permission or registration disabled.
+        "404":
+          description: Not found, not visible, or no unique available book matches the document.
+        "409":
+          description: A concurrent operation or content-scope safety rule prevents this change.
+  /api/v1/kosync/syncs/progress/{document}:
+    get:
+      tags:
+        - opds
+      summary: Read owner-scoped KOReader progress for an exact available document.
+      description: document is a 32-hex partial-MD5 of exact file bytes, with Binary matching. Returns canonical
+        reconciled fixed-page progress or stored opaque EPUB position, otherwise {}. Visibility and current
+        byte signature are checked; ambiguous hashes never pick an edition.
+      operationId: getApiV1KosyncSyncsProgressDocument}
+      security:
+        - kosyncUser: []
+          kosyncKey: []
+      responses:
+        "200":
+          description: Success; restricted to the authenticated account and its content scope.
+        "400":
+          description: Malformed or unsupported input.
+        "401":
+          description: Not authenticated or revoked credential.
+        "403":
+          description: Insufficient token scope, account permission or registration disabled.
+        "404":
+          description: Not found, not visible, or no unique available book matches the document.
+        "409":
+          description: A concurrent operation or content-scope safety rule prevents this change.
+      parameters:
+        - name: document
+          in: path
+          required: true
+          schema:
+            type: string
+  /api/v1/kosync/syncs/progress:
+    put:
+      tags:
+        - opds
+      summary: Push explicit KOReader progress without rewinding canonical reading.
+      description: Fixed-page progress is a one-based page string. EPUB positions remain opaque; percentage alone
+        does not invent chapter boundaries. Returns document and server timestamp. First binding/bulk catch-up
+        are silent; replayed progress cannot duplicate completion events.
+      operationId: putApiV1KosyncSyncsProgress
+      security:
+        - kosyncUser: []
+          kosyncKey: []
+      responses:
+        "200":
+          description: Success; restricted to the authenticated account and its content scope.
+        "400":
+          description: Malformed or unsupported input.
+        "401":
+          description: Not authenticated or revoked credential.
+        "403":
+          description: Insufficient token scope, account permission or registration disabled.
+        "404":
+          description: Not found, not visible, or no unique available book matches the document.
+        "409":
+          description: A concurrent operation or content-scope safety rule prevents this change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                document:
+                  type: string
+                  pattern: ^[a-fA-F0-9]{32}$
+                progress:
+                  type: string
+                  minLength: 1
+                  maxLength: 4096
+                percentage:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+                device:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                device_id:
+                  type: string
+                  maxLength: 128
+                metadata: {}
+              required:
+                - document
+                - progress
+                - percentage
+                - device

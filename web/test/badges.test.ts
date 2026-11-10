@@ -18,6 +18,13 @@ const stats = (chapters: number, best: number): Stats => ({
 });
 const byLabel = (l: string) => BADGES.find((b) => b.label === l)!;
 
+test('synced chapter counts do not claim badge rewards the server will refuse',()=>{
+  const synced={...stats(500,0),badgeChapters:0};
+  assert.equal(BADGES.filter(b=>badgeEarned(b,synced)).length,0);
+  assert.equal(badgeEarned(byLabel('Reader'),{...synced,badgeChapters:10}),true);
+  assert.equal(badgeEarned(byLabel('Legend'),{...synced,badgeChapters:10}),false);
+});
+
 test('every badge is a goal on one measure, and its words say the goal', () => {
   // The thresholds the badges always had (they were bare test() functions until #267).
   assert.deepEqual(BADGES.map((b) => [b.label, b.kind, b.goal]), [

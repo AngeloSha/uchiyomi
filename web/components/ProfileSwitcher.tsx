@@ -6,7 +6,7 @@ import { api } from '@/lib/api';
 import { useAuth, type Avatar as AvatarShape } from '@/lib/auth';
 import { t as tr } from '@/lib/i18n';
 import { Avatar } from './Avatar';
-import { Sheet } from './ui';
+import { OnBody, Sheet } from './ui';
 
 interface Switchable { id: string; displayName: string; avatar: AvatarShape }
 
@@ -43,7 +43,9 @@ export function ProfileSwitcher({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Sheet title={tr('Switch profile')} onClose={onClose} overBottomNav>
+    // The desktop caller lives in the blurred header. Portal the fixed sheet out of its containing
+    // block; the phone caller uses the same component and keeps the same full-viewport placement.
+    <OnBody><Sheet title={tr('Switch profile')} onClose={onClose} overBottomNav>
       <div data-lenis-prevent className="min-h-0 space-y-2 overflow-y-auto px-4 pb-4">
         {[...managed.map((p) => ({ p, how: 'switch' as const })), ...remembered.map((p) => ({ p, how: 'resume' as const }))].map(({ p, how }) => (
           <button key={p.id} type="button" onClick={() => to(p.id, how)} disabled={!!busy} data-switch-profile={how}
@@ -63,6 +65,6 @@ export function ProfileSwitcher({ onClose }: { onClose: () => void }) {
           <button type="button" onClick={() => { onClose(); void leave(); }} className="btn-key w-full">{tr('Sign in with another account')}</button>
         )}
       </div>
-    </Sheet>
+    </Sheet></OnBody>
   );
 }

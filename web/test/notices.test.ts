@@ -429,7 +429,7 @@ test('the viewport is over the bottom nav: rendered beside the app, not inside <
   const provider = toast.slice(toast.indexOf('export function ToastProvider('));
   assert.match(provider, /\{children\}\s*<NoticeViewport /, 'the viewport is not rendered beside the app');
   const providers = code(read('app/providers.tsx'));
-  assert.match(providers, /<ToastProvider>\s*<AuthProvider>\{children\}<\/AuthProvider>\s*<\/ToastProvider>/, 'ToastProvider no longer wraps the app shell');
+  assert.match(providers, /<AuthProvider>\s*<I18nProvider>\s*<ToastProvider>\{children\}<\/ToastProvider>\s*<\/I18nProvider>\s*<\/AuthProvider>/, 'the authenticated, translated app shell must remain inside ToastProvider');
   assert.doesNotMatch(code(read('components/AppShell.tsx')), /NoticeViewport|data-notices/, 'the notices moved inside the app shell');
 });
 

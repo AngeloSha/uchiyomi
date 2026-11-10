@@ -203,6 +203,8 @@ export interface SeriesTitleArt {
 }
 
 export interface Series {
+  /** Account-owned copy; authorization is always enforced by the server. */
+  isPrivate?: boolean;
   /** Admins only: the library it is in. */
   library?: { id: string; name: string };
   /** The reading defaults of the library the series is in (#235): the content's look, never a theme; null when it has none. */

@@ -72,11 +72,22 @@ test('the two inline lookups are bounded, parallel, and shared with the dialog',
   assert.match(helper, /withTimeout\(src\.listChapters\(/, 'listChapters is unbounded');
   assert.match(helper, /Promise\.all\(/, 'the two lookups are sequential again, so an add pays the sum');
   assert.match(helper, /detailCache\.set/, 'nothing is cached, so the dialog and the add each pay in full');
+  assert.match(helper, /withTimeout\(src\.getSeries\(sourceId\), budgetFor\(src, ADD_LOOKUP_TIMEOUT\)\)/, 'the detail budget is no longer source-aware');
+  assert.match(helper, /withTimeout\(src\.listChapters\(sourceId\), budgetFor\(src, ADD_LOOKUP_TIMEOUT\)\)/, 'the chapter budget is no longer source-aware');
+  assert.match(helper, /const flying = detailInflight\.get\(key\);\s*if \(flying\) return flying;/, 'a dialog lookup in flight cannot be joined by the add');
+  assert.match(helper, /detailInflight\.set\(key, p\)/, 'the shared in-flight lookup is never recorded');
 
   // Both callers must go through it, or the caching is pointless.
   assert.match(addFn(), /seriesAndChapters\(src, sourceId\)/, 'add fetches its own copy again');
-  const detail = t.slice(t.indexOf("app.get('/api/sources/detail'"), t.indexOf("app.get('/api/sources/detail'") + 900);
+  const detailAt=t.indexOf("app.get('/api/sources/detail'");
+  assert.ok(detailAt>=0,'the detail route is gone');
+  const detailEnd=t.indexOf('\n  });',detailAt);
+  assert.ok(detailEnd>detailAt,'the detail route has no closing brace');
+  // Scope authorization grew the preflight; inspect the whole route instead of an arbitrary byte window.
+  const detail=t.slice(detailAt,detailEnd);
   assert.match(detail, /seriesAndChapters\(src, sourceId\)/, 'detail does not populate the cache the add reads');
+  assert.ok(detail.indexOf('resolveAddScope(')>=0 && detail.indexOf('resolveAddScope(')<detail.indexOf('seriesAndChapters('),
+    'the authenticated destination must be resolved before reading shared source details');
 });
 
 test('a failed background download leaves the failure behind; an awaited one does not', () => {

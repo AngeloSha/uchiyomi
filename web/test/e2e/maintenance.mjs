@@ -1,9 +1,12 @@
-// Source bundles and mobile diagnostics through the built application. Uses up.sh's disposable instance.
+// Source bundles, mobile diagnostics and upload/import controls in up.sh's disposable instance.
 import puppeteer from 'puppeteer';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { multiSiteExtensionWalk } from './multiSiteExtensionWalk.mjs';
 import { errorDetailsWalk } from './errorDetailsWalk.mjs';
+import { uploadImportEnhancementsWalk } from './uploadImportEnhancementsWalk.mjs';
 import { waitForLoginCooldown } from './loginCooldown.mjs';
 
 const base = process.env.BASE || 'http://127.0.0.1:18140';
@@ -14,6 +17,7 @@ const failures = [];
 const consoleErrors = [];
 const serverErrors = [];
 let expectedRepositoryError = false;
+let expectedImageRefusal = false;
 let loginAttempt = -1;
 let step = 0;
 let page;
@@ -33,6 +37,11 @@ try {
     if (loginAttempt === 0 && /429/.test(message.text()) && url === `${base}/auth/login`) return;
     // Only this fixture's deliberate refusal is expected; unrelated HTTP or script errors remain failures.
     if (expectedRepositoryError && /400/.test(message.text()) && url === `${base}/api/admin/extensions/repos`) return;
+    // The upload fixture refuses its FIRST request to prove that retry keeps the selected pages.
+    if (expectedImageRefusal && /400/.test(message.text()) && new URL(url, base).pathname === '/api/library/upload') {
+      expectedImageRefusal = false;
+      return;
+    }
     consoleErrors.push(`${message.text()} ${url}`);
   });
   page.on('response', (response) => { if (response.status() >= 500) serverErrors.push(`${response.status()} ${response.url()}`); });
@@ -62,6 +71,9 @@ try {
   expectedRepositoryError = true;
   await errorDetailsWalk({ page, base, ok, bad, shot });
   expectedRepositoryError = false;
+  expectedImageRefusal = true;
+  await uploadImportEnhancementsWalk({ page, base, shot, check: (label, condition) => condition ? ok(label) : bad(label) });
+  expectedImageRefusal = false;
 } catch (error) {
   if (page && !page.isClosed()) {
     await page.screenshot({ path: `${out}/failure.png` }).catch(() => {});
@@ -70,6 +82,37 @@ try {
   bad(error.stack || error.message);
 } finally {
   await browser.close();
+}
+// Private/offline acceptance must use a fresh real browser, after every mocked page is closed.
+// Inherit the fixture credentials and TMPDIR, while keeping all response interception and SW bypass above isolated.
+await new Promise((resolve) => {
+  const child = spawn(process.execPath, [fileURLToPath(new URL('./privateLibraryEnhancementsWalk.mjs', import.meta.url))], {
+    env: { ...process.env, BASE: base, OUT: `${out}/private-library` }, stdio: 'inherit',
+  });
+  child.once('error', (error) => { bad(`Private library browser could not start: ${error.message}`); resolve(); });
+  child.once('close', (code, signal) => {
+    if (code === 0) ok('Private library acceptance with the real service worker');
+    else bad(`Private library browser failed (${signal || code})`);
+    resolve();
+  });
+});
+// Account/locale and interrupted-download races each need a clean document, worker and IndexedDB.
+// They forward real responses; targeted worker bypass is confined to their delayed asset/response step.
+for (const [script, directory, label] of [
+  ['localeSessionWalk.mjs', 'locale-session', 'Account-owned locale and real delayed dictionary acceptance'],
+  ['offlineAccountRaceWalk.mjs', 'offline-race', 'Interrupted private download across an actual account switch'],
+]) {
+  await new Promise((resolve) => {
+    const child = spawn(process.execPath, [fileURLToPath(new URL(`./${script}`, import.meta.url))], {
+      env: { ...process.env, BASE: base, OUT: `${out}/${directory}` }, stdio: 'inherit',
+    });
+    child.once('error', (error) => { bad(`${label} could not start: ${error.message}`); resolve(); });
+    child.once('close', (code, signal) => {
+      if (code === 0) ok(label);
+      else bad(`${label} failed (${signal || code})`);
+      resolve();
+    });
+  });
 }
 const result = { failures, consoleErrors, serverErrors };
 writeFileSync(`${out}/result.json`, JSON.stringify(result, null, 2) + '\n');

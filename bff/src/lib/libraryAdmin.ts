@@ -1,3 +1,4 @@
+import { sameContentScope, privateFolderOwner, reservedPrivateFolder } from './contentScope';
 // Destructive library operations: hide a series, restore it, and merge one into another.
 //
 // Deleting HIDES rather than erases. The id survives, so favourites, ratings, notes and -- above all --
@@ -46,10 +47,13 @@ export interface SeriesRow {
   folder: string;
   deleted_at: string | null;
   merged_into: string | null;
+  library_id: string;
+  is_private: boolean;
+  owner_user_id: string | null;
 }
 
 export const getSeriesRow = (id: string) =>
-  one<SeriesRow>(`SELECT id, title, folder, deleted_at, merged_into FROM lib_series WHERE id = $1`, [id]);
+  one<SeriesRow>(`SELECT id, title, folder, deleted_at, merged_into, library_id, is_private, owner_user_id FROM lib_series WHERE id = $1`, [id]);
 
 /** Remove per-series artwork, including versioned title logos and the first page the cleanup kept. */
 async function dropArt(id: string): Promise<void> {
@@ -88,7 +92,7 @@ export async function restoreSeries(id: string): Promise<{ ok: true }> {
 
 /** Why one series cannot be merged into another (mergeRefusal). The admin route answers each with its own status. */
 export type MergeRefusal =
-  | { refused: 'same_series' | 'not_found' | 'same_work' }
+  | { refused: 'same_series' | 'not_found' | 'same_work' | 'different_scope' }
   | { refused: 'deleted' | 'merged'; which: 'source' | 'target' };
 
 /**
@@ -102,6 +106,7 @@ export async function mergeRefusal(fromId: string, intoId: string): Promise<Merg
   const from = await getSeriesRow(fromId);
   const into = await getSeriesRow(intoId);
   if (!from || !into) return { refused: 'not_found' };
+  if (!sameContentScope(from,into)) return {refused:'different_scope'};
   for (const [row, which] of [[from, 'source'], [into, 'target']] as const) {
     if (row.deleted_at) return { refused: 'deleted', which };
     if (row.merged_into) return { refused: 'merged', which };
@@ -210,12 +215,13 @@ export async function mergeSeries(
     // edition checks happen again *under* the locks: two BFF processes can both pass mergeRefusal(), but only the first
     // may move rows. The second observes the first one's merged_into (or a concurrent hide) and refuses.
     const locked = await qq<SeriesRow & { work_id: string | null; source_id: string | null; source_series_id: string | null; numbering: string | null }>(
-      `SELECT id, title, folder, deleted_at, merged_into, work_id, source_id, source_series_id, numbering
+      `SELECT id, title, folder, deleted_at, merged_into, work_id, source_id, source_series_id, numbering,library_id,is_private,owner_user_id
          FROM lib_series WHERE id = ANY($1::text[]) ORDER BY id FOR UPDATE`, [[fromId, intoId]],
     );
     const from = locked.find((r) => r.id === fromId);
     const into = locked.find((r) => r.id === intoId);
     if (!from || !into) throw new MergeConflictError({ refused: 'not_found' });
+    if (!sameContentScope(from,into)) throw new MergeConflictError({refused:'different_scope'});
     if (from.deleted_at) throw new MergeConflictError({ refused: 'deleted', which: 'source' });
     if (into.deleted_at) throw new MergeConflictError({ refused: 'deleted', which: 'target' });
     if (from.merged_into) throw new MergeConflictError({ refused: 'merged', which: 'source' });
@@ -303,10 +309,12 @@ export async function mergeSeries(
     // time wins, and the chapters it now holds are reconciled" in forgetSeries.int.test.ts finds the mark
     // still a mark and the run at 0.
     await qq(
-      `INSERT INTO listing_progress (user_id, series_id, number, completed_at, source)
-       SELECT user_id, $2, number, completed_at, source FROM listing_progress WHERE series_id = $1
+      `INSERT INTO listing_progress (user_id, series_id, number, completed_at, source, is_private, incognito)
+       SELECT user_id, $2, number, completed_at, source, is_private, incognito FROM listing_progress WHERE series_id = $1
        ON CONFLICT (user_id, series_id, number) DO UPDATE
-         SET completed_at = LEAST(listing_progress.completed_at, EXCLUDED.completed_at)`,
+         SET completed_at = LEAST(listing_progress.completed_at, EXCLUDED.completed_at),
+             is_private=listing_progress.is_private OR EXCLUDED.is_private,
+             incognito=listing_progress.incognito AND EXCLUDED.incognito`,
       [fromId, intoId],
     );
     await qq(`DELETE FROM listing_progress WHERE series_id = $1`, [fromId]);
@@ -592,7 +600,8 @@ const BOOK_KEYED_USER_TABLES = ['read_progress', 'reading_events', 'bookmarks', 
  */
 // v0.85.0: page_translations (lib/translate/pages.ts) cascades from lib_books; named for the same count. So, since v0.89.0,
 // does spread_marks (lib/spreadMarks.ts), a reader's own merges and splits of a chapter's pages.
-const BOOK_KEYED_TABLES = [...BOOK_KEYED_USER_TABLES, 'book_overrides', 'page_hashes', 'page_translations', 'chapter_comments', 'chapter_reactions', 'spread_marks'] as const;
+const BOOK_KEYED_TABLES = [...BOOK_KEYED_USER_TABLES, 'book_overrides', 'page_hashes', 'page_translations', 'chapter_comments', 'chapter_reactions', 'spread_marks',
+  'koreader_hashes','koreader_progress','opds_estimated_bookmarks'] as const;
 /** Every table keyed on the series id. lib_books and lib_series themselves come last, on their own. */
 const SERIES_KEYED_TABLES = [
   'favorites', 'collection_items', 'ratings', 'series_colors', 'series_art', 'series_local_art', 'series_title_art', 'series_seen', 'series_trackers',
@@ -836,12 +845,20 @@ export async function forgetSeries(id: string): Promise<ForgetResult | ForgetRef
          UNION SELECT user_id FROM listing_progress WHERE series_id = ANY($1)
          UNION SELECT user_id FROM chapter_comments  WHERE book_id = ANY($2)
          UNION SELECT user_id FROM chapter_reactions WHERE book_id = ANY($2)
+         UNION SELECT user_id FROM koreader_progress WHERE book_id = ANY($2)
+         UNION SELECT user_id FROM opds_estimated_bookmarks WHERE book_id = ANY($2)
          UNION SELECT c.user_id FROM collection_items ci JOIN collections c ON c.id = ci.collection_id
                 WHERE ci.series_id = ANY($1)
        ) u`,
       [ids, bookIds, uncarried],
     );
 
+    // Baselines are protocol cursors, never cross-series aliases. Drop only this series' Komga cursors or
+    // exact KOReader records mapped to books that are actually being forgotten, before those records go.
+    const baselines=await qq(`DELETE FROM external_sync_baselines e WHERE
+      (e.origin='komga' AND e.scope_key=ANY($1::text[])) OR (e.origin='koreader' AND EXISTS(
+        SELECT 1 FROM koreader_progress k WHERE k.user_id=e.user_id AND k.document=e.scope_key AND k.book_id=ANY($2::text[]))) RETURNING 1`,[ids,bookIds]);
+    count('external_sync_baselines',baselines.length);
     // (2) Per-book rows, strictly by the books this series owns. Never by series_id here: that is the
     // clause that erased live bookmarks on a survivor's chapters.
     if (bookIds.length) {
@@ -1203,13 +1220,14 @@ async function rootProven(root: string, seriesId: string, present: number, absen
  * performs the rename it knows the mapping exactly, so guessing it back would be strictly worse.
  */
 export async function renameSeriesFolder(id: string, newFolder: string): Promise<{ ok: true } | FileOpRefusal> {
-  const row = await one<{ folder: string; library_id: string }>(
-    'SELECT folder, library_id FROM lib_series WHERE id = $1', [id],
+  const row = await one<{ folder: string; library_id: string; is_private: boolean; owner_user_id: string | null }>(
+    'SELECT folder, library_id, is_private, owner_user_id FROM lib_series WHERE id = $1', [id],
   );
   if (!row) return { ok: false, reason: 'That series no longer exists.' };
 
   const typed = toStoredRel(newFolder).replace(/^\/+|\/+$/g, '').trim();
   if (!typed || typed === row.folder) return { ok: false, reason: 'Choose a different folder name.' };
+  if (privateFolderOwner(row.folder) !== privateFolderOwner(typed) || (reservedPrivateFolder(typed) && !privateFolderOwner(typed))) return {ok:false,reason:'A private storage folder must remain in its owner’s namespace.'};
 
   const roots = await rootsOf(id);
   if (!roots.length) return { ok: false, reason: 'That series has no files on disk.' };

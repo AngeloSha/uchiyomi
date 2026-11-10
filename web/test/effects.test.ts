@@ -404,7 +404,19 @@ test('the class is applied before the app shell renders, and follows the account
   assert.ok(o > 0 && o < offline.indexOf("setStatus('offline')"), 'an offline launch applies the switch after rendering, or not at all');
   const signOut = body('clearLocalSession');
   const c = signOut.indexOf('applyReduceEffects(false);');
-  assert.ok(c > 0 && c < signOut.indexOf("setStatus('anon')"), 'signing out leaves this account\'s choice on the sign-in screen');
+  const tone = signOut.indexOf('applyTone(null);');
+  const status = signOut.indexOf('setStatus(nextStatus);');
+  assert.ok(c > 0 && tone > c && status > tone,
+    'clearing a session must restore effects and tone before either anonymous or loading UI renders');
+  assert.doesNotMatch(signOut.slice(0,status),/\bawait\b/,'appearance cleanup must not yield before removing the account view');
+  assert.match(src,/const clearLocalSession = async \(nextStatus\s*:\s*'anon'\s*\|\s*'loading'\s*=\s*'anon'\)/,
+    'a rejected session must still default to the anonymous screen after restoring the default look');
+  for(const name of ['logout','leave']){
+    const signOutPath=body(name);
+    const steps=['beginAccountTransition();',"await clearLocalSession('loading');",'window.location.reload();']
+      .map(step=>{const at=signOutPath.indexOf(step);assert.ok(at>=0,`${name} must ${step}`);return at;});
+    assert.deepEqual(steps,[...steps].sort((a,b)=>a-b),`${name} must fence, restore the default look through shared cleanup, then replace its document`);
+  }
   assert.match(body('setSettings'), /if \('reduceEffects' in partial\) applyReduceEffects\(partial\.reduceEffects === true\);/,
     'flipping the switch does not apply it at once');
 });

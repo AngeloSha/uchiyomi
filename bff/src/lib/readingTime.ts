@@ -225,7 +225,7 @@ export async function loadTimeline(userId: string, from: number, to: number): Pr
   if (!(from - EDGE_MS < end)) return { pieces: [], finished: [] };
   const rows = await q<{ id: number; at: Date; book_id: string; series_id: string; device_id: string | null; completed: boolean }>(
     `SELECT id, created_at AS at, book_id, series_id, device_id, completed FROM reading_events
-      WHERE user_id = $1 AND created_at >= $2 AND created_at < $3 ORDER BY created_at, id`,
+      WHERE user_id = $1 AND origin = 'web' AND created_at >= $2 AND created_at < $3 ORDER BY created_at, id`,
     [userId, new Date(from - EDGE_MS).toISOString(), new Date(end).toISOString()],
   );
   const books = [...new Set(rows.map((r) => r.book_id))];

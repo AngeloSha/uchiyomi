@@ -228,8 +228,8 @@ test('Kitsu list: manga joined from included, planned is plan_to_read', async ()
   assert.deepEqual(rows.map((r) => r.externalId), ['14916', '23815', '777', '555'], 'the MANGA id is the external id, never the entry id');
   const byId = Object.fromEntries(rows.map((r) => [r.externalId, r]));
   assert.equal(byId['14916'].title, 'Attack on Titan');
-  assert.deepEqual(byId['14916'].altTitles, ['Shingeki no Kyojin', 'Titan', 'Shingeki no Kyojin: Attack on Titan'],
-    'romaji then abbreviatedTitles; kanji has no key and SNK/AOT are abbreviations, all dropped; capped at 3');
+  assert.deepEqual(byId['14916'].altTitles, ['Shingeki no Kyojin', '進擊的巨人', 'Titan'],
+    'romaji and the native title retain distinct Unicode keys; short SNK/AOT abbreviations are dropped; capped at 3');
   assert.equal(byId['23815'].title, 'Noblesse', 'en_us when there is no en');
   assert.equal(byId['23815'].status, 'plan_to_read');
   assert.equal(byId['777'].title, 'Some Novel', 'a null en falls through to the canonical title');
@@ -354,7 +354,7 @@ test('AniList state: ended, count and the viewer\'s entry from one query; a re-r
   answer = { status: 'RELEASING', chapters: null, mediaListEntry: { status: 'CURRENT', progress: 50 } };
   assert.deepEqual(await anilistAdapter.seriesState('tok', '30013'),
     { ended: false, total: null, entry: { status: 'reading', progress: 50 } });
-  assert.match(calls[0].body.query, /mediaListEntry\s*\{\s*status progress\s*\}/, 'the entry is read in the same query');
+  assert.match(calls[0].body.query, /mediaListEntry\s*\{\s*status progress private\s*\}/, 'the entry is read in the same query');
   assert.equal(calls[0].body.variables.id, 30013);
 
   answer = { status: 'FINISHED', chapters: 100, mediaListEntry: null };
@@ -620,4 +620,24 @@ test('multi-provider tracking', { skip }, async (t) => {
     await q('DELETE FROM lib_series WHERE id = $1', [SERIES]).catch(() => {});
     await q(`DELETE FROM users WHERE username = 'trk-multi'`).catch(() => {});
   }
+});
+
+
+test('AniList privacy uses an atomic private progress mutation and a separate privacy-only mutation', async()=>{
+  const {anilistAdapter}=await import('../src/lib/trackerProviders');
+  let accepted=true;
+  reset(c=>c.url.hostname==='graphql.anilist.co' ? json({data:{SaveMediaListEntry:{id:88,private:accepted}}}) : null);
+  await anilistAdapter.setProgress('tok','88',12,'reading',undefined,{private:true});
+  assert.match(calls.at(-1)!.body.query,/private:true/);
+  assert.equal(calls.at(-1)!.body.variables.progress,12);
+  await anilistAdapter.setPrivate!('tok','88');
+  assert.deepEqual(calls.at(-1)!.body.variables,{mediaId:88},'privacy-only protection never rewinds progress or changes status');
+  assert.doesNotMatch(calls.at(-1)!.body.query,/progress:|status:/);
+  await anilistAdapter.setProgress('tok','88',13,'reading');
+  assert.doesNotMatch(calls.at(-1)!.body.query,/private:/,'ordinary/shared progress preserves any remote privacy choice');
+  await anilistAdapter.setProgress('tok','88',13,'reading',{ended:false,total:null,entry:{status:'reading',progress:12,private:true}});
+  assert.match(calls.at(-1)!.body.query,/private:true/,'an existing remote private flag is explicitly retained even for shared local content');
+  accepted=false;
+  await assert.rejects(()=>anilistAdapter.setPrivate!('tok','88'),/did not confirm private/);
+  await assert.rejects(()=>anilistAdapter.setProgress('tok','88',14,'reading',undefined,{private:true}),/did not confirm private/);
 });

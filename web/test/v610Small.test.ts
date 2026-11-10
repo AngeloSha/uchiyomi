@@ -55,8 +55,8 @@ test('the service worker\'s flush and the reader\'s live write carry it too', ()
     "the worker's flush drops the flag");
   const reader = read('app/reader/page.tsx');
   assert.match(reader, /import \{ IncognitoTag, incognitoRef \} from '@\/components\/IncognitoBanner';/);
-  // The payload goes to the live PUT and, when that fails, into the outbox whole: `queueProgress({ bookId, ...payload })`.
-  assert.match(reader, /queueProgress\(\{ bookId: chId, \.\.\.payload \}\)/, 'a failed live write loses the flag on its way to the outbox');
+  // The complete payload and original actor accompany the fallback; a changed account never owns the queued event.
+  assert.match(reader, /queueProgress\(\{ bookId: chId, \.\.\.payload \},\s*actor\)/, 'a failed live write loses its flag or original owner on the way to the outbox');
   assert.match(reader, /<IncognitoTag \/>/, 'the reader does not say it is incognito');
 });
 

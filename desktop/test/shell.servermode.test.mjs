@@ -387,7 +387,7 @@ test('main.js: the window carries its mode; server mode quits on close, reloads 
   assert.match(cw, /wc\.on\('did-fail-load', \(_e, code, desc, url, isMainFrame\) => \{\s*if \(isMainFrame && !quitting && \/\^https\?:\/i\.test\(url\)\) onServerLoadFailed\(code, desc, url\);/);
   assert.match(cw, /navDecision\(\{ mode, url, own: ownOrigin\(\), current: wc\.getURL\(\)/);
   // A first-launch choice continues in a NEW window started in the chosen mode.
-  assert.match(fn('runApp'), /appMode = choice\.mode;\s*replaceWindow\(\);/);
+  assert.match(fn('runApp'), /appMode = choice\.mode;\s*await replaceWindow\(\);/);
 });
 
 test('main.js: certificates -- no accept-all path, no certificate-error handler, pins written only through pinUpdate', () => {

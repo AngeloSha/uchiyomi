@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.107.0 — 2026-11-10
+
+**Private copies for each account, image folders as chapters, explicit external-reader progress, and a clearer import review.**
+
+- **Private libraries** ([#371](https://github.com/AngeloSha/uchiyomi/issues/371), **Calvin-Davidson**): choose shared or private when adding or uploading, with a per-account default that starts off. Owners can pause, remove, restore or deliberately share eligible copies. Private additions have independent files and identity; other accounts, including admins using content APIs, cannot browse them. Private reading history stays private after sharing. AniList privacy is enforced separately from progress changes; trackers without a supported private-entry operation do not receive private writes.
+- **Images as one chapter** ([#375](https://github.com/AngeloSha/uchiyomi/issues/375), **Calvin-Davidson**): select loose images or a folder, review their order, and upload one validated CBZ. Streaming validation, upload limits, disk-floor checks and atomic publication preserve existing files.
+- **External readers** ([#377](https://github.com/AngeloSha/uchiyomi/issues/377), **farewell-ladmin**): a local KOReader sync endpoint maps the original downloaded file by its partial MD5, checks visibility on every request, and accepts explicit progress. OPDS page-streaming requests can optionally save an estimated bookmark; fetching pages never marks a chapter complete. Both options are described under Profile → Connections.
+- **Optional external chapter counts** ([#378](https://github.com/AngeloSha/uchiyomi/issues/378), **farewell-ladmin**): newly reported KOReader/Komga completions may appear in personal chapter counts. Initial linking, bulk reports and retries do not fabricate reading sessions. External counts add no reading time, badges, streaks or household rankings. Off by default.
+- **Import review** ([#410](https://github.com/AngeloSha/uchiyomi/issues/410), **julieminer**): filter by state and source, select or skip visible rows, inspect match provenance and ambiguity, retain supported Mihon tracker links, and continue a large saved import in subsequent batches. Exact alternate titles precede weak matches, including non-Latin titles. Batches and skip decisions belong to their account and library scope; private tracker entries remain private in mixed imports.
+- **Privacy on shared devices:** private API/image responses bypass implicit caches; account changes clear runtime caches and prevent stale requests or forms from acting as the newly selected account. Explicit offline downloads remain keyed to their owner. Account changes reload the app, and delayed work stays bound to its original account. Notification details require a matching recipient; older workers receive generic text. Server headers also prevent older browser workers from caching private images during an upgrade.
+- **Desktop startup:** finish loading the shell before opening the app, so an interrupted loading screen cannot replace a successfully opened app with an error. A stalled notification service no longer blocks worker startup, reader requests or account changes.
+- **Upgrade:** additive database migrations preserve existing shared defaults and artwork. After upgrading, older versions do not enforce the new private-content permissions: use a forward fix rather than rolling an older image back against this database. Back up before upgrading. The optional extraction service keeps its existing models and limits; the Umbrel package pins published v0.106.0.
+
 ## v0.106.0 — 2026-11-09
 
 **Find individual sites inside large extensions, inspect errors on a phone, and connect to Suwayomi's newer login modes.**

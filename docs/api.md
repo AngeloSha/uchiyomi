@@ -3527,3 +3527,32 @@ provider's *Subject mode* decides what that subject is.)
 Nightly local cover-title generation has separate default-off generation and available-checks application switches.
 The durable run/status/cancel APIs, private14-day review retention and source/model fingerprint behavior are described
 in [Nightly cover titles](cover-title-batch.md). Status reads do not start inference or metadata discovery.
+
+
+### Account-owned libraries and external readers
+
+```text
+GET /api/personal/privacy
+PUT /api/personal/privacy
+GET /api/personal/private-series
+GET /api/series/{id}/privacy
+PUT /api/series/{id}/privacy
+POST /api/series/{id}/private-management
+GET /api/external-readers
+PUT /api/external-readers
+POST /api/admin/import/batches/{id}/skip
+GET /api/v1/kosync/users/auth
+POST /api/v1/kosync/users/create
+GET /api/v1/kosync/syncs/progress/{document}
+PUT /api/v1/kosync/syncs/progress
+```
+
+Private additions use `visibility: private`; owner IDs are inferred from authentication. Existing shared content remains shared, and the account default starts off. A private copy has independent files/identity; it never implicitly reuses a shared copy. Owner-only management supports reversible removal and restoration. Permanent deletion requires an already removed, never-published private copy and explicit confirmation. This is server access control, not end-to-end encryption against the server operator.
+
+KOReader custom server: `https://your-server/api/v1/kosync`, Binary matching, API token as username and any dummy password. Give its token read/write scopes. A read-only token may pull but cannot push. Revocation/expiry and account/library restrictions apply. Documents not yet hashed or with ambiguous editions cannot update canonical progress. Hashing is bounded and follows scans. EPUB positions are preserved without inventing page boundaries.
+
+`externalReadingStats` and `opdsEstimatedBookmarks` are separate opt-ins, both off. Explicit small completion transitions can contribute counts at sync time, without estimated duration, streaks, badges or household ranking. First binding, bulk catch-up and duplicate delivery stay silent. OPDS page requests may be prefetches: estimates never complete chapters, append reading events or push trackers. Existing Incognito behavior remains private position with no events or tracker writes.
+
+Image chapter uploads keep `POST /api/library/upload`: select `images=1`, a `.cbz` chapter `name`, and either a visible `seriesId` or `fresh=1&title=...`. Send ordered multipart `pages` files. Validation and configured upload/free-space limits apply; publication never overwrites an existing file. New-series `visibility`/`libraryId` are authenticated choices; existing-series uploads inherit its scope.
+
+Reviewed imports remain admin-only and account-owned. A mixed batch uses its destination as a default; validated remote private flags force those rows into the owner’s private scope. `POST /api/admin/import/batches` also accepts `{continueFrom: completedBatchId}` to idempotently create/reuse the next saved batch after reload. Bulk skip uses the route above. Candidate responses include `tracker_links`, `content_scope`, `ambiguous`, `auto_ambiguous` and `auto_matched_via`; batch responses include `remainingCount`, `nextBatchId` and `canContinue`. Legacy skips are attributed only where retained owned batches establish their source; unattributable old records are retained without applying them to other accounts.

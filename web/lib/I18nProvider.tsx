@@ -3,12 +3,14 @@
 //
 // Kept apart from lib/i18n.ts so the pure parts -- locale detection, the dictionary lookup, the direction
 // table -- stay importable from a plain unit test with no React in scope.
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   DEFAULT_LOCALE, detectLocale, dirOf, isLocale, loadDict, setActiveDict, storeLocale, storedLocale,
   translate, type Locale,
 } from './i18n';
 import { setActiveLocale } from './format';
+import { useAuth } from './auth';
+import { api, getCurrentUser } from './api';
 
 type Ctx = {
   lang: Locale;
@@ -27,6 +29,8 @@ const I18nCtx = createContext<Ctx>({
 });
 
 export function I18nProvider({ children }: { children: ReactNode }) {
+  const auth=useAuth(), ownerId=auth?.user?.id ?? null, status=auth?.status;
+  const applyVersion=useRef(0), choiceVersion=useRef(0), mounted=useRef(false);
   // Starts at the default rather than at the detected language, because the server rendered English into the
   // static HTML: picking a different one here would mismatch on hydration. The effect below switches on the
   // first client tick, which is soon enough not to be seen.
@@ -34,7 +38,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const [dict, setDict] = useState<Record<string, string>>({});
 
   const apply = useCallback(async (next: Locale) => {
+    const version=++applyVersion.current;
     const d = await loadDict(next);
+    // An older dictionary, including one from the previous account, must not mutate the shared translators or DOM.
+    if(!mounted.current || version!==applyVersion.current)return;
     // Published to the module before the state update, so anything rendering in the same tick already sees
     // the new strings rather than one frame of the old ones. The locale goes with them: durations and "5
     // minutes ago" are formatted by Intl in lib/format.ts, not looked up in the dictionary.
@@ -53,25 +60,34 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   // Pick up the stored choice, or the browser's, on the first client tick.
   useEffect(() => {
+    mounted.current=true;
     void apply(storedLocale() ?? detectLocale());
+    return()=>{mounted.current=false;applyVersion.current++;};
   }, [apply]);
 
-  // The server copy wins once it arrives, so a language chosen on a laptop follows to a phone. Deliberately
-  // fire-and-forget and deliberately after the local read: waiting on the network to decide what language to
-  // render would put a spinner in front of the login screen.
+  // Auth owns the account boundary. Fetch after login or reconnection, while the login screen keeps its device choice.
   useEffect(() => {
-    let cancelled = false;
-    import('./api').then(({ api }) => api<{ lang?: string }>('/api/settings'))
-      .then((s) => { if (!cancelled && isLocale(s?.lang)) { storeLocale(s.lang); void apply(s.lang); } })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [apply]);
+    if(status!=='authed' || !ownerId || getCurrentUser()!==ownerId)return;
+    const controller=new AbortController(), choice=choiceVersion.current;
+    let cancelled=false;
+    void api<{lang?:string}>('/api/settings',{signal:controller.signal})
+      .then(settings=>{
+        if(cancelled || getCurrentUser()!==ownerId || choice!==choiceVersion.current || !isLocale(settings?.lang))return;
+        storeLocale(settings.lang);void apply(settings.lang);
+      }).catch(()=>{});
+    return()=>{cancelled=true;controller.abort();};
+  },[apply,ownerId,status]);
 
   const setLang = useCallback((next: Locale) => {
+    if(!mounted.current || (ownerId && getCurrentUser()!==ownerId))return;
+    choiceVersion.current++;
     storeLocale(next);
     void apply(next);
-    import('./api').then(({ api }) => api('/api/settings', { method: 'PUT', json: { lang: next } })).catch(() => {});
-  }, [apply]);
+    // Call synchronously under this owner; an anonymous/offline choice stays on the device.
+    if(status==='authed' && ownerId && getCurrentUser()===ownerId) {
+      void api('/api/settings',{method:'PUT',json:{lang:next}}).catch(()=>{});
+    }
+  },[apply,ownerId,status]);
 
   const value = useMemo<Ctx>(() => ({
     lang,
