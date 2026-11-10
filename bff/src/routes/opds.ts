@@ -511,8 +511,10 @@ export default async function opdsRoutes(app: FastifyInstance) {
       // Regular files only, read without following a symlink and within the page cap (lib/archiveCaps.ts): addLocalFile
       // followed an entry named like an image out of the library -- the audit downloaded a jwt.secret this way.
       for (const name of (await regularFiles(abs, (n) => IMG.test(n))).sort()) {
-        zip.addFile(name,await readRegularFile(abs,name));
-        zip.getEntry(name).header.time=new Date('1980-01-01T00:00:00Z');
+        const entry=zip.addFile(name,await readRegularFile(abs,name));
+        // ZIP stores local calendar fields, so constructing its fixed date locally produces the same
+        // DOS timestamp in every server timezone (a UTC instant can fall into 1979 west of Greenwich).
+        entry.header.time=new Date(1980,0,1);
       }
       reply.header('Content-Disposition', `attachment; filename="${esc(base)}.cbz"`);
       const bytes=zip.toBuffer();

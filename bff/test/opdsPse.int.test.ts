@@ -222,8 +222,23 @@ test('what an OPDS reader is told is true, and it can stream pages', { skip }, a
       writeFileSync(join(folder,'001.png'),p0);writeFileSync(join(folder,'002.png'),p1);
       await book('b_pse_loose',S_MAIN,'loose',2);
       const first=await app.inject({url:'/opds/book/b_pse_loose/file',headers:as(token)});
-      const second=await app.inject({url:'/opds/book/b_pse_loose/file',headers:as(token)});
+      const previousTimezone=process.env.TZ;let second;
+      try{
+        process.env.TZ='America/Los_Angeles';
+        second=await app.inject({url:'/opds/book/b_pse_loose/file',headers:as(token)});
+      }finally{
+        if(previousTimezone===undefined)delete process.env.TZ;else process.env.TZ=previousTimezone;
+      }
       assert.equal(first.statusCode,200);assert.deepEqual(first.rawPayload,second.rawPayload);
+      // Inspect our generated result through the ordinary archive reader, never adm-zip's read API.
+      // A fixed timestamp proves stability across later downloads, not just two calls in one DOS time tick.
+      const exportedFile=join(TMP,'deterministic-export.cbz');writeFileSync(exportedFile,first.rawPayload);
+      const StreamZip=require('node-stream-zip');const exported=new StreamZip.async({file:exportedFile});
+      try{
+        const entries=await exported.entries();assert.deepEqual(Object.keys(entries).sort(),['001.png','002.png']);
+        for(const entry of Object.values(entries) as Array<{time:number}>)assert.equal(entry.time,Date.UTC(1980,0,1));
+        assert.deepEqual(await exported.entryData('001.png'),p0);assert.deepEqual(await exported.entryData('002.png'),p1);
+      }finally{await exported.close();}
       const hash=(await q<{digest:string;signature:string}>("SELECT digest,signature FROM koreader_hashes WHERE book_id='b_pse_loose'"))[0];
       assert.equal(hash.digest,partialBufferMd5(first.rawPayload));assert.equal(hash.signature,await bookFileSignature(folder));
     });

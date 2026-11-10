@@ -3734,7 +3734,7 @@ account for 15 minutes. Every sign-in is recorded in the admin audit feed.
 
 ### Private libraries
 
-**Profile → General → Privacy → Make new additions private** sets this account's default; it starts off.
+**Profile → General → Privacy → Add to my private library by default** sets this account's default; it starts off.
 The shared/private choice also appears when adding a series, uploading a new series or starting an import.
 Private copies use their own files and identities, so adding privately does not take over a shared copy.
 Accounts' age limits and download/upload permissions still apply. Private additions require the built-in library
@@ -3772,7 +3772,7 @@ token on a non-admin account still can't reach the admin API. See [docs/api.md](
 
 ### KOReader and other external readers
 
-Under **Profile → Connections → External readers**, use the KOReader sync address shown there
+Under **Profile → Connections → External reader progress**, use the KOReader sync address shown there
 (`https://your-server/api/v1/kosync`) as KOReader's custom progress-sync server. Create a read/write API token;
 use that token as the sync user name, with a nonempty password. Token expiry, revocation, library access and age
 limits are checked for each sync request. A read-only token can fetch a position but cannot update it.
@@ -3784,10 +3784,10 @@ locations remain opaque, and only explicit whole-file completion completes an EP
 
 Two separate switches start off:
 
-- **Count external reading** includes small, newly reported explicit completions from KOReader and the Komga API
+- **Count completed chapters from other apps** includes small, newly reported explicit completions from KOReader and the Komga API
   in your personal chapter totals. Initial linking, bulk reports and retries do not count as new reading. These
   counts add no minutes, sessions, streaks, badges or household leaderboard activity.
-- **Save estimated OPDS bookmarks** uses page-streaming requests as a rough resume hint. Prefetching can move this
+- **Remember estimated OPDS positions** uses page-streaming requests as a rough resume hint. Prefetching can move this
   hint: a page request does not prove that you read it and never creates a completion or a tracker update.
 
 Incognito keeps only your private position and suppresses reading events and tracker updates across readers.
