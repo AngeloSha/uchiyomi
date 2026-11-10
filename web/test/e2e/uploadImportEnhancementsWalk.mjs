@@ -56,14 +56,19 @@ export async function uploadImportEnhancementsWalk({page,base,check=(name,ok)=>a
       return url.origin===new URL(base).origin && url.pathname==='/api/library/upload'
         && response.request().method()==='POST' && response.status()===status;
     });
+    const clickUpload=async()=>{
+      // Nearest-edge scrolling can leave this mobile control behind BottomNav.
+      await page.$eval('[data-upload-start]',el=>el.scrollIntoView({block:'center',inline:'center',behavior:'instant'}));
+      await page.locator('[data-upload-start]').click();
+    };
     // The filenames and enabled button already exist before the first POST.
     // Await its actual refusal and rendered error before attempting the retry.
-    await Promise.all([uploadResponse(400),page.click('[data-upload-start]')]);
+    await Promise.all([uploadResponse(400),clickUpload()]);
     await page.waitForFunction(()=>[...document.querySelectorAll('[data-notice="error"]')]
       .some(notice=>notice.textContent.includes('Could not read image') && notice.textContent.includes('page2.png'))
       && document.querySelector('[data-upload-start]')?.disabled===false);
     check('failed image chapter leaves all pages selected for retry',await page.$$eval('[data-image-pages] li',els=>els.length)===2);
-    await Promise.all([uploadResponse(200),page.click('[data-upload-start]')]);
+    await Promise.all([uploadResponse(200),clickUpload()]);
     await page.waitForFunction(()=>document.querySelectorAll('[data-image-pages] li').length===0);
     const uploads=writes.filter(w=>w.kind==='upload');
     check('image retry posts multipart to the selected scope and chapter',uploads.length===2 && uploads.every(w=>w.query.images==='1' && w.query.visibility==='shared' && w.query.name==='Chapter 7.cbz' && w.contentType.startsWith('multipart/form-data;')));
