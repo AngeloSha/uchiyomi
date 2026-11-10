@@ -1,5 +1,6 @@
 // Offline chapter store (IndexedDB): page blobs + chapter metadata + a progress outbox.
 import { openDB, IDBPDatabase } from 'idb';
+import { usesNativeCache } from './native';
 import { api, apiResponse, ApiError, getCurrentUser } from './api';
 import { DownloadManifest } from './types';
 import { deviceId } from './device';
@@ -443,6 +444,7 @@ export async function queueProgress(ev: ProgressEvent,expectedOwnerId?:string|nu
   // against B's reading history, streaks and leaderboard position.
   await d.add('outbox', { ...ev, userId:actor, ts:at, tries: 0 });
   if(!sameActor(actor))return;
+  if(usesNativeCache())return;
   // background sync: the SW flushes the outbox when connectivity returns, even if the app is closed
   try {
     // Bounded: `serviceWorker.ready` never resolves when no worker becomes active, and this is awaited on

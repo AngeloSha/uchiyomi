@@ -262,3 +262,7 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npm test
+      - name: iOS frontend manifest tests
+        run: node --test ios/scripts/manifest.test.mjs
+      - name: iOS distribution and build-adapter tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s ios/Tests/Distribution

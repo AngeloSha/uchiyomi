@@ -297,11 +297,11 @@ test('the page reads both views through the live answers, hides owned works on t
   const src = readFileSync(join(ROOT, 'app/discover/page.tsx'), 'utf8');
   const code = src.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
   assert.match(code, /const wallKeys = useMemo\(\(\) => unknownWorks\(mine\(byId\)\.flatMap\(\(\[, list\]\) => list\)\), \[byId, mine\]\);/);
-  assert.match(code, /const wallWorks = useLiveWorks\(wallKeys, mayAdd && mode === 'newest'\);/, 'the wall is not asked about while it is on screen');
+  assert.match(code, /const wallWorks = useLiveWorks\(wallKeys, mayAdd && tab === 'sources' && mode === 'newest'\);/, 'the wall is not asked about while it is on screen');
   assert.match(code, /const rows = useMemo\(\(\) => Object\.fromEntries\(mine\(byId\)\.map\(\(\[k, list\]\) => \[k, applyWorks\(list, wallWorks\)\]\)\), \[byId, mine, wallWorks\]\);/,
     'the wall does not read its rows through the answers');
   assert.match(code, /for \(const it of rows\[key\] \?\? \[\]\) \{/, 'the wall does not read its rows through the answers');
-  assert.match(code, /const searchWorks = useLiveWorks\(searchKeys, mayAdd && mode === 'search'\);/, 'search is not asked about while it is on screen');
+  assert.match(code, /const searchWorks = useLiveWorks\(searchKeys, mayAdd && tab === 'sources' && mode === 'search'\);/, 'search is not asked about while it is on screen');
   assert.match(code, /const searchGroups = useMemo\(\(\) => mergeGroups\(applyWorks\(searchQ\.data\?\.content \?\? \[\], searchWorks\)\), \[searchQ\.data, searchWorks\]\);/);
   assert.equal((code.match(/foldByWork\(/g) ?? []).length, 1, 'search drops what you have: the wall\'s fold runs twice');
   assert.match(code, /const key = workKey\(it\);[\s\S]{0,600}?fromKey\.current = key \|\| null;/, 'open() does not remember which card the dialog is for');

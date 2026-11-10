@@ -9,6 +9,7 @@ import { ssoOnly } from './authMode';
 import { PRIVATE_LIBRARY_DDL } from './privateLibrarySchema';
 import { EXTERNAL_READER_DDL } from './externalReaderSchema';
 import { IMPORT_ENHANCEMENT_DDL } from './importEnhancementSchema';
+import { DISCOVERY_HUB_DDL } from './discoveryHubSchema';
 
 // NOTE: gen_random_uuid() is in Postgres core (v13+); no pgcrypto extension needed.
 // (The supabase/postgres image's event triggers reject CREATE EXTENSION under a custom role.)
@@ -2236,6 +2237,7 @@ ALTER TABLE listing_progress ADD COLUMN IF NOT EXISTS is_private boolean NOT NUL
 ALTER TABLE listing_progress ADD COLUMN IF NOT EXISTS incognito boolean NOT NULL DEFAULT false;
 ${EXTERNAL_READER_DDL}
 ${IMPORT_ENHANCEMENT_DDL}
+${DISCOVERY_HUB_DDL}
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

@@ -56,7 +56,7 @@ export function heroArt(t: Trending, wide: boolean): { src: string; fallback: st
 const HERO_BOX = 'bleed under-topbar relative isolate h-[44vh] min-h-[300px] overflow-hidden lg:h-[60vh] lg:max-h-[665px] lg:min-h-[465px]';
 
 /** The hero's round-cornered keys over art: glass, so they read on any picture (Home's). */
-const HERO_KEY = 'h-10 w-10 place-items-center rounded-xl border border-white/15 bg-black/40 text-white backdrop-blur transition hover:bg-black/60 active:scale-95';
+const HERO_KEY = 'h-11 w-11 place-items-center rounded-xl border border-white/15 bg-black/40 text-white backdrop-blur transition hover:bg-black/60 active:scale-95';
 
 /**
  * The small tag over Discover's art: the hero's "Trending now", and since v0.99.0 the For you band's "For you"
@@ -97,7 +97,7 @@ function Scrims() {
  * copy now, so that is a moment. And it moves as Home's does: the slides crossfade, a phone's cover drifts slowly closer,
  * and segments say where the slides are, with a Pause key (WCAG 2.2.2) -- still under Reduce effects or reduced motion.
  */
-export function DiscoverHero({ slides, onPick, waiting = false }: { slides: Trending[]; onPick: (t: Trending) => void; waiting?: boolean }) {
+export function DiscoverHero({ slides, onPick, waiting = false, actionLabel, underChrome = true }: { slides: Trending[]; onPick: (t: Trending) => void; waiting?: boolean; actionLabel?: string; underChrome?: boolean }) {
   const wide = useWideViewport();
   const [i, setI] = useState(0);
   // Held while the pointer is over the hero; `held` is the Pause key's.
@@ -112,7 +112,8 @@ export function DiscoverHero({ slides, onPick, waiting = false }: { slides: Tren
   const n = slides.length;
   // Its art starts at the top of the window: the desktop top bar is see-through over it (lib/overArt.ts) -- over the
   // stand-in too, which is the same box.
-  useArtUnderChrome(n > 0 || waiting);
+  useArtUnderChrome(underChrome && (n > 0 || waiting));
+  const heroBox = underChrome ? HERO_BOX : HERO_BOX.replace('under-topbar', '');
 
   useEffect(() => { if (i >= n && n > 0) setI(0); }, [n, i]);
   // 5s, not 7s. With ten slides a seven-second beat is a seventy-second loop, so the back half was seen by essentially
@@ -138,7 +139,7 @@ export function DiscoverHero({ slides, onPick, waiting = false }: { slides: Tren
     if (!waiting) return null;
     // The stand-in: the hero's box, its scrims and bloom, the eyebrow, and where the title and key will be.
     return (
-      <div className={HERO_BOX} data-hero-waiting aria-hidden>
+      <div className={heroBox} data-hero-waiting aria-hidden>
         <div className="skeleton absolute inset-0" />
         <Scrims />
         <div className="bleed-pad relative z-10 flex h-full flex-col justify-end pb-5 lg:pb-10">
@@ -156,7 +157,7 @@ export function DiscoverHero({ slides, onPick, waiting = false }: { slides: Tren
 
   return (
     <div
-      className={HERO_BOX}
+      className={heroBox}
       data-discover-hero
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
@@ -204,7 +205,7 @@ export function DiscoverHero({ slides, onPick, waiting = false }: { slides: Tren
         )}
         <div className="mt-4">
           <button onClick={() => onPick(cur)} className="btn-accent px-6 py-3 text-sm lg:px-7 lg:py-3.5 lg:text-base">
-            <IcPlus width={17} height={17} />{tr('Find and add')}
+            <IcPlus width={17} height={17} />{actionLabel ?? tr('Find and add')}
           </button>
         </div>
         {/* Where the slides are: one segment each, the current one filling while it shows -- still under Reduce effects or
@@ -213,7 +214,7 @@ export function DiscoverHero({ slides, onPick, waiting = false }: { slides: Tren
           <div className="mt-4 flex items-center gap-1.5 lg:mt-5" data-hero-slides>
             {slides.map((s, k) => (
               <button key={s.title} type="button" aria-label={s.title} aria-current={k === i || undefined} onClick={() => setI(k)}
-                className="group grid h-5 place-items-center">
+                className="group grid h-11 min-w-6 place-items-center">
                 <span className={`relative h-1 overflow-hidden rounded-[2px] transition-[width,background-color] duration-300 ${k === i ? 'w-10 bg-white/25' : 'w-5 bg-white/25 group-hover:bg-white/45'}`}>
                   {k === i && (
                     <span key={`${i}:${stopped}`} aria-hidden className="absolute inset-0 origin-left bg-accent rtl:origin-right"

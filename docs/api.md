@@ -564,6 +564,27 @@ browse it, in a library with AniList lookups on, through a checked link. It is a
 (`tracker_list_cache`: the list, read at most every 12 hours; `tracker_rec_cache`: what readers recommend after a title,
 once per server per 14 days) and waits up to 8 seconds for a first refresh; `pending: true` says one is still running.
 An account with nothing connected gets an empty `content`, and nothing is asked of any service. `Cache-Control: no-store`.
+
+**Personal Discover choices.** `GET /api/discover/state` answers `{tab, saved, hidden}` for the authenticated account.
+`tab` is `for-you` (the default) or `sources`; `PATCH /api/discover/state` with `{tab}` remembers it across devices,
+merging other account settings. `saved` contains normalized cards: `{key, id, title, cover, coverXL, banner,
+description, genres, score, chapters, status, country}` with unknown metadata null or empty. `hidden` contains work
+keys and their known title aliases. These responses are `private, no-store` with `Vary: *`.
+
+`PUT /api/discover/items/:key` takes `{saved?: boolean, hidden?: boolean, item?: {title, ...}}`, with at least one
+action. The key is `al:<positive AniList id>`, or `t:<NFKC, lower-case, letters/marks/digits-only title>` when no ID is
+known. The optional title is a matching hint only: the server resolves saved metadata and its adult rating from
+existing trusted catalog caches. Client-supplied art, synopsis and safety labels cannot replace it. Saving an unknown
+or forbidden title answers the same **404**. Feedback never calls an external service, creates a library series or
+downloads chapters. An account may keep up to 1,000 saved/hidden choices; adding beyond this answers **409**.
+
+Saving and hiding are independent: `{hidden:false}` restores a rejected title while retaining its saved state.
+`DELETE /api/discover/items/:key` clears both choices for that title; `DELETE /api/discover/hidden` resets rejections
+while preserving saved titles. Hidden choices suppress the caller's trending, recent-read and tracker recommendations.
+Saved cards are judged against the caller's current age cap, 18+ reveal and configured adult genres on each read.
+All endpoints require authentication and Discover's existing add-series permission; no account ID is accepted from
+the client. Private tracker entries and private local reading never seed new online recommendation requests.
+
 Responses worth handling: **200** with `message: "already in library"` if you have that exact series already,
 and **409** `duplicate` if a series with the same title came from a *different* source — retry with
 `"force": true` to add the second copy anyway.
@@ -1448,6 +1469,9 @@ GET    /api/sources/jobs          POST   /api/sources/add
 GET    /api/discover/trending     POST   /api/sources/fill/scan
 GET    /api/discover/works        GET    /api/discover/because
 GET    /api/discover/recommendations
+GET    /api/discover/state        PATCH  /api/discover/state
+PUT    /api/discover/items/:key   DELETE /api/discover/items/:key
+DELETE /api/discover/hidden
 GET    /api/sources/fill/scan/:id POST   /api/sources/fill
 POST   /api/sources/fetch
 GET    /api/sources/archive       POST   /api/sources/archive
