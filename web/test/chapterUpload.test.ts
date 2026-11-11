@@ -6,7 +6,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { setActiveDict } from '../lib/i18n';
 import { ApiError } from '../lib/api';
-import { libraryMoveRefusal } from '../lib/libraryRefusals';
+import { libraryMoveRefusal } from '../lib/refusals';
 import { uploadAll, uploadRefusal, orderedImagePages, uploadImageChapter, isRasterPageHeader, imagePreviewBitmap } from '../lib/chapterUpload';
 
 setActiveDict({});
@@ -109,4 +109,20 @@ test('thumbnail decoding is bounded, skips oversized or cancelled files, and clo
     const departed=new AbortController(),pending=imagePreviewBitmap(png,departed.signal);await waitFor(3);departed.abort();releases[2]();
     assert.equal(await pending,null);assert.equal(closed,3,'a bitmap that finishes after unmount is closed too');
   } finally {for(const release of releases)release();globalThis.createImageBitmap=original;}
+});
+
+test('download cancels say why they were refused, and fall back to the shared connection message', async () => {
+  const { downloadCancelRefusal } = await import('../lib/refusals');
+  assert.match(downloadCancelRefusal(refusal(404, { error: 'not_found' })), /no longer in the queue/);
+  assert.match(downloadCancelRefusal(refusal(409, { error: 'not_running' })), /no longer running/);
+  assert.match(downloadCancelRefusal(refusal(403, { error: 'forbidden' })), /Only the person who started/);
+  assert.match(downloadCancelRefusal(new TypeError('fetch failed')), /Check your connection/);
+  assert.match(downloadCancelRefusal(refusal(500, {})), /Could not cancel this download/);
+});
+
+test('shared request failures cover an expired session and an unavailable server', async () => {
+  const { requestFailure } = await import('../lib/refusals');
+  assert.match(requestFailure(refusal(401, {})) ?? '', /session has expired/);
+  assert.match(requestFailure(refusal(503, {})) ?? '', /temporarily unavailable/);
+  assert.equal(requestFailure(refusal(500, {})), undefined);
 });

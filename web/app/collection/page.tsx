@@ -1,9 +1,9 @@
 'use client';
-import { listActionFailure } from '@/components/ConfirmDialog';
 import { Suspense, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { listActionFailure } from '@/components/ConfirmDialog';
 import { Series } from '@/lib/types';
 import { useAuth } from '@/lib/auth';
 import { LIST_SORTS, listSortOf, sortList, withListSort, type ListSort } from '@/lib/listSort';

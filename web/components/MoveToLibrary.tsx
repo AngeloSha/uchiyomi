@@ -1,7 +1,7 @@
 'use client';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { requestFailure } from '@/lib/libraryRefusals';
+import { requestFailure } from '@/lib/refusals';
 import { t as tr } from '@/lib/i18n';
 import { Modal } from '@/components/ConfirmDialog';
 import { LibraryFolders } from '@/components/LibraryFolders';

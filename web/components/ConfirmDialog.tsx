@@ -7,7 +7,7 @@
 //
 // `confirmText` asks the user to type the name of what they are about to change. Worth the friction only
 // where the action moves other people's data — deleting a series a household is reading, merging two.
-import { refusalBody, requestFailure } from '@/lib/libraryRefusals';
+import { refusalBody, requestFailure } from '@/lib/refusals';
 import { useEffect, useRef, useState } from 'react';
 import { t as tr } from '@/lib/i18n';
 import { saidText } from '@/lib/said';

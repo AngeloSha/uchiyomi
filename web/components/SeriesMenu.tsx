@@ -11,7 +11,7 @@ import type { Series } from '@/lib/types';
 import { useToast } from './Toast';
 import { useContextMenu, type MenuItem } from './ContextMenu';
 import { useArchiveEnqueue } from './ArchiveQueue';
-import { libraryMoveRefusal, requestFailure } from '@/lib/libraryRefusals';
+import { libraryMoveRefusal, requestFailure } from '@/lib/refusals';
 import { MoveToLibrary } from './MoveToLibrary';
 
 /**

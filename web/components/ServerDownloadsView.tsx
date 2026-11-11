@@ -3,7 +3,7 @@ import { useCallback, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
-import { downloadCancelRefusal } from '@/lib/libraryRefusals';
+import { downloadCancelRefusal } from '@/lib/refusals';
 import { useAuth, canDownload } from '@/lib/auth';
 import { useToast } from '@/components/Toast';
 import { actionFailure, msgOf } from '@/components/ConfirmDialog';

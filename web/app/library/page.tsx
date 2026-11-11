@@ -15,7 +15,7 @@ import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from '@/components/Toast';
 import { Modal, ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { MoveToLibrary } from '@/components/MoveToLibrary';
-import { libraryMoveRefusal, refusalBody, requestFailure } from '@/lib/libraryRefusals';
+import { libraryMoveRefusal, refusalBody, requestFailure } from '@/lib/refusals';
 import { useAuth, canDownload, canUploadManually } from '@/lib/auth';
 import { AdultToggle, useAdultFilterConfigured, useAdultShown, useLibraries } from '@/components/AdultToggle';
 import { LibraryFilters, NO_SOURCE, READ_STATES, STATUSES, useLibrarySources } from '@/components/LibraryFilters';

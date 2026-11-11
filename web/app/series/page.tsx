@@ -19,7 +19,7 @@ import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, actionFailure, listActionFailure, msgOf } from '@/components/ConfirmDialog';
 import { MoveToLibrary } from '@/components/MoveToLibrary';
-import { libraryMoveRefusal, requestFailure } from '@/lib/libraryRefusals';
+import { libraryMoveRefusal, requestFailure } from '@/lib/refusals';
 import { SeriesPrivacyControls } from '@/components/SeriesPrivacyControls';
 import { useAuth, canDownload } from '@/lib/auth';
 import { IcChevronLeft, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcHourglass, IcGrid, IcRows, IcComment } from '@/components/icons';

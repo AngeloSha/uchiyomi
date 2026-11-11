@@ -2,7 +2,7 @@
 import { FormEvent, useEffect, useId, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
-import { refusalBody, requestFailure } from '@/lib/libraryRefusals';
+import { refusalBody, requestFailure } from '@/lib/refusals';
 import { useAuth } from '@/lib/auth';
 import { relativeTime } from '@/lib/format';
 import { shownDeviceName } from '@/lib/device';

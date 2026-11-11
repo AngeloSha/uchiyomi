@@ -16,7 +16,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, getCurrentUser } from '@/lib/api';
-import { refusalBody, requestFailure } from '@/lib/libraryRefusals';
+import { refusalBody, requestFailure } from '@/lib/refusals';
 import { revealed } from '@/lib/adult';
 import { useAuth } from '@/lib/auth';
 import { useToast } from '@/components/Toast';

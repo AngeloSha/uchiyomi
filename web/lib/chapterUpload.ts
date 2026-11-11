@@ -2,7 +2,7 @@
 // already on the admin's own disk. One file per request, the file itself as the body, one after another.
 import { api, ApiError, getCurrentUser } from './api';
 import { t as tr } from './i18n';
-import { refusalBody, requestFailure } from './libraryRefusals';
+import { refusalBody, requestFailure } from './refusals';
 
 /** What the scanner reads as a chapter, for the file picker. The server checks it again, and the bytes too. */
 export const CHAPTER_ACCEPT = '.cbz,.cbr,.zip,.rar,.pdf,.epub';

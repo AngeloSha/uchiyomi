@@ -15,7 +15,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
-import { refusalBody, requestFailure } from '@/lib/libraryRefusals';
+import { refusalBody, requestFailure } from '@/lib/refusals';
 import { t as tr } from '@/lib/i18n';
 import { bytes, etaText, relativeTime } from '@/lib/format';
 import {

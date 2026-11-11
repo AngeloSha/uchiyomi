@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { downloadCancelRefusal } from '@/lib/libraryRefusals';
+import { downloadCancelRefusal } from '@/lib/refusals';
 import { useAuth } from '@/lib/auth';
 import { useToast } from '@/components/Toast';
 import { actionFailure } from '@/components/ConfirmDialog';

@@ -119,7 +119,7 @@ test('Admin → Sources says Reload sources, its busy word and its toasts in the
   assert.doesNotMatch(page, /'↻ Reload sources'|: 'Reloading…'|toast\(`Reloaded|toast\('Reload failed'/, 'a reload word is left in bare English');
   assert.match(page, /toast\(r\.available === 1 \? tr\('Reloaded — 1 source available'\) : tr\('Reloaded — \{n\} sources available', \{ n: r\.available \}\), 'success'\)/,
     'the reload toast is English, or has no singular');
-  assert.match(page, /toast\(tr\('Reload failed'\), 'error'\)/);
+  assert.match(page, /toast\(actionFailure\(error, tr\('Could not reload the source list\.'\)\), 'error'\)/);
 });
 
 test('the engine card says "Still no answer" without a reason it does not have, and one try as a time', () => {
