@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { downloadCancelRefusal } from '@/lib/libraryRefusals';
 import { useAuth } from '@/lib/auth';
 import { useToast } from '@/components/Toast';
 import { msgOf } from '@/components/ConfirmDialog';
@@ -65,8 +66,8 @@ export function SeriesServerDownloads({ seriesId, folder }: { seriesId: string; 
   }, [landed, seriesId, qc]);
 
   if (!tile && !failed && !archive) return null;
-  const call = async (path: string, method: 'POST' | 'DELETE') => {
-    try { await api(path, { method }); } catch (e) { toast(msgOf(e, tr('Could not do that')), 'error'); }
+  const call = async (path: string, method: 'POST' | 'DELETE', failure = (error: unknown) => msgOf(error, tr('Could not do that'))) => {
+    try { await api(path, { method }); } catch (e) { toast(failure(e), 'error'); }
     void kickDownloads(qc);
   };
   const retry = async (numbers: number[]) => {
@@ -111,7 +112,7 @@ export function SeriesServerDownloads({ seriesId, folder }: { seriesId: string; 
           {!tile.archive && <PageProgress entries={tile.entries} job={job} />}
           </div>
           {job && mayCancel(job, isAdmin) && (
-            <button type="button" onClick={() => call(`/api/sources/jobs/${encodeURIComponent(job.folder)}/cancel`, 'POST')} className="btn-key">
+            <button type="button" onClick={() => call(`/api/sources/jobs/${encodeURIComponent(job.folder)}/cancel`, 'POST', downloadCancelRefusal)} className="btn-key">
               {tr('Cancel')}
             </button>
           )}

@@ -10,6 +10,7 @@ import type { Series } from '@/lib/types';
 import { useToast } from './Toast';
 import { useContextMenu, type MenuItem } from './ContextMenu';
 import { useArchiveEnqueue } from './ArchiveQueue';
+import { libraryMoveRefusal, requestFailure } from '@/lib/libraryRefusals';
 import { MoveToLibrary } from './MoveToLibrary';
 
 /**
@@ -37,12 +38,12 @@ export function useSeriesMenu(series: Series) {
     for (const key of [['library'], ['home'], ['collection'], ['series', series.id], ['series-books', series.id]]) qc.invalidateQueries({ queryKey: key });
   };
   // The Library's bulk routes, for a selection of one: the same permission checks, and the same answer shape.
-  const bulk = async (path: string, extra: Record<string, unknown>, done: string) => {
+  const bulk = async (path: string, extra: Record<string, unknown>, done: string, failure: string) => {
     try {
       const r = await api<{ applied: number }>(path, { json: { seriesIds: [series.id], ...extra } });
       toast(r.applied ? done : tr('That series is no longer in the library'), r.applied ? 'success' : 'error');
       settle();
-    } catch { toast(tr('Could not do that'), 'error'); }
+    } catch (error) { toast(requestFailure(error) ?? failure, 'error'); }
   };
 
   // Move library (admins): the picker is a dialog, so the menu's `element` carries it along with the menu itself.
@@ -60,10 +61,10 @@ export function useSeriesMenu(series: Series) {
     },
     {
       label: favourite ? tr('Remove from favourites') : tr('Favourite'), divider: true, disabled: offline,
-      onSelect: () => bulk('/api/favorites/bulk', { favorite: !favourite }, favourite ? tr('Removed from favourites') : tr('Added to favourites')),
+      onSelect: () => bulk('/api/favorites/bulk', { favorite: !favourite }, favourite ? tr('Removed from favourites') : tr('Added to favourites'), favourite ? tr('Could not remove this series from favourites.') : tr('Could not add this series to favourites.')),
     },
-    { label: tr('Mark all read'), disabled: offline, onSelect: () => bulk('/api/library/bulk/read', { completed: true }, tr('Marked read')) },
-    { label: tr('Mark all unread'), disabled: offline, onSelect: () => bulk('/api/library/bulk/read', { completed: false }, tr('Marked unread')) },
+    { label: tr('Mark all read'), disabled: offline, onSelect: () => bulk('/api/library/bulk/read', { completed: true }, tr('Marked read'), tr('Could not mark this series as read.')) },
+    { label: tr('Mark all unread'), disabled: offline, onSelect: () => bulk('/api/library/bulk/read', { completed: false }, tr('Marked unread'), tr('Could not mark this series as unread.')) },
     ...(isAdmin ? [{
       label: tr('Check for new chapters'), divider: true, disabled: offline,
       onSelect: async () => {
@@ -90,7 +91,7 @@ export function useSeriesMenu(series: Series) {
         await api(`/api/admin/series/${encodeURIComponent(series.id)}/library`, { json: { libraryId } });
         toast(tr('1 series updated'), 'success');
         settle();
-      } catch { toast(tr('Could not do that'), 'error'); }
+      } catch (error) { toast(libraryMoveRefusal(error, 1), 'error'); }
       setMoveBusy(false);
       setMoving(false);
     }} />,

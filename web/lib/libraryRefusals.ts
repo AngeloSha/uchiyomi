@@ -19,6 +19,15 @@ export function requestFailure(error: unknown): string | undefined {
   }
 }
 
+export function downloadCancelRefusal(error: unknown): string {
+  switch (refusalBody(error)?.error) {
+    case 'not_found': return tr('This download is no longer in the queue.');
+    case 'not_running': return tr('This download is no longer running.');
+    case 'forbidden': return tr('Only the person who started this download or an admin can cancel it.');
+  }
+  return requestFailure(error) ?? tr('Could not cancel this download. Try again.');
+}
+
 export function libraryMoveRefusal(error: unknown, selected: number): string {
   switch (refusalBody(error)?.error) {
     case 'use_privacy_action':

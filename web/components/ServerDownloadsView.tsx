@@ -3,6 +3,7 @@ import { useCallback, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
+import { downloadCancelRefusal } from '@/lib/libraryRefusals';
 import { useAuth, canDownload } from '@/lib/auth';
 import { useToast } from '@/components/Toast';
 import { msgOf } from '@/components/ConfirmDialog';
@@ -90,11 +91,11 @@ export function ServerDownloadsView({ focusFolder }: { focusFolder?: string | nu
   });
   const nameOf = (id: string) => sources?.content.find((x) => x.id === id)?.name ?? id;
 
-  const call = async (path: string, method: 'POST' | 'DELETE') => {
-    try { await api(path, { method }); } catch (e) { toast(msgOf(e, tr('Could not do that')), 'error'); }
+  const call = async (path: string, method: 'POST' | 'DELETE', failure = (error: unknown) => msgOf(error, tr('Could not do that'))) => {
+    try { await api(path, { method }); } catch (e) { toast(failure(e), 'error'); }
     void kickDownloads(qc);
   };
-  const cancelJob = (folder: string) => call(`/api/sources/jobs/${encodeURIComponent(folder)}/cancel`, 'POST');
+  const cancelJob = (folder: string) => call(`/api/sources/jobs/${encodeURIComponent(folder)}/cancel`, 'POST', downloadCancelRefusal);
   const dismissJob = (folder: string) => call(`/api/sources/jobs/${encodeURIComponent(folder)}`, 'DELETE');
   // A "Find other sources" run stops through its own route (v0.49.1), at once; Fix everything through its own (v0.55.0),
   // at its next safe point -- never inside a merge, a delete or a renumbering.

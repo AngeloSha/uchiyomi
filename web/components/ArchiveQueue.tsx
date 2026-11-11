@@ -15,6 +15,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
+import { refusalBody, requestFailure } from '@/lib/libraryRefusals';
 import { t as tr } from '@/lib/i18n';
 import { bytes, etaText, relativeTime } from '@/lib/format';
 import {
@@ -56,7 +57,12 @@ export function useArchiveActions() {
     try {
       await api(path, { method });
       if (ok) toast(ok, 'success');
-    } catch (e) { toast(msgOf(e, tr('Could not do that')), 'error'); }
+    } catch (e) {
+      const message = refusalBody(e)?.error === 'not_found'
+        ? tr('This archive is no longer in your queue.')
+        : requestFailure(e) ?? msgOf(e, tr('Could not update this archive.'));
+      toast(message, 'error');
+    }
     kickTwice(qc);
     void qc.invalidateQueries({ queryKey: ['series-listing', seriesId] });
     setBusy(false);

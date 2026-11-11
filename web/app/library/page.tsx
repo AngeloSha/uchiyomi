@@ -15,7 +15,7 @@ import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from '@/components/Toast';
 import { Modal, ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { MoveToLibrary } from '@/components/MoveToLibrary';
-import { libraryMoveRefusal } from '@/lib/libraryRefusals';
+import { libraryMoveRefusal, refusalBody, requestFailure } from '@/lib/libraryRefusals';
 import { useAuth, canDownload, canUploadManually } from '@/lib/auth';
 import { AdultToggle, useAdultFilterConfigured, useAdultShown, useLibraries } from '@/components/AdultToggle';
 import { LibraryFilters, NO_SOURCE, READ_STATES, STATUSES, useLibrarySources } from '@/components/LibraryFilters';
@@ -316,7 +316,12 @@ function LibraryInner() {
     qc.invalidateQueries({ queryKey: ['home'] });
   };
 
-  const bulk = async (path: string, extra: Record<string, unknown>, failure = (_error: unknown) => tr('Could not apply that')) => {
+  const bulkFailure = (error: unknown, fallback: string) => {
+    if (refusalBody(error)?.error === 'bad_request' && picked.size > 500) return tr('Select up to 500 series at a time.');
+    return requestFailure(error) ?? fallback;
+  };
+
+  const bulk = async (path: string, extra: Record<string, unknown>, failure: (error: unknown) => string) => {
     setActing(true);
     try {
       const r = await api<{ applied: number; skipped: { id: string }[] }>(path, {
@@ -821,9 +826,9 @@ function LibraryInner() {
             <span className="me-auto text-sm font-medium text-fog-100">
               {fetching ? tr('Fetching {done} of {total}…', { done: fetching.done, total: fetching.total }) : selectedText(picked.size)}
             </span>
-            <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: true })} className="btn-key">{tr('Mark read')}</button>
-            <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: false })} className="btn-key">{tr('Mark unread')}</button>
-            <button disabled={acting} onClick={() => bulk('/api/favorites/bulk', { favorite: true })} className="btn-key">{tr('Favourite')}</button>
+            <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: true }, (error) => bulkFailure(error, tr('Could not mark the selected series as read.')))} className="btn-key">{tr('Mark read')}</button>
+            <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: false }, (error) => bulkFailure(error, tr('Could not mark the selected series as unread.')))} className="btn-key">{tr('Mark unread')}</button>
+            <button disabled={acting} onClick={() => bulk('/api/favorites/bulk', { favorite: true }, (error) => bulkFailure(error, tr('Could not add the selected series to favourites.')))} className="btn-key">{tr('Favourite')}</button>
             {/* Server-side fetch, so it follows the same permission as the Add button and the series
                 page's Fetch: a member who may not download does not see it. */}
             {canDownload(user) && <button disabled={acting} onClick={fetchNewest} className="btn-key">{tr('Fetch newest')}</button>}

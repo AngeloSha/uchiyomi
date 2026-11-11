@@ -19,7 +19,7 @@ import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { MoveToLibrary } from '@/components/MoveToLibrary';
-import { libraryMoveRefusal } from '@/lib/libraryRefusals';
+import { libraryMoveRefusal, requestFailure } from '@/lib/libraryRefusals';
 import { SeriesPrivacyControls } from '@/components/SeriesPrivacyControls';
 import { useAuth, canDownload } from '@/lib/auth';
 import { IcChevronLeft, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcHourglass, IcGrid, IcRows, IcComment } from '@/components/icons';
@@ -1187,10 +1187,10 @@ function SeriesInner() {
       else await api(`/api/favorites/${id}`, { method: 'DELETE' });
       qc.invalidateQueries({ queryKey: ['home'] });
       qc.invalidateQueries({ queryKey: ['library'] });
-    } catch {
+    } catch (error) {
       // Put back, and say so: the heart that stayed lit over a refusal was the one feedback, and it lied.
       setFav(!next);
-      toast(tr('Could not do that'), 'error');
+      toast(requestFailure(error) ?? (next ? tr('Could not add this series to favourites.') : tr('Could not remove this series from favourites.')), 'error');
     }
   };
 
@@ -1295,9 +1295,10 @@ function SeriesInner() {
   // with it -- unread means those too -- and tells no tracker: a tracker left ahead is the safe direction.
   const markAllUnread = async () => {
     try {
-      await api('/api/library/bulk/read', { json: { seriesIds: [id], completed: false } });
-      toast(tr('Marked unread'), 'success');
-    } catch { toast(tr('Could not do that'), 'error'); }
+      const { applied } = await api<{ applied: number }>('/api/library/bulk/read', { json: { seriesIds: [id], completed: false } });
+      if (applied) toast(tr('Marked unread'), 'success');
+      else toast(tr('That series is no longer in the library'), 'error');
+    } catch (error) { toast(requestFailure(error) ?? tr('Could not mark this series as unread.'), 'error'); }
     for (const k of [['series-books', id], ['series-listing', id], ['series', id], ['home'], ['library'], ['collection']]) qc.invalidateQueries({ queryKey: k });
   };
 
@@ -1455,7 +1456,10 @@ function SeriesInner() {
         }
         if (i < requests.length - 1) {
           const ended = await awaitJob(res.folder);
-          if (ended?.status === 'error') throw new Error(reasonText(ended) || tr('Fetch stopped. Try another source or wait.'));
+          if (ended?.status === 'error') {
+            toast(reasonText(ended) || tr('Fetch stopped. Try another source or wait.'), 'error');
+            break;
+          }
         }
       }
     } catch (e) { toast(msgOf(e, tr('Could not start.')), 'error'); }
