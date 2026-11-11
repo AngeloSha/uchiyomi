@@ -45,10 +45,24 @@ build_args=(-project ios/Uchiyomi.xcodeproj -scheme Uchiyomi -configuration Debu
   DEVELOPMENT_TEAM= CODE_SIGN_IDENTITY=- PRODUCT_BUNDLE_IDENTIFIER=org.uchiyomi.ci
   UCHI_TEST_BUNDLE_IDENTIFIER=org.uchiyomi.ci.tests)
 auth_test=UchiyomiWebViewTests/CachedWebViewTests/testExpiredIdentityAccountBoundaryAndOfflineLogout
-# Hosted WebKit can stall starting this fixture after the update/rollback fixture's
-# many process replacements. Give it a fresh test host; neither skip nor retry its
-# assertions. Both invocations must pass, and both result bundles are retained.
+# These fixtures replace many WebKit processes/stores. Hosted simulators can stall
+# later fixtures in the same test host, including cookie and IndexedDB operations.
+# Run each in a fresh host, as for authentication. Every invocation must pass;
+# no assertion is skipped or retried, and every result bundle is retained.
+cache_tests=(
+  UchiyomiWebViewTests/CachedWebViewTests/testAutomaticUIUpdateAndFailedStartupRecoveryPreserveOfflineData
+  UchiyomiWebViewTests/CachedWebViewTests/testPreparedReaderWithUnavailableServer
+  UchiyomiWebViewTests/CachedWebViewTests/testTwoServerProfilesWithSameAccountAndChapterIDsAndConfirmedRemoval
+)
+skip_cache=()
+for cache_test in "${cache_tests[@]}"; do
+  skip_cache+=("-skip-testing:$cache_test")
+done
 xcodebuild "${build_args[@]}" -resultBundlePath "$output/tests.xcresult" \
-  -skip-testing:"$auth_test" test 2>&1 | tee "$output/test.log"
+  -skip-testing:"$auth_test" "${skip_cache[@]}" test 2>&1 | tee "$output/test.log"
+for cache_test in "${cache_tests[@]}"; do
+  xcodebuild "${build_args[@]}" -resultBundlePath "$output/${cache_test##*/}.xcresult" \
+    -only-testing:"$cache_test" test-without-building 2>&1 | tee -a "$output/test.log"
+done
 xcodebuild "${build_args[@]}" -resultBundlePath "$output/auth.xcresult" \
   -only-testing:"$auth_test" test-without-building 2>&1 | tee -a "$output/test.log"
