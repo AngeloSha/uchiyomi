@@ -3,7 +3,7 @@
 import test, {before, after} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {mkdtemp, mkdir, readFile, writeFile, rm, stat} from 'node:fs/promises';
+import {mkdtemp, mkdir, readFile, readdir, writeFile, rm, stat} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
@@ -245,4 +245,18 @@ test('a source ownership change after preflight refuses the stale snapshot befor
     assert.equal((await row(s.id)).owner_user_id,b);assert.deepEqual(await books(s.id),priorBooks);
     for(const disk of roots)assert.ok(await exists(join(disk,s.folder)));
   }finally{lease.release();await q('UPDATE lib_series SET owner_user_id=$2 WHERE id=$1',[s.id,a]);}
+});
+
+test('scans do not register empty move parents as ghost series',{skip},async t=>{
+  const registered=await q(`SELECT s.id,s.folder,b.file,b.root FROM lib_series s LEFT JOIN lib_books b ON b.series_id=s.id
+    WHERE NOT(s.id=ANY($1::text[])) AND (s.library_id=$2 OR s.owner_user_id=ANY($3::uuid[]))`,[[...ids],shared,[a,b]]);
+  // Existing loose-image support may index the parent of our cover-only fixture.
+  // Those rows must point to actual cover-bearing chapter directories, never to
+  // empty parent directories left by a successful rename.
+  for(const entry of registered){
+    assert.ok(entry.file,`${entry.folder} is an empty ghost series`);
+    const chapter=join(entry.root,entry.file);assert.ok((await stat(chapter)).isDirectory());
+    assert.ok((await readdir(chapter)).includes('cover.png'),'extra row represents the cover-only loose-image fixture');
+  }
+  t.diagnostic(`${new Set(registered.map((entry:any)=>entry.id)).size} additional scanner row(s), all backed by real cover-bearing chapters`);
 });
