@@ -74,6 +74,7 @@ const HELD = 'add-held';     // three chapters the library already holds under t
 const LANG_ES = 'add-lang-es';   // v0.52.0: declares es-419, and its chapters say nothing
 const LANG_MDX = 'add-lang-mdx'; // v0.52.0: declares en, and every chapter says es-la -- MangaDex's English fallback
 const USER = 'add-route-user';
+const TRACKER_USER = 'add-route-tracker-user';
 const MEMBER = 'add-route-member';
 let addSeriesFromSource: any, q: any;
 let moodyCalls = 0;
@@ -253,7 +254,7 @@ after(async () => {
   await q(`DELETE FROM lib_series WHERE source_id = ANY($1)`, [[MOODY, NAMELESS, LATEST, GROUPS, NOTHING, IDS, HELD, LANG_ES, LANG_MDX]]).catch(() => {});
   // The held fixture is seeded by hand, so its row can still be unrouted (no source_id) if an add failed.
   await q(`DELETE FROM lib_series WHERE folder LIKE 'Held Source/%'`).catch(() => {});
-  await q('DELETE FROM users WHERE username = ANY($1)', [[USER, MEMBER]]).catch(() => {});
+  await q('DELETE FROM users WHERE username = ANY($1)', [[USER, TRACKER_USER, MEMBER]]).catch(() => {});
   await q(`UPDATE server_settings SET scanlator_prefs = DEFAULT WHERE id = 1`).catch(() => {});
 });
 
@@ -469,6 +470,14 @@ test('POST /api/sources/add refuses a chapterFrom it does not know', { skip }, a
       // hands the person's id to the add, and the add plans once the series is linked -- here a series already in the
       // library, whose AniList link is already there. Reintroduce by dropping the planSeriesOnAddAsync call from the
       // "already in library" branch (or not passing userId from the route): AniList is never written to.
+      // The preceding add starts tracker work without awaiting it. Keep this case's
+      // opt-in and connection on a fresh account so that earlier work cannot start
+      // planning too when these settings become visible.
+      await q('DELETE FROM users WHERE username = $1', [TRACKER_USER]);
+      const uid = (await q<{ id: string }>(
+        `INSERT INTO users (username, display_name, password_hash, role, auth_kind, perms, max_age_rating)
+         VALUES ($1,$1,'x','admin','password','{}',NULL) RETURNING id`, [TRACKER_USER]))[0].id;
+      const headers = { authorization: `Bearer ${app.jwt.sign({ sub: uid, role: 'admin' })}` };
       const trackers = await import('../src/lib/trackers');
       const sid = (await q(`SELECT id FROM lib_series WHERE source_id = $1`, [LATEST]))[0].id;
       await trackers.linkSeries(sid, '987', 'Caught Up', null, 'anilist');
