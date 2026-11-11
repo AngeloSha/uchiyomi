@@ -17,7 +17,7 @@ import { applyCover, clearCover } from '@/lib/theme';
 import { Img, Backdrop, SectionTitle, useWideViewport } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
-import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
+import { ConfirmDialog, Modal, actionFailure, listActionFailure, msgOf } from '@/components/ConfirmDialog';
 import { MoveToLibrary } from '@/components/MoveToLibrary';
 import { libraryMoveRefusal, requestFailure } from '@/lib/libraryRefusals';
 import { SeriesPrivacyControls } from '@/components/SeriesPrivacyControls';
@@ -119,7 +119,7 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
     if (inFlight.current || typeof c.contains !== 'boolean') return;
     inFlight.current = true; setSaving(true);
     try { await saveMembership(c, !c.contains); }
-    catch { toast(tr('Failed'), 'error'); }
+    catch (error) { toast(listActionFailure(error, tr('Could not change this series’s list membership.')), 'error'); }
     finally { inFlight.current = false; setSaving(false); }
   };
   const createAndAdd = async () => {
@@ -131,7 +131,7 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
       qc.setQueryData<{ content: CollectionRow[] }>(queryKey, (old) => ({ content: [...(old?.content ?? []), { ...c, contains: false }] }));
       setName('');
       // If adding fails, keep the newly created empty list visible and retryable.
-      try { await saveMembership(c, true); } catch { toast(tr('Failed'), 'error'); }
+      try { await saveMembership(c, true); } catch (error) { toast(listActionFailure(error, tr('The list was created, but this series could not be added.')), 'error'); }
     } catch { toast(tr('Could not create the list'), 'error'); }
     finally { inFlight.current = false; setSaving(false); }
   };
@@ -1430,7 +1430,7 @@ function SeriesInner() {
       invalidateChapters();
       leaveSelect();
     } catch (e) {
-      toast(msgOf(e, tr('Could not start.')), 'error');
+      toast(actionFailure(e, tr('Could not start fetching chapters.')), 'error');
     }
     setActing(false);
     setConfirming(null);
@@ -1462,7 +1462,7 @@ function SeriesInner() {
           }
         }
       }
-    } catch (e) { toast(msgOf(e, tr('Could not start.')), 'error'); }
+    } catch (e) { toast(actionFailure(e, tr('Could not start fetching chapters.')), 'error'); }
     setActing(false);
   };
   // The fetch icon on one ghost row: the bar's Fetch for a list of one, same request, same toast, same
@@ -1512,7 +1512,7 @@ function SeriesInner() {
         if (ended?.status === 'error') { toast(reasonText(ended) || tr('Fetch stopped. Try another source or wait.'), 'error'); break; }
       }
     } catch (e) {
-      toast(msgOf(e, tr('Could not start.')), 'error');
+      toast(actionFailure(e, tr('Could not start fetching chapters.')), 'error');
     }
     setActing(false);
   };

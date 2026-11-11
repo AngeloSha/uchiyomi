@@ -1,4 +1,5 @@
 'use client';
+import { actionFailure } from '@/components/ConfirmDialog';
 import Link from 'next/link';
 import { useCallback, useId, useMemo, useRef, useState } from 'react';
 import { img } from '@/lib/api';
@@ -253,7 +254,7 @@ export function ContinueCard({ book, eager = false, note, keepReading = false }:
         await api(`/api/keep-reading/${encodeURIComponent(book.seriesId)}`, { method: 'PUT', json: { hidden: true } });
         toast(tr('Removed from Keep reading. Reading it again brings it back.'), 'success');
         qc.invalidateQueries({ queryKey: ['home'] });
-      } catch { toast(tr('Could not do that'), 'error'); }
+      } catch (error) { toast(actionFailure(error, tr('Could not remove this series from Keep Reading.')), 'error'); }
     },
   }], { label: book.seriesTitle });
   const pct = progressOf(book);

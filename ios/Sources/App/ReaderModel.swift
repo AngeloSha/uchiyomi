@@ -244,7 +244,7 @@ final class ReaderModel: ObservableObject {
                         await self.recover()
                         if self.error == nil { self.status = "The update couldn’t start. Your previous version has been restored." }
                     } else {
-                        self.error = "The app couldn’t finish starting. Check your connection and try again."
+                        self.error = "The reader took too long to start. Tap Try again to restart it."
                     }
                 }
             }

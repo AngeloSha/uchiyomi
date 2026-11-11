@@ -1,4 +1,5 @@
 'use client';
+import { actionFailure } from '@/components/ConfirmDialog';
 import { publicServerURL } from '@/lib/native';
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -71,7 +72,7 @@ export function useSeriesMenu(series: Series) {
         try {
           await api(`/api/admin/series/${encodeURIComponent(series.id)}/check`, { method: 'POST', json: {} });
           toast(tr('Checking for new chapters…'), 'info', { busy: true });
-        } catch { toast(tr('Could not do that'), 'error'); }
+        } catch (error) { toast(actionFailure(error, tr('Could not check this series for new chapters.')), 'error'); }
       },
     }] : []),
     ...(isAdmin ? [{ label: tr('Move library'), disabled: offline, onSelect: () => setMoving(true) }] : []),

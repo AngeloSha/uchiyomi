@@ -24,7 +24,7 @@ import {
 } from '@/lib/archive';
 import { kickDownloads } from '@/lib/useServerDownloads';
 import { useToast } from '@/components/Toast';
-import { ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
+import { ConfirmDialog, actionFailure, msgOf } from '@/components/ConfirmDialog';
 import { Img, OnBody, Sheet } from '@/components/ui';
 import { CoverProgress, ProgressRing } from '@/components/ProgressRing';
 import { IcHourglass } from '@/components/icons';
@@ -92,7 +92,7 @@ export function useArchiveEnqueue() {
         results.push(...r.results);
       }
     } catch (e) {
-      toast(msgOf(e, tr('Could not do that')), 'error');
+      toast(actionFailure(e, tr('Could not queue the selected series for archiving.')), 'error');
       return null;
     } finally {
       kickTwice(qc);
@@ -291,7 +291,7 @@ export function ArchiveQueueNote({ view, admin }: { view: ArchiveView; admin: bo
   const flip = async () => {
     setBusy(true);
     try { await api('/api/admin/settings', { method: 'PATCH', json: { archivePaused: !view.paused } }); }
-    catch (e) { toast(msgOf(e, tr('Could not do that')), 'error'); }
+    catch (e) { toast(actionFailure(e, view.paused ? tr('Could not resume the archive queue.') : tr('Could not pause the archive queue.')), 'error'); }
     kickTwice(qc);
     void qc.invalidateQueries({ queryKey: ['admin-settings'] });
     setBusy(false);

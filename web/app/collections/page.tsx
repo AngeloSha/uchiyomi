@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
-import { ConfirmDialog, Modal } from '@/components/ConfirmDialog';
+import { ConfirmDialog, Modal, listActionFailure } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/Toast';
 import { useAuth } from '@/lib/auth';
 import { EmptyState } from '@/components/EmptyState';
@@ -97,7 +97,7 @@ export default function CollectionsPage() {
       await api(`/api/collections/${c.id}`, { method: 'DELETE' });
       toast(tr('Deleted'), 'success');
       invalidateLists(qc);
-    } catch { toast(tr('Failed'), 'error'); }
+    } catch (error) { toast(listActionFailure(error, tr('Could not delete this list.')), 'error'); }
   };
 
   /**

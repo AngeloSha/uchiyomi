@@ -6,7 +6,7 @@ import { api } from '@/lib/api';
 import { downloadCancelRefusal } from '@/lib/libraryRefusals';
 import { useAuth } from '@/lib/auth';
 import { useToast } from '@/components/Toast';
-import { msgOf } from '@/components/ConfirmDialog';
+import { actionFailure } from '@/components/ConfirmDialog';
 import { ProgressRing } from '@/components/ProgressRing';
 import { IcHourglass } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
@@ -66,15 +66,15 @@ export function SeriesServerDownloads({ seriesId, folder }: { seriesId: string; 
   }, [landed, seriesId, qc]);
 
   if (!tile && !failed && !archive) return null;
-  const call = async (path: string, method: 'POST' | 'DELETE', failure = (error: unknown) => msgOf(error, tr('Could not do that'))) => {
-    try { await api(path, { method }); } catch (e) { toast(failure(e), 'error'); }
+  const call = async (path: string, method: 'POST' | 'DELETE', failure: string | ((error: unknown) => string)) => {
+    try { await api(path, { method }); } catch (e) { toast(typeof failure === 'string' ? actionFailure(e, failure) : failure(e), 'error'); }
     void kickDownloads(qc);
   };
   const retry = async (numbers: number[]) => {
     try {
       const res = await api<{ folder: string; total: number }>('/api/sources/fetch', { method: 'POST', json: { seriesId, numbers } });
       toast(fetchingToast(res.total), 'info', { busy: true });
-    } catch (e) { toast(msgOf(e, tr('Could not start.')), 'error'); }
+    } catch (e) { toast(actionFailure(e, tr('Could not retry the chapter download.')), 'error'); }
     void kickDownloads(qc);
   };
 
@@ -128,7 +128,7 @@ export function SeriesServerDownloads({ seriesId, folder }: { seriesId: string; 
           <div className="flex flex-wrap items-center gap-2">
             {failed.retry.length > 0 && <button type="button" onClick={() => retry(failed.retry)} className="btn-key">{tr('Try again')}</button>}
             {failed.dismiss && (
-              <button type="button" onClick={() => call(`/api/sources/jobs/${encodeURIComponent(failed.job.folder)}`, 'DELETE')} className="btn-key">
+              <button type="button" onClick={() => call(`/api/sources/jobs/${encodeURIComponent(failed.job.folder)}`, 'DELETE', tr('Could not dismiss this download.'))} className="btn-key">
                 {tr('Dismiss')}
               </button>
             )}

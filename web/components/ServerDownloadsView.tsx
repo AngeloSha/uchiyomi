@@ -6,7 +6,7 @@ import { api, img } from '@/lib/api';
 import { downloadCancelRefusal } from '@/lib/libraryRefusals';
 import { useAuth, canDownload } from '@/lib/auth';
 import { useToast } from '@/components/Toast';
-import { msgOf } from '@/components/ConfirmDialog';
+import { actionFailure, msgOf } from '@/components/ConfirmDialog';
 import { Img } from '@/components/ui';
 import { sourceCover } from '@/components/cards';
 import { CoverProgress, ProgressRing } from '@/components/ProgressRing';
@@ -91,16 +91,16 @@ export function ServerDownloadsView({ focusFolder }: { focusFolder?: string | nu
   });
   const nameOf = (id: string) => sources?.content.find((x) => x.id === id)?.name ?? id;
 
-  const call = async (path: string, method: 'POST' | 'DELETE', failure = (error: unknown) => msgOf(error, tr('Could not do that'))) => {
-    try { await api(path, { method }); } catch (e) { toast(failure(e), 'error'); }
+  const call = async (path: string, method: 'POST' | 'DELETE', failure: string | ((error: unknown) => string)) => {
+    try { await api(path, { method }); } catch (e) { toast(typeof failure === 'string' ? actionFailure(e, failure) : failure(e), 'error'); }
     void kickDownloads(qc);
   };
   const cancelJob = (folder: string) => call(`/api/sources/jobs/${encodeURIComponent(folder)}/cancel`, 'POST', downloadCancelRefusal);
-  const dismissJob = (folder: string) => call(`/api/sources/jobs/${encodeURIComponent(folder)}`, 'DELETE');
+  const dismissJob = (folder: string) => call(`/api/sources/jobs/${encodeURIComponent(folder)}`, 'DELETE', tr('Could not dismiss this download.'));
   // A "Find other sources" run stops through its own route (v0.49.1), at once; Fix everything through its own (v0.55.0),
   // at its next safe point -- never inside a merge, a delete or a renumbering.
   const cancelRun = (kind: string) => {
-    if (kind !== 'autofix') return call(kind === 'find_sources' ? '/api/admin/sources/find/stop' : `/api/sources/runs/${kind}/cancel`, 'POST');
+    if (kind !== 'autofix') return call(kind === 'find_sources' ? '/api/admin/sources/find/stop' : `/api/sources/runs/${kind}/cancel`, 'POST', tr('Could not stop this task.'));
     return (async () => {
       try { await stopAutofix(); } catch (e) { toast(msgOf(e, tr('Could not stop Fix everything')), 'error'); }
       // The card says "Stopping…" from the server's answer; Health's dialog, if it is open elsewhere, too.
@@ -108,14 +108,14 @@ export function ServerDownloadsView({ focusFolder }: { focusFolder?: string | nu
       void qc.invalidateQueries({ queryKey: AUTOFIX_KEY });
     })();
   };
-  const dismissRun = (kind: string) => call(`/api/sources/runs/${kind}`, 'DELETE');
+  const dismissRun = (kind: string) => call(`/api/sources/runs/${kind}`, 'DELETE', tr('Could not dismiss this task.'));
   // Try again is a Fetch of what did not land: the same route, the same checks (the series' visibility, its
   // listing, the 300 cap, a 409 while the series is busy), and a new job that takes the failed card's place.
   const retry = async (seriesId: string, numbers: number[]) => {
     try {
       const res = await api<{ folder: string; total: number }>('/api/sources/fetch', { method: 'POST', json: { seriesId, numbers } });
       toast(fetchingToast(res.total), 'info', { busy: true });
-    } catch (e) { toast(msgOf(e, tr('Could not start.')), 'error'); }
+    } catch (e) { toast(actionFailure(e, tr('Could not retry the chapter download.')), 'error'); }
     void kickDownloads(qc);
   };
 
