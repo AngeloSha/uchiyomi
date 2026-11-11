@@ -15,6 +15,7 @@ import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from '@/components/Toast';
 import { Modal, ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { MoveToLibrary } from '@/components/MoveToLibrary';
+import { libraryMoveRefusal } from '@/lib/libraryRefusals';
 import { useAuth, canDownload, canUploadManually } from '@/lib/auth';
 import { AdultToggle, useAdultFilterConfigured, useAdultShown, useLibraries } from '@/components/AdultToggle';
 import { LibraryFilters, NO_SOURCE, READ_STATES, STATUSES, useLibrarySources } from '@/components/LibraryFilters';
@@ -315,7 +316,7 @@ function LibraryInner() {
     qc.invalidateQueries({ queryKey: ['home'] });
   };
 
-  const bulk = async (path: string, extra: Record<string, unknown>) => {
+  const bulk = async (path: string, extra: Record<string, unknown>, failure = (_error: unknown) => tr('Could not apply that')) => {
     setActing(true);
     try {
       const r = await api<{ applied: number; skipped: { id: string }[] }>(path, {
@@ -329,7 +330,7 @@ function LibraryInner() {
         : tr('{n} series are no longer in the library', { n: r.skipped.length });
       toast(r.skipped.length ? `${updated} · ${gone}` : updated, 'success');
       settle();
-    } catch { toast(tr('Could not apply that'), 'error'); }
+    } catch (error) { toast(failure(error), 'error'); }
     setActing(false);
   };
 
@@ -938,7 +939,7 @@ function LibraryInner() {
           onClose={() => setMoving(false)}
           onPick={async (libraryId) => {
             setMoving(false);
-            await bulk('/api/admin/series/library', { libraryId });
+            await bulk('/api/admin/series/library', { libraryId }, (error) => libraryMoveRefusal(error, picked.size));
           }}
         />
       )}

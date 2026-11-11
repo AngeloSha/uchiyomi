@@ -1,6 +1,7 @@
 'use client';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { requestFailure } from '@/lib/libraryRefusals';
 import { t as tr } from '@/lib/i18n';
 import { Modal } from '@/components/ConfirmDialog';
 import { LibraryFolders } from '@/components/LibraryFolders';
@@ -16,12 +17,13 @@ import { foldersOf } from '@/lib/libraryFolders';
 export function MoveToLibrary({ n, busy, onClose, onPick }: {
   n: number; busy: boolean; onClose: () => void; onPick: (libraryId: string | null) => void;
 }) {
-  const { data } = useQuery({
+  const { data, error, isError } = useQuery({
     queryKey: ['admin-libraries'],
     queryFn: () => api<{ content: { id: string; name: string; path: string; paths?: string[]; age_rating: number | null }[] }>('/api/admin/libraries'),
   });
   return (
     <Modal title={n === 1 ? tr('File this series') : tr('File {n} series', { n })} onClose={onClose}>
+      {isError && <p role="alert" className="mb-2 text-sm text-rose-300">{requestFailure(error) ?? tr('Could not load the destination libraries. Close this dialog and try again.')}</p>}
       <div className="space-y-1">
         {(data?.content ?? []).map((l) => (
           <button key={l.id} disabled={busy} onClick={() => onPick(l.id)}

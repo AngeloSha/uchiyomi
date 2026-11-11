@@ -2,6 +2,7 @@
 // already on the admin's own disk. One file per request, the file itself as the body, one after another.
 import { api, ApiError, getCurrentUser } from './api';
 import { t as tr } from './i18n';
+import { refusalBody, requestFailure } from './libraryRefusals';
 
 /** What the scanner reads as a chapter, for the file picker. The server checks it again, and the bytes too. */
 export const CHAPTER_ACCEPT = '.cbz,.cbr,.zip,.rar,.pdf,.epub';
@@ -68,15 +69,9 @@ export async function uploadImageChapter(to: UploadTarget, name: string, pages: 
 
 /** A refusal in the reader's words: the route answers with a code and an English message. */
 export function uploadRefusal(e: unknown, name: string): string {
-  let code: string | null = null;
-  let message: string | null = null;
-  let page: string | null = null;
-  try {
-    const b = e instanceof ApiError ? JSON.parse(e.body) : null;
-    code = b?.error ?? null;
-    message = b?.message ?? null;
-    page = typeof b?.page === 'string' ? b.page : null;
-  } catch { /* not JSON: the plain failure */ }
+  const body = refusalBody(e);
+  const code = body?.error;
+  const page = typeof body?.page === 'string' ? body.page : null;
   if (code === 'taken') return tr('A series by that title is already here. Pick another title.');
   if (code === 'exists') return tr('{name} is already in this series.', { name });
   if (code === 'bad_type') return tr('{name} is not a .cbz, .cbr, .zip, .rar, .pdf or .epub file.', { name });
@@ -85,16 +80,24 @@ export function uploadRefusal(e: unknown, name: string): string {
   if (code === 'image_type') return tr('Choose JPG, PNG, WebP, GIF or AVIF pages.');
   if (code === 'invalid_page') return page ? tr('Could not read image “{page}”. No chapter was stored.', {page}) : tr('One of the images could not be read. No chapter was stored.');
   if (code === 'too_many_pages') return tr('A chapter can contain up to 2,000 images.');
+  if (code === 'too_large' && page) return tr('Image “{page}” exceeds the upload size limit.', { page });
   if (code === 'too_large' || (e instanceof ApiError && e.status === 413)) return tr('{name} is too large to upload.', { name });
   if (code === 'disk_full') return tr('The download folder is out of space.');
   // The route's other refusals carry English sentences (#375): said here in the reader's words instead.
   // 409 busy: a merge or a repair holds the series; 429: two uploads are going already.
   if (code === 'busy' && e instanceof ApiError && e.status === 409) return tr('Another task is changing this series. Try again in a moment.');
   if (code === 'busy' || (e instanceof ApiError && e.status === 429)) return tr('Two uploads are already running. Try again when one finishes.');
-  if (code === 'forbidden' || (e instanceof ApiError && e.status === 403)) return tr('Your account is not allowed to upload series.');
-  if (code) return tr('Could not upload {name}', { name });
-  if (message) return message;
-  return tr('Could not upload {name}', { name });
+  if (code === 'bad_path') return tr('{name} could not be stored at this destination. Check the file name and library folder.', { name });
+  if (code === 'not_found') return tr('The series is no longer available. Refresh the page and choose a destination again.');
+  if (code === 'private_backend_unsupported') return tr('This server does not support private uploads. Choose a shared library to upload a shared copy.');
+  if (code === 'privacy_destination_conflict') return tr('A series with different visibility already uses this folder. Choose another title or destination.');
+  if (code === 'bad_request') return tr('The upload request is invalid. Check the destination and files you selected.');
+  if (code === 'unsupported_media_type' || (e instanceof ApiError && e.status === 415)) return tr('The server did not accept the upload format for {name}.', { name });
+  if (code === 'forbidden' || (e instanceof ApiError && e.status === 403)) return tr('Your account does not have permission to upload to this destination.');
+  const reason = requestFailure(e);
+  if (reason) return tr('Could not upload {name}. {reason}', { name, reason });
+  if (e instanceof ApiError && e.status >= 500) return tr('The server could not complete the upload of {name}. Check the series before retrying.', { name });
+  return tr('Could not upload {name}. Check the destination and try again.', { name });
 }
 
 /** `failed` says why, in the reader's words; `failedFiles` names them, so the list keeps exactly those for another try. */

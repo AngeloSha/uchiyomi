@@ -19,6 +19,7 @@ import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { MoveToLibrary } from '@/components/MoveToLibrary';
+import { libraryMoveRefusal } from '@/lib/libraryRefusals';
 import { SeriesPrivacyControls } from '@/components/SeriesPrivacyControls';
 import { useAuth, canDownload } from '@/lib/auth';
 import { IcChevronLeft, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcHourglass, IcGrid, IcRows, IcComment } from '@/components/icons';
@@ -2270,7 +2271,7 @@ function SeriesInner() {
             await api(`/api/admin/series/${encodeURIComponent(id)}/library`, { json: { libraryId } });
             toast(tr('1 series updated'), 'success');
             for (const k of [['series', id], ['series-books', id], ['library'], ['home'], ['collection']]) qc.invalidateQueries({ queryKey: k });
-          } catch (e) { toast(msgOf(e, tr('Could not do that')), 'error'); }
+          } catch (e) { toast(libraryMoveRefusal(e, 1), 'error'); }
           setMoveBusy(false);
           setMoving(false);
         }} />
