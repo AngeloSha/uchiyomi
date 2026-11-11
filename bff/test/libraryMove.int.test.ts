@@ -260,3 +260,35 @@ test('scans do not register empty move parents as ghost series',{skip},async t=>
   }
   t.diagnostic(`${new Set(registered.map((entry:any)=>entry.id)).size} additional scanner row(s), all backed by real cover-bearing chapters`);
 });
+
+test('admin library counts and folder suggestions use the actor visibility for private, deleted and merged rows',{skip},async()=>{
+  const listing=async()=>{
+    const result=await app.inject({url:'/api/admin/libraries',headers:headers()});assert.equal(result.statusCode,200,result.body);
+    return {body:result.body,...result.json()};
+  };
+  const baseline=await listing(),ownBefore=baseline.content.find((entry:any)=>entry.id===privateA),sharedBefore=baseline.content.find((entry:any)=>entry.id===shared);
+  assert.ok(ownBefore);assert.ok(sharedBefore);
+  const live=await fixture('Count live',{owner:a,metadataOnly:true});
+  const deleted=await fixture('Count deleted',{owner:a,metadataOnly:true});
+  const merged=await fixture('Count merged',{owner:a,metadataOnly:true});
+  await q('UPDATE lib_series SET library_pinned=true WHERE id=ANY($1::text[])',[[live.id,deleted.id,merged.id]]);
+  await q('UPDATE lib_series SET deleted_at=now() WHERE id=$1',[deleted.id]);
+  await q('UPDATE lib_series SET merged_into=$2 WHERE id=$1',[merged.id,live.id]);
+  const publicSeries=await fixture('Visible folder suggestion',{metadataOnly:true}),prefix=`PublicSuggestion-${randomUUID()}`;
+  await q("UPDATE lib_series SET folder=$2,source='Visible public source',library_id=$3 WHERE id=$1",[publicSeries.id,`${prefix}/Group/Title`,shared]);
+  const foreign=await fixture('Foreign count secret',{owner:b,metadataOnly:true});
+  // A corrupt misfiled private row is still private. Neither counts, folder
+  // suggestions nor source-looking labels may turn the library_id into access.
+  await q('UPDATE lib_series SET library_id=$2,source=$3 WHERE id=$1',[foreign.id,shared,prefix]);
+  const foreignLibraryName=`Foreign private library ${randomUUID()}`;
+  await q('UPDATE libraries SET name=$2 WHERE id=$1',[privateB,foreignLibraryName]);
+  const result=await listing(),own=result.content.find((entry:any)=>entry.id===privateA),publicLibrary=result.content.find((entry:any)=>entry.id===shared);
+  assert.equal(own.n,ownBefore.n+1,'only live own-private series count');
+  assert.equal(own.pinned,ownBefore.pinned+1,'deleted/merged own-private pins do not count');
+  assert.equal(publicLibrary.n,sharedBefore.n+1,'foreign private rows do not inflate a shared library');
+  assert.ok(!result.content.some((entry:any)=>entry.id===privateB));
+  assert.ok(!result.body.includes(foreignLibraryName));assert.ok(!result.body.includes(`_private/${b}`));
+  assert.ok(result.candidates.every((entry:any)=>entry.path!=='_private'&&!entry.path.startsWith('_private/')),'reserved private parents cannot be library suggestions');
+  const suggestion=result.candidates.find((entry:any)=>entry.path===prefix);assert.ok(suggestion,'visible shared parent remains selectable');
+  assert.equal(suggestion.series,1);assert.equal(suggestion.looksLikeSource,false,'a hidden private source name does not label a public folder');
+});

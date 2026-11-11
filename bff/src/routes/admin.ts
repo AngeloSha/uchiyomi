@@ -119,7 +119,7 @@ import { prepareCleanup, cleanupPreview, cleanupConfirmation, purgeLeftovers, pu
 import { mainUses, retireSource } from '../lib/retireSource';
 import { sourcesOverview } from '../lib/sourcesOverview';
 import { titlesFromBackup, entriesFromBackup, type BackupEntry } from '../lib/tachibk';
-import { resolveAddScope, scopeSql, samePrivacyDomainSql, ContentScopeError, deleteAccountPreservingPrivate, type AddScope } from '../lib/contentScope';
+import { resolveAddScope, scopeSql, samePrivacyDomainSql, reservedPrivateFolder, ContentScopeError, deleteAccountPreservingPrivate, type AddScope } from '../lib/contentScope';
 import { normalizeImportEntries, trackerLinksOf, importSkipKeys, type ImportEntry } from '../lib/importMetadata';
 import { importMatchNeedsReview } from '../lib/importMatchReview';
 import { linkSeries, seedTrackerFloor, rememberTrackerPrivacy, TOKEN_EXPIRED, TOKEN_REJECTED, TOKEN_UNREADABLE } from '../lib/trackers';
@@ -3204,14 +3204,20 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/admin/libraries', async (req) => {
+    const viewer = await viewCtxFor(userIdOf(req),roleOf(req));
+    const counts = new Params();
+    const countable = visible('s',viewer,counts);
+    const owner = counts.add(userIdOf(req));
+    const candidatesParams = new Params();
+    const candidateVisible = visible('s',viewer,candidatesParams);
     const rows = await q<{ id: string; name: string; path: string; paths: string[]; age_rating: number | null; anilist_lookup: boolean; reader_prefs: unknown; managed_private: boolean; owner_user_id: string | null; n: number; pinned: number; members: string[] }>(
       // `paths`: every folder it holds (v0.55.1, #148), the first -- `path`, all a v0.55.0 reads -- first, then by name.
       `SELECT l.id, l.name, l.path, l.age_rating, l.anilist_lookup, l.reader_prefs, l.managed_private, l.owner_user_id,
               (SELECT coalesce(array_agg(lp.path ORDER BY lp.path <> l.path, lp.path), '{}') FROM library_paths lp
                 WHERE lp.library_id = l.id) AS paths,
-              (SELECT count(*)::int FROM lib_series s WHERE s.library_id = l.id AND (${visibleToAll('s')} OR (s.is_private AND s.owner_user_id=$1::uuid))) AS n,
+              (SELECT count(*)::int FROM lib_series s WHERE s.library_id = l.id AND ${countable}) AS n,
               (SELECT count(*)::int FROM lib_series s WHERE s.library_id = l.id AND s.library_pinned
-                 AND (${visibleToAll('s')} OR (s.is_private AND s.owner_user_id=$1::uuid))) AS pinned,
+                 AND ${countable}) AS pinned,
               -- Who can open it. A member with NO grant rows sees every library, so they count as allowed
               -- here even though nothing links them to this row -- which is what the UI has to show, or
               -- "nobody can see this" would be wrong for a brand-new install.
@@ -3220,23 +3226,23 @@ export default async function adminRoutes(app: FastifyInstance) {
                   AND (NOT EXISTS (SELECT 1 FROM user_libraries ul WHERE ul.user_id = u.id)
                        OR EXISTS (SELECT 1 FROM user_libraries ul WHERE ul.user_id = u.id AND ul.library_id = l.id))
               ) AS members
-         FROM libraries l WHERE NOT l.managed_private OR l.owner_user_id=$1::uuid ORDER BY l.sort_order, l.name`, [userIdOf(req)],
+         FROM libraries l WHERE NOT l.managed_private OR l.owner_user_id=${owner}::uuid ORDER BY l.sort_order, l.name`, counts.values,
     );
     // Candidate subdirectories: folders that hold series but are not yet a library. Annotated where the name
     // matches a known source, because that is the case an admin should NOT usually promote.
-    const sources = new Set((await q<{ source: string }>('SELECT DISTINCT source FROM lib_series')).map((r) => r.source));
+    const sources = new Set((await q<{ source: string }>(`SELECT DISTINCT source FROM lib_series s WHERE ${candidateVisible}`,candidatesParams.values)).map((r) => r.source));
     const taken = new Set(rows.flatMap((r) => r.paths));
     // EVERY ancestor of every series folder, not just the first segment. The top level of a real library
     // root holds source names written by the downloader -- which this list then flags as such -- so offering
     // only that level meant the one folder an admin actually wanted was unreachable.
     const seen = new Map<string, number>();
-    for (const r of await q<{ folder: string }>(`SELECT folder FROM lib_series s WHERE ${visibleToAll('s')}`)) {
+    for (const r of await q<{ folder: string }>(`SELECT folder FROM lib_series s WHERE ${candidateVisible}`,candidatesParams.values)) {
       const parts = r.folder.split('/');
       // Stop before the last segment: that is the series folder itself, and a library of exactly one series
       // is not a library.
       for (let i = 1; i < parts.length; i++) {
         const prefix = parts.slice(0, i).join('/');
-        if (!prefix || taken.has(prefix)) continue;
+        if (!prefix || reservedPrivateFolder(prefix) || taken.has(prefix)) continue;
         seen.set(prefix, (seen.get(prefix) ?? 0) + 1);
       }
     }

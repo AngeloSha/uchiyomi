@@ -1,5 +1,6 @@
 import { sameContentScope, privateFolderOwner, reservedPrivateFolder } from './contentScope';
 import { lockLibrarySaves } from './libraryFolders';
+import { visibleToAll } from './visibility';
 // Destructive library operations: hide a series, restore it, and merge one into another.
 //
 // Deleting HIDES rather than erases. The id survives, so favourites, ratings, notes and -- above all --
@@ -1333,7 +1334,7 @@ export async function renameSeriesFolder(id: string, newFolder: string, visibili
           throw new Error('The destination library changed. Try again.');
         if ((await qq(`SELECT id FROM lib_series s WHERE s.id<>$1 AND (s.folder=$2 OR
           (s.library_id=$3 AND s.source_id=(SELECT source_id FROM lib_series WHERE id=$1)
-            AND s.source_series_id=(SELECT source_series_id FROM lib_series WHERE id=$1) AND s.merged_into IS NULL AND s.deleted_at IS NULL)) LIMIT 1`, [id,dest,visibility.libraryId])).length)
+            AND s.source_series_id=(SELECT source_series_id FROM lib_series WHERE id=$1) AND ${visibleToAll('s')})) LIMIT 1`, [id,dest,visibility.libraryId])).length)
           throw Object.assign(new Error('That library already contains this series or folder.'),{code:'privacy_destination_conflict'});
         await qq(`UPDATE lib_series SET is_private=$2,owner_user_id=COALESCE(owner_user_id,$3::uuid),library_id=$4,library_pinned=true,
           private_published_at=CASE WHEN $2 THEN private_published_at ELSE COALESCE(private_published_at,now()) END WHERE id=$1`,
