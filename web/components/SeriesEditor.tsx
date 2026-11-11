@@ -4,9 +4,9 @@
 // Until v0.53.0 this was SeriesEditModal in app/series/page.tsx, and the owner called it what it was: one narrow
 // column of fifteen fields in no order; three ways of saving side by side -- Library, Language and Auto-update at
 // once, Title to Always show only on a "Save details" key in the middle of the scroll, so an edit was easy to
-// lose, and the art per action; native checkboxes and selects; a text "âœ•"; and the cover and the background at
+// lose, and the art per action; native checkboxes and selects; a text "✕"; and the cover and the background at
 // the very bottom with no picture of either. It speaks the settings kit now (components/settings.tsx), as Profile
-// and Admin â†’ Settings do: every field saves when it is changed or left, through `useAutosave`, and ONE SaveState
+// and Admin → Settings do: every field saves when it is changed or left, through `useAutosave`, and ONE SaveState
 // in the header says how the latest save went (a SaveScope: a tick beside each of twenty fields is the noise the
 // kit was made to remove).
 //
@@ -46,7 +46,7 @@ import { LinkRow, Row, SaveScope, SaveState, Segmented, SwitchRow, TextRow, useA
 
 /**
  * Put a path on the clipboard, and say so with the path in the notice (#136): copying is one tap, and the notice is
- * where the path can be read too. Isolated (FSIâ€¦PDI) so a path reads left to right inside an Arabic sentence. Where
+ * where the path can be read too. Isolated (FSI…PDI) so a path reads left to right inside an Arabic sentence. Where
  * the browser has no clipboard (plain http on a LAN) or refuses, the notice says where the file is instead. The
  * series page's chapter menu copies a chapter's file with it too.
  */
@@ -77,11 +77,11 @@ const DIRECTIONS = (['RIGHT_TO_LEFT', 'LEFT_TO_RIGHT', 'WEBTOON', 'VERTICAL'] as
  */
 function autoDirectionLabel(d: Series['detectedDirection']): string {
   const label = DIRECTIONS.find(([v]) => v === d?.direction)?.[1];
-  if (!d || !label) return tr('Automatic â€” not known, reads as a webtoon');
+  if (!d || !label) return tr('Automatic — not known, reads as a webtoon');
   const direction = tr(label);
-  if (d.from === 'comicinfo') return tr('Automatic â€” {direction}, from the chapter files', { direction });
-  if (d.from === 'anilist') return tr('Automatic â€” {direction}, from AniList', { direction });
-  return tr('Automatic â€” {direction}, from the source', { direction });
+  if (d.from === 'comicinfo') return tr('Automatic — {direction}, from the chapter files', { direction });
+  if (d.from === 'anilist') return tr('Automatic — {direction}, from AniList', { direction });
+  return tr('Automatic — {direction}, from the source', { direction });
 }
 
 /**
@@ -89,21 +89,21 @@ function autoDirectionLabel(d: Series['detectedDirection']): string {
  * or a Webtoon genre with nothing better.
  */
 function autoTypeLabel(d: Series['detectedType']): string {
-  if (!d) return tr('Automatic â€” not known');
+  if (!d) return tr('Automatic — not known');
   const type = tr(seriesTypeKey(d.type));
-  if (d.from === 'genre' || d.from === 'webtoon') return tr('Automatic â€” {type}, from the genres', { type });
-  if (d.from === 'anilist') return tr('Automatic â€” {type}, from AniList', { type });
-  return tr('Automatic â€” {type}, from the source', { type });
+  if (d.from === 'genre' || d.from === 'webtoon') return tr('Automatic — {type}, from the genres', { type });
+  if (d.from === 'anilist') return tr('Automatic — {type}, from AniList', { type });
+  return tr('Automatic — {type}, from the source', { type });
 }
 
 /** The Automatic choice itself, short enough for a segment: what it reads as now, a webtoon when nothing has said. */
 function autoDirectionChoice(d: Series['detectedDirection']): string {
   const label = DIRECTIONS.find(([v]) => v === d?.direction)?.[1] ?? DIRECTION_LABELS[2];
-  return tr('Automatic Â· {direction}', { direction: tr(label) });
+  return tr('Automatic · {direction}', { direction: tr(label) });
 }
 
 // The four the scanner itself writes from ComicInfo's PublishingStatus. A suggestion list rather than a hard enum:
-// a file can carry anything, and rejecting it would reject Uchiyomi's own data -- "Something elseâ€¦" keeps it.
+// a file can carry anything, and rejecting it would reject Uchiyomi's own data -- "Something else…" keeps it.
 const STATUSES = ['ONGOING', 'COMPLETED', 'HIATUS', 'CANCELLED'] as const;
 const STATUS_LABELS = keys('Ongoing', 'Completed', 'Hiatus', 'Cancelled');
 const OTHER_STATUS = '__other';
@@ -237,7 +237,7 @@ export function SeriesEditor({ id, series, tab: opening = 'details', onClose, on
             <div className="min-w-0 flex-1">
               <h2 id={`${uid}-title`} className="font-display text-lg font-semibold leading-tight text-fog-50 md:text-xl">{tr('Edit details')}</h2>
               <p className="mt-0.5 line-clamp-2 break-words text-xs text-fog-500">
-                <bdi dir="auto" className="text-fog-400">{shownTitle}</bdi> Â· {tr('Changes apply for everyone')}
+                <bdi dir="auto" className="text-fog-400">{shownTitle}</bdi> · {tr('Changes apply for everyone')}
               </p>
             </div>
             {/* The latest save's state, for the whole dialog. A long refusal is cut here (the kit's SaveState carries
@@ -360,8 +360,8 @@ function TextAreaRow({ id, label, value, maxLength, onSave }: { id: string; labe
 }
 
 /**
- * Status: "From the files", the four common ones, and Something elseâ€¦ for anything a file or a source page said.
- * The whole width of the pane, since six choices wrapped beside the author at 880 px. Picking Something elseâ€¦ only
+ * Status: "From the files", the four common ones, and Something else… for anything a file or a source page said.
+ * The whole width of the pane, since six choices wrapped beside the author at 880 px. Picking Something else… only
  * opens its field; the save is the field's, on leaving it or Enter, and a field left empty folds away again onto
  * what is saved.
  */
@@ -391,7 +391,7 @@ function StatusRow({ value, onSave }: { value: string; onSave: (v: string) => Pr
   const options = [
     { value: '', label: tr('From the files') },
     ...STATUSES.map((v, i) => ({ value: v as string, label: tr(STATUS_LABELS[i]) })),
-    { value: OTHER_STATUS, label: tr('Something elseâ€¦') },
+    { value: OTHER_STATUS, label: tr('Something else…') },
   ];
   return (
     <Row label={tr('Status')} stacked>
@@ -425,7 +425,7 @@ function GenresRow({ genres, onSave }: { genres: string[]; onSave: (g: string[])
   const fid = useId();
   return (
     <Row label={tr('Genres')} htmlFor={fid} stacked
-      help={tr('Genres drive the Libraryâ€™s genre filters and the recommendation rails. Clearing them all means this series genuinely has none.')}>
+      help={tr('Genres drive the Library’s genre filters and the recommendation rails. Clearing them all means this series genuinely has none.')}>
       <GenreTagInput id={fid} genres={genres} onChange={(next) => { void run(() => onSave(next)); }} />
     </Row>
   );
@@ -440,12 +440,12 @@ function ReadingPane({ id, series, meta, save, onSaved }: {
     <>
       <ChoiceRow narrow label={tr('Reading direction')} value={meta.readingDirection}
         help={<>
-          {tr('What â€œSeries defaultâ€ in the reader follows. Automatic takes it from the chapter files, then the source, then AniList.')}
+          {tr('What “Series default” in the reader follows. Automatic takes it from the chapter files, then the source, then AniList.')}
           <span data-auto-direction className="mt-0.5 block text-fog-400">{autoDirectionLabel(series.detectedDirection)}</span>
         </>}
         options={[{ value: '', label: autoDirectionChoice(series.detectedDirection) }, ...DIRECTIONS.map(([v, label]) => ({ value: v as string, label: tr(label) }))]}
         onPick={(readingDirection) => save({ readingDirection })} />
-      {/* What kind of comic it is: the notice-chapter switches in Admin â†’ Settings go by it (bff lib/noticeChapters.ts). */}
+      {/* What kind of comic it is: the notice-chapter switches in Admin → Settings go by it (bff lib/noticeChapters.ts). */}
       <ChoiceRow narrow label={tr('Series type')} value={meta.seriesType}
         help={<>
           {tr('What the notice-chapter switches in Settings go by. Automatic takes it from the genres, then the source, then AniList.')}
@@ -461,7 +461,7 @@ function ReadingPane({ id, series, meta, save, onSaved }: {
       {/* "Always show": kept on the shelf while "Show 18+" is off, whatever makes it 18+ (its genres, its rating, its
           library). Surfacing only: who may open the series is still the age rating above. */}
       <SwitchRow label={tr('Always show')} on={meta.adultExempt}
-        help={tr('Keep this series on the shelf while â€œShow 18+â€ is off, even if it or one of its genres is 18+.')}
+        help={tr('Keep this series on the shelf while “Show 18+” is off, even if it or one of its genres is 18+.')}
         onChange={(adultExempt) => save({ adultExempt })} />
     </>
   );
@@ -565,7 +565,7 @@ function UpdatesPane({ id, series, onSaved, onOpenSources }: { id: string; serie
       <div className="flex flex-wrap items-start gap-2 py-3">
         <button type="button" onClick={checkNow} disabled={checking} data-check-now className="btn-key">
           {checking && <ProgressRing progress="spin" size={14} />}
-          {checking ? tr('Checkingâ€¦') : tr('Check for new chapters now')}
+          {checking ? tr('Checking…') : tr('Check for new chapters now')}
         </button>
         {/* Mark caught up (v0.52.0): only for a series with a source to fetch from. Its key sits beside Check now;
             the question and the answer take the row under them. */}
@@ -594,7 +594,7 @@ function UpdatesPane({ id, series, onSaved, onOpenSources }: { id: string; serie
           </div>
         )}
       </div>
-      {/* The sources (with their Ã— to stop following one) and the Prefer / Block / patience controls live in the
+      {/* The sources (with their × to stop following one) and the Prefer / Block / patience controls live in the
           Sources & translations sheet, beside the statistics they are decided from. A way there where the page can
           open it, else one line saying where they went, so an admin who learned them here is not left to conclude
           they are gone. */}
@@ -653,7 +653,7 @@ function LibraryRow({ id, series, onSaved }: { id: string; series: Series; onSav
     <Row label={tr('Library')} htmlFor={sid} stacked
       help={lib ? tr('Filed here by hand. Rescans and new libraries will leave it alone.') : tr('Whichever library covers this folder, most specific first.')}>
       <select id={sid} value={lib} onChange={(e) => void pick(e.target.value)} className="field">
-        <option value="">{tr('Automatic â€” follow the folder')}</option>
+        <option value="">{tr('Automatic — follow the folder')}</option>
         {(libs?.content ?? []).map((l) => (
           <option key={l.id} value={l.id}>{l.name}{l.age_rating != null ? ` (${l.age_rating}+)` : ''}</option>
         ))}
@@ -705,8 +705,8 @@ const IcMore = () => (
 export const FIRST_PAGE_COVER = 'first_page';
 
 /**
- * What the cover's â‹¯ offers (v0.55.7): Use the first page, unless it already is; Reset to automatic, only over an
- * admin's choice. Every state leaves one of the two to press, so the â‹¯ is always there: a menu of nothing but greyed
+ * What the cover's ⋯ offers (v0.55.7): Use the first page, unless it already is; Reset to automatic, only over an
+ * admin's choice. Every state leaves one of the two to press, so the ⋯ is always there: a menu of nothing but greyed
  * items takes no focus, and the Escape meant to close it closed the dialog under it. Reintroduce Use the first page as
  * always on: "a cover that is the first page offers it again" in seriesEditor.test.ts fails.
  */
@@ -793,7 +793,7 @@ function ArtPanel({ id, series, onSaved, onNewBanner }: { id: string; series: Se
   const choose = (kind: ArtKind) => { fileFor.current = kind; file.current?.click(); };
 
   // Reset is offered only where there is something of the admin's to take back, and Use the first page only where the
-  // cover is not that already (coverChoices): one of them always, so the â‹¯ is always there.
+  // cover is not that already (coverChoices): one of them always, so the ⋯ is always there.
   const can = coverChoices(ov?.cover);
   const coverMenu = useContextMenu(() => [
     { label: tr('Use the first page'), onSelect: () => void firstPage(), disabled: !can.firstPage, hook: 'cover-first-page' },
@@ -827,7 +827,7 @@ function ArtPanel({ id, series, onSaved, onNewBanner }: { id: string; series: Se
           <p data-art-cover-note className="mt-2 text-[11px] leading-relaxed text-fog-500">
             {ov?.cover === FIRST_PAGE_COVER
               ? tr('The first page, by your choice: nothing found online replaces it.')
-              : tr('Automatic: the sourceâ€™s cover, or AniListâ€™s when its entry has the same name, else the first page.')}
+              : tr('Automatic: the source’s cover, or AniList’s when its entry has the same name, else the first page.')}
           </p>
         )}
       </div>
@@ -877,7 +877,7 @@ function ArtPanel({ id, series, onSaved, onNewBanner }: { id: string; series: Se
         <p className="mt-2 text-[11px] leading-relaxed text-fog-500">{tr('Transparent PNG or WebP works best. Original-language logos keep a readable title beneath them.')}</p>
         <p data-title-art-status aria-live="polite" className="mt-1 text-[11px] leading-relaxed text-fog-500">
           {series.titleArt?.mode === 'text' ? tr('Styled text, by your choice. No automatic logo lookup.')
-            : series.titleArt?.status === 'pending' ? tr('Looking for original title artworkâ€¦')
+            : series.titleArt?.status === 'pending' ? tr('Looking for original title artwork…')
             : series.titleArt?.mode === 'custom' ? tr('Your title logo. Automatic lookups will not replace it.')
             : series.titleArt?.status === 'missing' ? tr('No matching logo found. The styled title is shown.')
             : series.titleArt?.status === 'error' ? tr('The artwork source is unavailable. Cached artwork or the styled title stays visible.')
@@ -925,7 +925,7 @@ function ArtPreview({ kind, busy, onFile, className, children }: { kind: ArtKind
       {children}
       {busy && (
         <div className="absolute inset-0 grid place-items-center bg-ink-950/65">
-          <ProgressRing progress="spin" size="cover" onCover label={tr('Workingâ€¦')} />
+          <ProgressRing progress="spin" size="cover" onCover label={tr('Working…')} />
         </div>
       )}
     </div>
@@ -942,7 +942,7 @@ function LinkField({ kind, busy, onSet, onCancel }: { kind: ArtKind; busy: boole
     <div data-art-url={kind} className="mt-2 flex items-center gap-1.5">
       <label htmlFor={fid} className="sr-only">{tr('Image link')}</label>
       <input ref={field} id={fid} type="url" inputMode="url" dir="ltr" autoCapitalize="none" autoComplete="off" spellCheck={false}
-        value={url} placeholder="https://â€¦" className="field min-w-0 flex-1 py-1.5 text-xs"
+        value={url} placeholder="https://…" className="field min-w-0 flex-1 py-1.5 text-xs"
         onChange={(e) => setUrl(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') { e.preventDefault(); if (url.trim() && !busy) onSet(url); }
@@ -956,7 +956,7 @@ function LinkField({ kind, busy, onSet, onCancel }: { kind: ArtKind; busy: boole
 /**
  * The hidden file input both Upload keys open, for whichever asked last.
  *
- * âš ï¸ LAST IN THE FILE, and kept last: several of web/test's source scans strip block comments with a regex, and the
+ * ⚠️ LAST IN THE FILE, and kept last: several of web/test's source scans strip block comments with a regex, and the
  * slash-star inside the accept value below opens one for them that runs to the end of the next block comment --
  * everything between would vanish from the capsule and Lenis scans. With nothing after it, nothing vanishes.
  */

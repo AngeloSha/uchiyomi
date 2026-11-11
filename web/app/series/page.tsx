@@ -85,8 +85,8 @@ import { SeriesEditor, copyPath, type EditTab } from '@/components/SeriesEditor'
 import { RelatedRail } from '@/components/RelatedRail';
 import { safeColor } from '@/lib/safeColor';
 
-/** "Marking 3 chapters readâ€¦", counted: the busy half of Mark read's one card. */
-const markingText = (n: number) => (n === 1 ? tr('Marking 1 chapter readâ€¦') : tr('Marking {n} chapters readâ€¦', { n }));
+/** "Marking 3 chapters read…", counted: the busy half of Mark read's one card. */
+const markingText = (n: number) => (n === 1 ? tr('Marking 1 chapter read…') : tr('Marking {n} chapters read…', { n }));
 
 // The one field style the page's own small dialogs share (Add to collection, Edit chapter).
 const fld = 'w-full rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2 text-sm text-fog-100 outline-hidden transition focus:border-accent/60';
@@ -107,7 +107,7 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
     qc.setQueryData<{ content: CollectionRow[] }>(queryKey, (old) => ({ content: (old?.content ?? []).map((row) => row.id === c.id
       ? { ...row, contains, item_count: Math.max(0, Number(row.item_count) + (contains ? 1 : -1)) } : row) }));
     for (const key of [['collections'], ['lists-all'], ['collection', c.id], ['home']]) qc.invalidateQueries({ queryKey: key });
-    toast(tr(contains ? 'Added to â€œ{name}â€' : 'Removed from â€œ{name}â€', { name: `\u2068${c.name}\u2069` }), 'success');
+    toast(tr(contains ? 'Added to “{name}”' : 'Removed from “{name}”', { name: `\u2068${c.name}\u2069` }), 'success');
   };
   const saveMembership = async (c: CollectionRow, contains: boolean) => {
     await api(contains ? `/api/collections/${c.id}/items` : `/api/collections/${c.id}/items/${encodeURIComponent(seriesId)}`,
@@ -156,12 +156,12 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
               </span>
             </button>
           ))}
-          {!(data?.content ?? []).length && <p className="py-2 text-center text-xs text-fog-500">{tr('No lists yet â€” create one below.')}</p>}
+          {!(data?.content ?? []).length && <p className="py-2 text-center text-xs text-fog-500">{tr('No lists yet — create one below.')}</p>}
         </div>
       )}
       <div className="mt-3 flex gap-2 border-t border-ink-800 pt-3">
         <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && createAndAdd()}
-          maxLength={120} disabled={saving} aria-label={tr('New listâ€¦')} placeholder={tr('New listâ€¦')} className={`${fld} flex-1`} />
+          maxLength={120} disabled={saving} aria-label={tr('New list…')} placeholder={tr('New list…')} className={`${fld} flex-1`} />
         <button type="button" onClick={() => void createAndAdd()} disabled={!name.trim() || saving} className="btn-accent px-3 text-xs disabled:opacity-50">{tr('Create')}</button>
       </div>
       <div className="mt-3 flex justify-end"><button type="button" className="btn-ghost px-3 py-2 text-sm" onClick={onClose}>{tr('Done')}</button></div>
@@ -217,10 +217,10 @@ function RenameFolderModal({ id, folder, title, onClose, onSaved }: {
   const [currentlyBefore, currentlyAfter] = tr('Currently: {folder}').split('{folder}');
 
   return (
-    <Modal title={tr('Rename the folder for â€œ{title}â€', { title: `\u2068${title}\u2069` })} onClose={onClose}>
+    <Modal title={tr('Rename the folder for “{title}”', { title: `\u2068${title}\u2069` })} onClose={onClose}>
       <div className="space-y-3">
         <p className="text-xs text-fog-500">
-          {tr('This moves the folder on disk. Chapter ids and everyoneâ€™s reading progress stay exactly as they are, so nothing is marked unread and nothing is re-downloaded.')}
+          {tr('This moves the folder on disk. Chapter ids and everyone’s reading progress stay exactly as they are, so nothing is marked unread and nothing is re-downloaded.')}
         </p>
         <label className="block">
           <span className="mb-1 block text-xs text-fog-500">{tr('Folder, relative to your library root')}</span>
@@ -245,7 +245,7 @@ function RenameFolderModal({ id, folder, title, onClose, onSaved }: {
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onClose} className="chip text-xs">{tr('Cancel')}</button>
           <button onClick={save} disabled={busy || !changed} className="btn-accent px-4 py-2 text-sm disabled:opacity-50">
-            {busy ? tr('Renamingâ€¦') : tr('Rename folder')}
+            {busy ? tr('Renaming…') : tr('Rename folder')}
           </button>
         </div>
       </div>
@@ -286,7 +286,7 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
       <input value={title} onChange={(e) => setTitle(e.target.value)} className={fld} />
       {completed && (
         <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] leading-relaxed text-amber-200">
-          {tr('You have finished this chapter. Changing its number changes what gets reported to a connected tracker. Progress never moves backwards on its own: if the new number is lower, the tracker keeps the higher one until an admin imports your list again under Admin â†’ Import (From your tracker).')}
+          {tr('You have finished this chapter. Changing its number changes what gets reported to a connected tracker. Progress never moves backwards on its own: if the new number is lower, the tracker keeps the higher one until an admin imports your list again under Admin → Import (From your tracker).')}
         </p>
       )}
       <div className="mt-4 flex gap-2">
@@ -304,16 +304,16 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
  * which at 390 px was more chrome than chapter. `Deleted from the server` stays a small tag before it: a
  * tombstone is a state, not a caption (and since v0.55.7 its words wrap rather than being cut; see below).
  *
- * âš ï¸ `{n} versions` is TEXT, never a button. This caption sits inside the row's opener, which is itself a
+ * ⚠️ `{n} versions` is TEXT, never a button. This caption sits inside the row's opener, which is itself a
  * <button>, and a button inside a button is invalid DOM that browsers un-nest unpredictably (the v0.33 strip
- * sat OUTSIDE the opener for exactly this reason). The copies open from â‹¯ â†’ Versions on a chapter row, and
+ * sat OUTSIDE the opener for exactly this reason). The copies open from ⋯ → Versions on a chapter row, and
  * from the row tap on a ghost row.
  */
 function RowCaption({ group, via, versions, tone = 'text-fog-500', pruned, lead, missing, talk }: {
   group?: string | null;
   /**
    * v0.87.0: the chapter's talk, while the household has any (lib/comments.ts): its two most used reactions with how many
-   * reacted ("ðŸ˜‚ðŸ”¥ 3"), and how many comments ("ðŸ’¬ 2"). Absent, or a chapter nobody talked about, draws nothing.
+   * reacted ("😂🔥 3"), and how many comments ("💬 2"). Absent, or a chapter nobody talked about, draws nothing.
    */
   talk?: ChapterTalkCount | null;
   via?: string | null;
@@ -322,7 +322,7 @@ function RowCaption({ group, via, versions, tone = 'text-fog-500', pruned, lead,
   /** A tombstone's tag, in its words, whole and short (lib/chapterRows.ts prunedWords); null for a chapter with its file. */
   pruned?: { full: string; short: string } | null;
   /**
-   * A first part before the group: a ghost's reason ("not here yet", "waiting for Asura Scans Â· 2 days left"). `full`
+   * A first part before the group: a ghost's reason ("not here yet", "waiting for Asura Scans · 2 days left"). `full`
    * is the sentence a short reason stands for ("another split" for "another split of a chapter you have"): the title
    * and what a screen reader says, where the short form is what fits beside the group and the source.
    */
@@ -337,7 +337,7 @@ function RowCaption({ group, via, versions, tone = 'text-fog-500', pruned, lead,
   const parts: ReactNode[] = [];
   const short = missing && missing > 0 ? (missing === 1 ? tr('1 page missing') : tr('{n} pages missing', { n: missing })) : null;
   // The same caption as plain text, for `title`: at the owner's desktop width a cell is 287 px and the
-  // caption beside the thumb, the date and the two buttons gets â‰ˆ90, so "Reaper Scans Â· 2 versions" is an
+  // caption beside the thumb, the date and the two buttons gets ≈90, so "Reaper Scans · 2 versions" is an
   // ellipsis there and a hover is how the rest is read.
   const plain: string[] = [];
   if (lead) {
@@ -350,7 +350,7 @@ function RowCaption({ group, via, versions, tone = 'text-fog-500', pruned, lead,
   }
   // The avatar is an atomic inline BESIDE the name, not a flex box AROUND it: Chrome does not put an
   // ellipsis inside an inline-flex it has to cut, so a name wrapped with its avatar was clipped mid-letter
-  // in the 250 px desktop grid cells ("Asura Sc") while a plain-text part ended in "â€¦".
+  // in the 250 px desktop grid cells ("Asura Sc") while a plain-text part ended in "…".
   if (group) { parts.push(<span key="g"><GroupAvatar name={group} size={14} className="me-1 align-text-bottom" />{group}</span>); plain.push(group); }
   if (via) { const t = tr('via {source}', { source: via }); parts.push(<span key="via">{t}</span>); plain.push(t); }
   if (versions && versions >= 2) { const t = tr('{n} versions', { n: versions }); parts.push(<span key="v">{t}</span>); plain.push(t); }
@@ -365,17 +365,17 @@ function RowCaption({ group, via, versions, tone = 'text-fog-500', pruned, lead,
     plain.push(t);
   }
   if (!parts.length && !pruned && !short) return null;
-  const title = [...(pruned ? [pruned.full] : []), ...(short ? [short] : []), ...plain].join(' Â· ');
+  const title = [...(pruned ? [pruned.full] : []), ...(short ? [short] : []), ...plain].join(' · ');
   if (pruned) {
     const caption = parts.map((n, i) => (
       <span key={i}>
-        {i > 0 && <span aria-hidden className="text-ink-600"> Â· </span>}
+        {i > 0 && <span aria-hidden className="text-ink-600"> · </span>}
         {n}
       </span>
     ));
     return (
       // A tombstone's words are read whole, wherever the row is (v0.55.7). As a chip in the one truncating line below,
-      // "File no longer on disk" came out "File no loâ€¦" in the three-column grid at 1280, where a row with a full
+      // "File no longer on disk" came out "File no lo…" in the three-column grid at 1280, where a row with a full
       // date leaves this caption 51-68 px. So the words are a tag of their own: the sentence below lg, a word or two
       // in the grid (prunedWords says why) with the sentence as the title and for a screen reader, and it takes the
       // line's width and wraps inside it when even that does not fit -- squared, as the chapter sheet's tags are, so
@@ -402,12 +402,12 @@ function RowCaption({ group, via, versions, tone = 'text-fog-500', pruned, lead,
     // One block that truncates as a whole (inline children, no flex): a flex row of shrink-0 parts would
     // run under the date at the end of the row instead of ending in an ellipsis.
     <p className={`mt-0.5 truncate text-[11px] ${tone}`} title={title}>
-      {/* Before the group, as a chip and not a caption part: "3 pages missing Â· Asura Scans" would read as
+      {/* Before the group, as a chip and not a caption part: "3 pages missing · Asura Scans" would read as
           the group's fault. The count is the file's -- the reader shows the caption on exactly those pages. */}
       {short && <span className="me-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 text-[10px] leading-4 text-amber-300">{short}</span>}
       {parts.map((n, i) => (
         <span key={i}>
-          {i > 0 && <span aria-hidden className="text-ink-600"> Â· </span>}
+          {i > 0 && <span aria-hidden className="text-ink-600"> · </span>}
           {n}
         </span>
       ))}
@@ -417,12 +417,12 @@ function RowCaption({ group, via, versions, tone = 'text-fog-500', pruned, lead,
 
 /**
  * The date at the end of a row: "3d ago" on the phone, "3d" on the desktop grid. A 287-px cell (three
- * columns at 1280) leaves the caption 71 px beside "3d ago", and a group name with its avatar is â‰ˆ90: the
+ * columns at 1280) leaves the caption 71 px beside "3d ago", and a group name with its avatar is ≈90: the
  * word is what the column can spare there, and the number still reads as a date beside the others. Older
  * chapters show the locale date in both forms, as the column always has. `lg` is where the list becomes
  * the grid. Two spans rather than a media query in JS: the first paint of a static export knows no width.
  *
- * âš ï¸ The short form is lib/format.ts `relativeTimeShort`, not this sentence with " ago" cut off: every
+ * ⚠️ The short form is lib/format.ts `relativeTimeShort`, not this sentence with " ago" cut off: every
  * language but English says the sentence through Intl ("vor 3 Tagen"), where the cut matched nothing and
  * the grid showed the whole of it.
  */
@@ -469,7 +469,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
   /** The opt-in compact chapter list (lib/compactChapters.ts). Off: the row is exactly as it always was. */
   compact?: boolean;
   downloaded: boolean;
-  /** Select mode: the row toggles instead of opening, shows the âœ“ bubble, and hides its own two controls. */
+  /** Select mode: the row toggles instead of opening, shows the ✓ bubble, and hides its own two controls. */
   selectable?: boolean; selected?: boolean; onToggle?: () => void;
   /** Source id -> display name, from the series' followed sources; names the caption on a chapter another source supplied. */
   sourceNames?: Record<string, string>;
@@ -492,16 +492,16 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
   // Page 0 is unread: it is what Mark unread writes (setRead), and Continue reading reads it so too (lib/continueLabel.ts).
   // Counted as "reading", a chapter marked unread showed "page 0/19" in the accent.
   const state = rp?.completed ? 'read' : rp && rp.page >= 1 ? 'reading' : 'unread';
-  // The â‹¯ button's menu, which right-click, a press-and-hold and Shift+F10 on the row now open as well (#100,
+  // The ⋯ button's menu, which right-click, a press-and-hold and Shift+F10 on the row now open as well (#100,
   // components/ContextMenu.tsx). It was a hand-rolled popover that clipped at the screen's edge.
   const menu = useContextMenu(() => [
     // A part-read chapter offers both (#215, klave7): finish it, or put it back to unread, its page with it.
     ...(state !== 'read' ? [{ label: tr('Mark read'), onSelect: () => onMark('read') }] : []),
     ...(state !== 'unread' ? [{ label: tr('Mark unread'), onSelect: () => onMark('unread') }] : []),
     { label: tr('Mark previous as read'), onSelect: () => onMark('previous') },
-    ...(onTalk ? [{ label: talk?.comments ? `${tr('Comments')} Â· ${talk.comments}` : tr('Comments'), divider: true, hook: 'comments', onSelect: onTalk }] : []),
+    ...(onTalk ? [{ label: talk?.comments ? `${tr('Comments')} · ${talk.comments}` : tr('Comments'), divider: true, hook: 'comments', onSelect: onTalk }] : []),
     ...(onVersions ? [{ label: tr('Versions'), divider: true, onSelect: onVersions }] : []),
-    ...(onReplaceFrom ? [{ label: tr('Replace from another sourceâ€¦'), onSelect: onReplaceFrom }] : []),
+    ...(onReplaceFrom ? [{ label: tr('Replace from another source…'), onSelect: onReplaceFrom }] : []),
     ...(onEdit ? [{ label: tr('Edit number & title'), divider: true, onSelect: onEdit }] : []),
     ...(onCopyPath ? [{ label: tr('Copy file path'), divider: !onEdit, onSelect: onCopyPath }] : []),
     ...(onHide ? [{ label: tr('Hide chapter {n}', { n: book.number }), divider: !onEdit && !onCopyPath, hook: 'hide-chapter', onSelect: onHide }] : []),
@@ -516,7 +516,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
    * pages must stop promising them. Opening it would lay out zero pages and downloading it would save an
    * empty chapter, and both would look like a bug in the reader rather than a decision the admin made.
    *
-   * âš ï¸ UNLESS IT IS ALREADY ON THIS DEVICE. The reader consults the offline copy before the server, so a
+   * ⚠️ UNLESS IT IS ALREADY ON THIS DEVICE. The reader consults the offline copy before the server, so a
    * chapter saved before the cleanup took it still opens and still reads perfectly. Greying that out would
    * take away the one copy of it left in the world.
    */
@@ -524,7 +524,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
 
   return (
     // `id="ch-N"` is what the chapter chips in the Sources & translations sheet scroll to. `lg:gap-2.5`: on
-    // the desktop grid a 287-px cell (three columns at 1280) leaves the caption â‰ˆ90 px beside the thumb,
+    // the desktop grid a 287-px cell (three columns at 1280) leaves the caption ≈90 px beside the thumb,
     // the dot, the date and two 36-px buttons -- exactly a group name with its avatar -- and a two-digit
     // day ("29d") took 4 of them back. Five gaps at 10 rather than 12 return ten. GhostRow matches.
     // UI refresh: a pointer lights the row under it, a surface just past the row's own edges (the grid's gaps have room).
@@ -546,7 +546,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
           <p className={`truncate text-sm ${state === 'read' ? 'text-fog-500' : 'text-fog-100'}`}>
             {chapterLabel(book)}
             {/* The chapter's own name, when the source gave one that is not just the number again. */}
-            {chapterName(book) && <span className="text-fog-500"> Â· {chapterName(book)}</span>}
+            {chapterName(book) && <span className="text-fog-500"> · {chapterName(book)}</span>}
           </p>
           <RowCaption group={book.scanlator} via={altSource} versions={versions} pruned={prunedWords(book)} missing={book.missingPages?.length} talk={talk} />
           {state === 'reading' && rp && (
@@ -568,11 +568,11 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
         // which matters, because it is the only copy left.
         disabled={pruned}
         className={`grid h-9 w-9 place-items-center rounded-lg border disabled:opacity-30 ${downloaded ? 'border-accent/40 text-accent' : 'border-ink-700 text-fog-500'}`}
-        // "Save offline", not "Download": the â˜ on a ghost row brings a chapter onto the server, this arrow
+        // "Save offline", not "Download": the ☁ on a ghost row brings a chapter onto the server, this arrow
         // copies one to this device, and one word for both promised the wrong thing on one of them.
         aria-label={downloaded ? tr('Remove from this device') : tr('Save offline')}
       >
-        {busy ? <span className="text-[10px] font-semibold text-accent">â€¦</span> : downloaded ? <IcCheck width={16} height={16} /> : <IcDownload width={16} height={16} />}
+        {busy ? <span className="text-[10px] font-semibold text-accent">…</span> : downloaded ? <IcCheck width={16} height={16} /> : <IcDownload width={16} height={16} />}
       </button>}
       <div className="relative shrink-0">
         <button onClick={(e) => menu.openFrom(e.currentTarget)} aria-label={tr('Chapter actions')} aria-haspopup="menu" aria-expanded={menu.open}
@@ -587,13 +587,13 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
   );
 }
 
-/** The âœ“ bubble on a thumb in select mode -- the library tile's, so the two select modes look like one. */
+/** The ✓ bubble on a thumb in select mode -- the library tile's, so the two select modes look like one. */
 function SelectBubble({ selected }: { selected: boolean }) {
   return (
     <>
       {selected && <span className="absolute inset-0 z-10 rounded-lg border-2 border-accent bg-accent/20" />}
       <span className={`absolute start-1.5 top-1.5 z-20 grid h-6 w-6 place-items-center rounded-full border text-[11px] font-bold ${
-        selected ? 'border-accent bg-accent text-black' : 'border-white/50 bg-black/50 text-transparent'}`}>âœ“</span>
+        selected ? 'border-accent bg-accent text-black' : 'border-white/50 bg-black/50 text-transparent'}`}>✓</span>
     </>
   );
 }
@@ -610,7 +610,7 @@ function SelectBubble({ selected }: { selected: boolean }) {
  * else).
  *
  * A reader can mark it read without ever fetching it (#69): the row then takes the chapter row's read
- * treatment -- the filled grey dot, the dimmed title -- plus a âœ“ in the empty thumb, and it STAYS dashed and
+ * treatment -- the filled grey dot, the dimmed title -- plus a ✓ in the empty thumb, and it STAYS dashed and
  * dimmed, because "this server does not have it" is still true. The mark lives in its own table and becomes
  * ordinary progress when the chapter lands (bff lib/listingProgress).
  */
@@ -632,8 +632,8 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
   /** Open the chapter sheet for this number. */
   onOpen: () => void;
   /**
-   * Mark this number read (true) or unread (false) -- the â‹¯ menu, the chapter row's. For every viewer who
-   * can see the page, download permission or not: a mark costs no bytes. Select mode hides it like the â˜.
+   * Mark this number read (true) or unread (false) -- the ⋯ menu, the chapter row's. For every viewer who
+   * can see the page, download permission or not: a mark costs no bytes. Select mode hides it like the ☁.
    */
   onMark?: (completed: boolean) => void;
   /** Admins only (#240): hide this number from the series, for everyone -- a source's stray. It asks first. */
@@ -651,7 +651,7 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
   const label = whyLabel(ghost, { wholeHere });
   // The same rule as the chapter row's caption: the series' own source is the normal case, not news. The
   // listing carries the source's name, so an id the followed list no longer resolves still gets one --
-  // âš ï¸ unless that "name" IS the id: the server falls back to `getSource(id)?.name ?? id`, so a source that
+  // ⚠️ unless that "name" IS the id: the server falls back to `getSource(id)?.name ?? id`, so a source that
   // is no longer loaded (an extension removed since the check) arrives as `ext:fake` or a nineteen-digit
   // number, and the ChapterRow rule is that a caption is a name or nothing. Reintroduce by dropping the
   // `!== ghost.sourceId` test: seed a ghost from an unloaded source and its caption reads the raw id.
@@ -670,7 +670,7 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
         className={`flex min-w-0 flex-1 items-center gap-3 text-start ${selected ? '' : 'opacity-60'}`}>
         <div className={`relative grid h-14 w-10 shrink-0${thumbHide(!!compact, !!selectable)} place-items-center rounded-lg border border-dashed border-ink-600`}>
           {read && !selectable && (
-            <span role="img" aria-label={tr('Read Â· not on the server')} className="text-fog-500"><IcCheck width={14} height={14} /></span>
+            <span role="img" aria-label={tr('Read · not on the server')} className="text-fog-500"><IcCheck width={14} height={14} /></span>
           )}
           {selectable && <SelectBubble selected={!!selected} />}
         </div>
@@ -678,11 +678,11 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
         <div className="min-w-0">
           <p className={`truncate text-sm ${read ? 'text-fog-500' : 'text-fog-300'}`}>
             {/* Compact hides the box, and its tick's label with it: say it once for screen readers. */}
-            {compact && read && !selectable && <span className="sr-only hidden lg:pointer-fine:inline">{tr('Read Â· not on the server')} </span>}
+            {compact && read && !selectable && <span className="sr-only hidden lg:pointer-fine:inline">{tr('Read · not on the server')} </span>}
             {chapterLabel({ number: ghost.number, numberEnd: ghost.numberEnd })}
-            {showTitle && <span className="text-fog-500"> Â· {title}</span>}
+            {showTitle && <span className="text-fog-500"> · {title}</span>}
           </p>
-          {/* "waiting for Asura Scans Â· 2 days left" already names the group; the group part is for the
+          {/* "waiting for Asura Scans · 2 days left" already names the group; the group part is for the
               other reasons, where the caption would otherwise not say who has it. */}
           <RowCaption lead={label ? { text: tr(label.key, label.args), amber: ghost.why === 'failed', ...(label.full ? { full: tr(label.full.key, label.full.args) } : {}) } : null}
             group={ghost.why === 'held' && label?.args.g ? null : ghost.scanlator} via={altSource} />
@@ -690,7 +690,7 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
       </button>
       {ghost.publishedAt && <RowDate iso={ghost.publishedAt} className={selected ? '' : 'opacity-60'} />}
       <ButtonsWrap compact={!!compact} menuOpen={menu.open}>
-      {/* The cloud, not the â¬‡ of the row above: that arrow saves a chapter to THIS DEVICE, this one brings
+      {/* The cloud, not the ⬇ of the row above: that arrow saves a chapter to THIS DEVICE, this one brings
           it onto the server, and the same glyph for both would promise the wrong thing on one of them. */}
       {onFetch && !selectable && (
         <button type="button" aria-label={tr('Fetch')} disabled={busy}
@@ -700,10 +700,10 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
             try { await onFetch(); } finally { setBusy(false); }
           }}
           className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-ink-700 text-fog-500 disabled:opacity-60">
-          {busy ? <span className="text-[10px] font-semibold text-accent">â€¦</span> : <IcCloudDownload width={16} height={16} />}
+          {busy ? <span className="text-[10px] font-semibold text-accent">…</span> : <IcCloudDownload width={16} height={16} />}
         </button>
       )}
-      {/* The chapter row's â‹¯, with the actions that apply to a chapter that is not here. */}
+      {/* The chapter row's ⋯, with the actions that apply to a chapter that is not here. */}
       {hasMenu && !selectable && (
         <div className="relative shrink-0">
           <button type="button" onClick={(e) => menu.openFrom(e.currentTarget)} aria-label={tr('Chapter actions')} aria-haspopup="menu" aria-expanded={menu.open}
@@ -731,25 +731,25 @@ function readShowGhosts(): boolean {
 
 /**
  * Prev / a range picker / Next for the chapter list. The picker names each page by the first and last chapter
- * numbers it shows ("901â€“1000", or "1193â€“1094" newest first), which is what a reader hunting for a chapter
+ * numbers it shows ("901–1000", or "1193–1094" newest first), which is what a reader hunting for a chapter
  * number actually scans for.
  *
- * âš ï¸ No count beside it: "86â€“129 of 149" counted FILES (149, half chapters included) next to chapter numbers, and read as
- * chapters 130â€“149 missing (the owner, 10-19). The header says how many chapters there are, and their numbers when those
+ * ⚠️ No count beside it: "86–129 of 149" counted FILES (149, half chapters included) next to chapter numbers, and read as
+ * chapters 130–149 missing (the owner, 10-19). The header says how many chapters there are, and their numbers when those
  * differ (numberingSpan). Reintroduce by putting `of {n}` back: chapterPages.test.ts finds it.
  */
 function ChapterPager({ page, pages, rows, asc, onPage }: { page: number; pages: number; rows: readonly Row[]; asc: boolean; onPage: (p: number) => void }) {
   const range = (p: number) => pageLabel(rows, p, asc);
   return (
     <nav aria-label={tr('Chapter pages')} data-chapter-pager className="my-2 flex items-center justify-center gap-2 text-xs">
-      <button type="button" onClick={() => onPage(0)} disabled={page === 0} className="btn-key px-2.5" aria-label={tr('First page')}>Â«</button>
+      <button type="button" onClick={() => onPage(0)} disabled={page === 0} className="btn-key px-2.5" aria-label={tr('First page')}>«</button>
       <button type="button" onClick={() => onPage(page - 1)} disabled={page === 0} className="btn-key">{tr('Previous')}</button>
       <select value={page} onChange={(e) => onPage(Number(e.target.value))} aria-label={tr('Chapter pages')}
         className="h-8 rounded-lg border border-ink-700 bg-ink-850 px-2.5 text-fog-100">
         {Array.from({ length: pages }, (_, p) => <option key={p} value={p}>{range(p)}</option>)}
       </select>
       <button type="button" onClick={() => onPage(page + 1)} disabled={page >= pages - 1} className="btn-key">{tr('Next')}</button>
-      <button type="button" onClick={() => onPage(pages - 1)} disabled={page >= pages - 1} className="btn-key px-2.5" aria-label={tr('Last page')}>Â»</button>
+      <button type="button" onClick={() => onPage(pages - 1)} disabled={page >= pages - 1} className="btn-key px-2.5" aria-label={tr('Last page')}>»</button>
     </nav>
   );
 }
@@ -818,7 +818,7 @@ function SeriesInner() {
   const [pickedBooks, setPickedBooks] = useState<Set<string>>(new Set());
   const [pickedGhosts, setPickedGhosts] = useState<Set<string>>(new Set());
   const [acting, setActing] = useState(false);
-  // What a confirm acts on: the select bar's subset, or the one chapter a row's â‹¯ names (v0.62.0).
+  // What a confirm acts on: the select bar's subset, or the one chapter a row's ⋯ names (v0.62.0).
   const [confirming, setConfirming] = useState<null | { what: 'delete' | 'refetch'; books: Book[] }>(null);
   // The chosen chapters no source this series follows lists (bff lib/sourceLeftovers.ts): the Delete confirmation warns
   // that nothing can fetch them again. Asked when it opens; a failure warns of nothing rather than block the delete.
@@ -836,13 +836,13 @@ function SeriesInner() {
     enabled: !!id && deletingIds.length > 0,
     retry: false,
   });
-  // #240: the chapter numbers a Hide asks about -- a row's â‹¯, or the select bar's -- and More's Show hidden chapters.
+  // #240: the chapter numbers a Hide asks about -- a row's ⋯, or the select bar's -- and More's Show hidden chapters.
   const [hiding, setHiding] = useState<number[] | null>(null);
   const [showHidden, setShowHidden] = useState(false);
   const [started, setStarted] = useState<StartedJob | null>(null);
   const clearPicks = () => { setPickedBooks(new Set()); setPickedGhosts(new Set()); };
   const leaveSelect = () => { setSelecting(false); clearPicks(); };
-  // The four sheets and the explainer. âš ï¸ At most one is open at a time, and a sheet is closed BEFORE any
+  // The four sheets and the explainer. ⚠️ At most one is open at a time, and a sheet is closed BEFORE any
   // Modal opens: `Modal`/`ConfirmDialog` are z-50 and `Sheet` z-60 inside main's stacking context, so a
   // dialog opened while a sheet is up paints under its backdrop and cannot be tapped. The explainer is a
   // Sheet too, so the (i) SWAPS it for the sources sheet (and back on close) rather than stacking: two
@@ -1048,7 +1048,7 @@ function SeriesInner() {
   // A series with no chapters at all (a "Nothing yet" add) has one thing to show: the run of older chapters
   // under its floor, which is every number the source lists. It opens unfolded, once per series AND
   // direction -- a ref, not an effect on `rows`, or Hide would be undone by the next listing refetch.
-  // âš ï¸ Keyed by `asc` too: the effect above folds every run on Newest/Oldest, and a key of `id` alone let
+  // ⚠️ Keyed by `asc` too: the effect above folds every run on Newest/Oldest, and a key of `id` alone let
   // it re-open nothing, so one tap on the sort left the page with a single folded run row and no other
   // content until the reader found Show.
   const defaultedRun = useRef<string | null>(null);
@@ -1061,7 +1061,7 @@ function SeriesInner() {
   // For the per-chapter `via {source}` caption: which source each id is, and which one is the series' own.
   // A chapter fetched through "Find missing chapters" carries the adapter it came from without that source
   // being followed, so the names come from the full source list too -- never the raw id, which for an
-  // extension is a nineteen-digit number nobody can read. âš ï¸ Only for a viewer who may download: the route
+  // extension is a nineteen-digit number nobody can read. ⚠️ Only for a viewer who may download: the route
   // answers 403 to everyone else, which was one failed request per visit for a member without download
   // rights; their names come from `series.sources` and the listing's `sourceName`.
   const { data: allSources } = useQuery({
@@ -1226,7 +1226,7 @@ function SeriesInner() {
   /**
    * The same for chapters the server does not hold (#69): they have no book id for the progress endpoint,
    * so they go by number to their own route, in chunks of its cap (MARK_CHUNK). Neither writes a reading
-   * event. âš ï¸ No offline outbox: the outbox replays `/api/books/:id/progress` and a ghost has no book, so a
+   * event. ⚠️ No offline outbox: the outbox replays `/api/books/:id/progress` and a ghost has no book, so a
    * failure says so instead of pretending it will sync later. The caches are invalidated either way -- a
    * chunk that landed before a failure is still a change -- the books' too, because a number that landed
    * since the page loaded is marked on its chapter row by the server. Resolves to whether every chunk was
@@ -1240,7 +1240,7 @@ function SeriesInner() {
       }
     } catch {
       ok = false;
-      toast(tr('Could not mark â€” try again when online'), 'error');
+      toast(tr('Could not mark — try again when online'), 'error');
     }
     qc.invalidateQueries({ queryKey: ['series-listing', id] });
     qc.invalidateQueries({ queryKey: ['series-books', id] });
@@ -1278,7 +1278,7 @@ function SeriesInner() {
   // Deliberately the WHOLE list, not the group filter's subset: "Mark all read" is a statement about the
   // series, and a reader who filtered to one group to look at it did not thereby decide the other groups'
   // chapters are unread. Select mode is the way to mark a subset.
-  // âš ï¸ And the chapters on this server ONLY, never the grey rows (#69): a series listing 800 chapters would
+  // ⚠️ And the chapters on this server ONLY, never the grey rows (#69): a series listing 800 chapters would
   // otherwise tick all 800 with one tap -- and a contiguous run of ticks is exactly what the trackers are
   // told. Marking chapters the server does not hold is a choice made row by row or in select mode.
   // Reintroduce by adding the ghosts to `todo`: "Mark all read never touches the grey rows" in
@@ -1310,7 +1310,7 @@ function SeriesInner() {
   // fails on any flow that keys a success after its error.
   const saveOffline = async (todo: Book[]) => {
     const actor=user?.id;if(!actor || getCurrentUser()!==actor)return;
-    toast(todo.length === 1 ? tr('Saving 1 chapter offlineâ€¦') : tr('Saving {n} chapters offlineâ€¦', { n: todo.length }), 'info', { busy: true, key: 'save-offline' });
+    toast(todo.length === 1 ? tr('Saving 1 chapter offline…') : tr('Saving {n} chapters offline…', { n: todo.length }), 'info', { busy: true, key: 'save-offline' });
     let done = 0;
     let stopped = false;
     for (const b of todo) {
@@ -1363,7 +1363,7 @@ function SeriesInner() {
   const saveable = pickedBookList.filter((b) => !b.pruned && !downloaded.has(b.id));
   const fetchable = pickedGhostList.filter((g) => g.why !== 'blocked');
   const refetchable = pickedBookList.filter((b) => b.owned);
-  // âš ï¸ NOT filtered by `owned`. The server classifies each id and answers with a reason per skip, and the
+  // ⚠️ NOT filtered by `owned`. The server classifies each id and answers with a reason per skip, and the
   // toast below repeats it -- "3 skipped: not downloaded by Uchiyomi" is the one line that explains why a
   // hand-assembled library (86 % of the chapters on a real install) cannot be deleted from here. Filtering
   // here made that toast dead code: the ids never reached the server, and picking only such chapters
@@ -1484,9 +1484,9 @@ function SeriesInner() {
     }
   };
   // One run of requests for this series, in chunks of at most FETCH_CHUNK (the routes' FILL_MAX_CHAPTERS), each
-  // posted only after the previous chunk's job has ENDED. âš ï¸ `startJob` returns when a job has started, not when it
+  // posted only after the previous chunk's job has ENDED. ⚠️ `startJob` returns when a job has started, not when it
   // is done, and the routes answer 409 `busy` while the series' job runs: the first cut posted the chunks back to
-  // back, so on a run past 300 the reader saw "Fetching 300 chaptersâ€¦" and then one error toast per further chunk,
+  // back, so on a run past 300 the reader saw "Fetching 300 chapters…" and then one error toast per further chunk,
   // and the rest was never fetched. One toast for the whole run; the run stops at the first chunk that fails to start
   // or whose job ends in error, with that message. `acting` holds for the whole run, so the chip cannot be tapped
   // into a 409 of its own meanwhile.
@@ -1579,7 +1579,7 @@ function SeriesInner() {
         { n: other, text: other === 1 ? tr('1 chapter could not be deleted') : tr('{n} chapters could not be deleted', { n: other }) },
       ].filter((l) => l.n > 0);
       if (res.applied === 0 && lines.length) {
-        // âš ï¸ A delete that deleted nothing is not a success. A green "0 deleted" over unchanged rows was
+        // ⚠️ A delete that deleted nothing is not a success. A green "0 deleted" over unchanged rows was
         // what an unlink failure looked like; the dominant reason, in red, is what it looks like now.
         // Reintroduce by toasting "{n} deleted" unconditionally: pick a bookmarked chapter and delete it.
         // The other reasons still get their line (the docs promise one per reason), just not in red.
@@ -1593,7 +1593,7 @@ function SeriesInner() {
       invalidateChapters();
       leaveSelect();
     } catch (e) {
-      toast([res.applied ? deletedText(res.applied) : '', msgOf(e, tr('Could not delete those'))].filter(Boolean).join(' Â· '), 'error');
+      toast([res.applied ? deletedText(res.applied) : '', msgOf(e, tr('Could not delete those'))].filter(Boolean).join(' · '), 'error');
       invalidateChapters();
     }
     setActing(false);
@@ -1603,7 +1603,7 @@ function SeriesInner() {
   // While the job this page started is downloading, read the shared jobs key and refresh the chapter queries
   // when it stops, so ghosts turn into rows without a reload. No poll of its own (v0.49.0): AppShell's one
   // poller asks every 2.5 s while a job downloads, and startJob kicks it the moment the job exists. A second
-  // observer with its own interval would double the requests. âš ï¸ `dataUpdatedAt` is compared against the
+  // observer with its own interval would double the requests. ⚠️ `dataUpdatedAt` is compared against the
   // moment the job started: the key is shared with the Library ring, so the first render after the POST sees
   // its CACHED list -- from before the job existed -- and "the job is not in the list" would otherwise read as
   // "the job has finished".
@@ -1635,7 +1635,7 @@ function SeriesInner() {
 
   const meta = series?.metadata;
   const summary = meta?.summary || series?.booksMetadata?.summary;
-  const title = meta?.title || series?.name || 'â€¦';
+  const title = meta?.title || series?.name || '…';
   const author = meta?.author || meta?.publisher || '';
   // "Updated {X ago}" from the newest chapter's date (always available; a real publish date exists for only some series)
   const updatedAt = useMemo(() => {
@@ -1689,7 +1689,7 @@ function SeriesInner() {
       const r = await api<{ ok: boolean; same?: boolean }>(`/api/admin/series/${encodeURIComponent(id)}/hero/shuffle`, { method: 'POST', json: {} });
       // v0.52.0: the series' pages give no other banner (a short series whose few good crops are all on it). Said, rather
       // than "Banner changed" over the same picture.
-      if (r.ok && r.same) toast(tr('This is the only banner this seriesâ€™ pages give.'), 'info');
+      if (r.ok && r.same) toast(tr('This is the only banner this series’ pages give.'), 'info');
       else if (r.ok) { await qc.invalidateQueries({ queryKey: ['series', id] }); toast(tr('Banner changed'), 'success'); }
       else toast(tr('Could not make a new banner'), 'error');
     } catch {
@@ -1711,7 +1711,7 @@ function SeriesInner() {
   };
 
   // A "Nothing yet" series: added with no chapters, the older run under its floor is the page's only
-  // content and the â˜ on those rows the call to action. Nothing to read, nothing to save offline.
+  // content and the ☁ on those rows the call to action. Nothing to read, nothing to save offline.
   const nothingYet = !!series && series.booksCount === 0;
   // "Archive slowly" (#117): the rest of the series fetched a chapter at a time, over nights or days. Offered
   // while the listing has something the archive could take and no archive is on it; this page only starts
@@ -1740,8 +1740,8 @@ function SeriesInner() {
     ? { read: books.content.filter((b) => b.readProgress?.completed).length, total: books.content.length }
     : { read: series?.booksReadCount ?? 0, total: series?.booksCount ?? 0 }), [books, series]);
   const readLine = readCountText(readCount.read, readCount.total);
-  // v0.61.0: what comes next -- the release radar's estimate, as an estimate (lib/radar.ts): "Next chapter ~Friday Â·
-  // usually Fridays", "Next chapter due any day", "Running late Â· last release 12d ago"; nothing for a series that is
+  // v0.61.0: what comes next -- the release radar's estimate, as an estimate (lib/radar.ts): "Next chapter ~Friday ·
+  // usually Fridays", "Next chapter due any day", "Running late · last release 12d ago"; nothing for a series that is
   // quiet, ended, on hiatus, undated or not monitored. Before it, how long the chapters left take at this reader's own
   // pace (lib/readingTime.ts, "Catch up in ~2 hr"), asked only when it can be said: some read, some left.
   const unreadCount = Math.max(0, readCount.total - readCount.read);
@@ -1754,7 +1754,7 @@ function SeriesInner() {
   const outlook = [
     catchUpText({ read: readCount.read, unread: unreadCount, perChapterMs: pace?.perChapterMs }),
     radarText(series?.yomi?.radar, { autoUpdate: series?.autoUpdate !== false }),
-  ].filter(Boolean).join(' Â· ');
+  ].filter(Boolean).join(' · ');
   // Check for new chapters, the Sources sheet's and Edit details' own: the same notices, the same polling.
   const { checking, checkNow } = useCheckNow(id, () => {
     for (const k of [['series', id], ['series-books', id], ['series-listing', id], ['series-versions', id], ['home']]) qc.invalidateQueries({ queryKey: k });
@@ -1792,7 +1792,7 @@ function SeriesInner() {
       case 'remove': setDeleting(true); break;
     }
   };
-  // âš ï¸ The sheet closes BEFORE its row's action runs (SeriesMoreSheet's onPick): Edit details, Rename folder, Remove's
+  // ⚠️ The sheet closes BEFORE its row's action runs (SeriesMoreSheet's onPick): Edit details, Rename folder, Remove's
   // typed-title confirmation and Find missing chapters are dialogs, and a dialog opened under a Sheet cannot be tapped.
   const [moreSheet, setMoreSheet] = useState(false);
   useEffect(() => { setMoreSheet(false); }, [id]);
@@ -1815,7 +1815,7 @@ function SeriesInner() {
 
   const Actions = (
     <div className="mt-4 flex flex-col gap-2.5">
-      {/* The one reading button. It names the chapter it opens -- "Continue Â· Ch. 12", "Next Â· Ch. 11" -- and the line
+      {/* The one reading button. It names the chapter it opens -- "Continue · Ch. 12", "Next · Ch. 11" -- and the line
           under it says what the label does not: the chapter's own name and how far into it the reader is, or which
           chapter "Start reading" and "Read again" open. */}
       <div ref={ctaRef}>
@@ -1827,12 +1827,12 @@ function SeriesInner() {
       {/* Four keys, or three where there is nothing to save offline. Equal widths, whatever their number. */}
       <div data-series-keys className="mt-0.5 grid auto-cols-fr grid-flow-col gap-1.5">
         <FavouriteKey on={fav} pops={favPops} onToggle={toggleFav} />
-        {/* "Save all offline", not "Download all": this copies to THIS DEVICE; the server side is Fetch (â˜). Never on
+        {/* "Save all offline", not "Download all": this copies to THIS DEVICE; the server side is Fetch (☁). Never on
             Uchiyomi Desktop, where this device IS the server (lib/desktop.ts). The key's word is "Offline", its name the
             whole action. */}
         {offlineKeyShown({ nothingYet, desktop: isDesktop() }) && (
           <SeriesKey icon={downloadingAll ? <ProgressRing progress="spin" size={20} /> : <IcDownload width={20} height={20} aria-hidden />}
-            label={tr('Offline')} name={downloadingAll ? tr('Savingâ€¦') : tr('Save all offline')} onClick={downloadAll} disabled={downloadingAll} />
+            label={tr('Offline')} name={downloadingAll ? tr('Saving…') : tr('Save all offline')} onClick={downloadAll} disabled={downloadingAll} />
         )}
         <SeriesKey icon={<IcListAdd />} label={tr('List')} title={tr('Add to list')} onClick={() => setCollecting(true)}
           attrs={{ 'aria-haspopup': 'dialog' }} />
@@ -1850,8 +1850,8 @@ function SeriesInner() {
       : author ? <span className="text-fog-300">{tr('by {author}', { author: `\u2068${author}\u2069` })}</span> : null,
     meta?.status ? <span className="capitalize">{statusText(meta.status)}</span> : null,
     series ? <>{bookCountText(series.booksCount, mostlyVolumes)}</> : null,
-    // Their numbers, when they do not run 1 to the count (half chapters, a chapter 0, gaps): "149 chapters Â· Ch. 0â€“129".
-    span ? <>{tr('Ch. {a}â€“{b}', span)}</> : null,
+    // Their numbers, when they do not run 1 to the count (half chapters, a chapter 0, gaps): "149 chapters · Ch. 0–129".
+    span ? <>{tr('Ch. {a}–{b}', span)}</> : null,
     (series?.yomi?.unread ?? series?.booksUnreadCount ?? 0) > 0 ? <span className="text-accent">{tr('{n} unread', { n: series!.yomi?.unread ?? series!.booksUnreadCount })}</span> : null,
     // "{n} behind" used to sit here; the supply line under the title carries that count now ("4 not here
     // yet"), with the source and the groups beside it, and one line saying it is enough.
@@ -1863,7 +1863,7 @@ function SeriesInner() {
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fog-400 lg:text-sm">
       {metaBits.map((n, i) => (
         <span key={i} className="inline-flex items-center gap-2">
-          {i > 0 && <span aria-hidden className="text-ink-600">Â·</span>}
+          {i > 0 && <span aria-hidden className="text-ink-600">·</span>}
           {n}
         </span>
       ))}
@@ -1908,7 +1908,7 @@ function SeriesInner() {
           <button onClick={markAllRead} className="btn-key">{tr('Mark all read')}</button>
           <button onClick={flipOrder} className="btn-key">{asc ? tr('Oldest') : tr('Newest')}</button>
           {/* The group filter and the ghost switch live in a sheet; the count of active choices is a tiny
-              badge on the chip, not ` Â· {n}` text, which is what pushed the row past 358 px. Rendered only
+              badge on the chip, not ` · {n}` text, which is what pushed the row past 358 px. Rendered only
               when there is something to filter by. */}
           {(groupNames.length > 0 || ghosts.length > 0 || deletedGhosts.length > 0) && (
             <button onClick={() => setFilterOpen(true)} aria-haspopup="dialog" className={`btn-key relative ${activeFilters > 0 ? 'btn-key-accent' : ''}`}>
@@ -1976,7 +1976,7 @@ function SeriesInner() {
           }
           if (r.kind === 'run') {
             // One line for the whole stretch below the Latest-N floor, with Show/Hide to unfold it into
-            // ordinary ghost rows (each with its â˜ and its sheet) and, for a viewer who may download,
+            // ordinary ghost rows (each with its ☁ and its sheet) and, for a viewer who may download,
             // "Fetch all {n}" for the whole stretch at once -- Find missing chapters is refused below three
             // chapters, so a "Nothing yet" series had no bulk way to its older chapters. The sentence
             // itself (range or single number, plural or singular) is `runLabel`'s, where a test can reach
@@ -1993,7 +1993,7 @@ function SeriesInner() {
             const archiving = r.why === 'archive';
             return (
               <div key={`run${r.from}`} data-run={r.why} className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-ink-800/70 py-2.5 text-xs text-fog-500 lg:col-span-full">
-                <span className="me-auto">{archiving ? [tr(key, args), listingArchiveLine(listing?.archive)].filter(Boolean).join(' Â· ') : tr(key, args)}</span>
+                <span className="me-auto">{archiving ? [tr(key, args), listingArchiveLine(listing?.archive)].filter(Boolean).join(' · ') : tr(key, args)}</span>
                 {/* The two chips travel together: when the sentence leaves no room they wrap as one pair to
                     the end of the next line, not one chip after the sentence and one orphaned below. */}
                 <span className="ms-auto flex shrink-0 gap-1.5">
@@ -2030,7 +2030,7 @@ function SeriesInner() {
   // wraps. Every button is disabled when its subset is empty rather than hidden, so the row does not
   // reflow as the selection changes; the two admin buttons and Fetch are hidden outside their audience.
   //
-  // âš ï¸ `bottom-0` here puts the bar UNDER the phone nav, not over it. This renders inside AppShell's
+  // ⚠️ `bottom-0` here puts the bar UNDER the phone nav, not over it. This renders inside AppShell's
   // `<main class="relative z-[1]">`, which is its own stacking context, while <BottomNav> is main's sibling
   // at z-40 in the root context -- so whatever z-index this div carries, the nav paints on top of it. With
   // seven chips wrapping to three rows at 390 px, Fetch, Fetch again, Delete from server and Cancel all sat
@@ -2048,12 +2048,12 @@ function SeriesInner() {
   const Toolbar = selecting && (
     <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:start-[var(--rail-w)] lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
       <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
-        <span className="me-auto text-sm font-medium text-fog-100">{acting ? 'â€¦' : selectedText(pickedCount)}</span>
+        <span className="me-auto text-sm font-medium text-fog-100">{acting ? '…' : selectedText(pickedCount)}</span>
         <button disabled={acting || filteredBooks.length + filteredGhosts.length === 0} onClick={selectAllChapters}
           data-select-all-chapters className="btn-key">{allPicked ? tr('Clear selection') : tr('Select all')}</button>
         <button disabled={acting || !pickedCount} onClick={() => bulkMark(true)} className="btn-key">{tr('Mark read')}</button>
         <button disabled={acting || !pickedCount} onClick={() => bulkMark(false)} className="btn-key">{tr('Mark unread')}</button>
-        {/* The two icons say which side each acts on: â¬‡ this device, â˜ the server. */}
+        {/* The two icons say which side each acts on: ⬇ this device, ☁ the server. */}
         {!isDesktop() && <button disabled={acting || !saveable.length} onClick={bulkSave} className="btn-key"><IcDownload width={14} height={14} />{tr('Save offline')}</button>}
         {canDownload(user) && <button disabled={acting || !fetchable.length} onClick={bulkFetch} className="btn-key"><IcCloudDownload width={14} height={14} />{tr('Fetch')}</button>}
         {isAdmin && <button disabled={acting || !refetchable.length} onClick={() => setConfirming({ what: 'refetch', books: refetchable })} className="btn-key"><IcCloudDownload width={14} height={14} />{tr('Fetch again')}</button>}
@@ -2111,7 +2111,7 @@ function SeriesInner() {
         <span aria-hidden={!titleOut} className={`truncate text-sm font-medium text-fog-100 transition-opacity duration-200 lg:hidden ${titleOut ? 'opacity-100' : 'opacity-0'}`}>{title}</span>
       </div>
 
-      {/* banner â€” real art pulled from the internet (AniList), else the one the server made from the series' own pages
+      {/* banner — real art pulled from the internet (AniList), else the one the server made from the series' own pages
           (v0.51.0), genre-banner fallback. A real banner is shown sharp (v0.53.0: it was blurred like the stand-in
           cover); a series without one keeps the blurred wash of its cover. The gradients below keep the title readable. */}
       {/* UI refresh: the window's whole width from its top edge, under the see-through top bar (lib/overArt.ts), the
@@ -2137,7 +2137,7 @@ function SeriesInner() {
           <HeroTitle series={series ?? { id, name: title, metadata: {} }} title={title} headingRef={heroTitleRef} logo={false} />
           <div className="mt-2">{Meta}</div>
         </motion.div>
-        {/* desktop title-over-art (Jellyfin style) â€” offset to the right of the floating poster */}
+        {/* desktop title-over-art (Jellyfin style) — offset to the right of the floating poster */}
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55, delay: 0.08, ease: [0.22, 0.61, 0.36, 1] }}
           className="pointer-events-none absolute inset-x-0 bottom-0 hidden flex-col justify-end p-8 lg:flex lg:ps-[calc(var(--rail-w)+2rem+288px)]">
           {meta?.status && (
@@ -2231,7 +2231,7 @@ function SeriesInner() {
             // alternate copies shown by the versions sheet; the member restore endpoint enforces it too.
             void (ghost?.bookId ? fetchDeleted(ghost.bookId) : copy ? pickGhost(n, copy) : fetchOne(n));
           }}
-          // âš ï¸ The sheet closes FIRST, then the confirm opens: a Modal under a Sheet cannot be tapped.
+          // ⚠️ The sheet closes FIRST, then the confirm opens: a Modal under a Sheet cannot be tapped.
           onReplace={(copy) => { const b = chapterSheet.book!; setChapterSheet(null); setReplacing({ book: b, copy }); }}
           // Sheet for sheet, never stacked: the versions sheet closes and the plan opens.
           // Not while a change waits for review (a remap, an undo): the notice above the list offers that plan, and
@@ -2257,7 +2257,7 @@ function SeriesInner() {
                 <p className="mb-2">{tr('This removes the {language} edition. The other editions stay.', { language: languageName(series.lang) })}</p>
               )}
               <p><strong className="text-fog-100">{tr('No files are deleted.')}</strong>{' '}{tr('The chapters stay exactly where they are on disk, and nothing in your library folder is touched.')}</p>
-              <p className="mt-2">{tr('Everyoneâ€™s reading progress, history, favourites and ratings are kept, so you can put it back at any time from Admin â†’ Library, or just add it again.')}</p>
+              <p className="mt-2">{tr('Everyone’s reading progress, history, favourites and ratings are kept, so you can put it back at any time from Admin → Library, or just add it again.')}</p>
             </>
           }
           onConfirm={doDelete}
@@ -2361,7 +2361,7 @@ function SeriesInner() {
           danger
           busy={acting}
           confirmLabel={tr('Fetch again')}
-          body={<p>{tr('Each file is replaced with the copy the translation rules choose now. A different groupâ€™s copy may have a different page count, so reading positions inside the chapter may shift.')}</p>}
+          body={<p>{tr('Each file is replaced with the copy the translation rules choose now. A different group’s copy may have a different page count, so reading positions inside the chapter may shift.')}</p>}
           onConfirm={() => refetchBooks(confirming.books)}
           onClose={() => setConfirming(null)}
         />
@@ -2411,8 +2411,8 @@ function SeriesInner() {
           // A tombstone has no file to set aside -- the cleanup already deleted it -- and a sentence that
           // says one is set aside on a row that reads "Deleted from the server" contradicts the row.
           body={<p>{replacing.book.pruned
-            ? tr('The chapter was deleted from the server; this copy is downloaded onto the same row and everyoneâ€™s progress stays.')
-            : tr('The current file is set aside and this copy is downloaded onto the same row. Everyoneâ€™s progress stays; the page count may differ.')}</p>}
+            ? tr('The chapter was deleted from the server; this copy is downloaded onto the same row and everyone’s progress stays.')
+            : tr('The current file is set aside and this copy is downloaded onto the same row. Everyone’s progress stays; the page count may differ.')}</p>}
           onConfirm={replaceWith}
           onClose={() => setReplacing(null)}
         />
