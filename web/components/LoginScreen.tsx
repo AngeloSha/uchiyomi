@@ -9,6 +9,7 @@ import { providerOnly, type AuthConfig } from '@/lib/authConfig';
 import { ART } from '@/lib/art';
 import { Mark, Wordmark } from './Brand';
 import { t as tr } from '@/lib/i18n';
+import { acknowledgeNativeAppControls, hasNativeAppActions, requestNativeAppAction } from '@/lib/native';
 
 /**
  * Why the OIDC callback could not sign someone in, by the reason it sends back. A function, so each sentence is
@@ -34,6 +35,8 @@ const ssoError = (reason: string): string => {
 
 export function LoginScreen() {
   const { login, firstRunSetup, register, signedOutWhy, resumeProfile, pickProfile } = useAuth();
+  const [nativeServers, setNativeServers] = useState(false);
+  useEffect(() => { setNativeServers(hasNativeAppActions()); acknowledgeNativeAppControls(); }, []);
   // `desktop`: this port is Uchiyomi Desktop's, reached from a browser tab -- see the effect below. `register` (v0.61.0):
   // signing up, reached only from `login` by "Create an account" while Open registration is on. `sso` (v0.63.0): the
   // server signs in through its provider only (lib/authConfig.ts providerOnly), so the screen is that button alone.
@@ -344,6 +347,10 @@ export function LoginScreen() {
           </form>
         )}
 
+        {nativeServers && <button type="button" onClick={() => { requestNativeAppAction('servers'); }}
+          className="mt-6 w-full rounded-xl py-3 text-center text-sm text-fog-400 transition hover:bg-ink-800 hover:text-fog-100 focus-visible:outline-2 focus-visible:outline-accent" data-native-servers>
+          {tr('Manage servers')}
+        </button>}
         <p className="mt-6 text-center text-xs text-fog-500">{mode === 'setup' ? tr('First-run setup') : tr('Private library · single sign-in')}</p>
       </motion.div>
     </div>

@@ -148,7 +148,7 @@ export function Sheet({ title, onClose, overBottomNav, action, footer, wrapTitle
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/70 backdrop-blur-xs"
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/70 backdrop-blur-xs" data-shell-sheet
       role="dialog" aria-modal="true" aria-label={title} onClick={onClose}>
       {/* The panel is a column: header, the one scroller, then the optional footer. Only the middle scrolls, so
           the footer stays put and the padding that clears the bottom nav is applied to whichever of the two

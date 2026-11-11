@@ -2045,7 +2045,7 @@ function SeriesInner() {
   // it reads "Remove 3 chapters" now, and with nothing ticked says how to use it and where the series' own Remove is.
   // UI refresh: keys, as the Library's select bar has been since v0.60.0 -- they act on the picked chapters.
   const Toolbar = selecting && (
-    <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:start-[var(--rail-w)] lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+    <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:start-[var(--rail-w)] lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]" data-selection-toolbar>
       <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
         <span className="me-auto text-sm font-medium text-fog-100">{acting ? '…' : selectedText(pickedCount)}</span>
         <button disabled={acting || filteredBooks.length + filteredGhosts.length === 0} onClick={selectAllChapters}

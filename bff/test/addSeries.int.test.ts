@@ -470,11 +470,17 @@ test('POST /api/sources/add refuses a chapterFrom it does not know', { skip }, a
       // library, whose AniList link is already there. Reintroduce by dropping the planSeriesOnAddAsync call from the
       // "already in library" branch (or not passing userId from the route): AniList is never written to.
       const trackers = await import('../src/lib/trackers');
+      // Earlier adds intentionally schedule background tracker work. Give this opt-in its own account,
+      // so a preceding add cannot observe settings enabled by this subtest and plan the same series twice.
+      const planningUser = (await q<{ id: string }>(
+        `INSERT INTO users (username, display_name, password_hash, role, auth_kind, perms, max_age_rating)
+         VALUES ($1,$1,'x','admin','password','{}',NULL) RETURNING id`, [`${USER}-planning`]))[0].id;
+      const planningHeaders = { authorization: `Bearer ${app.jwt.sign({ sub: planningUser, role: 'admin' })}` };
       const sid = (await q(`SELECT id FROM lib_series WHERE source_id = $1`, [LATEST]))[0].id;
       await trackers.linkSeries(sid, '987', 'Caught Up', null, 'anilist');
-      await trackers.saveConnection(uid, 'anilist', 'tok-anilist', 'me', new Date(Date.now() + 86_400_000));
+      await trackers.saveConnection(planningUser, 'anilist', 'tok-anilist', 'me', new Date(Date.now() + 86_400_000));
       await q(`INSERT INTO app_settings (user_id, data) VALUES ($1, '{"trackerPlanOnAdd": true}'::jsonb)
-        ON CONFLICT (user_id) DO UPDATE SET data = app_settings.data || EXCLUDED.data`, [uid]);
+        ON CONFLICT (user_id) DO UPDATE SET data = app_settings.data || EXCLUDED.data`, [planningUser]);
       const sent: any[] = [];
       globalThis.fetch = (async (u: any, init?: any) => {
         const url = new URL(String(u));
@@ -484,7 +490,7 @@ test('POST /api/sources/add refuses a chapterFrom it does not know', { skip }, a
         return new Response(JSON.stringify({ data: { Media: { status: 'RELEASING', chapters: null, mediaListEntry: null } } }), { status: 200, headers: { 'content-type': 'application/json' } });
       }) as typeof fetch;
       try {
-        const r = await app.inject({ method: 'POST', url: '/api/sources/add', headers,
+        const r = await app.inject({ method: 'POST', url: '/api/sources/add', headers: planningHeaders,
           payload: { source: LATEST, sourceId: `${LATEST}-1`, chapterCount: 2, chapterFrom: 'newest' } });
         assert.equal(r.statusCode, 200, r.body);
         assert.equal(r.json().seriesId, sid);
@@ -492,9 +498,10 @@ test('POST /api/sources/add refuses a chapterFrom it does not know', { skip }, a
         assert.deepEqual(sent, [{ mediaId: 987, progress: 0, status: 'PLANNING' }]);
       } finally {
         globalThis.fetch = realFetch;
-        await q(`DELETE FROM user_trackers WHERE user_id = $1`, [uid]);
-        await q(`DELETE FROM app_settings WHERE user_id = $1`, [uid]);
+        await q(`DELETE FROM user_trackers WHERE user_id = $1`, [planningUser]);
+        await q(`DELETE FROM app_settings WHERE user_id = $1`, [planningUser]);
         await q(`DELETE FROM series_trackers WHERE series_id = $1`, [sid]);
+        await q(`DELETE FROM users WHERE id = $1`, [planningUser]);
       }
     });
     await t.test('a missing source or sourceId is still the same 400', async () => {

@@ -73,7 +73,7 @@ export function Modal({
   // is capped at the viewport minus that band and the top padding (7.5 rem = 5.5 + 1 + 1); from `lg` up it
   // is the centred 88vh dialog it always was. The same 5.5 rem the Sheet's `overBottomNav` uses.
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] backdrop-blur-xs lg:pb-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] backdrop-blur-xs lg:pb-4" data-shell-modal onClick={onClose}>
       <div
         ref={ref}
         role="dialog"

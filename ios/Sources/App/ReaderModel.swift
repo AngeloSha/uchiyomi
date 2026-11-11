@@ -18,6 +18,11 @@ final class ReaderModel: ObservableObject {
     @Published var selectedID: UUID?
     @Published var showingServers = false
     @Published var addingServer = false
+    @Published private(set) var showServerFallback = false
+    private(set) var appActions: NativeAppActionsBridge?
+    private var appControlsReady = false
+    private var appControlsDocument = UUID()
+    private var appControlsFallbackTask: Task<Void, Never>?
     private var profile: ServerProfile?
     private var gateway: Gateway?
     private var client: RemoteClient?
@@ -156,6 +161,9 @@ final class ReaderModel: ObservableObject {
     @discardableResult
     private func stopReader() async -> Bool {
         readerID = UUID(); activeUI = nil
+        appControlsFallbackTask?.cancel(); appControlsFallbackTask = nil
+        appControlsDocument = UUID(); appControlsReady = false; showServerFallback = false
+        appActions?.retire(); appActions = nil
         dismissStatus()
         startupTask?.cancel(); startupTask = nil
         weak var retired = webView
@@ -226,11 +234,29 @@ final class ReaderModel: ObservableObject {
             let pending = try await cache.needsConfirmation()
             awaitingConfirmation = pending && ui.manifest.startupCheckVersion != 1
             let readerID = self.readerID
-            let view = try await NativeWebView.make(profile: selected, policy: gateway.policy) { [weak self] in
+            let appActions = NativeAppActionsBridge(origin: selected.localOrigin) { [weak self] action in
+                guard let self, self.readerID == readerID else { return }
+                guard action.isAvailability || !self.busy else { return }
+                switch action {
+                case .servers: self.showingServers = true
+                case .reload: Task { await self.reload() }
+                case .controlsReady:
+                    self.appControlsReady = true
+                    self.showServerFallback = false
+                    self.appControlsFallbackTask?.cancel(); self.appControlsFallbackTask = nil
+                case .controlsUnavailable:
+                    self.appControlsReady = false
+                    self.showServerFallback = self.webView != nil
+                    self.appControlsFallbackTask?.cancel(); self.appControlsFallbackTask = nil
+                }
+            }
+            self.appActions = appActions
+            let view = try await NativeWebView.make(profile: selected, policy: gateway.policy, appActions: appActions) { [weak self] in
                 Task { await self?.confirmUI(readerID: readerID) }
             }
             serverName = selected.origin.host ?? "Uchiyomi"
             webView = view
+            scheduleAppControlsFallback()
             addingServer = false; showingServers = false
             // Start at the web app's home page; its auth state handles offline fallback.
             view.load(URLRequest(url: selected.localOrigin))
@@ -253,6 +279,26 @@ final class ReaderModel: ObservableObject {
             setServerStatus(.failure(error), for: selected.id)
             if case .incompatible = error as? ClientError { canRecover = false }
             self.error = ClientError.connectionMessage(error)
+        }
+    }
+
+    func readerDocumentStarted(_ view: WKWebView) {
+        guard webView === view else { return }
+        appActions?.reset()
+        appControlsDocument = UUID(); appControlsReady = false; showServerFallback = false
+        scheduleAppControlsFallback()
+    }
+
+    private func scheduleAppControlsFallback() {
+        appControlsFallbackTask?.cancel()
+        let document = appControlsDocument, reader = readerID
+        appControlsFallbackTask = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return }
+            guard let self, self.readerID == reader, self.appControlsDocument == document,
+                  self.webView != nil, self.appActions != nil, !self.appControlsReady else { return }
+            // An older saved protocol-2 UI has no Profile control. Keep its device controls reachable
+            // without bringing back a native top bar or changing its offline data/cache contract.
+            self.showServerFallback = true
         }
     }
     func confirmUI() async {

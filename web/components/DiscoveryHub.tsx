@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'next/navigation';
 import { api, getCurrentUser } from '@/lib/api';
@@ -22,6 +23,7 @@ const COUNTRIES = ['all', 'JP', 'KR', 'CN'] as const;
 
 type CatalogGroup = { country: DiscoveryCountry; items: Trending[] };
 interface Props {
+  heroTarget: HTMLElement | null;
   owner: string; state?: DiscoveryState; stateLoading: boolean; stateError: boolean; onRetryState: () => void;
   groups: CatalogGroup[]; picks: Pick[]; whyOf: (p: Pick) => CardWhy;
   waiting: boolean; failed: boolean; onRetry: () => void;
@@ -30,7 +32,7 @@ interface Props {
 }
 
 /** One personal page, built from the same cached catalog and recommendation answers as Discover's old rails. */
-export function DiscoveryHub({ owner, state, stateLoading, stateError, onRetryState, groups, picks, whyOf, waiting, failed, onRetry, onFind, stateKey }: Props) {
+export function DiscoveryHub({ heroTarget, owner, state, stateLoading, stateError, onRetryState, groups, picks, whyOf, waiting, failed, onRetry, onFind, stateKey }: Props) {
   const qc = useQueryClient();
   const params = useSearchParams();
   const [filters, setFilters] = useState<DiscoveryFilters>(() => discoveryFiltersFrom(params));
@@ -121,7 +123,7 @@ export function DiscoveryHub({ owner, state, stateLoading, stateError, onRetrySt
 
   return (
     <div data-discovery-hub>
-      <DiscoverHero slides={hero} waiting={waiting && !hero.length} onPick={(t) => setPreview(t as DiscoveryItem)} actionLabel={tr('Explore this title')} underChrome={false} />
+      {heroTarget && createPortal(<DiscoverHero slides={hero} waiting={waiting && !hero.length} onPick={(t) => setPreview(t as DiscoveryItem)} actionLabel={tr('Explore this title')} underChrome={false} />, heroTarget)}
       <section className="pb-4 pt-6 lg:pt-8" aria-label={tr('Your discovery interests')}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>

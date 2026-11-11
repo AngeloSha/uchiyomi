@@ -27,7 +27,9 @@ export type SettingsCondition =
   /** A pointer that can hover: a computer, not a phone or tablet held alone (the rows that do nothing on touch). */
   | 'pointer'
   /** v0.90.0: the household has chapter comments -- two or more members on the owned library, not Uchiyomi Desktop. */
-  | 'talk';
+  | 'talk'
+  /** The current native wrapper exposes Profile's device-local server controls. */
+  | 'native-app-controls';
 
 export interface SettingsCategory {
   /** The page's `?tab=` (lower case; an older capitalised tab name is read case-blind). */

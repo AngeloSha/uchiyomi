@@ -2,7 +2,34 @@ import 'fake-indexeddb/auto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { openDB } from 'idb';
-import { nativeHost, usesNativeCache, publicServerURL } from '../lib/native';
+import { nativeHost, usesNativeCache, publicServerURL, hasNativeAppActions, requestNativeAppAction, acknowledgeNativeAppControls } from '../lib/native';
+
+test('server controls are optional and expose only fixed actions on a supported host', () => {
+  const saved = (globalThis as any).window;
+  const called: string[] = [];
+  try {
+    for (const marker of [undefined, { platform: 'ios', protocolVersion: 1, appActions: { version: 1, request: () => {} } },
+      { platform: 'ios', protocolVersion: 2 }, { platform: 'ios', protocolVersion: 2, appActions: { version: 2, request: () => {} } },
+      { platform: 'ios', protocolVersion: 2, appActions: { version: 1, request: null } }]) {
+      (globalThis as any).window = { uchiyomiNative: marker };
+      assert.equal(hasNativeAppActions(), false);
+      assert.equal(requestNativeAppAction('servers'), false);
+      assert.equal(acknowledgeNativeAppControls(), false);
+    }
+    (globalThis as any).window = { uchiyomiNative: { platform: 'ios', protocolVersion: 2,
+      appActions: { version: 1, request: (action: string) => called.push(action) } } };
+    assert.equal(hasNativeAppActions(), true);
+    assert.equal(requestNativeAppAction('servers'), true);
+    assert.equal(requestNativeAppAction('reload'), true);
+    assert.equal(requestNativeAppAction('open-url' as any), false);
+    assert.equal(acknowledgeNativeAppControls(), true);
+    assert.equal(acknowledgeNativeAppControls(false), true);
+    assert.deepEqual(called, ['servers', 'reload', 'controls-ready', 'controls-unavailable']);
+    (globalThis as any).window.uchiyomiNative.appActions.request = () => { throw new Error('Host unavailable'); };
+    assert.equal(requestNativeAppAction('servers'), false);
+    assert.equal(acknowledgeNativeAppControls(), false);
+  } finally { (globalThis as any).window = saved; }
+});
 
 test('only the explicit supported iOS host opts out of the PWA cache', () => {
   const saved = (globalThis as any).window;

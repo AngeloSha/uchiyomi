@@ -16,6 +16,7 @@ import { keys, t as tr } from './i18n';
 import { fold, rankMatch, type SettingsIndex } from './settingsIndex';
 import { PROFILE_SETTINGS } from './settingsIndex.profile';
 import { ADMIN_SETTINGS, SETTINGS_NAME_ALIASES } from './settingsIndex.admin';
+import { hasNativeAppActions } from './native';
 
 export { fold };
 
@@ -35,6 +36,8 @@ const LABELS = keys(
 export type DestinationLabel = (typeof LABELS)[number];
 
 export interface Destination {
+  /** Requires the current wrapper's Profile controls; never offered in a browser or older wrapper. */
+  nativeControls?: boolean;
   /** Stable: React's key and the tests'. */
   key: string;
   /** What the row says, an English key shown through tr(). A setting's is its row's own label (lib/settingsIndex*.ts). */
@@ -123,7 +126,7 @@ export function consoleDestinations(index: SettingsIndex): Destination[] {
   const out: Destination[] = index.categories.map((c) => ({
     key: `${index.page}-cat-${c.id}`, label: c.label, where: c.group ? [top, c.group] : [top],
     href: c.id === first ? path : `${path}?tab=${c.id}`,
-    admin: admin || undefined, desktopHidden: web(c.when) || undefined,
+    admin: admin || undefined, desktopHidden: web(c.when) || undefined, nativeControls: c.when?.includes('native-app-controls') || undefined,
     // A section's name before v0.86.0 finds the page it became.
     keywords: [...(c.keywords ?? []), ...aliasesOf(c.label)],
   }));
@@ -134,6 +137,7 @@ export function consoleDestinations(index: SettingsIndex): Destination[] {
       key: `${index.page}-${e.id}`, label: e.label, where: [top, ...(cat.group ? [cat.group] : []), cat.label],
       href: `${path}?tab=${cat.id}&section=${e.id}`,
       admin: admin || undefined, desktopHidden: web(e.when) || web(cat.when) || undefined,
+      nativeControls: e.when?.includes('native-app-controls') || cat.when?.includes('native-app-controls') || undefined,
       keywords: [...(e.keywords ?? []), ...aliasesOf(e.label)],
     });
   }
@@ -153,12 +157,13 @@ export const DESTINATIONS: readonly Destination[] = [...CONSOLES.filter(isPage),
  * A match inside a word ("ate" in "Updates") counts from three characters, where two are noise ("pd" found Updates
  * and OPDS) -- except in Chinese and Japanese, written without spaces, where there is no word start to look for.
  */
-export function findDestinations(query: string, viewer: { admin: boolean; desktop: boolean; limit?: number; label?: (k: string) => string }): Destination[] {
+export function findDestinations(query: string, viewer: { admin: boolean; desktop: boolean; nativeControls?: boolean; limit?: number; label?: (k: string) => string }): Destination[] {
   if (fold(query.trim()).length < 2) return [];
   const label = viewer.label ?? ((k: string) => tr(k));
   const rank = (d: Destination): number => rankMatch(query, [label(d.label), d.label], d.keywords ?? []);
   return DESTINATIONS
-    .filter((d) => (!d.admin || viewer.admin) && !(d.desktopHidden && viewer.desktop))
+    .filter((d) => (!d.admin || viewer.admin) && !(d.desktopHidden && viewer.desktop)
+      && (!d.nativeControls || (viewer.nativeControls ?? hasNativeAppActions())))
     .map((d, i) => ({ d, i, r: rank(d) }))
     .filter((x) => x.r >= 0)
     .sort((a, b) => a.r - b.r || a.i - b.i)

@@ -68,6 +68,9 @@ export const PROFILE_SETTINGS: SettingsIndex = {
     { id: 'crop-borders', cat: 'reading', more: 'reading-more', label: 'Crop page borders', keywords: ['margins', 'trim', 'white borders'] },
 
     // ---- This device ----
+    { id: 'server-connections', cat: 'device', label: 'Server connections', when: ['web', 'native-app-controls'],
+      keywords: ['manage servers', 'saved servers', 'switch server', 'reload interface', 'iphone', 'ipad'],
+      help: 'Choose a server saved on this device.' },
     { id: 'downloads', cat: 'device', label: 'Offline downloads', when: ['web'], keywords: ['offline', 'downloaded chapters'] },
     { id: 'keep-offline', cat: 'device', label: 'Keep favorites offline', when: ['web'], keywords: ['auto download', 'offline', 'favourites'] },
     { id: 'storage', cat: 'device', label: 'Storage used', when: ['web'], keywords: ['space', 'quota', 'eviction', 'protect downloads', 'persist'] },

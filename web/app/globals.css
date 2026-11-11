@@ -679,3 +679,25 @@ html.lenis, html.lenis body { height: auto; }
 @media (forced-colors: active) {
   .hero-title .hero-title-text { background: none; color: CanvasText; -webkit-text-fill-color: CanvasText; filter: none; text-shadow: none; }
 }
+
+/* A supported native host may choose a vertical presentation before the desktop breakpoint. The web
+   still owns its icons, accent, links and layers. Only nativeLayout.ts sets this derived flag after
+   validating the protocol-2 host; an arbitrary attribute on an ordinary browser cannot opt in. */
+@media (max-width: 1023.98px) {
+  :root[data-uchiyomi-native-sidebar] { --rail-w: 4.5rem; }
+  :root[data-uchiyomi-native-sidebar] .banner-stack { padding-inline-start: var(--rail-w); }
+  :root[data-uchiyomi-native-sidebar] .shell { padding-inline-start: var(--rail-w); padding-bottom: max(3rem, env(safe-area-inset-bottom)); }
+  :root[data-uchiyomi-native-sidebar] .bleed {
+    margin-inline-start: calc(-1rem - var(--rail-w)); margin-inline-end: -1rem;
+    width: calc(100% + 2rem + var(--rail-w));
+  }
+  :root[data-uchiyomi-native-sidebar] .bleed-lg { margin-inline-start: calc(-1 * var(--rail-w)); width: calc(100% + var(--rail-w)); }
+  :root[data-uchiyomi-native-sidebar] .bleed-pad { padding-inline-start: calc(1rem + var(--rail-w)); scroll-padding-inline-start: calc(1rem + var(--rail-w)); }
+  :root[data-uchiyomi-native-sidebar] :is([data-selection-toolbar], [data-continue-bar]) {
+    inset-inline-start: var(--rail-w); bottom: 0; padding-bottom: max(.75rem, env(safe-area-inset-bottom));
+  }
+  :root[data-uchiyomi-native-sidebar] :is([data-shell-modal], [data-shell-sheet], [data-shell-editor], [data-shell-extraction]) { inset-inline-start: var(--rail-w); }
+  /* Dialogs retain their compact-screen message band; notices use the cleared rail/content geometry
+     instead of reserving space for a bottom bar that is no longer present. */
+  :root[data-uchiyomi-native-sidebar] [data-notices] { inset-inline-start: var(--rail-w); bottom: var(--notice-bottom-lg); }
+}

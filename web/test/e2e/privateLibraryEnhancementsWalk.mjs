@@ -6,7 +6,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { fixtureLogin, waitForLoginCooldown } from './loginCooldown.mjs';
-import { plannedOfflineEvidence } from './plannedOfflineEvidence.mjs';
+import { plannedOfflineEvidence, restorePlannedOnline } from './plannedOfflineEvidence.mjs';
 
 const base=process.env.BASE||'http://127.0.0.1:18310';
 const url=new URL(base);
@@ -15,8 +15,10 @@ const out=process.env.OUT||'/tmp/uchiyomi-private-library-walk';mkdirSync(out,{r
 const nonce=randomUUID().replaceAll('-','');
 const nativeProbeCache='uchi-private-native-cache-'+nonce;
 const title=`Private browser fixture ${nonce}`,password=`Fixture-${randomBytes(24).toString('base64url')}-A9`;
-const accounts=[],checks=[],failures=[],consoleErrors=[],serverErrors=[],expectedNetworkResponses=[],authResponses=[],expectedErrors=new Set();
-let browser,page,adminToken,ownerToken,otherToken,owner,other,seriesId,bookId,loginAttempt=-1,offline=false,step=0,authTransition=true,nativeOwnerProbe,nativeOtherProbe,offlineEvidence;
+const accounts=[],checks=[],failures=[],consoleErrors=[],serverErrors=[],expectedNetworkResponses=[],authResponses=[],connectivityTransitions=[],expectedErrors=new Set();
+let browser,page,adminToken,ownerToken,otherToken,owner,other,seriesId,bookId,loginAttempt=-1,offline=false,connectivity='online',step=0,authTransition=true,nativeOwnerProbe,nativeOtherProbe,offlineEvidence;
+// Account's Change password form also contains password inputs. It is never a sign-in screen.
+const LOGIN_FORM='form:has(input[type=text]):has(input[type=password])';
 const check=(name,condition,detail='')=>{checks.push({name,pass:!!condition,...(!condition?{detail}:{} )});console.log(`[${condition?'PASS':'FAIL'}] ${name}${!condition?' '+detail:''}`);if(!condition)failures.push(name);};
 const shot=async name=>page.screenshot({path:`${out}/${String(++step).padStart(2,'0')}-${name}.png`,waitForFonts:false});
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -43,22 +45,35 @@ async function clickText(text,scope='button'){
 }
 async function signIn(account){
   authTransition=true;
-  await page.goto(base,{waitUntil:'networkidle2'});await page.waitForSelector('form input[type=password]',{visible:true});
+  await page.goto(base,{waitUntil:'networkidle2'});await page.waitForSelector(LOGIN_FORM,{visible:true});
   let token;
   for(let attempt=0;attempt<2;attempt++){
     loginAttempt=attempt;
-    await page.locator('form input[type=text]').fill(account.username);await page.locator('form input[type=password]').fill(password);
+    await page.locator(`${LOGIN_FORM} input[type=text]`).fill(account.username);await page.locator(`${LOGIN_FORM} input[type=password]`).fill(password);
     const pending=page.waitForResponse(r=>new URL(r.url()).pathname==='/auth/login'&&r.request().method()==='POST');
-    await page.locator('form button[type=submit]').click();const response=await pending;
+    await page.locator(`${LOGIN_FORM} button[type=submit]`).click();const response=await pending;
     if(response.status()===429&&attempt===0){await waitForLoginCooldown(response.headers()['retry-after']);continue;}
-    assert.equal(response.status(),200,'fixture browser login');token=(await response.json()).accessToken;break;
+    assert.equal(response.status(),200,'fixture browser login');const result=await response.json();assert.equal(result.user.id,account.id,'server-confirmed browser identity');token=result.accessToken;break;
   }
-  loginAttempt=-1;await page.waitForSelector('[data-topbar]',{visible:true});await page.waitForSelector('form input[type=password]',{hidden:true});authTransition=false;return token;
+  loginAttempt=-1;await page.waitForSelector('[data-topbar]',{visible:true});await page.waitForSelector(LOGIN_FORM,{hidden:true});
+  await page.waitForFunction(id=>JSON.parse(localStorage.getItem('uchiyomi.offlineUser')||'null')?.id===id,{},account.id);
+  authTransition=false;return token;
 }
 async function signOut(){
   authTransition=true;
   await page.goto(base+'/profile/?tab=account',{waitUntil:'networkidle2'});await page.waitForSelector('#sign-out');
-  await clickText('Sign out','#sign-out button');await page.waitForSelector('form input[type=password]',{visible:true});
+  const loggedOut=page.waitForResponse(response=>new URL(response.url()).pathname==='/auth/logout'&&response.request().method()==='POST');
+  await clickText('Sign out','#sign-out button');assert.equal((await loggedOut).status(),200,'fixture logout reached the server');
+  await page.waitForSelector(LOGIN_FORM,{visible:true});
+  assert.equal(await page.evaluate(()=>localStorage.getItem('uchiyomi.offlineUser')),null,'sign-out cleared the saved identity');
+}
+async function goOffline(){
+  offline=true;connectivity='cut';connectivityTransitions.push({state:connectivity,atEpoch:Date.now(),phase:checks.at(-1)?.name||'setup'});
+  await page.setOfflineMode(true);
+}
+async function goOnline(){
+  connectivity='reconnecting';connectivityTransitions.push({state:connectivity,atEpoch:Date.now(),phase:checks.at(-1)?.name||'setup'});
+  await restorePlannedOnline(page,proof=>{offline=false;connectivity='online';connectivityTransitions.push(proof);},{origin:base,phase:checks.at(-1)?.name||'setup'});
 }
 async function dbChapters(){return page.evaluate(()=>new Promise((resolve,reject)=>{
   const request=indexedDB.open('yomi-offline');request.onerror=()=>reject(request.error);request.onsuccess=()=>{const db=request.result;
@@ -85,7 +100,7 @@ try{
   }
   [owner,other]=accounts;
   browser=await puppeteer.launch({headless:true,args:['--no-sandbox','--disable-dev-shm-usage','--disable-gpu']});page=await browser.newPage();await page.setViewport({width:1280,height:900});
-  offlineEvidence=plannedOfflineEvidence(page,()=>offline,()=>checks.at(-1)?.name||'setup');
+  offlineEvidence=plannedOfflineEvidence(page,()=>offline,()=>checks.at(-1)?.name||'setup',()=>connectivity);
   page.on('pageerror',error=>consoleErrors.push(error.message));
   page.on('console',message=>{if(message.type()!=='error')return;const location=message.location()?.url||'',text=message.text();
     if(/401/.test(text)&&[base+'/auth/me',base+'/auth/refresh'].includes(location))return;
@@ -146,10 +161,10 @@ try{
   check('explicit offline copy is stored under the owner identity',(await dbChapters()).some(row=>row.key===`${owner.id}:${bookId}`));
   check('private API and image replies never enter implicit service-worker caches',(await privateCacheEntries()).length===0);
   await page.goto(`${base}/reader/?book=${bookId}&page=1`,{waitUntil:'networkidle2'});await page.waitForSelector('img');
-  offline=true;await page.setOfflineMode(true);await page.reload({waitUntil:'domcontentloaded'});
+  await goOffline();await page.reload({waitUntil:'domcontentloaded'});
   await page.waitForFunction(()=>[...document.images].some(image=>image.src.startsWith('blob:')&&image.complete&&image.naturalWidth>0),{timeout:25000});
   check('owner can read the explicitly saved private page offline',true);await shot('owner-offline');
-  await page.setOfflineMode(false);offline=false;await signOut();otherToken=await signIn(other);
+  await goOnline();await signOut();otherToken=await signIn(other);
   check('other account has independent shared-default preference',(await uiRequest('/api/personal/privacy',{token:otherToken})).data.defaultPrivate===false);
   for(const path of [`/api/series/${seriesId}`,`/api/series/${seriesId}/privacy`,`/api/books/${bookId}/download-manifest`,`/img/books/${bookId}/page/1`]){
     const response=await uiRequest(path,{token:otherToken,expected:404});check('other account cannot open '+path.split('/').slice(1,3).join('/'),response.status===404);
@@ -164,19 +179,19 @@ try{
   check('account switch keeps private title out of offline library UI',!(await page.$eval('body',el=>el.innerText)).includes(title));
   check('owner offline bytes survive account switch with their owner key',(await dbChapters()).some(row=>row.key===`${owner.id}:${bookId}`));
   check('switch leaves no private response in implicit caches',(await privateCacheEntries()).length===0);await shot('other-account');
-  offline=true;await page.setOfflineMode(true);
+  await goOffline();
   check('other account receives no old private page from network or service-worker cache',(await uiRequest(`/img/books/${bookId}/page/1`,{token:otherToken,expected:404})).status!==200);
   await page.goto(`${base}/reader/?book=${bookId}&page=1`,{waitUntil:'domcontentloaded'});
   await page.waitForFunction(()=>document.body.innerText.toLowerCase().includes('chapter unavailable'),{timeout:25000});
   check('other account cannot render the owner offline chapter',!(await page.$eval('body',el=>el.innerText)).includes(title)
     &&!(await page.evaluate(()=>[...document.images].some(image=>image.src.startsWith('blob:')&&image.naturalWidth>0))));await shot('other-offline-denied');
-  await page.setOfflineMode(false);offline=false;await signOut();ownerToken=await signIn(owner);
-  await page.goto(`${base}/reader/?book=${bookId}&page=1`,{waitUntil:'networkidle2'});offline=true;await page.setOfflineMode(true);await page.reload({waitUntil:'domcontentloaded'});
+  await goOnline();await signOut();ownerToken=await signIn(owner);
+  await page.goto(`${base}/reader/?book=${bookId}&page=1`,{waitUntil:'networkidle2'});await goOffline();await page.reload({waitUntil:'domcontentloaded'});
   await page.waitForFunction(()=>[...document.images].some(image=>image.src.startsWith('blob:')&&image.complete&&image.naturalWidth>0),{timeout:25000});
   check('returning owner retains access to their explicit offline bytes',true);await shot('returned-owner-offline');
 }catch(error){failures.push(error.stack||error.message);console.error(error.stack||error.message);if(page&&!page.isClosed()){await shot('failure').catch(()=>{});writeFileSync(`${out}/failure-page.txt`,`${page.url()}\n${await page.$eval('body',el=>el.innerText).catch(()=> '')}`);}}
 finally{
-  if(page&&offline)await page.setOfflineMode(false).catch(()=>{});
+  if(page&&offline)await goOnline().catch(error=>failures.push('fixture reconnect cleanup: '+error.message));
   if(page&&!page.isClosed())await page.evaluate(name=>caches.delete(name),nativeProbeCache).catch(()=>{});
   // Stop the app's ordinary authenticated polling before deleting its fixture account. A deliberate
   // account deletion is cleanup, not evidence of an unexpected runtime authorization failure.
@@ -202,7 +217,7 @@ finally{
       expectedNetworkResponses.push('unauthenticated document bootstrap401: '+url);consoleErrors.splice(i,1);
     }
   }
-  const result={base,image:process.env.E2E_IMAGE||null,checks,failures,consoleErrors,observedConsoleErrors,serverErrors,expectedNetworkResponses,authResponses,plannedOfflineFailures:offlineEvidence?.failures||[],nativeCache:{owner:nativeOwnerProbe,other:nativeOtherProbe},fixtures:{owner:owner?.id,other:other?.id,seriesId,bookId},serviceWorkerBypass:false};
+  const result={base,image:process.env.E2E_IMAGE||null,checks,failures,consoleErrors,observedConsoleErrors,serverErrors,expectedNetworkResponses,authResponses,connectivityTransitions,plannedOfflineFailures:offlineEvidence?.failures||[],nativeCache:{owner:nativeOwnerProbe,other:nativeOtherProbe},fixtures:{owner:owner?.id,other:other?.id,seriesId,bookId},serviceWorkerBypass:false};
   writeFileSync(`${out}/result.json`,JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({checks:checks.length,passed:checks.filter(check=>check.pass).length,failures,consoleErrors,serverErrors}));
   process.exitCode=failures.length||consoleErrors.length||serverErrors.length?1:0;
 }

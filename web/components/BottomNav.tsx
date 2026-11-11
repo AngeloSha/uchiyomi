@@ -26,7 +26,11 @@ const items = [
   { href: '/profile', label: NAV_LABELS[5], Icon: IcUser, match: (p: string) => p.startsWith('/profile') || p.startsWith('/settings') || p.startsWith('/admin') },
 ];
 
-export function BottomNav() {
+export function BottomNav({ nativeSide = false }: { nativeSide?: boolean }) {
+  return nativeSide ? null : <BottomNavigation />;
+}
+
+function BottomNavigation() {
   const path = usePathname();
   const { user, status } = useAuth();
   // On the notices' layer stack (lib/layers.ts): with the nav up, a notice sits above it rather than under it,

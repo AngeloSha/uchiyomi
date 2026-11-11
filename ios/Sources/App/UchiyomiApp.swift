@@ -79,28 +79,19 @@ struct ReaderView: View {
                 if model.progress != nil {
                     ReaderLoadingView(model: model)
                 } else if let webView = model.webView {
-                    ReaderWebView(view: webView, model: model).id(ObjectIdentifier(webView))
+                    if #available(iOS 27.1, *) {
+                        ReaderAdaptiveViewport(view: webView, model: model).id(ObjectIdentifier(webView))
+                    } else {
+                        ReaderWebView(view: webView, model: model).id(ObjectIdentifier(webView))
+                    }
                 } else {
                     ServerConnectionView(model: model)
                 }
             }
             .navigationTitle("")
-            .toolbar(model.webView == nil ? .hidden : .visible, for: .navigationBar)
+            .toolbar(.hidden, for: .navigationBar)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                if model.webView != nil {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            Section(model.serverName) {
-                                Button("Servers", systemImage: "server.rack") { model.showingServers = true }
-                                Button("Reload", systemImage: "arrow.clockwise") { Task { await model.reload() } }
-                            }
-                        } label: { Image(systemName: "ellipsis.circle") }
-                        .disabled(model.busy).accessibilityLabel("Reader menu")
-                    }
-                }
-            }
-            .safeAreaInset(edge: .bottom) {
+            .safeAreaInset(edge: .bottom, spacing: 0) {
                 if model.webView != nil && (model.awaitingConfirmation || model.status != nil || model.error != nil) {
                     VStack(spacing: 10) {
                         if model.awaitingConfirmation {
@@ -122,6 +113,7 @@ struct ReaderView: View {
                             Text(error).font(.footnote)
                             HStack {
                                 Button("Try again") { Task { await model.retry() } }
+                                Button("Servers") { model.showingServers = true }
                                 if model.canRecover {
                                     Button("Restore previous version") { Task { await model.recover() } }
                                 }
@@ -130,9 +122,31 @@ struct ReaderView: View {
                     }.padding(12).frame(maxWidth: .infinity).background(.regularMaterial)
                 }
             }
+            .overlay(alignment: .bottomTrailing) {
+                if model.webView != nil && model.showServerFallback {
+                    Button("Servers") { model.showingServers = true }
+                        .font(.footnote.weight(.semibold)).foregroundStyle(ReaderTheme.accent)
+                        .padding(.horizontal, 16).padding(.vertical, 12)
+                        .background(ReaderTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+                        .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(ReaderTheme.accent.opacity(0.4), lineWidth: 1) }
+                        .padding(.trailing, 16).padding(.bottom, 88)
+                        .disabled(model.busy).accessibilityLabel("Manage servers")
+                }
+            }
             .navigationDestination(isPresented: $model.showingServers) { ServerManagementView(model: model) }
         }
         .tint(ReaderTheme.accent).preferredColorScheme(.dark)
+    }
+}
+
+/// The OS supplies the available navigation edge; the web app retains its own icons and themed controls.
+@available(iOS 27.1, *)
+private struct ReaderAdaptiveViewport: View {
+    let view: WKWebView
+    @ObservedObject var model: ReaderModel
+    @Environment(\.toolbarVerticalEdge) private var edge
+    var body: some View {
+        ReaderWebView(view: view, model: model, navigationLayout: edge == nil ? .bottom : .side)
     }
 }
 
@@ -297,16 +311,31 @@ private struct ServerConnectionView: View {
 private struct ReaderWebView: UIViewRepresentable {
     let view: WKWebView
     let model: ReaderModel
+    var navigationLayout: NativeNavigationLayout?
     func makeCoordinator() -> Coordinator { Coordinator(model: model) }
     func makeUIView(context: Context) -> WKWebView {
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
+        if model.webView === view {
+            model.appActions?.setNavigationLayout(navigationLayout)
+            if !view.isLoading { model.appActions?.documentDidFinish() }
+        }
         return view
     }
-    func updateUIView(_ view: WKWebView, context: Context) {}
+    func updateUIView(_ view: WKWebView, context: Context) {
+        guard model.webView === view else { return }
+        model.appActions?.setNavigationLayout(navigationLayout)
+    }
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         let model: ReaderModel
         init(model: ReaderModel) { self.model = model }
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            model.readerDocumentStarted(webView)
+        }
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            guard model.webView === webView else { return }
+            model.appActions?.documentDidFinish()
+        }
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
             guard model.webView === webView, navigationAction.targetFrame == nil, let url = navigationAction.request.url else { return nil }
             if model.isLocal(url) { webView.load(navigationAction.request) }
@@ -327,6 +356,7 @@ private struct ReaderWebView: UIViewRepresentable {
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { model.navigationFailed(webView, error: error) }
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
             guard model.webView === webView else { return }
+            model.appActions?.reset()
             Task { await model.reload() }
         }
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { model.navigationFailed(webView, error: error) }

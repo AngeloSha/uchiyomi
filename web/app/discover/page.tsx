@@ -98,6 +98,8 @@ function DiscoverInner() {
   const [searchKind, setSearchKind] = useState<'title' | 'author' | 'artist'>(() => { const kind = params.get('creator'); return kind === 'author' || kind === 'artist' ? kind : 'title'; });
   const [openingTab] = useState(() => openingDiscoveryTab(params.get('tab'), arrivedQ));
   const [tabChoice, setTab] = useState<DiscoveryTab | null>(openingTab);
+  // The hero keeps its personal-hub state, while the shared controls stay mounted across tab changes.
+  const [heroTarget, setHeroTarget] = useState<HTMLDivElement | null>(null);
   const tabWrites = useRef<Promise<void>>(Promise.resolve());
 
 
@@ -621,61 +623,55 @@ function DiscoverInner() {
   };
   return (
     <div className="min-h-screen-d px-4 lg:px-0">
-      <header className="pt-5 lg:pt-7">
-        <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
-          <div className="min-w-0">
-            {/* The listing's name is the wall's own heading, a few lines down (v0.98.0: it was said here as well). */}
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-              <h1 className="font-display text-2xl font-bold tracking-tight lg:text-3xl">{tr('Discover')}</h1>
-              {/* In the HEADER and not on the chip row below, deliberately: a chip anchored there would sit among the
-                  wall's own controls -- and search is one of the surfaces the reveal changes. */}
-              <AdultToggle alsoWhen={showAdultChip} className="shrink-0 text-xs" />
-            </div>
-            <p className="mt-1 max-w-prose text-[11px] text-fog-500">
-              {tr('Manual AniList actions can contact AniList even when automatic lookups are off.')}
-            </p>
+      <h1 className="sr-only">{tr('Discover')}</h1>
+      {tabReady && tab === 'for-you' && user?.id && <div ref={setHeroTarget} data-discovery-hero-slot />}
+      <header className="mb-5 mt-4 rounded-2xl border border-ink-700/70 bg-ink-900/30 p-4 lg:p-5" data-discovery-controls>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div role="tablist" aria-label={tr('Discover')} className="flex gap-2" data-discovery-tabs>
+            {(['for-you', 'sources'] as const).map((key) => <button key={key} type="button" role="tab" id={`discover-tab-${key}`}
+              aria-selected={tab === key} aria-controls={`discover-panel-${key}`} tabIndex={tab === key ? 0 : -1}
+              className={`chip min-h-11 px-5 text-sm ${tab === key ? 'chip-active' : ''}`} onClick={() => chooseTab(key)}
+              onKeyDown={(e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') {
+                e.preventDefault(); const next = e.key === 'Home' ? 'for-you' : e.key === 'End' ? 'sources' : key === 'for-you' ? 'sources' : 'for-you';
+                chooseTab(next); document.getElementById(`discover-tab-${next}`)?.focus();
+              } }}>{key === 'for-you' ? tr('For you') : tr('Sources')}</button>)}
           </div>
-          <form onSubmit={search} className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-            <select value={searchKind} aria-label={tr('Search by')}
-              onChange={(e) => { const kind = e.target.value as 'title' | 'author' | 'artist'; setSearchKind(kind); if (mode === 'search') writeQ(term, kind); }}
-              className="field max-w-28 py-2.5 text-sm">
-              <option value="title">{tr('Title')}</option>
-              <option value="author">{tr('Author')}</option>
-              <option value="artist">{tr('Artist')}</option>
-            </select>
-            <div className="field flex min-w-0 flex-1 items-center gap-2 py-0 sm:w-72 lg:w-80">
-              <IcSearch width={17} height={17} className="shrink-0 text-fog-500" />
-              <input value={q} onChange={(e) => setQ(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Escape') backToNewest(); }}
-                placeholder={tr('Search all sources…')} aria-label={tr('Search all sources…')}
-                className="w-full bg-transparent py-2.5 text-sm text-fog-50 outline-hidden placeholder:text-fog-500" />
-              {q && (
-                <button type="button" onClick={backToNewest} aria-label={tr('Close')} className="shrink-0 text-fog-500 hover:text-fog-200">
-                  <IcX width={15} height={15} />
-                </button>
-              )}
-            </div>
-            <button className="btn-accent shrink-0 px-5 py-2.5 text-sm">{tr('Search')}</button>
-          </form>
+          <AdultToggle alsoWhen={showAdultChip} className="shrink-0 text-xs" />
         </div>
+        <form onSubmit={search} className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] gap-2 sm:grid-cols-[auto_minmax(0,28rem)_auto] sm:justify-start">
+          <select value={searchKind} aria-label={tr('Search by')}
+            onChange={(e) => { const kind = e.target.value as 'title' | 'author' | 'artist'; setSearchKind(kind); if (mode === 'search') writeQ(term, kind); }}
+            className="field min-h-11 max-w-28 py-2.5 text-sm">
+            <option value="title">{tr('Title')}</option>
+            <option value="author">{tr('Author')}</option>
+            <option value="artist">{tr('Artist')}</option>
+          </select>
+          <div className="field flex min-w-0 items-center gap-2 py-0">
+            <IcSearch width={17} height={17} className="shrink-0 text-fog-500" />
+            <input value={q} onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape') backToNewest(); }}
+              placeholder={tr('Search all sources…')} aria-label={tr('Search all sources…')}
+              className="w-full min-w-0 bg-transparent py-2.5 text-sm text-fog-50 outline-hidden placeholder:text-fog-500" />
+            {q && (
+              <button type="button" onClick={backToNewest} aria-label={tr('Close')} className="shrink-0 text-fog-500 hover:text-fog-200">
+                <IcX width={15} height={15} />
+              </button>
+            )}
+          </div>
+          <button className="btn-accent col-span-2 min-h-11 px-5 py-2.5 text-sm sm:col-span-1">{tr('Search')}</button>
+        </form>
         {searchKind !== 'title' && (
           <p className="mt-2 text-xs text-fog-500" role="status">
             {tr('Creator searches only ask sources that support author and artist filters.')}
           </p>
         )}
+        <p className="mt-3 max-w-prose text-[11px] text-fog-500">
+          {tr('Manual AniList actions can contact AniList even when automatic lookups are off.')}
+        </p>
       </header>
-      <div role="tablist" aria-label={tr('Discover')} className="mb-5 mt-5 flex gap-2 border-b border-ink-700/70 pb-3" data-discovery-tabs>
-        {(['for-you', 'sources'] as const).map((key) => <button key={key} type="button" role="tab" id={`discover-tab-${key}`}
-          aria-selected={tab === key} aria-controls={`discover-panel-${key}`} tabIndex={tab === key ? 0 : -1}
-          className={`chip min-h-11 px-5 text-sm ${tab === key ? 'chip-active' : ''}`} onClick={() => chooseTab(key)}
-          onKeyDown={(e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') {
-            e.preventDefault(); const next = e.key === 'Home' ? 'for-you' : e.key === 'End' ? 'sources' : key === 'for-you' ? 'sources' : 'for-you';
-            chooseTab(next); document.getElementById(`discover-tab-${next}`)?.focus();
-          } }}>{key === 'for-you' ? tr('For you') : tr('Sources')}</button>)}
-      </div>
       {!tabReady && <DiscoveryTabLoading />}
       {tabReady && tab === 'for-you' && user?.id && <section role="tabpanel" id="discover-panel-for-you" aria-labelledby="discover-tab-for-you">
-        <DiscoveryHub key={`${user.id}:${adultOn}`} owner={user.id} state={stateQ.data} stateLoading={stateQ.isPending} stateError={stateQ.isError} stateKey={stateKey}
+        <DiscoveryHub key={`${user.id}:${adultOn}`} heroTarget={heroTarget} owner={user.id} state={stateQ.data} stateLoading={stateQ.isPending} stateError={stateQ.isError} stateKey={stateKey}
           onRetryState={() => void stateQ.refetch()} waiting={heroWaiting} failed={trendQ.isError && moreTrending.every((m) => m.isError)}
           groups={TREND_RAILS.map((country, i) => ({ country, items: (i === 0 ? trending?.content ?? [] : moreTrending[i - 1]?.data?.content ?? []).filter((t) => !railAdded.has(railKey(t))) }))}
           picks={picks} whyOf={whyOf} onFind={pickRail}

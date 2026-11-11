@@ -4,6 +4,64 @@ import WebKit
 
 @MainActor
 final class ReaderLifecycleTests: XCTestCase {
+    func testOlderSavedFrontendKeepsNonReservingServerAccessUntilCurrentControlsAcknowledge() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = ProfileStore(root: root)
+        let profile = try store.profile(for: URL(string: "https://127.0.0.1:9")!, in: .init())
+        try store.save(.init(profiles: [profile], selectedID: profile.id))
+        let cache = AssetCache(root: store.directory(for: profile).appendingPathComponent("ui"))
+        let ui = try await cache.prepare(client: ReaderFixture()) { _, _ in }
+        try await cache.confirm(ui)
+        let model = ReaderModel(root: root, assetClient: { _ in UnavailableReaderFixture() })
+        func waitForFallback(_ expected: Bool) async throws {
+            for _ in 0..<200 {
+                if model.showServerFallback == expected { return }
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
+            XCTFail("Legacy server fallback did not become \(expected)")
+        }
+        do {
+            await model.restore()
+            try await waitForPath(model, "/")
+            try await waitForFallback(true)
+            let web = try XCTUnwrap(model.webView)
+            _ = try await web.evaluateJavaScript("uchiyomiNative.appActions.request('servers'); true")
+            for _ in 0..<100 {
+                if model.showingServers { break }
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
+            XCTAssertTrue(model.showingServers, "An old offline frontend must retain a usable server picker")
+            model.showingServers = false
+            let retired = try await web.evaluateJavaScript("({version:1,documentID:uchiyomiNative.appActions.documentID,action:'controls-ready'})")
+            _ = try await web.evaluateJavaScript("uchiyomiNative.appActions.request('controls-ready'); true")
+            try await waitForFallback(false)
+
+            _ = try await web.evaluateJavaScript("uchiyomiNative.appActions.request('controls-unavailable'); true")
+            try await waitForFallback(true)
+            model.dismissStatus()
+            XCTAssertTrue(model.showServerFallback, "Dismissing the outage notice must not strand server selection while Profile is offline")
+            _ = try await web.evaluateJavaScript("uchiyomiNative.appActions.request('controls-ready'); true")
+            try await waitForFallback(false)
+
+            model.readerDocumentStarted(web)
+            web.reload()
+            try await waitForPath(model, "/")
+            try await waitForFallback(true)
+            _ = try await web.callAsyncJavaScript("window.webkit.messageHandlers.appActions.postMessage(retired); return true", arguments: ["retired": retired!], in: nil, contentWorld: .page)
+            try await Task.sleep(nanoseconds: 100_000_000)
+            XCTAssertTrue(model.showServerFallback, "A retired document must not hide the new document's recovery control")
+            _ = try await web.evaluateJavaScript("uchiyomiNative.appActions.request('controls-ready'); true")
+            try await waitForFallback(false)
+            await model.addServer()
+        } catch {
+            await model.addServer()
+            throw error
+        }
+        try KeychainCookieVault(profileID: profile.id).remove()
+        try await removeFixtureStore(profile.id)
+        try FileManager.default.removeItem(at: root)
+    }
+
     private func waitForPath(_ model: ReaderModel, _ path: String) async throws {
         let view = try XCTUnwrap(model.webView)
         for _ in 0..<100 {

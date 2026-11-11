@@ -24,6 +24,8 @@ import { IncognitoBanner, useIncognito } from './IncognitoBanner';
 import { AdultBanner } from './AdultToggle';
 import { usePrefetchSeriesOnClick } from '@/lib/seriesPrefetch';
 import { scrollMemory } from '@/lib/scrollMemory';
+import { acknowledgeNativeAppControls } from '@/lib/native';
+import { useNativeNavigationLayout, usesSideNavigation } from '@/lib/nativeLayout';
 
 function Splash() {
   return (
@@ -72,8 +74,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [palette, setPalette] = useState(false);
   const [paletteSeed, setPaletteSeed] = useState('');
-  // The desktop's sidebar is mounted from lg up only: on a phone none of it is in the document (components/Sidebar.tsx).
+  // Wide browsers keep their rail. A supported iOS host may ask for that same themed rail when its layout turns vertical.
   const wide = useWideViewport();
+  const nativeLayout = useNativeNavigationLayout((status === 'authed' || status === 'offline') && !path.startsWith('/reader'));
+  const nativeSide = nativeLayout === 'side';
+  const sideNavigation = usesSideNavigation(wide, nativeLayout);
+  useEffect(() => { acknowledgeNativeAppControls(status === 'authed' || status === 'anon'); }, [status]);
 
   /**
    * An offline launch arrives at `/` -- the manifest's `start_url` -- which is a home screen assembled
@@ -155,11 +161,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {status === 'authed' && <TrackerAlert />}
       </div>
       <TopNav onSearchFocus={() => { setPaletteSeed(''); setPalette(true); }} />
-      {wide && <Sidebar />}
+      {sideNavigation && <Sidebar nativeCompact={nativeSide && !wide} />}
       <main className="shell relative z-[1] pb-28 lg:pb-12">
         <PageTransition>{children}</PageTransition>
       </main>
-      <BottomNav />
+      <BottomNav nativeSide={nativeSide} />
       {status === 'authed' && <CommandPalette open={palette} seed={paletteSeed} onClose={() => setPalette(false)} />}
     </>
   );

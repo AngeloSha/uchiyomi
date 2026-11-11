@@ -46,6 +46,15 @@ const PAGE_FILES: Record<string, string[]> = {
 const sectionIds = (files: string[]): Set<string> =>
   new Set(files.flatMap((f) => [...code(read(f)).matchAll(/\bid="([a-z0-9-]+)"/g)].map((m) => m[1])));
 const viewer = { admin: true, desktop: false, label: (k: string) => k };
+
+test('server settings search requires the native app-control capability', () => {
+  const hasServers = (nativeControls: boolean) => findDestinations('manage servers', { ...viewer, nativeControls, limit: 50 })
+    .some((d) => d.key === 'profile-server-connections');
+  assert.equal(hasServers(false), false);
+  assert.equal(hasServers(true), true);
+  assert.equal(findDestinations('manage servers', { ...viewer, nativeControls: true, desktop: true, limit: 50 })
+    .some((d) => d.key === 'profile-server-connections'), false);
+});
 /** The ids of the tasks the server lists on Admin → Maintenance (bff routes/admin.ts GET /api/admin/tasks). */
 const TASK_IDS = (() => {
   const route = readFileSync(join(ROOT, '../bff/src/routes/admin.ts'), 'utf8');

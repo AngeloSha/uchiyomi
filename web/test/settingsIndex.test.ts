@@ -31,7 +31,7 @@ const PAGES: Array<[SettingsIndex, string[]]> = [
   [PROFILE_SETTINGS, ['components/ProfileSettings.tsx']],
   [ADMIN_SETTINGS, ['components/AdminSettings.tsx', 'components/ArchiveSettings.tsx', 'components/PolitenessSettings.tsx', 'components/AdminNotifications.tsx', 'components/TranslateSettings.tsx', 'components/NetworkSettings.tsx']],
 ];
-const ALL: Record<SettingsCondition, boolean> = { web: true, 'local-accounts': true, extensions: true, pointer: true, talk: true };
+const ALL: Record<SettingsCondition, boolean> = { web: true, 'local-accounts': true, extensions: true, pointer: true, talk: true, 'native-app-controls': true };
 const en = (k: string) => k;
 const ids = (files: string[]) => new Set(files.flatMap((f) => [...code(read(f)).matchAll(/\bid="([a-z0-9-]+)"/g)].map((m) => m[1])));
 /** An id on these pages that is no row: an input's own id, which its label points at. */
@@ -134,6 +134,8 @@ test('search finds a row by its words, in the reader\'s language, by its old nam
   assert.ok(!find(ADMIN_SETTINGS, 'registration', { conds: { ...ALL, 'local-accounts': false } }).includes('registration'), 'SSO-only is offered sign-ups');
   assert.ok(!find(ADMIN_SETTINGS, 'extension', { conds: { ...ALL, extensions: false } }).some((id) => id.startsWith('extension-')), 'no engine, and the extension rows are offered');
   assert.ok(!find(PROFILE_SETTINGS, 'compact', { conds: { ...ALL, pointer: false } }).includes('compact-chapters'), 'a phone is offered a computer-only row');
+  assert.ok(find(PROFILE_SETTINGS, 'manage servers').includes('server-connections'), 'native server controls must be discoverable');
+  assert.ok(!find(PROFILE_SETTINGS, 'manage servers', { conds: { ...ALL, 'native-app-controls': false } }).includes('server-connections'), 'a browser or older host must not be offered unavailable native controls');
   assert.deepEqual(find(ADMIN_SETTINGS, 'b'), [], 'one character searches');
 });
 

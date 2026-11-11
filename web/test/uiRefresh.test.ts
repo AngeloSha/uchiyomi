@@ -77,6 +77,10 @@ test('the sidebar: who sees which item', () => {
   assert.ok(!names({ downloader: false, admin: false, desktop: false }).includes('/discover'), 'Discover for an account that may not add series');
   assert.ok(!names({ downloader: true, admin: false, desktop: false }).includes('/admin'), 'Admin for a member');
   assert.ok(!names({ downloader: true, admin: true, desktop: true }).includes('/downloads'), 'Offline in Uchiyomi Desktop, where the chapters are on the disk');
+  const compact = names({ downloader: false, admin: false, desktop: false, nativeCompact: true });
+  assert.ok(compact.includes('/search') && compact.includes('/profile'), 'native compact rail loses the phone search or profile entry');
+  assert.ok(!compact.includes('/discover') && !compact.includes('/admin'), 'native compact layout bypasses navigation permissions');
+  assert.equal(new Set(compact).size, compact.length, 'native compact rail duplicates destinations');
   // The mark walk49 reads off the Library item.
   const ring = (o: Partial<NavRing>): NavRing => ({ show: false, progress: 'idle', count: 0, attention: false, slow: false, label: '', ...o });
   assert.equal(ringMark(ring({})), 'idle');
@@ -103,12 +107,16 @@ test('the sidebar is built the way the walks and the layers need it', () => {
   assert.match(src, /matches\?\.\(':focus-visible'\)/, 'a mouse click holds the panel open on the next page');
 });
 
-test('the shell: the sidebar from lg up only, the Health banner above the bar, and the hooks before any return', () => {
-  // Reintroduce `<Sidebar />` without the wide gate: a phone gets a second navigation over its bottom bar.
+test('the shell: wide or supported native side navigation, with hooks before any return', () => {
+  // Ordinary phones keep their bottom bar; the supported native presentation reuses the themed rail.
   const shell = code(read('components/AppShell.tsx'));
   const at = (s: string) => shell.indexOf(s);
   assert.ok(at('const wide = useWideViewport();') > 0 && at('const wide = useWideViewport();') < at("if (status === 'loading') return"), 'the viewport hook runs after an early return');
-  assert.ok(at('<HealthBanner />') < at('<TopNav ') && at('<TopNav ') < at('{wide && <Sidebar />}') && at('{wide && <Sidebar />}') < at('<main '),
+  const rail = at('{sideNavigation && <Sidebar nativeCompact={nativeSide && !wide} />}');
+  assert.ok(at('const nativeLayout = useNativeNavigationLayout(') > 0 && at('const nativeLayout = useNativeNavigationLayout(') < at("if (status === 'loading') return"), 'native layout hook runs after an early return');
+  assert.match(shell, /const sideNavigation = usesSideNavigation\(wide, nativeLayout\);/);
+  assert.match(shell, /<BottomNav nativeSide=\{nativeSide\} \/>/, 'native side layout leaves the bottom bar mounted');
+  assert.ok(at('<HealthBanner />') < at('<TopNav ') && at('<TopNav ') < rail && rail < at('<main '),
     'not banner, bar, sidebar, page -- in that order');
 });
 

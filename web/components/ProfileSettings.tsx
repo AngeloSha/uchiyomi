@@ -23,13 +23,13 @@ import { IcCheck, IcChevronRight, IcDownload, IcLock, IcMoments, IcSliders, IcSp
 import { t as tr, LOCALES, keys, type Locale } from '@/lib/i18n';
 import { useT } from '@/lib/I18nProvider';
 import {
-  ChoiceRow, EditorSheet, MoreOptions, Row, RowBlock, RowGroup, RowSubgroup, SegmentedRow, SelectRow, SummaryRow, SwitchRow,
+  ChoiceRow, EditorSheet, LinkRow, MoreOptions, Row, RowBlock, RowGroup, RowSubgroup, SegmentedRow, SelectRow, SummaryRow, SwitchRow,
   useAutosave, useEditor,
 } from '@/components/settings';
 import type { PageView } from '@/components/ConsoleLayout';
 import { ModeArt, RepeatedArt, ThemeArt, ToneArt, WideArt } from '@/components/settingsArt';
 import { inDesktopWindow, isDesktop } from '@/lib/desktop';
-import { usesNativeCache } from '@/lib/native';
+import { hasNativeAppActions, requestNativeAppAction, usesNativeCache } from '@/lib/native';
 import { useIncognito } from '@/components/IncognitoBanner';
 import { INCOGNITO_TEXT } from '@/lib/incognito';
 import { COMMENTS_TEXT, talkWantedOf } from '@/lib/comments';
@@ -47,7 +47,7 @@ import { PrivateLibraryDefaults } from '@/components/ContentScopePicker';
  * weekly goal and Incognito under Reading. Now each row is where its name says, a row's help folds to two lines, and a
  * category's line in the list says what is set in it.
  */
-export function useProfileSettingsViews(): { views: Record<string, PageView>; pointer: boolean } {
+export function useProfileSettingsViews(): { views: Record<string, PageView>; pointer: boolean; nativeControls: boolean } {
   // Uchiyomi Desktop (lib/desktop.ts): no This device -- no offline copies (the chapters are already on this disk;
   // copying them into the window's storage would store every one twice), no push service, and the app is installed.
   const desktop = isDesktop();
@@ -55,6 +55,8 @@ export function useProfileSettingsViews(): { views: Record<string, PageView>; po
   const { user } = useAuth();
   const { lang } = useT();
   const incognito = useIncognito();
+  const [nativeControls, setNativeControls] = useState(false);
+  useEffect(() => { setNativeControls(hasNativeAppActions()); }, []);
 
   // The reader's defaults, held here for Reading's rows and the line that sums them up.
   const [prefs, setPrefs] = useState(loadPrefs);
@@ -90,10 +92,10 @@ export function useProfileSettingsViews(): { views: Record<string, PageView>; po
     device: {
       icon: <IcDownload width={18} height={18} />, tint: 'bg-sky-500/15 text-sky-300',
       summary: [usage.usage > 0 ? bytes(usage.usage) : null, so.enabled ? tr('Keep favorites offline') : null].filter(Boolean).join(' · ') || undefined,
-      pane: <DevicePane usage={usage} />,
+      pane: <DevicePane usage={usage} nativeControls={nativeControls} />,
     },
   };
-  return { views, pointer };
+  return { views, pointer, nativeControls };
 }
 
 /**
@@ -492,12 +494,26 @@ function ReadingSection({ prefs, set }: { prefs: ReaderPrefs; set: (p: Partial<R
 const PER_SERIES = ['3', '5', '10'] as const;
 type PerSeries = (typeof PER_SERIES)[number];
 
-function DevicePane({ usage }: { usage: { usage: number; quota: number } }) {
+function DevicePane({ usage, nativeControls }: { usage: { usage: number; quota: number }; nativeControls: boolean }) {
   return (
     <>
+      <NativeServerSettings available={nativeControls} />
       <DownloadsSection usage={usage} />
       <DeviceSection />
     </>
+  );
+}
+
+/** Native server controls use the same Profile rows and theme as the rest of the app. */
+function NativeServerSettings({ available }: { available: boolean }) {
+  if (!available) return null;
+  return (
+    <RowGroup id="server-connections" title={tr('Server connections')}>
+      <LinkRow label={tr('Manage servers')} help={tr('Choose a server saved on this device.')}
+        onClick={() => { requestNativeAppAction('servers'); }} />
+      <LinkRow label={tr('Reload interface')} help={tr('Check for an updated interface from this server.')}
+        onClick={() => { requestNativeAppAction('reload'); }} />
+    </RowGroup>
   );
 }
 

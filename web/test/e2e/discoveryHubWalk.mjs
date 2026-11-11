@@ -25,6 +25,12 @@ const lit = (s) => `'${String(s).replaceAll("'", "''")}'`;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const check = (name, pass, detail = '') => { checks.push({ name, pass: !!pass, ...(!pass ? { detail } : {}) }); console.log(`[${pass ? 'PASS' : 'FAIL'}] ${name}${!pass ? ` ${detail}` : ''}`); if (!pass) failures.push(name); };
 const shot = (name, p = page) => p.screenshot({ path: `${out}/${String(++shotNumber).padStart(2, '0')}-${name}.png`, fullPage: true, waitForFonts: false });
+const heroFirst = () => page.evaluate(() => {
+  const hero = document.querySelector('[data-discover-hero]'), controls = document.querySelector('[data-discovery-controls]');
+  return !!hero && !!controls && document.querySelectorAll('[data-discovery-controls]').length === 1
+    && !!(hero.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING)
+    && hero.getBoundingClientRect().bottom <= controls.getBoundingClientRect().top + 1;
+});
 const sourcePath = (path) => /^\/api\/sources\/(latest|popular|search-all|find)(?:$|\/)/.test(path);
 async function api(path, { token = adminToken, method = 'GET', body } = {}) {
   const response = await fetch(base + path, { method, headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
@@ -121,6 +127,14 @@ try {
   check('unrevealed catalog and hero exclude configured adult genres', !catalog.data.content.some((it) => it.id === restricted.id) && !await page.evaluate((title) => document.querySelector('[data-discovery-hub]')?.textContent.includes(title), restricted.title));
   const countries = await page.$$eval('[data-discover-hero] [data-hero-slides] button', (buttons) => buttons.map((b) => b.getAttribute('aria-label')));
   check('hero includes manga, manhwa and manhua titles', [fantasy.title, mystery.title, groups.CN[0].title].every((t) => countries.includes(t)));
+  check('For you opens with the hero before one shared controls panel in DOM and layout', await heroFirst());
+  check('desktop Search stays beside its field without an empty stretch of controls', await page.evaluate(() => {
+    const form = document.querySelector('[data-discovery-controls] form'), field = form?.querySelector('input')?.closest('.field'), search = form?.querySelector('button.btn-accent');
+    if (!form || !field || !search) return false;
+    const a = field.getBoundingClientRect(), b = search.getBoundingClientRect();
+    const gap = getComputedStyle(form).direction === 'rtl' ? a.left - b.right : b.left - a.right;
+    return gap >= 0 && gap <= 16 && Math.abs(a.top - b.top) <= 1;
+  }));
   await shot('desktop-personal-hub');
   await openTitle(fantasy.title);
   check('rich preview shows trusted synopsis and completion metadata', (await page.$eval('[data-discovery-preview]', (el) => el.innerText)).includes(fantasy.description) && (await page.$eval('[data-discovery-preview]', (el) => el.innerText)).includes('Completed'));
@@ -159,9 +173,16 @@ try {
   await page.goto(base + '/discover/?tab=for-you', { waitUntil: 'networkidle2' }); await page.waitForSelector('[data-discovery-collection=trending] button');
 
   const savedTab = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/discover/state' && r.request().method() === 'PATCH' && JSON.parse(r.request().postData() || '{}').tab === 'sources');
-  await tab('sources'); assert.equal((await savedTab).status(), 200);
+  await page.focus('#discover-tab-for-you'); await page.keyboard.press('ArrowRight');
+  await page.waitForSelector('#discover-panel-sources', { visible: true }); assert.equal((await savedTab).status(), 200);
+  check('keyboard tab selection retains focus on the selected Sources control', await page.evaluate(() => document.activeElement?.id === 'discover-tab-sources' && document.activeElement.getAttribute('aria-selected') === 'true'));
   await page.waitForFunction(() => document.querySelector('[data-wall-part]')?.textContent.includes('Walk'), { timeout: 30000 });
   check('source listing requests begin only after Sources is chosen', apiRequests.some((r) => r.page === 'owner' && r.path === '/api/sources/latest'));
+  check('Sources keeps its shared controls above results without a hero placeholder', await page.evaluate(() => {
+    const controls = document.querySelector('[data-discovery-controls]'), panel = document.querySelector('#discover-panel-sources');
+    return !!controls && !!panel && document.querySelectorAll('[data-discovery-controls]').length === 1
+      && !document.querySelector('[data-discovery-hero-slot]') && controls.getBoundingClientRect().bottom <= panel.getBoundingClientRect().top + 1;
+  }));
   const catalogBeforeRemember = apiRequests.length;
   await page.goto(base + '/discover/', { waitUntil: 'networkidle2' }); await page.waitForSelector('#discover-panel-sources');
   check('remembered Sources opens without rendering the personal hub', await page.$('[data-discovery-hub]') === null && await page.$eval('#discover-tab-sources', (el) => el.getAttribute('aria-selected')) === 'true');
@@ -182,6 +203,7 @@ try {
   await page.setViewport({ width: 360, height: 780, isMobile: true, hasTouch: true });
   await page.goto(base + '/discover/?tab=for-you', { waitUntil: 'networkidle2' }); await page.waitForSelector('[data-discovery-collection=trending] button');
   check('personal hub fits a 360px phone without document overflow', await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+  check('the phone keeps the full controls panel below the hero', await heroFirst());
   await openTitle(mystery.title);
   check('rich preview remains readable on a small phone', await page.$eval('[role=dialog]', (el) => el.scrollWidth <= el.clientWidth + 1 && el.getBoundingClientRect().width <= innerWidth));
   await shot('phone-rich-preview'); await closePreview(); await shot('phone-personal-hub');

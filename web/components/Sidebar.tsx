@@ -7,7 +7,7 @@ import { Mark, Wordmark } from './Brand';
 import { RingIcon } from './ProgressRing';
 import { ringProps } from './DownloadsRing';
 import { useHealthSummary, HEALTH_HREF } from './HealthAlert';
-import { IcHome, IcGrid, IcBookmark, IcPlus, IcClock, IcMoments, IcDownload, IcShield, IcChevronRight } from './icons';
+import { IcHome, IcGrid, IcBookmark, IcPlus, IcClock, IcMoments, IcDownload, IcShield, IcChevronRight, IcSearch, IcUser } from './icons';
 import { useAuth, canDownload } from '@/lib/auth';
 import { keys, t as tr } from '@/lib/i18n';
 import { isDesktop, DESKTOP_HIDDEN } from '@/lib/desktop';
@@ -32,7 +32,7 @@ import type { NavRing } from '@/lib/serverDownloads';
 // notices' band (lib/layers.ts).
 
 // `keys()` is the identity function; it exists so these reach the translation extractor (lib/i18n.ts).
-const LABELS = keys('Home', 'Library', 'Lists', 'Discover', 'Reading history', 'Moments', 'Offline', 'Admin');
+const LABELS = keys('Home', 'Library', 'Lists', 'Discover', 'Reading history', 'Moments', 'Offline', 'Admin', 'Search', 'You');
 
 interface Item {
   href: string;
@@ -56,19 +56,23 @@ const MORE: Item[] = [
   { href: '/downloads', label: LABELS[6], Icon: IcDownload, match: (p) => p.startsWith('/downloads'), only: 'browser' },
 ];
 const ADMIN: Item = { href: '/admin', label: LABELS[7], Icon: IcShield, match: (p) => p.startsWith('/admin'), only: 'admins' };
+const SEARCH: Item = { href: '/search', label: LABELS[8], Icon: IcSearch, match: (p) => p.startsWith('/search') };
+const PROFILE: Item = { href: '/profile', label: LABELS[9], Icon: IcUser, match: (p) => p.startsWith('/profile') || p.startsWith('/settings') };
 
 /** What the rail shows, worked out from who is looking: a pure function, so a test can hold it. */
-export function sidebarItems(o: { downloader: boolean; admin: boolean; desktop: boolean }): { main: Item[]; more: Item[]; admin: Item | null } {
+export function sidebarItems(o: { downloader: boolean; admin: boolean; desktop: boolean; nativeCompact?: boolean }): { main: Item[]; more: Item[]; admin: Item | null } {
   const keep = (i: Item) => (i.only === 'downloaders' ? o.downloader : i.only === 'browser'
     ? !(o.desktop && (DESKTOP_HIDDEN.navHrefs as readonly string[]).includes(i.href))
     : true);
-  return { main: MAIN.filter(keep), more: MORE.filter(keep), admin: o.admin ? ADMIN : null };
+  const main = MAIN.filter(keep), more = MORE.filter(keep);
+  return { main: o.nativeCompact ? [...main.slice(0, 2), SEARCH, ...main.slice(2)] : main,
+    more: o.nativeCompact ? [...more, PROFILE] : more, admin: o.admin ? ADMIN : null };
 }
 
 /** The `data-downloads-ring` value walk49 reads off the rail's Library link (it was the old round button's). */
 export const ringMark = (ring: NavRing): 'idle' | 'active' | 'slow' => (ring.show ? (ring.slow ? 'slow' : 'active') : 'idle');
 
-export function Sidebar() {
+export function Sidebar({ nativeCompact = false }: { nativeCompact?: boolean }) {
   const path = usePathname();
   const { user, status, isAdmin } = useAuth();
   const offline = status === 'offline';
@@ -99,7 +103,7 @@ export function Sidebar() {
   // and clickable over every scrim.
   const covered = layers.dialog > 0;
 
-  const { main, more, admin } = sidebarItems({ downloader, admin: isAdmin, desktop: isDesktop() });
+  const { main, more, admin } = sidebarItems({ downloader, admin: isAdmin, desktop: isDesktop(), nativeCompact });
   const flagged = admin && tone && health ? `${tr(admin.label)} · ${headlineText(health) ?? tr('Health')}` : null;
 
   const link = (i: Item, extra?: { badge?: ReactNode; icon?: ReactNode; name?: string; mark?: string; sub?: { text: string; href: string } }) => {
