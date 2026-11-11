@@ -189,7 +189,8 @@ export async function uploadSeriesRoutes(app: FastifyInstance) {
     }
     const p = z.object({ title: z.string().trim().min(1).max(300).optional(), name: NAME,
       fresh: z.literal('1').optional(), seriesId: z.string().min(1).max(200).optional(), images: z.literal('1').optional(),
-      visibility: z.enum(['shared', 'private']).optional(), libraryId: z.string().min(1).max(100).optional() }).strict().safeParse(req.query);
+      visibility: z.enum(['shared', 'private']).optional(), libraryId: z.string().min(1).max(100).optional(),
+      adult: z.literal('1').optional() }).strict().safeParse(req.query);
     if (!p.success || !(p.data.seriesId ? !p.data.title && !p.data.fresh : p.data.title && p.data.fresh)) {
       return reply.code(400).send({ error: 'bad_request', message: 'Choose a new title or an existing series.' });
     }
