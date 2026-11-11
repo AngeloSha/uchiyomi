@@ -2,7 +2,7 @@
 
 This experimental source beta integrates the SwiftUI/WKWebView client from [PR #390](https://github.com/AngeloSha/uchiyomi/pull/390) with UchiYomi v0.107's private libraries and account isolation. The native app prepares a verified copy of its server's web reader for offline launch. The IPA contains no server frontend, library, Apple credentials or personal signing profile.
 
-**Current acceptance:** on November 10, 2026, the owner reported successful installation and basic operation on an iPhone and approved publishing the source. Protocol-2 integration, unsigned Linux packaging and server/browser tests do not establish every device behavior. The extended device checklist below, including offline reboot, account switching and in-place updates, remains pending. Earlier contributor builds do not verify this beta. No binary release or publishing workflow is enabled by these instructions.
+**Current acceptance:** on November 10, 2026, the owner reported successful installation and basic operation on an iPhone and approved publishing the source. Protocol-2 integration, unsigned Linux packaging and server/browser tests do not establish every device behavior. The extended device checklist below, including offline reboot, account switching and in-place updates, remains pending. Earlier contributor builds do not verify this beta. GitHub Actions can build candidates; public IPA releases and AltStore source publishing remain disabled until maintainers explicitly enable them after release acceptance.
 
 ## Compatible server
 
@@ -29,11 +29,45 @@ The script stages copies of the canonical App/Core sources as one Swift Package,
 
 Outputs include the private IPA, `native-source.json` and `candidate.json`. The inspector checks ZIP paths, arm64 iOS Mach-O target, actual iOS SDK (27.1 or newer), application identity, networking policy and absence of personal provisioning/test bundles/bundled frontend. Its metadata deliberately leaves signature and physical-device verification false. Compilation/packaging success is not proof of correct iPhone runtime behavior.
 
-The Xcode project remains available for developers who have a Mac. Configure signing locally in ignored `ios/Local.xcconfig`; do not commit or transfer signing keys. Existing macOS packaging scripts remain available; source publication does not enable their historical distribution commands or publish a binary release.
+The Xcode project remains available for developers who have a Mac. Configure signing locally in ignored `ios/Local.xcconfig`; do not commit or transfer signing keys. The hosted workflow below uses the same Xcode project and macOS packaging script. The Linux/xtool build remains independent.
+
+## GitHub Actions candidates and optional releases
+
+The **iOS beta** workflow (`.github/workflows/ios-release.yml`) runs for pull requests touching the native client, web frontend or workflow, for `ios-v*` tags, and through **Actions → iOS beta → Run workflow**. Manual runs take a numeric native version such as `0.1.0` and never publish. Ordinary pushes to `main` and server release tags (`v*`) do not trigger it.
+
+It uses the GitHub-hosted `xcode-27` runner with Xcode 27.2, runs the existing distribution, manifest, native core/transport and real WebKit/lifecycle checks, and archives an arm64 device app. No Apple account, certificate, provisioning profile or signing secret is required. The package receives a local **ad-hoc signature with empty entitlements**; AltStore replaces that signature using the installing user's Apple account. It is not an App Store or directly installable developer-signed package.
+
+Successful runs retain two artifacts for 14 days:
+
+- `ios-altstore-candidate`: the IPA, `release.json` and `SHA256SUMS`. Metadata records the source revision/fingerprint, protocol/schema, SDK, version, build and checksum. Device acceptance flags remain false.
+- `ios-source-preview`: a generated `altstore.json`, icon and landing page. Its download links are placeholders until the corresponding release exists; it is not a published source.
+
+The bundle identifier comes from `ios/distribution/listing.json` (`com.uchiyomi.reader`). Build numbers are `1000 + github.run_number`, so workflow reruns retain the same version/build identity. Keep the workflow name and app identity stable after the first public release. Forks with existing installations must preserve their own listing identifier and build-number sequence.
+
+### Maintainer setup
+
+Building candidates needs only GitHub Actions enabled and permission to use the hosted runner. To authorize **public beta releases** after completing the device checklist:
+
+1. Under **Settings → Environments**, create `ios-release`. Configure required reviewers and allowed `ios-v*` tags if your release policy requires them.
+2. Under **Settings → Secrets and variables → Actions → Variables**, add the repository variable `IOS_RELEASE_PUBLISH` with the exact value `true`.
+3. Tag the intended commit with a new native release tag, for example `ios-v0.1.0-beta.1`, and push that tag. Native versions are independent of server versions. The accepted format is `ios-vMAJOR.MINOR.PATCH`, optionally followed by `-beta.N`; all releases from this workflow are marked prereleases and never replace the repository's latest stable release.
+
+Only a successful tag build can enter the release job. It uses the built-in `GITHUB_TOKEN` with `contents: write` in that job only. It verifies the tag/source revision and IPA, uploads to a draft, downloads and checks every asset, then publishes. Existing assets are immutable: rerun failed jobs to resume an interrupted upload; a full rebuild that produces different bytes cannot overwrite a published version. Use a new tag for a replacement build.
+
+To also publish an **AltStore source on GitHub Pages**:
+
+1. Confirm the repository's Pages site will be dedicated to this source. The source job deploys the entire site; see the existing-site note below.
+2. Set **Settings → Pages → Build and deployment → Source** to **GitHub Actions**.
+3. Allow `ios-v*` tags in the `github-pages` environment's deployment rules.
+4. Set the repository variable `IOS_ALTSTORE_PUBLISH` to `true`, in addition to `IOS_RELEASE_PUBLISH`.
+
+After a release succeeds, the source job downloads and verifies every advertised public iOS release, preserves version history, and publishes the feed using the configured Pages URL (including a custom domain, if configured). Add `<Pages URL>/altstore.json` in AltStore Classic. A failed fetch or verification leaves the deployed site unchanged. To disable future publication, remove the relevant variables; this does not remove existing releases or the live source.
+
+**Existing Pages sites:** leave `IOS_ALTSTORE_PUBLISH` unset when another workflow publishes documentation or a website. Pages deployments replace the whole site, so two independent publishers cannot safely share it. Integrate `fetch-releases.py` and `altstore-source.py` into that site's build, generating into a new subdirectory such as `site/ios` with `--base-url "${PAGES_URL}/ios"`, then upload/deploy one combined artifact. The scripts work without enabling the dedicated source job. The project's separate `uchiyomi.com` homepage is not changed by this workflow.
 
 ## Install and use
 
-Install your unsigned IPA with AltStore Classic on Windows, letting AltStore sign it with your own Apple account. Keep that account and the effective installed app identity stable for subsequent in-place updates. The unsigned IPA is not directly installable as a developer-signed app. Follow [AltStore's installation and refresh guidance](https://faq.altstore.io/altstore-classic/your-altstore).
+Import your locally built or Actions-generated IPA into AltStore Classic with AltServer running on macOS or Windows, letting AltStore sign it with your own Apple account. If maintainers have enabled a public source, add its published source URL in AltStore instead. Keep that account and the effective installed app identity stable for subsequent in-place updates. Follow [AltStore's installation and refresh guidance](https://faq.altstore.io/altstore-classic/your-altstore).
 
 1. Enter the compatible server's HTTPS origin and choose **Connect to server**.
 2. Sign in to UchiYomi. The wrapper does not store your password; each server has an isolated Keychain cookie jar and persistent WebKit data store.

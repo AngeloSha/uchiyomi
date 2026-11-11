@@ -19,7 +19,7 @@ environment variables see [CONFIGURATION.md](CONFIGURATION.md).
 - [12. Backups & restore](#12-backups--restore)
 - [13. Troubleshooting & FAQ](#13-troubleshooting--faq)
 - [14. Uchiyomi Desktop](#14-uchiyomi-desktop) — the Windows and macOS app (beta), now in [its own guide](DESKTOP.md)
-- [Uchiyomi for iPhone and iPad](IOS.md) — private beta setup, offline reading and device acceptance
+- [Uchiyomi for iPhone and iPad](IOS.md) — beta setup, Actions-built IPAs, optional AltStore source, offline reading and device acceptance
 
 ---
 
