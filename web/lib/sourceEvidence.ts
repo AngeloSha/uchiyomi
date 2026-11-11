@@ -212,6 +212,13 @@ export function testedLine(v: LiveVerdict | null | undefined, failing = true): {
   return { tone, text };
 }
 
+/** The action and its notice share Details' scope; a list Test cannot announce recovered downloads. */
+export function sourceTestOutcome(answer: TestAnswer, recorded?: StageLine[] | null): { text: string; ok: boolean; partial: boolean } {
+  const head = answerView(answer, recorded).head;
+  return { text: head?.text ?? tr('That source is still failing'), ok: answer.ok,
+    partial: answer.ok && head?.tone !== 'ok' };
+}
+
 /**
  * Persisted evidence as lines: every stage, what was last seen there, when, and by what.
  *
@@ -219,6 +226,7 @@ export function testedLine(v: LiveVerdict | null | undefined, failing = true): {
  * cooldowns too (thirty of them, once a language is hidden), and every one of them got four "nothing recorded
  * yet" lines. `failing` defaults to what the lines show; Providers passes its confirmed failures (testedLine).
  */
+
 export function evidenceView(
   lines: StageLine[] | null | undefined, tested?: LiveVerdict | null, fix?: string | null, failing?: boolean,
 ): EvidenceView {

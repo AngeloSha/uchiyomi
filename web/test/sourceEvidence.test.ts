@@ -12,7 +12,7 @@ import * as React from 'react';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
-  answerView, evidenceView, healthRowEvidence, testClock, testStep, checkAllLabel, sweepToast, STAGE_LABELS, BY_LABELS, GLYPH_WORDS,
+  answerView, evidenceView, healthRowEvidence, sourceTestOutcome, testClock, testStep, checkAllLabel, sweepToast, STAGE_LABELS, BY_LABELS, GLYPH_WORDS,
   type StageLine, type TestAnswer,
 } from '../lib/sourceEvidence';
 import { SourceEvidence } from '../components/SourceEvidence';
@@ -127,6 +127,23 @@ test('a new success supersedes only the same checked stage; unreached failures r
   assert.equal(partial.head?.tone, 'warn');
   assert.match(readFileSync(join(ROOT, 'components/SourceSheet.tsx'), 'utf8'), /<SourceEvidence answer=\{answer\} lines=\{row\?\.evidence\}/,
     'the source sheet must combine the fresh Test with recorded download evidence');
+});
+
+test('#426: source Test notices and Health actions use Details’ scoped result and severity', () => {
+  const images: StageLine = { stage: 'images', state: 'fail', at: new Date().toISOString(), by: 'traffic', kind: 'error', error: 'HTTP 404' };
+  assert.deepEqual(sourceTestOutcome(passing), { text: 'The checked steps passed.', ok: true, partial: false });
+  assert.deepEqual(sourceTestOutcome(passing, [images]), {
+    text: 'The checked steps passed; earlier failures are shown below.', ok: true, partial: true,
+  });
+  const covers = { ...passing, checks: [...passing.checks, { name: 'Covers', ok: false, detail: 'No usable cover URL' }] };
+  assert.deepEqual(sourceTestOutcome(covers, [images]), { text: 'Works, but not everything checked out', ok: true, partial: true });
+  assert.equal(sourceTestOutcome(ballTest(), [images]).ok, false);
+  const sheet = readFileSync(join(ROOT, 'components/SourceSheet.tsx'), 'utf8');
+  const actions = readFileSync(join(ROOT, 'components/HealthActions.tsx'), 'utf8');
+  assert.match(sheet, /sourceTestOutcome\(r, row\?\.evidence\)/);
+  assert.match(sheet, /outcome\.partial \? 'info' : 'success'/);
+  assert.match(actions, /return sourceTestOutcome\(r, item\.evidence\)/);
+  assert.doesNotMatch(sheet + actions, /That source is working/);
 });
 
 test('stored evidence: one line per stage, with when and by what', () => {

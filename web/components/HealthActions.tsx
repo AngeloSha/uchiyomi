@@ -51,8 +51,8 @@ import {
 import { useRepairRun } from '@/lib/useRepairRun';
 import { kickDownloads } from '@/lib/useServerDownloads';
 import { fetchingToast } from '@/lib/jobs';
-import { testStep } from '@/lib/sourceEvidence';
-import { diagnosisReason, itemDetail, itemTitle, type Said } from '@/lib/said';
+import { sourceTestOutcome, testStep, type TestAnswer } from '@/lib/sourceEvidence';
+import { itemDetail, itemTitle, type Said } from '@/lib/said';
 import { useFindRun } from '@/lib/useFindRun';
 import { findGate, findSlotState } from '@/lib/findSources';
 import { numberingOutcome, refusalText, type NumberingAnswer, type PlanMode, type RenumberMode } from '@/lib/numbering';
@@ -450,9 +450,9 @@ export function HealthRow({ check, item, rowKey, links, children, compact }: {
         return {
           ...base, label: tr('Test'),
           onRun: () => act(a, async () => {
-            const r = await api<{ ok: boolean; diagnosis?: { code?: string; reason?: string; fix?: string; fixSaid?: Said } }>(
+            const r = await api<TestAnswer>(
               `/api/admin/sources/${encodeURIComponent(item.sourceId || '')}/test`, { method: 'POST' });
-            return r.ok ? { text: tr('That source is working') } : { text: diagnosisReason(r.diagnosis) || tr('That source is still failing'), ok: false };
+            return sourceTestOutcome(r, item.evidence);
           }, testStep(check.testMs)),
         };
       case 'unblock':

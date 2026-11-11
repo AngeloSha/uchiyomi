@@ -23,9 +23,8 @@ import { api } from '@/lib/api';
 import { t as tr } from '@/lib/i18n';
 import { isDesktop } from '@/lib/desktop';
 import { numberText } from '@/lib/format';
-import { diagnosisReason } from '@/lib/said';
 import { useTicker } from '@/lib/ticker';
-import { testClock, type TestAnswer } from '@/lib/sourceEvidence';
+import { sourceTestOutcome, testClock, type TestAnswer } from '@/lib/sourceEvidence';
 import {
   backupLine, failingSince, libraryHref, limitLine, sheetFacts, sheetKeys, sourceSays, turnOffQuestion, turnOffRequest, turnOnRequest,
   usedBy, usedByLink, type OverviewSource, type SheetKey, type SourceEvidenceRow, type SourcesOverview,
@@ -148,8 +147,9 @@ export function SourceSheet({ target, overview, evidence, testMs, status, action
       // The answer is what Details is for: open it, so the stage that failed is in front of whoever asked.
       setDetailsOpen(true);
       void qc.invalidateQueries({ queryKey: ['admin-sources'] });
-      if (!r.ok) toast(diagnosisReason(r.diagnosis) || tr('That source is still failing'), 'error');
-      return r.ok ? tr('That source is working') : null;
+      const outcome = sourceTestOutcome(r, row?.evidence);
+      toast(outcome.text, outcome.ok ? outcome.partial ? 'info' : 'success' : 'error');
+      return null;
     });
   };
   const unblock = () => s && run('unblock', async () => {
