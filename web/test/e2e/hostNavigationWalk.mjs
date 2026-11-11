@@ -171,7 +171,15 @@ export async function hostNavigationWalk({ page, BASE, ok, bad, shot, ensureSign
       await page.waitForSelector('[role=dialog][aria-label=Filters]', { hidden: true });
       assert(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--rail-w').trim() === '0px'), `native viewport has no reserved web rail at ${width}px`);
       await page.evaluate(() => [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Select').click());
-      await page.evaluate(() => [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Select all').click());
+      // Committing the Library route does not wait for its search response. The
+      // toolbar is already usable over skeletons, but Select all picks only loaded
+      // series. Wait for real tiles so a slow response cannot select an empty list.
+      await page.waitForSelector('[data-library-grid]:not([aria-busy=true]) button[aria-pressed=false]');
+      await page.evaluate(() => [...document.querySelectorAll('[data-library-toolbar] button')].find(b => b.textContent.trim() === 'Select all').click());
+      await page.waitForFunction(() => {
+        const tiles = [...document.querySelectorAll('[data-library-grid] button[aria-pressed]')];
+        return tiles.length > 0 && tiles.every(tile => tile.getAttribute('aria-pressed') === 'true');
+      });
       await page.waitForFunction(() => [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Cancel' && b.closest('.fixed')));
       await page.evaluate(() => [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Cancel' && b.closest('.fixed')).setAttribute('data-host-library-cancel', ''));
       assert(await reachable('[data-host-library-cancel]'), `library selection bar is tappable at ${width}px`);
