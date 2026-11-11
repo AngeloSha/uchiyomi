@@ -37,7 +37,7 @@ export function SourceEvidence({ answer, lines, tested, failing, fix, compact, o
   onMove?: () => void;
   className?: string;
 }) {
-  const view: EvidenceView = answer ? answerView(answer) : evidenceView(lines, tested, fix, failing);
+  const view: EvidenceView = answer ? answerView(answer, lines) : evidenceView(lines, tested, fix, failing);
   const rows = compact ? [] : view.rows;
   if (!view.head && !rows.length && !view.fix) return null;
   const moved = !!answer && answer.diagnosis?.code === 'moved' && !!onMove;

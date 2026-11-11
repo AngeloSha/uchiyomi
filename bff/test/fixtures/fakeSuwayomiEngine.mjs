@@ -1632,6 +1632,18 @@ export function createFakeEngine({ seed = defaultSeed(), schema: initialSchema =
       },
       extension: ({ pkgName }) => { const e = st.extensions.get(pkgName); return e ? extensionView(e) : null; },
       manga: ({ id }) => { const m = st.mangas.get(id); return m && sourceOf(m.sourceId) ? mangaView(m) : null; },
+      mangas: ({ condition, filter, first }) => {
+        // Import identity recovery uses this bounded, source-scoped catalogue read only. Fail loudly
+        // if a new caller asks for shapes this fixture does not model rather than pretending to filter.
+        only(condition ?? {}, ['sourceId'], 'MangaConditionInput');
+        only(filter ?? {}, ['url'], 'MangaFilterInput');
+        only(filter?.url ?? {}, ['in'], 'StringFilterInput');
+        if (condition?.sourceId == null || !Array.isArray(filter?.url?.in) || !Number.isInteger(first) || first < 1 || first > 2)
+          throw new NotImplemented('Query.mangas identity lookup');
+        const list = [...st.mangas.values()].filter((m) => sourceOf(m.sourceId) &&
+          String(m.sourceId) === String(condition.sourceId) && filter.url.in.includes(m.url));
+        return connection(list.slice(0, first).map(mangaView));
+      },
       chapter: ({ id }) => { const c = st.chapters.get(id); return c ? chapterView(c) : null; },
       extensionStores: (args) => { only(args, [], 'Query.extensionStores'); return connection([...st.stores.values()].map(storeView)); },
       extensionStore: ({ indexUrl }) => { const x = st.stores.get(indexUrl); return x ? storeView(x) : null; },

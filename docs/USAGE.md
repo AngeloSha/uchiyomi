@@ -19,7 +19,7 @@ environment variables see [CONFIGURATION.md](CONFIGURATION.md).
 - [12. Backups & restore](#12-backups--restore)
 - [13. Troubleshooting & FAQ](#13-troubleshooting--faq)
 - [14. Uchiyomi Desktop](#14-uchiyomi-desktop) — the Windows and macOS app (beta), now in [its own guide](DESKTOP.md)
-- [Uchiyomi for iPhone and iPad](IOS.md) — private beta setup, offline reading and device acceptance
+- [Uchiyomi for iPhone and iPad](IOS.md) — beta setup, Actions-built IPAs, optional AltStore source, offline reading and device acceptance
 
 ---
 
@@ -3315,6 +3315,17 @@ narrows them.
 use **Move to library**. A series filed by hand stays put: rescans, newly created libraries and changing an
 existing one's folders all leave it alone. Set it back to **Automatic** to hand it to the folder rule again;
 removing the library you filed it into does that too (since v0.55.1).
+
+The picker marks the current library; mixed selections have no current badge. Moving between shared libraries
+keeps files in place. Selecting **your private library**, or moving your private copy to a shared library,
+asks for confirmation before changing who can read it. These visibility changes move the series folder across
+all of its storage roots and preserve series, chapter and progress IDs. A failure restores the original folders
+and catalogue; a conflicting destination or busy reader is refused. Another account's private copies are never
+available, including to admins. Linked editions must be unlinked before changing visibility.
+
+**Automatic** preserves visibility and follows the folder rule; it never publishes a private copy. The bulk
+result reports any skipped series. Earlier private reading history stays private after publication, and existing
+private AniList entries are not made public automatically.
 
 Nothing changes until you declare something. A fresh install and an upgraded one both start with a single
 library covering the whole root, no reading progress moves, no files are touched, and removing a library

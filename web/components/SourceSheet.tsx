@@ -289,7 +289,7 @@ export function SourceSheet({ target, overview, evidence, testMs, status, action
           <div className="border-t border-ink-800/70 pt-1" data-source-details>
             <Disclosure label={tr('Details')} open={detailsOpen} onOpenChange={setDetailsOpen}>
               {answer
-                ? <SourceEvidence answer={answer} onMove={s.kind === 'site' && answer.probe?.finalUrl ? () => moveTo(answer.probe!.finalUrl!) : undefined} />
+                ? <SourceEvidence answer={answer} lines={row?.evidence} onMove={s.kind === 'site' && answer.probe?.finalUrl ? () => moveTo(answer.probe!.finalUrl!) : undefined} />
                 : <SourceEvidence lines={row?.evidence} tested={row?.live} failing={!!row?.failing?.length} />}
             </Disclosure>
           </div>

@@ -14,7 +14,8 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT/'ios/scripts'))
 from release_lib import inspect_payload, make_source, require_full_display_sdk, tag_version, validate_record, verify_ipa
-from github_release import fetch_records, find_release, release_assets, verify_existing_files
+from github_release import fetch_records, find_release, published_metadata, release_assets, require_publication_progress, verify_existing_files
+from build_number import LEGACY_BUILD_FLOOR
 
 
 class ReleaseTests(unittest.TestCase):
@@ -180,6 +181,13 @@ class ReleaseTests(unittest.TestCase):
             release_assets(release, self.record)
 
     def test_publisher_handles_new_and_partial_drafts_before_publication(self):
+        # Legacy low-numbered releases remain readable history, but fresh
+        # promotions must exceed the private builds already installed on devices.
+        self.info['CFBundleVersion'] = str(LEGACY_BUILD_FLOOR+1)
+        self.ipa = self.root/f"Uchiyomi-0.1.0-{self.info['CFBundleVersion']}.ipa"
+        self.write_ipa()
+        self.record.update(build=self.info['CFBundleVersion'], artifact=self.ipa.name,
+                           sha256=hashlib.sha256(self.ipa.read_bytes()).hexdigest(), size=self.ipa.stat().st_size)
         (self.root/'release.json').write_text(json.dumps(self.record))
         (self.root/'SHA256SUMS').write_text(f"{self.record['sha256']}  {self.ipa.name}\n")
         names = {self.ipa.name, 'release.json', 'SHA256SUMS'}
@@ -199,7 +207,10 @@ class ReleaseTests(unittest.TestCase):
                         # A newly created draft may be missing from the release
                         # listing even though direct reads already work.
                         if '/releases?per_page=100' in args[-1]:
-                            return json.dumps([[]])
+                            if release is None or release['draft']:
+                                return json.dumps([[]])
+                            release['assets'] = [{'name': name, 'size': len(data)} for name, data in assets.items()]
+                            return json.dumps([[release]])
                         # GitHub's tag endpoint only returns published releases.
                         if '/releases/tags/' in args[-1] and release['draft']:
                             raise subprocess.CalledProcessError(1, args, stderr='HTTP 404')
@@ -240,6 +251,58 @@ class ReleaseTests(unittest.TestCase):
                 self.assertFalse(release['draft'])
                 self.assertEqual(set(uploads), names-({self.ipa.name} if partial else set()))
                 self.assertEqual(len(uploads), len(set(uploads)))
+
+    def test_new_publications_advance_build_and_version_across_linux_and_hosted_candidates(self):
+        previous = self.record_for('0.1.0', LEGACY_BUILD_FLOOR+100)
+        next_record = self.record_for('0.1.0', LEGACY_BUILD_FLOOR+101)
+        require_publication_progress(next_record, [self.record, previous])
+        for candidate in [self.record, self.record_for('0.1.0', LEGACY_BUILD_FLOOR+99),
+                          self.record_for('0.0.9', LEGACY_BUILD_FLOOR+102)]:
+            with self.subTest(build=candidate['build']), self.assertRaises(ValueError):
+                require_publication_progress(candidate, [previous])
+
+    def test_published_retry_is_idempotent_but_collisions_never_overwrite(self):
+        previous = self.record_for('0.1.0', LEGACY_BUILD_FLOOR+100)
+        newer = self.record_for('0.1.0', LEGACY_BUILD_FLOOR+101)
+        require_publication_progress(previous, [previous, newer], already_published=True)
+        for candidate in [dict(previous, sha256='c'*64), dict(previous, releaseTag='ios-v0.1.0-beta.other'),
+                          self.record_for('0.2.0', previous['build'])]:
+            with self.subTest(candidate=candidate), self.assertRaises(ValueError):
+                require_publication_progress(candidate, [previous], already_published=True)
+
+    def test_publication_ledger_failure_cannot_look_like_empty_history(self):
+        with patch('github_release.gh', side_effect=RuntimeError('API unavailable')):
+            with self.assertRaisesRegex(RuntimeError, 'API unavailable'):
+                published_metadata('example/reader')
+
+    def test_publisher_rejects_regression_before_creating_a_draft(self):
+        (self.root/'release.json').write_text(json.dumps(self.record))
+        (self.root/'SHA256SUMS').write_text(f"{self.record['sha256']}  {self.ipa.name}\n")
+        argv = ['publish-release.py', '--directory', str(self.root), '--repository', 'example/reader',
+                '--tag', self.record['releaseTag']]
+        with patch('github_release.find_release', return_value=None), \
+                patch('github_release.published_metadata', return_value=[self.record_for('0.1.0', LEGACY_BUILD_FLOOR+1)]), \
+                patch('github_release.gh') as api, patch.object(sys, 'argv', argv), \
+                patch('subprocess.check_output', return_value=self.record['sourceRevision']+'\n'):
+            with self.assertRaisesRegex(ValueError, 'exceed installed'):
+                runpy.run_path(str(ROOT/'ios/scripts/publish-release.py'), run_name='__main__')
+        api.assert_not_called()
+
+    def test_complete_publication_ledger_reads_history_and_rejects_mismatched_metadata(self):
+        release = {'tag_name': self.record['releaseTag'], 'draft': False,
+                   'assets': [{'name': name, 'size': self.record['size'] if name == self.ipa.name else 1}
+                              for name in [self.ipa.name, 'release.json', 'SHA256SUMS']]}
+        def fake_gh(*args):
+            if args[0] == 'api':
+                return json.dumps([[{'tag_name': 'v0.107.0', 'draft': False}], [release]])
+            self.assertEqual(args[:2], ('release', 'download'))
+            (Path(args[args.index('--dir')+1])/'release.json').write_text(json.dumps(self.record))
+            return ''
+        with patch('github_release.gh', side_effect=fake_gh):
+            self.assertEqual(published_metadata('example/reader'), [self.record])
+            release['tag_name'] = 'ios-v0.1.0-beta.2'
+            with self.assertRaisesRegex(ValueError, 'tag differs'):
+                published_metadata('example/reader')
 
     def test_draft_lookup_distinguishes_absence_from_api_failure(self):
         with patch('github_release.gh', return_value=json.dumps({'data': {'repository': {'release': None}}})):

@@ -3,9 +3,52 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import tempfile
 import urllib.request
 
-from release_lib import download_url, require, validate_record, verify_ipa
+from release_lib import download_url, require, tag_version, validate_record, verify_ipa
+from build_number import LEGACY_BUILD_FLOOR
+
+
+def require_publication_progress(candidate, history, *, already_published=False):
+    """Keep old history readable, but prevent promoting regressive new builds."""
+    others = []
+    for record in history:
+        require(record['bundleIdentifier'] == candidate['bundleIdentifier'], 'Published bundle identity differs')
+        same_identity = (record['version'], record['build']) == (candidate['version'], candidate['build'])
+        if same_identity or record['releaseTag'] == candidate['releaseTag']:
+            require(record == candidate, 'Conflicting published version/build or tag')
+        else:
+            require(record['build'] != candidate['build'], 'Build number already published under another version')
+            others.append(record)
+    if already_published:
+        # The caller must verify every existing asset byte before an idempotent
+        # retry is accepted. Later publications must not break that retry.
+        return
+    require(int(candidate['build']) > LEGACY_BUILD_FLOOR, 'New publication must exceed installed private builds')
+    require(all(int(candidate['build']) > int(record['build']) for record in others),
+            'New publication would move the native build number backwards')
+    version = tuple(map(int, candidate['version'].split('.')))
+    require(all(version >= tuple(map(int, record['version'].split('.'))) for record in others),
+            'New publication would move the native version backwards')
+
+
+def published_metadata(repository):
+    """Read the complete publication ledger; API/download failures fail closed."""
+    pages = json.loads(gh('api', '--paginate', '--slurp', f'repos/{repository}/releases?per_page=100'))
+    records = []
+    for release in (release for page in pages for release in page):
+        tag = release['tag_name']
+        if release['draft'] or not tag.startswith('ios-v'):
+            continue
+        tag_version(tag)
+        with tempfile.TemporaryDirectory() as scratch:
+            gh('release', 'download', tag, '--repo', repository, '--pattern', 'release.json', '--dir', scratch)
+            record = validate_record(json.loads((Path(scratch)/'release.json').read_text()), publication=True)
+        require(record['releaseTag'] == tag, 'Release tag differs from its metadata')
+        release_assets(release, record)
+        records.append(record)
+    return records
 
 
 def gh(*arguments):

@@ -177,11 +177,22 @@ final class CachedWebViewTests: XCTestCase {
             for failure in [ExportFixture.Failure.interrupted, .corrupt, .unsupportedSchema] {
                 remote = try ExportFixture(directory: export, revision: "rejected-\(failure)", failure: failure)
                 await model.choose(profile)
-                XCTAssertNil(model.error, "A failed update hid the saved reader")
-                XCTAssertNotNil(model.status)
+                if failure == .unsupportedSchema {
+                    // An incompatible offline schema must fail closed. Keep the
+                    // saved UI/data, but only reopen after a compatible manifest.
+                    XCTAssertNotNil(model.error)
+                    XCTAssertNil(model.webView)
+                    XCTAssertFalse(model.canRecover)
+                    XCTAssertEqual(remote.assetReads, 0)
+                    remote = second
+                    await model.choose(profile)
+                    XCTAssertNil(model.error)
+                } else {
+                    XCTAssertNil(model.error, "A failed update hid the saved reader")
+                    XCTAssertNotNil(model.status)
+                }
                 let retainedUI = try await cache.load()
                 XCTAssertEqual(retainedUI?.manifest.buildId, updated.manifest.buildId)
-                if failure == .unsupportedSchema { XCTAssertEqual(remote.assetReads, 0) }
                 let retainedWeb = try await waitForReader()
                 let retainedData = try await retainedWeb.callAsyncJavaScript("""
                     const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('yomi-offline',2);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});

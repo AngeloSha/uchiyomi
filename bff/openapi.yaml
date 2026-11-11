@@ -11929,7 +11929,13 @@ paths:
         - admin
       summary: Move a series to another library.
       operationId: postApiAdminSeriesIdLibrary
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and admin token scope. Shared filing keeps files in place.
+        A visibility change into the actor's own private library or into shared storage requires
+        confirmVisibilityChange after a 409 visibility_confirmation_required response; the entire
+        selection is checked before any mutation. Automatic (null) preserves privacy. Other accounts'
+        private copies remain unavailable. Confirmed moves preserve identities and roll folders back
+        on database failure. Linked editions and conflicting destinations are refused.
       parameters:
         - name: id
           in: path
@@ -11937,17 +11943,24 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
+              additionalProperties: false
+              required: [libraryId]
               properties:
                 libraryId:
-                  type: string
+                  type: [string, "null"]
+                confirmVisibilityChange:
+                  type: boolean
+                  default: false
       security:
         - bearer: []
       responses:
+        "409":
+          description: Visibility confirmation required (visibility and count supplied), busy reader/writer, conflicting destination, or refused file operation. No changes occur before confirmation.
         "200":
           description: OK
         "400":
@@ -11964,23 +11977,38 @@ paths:
         - admin
       summary: Move many series to a library.
       operationId: postApiAdminSeriesLibrary
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and admin token scope. Shared filing keeps files in place.
+        A visibility change into the actor's own private library or into shared storage requires
+        confirmVisibilityChange after a 409 visibility_confirmation_required response; the entire
+        selection is checked before any mutation. Automatic (null) preserves privacy. Other accounts'
+        private copies remain unavailable. Confirmed moves preserve identities and roll folders back
+        on database failure. Linked editions and conflicting destinations are refused.
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
+              additionalProperties: false
+              required: [seriesIds, libraryId]
               properties:
                 seriesIds:
                   type: array
+                  minItems: 1
+                  maxItems: 500
                   items:
                     type: string
                 libraryId:
-                  type: string
+                  type: [string, "null"]
+                confirmVisibilityChange:
+                  type: boolean
+                  default: false
       security:
         - bearer: []
       responses:
+        "409":
+          description: Visibility confirmation required (visibility and count supplied), busy reader/writer, conflicting destination, or refused file operation. No changes occur before confirmation.
         "200":
           description: OK
         "400":

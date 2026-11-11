@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as React from 'react';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { DiscoveryPreview, DiscoveryTabLoading } from '../components/DiscoveryHub';
+import { DiscoveryFilterBar, DiscoveryFilterPanel, DiscoveryPreview, DiscoveryTabLoading } from '../components/DiscoveryHub';
 import { catalogItem, discoveryView, discoveryFiltersFrom, discoveryKey, filterDiscovery, isHiddenPick, mixCatalog, NO_DISCOVERY_FILTERS, openingDiscoveryTab, recommendationItems, surprisePick, writeDiscoveryFilters, type DiscoveryItem } from '../lib/discoveryHub';
 import type { Pick } from '../lib/forYou';
 import { setActiveLocale } from '../lib/format';
@@ -121,4 +121,33 @@ test('an explicit URL or click opens immediately, and a failed preference reques
   assert.deepEqual(discoveryView('for-you', 'sources', true), { tab: 'for-you', ready: true });
   assert.deepEqual(discoveryView(null, undefined, false), { tab: 'for-you', ready: true });
   assert.deepEqual(discoveryView('sources', 'for-you', false), { tab: 'sources', ready: true });
+});
+
+
+test('Discover keeps filter choices behind one compact themed toolbar', () => {
+  const html = renderToStaticMarkup(createElement(DiscoveryFilterBar, { filters: NO_DISCOVERY_FILTERS,
+    onOpen() {}, onClear() {}, onSurprise() {}, surpriseDisabled: false }));
+  assert.match(html, /data-discovery-filter-bar/); assert.match(html, /aria-haspopup="dialog" aria-expanded="false"/);
+  assert.match(html, />Filters</); assert.match(html, /aria-label="Surprise me"/);
+  assert.doesNotMatch(html, /data-discovery-filter-panel|data-discovery-filter-summary|Series type|All genres|Completed series only|Filters use known/);
+  assert.doesNotMatch(html, /type="checkbox"|aria-label="Clear filters"/);
+});
+
+test('the compact toolbar summarizes all active filters and keeps a labelled clear action', () => {
+  const html = renderToStaticMarkup(createElement(DiscoveryFilterBar, { filters: { country: 'JP', genre: 'Mystery', completed: true }, open: true,
+    onOpen() {}, onClear() {}, onSurprise() {}, surpriseDisabled: true }));
+  assert.match(html, /aria-expanded="true"/); assert.match(html, /data-discovery-filter-summary="true">Manga · Mystery · Completed</);
+  assert.match(html, /aria-hidden="true"[^>]*>3</); assert.match(html, /aria-label="Clear filters"/);
+  assert.match(html, /disabled="" aria-label="Surprise me"/);
+});
+
+test('the filter dialog groups type, genre and completion without a separate checkbox row', () => {
+  const html = renderToStaticMarkup(createElement(DiscoveryFilterPanel, { filters: { country: 'KR', genre: 'Action', completed: true },
+    onChange() {}, onClose() {}, hiddenCount: 2, canResetHidden: false, onResetHidden() {} }));
+  assert.match(html, /role="dialog" aria-modal="true" aria-label="Filters"/);
+  for (const label of ['Series type', 'Genre', 'Status']) assert.match(html, new RegExp(`role="group" aria-label="${label}"`));
+  assert.match(html, /aria-pressed="true">Manhwa</); assert.match(html, /aria-pressed="true">Action</);
+  assert.match(html, /aria-pressed="true" aria-label="Completed series only"/);
+  assert.match(html, />Clear filters</); assert.match(html, />Done</); assert.match(html, /disabled="">Reset hidden picks</);
+  assert.doesNotMatch(html, /type="checkbox"/);
 });

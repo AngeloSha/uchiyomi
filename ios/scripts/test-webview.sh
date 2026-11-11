@@ -17,21 +17,18 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+xcrun simctl list runtimes --json > "$output/runtimes.json"
+sdk="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+runtime_args=(--runtimes "$output/runtimes.json" --sdk "$sdk" --device-type "$device_type")
+if [[ -n "${UCHI_SIMULATOR_RUNTIME_BUILD:-}" ]]; then
+  runtime_args+=(--build "$UCHI_SIMULATOR_RUNTIME_BUILD")
+fi
+if [[ -n "$simulator" ]]; then
+  xcrun simctl list devices --json > "$output/devices.json"
+  runtime_args+=(--simulator "$simulator" --devices "$output/devices.json")
+fi
+runtime="$(python3 ios/scripts/select-simulator-runtime.py "${runtime_args[@]}")"
 if [[ -z "$simulator" ]]; then
-  xcrun simctl list runtimes --json > "$output/runtimes.json"
-  sdk="$(xcrun --sdk iphonesimulator --show-sdk-version)"
-  runtime="$(python3 - "$output/runtimes.json" "$sdk" "$device_type" <<'PY'
-import json, sys
-sdk = tuple(map(int, sys.argv[2].split('.')))
-available = [r for r in json.load(open(sys.argv[1]))['runtimes']
-             if r.get('isAvailable') and '.iOS-' in r['identifier']
-             and tuple(map(int, r['version'].split('.')))[:2] == sdk[:2]
-             and sys.argv[3] in {d['identifier'] for d in r.get('supportedDeviceTypes', [])}]
-if not available:
-    raise SystemExit('Install an iOS simulator runtime matching the selected Xcode SDK and device type')
-print(available[0]['identifier'])
-PY
-)"
   simulator="$(xcrun simctl create 'Uchiyomi CI' "$device_type" "$runtime")"
   created=true
 fi
@@ -45,10 +42,24 @@ build_args=(-project ios/Uchiyomi.xcodeproj -scheme Uchiyomi -configuration Debu
   DEVELOPMENT_TEAM= CODE_SIGN_IDENTITY=- PRODUCT_BUNDLE_IDENTIFIER=org.uchiyomi.ci
   UCHI_TEST_BUNDLE_IDENTIFIER=org.uchiyomi.ci.tests)
 auth_test=UchiyomiWebViewTests/CachedWebViewTests/testExpiredIdentityAccountBoundaryAndOfflineLogout
-# Hosted WebKit can stall starting this fixture after the update/rollback fixture's
-# many process replacements. Give it a fresh test host; neither skip nor retry its
-# assertions. Both invocations must pass, and both result bundles are retained.
+# These fixtures replace many WebKit processes/stores. Hosted simulators can stall
+# later fixtures in the same test host, including cookie and IndexedDB operations.
+# Run each in a fresh host, as for authentication. Every invocation must pass;
+# no assertion is skipped or retried, and every result bundle is retained.
+cache_tests=(
+  UchiyomiWebViewTests/CachedWebViewTests/testAutomaticUIUpdateAndFailedStartupRecoveryPreserveOfflineData
+  UchiyomiWebViewTests/CachedWebViewTests/testPreparedReaderWithUnavailableServer
+  UchiyomiWebViewTests/CachedWebViewTests/testTwoServerProfilesWithSameAccountAndChapterIDsAndConfirmedRemoval
+)
+skip_cache=()
+for cache_test in "${cache_tests[@]}"; do
+  skip_cache+=("-skip-testing:$cache_test")
+done
 xcodebuild "${build_args[@]}" -resultBundlePath "$output/tests.xcresult" \
-  -skip-testing:"$auth_test" test 2>&1 | tee "$output/test.log"
+  -skip-testing:"$auth_test" "${skip_cache[@]}" test 2>&1 | tee "$output/test.log"
+for cache_test in "${cache_tests[@]}"; do
+  xcodebuild "${build_args[@]}" -resultBundlePath "$output/${cache_test##*/}.xcresult" \
+    -only-testing:"$cache_test" test-without-building 2>&1 | tee -a "$output/test.log"
+done
 xcodebuild "${build_args[@]}" -resultBundlePath "$output/auth.xcresult" \
   -only-testing:"$auth_test" test-without-building 2>&1 | tee -a "$output/test.log"

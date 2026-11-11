@@ -116,6 +116,12 @@ export interface SourceAdapter {
   searchCreator?(name: string, kind: CreatorField, page?: number): Promise<SourceSeries[]>;
   /** Supported creator roles; absent on an adapter with searchCreator means both (e.g. MangaDex). */
   creatorFields?: readonly CreatorField[];
+  /**
+   * Bounded lookup in the provider's already-known catalogue by its OWN path, not a request to that URL.
+   * For backup identity recovery after a rename. Multiple distinct ids mean ambiguity, never first wins.
+   * A cold catalogue or an unsupported adapter returns no identity proof; title search still follows.
+   */
+  lookupByPath?(path: string, timeoutMs: number): Promise<SourceSeries[]>;
   getSeries(id: string): Promise<SourceSeries | null>;
   listChapters(seriesId: string): Promise<SourceChapter[]>;
   getPageUrls(chapterId: string): Promise<string[]>;

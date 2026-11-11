@@ -1,4 +1,6 @@
-import { privateAdminContentGuard, privateAdminResponse } from '../lib/privateAdmin';
+import { fileSeriesInLibrary, filingLibrary, type FilingSeries } from '../lib/libraryMove';
+import { claimPrivateContentChange, type PrivacyLease } from '../lib/privateFence';
+import { privateAdminContentGuard, privateAdminResponse, releasePrivateAdminRead } from '../lib/privateAdmin';
 import { hash } from '@node-rs/argon2';
 import { isIP } from 'node:net';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -119,6 +121,7 @@ import { sourcesOverview } from '../lib/sourcesOverview';
 import { titlesFromBackup, entriesFromBackup, type BackupEntry } from '../lib/tachibk';
 import { resolveAddScope, scopeSql, samePrivacyDomainSql, ContentScopeError, deleteAccountPreservingPrivate, type AddScope } from '../lib/contentScope';
 import { normalizeImportEntries, trackerLinksOf, importSkipKeys, type ImportEntry } from '../lib/importMetadata';
+import { importMatchNeedsReview } from '../lib/importMatchReview';
 import { linkSeries, seedTrackerFloor, rememberTrackerPrivacy, TOKEN_EXPIRED, TOKEN_REJECTED, TOKEN_UNREADABLE } from '../lib/trackers';
 import { ADAPTERS, PROVIDERS, LIST_STATUSES, TRACKER_LIST_MAX, type Provider, type LibraryEntry } from '../lib/trackerProviders';
 import { open as unseal } from '../lib/secretbox';
@@ -213,6 +216,16 @@ interface ImportCandidateRow {
   /** Tracker rows only (migrate.ts says what each is for); null / empty on the other intakes. */
   tracker: string | null; external_id: string | null; alt_titles: string[]; matched_via: string | null; progress: number | null;
   tracker_links?: unknown; ambiguous?: boolean; content_scope?:AddScope|null;
+}
+
+/** Older persisted suggestions obey the same review rule as new matches, even with explicit /run ids. */
+async function enforceImportReview(batchId: string): Promise<void> {
+  const pending = await q<Pick<ImportCandidateRow, 'id' | 'confidence' | 'backup_title' | 'alt_titles' | 'match_title' | 'backup_url' | 'backup_source_id_unsigned' | 'backup_source_id_signed' | 'match_source'>>(
+    `SELECT id, confidence, backup_title, alt_titles, match_title, backup_url, backup_source_id_unsigned, backup_source_id_signed, match_source FROM import_candidates
+     WHERE batch_id=$1 AND decision='auto' AND status IS NULL AND NOT ambiguous`, [batchId]);
+  const ids = pending.filter(importMatchNeedsReview).map((r) => r.id);
+  if (ids.length) await q(`UPDATE import_candidates SET ambiguous=true, auto_ambiguous=true
+    WHERE batch_id=$1 AND id=ANY($2) AND decision='auto' AND status IS NULL`, [batchId, ids]);
 }
 
 /**
@@ -3112,67 +3125,47 @@ export default async function adminRoutes(app: FastifyInstance) {
    *
    * Passing null unpins it and lets the folder rule decide again, which is the way back out.
    */
-  app.post('/api/admin/series/:id/library', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const b = z.object({ libraryId: z.string().min(1).max(64).nullable() }).safeParse(req.body);
-    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
-
-    const series = await one<{ folder: string }>('SELECT folder FROM lib_series WHERE id = $1', [id]);
-    if (!series) return reply.code(404).send({ error: 'not_found' });
-    if (await one('SELECT 1 FROM lib_series WHERE id=$1 AND is_private',[id])) return reply.code(409).send({error:'use_privacy_action'});
-    if (b.data.libraryId && await one('SELECT 1 FROM libraries WHERE id=$1 AND managed_private',[b.data.libraryId])) return reply.code(409).send({error:'use_privacy_action'});
-
-    if (b.data.libraryId === null) {
-      const libs = await libraryRows();
-      await q('UPDATE lib_series SET library_id = $2, library_pinned = false WHERE id = $1',
-        [id, libraryIdFor(series.folder, libs)]);
-      await logAudit('series.library', { userId: userIdOf(req), detail: { id, libraryId: null }, req });
-      return { ok: true, pinned: false };
-    }
-
-    const lib = await one<{ id: string }>('SELECT id FROM libraries WHERE id = $1', [b.data.libraryId]);
-    if (!lib) return reply.code(404).send({ error: 'no_such_library' });
-    await q('UPDATE lib_series SET library_id = $2, library_pinned = true WHERE id = $1', [id, b.data.libraryId]);
-    await logAudit('series.library', { userId: userIdOf(req), detail: { id, libraryId: b.data.libraryId }, req });
-    return { ok: true, pinned: true };
-  });
-
-  /**
-   * The same move, for a selection.
-   *
-   * Looping the single-series route from the browser would work and would fire one request per title; a
-   * bulk move of a whole shelf is exactly the case where that is worst. Reports what it skipped rather
-   * than quietly applying to fewer series than were ticked, which is the shape every other bulk route here
-   * already uses.
-   */
-  app.post('/api/admin/series/library', async (req, reply) => {
-    const b = z.object({
-      seriesIds: z.array(z.string().min(1).max(64)).min(1).max(500),
-      libraryId: z.string().min(1).max(64).nullable(),
-    }).safeParse(req.body);
-    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
-
-    if (await one('SELECT 1 FROM lib_series WHERE id=ANY($1) AND is_private',[b.data.seriesIds])) return reply.code(409).send({error:'use_privacy_action'});
-    if (b.data.libraryId && await one('SELECT 1 FROM libraries WHERE id=$1 AND managed_private',[b.data.libraryId])) return reply.code(409).send({error:'use_privacy_action'});
-    const found = await q<{ id: string; folder: string }>(
-      'SELECT id, folder FROM lib_series WHERE id = ANY($1)', [b.data.seriesIds]);
-    const skipped = b.data.seriesIds.filter((id) => !found.some((f) => f.id === id)).map((id) => ({ id }));
-
-    if (b.data.libraryId === null) {
-      const libs = await libraryRows();
-      for (const s of found) {
-        await q('UPDATE lib_series SET library_id = $2, library_pinned = false WHERE id = $1',
-          [s.id, libraryIdFor(s.folder, libs)]);
+  const fileSelection = async (req: FastifyRequest, reply: FastifyReply, ids: string[], libraryId: string | null, confirmed: boolean, single = false) => {
+    const uid = userIdOf(req);
+    const target = libraryId === null ? null : await filingLibrary(libraryId);
+    if (libraryId !== null && !target) return reply.code(404).send({error:'no_such_library'});
+    if (target?.managed_private && target.owner_user_id !== uid) return reply.code(404).send({error:'not_found'});
+    const unique = [...new Set(ids)];
+    const found = await q<FilingSeries>('SELECT id,folder,library_id,is_private,owner_user_id,work_id,deleted_at,merged_into FROM lib_series WHERE id=ANY($1::text[])',[unique]);
+    if (found.some(s=>s.is_private && s.owner_user_id!==uid)) return reply.code(404).send({error:'not_found'});
+    if (single && !found.length) return reply.code(404).send({error:'not_found'});
+    const changes = target ? found.filter(s=>s.is_private!==target.managed_private) : [];
+    // Entire batch preflight precedes ANY filing, including mixed shared/private selections.
+    if (changes.length && !confirmed) return reply.code(409).send({error:'visibility_confirmation_required',visibility:target!.managed_private?'private':'shared',count:changes.length});
+    releasePrivateAdminRead(req);
+    const leases: PrivacyLease[] = [];
+    try {
+      for (const row of found) {
+        const lease = claimPrivateContentChange(row.id);
+        if (!lease) return reply.code(409).send({error:'busy',message:'Another request is using this series. Try again when it finishes.'});
+        leases.push(lease);
       }
-    } else {
-      const lib = await one<{ id: string }>('SELECT id FROM libraries WHERE id = $1', [b.data.libraryId]);
-      if (!lib) return reply.code(404).send({ error: 'no_such_library' });
-      await q('UPDATE lib_series SET library_id = $2, library_pinned = true WHERE id = ANY($1)',
-        [found.map((s) => s.id), b.data.libraryId]);
-    }
-    await logAudit('series.library', {
-      userId: userIdOf(req), detail: { n: found.length, libraryId: b.data.libraryId }, req });
-    return { applied: found.length, skipped };
+      const skipped: {id:string;reason?:string;message?:string}[] = unique.filter(id=>!found.some(s=>s.id===id)).map(id=>({id}));
+      let applied = 0;
+      for (const row of found) {
+        const outcome = await fileSeriesInLibrary(row,target,uid,claimSeriesWriter);
+        if (outcome.ok) applied++;
+        else if (single) return reply.code(409).send({error:outcome.code??'file_operation_failed',message:outcome.reason,fix:outcome.fix});
+        else skipped.push({id:row.id,reason:outcome.code??'file_operation_failed',message:outcome.reason});
+      }
+      await logAudit('series.library',{userId:uid,detail:{n:applied,libraryId,visibilityChanges:changes.length},req});
+      return single ? {ok:true,pinned:libraryId!==null} : {applied,skipped};
+    } finally { for (const lease of leases) lease.release(); }
+  };
+  app.post('/api/admin/series/:id/library', async (req, reply) => {
+    const body = z.strictObject({libraryId:z.string().min(1).max(64).nullable(),confirmVisibilityChange:z.boolean().optional()}).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({error:'bad_request'});
+    return fileSelection(req,reply,[(req.params as {id:string}).id],body.data.libraryId,body.data.confirmVisibilityChange===true,true);
+  });
+  app.post('/api/admin/series/library', async (req, reply) => {
+    const body = z.strictObject({seriesIds:z.array(z.string().min(1).max(64)).min(1).max(500),libraryId:z.string().min(1).max(64).nullable(),confirmVisibilityChange:z.boolean().optional()}).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({error:'bad_request'});
+    return fileSelection(req,reply,body.data.seriesIds,body.data.libraryId,body.data.confirmVisibilityChange===true);
   });
 
   app.post('/api/admin/series/:id/rename-folder', async (req, reply) => {
@@ -3210,24 +3203,24 @@ export default async function adminRoutes(app: FastifyInstance) {
     pagedDirection: z.enum(['ltr', 'rtl', 'series']).optional(),
   });
 
-  app.get('/api/admin/libraries', async () => {
-    const rows = await q<{ id: string; name: string; path: string; paths: string[]; age_rating: number | null; anilist_lookup: boolean; reader_prefs: unknown; n: number; pinned: number; members: string[] }>(
+  app.get('/api/admin/libraries', async (req) => {
+    const rows = await q<{ id: string; name: string; path: string; paths: string[]; age_rating: number | null; anilist_lookup: boolean; reader_prefs: unknown; managed_private: boolean; owner_user_id: string | null; n: number; pinned: number; members: string[] }>(
       // `paths`: every folder it holds (v0.55.1, #148), the first -- `path`, all a v0.55.0 reads -- first, then by name.
-      `SELECT l.id, l.name, l.path, l.age_rating, l.anilist_lookup, l.reader_prefs,
+      `SELECT l.id, l.name, l.path, l.age_rating, l.anilist_lookup, l.reader_prefs, l.managed_private, l.owner_user_id,
               (SELECT coalesce(array_agg(lp.path ORDER BY lp.path <> l.path, lp.path), '{}') FROM library_paths lp
                 WHERE lp.library_id = l.id) AS paths,
-              (SELECT count(*)::int FROM lib_series s WHERE s.library_id = l.id AND ${visibleToAll('s')}) AS n,
+              (SELECT count(*)::int FROM lib_series s WHERE s.library_id = l.id AND (${visibleToAll('s')} OR (s.is_private AND s.owner_user_id=$1::uuid))) AS n,
               (SELECT count(*)::int FROM lib_series s WHERE s.library_id = l.id AND s.library_pinned
-                 AND ${visibleToAll('s')}) AS pinned,
+                 AND (${visibleToAll('s')} OR (s.is_private AND s.owner_user_id=$1::uuid))) AS pinned,
               -- Who can open it. A member with NO grant rows sees every library, so they count as allowed
               -- here even though nothing links them to this row -- which is what the UI has to show, or
               -- "nobody can see this" would be wrong for a brand-new install.
               (SELECT coalesce(array_agg(u.id), '{}') FROM users u
-                WHERE u.role <> 'admin'
+                WHERE u.role <> 'admin' AND (NOT l.managed_private OR u.id=l.owner_user_id)
                   AND (NOT EXISTS (SELECT 1 FROM user_libraries ul WHERE ul.user_id = u.id)
                        OR EXISTS (SELECT 1 FROM user_libraries ul WHERE ul.user_id = u.id AND ul.library_id = l.id))
               ) AS members
-         FROM libraries l ORDER BY l.sort_order, l.name`,
+         FROM libraries l WHERE NOT l.managed_private OR l.owner_user_id=$1::uuid ORDER BY l.sort_order, l.name`, [userIdOf(req)],
     );
     // Candidate subdirectories: folders that hold series but are not yet a library. Annotated where the name
     // matches a known source, because that is the case an admin should NOT usually promote.
@@ -4904,6 +4897,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (!id) return reply;
     let batch = await one<ImportBatchRow>('SELECT * FROM import_batches WHERE id = $1 AND user_id=$2', [id,userIdOf(req)]);
     if (!batch) return reply.code(404).send({ error: 'not_found' });
+    await enforceImportReview(id);
     // An `importing` batch this process is not importing was stranded by a restart mid-run. Back to
     // `review`: the rows /run never reached still have no status and are still ready, and /run only ever
     // picks up rows without one, so the admin can simply press Import again -- or to `done` when every
@@ -5068,6 +5062,8 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (batch.state === 'importing') return reply.code(409).send({ error: 'busy', message: 'This batch is already importing.' });
     if (batch.state === 'resolving') return reply.code(409).send({ error: 'still_resolving', message: 'Wait for matching to finish first.' });
 
+    await enforceImportReview(id);
+
     // Gated on decision + a match id + not already run, regardless of what the caller selected: a skipped
     // or still-unresolved row in `candidateIds` (an admin who pressed "Select all" rather than "Select ready
     // to import") is silently left out rather than erroring the whole request, and a row this same endpoint
@@ -5097,6 +5093,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (!claimed) return reply.code(409).send({ error: 'busy', message: 'This batch is already importing.' });
     importingBatches.add(id);
     // Decisions take the same batch-row lock as this claim. Re-read AFTER it: a skip that won the race must not be imported.
+    await enforceImportReview(id);
     rows=await q(selectedQuery,selectedParams);
     if(!rows.length) {
       importingBatches.delete(id);

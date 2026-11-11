@@ -19,6 +19,7 @@ import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { MoveToLibrary } from '@/components/MoveToLibrary';
+import { moveSeriesToLibrary } from '@/lib/moveLibrary';
 import { SeriesPrivacyControls } from '@/components/SeriesPrivacyControls';
 import { useAuth, canDownload } from '@/lib/auth';
 import { IcChevronLeft, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcHourglass, IcGrid, IcRows, IcComment } from '@/components/icons';
@@ -2264,15 +2265,13 @@ function SeriesInner() {
         />
       )}
       {moving && (
-        <MoveToLibrary n={1} busy={moveBusy} onClose={() => setMoving(false)} onPick={async (libraryId) => {
+        <MoveToLibrary n={1} busy={moveBusy} current={series ? { libraryId: series.libraryId } : undefined} onClose={() => setMoving(false)} onPick={async (libraryId, options) => {
           setMoveBusy(true);
           try {
-            await api(`/api/admin/series/${encodeURIComponent(id)}/library`, { json: { libraryId } });
-            toast(tr('1 series updated'), 'success');
-            for (const k of [['series', id], ['series-books', id], ['library'], ['home'], ['collection']]) qc.invalidateQueries({ queryKey: k });
-          } catch (e) { toast(msgOf(e, tr('Could not do that')), 'error'); }
-          setMoveBusy(false);
-          setMoving(false);
+            const result = await moveSeriesToLibrary([id], libraryId, options);
+            for (const k of [['series', id], ['series-books', id], ['series-privacy'], ['library'], ['home'], ['collection'], ['content-privacy']]) qc.invalidateQueries({ queryKey: k });
+            return result;
+          } finally { setMoveBusy(false); }
         }} />
       )}
       {renaming && series?.folder && (

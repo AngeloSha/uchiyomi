@@ -228,6 +228,145 @@ test('duplicate exact source entries require confirmation, including after resto
   } finally {unregisterAdapter(source);if(id)await q('DELETE FROM import_batches WHERE id=$1',[id]);await app.close();}
 });
 
+test('a renamed backup entry uses source/path catalogue identity before a misleading title result', { skip }, async () => {
+  const { registerAdapter: register, unregisterAdapter } = await import('../src/lib/sources');
+  const registerAdapter = (adapter: any) => { unregisterAdapter(SW_ADAPTER); register(adapter); };
+  const { resolveCandidate } = await import('../src/routes/sources');
+  let searches = 0;
+  registerAdapter({ ...swAdapter(), async lookupByPath(path: string, timeout: number) {
+    assert.equal(path, '/manga/enen'); assert.ok(timeout > 0 && timeout <= 5000);
+    return [{ source: SW_ADAPTER, sourceId: '425-renamed', title: 'Enen no Shouboutai', path: 'manga/enen/' }];
+  }, async search() { searches++; return [{ source: SW_ADAPTER, sourceId: '425-wrong', title: 'Fire!', path: '/manga/fire' }]; } } as any);
+  try {
+    const match = await resolveCandidate({ title: 'Fire Force', sourceIdUnsigned: SW_ID, url: '/manga/enen' });
+    assert.deepEqual([match?.sourceId, match?.title, match?.confidence, match?.ambiguous], ['425-renamed','Enen no Shouboutai','same_source',false]);
+    assert.equal(searches, 0, 'a proved identity does not need a misleading title search');
+  } finally { registerAdapter(swAdapter() as any); }
+});
+
+test('backup path proof is checked across aliases even when the original search has a conflicting exact title', { skip }, async () => {
+  const { registerAdapter: register, unregisterAdapter } = await import('../src/lib/sources');
+  const registerAdapter = (adapter: any) => { unregisterAdapter(SW_ADAPTER); register(adapter); };
+  const { resolveCandidate } = await import('../src/routes/sources');
+  const terms: string[] = [];
+  registerAdapter({ ...swAdapter(), async lookupByPath() { return []; }, async search(term: string) {
+    terms.push(term);
+    return term === 'Fire Force' ? [{ source: SW_ADAPTER, sourceId: '425-wrong', title: term, path: '/manga/unrelated' }]
+      : [{ source: SW_ADAPTER, sourceId: '425-alias', title: 'Enen no Shouboutai', path: '/manga/enen/' }];
+  } } as any);
+  try {
+    const match = await resolveCandidate({ title: 'Fire Force', altTitles: ['Enen no Shouboutai'], sourceIdUnsigned: SW_ID, url: 'manga/enen' });
+    assert.deepEqual([match?.sourceId, match?.confidence, match?.matchedVia, match?.ambiguous], ['425-alias','same_source','Enen no Shouboutai',false]);
+    assert.deepEqual(terms, ['Fire Force','Enen no Shouboutai']);
+  } finally { registerAdapter(swAdapter() as any); }
+});
+
+test('cold identity misses and failed catalogue reads leave divergent suggestions for review', { skip }, async () => {
+  const { registerAdapter: register, unregisterAdapter } = await import('../src/lib/sources');
+  const registerAdapter = (adapter: any) => { unregisterAdapter(SW_ADAPTER); register(adapter); };
+  const { resolveCandidate } = await import('../src/routes/sources');
+  for (const fails of [false,true]) {
+    registerAdapter({ ...swAdapter(), async lookupByPath() { if (fails) throw new Error('engine timeout'); return []; },
+      async search() { return [{ source: SW_ADAPTER, sourceId: '425-wrong', title: 'Fire!', path: '/manga/fire' }]; } } as any);
+    try {
+      const match = await resolveCandidate({ title: 'Fire Force', sourceIdUnsigned: SW_ID, url: '/manga/enen' });
+      assert.deepEqual([match?.sourceId, match?.confidence, match?.ambiguous], ['425-wrong','contains',true]);
+    } finally { registerAdapter(swAdapter() as any); }
+  }
+});
+
+test('identity recovery shares the existing query budget and a timed-out lookup still reaches safe title review', { skip }, async () => {
+  const { registerAdapter: register, unregisterAdapter } = await import('../src/lib/sources');
+  const registerAdapter = (adapter: any) => { unregisterAdapter(SW_ADAPTER); register(adapter); };
+  const { resolveCandidate } = await import('../src/routes/sources');
+  let calls = 0;
+  const ids = Array.from({ length: 25 }, (_, i) => `425-budget-${i}`);
+  for (const id of ids) register({ ...fakeAdapter(), id, preferredOrder: -100, async search() { calls++; return []; } } as any);
+  registerAdapter({ ...swAdapter(), async lookupByPath() { calls++; return []; }, async search() { calls++; return []; } } as any);
+  try {
+    await resolveCandidate({ title: 'Unmatched Budget Probe', altTitles: ['Budget Alternate One','Budget Alternate Two','Budget Alternate Three'], sourceIdUnsigned: SW_ID, url: '/budget' });
+    assert.equal(calls, 24, 'identity read consumes a slot, not another full source-search budget');
+    for (const id of ids) unregisterAdapter(id);
+    registerAdapter({ ...swAdapter(), async lookupByPath() { return new Promise(() => {}); }, async search() {
+      return [{ source: SW_ADAPTER, sourceId: '425-wrong', title: 'Fire!', path: '/manga/fire' }];
+    } } as any);
+    const started = Date.now();
+    const match = await resolveCandidate({ title: 'Fire Force', sourceIdUnsigned: SW_ID, url: '/manga/enen' });
+    assert.equal(match?.ambiguous, true);
+    assert.ok(Date.now() - started < 8000, 'lookup timeout leaves the overall resolve budget available');
+  } finally { for (const id of ids) unregisterAdapter(id); registerAdapter(swAdapter() as any); }
+});
+
+test('duplicate identity paths require review and foreign lookup results cannot prove home identity', { skip }, async () => {
+  const { registerAdapter: register, unregisterAdapter } = await import('../src/lib/sources');
+  const registerAdapter = (adapter: any) => { unregisterAdapter(SW_ADAPTER); register(adapter); };
+  const { resolveCandidate } = await import('../src/routes/sources');
+  const row = { source: SW_ADAPTER, sourceId: '425-a', title: 'Renamed', path: '/manga/identity' };
+  registerAdapter({ ...swAdapter(), async lookupByPath() { return [row, { ...row, sourceId: '425-b' }]; }, async search() { return []; } } as any);
+  try {
+    const match = await resolveCandidate({ title: 'Original Identity', sourceIdUnsigned: SW_ID, url: '/manga/identity' });
+    assert.equal(match?.confidence, 'same_source'); assert.equal(match?.ambiguous, true);
+    registerAdapter({ ...swAdapter(), async lookupByPath() { return [{ ...row, source: 'sw:foreign' }]; }, async search() { return []; } } as any);
+    assert.equal(await resolveCandidate({ title: 'Original Identity', sourceIdUnsigned: SW_ID, url: '/manga/identity' }), null);
+  } finally { registerAdapter(swAdapter() as any); }
+});
+
+test('disabled backup sources are not asked for identity, and two source-id renderings never pick an arbitrary home', { skip }, async () => {
+  const { registerAdapter: register, unregisterAdapter } = await import('../src/lib/sources');
+  const registerAdapter = (adapter: any) => { unregisterAdapter(SW_ADAPTER); register(adapter); };
+  const { resolveCandidate, mihonSourceToAdapter } = await import('../src/routes/sources');
+  let lookups = 0, searches = 0;
+  registerAdapter({ ...swAdapter(), async lookupByPath() { lookups++; return []; }, async search() { searches++; return []; } } as any);
+  try {
+    await q('UPDATE suwayomi_sources SET enabled=false WHERE source_id=$1', [SW_ID]);
+    await resolveCandidate({ title: 'Identity Only Probe', sourceIdUnsigned: SW_ID, url: '/manga/identity' });
+    assert.equal(lookups, 0);
+    const { setDisabled } = await import('../src/lib/sourceHealth');
+    await setDisabled(SW_ADAPTER, true); searches = 0;
+    await resolveCandidate({ title: 'Identity Only Probe', sourceIdUnsigned: SW_ID, url: '/manga/identity' });
+    assert.deepEqual([lookups, searches], [0,0], 'a source switched off in Health is never queried');
+    await q("INSERT INTO suwayomi_sources(source_id,name,enabled) VALUES ('-425','Ambiguous id fixture',true)");
+    await q('UPDATE suwayomi_sources SET enabled=true WHERE source_id=$1', [SW_ID]);
+    assert.equal(await mihonSourceToAdapter({ sourceIdUnsigned: SW_ID, sourceIdSigned: '-425' }), null);
+  } finally {
+    await q("DELETE FROM suwayomi_sources WHERE source_id='-425'");
+    await q('UPDATE suwayomi_sources SET enabled=true WHERE source_id=$1', [SW_ID]);
+    await q('DELETE FROM source_health WHERE source_id=$1', [SW_ADAPTER]);
+    registerAdapter(swAdapter() as any);
+  }
+});
+
+test('unconfirmed divergent matches cannot be imported by explicit ids or restored automatic decisions, including legacy rows', { skip }, async () => {
+  globalThis.fetch = pixelFetch;
+  const { app, headers } = await boot();
+  let id = '';
+  FAKE_TITLES['fire force'] = { sourceId: '425-wrong', title: 'Fire!' };
+  try {
+    const intake = await app.inject({ method: 'POST', url: '/api/admin/import/batches', headers, payload: { titles: ['Fire Force'] } });
+    assert.equal(intake.statusCode, 200, intake.body); id = intake.json().batchId;
+    const row = (await waitForState(app,headers,id,['review'])).items[0];
+    assert.equal(row.ambiguous, true);
+    // Simulate an older server's persisted suggestion, then call /run without a GET that could repair it.
+    await q('UPDATE import_candidates SET ambiguous=false,auto_ambiguous=false WHERE id=$1', [row.id]);
+    const run = () => app.inject({ method: 'POST', url: `/api/admin/import/batches/${id}/run`, headers, payload: { candidateIds: [row.id] } });
+    assert.equal((await run()).json().error, 'nothing_to_import');
+    assert.equal((await q('SELECT ambiguous,auto_ambiguous FROM import_candidates WHERE id=$1',[row.id]))[0].auto_ambiguous, true);
+    assert.equal((await app.inject({ method: 'PATCH', url: `/api/admin/import/candidates/${row.id}`, headers,
+      payload: { decision: 'manual', source: FAKE, sourceId: 'fm-1', title: 'Fake Manga' } })).statusCode, 200);
+    assert.equal((await app.inject({ method: 'PATCH', url: `/api/admin/import/candidates/${row.id}`, headers, payload: { decision: 'auto' } })).statusCode, 200);
+    assert.equal((await run()).json().error, 'nothing_to_import');
+    await app.inject({ method: 'PATCH', url: `/api/admin/import/candidates/${row.id}`, headers,
+      payload: { decision: 'manual', source: FAKE, sourceId: 'fm-1', title: 'Fake Manga' } });
+    const confirmed = await run(); assert.equal(confirmed.statusCode, 200, confirmed.body);
+    const done = await waitForState(app,headers,id,['done']); assert.equal(done.items[0].status, 'added');
+    assert.equal((await q("SELECT count(*)::int AS n FROM lib_series WHERE source_series_id='425-wrong'"))[0].n, 0);
+  } finally {
+    delete FAKE_TITLES['fire force'];
+    if (id) await q('DELETE FROM import_batches WHERE id=$1',[id]);
+    await q("DELETE FROM lib_series WHERE source_series_id IN ('fm-1','425-wrong')"); await app.close();
+  }
+});
+
 test('bulk skip is atomic, rejects a foreign candidate, and remains local to the selected content scope',{skip},async()=> {
   const {app,headers,uid}=await boot();const ids:string[]=[];
   try {

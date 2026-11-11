@@ -18,6 +18,7 @@ import { followGuard, seriesLanguage } from '../lib/seriesLang';
 import { searchAll, groupByTitle, bySource, ratingOf, narrowTo, SEARCH_FIRST_ANSWER_MS, type Rated, type RatingFilter } from '../lib/searchAll';
 import type { SourceSeries as DiscoverItem } from '../lib/sources/types';
 import { budgetFor, listBudgetFor } from '../lib/sources/budget';
+import { importMatchNeedsReview } from '../lib/importMatchReview';
 import { SOLVER_CONCURRENCY, withSolverDeadline } from '../lib/sources/flaresolverr';
 
 /**
@@ -2340,7 +2341,8 @@ export async function mihonSourceToAdapter(ids: { sourceIdUnsigned?: string; sou
     'SELECT source_id FROM suwayomi_sources WHERE source_id = ANY($1) AND enabled = true',
     [candidates],
   ).catch(() => []);
-  if (!rows.length) return null;
+  // Signed/unsigned forms name one source, never permission to choose between two installed sources.
+  if (new Set(rows.map((r) => r.source_id)).size !== 1) return null;
   const id = swAdapterId(rows[0].source_id);
   if (await isDisabled(id).catch(() => false)) return null;
   return getSource(id) ? id : null;
@@ -2392,8 +2394,8 @@ export const normPath = (p: string) => p.trim().replace(/^\/+/, '').replace(/\/+
  * alternate's weak `contains` hit on the first source pre-empted an exact hit for the title on the second
  * -- AniList synonyms are user-contributed ("AoT", "Atak Tytanów"), and "AoT" on a site that lacks the
  * series answered "Chaotic Love Story" while the next site carried "Attack on Titan" exactly and was never
- * asked. The home source keeps its own block above: a backup names its own source and carries no alternates,
- * so there is nothing to interleave.
+ * asked. The home source keeps its own block above so a saved source+path can prove identity across every
+ * alias before another source's title match is considered.
  */
 export async function resolveCandidate(entry: { title: string; altTitles?: string[]; url?: string; sourceIdUnsigned?: string; sourceIdSigned?: string }): Promise<ResolvedCandidate | null> {
   // The search title first, then each distinct alternate; an alternate that normalises to the title (or to
@@ -2406,17 +2408,20 @@ export async function resolveCandidate(entry: { title: string; altTitles?: strin
   }
   const viaOf = (term: string): string | null => (term === entry.title ? null : term);
   const deadline = Date.now() + 60_000;
+  let queriesLeft = 24;
   const perTerm = Math.max(1, Math.floor(24 / terms.length));
   let fallback: ResolvedCandidate | null = null;
   const rank = (c: MatchConfidence) => c === 'same_source' ? 4 : c === 'exact' ? 3 : c === 'contains' ? 2 : 1;
   const retain = (candidate: ResolvedCandidate): ResolvedCandidate | null => {
-    if (!fallback || rank(candidate.confidence) > rank(fallback.confidence)) fallback = candidate;
-    return candidate.confidence === 'same_source' || candidate.confidence === 'exact' ? candidate : null;
+    if (!fallback || rank(candidate.confidence) > rank(fallback.confidence) ||
+      (rank(candidate.confidence) === rank(fallback.confidence) && fallback.ambiguous && !candidate.ambiguous)) fallback = candidate;
+    return !candidate.ambiguous && (candidate.confidence === 'same_source' || candidate.confidence === 'exact') ? candidate : null;
   };
   const choose = (raw: Awaited<ReturnType<NonNullable<ReturnType<typeof getSource>>['search']>>, term: string, source: string): ResolvedCandidate | null => {
     const best = pickBestScored(raw, term);
     if (!best?.item.sourceId) return null;
-    const ambiguous = best.confidence === 'exact' && new Set(raw.filter(r => norm(r.title) === norm(term)).map(r => r.sourceId).filter(Boolean)).size > 1;
+    const ambiguous = (best.confidence === 'exact' && new Set(raw.filter(r => norm(r.title) === norm(term)).map(r => r.sourceId).filter(Boolean)).size > 1) ||
+      importMatchNeedsReview({ confidence: best.confidence, backup_title: entry.title, alt_titles: terms.slice(1), match_title: best.item.title });
     return { source, sourceId: best.item.sourceId, title: best.item.title, coverUrl: best.item.coverUrl,
       confidence: best.confidence, matchedVia: viaOf(term), ambiguous };
   };
@@ -2425,18 +2430,38 @@ export async function resolveCandidate(entry: { title: string; altTitles?: strin
   if (home) {
     const src = getSource(home);
     if (src) {
+      const want = entry.url ? normPath(entry.url) : '';
+      const identity = (raw: SourceSeries[], term: string): ResolvedCandidate | null => {
+        const hits = raw.filter((r) => r.source === home && !!r.sourceId && !!r.path && normPath(r.path) === want);
+        const hit = hits[0];
+        return hit ? { source: home, sourceId: hit.sourceId, title: hit.title, coverUrl: hit.coverUrl,
+          confidence: 'same_source', matchedVia: viaOf(term), ambiguous: new Set(hits.map((r) => r.sourceId)).size > 1 } : null;
+      };
+      if (want && src.lookupByPath) {
+        try {
+          const budget = Math.min(deadline - Date.now(), 5000);
+          if (budget > 0 && queriesLeft-- > 0) {
+            const found = identity(await withTimeout(src.lookupByPath(entry.url!, budget), budget), entry.title);
+            if (found) return found;
+          }
+        } catch { /* cold/unsupported engine catalogue or failed refresh: try titles and aliases safely */ }
+      }
       for (const term of terms) {
         try {
           const remaining = deadline - Date.now();
-          if (remaining <= 0) return fallback;
+          if (remaining <= 0 || queriesLeft-- <= 0) return fallback;
           const raw = await withTimeout(src.search(term), Math.min(remaining, budgetFor(src, 10000)));
-          // The url proof only against the search title's results: a backup names ONE entry, and its
-          // alternates (none today -- backups carry no synonyms) would prove nothing more.
-          const want = term === entry.title && entry.url ? normPath(entry.url) : '';
-          const byUrl = want ? raw.find((r) => !!r.sourceId && !!r.path && normPath(r.path) === want) : undefined;
-          if (byUrl) return { source: home, sourceId: byUrl.sourceId, title: byUrl.title, coverUrl: byUrl.coverUrl, confidence: 'same_source', matchedVia: null };
+          // Tracker links in Mihon backups carry alternate names. A saved path proves the same entry
+          // under ANY of those searches, including a renamed title absent from the original results.
+          const byUrl = want ? identity(raw, term) : null;
+          if (byUrl) return byUrl;
           const candidate = choose(raw, term, home);
-          if (candidate) { const exact = retain(candidate); if (exact) return exact; }
+          if (candidate) {
+            // A home-source title hit with a conflicting saved path cannot be silently accepted. Keep
+            // trying aliases for identity before presenting that suggestion for manual confirmation.
+            if (want) candidate.ambiguous = true;
+            const exact = retain(candidate); if (exact) return exact;
+          }
         } catch { /* fall through to the next term, then the cross-source search */ }
       }
     }
@@ -2455,7 +2480,7 @@ export async function resolveCandidate(entry: { title: string; altTitles?: strin
     for (const { id, src } of order.slice(0, perTerm - (home ? 1 : 0))) {
       try {
         const remaining = deadline - Date.now();
-        if (remaining <= 0) return fallback;
+        if (remaining <= 0 || queriesLeft-- <= 0) return fallback;
         const candidate = choose(await withTimeout(src.search(term), Math.min(remaining, budgetFor(src, 10000))), term, id);
         if (candidate) { const exact = retain(candidate); if (exact) return exact; }
       } catch { /* try the next source, then the next term */ }

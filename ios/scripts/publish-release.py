@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-from github_release import find_release, gh, release_assets, verify_existing_files
+from github_release import find_release, gh, published_metadata, release_assets, require_publication_progress, verify_existing_files
 from release_lib import repository_name, require, validate_record, verify_ipa
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -21,6 +21,8 @@ require(subprocess.check_output(['git', 'rev-parse', args.tag+'^{commit}'], text
 verify_ipa(args.directory/record['artifact'], record)
 require((args.directory/'SHA256SUMS').read_text() == f"{record['sha256']}  {record['artifact']}\n", 'Checksum file differs')
 release = find_release(args.repository, args.tag)
+already_published = release is not None and not release['draft']
+require_publication_progress(record, published_metadata(args.repository), already_published=already_published)
 names = {record['artifact'], 'release.json', 'SHA256SUMS'}
 if release is None:
     with tempfile.TemporaryDirectory() as scratch:
@@ -46,4 +48,7 @@ with tempfile.TemporaryDirectory() as scratch:
 release = find_release(args.repository, args.tag)
 require(release is not None, 'Release disappeared during asset verification')
 release_assets(release, record)
+# Recheck immediately before promotion: another publisher may have advanced the
+# ledger while these immutable assets were being uploaded and verified.
+require_publication_progress(record, published_metadata(args.repository), already_published=already_published)
 gh('release', 'edit', args.tag, '--repo', args.repository, '--draft=false', '--prerelease', '--latest=false')

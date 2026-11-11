@@ -127,10 +127,10 @@ const checkName = (n: string): string =>
 /**
  * A live Test answer as lines, one per stage the Test covers, plus Covers when it was looked at.
  *
- * ⚠️ "Working normally." is said ONLY when the Test passed and no line on screen is a ✗. It used to be the
- * fallback for any diagnosis without a reason, which is how it sat under a failed Search (#115).
+ * A passing Test speaks only for the steps it checked. Recorded failures from an unchecked step
+ * remain visible with their original date; a list probe cannot clear a failed image download (#426).
  */
-export function answerView(t: TestAnswer): EvidenceView {
+export function answerView(t: TestAnswer, recorded?: StageLine[] | null): EvidenceView {
   const rows: EvidenceRow[] = [];
   for (const stage of ['search', 'chapters', 'pages'] as const) {
     const cs = (t.checks || []).filter((c) => c.stage === stage);
@@ -163,12 +163,24 @@ export function answerView(t: TestAnswer): EvidenceView {
   // admin wondering why a passing Test did not clear a download failure.
   rows.push({ key: 'images', glyph: 'none', label: stageLabel('images'), detail: tr('a Test does not download images'), error: null, when: null });
 
-  const failedLine = rows.some((r) => r.glyph === 'fail');
+  const liveFailure = rows.some((r) => r.glyph === 'fail');
+  let recordedFailure = false;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.glyph !== 'none') continue;
+    const prior = recorded?.find((line) => line.stage === row.key && line.state === 'fail');
+    if (!prior) continue;
+    recordedFailure = true;
+    rows[i] = { ...row, glyph: 'fail', detail: tr('not checked by this test'), error: prior.error,
+      when: whenBy(prior.at, prior.by) };
+  }
+  const failedLine = liveFailure || recordedFailure;
   const d = t.diagnosis;
   // The verdict in the reader's language: the reason by its code, the fix by its own (lib/said.ts).
   const reason = diagnosisReason(d);
   let head: EvidenceView['head'];
-  if (t.ok && !failedLine) head = { tone: 'ok', text: tr('Working normally.') };
+  if (t.ok && !liveFailure && recordedFailure) head = { tone: 'warn', text: tr('The checked steps passed; earlier failures are shown below.') };
+  else if (t.ok && !failedLine) head = { tone: 'ok', text: tr('The checked steps passed.') };
   else if (t.ok) head = { tone: 'warn', text: tr('Works, but not everything checked out') };
   else if (t.state === 'inconclusive' || (t.timedOut && !failedLine)) {
     head = { tone: 'warn', text: reason || tr('The test ran out of time. That alone is not proof it is broken.') };

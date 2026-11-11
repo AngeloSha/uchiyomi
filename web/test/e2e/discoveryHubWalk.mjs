@@ -135,6 +135,20 @@ try {
     const gap = getComputedStyle(form).direction === 'rtl' ? a.left - b.right : b.left - a.right;
     return gap >= 0 && gap <= 16 && Math.abs(a.top - b.top) <= 1;
   }));
+  check('default filters occupy one short row and keep choices out of the page', await page.evaluate(() => {
+    const row = document.querySelector('[data-discovery-filter-bar]');
+    return !!row && row.getBoundingClientRect().height <= 52 && !document.querySelector('[data-discovery-filter-panel]')
+      && !document.querySelector('[data-discovery-hub] input[type=checkbox]');
+  }));
+  await page.locator('[data-discovery-filters-trigger]').click();
+  await page.waitForSelector('[data-discovery-filter-panel]');
+  check('Filters opens with focus inside its dialog', await page.evaluate(() => !!document.activeElement?.closest('[role=dialog]')));
+  await page.keyboard.down('Shift'); await page.keyboard.press('Tab'); await page.keyboard.up('Shift');
+  check('Shift+Tab wraps from close to the final dialog action', await page.evaluate(() => document.activeElement?.textContent.trim() === 'Done'));
+  await page.keyboard.press('Tab');
+  check('Tab wraps from the final dialog action to close', await page.evaluate(() => document.activeElement?.getAttribute('aria-label') === 'Close'));
+  await page.keyboard.press('Escape'); await page.waitForSelector('[data-discovery-filter-panel]', { hidden: true });
+  check('Escape closes Filters and restores its trigger focus', await page.evaluate(() => document.activeElement?.hasAttribute('data-discovery-filters-trigger')));
   await shot('desktop-personal-hub');
   await openTitle(fantasy.title);
   check('rich preview shows trusted synopsis and completion metadata', (await page.$eval('[data-discovery-preview]', (el) => el.innerText)).includes(fantasy.description) && (await page.$eval('[data-discovery-preview]', (el) => el.innerText)).includes('Completed'));
@@ -154,22 +168,28 @@ try {
   await page.waitForFunction((title) => document.querySelector('[data-discovery-hub]')?.textContent.includes(title), {}, rejected.title);
   check('Undo restores the same title without losing saves', (await api('/api/discover/state', { token: ownerToken })).data.saved.some((it) => it.id === fantasy.id));
   await openTitle(rejected.title); await mutateClick('Not interested', 'hidden', true); await page.waitForSelector('[data-discovery-preview]', { hidden: true });
+  await page.locator('[data-discovery-filters-trigger]').click(); await page.waitForSelector('[data-discovery-filter-panel]');
   const reset = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/discover/hidden' && r.request().method() === 'DELETE');
   await clickText('Reset hidden picks'); assert.equal((await reset).status(), 200);
   const afterReset = (await api('/api/discover/state', { token: ownerToken })).data;
   check('Reset hidden picks preserves saved titles', afterReset.hidden.length === 0 && afterReset.saved.some((it) => it.id === fantasy.id));
 
   await clickText('Manga', '[aria-label="Series type"] button'); await clickText('Mystery', '[aria-label=Genre] button');
-  await page.locator('[data-discovery-hub] input[type=checkbox]').click();
+  await page.locator('button[aria-label="Completed series only"]').click();
+  await clickText('Done', '[data-discovery-filter-panel] button');
   await page.waitForFunction(() => new URL(location.href).searchParams.get('completed') === '1');
   const filterUrl = page.url();
   check('interest choices are represented in the URL', new URL(filterUrl).searchParams.get('country') === 'JP' && new URL(filterUrl).searchParams.get('genre') === 'Mystery');
   const filteredTitles = await page.$$eval('[data-discovery-collection=trending] button p', (els) => els.map((el) => el.textContent.trim()));
   check('combined metadata filters show only matching completed manga', filteredTitles.length === 1 && filteredTitles[0] === mystery.title);
   await page.reload({ waitUntil: 'networkidle2' }); await page.waitForSelector('[data-discovery-collection=trending] button');
-  check('filter choices restore after reload', await page.$eval('[data-discovery-hub] input[type=checkbox]', (el) => el.checked) && (await page.$$eval('[data-discovery-collection=trending] button p', (els) => els.map((el) => el.textContent.trim()))).every((t) => t === mystery.title));
-  await clickText('Surprise me'); await page.waitForSelector('[data-discovery-preview]');
+  check('filter choices restore after reload', await page.$eval('[data-discovery-filter-summary]', (el) => el.textContent === 'Manga · Mystery · Completed') && (await page.$$eval('[data-discovery-collection=trending] button p', (els) => els.map((el) => el.textContent.trim()))).every((t) => t === mystery.title));
+  await page.locator('button[aria-label="Surprise me"]').click(); await page.waitForSelector('[data-discovery-preview]');
   check('Surprise me respects the current filtered permitted pool', await page.$eval('[role=dialog]', (el) => el.getAttribute('aria-label')) === mystery.title); await closePreview();
+  await page.locator('[data-discovery-filter-bar] button[aria-label="Clear filters"]').click();
+  await page.waitForFunction(() => !['country', 'genre', 'completed'].some((key) => new URL(location.href).searchParams.has(key)));
+  check('one clear action removes every active filter and restores the full catalog', !await page.$('[data-discovery-filter-summary]')
+    && await page.$$eval('[data-discovery-collection=trending] button', (buttons) => buttons.length >= 8));
   await page.goto(base + '/discover/?tab=for-you', { waitUntil: 'networkidle2' }); await page.waitForSelector('[data-discovery-collection=trending] button');
 
   const savedTab = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/discover/state' && r.request().method() === 'PATCH' && JSON.parse(r.request().postData() || '{}').tab === 'sources');
@@ -204,14 +224,28 @@ try {
   await page.goto(base + '/discover/?tab=for-you', { waitUntil: 'networkidle2' }); await page.waitForSelector('[data-discovery-collection=trending] button');
   check('personal hub fits a 360px phone without document overflow', await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
   check('the phone keeps the full controls panel below the hero', await heroFirst());
+  await page.goto(base + '/discover/?tab=for-you&country=JP&genre=Mystery&completed=1', { waitUntil: 'networkidle2' });
+  await page.waitForSelector('[data-discovery-filter-summary]');
+  check('all three active filters still fit one row on a small phone', await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1
+    && document.querySelector('[data-discovery-filter-bar]').getBoundingClientRect().height <= 52));
+  await shot('phone-active-filter-toolbar');
+  await page.locator('[data-discovery-filters-trigger]').click(); await page.waitForSelector('[data-discovery-filter-panel]');
+  check('phone filters fit inside the viewport with reachable scrollable choices', await page.$eval('[role=dialog]', (el) =>
+    el.scrollWidth <= el.clientWidth + 1 && el.getBoundingClientRect().width <= innerWidth && el.getBoundingClientRect().bottom <= innerHeight));
+  await shot('phone-filter-dialog'); await page.keyboard.press('Escape');
+  await page.waitForSelector('[data-discovery-filter-panel]', { hidden: true });
   await openTitle(mystery.title);
   check('rich preview remains readable on a small phone', await page.$eval('[role=dialog]', (el) => el.scrollWidth <= el.clientWidth + 1 && el.getBoundingClientRect().width <= innerWidth));
   await shot('phone-rich-preview'); await closePreview(); await shot('phone-personal-hub');
   assert.equal((await api('/api/settings', { token: ownerToken, method: 'PUT', body: { lang: 'ar' } })).status, 200);
-  await page.reload({ waitUntil: 'networkidle2' }); await page.waitForFunction(() => document.documentElement.lang === 'ar' && document.documentElement.dir === 'rtl');
+  await page.goto(base + '/discover/?tab=for-you&country=KR&genre=Fantasy&completed=1', { waitUntil: 'networkidle2' }); await page.waitForFunction(() => document.documentElement.lang === 'ar' && document.documentElement.dir === 'rtl');
   await page.waitForSelector('[data-discovery-hub]');
   check('Arabic renders translated interests in RTL without horizontal overflow', await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1 && /[\u0600-\u06ff]/.test(document.querySelector('[data-discovery-hub]')?.textContent || '')));
   await shot('phone-arabic-hub');
+  await page.locator('[data-discovery-filters-trigger]').click(); await page.waitForSelector('[data-discovery-filter-panel]');
+  check('Arabic filter dialog follows RTL and fits the phone without overflow', await page.$eval('[role=dialog]', (el) =>
+    getComputedStyle(el).direction === 'rtl' && el.scrollWidth <= el.clientWidth + 1 && document.documentElement.scrollWidth <= innerWidth + 1));
+  await shot('phone-arabic-filters'); await page.keyboard.press('Escape'); await page.waitForSelector('[data-discovery-filter-panel]', { hidden: true });
   assert.equal((await api('/api/settings', { token: ownerToken, method: 'PUT', body: { lang: 'en' } })).status, 200);
   await page.reload({ waitUntil: 'networkidle2' }); await page.waitForFunction(() => document.documentElement.lang === 'en');
   await page.setViewport({ width: 1440, height: 1000 });

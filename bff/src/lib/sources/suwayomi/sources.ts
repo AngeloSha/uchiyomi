@@ -266,6 +266,7 @@ export function makeSuwayomiAdapter(remote: RemoteSource, gqlRun: Gql = defaultG
     if (!Array.isArray(list)) return [];
     const seen = new Set<string>();
     return list
+      .filter((m) => ownManga(m?.sourceId))
       .map((m) => toSeries(m, adapterId))
       .filter((s): s is SourceSeries => !!s && (seen.has(s.sourceId) ? false : (seen.add(s.sourceId), true)));
   };
@@ -308,6 +309,36 @@ export function makeSuwayomiAdapter(remote: RemoteSource, gqlRun: Gql = defaultG
     // Every extension pages its search the way its site does (#331): the engine asks the page it is given.
     async searchPage(query, page) {
       return fetchList('SEARCH', query, page);
+    },
+
+    async lookupByPath(path, timeoutMs) {
+      const normalized = path.trim().replace(/^\/+/, '').replace(/\/+$/, '');
+      if (!normalized) return [];
+      const deadline = Date.now() + Math.max(1, timeoutMs);
+      const paths = [normalized, `/${normalized}`, `${normalized}/`, `/${normalized}/`];
+      // This is a local engine catalogue read: the site's browser retry cannot repair it and would
+      // spend the identity budget opening an unrelated home page. Preserve 64-bit source ids as strings.
+      const d = await gqlRun<{ mangas?: { nodes?: RemoteManga[] } }>(OPS.mangaIdentity.doc, { source: remote.id, paths }, Math.max(1, deadline - Date.now()));
+      const seen = new Set<number>();
+      const rows = (Array.isArray(d?.mangas?.nodes) ? d.mangas!.nodes! : []).filter((m) =>
+        m && Number.isSafeInteger(m.id) && m.id > 0 && m.sourceId != null && String(m.sourceId) === String(remote.id) &&
+        typeof m.url === 'string' && m.url.trim().replace(/^\/+/, '').replace(/\/+$/, '') === normalized &&
+        (seen.has(m.id) ? false : (seen.add(m.id), true)));
+      if (rows.length !== 1) {
+        const matches = rows.map((m) => toSeries(m, adapterId)).filter((m): m is SourceSeries => !!m);
+        // Dropping a malformed duplicate must not turn an ambiguous catalogue into one proved hit.
+        return matches.length > 1 ? matches : [];
+      }
+      if (Date.now() >= deadline) return [];
+      // A stored hit might be stale. Refresh using the ENGINE'S numeric id and recheck both halves of
+      // identity; never hand a Mihon path to getSeries(Number(path)). Errors leave title search available.
+      const fresh = await gqlRun<{ fetchMangaAndChapters?: { manga?: RemoteManga | null } }>(OPS.fetchManga.doc,
+        { id: rows[0].id }, Math.max(1, deadline - Date.now()));
+      const m = fresh?.fetchMangaAndChapters?.manga;
+      if (!m || m.id !== rows[0].id || m.sourceId == null || String(m.sourceId) !== String(remote.id) ||
+        typeof m.url !== 'string' || m.url.trim().replace(/^\/+/, '').replace(/\/+$/, '') !== normalized) return [];
+      const result = toSeries(m, adapterId);
+      return result ? [result] : [];
     },
 
     async getSeries(id) {

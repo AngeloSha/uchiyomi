@@ -9,16 +9,16 @@ import re
 import shutil
 import subprocess
 import tempfile
+from build_number import choose_build
 
 ROOT = Path(__file__).resolve().parents[2]
 IOS = ROOT / 'ios'
 MARKER = '.uchiyomi-xtool-staging'
 
-def prepare(output, *, version='0.1.0', build='2026111001', sdk_version='27.2'):
+def prepare(output, *, version='0.1.0', build=None, sdk_version='27.2'):
     if not re.fullmatch(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)', version):
         raise ValueError('Use a numeric native version')
-    if not re.fullmatch(r'[1-9][0-9]{0,15}', build):
-        raise ValueError('Use a positive integer build number')
+    build = choose_build(build)
     if not re.fullmatch(r'[0-9]+\.[0-9]+(?:\.[0-9]+)?', sdk_version) or tuple(map(int, sdk_version.split('.')[:2])) < (27, 1):
         raise ValueError('Use an installed iPhone SDK version of 27.1 or newer')
     output = Path(output).resolve()
@@ -70,7 +70,7 @@ bundleID: com.uchiyomi.reader
 infoPath: Info.plist
 iconPath: AppIcon.png
 ''')
-        for source in [brand, icon, info_source, Path(__file__).resolve(), IOS / "scripts/build-linux.sh", IOS / "scripts/inspect-linux-ipa.py"]:
+        for source in [brand, icon, info_source, Path(__file__).resolve(), IOS / "scripts/build_number.py", IOS / "scripts/build-number.py", IOS / "scripts/build-linux.sh", IOS / "scripts/inspect-linux-ipa.py"]:
             records.append({'path': str(source.relative_to(ROOT)), 'sha256': hashlib.sha256(source.read_bytes()).hexdigest()})
         fingerprint = hashlib.sha256(json.dumps(records, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         record = {'xtoolVersion': '1.24.0', 'iPhoneSDKVersion': sdk_version, 'nativeProtocolVersion': 2, 'offlineSchemaVersion': 2,
@@ -91,7 +91,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path)
     parser.add_argument('--version', default='0.1.0')
-    parser.add_argument('--build', default='2026111001')
+    parser.add_argument('--build')
     parser.add_argument('--sdk-version', default='27.2')
     args = parser.parse_args()
     record = prepare(args.output, version=args.version, build=args.build, sdk_version=args.sdk_version)

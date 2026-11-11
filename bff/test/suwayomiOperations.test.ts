@@ -86,12 +86,13 @@ async function recorder() {
     pref('ListPreference', 'ls', { str: 'a', strDefault: 'a', entries: ['A', 'B'], entryValues: ['a', 'b'] }),
     pref('MultiSelectListPreference', 'ms', { strs: [], strsDefault: [], entries: ['A'], entryValues: ['a'] }),
   ];
-  const manga = { id: 1, title: 'T', thumbnailUrl: '/t', realUrl: null, url: '/t', description: null, author: null, artist: null, genre: [], status: 'ONGOING' };
+  const manga = { id: 1, sourceId: '1', title: 'T', thumbnailUrl: '/t', realUrl: null, url: '/t', description: null, author: null, artist: null, genre: [], status: 'ONGOING' };
   const answers: Record<string, unknown> = {
     aboutServer: { aboutServer: { name: 'Suwayomi-Server', version: 'v2.3.2243', buildType: 'Stable' } },
     sources: { sources: { nodes: [{ id: '1', name: 'S', lang: 'en', contentWarning: 'SAFE', supportsLatest: true }] } },
     sourceCreatorFilters: { sources: { nodes: [{ id: '1', filters: [{ __typename: 'TextFilter', name: 'Author' }] }] } },
     fetchSourceManga: { fetchSourceManga: { mangas: [manga] } },
+    mangaIdentity: { mangas: { nodes: [manga] } },
     fetchManga: { fetchMangaAndChapters: { manga } },
     fetchChapters: { fetchMangaAndChapters: { chapters: [{ id: 1, chapterNumber: 1, name: 'One', uploadDate: '1704067200000', sourceOrder: 1, url: '/1' }] } },
     fetchChapterPages: { fetchChapterPages: { pages: ['/p/0'] } },
@@ -139,6 +140,7 @@ test('every adapter function sends documents from the registry, and every docume
   await a.latest!(1);
   await a.popular!(1);
   await a.getSeries('1');
+  await a.lookupByPath!('/t', 1000);
   await a.listChapters('1');
   await a.getPageUrls('1');
   await ext.listExtensions(run);

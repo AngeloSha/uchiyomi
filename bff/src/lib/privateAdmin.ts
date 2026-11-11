@@ -6,7 +6,16 @@ import { q } from './db';
 import { roleOf } from './auth';
 import { viewCtxFor } from './visibility';
 import { privateFolderOwner } from './contentScope';
-import { claimPrivateContentRead } from './privateFence';
+import { claimPrivateContentRead, type PrivacyLease } from './privateFence';
+
+const adminReadLease = Symbol('adminReadLease');
+type GuardedRequest = FastifyRequest & { [adminReadLease]?: PrivacyLease };
+/** Release this request's read lease only when handing off to an exclusive visibility writer. */
+export function releasePrivateAdminRead(req: FastifyRequest): void {
+  const held = req as GuardedRequest;
+  held[adminReadLease]?.release();
+  delete held[adminReadLease];
+}
 
 const targetKeys=new Set(['id','ids','series','seriesId','seriesIds','series_id','bookId','bookIds','book_id','libraryId','library_id','of','with','withId','from','into','intoId','fromId','targetId']);
 function targets(value:unknown,out:Set<string>,key='',depth=0,allStrings=false):void{
@@ -51,6 +60,7 @@ export async function privateAdminContentGuard(req:FastifyRequest,reply:FastifyR
       OR EXISTS(SELECT 1 FROM lib_books b WHERE b.series_id=s.id AND b.id=ANY($1::text[]))`,[[...ids]]);
     const lease=claimPrivateContentRead(rows.map(r=>r.id));
     if(!lease)return reply.code(404).send({error:'not_found'});
+    (req as GuardedRequest)[adminReadLease]=lease;
     reply.raw.once('finish',()=>lease.release());reply.raw.once('close',()=>lease.release());
   }
   if((await forbiddenIds(ids,uid)).size)return reply.code(404).send({error:'not_found'});

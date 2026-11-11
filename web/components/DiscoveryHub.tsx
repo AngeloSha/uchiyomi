@@ -8,13 +8,13 @@ import { keys, t as tr } from '@/lib/i18n';
 import { catalogItem, discoveryFiltersFrom, discoveryKey, EMPTY_DISCOVERY_STATE, filterDiscovery, isHiddenPick, mixCatalog, NO_DISCOVERY_FILTERS, recommendationItems, surprisePick, titleKey, writeDiscoveryFilters,
   type DiscoveryCountry, type DiscoveryFilters, type DiscoveryItem, type DiscoveryState } from '@/lib/discoveryHub';
 import type { Pick } from '@/lib/forYou';
-import { DiscoverHero, Eyebrow, TrendingCard, type Trending } from './DiscoverHero';
+import { DiscoverHero, TrendingCard, type Trending } from './DiscoverHero';
 import { ForYouBand } from './ForYouBand';
 import { Modal, msgOf } from './ConfirmDialog';
 import { ScrollRail } from './ScrollRail';
 import { Img } from './ui';
 import { sourceCover } from './cards';
-import { IcBookmark, IcCheck, IcEyeOff, IcSearch, IcSparkle } from './icons';
+import { IcBookmark, IcCheck, IcEyeOff, IcSearch, IcSliders, IcSparkle, IcX } from './icons';
 import type { CardWhy } from './DiscoverHero';
 
 const MOODS = keys('All genres', 'Fantasy', 'Action', 'Romance', 'Mystery', 'Comedy', 'Sports');
@@ -42,6 +42,7 @@ export function DiscoveryHub({ heroTarget, owner, state, stateLoading, stateErro
     } catch { /* filters still work without history access */ }
   }, [filters]);
   const [preview, setPreview] = useState<DiscoveryItem | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -124,39 +125,14 @@ export function DiscoveryHub({ heroTarget, owner, state, stateLoading, stateErro
   return (
     <div data-discovery-hub>
       {heroTarget && createPortal(<DiscoverHero slides={hero} waiting={waiting && !hero.length} onPick={(t) => setPreview(t as DiscoveryItem)} actionLabel={tr('Explore this title')} underChrome={false} />, heroTarget)}
-      <section className="pb-4 pt-6 lg:pt-8" aria-label={tr('Your discovery interests')}>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <Eyebrow>{tr('Find your next favorite')}</Eyebrow>
-            <h2 className="font-display text-2xl font-bold tracking-tight lg:text-3xl">{tr('What are you in the mood for?')}</h2>
-            <p className="mt-1.5 max-w-xl text-sm text-fog-400">{tr('Explore your interests, keep a few for later, or try something unexpected.')}</p>
-          </div>
-          <button type="button" className="btn-ghost min-h-11 gap-2 px-4 py-3 text-sm" onClick={surprise} disabled={!filtered.length}>
-            <IcSparkle width={17} height={17} />{tr('Surprise me')}
-          </button>
-        </div>
-        <div role="group" aria-label={tr('Series type')} className="mt-5 flex flex-wrap gap-2">
-          {COUNTRIES.map((country, i) => <button key={country} type="button" className={`chip min-h-11 px-4 text-sm ${filters.country === country ? 'chip-active' : ''}`}
-            aria-pressed={filters.country === country} onClick={() => setFilters((v) => ({ ...v, country }))}>{tr(COUNTRY_LABELS[i])}</button>)}
-        </div>
-        <div role="group" aria-label={tr('Genre')} className="mt-2 flex flex-wrap gap-2">
-          {MOODS.map((genre, i) => <button key={genre} type="button" className={`chip min-h-11 px-3 text-xs ${(i === 0 ? filters.genre === null : filters.genre === genre) ? 'chip-active' : ''}`}
-            aria-pressed={i === 0 ? filters.genre === null : filters.genre === genre}
-            onClick={() => setFilters((v) => ({ ...v, genre: i === 0 ? null : genre }))}>{tr(genre)}</button>)}
-        </div>
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-          <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-fog-300">
-            <input type="checkbox" className="size-4 accent-accent" checked={filters.completed} onChange={(e) => setFilters((v) => ({ ...v, completed: e.target.checked }))} />
-            {tr('Completed series only')}
-          </label>
-          {ownState.hidden.length > 0 && <button type="button" className="min-h-11 px-2 text-xs text-fog-400 hover:text-fog-100 disabled:opacity-50" disabled={!canChange} onClick={() => void resetHidden()}>{tr('Reset hidden picks')}</button>}
-        </div>
-        <p className="mt-1 text-xs text-fog-500">{tr('Filters use known catalog details. A completed series may still have missing translations.')}</p>
+      <section className="py-4" aria-label={tr('Your discovery interests')}>
+        <DiscoveryFilterBar filters={filters} open={filtersOpen} onOpen={() => setFiltersOpen(true)} onClear={() => setFilters(NO_DISCOVERY_FILTERS)}
+          onSurprise={surprise} surpriseDisabled={!filtered.length} />
         {stateError && <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-sm" role="status">
           <p>{tr('Your saved picks could not be loaded. You can still browse.')}</p>
           <button type="button" className="btn-ghost mt-2 min-h-11 px-3 text-xs" onClick={onRetryState}>{tr('Try again')}</button>
         </div>}
-        <div className="min-h-8 pt-3" aria-live="polite" aria-atomic="true">
+        <div className={error || notice ? 'pt-3' : ''} aria-live="polite" aria-atomic="true">
           {error ? <p className="text-sm text-amber-300">{error}</p> : notice ? <div className="flex flex-wrap items-center gap-2 text-sm text-fog-300">
             <p>{notice}</p>{undo && <button type="button" disabled={!canChange} className="min-h-11 px-3 font-medium text-accent" onClick={() => void feedback(undo, { hidden: false })}>{tr('Undo')}</button>}
           </div> : null}
@@ -184,12 +160,98 @@ export function DiscoveryHub({ heroTarget, owner, state, stateLoading, stateErro
           <button type="button" className="btn-ghost mt-4 min-h-11 px-4 text-sm" onClick={() => { setFilters(NO_DISCOVERY_FILTERS); if (failed) onRetry(); }}>{failed ? tr('Try again') : tr('Clear filters')}</button>
         </div>}
       </>}
+      {filtersOpen && <DiscoveryFilterPanel filters={filters} onChange={setFilters} onClose={() => setFiltersOpen(false)}
+        hiddenCount={ownState.hidden.length} canResetHidden={canChange} onResetHidden={() => void resetHidden()} />}
       {previewItem && <DiscoveryPreview item={previewItem} saved={isHiddenPick(previewItem, saved)} busy={busy} canChange={canChange}
         onClose={() => setPreview(null)} onFind={() => { const item = previewItem; setPreview(null); onFind(item); }}
         error={error} onSave={() => void feedback(previewItem, { saved: !isHiddenPick(previewItem, saved) })}
         onHide={() => void feedback(previewItem, { hidden: true })} />}
     </div>
   );
+}
+
+/** A single compact row; details are only rendered when someone asks for them. */
+export function DiscoveryFilterBar({ filters, open = false, onOpen, onClear, onSurprise, surpriseDisabled }: {
+  filters: DiscoveryFilters; open?: boolean; onOpen: () => void; onClear: () => void; onSurprise: () => void; surpriseDisabled: boolean;
+}) {
+  const active = [filters.country !== 'all' ? tr(COUNTRY_LABELS[COUNTRIES.indexOf(filters.country)]) : null,
+    filters.genre ? tr(filters.genre) : null, filters.completed ? tr('Completed') : null].filter(Boolean);
+  return <div className="flex min-w-0 items-center gap-2" data-discovery-filter-bar>
+    <button type="button" className="btn-ghost min-h-11 min-w-0 flex-1 justify-start gap-2 rounded-xl px-3 text-sm sm:flex-none sm:max-w-[70%]"
+      aria-haspopup="dialog" aria-expanded={open} onClick={onOpen} data-discovery-filters-trigger>
+      <IcSliders width={17} height={17} className="shrink-0 text-accent" />
+      <span className="shrink-0">{tr('Filters')}</span>
+      {!!active.length && <><span aria-hidden="true" className="grid size-5 shrink-0 place-items-center rounded-md bg-accent-soft text-[11px] font-semibold text-accent">{active.length}</span>
+        <span className="min-w-0 truncate text-xs font-normal text-fog-400" data-discovery-filter-summary>{active.join(' · ')}</span></>}
+    </button>
+    {!!active.length && <button type="button" onClick={onClear} className="btn-ghost min-h-11 min-w-11 shrink-0 rounded-xl px-2 text-fog-400"
+      aria-label={tr('Clear filters')} title={tr('Clear filters')}><IcX width={15} height={15} /></button>}
+    <button type="button" className="btn-ghost ms-auto min-h-11 min-w-11 shrink-0 gap-2 rounded-xl px-3 text-sm" onClick={onSurprise}
+      disabled={surpriseDisabled} aria-label={tr('Surprise me')} title={tr('Surprise me')}>
+      <IcSparkle width={17} height={17} className="text-accent" /><span className="hidden sm:inline">{tr('Surprise me')}</span>
+    </button>
+  </div>;
+}
+
+export function DiscoveryFilterPanel({ filters, onChange, onClose, hiddenCount, canResetHidden, onResetHidden }: {
+  filters: DiscoveryFilters; onChange: (filters: DiscoveryFilters) => void; onClose: () => void;
+  hiddenCount: number; canResetHidden: boolean; onResetHidden: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const dialog = ref.current?.closest<HTMLElement>('[role="dialog"]');
+    if (!dialog) return;
+    // Include the shared modal's close key as well as the controls. Keyboard navigation stays inside
+    // this dialog; the shared modal restores focus to the original Filters button on close.
+    const trap = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return;
+      const controls = [...dialog.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]')]
+        .filter((element) => element.getClientRects().length > 0);
+      const first = controls[0], last = controls.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    dialog.addEventListener('keydown', trap);
+    return () => dialog.removeEventListener('keydown', trap);
+  }, []);
+  const choice = (selected: boolean) => `min-h-11 rounded-xl border px-3 py-2 text-sm transition-colors ${selected
+    ? 'border-accent/40 bg-accent-soft font-medium text-accent' : 'border-ink-700/70 bg-ink-900/30 text-fog-400 hover:border-ink-600 hover:text-fog-100'}`;
+  return <Modal title={tr('Filters')} onClose={onClose} fieldFocus={false}>
+    <div ref={ref} className="space-y-5" data-discovery-filter-panel>
+      <fieldset>
+        <legend className="mb-2 text-xs font-medium text-fog-400">{tr('Series type')}</legend>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="group" aria-label={tr('Series type')}>
+          {COUNTRIES.map((country, i) => <button key={country} type="button" className={choice(filters.country === country)}
+            aria-pressed={filters.country === country} onClick={() => onChange({ ...filters, country })}>{tr(COUNTRY_LABELS[i])}</button>)}
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend className="mb-2 text-xs font-medium text-fog-400">{tr('Genre')}</legend>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" role="group" aria-label={tr('Genre')}>
+          {MOODS.map((genre, i) => <button key={genre} type="button" className={choice(i === 0 ? filters.genre === null : filters.genre === genre)}
+            aria-pressed={i === 0 ? filters.genre === null : filters.genre === genre}
+            onClick={() => onChange({ ...filters, genre: i === 0 ? null : genre })}>{tr(genre)}</button>)}
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend className="mb-2 text-xs font-medium text-fog-400">{tr('Status')}</legend>
+        <div className="grid grid-cols-2 gap-2" role="group" aria-label={tr('Status')}>
+          <button type="button" className={choice(!filters.completed)} aria-pressed={!filters.completed}
+            onClick={() => onChange({ ...filters, completed: false })}>{tr('All')}</button>
+          <button type="button" className={choice(filters.completed)} aria-pressed={filters.completed}
+            aria-label={tr('Completed series only')} onClick={() => onChange({ ...filters, completed: true })}>{tr('Completed')}</button>
+        </div>
+      </fieldset>
+      <p className="text-xs leading-relaxed text-fog-500">{tr('Filters use known catalog details. A completed series may still have missing translations.')}</p>
+      {hiddenCount > 0 && <button type="button" className="min-h-11 text-xs text-fog-400 hover:text-fog-100 disabled:opacity-50"
+        disabled={!canResetHidden} onClick={onResetHidden}>{tr('Reset hidden picks')}</button>}
+      <div className="flex items-center justify-between gap-3 border-t border-ink-700/70 pt-4">
+        <button type="button" className="btn-ghost min-h-11 px-3 text-sm" onClick={() => onChange(NO_DISCOVERY_FILTERS)}>{tr('Clear filters')}</button>
+        <button type="button" className="btn-accent min-h-11 px-5 text-sm" onClick={onClose}>{tr('Done')}</button>
+      </div>
+    </div>
+  </Modal>;
 }
 
 export function DiscoveryRail({ title, kind, items, onPreview }: { title: string; kind: string; items: DiscoveryItem[]; onPreview: (it: DiscoveryItem) => void }) {

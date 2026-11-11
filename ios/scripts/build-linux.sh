@@ -23,7 +23,10 @@ if len(paths) != 1:
 print(json.loads((Path(paths.pop()) / 'SDKSettings.json').read_text())['Version'])
 PYSDK
 )"
-python3 "$native_root/scripts/prepare-xtool.py" "$output/staging" --version "${UCHI_IOS_VERSION:-0.1.0}" --build "${UCHI_IOS_BUILD:-2026111001}" --sdk-version "$native_sdk_version"
+build_args=()
+if [[ -n "${UCHI_IOS_BUILD:-}" ]]; then build_args+=(--build "$UCHI_IOS_BUILD"); fi
+native_build="$(python3 "$native_root/scripts/build-number.py" "${build_args[@]}")"
+python3 "$native_root/scripts/prepare-xtool.py" "$output/staging" --version "${UCHI_IOS_VERSION:-0.1.0}" --build "$native_build" --sdk-version "$native_sdk_version"
 cd "$output/staging"
 xtool dev build -c release --ipa
 python3 - "$native_root" "$output" <<'PY'

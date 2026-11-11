@@ -85,6 +85,10 @@ export const OPS = {
   fetchSourceManga: op('fetchSourceManga', `mutation($source:LongString!,$type:FetchSourceMangaType!,$query:String,$page:Int!,$filters:[FilterChangeInput!]){
   fetchSourceManga(input:{source:$source,type:$type,query:$query,page:$page,filters:$filters}){ mangas { ${MANGA_FIELDS} } }
 }`),
+  /** Read existing engine rows only: never create a manga by fetching a caller-supplied URL. */
+  mangaIdentity: op('mangaIdentity', `query($source:LongString!,$paths:[String!]!){
+    mangas(condition:{sourceId:$source},filter:{url:{in:$paths}},first:2){ nodes { ${MANGA_FIELDS} } }
+  }`),
   /**
    * The series, through `fetchMangaAndChapters`, which replaced `fetchManga` and runs the same engine code. ⚠️ It
    * catches a failure of the update and answers the STORED series with the error attached (`data` and `errors` both;

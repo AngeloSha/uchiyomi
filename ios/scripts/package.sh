@@ -10,10 +10,10 @@ mkdir -p "$output"
 output="$(cd "$output" && pwd)"
 python3 ios/scripts/source-record.py > "$output/source.json"
 settings=()
-if [[ -n "${UCHI_BUILD_NUMBER:-}" ]]; then
-  if [[ ! "$UCHI_BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then echo 'UCHI_BUILD_NUMBER must be a positive integer' >&2; exit 1; fi
-  settings+=("CURRENT_PROJECT_VERSION=$UCHI_BUILD_NUMBER")
-fi
+build_args=()
+if [[ -n "${UCHI_BUILD_NUMBER:-}" ]]; then build_args+=(--build "$UCHI_BUILD_NUMBER"); fi
+native_build="$(python3 ios/scripts/build-number.py "${build_args[@]}")"
+settings+=("CURRENT_PROJECT_VERSION=$native_build")
 version="${UCHI_VERSION:-}"
 if [[ -n "${UCHI_RELEASE_TAG:-}" ]]; then
   version="$(PYTHONPATH=ios/scripts python3 -c 'import os; from release_lib import tag_version; print(tag_version(os.environ["UCHI_RELEASE_TAG"]))')"

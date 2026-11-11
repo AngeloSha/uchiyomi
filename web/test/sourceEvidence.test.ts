@@ -66,8 +66,8 @@ test('#115 itself: a failed Test whose diagnosis has no reason is still not "Wor
     'a known code without its sentence is not worded by its code');
 });
 
-test('"Working normally." only under a pass with no ✗ on screen', () => {
-  assert.deepEqual(answerView(passing).head, { tone: 'ok', text: 'Working normally.' });
+test('a passing Test speaks only for its checked steps and no failed line', () => {
+  assert.deepEqual(answerView(passing).head, { tone: 'ok', text: 'The checked steps passed.' });
   assert.equal(answerView(passing).fix, null, 'a pass carries no fix');
   assert.deepEqual(answerView(passing).rows[1], { key: 'chapters', glyph: 'ok', label: 'Chapter list', detail: 'Walk Tale · 14 chapter(s)', error: null, when: null });
   // Covers do not vote, so the Test passes -- but a ✗ Covers line under "Working normally." is the same lie.
@@ -98,6 +98,36 @@ const stored: StageLine[] = [
   { stage: 'pages', state: 'ok', at: new Date(Date.now() - 3 * 3600_000).toISOString(), by: 'traffic', kind: null, error: null },
   { stage: 'images', state: 'ok', at: new Date(Date.now() - 26 * 3600_000).toISOString(), by: 'sweep', kind: null, error: null },
 ];
+
+test('#426: a passing list Test retains an unresolved image failure with its date and cause', () => {
+  const images: StageLine = { stage: 'images', state: 'fail', at: new Date(Date.now() - 420_000).toISOString(),
+    by: 'traffic', kind: 'error', error: '0/12 pages downloaded (HTTP 404)' };
+  const recorded = [...stored.slice(0, 3), images];
+  const before = JSON.stringify(recorded);
+  const view = answerView(passing, recorded);
+  assert.deepEqual(view.head, { tone: 'warn', text: 'The checked steps passed; earlier failures are shown below.' });
+  assert.deepEqual(view.rows.map((r) => [r.key, r.glyph]), [
+    ['search', 'ok'], ['chapters', 'ok'], ['pages', 'ok'], ['images', 'fail'],
+  ]);
+  assert.deepEqual(view.rows.at(-1), { key: 'images', glyph: 'fail', label: 'Images',
+    detail: 'not checked by this test', error: images.error, when: '7m ago · in normal use' });
+  assert.equal(JSON.stringify(recorded), before, 'presenting a new Test must never mutate stored evidence');
+  const html = renderToStaticMarkup(createElement(SourceEvidence, { answer: passing, lines: recorded }));
+  assert.match(html, /data-evidence-stage="images" data-evidence-state="fail"/);
+  assert.match(html, /not checked by this test/); assert.match(html, /7m ago · in normal use/);
+  assert.match(html, /0\/12 pages downloaded \(HTTP 404\)/); assert.doesNotMatch(html, /Working normally/);
+});
+
+test('a new success supersedes only the same checked stage; unreached failures remain recorded', () => {
+  assert.equal(answerView(passing, stored).rows[0].glyph, 'ok', 'the current passing search replaces an older failed search');
+  assert.equal(answerView(passing, stored).head?.tone, 'ok', 'the old search must not make the new passing search look bad');
+  const partial = answerView({ ...passing, checks: passing.checks.filter((c) => c.stage !== 'search') }, stored);
+  assert.equal(partial.rows[0].glyph, 'fail'); assert.equal(partial.rows[0].error, ENGINE);
+  assert.equal(partial.rows[0].detail, 'not checked by this test');
+  assert.equal(partial.head?.tone, 'warn');
+  assert.match(readFileSync(join(ROOT, 'components/SourceSheet.tsx'), 'utf8'), /<SourceEvidence answer=\{answer\} lines=\{row\?\.evidence\}/,
+    'the source sheet must combine the fresh Test with recorded download evidence');
+});
 
 test('stored evidence: one line per stage, with when and by what', () => {
   const v = evidenceView(stored, { at: new Date(Date.now() - 120_000).toISOString(), by: 'test', state: 'fail', stage: 'search' }, 'Update the extension.');
@@ -218,6 +248,7 @@ test('every word this says is in all eight languages, the counted pairs included
   // Reintroduce by deleting "Chapter list" from one locale: that language fails by name.
   const words = [
     ...STAGE_LABELS, ...BY_LABELS, ...GLYPH_WORDS, 'Failing',
+    'The checked steps passed.', 'The checked steps passed; earlier failures are shown below.', 'not checked by this test',
     '1 source needs attention', '{n} sources need attention', '1 source could not finish in time', '{n} sources could not finish in time',
     'Testing… {elapsed} of up to {max}', 'Checking {done} of {total}', 'Last tested {when} with the Test button',
   ];

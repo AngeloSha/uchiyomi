@@ -59,6 +59,70 @@ test('search maps a source manga list onto series', async () => {
   assert.equal(s.url, undefined, 'realUrl is the web link and stays separate from the path');
 });
 
+test('backup identity looks up the exact source and path, then refreshes only its numeric engine id', async () => {
+  const { makeSuwayomiAdapter } = await load();
+  const { OPS } = await import('../src/lib/sources/suwayomi/operations');
+  const remote = { ...LOCAL, id: '9223372036854775807' };
+  const stale = { id: 43, sourceId: remote.id, title: 'Old Name', url: '/manga/enen/' };
+  const seen: { doc: string; vars: Record<string, unknown>; timeout: number }[] = [];
+  const run = (async (doc: string, vars: Record<string, unknown>, timeout: number) => {
+    seen.push({ doc, vars, timeout });
+    if (doc === OPS.mangaIdentity.doc) return { mangas: { nodes: [stale] } };
+    if (doc === OPS.fetchManga.doc) return { fetchMangaAndChapters: { manga: { ...stale, title: 'Enen no Shouboutai' } } };
+    throw new Error('unexpected engine operation');
+  }) as never;
+  const [m] = await makeSuwayomiAdapter(remote, run).lookupByPath!(' manga/enen ', 1500);
+  assert.deepEqual([m.source, m.sourceId, m.title], [`sw:${remote.id}`, '43', 'Enen no Shouboutai']);
+  assert.deepEqual(seen.map((x) => x.vars), [
+    { source: remote.id, paths: ['manga/enen', '/manga/enen', 'manga/enen/', '/manga/enen/'] }, { id: 43 },
+  ]);
+  assert.ok(seen.every((x) => x.timeout > 0 && x.timeout <= 1500));
+});
+
+test('identity catalogue misses and malformed or foreign hits never fetch supplied paths as manga ids', async () => {
+  const { makeSuwayomiAdapter } = await load();
+  const { OPS } = await import('../src/lib/sources/suwayomi/operations');
+  for (const nodes of [[], [{ id: 4, sourceId: 'other', title: 'T', url: '/manga/t' }],
+    [{ id: 4, title: 'T', url: '/manga/t' }], [{ id: 4, sourceId: '0', title: 'T', url: '/Manga/t' }],
+    [{ id: '/manga/t', sourceId: '0', title: 'T', url: '/manga/t' }]]) {
+    let calls = 0;
+    const run = (async (doc: string) => {
+      calls++; assert.equal(doc, OPS.mangaIdentity.doc, 'no fetch on a miss'); return { mangas: { nodes } };
+    }) as never;
+    assert.deepEqual(await makeSuwayomiAdapter(LOCAL, run).lookupByPath!('/manga/t', 50), []);
+    assert.equal(calls, 1);
+  }
+});
+
+test('duplicate identities remain ambiguous, while a refreshed foreign or changed entry loses its proof', async () => {
+  const { makeSuwayomiAdapter } = await load();
+  const { OPS } = await import('../src/lib/sources/suwayomi/operations');
+  const row = { id: 4, sourceId: '0', title: 'T', url: '/manga/t' };
+  const duplicate = makeSuwayomiAdapter(LOCAL, (async (doc: string) => {
+    assert.equal(doc, OPS.mangaIdentity.doc); return { mangas: { nodes: [row, { ...row, id: 5 }] } };
+  }) as never);
+  assert.deepEqual((await duplicate.lookupByPath!('/manga/t', 50)).map((m) => m.sourceId), ['4','5']);
+  const malformedDuplicate = makeSuwayomiAdapter(LOCAL, (async (doc: string) => {
+    assert.equal(doc, OPS.mangaIdentity.doc); return { mangas: { nodes: [row, { ...row, id: 5, title: '' }] } };
+  }) as never);
+  assert.deepEqual(await malformedDuplicate.lookupByPath!('/manga/t', 50), [], 'discarding a malformed duplicate cannot prove the other hit');
+  for (const changed of [{ ...row, sourceId: 'other' }, { ...row, url: '/manga/other' }, { ...row, id: 9 }, null]) {
+    const adapter = makeSuwayomiAdapter(LOCAL, (async (doc: string) => doc === OPS.mangaIdentity.doc
+      ? { mangas: { nodes: [row] } } : { fetchMangaAndChapters: { manga: changed } }) as never);
+    assert.deepEqual(await adapter.lookupByPath!('/manga/t', 50), []);
+  }
+});
+
+test('identity engine errors stay bounded and do not trigger a website retry', async () => {
+  const { makeSuwayomiAdapter } = await load();
+  let calls = 0;
+  const adapter = makeSuwayomiAdapter({ ...LOCAL, homeUrl: 'https://example.invalid' }, (async (_doc: string, _vars: unknown, timeout: number) => {
+    calls++; assert.ok(timeout <= 30); throw new Error('catalogue timeout');
+  }) as never);
+  await assert.rejects(adapter.lookupByPath!('/manga/t', 30), /catalogue timeout/);
+  assert.equal(calls, 1);
+});
+
 test('extension rating tags become per-title ratings, with adult tags winning conflicting safe tags', async () => {
   // From @globalteddy's fork: an extension that rates each title only by a genre tag, while declaring nothing itself.
   // Reintroduce by dropping contentRating from toSeries: every rating below reads undefined, and a capped account's
@@ -318,6 +382,10 @@ test('against the pinned engine: Istrevelia arrives with its posting order, its 
       return r.data;
     }) as never;
     const a = makeSuwayomiAdapter({ id: SOURCE_IDS.webtoons, name: 'Webtoons.com', lang: 'en' }, run);
+    const manga = fake.manga('Istrevelia');
+    const identity = await a.lookupByPath!(manga.url, 1500);
+    assert.deepEqual(identity.map((m) => [m.sourceId, m.title, m.path]), [[String(manga.id), manga.title, manga.url]], 'source/path catalogue query and numeric refresh meet the strict engine');
+    assert.deepEqual(await a.lookupByPath!('/missing-catalogue-entry', 1500), []);
     const cs = await a.listChapters(String(fake.manga('Istrevelia').id));
     assert.equal(cs.length, 226);
     assert.deepEqual(fake.calls.filter((c) => c.status === 'rejected' || c.status === 'unimplemented'), []);

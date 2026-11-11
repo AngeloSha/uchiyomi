@@ -15,6 +15,7 @@ import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from '@/components/Toast';
 import { Modal, ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { MoveToLibrary } from '@/components/MoveToLibrary';
+import { currentSelectionLibrary, moveSeriesToLibrary } from '@/lib/moveLibrary';
 import { useAuth, canDownload, canUploadManually } from '@/lib/auth';
 import { AdultToggle, useAdultFilterConfigured, useAdultShown, useLibraries } from '@/components/AdultToggle';
 import { LibraryFilters, NO_SOURCE, READ_STATES, STATUSES, useLibrarySources } from '@/components/LibraryFilters';
@@ -543,6 +544,7 @@ function LibraryInner() {
   }, [hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage, view]);
 
   const items = data?.pages.flatMap((p) => p.content) ?? [];
+  const currentMoveLibrary = currentSelectionLibrary(picked, items);
   const total = data?.pages[0]?.totalElements;
 
   const series = view === 'series';
@@ -935,10 +937,16 @@ function LibraryInner() {
         <MoveToLibrary
           n={picked.size}
           busy={acting}
+          current={currentMoveLibrary ? { libraryId: currentMoveLibrary } : undefined}
           onClose={() => setMoving(false)}
-          onPick={async (libraryId) => {
-            setMoving(false);
-            await bulk('/api/admin/series/library', { libraryId });
+          onPick={async (libraryId, options) => {
+            setActing(true);
+            try {
+              const result = await moveSeriesToLibrary([...picked], libraryId, options);
+              for (const key of [['library'], ['home'], ['collection'], ['series'], ['series-privacy'], ['content-privacy']]) qc.invalidateQueries({ queryKey: key });
+              if (!result.skipped.length) settle();
+              return result;
+            } finally { setActing(false); }
           }}
         />
       )}

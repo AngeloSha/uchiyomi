@@ -16,8 +16,9 @@
 // genre or link is still there on the way back.
 import { useEffect, useId, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
+import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, ApiError, img } from '@/lib/api';
+import { api, ApiError, img, getCurrentUser } from '@/lib/api';
 import type { Series } from '@/lib/types';
 import { languageName } from '@/lib/format';
 import { languageChoices } from '@/lib/editions';
@@ -31,6 +32,8 @@ import { metaSaver, seedMeta, type SeriesMeta } from '@/lib/seriesMeta';
 import { SERIES_TYPES, seriesTypeKey } from '@/lib/seriesTypes';
 import { useToast } from './Toast';
 import { msgOf } from './ConfirmDialog';
+import { MoveToLibrary } from './MoveToLibrary';
+import { moveSeriesToLibrary, type LibraryDestination } from '@/lib/moveLibrary';
 import { Backdrop, useRtl } from './ui';
 import { ProgressRing } from './ProgressRing';
 import { HeroTitle } from './HeroTitle';
@@ -635,30 +638,35 @@ function FilesPane({ id, series, onSaved }: { id: string; series: Series; onSave
  * re-pathing an existing one, which is the whole point and also the reason not to do it by accident.
  */
 function LibraryRow({ id, series, onSaved }: { id: string; series: Series; onSaved: () => void }) {
-  const { run } = useAutosave();
   const sid = useId();
-  const [lib, setLib] = useState<string>(series.libraryPinned ? series.libraryId : '');
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const owner = getCurrentUser();
   const { data: libs } = useQuery({
-    queryKey: ['admin-libraries'],
-    queryFn: () => api<{ content: { id: string; name: string; age_rating: number | null }[] }>('/api/admin/libraries'),
+    queryKey: ['admin-libraries', owner],
+    queryFn: () => api<{ content: LibraryDestination[] }>('/api/admin/libraries', { expectedOwnerId: owner }),
   });
-  const pick = async (next: string) => {
-    const prev = lib;
-    setLib(next);
-    if (await run(() => api(`/api/admin/series/${id}/library`, { method: 'POST', json: { libraryId: next || null } }))) onSaved();
-    else setLib(prev);
-  };
-  return (
+  const currentName = libs?.content.find((l) => l.id === series.libraryId)?.name;
+  return <>
     <Row label={tr('Library')} htmlFor={sid} stacked
-      help={lib ? tr('Filed here by hand. Rescans and new libraries will leave it alone.') : tr('Whichever library covers this folder, most specific first.')}>
-      <select id={sid} value={lib} onChange={(e) => void pick(e.target.value)} className="field">
-        <option value="">{tr('Automatic — follow the folder')}</option>
-        {(libs?.content ?? []).map((l) => (
-          <option key={l.id} value={l.id}>{l.name}{l.age_rating != null ? ` (${l.age_rating}+)` : ''}</option>
-        ))}
-      </select>
+      help={series.libraryPinned ? tr('Filed here by hand. Rescans and new libraries will leave it alone.') : tr('Whichever library covers this folder, most specific first.')}>
+      <button id={sid} type="button" className="btn-ghost min-h-11 w-full justify-between px-3 text-sm" aria-haspopup="dialog" aria-expanded={open}
+        onClick={() => setOpen(true)}>
+        <span dir="auto" className="truncate">{currentName ?? tr('Automatic — follow the folder')}</span><span className="ms-3 text-xs text-accent">{tr('Change')}</span>
+      </button>
     </Row>
-  );
+    {open && typeof document !== 'undefined' && createPortal(<MoveToLibrary n={1} busy={busy} current={{ libraryId: series.libraryId }}
+      onClose={() => setOpen(false)} onPick={async (libraryId, options) => {
+        setBusy(true);
+        try {
+          const result = await moveSeriesToLibrary([id], libraryId, options);
+          for (const key of [['library'], ['home'], ['collection'], ['series', id], ['series-privacy'], ['content-privacy']]) qc.invalidateQueries({ queryKey: key });
+          onSaved();
+          return result;
+        } finally { setBusy(false); }
+      }} />, document.body)}
+  </>;
 }
 
 /* =============================== Art =============================== */
