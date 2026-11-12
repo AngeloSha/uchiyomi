@@ -7,6 +7,7 @@ import { cleanDescription } from './htmlText';
 import { effectiveLang } from './seriesLang';
 import { noticeBook, noticeShown, visibleBookCount } from './noticeChapters';
 import { rangeEnd, numberText } from './chapterRanges';
+import { chapterName as extractChapterName } from './naming';
 import { anilistScoreOf } from './anilistScores';
 import { AUTO_DETAILS, authorOf, genresOf, summaryOf } from './autoDetailsSql';
 import { lineHas, nameKeys } from './authorNames';
@@ -92,7 +93,8 @@ const booksSrc = (ctx: ViewCtx, p: Params, alias = 'bv') => `(
          b.updated_at, b.fingerprint, b.scanlator, b.source_id, b.pruned_at, b.pruned_reason, b.size, b.missing_pages, b.chapter_name,
          COALESCE(ov.number, b.number) AS number,
          ${rangeEnd('b', 'ov')} AS number_end,
-         COALESCE(ov.title,  b.title)  AS title
+         COALESCE(ov.title,  b.title)  AS title,
+         ov.title AS title_override
     FROM lib_books b
     -- The join that was missing. This carried zero references to lib_series, so a book id alone opened a
     -- chapter of a hidden series and next/previous then walked the whole thing. Every series-level rule --
@@ -199,7 +201,11 @@ function bookDto(r: any) {
     metadata: { title: r.title, number: numberText(num, end), numberSort: num, summary: '', releaseDate: released },
     // The chapter's own name as its source gave it (lib/library.ts chapterName), null when it had none. NOT
     // `name`/`metadata.title`, which are the filename's and keep saying so for every client that prints them.
-    chapterName: r.chapter_name ?? null,
+    // An admin's explicit title override is the name they chose in Edit chapter. Use the same
+    // number-aware extraction as source titles, so "Chapter 12: The Return" displays as "The Return".
+    // A plain "Chapter 12" intentionally clears the displayed name. Without an override, keep the
+    // source's chapter name; never derive one from the filename.
+    chapterName: r.title_override != null ? extractChapterName(r.title_override, num) : (r.chapter_name ?? null),
     // Who released the file on disk and which adapter it came from (setBookMeta in lib/library.ts). Both
     // null for a book the scanner found rather than the downloader wrote. These are read through booksSrc's
     // explicit column list above: a name dropped there does not error, it silently reads as null here.
