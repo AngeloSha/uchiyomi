@@ -35,6 +35,12 @@ import { epubPages } from './readers/epub';
 export const LIBRARY_ROOT = process.env.LIBRARY_ROOT || '/library';
 const IMG = /\.(jpe?g|png|webp|gif|avif)$/i;
 
+function zipPageNames(entries: Record<string, { isDirectory: boolean }>, formatName: string): string[] {
+  // Compare every number in a ZIP path so a numbered wrapper folder can't mask the page number.
+  const compare = /\.zip$/i.test(formatName) ? new Intl.Collator('en', { numeric: true }).compare : naturalCmp;
+  return Object.keys(entries).filter((name) => !entries[name].isDirectory && IMG.test(name)).sort(compare);
+}
+
 export interface ScanBook {
   id: string;
   seriesId: string;
@@ -317,7 +323,7 @@ export async function cbzPages(path: string, formatName: string = path): Promise
   const zip = new StreamZip.async({ file: path });
   try {
     const entries = await zip.entries();
-    return Object.keys(entries).filter((n) => !entries[n].isDirectory && IMG.test(n)).sort(naturalCmp);
+    return zipPageNames(entries, formatName);
   } finally {
     await zip.close();
   }
@@ -379,7 +385,7 @@ export async function cbzPageAt(
   const zip = new StreamZip.async({ file: path });
   try {
     const entries = await zip.entries();
-    const names = Object.keys(entries).filter((n) => !entries[n].isDirectory && IMG.test(n)).sort(naturalCmp);
+    const names = zipPageNames(entries, path);
     const name = names[index];
     return name ? { name, bytes: await zipEntryCapped(zip, name), total: names.length } : null;
   } finally {
@@ -404,7 +410,7 @@ export async function cbzPageDims(path: string): Promise<Array<{ name: string; w
     const zip = new StreamZip.async({ file: path });
     try {
       const entries = await zip.entries();
-      for (const name of Object.keys(entries).filter((n) => !entries[n].isDirectory && IMG.test(n)).sort(naturalCmp)) {
+      for (const name of zipPageNames(entries, path)) {
         // A page over the cap is measured as unknown rather than failing the whole chapter's dimensions.
         const bytes = await zipEntryCapped(zip, name).catch(() => null);
         if (bytes) await dim(name, bytes); else out.push({ name, width: null, height: null });
@@ -432,7 +438,7 @@ export async function eachPageBytes(path: string, fn: (bytes: Buffer | null) => 
     const zip = new StreamZip.async({ file: path });
     try {
       const entries = await zip.entries();
-      const names = Object.keys(entries).filter((n) => !entries[n].isDirectory && IMG.test(n)).sort(naturalCmp);
+      const names = zipPageNames(entries, path);
       for (const name of names) await fn(await zipEntryCapped(zip, name).catch(() => null));
       return names.length;
     } finally { await zip.close(); }

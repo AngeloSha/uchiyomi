@@ -897,14 +897,17 @@ export const owned = {
       if (after !== contentVersion) throw Object.assign(new Error('The chapter changed while its page list was being read. Reload it.'), { statusCode: 409 });
       return listed;
     };
-    if (Array.isArray(r.page_dims) && r.page_dims.length && (!cleanup.revision || !contentVersion || r.page_dims_version === contentVersion)) {
+    // Rebuild cached ZIP dimensions in the new page order.
+    const isZip = /\.zip$/i.test(r.file);
+    const dimsVersion = isZip && contentVersion ? `${contentVersion}:zip-order-2` : contentVersion;
+    if (Array.isArray(r.page_dims) && r.page_dims.length && ((!isZip && !cleanup.revision) || !contentVersion || r.page_dims_version === dimsVersion)) {
       return stable(r.page_dims.map((pd, i) => mark({ number: i + 1, fileName: pd.name, mediaType: mediaType(pd.name), width: pd.width ?? null, height: pd.height ?? null, sizeBytes: null })));
     }
     const dims = await cbzPageDims(`${r.root || LIBRARY_ROOT}/${r.file}`).catch(() => [] as Array<{ name: string; width: number | null; height: number | null }>);
     // This is a cache, so a failed write must never hide readable pages; but once this call resolves a
     // second reader should be able to use the cache instead of opening the archive again. Fire-and-forget
     // made that ordering depend on database load and was exposed by the partial-chapter completion suite.
-    if (dims.length) await q('UPDATE lib_books SET pages = $1, page_dims = $2, page_dims_version = $4 WHERE id = $3', [dims.length, JSON.stringify(dims), id, contentVersion ?? null]).catch(() => {});
+    if (dims.length) await q('UPDATE lib_books SET pages = $1, page_dims = $2, page_dims_version = $4 WHERE id = $3', [dims.length, JSON.stringify(dims), id, dimsVersion ?? null]).catch(() => {});
     return stable(dims.map((pd, i) => mark({ number: i + 1, fileName: pd.name, mediaType: mediaType(pd.name), width: pd.width, height: pd.height, sizeBytes: null })));
   },
 
