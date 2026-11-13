@@ -294,11 +294,13 @@ final class ReaderLifecycleTests: XCTestCase {
         // A fresh simulator can retain WebKit's network process after the view is gone.
         // The app exposes retry on removal failure; fixture teardown waits for that same
         // asynchronous shutdown without making lifecycle assertions depend on its timing.
-        for attempt in 0..<10 {
+        // Up to about 30 s: on GitHub's macOS runners the network process held the store
+        // past the 2 s this waited before, twice in a row (11-13), while every assertion passed.
+        for attempt in 0..<40 {
             do { try await NativeWebView.removeStore(for: id); return }
             catch {
-                if attempt == 9 { throw error }
-                try await Task.sleep(nanoseconds: 200_000_000)
+                if attempt == 39 { throw error }
+                try await Task.sleep(nanoseconds: 750_000_000)
             }
         }
     }
