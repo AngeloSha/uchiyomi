@@ -4,7 +4,9 @@
 //
 // Beyond the 1.2 baseline this speaks two things a reader can use or ignore:
 //   * OPDS-PSE 1.1 page streaming (Panels, Chunky, KOReader): a chapter can be read page by page over HTTP
-//     instead of downloaded whole. A reader that does not know the `rel` keeps downloading the CBZ.
+//     instead of downloaded whole. A reader that does not know the `rel` keeps downloading the CBZ. With the
+//     account's switch on, the pages streamed keep its place and a chapter paged through to the end counts as read
+//     (#377, the page route below).
 //   * Facets (OPDS 1.2 §7): sort, library, genre and status as links the reader renders as filters.
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createReadStream } from 'node:fs';
@@ -83,6 +85,23 @@ const pageCt = (name: string): string => {
   const e = name.toLowerCase().split('.').pop() || '';
   return e === 'png' ? 'image/png' : e === 'webp' ? 'image/webp' : e === 'gif' ? 'image/gif' : e === 'avif' ? 'image/avif' : 'image/jpeg';
 };
+
+/**
+ * Whether a page fetch asks for the page at a size someone reads it at (#377): `maxWidth` absent, blank, left as the
+ * template's own `{maxWidth}`, or 600 px and up. A reader fills the template with its screen's width -- KOReader does,
+ * and e-reader screens start at 600 -- and asks for less for a strip of thumbnails or a scrubber, which is no page read.
+ * v0.107.0 counted only a fetch with no `maxWidth` at all, which our own template never makes, so its estimates almost
+ * never happened. Reintroduce `maxWidth === undefined`: "a page at reading size is recorded" in opdsPse.int.test.ts
+ * records nothing for 1264, blank or {maxWidth}.
+ */
+const readingSize = (maxWidth: unknown): boolean => {
+  if (maxWidth === undefined) return true;
+  if (typeof maxWidth !== 'string') return false;
+  const w = maxWidth.trim();
+  return w === '' || w === '{maxWidth}' || Number(w) >= 600;
+};
+/** A page fetch to record once it is known to have been served (the page route's onSend). */
+interface OpdsRead { book: { id: string; seriesId: string; pages: number }; page: number }
 
 /** The browsing parameters a series feed understands, and the query string that reproduces them. */
 interface Browse { sort: string; q: string; library: string; genre: string; status: string }
@@ -467,14 +486,27 @@ export default async function opdsRoutes(app: FastifyInstance) {
   // bytes under the SAME cache key the web reader uses, so the two never fetch or store a page twice; with
   // it, a distinct key and a JPEG, because a resized variant must not be mistaken for the original and a
   // reader asking for a width is not necessarily one that decodes webp.
-  app.get('/opds/book/:id/page/:n', async (req, reply) => {
+  //
+  // With the account's switch on, a page served at reading size is a page read (#377; lib/externalReading.ts
+  // rememberOpdsEstimate decides when that finishes the chapter). Recorded in onSend, once the answer is known to be a
+  // GET's 200 -- a 404, a 304 revalidation, a range or a HEAD is no page read -- and before its bytes go, so a reader
+  // that asks for the next page only once it has this one is recorded in the order it read.
+  app.get('/opds/book/:id/page/:n', {
+    onSend: async (req, reply, payload) => {
+      const read = (req as { opdsRead?: OpdsRead }).opdsRead;
+      if (read && req.method === 'GET' && reply.statusCode === 200) await rememberOpdsEstimate(uidOf(req), read.book, read.page).catch(() => {});
+      return payload;
+    },
+  }, async (req, reply) => {
     const { id, n } = req.params as { id: string; n: string };
     const pageNo = Number(n);
     if (!Number.isInteger(pageNo) || pageNo < 0) return reply.code(400).send('bad page');
     const row = await visibleBookFile(id, vc(req));
     if (!row) return reply.code(404).send('not found');
     const abs = join(row.root || LIBRARY_ROOT, row.file);
-    const w = Number((req.query as Record<string, string>).maxWidth);
+    const maxWidth = (req.query as Record<string, unknown>).maxWidth;
+    if (readingSize(maxWidth)) (req as { opdsRead?: OpdsRead }).opdsRead = { book: { id, seriesId: row.series_id, pages: row.pages }, page: pageNo + 1 };
+    const w = Number(maxWidth);
     if (w && Number.isInteger(w) && w >= 64 && w <= 2000) {
       return serveImage(req, reply, `pse-page:${id}:${pageNo + 1}:w${w}`, async () => {
         const page = await cbzPageAt(abs, pageNo);
@@ -483,14 +515,12 @@ export default async function opdsRoutes(app: FastifyInstance) {
         return { buffer, contentType: 'image/jpeg' };
       });
     }
-    await serveImage(req, reply, `lib-page:${id}:${pageNo + 1}`, async () => {
+    return serveImage(req, reply, `lib-page:${id}:${pageNo + 1}`, async () => {
       const page = await cbzPageAt(abs, pageNo);
       if (!page) throw Object.assign(new Error('no page'), { statusCode: 404 });
       q('UPDATE lib_books SET pages=$1 WHERE id=$2 AND pages<>$1', [page.total, id]).catch(() => {});
       return { buffer: page.bytes, contentType: pageCt(page.name) };
     });
-    if(req.method==='GET'&&reply.statusCode===200&&(req.query as Record<string,string>).maxWidth===undefined)await rememberOpdsEstimate(uidOf(req),id,pageNo+1).catch(()=>{});
-    return reply;
   });
 
   // download one chapter as a CBZ (streams the file; zips a loose-image folder on the fly)

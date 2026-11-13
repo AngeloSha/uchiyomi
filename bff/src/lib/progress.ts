@@ -52,6 +52,9 @@ export async function writeProgress(w: ProgressWrite): Promise<void> {
   // later replayed page was then older than that and moved nothing, and the reader resumed at the first page read
   // offline rather than the last. Reintroduce by letting the INSERT take updated_at's default: "a chapter first read
   // offline resumes where the reader stopped" in offlineDates.int.test.ts finds page 3, not 25.
+  // A completion guessed from OPDS page streaming (read_progress.inferred, lib/externalReading.ts) stays a guess through
+  // a page ping and ends with this write's own word: the chapter read to the end, Mark read, or Mark unread. Reintroduce
+  // by leaving `inferred` alone here: "... a later real read makes it due" in opdsPse.int.test.ts finds nothing due.
   await q(
     `INSERT INTO read_progress (user_id, book_id, series_id, page, completed, updated_at, incognito, is_private)
      VALUES ($1, $2, $3, $4, $5, COALESCE($7::timestamptz, now()), $8, EXISTS(SELECT 1 FROM lib_series s WHERE s.id=$3 AND s.is_private))
@@ -59,6 +62,7 @@ export async function writeProgress(w: ProgressWrite): Promise<void> {
      DO UPDATE SET page = CASE WHEN $7::timestamptz IS NULL OR $7 >= read_progress.updated_at
                                THEN EXCLUDED.page ELSE read_progress.page END,
        completed = CASE WHEN $6 THEN EXCLUDED.completed ELSE (read_progress.completed OR EXCLUDED.completed) END,
+       inferred = read_progress.inferred AND NOT EXCLUDED.completed AND NOT $6::boolean,
        updated_at = GREATEST(read_progress.updated_at, COALESCE($7::timestamptz, now())),
        incognito = read_progress.incognito AND EXCLUDED.incognito,
        is_private = read_progress.is_private OR EXCLUDED.is_private`,

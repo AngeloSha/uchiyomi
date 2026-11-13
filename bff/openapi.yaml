@@ -8162,6 +8162,12 @@ paths:
       tags:
         - opds
       summary: One page for OPDS-PSE readers. ZERO-based; ?maxWidth (64-2000) returns a JPEG no wider than asked.
+      description: Since v0.108.0, with the account's opdsEstimatedBookmarks on, a GET answered 200 at reading size
+        (maxWidth absent, blank, the unfilled {maxWidth}, or 600 and up) keeps the reader's estimated place, and the
+        fetch that first reaches the last page completes the chapter (read_progress, trackers) when its sitting -- the
+        chapter's counted fetches with no six-hour gap -- reached at least half the pages going forward and began at
+        least max(20 s, 0.5 s per page) earlier. Pages before the end stay estimates. Under Incognito the place and the
+        completion are kept privately, with no reading event or tracker write.
       operationId: getOpdsBookIdPageN
       parameters:
         - name: id
@@ -16332,7 +16338,8 @@ paths:
         - personal
       summary: Read the account’s external-reader options.
       description: Both externalReadingStats and opdsEstimatedBookmarks default off. External completions supply
-        counts only; page-fetch estimates do not constitute reading completion.
+        counts only; byReader lists them by origin (komga, koreader, opds). Since v0.108.0 opdsEstimatedBookmarks also
+        completes a chapter paged through to the end over OPDS page streaming (see /opds/book/{id}/page/{n}).
       operationId: getApiExternalReaders
       security:
         - bearer: []
@@ -16352,9 +16359,10 @@ paths:
     put:
       tags:
         - personal
-      summary: Save external-reader count and estimated-bookmark options.
+      summary: Save external-reader count and OPDS page-streaming tracking options.
       description: Does not backfill historical events. External completions never invent duration or affect
-        streaks, badges or household rankings.
+        streaks, badges or household rankings. opdsEstimatedBookmarks is the OPDS page-streaming switch (its v0.107.0
+        name), which since v0.108.0 keeps the reader's place and completes a chapter read to the end.
       operationId: putApiExternalReaders
       security:
         - bearer: []

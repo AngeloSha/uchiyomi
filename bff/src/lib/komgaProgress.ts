@@ -209,6 +209,9 @@ export async function markReadUpTo(userId: string, seriesId: string, n: number):
     await externalCompletions(qq,userId,'komga',seriesId,0,[],incognito);
     return {changed:0,ghostMarks:0,ghostMarksAhead:0};
   }
+  // A chapter this moves to read is a real read, never a guess (read_progress.inferred, lib/externalReading.ts). One a
+  // guess from OPDS page streaming already counts as read is left a guess: the phone was told it is read by this
+  // server's own answer above, and a PUT up to it is that answer echoed back, not a sign anyone read it.
   const rows = await qq<ExternalCompletedBook>(
     `INSERT INTO read_progress (user_id, book_id, series_id, page, completed, incognito, is_private)
      SELECT $1, b.id, b.series_id, COALESCE(b.pages, 0), true, $4, EXISTS(SELECT 1 FROM lib_series s WHERE s.id=b.series_id AND s.is_private)
@@ -216,7 +219,7 @@ export async function markReadUpTo(userId: string, seriesId: string, n: number):
        LEFT JOIN book_overrides ov ON ov.book_id = b.id
       WHERE b.series_id = $2 AND COALESCE(ov.number, b.number) <= $3::real
      ON CONFLICT (user_id, book_id) DO UPDATE
-       SET completed = true, page = GREATEST(read_progress.page, EXCLUDED.page), updated_at = now(), incognito = read_progress.incognito AND EXCLUDED.incognito, is_private = read_progress.is_private OR EXCLUDED.is_private
+       SET completed = true, inferred = false, page = GREATEST(read_progress.page, EXCLUDED.page), updated_at = now(), incognito = read_progress.incognito AND EXCLUDED.incognito, is_private = read_progress.is_private OR EXCLUDED.is_private
        WHERE NOT read_progress.completed
      RETURNING book_id,series_id,page`,
     [userId, seriesId, n, incognito],

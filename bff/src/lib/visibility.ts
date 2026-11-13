@@ -580,13 +580,14 @@ export async function viewCtxFor(
  * deleted. OPDS's file download had the same shape. One resolver now guards both.
  *
  * Returns null when the book does not exist OR the viewer may not see it. The caller must not distinguish
- * the two: "no such chapter" and "not yours" should look identical from outside.
+ * the two: "no such chapter" and "not yours" should look identical from outside. The page count and series come along
+ * for OPDS page streaming, which records where a reader got to (routes/opds.ts).
  */
-export async function visibleBookFile(bookId: string, ctx: ViewCtx): Promise<{ file: string; root: string } | null> {
+export async function visibleBookFile(bookId: string, ctx: ViewCtx): Promise<{ file: string; root: string; pages: number; series_id: string } | null> {
   const p = new Params();
   const id = p.add(bookId);
-  return (await one<{ file: string; root: string }>(
-    `SELECT b.file, b.root FROM lib_books b
+  return (await one<{ file: string; root: string; pages: number; series_id: string }>(
+    `SELECT b.file, b.root, b.pages, b.series_id FROM lib_books b
        JOIN lib_series s ON s.id = b.series_id
       WHERE b.id = ${id} AND ${visible('s', ctx, p)}
         -- A notice chapter the admin hides (lib/noticeChapters.ts) has no pages to give, as booksSrc has no row.

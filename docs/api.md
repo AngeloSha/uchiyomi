@@ -3109,7 +3109,8 @@ them:
   the spec and the same base as `read_progress.page`. Panels, Chunky and KOReader read page by page over
   this instead of downloading the CBZ; everything else keeps using the acquisition link. Without `maxWidth`
   the original bytes are served (shared cache with the web reader); with it, a JPEG no wider than asked
-  (64–2000).
+  (64–2000). Under the account's `opdsEstimatedBookmarks` (below, with the external readers) a page fetched this
+  way keeps the reader's place, and reading a chapter through to the end counts as reading it (since v0.108.0).
 - **Facets (OPDS 1.2 §7).** `/opds/series` and `/opds/search` carry `rel="http://opds-spec.org/facet"`
   links in four `opds:facetGroup`s -- Sort, Library, Genre, Status -- each with `thresholdCount` (how many
   of *your* series it leaves) and `opds:activeFacet` on the one in force. The matching query parameters are
@@ -3575,7 +3576,9 @@ Private additions use `visibility: private`; owner IDs are inferred from authent
 
 KOReader custom server: `https://your-server/api/v1/kosync`, Binary matching, API token as username and any dummy password. Give its token read/write scopes. A read-only token may pull but cannot push. Revocation/expiry and account/library restrictions apply. Documents not yet hashed or with ambiguous editions cannot update canonical progress. Hashing is bounded and follows scans. EPUB positions are preserved without inventing page boundaries.
 
-`externalReadingStats` and `opdsEstimatedBookmarks` are separate opt-ins, both off. Explicit small completion transitions can contribute counts at sync time, without estimated duration, streaks, badges or household ranking. First binding, bulk catch-up and duplicate delivery stay silent. OPDS page requests may be prefetches: estimates never complete chapters, append reading events or push trackers. Existing Incognito behavior remains private position with no events or tracker writes.
+`externalReadingStats` and `opdsEstimatedBookmarks` are separate opt-ins, both off. Explicit small completion transitions can contribute counts at sync time, without estimated duration, streaks, badges or household ranking. First binding, bulk catch-up and duplicate delivery stay silent. Existing Incognito behavior remains private position with no events or tracker writes.
+
+OPDS page streaming (`opdsEstimatedBookmarks`; since v0.108.0, [#377](https://github.com/AngeloSha/uchiyomi/issues/377)): a `GET /opds/book/:id/page/:n` answered **200** at reading size — `maxWidth` absent, blank, the unfilled `{maxWidth}`, or 600 and up; narrower is a thumbnail and is ignored — moves the account's estimated place in that chapter, which the feed gives as `pse:lastRead` where the account has no real progress there. The fetch that first reaches the last page (`pse:count`) completes the chapter when its sitting — the chapter's counted fetches with no gap of six hours — reached at least half the pages going forward and began at least max(20 s, 0.5 s × pages) earlier. So a preload of every page, a jump to the end or a run of thumbnails never completes one, and a reader that loads ahead may complete one a few pages early. Pages before the end stay estimates. A completion is written as a KOReader one is: the furthest page, never downgraded, a tracker push, and under `externalReadingStats` one `reading_events` row with `origin: "opds"` (which `GET /api/external-readers` counts in `byReader`, `[{origin, chapters}]`); Incognito keeps the place and completion privately and writes neither. It is marked as inferred, and the read-chapter cleanup deletes no file on an inferred completion until a real one replaces it: the web reader's, a KOReader push, or Mark read.
 
 Image chapter uploads keep `POST /api/library/upload`: select `images=1`, a `.cbz` chapter `name`, and either a visible `seriesId` or `fresh=1&title=...`. Send ordered multipart `pages` files. Validation and configured upload/free-space limits apply; publication never overwrites an existing file. New-series `visibility`/`libraryId` are authenticated choices; existing-series uploads inherit its scope.
 
