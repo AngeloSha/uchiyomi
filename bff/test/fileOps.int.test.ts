@@ -359,6 +359,35 @@ test('ids and reading progress survive a rename', { skip }, async () => {
   assert.equal((await q('SELECT id FROM lib_series WHERE id = $1', [S])).length, 1, 'the series id changed');
 });
 
+const PRIV_OWNER = '0b6a8f4e-3c1d-4e2a-9f7b-5d6c7e8f9a0b';
+const PRIV_OTHER = '11111111-2222-4333-8444-555555555555';
+
+// From Calvin-Davidson's #432. Who a series' files belong to is the folder they sit in (`_private/<owner>/...`), so a
+// plain rename (Edit details' folder, no visibility move) must never carry a folder across that line, either way.
+test('a plain rename never crosses into a private namespace', { skip }, async () => {
+  await seed(true);
+  const r = await renameSeriesFolder(S, `_private/${PRIV_OWNER}/Berserk`);
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /namespace/i);
+  assert.ok(await exists(join(ROOT, FOLDER, 'ch1.cbz')), 'a refused filing moved files');
+});
+
+test('a plain rename never moves a folder out of its private namespace, or into another one', { skip }, async () => {
+  const inside = `_private/${PRIV_OWNER}/Berserk`;
+  await mkdir(join(ROOT, inside), { recursive: true });
+  await writeFile(join(ROOT, inside, 'ch1.cbz'), 'one');
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count) VALUES ($1,'T!fo','Berserk',$2,1)`, [S, inside]);
+  await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, root) VALUES ('b_fo_1',$1,'T!fo',$2,1,'Chapter 1',$3)`,
+    [S, `${inside}/ch1.cbz`, ROOT]);
+  // Reintroduce a rename that only checks the destination and the first one goes through.
+  for (const dest of ['T!fo/Berserk', `_private/${PRIV_OTHER}/Berserk`, '_private/Berserk']) {
+    const r = await renameSeriesFolder(S, dest);
+    assert.equal(r.ok, false, `a plain rename moved a private folder to ${dest}`);
+  }
+  assert.ok(await exists(join(ROOT, inside, 'ch1.cbz')), 'a refused rename moved files');
+  assert.equal((await q('SELECT folder FROM lib_series WHERE id = $1', [S]))[0].folder, inside);
+});
+
 test('a rename is refused when the destination already exists', { skip }, async () => {
   await seed(true);
   await mkdir(join(DL, 'T!fo/Taken'), { recursive: true });

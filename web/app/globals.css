@@ -693,6 +693,10 @@ html.lenis, html.lenis body { height: auto; }
   }
   :root[data-uchiyomi-native-sidebar] .bleed-lg { margin-inline-start: calc(-1 * var(--rail-w)); width: calc(100% + var(--rail-w)); }
   :root[data-uchiyomi-native-sidebar] .bleed-pad { padding-inline-start: calc(1rem + var(--rail-w)); scroll-padding-inline-start: calc(1rem + var(--rail-w)); }
+  /* Words laid on full-bleed art clear the rail, as lg's `lg:ps-[calc(var(--rail-w)+...)]` does: the art runs under the
+     rail, the text must not. Without these the heroes' titles started 20 px in, under a 72 px rail. */
+  :root[data-uchiyomi-native-sidebar] :is([data-home-hero-content], [data-welcome-hero-content]) { padding-inline-start: calc(var(--rail-w) + 1.25rem); }
+  :root[data-uchiyomi-native-sidebar] [data-series-phone-title] { padding-inline-start: calc(var(--rail-w) + 1rem); }
   :root[data-uchiyomi-native-sidebar] :is([data-selection-toolbar], [data-continue-bar]) {
     inset-inline-start: var(--rail-w); bottom: 0; padding-bottom: max(.75rem, env(safe-area-inset-bottom));
   }

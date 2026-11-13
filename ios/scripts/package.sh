@@ -12,7 +12,8 @@ python3 ios/scripts/source-record.py > "$output/source.json"
 settings=()
 build_args=()
 if [[ -n "${UCHI_BUILD_NUMBER:-}" ]]; then build_args+=(--build "$UCHI_BUILD_NUMBER"); fi
-native_build="$(python3 ios/scripts/build-number.py "${build_args[@]}")"
+# ${a[@]+"${a[@]}"}: macOS bash 3.2 calls an empty array unbound under set -u.
+native_build="$(python3 ios/scripts/build-number.py ${build_args[@]+"${build_args[@]}"})"
 settings+=("CURRENT_PROJECT_VERSION=$native_build")
 version="${UCHI_VERSION:-}"
 if [[ -n "${UCHI_RELEASE_TAG:-}" ]]; then

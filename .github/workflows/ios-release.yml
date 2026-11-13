@@ -64,7 +64,8 @@ jobs:
           writeFileSync(`${temp}/native-build-created-at`, run.created_at);
           JS
           created_at="$(cat "$RUNNER_TEMP/native-build-created-at")"
-          native_build="$(python3 ios/scripts/build-number.py --timestamp "$created_at")"
+          # The token was for the request above; the repository's own Python never sees it.
+          native_build="$(env -u GH_TOKEN python3 ios/scripts/build-number.py --timestamp "$created_at")"
           echo "UCHI_BUILD_NUMBER=$native_build" >> "$GITHUB_ENV"
       - name: Verify toolchain and distribution rules
         run: |

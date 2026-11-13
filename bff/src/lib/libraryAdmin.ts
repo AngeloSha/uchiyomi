@@ -1299,6 +1299,11 @@ export async function renameSeriesFolder(id: string, newFolder: string, visibili
     }
   }
 
+  // A library that already holds this series is refused before any folder moves (from Calvin-Davidson's #432), rather
+  // than found in the catalogue step below and undone on disk. The step below asks again under the row lock.
+  if (visibility && await destinationHolds(q, id, dest, visibility.libraryId))
+    return {ok:false,code:'privacy_destination_conflict',reason:'That library already contains this series or folder.'};
+
   const done: Array<{ root: string; from: string; to: string }> = [];
   for (const root of dest === row.folder ? [] : roots) {
     const from = containedPath(root, row.folder)!;
@@ -1332,9 +1337,7 @@ export async function renameSeriesFolder(id: string, newFolder: string, visibili
         const [lib] = await qq<{managed_private:boolean;owner_user_id:string|null;path:string;paths:string[]}>('SELECT l.managed_private,l.owner_user_id,l.path,ARRAY(SELECT p.path FROM library_paths p WHERE p.library_id=l.id ORDER BY p.path) AS paths FROM libraries l WHERE l.id=$1 FOR SHARE', [visibility.libraryId]);
         if (!lib || lib.path!==visibility.expectedLibrary.path || JSON.stringify(lib.paths)!==JSON.stringify(visibility.expectedLibrary.paths) || lib.managed_private !== visibility.isPrivate || (visibility.isPrivate ? lib.owner_user_id !== visibility.userId : lib.owner_user_id !== null))
           throw new Error('The destination library changed. Try again.');
-        if ((await qq(`SELECT id FROM lib_series s WHERE s.id<>$1 AND (s.folder=$2 OR
-          (s.library_id=$3 AND s.source_id=(SELECT source_id FROM lib_series WHERE id=$1)
-            AND s.source_series_id=(SELECT source_series_id FROM lib_series WHERE id=$1) AND ${visibleToAll('s')})) LIMIT 1`, [id,dest,visibility.libraryId])).length)
+        if (await destinationHolds(qq, id, dest, visibility.libraryId))
           throw Object.assign(new Error('That library already contains this series or folder.'),{code:'privacy_destination_conflict'});
         await qq(`UPDATE lib_series SET is_private=$2,owner_user_id=COALESCE(owner_user_id,$3::uuid),library_id=$4,library_pinned=true,
           private_published_at=CASE WHEN $2 THEN private_published_at ELSE COALESCE(private_published_at,now()) END WHERE id=$1`,
@@ -1362,6 +1365,13 @@ export async function renameSeriesFolder(id: string, newFolder: string, visibili
     return {ok:false,code:(error as {code?:string}).code==='privacy_destination_conflict'?'privacy_destination_conflict':'file_operation_failed',reason:`Could not update the catalogue; folder moves were undone. ${(error as Error).message}`};
   }
   return { ok: true };
+}
+
+/** Another visible series already at `dest`, or this series' own source entry already in that library. */
+async function destinationHolds(qq: <R = any>(text: string, params?: any[]) => Promise<R[]>, id: string, dest: string, libraryId: string): Promise<boolean> {
+  return (await qq(`SELECT id FROM lib_series s WHERE s.id<>$1 AND (s.folder=$2 OR
+    (s.library_id=$3 AND s.source_id=(SELECT source_id FROM lib_series WHERE id=$1)
+      AND s.source_series_id=(SELECT source_series_id FROM lib_series WHERE id=$1) AND ${visibleToAll('s')})) LIMIT 1`, [id, dest, libraryId])).length > 0;
 }
 
 /** Is `real` inside `root` once the root is resolved the same way (realpath) the path was? */

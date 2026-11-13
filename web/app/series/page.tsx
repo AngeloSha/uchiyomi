@@ -2129,7 +2129,7 @@ function SeriesInner() {
         <div className="pointer-events-none absolute inset-0" style={{ background: 'radial-gradient(85% 95% at 22% 0%, rgb(var(--cover, 124 92 255) / 0.32), transparent 62%)' }} />
         {/* a phone's title, on the cover's foot (UI refresh, phone) */}
         <motion.div initial={reduced ? false : { opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.08, ease: [0.22, 0.61, 0.36, 1] }}
-          className="absolute inset-x-0 bottom-0 px-4 pb-3 lg:hidden">
+          data-series-phone-title className="absolute inset-x-0 bottom-0 px-4 pb-3 lg:hidden">
           {meta?.status && (
             <span className="mb-2 inline-block rounded-md bg-white/15 px-2 py-0.5 text-2xs font-semibold uppercase tracking-wide text-white backdrop-blur rtl:tracking-normal">{statusText(meta.status)}</span>
           )}

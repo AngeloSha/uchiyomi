@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {randomBytes,randomUUID}from'node:crypto';
 import {mkdirSync,writeFileSync}from'node:fs';
 import {fixtureLogin,waitForLoginCooldown}from'./loginCooldown.mjs';
-import {plannedOfflineEvidence}from'./plannedOfflineEvidence.mjs';
+import {plannedOfflineEvidence,restorePlannedOnline}from'./plannedOfflineEvidence.mjs';
 
 const base=process.env.BASE||'http://127.0.0.1:18330';
 const parsed=new URL(base);
@@ -143,7 +143,9 @@ try{
   check('offline cold boot retains B saved locale on the supported Downloads surface',new URL(page.url()).pathname==='/downloads/'&&await page.evaluate(id=>JSON.parse(localStorage.getItem('uchiyomi.offlineUser')||'null')?.id===id,second.id));
   check('offline boot never submits a preference change',settingsRequests.filter(request=>request.method==='PUT').length===beforeOffline);
   await shot('offline-owned-language');
-  await page.setOfflineMode(false);offline=false;await locale('de');
+  // Online only once a fresh server answer proves it (plannedOfflineEvidence.mjs): a queued online event can arrive before
+  // Chromium's network is back, and the app's own /auth/refresh then failed as an unexpected console error (PR #432's CI).
+  await restorePlannedOnline(page,()=>{offline=false;},{origin:base,phase:checks.at(-1)?.name||'setup'});await locale('de');
   check('same-account offline-to-online transition reloads the saved account language',true);
   check('online settings and every preference write have an authenticated owner',settingsRequests.filter(request=>!request.offline||request.method==='PUT').every(request=>request.subject===first.id||request.subject===second.id));
 }catch(error){failures.push(error.stack||error.message);console.error(error.stack||error.message);if(page&&!page.isClosed()){await shot('failure').catch(()=>{});writeFileSync(`${out}/failure-page.txt`,page.url()+'\n'+await page.$eval('body',node=>node.innerText).catch(()=>''));}}

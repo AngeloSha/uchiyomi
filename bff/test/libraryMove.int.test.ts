@@ -137,6 +137,20 @@ test('a destination occupied in only the second root refuses the whole move with
   await rm(join(roots[1],dest),{recursive:true});
 });
 
+test('a library that already holds the series refuses publication before any folder moves',{skip},async()=>{
+  // From Calvin-Davidson's #432: the clash is found before the disk is touched, not in the catalogue step and undone.
+  const mine=await fixture('Published twice',{owner:a}),theirs=await fixture('Published twice shared');
+  await q(`UPDATE lib_series SET source_id='sw:clash',source_series_id=$2 WHERE id=ANY($1)`,[[mine.id,theirs.id],randomUUID()]);
+  await q('UPDATE lib_series SET library_id=$2 WHERE id=$1',[theirs.id,shared]);
+  const before=await row(mine.id),priorBooks=await books(mine.id);
+  const result=await move(mine.id,shared,true);
+  assert.equal(result.statusCode,409,result.body);assert.equal(result.json().error,'privacy_destination_conflict');
+  // Reintroduce the catalogue-step check alone (lib/libraryAdmin.ts renameSeriesFolder) and this says the moves were undone.
+  assert.doesNotMatch(result.json().message,/undone/i,'the folders moved before the clash was found');
+  assert.deepEqual(await row(mine.id),before);assert.deepEqual(await books(mine.id),priorBooks);
+  for(const disk of roots)assert.ok(await exists(join(disk,mine.folder)),'a refused publication moved files');
+});
+
 test('a catalog failure after both filesystem renames rolls back every root, privacy and book path',{skip},async()=>{
   const s=await fixture('Database rollback'),before=await row(s.id),priorBooks=await books(s.id),dest=`_private/${a}/${s.folder}`;
   await q(`CREATE OR REPLACE FUNCTION move_fixture_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.series_id='${s.id}' THEN RAISE EXCEPTION 'forced move fixture failure'; END IF; RETURN NEW; END $$`);

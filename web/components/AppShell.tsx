@@ -79,7 +79,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const nativeLayout = useNativeNavigationLayout((status === 'authed' || status === 'offline') && !path.startsWith('/reader'));
   const nativeSide = nativeLayout === 'side';
   const sideNavigation = usesSideNavigation(wide, nativeLayout);
-  useEffect(() => { acknowledgeNativeAppControls(status === 'authed' || status === 'anon'); }, [status]);
+  // The iOS wrapper's own Servers button, for when these controls are out of reach (offline, the downloads alone). Loading
+  // says nothing yet: the wrapper waits 2 s before offering it, so a quick start shows no button and a start that hangs
+  // still gets one, where "unavailable" here flashed it over every splash. A chapter is never covered by it, online or
+  // off: the reader counts as handled, and leaving it for the offline downloads brings the button back.
+  useEffect(() => {
+    if (status === 'loading') return;
+    acknowledgeNativeAppControls(status === 'authed' || status === 'anon' || path.startsWith('/reader'));
+  }, [status, path]);
 
   /**
    * An offline launch arrives at `/` -- the manifest's `start_url` -- which is a home screen assembled

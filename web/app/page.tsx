@@ -305,7 +305,7 @@ export default function HomePage() {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={ART.hero} alt="" className="absolute inset-0 h-full w-full object-cover" />
           <div className="absolute inset-0 bg-linear-to-t from-ink-950 via-ink-950/55 to-ink-950/15" />
-          <div className="absolute inset-x-0 bottom-0 px-5 pb-12 lg:pe-14 lg:ps-[calc(var(--rail-w)+3.5rem)]">
+          <div data-welcome-hero-content className="absolute inset-x-0 bottom-0 px-5 pb-12 lg:pe-14 lg:ps-[calc(var(--rail-w)+3.5rem)]">
             <span className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-black/45 px-3 py-1.5 text-xs font-medium text-accent backdrop-blur"><IcSparkle width={13} height={13} />{tr('Welcome')}</span>
             <h1 className="font-brand text-4xl font-bold leading-tight text-white drop-shadow lg:text-6xl">{tr('Welcome to Uchiyomi')}</h1>
             <p className="mb-4 mt-1 text-sm text-fog-300">{tr('Your cinematic library awaits.')}</p>
