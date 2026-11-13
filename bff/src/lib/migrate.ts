@@ -1103,9 +1103,10 @@ ALTER TABLE import_batches    ADD COLUMN IF NOT EXISTS truncated      boolean NO
 -- chapter lands -- clamped to just before the file's mtime. Stamping now() there would make the read-chapter
 -- cleanup delete a file minutes after fetching it (the which-copy-did-they-read rule in dueSql,
 -- lib/chapterCleanup.ts), and the tombstone would make that permanent. source is 'web' or 'komga': whether a
--- person ticked it here or a paired phone's sync wrote it. ⚠️ Not a support field -- it is the difference
+-- person ticked it here or a paired phone's sync wrote it ('import' since v0.108.0: an import brought it over, below).
+-- ⚠️ Not a support field -- it is the difference
 -- between an act and an echo. Mihon PUTs on every bind, and that PUT marks the ghosts under the run this
--- server just reported, so only a 'web' row says the READER did anything (lib/komgaProgress readProgressDetail).
+-- server just reported, so only a row that is not 'komga' says the READER did anything (lib/komgaProgress readProgressDetail).
 --
 -- The keys are declared here rather than in the NOT VALID list below: this table is new, so there are no
 -- orphans to quarantine first. Deleting a series (Forget) or a user takes the marks with it; merging carries
@@ -2238,6 +2239,19 @@ ALTER TABLE listing_progress ADD COLUMN IF NOT EXISTS incognito boolean NOT NULL
 ${EXTERNAL_READER_DDL}
 ${IMPORT_ENHANCEMENT_DDL}
 ${DISCOVERY_HUB_DDL}
+
+-- v0.108.0 (#433): reading progress an import brings over (lib/importProgress.ts). All additive, with defaults:
+-- v0.107.0 boots on this schema and never names them.
+--   import_batches.mark_read        the intake's Mark chapters I've read. Off on every batch from before, each of
+--                                    which was started on the promise that titles alone are brought over.
+--   import_candidates.read_numbers  the chapters the backup has marked read (lib/tachibk.ts), kept for /run to mark
+--                                    once the series exists. A tracker's progress rides in tracker_links, as before.
+--   import_candidates.marked_read   how many chapters this import marked read for the row: the done line's count.
+-- The marks the import makes on chapters this server does not hold are listing_progress rows with source 'import':
+-- a person's act, as 'web' is (lib/listingProgress.ts marksByOrigin), never an echo of this server's own answer.
+ALTER TABLE import_batches    ADD COLUMN IF NOT EXISTS mark_read    boolean NOT NULL DEFAULT false;
+ALTER TABLE import_candidates ADD COLUMN IF NOT EXISTS read_numbers real[]  NOT NULL DEFAULT '{}';
+ALTER TABLE import_candidates ADD COLUMN IF NOT EXISTS marked_read  int     NOT NULL DEFAULT 0;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

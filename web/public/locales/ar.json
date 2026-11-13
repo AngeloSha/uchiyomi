@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4790
+    "strings": 4796
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -4793,5 +4793,11 @@
   "Could not confirm the selected matches": "تعذّر تأكيد المطابقات المحددة",
   "No source this series follows lists chapter {number} right now. Check for new chapters, or add a source that has it.": "لا يُدرج أيُّ مصدر تتابعه هذه السلسلة الفصلَ {number} حاليًا. ابحث عن فصول جديدة، أو أضف مصدرًا يتوفر فيه.",
   "That chapter cannot be put back where it was: its file is not one Uchiyomi downloaded under its usual name. Pick a copy under Versions to fetch it instead.": "لا يمكن إعادة هذا الفصل إلى مكانه: ملفه ليس ملفًا نزّله Uchiyomi باسمه المعتاد. اختر نسخة من «النسخ» لجلبه بدلًا من ذلك.",
-  "That chapter was not deleted on purpose: its file went missing. Check for new chapters to fetch it again.": "لم يُحذف هذا الفصل عن قصد: فُقد ملفه. ابحث عن فصول جديدة لجلبه مرة أخرى."
+  "That chapter was not deleted on purpose: its file went missing. Check for new chapters to fetch it again.": "لم يُحذف هذا الفصل عن قصد: فُقد ملفه. ابحث عن فصول جديدة لجلبه مرة أخرى.",
+  "Mark chapters I’ve read": "تعليم الفصول التي قرأتها كمقروءة",
+  "Chapters you’ve read are marked read here. Nothing is marked unread or sent to your trackers.": "تُعلَّم الفصول التي قرأتها كمقروءة هنا. لا يُعلَّم شيء كغير مقروء، ولا يُرسَل شيء إلى متتبّعاتك.",
+  "Read to ch. {n}": "مقروء حتى الفصل ⁦{n}⁩",
+  "Marked 1 chapter read.": "عُلِّم فصل واحد كمقروء.",
+  "Marked {n} chapters read in 1 series.": "فصول عُلِّمت كمقروءة: {n} في سلسلة واحدة.",
+  "Marked {n} chapters read in {m} series.": "فصول عُلِّمت كمقروءة: {n} في {m} من السلاسل."
 }

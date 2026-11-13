@@ -14357,6 +14357,21 @@ paths:
                     type: string
                     enum: [reading, plan_to_read, completed, on_hold, dropped]
                   description: Which of the person's lists to bring over. Defaults to reading + plan_to_read.
+                markRead:
+                  type: boolean
+                  description: >-
+                    Mark chapters I've read (since v0.108.0, #433). When true, what each row says was read is marked read
+                    for the requesting admin: the chapters a backup has marked read, and every chapter at or below the
+                    highest progress its trackers give (a provider named twice with two different entries gives none). At
+                    intake for a title already in the library, at /run once a series is added or found. A number the series
+                    holds is marked on its chapter; one its sources list and this server does not hold becomes a
+                    listing mark (source `import`) that turns into a read chapter when it lands; any other number is
+                    skipped. Never marks a chapter unread, never touches one already read, writes no reading_events, pushes
+                    nothing to a tracker, and stamps each read just before its file's mtime, so the read-chapter cleanup
+                    never takes it for a read of this server's copy. A file holding a range of chapters is marked only when
+                    the tracker's number reaches its last chapter; a series numbered by posting order or by its chapter
+                    titles, or with a renumber pending, is left alone. Off when omitted; a continuation (`continueFrom`)
+                    keeps the choice of the batch it continues.
       security:
         - bearer: []
       responses:
@@ -14399,7 +14414,11 @@ paths:
         the match was found under, null when the search title found it), `progress` (chapters read on the
         tracker) and `linked` — true when a `series_trackers` row carries this entry's id on that service,
         i.e. the series was linked at intake (a title already owned) or at /run (an added one); read live,
-        not remembered, so a row whose link did not happen never claims it.
+        not remembered, so a row whose link did not happen never claims it. Since v0.108.0 (#433) the batch
+        carries `mark_read` (whether it was started with `markRead`), and each item `read_to` (the highest
+        chapter its backup has marked read, null when none; the backup's whole read set stays on the server) and
+        `marked_read` (how many chapters this import marked read for the row: at intake for an owned title, at
+        /run otherwise).
       parameters:
         - name: id
           in: path
@@ -14504,7 +14523,10 @@ paths:
         current number and clears the stamp, so re-reading the list is how a downward correction on the
         tracker reaches this app. A push goes out once the local count exceeds the floor (equal to an
         unstamped floor is skipped quietly; equal to a stamped one, a number this app sent, still pushes);
-        the row then reads `linked: true` on GET.
+        the row then reads `linked: true` on GET. On a batch started with `markRead`, a row that ends `added` or
+        `already` also has what it says was read marked on its series for the batch's owner, as POST
+        /api/admin/import/batches describes, and counted in its `marked_read`; on a series just added, that is
+        the listing the add wrote.
       parameters:
         - name: id
           in: path

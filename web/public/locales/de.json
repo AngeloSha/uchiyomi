@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4790
+    "strings": 4796
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -4793,5 +4793,11 @@
   "Could not confirm the selected matches": "Die ausgewählten Zuordnungen konnten nicht bestätigt werden",
   "No source this series follows lists chapter {number} right now. Check for new chapters, or add a source that has it.": "Keine Quelle, die diese Serie verfolgt, führt Kapitel {number} gerade auf. Such nach neuen Kapiteln oder füge eine Quelle hinzu, die es hat.",
   "That chapter cannot be put back where it was: its file is not one Uchiyomi downloaded under its usual name. Pick a copy under Versions to fetch it instead.": "Dieses Kapitel kann nicht an seinen Platz zurück: Seine Datei ist keine, die Uchiyomi unter dem üblichen Namen heruntergeladen hat. Wähle unter „Versionen“ eine Kopie, um es stattdessen zu holen.",
-  "That chapter was not deleted on purpose: its file went missing. Check for new chapters to fetch it again.": "Dieses Kapitel wurde nicht absichtlich gelöscht: Seine Datei fehlt. Such nach neuen Kapiteln, um es erneut zu holen."
+  "That chapter was not deleted on purpose: its file went missing. Check for new chapters to fetch it again.": "Dieses Kapitel wurde nicht absichtlich gelöscht: Seine Datei fehlt. Such nach neuen Kapiteln, um es erneut zu holen.",
+  "Mark chapters I’ve read": "Meine gelesenen Kapitel markieren",
+  "Chapters you’ve read are marked read here. Nothing is marked unread or sent to your trackers.": "Kapitel, die du gelesen hast, werden hier als gelesen markiert. Nichts wird als ungelesen markiert oder an deine Tracker gesendet.",
+  "Read to ch. {n}": "Gelesen bis Kap. {n}",
+  "Marked 1 chapter read.": "1 Kapitel als gelesen markiert.",
+  "Marked {n} chapters read in 1 series.": "{n} Kapitel in 1 Serie als gelesen markiert.",
+  "Marked {n} chapters read in {m} series.": "{n} Kapitel in {m} Serien als gelesen markiert."
 }

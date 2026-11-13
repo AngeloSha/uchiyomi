@@ -1,16 +1,19 @@
 // Reader for Mihon / Tachiyomi library backups (.tachibk, formerly .proto.gz) — gzipped protobuf.
 //
-// Read the manga title, Mihon's source id, its on-site URL and supported tracker identity/progress/privacy.
-// Uchiyomi resolves chapters against its own configured sources; chapter history and categories are skipped. The
+// Read the manga title, Mihon's source id, its on-site URL, supported tracker identity/progress/privacy, and the
+// numbers of the chapters marked read (#433). Uchiyomi resolves chapters against its own configured sources, so of a
+// chapter only its read flag and number are kept; chapter history and categories are skipped. The
 // source id is read too (not just skipped) so a title that came from an extension the user has installed
 // can be matched against that SAME source first, instead of blind title search across everything — see
 // `resolveCandidate` in routes/sources.ts. That lets us walk the wire format directly instead of taking a
 // protobuf dependency, and makes the parser immune to schema changes — unknown fields are skipped
 // generically by wire type.
 //
-// Schema (Tachiyomi/Mihon Backup):
+// Schema (Tachiyomi/Mihon Backup; Suwayomi writes the same):
 //   Backup.backupManga = 1 (repeated BackupManga)
-//   BackupManga: source = 1 (int64/fixed64 varint-encoded), url = 2, title = 3, ..., favorite = 100
+//   BackupManga: source = 1 (int64/fixed64 varint-encoded), url = 2, title = 3, ..., chapters = 16, tracking = 18,
+//                favorite = 100, history = 104
+//   BackupChapter: url = 1, name = 2, read = 4 (bool), lastPageRead = 6, chapterNumber = 9 (float)
 import { gunzipSync } from 'zlib';
 
 const WIRE_VARINT = 0;
@@ -87,7 +90,16 @@ export interface BackupEntry {
    */
   url?: string;
   trackerLinks?: BackupTracker[];
+  /**
+   * The numbers of the chapters Mihon has marked read (#433), ascending, each once, at most READ_NUMBERS_MAX. As the
+   * float32 the file holds (12.1 reads 12.100000381469727): the database compares them as `real`, the type every
+   * chapter number here has, so they meet the listing's numbers exactly. Absent when none is.
+   */
+  readNumbers?: number[];
 }
+
+/** Most read chapters one entry keeps (#433): far past any series, and a bound on what one row can ask to mark. */
+export const READ_NUMBERS_MAX = 5000;
 
 export interface BackupTracker {
   provider: 'myanimelist' | 'anilist' | 'kitsu' | 'mangaupdates';
@@ -123,7 +135,29 @@ function trackingOf(sub: Buffer): BackupTracker | null {
     progress: Number.isFinite(progress) ? Math.max(0, Math.min(2_147_483_647, Math.floor(progress))) : 0, private: privateEntry };
 }
 
-/** Pull `source` (1), `url` (2) and `title` (3) out of one serialized BackupManga message. */
+/**
+ * One BackupChapter's number when Mihon has it marked read (#433), else null. Mihon writes no field that holds its
+ * default, so a missing `read` (4) is unread and a missing `chapterNumber` (9) is chapter 0. A negative number is
+ * Mihon's "not recognised" (-1), no chapter anything here can match. `lastPageRead` (6) is left alone: two sources'
+ * copies of one chapter are paged differently, so a page there is no page here.
+ */
+function readNumberOf(sub: Buffer): number | null {
+  let pos = 0, read = false, number = 0;
+  while (pos < sub.length) {
+    const [key, at] = readVarint(sub, pos), field = key >>> 3, wire = key & 7;
+    const end = skip(sub, at, wire);
+    if (field === 4 && wire === WIRE_VARINT) read = readVarint(sub, at)[0] !== 0;
+    else if (field === 9 && wire === WIRE_I32) number = sub.readFloatLE(at);
+    pos = end;
+  }
+  return read && Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+/** Two entries' read numbers as one, in the order readNumbers promises. */
+const readUnion = (a: number[] | undefined, b: number[]): number[] =>
+  [...new Set([...(a ?? []), ...b])].slice(0, READ_NUMBERS_MAX).sort((x, y) => x - y);
+
+/** Pull `source` (1), `url` (2), `title` (3), the read chapters (16) and the tracking (18) out of one serialized BackupManga message. */
 function entryOfManga(sub: Buffer): BackupEntry | null {
   let pos = 0;
   let title: string | null = null;
@@ -131,6 +165,7 @@ function entryOfManga(sub: Buffer): BackupEntry | null {
   let sourceIdUnsigned: string | undefined;
   let sourceIdSigned: string | undefined;
   const trackerLinks: BackupTracker[] = [];
+  const readNumbers = new Set<number>();
   while (pos < sub.length) {
     const [key, p1] = readVarint(sub, pos);
     const field = key >>> 3;
@@ -157,6 +192,12 @@ function entryOfManga(sub: Buffer): BackupEntry | null {
       pos = p2 + len;
       continue;
     }
+    if (field === 16 && wire === WIRE_LEN) {
+      // Past the cap the rest are skipped, not refused: a long series must not fail the whole file.
+      const [, start] = readVarint(sub, p1);
+      const read = readNumberOf(sub.subarray(start, end));
+      if (read !== null && readNumbers.size < READ_NUMBERS_MAX) readNumbers.add(read);
+    }
     if (field === 18 && wire === WIRE_LEN) {
       const [, start] = readVarint(sub, p1);
       const tracker = trackingOf(sub.subarray(start, end));
@@ -168,7 +209,8 @@ function entryOfManga(sub: Buffer): BackupEntry | null {
     pos = end;
   }
   if (!title) return null;
-  return { title, sourceIdUnsigned, sourceIdSigned, url, ...(trackerLinks.length ? { trackerLinks } : {}) };
+  return { title, sourceIdUnsigned, sourceIdSigned, url, ...(trackerLinks.length ? { trackerLinks } : {}),
+    ...(readNumbers.size ? { readNumbers: [...readNumbers].sort((a, b) => a - b) } : {}) };
 }
 
 /**
@@ -181,9 +223,9 @@ function entryOfManga(sub: Buffer): BackupEntry | null {
 export const MAX_INFLATED_BYTES = 256 * 1024 * 1024;
 
 /**
- * Extract library entries (title + Mihon source id + url) from a .tachibk / .proto.gz buffer (plain
- * protobuf also accepted). Titles are trimmed and de-duplicated case-insensitively, first occurrence wins,
- * backup order preserved. Throws if the buffer isn't parseable as a backup, or inflates past
+ * Extract library entries (title + Mihon source id + url, trackers and read chapters) from a .tachibk / .proto.gz buffer
+ * (plain protobuf also accepted). Titles are trimmed and de-duplicated case-insensitively, first occurrence wins (its
+ * trackers and read chapters take in the later ones'), backup order preserved. Throws if the buffer isn't parseable as a backup, or inflates past
  * `maxInflatedBytes` (a parameter only so a test can prove the cap without a 256 MB fixture).
  */
 export function entriesFromBackup(file: Buffer, maxInflatedBytes = MAX_INFLATED_BYTES): BackupEntry[] {
@@ -219,14 +261,19 @@ export function entriesFromBackup(file: Buffer, maxInflatedBytes = MAX_INFLATED_
           const k = clean.toLowerCase();
           const previous = seen.get(k);
           if (previous === undefined) { seen.set(k, entries.length); entries.push({ ...entry, title: clean }); }
-          else if (entry.trackerLinks?.length) {
-            const links = entries[previous].trackerLinks ?? [];
-            for (const link of entry.trackerLinks) {
-              const same = links.find(v => v.provider === link.provider && v.externalId === link.externalId);
-              if (same) { same.progress = Math.max(same.progress, link.progress); same.private ||= link.private; }
-              else { if (links.length >= 16) throw new Error('too many trackers'); links.push(link); }
+          else {
+            if (entry.trackerLinks?.length) {
+              const links = entries[previous].trackerLinks ?? [];
+              for (const link of entry.trackerLinks) {
+                const same = links.find(v => v.provider === link.provider && v.externalId === link.externalId);
+                if (same) { same.progress = Math.max(same.progress, link.progress); same.private ||= link.private; }
+                else { if (links.length >= 16) throw new Error('too many trackers'); links.push(link); }
+              }
+              entries[previous].trackerLinks = links;
             }
-            entries[previous].trackerLinks = links;
+            // The same title twice -- a manga Mihon holds from two sources -- is one row here, and a chapter read on
+            // either copy was read.
+            if (entry.readNumbers?.length) entries[previous].readNumbers = readUnion(entries[previous].readNumbers, entry.readNumbers);
           }
         }
         pos = end;

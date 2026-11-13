@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4790
+    "strings": 4796
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -4793,5 +4793,11 @@
   "Could not confirm the selected matches": "Não foi possível confirmar as correspondências selecionadas",
   "No source this series follows lists chapter {number} right now. Check for new chapters, or add a source that has it.": "Nenhuma fonte que esta série segue tem o capítulo {number} agora. Procure novos capítulos ou adicione uma fonte que o tenha.",
   "That chapter cannot be put back where it was: its file is not one Uchiyomi downloaded under its usual name. Pick a copy under Versions to fetch it instead.": "Esse capítulo não pode voltar ao lugar: o arquivo dele não é um que o Uchiyomi baixou com o nome de sempre. Escolha uma cópia em Versões para buscá-lo no lugar.",
-  "That chapter was not deleted on purpose: its file went missing. Check for new chapters to fetch it again.": "Esse capítulo não foi excluído de propósito: o arquivo dele sumiu. Procure novos capítulos para buscá-lo de novo."
+  "That chapter was not deleted on purpose: its file went missing. Check for new chapters to fetch it again.": "Esse capítulo não foi excluído de propósito: o arquivo dele sumiu. Procure novos capítulos para buscá-lo de novo.",
+  "Mark chapters I’ve read": "Marcar os capítulos que já li",
+  "Chapters you’ve read are marked read here. Nothing is marked unread or sent to your trackers.": "Os capítulos que você leu são marcados como lidos aqui. Nada é marcado como não lido nem enviado aos seus trackers.",
+  "Read to ch. {n}": "Lido até o cap. {n}",
+  "Marked 1 chapter read.": "1 capítulo marcado como lido.",
+  "Marked {n} chapters read in 1 series.": "{n} capítulos marcados como lidos em 1 série.",
+  "Marked {n} chapters read in {m} series.": "{n} capítulos marcados como lidos em {m} séries."
 }

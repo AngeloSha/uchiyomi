@@ -61,6 +61,8 @@ export interface ImportBatch {
   nextBatchId?: string | null;
   canContinue?: boolean;
   content_scope?: { visibility: 'shared' | 'private'; libraryId: string } | null;
+  /** Mark chapters I've read (#433): whether this batch marks what its rows say was read. Absent from an older server. */
+  mark_read?: boolean;
 }
 
 /** One row of GET /api/admin/import/batches: enough to name a batch on the intake card and open it. */
@@ -125,6 +127,11 @@ export interface ImportCandidate {
   tracker_links?: Array<{ provider: string; externalId: string; title: string; progress: number; private: boolean }>;
   ambiguous?: boolean;
   content_scope?: { visibility: 'private' | 'shared'; libraryId: string } | null;
+  // ---- reading progress (#433). Absent from an older server. ----
+  /** The highest chapter the backup has marked read; null when none is. The server sends this, not the whole list. */
+  read_to?: number | null;
+  /** How many chapters this import marked read for the row, here: at intake for a title already held, else at /run. */
+  marked_read?: number;
 }
 
 export type ImportRowState = 'same_source' | 'exact' | 'contains' | 'fuzzy' | 'manual' | 'unmatched' | 'skipped' | 'owned' | 'failed';
@@ -282,6 +289,23 @@ export const linkedCount = (items: ImportCandidate[]): number =>
 export function linkedLine(n: number): string | null {
   if (n <= 0) return null;
   return n === 1 ? tr('1 linked for progress sync') : tr('{n} linked for progress sync', { n });
+}
+
+/** A backup row's caption (#433): how far its chapters are marked read in the backup. Null when none is. */
+export const readToLine = (c: ImportCandidate): string | null =>
+  c.read_to == null ? null : tr('Read to ch. {n}', { n: c.read_to });
+
+/**
+ * The line for what an import marked read (#433): how many chapters, in how many series -- the rows that marked any,
+ * each one series. One chapter is one series, so its line names none. Singular by hand, as linkedLine is, and counted
+ * over the whole batch, never a filtered view of it; null when the import marked nothing.
+ */
+export function markedLine(items: ImportCandidate[]): string | null {
+  const rows = items.filter((c) => (c.marked_read ?? 0) > 0);
+  const n = rows.reduce((sum, c) => sum + (c.marked_read ?? 0), 0);
+  if (n <= 0) return null;
+  if (n === 1) return tr('Marked 1 chapter read.');
+  return rows.length === 1 ? tr('Marked {n} chapters read in 1 series.', { n }) : tr('Marked {n} chapters read in {m} series.', { n, m: rows.length });
 }
 
 /** Where a batch stands, in words, for the "Open imports" list. Every call site passes a literal state. */

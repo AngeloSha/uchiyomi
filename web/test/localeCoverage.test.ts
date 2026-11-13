@@ -278,6 +278,9 @@ const IRREGULAR_PAIRS: Record<string, string> = {
   '1 fewer chapter than the current pick': '{n} fewer chapters than the current pick',
   // #240, hiding chapters: one asked about by its number, as its ⋯ names it, several by how many.
   'Hide chapter {n}?': 'Hide {n} chapters?',
+  // #433, what an import marked read, as "{n} chapters behind" counts: one chapter is in one series, so it names none.
+  'Marked 1 chapter read.': 'Marked {n} chapters read in 1 series.',
+  'Marked {n} chapters read in 1 series.': 'Marked {n} chapters read in {m} series.',
 };
 /** Keys that look counted and are not a pair, each with why. Not a place to park a new key. */
 const NOT_PAIRED: Record<string, string> = {

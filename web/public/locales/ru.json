@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4790
+    "strings": 4796
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -4793,5 +4793,11 @@
   "Could not confirm the selected matches": "Не удалось подтвердить выбранные совпадения",
   "No source this series follows lists chapter {number} right now. Check for new chapters, or add a source that has it.": "Ни в одном источнике, который отслеживает эта серия, сейчас нет главы {number}. Проверьте новые главы или добавьте источник, где она есть.",
   "That chapter cannot be put back where it was: its file is not one Uchiyomi downloaded under its usual name. Pick a copy under Versions to fetch it instead.": "Эту главу нельзя вернуть на место: её файл не из тех, что Uchiyomi загрузил под обычным именем. Выберите копию в «Версиях», чтобы загрузить её вместо этого.",
-  "That chapter was not deleted on purpose: its file went missing. Check for new chapters to fetch it again.": "Эта глава не была удалена намеренно: её файл пропал. Проверьте новые главы, чтобы загрузить её снова."
+  "That chapter was not deleted on purpose: its file went missing. Check for new chapters to fetch it again.": "Эта глава не была удалена намеренно: её файл пропал. Проверьте новые главы, чтобы загрузить её снова.",
+  "Mark chapters I’ve read": "Отметить прочитанные главы",
+  "Chapters you’ve read are marked read here. Nothing is marked unread or sent to your trackers.": "Главы, которые вы прочитали, отмечаются здесь как прочитанные. Ничего не отмечается как непрочитанное и не отправляется в ваши трекеры.",
+  "Read to ch. {n}": "Прочитано до гл. {n}",
+  "Marked 1 chapter read.": "1 глава отмечена как прочитанная.",
+  "Marked {n} chapters read in 1 series.": "Отмечено как прочитанные: глав — {n}, в 1 серии.",
+  "Marked {n} chapters read in {m} series.": "Отмечено как прочитанные: глав — {n}, серий — {m}."
 }
