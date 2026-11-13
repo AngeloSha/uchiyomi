@@ -1,6 +1,7 @@
 import { api, ApiError, getCurrentUser } from './api';
 import { errorPayload, redactDiagnostic } from './errorDetails';
 import { t as tr } from './i18n';
+import { requestFailure } from './refusals';
 
 export interface MoveLibraryOptions { confirmVisibilityChange?: true; expectedOwnerId?: string | null }
 export interface MoveLibraryResult { applied: number; skipped: { id: string; reason?: string; message?: string }[] }
@@ -42,6 +43,8 @@ export function moveLibrarySummary(result: MoveLibraryResult): string {
 }
 
 export function moveLibraryRefusal(error: unknown): string {
+  const failure = requestFailure(error);
+  if (failure) return failure;
   const body = errorPayload(error) ?? (error && typeof error === 'object' ? error as Record<string, unknown> : null);
   const code = typeof error === 'string' ? error : body?.error ?? body?.reason;
   if (code === 'busy') return tr('This series is busy. Try again after its current task finishes.');

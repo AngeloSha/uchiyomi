@@ -926,7 +926,7 @@ function Tasks() {
           : r.error === 'repair_running' ? tr('The library repair is running — try again in a few minutes')
           : r.error === 'busy' ? tr('Already running')
           : r.error === 'not_enabled' ? tr('That task is switched off')
-          : tr('Could not start {task}.', { task: tr(name) }), 'error');
+          : tr('Could not start “{task}”.', { task: tr(name) }), 'error');
       }
       // ⚠️ The scan is the one task that runs to completion before answering, and it answers with its
       // counts. Toasting "Started" for it hid the only fact that mattered: in #34 a library scanned to zero
@@ -950,7 +950,7 @@ function Tasks() {
       else if (id === 'rescan' && r?.started) qc.invalidateQueries({ queryKey: RESCAN_KEY });
       else toast(tr('Started'), 'success');
       qc.invalidateQueries({ queryKey: ['admin-tasks'] });
-    } catch (error) { toast(actionFailure(error, tr('Could not start {task}.', { task: tr(name) })), 'error'); }
+    } catch (error) { toast(actionFailure(error, tr('Could not start “{task}”.', { task: tr(name) })), 'error'); }
   };
   // Chronological, per-row actions: a list, not a card grid. But an explicit column template rather than
   // `justify-between`, which at 1592px left a lake of nothing between a task's name and its own button.

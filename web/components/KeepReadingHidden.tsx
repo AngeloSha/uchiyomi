@@ -29,7 +29,7 @@ export function KeepReadingHidden({ count }: { count: number }) {
       toast(tr('Back in Keep reading'), 'success');
       qc.invalidateQueries({ queryKey: ['home'] });
       qc.invalidateQueries({ queryKey: ['keep-reading-hidden'] });
-    } catch (error) { toast(actionFailure(error, tr('Could not restore this series to Keep Reading.')), 'error'); }
+    } catch (error) { toast(actionFailure(error, tr('Could not restore this series to Keep reading.')), 'error'); }
   };
   const menu = useContextMenu(() => (list.data ?? []).map((h, i) => ({
     label: h.title, disabled: offline, hook: 'keep-reading-show',

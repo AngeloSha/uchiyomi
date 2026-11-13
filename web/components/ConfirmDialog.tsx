@@ -209,8 +209,12 @@ export const msgOf = (e: any, fallback: string): string => {
   }
 };
 
-export const actionFailure = (error: unknown, fallback: string): string =>
-  requestFailure(error) ?? msgOf(error, fallback);
+// What did not happen, then why. The action's own words carry what a generic reason cannot ("The list was created, but
+// this series could not be added."); said alone, a dropped connection made someone create the list again.
+export const actionFailure = (error: unknown, fallback: string): string => {
+  const reason = requestFailure(error);
+  return reason ? tr('{action}. {reason}', { action: fallback.trim().replace(/[.。．!！?？]+$/u, ''), reason }) : msgOf(error, fallback);
+};
 
 export const listActionFailure = (error: unknown, fallback: string): string =>
   refusalBody(error)?.error === 'not_found'

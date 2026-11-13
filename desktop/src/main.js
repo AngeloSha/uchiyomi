@@ -1052,7 +1052,6 @@ async function checkNow() {
     if (j.ok) note(t('note.checking'));
     else if (j.error === 'busy') note(t('note.busy'));
     else if (j.error === 'repair_running') note(t('note.repair'));
-    else if (j.error === 'not_enabled') note(t('note.checkDisabled'));
     else note(t('note.checkRetry'));
     log.info('tray: check for new chapters', { status, answer: j });
   } catch (e) {

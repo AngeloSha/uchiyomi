@@ -84,8 +84,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // still gets one, where "unavailable" here flashed it over every splash. A chapter is never covered by it, online or
   // off: the reader counts as handled, and leaving it for the offline downloads brings the button back.
   useEffect(() => {
-    if (status === 'loading') return;
-    acknowledgeNativeAppControls(status === 'authed' || status === 'anon' || path.startsWith('/reader'));
+    if (status !== 'loading') acknowledgeNativeAppControls(status === 'authed' || status === 'anon' || path.startsWith('/reader'));
   }, [status, path]);
 
   /**

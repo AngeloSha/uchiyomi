@@ -705,7 +705,7 @@ function ImportWizardInner() {
       refetch();
     } catch (e) {
       const code = refusalBody(e)?.error;
-      if (code === 'not_found') toast(tr('This import batch is no longer available. Return to Open imports and choose another batch, or start a new import.'), 'error');
+      if (code === 'not_found') toast(tr('That import is gone'), 'error');
       else if (e instanceof ApiError && e.status === 403) toast(tr('Your account no longer has access to this import destination. Start a new import and choose a library you can use.'), 'error');
       else if (code === 'private_backend_unsupported') toast(tr('Private entries need the built-in library backend. Nothing was imported.'), 'error');
       else toast(requestFailure(e) ?? msgOf(e, tr('Could not import the selected titles.')), 'error');

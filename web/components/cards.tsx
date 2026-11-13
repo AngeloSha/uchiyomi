@@ -254,7 +254,7 @@ export function ContinueCard({ book, eager = false, note, keepReading = false }:
         await api(`/api/keep-reading/${encodeURIComponent(book.seriesId)}`, { method: 'PUT', json: { hidden: true } });
         toast(tr('Removed from Keep reading. Reading it again brings it back.'), 'success');
         qc.invalidateQueries({ queryKey: ['home'] });
-      } catch (error) { toast(actionFailure(error, tr('Could not remove this series from Keep Reading.')), 'error'); }
+      } catch (error) { toast(actionFailure(error, tr('Could not remove this series from Keep reading.')), 'error'); }
     },
   }], { label: book.seriesTitle });
   const pct = progressOf(book);
