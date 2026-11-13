@@ -35,7 +35,7 @@ import { useTrackers, usableTrackers, brokenTrackers } from '@/lib/trackerHealth
 import {
   needsAttention, confidenceLabel, confidenceColor, matchTitleDiffers, matchedViaAlt, openBatches, batchStateLabel, batchOriginLabel,
   runStatusLabel, runStatusColor, linkedCount, linkedLine, truncatedWords, sameSourcePair, alreadyImported,
-  filterImportRows, importRowState, selectableImport, readyImport, trackerProgressLine, readImportBackup,
+  filterImportRows, importRowState, selectableImport, readyImport, trackerProgressLine, readImportBackup, readToLine, markedLine,
   type ImportFilter, type ImportBatch, type ImportBatchSummary, type ImportCandidate, type ImportOrigin,
 } from '@/lib/importBatch';
 
@@ -189,6 +189,27 @@ function OpenImports({ batches, onOpen }: { batches: ImportBatchSummary[]; onOpe
   );
 }
 
+/**
+ * Mark chapters I've read (#433): one checkbox for the whole intake, on by default. The chapters a backup has marked
+ * read, and every chapter up to how far a tracker says you got, are marked read here as the titles land -- on the ones
+ * you already have at once, on the rest when they are imported. In the card above the intake, beside the library
+ * choice, because it is the same kind of thing: how this import lands, whichever way in. The server marks nothing
+ * unless the request asks (POST /batches `markRead`), so a script that never heard of it imports titles as before.
+ * `first:mt-0`: with private libraries off the picker renders nothing, and the checkbox is the card's first line.
+ */
+function MarkReadChoice({ on, onChange, disabled }: { on: boolean; onChange: (on: boolean) => void; disabled: boolean }) {
+  return (
+    <label className="mt-3 flex items-start gap-2.5 first:mt-0" data-import-mark-read>
+      <input type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked)} disabled={disabled}
+        className="mt-0.5 size-4 shrink-0 rounded border-ink-600 bg-ink-800 accent-accent" />
+      <span className="min-w-0">
+        <span className="block text-xs font-semibold text-fog-300">{tr('Mark chapters I’ve read')}</span>
+        <span className="mt-1 block text-xs leading-relaxed text-fog-500">{tr('Chapters you’ve read are marked read here. Nothing is marked unread or sent to your trackers.')}</span>
+      </span>
+    </label>
+  );
+}
+
 function IntakeCard({ backupRef, mdUrl, setMdUrl, pasted, setPasted, starting, canStart, open, onOpen, onFile, onMangadex, onPaste, onTracker }: {
   backupRef: React.RefObject<HTMLInputElement | null>;
   mdUrl: string; setMdUrl: (v: string) => void;
@@ -302,6 +323,8 @@ function ReviewRow({ c, sourceName, selected, onToggle, onEdit }: {
         {c.content_scope?.visibility==='private' && <span className="text-[11px] text-accent">{tr('Private library')}</span>}
         {(c.tracker_links?.length ? c.tracker_links : c.tracker && c.progress != null ? [{provider:c.tracker,progress:c.progress}] : []).map((link,i) =>
           <p key={i} className="text-[11px] text-fog-500">{trackerProgressLine(link.provider,link.progress,!c.tracker)}</p>)}
+        {/* How far the backup has the title read (#433), beside the trackers' numbers: what Mark chapters I've read marks. */}
+        {c.read_to != null && <p className="text-[11px] text-fog-500" data-read-to>{readToLine(c)}</p>}
         {/* What the title was matched TO, on every matched row. Without it "Solo Leveling · MangaDex · close
             match" read the same whether the pick was Solo Leveling or Solo Leveling: Ragnarok, and the only
             hint was a 40-px cover -- a wrong pick was invisible without opening the row. Dim when it is the
@@ -353,13 +376,15 @@ function ReviewRow({ c, sourceName, selected, onToggle, onEdit }: {
 }
 
 function ReviewCard({
-  items, allCount, filterCount, attentionCount, skippedCount, readyCount, sameSourceCount, selectedIds, note,
+  items, allCount, filterCount, attentionCount, skippedCount, readyCount, sameSourceCount, selectedIds, note, marked,
   filter, setFilter, q, setQ, onEdit, onToggle, onSelectAll, onSelectReady, onSelectSameSource, onClearSelection, onRun, running, sourceName,
   hereCount, sourceFilter, setSourceFilter, sourceOptions, onSkip, importCount,
 }: {
   items: ImportCandidate[];
   allCount: number; filterCount:number; attentionCount: number; skippedCount: number; readyCount: number; sameSourceCount: number;
   note: string | null;
+  /** What the import has marked read so far (#433): the titles already here were marked at intake. */
+  marked: string | null;
   selectedIds: Set<string>;
   filter: Filter; setFilter: (f: Filter) => void;
   q: string; setQ: (v: string) => void;
@@ -382,6 +407,8 @@ function ReviewCard({
   return (
     <div className="card grad-border wide p-4">
       <p className="mb-1 text-sm font-semibold text-fog-100">{tr('{n} titles matched', { n: allCount })}<Note note={note} /></p>
+      {/* A backup of the library you already have is all owned rows, which never leave review: this is where it says so. */}
+      {marked && <p className="mb-1 text-[11px] text-fog-300" data-import-marked>{marked}</p>}
       {/* "A few minutes", not "seconds": adding a title with nothing downloaded still asks its source for the
           series and its chapter list, one title at a time, so two hundred rows is minutes, not a database
           write. */}
@@ -445,13 +472,15 @@ function ReviewCard({
   );
 }
 
-function RunCard({ batch, items, runIds, runTotal, note, onStartOver }: {
+function RunCard({ batch, items, runIds, runTotal, note, marked, onStartOver }: {
   batch: ImportBatch; items: ImportCandidate[];
   /** The candidate ids this tab sent to /run, or null when the run was started elsewhere (a reload, another tab). */
   runIds: Set<string> | null;
   /** `total` from the /run answer: how many of those ids the server accepted as ready. */
   runTotal: number | null;
   note: string | null;
+  /** What the import marked read (#433), over the whole batch. */
+  marked: string | null;
   onStartOver: () => void;
 }) {
   // Only the rows this run is over. The card used to list every auto/manual row and count the batch's
@@ -479,6 +508,7 @@ function RunCard({ batch, items, runIds, runTotal, note, onStartOver }: {
         <Note note={linked} />
         <Note note={note} />
       </p>
+      {batch.state === 'done' && marked && <p className="mb-3 text-[11px] text-fog-300" data-import-marked>{marked}</p>}
       {batch.state === 'importing' && (
         <p className="mb-3 text-[11px] text-fog-500">
           {tr('Each title is looked up on its source, so a long list takes a few minutes. You can leave this page; your progress is saved.')}
@@ -534,6 +564,7 @@ function ImportWizardInner() {
   const [pasted, setPasted] = useState('');
   const [starting, setStarting] = useState(false);
   const scope=useContentScope();
+  const [markRead, setMarkRead] = useState(true);
   const [intakeNote, setIntakeNote] = useState<IntakeNote | null>(null);
 
   const start = async (body: Record<string, unknown>, expectedOwnerId = ownerId) => {
@@ -541,7 +572,7 @@ function ImportWizardInner() {
     if(!body.continueFrom && !scope.ready) return;
     setStarting(true);
     try {
-      const r = await api<{ batchId: string; total: number; truncated: boolean; skippedNovels?: number; leftOver?: number | null }>('/api/admin/import/batches', { json: body.continueFrom ? body : {...body,visibility:scope.visibility}, expectedOwnerId });
+      const r = await api<{ batchId: string; total: number; truncated: boolean; skippedNovels?: number; leftOver?: number | null }>('/api/admin/import/batches', { json: body.continueFrom ? body : {...body,visibility:scope.visibility,markRead}, expectedOwnerId });
       if(getCurrentUser() !== expectedOwnerId) return;
       const origin = body.origin === 'tracker' ? 'tracker' : null;
       if (r.truncated) toast(truncatedWords(r.leftOver).toast, 'info');
@@ -749,6 +780,8 @@ function ImportWizardInner() {
     ? { skippedNovels: batch.skippedNovels ?? intakeNote?.skippedNovels ?? 0, truncated: batch.truncated ?? intakeNote?.truncated ?? false, origin: batch.origin,
         leftOver: batch.leftOver ?? intakeNote?.leftOver ?? null }
     : null);
+  // Over every row, never the filtered view the review lists: the count is the batch's.
+  const marked = markedLine(items);
 
   return (
     <div className="min-h-screen-d px-4 pb-10 pt-4 lg:px-0">
@@ -766,19 +799,19 @@ function ImportWizardInner() {
       {batch?.content_scope && <p className="mb-3 text-xs text-fog-400">{batch.content_scope.visibility==='private' ? tr('Private library') : tr('Shared library')}</p>}
 
       {!batch ? (
-        <><div className="card mb-3 p-4"><ContentScopePicker scope={scope} disabled={starting} /></div><IntakeCard backupRef={backupRef} mdUrl={mdUrl} setMdUrl={setMdUrl} pasted={pasted} setPasted={setPasted}
+        <><div className="card mb-3 p-4"><ContentScopePicker scope={scope} disabled={starting} /><MarkReadChoice on={markRead} onChange={setMarkRead} disabled={starting} /></div><IntakeCard backupRef={backupRef} mdUrl={mdUrl} setMdUrl={setMdUrl} pasted={pasted} setPasted={setPasted}
           starting={starting} canStart={scope.ready} open={open} onOpen={openBatch} onFile={startFromFile} onMangadex={startFromMangadex} onPaste={startFromPaste}
           onTracker={startFromTracker} /></>
       ) : batch.state === 'resolving' ? (
         <ResolvingCard batch={batch} note={note} onResume={resume} />
       ) : batch.state === 'review' ? (
         <ReviewCard items={filtered} allCount={items.length} filterCount={facetRows.length} attentionCount={attentionCount} skippedCount={skippedCount}
-          readyCount={readyCount} sameSourceCount={sameSourceCount} selectedIds={selectedVisible} note={note} filter={filter} setFilter={setFilter}
+          readyCount={readyCount} sameSourceCount={sameSourceCount} selectedIds={selectedVisible} note={note} marked={marked} filter={filter} setFilter={setFilter}
           q={q} setQ={setQ} onEdit={setEditing} onToggle={toggleSelected} onSelectAll={selectAll} onSelectReady={selectReady}
           onSelectSameSource={selectSameSource} hereCount={hereCount} sourceFilter={sourceFilter} setSourceFilter={setSourceFilter} sourceOptions={sourceOptions} onSkip={skipSelected} importCount={selectedReady.size}
           onClearSelection={clearSelection} onRun={runImport} running={running} sourceName={sourceName} />
       ) : (
-        <><RunCard batch={batch} items={items} runIds={runIds} runTotal={runTotal} note={note} onStartOver={startOver} />
+        <><RunCard batch={batch} items={items} runIds={runIds} runTotal={runTotal} note={note} marked={marked} onStartOver={startOver} />
         {batch.state==='done' && batch.canContinue && <button type="button" disabled={starting} className="btn-accent mt-3 w-full" data-import-continue
           onClick={()=>void start({continueFrom:batch.id})}>{starting ? tr('Starting…') : tr('Continue with next batch')} · {batch.remainingCount ?? 0}</button>}</>
       )}

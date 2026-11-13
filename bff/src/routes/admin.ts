@@ -118,10 +118,11 @@ import { refileFailures } from '../lib/chapterFailures';
 import { prepareCleanup, cleanupPreview, cleanupConfirmation, purgeLeftovers, purgeRefusal, unlistedOf, CleanupRefused } from '../lib/sourceLeftovers';
 import { mainUses, retireSource } from '../lib/retireSource';
 import { sourcesOverview } from '../lib/sourcesOverview';
-import { titlesFromBackup, entriesFromBackup, type BackupEntry } from '../lib/tachibk';
+import { titlesFromBackup, entriesFromBackup, type BackupEntry, type BackupTracker } from '../lib/tachibk';
 import { resolveAddScope, scopeSql, samePrivacyDomainSql, reservedPrivateFolder, ContentScopeError, deleteAccountPreservingPrivate, type AddScope } from '../lib/contentScope';
 import { normalizeImportEntries, trackerLinksOf, importSkipKeys, type ImportEntry } from '../lib/importMetadata';
 import { importMatchNeedsReview } from '../lib/importMatchReview';
+import { importReadProgress, readUpTo } from '../lib/importProgress';
 import { linkSeries, seedTrackerFloor, rememberTrackerPrivacy, TOKEN_EXPIRED, TOKEN_REJECTED, TOKEN_UNREADABLE } from '../lib/trackers';
 import { ADAPTERS, PROVIDERS, LIST_STATUSES, TRACKER_LIST_MAX, type Provider, type LibraryEntry } from '../lib/trackerProviders';
 import { open as unseal } from '../lib/secretbox';
@@ -195,6 +196,8 @@ interface ImportBatchRow {
   /** How many titles not in the library came after the 500 (#410); null when not counted. */
   left_over: number | null;
   content_scope: AddScope | null; remaining_entries: ImportEntry[]; remaining_count?: number; next_batch_id: string | null;
+  /** Mark chapters I've read (#433): whether this batch marks what its rows say was read. */
+  mark_read: boolean;
   created_at: string; updated_at: string;
 }
 /**
@@ -216,6 +219,8 @@ interface ImportCandidateRow {
   /** Tracker rows only (migrate.ts says what each is for); null / empty on the other intakes. */
   tracker: string | null; external_id: string | null; alt_titles: string[]; matched_via: string | null; progress: number | null;
   tracker_links?: unknown; ambiguous?: boolean; content_scope?:AddScope|null;
+  /** The chapters the backup has marked read, and how many this import marked here (#433; migrate.ts). */
+  read_numbers?: number[]; marked_read?: number;
 }
 
 /** Older persisted suggestions obey the same review rule as new matches, even with explicit /run ids. */
@@ -276,6 +281,27 @@ async function linkImportedSeries(
     }
   }
   return linked;
+}
+
+/**
+ * Mark what an import row says was read (#433) on the series it now is: the chapters its backup has marked read, and
+ * every chapter at or below how far its trackers say the person got (lib/importProgress.ts says how, and why nothing is
+ * pushed). `owner` is the batch's, for the reason linkImportedSeries gives; the callers mark only on a batch started
+ * with Mark chapters I've read on. The count rides on the row, `row` by its id or by its place in the batch, for the
+ * done line. Best effort, as the link is: a failure leaves the row unmarked and never fails the import.
+ */
+async function markImportedRead(
+  row: { id: string } | { batchId: string; ord: number }, readNumbers: readonly number[], links: BackupTracker[],
+  seriesId: string, owner: string,
+): Promise<number> {
+  try {
+    const marked = await importReadProgress(owner, seriesId, readNumbers, readUpTo(links));
+    if (marked > 0) {
+      if ('id' in row) await q('UPDATE import_candidates SET marked_read = marked_read + $2 WHERE id = $1', [row.id, marked]);
+      else await q('UPDATE import_candidates SET marked_read = marked_read + $3 WHERE batch_id = $1 AND ord = $2', [row.batchId, row.ord, marked]);
+    }
+    return marked;
+  } catch { return 0; }
 }
 
 /**
@@ -4632,6 +4658,8 @@ export default async function adminRoutes(app: FastifyInstance) {
           origin: z.literal('tracker').optional(),
           tracker: z.enum(PROVIDERS as [Provider, ...Provider[]]).optional(),
           statuses: z.array(z.enum(LIST_STATUSES)).min(1).max(LIST_STATUSES.length).optional(),
+          // Mark chapters I've read (#433). Off unless asked: a script that never heard of it imports titles, as before.
+          markRead: z.boolean().optional(),
         })
         .safeParse(req.body);
       if (!b.success) return reply.code(400).send({ error: 'bad_request' });
@@ -4658,6 +4686,8 @@ export default async function adminRoutes(app: FastifyInstance) {
       let tracker: Provider | null = null;
       let skippedNovels = 0;
       let capped = false;
+      // A continuation marks as the batch it continues does: the rest of one list under the one choice made for it.
+      const markRead = parent ? parent.mark_read === true : b.data.markRead === true;
       try {
         if (parent) {
           entries=normalizeImportEntries(parent.remaining_entries);
@@ -4841,20 +4871,23 @@ export default async function adminRoutes(app: FastifyInstance) {
         if(!locked || locked.next_batch_id) throw new Error('continuation_changed');
       }
       const [batch]=await qq<{id:string}>(
-        `INSERT INTO import_batches (user_id,origin,tracker,state,total,resolved,already,skipped_novels,truncated,left_over,content_scope,remaining_entries)
-         VALUES ($1,$2,$3,'resolving',$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb) RETURNING id`,
-        [userId,origin,tracker,entries.length,initialResolved,linkedAtIntake.filter(Boolean).length,skippedNovels,truncated,leftOver,JSON.stringify(scope),JSON.stringify(remainingEntries)]);
+        `INSERT INTO import_batches (user_id,origin,tracker,state,total,resolved,already,skipped_novels,truncated,left_over,content_scope,remaining_entries,mark_read)
+         VALUES ($1,$2,$3,'resolving',$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12) RETURNING id`,
+        [userId,origin,tracker,entries.length,initialResolved,linkedAtIntake.filter(Boolean).length,skippedNovels,truncated,leftOver,JSON.stringify(scope),JSON.stringify(remainingEntries),markRead]);
       const batchId=batch.id;
       // One round trip for up to 500 rows via unnest, rather than 500 sequential INSERTs. ⚠️ `alt_titles`
       // rides as `jsonb[]` (one JSON array per row) unpacked per row in the SELECT: `unnest` over a `text[][]`
-      // flattens it, and a plain `jsonb` cannot yield one array per row.
+      // flattens it, and a plain `jsonb` cannot yield one array per row. `read_numbers` rides the same way, for the
+      // same reason, cast to real number by number: the type the listing's numbers have (#433).
       await qq(
         `INSERT INTO import_candidates (batch_id, ord, backup_title, backup_source_id_unsigned, backup_source_id_signed, backup_url, in_library, decision,
-                                        tracker, external_id, alt_titles, progress, status, matched_via, tracker_links, ambiguous, content_scope)
+                                        tracker, external_id, alt_titles, progress, status, matched_via, tracker_links, ambiguous, content_scope, read_numbers)
          SELECT $1, o, t, su, ss, u, il, CASE WHEN il OR sk THEN 'skip' ELSE 'unresolved' END,
-                tr, ex, ARRAY(SELECT jsonb_array_elements_text(x.al))::text[], pr, st, mv, tl, am, cs
+                tr, ex, ARRAY(SELECT jsonb_array_elements_text(x.al))::text[], pr, st, mv, tl, am, cs,
+                ARRAY(SELECT jsonb_array_elements_text(x.rn)::real)::real[]
          FROM unnest($2::int[], $3::text[], $4::text[], $5::text[], $6::text[], $7::boolean[],
-                     $8::text[], $9::text[], $10::jsonb[], $11::int[], $12::text[], $13::text[], $14::boolean[], $15::jsonb[], $16::boolean[], $17::jsonb[]) AS x(o, t, su, ss, u, il, tr, ex, al, pr, st, mv, sk, tl, am, cs)`,
+                     $8::text[], $9::text[], $10::jsonb[], $11::int[], $12::text[], $13::text[], $14::boolean[], $15::jsonb[], $16::boolean[], $17::jsonb[],
+                     $18::jsonb[]) AS x(o, t, su, ss, u, il, tr, ex, al, pr, st, mv, sk, tl, am, cs, rn)`,
         [
           batchId,
           entries.map((_, i) => i),
@@ -4873,6 +4906,7 @@ export default async function adminRoutes(app: FastifyInstance) {
           entries.map(e=>JSON.stringify(trackerLinksOf(e))),
           entries.map(e=>{const links=trackerLinksOf(e);return links.some(l=>links.some(o=>l.provider===o.provider && l.externalId!==o.externalId)) || new Set(links.map(l=>linkedTo.get(entryScope(e).key+'|'+l.provider+':'+l.externalId)?.id).filter(Boolean)).size>1;}),
           entries.map(e=>JSON.stringify(entryScope(e))),
+          entries.map((e) => JSON.stringify(e.readNumbers ?? [])),
         ],
       );
       if(parent) await qq('UPDATE import_batches SET next_batch_id=$2,updated_at=now() WHERE id=$1',[parent.id,batchId]);
@@ -4886,9 +4920,17 @@ export default async function adminRoutes(app: FastifyInstance) {
         await linkImportedSeries({ tracker: e.tracker ?? null, external_id: e.externalId ?? null, backup_title: e.title, progress: e.progress ?? null, tracker_links:trackerLinksOf(e) }, owned[i]!.id, userId,entryScope(e),origin==='backup');
         linked++;
       }
+      // What the file or list says was read, on the titles already here (#433): an owned row starts skipped, so /run
+      // never reaches it, and this is its one chance. A row the import adds is marked at /run, once its series exists.
+      // Reintroduce by dropping the loop: "a backup marks what it says was read on the titles already here" finds nothing read.
+      let marked = 0;
+      if (markRead) for (let i = 0; i < entries.length; i++) {
+        if (owned[i]) marked += await markImportedRead({ batchId, ord: i }, entries[i].readNumbers ?? [], trackerLinksOf(entries[i]), owned[i]!.id, userId);
+      }
       await logAudit('import.batch.start', {
         userId, req,
-        detail: { batchId, origin, count: entries.length, ...(tracker ? { tracker, statuses: b.data.statuses ?? ['reading', 'plan_to_read'], skippedNovels, linked } : {}) },
+        detail: { batchId, origin, count: entries.length, ...(tracker ? { tracker, statuses: b.data.statuses ?? ['reading', 'plan_to_read'], skippedNovels, linked } : {}),
+          ...(markRead ? { markRead, marked } : {}) },
       });
       void resolveBatch(batchId).catch(() => {});
       started = true;
@@ -4935,8 +4977,10 @@ export default async function adminRoutes(app: FastifyInstance) {
     const fallbackVisibility=linkedParams.add(scope.visibility), fallbackLibrary=linkedParams.add(scope.libraryId), owner=linkedParams.add(userIdOf(req));
     const rowVisibility=`COALESCE(c.content_scope->>'visibility',${fallbackVisibility})`, rowLibrary=`COALESCE(c.content_scope->>'libraryId',${fallbackLibrary})`;
     const linkedScope=`((${rowVisibility}='private' AND s.is_private AND s.owner_user_id=${owner}::uuid) OR (${rowVisibility}='shared' AND NOT s.is_private AND s.library_id=${rowLibrary}))`;
-    const items = await q<ImportCandidateRow & { linked: boolean }>(
-      `SELECT c.*, EXISTS (SELECT 1 FROM series_trackers st JOIN lib_series s ON s.id=st.series_id
+    // `read_to` stands in for `read_numbers` (#433): the row says how far the backup was read, and a list of up to 5,000
+    // numbers per row, polled every 1.5 s while the batch works, is not what a caption needs.
+    const items = await q<ImportCandidateRow & { linked: boolean; read_to: number | null }>(
+      `SELECT c.*, (SELECT max(n) FROM unnest(c.read_numbers) AS n) AS read_to, EXISTS (SELECT 1 FROM series_trackers st JOIN lib_series s ON s.id=st.series_id
         WHERE ${linkedScope} AND s.deleted_at IS NULL AND s.merged_into IS NULL AND
         ((st.provider=c.tracker AND st.external_id=c.external_id) OR EXISTS
           (SELECT 1 FROM jsonb_array_elements(c.tracker_links) l WHERE l->>'provider'=st.provider AND l->>'externalId'=st.external_id))) AS linked
@@ -4944,7 +4988,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     // A batch stuck in 'resolving' with nobody actually resolving it (this process restarted mid-pass) is
     // stale: the UI offers Resume instead of a progress bar that will never move again.
     const stale = batch.state === 'resolving' && resolvingBatch !== id;
-    return { batch: { ...batchDto(batch), stale }, items };
+    return { batch: { ...batchDto(batch), stale }, items: items.map(({ read_numbers: _readNumbers, ...item }) => item) };
   });
 
   app.post('/api/admin/import/batches/:id/resume', async (req, reply) => {
@@ -5077,15 +5121,15 @@ export default async function adminRoutes(app: FastifyInstance) {
     // on the same batch -- after fixing the rows an admin found manually -- safe: it only ever picks up
     // what is newly ready.
     // `tracker`, `external_id`, `backup_title` and `progress` ride along so a tracker row can be linked
-    // (and floored) once its series exists, without a second read per row.
+    // (and floored) once its series exists, without a second read per row; `read_numbers` so it can be marked (#433).
     const selectedQuery = b.data.candidateIds
-        ? `SELECT id, match_source, match_source_id, tracker, external_id, backup_title, progress, alt_titles, tracker_links, content_scope FROM import_candidates
+        ? `SELECT id, match_source, match_source_id, tracker, external_id, backup_title, progress, alt_titles, tracker_links, content_scope, read_numbers FROM import_candidates
            WHERE batch_id = $1 AND decision IN ('auto','manual') AND (decision='manual' OR NOT ambiguous) AND match_source_id IS NOT NULL AND status IS NULL
              AND id = ANY($2) ORDER BY ord`
-        : `SELECT id, match_source, match_source_id, tracker, external_id, backup_title, progress, alt_titles, tracker_links, content_scope FROM import_candidates
+        : `SELECT id, match_source, match_source_id, tracker, external_id, backup_title, progress, alt_titles, tracker_links, content_scope, read_numbers FROM import_candidates
            WHERE batch_id = $1 AND decision IN ('auto','manual') AND (decision='manual' OR NOT ambiguous) AND match_source_id IS NOT NULL AND status IS NULL ORDER BY ord`;
     const selectedParams = b.data.candidateIds ? [id,b.data.candidateIds] : [id];
-    let rows = await q<{ id: string; match_source: string; match_source_id: string; tracker: string | null; external_id: string | null; backup_title: string; progress: number | null; alt_titles: string[] | null; tracker_links:unknown; content_scope:AddScope|null }>(selectedQuery,selectedParams);
+    let rows = await q<{ id: string; match_source: string; match_source_id: string; tracker: string | null; external_id: string | null; backup_title: string; progress: number | null; alt_titles: string[] | null; tracker_links:unknown; content_scope:AddScope|null; read_numbers: number[] | null }>(selectedQuery,selectedParams);
     if (!rows.length) return reply.code(400).send({ error: 'nothing_to_import', message: 'Nothing selected is ready to import.' });
 
     // The state checks above are advisory; THIS is the guard. Two /run requests that both read `review`
@@ -5155,6 +5199,7 @@ export default async function adminRoutes(app: FastifyInstance) {
               await q(`UPDATE import_candidates SET status='already' WHERE id=$1`,[row.id]);
               await q(`UPDATE import_batches SET already=already+1,updated_at=now() WHERE id=$1`,[id]);
               await linkImportedSeries(row,held.id,owner,targetScope,batch.origin==='backup');
+              if (batch.mark_read) await markImportedRead({ id: row.id }, row.read_numbers ?? [], trackerLinksOf(row), held.id, owner);
               continue;
             }
             if(heldIds.size>1) {
@@ -5195,11 +5240,17 @@ export default async function adminRoutes(app: FastifyInstance) {
             }
             // Added, or the library had it: either way the series exists now, so a tracker row is linked to
             // the entry it came from and the OWNER's progress there becomes the owner's floor -- sync from
-            // the first chapter, and never a push below what the tracker already holds.
-            if (trackerLinksOf(row).length && (r.ok || r.error === 'duplicate')) {
+            // the first chapter, and never a push below what the tracker already holds. And what the row says was
+            // read is marked on it (#433): on a series just added, the listing the add wrote is what there is to mark.
+            // Reintroduce by marking only the `already` rows: "a title the import adds is marked from the listing its add wrote"
+            // finds no mark.
+            const links = trackerLinksOf(row);
+            const marks = batch.mark_read && (!!row.read_numbers?.length || readUpTo(links) > 0);
+            if ((links.length || marks) && (r.ok || r.error === 'duplicate')) {
               try {
                 const sid = await seriesIdOf(r,targetScope);
-                if (sid) await linkImportedSeries(row, sid, owner,targetScope,batch.origin==='backup');
+                if (sid && links.length) await linkImportedSeries(row, sid, owner,targetScope,batch.origin==='backup');
+                if (sid && marks) await markImportedRead({ id: row.id }, row.read_numbers ?? [], links, sid, owner);
               } catch { /* the add stands and is already counted; the row simply reads unlinked */ }
             }
           } catch {

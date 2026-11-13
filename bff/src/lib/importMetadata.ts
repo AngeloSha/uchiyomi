@@ -1,4 +1,4 @@
-import type { BackupEntry, BackupTracker } from './tachibk';
+import { READ_NUMBERS_MAX, type BackupEntry, type BackupTracker } from './tachibk';
 import { normTitle } from './titleMatch';
 
 export interface ImportEntry extends BackupEntry {
@@ -26,6 +26,20 @@ export function trackerLinksOf(row: { tracker_links?: unknown; trackerLinks?: un
   }
   return out;
 }
+/**
+ * An entry's read chapters as a batch keeps them (#433): finite, 0 to 1e6 -- the range the mark route holds a `real` to
+ * (routes/catalog.ts) -- each once, ascending, at most READ_NUMBERS_MAX. The parser already answers so; this is for the
+ * JSON a continued batch reads back (remaining_entries), which is the database's word rather than the file's.
+ */
+export function readNumbersOf(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [];
+  const out = new Set<number>();
+  for (const v of raw) {
+    if (out.size >= READ_NUMBERS_MAX) break;
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1e6) out.add(v);
+  }
+  return [...out].sort((a, b) => a - b);
+}
 export function importSkipKeys(row: Parameters<typeof trackerLinksOf>[0]): string[] {
   const links = trackerLinksOf(row);
   if (links.length) return links.map(v => `t:${v.provider}:${v.externalId}`);
@@ -42,7 +56,9 @@ export function normalizeImportEntries(raw: unknown): ImportEntry[] {
     const altTitles = [...(Array.isArray(row.altTitles) ? row.altTitles : []), ...trackerLinks.map(t => t.title)]
       .filter((v): v is string => typeof v === 'string' && !!normTitle(v) && normTitle(v) !== normTitle(title));
     const seen = new Set<string>();
+    const readNumbers = readNumbersOf(row.readNumbers);
     return { title, ...(row.sourceIdUnsigned ? { sourceIdUnsigned: String(row.sourceIdUnsigned).slice(0, 30) } : {}),
+      ...(readNumbers.length ? { readNumbers } : {}),
       ...(row.sourceIdSigned ? { sourceIdSigned: String(row.sourceIdSigned).slice(0, 30) } : {}),
       ...(row.url ? { url: String(row.url).slice(0, 16384) } : {}),
       altTitles: altTitles.filter(v => { const key = normTitle(v); if (seen.has(key)) return false; seen.add(key); return true; }).slice(0, 3).map(v => v.slice(0, 300)),

@@ -13,6 +13,7 @@ import { join } from 'path';
 import {
   needsAttention, containsDiverges, matchTitleDiffers, matchedViaAlt, openBatches, batchOriginLabel, runStatusLabel, runStatusColor,
   linkedCount, linkedLine, truncatedWords, sameSourcePair, alreadyImported, filterImportRows, importRowState, selectableImport, readyImport, importProvenance, trackerProgressLine,
+  readToLine, markedLine,
   type ImportCandidate, type ImportBatchSummary,
 } from '../lib/importBatch';
 import { readPage } from '../lib/settingsIndex';
@@ -740,4 +741,46 @@ test('state/source/title filters and selections keep skipped, unmatched, private
  assert.match(trackerProgressLine('anilist',30,true),/backup on AniList: 30 chapters$/);
  const next={id:'next',origin:'paste',state:'done',canContinue:true,total:500,resolved:500,added:0,failed:0,created_at:''} as ImportBatchSummary;
  assert.deepEqual(openBatches([next]).map(b=>b.id),['next'],'a finished tranche with remaining titles remains reachable');
+});
+
+test('Mark chapters I’ve read is one checkbox, on by default, above every way in, and sent with each new intake (#433)', () => {
+  // Reintroduce by starting the state at false: "the checkbox is not on by default". By leaving markRead out of the
+  // body: the server marks only when asked, so nothing is marked. By putting the box under the entrances: a backup
+  // starts the moment its file is picked, before the box below it was ever seen.
+  const src = code(read('app/admin/import/page.tsx'));
+  assert.match(src, /const \[markRead, setMarkRead\] = useState\(true\);/, 'the checkbox is not on by default');
+  assert.match(src, /json: body\.continueFrom \? body : \{\.\.\.body,visibility:scope\.visibility,markRead\}/, 'a new intake does not send markRead');
+  assert.match(src, /<ContentScopePicker scope=\{scope\} disabled=\{starting\} \/><MarkReadChoice on=\{markRead\} onChange=\{setMarkRead\} disabled=\{starting\} \/><\/div><IntakeCard /,
+    'the checkbox is not beside the library choice, above the intake');
+  const choice = src.slice(src.indexOf('function MarkReadChoice('), src.indexOf('function IntakeCard('));
+  assert.ok(choice.length > 0, 'MarkReadChoice is not where this test looks');
+  assert.equal((choice.match(/type="checkbox"/g) || []).length, 1, 'more than one control');
+  assert.match(choice, /tr\('Mark chapters I’ve read'\)/);
+  assert.match(choice, /tr\('Chapters you’ve read are marked read here\. Nothing is marked unread or sent to your trackers\.'\)/);
+  assert.deepEqual(missingIn('es.json', ['Mark chapters I’ve read', 'Chapters you’ve read are marked read here. Nothing is marked unread or sent to your trackers.']), []);
+});
+
+test('an import says what it marked read: a done line over the whole batch, and how far each backup row was read (#433)', () => {
+  // Reintroduce by counting the rows instead of their chapters in markedLine: "Marked 2 chapters…" for 57. By the plural
+  // for one: "Marked 1 chapters read in 1 series." By counting ReviewCard's `items` -- the filtered view -- instead of the
+  // batch: the line changes with the filter. By dropping the review card's line: a backup of the library you already
+  // have, whose rows are all owned and never leave review, never says what it marked.
+  const marked = (id: string, n: number) => row({ id, marked_read: n });
+  assert.equal(markedLine([marked('a', 50), marked('b', 7), row({ id: 'c' })]), 'Marked 57 chapters read in 2 series.');
+  assert.equal(markedLine([marked('a', 12)]), 'Marked 12 chapters read in 1 series.');
+  assert.equal(markedLine([marked('a', 1)]), 'Marked 1 chapter read.');
+  assert.equal(markedLine([row({}), row({ marked_read: 0 })]), null, 'nothing marked prints a line');
+  assert.equal(readToLine(row({ read_to: 57 })), 'Read to ch. 57');
+  assert.equal(readToLine(row({ read_to: 12.5 })), 'Read to ch. 12.5');
+  assert.equal(readToLine(row({ read_to: null })), null);
+  assert.equal(readToLine(row({})), null, 'an older server, which sends no read_to, gets a caption');
+  const src = code(read('app/admin/import/page.tsx'));
+  assert.match(src, /const marked = markedLine\(items\);/, 'the line is not counted over every row of the batch');
+  const between = (a: string, b: string) => src.slice(src.indexOf(a), src.indexOf(b));
+  assert.match(between('function ReviewRow(', 'function ReviewCard('), /\{c\.read_to != null && <p className="text-\[11px\] text-fog-500" data-read-to>\{readToLine\(c\)\}<\/p>\}/, 'the row has no caption');
+  assert.match(between('function ReviewCard(', 'function RunCard('), /\{marked && <p className="mb-1 text-\[11px\] text-fog-300" data-import-marked>\{marked\}<\/p>\}/, 'the review card does not say what was marked');
+  assert.match(between('function RunCard(', 'function ImportWizardInner('), /\{batch\.state === 'done' && marked && <p className="mb-3 text-\[11px\] text-fog-300" data-import-marked>\{marked\}<\/p>\}/, 'the done card does not say what was marked');
+  assert.match(src, /note=\{note\} marked=\{marked\} filter=\{filter\}/, 'the review card is not handed the line');
+  assert.match(src, /<RunCard batch=\{batch\} items=\{items\} runIds=\{runIds\} runTotal=\{runTotal\} note=\{note\} marked=\{marked\}/, 'the done card is not handed the line');
+  assert.deepEqual(missingIn('es.json', ['Read to ch. {n}', 'Marked 1 chapter read.', 'Marked {n} chapters read in 1 series.', 'Marked {n} chapters read in {m} series.']), []);
 });

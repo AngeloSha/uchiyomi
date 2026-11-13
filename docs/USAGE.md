@@ -3399,10 +3399,11 @@ ways:
 
 ![Import and review matches](shots/admin-import.webp)
 
-- **Mihon / Tachiyomi backup** — pick your `.tachibk` (or `.proto.gz`) file. Only each entry's title, its
-  source and its address on that source are read: the source to look the title up on that same source here,
+- **Mihon / Tachiyomi backup** — pick your `.tachibk` (or `.proto.gz`) file; a Suwayomi backup is the same file.
+  Each entry's title, its source and its address on that source are read: the source to look the title up on that same source here,
   if you have it installed, and the address as the proof that a result there is that exact entry rather than
-  a namesake. The file never leaves your server, and no Mihon account is used.
+  a namesake. So are its tracker links, and which of its chapters are marked read (see *Mark chapters I've read*,
+  below). The file never leaves your server, and no Mihon account is used.
 - **MangaDex list** — paste the link to a **public** custom list. Private follows would need a MangaDex
   login, which Uchiyomi never asks for; make a list public and share that instead.
 - **Paste titles** — one per line, from anywhere.
@@ -3423,6 +3424,17 @@ ways:
   connection is read, never another admin's. A token the service rejects switches that connection off and
   says so, exactly as a failed push does; a token that has merely lapsed is reported before the service is
   asked and the connection is left in place. Either way, reconnect under Profile and load again.
+
+**Mark chapters I've read**, beside the library choice above the intake and on by default, brings your reading over
+with the titles (since v0.108.0, #433): the chapters a backup has marked read, and every chapter up to how far your
+tracker says you are, are marked read here for your account alone — on the titles you already have as soon as the
+list is read, on the others when **Import selected** adds them. A chapter this server does not have yet is ticked on
+its listing and becomes read when it lands. Nothing is marked unread, a chapter you already finished here keeps its
+date, nothing is sent to your trackers, and streaks and reading stats do not count it, since you did not read it here.
+Nor does the read-chapter cleanup take an imported read as a reason to delete a downloaded file. A series numbered by
+posting order or by its chapter titles is left alone, since its numbers are not the other app's, and a file holding
+several chapters is marked only once your tracker reaches the last of them. Each backup row says how far it was read
+(*Read to ch. 57*), and the import says what it marked (*Marked 57 chapters read in 2 series.*).
 
 **Start matching** looks every title up against your sources in the background — a backup entry is matched
 on the source it came from first, when you have that source installed, and only a result whose catalogue

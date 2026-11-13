@@ -2171,10 +2171,25 @@ a rejected push leaves — 422 rather than 401 because a 401 is retried after a 
 then read `not_connected`; the same code, without disabling, when the stored token cannot be unsealed),
 **502** `tracker_unavailable` (no answer; nothing changed — a 400 or a 403 from the service never disables
 anything: only a 401, or AniList's "Invalid token" 400, is a verdict on the token).
+Since v0.108.0 (#433) every intake also takes `markRead: true` — the page's **Mark chapters I've read**, off when
+omitted, so a script that does not send it imports titles alone, as before; a `continueFrom` batch keeps the choice of
+the one it continues. It marks what each row says was read, for the requesting admin: the chapters a backup has marked
+read (BackupManga's chapters; a chapter's page is not read, since two sources page one chapter differently) and every
+chapter at or below the highest progress its trackers give, a provider named twice with two different entries giving
+none — at intake for a title already in the library, at `/run` once a series is added or found. Each number is
+authorised as the series page's own read ticks are: a number the series holds is marked on its chapter (tombstones
+included), one its sources list and this server does not hold is a `listing_progress` mark with `source: 'import'`
+that becomes a read chapter when it lands, and any other number is skipped. Nothing is marked unread, a chapter already
+read is left as it is, no `reading_events` row is written and nothing is pushed to a tracker; each read is stamped just
+before its file's mtime (never later than now), so the read-chapter cleanup never takes it for a read of this server's
+copy. A file holding a range is marked only once the tracker's number reaches its last chapter, and a series numbered by
+posting order or by its chapter titles, or with a renumber pending, is left alone: its numbers are not another app's.
 `GET .../batches/:id` polls `{batch, items}` — each item's `decision` is `unresolved | auto | manual | skip`
 and, once the batch leaves `resolving`, an `unresolved` row means "no match found" rather than "not looked
 at yet"; a tracker row reads `linked: true` when a `series_trackers` row carries its id (read live, not
-remembered). A row's
+remembered). The batch carries `mark_read`; each item `read_to` (the highest chapter its backup has marked read, null
+when none — the read set itself stays on the server) and `marked_read` (how many chapters this import marked read for
+the row). A row's
 `confidence` is `same_source` only when the backup entry's own Mihon source is installed here (a Suwayomi
 extension) and a hit's extension-relative path equals the url the backup stored -- Mihon's identity for a
 manga, which survives a retitle -- otherwise `exact | contains | fuzzy` from the title alone; a title with no
@@ -2190,7 +2205,8 @@ uuid, or more than 500 of them, is **400** `bad_request`), omitted means every e
 Each row's `status` afterwards is `added`, `already` (the library has the title — the same folder, or the
 same title from another source under a spelling the up-front `in_library` check missed) or the add's error
 code (`no_title`, `no_chapters`, `disabled`, `blocked`, `undownloadable`, `disk_full`, `bad_request`, `error`);
-`already` counts under the batch's `already`, an error code under `failed`. A tracker row that ends `added`
+`already` counts under the batch's `already`, an error code under `failed`. On a `markRead` batch a row that ends
+`added` or `already` is marked as described above, counted in its `marked_read`. A tracker row that ends `added`
 or `already` is linked to its tracker entry (`series_trackers`, `linked_by` = **the account whose list was
 read**, the batch's `user_id` — batches are shared between admins, and whoever calls `/run`, the link and
 the floor are the owner's; the caller appears only in the `import.batch.run` audit row, whose `detail`
@@ -3579,4 +3595,4 @@ KOReader custom server: `https://your-server/api/v1/kosync`, Binary matching, AP
 
 Image chapter uploads keep `POST /api/library/upload`: select `images=1`, a `.cbz` chapter `name`, and either a visible `seriesId` or `fresh=1&title=...`. Send ordered multipart `pages` files. Validation and configured upload/free-space limits apply; publication never overwrites an existing file. New-series `visibility`/`libraryId` are authenticated choices; existing-series uploads inherit its scope.
 
-Reviewed imports remain admin-only and account-owned. A mixed batch uses its destination as a default; validated remote private flags force those rows into the owner’s private scope. `POST /api/admin/import/batches` also accepts `{continueFrom: completedBatchId}` to idempotently create/reuse the next saved batch after reload. Bulk skip uses the route above. Candidate responses include `tracker_links`, `content_scope`, `ambiguous`, `auto_ambiguous` and `auto_matched_via`; batch responses include `remainingCount`, `nextBatchId` and `canContinue`. Legacy skips are attributed only where retained owned batches establish their source; unattributable old records are retained without applying them to other accounts.
+Reviewed imports remain admin-only and account-owned. A mixed batch uses its destination as a default; validated remote private flags force those rows into the owner’s private scope. `POST /api/admin/import/batches` also accepts `{continueFrom: completedBatchId}` to idempotently create/reuse the next saved batch after reload. Bulk skip uses the route above. Candidate responses include `tracker_links`, `content_scope`, `ambiguous`, `auto_ambiguous` and `auto_matched_via` (and, since v0.108.0, `read_to` and `marked_read`); batch responses include `remainingCount`, `nextBatchId` and `canContinue` (and `mark_read`). Progress imported with `markRead` is the owner's alone and keeps each series' privacy: a private entry's chapters are marked on its private copy. Legacy skips are attributed only where retained owned batches establish their source; unattributable old records are retained without applying them to other accounts.

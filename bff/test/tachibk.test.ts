@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { gzipSync } from 'zlib';
-import { titlesFromBackup, entriesFromBackup } from '../src/lib/tachibk';
+import { titlesFromBackup, entriesFromBackup, READ_NUMBERS_MAX } from '../src/lib/tachibk';
 
 // --- minimal protobuf writer, just enough to build a Backup message ---
 const varint = (n: number): Buffer => {
@@ -99,6 +99,35 @@ test('duplicate manga rows preserve supported tracker links and the strongest pr
   const entries=entriesFromBackup(raw);assert.equal(entries.length,1);
   assert.deepEqual(entries[0].trackerLinks?.map(t=>[t.provider,t.progress,t.private]),[['anilist',20,true],['myanimelist',18,false]]);
 });
+/**
+ * A BackupChapter as Mihon writes one: `read` (4) and `chapterNumber` (9) only when they are not their default, and a
+ * page (6) on a chapter left partway, which the parser must not mistake for a read.
+ */
+const chapter = (number: number, read: boolean, lastPageRead = 0) => lenField(16, Buffer.concat([
+  strField(1, `/chapter/${number}`), strField(2, `Chapter ${number}`),
+  ...(read ? [varField(4, 1)] : []), ...(lastPageRead ? [varField(6, lastPageRead)] : []),
+  ...(number !== 0 ? [floatField(9, number)] : []),
+]));
+test('reads the numbers of the chapters marked read, and nothing else about a chapter (#433)', () => {
+  // Reintroduce by dropping the field-16 branch in entryOfManga: readNumbers is undefined. By keeping a chapter whatever
+  // its read flag: 3, left on page 12, comes through. By dropping `number >= 0`: Mihon's -1, "not recognised", does.
+  const raw = Buffer.concat([manga('Read manga'), chapter(1, true), chapter(2.5, true), chapter(3, false, 12), chapter(-1, true), chapter(1, true)]);
+  assert.deepEqual(entriesFromBackup(backupOf(raw))[0].readNumbers, [1, 2.5]);
+  // A number Mihon left out is its default, chapter 0. Reintroduce by starting readNumberOf's number at -1: 0 is lost.
+  assert.deepEqual(entriesFromBackup(backupOf(Buffer.concat([manga('Prologue'), chapter(0, true)])))[0].readNumbers, [0]);
+  assert.equal(entriesFromBackup(backupOf(Buffer.concat([manga('Unread'), chapter(1, false)])))[0].readNumbers, undefined, 'nothing read, no list');
+});
+test('the same title twice reads as the chapters read on either, and a long series stops at the cap (#433)', () => {
+  // Reintroduce by keeping only the first occurrence's numbers in entriesFromBackup: [1] instead of [1, 2]. Drop the
+  // cap in entryOfManga and one entry asks to mark 5,001 numbers.
+  const twice = backupOf(Buffer.concat([manga('Twice'), chapter(1, true)]), Buffer.concat([manga('TWICE'), chapter(2, true), chapter(1, true)]));
+  assert.deepEqual(entriesFromBackup(twice)[0].readNumbers, [1, 2]);
+  const long = Buffer.concat([manga('Long'), ...Array.from({ length: READ_NUMBERS_MAX + 1 }, (_, i) => chapter(i + 1, true))]);
+  const [entry] = entriesFromBackup(backupOf(long));
+  assert.equal(entry.readNumbers?.length, READ_NUMBERS_MAX);
+  assert.equal(entry.readNumbers?.[0], 1);
+});
+
 test('truncated nested metadata is rejected instead of reading bytes outside its message',()=> {
   const broken=Buffer.concat([manga('Broken'),tag(18,2),varint(999),Buffer.from([1])]);
   assert.throws(()=>entriesFromBackup(backupOf(broken)),/could not read/);

@@ -167,9 +167,10 @@ export async function realRows(userId: string, seriesId: string): Promise<Array<
 
 /**
  * The override-aware "this series holds a chapter with this number" test, tombstones included -- a number inside a
- * file holding a range among them (lib/chapterRanges.ts), so no mark is minted on a chapter a file here holds.
+ * file holding a range among them (lib/chapterRanges.ts), so no mark is minted on a chapter a file here holds. The
+ * import's marks (lib/importProgress.ts) are authorised by it too.
  */
-const HELD = (seriesCol: string, numberCol: string) => `EXISTS (
+export const HELD = (seriesCol: string, numberCol: string) => `EXISTS (
   SELECT 1 FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
    WHERE b.series_id = ${seriesCol} AND ${holds('b', 'ov', numberCol)})`;
 

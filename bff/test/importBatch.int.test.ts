@@ -2303,3 +2303,139 @@ test('the novel count survives a reload (it is on the batch row)', { skip }, asy
     await app.close();
   }
 });
+
+// ---- Reading progress (#433): with Mark chapters I've read on, what the backup or the tracker list says was read is
+// marked here for the batch's owner -- at intake on the titles already in the library, at /run once a series exists.
+// What a mark is, and what it must never do, is importProgress.int.test.ts's; these are its doors. ----
+
+/** A BackupChapter marked read: url, name, read = 4, chapterNumber = 9 (a float). */
+const chapterRead = (n: number) => {
+  const f = Buffer.alloc(4); f.writeFloatLE(n);
+  return lenField(16, Buffer.concat([strField(1, `/c/${n}`), strField(2, `Chapter ${n}`), varField(4, 1), tag(9, 5), f]));
+};
+/** The chapters this reader has read on a series, by number. */
+const readHere = async (uid: string, sid: string) => (await q(
+  `SELECT b.number::float8 AS n FROM read_progress rp JOIN lib_books b ON b.id = rp.book_id
+    WHERE rp.user_id = $1 AND rp.series_id = $2 AND rp.completed ORDER BY b.number`, [uid, sid])).map((r: any) => Number(r.n));
+/** The marks this reader has on the series' listed chapters, with who made them. */
+const markedHere = async (uid: string, sid: string) => (await q(
+  'SELECT number::float8 AS n, source FROM listing_progress WHERE user_id = $1 AND series_id = $2 ORDER BY number', [uid, sid]))
+  .map((r: any) => [Number(r.n), r.source]);
+/** A series here holding chapters 1..`held`, its sources listing 1..`listed`. */
+async function progressSeries(title: string, held: number, listed: number): Promise<string> {
+  const { newSeriesId } = await import('../src/lib/ids');
+  const sid = newSeriesId();
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count) VALUES ($1,'Other',$2,$1,$3)`, [sid, title, held]);
+  await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, root, pages, mtime)
+           SELECT $1 || '-' || n, $1, 'Other', $1 || '/Chapter ' || n || '.cbz', n, 'Chapter ' || n, '/library', 10, $3
+             FROM generate_series(1, $2::int) AS n`, [sid, held, Date.now() - 3_600_000]);
+  await q(`INSERT INTO series_listing (series_id, number, title, source_id, chosen, status)
+           SELECT $1, n, 'Chapter ' || n, 'src', '{}'::jsonb, 'available' FROM generate_series(1, $2::int) AS n`, [sid, listed]);
+  return sid;
+}
+/** read_progress first: its book_id is ON DELETE RESTRICT, so a series with read chapters cannot go before them. */
+const dropSeries = async (ids: string[]) => {
+  await q('DELETE FROM read_progress WHERE series_id = ANY($1)', [ids]);
+  await q('DELETE FROM lib_series WHERE id = ANY($1)', [ids]);
+};
+
+test('a backup marks what it says was read on the titles already here, at intake, and only when asked (#433)', { skip }, async () => {
+  // Reintroduce by dropping the marking loop from POST /batches (routes/admin.ts): the second batch reads nothing. By
+  // taking Mark chapters I've read as on when the body does not say so: the first batch marks.
+  const { app, headers, uid } = await boot();
+  const sid = await progressSeries('Progress Owned Title', 3, 6);
+  const ids: string[] = [];
+  // 1 and 2 are here, 5 is listed and not here, 7 is neither; 3 is unread.
+  const file = dataUrlOf(backupOf(Buffer.concat([mangaEntry('Progress Owned Title', 0), chapterRead(1), chapterRead(2), chapterRead(5), chapterRead(7)])));
+  try {
+    const off = await app.inject({ method: 'POST', url: '/api/admin/import/batches', headers, payload: { dataUrl: file } });
+    assert.equal(off.statusCode, 200, off.body);
+    ids.push(off.json().batchId);
+    const unasked = await waitForState(app, headers, ids[0], ['review']);
+    assert.deepEqual([unasked.batch.mark_read, unasked.items[0].in_library, unasked.items[0].marked_read], [false, true, 0]);
+    assert.deepEqual([await readHere(uid, sid), await markedHere(uid, sid)], [[], []], 'a batch that did not ask marked chapters read');
+
+    const on = await app.inject({ method: 'POST', url: '/api/admin/import/batches', headers, payload: { dataUrl: file, markRead: true } });
+    assert.equal(on.statusCode, 200, on.body);
+    ids.push(on.json().batchId);
+    const asked = await waitForState(app, headers, ids[1], ['review']);
+    const row = asked.items[0];
+    assert.equal(asked.batch.mark_read, true);
+    assert.deepEqual([row.read_to, row.marked_read], [7, 3], 'the row says how far the backup was read, and how many were marked');
+    assert.equal('read_numbers' in row, false, 'the whole read set rides along on every poll');
+    assert.deepEqual(await readHere(uid, sid), [1, 2]);
+    assert.deepEqual(await markedHere(uid, sid), [[5, 'import']]);
+  } finally {
+    for (const id of ids) await q('DELETE FROM import_batches WHERE id = $1', [id]);
+    await dropSeries([sid]);
+    await app.close();
+  }
+});
+
+test('a title the import adds is marked from the listing its add wrote, at /run (#433)', { skip }, async () => {
+  // Reintroduce by marking only the rows /run finds already here: the mark on chapter 1 is missing.
+  globalThis.fetch = pixelFetch;
+  const { app, headers, uid } = await boot();
+  let id = '';
+  // FAKE lists chapter 1 alone (fakeAdapter's listChapters): 2 is read in the backup, and not there to mark.
+  const file = dataUrlOf(backupOf(Buffer.concat([mangaEntry('Fake Manga', 0), chapterRead(1), chapterRead(2)])));
+  try {
+    const r = await app.inject({ method: 'POST', url: '/api/admin/import/batches', headers, payload: { dataUrl: file, markRead: true } });
+    assert.equal(r.statusCode, 200, r.body);
+    id = r.json().batchId;
+    const review = await waitForState(app, headers, id, ['review']);
+    assert.deepEqual([review.items[0].decision, review.items[0].marked_read], ['auto', 0], 'PREMISE: matched, and nothing to mark before the series exists');
+    const run = await app.inject({ method: 'POST', url: `/api/admin/import/batches/${id}/run`, headers });
+    assert.equal(run.statusCode, 200, run.body);
+    const done = await waitForState(app, headers, id, ['done']);
+    assert.deepEqual([done.items[0].status, done.items[0].marked_read], ['added', 1]);
+    const sid = (await q(`SELECT id FROM lib_series WHERE source_series_id = 'fm-1'`))[0].id;
+    assert.deepEqual(await markedHere(uid, sid), [[1, 'import']]);
+    assert.equal((await q('SELECT count(*)::int AS n FROM reading_events WHERE user_id = $1', [uid]))[0].n, 0);
+  } finally {
+    if (id) await q('DELETE FROM import_batches WHERE id = $1', [id]);
+    await q(`DELETE FROM lib_series WHERE source_series_id = 'fm-1'`);
+    globalThis.fetch = realFetch;
+    await app.close();
+  }
+});
+
+test('a tracker list marks every chapter up to its number: at intake on a title here, at /run on one linked since (#433)', { skip }, async () => {
+  // Reintroduce by dropping the mark from /run's already-linked branch (routes/admin.ts): the late title reads nothing.
+  globalThis.fetch = pixelFetch;
+  const { app, headers, uid } = await boot();
+  const owned = await progressSeries('Owned Progress Title', 4, 6);
+  let late = '';
+  const restore = await stubAniList(async () => [
+    entry('pg-owned', 'Owned Progress Title', { progress: 5 }),
+    entry('pg-late', 'Tracker Manga One', { progress: 2 }),
+  ]);
+  let batchId = '';
+  try {
+    await connectAniList(uid);
+    const r = await trackerIntake(app, headers, { markRead: true });
+    assert.equal(r.statusCode, 200, r.body);
+    batchId = r.json().batchId;
+    const review = await waitForState(app, headers, batchId, ['review']);
+    assert.equal(review.items.find((i: any) => i.backup_title === 'Owned Progress Title').marked_read, 5);
+    assert.deepEqual(await readHere(uid, owned), [1, 2, 3, 4], 'at intake: every chapter here up to 5');
+    assert.deepEqual(await markedHere(uid, owned), [[5, 'import']], 'and the listed 5, never 6');
+    // Between the intake and Import, the other entry gets a series here, linked to it by a person.
+    late = await progressSeries('Late Progress Spelling', 3, 3);
+    await q(`INSERT INTO series_trackers (series_id, provider, external_id, title, linked_by) VALUES ($1,'anilist',$2,'Tracker Manga One',$3)`, [late, `${T36}-pg-late`, uid]);
+    const run = await app.inject({ method: 'POST', url: `/api/admin/import/batches/${batchId}/run`, headers });
+    assert.equal(run.statusCode, 200, run.body);
+    const done = await waitForState(app, headers, batchId, ['done']);
+    const row = done.items.find((i: any) => i.backup_title === 'Tracker Manga One');
+    assert.deepEqual([row.status, row.marked_read], ['already', 2]);
+    assert.deepEqual(await readHere(uid, late), [1, 2]);
+  } finally {
+    restore();
+    if (batchId) await q('DELETE FROM import_batches WHERE id = $1', [batchId]);
+    await dropSeries([owned, ...(late ? [late] : [])]);
+    await q(`DELETE FROM lib_series WHERE source_series_id = 'fm-t1'`);
+    await cleanupTracker(uid);
+    globalThis.fetch = realFetch;
+    await app.close();
+  }
+});
