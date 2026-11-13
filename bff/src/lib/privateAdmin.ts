@@ -81,6 +81,11 @@ export async function privateAdminResponse(req:FastifyRequest,reply:FastifyReply
   const privatePath=(v:unknown):boolean=>typeof v==='string' && [...v.matchAll(/_private\/[0-9a-f-]{36}(?:\/[^\s"']*)?/gi)]
     .some(m=>privateFolderOwner(m[0])!==uid);
   const scrub=(value:unknown):unknown=>{
+    // A value that says how it is written (a Date, above all) is scrubbed as what it is written as. Rebuilt from its
+    // entries, every timestamp under /api/admin went out as {} and read "Invalid Date": removed series, members' last
+    // active, sessions, the audit log, import batches (#437's screenshot). Reintroduce by dropping this line:
+    // privateAdminResponse.int.test.ts reads {}.
+    if(value && typeof value==='object' && typeof (value as {toJSON?:unknown}).toJSON==='function')return scrub((value as {toJSON:()=>unknown}).toJSON());
     if(Array.isArray(value))return value.map(scrub).filter(v=>v!==undefined);
     if(!value || typeof value!=='object')return privatePath(value)||typeof value==='string'&&denied.has(value)?undefined:value;
     const source=value as Record<string,unknown>;
