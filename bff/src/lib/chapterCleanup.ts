@@ -32,6 +32,12 @@
  *   lib/progressRules.ts: `page >= pages - 1`; "Mark read" writes `page = pages`, so it still qualifies), and
  *   a chapter whose page count is unknown (`pages <= 1`) keeps the plain rule, because there is no end to
  *   compare against.
+ *   ⚠️ And a completion that is a guess is not a finish (v0.108.0, #377). A chapter an OPDS reader paged through to the
+ *   end counts as read (lib/externalReading.ts rememberOpdsEstimate), but on page requests alone, and a reader loading
+ *   pages ahead makes the same ones. Such a row is `inferred`, and keeps the chapter as an unfinished one does until a
+ *   real read of it clears the mark: the web reader's, KOReader's, Mark read (never a Komga PUT, which echoes back what
+ *   it was told: lib/komgaProgress.ts markReadUpTo). Reintroduce by dropping `NOT bool_or(rp.inferred)`: "an OPDS
+ *   completion leaves nothing due" in opdsPse.int.test.ts finds the chapter due.
  *
  * WHICH COPY THEY READ
  *   The reads have to be of the file that is on disk NOW, not of one this file replaced: `done_at` must be
@@ -145,6 +151,8 @@ export function dueSql(limit: number | null): string {
                 JOIN lib_books lb ON lb.id = rp.book_id
                GROUP BY rp.book_id
               HAVING bool_and(rp.completed AND (lb.pages <= 1 OR rp.page >= lb.pages - 1))
+                 -- nobody's completion of it is only a guess from OPDS page streaming (see WHO COUNTS AS HAVING READ IT)
+                 AND NOT bool_or(rp.inferred)
                  AND max(rp.updated_at) <= now() - make_interval(days => $2)
             ) done ON done.book_id = b.id
             LEFT JOIN book_overrides ov ON ov.book_id = b.id
@@ -203,7 +211,7 @@ export const cleanupLog = { on: logLevel === 'debug' || logLevel === 'trace' };
 const trace = (line: string) => { if (cleanupLog.on) console.log(`[cleanup] ${line}`); };
 
 /** Why a read chapter on the download disk stays this run: the first rule that holds it, in dueSql's order. */
-export type KeptWhy = 'reading' | 'recent' | 'changed' | 'removed' | 'bookmarked' | 'last_copy' | 'hidden';
+export type KeptWhy = 'reading' | 'inferred' | 'recent' | 'changed' | 'removed' | 'bookmarked' | 'last_copy' | 'hidden';
 
 export interface KeptReasons {
   /** Chapters on the download disk somebody opened, not deleted yet. */
@@ -224,7 +232,8 @@ export async function keptReasons(days: number): Promise<KeptReasons> {
   const rows = await q<{ why: KeptWhy | null; title: string; number: string }>(
     `WITH done AS (
        SELECT rp.book_id, max(rp.updated_at) AS done_at,
-              bool_and(rp.completed AND (lb.pages <= 1 OR rp.page >= lb.pages - 1)) AS finished
+              bool_and(rp.completed AND (lb.pages <= 1 OR rp.page >= lb.pages - 1)) AS finished,
+              bool_or(rp.inferred) AS inferred
          FROM read_progress rp
          JOIN lib_books lb ON lb.id = rp.book_id
         WHERE lb.root = $1 AND lb.pruned_at IS NULL
@@ -232,6 +241,7 @@ export async function keptReasons(days: number): Promise<KeptReasons> {
      )
      SELECT CASE
               WHEN NOT COALESCE(done.finished, false) THEN 'reading'
+              WHEN done.inferred THEN 'inferred'
               WHEN done.done_at > now() - make_interval(days => $2) THEN 'recent'
               WHEN done.done_at < to_timestamp(b.mtime / 1000.0) THEN 'changed'
               WHEN s.deleted_at IS NOT NULL THEN 'removed'
@@ -264,6 +274,7 @@ export async function keptReasons(days: number): Promise<KeptReasons> {
 /** Each rule in words, for the `[cleanup]` lines. */
 const KEPT_LINE: Record<KeptWhy, (days: number) => string> = {
   reading: () => 'someone who opened it has not finished it',
+  inferred: () => 'someone has read it only by paging through it over OPDS, a guess until they read it here or in KOReader',
   recent: (days) => `finished less than ${days} day${days === 1 ? '' : 's'} ago`,
   changed: () => 'the file on disk is newer than the last read of it (fetched again since)',
   removed: () => 'its series is removed (Delete files is for those)',

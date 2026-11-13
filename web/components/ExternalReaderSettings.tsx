@@ -24,10 +24,11 @@ export function ExternalReaderSettings(){
     <p className="mb-3 text-xs text-fog-400">{tr('KOReader: use this server’s URL followed by /api/v1/kosync. Choose Binary matching. Sign in with a read/write API token as the username and any dummy password. Create a separate token for each device below.')}</p>
     {data&&<>
       <SwitchRow label={tr('Count completed chapters from other apps')} on={data.externalReadingStats}
-        help={tr('Count small new completions reported by Komga and KOReader in your history, Insights, heatmap and Wrapped. Initial links and bulk catch-ups stay silent. No reading time, streaks, badges or household rankings are inferred.')}
+        help={tr('Count small new completions from Komga, KOReader and OPDS page streaming in your history, Insights, heatmap and Wrapped. Initial links and bulk catch-ups stay silent. No reading time, streaks, badges or household rankings are inferred.')}
         onChange={on=>save('externalReadingStats',on)}/>
-      <SwitchRow label={tr('Remember estimated OPDS positions')} on={data.opdsEstimatedBookmarks}
-        help={tr('Use streamed page requests as estimated bookmarks in OPDS when no explicit position exists. Readers may prefetch pages. These estimates never mark chapters completed, create reading statistics or update trackers.')}
+      {/* Stored under v0.107.0's name; since #377 it also counts chapters read to the end (bff lib/externalReading.ts). */}
+      <SwitchRow label={tr('Track reading from OPDS page streaming')} on={data.opdsEstimatedBookmarks}
+        help={tr('Uchiyomi remembers the page you reach, and a chapter you page through to the end counts as read, here and on your trackers. Readers that load pages ahead may count a chapter a few pages early.')}
         onChange={on=>save('opdsEstimatedBookmarks',on)}/>
     </>}
     <p className="mt-3 text-xs text-fog-500">{tr('Incognito keeps your private position and suppresses reading events and tracker updates across all readers.')}</p>

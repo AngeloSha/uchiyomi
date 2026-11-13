@@ -212,7 +212,7 @@ function Backlog({ data }: { data: InsightsPayload }) {
 }
 
 /** Sync supplies counts, never elapsed reading time. Keep these separate from the Studio's time-by-device. */
-const EXTERNAL_READER_NAMES:Record<string,string>={koreader:'KOReader',komga:'Komga'};
+const EXTERNAL_READER_NAMES:Record<string,string>={koreader:'KOReader',komga:'Komga',opds:'OPDS'};
 function ExternalReadCounts({counts}:{counts:Array<{origin:string;chapters:number}>}){
   counts=counts.filter(r=>r.chapters>0);
   if(!counts.length)return null;

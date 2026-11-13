@@ -977,7 +977,8 @@ export default async function personalRoutes(app: FastifyInstance) {
       // GREATEST on page so marking a series read never rewinds a chapter someone is part-way through.
       // Deliberately no reading_events insert: that table records chapters actually read in the app, and
       // bulk-marking a backlog must not inflate streaks, the leaderboard or Wrapped. Same rule as the
-      // `silent` flag in lib/progress.ts.
+      // `silent` flag in lib/progress.ts. And their word, like Mark read's, ends a guess from OPDS page streaming
+      // (read_progress.inferred, lib/externalReading.ts).
       await q(
         `INSERT INTO read_progress (user_id, book_id, series_id, page, completed, is_private)
          SELECT $1, b.id, b.series_id, COALESCE(b.pages, 0), true, EXISTS(SELECT 1 FROM lib_series s WHERE s.id=b.series_id AND s.is_private)
@@ -985,7 +986,7 @@ export default async function personalRoutes(app: FastifyInstance) {
             -- What the reader sees: a notice chapter the admin hides (lib/noticeChapters.ts) is left as it was.
             AND NOT ${noticeBook('b.id')}
          ON CONFLICT (user_id, book_id) DO UPDATE
-           SET completed = true, page = GREATEST(read_progress.page, EXCLUDED.page), updated_at = now(), is_private=read_progress.is_private OR EXCLUDED.is_private`,
+           SET completed = true, inferred = false, page = GREATEST(read_progress.page, EXCLUDED.page), updated_at = now(), is_private=read_progress.is_private OR EXCLUDED.is_private`,
         [uid, live],
       );
       // One tracker push per series, not per chapter, after the write and fire-and-forget. The existing

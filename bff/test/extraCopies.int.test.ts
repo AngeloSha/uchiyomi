@@ -213,6 +213,29 @@ test('colliding external completions fold once with earliest origin and immutabl
     'normal web page-turn timing and identity are preserved');
 });
 
+test('a completion guessed from OPDS page streaming stays a guess on the copy kept, unless either copy was really read', { skip }, async () => {
+  // #377: the read-chapter cleanup deletes no file on a guess (read_progress.inferred, lib/chapterCleanup.ts). Reintroduce
+  // by leaving `inferred` out of removeCopy's fold: chapter 2's guess lands on the kept copy as a read.
+  await series(KEEP,'Keep Tale',KEEP_DIR);
+  await series(GONE,'Gone Tale',GONE_DIR);
+  for(const n of [2,3]){
+    await book(`xc_k${n}`,KEEP,DL,KEEP_DIR,`Chapter ${n}.cbz`,n,{pages:8});
+    await book(`xc_g${n}`,GONE,DL,GONE_DIR,`Chapter ${n}.cbz`,n,{pages:8});
+  }
+  // Chapter 2 guessed on the dropped copy alone; chapter 3 guessed there and read in the app on the copy kept.
+  await q(`INSERT INTO read_progress(user_id,book_id,series_id,page,completed,inferred)
+    VALUES($1,'xc_g2',$3,8,true,true),($1,'xc_g3',$3,8,true,true),($1,'xc_k3',$2,8,true,false)`,[user,KEEP,GONE]);
+  // Both copies of chapter 3 counted as an OPDS completion: one claim when they fold, as KOReader's and Komga's are.
+  await q(`INSERT INTO reading_events(user_id,book_id,series_id,page,completed,origin,device_id)
+    VALUES($1,'xc_g3',$3,8,true,'opds','opds'),($1,'xc_k3',$2,8,true,'opds','opds')`,[user,KEEP,GONE]);
+  const result=await admin.mergeSeries(GONE,KEEP,{keepOnce:{userId:user}});
+  assert.equal(result.duplicates,2);
+  assert.deepEqual(await q('SELECT book_id,completed,inferred FROM read_progress WHERE user_id=$1 ORDER BY book_id',[user]),
+    [{book_id:'xc_k2',completed:true,inferred:true},{book_id:'xc_k3',completed:true,inferred:false}]);
+  // Reintroduce by leaving 'opds' out of removeCopy's external origins: the two claims meet on one copy and the fold fails.
+  assert.deepEqual(await q(`SELECT book_id FROM reading_events WHERE user_id=$1 AND origin='opds'`,[user]),[{book_id:'xc_k3'}]);
+});
+
 test("a dropped copy's comments and reactions follow the chapter", { skip }, async () => {
   // v0.87.0: what the household said about a chapter is about the chapter, not the file. The copy that goes takes its
   // row with it (CASCADE), so removeCopy carries the talk first: comments onto the kept copy, a page scaled as progress

@@ -3112,6 +3112,10 @@ What it will not touch:
 * a chapter **somebody is partway through** -- one unfinished reader keeps it for everybody;
 * a chapter **nobody has read**;
 * a chapter anyone has **bookmarked** (a bookmark points at a page inside the file);
+* a chapter someone has read **only over OPDS page streaming** (since v0.108.0,
+  [#377](https://github.com/AngeloSha/uchiyomi/issues/377); section 9): that is worked out from the pages a reader
+  fetched, which a reader loading pages ahead fetches too, so the file stays until they read the chapter here or in
+  KOReader, or mark it read;
 * a chapter **the sources no longer list**, or list only in a way that cannot be downloaded (only from a group you
   blocked, or only as a link to the publisher, as MangaDex keeps a licensed chapter): the file here is the last copy.
   A file holding several chapters is kept if any one of them is missing. The list is the one from the last check that
@@ -3819,11 +3823,21 @@ locations remain opaque, and only explicit whole-file completion completes an EP
 
 Two separate switches start off:
 
-- **Count completed chapters from other apps** includes small, newly reported explicit completions from KOReader and the Komga API
-  in your personal chapter totals. Initial linking, bulk reports and retries do not count as new reading. These
-  counts add no minutes, sessions, streaks, badges or household leaderboard activity.
-- **Remember estimated OPDS positions** uses page-streaming requests as a rough resume hint. Prefetching can move this
-  hint: a page request does not prove that you read it and never creates a completion or a tracker update.
+- **Count completed chapters from other apps** includes small, newly reported explicit completions from KOReader and the Komga API,
+  and chapters read over OPDS page streaming (the next switch), in your personal chapter totals. Initial linking, bulk
+  reports and retries do not count as new reading. These counts add no minutes, sessions, streaks, badges or household
+  leaderboard activity.
+- **Track reading from OPDS page streaming** (named *Remember estimated OPDS positions* in v0.107.0; since v0.108.0,
+  [#377](https://github.com/AngeloSha/uchiyomi/issues/377), it also counts chapters read) is for readers that read a
+  chapter page by page over OPDS rather than downloading it: Panels, Chunky, KOReader's OPDS browser. Uchiyomi
+  remembers the page you reach, and the OPDS feed offers it as where you stopped wherever you have no other place in
+  that chapter. A chapter you page through to the end counts as read, here and on your trackers, when its last page
+  comes in a sitting (pages with no break of six hours) that reached at least half the chapter's pages going forward
+  and began at least 20 seconds before, or half a second a page before in a long chapter. So a reader that loads the
+  whole chapter at once, a jump to the last page, or a strip of thumbnails (pages asked for narrower than 600 pixels)
+  does not count, and a reader that loads a few pages ahead may count a chapter a few pages early. The pages before the
+  end only move your place, never back. Reading a finished chapter again changes nothing, and a chapter counted this
+  way keeps its file from *Delete read chapters* (section 8) until you read it here or in KOReader, or mark it read.
 
 Incognito keeps only your private position and suppresses reading events and tracker updates across readers.
 These server features require the built-in library backend.

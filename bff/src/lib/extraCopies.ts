@@ -30,6 +30,7 @@ import { allWritable, containedPath, realContainedPath } from './fsGuard';
 import { REFETCH_BAK } from './fsAtomic';
 import { logAudit } from './audit';
 import { visibleToAll } from './visibility';
+import { EXTERNAL_ORIGINS } from './externalReaderSchema';
 
 /** One live chapter row, as this module weighs it. `number` is the effective one (an admin's override first). */
 export interface Copy {
@@ -145,16 +146,21 @@ async function removeCopy(keep: Copy, drop: Copy, dropFile: FileState): Promise<
     // Explicit external sync uses this same account lock. Folding two already-counted physical copies must
     // not race a retry into a duplicate completion, and must leave ordinary web page-turn history intact.
     const readers=await qq<{user_id:string}>(`SELECT DISTINCT user_id FROM reading_events
-      WHERE book_id=ANY($1::text[]) AND origin IN ('komga','koreader') ORDER BY user_id`,[[drop.id,keep.id]]);
+      WHERE book_id=ANY($1::text[]) AND origin IN (${EXTERNAL_ORIGINS}) ORDER BY user_id`,[[drop.id,keep.id]]);
     for(const reader of readers)await qq('SELECT pg_advisory_xact_lock(hashtextextended($1,718))',[reader.user_id]);
+    // A completion guessed from OPDS page streaming (read_progress.inferred) stays a guess on the copy that stays, unless
+    // either copy was really read: folding the two must not turn a guess into a read the read-chapter cleanup acts on.
     await qq(
-      `INSERT INTO read_progress (user_id, book_id, series_id, page, completed, updated_at, is_private, incognito)
+      `INSERT INTO read_progress (user_id, book_id, series_id, page, completed, updated_at, is_private, incognito, inferred)
        SELECT user_id, $2, $3,
               CASE WHEN $4::int > 0 AND $5::int > 0 THEN LEAST($5::int - 1, (page * $5::int) / $4::int) ELSE page END,
-              completed, updated_at, is_private OR EXISTS(SELECT 1 FROM lib_series WHERE id=$3 AND is_private), incognito
+              completed, updated_at, is_private OR EXISTS(SELECT 1 FROM lib_series WHERE id=$3 AND is_private), incognito, inferred
          FROM read_progress WHERE book_id = $1
        ON CONFLICT (user_id, book_id) DO UPDATE SET
          completed = read_progress.completed OR EXCLUDED.completed,
+         inferred = (read_progress.inferred OR EXCLUDED.inferred)
+                    AND NOT (read_progress.completed AND NOT read_progress.inferred)
+                    AND NOT (EXCLUDED.completed AND NOT EXCLUDED.inferred),
          page = CASE WHEN EXCLUDED.updated_at > read_progress.updated_at THEN EXCLUDED.page ELSE read_progress.page END,
          updated_at = GREATEST(read_progress.updated_at, EXCLUDED.updated_at),
          is_private=read_progress.is_private OR EXCLUDED.is_private,
@@ -168,9 +174,9 @@ async function removeCopy(keep: Copy, drop: Copy, dropFile: FileState): Promise<
       device_id=CASE WHEN (d.created_at,d.id)<(k.created_at,k.id) THEN d.device_id ELSE k.device_id END,
       created_at=LEAST(k.created_at,d.created_at),is_private=k.is_private OR d.is_private
       FROM reading_events d WHERE d.book_id=$1 AND k.book_id=$2 AND d.user_id=k.user_id
-        AND d.origin IN ('komga','koreader') AND k.origin IN ('komga','koreader')`,[drop.id,keep.id]);
+        AND d.origin IN (${EXTERNAL_ORIGINS}) AND k.origin IN (${EXTERNAL_ORIGINS})`,[drop.id,keep.id]);
     await qq(`DELETE FROM reading_events d USING reading_events k WHERE d.book_id=$1 AND k.book_id=$2
-      AND d.user_id=k.user_id AND d.origin IN ('komga','koreader') AND k.origin IN ('komga','koreader')`,[drop.id,keep.id]);
+      AND d.user_id=k.user_id AND d.origin IN (${EXTERNAL_ORIGINS}) AND k.origin IN (${EXTERNAL_ORIGINS})`,[drop.id,keep.id]);
     await qq('UPDATE reading_events SET book_id = $2, series_id = $3 WHERE book_id = $1', [drop.id, keep.id, keep.seriesId]);
     await qq('UPDATE notes SET book_id = $2 WHERE book_id = $1', [drop.id, keep.id]);
     // v0.87.0: what the household said about the chapter goes with it to the copy that stays -- a comment's page scaled

@@ -137,9 +137,11 @@ test('Insights is its own page, from one request keyed on Show 18+, and the Stud
 });
 
 test('external sync totals are chapter counts with time unavailable, rendered without another query',()=>{
-  const html=renderToStaticMarkup(createElement(InsightCards,{data:payload({externalReads:[{origin:'koreader',chapters:2},{origin:'komga',chapters:1}]})}));
+  const html=renderToStaticMarkup(createElement(InsightCards,{data:payload({externalReads:[{origin:'koreader',chapters:2},{origin:'komga',chapters:1},{origin:'opds',chapters:3}]})}));
   assert.match(html,/data-insight="external-readers"/);
   assert.match(html,/KOReader/);assert.match(html,/Komga/);
-  assert.match(html,/2 chapters/);assert.match(html,/1 chapter/);
+  // #377: chapters read over OPDS page streaming, under the name of the protocol, not the raw origin.
+  assert.match(html,/>OPDS</);
+  assert.match(html,/2 chapters/);assert.match(html,/1 chapter/);assert.match(html,/3 chapters/);
   assert.match(html,/Reading time is unavailable/);
 });

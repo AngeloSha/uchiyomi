@@ -7,6 +7,9 @@
 //   * a search could not be narrowed or paged past sixty hits, because it was a separate code path;
 //   * 18+ libraries were always hidden, with no way for a reader to ask -- the web app's reveal button does
 //     not exist in an OPDS client, so the preference now rides on the credential.
+// And, since v0.108.0 (#377), what reading over the stream tells the server: with the account's switch on, the pages
+// fetched at reading size keep the reader's place, and a chapter paged through to the end in one sitting is read, here
+// and on the trackers -- timed by a clock of the test's own (setOpdsClock), so a sitting of minutes takes none.
 //
 // Everything here is driven over HTTP against the real routes, with a real archive on disk, because the
 // page route hands out bytes: a test that mocked the archive would pass while serving the wrong page.
@@ -33,13 +36,33 @@ if (DSN) {
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 const LIB = 'lib_pse_a', ADULT_LIB = 'lib_pse_x';
-const S_MAIN = 's_pse_main', S_HIDDEN = 's_pse_hidden', S_ADULT = 's_pse_adult';
+const S_MAIN = 's_pse_main', S_HIDDEN = 's_pse_hidden', S_ADULT = 's_pse_adult', S_READ = 's_pse_read';
+/** The chapters read over the stream (#377): number n of S_READ, six pages each, one per case so none shares a place. */
+const R = (n: number) => `b_pse_r${n}`;
 const B_TWO = 'b_pse_two', B_ZERO = 'b_pse_zero', B_HIDDEN = 'b_pse_hidden';
 const USER = 'pse-user', CAPPED = 'pse-capped';
 const FIXED_AT = '2026-01-02T03:04:05.000Z';
 const basic = (u: string, p: string) => 'Basic ' + Buffer.from(`${u}:${p}`).toString('base64');
 
+// MyAnimeList stands in for every tracker: its push is a PATCH the stub can see (as in incognito.int.test.ts).
+const pushes: string[] = [];
+const realFetch = globalThis.fetch;
+/** Waits for the push count to reach `n`, up to `ms`; answers the count it saw. A push is fire-and-forget. */
+const pushedBy = async (n: number, ms = 3000) => {
+  const end = Date.now() + ms;
+  while (pushes.length < n && Date.now() < end) await new Promise((r) => setTimeout(r, 50));
+  return pushes.length;
+};
+
 async function setup() {
+  globalThis.fetch = (async (u: any, init?: any) => {
+    if (!/api\.myanimelist\.net/.test(String(u))) return realFetch(u, init);
+    const answer = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: { 'content-type': 'application/json' } });
+    // A push reads the series first (v0.61.2): a GET, answered as a series still coming out. Only the write is a push.
+    if (String(init?.method ?? 'GET') === 'GET') return answer({ status: 'currently_publishing', num_chapters: 0 });
+    pushes.push(String(init?.body ?? ''));
+    return answer({ status: 'reading' });
+  }) as typeof fetch;
   const { migrate } = await import('../src/lib/migrate');
   const { q } = await import('../src/lib/db');
   const auth = await import('../src/lib/auth');
@@ -87,6 +110,20 @@ async function setup() {
   await book(B_HIDDEN, S_HIDDEN, cbz('hidden.cbz'), 2);
   await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed, updated_at) VALUES ($1,$2,$3,1,false,$4)`, [uid, B_TWO, S_MAIN, FIXED_AT]);
 
+  // #377: a series of six-page chapters to read over the stream, linked on the reader's MyAnimeList.
+  await series(S_READ, 'Pse Read Title', LIB, ['Drama'], 'ongoing', 0);
+  const six = new AdmZip();
+  const tiny = await page(40, 60);
+  for (let i = 1; i <= 6; i++) six.addFile(`00${i}.png`, tiny);
+  for (let n = 1; n <= 9; n++) {
+    writeFileSync(join(TMP, 'lib', `r${n}.cbz`), six.toBuffer());
+    await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages, root, updated_at)
+             VALUES ($1,$2,'T!pse',$3,$4,$5,6,$6,$7)`, [R(n), S_READ, `r${n}.cbz`, n, `Chapter ${n}`, join(TMP, 'lib'), FIXED_AT]);
+  }
+  const trackers = await import('../src/lib/trackers');
+  await trackers.saveConnection(uid, 'myanimelist', 'tok-mal', 'me-on-mal', new Date(Date.now() + 86_400_000));
+  await trackers.linkSeries(S_READ, '377', 'Pse Read Title', uid, 'myanimelist');
+
   const app = Fastify();
   await app.register(jwt, { secret: process.env.JWT_SECRET! });
   app.setErrorHandler((err: any, req: any, reply: any) => {
@@ -107,8 +144,11 @@ async function setup() {
 }
 
 async function teardown(app: any, q: any) {
+  (await import('../src/lib/externalReading')).setOpdsClock(null);
+  globalThis.fetch = realFetch;
   await app.close();
   await q(`DELETE FROM users WHERE username = ANY($1)`, [[USER, CAPPED]]).catch(() => {});
+  await q(`DELETE FROM series_trackers WHERE series_id LIKE 's_pse_%'`).catch(() => {});
   await q(`DELETE FROM lib_series WHERE id LIKE 's_pse_%'`).catch(() => {});
   await q(`DELETE FROM libraries WHERE id = ANY($1)`, [[LIB, ADULT_LIB]]).catch(() => {});
   rmSync(TMP, { recursive: true, force: true });
@@ -195,7 +235,7 @@ test('what an OPDS reader is told is true, and it can stream pages', { skip }, a
       assert.match(entryFor(series.body, S_MAIN), /<updated>2026-03-04T05:06:07\.000Z<\/updated>/, 'a series carries its newest chapter time (latest_mtime)');
     });
 
-    await t.test('prefetch estimates are opt-in and never completion, events or explicit places', async () => {
+    await t.test('estimates are opt-in, two pages fetched in a moment are no read, and an explicit place wins', async () => {
       const count=async(table:string)=>(await q<{n:number}>(`SELECT count(*)::int AS n FROM ${table} WHERE user_id=$1`,[uid]))[0].n;
       const beforeEvents=await count('reading_events');
       await app.inject({url:`/opds/book/${B_ZERO}/page/0`,headers:as(token)});
@@ -216,6 +256,174 @@ test('what an OPDS reader is told is true, and it can stream pages', { skip }, a
       assert.match(entryFor((await app.inject({url:`/opds/series/${S_MAIN}`,headers:as(token)})).body,B_ZERO),/pse:lastRead="1"/,'explicit position wins');
       await q('DELETE FROM read_progress WHERE user_id=$1 AND book_id=$2',[uid,B_ZERO]);
     });
+
+    // ---- Reading over the stream (#377). The switch is on from the test above. ----
+    const { setOpdsClock, writeExternalBook, externalReaderCounts } = await import('../src/lib/externalReading');
+    const { writeProgress } = await import('../src/lib/progress');
+    let now = Date.parse('2026-11-13T10:00:00.000Z');
+    setOpdsClock(() => now);
+    const HOUR = 3_600_000;
+    /** One page (zero-based, as the template is) after `gapMs` on the sitting's clock; `width` absent sends no maxWidth. */
+    const fetchPage = async (bookId: string, n: number, o: { gapMs?: number; width?: string } = {}) => {
+      now += o.gapMs ?? 0;
+      const r = await app.inject({ url: `/opds/book/${bookId}/page/${n}${o.width === undefined ? '' : `?maxWidth=${encodeURIComponent(o.width)}`}`, headers: as(token) });
+      assert.equal(r.statusCode, 200, `page ${n} of ${bookId} answered ${r.statusCode}`);
+    };
+    /** Pages `from` to `to` in order, each `gapMs` after the one before, at KOReader's width unless told otherwise. */
+    const run = async (bookId: string, from: number, to: number, gapMs: number, width = '1264') => {
+      for (let n = from; n <= to; n++) await fetchPage(bookId, n, { gapMs, width });
+    };
+    const place = async (bookId: string) =>
+      (await q<{ page: number }>('SELECT page FROM opds_estimated_bookmarks WHERE user_id=$1 AND book_id=$2', [uid, bookId]))[0]?.page ?? null;
+    const progressOf = async (bookId: string) =>
+      (await q('SELECT page, completed, inferred, incognito FROM read_progress WHERE user_id=$1 AND book_id=$2', [uid, bookId]))[0] ?? null;
+    const eventsOf = async (bookId: string) =>
+      q<{ origin: string }>('SELECT origin FROM reading_events WHERE user_id=$1 AND book_id=$2 AND completed', [uid, bookId]);
+
+    await t.test('a page at reading size is recorded: 1264, blank and an unfilled {maxWidth} are, a 300 px thumbnail is not', async () => {
+      // The page is recorded once served, whichever branch served it (routes/opds.ts readingSize). Reintroduce v0.107.0's
+      // rule -- only a fetch with no maxWidth at all, and only in the plain branch -- and 1264, blank and {maxWidth} record
+      // nothing, though our own template always sends the key. Drop the 600 px floor and 300 records.
+      await fetchPage(R(1), 0, { width: '300' });
+      assert.equal(await place(R(1)), null, 'a 300 px thumbnail is no page read');
+      await fetchPage(R(1), 0, { width: '1264' });
+      assert.equal(await place(R(1)), 1, "KOReader's screen width");
+      await fetchPage(R(1), 1, { width: '' });
+      assert.equal(await place(R(1)), 2, 'a blank maxWidth');
+      await fetchPage(R(1), 2, { width: '{maxWidth}' });
+      assert.equal(await place(R(1)), 3, 'the template sent back unfilled');
+      await fetchPage(R(1), 3, { width: '600' });
+      assert.equal(await place(R(1)), 4, 'the narrowest e-reader screen');
+      await fetchPage(R(1), 4, { width: '599' });
+      assert.equal(await place(R(1)), 4, 'and one pixel less is a thumbnail');
+    });
+
+    await t.test('a chapter paged through to the end in one sitting is read, here and on the trackers, once', async () => {
+      await q(`UPDATE app_settings SET data = data || '{"externalReadingStats":true}' WHERE user_id=$1`, [uid]);
+      const before = pushes.length;
+      await run(R(2), 0, 4, 12_000); // the median web-reader sitting: 12 s a page
+      // Reintroduce by completing without the last page (forward and age alone): page 3 of 6 counts as read here.
+      assert.equal(await progressOf(R(2)), null, 'the pages before the end stay an estimate');
+      assert.equal(await place(R(2)), 5);
+      await fetchPage(R(2), 5, { gapMs: 12_000, width: '1264' });
+      assert.deepEqual(await progressOf(R(2)), { page: 6, completed: true, inferred: true, incognito: false },
+        'read to the end, and marked as the guess it is');
+      assert.equal(await pushedBy(before + 1), before + 1, 'the tracker is told');
+      assert.match(pushes[before], /num_chapters_read=2/);
+      assert.deepEqual(await eventsOf(R(2)), [{ origin: 'opds' }], 'one completion in the counts, as from another app');
+      // Reintroduce by leaving 'opds' out of EXTERNAL_ORIGINS (lib/externalReaderSchema.ts): Insights counts no OPDS reader.
+      assert.deepEqual((await externalReaderCounts(uid)).filter((c) => c.origin === 'opds'), [{ origin: 'opds', chapters: 1 }]);
+      // Once: the last page again, and the whole chapter again after a night away, tell nobody anything new.
+      await fetchPage(R(2), 5, { gapMs: 5_000, width: '1264' });
+      await run(R(2), 0, 5, 12_000);
+      now += 9 * HOUR;
+      await run(R(2), 0, 5, 12_000);
+      // Nor does a second completion, as two fetches of the last page in flight together can both make. Reintroduce by
+      // pushing on every completion in writeExternalBook (`if (!incognito)`): the tracker hears of it twice.
+      await writeExternalBook(uid, { id: R(2), seriesId: S_READ, pages: 6 }, 6, R(2), false, 'opds');
+      assert.equal(await pushedBy(before + 2, 1500), before + 1, 'no second push');
+      assert.deepEqual(await eventsOf(R(2)), [{ origin: 'opds' }], 'no second completion');
+    });
+
+    await t.test('under Incognito a chapter read over the stream keeps its place and nothing else', async () => {
+      await q(`UPDATE app_settings SET data = data || '{"incognito":true}' WHERE user_id=$1`, [uid]);
+      try {
+        const before = pushes.length;
+        await run(R(3), 0, 5, 12_000);
+        // As kosync keeps it: the place, marked private (read_progress.incognito, so other members' rails skip it), and
+        // no reading event or tracker push. Reintroduce by not asking incognitoOn for an OPDS completion in
+        // writeExternalBook: the place is kept as an open one.
+        assert.deepEqual(await progressOf(R(3)), { page: 6, completed: true, inferred: true, incognito: true });
+        assert.deepEqual(await eventsOf(R(3)), [], 'no reading event');
+        assert.equal(await pushedBy(before + 1, 1500), before, 'no tracker push');
+      } finally {
+        await q(`UPDATE app_settings SET data = data - 'incognito' WHERE user_id=$1`, [uid]);
+      }
+      // Nothing below is about the trackers, and their pushes wait their turn (2.4 s apart): unlinked so none is pending.
+      await q('DELETE FROM series_trackers WHERE series_id = $1', [S_READ]);
+    });
+
+    await t.test('a preload is not a read: every page within 2 s, the same again later, or after a chapter opened yesterday', async () => {
+      // Reintroduce by dropping the sitting's age (opdsSittingFloorMs) from rememberOpdsEstimate: six pages in 1.5 s are read.
+      await run(R(4), 0, 5, 300);
+      assert.equal(await progressOf(R(4)), null, 'a reader loading every page at once is not a person reading them');
+      // Reintroduce by dropping the `was` test: the second preload half a minute on reaches the last page in a sitting
+      // that is old enough, and counts.
+      await fetchPage(R(4), 0, { gapMs: 30_000, width: '1264' });
+      await run(R(4), 1, 5, 300);
+      assert.equal(await progressOf(R(4)), null, 'a last page reached already is not reached again');
+      // Reintroduce by dropping the six-hour gap (one sitting for ever): yesterday's first page makes today's preload a
+      // sitting a day old.
+      await fetchPage(R(5), 0, { width: '1264' });
+      now += 20 * HOUR;
+      await run(R(5), 0, 5, 300);
+      assert.equal(await progressOf(R(5)), null, "yesterday's page is another sitting");
+    });
+
+    await t.test('a jump straight to the last page is not a read', async () => {
+      // Reintroduce by dropping the forward count from rememberOpdsEstimate: the first page, then the last half a minute
+      // on, is a chapter read.
+      await fetchPage(R(6), 0, { width: '1264' });
+      await fetchPage(R(6), 5, { gapMs: 30_000, width: '1264' });
+      assert.equal(await place(R(6)), 6);
+      assert.equal(await progressOf(R(6)), null, 'two pages of six reached going forward');
+    });
+
+    await t.test('a run of thumbnail-size fetches is not a read', async () => {
+      // A strip of thumbnails or a scrubber fetches every page small, in order, as a person paging through would.
+      // Reintroduce by dropping the 600 px floor from readingSize (routes/opds.ts): the run is a chapter read.
+      await run(R(7), 0, 5, 12_000, '300');
+      assert.equal(await place(R(7)), null, 'no place');
+      assert.equal(await progressOf(R(7)), null, 'no completion');
+    });
+
+    await t.test('re-streaming a finished chapter never downgrades it', async () => {
+      // Finished in the web reader on the page before the last, which is the end there (progressRules.ts reachedEnd), then
+      // paged through over the stream, the whole way -- so its last page moves the place on -- and part of it.
+      await writeProgress({ userId: uid, bookId: R(9), seriesId: S_READ, page: 5, completed: true });
+      await run(R(9), 0, 5, 12_000);
+      // Reintroduce `inferred = EXCLUDED.inferred` in writeExternalBook: the chapter read in the app becomes a guess.
+      assert.deepEqual(await progressOf(R(9)), { page: 6, completed: true, inferred: false, incognito: false }, 'still a real read');
+      now += 9 * HOUR;
+      await run(R(9), 0, 2, 12_000);
+      assert.deepEqual(await progressOf(R(9)), { page: 6, completed: true, inferred: false, incognito: false });
+      // And the chapter read over the stream above, started again after a night: still read, still at its end.
+      now += 9 * HOUR;
+      await run(R(2), 0, 2, 12_000);
+      assert.deepEqual(await progressOf(R(2)), { page: 6, completed: true, inferred: true, incognito: false });
+      assert.match(entryFor((await app.inject({ url: `/opds/series/${S_READ}`, headers: as(token) })).body, R(2)), /pse:lastRead="6"/,
+        'the place the feed gives is the end, not the estimate');
+    });
+
+    await t.test('an OPDS completion leaves nothing due for a 0-day read-chapter cleanup; a later real read makes it due', async () => {
+      const { dueSql } = await import('../src/lib/chapterCleanup');
+      const { markReadUpTo } = await import('../src/lib/komgaProgress');
+      const due = async () => (await q<{ id: string }>(`SELECT id FROM (${dueSql(null)}) d WHERE id = ANY($3)`,
+        [join(TMP, 'lib'), 0, [R(2), R(8)]])).map((r) => r.id).sort();
+      // R(2) was read to the end over the stream. Reintroduce by dropping `NOT bool_or(rp.inferred)` from dueSql: it is due,
+      // and the cleanup would delete its file on a guess.
+      assert.deepEqual(await due(), [], 'a guess deletes no file');
+      // Mihon puts back the run it was given, and the Komga API gave it this guess as read: an echo, not a read. Reintroduce
+      // by letting markReadUpTo's update reach a guessed row (`WHERE NOT completed OR inferred`): R(2) is due.
+      await markReadUpTo(uid, S_READ, 2);
+      assert.deepEqual(await due(), [], 'the guess echoed back is still a guess');
+      // The web reader's read to the end is a read. Reintroduce by leaving `inferred` alone in writeProgress: nothing due.
+      await writeProgress({ userId: uid, bookId: R(2), seriesId: S_READ, page: 6, completed: true });
+      assert.deepEqual(await due(), [R(2)]);
+      // So is KOReader's last page. Reintroduce by dropping writeExternalBook's `read_progress.inferred AND ...` clause: R(8)
+      // is not due.
+      await run(R(8), 0, 5, 12_000);
+      assert.equal((await progressOf(R(8)))?.inferred, true);
+      await writeExternalBook(uid, { id: R(8), seriesId: S_READ, pages: 6 }, 6, 'f'.repeat(32));
+      assert.deepEqual(await progressOf(R(8)), { page: 6, completed: true, inferred: false, incognito: false });
+      assert.deepEqual(await due(), [R(2), R(8)]);
+      // And Mark read on the whole series is their word as well. Reintroduce by leaving `inferred` alone in the bulk read
+      // (routes/personal.ts): R(3), read over the stream under Incognito, stays a guess.
+      const bulk = await app.inject({ method: 'POST', url: '/api/library/bulk/read', headers: jwtFor(uid), payload: { seriesIds: [S_READ], completed: true } });
+      assert.equal(bulk.statusCode, 200, bulk.body);
+      assert.equal((await progressOf(R(3)))?.inferred, false);
+    });
+    setOpdsClock(null);
     await t.test('loose-image exports have deterministic bytes and the exact KOReader binary hash',async()=>{
       const {partialBufferMd5,bookFileSignature}=await import('../src/lib/koreaderHash');
       const folder=join(TMP,'lib','loose');mkdirSync(folder);

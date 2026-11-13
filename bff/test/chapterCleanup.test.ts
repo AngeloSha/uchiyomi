@@ -55,6 +55,13 @@ test('a completed reader who is not at the end is re-reading, and vetoes the cha
   assert.match(dueSql(null), /JOIN lib_books lb ON lb\.id = rp\.book_id/, 'the page count comes from the book row inside the aggregate');
 });
 
+test('a completion guessed from OPDS page streaming vetoes the chapter (#377)', () => {
+  // A reader loading pages ahead fetches the last page just as a person reading to it does, so a chapter read over the
+  // stream is `inferred`, and no file goes on a guess until a real read clears it. Reintroduce by dropping
+  // `NOT bool_or(rp.inferred)` from dueSql.
+  assert.match(dueSql(null), /AND NOT bool_or\(rp\.inferred\)/);
+});
+
 test('the clock is the LAST reader to finish, not the first', () => {
   assert.match(dueSql(null), /max\(rp\.updated_at\) <= now\(\) - make_interval\(days => \$2\)/);
 });
