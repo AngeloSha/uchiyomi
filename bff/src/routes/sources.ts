@@ -82,7 +82,7 @@ function fillScanView(st: FillScan) {
 export function _clearFillScans(): void { fillScans.clear(); }
 import { persistScan, setBookDates, setBookMeta, libraryIdFor, libraryRows, LIBRARY_ROOT, DL_ROOT } from '../lib/library';
 import { notInLibrary, notInLibraryParts } from '../lib/downloadCensus';
-import { english, joined, say, saids, type Part, type Said } from '../lib/said';
+import { english, joined, say, saidOf, saids, type Part, type Said } from '../lib/said';
 import { diskSpelling } from '../lib/libraryAdmin';
 import { isDesktop } from '../lib/desktop';
 import { newSeriesId } from '../lib/ids';
@@ -3125,15 +3125,132 @@ export default async function sourceRoutes(app: FastifyInstance) {
     }
   });
 
+  /** Why a Fetch leaves out a number it was asked for (`skipped[].reason`), short of the body's own reasons. */
+  type FetchSkip = 'not_listed' | 'blocked_group' | 'other_language' | 'already_here' | 'source_unavailable' | 'cooldown';
+
+  /**
+   * POST /api/sources/fetch's rules, read once for one series and the numbers one request names: their listing rows,
+   * the sources the series follows, which of the numbers a live chapter holds, and each source's state, asked once per
+   * source -- and `plain`, the copy a Fetch of a number takes when no copy is picked, or why there is none ('denied':
+   * the copy's source is outside the viewer's age cap, which refuses the whole request). The restore of a deleted
+   * chapter (POST /api/books/:id/refetch, #437) asks `plain` of its one number, so it takes what a Fetch takes.
+   */
+  const fetchRules = async (seriesId: string, s: { source_id?: string | null; numbering?: string | null }, numbers: number[], maxAgeRating: ViewCtx['maxAgeRating']) => {
+    const listed = new Map((await q<{ number: number; title: string | null; source_id: string; status: string; chosen: SourceChapter; copies: ListingCopy[] }>(
+      'SELECT number, title, source_id, status, chosen, copies FROM series_listing WHERE series_id = $1 AND number = ANY($2::real[])',
+      [seriesId, numbers],
+    )).map((r) => [Number(r.number), r]));
+    // A listing row's source_id is trusted only while the series still follows that source (the primary,
+    // or a series_sources row): an unfollow drops the rows it carried, but a stale row must never authorise
+    // a download from a source the admin removed. Same check as the admin's refetch.
+    // Reintroduce by dropping the `followed` check in stateOf: "a stale listing row never authorises a
+    // source the series does not follow" in chapterActions.int.test.ts starts a download from it.
+    const followed = new Set([
+      ...(s.source_id ? [s.source_id as string] : []),
+      ...(await q<{ source_id: string }>('SELECT source_id FROM series_sources WHERE series_id = $1', [seriesId]).catch(() => [])).map((r) => r.source_id),
+    ]);
+    // A live row, not a tombstone: a chapter the cleanup let go is fetchable again, and "already here"
+    // would send the person to a row with no pages behind it. Since #437 the series page sends a deleted chapter's
+    // number and picks this way, and the copy lands on the tombstone's own row. Reintroduce by dropping
+    // `b.pruned_at IS NULL`: "a deleted chapter comes back from the source the series follows now" in
+    // chapterActions.int.test.ts reads 409 `already_here` for the Fetch and the pick.
+    // Override-aware under posting order, as the sweep's have-set is (lib/updater.ts): a book the renumber could
+    // not rename holds its posting number in book_overrides, and its raw number is some other post's now.
+    // A number inside a live range file is here too (lib/chapterRanges.ts): the range rows come along whatever they
+    // start at, and heldBy asks each of them. Reintroduce the exact number: "a fetch of a number a range file holds is
+    // already here" in chapterRanges.int.test.ts starts a download of 3.
+    const here = heldBy(await q<{ number: number; end: number | null }>(
+      s.numbering === 'posting_order'
+        ? `SELECT COALESCE(ov.number, b.number) AS number, ${rangeEnd('b', 'ov')} AS end
+             FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
+            WHERE b.series_id = $1 AND (COALESCE(ov.number, b.number) = ANY($2::real[]) OR ${rangeEnd('b', 'ov')} IS NOT NULL)
+              AND b.pruned_at IS NULL`
+        : `SELECT b.number, ${rawRangeEnd('b')} AS end FROM lib_books b
+            WHERE b.series_id = $1 AND (b.number = ANY($2::real[]) OR ${isRange('b')}) AND b.pruned_at IS NULL`,
+      [seriesId, numbers],
+    ));
+    // Health is per source, asked once per source rather than once per number.
+    const sourceState = new Map<string, 'ok' | 'source_unavailable' | 'cooldown' | 'denied'>();
+    // The series' language rules (v0.62.0), read once and only when a blocked number needs explaining.
+    let languageRules: Promise<LanguageRules> | null = null;
+    const languageOf = () => (languageRules ??= languageRulesFor(seriesId, [...followed]).catch((): LanguageRules => ({})));
+    const stateOf = async (sid: string) => {
+      let st = sourceState.get(sid);
+      if (st) return st;
+      const src = getSource(sid);
+      if (!followed.has(sid) || !src || await isDisabled(sid).catch(() => false)) st = 'source_unavailable';
+      else if (!sourceAllowedFor(src, maxAgeRating)) st = 'denied';
+      else if (await blockedNow(sid).catch(() => null)) st = 'cooldown';
+      else st = 'ok';
+      sourceState.set(sid, st);
+      return st;
+    };
+    const plain = async (n: number): Promise<SourceChapter | FetchSkip | 'denied'> => {
+      const row = listed.get(n);
+      if (!row) return 'not_listed';
+      if (row.status === 'blocked') {
+        // v0.62.0: a number whose every copy is in another language than the series' is left out by the language
+        // rule (lib/copyLanguage.ts), and unblocking a group would not bring it back: say which it is.
+        const language = (await languageOf()).inLanguage;
+        return language && row.copies.length > 0 && row.copies.every((c) => !language(c)) ? 'other_language' : 'blocked_group';
+      }
+      if (here.has(n)) return 'already_here';
+      const st = await stateOf(row.source_id);
+      if (st === 'cooldown') {
+        // v0.79.0: the copy the rules chose is on a source in a cooldown. Another followed source's copy of the same
+        // number, as the sweep's fallback would take it (the blocklist and the series' language as they stand), is
+        // fetched instead. It worked only by accident before -- the route's listing refresh rewrote the listing from the
+        // source that answered -- and stopped working once a cooling source's rows are kept (lib/updater.ts). With none, a
+        // Fetch leaves the number to the finishing sweep (`later`, lib/finishDownloads.ts), which comes back when the
+        // source can answer. Reintroduce by skipping it as `cooldown`: "a Fetch while the main cools takes the
+        // follower's copy" in fetchRotation.int.test.ts reads 409.
+        for (const c of await automaticCopiesFor(seriesId, row.copies ?? [])) {
+          if (c.source !== row.source_id && (await stateOf(c.source)) === 'ok') return copyToChapter(c, { number: n, title: row.title });
+        }
+      }
+      if (st !== 'ok') return st;
+      return { ...row.chosen, source: row.source_id };
+    };
+    return { listed, followed, here, stateOf, plain };
+  };
+
+  /** What a Fetch that took nothing says, by the first reason a number was left out. */
+  const fetchSkipMessage = (reason: string | undefined): string => (
+    reason === 'not_listed' ? 'Not in the last listing -- run Check for new chapters first.'
+    : reason === 'blocked_group' ? 'Only blocked groups released that chapter. Unblock the group and check again.'
+    : reason === 'other_language' ? 'That chapter is only in another language than the series. Pick a copy under Versions to fetch it anyway.'
+    : reason === 'already_here' ? 'That chapter is already here.'
+    : reason === 'cooldown' ? 'That source is in a cooldown. Try again later.'
+    : reason === 'later' ? 'That source is in a cooldown. These chapters will download on their own when it is ready.'
+    : reason === 'hidden' ? 'That chapter is hidden from this series. Restore it under More to fetch it.'
+    : 'That source is not available right now.');
+
+  /** A Fetch refused because something is writing into the series' folder: which, as far as the person can act on it. */
+  const busyMessage = (folder: string): string => (archiveBusy(folder)
+    ? 'The slow archive is fetching a chapter of this series right now. Try again in a minute.'
+    : 'A download for that series is already running.');
+
   /**
    * Put back one chapter that Uchiyomi deliberately deleted.
    *
-   * The book id is the capability boundary: it resolves through this viewer's normal series visibility,
-   * and the server derives the only permitted source chapter from the tombstone itself. No source id,
-   * chapter id, number or path supplied by a client is ever accepted. Only a canonical file previously
-   * written under DL_ROOT can land on the same row and retain everybody's reading progress. The stamped
-   * source copy is pinned so a blocklist may be overridden by this explicit act but fallback can never
-   * replace it with an arbitrary copy.
+   * The book id is the capability boundary: it resolves through this viewer's normal series visibility, and the
+   * server derives everything else -- the number, the copy, the target -- from the tombstone and the listing. No
+   * source id, chapter id, number or path supplied by a client is ever accepted. Only a canonical file previously
+   * written under DL_ROOT can land on the same row and retain everybody's reading progress.
+   *
+   * The copy is the one a Fetch of the number takes (#437): POST /api/sources/fetch's rules (fetchRules), after the
+   * same listing refresh, from a source the series follows NOW, and not pinned, so a copy that fails is taken from
+   * another followed source as any Fetch's is. The copy stamped on the tombstone is asked only when no followed source
+   * lists the number. Then it is its own capability even when its source is no longer followed, pinned so a blocklist
+   * may be overridden by this explicit act but fallback can never replace it with an arbitrary copy. It used to be
+   * the only copy ever asked, so a chapter deleted after its series moved to another source could not come back from
+   * that one: while the old source was unloaded, switched off or cooling, the answer was a bare 409, which the series
+   * page read as "Could not start." Reintroduce by going straight to the stamp: "a deleted chapter comes back from the
+   * source the series follows now" in chapterActions.int.test.ts asks the old source for its copy.
+   *
+   * Every refusal says why and what to do in words (`message`; `messageSaid` too where the sentence is this route's
+   * own), and a `not_refetchable` one which rule refused (`reason`). Reintroduce a bare one: "a deleted chapter nothing
+   * can serve says so" in chapterActions.int.test.ts finds no message.
    */
   app.post('/api/books/:id/refetch', async (req, reply) => {
     const parsed = z.object({ id: z.string().min(1).max(64) }).safeParse(req.params);
@@ -3162,55 +3279,83 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // boundary. The query also hides removed/merged series through visible().
     if (!row) return reply.code(404).send({ error: 'not_found' });
 
+    /** Refused by a rule: which one, and why in words -- this route's own sentence with its code, or a Fetch's. */
+    const refuse = (reason: string, why: Part | string, more: Record<string, unknown> = {}) => reply.code(409).send({
+      error: 'not_refetchable', reason,
+      ...(typeof why === 'string' ? { message: why } : { message: why.text, messageSaid: saidOf(why) }),
+      ...more,
+    });
+
     const n = Number(row.number);
+    // A chapter that has its file, or one whose file went missing rather than being deleted on purpose (Verify, Rescan):
+    // the sweep fetches the second back by itself, and neither is this route's to put back.
+    if (!deliberatelyDeleted({ pruned: row.pruned_at != null, prunedReason: row.pruned_reason })) {
+      return row.pruned_at == null ? refuse('already_here', fetchSkipMessage('already_here')) : refuse('not_deleted', say('restore.notDeleted'));
+    }
     const safePath = row.root === DL_ROOT ? await realContainedPath(DL_ROOT, row.file) : null;
     const canonical = !!safePath
       && row.root === DL_ROOT
       && Number.isFinite(n)
       && row.number_end == null
-      && row.file === chapterFileRel(row.folder, n)
-      && deliberatelyDeleted({ pruned: row.pruned_at != null, prunedReason: row.pruned_reason })
-      && !!row.source_id
-      && !!row.source_chapter_id;
-    if (!canonical) return reply.code(409).send({ error: 'not_refetchable' });
+      && row.file === chapterFileRel(row.folder, n);
+    if (!canonical) return refuse('not_in_place', say('restore.notInPlace'));
+    if (jobBusy(row.folder)) return reply.code(409).send({ error: 'busy', message: busyMessage(row.folder) });
+    // The series' own numbering and main source. ⚠️ Never `row` itself: its source_id is the tombstone's stamp, which
+    // read as the series' main would count the stamp's source as followed.
+    const seriesRow = { numbering: row.numbering, numbering_pending: row.numbering_pending, renumber_plan: row.renumber_plan, source_id: row.series_source_id };
+    const renumbering = renumberRefusal(seriesRow);
+    if (renumbering) return refuse(renumbering.error, renumbering.message);
+    // The listing is refreshed first and the renumber asked again after it, exactly as POST /api/sources/fetch does
+    // (its comments say why): what comes back is the copy the release rules choose now.
+    await withTimeout(updateSeries(row.series_id, 0), REFRESH_BUDGET_MS).catch(() => {});
+    const series = await one<{ numbering: string | null; numbering_pending: string | null; renumber_plan: unknown; source_id: string | null }>(
+      'SELECT numbering, numbering_pending, renumber_plan, source_id FROM lib_series WHERE id = $1', [row.series_id]).catch(() => null) ?? seriesRow;
+    const heldNow = renumberRefusal(series);
+    if (heldNow) return refuse(heldNow.error, heldNow.message);
+    if ((await hiddenNumbersOf(row.series_id)).has(numKey(n))) return refuse('hidden', fetchSkipMessage('hidden'));
 
-    const src = getSource(row.source_id!);
-    // An age-capped account gets the same non-disclosing answer as for any other inaccessible row.
-    if (src && !sourceAllowedFor(src, vc(req).maxAgeRating)) {
-      return reply.code(404).send({ error: 'not_found' });
+    const maxAgeRating = vc(req).maxAgeRating;
+    const rules = await fetchRules(row.series_id, series, [n], maxAgeRating);
+    const listedRow = rules.listed.get(n);
+    let chapter: SourceChapter & { pinned?: boolean };
+    if (listedRow && rules.followed.has(listedRow.source_id)) {
+      const got = await rules.plain(n);
+      if (got === 'denied') return denySource(reply);
+      if (typeof got === 'string') return refuse(got, fetchSkipMessage(got));
+      // Under the tombstone's own spelling of its number, so the file lands at its canonical path and on its row:
+      // a source may spell 84.3 as 84.29999999999998 (lib/chapterRanges.ts heldBy), and the downloader names the file
+      // after the number it is given.
+      chapter = { ...got, number: n };
+    } else {
+      // No source the series follows lists the number: the copy stamped on the tombstone, while it can still be asked.
+      const nothing = () => refuse('not_listed', say('restore.notListed', { number: n }));
+      if (!row.source_id || !row.source_chapter_id) return nothing();
+      const src = getSource(row.source_id);
+      // An age-capped account gets the same non-disclosing answer as for any other inaccessible row.
+      if (src && !sourceAllowedFor(src, maxAgeRating)) return reply.code(404).send({ error: 'not_found' });
+      if (!src || await isDisabled(row.source_id).catch(() => true)) return nothing();
+      if (await blockedNow(row.source_id).catch(() => true)) return refuse('cooldown', fetchSkipMessage('cooldown'));
+      // A series numbered by posting order takes no other source's numbers (renumberRefusal).
+      const posting = renumberRefusal(series, row.source_id);
+      if (posting) return refuse(posting.error, posting.message);
+      chapter = { source: row.source_id, sourceId: row.source_chapter_id, number: n, title: row.chapter_name ?? row.title ?? undefined, pinned: true };
     }
-    const unavailable = !src
-      || await isDisabled(row.source_id!).catch(() => true)
-      || !!(await blockedNow(row.source_id!).catch(() => true));
-    if (unavailable) return reply.code(409).send({ error: 'not_refetchable' });
-
-    if (jobBusy(row.folder)) return reply.code(409).send({ error: 'busy' });
-    if (renumberRefusal(row, row.source_id!)) return reply.code(409).send({ error: 'not_refetchable' });
     const writable = await allWritable([DL_ROOT]);
-    if (!writable.ok) return reply.code(409).send({ error: 'not_refetchable', message: writable.reason, fix: writable.fix });
+    if (!writable.ok) return refuse('not_writable', writable.reason, { fix: writable.fix });
 
     const claim = claimDownloadJob(row.folder, row.series_id);
-    if (!claim) return reply.code(409).send({ error: 'busy' });
+    if (!claim) return reply.code(409).send({ error: 'busy', message: busyMessage(row.folder) });
     const restoreUserId = userIdOf(req);
     const restoreRole = roleOf(req);
-    const chapter: SourceChapter & { pinned: true } = {
-      source: row.source_id!,
-      sourceId: row.source_chapter_id!,
-      number: n,
-      title: row.chapter_name ?? row.title ?? undefined,
-      pinned: true,
-    };
     try {
       // Several source/policy and writability reads happened after the first realpath check. Revalidate after owning
       // the folder and immediately before publishing the writer, so a symlink swap is a synchronous contract refusal
       // instead of an asynchronous failed download card.
-      if (!safePath || await realContainedPath(DL_ROOT, row.file) !== safePath) {
-        return reply.code(409).send({ error: 'not_refetchable' });
-      }
+      if (await realContainedPath(DL_ROOT, row.file) !== safePath) return refuse('not_in_place', say('restore.notInPlace'));
       await q('DELETE FROM chapter_failures WHERE series_id = $1 AND number = $2::real', [row.series_id, n]).catch(() => {});
       await logAudit('book.refetch', {
         userId: userIdOf(req),
-        detail: { bookId: row.id, seriesId: row.series_id, source: row.source_id, sourceId: row.source_chapter_id, number: n },
+        detail: { bookId: row.id, seriesId: row.series_id, source: chapter.source, sourceId: chapter.sourceId, number: n, ...(chapter.pinned ? { stamped: true } : {}) },
         req,
       });
       const { total } = startDownloadJob({
@@ -3221,16 +3366,18 @@ export default async function sourceRoutes(app: FastifyInstance) {
         chapters: [chapter],
         meta: { series: row.series_title, summary: row.summary ?? undefined, author: row.author ?? undefined,
           genres: row.genres, url: row.web ?? undefined, status: row.status ?? undefined },
-        // Redundant for a pinned job today, and intentional: if the downloader ever grows another recovery
-        // path it still cannot cross this member's age boundary.
+        // The copies a listed chapter may fall back to stay inside this member's age boundary, as a Fetch's do. Redundant
+        // for the stamped copy, which is pinned, and intentional: if the downloader ever grows another recovery path it
+        // still cannot cross that boundary.
         allowed: (id) => {
           const candidate = getSource(id);
-          return !!candidate && sourceAllowedFor(candidate, vc(req).maxAgeRating);
+          return !!candidate && sourceAllowedFor(candidate, maxAgeRating);
         },
-        // A deliberate tombstone is its own source capability even when that old source is no longer
-        // followed. Re-read the exact book identity, visibility and canonical target inside the source gate;
-        // changing any of them while the detached job waits refuses the request without fallback.
-        sourceAllowedNow: async (candidate) => {
+        // A copy from the listing is any Fetch's: its source must still be followed when the job reaches it, which is
+        // the job's own check when this one is absent. The stamped copy is its own source capability even when that
+        // old source is no longer followed. Re-read the exact book identity, visibility and canonical target inside
+        // the source gate; changing any of them while the detached job waits refuses the request without fallback.
+        ...(chapter.pinned ? { sourceAllowedNow: async (candidate: SourceChapter) => {
           if (candidate.source !== row.source_id || candidate.sourceId !== row.source_chapter_id || candidate.number !== n) return false;
           const currentCtx = await viewCtxFor(restoreUserId, restoreRole).catch(() => null);
           if (!currentCtx) return false;
@@ -3255,7 +3402,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
           const currentSource = getSource(current.source_id!);
           return !!currentPath && currentPath === safePath && !!currentSource
             && sourceAllowedFor(currentSource, currentCtx.maxAgeRating);
-        },
+        } } : {}),
         by: restoreUserId,
       }, claim);
       return { ok: true, started: true, folder: row.folder, total };
@@ -3348,11 +3495,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (rows === null) return reply.code(503).send({ error: 'unavailable' });
     const s = rows[0];
     if (!s) return reply.code(404).send({ error: 'not_found' });
-    if (jobBusy(s.folder)) {
-      return reply.code(409).send({ error: 'busy', message: archiveBusy(s.folder)
-        ? 'The slow archive is fetching a chapter of this series right now. Try again in a minute.'
-        : 'A download for that series is already running.' });
-    }
+    if (jobBusy(s.folder)) return reply.code(409).send({ error: 'busy', message: busyMessage(s.folder) });
     const renumbering = renumberRefusal(s);
     if (renumbering) return reply.code(409).send(renumbering);
 
@@ -3402,64 +3545,20 @@ export default async function sourceRoutes(app: FastifyInstance) {
       }
       numbers = [...new Set([...plain, ...pickOf.keys()])].sort((x, y) => x - y);
     }
-    const listed = new Map((await q<{ number: number; title: string | null; source_id: string; status: string; chosen: SourceChapter; copies: ListingCopy[] }>(
-      'SELECT number, title, source_id, status, chosen, copies FROM series_listing WHERE series_id = $1 AND number = ANY($2::real[])',
-      [seriesId, numbers],
-    )).map((r) => [Number(r.number), r]));
-    // A listing row's source_id is trusted only while the series still follows that source (the primary,
-    // or a series_sources row): an unfollow drops the rows it carried, but a stale row must never authorise
-    // a download from a source the admin removed. Same check as the admin's refetch.
-    // Reintroduce by dropping the `followed` check in stateOf: "a stale listing row never authorises a
-    // source the series does not follow" in chapterActions.int.test.ts starts a download from it.
-    const followed = new Set([
-      ...(s.source_id ? [s.source_id as string] : []),
-      ...(await q<{ source_id: string }>('SELECT source_id FROM series_sources WHERE series_id = $1', [seriesId]).catch(() => [])).map((r) => r.source_id),
-    ]);
-    // A live row, not a tombstone: a chapter the cleanup let go is fetchable again, and "already here"
-    // would send the person to a row with no pages behind it.
-    // Override-aware under posting order, as the sweep's have-set is (lib/updater.ts): a book the renumber could
-    // not rename holds its posting number in book_overrides, and its raw number is some other post's now.
-    // A number inside a live range file is here too (lib/chapterRanges.ts): the range rows come along whatever they
-    // start at, and heldBy asks each of them. Reintroduce the exact number: "a fetch of a number a range file holds is
-    // already here" in chapterRanges.int.test.ts starts a download of 3.
-    const here = heldBy(await q<{ number: number; end: number | null }>(
-      s.numbering === 'posting_order'
-        ? `SELECT COALESCE(ov.number, b.number) AS number, ${rangeEnd('b', 'ov')} AS end
-             FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
-            WHERE b.series_id = $1 AND (COALESCE(ov.number, b.number) = ANY($2::real[]) OR ${rangeEnd('b', 'ov')} IS NOT NULL)
-              AND b.pruned_at IS NULL`
-        : `SELECT b.number, ${rawRangeEnd('b')} AS end FROM lib_books b
-            WHERE b.series_id = $1 AND (b.number = ANY($2::real[]) OR ${isRange('b')}) AND b.pruned_at IS NULL`,
-      [seriesId, numbers],
-    ));
-
+    // The listing rows, the followed sources, what is here and each source's state: fetchRules, which the restore of a
+    // deleted chapter asks too.
+    const rules = await fetchRules(seriesId, s, numbers, maxAgeRating);
     const chapters: Array<SourceChapter & { pinned?: boolean }> = [];
     // "Finish downloads on their own" (lib/finishDownloads.ts): a number no source can serve now is handed to it.
     const finishOn = await finishDownloadsOn().catch(() => false);
     let handOff = false;
-    // Health is per source, asked once per source rather than once per number.
-    const sourceState = new Map<string, 'ok' | 'source_unavailable' | 'cooldown' | 'denied'>();
-    // The series' language rules (v0.62.0), read once and only when a blocked number needs explaining.
-    let languageRules: Promise<LanguageRules> | null = null;
-    const languageOf = () => (languageRules ??= languageRulesFor(seriesId, [...followed]).catch((): LanguageRules => ({})));
-    const stateOf = async (sid: string) => {
-      let st = sourceState.get(sid);
-      if (st) return st;
-      const src = getSource(sid);
-      if (!followed.has(sid) || !src || await isDisabled(sid).catch(() => false)) st = 'source_unavailable';
-      else if (!sourceAllowedFor(src, vc(req).maxAgeRating)) st = 'denied';
-      else if (await blockedNow(sid).catch(() => null)) st = 'cooldown';
-      else st = 'ok';
-      sourceState.set(sid, st);
-      return st;
-    };
     // A number an admin hid from the series (#240, lib/hiddenChapters.ts) is fetched by nobody, a pick included: said so
     // rather than started and skipped by the download (lib/chapterFallback.ts), which is what a page from before the
     // hide would otherwise get. Reintroduce by dropping it: "a fetch of a hidden number is skipped as hidden" in
     // hiddenChapters.int.test.ts starts a job.
     const hiddenNums = await hiddenNumbersOf(seriesId);
     for (const n of numbers) {
-      const row = listed.get(n);
+      const row = rules.listed.get(n);
       const pick = pickOf.get(n);
       if (hiddenNums.has(numKey(n))) {
         skipped.push({ number: n, reason: 'hidden', ...(pick ? { source: pick.source, sourceId: pick.sourceId } : {}) });
@@ -3475,43 +3574,21 @@ export default async function sourceRoutes(app: FastifyInstance) {
         // chapterActions.int.test.ts reads 409.
         const copy = row?.copies?.find((c) => c.source === pick.source && c.sourceId === pick.sourceId);
         if (!row || !copy) { skipped.push({ number: n, reason: 'not_listed', source: pick.source, sourceId: pick.sourceId }); continue; }
-        if (here.has(n)) { skipped.push({ number: n, reason: 'already_here', source: pick.source, sourceId: pick.sourceId }); continue; }
-        const st = await stateOf(copy.source);
+        if (rules.here.has(n)) { skipped.push({ number: n, reason: 'already_here', source: pick.source, sourceId: pick.sourceId }); continue; }
+        const st = await rules.stateOf(copy.source);
         if (st === 'denied') return denySource(reply);
         if (st !== 'ok') { skipped.push({ number: n, reason: st, source: pick.source, sourceId: pick.sourceId }); continue; }
         chapters.push({ ...copyToChapter(copy, { number: n, title: row.title }), pinned: true });
         continue;
       }
-      if (!row) { skipped.push({ number: n, reason: 'not_listed' }); continue; }
-      if (row.status === 'blocked') {
-        // v0.62.0: a number whose every copy is in another language than the series' is left out by the language
-        // rule (lib/copyLanguage.ts), and unblocking a group would not bring it back: say which it is.
-        const language = (await languageOf()).inLanguage;
-        const otherLanguage = !!language && row.copies.length > 0 && row.copies.every((c) => !language(c));
-        skipped.push({ number: n, reason: otherLanguage ? 'other_language' : 'blocked_group' });
-        continue;
-      }
-      if (here.has(n)) { skipped.push({ number: n, reason: 'already_here' }); continue; }
-      const st = await stateOf(row.source_id);
+      const got = await rules.plain(n);
       // The same by-id rejection the rest of this file gives, and it does not say what is being withheld.
-      if (st === 'denied') return denySource(reply);
-      if (st === 'cooldown') {
-        // v0.79.0: the copy the rules chose is on a source in a cooldown. Another followed source's copy of the same
-        // number, as the sweep's fallback would take it (the blocklist and the series' language as they stand), is
-        // fetched instead. It worked only by accident before -- the refresh above rewrote the listing from the source
-        // that answered -- and stopped working once a cooling source's rows are kept (lib/updater.ts). With none, the
-        // number is left to the finishing sweep (`later`, lib/finishDownloads.ts), which comes back when the source
-        // can answer. Reintroduce by skipping it as `cooldown`: "a Fetch while the main cools takes the follower's copy"
-        // in fetchRotation.int.test.ts reads 409.
-        let alt: ListingCopy | null = null;
-        for (const c of await automaticCopiesFor(seriesId, row.copies ?? [])) {
-          if (c.source !== row.source_id && (await stateOf(c.source)) === 'ok') { alt = c; break; }
-        }
-        if (alt) { chapters.push(copyToChapter(alt, { number: n, title: row.title })); continue; }
-        if (finishOn && s.auto_update !== false) { skipped.push({ number: n, reason: 'later' }); handOff = true; continue; }
-      }
-      if (st !== 'ok') { skipped.push({ number: n, reason: st }); continue; }
-      chapters.push({ ...row.chosen, source: row.source_id });
+      if (got === 'denied') return denySource(reply);
+      if (typeof got !== 'string') { chapters.push(got); continue; }
+      // A cooldown no other followed source's copy could stand in for (fetchRules): left to the finishing sweep, which
+      // comes back for it when the source can answer (v0.79.0).
+      if (got === 'cooldown' && finishOn && s.auto_update !== false) { skipped.push({ number: n, reason: 'later' }); handOff = true; continue; }
+      skipped.push({ number: n, reason: got });
     }
     // What a cooldown left (v0.79.0): first in the finishing sweep's line, so it comes back for them the moment it can.
     if (handOff) {
@@ -3525,15 +3602,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
       // The first reason that is about a chapter, not about the body: a duplicate pick is never why
       // nothing was fetched, since its number was handled once through its first pick.
       const first = skipped.find((x) => x.reason !== 'duplicate')?.reason ?? skipped[0]?.reason;
-      const message = first === 'not_listed' ? 'Not in the last listing -- run Check for new chapters first.'
-        : first === 'blocked_group' ? 'Only blocked groups released that chapter. Unblock the group and check again.'
-        : first === 'other_language' ? 'That chapter is only in another language than the series. Pick a copy under Versions to fetch it anyway.'
-        : first === 'already_here' ? 'That chapter is already here.'
-        : first === 'cooldown' ? 'That source is in a cooldown. Try again later.'
-        : first === 'later' ? 'That source is in a cooldown. These chapters will download on their own when it is ready.'
-        : first === 'hidden' ? 'That chapter is hidden from this series. Restore it under More to fetch it.'
-        : 'That source is not available right now.';
-      return reply.code(409).send({ error: 'nothing_to_fetch', message, skipped });
+      return reply.code(409).send({ error: 'nothing_to_fetch', message: fetchSkipMessage(first), skipped });
     }
 
     const claim = claimDownloadJob(s.folder, seriesId);

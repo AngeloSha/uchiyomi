@@ -3064,14 +3064,17 @@ paths:
       summary: Restore one visible chapter that Uchiyomi deliberately deleted, by its stable book id.
       operationId: postApiBooksIdRefetch
       description: >-
-        Available to a member who may download. The server derives the only permitted copy from the tombstone:
-        its canonical download-root path, stored source and stored source chapter id. It accepts no client-supplied
-        source, chapter number or path. The exact historical source need not still be followed: the tombstone's
-        book id, series, stored source, stored source chapter id and canonical download-root path are its authority.
-        That source must still have an installed adapter, be enabled, be outside cooldown and be allowed by the
-        caller's age boundary. The copy is pinned, so this explicit choice may override a scanlator block, but it
-        never falls back to another copy. Ranges, manual/read-library files, missing evidence and a copy whose stored
-        identity or canonical path changed are not refetchable. Progress stays attached to the same book id.
+        Available to a member who may download. It accepts no client-supplied source, chapter number or path: the
+        server derives them from the tombstone (its series, number and canonical download-root path) and the listing.
+        Since #437 the copy is the one `POST /api/sources/fetch` takes for that number -- after the same listing
+        refresh, by the same rules, from a source the series follows now -- and it is not pinned, so a copy that fails
+        is taken from another followed source. Only when no followed source lists the number is the copy stamped on the
+        tombstone used (its stored source and source chapter id): that source need not still be followed, but it must
+        still have an installed adapter, be enabled, be outside cooldown and be allowed by the caller's age boundary,
+        and the copy is pinned, so this explicit choice may override a scanlator block but never falls back to another
+        copy, and a change of the tombstone's stored identity or canonical path while the job waits refuses it.
+        Ranges, manual/read-library files and chapters not deleted on purpose are not refetchable. Progress stays
+        attached to the same book id.
       parameters:
         - name: id
           in: path
@@ -3095,14 +3098,37 @@ paths:
         "401":
           description: Not authenticated
         "403":
-          description: Download permission is disabled for this account.
+          description: >-
+            Download permission is disabled for this account, or (`forbidden`) the copy a Fetch would take is on a
+            source outside the caller's age boundary.
         "404":
-          description: No such visible tombstone, or it is outside the caller's library or age boundary.
+          description: >-
+            No such visible tombstone, or it is outside the caller's library or age boundary -- as is a stored copy,
+            asked when no followed source lists the number, on a source outside that boundary.
         "409":
           description: >-
-            `not_refetchable`: the row is not a deliberate canonical owned tombstone, its exact stored copy is
-            unsafe or unavailable, a renumber is pending, or the download root is not writable; `busy`: another
-            writer owns this series folder.
+            `not_refetchable`, with `reason` naming the rule and `message` saying why and what to do (and, for this
+            route's own sentences, `messageSaid`, its code for the reader's language): `not_deleted` (not deleted on
+            purpose), `already_here`, `not_in_place` (a range, a manual/read-library file or a path the downloader did
+            not write), `renumber_pending`, `posting_order`, `hidden`, the copy's rule from `POST /api/sources/fetch`
+            (`blocked_group`, `other_language`, `source_unavailable`, `cooldown`), `not_listed` (no followed source
+            lists the number and the stored copy is missing or its source unloaded or switched off) or `not_writable`
+            (with `fix`); `busy` (with `message`): another writer owns this series folder.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, message]
+                properties:
+                  error: { type: string, enum: [not_refetchable, busy] }
+                  reason: { type: string }
+                  message: { type: string }
+                  messageSaid:
+                    type: object
+                    properties:
+                      code: { type: string }
+                      params: { type: object }
+                  fix: { type: string }
   /api/books/{id}/pages:
     get:
       tags:

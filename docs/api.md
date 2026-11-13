@@ -1365,15 +1365,24 @@ the same display string.
 **Restore one deliberate tombstone by book id (v0.55.8).** A tombstone keeps its original `id`, `number`,
 `numberEnd`, title and the caller's `readProgress`; duplicate chapter numbers and ranges therefore remain distinct.
 `POST /api/books/:id/refetch` is the member-authorized restore used by a deleted ghost. It accepts no body and derives
-the only permitted copy from the row's stable book id, series, stored source and source-chapter id, and canonical
-download-root path. A client cannot supply or redirect any of them. The row must be visible to this account and
-deliberate rather than `missing`/`rescan_missing`. Its exact historical source need not still be followed: that stored
-identity is the authority, while its adapter must still be installed, enabled, outside cooldown and inside the
-account's age limit. The copy is pinned: an explicit restore may override the blocklist but never falls back to
-another copy. The standard download job answer is `{ok, started, folder, total}`; **404** deliberately covers an
-unknown/inaccessible id, and **409** `not_refetchable` covers a manual file, range, unsafe path, changed identity or
-canonical path, unavailable adapter, pending renumber or unwritable download root (`busy` while another writer owns
-the folder). Progress remains on the same book id when it lands.
+everything from the row's stable book id -- its series, number and canonical download-root path -- and the listing. A
+client cannot supply or redirect any of them. The row must be visible to this account and deliberate rather than
+`missing`/`rescan_missing`. Since [#437](https://github.com/AngeloSha/uchiyomi/issues/437) the copy is the one
+`POST /api/sources/fetch` takes for that number: the listing is refreshed first, and the release rules choose from the
+sources the series follows *now*, so a chapter deleted after the series moved to another source comes back from that
+one. That copy is not pinned: one that fails is taken from another followed source, as any Fetch's is. Only when no
+followed source lists the number is the copy stored on the row (its source and source-chapter id) asked: that source
+need not still be followed, but its adapter must still be installed, enabled, outside cooldown and inside the account's
+age limit, and the copy is pinned -- an explicit restore may override the blocklist but never falls back to another
+copy, and a change of the row's stored identity or canonical path while the job waits refuses it. The standard
+download job answer is `{ok, started, folder, total}`; **404** deliberately covers an unknown/inaccessible id;
+**403** `forbidden` when the copy a Fetch would take is on a source outside the age limit. Every **409** carries a
+`message` that says why and what to do: `busy` while another writer owns the folder, or `not_refetchable` with a
+`reason` -- `not_deleted`, `already_here`, `not_in_place` (a manual file, range or unsafe path), `renumber_pending`,
+`posting_order`, `hidden`, the Fetch's own `blocked_group`, `other_language`, `source_unavailable` or `cooldown`,
+`not_listed` (nothing the series follows lists the number and the stored copy cannot be asked) or `not_writable`
+(with `fix`). The route's own sentences carry `messageSaid` too, their code for the reader's language. Progress
+remains on the same book id when it lands.
 
 **Chapters the sources have that you don't.** `GET /api/series/:id/listing` answers
 `{checkedAt, content: [Ghost]}`: every chapter number the series' sources listed at the last check (the
@@ -2286,7 +2295,7 @@ use, `series` counting the series the group appears on. Memoised for 30 seconds.
 
 **Deleting a chapter from the server, and fetching it again.** The series-wide delete/refetch controls below are admin
 actions on chosen chapters; the narrower `POST /api/books/:id/refetch` described under Library is available to a
-member who may download and restores only that tombstone's canonical stored copy. All touch the download directory
+member who may download and restores only that tombstone, onto its own row. All touch the download directory
 only: a chapter the scanner found in the read library is never
 touched (`owned: false` on the Book), on the same footing as the read-chapter cleanup. Neither takes a
 typed confirmation; the client confirms with the count.

@@ -35,7 +35,7 @@ import { reasonText, type Said } from '@/lib/said';
 import { offlineOutcome } from '@/lib/notices';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
 import { normGroup } from '@/lib/scanlators';
-import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, countsAsBehind, MARK_CHUNK, heldBy, lastOf, wholesHeld, prunedWords, deliberatelyDeleted, ghostOfDeleted, withoutBlockedDeleted, type Row } from '@/lib/chapterRows';
+import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, countsAsBehind, MARK_CHUNK, heldBy, lastOf, wholesHeld, prunedWords, deliberatelyDeleted, ghostOfDeleted, withoutBlockedDeleted, fetchPlan, type Row } from '@/lib/chapterRows';
 import { chParam, landingNumber } from '@/lib/healthLinks';
 import { effectsReduced } from '@/lib/effects';
 import { clampPage, numberingSpan, pageCount, pageLabel, pageOf, pageSizeFor, pageSlice } from '@/lib/chapterPages';
@@ -1436,12 +1436,14 @@ function SeriesInner() {
     setActing(false);
     setConfirming(null);
   };
+  // The grey rows, and the deleted chapters the listing has a copy of, as one Fetch of numbers; each other deleted chapter
+  // restored by its own row (fetchPlan, #437). `versionsOf` is the listing's copies, the tombstones' numbers included:
+  // the listing route leaves those out of `ghosts`, since a tombstone holds its number.
   const bulkFetch = async () => {
-    const listed = fetchable.filter((g) => !g.bookId).map((g) => g.number);
-    const deleted = fetchable.flatMap((g) => g.bookId ? [g.bookId] : []);
+    const plan = fetchPlan(fetchable, versionsOf, allBooks);
     const requests: Array<{ path: string; body: Record<string, unknown> }> = [
-      ...chunkNumbers(listed).map((numbers) => ({ path: '/api/sources/fetch', body: { seriesId: id, numbers } })),
-      ...deleted.map((bookId) => ({ path: `/api/books/${bookId}/refetch`, body: {} })),
+      ...chunkNumbers(plan.numbers).map((numbers) => ({ path: '/api/sources/fetch', body: { seriesId: id, numbers } })),
+      ...plan.bookIds.map((bookId) => ({ path: `/api/books/${bookId}/refetch`, body: {} })),
     ];
     if (!requests.length) return;
     setActing(true);
@@ -1457,10 +1459,9 @@ function SeriesInner() {
         }
         if (i < requests.length - 1) {
           const ended = await awaitJob(res.folder);
-          if (ended?.status === 'error') {
-            toast(reasonText(ended) || tr('Fetch stopped. Try another source or wait.'), 'error');
-            break;
-          }
+          // Said here, as postInChunks says it: thrown, it reached msgOf, which reads only a refused request's body, and
+          // a job that stopped for a reason read "Could not start." (#437).
+          if (ended?.status === 'error') { toast(reasonText(ended) || tr('Fetch stopped. Try another source or wait.'), 'error'); break; }
         }
       }
     } catch (e) { toast(actionFailure(e, tr('Could not start fetching chapters.')), 'error'); }
@@ -2232,9 +2233,12 @@ function SeriesInner() {
           onFetch={(copy) => {
             const { number: n, ghost } = chapterSheet;
             setChapterSheet(null);
-            // A deliberate tombstone may only use the canonical owned copy stored on the book. Ignore
-            // alternate copies shown by the versions sheet; the member restore endpoint enforces it too.
-            void (ghost?.bookId ? fetchDeleted(ghost.bookId) : copy ? pickGhost(n, copy) : fetchOne(n));
+            // The copy the person picked is the one fetched, on a deleted chapter too (#437): the server takes a pick of a
+            // tombstone's number as it takes any pick, and lands it on the deleted row. It used to restore the tombstone's
+            // own copy whatever was picked -- the copy from the source the series had moved away from. With no copy to
+            // name (nothing lists the number, or a listing from before v0.33.0), a deleted chapter is restored by its row --
+            // the copy stamped on it, when no followed source has one -- and a grey row is fetched by number.
+            void (copy ? pickGhost(n, copy) : ghost?.bookId ? fetchDeleted(ghost.bookId) : fetchOne(n));
           }}
           // ⚠️ The sheet closes FIRST, then the confirm opens: a Modal under a Sheet cannot be tapped.
           onReplace={(copy) => { const b = chapterSheet.book!; setChapterSheet(null); setReplacing({ book: b, copy }); }}

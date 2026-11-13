@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4787
+    "strings": 4790
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4790,5 +4790,8 @@
   "Their files move into your private folder on the server.": "其文件会移到服务器上你的私人文件夹中。",
   "Their files move into this library’s folder on the server.": "其文件会移到服务器上此书库的文件夹中。",
   "Confirm selected": "确认所选",
-  "Could not confirm the selected matches": "无法确认所选的匹配"
+  "Could not confirm the selected matches": "无法确认所选的匹配",
+  "No source this series follows lists chapter {number} right now. Check for new chapters, or add a source that has it.": "此系列关注的来源目前都没有第 {number} 章。请检查新章节，或添加一个有这一章的来源。",
+  "That chapter cannot be put back where it was: its file is not one Uchiyomi downloaded under its usual name. Pick a copy under Versions to fetch it instead.": "这一章无法放回原处：它的文件不是 Uchiyomi 以惯用名称下载的。请在“版本”中选一个副本来获取它。",
+  "That chapter was not deleted on purpose: its file went missing. Check for new chapters to fetch it again.": "这一章不是被有意删除的：它的文件丢失了。请检查新章节以重新获取它。"
 }
