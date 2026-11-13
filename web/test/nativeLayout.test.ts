@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { nativeNavigationLayout, observeNativeNavigationLayout, usesSideNavigation, NATIVE_LAYOUT_ATTRIBUTE, NATIVE_SIDEBAR_ATTRIBUTE } from '../lib/nativeLayout';
 
 function environment(host: unknown, initial: string | null) {
@@ -100,4 +102,12 @@ test('native side layout preserves the existing wide-viewport rail and normal ph
   assert.equal(usesSideNavigation(false, null), false);
   assert.equal(usesSideNavigation(false, 'bottom'), false);
   assert.equal(usesSideNavigation(false, 'side'), true);
+});
+
+test('the Duo\'s series page shows one reading button', () => {
+  // The phone's floating Start reading bar comes up once the page's own button is in the bottom 160 px, where the bottom
+  // nav and the bar sit. The iOS side layout has no bottom nav: with the phone's band the bar came up on load, half over
+  // the button it copies (a Duo-width walk, 11-13). Reintroduce the single band and this finds no layout-aware margin.
+  const page = readFileSync(join(__dirname, '..', 'app/series/page.tsx'), 'utf8');
+  assert.match(page, /const nativeSide = useNativeSidebar\(\);\s*const ctaOut = useOutOfView\(ctaRef, nativeSide \? '-64px 0px 0px 0px' : '-64px 0px -160px 0px'\);/);
 });

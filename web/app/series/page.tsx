@@ -80,6 +80,7 @@ import { catchUpText } from '@/lib/readingTime';
 import { offlineKeyShown, seriesActionGroups, type SeriesActionId } from '@/lib/seriesActions';
 import { RatingsPanel, useSeriesRating } from '@/components/RatingsPanel';
 import { ContinueBar, ContinueButton, ReadProgress, useOutOfView } from '@/components/ContinueBar';
+import { useNativeSidebar } from '@/lib/nativeLayout';
 import { FavouriteKey, IcListAdd, MoreKey, SeriesKey, SeriesMoreSheet, moreMenuItems } from '@/components/SeriesKeys';
 import { ProgressRing } from '@/components/ProgressRing';
 import { SeriesEditor, copyPath, type EditTab } from '@/components/SeriesEditor';
@@ -1816,7 +1817,12 @@ function SeriesInner() {
   // A phone's title, on the cover (UI refresh, phone): once it has scrolled under the bar, the bar turns glass and says it.
   const heroTitleRef = useRef<HTMLHeadingElement>(null);
   const titleOut = useOutOfView(heroTitleRef, '-72px 0px 0px 0px');
-  const ctaOut = useOutOfView(ctaRef, '-64px 0px -160px 0px');
+  // The bottom 160 px are the phone's nav and this bar: a button there is hidden. The iOS side layout (the Duo) has no
+  // bottom nav, so there the button is out of view only once it scrolls off the top; with the phone's band the bar came
+  // up on load half over the button it copies. Reintroduce the one band: "the Duo's series page shows one reading
+  // button" in nativeLayout.test.ts.
+  const nativeSide = useNativeSidebar();
+  const ctaOut = useOutOfView(ctaRef, nativeSide ? '-64px 0px 0px 0px' : '-64px 0px -160px 0px');
   const barShown = !wide && ctaOut && !selecting && !!series;
 
   const Actions = (
