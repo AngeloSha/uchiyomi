@@ -356,7 +356,7 @@ function ReviewRow({ c, sourceName, selected, onToggle, onEdit }: {
 function ReviewCard({
   items, allCount, filterCount, attentionCount, skippedCount, readyCount, sameSourceCount, selectedIds, note,
   filter, setFilter, q, setQ, onEdit, onToggle, onSelectAll, onSelectReady, onSelectSameSource, onClearSelection, onRun, running, sourceName,
-  hereCount, sourceFilter, setSourceFilter, sourceOptions, onSkip, importCount,
+  hereCount, sourceFilter, setSourceFilter, sourceOptions, onSkip, onConfirm, confirmCount, importCount,
 }: {
   items: ImportCandidate[];
   allCount: number; filterCount:number; attentionCount: number; skippedCount: number; readyCount: number; sameSourceCount: number;
@@ -373,7 +373,7 @@ function ReviewCard({
   onRun: () => void;
   running: boolean;
   sourceName: (id: string | null) => string;
-  hereCount: number; sourceFilter:string; setSourceFilter:(v:string)=>void; sourceOptions:string[]; onSkip:()=>void; importCount:number;
+  hereCount: number; sourceFilter:string; setSourceFilter:(v:string)=>void; sourceOptions:string[]; onSkip:()=>void; onConfirm:()=>void; confirmCount:number; importCount:number;
 }) {
   // The sticky "Import selected" footer is a toolbar to the notices (lib/layers.ts): on a phone it rests on the
   // bottom nav, where a notice would otherwise sit on it -- and "Could not start the import" stays six seconds.
@@ -425,6 +425,9 @@ function ReviewCard({
         {selectedIds.size > 0 && (
           <button onClick={onClearSelection} className="chip text-xs">{tr('Clear selection')}</button>
         )}
+        {/* #425: a long import can hold hundreds of suggestions, each right more often than not. Filter, look, select, and
+            accept them together; what is not held is left as it is. */}
+        {confirmCount > 0 && <button type="button" onClick={onConfirm} disabled={running} className="chip text-xs" data-import-confirm>{tr('Confirm selected')} · {confirmCount}</button>}
         {selectedIds.size > 0 && <button type="button" onClick={onSkip} disabled={running} className="chip text-xs" data-import-skip>{tr('Skip selected')} · {selectedIds.size}</button>}
         <span className="ms-auto text-[11px] text-fog-500">{selectedText(selectedIds.size)}</span>
       </div>
@@ -684,6 +687,14 @@ function ImportWizardInner() {
   const selectReady = () => setSelected(new Set(filtered.filter(isReady).map((c) => c.id)));
   const selectSameSource = () => setSelected(new Set(filtered.filter(sameSourcePair).map((c) => c.id)));
   const clearSelection = () => setSelected(new Set());
+  const selectedHeld=items.filter(c=>selectedVisible.has(c.id) && c.ambiguous && c.decision==='auto' && !!c.match_source_id && !c.status && !c.in_library);
+  const confirmSelected=async()=> {
+    if(!batchId || !selectedHeld.length) return;
+    setRunning(true);
+    try { await api(`/api/admin/import/batches/${batchId}/confirm`,{method:'POST',json:{candidateIds:selectedHeld.map(c=>c.id)},expectedOwnerId:ownerId}); await refetch(); }
+    catch(error) { toast(msgOf(error,tr('Could not confirm the selected matches')),'error'); }
+    setRunning(false);
+  };
   const skipSelected=async()=> {
     if(!batchId || !selectedVisible.size) return;
     setRunning(true);
@@ -783,7 +794,7 @@ function ImportWizardInner() {
         <ReviewCard items={filtered} allCount={items.length} filterCount={facetRows.length} attentionCount={attentionCount} skippedCount={skippedCount}
           readyCount={readyCount} sameSourceCount={sameSourceCount} selectedIds={selectedVisible} note={note} filter={filter} setFilter={setFilter}
           q={q} setQ={setQ} onEdit={setEditing} onToggle={toggleSelected} onSelectAll={selectAll} onSelectReady={selectReady}
-          onSelectSameSource={selectSameSource} hereCount={hereCount} sourceFilter={sourceFilter} setSourceFilter={setSourceFilter} sourceOptions={sourceOptions} onSkip={skipSelected} importCount={selectedReady.size}
+          onSelectSameSource={selectSameSource} hereCount={hereCount} sourceFilter={sourceFilter} setSourceFilter={setSourceFilter} sourceOptions={sourceOptions} onSkip={skipSelected} onConfirm={confirmSelected} confirmCount={selectedHeld.length} importCount={selectedReady.size}
           onClearSelection={clearSelection} onRun={runImport} running={running} sourceName={sourceName} />
       ) : (
         <><RunCard batch={batch} items={items} runIds={runIds} runTotal={runTotal} note={note} onStartOver={startOver} />

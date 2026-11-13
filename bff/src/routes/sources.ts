@@ -2437,6 +2437,16 @@ export async function resolveCandidate(entry: { title: string; altTitles?: strin
         return hit ? { source: home, sourceId: hit.sourceId, title: hit.title, coverUrl: hit.coverUrl,
           confidence: 'same_source', matchedVia: viaOf(term), ambiguous: new Set(hits.map((r) => r.sourceId)).size > 1 } : null;
       };
+      // The same entry at an address the site has since moved (#425): a new section or domain prefix in front of the slug
+      // or id it always had (`/manga/fire-force.3xj4` saved, `/series/fire-force.3xj4` now). Not proof, so held for a
+      // person to confirm; but it is this source's own entry, which a title search under another name never finds.
+      const tail = (p: string) => normPath(p).split('/').pop()?.toLowerCase() ?? '';
+      const wantTail = want ? tail(want) : '';
+      const likely = (raw: SourceSeries[], term: string): ResolvedCandidate | null => {
+        const hit = wantTail ? raw.find((r) => r.source === home && !!r.sourceId && !!r.path && tail(r.path) === wantTail) : undefined;
+        return hit ? { source: home, sourceId: hit.sourceId, title: hit.title, coverUrl: hit.coverUrl,
+          confidence: 'same_source', matchedVia: viaOf(term), ambiguous: true } : null;
+      };
       if (want && src.lookupByPath) {
         try {
           const budget = Math.min(deadline - Date.now(), 5000);
@@ -2455,6 +2465,10 @@ export async function resolveCandidate(entry: { title: string; altTitles?: strin
           // under ANY of those searches, including a renamed title absent from the original results.
           const byUrl = want ? identity(raw, term) : null;
           if (byUrl) return byUrl;
+          // Reintroduce by dropping this: "a moved address on the backup's own source" in importBatch.int.test.ts
+          // suggests another series.
+          const moved = likely(raw, term);
+          if (moved) { retain(moved); continue; }
           const candidate = choose(raw, term, home);
           if (candidate) {
             // A home-source title hit with a conflicting saved path cannot be silently accepted. Keep
@@ -2476,12 +2490,18 @@ export async function resolveCandidate(entry: { title: string; altTitles?: strin
     if (await isDisabled(id).catch(() => false)) continue;
     order.push({ id, src });
   }
+  // A suggestion held on the backup's own source is the person's to confirm. Another source's exact title must not quietly
+  // take its place and import from a source they never used (it returned at once, ready to import): it can still become
+  // the suggestion if it ranks higher, held the same way. Reintroduce by dropping `homeHeld`: "a held suggestion on the
+  // backup's own source" in importBatch.int.test.ts imports from the other source unreviewed.
+  const homeHeld = (fallback as ResolvedCandidate | null)?.source === home && !!home;
   for (const term of terms) {
     for (const { id, src } of order.slice(0, perTerm - (home ? 1 : 0))) {
       try {
         const remaining = deadline - Date.now();
         if (remaining <= 0 || queriesLeft-- <= 0) return fallback;
         const candidate = choose(await withTimeout(src.search(term), Math.min(remaining, budgetFor(src, 10000))), term, id);
+        if (candidate && homeHeld) candidate.ambiguous = true;
         if (candidate) { const exact = retain(candidate); if (exact) return exact; }
       } catch { /* try the next source, then the next term */ }
     }

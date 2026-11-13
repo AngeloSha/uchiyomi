@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4785
+    "strings": 4787
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -4788,5 +4788,7 @@
   "Could not add this series to favourites.": "Impossible d’ajouter cette série aux favoris.",
   "{action}. {reason}": "{action}. {reason}",
   "Their files move into your private folder on the server.": "Leurs fichiers sont déplacés dans votre dossier privé sur le serveur.",
-  "Their files move into this library’s folder on the server.": "Leurs fichiers sont déplacés dans le dossier de cette bibliothèque sur le serveur."
+  "Their files move into this library’s folder on the server.": "Leurs fichiers sont déplacés dans le dossier de cette bibliothèque sur le serveur.",
+  "Confirm selected": "Confirmer la sélection",
+  "Could not confirm the selected matches": "Impossible de confirmer les correspondances sélectionnées"
 }

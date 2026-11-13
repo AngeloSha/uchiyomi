@@ -4976,7 +4976,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
 
   const applyImportDecision = async (req:FastifyRequest, batchId:string|null, ids:string[], body:
-    {decision:'skip'|'auto'|'manual';source?:string;sourceId?:string;title?:string;coverUrl?:string}) => {
+    {decision:'skip'|'auto'|'manual'|'confirm';source?:string;sourceId?:string;title?:string;coverUrl?:string}) => {
     const uid=userIdOf(req), viewer=await viewCtxFor(uid,roleOf(req));
     return tx(async qq=> {
       const [batch]=await qq<ImportBatchRow>(batchId
@@ -4989,10 +4989,21 @@ export default async function adminRoutes(app: FastifyInstance) {
       const rows=await qq<ImportCandidateRow>('SELECT * FROM import_candidates WHERE batch_id=$1 AND id=ANY($2::uuid[]) FOR UPDATE',[batch.id,[...new Set(ids)]]);
       if(rows.length!==new Set(ids).size) return {status:404,error:'not_found'};
       if(body.decision==='skip' && rows.every(r=>r.in_library && r.decision==='skip' && !r.status)) return {status:200,batchId:batch.id,updated:0};
-      if(rows.some(r=>!!r.status || r.in_library)) return {status:409,error:'already_processed'};
+      if(body.decision!=='confirm' && rows.some(r=>!!r.status || r.in_library)) return {status:409,error:'already_processed'};
       if(body.decision==='auto' && rows.some(r=>!r.auto_source_id)) return {status:409,error:'no_auto_match'};
       const rowScope=candidateScopes(viewer,scope);
+      let updated=0;
       for(const row of rows) {
+        // Confirm selected (#425): a held suggestion accepted as it stands, what "Confirm this match" does one row at a time.
+        // Its provenance stays. A row with nothing held is left as it is, so a broad selection is never a mistake.
+        if(body.decision==='confirm') {
+          if(row.status || row.in_library || row.decision!=='auto' || !row.ambiguous || !row.match_source_id) continue;
+          const keys=importSkipKeys(row),target=await rowScope(row);
+          if(keys.length) await qq('DELETE FROM import_scoped_skips WHERE user_id=$1 AND scope_key=$2 AND key=ANY($3)',[uid,target.key,keys]);
+          await qq("UPDATE import_candidates SET decision='manual',ambiguous=false WHERE id=$1",[row.id]);
+          updated++; continue;
+        }
+        updated++;
         const target=await rowScope(row);
         const keys=importSkipKeys(row);
         if(body.decision==='skip') {
@@ -5007,7 +5018,7 @@ export default async function adminRoutes(app: FastifyInstance) {
         }
       }
       await qq('UPDATE import_batches SET updated_at=now() WHERE id=$1',[batch.id]);
-      return {status:200,batchId:batch.id,updated:rows.length};
+      return {status:200,batchId:batch.id,updated};
     });
   };
   app.patch('/api/admin/import/candidates/:cid',async(req,reply)=> {
@@ -5022,6 +5033,16 @@ export default async function adminRoutes(app: FastifyInstance) {
       if(result.status!==200) return reply.code(result.status).send({error:result.error});
       if(body.data.decision==='skip') await closeBatchIfSettled(result.batchId!);
       return {ok:true};
+    } catch(error) { if(scopeReply(error,reply)) return reply; throw error; }
+  });
+  app.post('/api/admin/import/batches/:id/confirm',async(req,reply)=> {
+    const id=batchIdOf(req,reply); if(!id) return reply;
+    const body=z.object({candidateIds:z.array(z.string().uuid()).min(1).max(500)}).strict().safeParse(req.body);
+    if(!body.success) return reply.code(400).send({error:'bad_request'});
+    try {
+      const result=await applyImportDecision(req,id,body.data.candidateIds,{decision:'confirm'});
+      if(result.status!==200) return reply.code(result.status).send({error:result.error});
+      return {ok:true,updated:result.updated};
     } catch(error) { if(scopeReply(error,reply)) return reply; throw error; }
   });
   app.post('/api/admin/import/batches/:id/skip',async(req,reply)=> {

@@ -16384,6 +16384,53 @@ paths:
               required:
                 - externalReadingStats
                 - opdsEstimatedBookmarks
+  /api/admin/import/batches/{id}/confirm:
+    post:
+      tags:
+        - admin
+      summary: Confirm the held suggestions among selected rows in an owned review batch.
+      description: Transactional and guarded against a concurrent import run. Only candidate IDs from this account’s
+        reviewable batch are accepted. Each selected row whose automatic suggestion is held for review is accepted as it
+        stands, as Confirm this match does for one row; other rows are left unchanged. Returns {ok, updated}.
+      operationId: postApiAdminImportBatchesIdConfirm
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Success; restricted to the authenticated account and its content scope.
+        "400":
+          description: Malformed or unsupported input.
+        "401":
+          description: Not authenticated or revoked credential.
+        "403":
+          description: Insufficient token scope, account permission or registration disabled.
+        "404":
+          description: Not found, not visible, or no unique available book matches the document.
+        "409":
+          description: A concurrent operation or content-scope safety rule prevents this change.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                candidateIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: string
+                    format: uuid
+              required:
+                - candidateIds
   /api/admin/import/batches/{id}/skip:
     post:
       tags:

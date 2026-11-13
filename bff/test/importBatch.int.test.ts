@@ -261,6 +261,60 @@ test('backup path proof is checked across aliases even when the original search 
   } finally { registerAdapter(swAdapter() as any); }
 });
 
+test('a moved address on the backup\'s own source is held as the suggestion', { skip }, async () => {
+  // #425: the site moved its entries (a new section in front of the same slug), so the saved path no longer proves the
+  // entry, and the title search under another name ("Enen no Shouboutai" for "Fire Force") scores nothing.
+  const { registerAdapter: register, unregisterAdapter } = await import('../src/lib/sources');
+  const registerAdapter = (adapter: any) => { unregisterAdapter(SW_ADAPTER); register(adapter); };
+  const { resolveCandidate } = await import('../src/routes/sources');
+  registerAdapter({ ...swAdapter(), async lookupByPath() { return []; }, async search() {
+    return [{ source: SW_ADAPTER, sourceId: '425-fire', title: 'Fire!', path: '/series/fire' },
+      { source: SW_ADAPTER, sourceId: '425-moved', title: 'Enen no Shouboutai', path: '/series/enen/' }];
+  } } as any);
+  try {
+    const match = await resolveCandidate({ title: 'Fire Force', sourceIdUnsigned: SW_ID, url: '/manga/enen' });
+    assert.deepEqual([match?.sourceId, match?.confidence, match?.ambiguous], ['425-moved','same_source',true]);
+  } finally { registerAdapter(swAdapter() as any); }
+});
+
+test('a held suggestion on the backup\'s own source is not replaced unreviewed by another source\'s exact title', { skip }, async () => {
+  const { registerAdapter: register, unregisterAdapter } = await import('../src/lib/sources');
+  const registerAdapter = (adapter: any) => { unregisterAdapter(SW_ADAPTER); register(adapter); };
+  const { resolveCandidate } = await import('../src/routes/sources');
+  const other = 'import-other-exact';
+  // The backup's own source has the title exactly, at a path that proves nothing; another source has it exactly too.
+  registerAdapter({ ...swAdapter(), async lookupByPath() { return []; }, async search(term: string) {
+    return [{ source: SW_ADAPTER, sourceId: '425-held', title: term, path: '/manga/elsewhere' }];
+  } } as any);
+  register({ ...fakeAdapter(), id: other, preferredOrder: -50, async search(term: string) { return [{ source: other, sourceId: 'other-exact', title: term }]; } } as any);
+  try {
+    const match = await resolveCandidate({ title: 'Held Home Probe', sourceIdUnsigned: SW_ID, url: '/manga/held' });
+    assert.equal(match?.ambiguous, true, 'a match was made ready to import without a person confirming it');
+    assert.equal(match?.source, SW_ADAPTER, 'another source took the place of the backup\'s own');
+  } finally { unregisterAdapter(other); registerAdapter(swAdapter() as any); }
+});
+
+test('Confirm selected accepts the held suggestions among a selection, and leaves the rest', { skip }, async () => {
+  const { app, headers } = await boot(), { registerAdapter, unregisterAdapter } = await import('../src/lib/sources');
+  const source = 'import-confirm-fixture'; let id = '';
+  registerAdapter({ ...fakeAdapter(), id: source, preferredOrder: -10, async search(term: string) {
+    return term === 'Held Twice' ? [{ source, sourceId: 'a', title: term }, { source, sourceId: 'b', title: term }]
+      : term === 'Plainly Here' ? [{ source, sourceId: 'p', title: term }] : [];
+  } } as any);
+  try {
+    const r = await app.inject({ method: 'POST', url: '/api/admin/import/batches', headers, payload: { titles: ['Held Twice', 'Plainly Here'] } }); id = r.json().batchId;
+    const items = (await waitForState(app, headers, id, ['review'])).items;
+    const held = items.find((c: any) => c.backup_title === 'Held Twice'), plain = items.find((c: any) => c.backup_title === 'Plainly Here');
+    assert.equal(held.ambiguous, true, 'PREMISE: two exact entries hold the suggestion'); assert.equal(plain.ambiguous, false);
+    const confirmed = await app.inject({ method: 'POST', url: `/api/admin/import/batches/${id}/confirm`, headers, payload: { candidateIds: [held.id, plain.id] } });
+    assert.equal(confirmed.statusCode, 200, confirmed.body); assert.equal(confirmed.json().updated, 1, 'a row with nothing held was changed');
+    const after = (await app.inject({ method: 'GET', url: `/api/admin/import/batches/${id}`, headers })).json().items;
+    const h = after.find((c: any) => c.id === held.id), p = after.find((c: any) => c.id === plain.id);
+    assert.deepEqual([h.decision, h.ambiguous, h.match_source_id], ['manual', false, held.match_source_id], 'the suggestion shown is the one accepted');
+    assert.deepEqual([p.decision, p.ambiguous], [plain.decision, false]);
+  } finally { unregisterAdapter(source); if (id) await q('DELETE FROM import_batches WHERE id=$1', [id]); await app.close(); }
+});
+
 test('cold identity misses and failed catalogue reads leave divergent suggestions for review', { skip }, async () => {
   const { registerAdapter: register, unregisterAdapter } = await import('../src/lib/sources');
   const registerAdapter = (adapter: any) => { unregisterAdapter(SW_ADAPTER); register(adapter); };

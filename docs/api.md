@@ -3564,6 +3564,7 @@ PUT /api/series/{id}/privacy
 POST /api/series/{id}/private-management
 GET /api/external-readers
 PUT /api/external-readers
+POST /api/admin/import/batches/{id}/confirm
 POST /api/admin/import/batches/{id}/skip
 GET /api/v1/kosync/users/auth
 POST /api/v1/kosync/users/create
