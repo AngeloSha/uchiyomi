@@ -1,5 +1,57 @@
 # Changelog
 
+## v0.108.0 — 2026-11-13
+
+**Reading progress comes along with an import, a page streamed to the end in Panels counts as read, a deleted chapter can come back from any source, and the iPhone app fits the Duo.**
+
+### Reading progress comes with your import
+
+- **Mark chapters I've read** ([#433](https://github.com/AngeloSha/uchiyomi/issues/433), **himsin**): one checkbox on the import page, on by default. The chapters a Mihon or Suwayomi backup has marked read, and every chapter up to how far your AniList, MyAnimeList or Kitsu list says you got, are marked read here as the titles land: at once on the ones you already have, the rest as they are imported. The review rows say how far each one is read, and the import says how many chapters it marked.
+- Nothing is marked unread, a chapter already finished here keeps its own date, and nothing is sent to your trackers. Imported reads add no reading time, streaks or Wrapped entries, and never make a file due for the read-chapter cleanup. A series numbered by posting order or by its chapter titles is left alone, since its numbers are not another app's.
+
+### External readers
+
+- **A chapter paged through to the end in Panels counts as read** ([#377](https://github.com/AngeloSha/uchiyomi/issues/377), **farewell-ladmin**). With **Track reading from OPDS page streaming** on (Profile → Connections, off by default), Uchiyomi remembers the page you reach, and a chapter you page through to the end is marked read here and on your trackers. It never fired before: OPDS readers fill in our own `maxWidth` template, and every such request was skipped as a thumbnail. Pages at reading size count; thumbnail-size requests do not.
+- **A preload is not a read.** A chapter counts only when its last page is first reached after at least half of it was paged forward, and not faster than half a second a page (20 seconds at least), so a reader that loads a chapter ahead never completes it. A chapter counted this way is never deleted by the read-chapter cleanup until you read it in a way that is not a guess (the web reader, Mark read, KOReader). Incognito keeps the place and nothing else.
+
+### Deleted chapters come back from any source
+
+- **Fetch on a deleted chapter uses the sources the series follows now** ([#437](https://github.com/AngeloSha/uchiyomi/issues/437), **dfpmola**). It used to ask only the source the chapter first came from, even after the series had moved to another one, and then said only "Could not start." The copy you pick under **Versions** is the one fetched, Select → Fetch sends a deleted stretch as one job, and every refusal says why and what to do. The chapter comes back on its own row, so reading progress is kept. The stamped copy is still used when no followed source lists the number, and a deleted chapter caught in a cooldown is never promised to come on its own.
+
+### Imports keep your own sources
+
+- **Your backup's own source comes first** ([#425](https://github.com/AngeloSha/uchiyomi/issues/425), **Kedryn**). A suggestion held on the source a backup entry came from (its title found, at an address that does not prove the entry) was quietly replaced by another source's exact title, ready to import from a source the person never used. Another source can still become the suggestion when it ranks higher, held the same way.
+- **Moved addresses are found.** When a site changes its address format but keeps the same slug or id, the entry is found on its own source by that slug and suggested for confirmation. A title search under another name ("Enen no Shouboutai" for "Fire Force") could not find it, which is how "Fire!" won.
+- **Confirm selected** accepts the held suggestions among the selected rows, as **Confirm this match** does for one; rows with nothing held are left as they are.
+
+### Sources
+
+- **A Test loads one image** ([#426](https://github.com/AngeloSha/uchiyomi/issues/426), **Kedryn**, **Calvin-Davidson**). The Test button now loads the first page's image the way a download does, so a source whose downloads recovered no longer reads "Failing since — Images" until the next download or for a week. A 429 there is shown, never counted; the daily check still fetches no bytes.
+- **Only failures that count now read as failures.** One failure in normal use, one more than a week old, or a cooldown is history, not *Failing*, in Details as everywhere else.
+
+### Clearer errors
+
+- **Failed actions say what went wrong** ([#435](https://github.com/AngeloSha/uchiyomi/pull/435), **Calvin-Davidson**): uploads, library moves, list and library actions, admin tasks, imports, the archive queue, download cancels and two-factor setup now give a specific message in all eight languages. The action and its reason are said together, and a server's own reason for a 502/503 is shown rather than "temporarily unavailable".
+
+### Library
+
+- **Moving between shared and private** keeps a record that a series was shared, so its owner is never offered the Delete that would erase other members' progress. A series that absorbed a merge (chapters in another folder) is refused before anything moves; a storage folder that only held deleted chapters no longer blocks a move; the confirmation says the files move on the server; the audit log names the series again. With **Calvin-Davidson**'s namespace tests and clash check from [#432](https://github.com/AngeloSha/uchiyomi/pull/432); the move picker's current library ([#428](https://github.com/AngeloSha/uchiyomi/pull/428)) was already in.
+- **Pages in one order everywhere** ([#436](https://github.com/AngeloSha/uchiyomi/pull/436), **Calvin-Davidson**): a folder every page shares (`Series [3948394]/10.png`) no longer puts 10 before 2, in every archive format, and page cleanup counts pages the same way the reader does. Page sizes saved earlier are read in the new order.
+- **Chapter names from Edit chapter** ([#438](https://github.com/AngeloSha/uchiyomi/pull/438), **Calvin-Davidson**): a title you type is the chapter's name (the number in front of it dropped); a number-only edit keeps the chapter's own name.
+- **18+ uploads** ([#434](https://github.com/AngeloSha/uchiyomi/pull/434), **Calvin-Davidson**): an upload made while 18+ titles are shown is accepted.
+- **Admin dates are dates again.** Since v0.107.0 every timestamp an admin screen showed read "Invalid Date" (removed series, members, sessions, the audit log, import batches).
+
+### The iPhone and iPad app
+
+- **Fits the Duo** ([#430](https://github.com/AngeloSha/uchiyomi/pull/430), **nVitius**'s idea): when iOS asks for a side bar, the app shows Uchiyomi's own rail, with its icons and accent colour, and the heroes' words clear it; the series page shows one reading button. Server controls are in **Profile → This device**, Discover puts its hero first with compact filters, and the wrapper's fallback **Servers** button no longer flashes over the splash or covers a chapter.
+- **IPA builds in CI** ([#431](https://github.com/AngeloSha/uchiyomi/pull/431), **nVitius**): every relevant pull request builds and checks an unsigned IPA. Publishing a GitHub prerelease or the AltStore feed stays off until switched on; build numbers continue from the private builds already on phones.
+
+### Upkeep and upgrading
+
+- Dependabot [#423](https://github.com/AngeloSha/uchiyomi/pull/423): React Query, Motion and Tailwind patch updates. Dependabot can update postcss again (its override conflicted with the direct dependency).
+- Browser tests wait for a proven reconnect before counting a request as online.
+- Additive database changes only. The Umbrel package pins the published v0.107.0.
+
 ## v0.107.0 — 2026-11-10
 
 **Private copies for each account, image folders as chapters, explicit external-reader progress, and a clearer import review.**
