@@ -348,6 +348,27 @@ test('a Fetch while the main cools takes the follower\'s copy, and hands main-on
   assert.deepEqual(ask.numbers.map(Number), [4, 5]);
 });
 
+test('a deleted chapter caught in a cooldown is never promised to come on its own', { skip }, async () => {
+  // The finishing sweep counts a chapter deleted on purpose as held and never fetches it back (lib/chapterCleanup.ts
+  // heldBooks). Since #437 Select → Fetch sends deleted chapters by number, so "will download on their own" reached them.
+  const s = await series('fdel', ALPHA, [], [1, 2]);
+  const { updateSeries } = await import('../src/lib/updater');
+  await updateSeries(s.id, 0);
+  await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages, pruned_at, pruned_reason)
+           VALUES ('b_fdel_2', $1, 'T!rot', $2, 2, 'Chapter 2', 1, now(), 'deleted')`, [s.id, `${s.folder}/Chapter 2.cbz`]);
+  await q(`INSERT INTO source_health (source_id, status, blocked_until) VALUES ($1, 'rate_limited', now() + interval '10 minutes')
+           ON CONFLICT (source_id) DO UPDATE SET blocked_until = EXCLUDED.blocked_until`, [ALPHA]);
+  try {
+    const r = await fetchNums(s.id, [1, 2]);
+    assert.equal(r.statusCode, 409, r.payload);
+    assert.deepEqual(r.json().skipped.map((x: any) => [x.number, x.reason]), [[1, 'later'], [2, 'cooldown']],
+      'a deleted chapter was handed to a sweep that never fetches it');
+  } finally {
+    await q('DELETE FROM lib_books WHERE id = $1', ['b_fdel_2']);
+    await q('UPDATE source_health SET blocked_until = NULL WHERE source_id = $1', [ALPHA]);
+  }
+});
+
 test('a Fetch job every source refuses hands the rest on', { skip }, async () => {
   // Reintroduce by dropping `handsOn` (routes/sources.ts startDownloadJob): the series keeps its stamp.
   const s = await series('fex', ALPHA, [], [1, 2, 3]);

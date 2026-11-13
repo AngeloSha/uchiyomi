@@ -99,6 +99,7 @@ import { cleanSourceOrder } from '../lib/sourcePrefs';
 import { paceLevel, rateKeyOf, restLeft } from '../lib/pace';
 import { haveNumbers } from '../lib/libraryNumbers';
 import { heldBy, isRange, rangeEnd, rawRangeEnd } from '../lib/chapterRanges';
+import { heldBooks } from '../lib/chapterCleanup';
 import {
   addNumbering, numberingFor, numberedChapters, readsByTitles, stampAddNumbering, registerBusyProbe, onRenumbered, POSTING_ORDER_REFUSAL,
   type NumberingChoice,
@@ -3169,6 +3170,17 @@ export default async function sourceRoutes(app: FastifyInstance) {
             WHERE b.series_id = $1 AND (b.number = ANY($2::real[]) OR ${isRange('b')}) AND b.pruned_at IS NULL`,
       [seriesId, numbers],
     ));
+    // Numbers held only by a chapter deleted on purpose (lib/chapterCleanup.ts heldBooks): the finishing sweep counts them
+    // as held and never fetches them back, so a cooldown on one is "try again later", never "will download on its own".
+    // Reintroduce by dropping it: "a deleted chapter caught in a cooldown is never promised" in fetchRotation.int.test.ts
+    // reads `later`.
+    const deliberate = new Set((await q<{ number: number }>(
+      `SELECT ${s.numbering === 'posting_order' ? 'COALESCE(ov.number, b.number)' : 'b.number'} AS number
+         FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
+        WHERE b.series_id = $1 AND ${s.numbering === 'posting_order' ? 'COALESCE(ov.number, b.number)' : 'b.number'} = ANY($2::real[])
+          AND b.pruned_at IS NOT NULL AND ${heldBooks('b')}`,
+      [seriesId, numbers],
+    ).catch(() => [])).map((r) => Number(r.number)).filter((n) => !here.has(n)));
     // Health is per source, asked once per source rather than once per number.
     const sourceState = new Map<string, 'ok' | 'source_unavailable' | 'cooldown' | 'denied'>();
     // The series' language rules (v0.62.0), read once and only when a blocked number needs explaining.
@@ -3211,7 +3223,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
       if (st !== 'ok') return st;
       return { ...row.chosen, source: row.source_id };
     };
-    return { listed, followed, here, stateOf, plain };
+    return { listed, followed, here, deliberate, stateOf, plain };
   };
 
   /** What a Fetch that took nothing says, by the first reason a number was left out. */
@@ -3587,7 +3599,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
       if (typeof got !== 'string') { chapters.push(got); continue; }
       // A cooldown no other followed source's copy could stand in for (fetchRules): left to the finishing sweep, which
       // comes back for it when the source can answer (v0.79.0).
-      if (got === 'cooldown' && finishOn && s.auto_update !== false) { skipped.push({ number: n, reason: 'later' }); handOff = true; continue; }
+      if (got === 'cooldown' && finishOn && s.auto_update !== false && !rules.deliberate.has(n)) { skipped.push({ number: n, reason: 'later' }); handOff = true; continue; }
       skipped.push({ number: n, reason: got });
     }
     // What a cooldown left (v0.79.0): first in the finishing sweep's line, so it comes back for them the moment it can.
