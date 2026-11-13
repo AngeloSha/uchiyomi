@@ -41,7 +41,7 @@ import {
   rowFacts, settingsTarget, sourceSays, sourceTarget, splitSources, turnOnRequest, updatesTitle,
   type OverviewSource, type SourceEvidenceRow, type SourcesOverview, type SourcesView,
 } from '@/lib/sourcesPanel';
-import { msgOf } from '@/components/ConfirmDialog';
+import { actionFailure, msgOf } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/Toast';
 import { OnBody } from '@/components/ui';
 import { ActionStatus } from '@/components/ActionList';
@@ -631,7 +631,7 @@ function SourcePacksRow({ onDone }: { onDone: () => Promise<unknown> }) {
       const r = await api<{ available: number }>('/api/admin/sources/reload', { method: 'POST' });
       toast(r.available === 1 ? tr('Reloaded — 1 source available') : tr('Reloaded — {n} sources available', { n: r.available }), 'success');
       await onDone();
-    } catch { toast(tr('Reload failed'), 'error'); }
+    } catch (error) { toast(actionFailure(error, tr('Could not reload the source list.')), 'error'); }
     setReloading(false);
   };
   return (

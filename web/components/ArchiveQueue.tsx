@@ -15,6 +15,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
+import { refusalBody, requestFailure } from '@/lib/refusals';
 import { t as tr } from '@/lib/i18n';
 import { bytes, etaText, relativeTime } from '@/lib/format';
 import {
@@ -23,7 +24,7 @@ import {
 } from '@/lib/archive';
 import { kickDownloads } from '@/lib/useServerDownloads';
 import { useToast } from '@/components/Toast';
-import { ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
+import { ConfirmDialog, actionFailure, msgOf } from '@/components/ConfirmDialog';
 import { Img, OnBody, Sheet } from '@/components/ui';
 import { CoverProgress, ProgressRing } from '@/components/ProgressRing';
 import { IcHourglass } from '@/components/icons';
@@ -56,7 +57,12 @@ export function useArchiveActions() {
     try {
       await api(path, { method });
       if (ok) toast(ok, 'success');
-    } catch (e) { toast(msgOf(e, tr('Could not do that')), 'error'); }
+    } catch (e) {
+      const message = refusalBody(e)?.error === 'not_found'
+        ? tr('This archive is no longer in your queue.')
+        : requestFailure(e) ?? msgOf(e, tr('Could not update this archive.'));
+      toast(message, 'error');
+    }
     kickTwice(qc);
     void qc.invalidateQueries({ queryKey: ['series-listing', seriesId] });
     setBusy(false);
@@ -86,7 +92,7 @@ export function useArchiveEnqueue() {
         results.push(...r.results);
       }
     } catch (e) {
-      toast(msgOf(e, tr('Could not do that')), 'error');
+      toast(actionFailure(e, tr('Could not queue the selected series for archiving.')), 'error');
       return null;
     } finally {
       kickTwice(qc);
@@ -285,7 +291,7 @@ export function ArchiveQueueNote({ view, admin }: { view: ArchiveView; admin: bo
   const flip = async () => {
     setBusy(true);
     try { await api('/api/admin/settings', { method: 'PATCH', json: { archivePaused: !view.paused } }); }
-    catch (e) { toast(msgOf(e, tr('Could not do that')), 'error'); }
+    catch (e) { toast(actionFailure(e, view.paused ? tr('Could not resume the archive queue.') : tr('Could not pause the archive queue.')), 'error'); }
     kickTwice(qc);
     void qc.invalidateQueries({ queryKey: ['admin-settings'] });
     setBusy(false);

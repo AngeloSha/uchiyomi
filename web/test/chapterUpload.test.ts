@@ -15,10 +15,16 @@ const refusal = (status: number, body: unknown) => new ApiError(status, JSON.str
 test("every refusal the route answers is said in the reader's words, never its English sentence", () => {
   // Reintroduce `if (message) return message` ahead of the codes: busy and forbidden come back in English in every language.
   assert.match(uploadRefusal(refusal(429, { error: 'busy', message: 'Two uploads are already running. Try again when one finishes.' }), 'a.cbz'), /Two uploads are already running/);
-  assert.equal(uploadRefusal(refusal(403, { error: 'forbidden', message: 'Uploading needs an admin to allow it.' }), 'a.cbz'), 'Your account is not allowed to upload series.');
+  assert.equal(uploadRefusal(refusal(403, { error: 'forbidden', message: 'Uploading needs an admin to allow it.' }), 'a.cbz'), 'Your account does not have permission to upload to this destination.');
   assert.equal(uploadRefusal(refusal(409, { error: 'busy', message: 'Another task is changing this series.' }), 'a.cbz'), 'Another task is changing this series. Try again in a moment.');
-  assert.equal(uploadRefusal(refusal(400, { error: 'bad_path' }), 'a.cbz'), 'Could not upload a.cbz', 'a code with no words of its own');
+  assert.equal(uploadRefusal(refusal(400, { error: 'bad_path' }), 'a.cbz'), 'a.cbz could not be stored at this destination. Check the file name and library folder.');
   assert.equal(uploadRefusal(refusal(409, { error: 'exists' }), 'a.cbz'), 'a.cbz is already in this series.');
+});
+
+test('upload refusals distinguish a missing series, a private destination conflict and a dropped connection', () => {
+  assert.match(uploadRefusal(refusal(404, { error: 'not_found' }), 'a.cbz'), /series is no longer available/);
+  assert.match(uploadRefusal(refusal(409, { error: 'privacy_destination_conflict' }), 'a.cbz'), /different visibility/);
+  assert.match(uploadRefusal(new TypeError('fetch failed'), 'a.cbz'), /Check your connection/);
 });
 
 test('a run names the files that failed, and the next file of a new series joins the one the first made', async () => {
@@ -96,4 +102,20 @@ test('thumbnail decoding is bounded, skips oversized or cancelled files, and clo
     const departed=new AbortController(),pending=imagePreviewBitmap(png,departed.signal);await waitFor(3);departed.abort();releases[2]();
     assert.equal(await pending,null);assert.equal(closed,3,'a bitmap that finishes after unmount is closed too');
   } finally {for(const release of releases)release();globalThis.createImageBitmap=original;}
+});
+
+test('download cancels say why they were refused, and fall back to the shared connection message', async () => {
+  const { downloadCancelRefusal } = await import('../lib/refusals');
+  assert.match(downloadCancelRefusal(refusal(404, { error: 'not_found' })), /no longer in the queue/);
+  assert.match(downloadCancelRefusal(refusal(409, { error: 'not_running' })), /no longer running/);
+  assert.match(downloadCancelRefusal(refusal(403, { error: 'forbidden' })), /Only the person who started/);
+  assert.match(downloadCancelRefusal(new TypeError('fetch failed')), /Check your connection/);
+  assert.match(downloadCancelRefusal(refusal(500, {})), /Could not cancel this download/);
+});
+
+test('shared request failures cover an expired session and an unavailable server', async () => {
+  const { requestFailure } = await import('../lib/refusals');
+  assert.match(requestFailure(refusal(401, {})) ?? '', /session has expired/);
+  assert.match(requestFailure(refusal(503, {})) ?? '', /temporarily unavailable/);
+  assert.equal(requestFailure(refusal(500, {})), undefined);
 });

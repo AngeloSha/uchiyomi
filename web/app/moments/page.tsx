@@ -8,7 +8,7 @@ import { relativeTime } from '@/lib/format';
 import { PageTile } from '@/components/PageTile';
 import { EmptyState } from '@/components/EmptyState';
 import { useToast } from '@/components/Toast';
-import { Modal } from '@/components/ConfirmDialog';
+import { Modal, actionFailure } from '@/components/ConfirmDialog';
 import { ART } from '@/lib/art';
 import { IcChevronLeft, IcX, IcTrash, IcPlus, IcPencil } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
@@ -74,7 +74,7 @@ function Moments() {
   const del = useMutation({
     mutationFn: (id: string) => api(`/api/notes/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     onSuccess: () => { toast(tr('Note deleted'), 'success'); qc.invalidateQueries({ queryKey: ['notes'] }); },
-    onError: () => toast(tr('Could not delete that note'), 'error'),
+    onError: (error) => toast(actionFailure(error, tr('Could not delete that note')), 'error'),
   });
   const confirmDelete = (id: string) => {
     if (!window.confirm(tr('Delete this note? This cannot be undone.'))) return;
@@ -93,7 +93,7 @@ function Moments() {
     mutationFn: (m: Bookmark) =>
       api(`/api/bookmarks/${encodeURIComponent(m.book_id)}/${m.page}`, { method: 'DELETE' }),
     onSuccess: () => { toast(tr('Removed from Moments'), 'success'); qc.invalidateQueries({ queryKey: ['bookmarks'] }); },
-    onError: () => toast(tr('Could not remove that page'), 'error'),
+    onError: (error) => toast(actionFailure(error, tr('Could not remove that page')), 'error'),
   });
   const confirmUnsave = (m: Bookmark) => {
     if (m.note && !window.confirm(tr('Remove this page? The note on it goes too, and that cannot be undone.'))) return;
@@ -209,7 +209,7 @@ function PageNoteEditor({ mark, onClose }: { mark: Bookmark; onClose: () => void
     mutationFn: () => api(`/api/bookmarks/${encodeURIComponent(mark.book_id)}/${mark.page}`,
       { method: 'PUT', json: { note: body.trim() || null } }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['bookmarks'] }); onClose(); },
-    onError: () => toast(tr('Could not save that note'), 'error'),
+    onError: (error) => toast(actionFailure(error, tr('Could not save that note')), 'error'),
   });
   return (
     <Modal title={tr('Note on this page')} onClose={onClose}>
@@ -234,7 +234,7 @@ function NoteComposer({ seriesId }: { seriesId: string }) {
     mutationFn: () => api('/api/notes', { method: 'POST', json: { seriesId, body } }),
     onSuccess: () => { setBody(''); setOpen(false); qc.invalidateQueries({ queryKey: ['notes'] }); },
     // Keeps the draft in the box on failure, so a rejected write does not also lose what was typed.
-    onError: () => toast(tr('Could not save that note'), 'error'),
+    onError: (error) => toast(actionFailure(error, tr('Could not save that note')), 'error'),
   });
 
   if (!open) {

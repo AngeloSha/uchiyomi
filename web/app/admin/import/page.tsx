@@ -16,6 +16,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, getCurrentUser } from '@/lib/api';
+import { refusalBody, requestFailure } from '@/lib/refusals';
 import { revealed } from '@/lib/adult';
 import { useAuth } from '@/lib/auth';
 import { useToast } from '@/components/Toast';
@@ -561,7 +562,8 @@ function ImportWizardInner() {
       else if(body.error==='private_backend_unsupported') toast(tr('Private entries need the built-in library backend. Nothing was imported.'),'error');
       else if (body.error === 'tracker_unavailable') toast(tr('Could not read your list right now'), 'error');
       else if (body.error === 'not_connected') { qc.invalidateQueries({ queryKey: ['trackers'] }); toast(NOT_CONNECTED(), 'info'); }
-      else toast(msgOf(e, tr('Could not start the import')), 'error');
+      else if (e instanceof ApiError && e.status === 403) toast(tr('Your account cannot import into this destination. Choose a library you can use.'), 'error');
+      else toast(requestFailure(e) ?? msgOf(e, tr('Could not start the import')), 'error');
     }
     setStarting(false);
   };
@@ -701,7 +703,13 @@ function ImportWizardInner() {
       setRunTotal(typeof r?.total === 'number' ? r.total : ids.length);
       setSelected(new Set());
       refetch();
-    } catch (e: any) { toast(msgOf(e, tr('Could not start the import')), 'error'); }
+    } catch (e) {
+      const code = refusalBody(e)?.error;
+      if (code === 'not_found') toast(tr('This import batch is no longer available. Return to Open imports and choose another batch, or start a new import.'), 'error');
+      else if (e instanceof ApiError && e.status === 403) toast(tr('Your account no longer has access to this import destination. Start a new import and choose a library you can use.'), 'error');
+      else if (code === 'private_backend_unsupported') toast(tr('Private entries need the built-in library backend. Nothing was imported.'), 'error');
+      else toast(requestFailure(e) ?? msgOf(e, tr('Could not import the selected titles.')), 'error');
+    }
     setRunning(false);
   };
   const startOver = () => {

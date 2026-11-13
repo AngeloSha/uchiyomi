@@ -13,7 +13,7 @@ import { scheduleText, taskResult } from '@/lib/tasks';
 import { bytes, numberText, relativeTime } from '@/lib/format';
 import { shownDeviceName } from '@/lib/device';
 import { useToast } from '@/components/Toast';
-import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
+import { ConfirmDialog, Modal, actionFailure, msgOf } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
 import { IcChevronLeft, IcChevronRight, IcTrash, IcPlus, IcRefresh, IcX, IcGrid, IcShield, IcRows, IcGlobe, IcUsers, IcUser, IcClock } from '@/components/icons';
 import { LibraryFolders } from '@/components/LibraryFolders';
@@ -853,7 +853,7 @@ function ArtPicker({ row, onClose, onApplied }: { row: ArtRow; onClose: () => vo
     if (busy) return;
     setBusy(true);
     try { await api(`/api/admin/series/${row.id}/art`, { method: 'PUT', json: { kind, mode: 'reset' } }); toast(kind === 'banner' ? tr('Banner reset to automatic') : tr('Cover reset to automatic'), 'success'); onApplied(); }
-    catch { toast(tr('Failed'), 'error'); }
+    catch (error) { toast(actionFailure(error, kind === 'banner' ? tr('Could not reset the banner.') : tr('Could not reset the cover.')), 'error'); }
     setBusy(false);
   };
   // Use the first page (v0.55.7, #168), as Edit details offers it: the series' own first page is its cover for good.
@@ -909,7 +909,7 @@ function Tasks() {
   const toast = useToast();
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ['admin-tasks'], queryFn: () => api<{ content: any[] }>('/api/admin/tasks'), refetchInterval: 5000 });
-  const run = async (id: string) => {
+  const run = async (id: string, name: string) => {
     try {
       const r = await api<{ ok?: boolean; error?: string; started?: boolean; series?: number; books?: number }>(`/api/admin/tasks/${id}/run`, { method: 'POST' });
       // A refusal is a 200 with ok:false (the task is already running), and used to toast "Started" too.
@@ -926,7 +926,7 @@ function Tasks() {
           : r.error === 'repair_running' ? tr('The library repair is running — try again in a few minutes')
           : r.error === 'busy' ? tr('Already running')
           : r.error === 'not_enabled' ? tr('That task is switched off')
-          : tr('Failed'), 'error');
+          : tr('Could not start {task}.', { task: tr(name) }), 'error');
       }
       // ⚠️ The scan is the one task that runs to completion before answering, and it answers with its
       // counts. Toasting "Started" for it hid the only fact that mattered: in #34 a library scanned to zero
@@ -950,7 +950,7 @@ function Tasks() {
       else if (id === 'rescan' && r?.started) qc.invalidateQueries({ queryKey: RESCAN_KEY });
       else toast(tr('Started'), 'success');
       qc.invalidateQueries({ queryKey: ['admin-tasks'] });
-    } catch { toast(tr('Failed'), 'error'); }
+    } catch (error) { toast(actionFailure(error, tr('Could not start {task}.', { task: tr(name) })), 'error'); }
   };
   // Chronological, per-row actions: a list, not a card grid. But an explicit column template rather than
   // `justify-between`, which at 1592px left a lake of nothing between a task's name and its own button.
@@ -993,7 +993,7 @@ function Tasks() {
                 <RescanPanel running={!!t.running} />
               </div>
             )}
-            <button onClick={() => run(t.id)} disabled={t.running}
+            <button onClick={() => run(t.id, t.name)} disabled={t.running}
               className="btn-key col-start-2 row-span-2 row-start-1 justify-self-end lg:col-start-3 lg:row-span-1">
               {t.running ? tr('Running…') : t.id === 'rescan' ? tr('Start') : tr('Run now')}
             </button>

@@ -13,7 +13,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
-import { Modal, msgOf } from '@/components/ConfirmDialog';
+import { Modal, actionFailure, msgOf } from '@/components/ConfirmDialog';
 import { Img, ProgressBar } from '@/components/ui';
 import { sourceCover } from '@/components/cards';
 import { useToast } from '@/components/Toast';
@@ -224,7 +224,7 @@ export function FindMissingDialog({ seriesId, onClose, onAddEdition }: {
       qc.invalidateQueries({ queryKey: ['source-jobs'] });
       toast(fetchingToast(numbers.length), 'info', { busy: true });
     } catch (e) {
-      toast(msgOf(e, tr('Could not start.')), 'error');
+      toast(actionFailure(e, tr('Could not start downloading the missing chapters.')), 'error');
     } finally {
       setBusy(false);
     }
@@ -329,7 +329,7 @@ export function FindMissingDialog({ seriesId, onClose, onAddEdition }: {
       // the follow stands, and the card now offers a plain Download for when it has.
       else if (followedNow && code === 'nothing_to_fetch') toast(tr('Now following {s}. It is still listing its chapters: press Download again in a minute.', { s: c.name }), 'info');
       else if (code === 'nothing_to_fetch' && allLater(e)) toast(tr('Its site is busy right now. These chapters will download on their own when it is ready.'), 'info');
-      else toast(msgOf(e, tr('Could not start.')), 'error');
+      else toast(actionFailure(e, tr('Could not start downloading the missing chapters.')), 'error');
     } finally {
       setBusy(false);
     }

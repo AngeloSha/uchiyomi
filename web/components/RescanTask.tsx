@@ -8,6 +8,7 @@
  * The sentences live in lib/rescan.ts, where a test holds them. The server decides everything (bff lib/rescan.ts):
  * this page only shows the plan and sends back its id and the series ticked.
  */
+import { actionFailure } from '@/components/ConfirmDialog';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -142,7 +143,7 @@ function Preview({ plan, onClose, onApplied }: { plan: RescanPlanView; onClose: 
       // A refusal is the panel's to say, beside the button it is about: a stale preview, or the job it would run beside.
       if (r?.ok === false) setRefusal(applyRefusalText(r.error));
       else onApplied();
-    } catch { toast(tr('Failed'), 'error'); }
+    } catch (error) { toast(actionFailure(error, tr('Could not apply the rescan plan.')), 'error'); }
     setBusy(false);
   };
   return (

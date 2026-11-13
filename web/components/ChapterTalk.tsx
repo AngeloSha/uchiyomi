@@ -17,7 +17,7 @@ import {
   SEAM_H, type ChapterTalk, type Reaction, type TalkComment, type TalkReaction,
 } from '@/lib/comments';
 import { Avatar } from '@/components/Avatar';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { ConfirmDialog, actionFailure } from '@/components/ConfirmDialog';
 import { useContextMenu } from '@/components/ContextMenu';
 import { useIncognito } from '@/components/IncognitoBanner';
 import { useToast } from '@/components/Toast';
@@ -364,7 +364,7 @@ export function ChapterTalkSheet({ bookId, seriesId, title, subtitle, page, onPa
     setDoomed(null);
     const before = cache.get();
     cache.set((t) => ({ ...t, comments: t.comments.filter((x) => x.id !== c.id) }));
-    try { await api(`/api/comments/${c.id}`, { method: 'DELETE' }); } catch { cache.put(before); toast(tr('Could not save'), 'error'); }
+    try { await api(`/api/comments/${c.id}`, { method: 'DELETE' }); } catch (error) { cache.put(before); toast(actionFailure(error, tr('Could not delete this comment.')), 'error'); }
     cache.settle();
   };
 

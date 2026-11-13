@@ -2,6 +2,7 @@
 import { FormEvent, useEffect, useId, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
+import { refusalBody, requestFailure } from '@/lib/refusals';
 import { useAuth } from '@/lib/auth';
 import { relativeTime } from '@/lib/format';
 import { shownDeviceName } from '@/lib/device';
@@ -190,7 +191,12 @@ function TwoFactorSection() {
 
   const startTotp = async () => {
     setBusy(true);
-    try { setSetup(await api('/auth/totp/setup', { method: 'POST' })); } catch { toast(tr('Could not start setup'), 'error'); }
+    try { setSetup(await api('/auth/totp/setup', { method: 'POST' })); } catch (error) {
+      const message = refusalBody(error)?.error === 'totp_enabled'
+        ? tr('Two-factor authentication is already on. Turn it off first to set it up again.')
+        : requestFailure(error) ?? msgOf(error, tr('Could not start two-factor authentication setup.'));
+      toast(message, 'error');
+    }
     setBusy(false);
   };
   const enableTotp = async () => {

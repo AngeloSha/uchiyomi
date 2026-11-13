@@ -17,9 +17,10 @@ import { applyCover, clearCover } from '@/lib/theme';
 import { Img, Backdrop, SectionTitle, useWideViewport } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
-import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
+import { ConfirmDialog, Modal, actionFailure, listActionFailure, msgOf } from '@/components/ConfirmDialog';
 import { MoveToLibrary } from '@/components/MoveToLibrary';
 import { moveSeriesToLibrary } from '@/lib/moveLibrary';
+import { requestFailure } from '@/lib/refusals';
 import { SeriesPrivacyControls } from '@/components/SeriesPrivacyControls';
 import { useAuth, canDownload } from '@/lib/auth';
 import { IcChevronLeft, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcHourglass, IcGrid, IcRows, IcComment } from '@/components/icons';
@@ -119,7 +120,7 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
     if (inFlight.current || typeof c.contains !== 'boolean') return;
     inFlight.current = true; setSaving(true);
     try { await saveMembership(c, !c.contains); }
-    catch { toast(tr('Failed'), 'error'); }
+    catch (error) { toast(listActionFailure(error, tr('Could not change this series’s list membership.')), 'error'); }
     finally { inFlight.current = false; setSaving(false); }
   };
   const createAndAdd = async () => {
@@ -131,7 +132,7 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
       qc.setQueryData<{ content: CollectionRow[] }>(queryKey, (old) => ({ content: [...(old?.content ?? []), { ...c, contains: false }] }));
       setName('');
       // If adding fails, keep the newly created empty list visible and retryable.
-      try { await saveMembership(c, true); } catch { toast(tr('Failed'), 'error'); }
+      try { await saveMembership(c, true); } catch (error) { toast(listActionFailure(error, tr('The list was created, but this series could not be added.')), 'error'); }
     } catch { toast(tr('Could not create the list'), 'error'); }
     finally { inFlight.current = false; setSaving(false); }
   };
@@ -1187,10 +1188,10 @@ function SeriesInner() {
       else await api(`/api/favorites/${id}`, { method: 'DELETE' });
       qc.invalidateQueries({ queryKey: ['home'] });
       qc.invalidateQueries({ queryKey: ['library'] });
-    } catch {
+    } catch (error) {
       // Put back, and say so: the heart that stayed lit over a refusal was the one feedback, and it lied.
       setFav(!next);
-      toast(tr('Could not do that'), 'error');
+      toast(requestFailure(error) ?? (next ? tr('Could not add this series to favourites.') : tr('Could not remove this series from favourites.')), 'error');
     }
   };
 
@@ -1295,9 +1296,10 @@ function SeriesInner() {
   // with it -- unread means those too -- and tells no tracker: a tracker left ahead is the safe direction.
   const markAllUnread = async () => {
     try {
-      await api('/api/library/bulk/read', { json: { seriesIds: [id], completed: false } });
-      toast(tr('Marked unread'), 'success');
-    } catch { toast(tr('Could not do that'), 'error'); }
+      const { applied } = await api<{ applied: number }>('/api/library/bulk/read', { json: { seriesIds: [id], completed: false } });
+      if (applied) toast(tr('Marked unread'), 'success');
+      else toast(tr('That series is no longer in the library'), 'error');
+    } catch (error) { toast(requestFailure(error) ?? tr('Could not mark this series as unread.'), 'error'); }
     for (const k of [['series-books', id], ['series-listing', id], ['series', id], ['home'], ['library'], ['collection']]) qc.invalidateQueries({ queryKey: k });
   };
 
@@ -1429,7 +1431,7 @@ function SeriesInner() {
       invalidateChapters();
       leaveSelect();
     } catch (e) {
-      toast(msgOf(e, tr('Could not start.')), 'error');
+      toast(actionFailure(e, tr('Could not start fetching chapters.')), 'error');
     }
     setActing(false);
     setConfirming(null);
@@ -1455,10 +1457,13 @@ function SeriesInner() {
         }
         if (i < requests.length - 1) {
           const ended = await awaitJob(res.folder);
-          if (ended?.status === 'error') throw new Error(reasonText(ended) || tr('Fetch stopped. Try another source or wait.'));
+          if (ended?.status === 'error') {
+            toast(reasonText(ended) || tr('Fetch stopped. Try another source or wait.'), 'error');
+            break;
+          }
         }
       }
-    } catch (e) { toast(msgOf(e, tr('Could not start.')), 'error'); }
+    } catch (e) { toast(actionFailure(e, tr('Could not start fetching chapters.')), 'error'); }
     setActing(false);
   };
   // The fetch icon on one ghost row: the bar's Fetch for a list of one, same request, same toast, same
@@ -1508,7 +1513,7 @@ function SeriesInner() {
         if (ended?.status === 'error') { toast(reasonText(ended) || tr('Fetch stopped. Try another source or wait.'), 'error'); break; }
       }
     } catch (e) {
-      toast(msgOf(e, tr('Could not start.')), 'error');
+      toast(actionFailure(e, tr('Could not start fetching chapters.')), 'error');
     }
     setActing(false);
   };
