@@ -33,6 +33,11 @@ export interface StageLine {
    */
   kind: 'error' | 'empty' | 'unnumbered' | 'site_offline' | 'rate_limited' | null;
   error: string | null;
+  /**
+   * The failure counts now (bff currentFailures): confirmed, recent, not a cooldown. An open line that does not -- one
+   * failure in ordinary use, a week old, an HTTP 429 -- is history (#426). Absent from an older server: then it counts.
+   */
+  current?: boolean;
 }
 
 /** The last deliberate live check (`live` on GET /api/admin/sources, `tested` on a Health item). */
@@ -51,6 +56,8 @@ export interface TestCheck {
   stage?: Stage;
   kind?: 'error' | 'empty' | 'timeout' | 'unnumbered' | 'site_offline';
   error?: string;
+  /** false: shown, not part of the verdict (the Test's one image, when the site asked to slow down or time ran out). */
+  vote?: false;
 }
 
 /** POST /api/admin/sources/:id/test, as far as these screens read it. */
@@ -132,7 +139,10 @@ const checkName = (n: string): string =>
  */
 export function answerView(t: TestAnswer, recorded?: StageLine[] | null): EvidenceView {
   const rows: EvidenceRow[] = [];
-  for (const stage of ['search', 'chapters', 'pages'] as const) {
+  // A Test fetches the first page's image since #426; an older server's answer has no images check, and then that row
+  // says a Test does not download images, as it always has.
+  const imageChecked = (t.checks || []).some((c) => c.stage === 'images');
+  for (const stage of (imageChecked ? ['search', 'chapters', 'pages', 'images'] : ['search', 'chapters', 'pages']) as Stage[]) {
     const cs = (t.checks || []).filter((c) => c.stage === stage);
     if (!cs.length) {
       // Nothing ran at this stage: the Test stopped earlier (or ran out of time before it).
@@ -159,16 +169,18 @@ export function answerView(t: TestAnswer, recorded?: StageLine[] | null): Eviden
     if (c.stage) continue;
     rows.push({ key: `check:${c.name}`, glyph: c.ok ? 'ok' : 'fail', label: checkName(c.name), detail: c.ok ? c.detail || null : null, error: c.ok ? null : c.detail || null, when: null });
   }
-  // The smoke test never fetches an image byte, so it cannot speak for downloads: say so, rather than leave an
+  // An older server's Test never fetches an image byte, so it cannot speak for downloads: say so, rather than leave an
   // admin wondering why a passing Test did not clear a download failure.
-  rows.push({ key: 'images', glyph: 'none', label: stageLabel('images'), detail: tr('a Test does not download images'), error: null, when: null });
+  if (!imageChecked) rows.push({ key: 'images', glyph: 'none', label: stageLabel('images'), detail: tr('a Test does not download images'), error: null, when: null });
 
   const liveFailure = rows.some((r) => r.glyph === 'fail');
   let recordedFailure = false;
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     if (row.glyph !== 'none') continue;
-    const prior = recorded?.find((line) => line.stage === row.key && line.state === 'fail');
+    // Only a failure that counts now. Reintroduce `line.state === 'fail'` alone: "history is not a failure" in
+    // sourceEvidence.test.ts reads "earlier failures are shown below" over a source that is not failing.
+    const prior = recorded?.find((line) => line.stage === row.key && line.state === 'fail' && line.current !== false);
     if (!prior) continue;
     recordedFailure = true;
     rows[i] = { ...row, glyph: 'fail', detail: tr('not checked by this test'), error: prior.error,

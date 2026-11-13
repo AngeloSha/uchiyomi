@@ -126,3 +126,24 @@ test('a site asking us to slow down is a rate limit, never a current failure (v0
   assert.equal(isRateLimit({ kind: 'error', error: 'HTTP 403' }), false);
   assert.equal(isRateLimit({ kind: 'rate_limited', error: null }), true);
 });
+
+test('a Test that fetched an image speaks for images; the daily check never does (#426)', () => {
+  const at = ago(0);
+  // Reintroduce `if (stage === 'images') continue;` in liveStagesPatch and a passing Test leaves "Failing since — Images".
+  assert.deepEqual(liveStagesPatch({ passed: ['search', 'chapters', 'pages', 'images'] }, 'test', at).images, { okAt: at, okBy: 'test', streak: 0 });
+  assert.equal(liveStagesPatch({ passed: ['search', 'chapters', 'pages', 'images'] }, 'sweep', at).images, undefined);
+  assert.deepEqual(liveStagesPatch({ passed: ['search', 'chapters', 'pages'], failure: { stage: 'images', kind: 'error', error: 'HTTP 404' } }, 'test', at).images,
+    { failAt: at, failBy: 'test', error: 'HTTP 404', kind: 'error' });
+});
+
+test('stage lines say which failures count now (#426)', () => {
+  // Each of these is open, and only one is a failure the server counts: drawn alike, the Test said "earlier failures are
+  // shown below" over a source that was not failing.
+  const lines = stageLines({
+    search: { failAt: ago(MIN), failBy: 'traffic', streak: 1, kind: 'error', error: ERR },  // once in ordinary use: not yet
+    chapters: { failAt: ago(8 * DAY), failBy: 'test', kind: 'error', error: ERR },         // a week old: history
+    pages: { failAt: ago(MIN), failBy: 'test', kind: 'error', error: ERR },                // a Test, now: it counts
+    images: { failAt: ago(MIN), failBy: 'traffic', streak: 5, kind: 'rate_limited' },      // a cooldown
+  }, NOW);
+  assert.deepEqual(lines.map((l) => [l.stage, l.state, l.current]), [['search', 'fail', false], ['chapters', 'fail', false], ['pages', 'fail', true], ['images', 'fail', false]]);
+});

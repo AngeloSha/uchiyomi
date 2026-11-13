@@ -5282,7 +5282,7 @@ export default async function adminRoutes(app: FastifyInstance) {
         live: h.live_at
           ? { at: h.live_at, by: h.live_by, state: h.live_state, stage: h.live_stage, code: h.live_code, checks: h.live_checks }
           : null,
-        evidence: stageLines(h.stages),
+        evidence: stageLines(h.stages, now),
       })),
       testMs: env.SOURCE_TEST_TIMEOUT_MS + 8000,
     };

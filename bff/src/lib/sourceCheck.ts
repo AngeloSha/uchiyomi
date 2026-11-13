@@ -52,7 +52,8 @@ export async function checkSourceLive(src: SourceAdapter, opts: { by: 'test' | '
   // `base` to probe this way -- Suwayomi/extension sources never do, since the engine, not this server, talks to
   // the site -- so `bare` stays undefined for those and the homepage-status rules simply do not apply.
   const bare = src.base ? await probeBase(src.base) : undefined;
-  const smoke = await smokeTest(src, opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {});
+  // One image for a Test only (sourceProbe.ts firstImage): the daily check across every source fetches no bytes.
+  const smoke = await smokeTest(src, { ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}), images: opts.by === 'test' });
   // The adapter's own result, its failing stage and whether it is solver-fronted are live evidence, and all of
   // them outrank a bare homepage request. ⚠️ Do not inline this as `bare && {...}`: that dropped `adapterOk`
   // for every extension source (issue #54's second half).

@@ -129,6 +129,28 @@ test('a new success supersedes only the same checked stage; unreached failures r
     'the source sheet must combine the fresh Test with recorded download evidence');
 });
 
+test('#426: history is not a failure: only a recorded failure that counts now is lifted into a passing Test', () => {
+  // The server leaves these out of `failing`: one failure in ordinary use, a week-old one, a 429 cooldown.
+  const images: StageLine = { stage: 'images', state: 'fail', at: new Date(Date.now() - 8 * 86400_000).toISOString(),
+    by: 'traffic', kind: 'error', error: '0/12 pages downloaded (HTTP 404)', current: false };
+  const quiet = answerView(passing, [...stored.slice(1, 3), images]);
+  assert.deepEqual(quiet.head, { tone: 'ok', text: 'The checked steps passed.' }, 'history read as a failure');
+  assert.notEqual(quiet.rows.find((r) => r.key === 'images')?.glyph, 'fail');
+  // The same line from a server that does not say (an older one) still counts, as before.
+  const { current: _c, ...older } = images;
+  assert.equal(answerView(passing, [...stored.slice(1, 3), older]).head?.tone, 'warn');
+});
+
+test('#426: a Test that fetched an image draws its own images row', () => {
+  const withImage = { ...passing, checks: [...passing.checks, { name: 'Images', ok: true, detail: 'first page loaded (chapter 12)', stage: 'images' as const }] };
+  const images: StageLine = { stage: 'images', state: 'fail', at: new Date().toISOString(), by: 'traffic', kind: 'error', error: 'HTTP 404', current: true };
+  const view = answerView(withImage, [...stored.slice(1, 3), images]);
+  const row = view.rows.find((r) => r.key === 'images');
+  assert.equal(row?.glyph, 'ok', 'the image this Test loaded was drawn as the recorded failure');
+  assert.equal(view.rows.filter((r) => r.key === 'images').length, 1);
+  assert.deepEqual(view.head, { tone: 'ok', text: 'The checked steps passed.' });
+});
+
 test('#426: source Test notices and Health actions use Details’ scoped result and severity', () => {
   const images: StageLine = { stage: 'images', state: 'fail', at: new Date().toISOString(), by: 'traffic', kind: 'error', error: 'HTTP 404' };
   assert.deepEqual(sourceTestOutcome(passing), { text: 'The checked steps passed.', ok: true, partial: false });

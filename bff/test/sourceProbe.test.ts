@@ -225,3 +225,35 @@ test('a site that says it is offline fails the stage with that kind, and stops t
   const rc = await smokeTest(c, { timeoutMs: 5000 });
   assert.deepEqual([rc.failure?.stage, rc.failure?.kind], ['pages', 'site_offline']);
 });
+
+test('a Test fetches one image, the way a download does, and only when asked (#426)', async () => {
+  const { smokeTest } = await load();
+  const sharp = (await import('sharp')).default;
+  const http = await import('node:http');
+  const img = await sharp({ create: { width: 40, height: 60, channels: 3, background: '#9273e6' } }).png().toBuffer();
+  const asked: string[] = [];
+  const server = http.createServer((req, res) => {
+    asked.push(req.url || '');
+    if (req.url === '/ok.png') { res.writeHead(200, { 'content-type': 'image/png' }); res.end(img); }
+    else { res.writeHead(404, { 'content-type': 'text/html' }); res.end('<html>gone</html>'); }
+  });
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', () => done()));
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  try {
+    const good = adapter({ localImages: true, getPageUrls: async () => [`${base}/ok.png`, `${base}/two.png`] } as any);
+    const r = await smokeTest(good, { timeoutMs: 10_000, images: true });
+    // Reintroduce the Test without its image (sourceProbe.ts firstImage) and images never passes.
+    assert.deepEqual(r.passed, ['search', 'chapters', 'pages', 'images'], JSON.stringify(r.checks));
+    assert.equal(r.ok, true);
+    assert.deepEqual(asked, ['/ok.png'], 'a Test asks for one page, not the chapter');
+    asked.length = 0;
+    const quiet = await smokeTest(good, { timeoutMs: 10_000 });
+    assert.deepEqual(quiet.passed, ['search', 'chapters', 'pages']);
+    assert.deepEqual(asked, [], 'the daily check fetched an image');
+    const bad = adapter({ localImages: true, getPageUrls: async () => [`${base}/gone.png`] } as any);
+    const f = await smokeTest(bad, { timeoutMs: 10_000, images: true });
+    assert.equal(f.state, 'fail');
+    assert.equal(f.failure?.stage, 'images');
+    assert.match(f.failure?.error ?? '', /404/, 'the failure does not say what the site answered');
+  } finally { server.close(); }
+});

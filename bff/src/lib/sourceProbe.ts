@@ -14,6 +14,7 @@ import { unnumberedOf, type SourceAdapter, type SourceChapter } from './sources/
 import type { Probe } from './sourceDiagnosis';
 import type { Stage } from './sourceEvidence';
 import { coverSanity } from './sources/imgAttr';
+import { fetchPages } from './downloader';
 import { isSiteOffline } from './sources/offline';
 
 /**
@@ -33,9 +34,11 @@ export interface Check {
   kind?: SmokeKind;
   /** The error as thrown, up to 300 characters: what Health and the Providers card show as the engine's words. */
   error?: string;
+  /** false: shown, never part of the verdict (the Test's image when the site asked to slow down, or time ran out). */
+  vote?: false;
 }
 export type SmokeState = 'pass' | 'fail' | 'inconclusive';
-export interface SmokeFailure { stage: 'search' | 'chapters' | 'pages'; kind: SmokeKind; error?: string }
+export interface SmokeFailure { stage: 'search' | 'chapters' | 'pages' | 'images'; kind: SmokeKind; error?: string }
 export interface SmokeResult {
   /** Every voting check passed. */
   ok: boolean;
@@ -108,7 +111,10 @@ export function pageCandidates(chapters: SourceChapter[]): SourceChapter[] {
  * - A chapter list whose every chapter lacks a usable number says so (`unnumbered`), because "none found"
  *   sends an admin to the wrong fix.
  */
-export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number } = {}): Promise<SmokeResult> {
+/** Time a Test keeps back for its one image, so a slow page list never turns into an inconclusive verdict over it. */
+const IMAGE_ROOM_MS = 3000;
+
+export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number; images?: boolean } = {}): Promise<SmokeResult> {
   const t0 = Date.now();
   const deadline = t0 + (opts.timeoutMs ?? env.SOURCE_TEST_TIMEOUT_MS);
   const checks: Check[] = [];
@@ -123,7 +129,7 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number }
     // ⚠️ Covers are reported, never fatal. A source whose covers are wrong still fetches and reads perfectly,
     // and marking it down would take a cosmetic fault and turn it into "this source is broken" -- which is how
     // a health page starts crying wolf and stops being read. It shows in the check list; it does not vote.
-    const ok = !timedOut && !failure && checks.filter((c) => c.name !== COVER_CHECK).every((c) => c.ok);
+    const ok = !timedOut && !failure && checks.filter((c) => c.name !== COVER_CHECK && c.vote !== false).every((c) => c.ok);
     const state: SmokeState = failure && failure.kind !== 'timeout' ? 'fail' : timedOut ? 'inconclusive' : ok ? 'pass' : 'fail';
     return { ok, ...(timedOut ? { timedOut } : {}), checks, state, ...(failure ? { failure } : {}), passed, ms: Date.now() - t0 };
   };
@@ -138,6 +144,44 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number }
     checks.push({ name, ok: false, detail: late ? clip(late) : 'did not finish in time', stage, kind: 'timeout', ...(late ? { error: full(late) } : {}) });
     fail({ stage, kind: 'timeout', ...(late ? { error: full(late) } : {}) });
     return done();
+  };
+
+  /**
+   * The Test's one image (#426): the first page of the chapter whose list just loaded, fetched exactly as a download
+   * fetches it (lib/downloader.ts fetchPages: the source's referer, headers and solver), once, no retry. Without it a
+   * Test could not speak for images at all, so a source whose downloads had recovered kept "Failing since — Images"
+   * until the next download from it, or for a week. Only the Test button asks; the daily check fetches no bytes.
+   * Running out of time here is reported and not counted: the steps before it passed, and our patience is not the
+   * source's fault. Reintroduce by dropping the call above: "a Test fetches one image" in sourceProbe.test.ts.
+   */
+  const firstImage = async (urls: string[], c: SourceChapter) => {
+    try {
+      const r = await call(() => fetchPages(src, urls, [0], { chapterSourceId: c.sourceId, retry: false }));
+      const bytes = r.page[0];
+      if (bytes && bytes.length) {
+        checks.push({ name: 'Images', ok: true, detail: `first page loaded (chapter ${c.number})`, stage: 'images' });
+        passed.push('images');
+        return;
+      }
+      const f = r.failed.get(0);
+      // A site that asked to slow down is a cooldown, and a Test never changes one: shown, not counted or recorded.
+      if (r.refusal === 'rate_limited' || f?.status === 429) {
+        checks.push({ name: 'Images', ok: false, detail: 'the site asked to slow down (HTTP 429)', stage: 'images', kind: 'error', vote: false });
+        return;
+      }
+      const said = f ? (f.status ? `HTTP ${f.status}` : f.error || 'no answer') + (f.type ? ` (${f.type})` : '') : 'no image';
+      const detail = `the first page did not load: ${said}`;
+      checks.push({ name: 'Images', ok: false, detail: clip(detail), stage: 'images', kind: kindOf(said), error: full(detail) });
+      fail({ stage: 'images', kind: kindOf(said), error: full(detail) });
+    } catch (e) {
+      if (ours(e) || engineLate(e)) {
+        checks.push({ name: 'Images', ok: false, detail: 'did not finish in time', stage: 'images', kind: 'timeout', vote: false });
+        return;
+      }
+      const said = messageOf(e);
+      checks.push({ name: 'Images', ok: false, detail: clip(said), stage: 'images', kind: kindOf(said), error: full(said) });
+      fail({ stage: 'images', kind: kindOf(said), error: full(said) });
+    }
   };
 
   // ── search ────────────────────────────────────────────────────────────────────────────────────────────
@@ -255,6 +299,7 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number }
       if (Array.isArray(urls) && urls.length) {
         checks.push({ name: 'Pages', ok: true, detail: `${urls.length} page(s) (chapter ${c.number})`, stage: 'pages' });
         passed.push('pages');
+        if (opts.images && deadline - Date.now() >= IMAGE_ROOM_MS) await firstImage(urls, c);
         return done();
       }
       empty = true;

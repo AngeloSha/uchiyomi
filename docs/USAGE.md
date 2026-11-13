@@ -2310,8 +2310,9 @@ once, and **Check for extension updates** asks the repositories again. **Reload 
 Source packs**, re-scans after you drop a compiled source-plugin pack into `SOURCES_DIR`.
 
 **What a source's sheet knows** (since v0.49.0, #115). A source is checked in four steps — **Search**,
-**Chapter list**, **Page list** and **Images** (the Test and the daily check try the first three; images are seen
-when chapters download) — and Uchiyomi keeps what each was last seen doing and who saw it: the Test button, the
+**Chapter list**, **Page list** and **Images** (the daily check tries the first three; the Test button also loads the
+first page's image, as a download would, since v0.108.0; images are otherwise seen when chapters download) — and
+Uchiyomi keeps what each was last seen doing and who saw it: the Test button, the
 daily check, or normal use. A source with a failing step (above) reads *Failing*, and its sheet's **Details** has a
 line per step (✗ for the one that broke, when, and the engine's or site's own error, cut to two lines with the rest
 on hover), and keeps them after a reload; a Test opens **Details** on its answer. One whose last check passed says so
@@ -2319,8 +2320,10 @@ in one line. A failed Test or daily check marks its step
 failing at once; normal use does after three failures in a row at the same step. Only a later success at **that
 same step** clears it: a downloaded chapter says nothing about a broken search. A test that ran out of time reads
 *could not finish in time — not proof it is broken*, never *Failing*: raise `SOURCE_TEST_TIMEOUT_MS` (up to 120 s)
-for a source that keeps doing that behind a slow Cloudflare check. A Test never changes a cooldown. The same lines
-are on **Admin → Health** under *Source health*.
+for a source that keeps doing that behind a slow Cloudflare check. A Test never changes a cooldown: a site that answers its image
+with HTTP 429 is shown, not counted. Only failures that count now are drawn as failures: one failure in normal use, one
+more than a week old, or a cooldown is history, not *Failing*. The same lines are on **Admin → Health** under *Source
+health*.
 
 ### Replace a source
 

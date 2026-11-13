@@ -142,16 +142,23 @@ export interface StageLine {
   by: EvidenceBy | null;
   kind: FailKind | null;
   error: string | null;
+  /**
+   * A failure that counts now (currentFailures): confirmed and recent, and not a cooldown. An open failure that is not
+   * -- fewer than three in ordinary use, a week old, an HTTP 429 -- is history the server already leaves out of
+   * `failing`, and drawn as one it read "earlier failures are shown below" over a source that was not failing (#426).
+   */
+  current: boolean;
 }
 
-export function stageLines(stages: Stages | null | undefined): StageLine[] {
+export function stageLines(stages: Stages | null | undefined, now = Date.now()): StageLine[] {
+  const current = new Set(currentFailures(stages, now).map((f) => f.stage));
   return STAGES.map((stage) => {
     const r = stages?.[stage];
     if (r && isOpen(r)) {
-      return { stage, state: 'fail', at: r.failAt ?? null, by: r.failBy ?? null, kind: r.kind ?? 'error', error: r.error ?? null };
+      return { stage, state: 'fail', at: r.failAt ?? null, by: r.failBy ?? null, kind: r.kind ?? 'error', error: r.error ?? null, current: current.has(stage) };
     }
-    if (r?.okAt) return { stage, state: 'ok', at: r.okAt, by: r.okBy ?? null, kind: null, error: null };
-    return { stage, state: 'unknown', at: null, by: null, kind: null, error: null };
+    if (r?.okAt) return { stage, state: 'ok', at: r.okAt, by: r.okBy ?? null, kind: null, error: null, current: false };
+    return { stage, state: 'unknown', at: null, by: null, kind: null, error: null, current: false };
   });
 }
 
@@ -165,8 +172,9 @@ export interface LiveRun {
  * The per-stage patch a live run writes. Passed stages get their success; the failing stage gets its failure;
  * stages the run never reached are left exactly as they were.
  *
- * ⚠️ Two things it must never write. `images`: the smoke test fetches no bytes, so a pass says nothing about
- * them. And a `timeout` failure: that is our own deadline, which proves nothing about the source (the reportSlow
+ * ⚠️ `images` only from a run that fetched one: a Test fetches the first page (sourceProbe.ts firstImage, #426), the
+ * daily check fetches no bytes and so never lists it. Never a `timeout` failure: that is our own deadline, which proves
+ * nothing about the source (the reportSlow
  * lesson, sourceHealth.ts) -- the run is recorded as 'inconclusive' in live_state and the stage keeps whatever it
  * had. `since`, `streak` and a traffic failure's `failBy` are the writer's job, because they depend on what the
  * row holds at the moment of the write (sourceHealth.ts STAGE_MERGE).
@@ -174,11 +182,11 @@ export interface LiveRun {
 export function liveStagesPatch(run: LiveRun, by: 'test' | 'sweep', nowIso: string): Stages {
   const patch: Stages = {};
   for (const stage of run.passed) {
-    if (stage === 'images') continue;
+    if (stage === 'images' && by !== 'test') continue;
     patch[stage] = { okAt: nowIso, okBy: by, streak: 0 };
   }
   const f = run.failure;
-  if (f && f.kind !== 'timeout' && f.stage !== 'images') {
+  if (f && f.kind !== 'timeout' && (f.stage !== 'images' || by === 'test')) {
     patch[f.stage] = { failAt: nowIso, failBy: by, error: (f.error ?? '').slice(0, 300) || null, kind: f.kind };
   }
   return patch;
