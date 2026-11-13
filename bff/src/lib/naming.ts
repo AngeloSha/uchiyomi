@@ -188,6 +188,26 @@ export function naturalCmp(a: string, b: string): number {
   return numFromName(a) - numFromName(b) || a.localeCompare(b);
 }
 
+const PAGE_TEXT = new Intl.Collator('en', { numeric: true });
+/**
+ * The order of the pages in one chapter: an archive's image entries, or a folder's images. The reader, the page server
+ * and page cleanup all sort by this, because cleanup keeps its removed pages by number and the reader shows them by
+ * number: two orders would hide the wrong page.
+ *
+ * Folder by folder, so a folder every page shares never decides the order inside it: `Series [3948394]/10.png` read by
+ * its first number is 3948394 like every other page, and the text then put 10 before 2 (#436). Inside one name the
+ * first number still decides, as naturalCmp always has, so `cover.jpg` (no number) stays first and `1.5.jpg` stays
+ * between 1 and 2; a tie goes to the numbers after it (`ch1_p2` before `ch1_p10`), then to the text. A flat archive
+ * whose pages differ in their first number keeps exactly the order it always had.
+ */
+export function pageCmp(a: string, b: string): number {
+  const A = a.split(/[\\/]/), B = b.split(/[\\/]/);
+  for (let i = 0; i < A.length && i < B.length; i++) {
+    if (A[i] !== B[i]) return numFromName(A[i]) - numFromName(B[i]) || PAGE_TEXT.compare(A[i], B[i]) || A[i].localeCompare(B[i]);
+  }
+  return A.length - B.length;
+}
+
 // A volume marker in front of the chapter: "Vol.3", "Volume 3 -", "Tome 3,".
 const VOLUME = String.raw`(?:${VOLUME_WORD}\.?\s*\d+(?:\.\d+)?\s*[,:.\-–—]?\s*)?`;
 // The word a source puts before the number, in the languages sources are written in.

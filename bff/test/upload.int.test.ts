@@ -180,3 +180,15 @@ test('JSON bodies are refused cleanly before any upload reservation', { skip }, 
   assert.equal(r.json().error, 'unsupported_media_type');
   await assert.rejects(stat(join(ROOT, 'dl', 'Uploads', 'Upload Test JSON')));
 });
+
+test('an upload made while 18+ titles are shown is taken, and an unknown parameter is still refused', { skip }, async () => {
+  // #434. The web's api() adds `adult=1` to every request while 18+ titles are shown (web/lib/adult.ts withAdult), and
+  // this route's query schema is strict. Reintroduce the schema without `adult` and this upload answers 400.
+  const url = (extra: string) => `/api/library/upload?title=${encodeURIComponent('Upload Test Adult')}&fresh=1&name=Chapter%201.cbz${extra}`;
+  const send = async (extra: string) => app.inject({ method: 'POST', url: url(extra), payload: await cbz(),
+    headers: { ...headers, 'content-type': 'application/octet-stream' } });
+  const shown = await send('&adult=1');
+  assert.equal(shown.statusCode, 200, shown.body);
+  const unknown = await send('&surprise=1');
+  assert.equal(unknown.statusCode, 400, 'the strict schema stopped refusing what it does not know');
+});

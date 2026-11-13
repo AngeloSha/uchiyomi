@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { numFromName, naturalCmp, chapterName, chapterFromName, numberByRule, NAME_RULE, MAX_RANGE, nameSaysMore } from '../src/lib/naming';
+import { numFromName, naturalCmp, pageCmp, chapterName, chapterFromName, numberByRule, NAME_RULE, MAX_RANGE, nameSaysMore } from '../src/lib/naming';
 import { heroFit, aspectDistance } from '../src/lib/heroFrame';
 
 test('numFromName reads the first number, including decimals', () => {
@@ -178,6 +178,32 @@ test('naturalCmp falls back to text when numbers tie', () => {
   const sorted = ['Chapter 1 - b', 'Chapter 1 - a'].sort(naturalCmp);
   assert.deepEqual(sorted, ['Chapter 1 - a', 'Chapter 1 - b']);
 });
+test('pageCmp: a folder every page shares never decides the order of the pages in it (#436)', () => {
+  const wrapped = ['Series [3948394]/95.jpg', 'Series [3948394]/10.png', 'Series [3948394]/2.png', 'Series [3948394]/1.png'];
+  // Reintroduce `.sort(naturalCmp)` for pages and this reads 1, 10, 2, 95: every page's first number is 3948394.
+  assert.deepEqual([...wrapped].sort(pageCmp), ['Series [3948394]/1.png', 'Series [3948394]/2.png', 'Series [3948394]/10.png', 'Series [3948394]/95.jpg']);
+  // Folder by folder, a cover inside the shared folder stays first. Compare whole paths and it goes last: every page
+  // ties on 3948394, and the text then puts digits before letters.
+  assert.deepEqual(['Series [3948394]/2.png', 'Series [3948394]/cover.jpg', 'Series [3948394]/1.png'].sort(pageCmp),
+    ['Series [3948394]/cover.jpg', 'Series [3948394]/1.png', 'Series [3948394]/2.png']);
+  // A volume of chapter folders: the folders in number order, each one's pages in number order.
+  assert.deepEqual(['Chapter 10/2.jpg', 'Chapter 2/10.jpg', 'Chapter 2/9.jpg', 'Chapter 10/1.jpg'].sort(pageCmp),
+    ['Chapter 2/9.jpg', 'Chapter 2/10.jpg', 'Chapter 10/1.jpg', 'Chapter 10/2.jpg']);
+  // A Windows-made archive's backslashes are folders too.
+  assert.deepEqual(['Vol 3\\10.jpg', 'Vol 3\\9.jpg'].sort(pageCmp), ['Vol 3\\9.jpg', 'Vol 3\\10.jpg']);
+});
+
+test('pageCmp keeps the order naturalCmp gave every flat archive whose pages differ in their first number', () => {
+  // A cover with no number stays first and an inserted 1.5 stays between 1 and 2, as they always were. A plain
+  // numeric collator puts cover.jpg last and 1.5 before 1.
+  const flat = ['10.jpg', 'cover.jpg', '2.jpg', '1.5.jpg', '1.jpg'];
+  assert.deepEqual([...flat].sort(pageCmp), [...flat].sort(naturalCmp));
+  assert.deepEqual([...flat].sort(pageCmp), ['cover.jpg', '1.jpg', '1.5.jpg', '2.jpg', '10.jpg']);
+  // Where the first number ties, the later numbers decide, as a reader would: p2 before p10.
+  assert.deepEqual(['ch1_p10.jpg', 'ch1_p2.jpg', 'ch1_p1.jpg'].sort(pageCmp), ['ch1_p1.jpg', 'ch1_p2.jpg', 'ch1_p10.jpg']);
+  assert.deepEqual(['ch1_p10.jpg', 'ch1_p2.jpg'].sort(naturalCmp), ['ch1_p10.jpg', 'ch1_p2.jpg'], 'PREMISE: naturalCmp got this wrong');
+});
+
 
 test('chapterName is pure: the number said again is no name, what follows it is', () => {
   // The same cases chapterNames.int.test.ts runs through library.ts, here without a database: the numbering

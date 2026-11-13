@@ -11,7 +11,7 @@ import { env } from '../env';
 import { localArtFilename, refreshLocalSeriesArt } from './localSeriesArt';
 import { fingerprintChapter } from './fingerprint';
 import { findRematch, applyRematch, logRematch, MIN_BOOKS } from './rematch';
-import { naturalCmp, chapterName, numberByRule, NAME_RULE } from './naming';
+import { naturalCmp, pageCmp, chapterName, numberByRule, NAME_RULE } from './naming';
 import { parseComicInfoAgeRating } from './ageRating';
 import { directionFromComicInfo } from './directionSignals';
 import { typeFromGenres, SERIES_TYPE_FROM } from './seriesTypeSignals';
@@ -35,10 +35,9 @@ import { epubPages } from './readers/epub';
 export const LIBRARY_ROOT = process.env.LIBRARY_ROOT || '/library';
 const IMG = /\.(jpe?g|png|webp|gif|avif)$/i;
 
-function zipPageNames(entries: Record<string, { isDirectory: boolean }>, formatName: string): string[] {
-  // Compare every number in a ZIP path so a numbered wrapper folder can't mask the page number.
-  const compare = /\.zip$/i.test(formatName) ? new Intl.Collator('en', { numeric: true }).compare : naturalCmp;
-  return Object.keys(entries).filter((name) => !entries[name].isDirectory && IMG.test(name)).sort(compare);
+/** An archive's image entries in page order (lib/naming.ts pageCmp), the order page cleanup numbers them by. */
+export function zipPageNames(entries: Record<string, { isDirectory: boolean }>): string[] {
+  return Object.keys(entries).filter((name) => !entries[name].isDirectory && IMG.test(name)).sort(pageCmp);
 }
 
 export interface ScanBook {
@@ -101,6 +100,12 @@ function chapterKind(path: string): ChapterKind {
   // An EPUB is a zip, but its pages come in spine order rather than filename order, so it is its own kind.
   if (/\.epub$/i.test(path)) return 'epub';
   return 'dir';
+}
+
+/** Whether a chapter's pages are in name order (lib/naming.ts pageCmp): archives and folders; a PDF or EPUB has its own. */
+export function pagesInNameOrder(path: string): boolean {
+  const k = chapterKind(path);
+  return k === 'zip' || k === 'rar' || k === 'dir';
 }
 
 const ARCHIVE = /\.(cbz|cbr|zip|rar|pdf|epub)$/i;
@@ -318,12 +323,12 @@ export async function cbzPages(path: string, formatName: string = path): Promise
   const k = chapterKind(formatName);
   if (k === 'pdf') return pdfPages(path);
   if (k === 'epub') return epubPages(path);   // already in spine order; do NOT re-sort
-  if (k === 'dir') return regularFiles(path, (n) => IMG.test(n), naturalCmp);
-  if (k === 'rar') return (await rarHeaders(await rarExtractor(path))).map((h) => h.name).filter((n) => IMG.test(n)).sort(naturalCmp);
+  if (k === 'dir') return regularFiles(path, (n) => IMG.test(n), pageCmp);
+  if (k === 'rar') return (await rarHeaders(await rarExtractor(path))).map((h) => h.name).filter((n) => IMG.test(n)).sort(pageCmp);
   const zip = new StreamZip.async({ file: path });
   try {
     const entries = await zip.entries();
-    return zipPageNames(entries, formatName);
+    return zipPageNames(entries);
   } finally {
     await zip.close();
   }
@@ -372,20 +377,20 @@ export async function cbzPageAt(
     finally { await zip.close(); }
   }
   if (k === 'dir') {
-    const names = await regularFiles(path, (n) => IMG.test(n), naturalCmp);
+    const names = await regularFiles(path, (n) => IMG.test(n), pageCmp);
     const name = names[index];
     return name ? { name, bytes: await readRegularFile(path, name), total: names.length } : null;
   }
   if (k === 'rar') {
     const ex = await rarExtractor(path); // one extractor for both the listing and the read
-    const names = (await rarHeaders(ex)).map((h) => h.name).filter((n) => IMG.test(n)).sort(naturalCmp);
+    const names = (await rarHeaders(ex)).map((h) => h.name).filter((n) => IMG.test(n)).sort(pageCmp);
     const name = names[index];
     return name ? { name, bytes: await rarExtract(ex, name), total: names.length } : null;
   }
   const zip = new StreamZip.async({ file: path });
   try {
     const entries = await zip.entries();
-    const names = zipPageNames(entries, path);
+    const names = zipPageNames(entries);
     const name = names[index];
     return name ? { name, bytes: await zipEntryCapped(zip, name), total: names.length } : null;
   } finally {
@@ -410,7 +415,7 @@ export async function cbzPageDims(path: string): Promise<Array<{ name: string; w
     const zip = new StreamZip.async({ file: path });
     try {
       const entries = await zip.entries();
-      for (const name of zipPageNames(entries, path)) {
+      for (const name of zipPageNames(entries)) {
         // A page over the cap is measured as unknown rather than failing the whole chapter's dimensions.
         const bytes = await zipEntryCapped(zip, name).catch(() => null);
         if (bytes) await dim(name, bytes); else out.push({ name, width: null, height: null });
@@ -438,7 +443,7 @@ export async function eachPageBytes(path: string, fn: (bytes: Buffer | null) => 
     const zip = new StreamZip.async({ file: path });
     try {
       const entries = await zip.entries();
-      const names = zipPageNames(entries, path);
+      const names = zipPageNames(entries);
       for (const name of names) await fn(await zipEntryCapped(zip, name).catch(() => null));
       return names.length;
     } finally { await zip.close(); }

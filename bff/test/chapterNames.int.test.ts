@@ -168,3 +168,26 @@ test('a library built by hand is never named from its filenames, and the name re
   await q(`DELETE FROM lib_books WHERE root = $1`, [ROOT_A]);
   await q(`DELETE FROM lib_series WHERE folder = $1`, [handFolder]);
 });
+
+test('an admin\'s own title names the chapter, and a number-only edit keeps the chapter\'s name', { skip }, async () => {
+  // #438. Edit chapter (web/app/series/page.tsx ChapterEditModal) sends the title field back with every save, so a
+  // number-only edit stores the file's own title as the override. That must not become the name.
+  const { owned } = await import('../src/lib/ownedCatalog');
+  const { SYSTEM_CTX } = await import('../src/lib/visibility');
+  await lib.setBookMeta(FOLDER, [{ number: 1, source: 'a', title: 'Romance Dawn' }, { number: 2, source: 'a', title: 'Orange Town' }]);
+  const id = await seriesId();
+  const ids = Object.fromEntries((await q<{ id: string; number: number }>('SELECT id, number FROM lib_books WHERE series_id = $1', [id]))
+    .map((r) => [Number(r.number), r.id]));
+  const override = (n: number, number: number | null, title: string | null) =>
+    q('INSERT INTO book_overrides (book_id, number, title) VALUES ($1, $2, $3)', [ids[n], number, title]);
+  await override(1, 1.5, 'Chapter 1');                  // the number changed; the title is the file's, sent back
+  await override(2, null, 'Chapter 2: The Rescue');      // a title the admin typed
+  await override(3, null, 'Buggy the Clown');            // a name with no number in front of it
+  const books = (await owned.seriesBooks(SYSTEM_CTX, id, 0, 100)).content as any[];
+  const name = (n: number) => books.find((b) => b.id === ids[n])?.chapterName;
+  // Reintroduce `ov.title AS title_override` in lib/ownedCatalog.ts booksSrc and this reads 'Chapter 1'.
+  assert.equal(name(1), 'Romance Dawn', 'a number-only edit kept the source\'s name');
+  assert.equal(name(2), 'The Rescue', 'the number in front of a typed title is not part of the name');
+  assert.equal(name(3), 'Buggy the Clown');
+  await q('DELETE FROM book_overrides WHERE book_id = ANY($1)', [Object.values(ids)]);
+});

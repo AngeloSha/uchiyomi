@@ -6,7 +6,7 @@ import { constants, type Stats } from 'node:fs';
 import { access, chmod, chown, lstat, mkdir, open, readFile, readdir, realpath, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
-import { naturalCmp } from './naming';
+import { pageCmp } from './naming';
 import { MAX_META_BYTES, MAX_PAGE_BYTES, zipEntryCapped } from './archiveCaps';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const StreamZip = require('node-stream-zip');
@@ -139,7 +139,7 @@ async function archive(t: CleanupTarget) {
       if (!safeName(name) || !Number.isFinite(total) || total > MAX_BYTES || entry.size > MAX_PAGE_BYTES)
         fail('unsupported_archive', 'This archive exceeds safe entry limits or has unsupported entry names. Use Skip instead.');
     }
-    const names = Object.keys(entries).filter((n) => !entries[n].isDirectory && IMG.test(n)).sort(naturalCmp);
+    const names = Object.keys(entries).filter((n) => !entries[n].isDirectory && IMG.test(n)).sort(pageCmp);
     const pages: CleanupPage[] = names.map((name, i) => ({ number: i + 1, name, bytes: entries[name].size,
       gif: /\.gif$/i.test(name), removed: !!state.removed[String(i + 1)], restorable: false }));
     for (const [n, r] of Object.entries(state.removed)) {
@@ -170,7 +170,7 @@ async function embeddedMetadata(file: string): Promise<CleanupMetadata> {
     if (!entries[CLEANUP_MANIFEST] || Object.keys(entries).length > MAX_ENTRIES || st.size > MAX_BYTES) return result;
     const m = JSON.parse((await zipEntryCapped(zip, CLEANUP_MANIFEST, MAX_META_BYTES)).toString());
     if (m.version !== 1 || !Array.isArray(m.removed) || m.removed.length > MAX_ENTRIES) return result;
-    const names = Object.keys(entries).filter((n) => !entries[n].isDirectory && IMG.test(n)).sort(naturalCmp);
+    const names = Object.keys(entries).filter((n) => !entries[n].isDirectory && IMG.test(n)).sort(pageCmp);
     let total = 0;
     const removed = new Set<number>();
     for (const r of m.removed) {

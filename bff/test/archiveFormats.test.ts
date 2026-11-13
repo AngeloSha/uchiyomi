@@ -220,6 +220,15 @@ test('ZIP: a numbered wrapper folder does not mask page numbers', async () => {
     const streamed: Array<Buffer | null> = [];
     await eachPageBytes(file, async bytes => { streamed.push(bytes); });
     assert.deepEqual(streamed, pages);
+    // A CBZ is the same zip with another name, and people zip a folder and rename it every day: the same order.
+    const cbz = join(root, 'Series [3948394] 2.cbz');
+    await writeFile(cbz, zip.toBuffer());
+    assert.deepEqual(await cbzPages(cbz), names, 'a .cbz kept the old order');
+    // Page cleanup removes pages by NUMBER and the reader hides them by number, so the two must count alike.
+    // Reintroduce `.sort(naturalCmp)` in lib/pageCleanupFiles.ts and cleanup's page 2 is 10.png.
+    const { previewPageCleanup } = await import('../src/lib/pageCleanupFiles');
+    const preview = await previewPageCleanup({ bookId: 'wrapped', file: cbz, store: join(root, 'page-trash') });
+    assert.deepEqual(preview.pages.map((p) => p.name), names, 'page cleanup numbers the pages in another order');
   });
 });
 
