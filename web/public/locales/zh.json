@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4783
+    "strings": 4785
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4786,5 +4786,7 @@
   "Only the person who started this download or an admin can cancel it.": "只有发起此下载的用户或管理员可以取消。",
   "Could not cancel this download. Try again.": "无法取消此下载。请重试。",
   "Could not add this series to favourites.": "无法将此系列添加到收藏。",
-  "{action}. {reason}": "{action}。{reason}"
+  "{action}. {reason}": "{action}。{reason}",
+  "Their files move into your private folder on the server.": "其文件会移到服务器上你的私人文件夹中。",
+  "Their files move into this library’s folder on the server.": "其文件会移到服务器上此书库的文件夹中。"
 }

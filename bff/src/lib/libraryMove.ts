@@ -23,6 +23,12 @@ export async function fileSeriesInLibrary(row: FilingSeries, target: FilingLibra
   if (visibilityChanges) {
     if (!privateBackendSupported()) return {ok:false,code:'unsafe_files',reason:'This library backend does not support private filing.'};
     if (row.work_id) return {ok:false,code:'edition_privacy_conflict',reason:'Unlink editions before changing visibility.'};
+    // A merge moves chapter rows, not files: a series that absorbed another reads chapters from that series' folder, and
+    // only this folder moves here. Those chapters would keep the old visibility, and the scanner then skips them for good.
+    // Asked again inside the catalogue step. Reintroduce by dropping this: "a series that absorbed a merge" in
+    // libraryMove.int.test.ts changes visibility with chapters left behind.
+    if (await one('SELECT 1 FROM lib_series WHERE merged_into=$1 LIMIT 1',[row.id]) || await one(`SELECT 1 FROM lib_books WHERE series_id=$1 AND left(file,length($2)+1)<>$2||'/' LIMIT 1`,[row.id,row.folder]))
+      return {ok:false,code:'unsafe_files',reason:'Some of this series’ chapters are stored in another series’ folder.'};
     if (row.owner_user_id && row.owner_user_id !== userId) return {ok:false,code:'forbidden',reason:'Only the original owner can change this series’ visibility.'};
     const storedOwner = privateFolderOwner(row.folder);
     if (reservedPrivateFolder(row.folder) && storedOwner !== userId) return {ok:false,code:'forbidden',reason:'That folder belongs to another private namespace.'};

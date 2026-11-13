@@ -151,6 +151,41 @@ test('a library that already holds the series refuses publication before any fol
   for(const disk of roots)assert.ok(await exists(join(disk,mine.folder)),'a refused publication moved files');
 });
 
+test('a shared series made private keeps a record that it was shared, so its owner cannot erase it',{skip},async()=>{
+  // The private Delete erases every member's progress, favourites and ratings with the series; it is offered only for a
+  // series nobody else ever had (routes/privateLibrary.ts canDelete).
+  const s=await fixture('Was shared');
+  const result=await move(s.id,privateA,true);assert.equal(result.statusCode,200,result.body);
+  assert.ok((await row(s.id)).private_published_at,'a shared series made private looks as if it had never been shared');
+  const listed=await app.inject({method:'GET',url:'/api/personal/private-series',headers:headers()});
+  assert.equal(listed.json().content.find((r:any)=>r.id===s.id)?.canDelete,false,'its owner is offered the Delete that erases other members');
+});
+
+test('a series that absorbed a merge refuses a visibility change before anything moves',{skip},async()=>{
+  const survivor=await fixture('Merge survivor'),absorbed=await fixture('Merge absorbed');
+  // What mergeSeries does: the rows move to the survivor, the files stay in the absorbed folder.
+  await q('UPDATE lib_books SET series_id=$1 WHERE series_id=$2',[survivor.id,absorbed.id]);
+  await q('UPDATE lib_series SET merged_into=$1 WHERE id=$2',[survivor.id,absorbed.id]);
+  const before=await row(survivor.id);
+  const result=await move(survivor.id,privateA,true);assert.equal(result.statusCode,409,result.body);assert.equal(result.json().error,'unsafe_files');
+  // Refused before the disk is touched. The catalogue step asks again, so without the first check this still refuses, but
+  // only after moving the folder and back: the refusal then says the moves were undone.
+  assert.doesNotMatch(result.json().message,/undone/i,'the folder moved before the merge was noticed');
+  assert.deepEqual(await row(survivor.id),before);
+  for(const disk of roots){assert.ok(await exists(join(disk,survivor.folder)));assert.ok(await exists(join(disk,absorbed.folder)));}
+});
+
+test('a root left with only deleted chapters does not block a visibility change',{skip},async()=>{
+  const s=await fixture('Deleted in one root'),dest=`_private/${a}/${s.folder}`;
+  // Chapters deleted on purpose in the second root, and the folder gone with them.
+  await q(`UPDATE lib_books SET pruned_at=now(),pruned_reason='deleted' WHERE series_id=$1 AND root=$2`,[s.id,roots[1]]);
+  await rm(join(roots[1],s.folder),{recursive:true});
+  const result=await move(s.id,privateA,true);assert.equal(result.statusCode,200,result.body);
+  assert.ok(await exists(join(roots[0],dest)),'the folder that holds chapters did not move');
+  assert.equal(await exists(join(roots[1],dest)),false,'an empty private folder was made where nothing was');
+  assert.ok((await books(s.id)).every((b:any)=>b.file.startsWith(`${dest}/`)),'a deleted chapter kept the old folder in its path');
+});
+
 test('a catalog failure after both filesystem renames rolls back every root, privacy and book path',{skip},async()=>{
   const s=await fixture('Database rollback'),before=await row(s.id),priorBooks=await books(s.id),dest=`_private/${a}/${s.folder}`;
   await q(`CREATE OR REPLACE FUNCTION move_fixture_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.series_id='${s.id}' THEN RAISE EXCEPTION 'forced move fixture failure'; END IF; RETURN NEW; END $$`);

@@ -1244,7 +1244,17 @@ export async function renameSeriesFolder(id: string, newFolder: string, visibili
   if (visibility && !transition) return { ok:false, reason:'The owner or destination does not allow that visibility change.' };
   if (!transition && (privateFolderOwner(row.folder) !== privateFolderOwner(typed) || (reservedPrivateFolder(typed) && !privateFolderOwner(typed)))) return {ok:false,reason:'A private storage folder must remain in its owner’s namespace.'};
 
-  const roots = await rootsOf(id);
+  // A root that holds only tombstones (chapters deleted on purpose) and no longer has the folder has nothing to move. Renaming
+  // it ended in a raw ENOENT, so such a series could never be renamed or change visibility, and mkdirp left empty parent
+  // folders behind. Its rows still follow the new name below. Reintroduce by using rootsOf as is: "a root left with only
+  // deleted chapters" in libraryMove.int.test.ts answers 409.
+  const roots: string[] = [];
+  for (const root of await rootsOf(id)) {
+    const from = containedPath(root, row.folder);
+    const present = !!from && await stat(from).then(() => true, () => false);
+    if (!present && !(await one('SELECT 1 FROM lib_books WHERE series_id = $1 AND root = $2 AND pruned_at IS NULL LIMIT 1', [id, root]))) continue;
+    roots.push(root);
+  }
   // A newly added title can have cover/metadata files before its first chapter is indexed.
   // Include those real folders too; metadata-only transitions must not strand their bytes.
   if (visibility) for (const root of new Set([LIBRARY_ROOT,DL_ROOT])) {
@@ -1339,8 +1349,15 @@ export async function renameSeriesFolder(id: string, newFolder: string, visibili
           throw new Error('The destination library changed. Try again.');
         if (await destinationHolds(qq, id, dest, visibility.libraryId))
           throw Object.assign(new Error('That library already contains this series or folder.'),{code:'privacy_destination_conflict'});
+        // A series that reached anyone else, in either direction, is marked as having been shared: private_published_at is
+        // what keeps the owner's private Delete from erasing other members' progress, favourites and ratings with it
+        // (routes/privateLibrary.ts). Going private left it NULL, and a shared series looked as if it had never been shared.
+        // Reintroduce `CASE WHEN $2 THEN private_published_at ...`: "a shared series made private keeps..." in
+        // libraryMove.int.test.ts finds it NULL.
+        if (await qq('SELECT 1 FROM lib_series WHERE merged_into=$1 LIMIT 1', [id]).then((r) => r.length > 0))
+          throw Object.assign(new Error('Some of this series’ chapters are stored in another series’ folder.'), { code: 'unsafe_files' });
         await qq(`UPDATE lib_series SET is_private=$2,owner_user_id=COALESCE(owner_user_id,$3::uuid),library_id=$4,library_pinned=true,
-          private_published_at=CASE WHEN $2 THEN private_published_at ELSE COALESCE(private_published_at,now()) END WHERE id=$1`,
+          private_published_at=COALESCE(private_published_at,now()) WHERE id=$1`,
           [id,visibility.isPrivate,visibility.userId,visibility.libraryId]);
       }
       // The cached local artwork moves with its source folder. A stale destination candidate
@@ -1362,7 +1379,8 @@ export async function renameSeriesFolder(id: string, newFolder: string, visibili
       try { await rename(d.to, d.from); } catch { failed.push(`"${d.to}" should be "${d.from}"`); }
     }
     if (failed.length) return {ok:false,code:'file_operation_failed',reason:`The database update failed and some folder moves could not be undone: ${failed.join('; ')}. Restore these names and rescan.`};
-    return {ok:false,code:(error as {code?:string}).code==='privacy_destination_conflict'?'privacy_destination_conflict':'file_operation_failed',reason:`Could not update the catalogue; folder moves were undone. ${(error as Error).message}`};
+    const code = (error as {code?:string}).code;
+    return {ok:false,code:code==='privacy_destination_conflict'||code==='unsafe_files'?code:'file_operation_failed',reason:`Could not update the catalogue; folder moves were undone. ${(error as Error).message}`};
   }
   return { ok: true };
 }

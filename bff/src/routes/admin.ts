@@ -3153,7 +3153,8 @@ export default async function adminRoutes(app: FastifyInstance) {
         else if (single) return reply.code(409).send({error:outcome.code??'file_operation_failed',message:outcome.reason,fix:outcome.fix});
         else skipped.push({id:row.id,reason:outcome.code??'file_operation_failed',message:outcome.reason});
       }
-      await logAudit('series.library',{userId:uid,detail:{n:applied,libraryId,visibilityChanges:changes.length},req});
+      // Which series, as the audit log always said: the first 100 of a large selection are enough to find the rest.
+      await logAudit('series.library',{userId:uid,detail:{n:applied,libraryId,visibilityChanges:changes.length,ids:found.map(r=>r.id).slice(0,100)},req});
       return single ? {ok:true,pinned:libraryId!==null} : {applied,skipped};
     } finally { for (const lease of leases) lease.release(); }
   };

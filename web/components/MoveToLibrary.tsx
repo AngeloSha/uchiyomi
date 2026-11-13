@@ -80,6 +80,9 @@ export function MoveToLibrary({ n, busy, onClose, onPick, current }: {
         <p className="mt-2 text-sm leading-relaxed text-fog-300">{pending.visibility === 'shared'
           ? tr('People with access to this library will be able to browse and read the selected copies. Earlier private reading history stays private.')
           : tr('Only your account will be able to browse and read the selected server copies. Copies already downloaded by other people cannot be recalled.')}</p>
+        {/* The files themselves move between the shared tree and `_private/<you>/`, which another app reading the same
+            library folder sees: said here, once, rather than found out later. */}
+        <p className="mt-2 text-xs leading-relaxed text-fog-500">{pending.visibility === 'shared' ? tr('Their files move into this library’s folder on the server.') : tr('Their files move into your private folder on the server.')}</p>
         <p dir="auto" className="mt-3 rounded-lg bg-ink-800/50 p-3 text-sm text-fog-100">{pending.name}</p>
         <p className="mt-3 text-xs leading-relaxed text-fog-500">{tr('AniList entries already made private will not be made public automatically.')}</p>
         <div className="mt-5 flex justify-end gap-2">
