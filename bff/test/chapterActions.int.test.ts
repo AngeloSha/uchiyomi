@@ -40,7 +40,7 @@ const AdmZip = require('adm-zip');
 const LIB = 'lib_act', OTHER_LIB = 'lib_act_x';
 const S = 's_act_series', FOLDER = 'T!act/Act Series';
 const OTHER = 's_act_other', OTHER_FOLDER = 'T!act/Other Series';
-const SRC = 'act-src', FOL = 'act-fol';
+const SRC = 'act-src', FOL = 'act-fol', OLD = 'act-old';
 const ADMIN = 'act-admin', MEMBER = 'act-member', NODL = 'act-nodl', CAPPED = 'act-capped';
 const B = { one: 'b_act_1', two: 'b_act_2', three: 'b_act_3', lib: 'b_act_lib', odd: 'b_act_odd', other: 'b_act_other' };
 let q: any, app: any, updateSeries: any, CHAPTER_RETRY_CAP: number, clearPace: () => void;
@@ -105,6 +105,19 @@ const follower = {
   async latest() { return []; },
 };
 
+/**
+ * A site the series once took chapter 20 from and has since dropped (#437): loaded and answering, so a restore that still
+ * asked the copy stamped on the tombstone would reach it. Its chapter id is its own, so a page call says which site was asked.
+ */
+const former = {
+  id: OLD, name: 'Act Former',
+  async search() { return []; },
+  async getSeries(sid: string) { return { sourceId: sid, source: OLD, title: 'Act Series' }; },
+  async listChapters() { return [ch(20, 'Old Group', { sourceId: 'old/20' })]; },
+  async getPageUrls(id: string) { pageCalls.push(id); return [`https://example.invalid/${encodeURIComponent(id)}/p1.png`]; },
+  async latest() { return []; },
+};
+
 /** A real one-page archive with a ComicInfo naming its group, as the downloader would have written it. */
 function cbz(abs: string, group: string) {
   const z = new AdmZip();
@@ -129,7 +142,8 @@ before(async () => {
   await migrate();
   registerAdapter(adapter as any);
   registerAdapter(follower as any);
-  await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[SRC, FOL]]);
+  registerAdapter(former as any);
+  await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[SRC, FOL, OLD]]);
 
   await q(`INSERT INTO libraries (id, name, path) VALUES ($1,'Act',$1) ON CONFLICT (id) DO NOTHING`, [LIB]);
   await q(`INSERT INTO libraries (id, name, path) VALUES ($1,'Act X',$1) ON CONFLICT (id) DO NOTHING`, [OTHER_LIB]);
@@ -190,7 +204,7 @@ before(async () => {
 // starts where its cause is.
 beforeEach(async () => {
   if (!DSN) return;
-  await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[SRC, FOL]]).catch(() => {});
+  await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[SRC, FOL, OLD]]).catch(() => {});
   clearPace(); // the in-memory pace level is the same kind of leak as the cooldown, and cleared for the same reason
 });
 
@@ -204,7 +218,7 @@ after(async () => {
   await q('DELETE FROM lib_series WHERE id = ANY($1)', [[S, OTHER]]).catch(() => {});
   await q('DELETE FROM libraries WHERE id = ANY($1)', [[LIB, OTHER_LIB]]).catch(() => {});
   await q('DELETE FROM users WHERE username = ANY($1)', [[ADMIN, MEMBER, NODL, CAPPED]]).catch(() => {});
-  await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[SRC, FOL]]).catch(() => {});
+  await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[SRC, FOL, OLD]]).catch(() => {});
   if (savedGlobal !== undefined) await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb WHERE id = 1', [JSON.stringify(savedGlobal)]).catch(() => {});
 });
 
@@ -740,7 +754,9 @@ test('a member can restore only the deliberate tombstone by its stored canonical
     assert.equal((await refetchBook(B.one, nodlTok)).statusCode, 403, 'the existing canDownload gate still applies');
   });
 
-  await t.test('the canonical stored source is pinned and the same row comes back', async () => {
+  await t.test('the same row comes back, with everyone\'s progress on it', async () => {
+    // The main lists 1, so this is the copy a Fetch of 1 takes (#437) -- here the very copy the tombstone was stamped
+    // with. The stamp on its own is the next subtest's.
     const r = await refetchBook(B.one);
     assert.equal(r.statusCode, 200, r.body);
     assert.deepEqual(r.json(), { ok: true, started: true, folder: FOLDER, total: 1 });
@@ -754,6 +770,9 @@ test('a member can restore only the deliberate tombstone by its stored canonical
   });
 
   await t.test('its exact historical source remains refetchable after that source is no longer followed', async () => {
+    // Nothing the series follows now lists 1 -- the follower, its main here, lists only 20 -- so the copy stamped on the
+    // tombstone is the one asked: the fallback when no followed source has the number (#437). Reintroduce by refusing
+    // every number no followed source lists (`nothing()` in place of the stamp in POST /api/books/:id/refetch): 409.
     const removedAgain = await del([B.one]);
     assert.equal(removedAgain.statusCode, 200, removedAgain.body);
     await q('DELETE FROM series_sources WHERE series_id = $1 AND source_id = $2', [S, SRC]);
@@ -784,6 +803,9 @@ test('a member can restore only the deliberate tombstone by its stored canonical
     const holders = [occupy(), occupy()];
     await both;
     pageCalls.length = 0;
+    // The stamp is what this guards, and it is asked only when no followed source lists the number (#437): the series
+    // follows the follower alone meanwhile, as in the subtest above.
+    await q('UPDATE lib_series SET source_id = $2, source_series_id = $3 WHERE id = $1', [S, FOL, 'fol-1']);
     try {
       const started = await refetchBook(B.one);
       assert.equal(started.statusCode, 200, started.body);
@@ -798,6 +820,7 @@ test('a member can restore only the deliberate tombstone by its stored canonical
     } finally {
       release();
       await Promise.allSettled(holders);
+      await q('UPDATE lib_series SET source_id = $2, source_series_id = $3 WHERE id = $1', [S, SRC, 'act-1']);
       await q('UPDATE lib_books SET source_chapter_id = $2 WHERE id = $1', [B.one, 'c/1/Group A']);
       if ((await row(B.one)).pruned_at) {
         const restore = await refetchBook(B.one);
@@ -829,10 +852,11 @@ test('a member can restore only the deliberate tombstone by its stored canonical
   });
 
   await t.test('missing evidence, a range, and a noncanonical path are not refetchable', async () => {
+    // Each says which rule refused it and, in words, what to do instead (#437).
     const cases = [
-      { id: B.two, reason: 'missing', chapter: 'c/2/Group A', end: null, source: SRC },
-      { id: B.three, reason: 'deleted', chapter: 'c/3/Group A', end: 4, source: SRC },
-      { id: B.lib, reason: 'deleted', chapter: 'c/9/Group A', end: null, source: SRC },
+      { id: B.two, reason: 'missing', chapter: 'c/2/Group A', end: null, source: SRC, refused: 'not_deleted' },
+      { id: B.three, reason: 'deleted', chapter: 'c/3/Group A', end: 4, source: SRC, refused: 'not_in_place' },
+      { id: B.lib, reason: 'deleted', chapter: 'c/9/Group A', end: null, source: SRC, refused: 'not_in_place' },
     ];
     try {
       for (const c of cases) {
@@ -841,12 +865,107 @@ test('a member can restore only the deliberate tombstone by its stored canonical
         const r = await refetchBook(c.id);
         assert.equal(r.statusCode, 409, `${c.id}: ${r.body}`);
         assert.equal(r.json().error, 'not_refetchable');
+        assert.equal(r.json().reason, c.refused, `${c.id}: ${r.body}`);
+        assert.ok(r.json().message, `${c.id} is refused without a word: ${r.body}`);
       }
     } finally {
       await q('UPDATE lib_books SET pruned_at = NULL, pruned_reason = NULL, number_end = NULL WHERE id = ANY($1)', [[B.two, B.three, B.lib]]);
       await q('UPDATE lib_books SET source_id = NULL, source_chapter_id = NULL WHERE id = $1', [B.lib]);
     }
   });
+});
+
+/**
+ * #437: a chapter deleted after its series moved on comes back from the source the series follows now. Chapter 20 came
+ * from a site the series has since dropped (`former`, its copy stamped on the tombstone), and the follower lists 20 too:
+ * each way back -- the row's restore, Select → Fetch's number, the Versions sheet's pick -- takes the follower's copy onto
+ * the same row, with everyone's place in it.
+ * Reintroduce by going straight to the stamp in POST /api/books/:id/refetch, as the route did before: the restore asks
+ * the old site for `old/20` (and were it unloaded, switched off or cooling, the answer would be a 409). Reintroduce by
+ * counting a tombstone as here in fetchRules (dropping `b.pruned_at IS NULL`): the Fetch and the pick read 409
+ * `already_here`.
+ */
+test('a deleted chapter comes back from the source the series follows now, on the same row', { skip }, async (t) => {
+  const T20 = 'b_act_t20';
+  const abs = join(DL, FOLDER, 'Chapter 20.cbz');
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, $2, 'fol-1')`, [S, FOL]);
+  cbz(abs, 'Old Group');
+  await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages, root, scanlator, source_id, source_chapter_id)
+           VALUES ($1, $2, 'T!act', $3, 20, 'Chapter 20', 1, $4, 'Old Group', $5, 'old/20')`, [T20, S, `${FOLDER}/Chapter 20.cbz`, DL, OLD]);
+  await q('INSERT INTO read_progress (user_id, book_id, series_id, page, completed) VALUES ($1, $2, $3, 4, false)', [adminId, T20, S]);
+  /** Delete 20, stamped with the old site's copy, take it back the given way, and hold the result to the row it was. */
+  const back = async (how: () => Promise<any>) => {
+    await q('UPDATE lib_books SET source_id = $2, source_chapter_id = $3 WHERE id = $1', [T20, OLD, 'old/20']);
+    const removed = await del([T20]);
+    assert.equal(removed.statusCode, 200, removed.body);
+    assert.deepEqual((await q('SELECT pruned_reason, source_id, source_chapter_id FROM lib_books WHERE id = $1', [T20]))[0],
+      { pruned_reason: 'deleted', source_id: OLD, source_chapter_id: 'old/20' }, 'PREMISE: a deliberate tombstone of the old site\'s copy');
+    pageCalls.length = 0;
+    const r = await how();
+    assert.equal(r.statusCode, 200, r.body);
+    assert.equal(r.json().total, 1, r.body);
+    const job = await jobDone();
+    assert.equal(job?.status, 'done', JSON.stringify(job));
+    assert.deepEqual(pageCalls, ['c/20/Group A'], 'the follower\'s copy, and nothing asked of the site the series dropped');
+    assert.equal(translator(abs), 'Group A', 'the file on disk is the follower\'s');
+    const books = await q('SELECT id, pruned_at, source_id, source_chapter_id FROM lib_books WHERE series_id = $1 AND number = 20', [S]);
+    assert.deepEqual(books, [{ id: T20, pruned_at: null, source_id: FOL, source_chapter_id: 'c/20/Group A' }],
+      'one row for 20: the tombstone itself, back and stamped with what landed');
+    const p = (await q('SELECT page, completed FROM read_progress WHERE user_id = $1 AND book_id = $2', [adminId, T20]))[0];
+    assert.deepEqual(p, { page: 4, completed: false }, 'the reader\'s place rode through the delete and the return');
+  };
+  try {
+    await t.test('the row\'s restore takes the copy a Fetch of 20 takes, not the one stamped on it', async () => {
+      await back(async () => {
+        const r = await refetchBook(T20);
+        if (r.statusCode === 200) assert.deepEqual(r.json(), { ok: true, started: true, folder: FOLDER, total: 1 });
+        return r;
+      });
+    });
+    await t.test('Select → Fetch\'s number lands on the deleted row too', async () => {
+      await back(() => fetchNums([20], memberTok));
+    });
+    await t.test('and so does the Versions sheet\'s pick of a copy', async () => {
+      await back(() => fetchPicks([{ number: 20, source: FOL, sourceId: 'c/20/Group A' }], undefined, memberTok));
+    });
+  } finally {
+    await jobDone().catch(() => {});
+    await q('DELETE FROM read_progress WHERE book_id = $1', [T20]);
+    await q('DELETE FROM lib_books WHERE id = $1', [T20]);
+    await q('DELETE FROM series_sources WHERE series_id = $1 AND source_id = $2', [S, FOL]);
+    await q('DELETE FROM series_listing WHERE series_id = $1 AND source_id = $2', [S, FOL]);
+    rmSync(abs, { force: true });
+  }
+});
+
+/**
+ * The other half of #437's "Could not start.": a deleted chapter nothing can serve -- stamped with a source this server
+ * no longer has, and listed by no source the series follows -- is refused with the reason in words, and its code for the
+ * reader's language. Reintroduce by refusing without them (`{ error: 'not_refetchable' }` alone, as the route did): "the
+ * person is told why" fails.
+ */
+test('a deleted chapter nothing can serve says so', { skip }, async () => {
+  const T30 = 'b_act_t30';
+  const abs = join(DL, FOLDER, 'Chapter 30.cbz');
+  cbz(abs, 'Gone Group');
+  await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages, root, scanlator, source_id, source_chapter_id)
+           VALUES ($1, $2, 'T!act', $3, 30, 'Chapter 30', 1, $4, 'Gone Group', 'act-gone', 'gone/30')`, [T30, S, `${FOLDER}/Chapter 30.cbz`, DL]);
+  try {
+    const removed = await del([T30]);
+    assert.equal(removed.statusCode, 200, removed.body);
+    pageCalls.length = 0;
+    const r = await refetchBook(T30);
+    assert.equal(r.statusCode, 409, r.body);
+    assert.equal(r.json().error, 'not_refetchable');
+    assert.equal(r.json().reason, 'not_listed', r.body);
+    assert.match(r.json().message ?? '', /^No source this series follows lists chapter 30 right now\. Check for new chapters/, 'the person is told why');
+    assert.deepEqual(r.json().messageSaid, { code: 'restore.notListed', params: { number: 30 } }, 'in their own language too');
+    assert.deepEqual(pageCalls, [], 'nothing was asked of anyone');
+    assert.ok((await row(T30)).pruned_at, 'the tombstone is as it was');
+  } finally {
+    await q('DELETE FROM lib_books WHERE id = $1', [T30]);
+    rmSync(abs, { force: true });
+  }
 });
 
 test('a user who may not download cannot fetch', { skip }, async () => {

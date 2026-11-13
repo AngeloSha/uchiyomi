@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4726
+    "strings": 4729
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -4729,5 +4729,8 @@
   "These files cannot be moved safely.": "Ces fichiers ne peuvent pas être déplacés en toute sécurité.",
   "Restore this series before filing it.": "Restaurez cette série avant de la classer.",
   "Unlink editions before changing visibility.": "Déliez les éditions avant de modifier la visibilité.",
-  "Only the owner can change this series’ visibility.": "Seul le propriétaire peut modifier la visibilité de cette série."
+  "Only the owner can change this series’ visibility.": "Seul le propriétaire peut modifier la visibilité de cette série.",
+  "No source this series follows lists chapter {number} right now. Check for new chapters, or add a source that has it.": "Aucune source suivie par cette série ne propose le chapitre {number} pour l’instant. Cherchez de nouveaux chapitres, ou ajoutez une source qui l’a.",
+  "That chapter cannot be put back where it was: its file is not one Uchiyomi downloaded under its usual name. Pick a copy under Versions to fetch it instead.": "Ce chapitre ne peut pas être remis à sa place : son fichier n’est pas un fichier qu’Uchiyomi a téléchargé sous son nom habituel. Choisissez une copie dans Versions pour le récupérer à la place.",
+  "That chapter was not deleted on purpose: its file went missing. Check for new chapters to fetch it again.": "Ce chapitre n’a pas été supprimé volontairement : son fichier a disparu. Cherchez de nouveaux chapitres pour le récupérer à nouveau."
 }

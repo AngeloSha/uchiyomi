@@ -1,10 +1,11 @@
 // "Show deleted chapters as ghosts" (the admin's switch, Listing.deletedAsGhosts): a chapter deleted on purpose is
-// drawn as a ghost row. Which tombstones count, what the row carries, and that the rows never fold behind "Show all".
+// drawn as a ghost row. Which tombstones count, what the row carries, that the rows never fold behind "Show all", and
+// how they are fetched back (#437).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { GHOST_CAP, countsAsBehind, deliberatelyDeleted, ghostOfDeleted, mergeRows, whyLabel } from '../lib/chapterRows';
+import { GHOST_CAP, countsAsBehind, deliberatelyDeleted, fetchPlan, ghostOfDeleted, mergeRows, whyLabel } from '../lib/chapterRows';
 import type { Book, Ghost } from '../lib/types';
 
 const book = (number: number, over: Partial<Book> = {}): Book =>
@@ -78,8 +79,47 @@ test('the series page keys, marks and restores deliberate tombstones by book ID,
     'the member restore route is not addressed by the original book ID');
   assert.match(src, /r\.ghost\.bookId \? fetchDeleted\(r\.ghost\.bookId\) : fetchOne\(r\.ghost\.number\)/,
     'a row restore can silently choose another copy by number');
-  assert.match(src, /ghost\?\.bookId \? fetchDeleted\(ghost\.bookId\) : copy \? pickGhost/,
-    'the versions sheet can override a tombstone\'s stored canonical copy');
-  assert.match(src, /\.\.\.deleted\.map\(\(bookId\) => \(\{ path: `\/api\/books\/\$\{bookId\}\/refetch`, body: \{\} \}\)\)/,
-    'bulk restore does not keep duplicate-number tombstones distinct');
+  // #437: the versions sheet's picked copy and Select → Fetch's batching are the next two tests'. The row's ☁ stays the
+  // restore by book ID: the server takes the copy a Fetch would, and the one stamped on the row when nothing lists it.
+});
+
+test('Select → Fetch takes the deleted chapters the sources list in the one Fetch of numbers (#437)', () => {
+  // A series that moved to another source has a stretch of deleted chapters the new source lists: one job for them all,
+  // with the grey rows. Reintroduce the restore for every deleted chapter in fetchPlan (lib/chapterRows.ts): "a deleted
+  // chapter the sources list is fetched by its number" finds 7 among the book ids.
+  const tomb = (n: number, id: string, over: Partial<Book> = {}) => book(n, { id, pruned: true, prunedReason: 'deleted', owned: true, ...over });
+  const books = [
+    tomb(7, 'd7'), tomb(7, 'd7-twin'),        // the sources list 7: one number for both tombstones
+    tomb(8, 'd8', { owned: undefined }),       // a server older than `owned` is not read as "not ours"
+    tomb(9, 'd9'),                            // nothing lists 9: the copy stamped on its row
+    tomb(11, 'd11', { numberEnd: 12 }),        // a range cannot come back in place
+    tomb(13, 'd13', { owned: false }),         // nor can a hand-built library's file
+  ];
+  const ghosts = [ghost(5), ghost(6), ...books.map(ghostOfDeleted)]; // grey rows: by number, listed or not, as ever
+  const plan = fetchPlan(ghosts, new Set([5, 7, 8, 11, 13]), books);
+  assert.deepEqual(plan.numbers, [5, 6, 7, 8], 'a deleted chapter the sources list is fetched by its number, once, with the grey rows');
+  assert.deepEqual(plan.bookIds, ['d9', 'd11', 'd13'], 'the rest are restored by their own rows, each saying why when it cannot be');
+  assert.deepEqual(fetchPlan([ghostOfDeleted(tomb(7, 'd7'))], new Set([7]), []), { numbers: [], bookIds: ['d7'] },
+    'a tombstone the page has no row for is the server\'s to judge');
+});
+
+test('the series page fetches the copy picked on a deleted chapter, batches Select → Fetch, and says why a run stopped (#437)', () => {
+  const src = readFileSync(join(__dirname, '..', 'app/series/page.tsx'), 'utf8');
+  // Reintroduce `ghost?.bookId ? fetchDeleted(ghost.bookId) : copy ? pickGhost(...)`: the copy picked is thrown away
+  // for the one stamped on the tombstone -- the old source's, which is why it would not come back.
+  assert.match(src, /void \(copy \? pickGhost\(n, copy\) : ghost\?\.bookId \? fetchDeleted\(ghost\.bookId\) : fetchOne\(n\)\)/,
+    'the versions sheet drops the copy picked on a deleted chapter');
+  // Reintroduce one restore per deleted chapter: every one a job of its own, each waiting for the last to end.
+  const bulk = src.slice(src.indexOf('const bulkFetch = async'), src.indexOf('const fetchOne = '));
+  assert.ok(bulk.length > 200, 'bulkFetch was not found -- this pin is broken');
+  assert.match(bulk, /const plan = fetchPlan\(fetchable, versionsOf, allBooks\);/, 'Select → Fetch does not plan by the listing');
+  assert.match(bulk, /chunkNumbers\(plan\.numbers\)\.map\(\(numbers\) => \(\{ path: '\/api\/sources\/fetch', body: \{ seriesId: id, numbers \} \}\)\)/,
+    'the planned numbers are not one Fetch');
+  assert.match(bulk, /plan\.bookIds\.map\(\(bookId\) => \(\{ path: `\/api\/books\/\$\{bookId\}\/refetch`, body: \{\} \}\)\)/,
+    'the deleted chapters left are not restored by their rows');
+  // Reintroduce `throw new Error(reasonText(ended) || …)`: msgOf reads only a refused request's body, and a job that
+  // stopped for a reason it could name read "Could not start."
+  assert.match(bulk, /if \(ended\?\.status === 'error'\) \{ toast\(reasonText\(ended\) \|\| tr\('Fetch stopped\. Try another source or wait\.'\), 'error'\); break; \}/,
+    'a run that stopped does not say why');
+  assert.doesNotMatch(bulk, /throw new Error\(reasonText/, 'a stopped job\'s reason is thrown where msgOf cannot read it');
 });

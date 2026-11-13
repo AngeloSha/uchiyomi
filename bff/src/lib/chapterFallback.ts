@@ -91,8 +91,9 @@ export interface FallbackInput {
   automaticAllowed?: (chapter: SourceChapter) => Promise<boolean>;
   /**
    * Re-read the caller-specific source capability at the source-slot boundary. Ordinary jobs require the
-   * source still be primary/followed; a fill requires its still-authorised plan copy; tombstone restore
-   * requires the exact stored book identity. Unlike automaticAllowed this is never bypassed by a pin.
+   * source still be primary/followed; a fill requires its still-authorised plan copy; a tombstone restored
+   * from the copy stored on it requires the exact stored book identity. Unlike automaticAllowed this is never
+   * bypassed by a pin.
    */
   sourceAllowedNow?: (chapter: SourceChapter) => Promise<boolean>;
 }

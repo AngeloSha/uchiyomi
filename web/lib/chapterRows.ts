@@ -266,6 +266,31 @@ export function chunkNumbers<T>(numbers: T[], size = FETCH_CHUNK): T[][] {
 }
 
 /**
+ * What Select → Fetch asks for (#437): ONE Fetch of numbers (POST /api/sources/fetch) for the grey rows and for every
+ * deleted chapter whose number the listing has a copy of, and the restore by book id (POST /api/books/:id/refetch) for
+ * each deleted chapter left. The Fetch treats a tombstone as missing and lands the copy on its row, as the restore does,
+ * so a deleted stretch the series' sources list -- every chapter of a series that moved to another source -- is one job,
+ * where each deleted chapter was a job of its own, started only once the one before had ended. Only a tombstone that
+ * can come back in place takes the number: a file Uchiyomi downloaded (`owned`, absent read as yes), holding one
+ * chapter. A range or a hand-built library's file goes to the restore, which says why it cannot, rather than coming back
+ * as a second row beside its tombstone; so does a number nothing lists, for the copy stamped on its row. Two tombstones
+ * on one number are one number: only one file can be that chapter. Reintroduce the restore for every deleted chapter:
+ * "a deleted chapter the sources list is fetched by its number" in deletedGhosts.test.ts finds it among the book ids.
+ */
+export function fetchPlan(
+  ghosts: readonly Ghost[], listed: { has(n: number): boolean }, books: ReadonlyArray<Pick<Book, 'id' | 'owned'>>,
+): { numbers: number[]; bookIds: string[] } {
+  const owned = new Map(books.map((b) => [b.id, b.owned !== false]));
+  const numbers = new Set<number>();
+  const bookIds: string[] = [];
+  for (const g of ghosts) {
+    if (!g.bookId || (g.numberEnd == null && listed.has(g.number) && owned.get(g.bookId) === true)) numbers.add(g.number);
+    else bookIds.push(g.bookId);
+  }
+  return { numbers: [...numbers].sort((a, b) => a - b), bookIds };
+}
+
+/**
  * What the downloads pill counts: the chapters still to come across the running jobs, not their sizes --
  * a 300-chapter job at 290/300 is "Fetching 10 chapters", which is what its own progress line says
  * beneath (it read "Fetching 300 chapters" over a `290/300`). When that comes to nothing -- a job that has

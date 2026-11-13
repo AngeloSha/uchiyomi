@@ -793,6 +793,11 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'run.diskFull': () => tr('The library disk is full.'),
   'run.chapterLimit': () => tr('Stopped at this run\'s chapter limit; the rest wait for the next one.'),
 
+  // ---- A deleted chapter that could not be put back (#437, bff routes/sources.ts POST /api/books/:id/refetch)
+  'restore.notListed': (p) => tr('No source this series follows lists chapter {number} right now. Check for new chapters, or add a source that has it.', { number: num(p, 'number') }),
+  'restore.notInPlace': () => tr('That chapter cannot be put back where it was: its file is not one Uchiyomi downloaded under its usual name. Pick a copy under Versions to fetch it instead.'),
+  'restore.notDeleted': () => tr('That chapter was not deleted on purpose: its file went missing. Check for new chapters to fetch it again.'),
+
   // ---- A renumbering refused or put off
   'renumber.downloading': () => tr('Chapters are being fetched for this series. Try again when that ends.'),
   'renumber.checking': () => tr('This series is being checked right now. Try again when that ends.'),

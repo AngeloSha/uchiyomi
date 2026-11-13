@@ -1453,7 +1453,8 @@ two titles the sheet says *These look like different posts that share a number, 
 for an admin with **Number by posting order** (see *Chapter numbering* below). A chapter downloaded since v0.49.0
 also remembers the post it came from, so *on server* marks exactly that copy.
 
-**Fetch** beside a copy on a grey row takes exactly that copy, for anyone who may download. **Replace…**
+**Fetch** beside a copy on a grey row takes exactly that copy, for anyone who may download — on a deleted chapter's
+row too, where it lands on the deleted row. **Replace…**
 beside a copy of a chapter already here is admins only — and only on a file Uchiyomi downloaded, never one
 from a library you built, as with *Fetch again* — and is disabled on the copy already on disk: the sheet
 closes, *Replace with this version?* asks, and **Replace** is the *Fetch again* below with the copy named:
@@ -3177,10 +3178,16 @@ it back; Mihon lists it as *not downloaded*, as the switch above would. Nothing 
 place, everyone's reading history and its counts, and it is still not downloaded again by itself. A chapter whose
 file *Verify chapter files* found missing is not one of these — the hourly check fetches those back — and keeps its
 own look, as does a file gone from a library you built by hand (*File no longer on disk*). A copy saved on your
-device keeps the row a chapter you can open. Anyone allowed to download may press ☁: Uchiyomi restores only the exact
-source copy recorded on that deleted row, if the series still follows that source and it is safe and available. It
-never guesses another copy or fallback, and a manual-library file or a file holding a chapter range is left for an
-admin to restore by hand.
+device keeps the row a chapter you can open. Anyone allowed to download may press ☁ to bring it back onto its own row,
+with everyone's place in it: it fetches the copy a **Fetch** of that chapter would take now, from the sources the
+series follows — so a chapter deleted before the series moved to another source comes back from the new one. Only
+when none of them lists the chapter is the copy it was first downloaded from asked again, while that source is still
+installed, switched on and not cooling down. Tapping the row opens its versions, where **Fetch** beside a copy takes
+exactly that copy. To bring back many, select them and press **Fetch**: the ones the sources list come back as one
+download (since [#437](https://github.com/AngeloSha/uchiyomi/issues/437) that is all it takes after a series moved
+source — no need to remove the series and add it again). When a chapter cannot come back, the message says why and
+what to do: a file from a library you built by hand, or one holding a range of chapters, cannot be put back in place,
+but a copy picked under its versions can still be fetched.
 
 Since v0.43.0 the missing chapters can be marked read on the series page (section 4, *Marking chapters you
 don't have as read*), and with this switch on the marks reach Mihon:

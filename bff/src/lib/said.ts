@@ -593,6 +593,14 @@ const EN = {
   'run.diskFull': () => 'The library disk is full.',
   'run.chapterLimit': () => "Stopped at this run's chapter limit; the rest wait for the next one.",
 
+  // ---- A deleted chapter that could not be put back (#437, routes/sources.ts POST /api/books/:id/refetch). A refusal it
+  // shares with a Fetch (a cooldown, a blocked group) says what the Fetch says.
+  'restore.notListed': ({ number }: { number: number }) =>
+    `No source this series follows lists chapter ${number} right now. Check for new chapters, or add a source that has it.`,
+  'restore.notInPlace': () =>
+    'That chapter cannot be put back where it was: its file is not one Uchiyomi downloaded under its usual name. Pick a copy under Versions to fetch it instead.',
+  'restore.notDeleted': () => 'That chapter was not deleted on purpose: its file went missing. Check for new chapters to fetch it again.',
+
   // ---- A renumbering refused or put off (routes/numbering.ts, lib/numbering.ts)
   'renumber.downloading': () => 'Chapters are being fetched for this series. Try again when that ends.',
   'renumber.checking': () => 'This series is being checked right now. Try again when that ends.',
