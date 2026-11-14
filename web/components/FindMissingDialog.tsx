@@ -27,7 +27,7 @@ import type { SeriesSource } from '@/lib/types';
 import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
 import { fetchingToast, joinSentences } from '@/lib/jobs';
 import { editionOffer, editionOfferKey, type EditionOffer } from '@/lib/editions';
-import { languageName } from '@/lib/format';
+import { chapterNo, languageName } from '@/lib/format';
 
 interface Candidate {
   source: string; name: string; sourceSeriesId: string; title: string; coverUrl?: string;
@@ -128,7 +128,7 @@ function ChapterPicker({ numbers, selected, onChange }: {
                 className={`chip text-xs ${state === 'all' ? 'border-accent/60 text-accent' : state === 'some' ? 'border-accent/30 text-fog-200' : 'text-fog-500 line-through decoration-fog-600'}`}
               >
                 {/* <bdi>: a number range stays one unit inside an Arabic sentence. */}
-                <bdi>{r.lo === r.hi ? tr('Ch. {n}', { n: r.lo }) : tr('Ch. {a}–{b}', { a: r.lo, b: r.hi })}</bdi>
+                <bdi>{r.lo === r.hi ? tr('Ch. {n}', { n: chapterNo(r.lo) }) : tr('Ch. {a}–{b}', { a: chapterNo(r.lo), b: chapterNo(r.hi) })}</bdi>
               </button>
               {r.nums.length > 1 && (
                 <button type="button" aria-label={tr('Pick chapters one by one')} aria-expanded={open === r.lo}
@@ -142,7 +142,7 @@ function ChapterPicker({ numbers, selected, onChange }: {
         <div className="mt-2 flex max-h-40 flex-wrap gap-1 overflow-y-auto" data-lenis-prevent>
           {opened.nums.map((n) => (
             <button key={n} type="button" aria-pressed={selected.has(n)} onClick={() => onChange(toggleOne(selected, n))}
-              className={`chip px-2 text-[11px] ${selected.has(n) ? 'border-accent/60 text-accent' : 'text-fog-500'}`}>{n}</button>
+              className={`chip px-2 text-[11px] ${selected.has(n) ? 'border-accent/60 text-accent' : 'text-fog-500'}`}>{chapterNo(n)}</button>
           ))}
         </div>
       )}
@@ -442,9 +442,10 @@ export function FindMissingDialog({ seriesId, onClose, onAddEdition }: {
         <>
           <p className="text-sm text-fog-300">
             {d.have.count === 1 ? tr('You have 1 chapter') : tr('You have {n} chapters').replace('{n}', String(d.have.count))}
-            {d.have.first != null && `, ${d.have.first}–${d.have.last}`}
+            {/* chapterNo: the held numbers arrive as float8 copies of float4s, 80.2 as 80.19999694824219 (#439). */}
+            {d.have.first != null && `, ${chapterNo(d.have.first)}–${chapterNo(d.have.last ?? d.have.first)}`}
             {d.gaps.length
-              ? `. ${tr('Missing')}: ${d.gaps.map((g) => (g.lo === g.hi ? g.lo : `${g.lo}–${g.hi}`)).join(', ')}`
+              ? `. ${tr('Missing')}: ${d.gaps.map((g) => (g.lo === g.hi ? chapterNo(g.lo) : `${chapterNo(g.lo)}–${chapterNo(g.hi)}`)).join(', ')}`
               : `. ${tr('No gaps between them.')}`}
           </p>
 

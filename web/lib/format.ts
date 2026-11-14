@@ -376,3 +376,19 @@ function intlAgo(diff: number, at: number): string | null {
     return null;
   }
 }
+
+/**
+ * A chapter number as it was written: 80.2, never 80.19999694824219 (#439). lib_books.number is a float4 (`real`), and
+ * the server reads held numbers as float8 (lib/libraryNumbers.ts HAVE_SQL), which keeps the float4's binary value
+ * exactly. This is the shortest decimal that is the same float4, as Postgres itself prints one. Display only: the
+ * numbers a page compares and sends back stay as they came.
+ */
+export function chapterNo(n: number): string {
+  if (!Number.isFinite(n) || Number.isInteger(n)) return String(n);
+  const f = Math.fround(n);
+  for (let p = 1; p <= 9; p++) {
+    const s = Number(n.toPrecision(p));
+    if (Math.fround(s) === f) return String(s);
+  }
+  return String(n);
+}

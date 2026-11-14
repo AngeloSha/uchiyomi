@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  isVolumeName, chapterLabel, chapterName, bytes, progressOf, formatClock, durationText, etaLine, etaText, untilText,
+  isVolumeName, chapterLabel, chapterName, chapterNo, bytes, progressOf, formatClock, durationText, etaLine, etaText, untilText,
   relativeTime, relativeTimeShort, setActiveLocale, activeLocale, wallClock,
 } from '../lib/format';
 import { setActiveDict } from '../lib/i18n';
@@ -310,4 +310,17 @@ test('no English words wrap a relativeTime: the phrase is in the reader\'s langu
     "the Continue card's 'on <device> <when>' is English around the reader's language");
   assert.match(cards, /const where = elsewhere \? shownDeviceName\(elsewhere\.name, \{ device: true \}\) \|\| tr\('another device'\) : '';/,
     "the Continue card names the device with a stored English fallback (\"on Browser\") instead of the reader's words");
+});
+
+test('chapterNo: a held chapter number reads as it was written, not as its float4 (#439)', () => {
+  // The server reads lib_books.number (float4) as float8: 80.2 arrives as 80.19999694824219.
+  // Reintroduce `String(n)` in lib/format.ts chapterNo and the first line reads "80.19999694824219".
+  assert.equal(chapterNo(80.19999694824219), '80.2');
+  for (const n of [12.5, 1.1, 0.1, 1234.56, 99.9, 3.75]) assert.equal(chapterNo(Math.fround(n)), String(n), `${n} came back changed`);
+  for (const n of [0, 1, 80, 1000]) assert.equal(chapterNo(n), String(n));
+  assert.equal(chapterNo(80.2), '80.2', 'an exact number is left as it is');
+  // What the dialog prints with it, for the reporter's series: "0–80.2", and the chips with it.
+  const dialog = readFileSync(join(__dirname, '..', 'components/FindMissingDialog.tsx'), 'utf8');
+  assert.match(dialog, /\$\{chapterNo\(d\.have\.first\)\}–\$\{chapterNo\(d\.have\.last \?\? d\.have\.first\)\}/);
+  assert.match(dialog, /tr\('Ch\. \{n\}', \{ n: chapterNo\(r\.lo\) \}\)/);
 });
