@@ -2,7 +2,11 @@
 
 ## v0.108.1 — 2026-11-14
 
-**Find missing chapters writes chapter numbers as they are.**
+**Title logos arrive without the written title flashing first, and Find missing chapters writes chapter numbers as they are.**
+
+### Title logos without the flash
+
+- On a computer, a hero with a title logo drew the written title while the logo downloaded, then swapped it out: in every hero and at every turn of Home's carousel. The written title now keeps its place (and stays readable to screen readers) without being drawn while the logo downloads, and is drawn if the logo fails or takes longer than 1.5 seconds. Home's carousel also fetches the next slide's logo with its backdrop.
 
 ### Chapter numbers as they are written
 

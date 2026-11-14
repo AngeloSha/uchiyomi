@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { HeroTitle } from '../components/HeroTitle';
 import { titleArtStyle, titleArtAccent, titleLogoUrl, titleLogoNeedsCaption, titleNeedsNaturalScript, titleArtPending, titleArtPollAllowed } from '../lib/titleArt';
 import type { SeriesTitleArt } from '../lib/types';
@@ -69,7 +71,9 @@ test('a downloading logo never blanks the accessible title, and only readable En
   const english = renderToStaticMarkup(React.createElement(HeroTitle, { series: series(art()) }));
   assert.match(english, /<h1[^>]*dir="auto"/);
   assert.match(english, /<img[^>]*alt=""[^>]*aria-hidden="true"/);
-  assert.match(english, /class="hero-title-text">The Hero<\/span>/, 'the readable fallback stays while the image downloads');
+  // The written title stays in place and in the accessibility tree while the logo downloads, but is not drawn: drawn, it
+  // flashed in every hero before the logo replaced it (11-14). Reintroduce the plain class: this reads hero-title-text alone.
+  assert.match(english, /class="hero-title-text hero-title-waiting">The Hero<\/span>/, 'the written title flashes while the logo downloads');
   assert.match(english, /hero-title-loading/, 'the not-yet-loaded picture must not shift the controls');
   assert.equal(titleLogoNeedsCaption(art()), false);
   for (const language of ['original', null] as const) {
@@ -112,4 +116,16 @@ test('only pending jobs are polled and a run ends after a minute even if the pro
   assert.equal(titleArtPollAllowed(1000, 60_999), true);
   assert.equal(titleArtPollAllowed(1000, 61_000), false);
   assert.equal(titleArtPollAllowed(1000, 999), false);
+});
+
+test('a held-back title is still drawn after a wait, and the carousel warms the next slide\'s logo', () => {
+  // The wait ends in the written title on a slow connection, and a failed logo never holds it back (HeroTitle).
+  const hero = readFileSync(join(__dirname, '..', 'components/HeroTitle.tsx'), 'utf8');
+  assert.match(hero, /setTimeout\(\(\) => setWaited\(candidate\), LOGO_WAIT_MS\)/);
+  assert.match(hero, /const waiting = !!candidate && !logo && waited !== candidate;/);
+  assert.match(readFileSync(join(__dirname, '..', 'app/globals.css'), 'utf8'), /\.hero-title-waiting \{ opacity: 0; \}/,
+    'held back with visibility it would leave the accessibility tree');
+  // Home's carousel fetches the next slide's logo with its backdrop, on a computer only (the logo is drawn only there).
+  const carousel = readFileSync(join(__dirname, '..', 'components/HeroCarousel.tsx'), 'utf8');
+  assert.match(carousel, /const nextLogo = wide && nxt \? titleLogoUrl\(nxt\.id, nxt\.titleArt\) : null;/);
 });

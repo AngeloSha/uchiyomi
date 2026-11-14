@@ -1,4 +1,5 @@
 'use client';
+import { titleLogoUrl } from '@/lib/titleArt';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
@@ -75,6 +76,11 @@ export function HeroCarousel({ slides }: { slides: Series[] }) {
     const nxt = slides[(i + 1) % n];
     // A phone's hero is the cover (components/PhoneHeroCover.tsx), so a phone warms the next cover instead.
     if (nxt) { const im = new Image(); im.src = wide ? backdropSources(nxt.id, nxt.autoHero, { hero: true, wide }, '')[0] : img.seriesThumb(nxt.id, nxt.artVersion, 1600); }
+    // And its title logo, which only a computer draws (HeroTitle `logo={wide}`): fetched only once its slide showed, the
+    // next title waited for it at every turn. Reintroduce by dropping it: "the carousel warms the next slide's logo" in
+    // titleArt.test.ts.
+    const nextLogo = wide && nxt ? titleLogoUrl(nxt.id, nxt.titleArt) : null;
+    if (nextLogo) { const lm = new Image(); lm.src = nextLogo; }
   }, [i, n, slides, wide]);
 
   if (!n || !cur) return null;
