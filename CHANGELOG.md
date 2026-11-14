@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.108.1 — 2026-11-14
+
+**Find missing chapters writes chapter numbers as they are.**
+
+### Chapter numbers as they are written
+
+- **Find missing chapters** said "You have 170 chapters, 0–80.19999694824219" for a series with decimal chapters ([#439](https://github.com/AngeloSha/uchiyomi/issues/439), **brettohland**). Chapter numbers are stored compactly, and read back for this dialog they kept the stored value's last binary digits. The dialog, its gaps and its chapter chips now write each number as it was written: 0–80.2. Display only: nothing it compares or sends changes.
+
+### Upgrading
+
+- No database change. The Umbrel package pins the published v0.108.0.
+
 ## v0.108.0 — 2026-11-13
 
 **Reading progress comes along with an import, a page streamed to the end in Panels counts as read, a deleted chapter can come back from any source, and the iPhone app fits the Duo.**
