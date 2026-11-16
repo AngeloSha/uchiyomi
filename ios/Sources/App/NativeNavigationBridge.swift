@@ -31,7 +31,7 @@ final class NativeNavigationBridge: NSObject, WKScriptMessageHandler {
         self.origin = origin; self.changed = changed
     }
     func attach(_ view: WKWebView) { webView = view }
-    /// Native controls belong only in the system side rail. Folding restores the web controls.
+    /// Native controls belong only in the system side rail. Losing that rail restores the web controls.
     func setAvailable(_ value: Bool) {
         guard available != value else { return }
         available = value

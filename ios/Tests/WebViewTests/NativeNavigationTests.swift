@@ -86,7 +86,7 @@ final class NativeNavigationTests: XCTestCase {
             _ = try await web.evaluateJavaScript("send('state',{state});true")
             try await waitFor { bridge.presentation == state }
             bridge.setAvailable(false)
-            XCTAssertNil(bridge.presentation, "Folding immediately revokes native actions")
+            XCTAssertNil(bridge.presentation, "Losing the side rail immediately revokes native actions")
             bridge.retire()
             _ = try await web.evaluateJavaScript("send('hello',{state}); true")
             try await Task.sleep(nanoseconds: 100_000_000)
