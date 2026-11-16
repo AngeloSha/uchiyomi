@@ -11,6 +11,51 @@ private struct EmptyVault: CookieVault {
 // Uses the real exported frontend in a test bundle. These files are never part of Uchiyomi.app.
 @MainActor
 final class CachedWebViewTests: XCTestCase {
+    func testThemedNavigationUsesWebIconsAndRestoresWebFallback() async throws {
+        let export = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "out", withExtension: nil))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let fixture = try ExportFixture(directory: export, revision: "themed-navigation")
+        let store = ProfileStore(root: root)
+        let profile = try store.profile(for: URL(string: "https://127.0.0.1:9")!, in: .init())
+        try store.save(.init(profiles: [profile], selectedID: profile.id))
+        let cache = AssetCache(root: store.directory(for: profile).appendingPathComponent("ui"))
+        let prepared = try await cache.prepare(client: fixture) { _, _ in }
+        try await cache.confirm(prepared)
+        let model = ReaderModel(root: root, assetClient: { _ in fixture })
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(rootView: ReaderView(model: model))
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil; try? FileManager.default.removeItem(at: root) }
+        await model.restore()
+        let web = try XCTUnwrap(model.webView)
+        try await waitFor(web, "!!document.querySelector('input[type=password]')")
+        _ = try await web.callAsyncJavaScript(Self.seed, arguments: [:], in: nil, contentWorld: .page)
+        try await reloadAndWait(web, "document.body.innerText.includes('Offline fixture') && document.documentElement.hasAttribute('data-host-navigation')")
+        let state = try XCTUnwrap(model.navigation)
+        XCTAssertEqual(state.auth, .offline)
+        XCTAssertEqual(state.items.filter(\.enabled).map(\.id), [.offline])
+        XCTAssertEqual(state.appearance?.accent, "#7c5cff")
+        XCTAssertNotNil(state.appearance?.image("home"))
+        XCTAssertNotEqual(state.appearance?.icons["home"], state.appearance?.icons["library"])
+        let rail = try await web.evaluateJavaScript("getComputedStyle(document.documentElement).getPropertyValue('--rail-w').trim()") as? String
+        XCTAssertEqual(rail, "0px")
+        _ = try await web.evaluateJavaScript("document.documentElement.style.setProperty('--accent','255 90 40');document.documentElement.setAttribute('data-tone','midnight');true")
+        for _ in 0..<100 {
+            if model.navigation?.appearance?.accent == "#ff5a28" { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(model.navigation?.appearance?.accent, "#ff5a28", "The native tint follows a live web theme change")
+        XCTAssertEqual(model.navigation?.appearance?.background, "#111727", "Surface tones follow the web theme too")
+        _ = try await web.callAsyncJavaScript("await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return true", arguments: [:], in: nil, contentWorld: .page)
+        let screenshot = XCTAttachment(image: window.screen.screenshotForTest(window: window))
+        screenshot.name = "Themed native navigation"; screenshot.lifetime = .keepAlways; add(screenshot)
+        model.navigationBridge?.reset()
+        try await waitFor(web, "!document.documentElement.hasAttribute('data-host-navigation') && !!document.querySelector('nav')")
+        await model.addServer()
+    }
+
     func testPreparedReaderWithUnavailableServer() async throws {
         let directory = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "out", withExtension: nil))
         let manifest = try JSONDecoder().decode(AssetManifest.self, from: Data(contentsOf: directory.appendingPathComponent("mobile-assets.json")))

@@ -140,7 +140,7 @@ final class NativeAppActionsTests: XCTestCase {
     }
 }
 
-private struct AppControlsEmptyVault: CookieVault {
+struct AppControlsEmptyVault: CookieVault {
     func read() -> Data? { nil }
     func write(_ data: Data) {}
 }
@@ -152,7 +152,7 @@ private final class AppControlsLoadingHandler: NSObject, WKScriptMessageHandler 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) { started() }
 }
 
-private struct AppControlsPage: AssetFetching {
+struct AppControlsPage: AssetFetching {
     private let paths = ["/index.html", "/downloads/index.html", "/reader/index.html", "/index.txt", "/downloads/index.txt", "/reader/index.txt", "/_next/static/reader.js"]
     private let bytes = Data("""
         <!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><h1>App controls fixture</h1><script>
