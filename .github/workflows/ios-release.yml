@@ -195,7 +195,7 @@ jobs:
           persist-credentials: false
       - name: Get the configured Pages URL
         id: pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
       - name: Verify every advertised public release
         env:
           GH_TOKEN: ${{ github.token }}
