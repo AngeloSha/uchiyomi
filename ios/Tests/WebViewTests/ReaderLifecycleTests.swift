@@ -24,35 +24,38 @@ final class ReaderLifecycleTests: XCTestCase {
             await model.restore()
             try await waitForPath(model, "/")
             try await waitForFallback(true)
-            let web = try XCTUnwrap(model.webView)
-            _ = try await web.evaluateJavaScript("uchiyomiNative.appActions.request('servers'); true")
+            // Let the model release its view before deleting the persistent store.
+            // An async test's strong local can otherwise outlive this lexical scope.
+            weak var web: WKWebView? = try XCTUnwrap(model.webView)
+            _ = try await web?.evaluateJavaScript("uchiyomiNative.appActions.request('servers'); true")
             for _ in 0..<100 {
                 if model.showingServers { break }
                 try await Task.sleep(nanoseconds: 20_000_000)
             }
             XCTAssertTrue(model.showingServers, "An old offline frontend must retain a usable server picker")
             model.showingServers = false
-            let retired = try await web.evaluateJavaScript("({version:1,documentID:uchiyomiNative.appActions.documentID,action:'controls-ready'})")
-            _ = try await web.evaluateJavaScript("uchiyomiNative.appActions.request('controls-ready'); true")
+            let retired = try await web?.evaluateJavaScript("({version:1,documentID:uchiyomiNative.appActions.documentID,action:'controls-ready'})")
+            _ = try await web?.evaluateJavaScript("uchiyomiNative.appActions.request('controls-ready'); true")
             try await waitForFallback(false)
 
-            _ = try await web.evaluateJavaScript("uchiyomiNative.appActions.request('controls-unavailable'); true")
+            _ = try await web?.evaluateJavaScript("uchiyomiNative.appActions.request('controls-unavailable'); true")
             try await waitForFallback(true)
             model.dismissStatus()
             XCTAssertTrue(model.showServerFallback, "Dismissing the outage notice must not strand server selection while Profile is offline")
-            _ = try await web.evaluateJavaScript("uchiyomiNative.appActions.request('controls-ready'); true")
+            _ = try await web?.evaluateJavaScript("uchiyomiNative.appActions.request('controls-ready'); true")
             try await waitForFallback(false)
 
-            model.readerDocumentStarted(web)
-            web.reload()
+            model.readerDocumentStarted(try XCTUnwrap(web))
+            web?.reload()
             try await waitForPath(model, "/")
             try await waitForFallback(true)
-            _ = try await web.callAsyncJavaScript("window.webkit.messageHandlers.appActions.postMessage(retired); return true", arguments: ["retired": retired!], in: nil, contentWorld: .page)
+            _ = try await web?.callAsyncJavaScript("window.webkit.messageHandlers.appActions.postMessage(retired); return true", arguments: ["retired": retired!], in: nil, contentWorld: .page)
             try await Task.sleep(nanoseconds: 100_000_000)
             XCTAssertTrue(model.showServerFallback, "A retired document must not hide the new document's recovery control")
-            _ = try await web.evaluateJavaScript("uchiyomiNative.appActions.request('controls-ready'); true")
+            _ = try await web?.evaluateJavaScript("uchiyomiNative.appActions.request('controls-ready'); true")
             try await waitForFallback(false)
             await model.addServer()
+            XCTAssertNil(web, "The old reader must close before its persistent store is removed")
         } catch {
             await model.addServer()
             throw error

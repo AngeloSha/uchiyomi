@@ -33,6 +33,15 @@ if [[ -z "$simulator" ]]; then
   created=true
 fi
 xcrun simctl bootstatus "$simulator" -b
+if [[ "$created" == true ]]; then
+  # The first boot performs data migration. On hosted iOS 27.2 simulators,
+  # ScreenTimeSettingsAgent can remain blocked on the background scheduler
+  # afterward and exhaust the app's cooperative threads during WebKit tests.
+  # Restart those services before tests, after the initial migration attempt.
+  # Only restart our disposable simulator; leave caller-owned devices untouched.
+  xcrun simctl shutdown "$simulator"
+  xcrun simctl bootstatus "$simulator" -b
+fi
 # Keep simulator signing enabled: the Keychain fixture needs it. No Apple team is needed.
 build_args=(-project ios/Uchiyomi.xcodeproj -scheme Uchiyomi -configuration Debug
   -destination "platform=iOS Simulator,id=$simulator"
@@ -47,6 +56,7 @@ auth_test=UchiyomiWebViewTests/CachedWebViewTests/testExpiredIdentityAccountBoun
 # Run each in a fresh host, as for authentication. Every invocation must pass;
 # no assertion is skipped or retried, and every result bundle is retained.
 cache_tests=(
+  UchiyomiWebViewTests/CachedWebViewTests/testDuoNavigationUsesWebThemeAndPhonesKeepWebControls
   UchiyomiWebViewTests/CachedWebViewTests/testAutomaticUIUpdateAndFailedStartupRecoveryPreserveOfflineData
   UchiyomiWebViewTests/CachedWebViewTests/testPreparedReaderWithUnavailableServer
   UchiyomiWebViewTests/CachedWebViewTests/testTwoServerProfilesWithSameAccountAndChapterIDsAndConfirmedRemoval
