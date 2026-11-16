@@ -47,6 +47,7 @@ auth_test=UchiyomiWebViewTests/CachedWebViewTests/testExpiredIdentityAccountBoun
 # Run each in a fresh host, as for authentication. Every invocation must pass;
 # no assertion is skipped or retried, and every result bundle is retained.
 cache_tests=(
+  UchiyomiWebViewTests/CachedWebViewTests/testDuoNavigationUsesWebThemeAndPhonesKeepWebControls
   UchiyomiWebViewTests/CachedWebViewTests/testAutomaticUIUpdateAndFailedStartupRecoveryPreserveOfflineData
   UchiyomiWebViewTests/CachedWebViewTests/testPreparedReaderWithUnavailableServer
   UchiyomiWebViewTests/CachedWebViewTests/testTwoServerProfilesWithSameAccountAndChapterIDsAndConfirmedRemoval
