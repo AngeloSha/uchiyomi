@@ -11,6 +11,11 @@ import { iosNavigationTransport } from '../lib/hostNavigation/ios';
 const state = (auth: 'authed' | 'offline' | 'anon' = 'authed') => navigationPresentation({ path: '/', auth, downloader: true, admin: true });
 class Transport implements NavigationTransport {
   messages: WebNavigationMessage[] = [];
+  isAvailable = true;
+  availabilityChanged?: () => void;
+  available() { return this.isAvailable; }
+  observeAvailability(changed: () => void) { this.availabilityChanged = changed; return () => { this.availabilityChanged = undefined; }; }
+  setAvailable(available: boolean) { this.isAvailable = available; this.availabilityChanged?.(); }
   receive?: (message: unknown) => void;
   send(message: WebNavigationMessage) { this.messages.push(message); }
   subscribe(receive: (message: unknown) => void) { this.receive = receive; return () => { this.receive = undefined; }; }
@@ -84,7 +89,14 @@ test('presentation keeps permissions, downloads status and secondary routes', ()
 
 test('the adapter requires the themed capability without changing the cache protocol', () => {
   const capability = { version: 2, send() {}, subscribe() { return () => {}; } };
-  assert.ok(iosNavigationTransport({ uchiyomiNative: { platform: 'ios', protocolVersion: 2, navigation: capability } }));
+  const scope = { uchiyomiNative: { platform: 'ios', protocolVersion: 2, navigation: capability } };
+  let layout: string | null = null;
+  const root = { getAttribute: () => layout } as unknown as HTMLElement;
+  const adapter = iosNavigationTransport(scope, root)!;
+  assert.equal(adapter.available(), false);
+  layout = 'bottom'; assert.equal(adapter.available(), false);
+  layout = 'side'; assert.equal(adapter.available(), true);
+  layout = null; assert.equal(adapter.available(), false);
   for (const navigation of [undefined, { ...capability, version: 1 }, { ...capability, send: null }]) {
     assert.equal(iosNavigationTransport({ uchiyomiNative: { platform: 'ios', protocolVersion: 2, navigation } }), null);
   }
@@ -104,7 +116,7 @@ test('reset, failed delivery and stale sessions never leave web controls hidden'
 
 // Exercise the production hook with the same isolated-hook approach as the
 // profile-switcher portal suite. The account fence and controller are real.
-test('native actions respect the synchronous account fence before React rerenders', () => {
+test('the production hook keeps phone web controls, handles folding, and fences accounts', () => {
   const transport = new Transport(), effects: (() => void | (() => void))[] = [];
   const actions: string[] = [], cleanups: (() => void)[] = [];
   const modules: Record<string, unknown> = {
@@ -127,8 +139,20 @@ test('native actions respect the synchronous account fence before React rerender
     setCurrentUser('owner-a');
     module.exports.useHostNavigation({ ...state(), appearance: {} }, { account: 'owner-a', path: '/',
       navigate: (href: string) => actions.push(href) });
+    transport.isAvailable = false;
     for (const effect of effects) { const cleanup = effect(); if (cleanup) cleanups.push(cleanup); }
-    const session = transport.messages[0].session;
+    assert.equal(transport.messages.length, 0, 'A regular phone never requests native ownership');
+    transport.setAvailable(true);
+    // The same live document can move between the Duo rail and ordinary phone navigation.
+    transport.setAvailable(false);
+    assert.equal(transport.messages.at(-1)?.kind, 'stop');
+    const stopped = transport.messages.length;
+    transport.setAvailable(false);
+    assert.equal(transport.messages.length, stopped);
+    transport.setAvailable(true);
+    const session = transport.messages.at(-1)!.session;
+    assert.notEqual(session, transport.messages[0].session);
+    assert.equal(transport.messages.at(-1)?.kind, 'hello');
     transport.host({ kind: 'ready', session });
     transport.host({ kind: 'mounted', revision: 1, session });
     const request = (id: string, action: string) => transport.host({ kind: 'action', session, revision: 1, request: id, action });

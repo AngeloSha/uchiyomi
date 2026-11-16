@@ -22,13 +22,16 @@ struct ReaderNavigationAppearance: Equatable, Codable {
     let foreground: String
     let muted: String
     let background: String
+    let selection: String
     let moreLabel: String
     let icons: [String: String]
 
     static func color(_ hex: String) -> UIColor {
         let value = UInt32(hex.dropFirst(), radix: 16) ?? 0
-        return UIColor(red: CGFloat((value >> 16) & 255) / 255, green: CGFloat((value >> 8) & 255) / 255,
-                       blue: CGFloat(value & 255) / 255, alpha: 1)
+        let rgba = hex.count == 9
+        let rgb = rgba ? value >> 8 : value
+        return UIColor(red: CGFloat((rgb >> 16) & 255) / 255, green: CGFloat((rgb >> 8) & 255) / 255,
+                       blue: CGFloat(rgb & 255) / 255, alpha: rgba ? CGFloat(value & 255) / 255 : 1)
     }
     func image(_ id: String) -> UIImage? {
         guard let encoded = icons[id], encoded.utf8.count <= 12_288,
@@ -43,7 +46,7 @@ struct ReaderNavigationAppearance: Equatable, Codable {
     }
     var valid: Bool {
         let keys = Set(ReaderNavigationAction.allCases.map(\.rawValue) + ["more"])
-        return [accent, foreground, muted, background].allSatisfy { $0.range(of: "^#[0-9a-fA-F]{6}$", options: .regularExpression) != nil }
+        return [accent, foreground, muted, background, selection].allSatisfy { $0.range(of: "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$", options: .regularExpression) != nil }
             && !moreLabel.isEmpty && moreLabel.utf16.count <= 120
             && icons.count <= keys.count && Set(icons.keys).isSubset(of: keys)
             && icons.keys.allSatisfy { image($0) != nil }

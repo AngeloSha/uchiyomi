@@ -22,7 +22,7 @@ export type Destination = typeof PRIMARY_DESTINATIONS[number]['id'];
 export type NavigationAction = Destination | typeof SECONDARY_DESTINATIONS[number]['id'];
 export type NavigationAuth = 'loading' | 'anon' | 'authed' | 'offline';
 export interface NavigationAppearance {
-  accent: string; foreground: string; muted: string; background: string;
+  accent: string; foreground: string; muted: string; background: string; selection: string;
   moreLabel: string;
   icons: Record<string, string>;
 }

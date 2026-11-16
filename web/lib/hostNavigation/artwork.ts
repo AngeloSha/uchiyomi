@@ -11,13 +11,15 @@ export function readNavigationAppearance(): Omit<NavigationAppearance, 'icons' |
     context.clearRect(0, 0, 1, 1);
     context.fillStyle = value;
     context.fillRect(0, 0, 1, 1);
-    return '#' + [...context.getImageData(0, 0, 1, 1).data].slice(0, 3).map(n => n.toString(16).padStart(2, '0')).join('');
+    const bytes = [...context.getImageData(0, 0, 1, 1).data];
+    return '#' + (bytes[3] === 255 ? bytes.slice(0, 3) : bytes).map(n => n.toString(16).padStart(2, '0')).join('');
   };
   return {
     accent: color(`rgb(${style.getPropertyValue('--accent')})`),
     foreground: color(style.getPropertyValue('--color-fog-50')),
-    muted: color(style.getPropertyValue('--color-fog-500')),
+    muted: color(style.getPropertyValue('--color-fog-400')),
     background: color(style.getPropertyValue('--color-ink-850')),
+    selection: color(`rgb(${style.getPropertyValue('--accent')} / 0.14)`),
   };
 }
 

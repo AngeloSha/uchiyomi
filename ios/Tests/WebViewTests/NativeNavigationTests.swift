@@ -33,7 +33,7 @@ final class NativeNavigationTests: XCTestCase {
             let image = UIGraphicsImageRenderer(size: CGSize(width: 24, height: 24), format: format).pngData { context in
                 UIColor.white.setStroke(); context.cgContext.stroke(CGRect(x: 3, y: 3, width: 18, height: 18), width: 2)
             }.base64EncodedString()
-            let appearance = ReaderNavigationAppearance(accent: "#ff0088", foreground: "#ffffff", muted: "#777788", background: "#0b0b0f", moreLabel: "More",
+            let appearance = ReaderNavigationAppearance(accent: "#ff0088", foreground: "#ffffff", muted: "#777788", background: "#0b0b0f", selection: "#7c5cff24", moreLabel: "More",
                 icons: Dictionary(uniqueKeysWithValues: (ReaderNavigationAction.allCases.map(\.rawValue) + ["more"]).map { ($0, image) }))
             let state = ReaderNavigationPresentation(auth: .authed, immersive: false, blocked: false, selected: .home,
                 items: ReaderDestination.allCases.map { .init(id: ReaderNavigationAction(rawValue: $0.rawValue)!, label: $0.rawValue, enabled: true) },
@@ -47,6 +47,12 @@ final class NativeNavigationTests: XCTestCase {
                 window.send=(kind,extra={})=>uchiyomiNative.navigation.send({kind,version:2,session,revision:1,...extra});
                 send('hello',{state});return true;
                 """, arguments: ["state": object], in: nil, contentWorld: .page)
+            try await Task.sleep(nanoseconds: 100_000_000)
+            XCTAssertNil(bridge.presentation)
+            let phoneMessages = try await web.evaluateJavaScript("messages.length") as? Int
+            XCTAssertEqual(phoneMessages, 0, "Regular phones cannot acquire native navigation")
+            bridge.setAvailable(true)
+            _ = try await web.evaluateJavaScript("send('hello',{state});true")
             try await waitFor { (try? await web.evaluateJavaScript("messages.some(m=>m.kind==='ready')")) as? Bool == true }
             XCTAssertNil(bridge.presentation, "Ready alone must not replace web navigation")
             _ = try await web.evaluateJavaScript("send('state',{state}); true")
@@ -69,6 +75,18 @@ final class NativeNavigationTests: XCTestCase {
             _ = try await web.evaluateJavaScript("send('state',{revision:2,state:{...state,appearance:{...state.appearance,icons:{...state.appearance.icons,home:'not-a-png'}}}}); true")
             try await waitFor { bridge.presentation == nil }
             try await waitFor { (try? await web.evaluateJavaScript("messages.some(m=>m.kind==='reset')")) as? Bool == true }
+            // Losing the rail revokes pending handshakes too; reopening permits a fresh session.
+            bridge.setAvailable(false)
+            _ = try await web.evaluateJavaScript("messages=[];session=crypto.randomUUID();send('hello',{state});true")
+            try await Task.sleep(nanoseconds: 100_000_000)
+            XCTAssertNil(bridge.presentation)
+            bridge.setAvailable(true)
+            _ = try await web.evaluateJavaScript("send('hello',{state});true")
+            try await waitFor { (try? await web.evaluateJavaScript("messages.some(m=>m.kind==='ready')")) as? Bool == true }
+            _ = try await web.evaluateJavaScript("send('state',{state});true")
+            try await waitFor { bridge.presentation == state }
+            bridge.setAvailable(false)
+            XCTAssertNil(bridge.presentation, "Folding immediately revokes native actions")
             bridge.retire()
             _ = try await web.evaluateJavaScript("send('hello',{state}); true")
             try await Task.sleep(nanoseconds: 100_000_000)

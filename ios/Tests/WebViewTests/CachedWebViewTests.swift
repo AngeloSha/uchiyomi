@@ -11,7 +11,7 @@ private struct EmptyVault: CookieVault {
 // Uses the real exported frontend in a test bundle. These files are never part of Uchiyomi.app.
 @MainActor
 final class CachedWebViewTests: XCTestCase {
-    func testThemedNavigationUsesWebIconsAndRestoresWebFallback() async throws {
+    func testDuoNavigationUsesWebThemeAndPhonesKeepWebControls() async throws {
         let export = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "out", withExtension: nil))
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let fixture = try ExportFixture(directory: export, revision: "themed-navigation")
@@ -32,11 +32,26 @@ final class CachedWebViewTests: XCTestCase {
         let web = try XCTUnwrap(model.webView)
         try await waitFor(web, "!!document.querySelector('input[type=password]')")
         _ = try await web.callAsyncJavaScript(Self.seed, arguments: [:], in: nil, contentWorld: .page)
-        try await reloadAndWait(web, "document.body.innerText.includes('Offline fixture') && document.documentElement.hasAttribute('data-host-navigation')")
+        try await reloadAndWait(web, "document.body.innerText.includes('Offline fixture') && !!document.documentElement.getAttribute('data-native-navigation-layout')")
+        let layout = try await web.evaluateJavaScript("document.documentElement.getAttribute('data-native-navigation-layout')") as? String
+        if layout != "side" {
+            // No native takeover on a regular iPhone: the existing floating web bar remains.
+            try await waitFor(web, "!!document.querySelector('nav.fixed.bottom-0 a[href^=\"/downloads\"]')")
+            XCTAssertNil(model.navigation)
+            let native = try await web.evaluateJavaScript("document.documentElement.hasAttribute('data-host-navigation')") as? Bool
+            XCTAssertEqual(native, false)
+            let screenshot = XCTAttachment(image: window.screen.screenshotForTest(window: window))
+            screenshot.name = "Regular iPhone unchanged web navigation"; screenshot.lifetime = .keepAlways; add(screenshot)
+            await model.addServer()
+            return
+        }
+        try await waitFor(web, "document.documentElement.hasAttribute('data-host-navigation')")
         let state = try XCTUnwrap(model.navigation)
         XCTAssertEqual(state.auth, .offline)
         XCTAssertEqual(state.items.filter(\.enabled).map(\.id), [.offline])
         XCTAssertEqual(state.appearance?.accent, "#7c5cff")
+        XCTAssertEqual(state.appearance?.muted, "#9292a3", "Inactive glyphs match Sidebar's fog-400")
+        XCTAssertEqual(state.appearance?.selection.count, 9, "Selection preserves the web background alpha")
         XCTAssertNotNil(state.appearance?.image("home"))
         XCTAssertNotEqual(state.appearance?.icons["home"], state.appearance?.icons["library"])
         let rail = try await web.evaluateJavaScript("getComputedStyle(document.documentElement).getPropertyValue('--rail-w').trim()") as? String
@@ -48,9 +63,16 @@ final class CachedWebViewTests: XCTestCase {
         }
         XCTAssertEqual(model.navigation?.appearance?.accent, "#ff5a28", "The native tint follows a live web theme change")
         XCTAssertEqual(model.navigation?.appearance?.background, "#111727", "Surface tones follow the web theme too")
+        // Theme overrides are test assertions only. Restore the user's purple default for the preview.
+        _ = try await web.evaluateJavaScript("document.documentElement.style.removeProperty('--accent');document.documentElement.removeAttribute('data-tone');true")
+        for _ in 0..<100 {
+            if model.navigation?.appearance?.accent == "#7c5cff" { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(model.navigation?.appearance?.accent, "#7c5cff")
         _ = try await web.callAsyncJavaScript("await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return true", arguments: [:], in: nil, contentWorld: .page)
         let screenshot = XCTAttachment(image: window.screen.screenshotForTest(window: window))
-        screenshot.name = "Themed native navigation"; screenshot.lifetime = .keepAlways; add(screenshot)
+        screenshot.name = "Duo purple navigation"; screenshot.lifetime = .keepAlways; add(screenshot)
         model.navigationBridge?.reset()
         try await waitFor(web, "!document.documentElement.hasAttribute('data-host-navigation') && !!document.querySelector('nav')")
         await model.addServer()

@@ -317,6 +317,7 @@ private struct ReaderWebView: UIViewRepresentable {
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
         if model.webView === view {
+            model.navigationBridge?.setAvailable(navigationLayout == .side)
             model.appActions?.setNavigationLayout(navigationLayout)
             if !view.isLoading { model.appActions?.documentDidFinish(); model.navigationBridge?.documentDidFinish() }
         }
@@ -324,6 +325,7 @@ private struct ReaderWebView: UIViewRepresentable {
     }
     func updateUIView(_ view: WKWebView, context: Context) {
         guard model.webView === view else { return }
+        model.navigationBridge?.setAvailable(navigationLayout == .side)
         model.appActions?.setNavigationLayout(navigationLayout)
     }
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {

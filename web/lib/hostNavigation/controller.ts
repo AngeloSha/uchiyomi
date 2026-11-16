@@ -8,6 +8,8 @@ export type WebNavigationMessage = {
 
 /** Only the adapter knows how its host exchanges messages. Inbound data is untrusted. */
 export interface NavigationTransport {
+  available(): boolean;
+  observeAvailability(changed: () => void): () => void;
   send(message: WebNavigationMessage): void;
   subscribe(receive: (message: unknown) => void): () => void;
 }

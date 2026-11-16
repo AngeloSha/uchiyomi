@@ -24,12 +24,19 @@ final class NativeNavigationBridge: NSObject, WKScriptMessageHandler {
     private var pendingHello = UUID()
     private var earlyHello: Envelope?
     private var timeout: Task<Void, Never>?
+    private var available = false
     private(set) var presentation: ReaderNavigationPresentation?
 
     init(origin: URL, changed: @escaping (ReaderNavigationPresentation?) -> Void) {
         self.origin = origin; self.changed = changed
     }
     func attach(_ view: WKWebView) { webView = view }
+    /// Native controls belong only in the system side rail. Folding restores the web controls.
+    func setAvailable(_ value: Bool) {
+        guard available != value else { return }
+        available = value
+        if !value { reset() }
+    }
     func retire() { reset(); webView = nil }
     func reset() {
         if let webView, let document, let session {
@@ -89,6 +96,7 @@ final class NativeNavigationBridge: NSObject, WKScriptMessageHandler {
     }
 
     private func receive(_ envelope: Envelope, from webView: WKWebView) {
+        guard available else { return }
         let value = envelope.message
         guard value.version == 2, UUID(uuidString: value.session) != nil,
               value.revision > 0, value.revision <= 9_007_199_254_740_991 else { return }
@@ -135,7 +143,7 @@ final class NativeNavigationBridge: NSObject, WKScriptMessageHandler {
     }
 
     func request(_ action: ReaderNavigationAction) {
-        guard presentation?.allows(action) == true else { return }
+        guard available, presentation?.allows(action) == true else { return }
         let epoch = self.epoch
         let message: [String: Any] = ["kind": "action", "action": action.rawValue, "request": UUID().uuidString, "revision": revision]
         Task { [weak self] in await self?.deliver(message, epoch: epoch) }

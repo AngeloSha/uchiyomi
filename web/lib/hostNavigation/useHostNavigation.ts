@@ -27,10 +27,19 @@ export function useHostNavigation(state: NavigationPresentation, options: {
       const href = navigationTarget(action);
       if (href && options.path.replace(/\/$/, '') !== href.replace(/\/$/, '')) options.navigate(href);
     };
-    const next = new NavigationController(transport, crypto.randomUUID(), current.current.state, onAction, setHostNavigationActive);
-    controller.current = next;
-    next.start();
-    return () => { next.dispose(); if (controller.current === next) controller.current = null; };
+    let next: NavigationController | null = null;
+    const updateAvailability = () => {
+      if (!transport.available()) {
+        next?.dispose(); next = null; controller.current = null;
+      } else if (!next) {
+        next = new NavigationController(transport, crypto.randomUUID(), current.current.state, onAction, setHostNavigationActive);
+        controller.current = next;
+        next.start();
+      }
+    };
+    const unobserve = transport.observeAvailability(updateAvailability);
+    updateAvailability();
+    return () => { unobserve(); next?.dispose(); if (controller.current === next) controller.current = null; };
   }, [options.account, !!state.appearance]);
   useEffect(() => { controller.current?.update(state); }, [state]);
   return active;
