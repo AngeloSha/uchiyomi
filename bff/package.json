@@ -16,7 +16,7 @@
   "dependencies": {
     "@fastify/compress": "^9.3.0",
     "@fastify/cookie": "^11.1.5",
-    "@fastify/cors": "^11.4.1",
+    "@fastify/cors": "^11.4.2",
     "@fastify/helmet": "^13.2.0",
     "@fastify/jwt": "^10.2.7",
     "@fastify/multipart": "^10.1.8",
@@ -27,7 +27,7 @@
     "@node-rs/argon2": "^2.2.2",
     "adm-zip": "^0.6.1",
     "fastify": "^5.12.8",
-    "mupdf": "^1.28.1",
+    "mupdf": "^1.28.6",
     "node-stream-zip": "^1.15.0",
     "node-unrar-js": "^2.0.2",
     "pg": "^8.23.1",
