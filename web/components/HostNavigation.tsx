@@ -40,7 +40,7 @@ export function HostNavigation() {
   }, []);
   const state = navigationPresentation({ path, auth: status, downloader: canDownload(user), admin: user?.role === 'admin', ring, blocked: layers.dialog > 0 });
   state.appearance = appearance;
-  useHostNavigation(state, { account: user?.id ?? null, path, navigate: href => router.push(href) });
+  useHostNavigation(state, { account: user?.id ?? null, navigate: href => router.push(href) });
   return <div ref={artwork} hidden aria-hidden="true" data-navigation-artwork>
     {Object.entries(NAVIGATION_ICONS).map(([id, Icon]) => <Icon key={id} data-navigation-icon={id} />)}
   </div>;

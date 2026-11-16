@@ -710,9 +710,9 @@ html.lenis, html.lenis body { height: auto; }
 }
 
 /* Acknowledged native controls live outside the web viewport. Remove only the web chrome's clearance;
-   the native container owns the safe area beside the Duo rail and above an iPhone's bottom bar. */
+   the native container owns the safe area beside the Duo rail. */
 :root[data-host-navigation] { --rail-w: 0px; }
-:root[data-host-navigation] .shell { padding-bottom: max(3rem, env(safe-area-inset-bottom)); }
+:root[data-host-navigation] main.shell { padding-bottom: max(3rem, env(safe-area-inset-bottom)); }
 :root[data-host-navigation] :is([data-selection-toolbar], [data-continue-bar]) {
   inset-inline-start: 0; bottom: 0; padding-bottom: max(.75rem, env(safe-area-inset-bottom));
 }

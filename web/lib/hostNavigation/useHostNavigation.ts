@@ -8,7 +8,7 @@ import { setHostNavigationActive, useHostNavigationActive } from './chrome';
 
 /** AppShell owns the router/account state. Transport details never reach components. */
 export function useHostNavigation(state: NavigationPresentation, options: {
-  account: string | null; path: string; navigate: (href: string) => void;
+  account: string | null; navigate: (href: string) => void;
 }): boolean {
   const active = useHostNavigationActive();
   const controller = useRef<NavigationController | null>(null);
@@ -25,7 +25,8 @@ export function useHostNavigation(state: NavigationPresentation, options: {
       // Rendered permissions can change before the publication effect runs.
       if (!actionAllowed(state, action)) throw new Error('Navigation is no longer available');
       const href = navigationTarget(action);
-      if (href && options.path.replace(/\/$/, '') !== href.replace(/\/$/, '')) options.navigate(href);
+      // Match the web links: selecting a destination also clears query-backed views.
+      if (href) options.navigate(href);
     };
     let next: NavigationController | null = null;
     const updateAvailability = () => {

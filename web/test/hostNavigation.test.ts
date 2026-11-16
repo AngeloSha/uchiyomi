@@ -116,7 +116,7 @@ test('reset, failed delivery and stale sessions never leave web controls hidden'
 
 // Exercise the production hook with the same isolated-hook approach as the
 // profile-switcher portal suite. The account fence and controller are real.
-test('the production hook keeps phone web controls, handles folding, and fences accounts', () => {
+test('the production hook keeps phone web controls, handles rail availability, and fences accounts', () => {
   const transport = new Transport(), effects: (() => void | (() => void))[] = [];
   const actions: string[] = [], cleanups: (() => void)[] = [];
   const modules: Record<string, unknown> = {
@@ -134,11 +134,12 @@ test('the production hook keeps phone web controls, handles folding, and fences 
     assert.ok(name in modules, `unexpected dependency ${name}`); return modules[name];
   } });
   const previousOwner = getCurrentUser();
+  let currentURL = '/';
+  const options = { account: 'owner-a', navigate: (href: string) => { actions.push(href); currentURL = href; } };
   let release: (() => void) | undefined;
   try {
     setCurrentUser('owner-a');
-    module.exports.useHostNavigation({ ...state(), appearance: {} }, { account: 'owner-a', path: '/',
-      navigate: (href: string) => actions.push(href) });
+    module.exports.useHostNavigation({ ...state(), appearance: {} }, options);
     transport.isAvailable = false;
     for (const effect of effects) { const cleanup = effect(); if (cleanup) cleanups.push(cleanup); }
     assert.equal(transport.messages.length, 0, 'A regular phone never requests native ownership');
@@ -158,6 +159,14 @@ test('the production hook keeps phone web controls, handles folding, and fences 
     const request = (id: string, action: string) => transport.host({ kind: 'action', session, revision: 1, request: id, action });
     request('before', 'library');
     assert.deepEqual(actions, ['/library/']);
+    // Query-backed Library views share usePathname()'s /library/ value. Selecting
+    // the native destination must still push its canonical URL, like the web link.
+    currentURL = '/library/?view=downloads&folder=queued';
+    request('leave-downloads', 'library');
+    assert.equal(currentURL, '/library/', 'Library must leave the downloads/folder view');
+    currentURL = '/library/?q=title#results';
+    request('clear-filter', 'library');
+    assert.equal(currentURL, '/library/', 'Library must clear route parameters even when already selected');
     release = beginAccountTransition();
     request('transition', 'history');
     assert.equal((transport.messages.at(-1) as any).accepted, false);
@@ -165,7 +174,7 @@ test('the production hook keeps phone web controls, handles folding, and fences 
     setCurrentUser('owner-b');
     request('replacement', 'search');
     assert.equal((transport.messages.at(-1) as any).accepted, false);
-    assert.deepEqual(actions, ['/library/'], 'retained callbacks must not navigate or open settings for another account');
+    assert.deepEqual(actions, ['/library/', '/library/', '/library/'], 'retained callbacks must not navigate or open settings for another account');
   } finally {
     release?.(); for (const cleanup of cleanups.reverse()) cleanup(); setCurrentUser(previousOwner);
   }
