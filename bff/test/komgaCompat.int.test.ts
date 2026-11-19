@@ -471,6 +471,53 @@ test('the Komga-compatible API: credentials, the session cookie, and what a view
       assert.equal((await get('/api/v1/series/latest?page=0', key(tok.read))).statusCode, 200);
     });
 
+    await t.test('the list API answers the extension\'s Popular, Latest, search and Books bodies (#452)', async () => {
+      // Komga 1.19's POST /series/list is what the extension's source view calls now. Reintroduce by removing the
+      // route: every call below is a 404, which is the whole source view failing on the phone.
+      const post = (url: string, payload: unknown, headers: Record<string, string> = key(tok.read)) =>
+        app.inject({ method: 'POST', url, headers: { ...headers, 'content-type': 'application/json; charset=utf-8' }, payload: JSON.stringify(payload), remoteAddress: remoteAddress() });
+      const guard = { allOf: [{ deleted: { operator: 'isFalse' } }] };
+      // Popular, through a READ-ONLY token: a search POST is a read. Reintroduce the plain method check in the
+      // hook: 403 "This token is read-only."
+      const popular = await post('/api/v1/series/list?page=0&sort=metadata.titleSort%2Casc', { condition: guard });
+      assert.equal(popular.statusCode, 200, popular.body);
+      const pg = popular.json();
+      assert.deepEqual(Object.keys(pg).sort(), PAGE_KEYS);
+      const ids = pg.content.map((s: any) => s.id);
+      assert.ok(ids.includes(S_MAIN) && ids.includes(S_EMPTY), `Popular lists the shelf: ${ids}`);
+      assert.ok(!ids.includes(S_HIDDEN) && !ids.includes(S_ADULT), 'and never a deleted series, nor 18+ for a token that hides it');
+      assert.equal(popular.headers['cache-control'], 'no-store');
+      // Latest.
+      assert.equal((await post('/api/v1/series/list?page=0&sort=lastModifiedDate%2Cdesc', { condition: guard })).statusCode, 200);
+      // A search, Lucene-escaped as the extension sends it, with the default-libraries anyOf and a read state.
+      const found = await post('/api/v1/series/list?page=0&sort=relevance%2Casc', {
+        condition: { allOf: [...guard.allOf, { anyOf: [{ libraryId: { operator: 'is', value: LIB } }] }, { anyOf: [{ seriesStatus: { operator: 'is', value: 'ONGOING' } }] }] },
+        fullTextSearch: 'Kc Main',
+      });
+      assert.equal(found.statusCode, 200, found.body);
+      assert.deepEqual(found.json().content.map((s: any) => s.id), [S_MAIN]);
+      const escaped = await post('/api/v1/series/list?page=0', { condition: guard, fullTextSearch: 'Kc Main\\:' });
+      assert.equal(escaped.json().totalElements, 0, 'an escaped colon is a colon, and no title has one');
+      assert.equal((await post('/api/v1/series/list', { condition: guard, fullTextSearch: 'Main T' })).json().totalElements, 1);
+      // A per-user read state goes through the mine CTE, as the GET form does.
+      assert.equal((await post('/api/v1/series/list', { condition: { allOf: [{ readStatus: { operator: 'is', value: 'READ' } }] } })).statusCode, 200);
+      // What cannot be expressed is a 400, never the whole library.
+      const coll = await post('/api/v1/series/list', { condition: { allOf: [{ collectionId: { operator: 'is', value: 'c1' } }] } });
+      assert.equal(coll.statusCode, 400);
+      assert.equal(coll.json().error, 'unsupported_filter');
+      // The capped member's cap still applies on the body form.
+      assert.ok(!(await post('/api/v1/series/list', { condition: guard }, key(tok.capped))).json().content.some((s: any) => s.id === S_RATED));
+      // And it is authenticated like everything else.
+      assert.equal((await post('/api/v1/series/list', { condition: guard }, {})).statusCode, 401);
+      // The Books type.
+      const books = await post('/api/v1/books/list?page=0&sort=metadata.title%2Casc', { condition: { allOf: [...guard.allOf, { anyOf: [{ libraryId: { operator: 'is', value: LIB } }] }] } });
+      assert.equal(books.statusCode, 200, books.body);
+      assert.deepEqual(Object.keys(books.json()).sort(), PAGE_KEYS);
+      assert.equal(books.json().totalElements, 3, 'the shelf\'s three chapters, as GET /api/v1/books counts them');
+      assert.equal((await post('/api/v1/books/list', { condition: { libraryId: { operator: 'is', value: 'lib_nothing' } } })).json().totalElements, 0);
+      assert.equal((await post('/api/v1/books/list', { condition: { readStatus: { operator: 'is', value: 'READ' } } })).statusCode, 400);
+    });
+
     await t.test('details carry the real read counts; the chapter list honours unpaged and media_status', async () => {
       const d = await get(`/api/v1/series/${S_MAIN}`, key(tok.write));
       assert.equal(d.statusCode, 200);

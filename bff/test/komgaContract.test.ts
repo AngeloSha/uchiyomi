@@ -22,6 +22,7 @@ import assert from 'node:assert/strict';
 import {
   springPage, komgaDate, komgaDateOrNull, komgaDay, komgaSeries, komgaBook, komgaPage, komgaStatus,
   komgaReadingDirection, parseSeriesQuery, parseBooksQuery, listParam, komgaSort, PAGE_SIZE_MAX, humanSize,
+  parseSeriesSearch, parseBooksSearch, komgaCondition, UnsupportedCondition,
 } from '../src/lib/komgaDto';
 
 // ---- the schema language ----------------------------------------------------------------------------------
@@ -386,6 +387,74 @@ test('parseBooksQuery: unpaged, media_status=READY, direction', () => {
   const c = parseBooksQuery({ search: 'x', page: '1', sort: 'name,desc', library_id: 'lib' });
   assert.deepEqual([c.unpaged, c.readyOnly, c.sort, c.page, c.fullTextSearch, c.libraryIds], [false, false, 'metadata.numberSort,desc', 1, 'x', ['lib']]);
   assert.equal(parseBooksQuery({ media_status: 'READY,ERROR' }).readyOnly, false, 'asking for errors too is not "ready only"');
+});
+
+// #452: the extension's list-API bodies, as getSearchMangaList builds them (keiyoushi Komga.kt, Dto.kt ConditionDto).
+const isLib = (id: string) => ({ libraryId: { operator: 'is', value: id } });
+test('parseSeriesSearch: Popular\'s body is no filter at all, its pageable comes from the query', () => {
+  // Popular: SeriesSort(Selection(1, true)) and nothing else -> only the deleted guard in the allOf.
+  const popular = parseSeriesSearch({ page: '0', sort: 'metadata.titleSort,asc' }, { condition: { allOf: [{ deleted: { operator: 'isFalse' } }] } });
+  assert.deepEqual([popular.condition, popular.fullTextSearch, popular.page, popular.size, popular.sort, popular.needsUser], [null, null, 0, 20, 'title,asc', false]);
+  // Latest, page 3, and a client that writes every absent field as null.
+  const latest = parseSeriesSearch({ page: '2', sort: 'lastModifiedDate,desc' }, { condition: { allOf: [{ deleted: { operator: 'isFalse' }, libraryId: null, genre: null }], anyOf: null }, fullTextSearch: null });
+  assert.deepEqual([latest.condition, latest.page, latest.sort], [null, 2, 'updated,desc']);
+  // No body at all is the whole list, never an error.
+  assert.equal(parseSeriesSearch({}, undefined).condition, null);
+});
+
+test('parseSeriesSearch translates every condition the extension builds into condSql\'s vocabulary', () => {
+  const s = parseSeriesSearch({ page: '0', sort: 'relevance,asc' }, {
+    condition: { allOf: [
+      { deleted: { operator: 'isFalse' } },
+      { anyOf: [isLib('lib'), isLib('lib_a')] },
+      { anyOf: [{ readStatus: { operator: 'is', value: 'UNREAD' } }, { readStatus: { operator: 'is', value: 'IN_PROGRESS' } }] },
+      { anyOf: [{ seriesStatus: { operator: 'is', value: 'ENDED' } }] },
+      { anyOf: [{ genre: { operator: 'is', value: 'Action' } }, { tag: { operator: 'is', value: 'x' } }] },
+      { anyOf: [{ publisher: { operator: 'is', value: 'Pub' } }] },
+      { anyOf: [{ author: { operator: 'is', value: { name: 'Oda', role: 'writer' } } }] },
+    ] },
+    fullTextSearch: 'Re\\:Zero \\(2016\\)',
+  });
+  assert.equal(s.fullTextSearch, 'Re:Zero (2016)', 'the Lucene escapes go: our search is ILIKE, where a backslash matches a backslash');
+  assert.equal(s.needsUser, true);
+  assert.equal(s.sort, 'title,asc');
+  const parts = (s.condition as any).allOf as any[];
+  assert.equal(parts.length, 6, 'the deleted guard is no restriction and drops out');
+  assert.deepEqual(parts[0], { anyOf: [isLib('lib'), isLib('lib_a')] });
+  assert.ok(JSON.stringify(parts[2]).includes('"COMPLETED"'), 'seriesStatus ENDED runs the synonym table');
+  assert.deepEqual(parts[3], { anyOf: [{ genre: { operator: 'is', value: 'Action' } }, { genre: { operator: 'is', value: 'x' } }] }, 'tag filters genres');
+  assert.deepEqual(parts[4], { author: { operator: 'is', value: 'Pub' } }, 'publisher filters the author line');
+  assert.deepEqual(parts[5], { author: { operator: 'is', value: 'Oda' } }, 'the author\'s role is dropped');
+  // isNot ENDED excludes every spelling of it.
+  const notEnded = komgaCondition({ seriesStatus: { operator: 'isNot', value: 'ENDED' } }) as any;
+  assert.ok(Array.isArray(notEnded.allOf) && notEnded.allOf.every((c: any) => c.status.operator === 'isNot'));
+  // An anyOf with an unrestricted branch is unrestricted.
+  assert.equal(komgaCondition({ anyOf: [isLib('lib'), { deleted: { operator: 'isFalse' } }] }), null);
+});
+
+test('parseSeriesSearch refuses what it cannot express rather than widening the list', () => {
+  const refused = (body: unknown) => assert.throws(() => parseSeriesSearch({}, body), UnsupportedCondition, JSON.stringify(body));
+  refused({ condition: { collectionId: { operator: 'is', value: 'c1' } } });
+  refused({ condition: { deleted: { operator: 'isTrue' } } });
+  refused({ condition: { genre: { operator: 'beginsWith', value: 'A' } } });
+  refused({ condition: { genre: { operator: 'is', value: '' } } });
+  refused({ condition: { genre: { operator: 'is', value: 'A' }, tag: { operator: 'is', value: 'B' } } });
+  refused({ condition: { allOf: 'nope' } });
+  refused({ fullTextSearch: 42 });
+  refused([]);
+  let deep: any = isLib('lib');
+  for (let i = 0; i < 10; i++) deep = { allOf: [deep] };
+  refused({ condition: deep });
+  refused({ condition: { anyOf: Array.from({ length: 200 }, (_, i) => isLib(`l${i}`)) } });
+});
+
+test('parseBooksSearch: the Books type narrows by library only, and says so', () => {
+  const b = parseBooksSearch({ page: '1', sort: 'metadata.title,desc' }, {
+    condition: { allOf: [{ deleted: { operator: 'isFalse' } }, { anyOf: [isLib('lib'), isLib('lib_a')] }] }, fullTextSearch: 'one',
+  });
+  assert.deepEqual([b.page, b.sort, b.libraryIds, b.fullTextSearch, b.readyOnly], [1, 'metadata.numberSort,desc', ['lib', 'lib_a'], 'one', false]);
+  assert.deepEqual(parseBooksSearch({}, { condition: { allOf: [{ deleted: { operator: 'isFalse' } }] } }).libraryIds, []);
+  assert.throws(() => parseBooksSearch({}, { condition: { allOf: [{ readStatus: { operator: 'is', value: 'READ' } }] } }), UnsupportedCondition);
 });
 
 test('humanSize mirrors Komga\'s BinaryByteUnit', () => {
