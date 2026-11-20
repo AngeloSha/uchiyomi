@@ -129,6 +129,10 @@ Run the worker only on a private internal Docker network shared with the app. Pu
 port is 3081. Use a read-only container filesystem, a bounded writable `/tmp`, no Linux capabilities, three CPU
 threads and a memory limit of at least 4 GiB. The worker runs as uid/gid 10002 and accepts one inference at a time.
 
+The image ships CPU-only PyTorch. For GPU inference, build an image with a CUDA PyTorch wheel instead; the worker then
+uses the GPU by default, and `TITLE_EXTRACTOR_DEVICE` (`cuda` or `cpu`) overrides that choice. Model and cache
+fittings are unchanged, so a GPU only shortens how long an inference takes.
+
 Set these on the app:
 
 | Variable | Value |
