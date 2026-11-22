@@ -292,3 +292,38 @@ test('a failed listing reapply rolls back both preference routes and returns a r
     await q('DROP FUNCTION IF EXISTS test_blocklist_reapply_failure()').catch(() => {});
   }
 });
+
+test('a deleted chapter only a blocked group released leaves the Komga list too, and comes back on unblock', { skip }, async () => {
+  // #396: the series page hid it (v0.104.0), but Mihon -- under "Show deleted chapters as ghosts" or the Komga ghost
+  // switch, both of which list tombstones as "not downloaded" -- kept it, so blocking the group left the chapter there.
+  const { tombstoneBooks } = await import('../src/lib/chapterCleanup');
+  const BID = 'b_blk_deleted_1';
+  const prior = (await q('SELECT deleted_as_ghosts FROM server_settings WHERE id = 1'))[0]?.deleted_as_ghosts ?? false;
+  await q(`INSERT INTO lib_books (id, series_id, source, file, title, number, scanlator) VALUES ($1,$2,'T!blk',$3,'Chapter 1',1,'Bad')`,
+    [BID, S, `T!blk/${S}/1.cbz`]);
+  await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed)
+           SELECT id, $1, $2, 10, true FROM users WHERE username = $3`, [BID, S, ADMIN]);
+  const all = async () => (await app.inject({
+    method: 'GET', url: `/api/v1/series/${S}/books?unpaged=true`, headers: { 'x-api-key': apiKey },
+  })).json().content.map((b: any) => b.id);
+  try {
+    await tombstoneBooks([BID], 'deleted');
+    for (const [ghosts, deleted] of [[true, false], [false, true]]) {
+      await q('UPDATE server_settings SET komga_ghost_chapters = $1, deleted_as_ghosts = $2 WHERE id = 1', [ghosts, deleted]);
+      assert.ok((await mihon()).includes(1), `PREMISE: the tombstone is listed as not downloaded (ghosts ${ghosts}, deleted ${deleted})`);
+      assert.equal((await patchSeries(['Bad'])).statusCode, 200);
+      assert.ok(!(await mihon()).includes(1), `the blocked group's deleted chapter is still on Mihon (ghosts ${ghosts}, deleted ${deleted})`);
+      assert.ok(!(await all()).includes(BID), 'a client that asks for every book is not handed it either');
+      const listing = (await app.inject({ method: 'GET', url: `/api/series/${S}/listing`, headers: { authorization: tok } })).json();
+      assert.deepEqual(listing.blockedDeletedBookIds, [BID], 'the series page hides it by the same rule');
+      assert.equal((await q('SELECT count(*)::int AS n FROM read_progress WHERE book_id = $1', [BID]))[0].n, 1, 'reading history stays');
+      assert.equal((await patchSeries([])).statusCode, 200);
+      assert.ok((await mihon()).includes(1), 'unblocking lists it again at once');
+    }
+  } finally {
+    await q('DELETE FROM read_progress WHERE book_id = $1', [BID]).catch(() => {});
+    await q('DELETE FROM lib_books WHERE id = $1', [BID]).catch(() => {});
+    await q('UPDATE server_settings SET komga_ghost_chapters = true, deleted_as_ghosts = $1 WHERE id = 1', [prior]).catch(() => {});
+    await patchSeries([]).catch(() => {});
+  }
+});

@@ -825,6 +825,9 @@ no check needed, and nothing fetches it (the hourly check, the slow archive, *Fe
 group has also released stays, and its copy becomes that group's. **Unblock** brings the hidden chapters back
 just as fast, as chapters you can fetch. The same goes for a group blocked for every series under **Admin →
 Settings → Downloads → Scanlation groups**. A chapter already downloaded from a group you block stays on the shelf.
+One of its chapters you already deleted does not: it leaves the series page and the list Mihon reads, even with
+**Show deleted chapters as ghosts** on, while its reading history stays and **Unblock** brings it back
+([#396](https://github.com/AngeloSha/uchiyomi/issues/396)).
 
 **In the series' language** (since v0.62.0). A copy known to be in another language than the series' is never
 taken, exactly like a blocked group's: a Spanish copy never fills a chapter of an English series, whichever source

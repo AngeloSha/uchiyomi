@@ -31,7 +31,7 @@ import { serveLibSeriesThumb, serveLibBookThumb, serveLibBookPage } from './imag
 import { springPage, komgaSeries, komgaBook, komgaGhostBook, komgaPage, parseSeriesQuery, parseBooksQuery } from '../lib/komgaDto';
 import { readProgressV2, readProgressDetail, markReadUpTo } from '../lib/komgaProgress';
 import { ghostsEnabled, ghostBooksFor, ghostBookById, isGhostId } from '../lib/komgaGhosts';
-import { deletedAsGhostsOn, deliberatelyDeleted } from '../lib/deletedGhosts';
+import { deletedAsGhostsOn, deliberatelyDeleted, blockedDeletedBookIds } from '../lib/deletedGhosts';
 import { editionLabels } from '../lib/editions';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -316,8 +316,14 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
     const absentRow = (b: any) => absentBook(b, policy);
     // One query for the whole series rather than a count and a page: the READY filter has to run over the
     // rows, and a series holds hundreds of chapters, not millions.
-    const all = await owned.seriesBooks(vc(req), id, 0, 100_000, parsed.sort);
-    const real = parsed.readyOnly ? all.content.filter((b: any) => !b.pruned || absentRow(b)) : all.content;
+    // A deleted chapter only blocked groups released is no chapter here, as on the series page (#396): its ghost is
+    // already left out (NOT_COVERED), and its tombstone goes with it. Display only; progress still reads every book.
+    const [all, blockedDeleted] = await Promise.all([
+      owned.seriesBooks(vc(req), id, 0, 100_000, parsed.sort),
+      blockedDeletedBookIds(id).then((ids) => new Set(ids)),
+    ]);
+    const listed = all.content.filter((b: any) => !(b.pruned && blockedDeleted.has(b.id)));
+    const real = parsed.readyOnly ? listed.filter((b: any) => !b.pruned || absentRow(b)) : listed;
     let rows: unknown[] = real.map((b: any) => komgaBook(b, { absent: absentRow(b) }));
     if (ghosts) {
       // Merged by number into the order seriesBooks already returned, rather than appended: the extension
