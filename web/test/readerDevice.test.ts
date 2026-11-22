@@ -71,7 +71,21 @@ test('the colour filters, and E-ink moves without a glide', async () => {
   // page turn: this fails, and an e-ink screen smears every turn again.
   const page = code(read('app/reader/page.tsx'));
   assert.doesNotMatch(page, /behavior: 'smooth'/, 'a page move glides whatever the filter');
-  assert.match(page, /const behavior = glide\(device\.colorFilter\);/);
+  assert.match(page, /const behavior = glide\(device\.colorFilter, device\.pageAnimation\);/);
+});
+
+test('Page turn animation is this device\'s, on until switched off, and jumps on any filter (#461)', async () => {
+  const d = await import('../lib/readerDevice');
+  assert.equal(d.DEFAULT_DEVICE.pageAnimation, true, 'the default must stay today\'s glide');
+  assert.equal(d.migrateDevicePrefs({}).pageAnimation, true);
+  assert.equal(d.migrateDevicePrefs({ pageAnimation: 'no' }).pageAnimation, true);
+  assert.equal(d.migrateDevicePrefs({ pageAnimation: false }).pageAnimation, false);
+  // Off jumps on every filter, not only E-ink. Reintroduce by ignoring the second argument: the colour filters glide again.
+  for (const f of d.COLOR_FILTERS) {
+    assert.equal(d.glide(f, false), 'auto', f);
+    assert.equal(d.glide(f), f === 'eink' ? 'auto' : 'smooth', f);
+  }
+  assert.match(read('components/ReaderSettings.tsx'), /on=\{device\.pageAnimation\} onChange=\{\(pageAnimation\) => setDevice\(\{ pageAnimation \}\)\}/);
 });
 
 test('the colour filter is on the page images, never on the column, the track or a card', () => {
