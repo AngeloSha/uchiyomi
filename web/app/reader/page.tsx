@@ -212,7 +212,7 @@ function ReaderInner() {
   const setDevice = (p: Partial<DevicePrefs>) => setDeviceState((cur) => { const n = { ...cur, ...p }; saveDevicePrefs(n); return n; });
   /** The colour filter over every page IMAGE (never the column, the track or a card), and how a move moves under it. */
   const imgFilter = COLOR_FILTER[device.colorFilter];
-  const behavior = glide(device.colorFilter);
+  const behavior = glide(device.colorFilter, device.pageAnimation);
   const [zoom, setZoomState] = useState(1);
   const widthZoomAnchor = useRef<{ pane: HTMLElement; slide: number; page: number; focusedPage?: number; zoom: number; x: number; y: number } | null>(null);
   // A turn back in reading order under Fit width (#401): the slide (and the focused page of a pair) it went back to, which
