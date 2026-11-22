@@ -19,6 +19,7 @@ import { editionNames } from '@/lib/editions';
 import Link from 'next/link';
 import { useToast } from '@/components/Toast';
 import { msgOf } from '@/components/ConfirmDialog';
+import { BlockedChaptersAsk, blockedChaptersKey } from '@/components/BlockedChapters';
 import { Sheet } from '@/components/ui';
 import { GroupAvatar } from '@/components/GroupAvatar';
 import { ActivityDots } from '@/components/ActivityDots';
@@ -629,6 +630,8 @@ export function SourcesSheet({ id, title: seriesTitle, series, groups, admin, er
       toast(tr('Saved'), 'success');
       // The ghost rows' `why` and the versions' `blocked` markers both follow the effective prefs.
       for (const k of ['series-scanlators', 'series-groups', 'series-listing', 'series-versions']) qc.invalidateQueries({ queryKey: [k, id] });
+      // And whether the block left any of that group's chapters on the shelf: the question under the rows (#396).
+      void qc.invalidateQueries({ queryKey: blockedChaptersKey(id) });
       onSaved();
       return true;
     } catch (e) { toast(msgOf(e, tr('Could not save')), 'error'); setLocal(undefined); return false; }
@@ -997,6 +1000,8 @@ export function SourcesSheet({ id, title: seriesTitle, series, groups, admin, er
               dragProps={rank >= 0 ? drag.item(rank) : undefined} />
           );
         })}
+        {/* A block hides at once; a blocked group's chapters already downloaded are removed only when asked (#396). */}
+        {isAdmin && <BlockedChaptersAsk seriesId={id} />}
       </section>
 
       {/* Last, below Translated by: Prefer and Block live there, and at 390 px every line above them is one they lose.
