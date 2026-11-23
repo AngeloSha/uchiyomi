@@ -41,14 +41,14 @@ export function observeNativeNavigationLayout(active: boolean, changed: (layout:
  * measurements assumed a phone's bottom navigation, which that layout does not have.
  */
 export function useNativeSidebar(): boolean {
-  const [on, setOn] = useState(() => typeof document !== 'undefined' && document.documentElement.hasAttribute(NATIVE_SIDEBAR_ATTRIBUTE));
+  const [on, setOn] = useState(() => typeof document !== 'undefined' && (document.documentElement.hasAttribute(NATIVE_SIDEBAR_ATTRIBUTE) || document.documentElement.hasAttribute('data-host-navigation')));
   useEffect(() => {
     const root = document.documentElement;
-    const read = () => setOn(root.hasAttribute(NATIVE_SIDEBAR_ATTRIBUTE));
+    const read = () => setOn((root.hasAttribute(NATIVE_SIDEBAR_ATTRIBUTE) || root.hasAttribute('data-host-navigation')));
     read();
     if (typeof MutationObserver === 'undefined') return;
     const observer = new MutationObserver(read);
-    observer.observe(root, { attributes: true, attributeFilter: [NATIVE_SIDEBAR_ATTRIBUTE] });
+    observer.observe(root, { attributes: true, attributeFilter: [NATIVE_SIDEBAR_ATTRIBUTE, 'data-host-navigation'] });
     return () => observer.disconnect();
   }, []);
   return on;

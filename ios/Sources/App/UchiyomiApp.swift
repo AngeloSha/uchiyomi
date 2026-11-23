@@ -89,7 +89,7 @@ struct ReaderView: View {
                 }
             }
             .navigationTitle("")
-            .toolbar(.hidden, for: .navigationBar)
+            .modifier(ReaderNavigationToolbar(model: model))
             .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if model.webView != nil && (model.awaitingConfirmation || model.status != nil || model.error != nil) {
@@ -139,7 +139,7 @@ struct ReaderView: View {
     }
 }
 
-/// The OS supplies the available navigation edge; the web app retains its own icons and themed controls.
+/// The layout hint also supports cached frontends that predate native navigation.
 @available(iOS 27.1, *)
 private struct ReaderAdaptiveViewport: View {
     let view: WKWebView
@@ -317,13 +317,15 @@ private struct ReaderWebView: UIViewRepresentable {
         view.navigationDelegate = context.coordinator
         view.uiDelegate = context.coordinator
         if model.webView === view {
+            model.navigationBridge?.setAvailable(navigationLayout == .side)
             model.appActions?.setNavigationLayout(navigationLayout)
-            if !view.isLoading { model.appActions?.documentDidFinish() }
+            if !view.isLoading { model.appActions?.documentDidFinish(); model.navigationBridge?.documentDidFinish() }
         }
         return view
     }
     func updateUIView(_ view: WKWebView, context: Context) {
         guard model.webView === view else { return }
+        model.navigationBridge?.setAvailable(navigationLayout == .side)
         model.appActions?.setNavigationLayout(navigationLayout)
     }
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
@@ -335,6 +337,7 @@ private struct ReaderWebView: UIViewRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             guard model.webView === webView else { return }
             model.appActions?.documentDidFinish()
+            model.navigationBridge?.documentDidFinish()
         }
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
             guard model.webView === webView, navigationAction.targetFrame == nil, let url = navigationAction.request.url else { return nil }
