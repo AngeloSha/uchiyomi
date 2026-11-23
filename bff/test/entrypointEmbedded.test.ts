@@ -109,6 +109,11 @@ test('THE EMBEDDED PATH: initdb once, socket-only start, the app pointed at it, 
   assert.match(start, /listen_addresses=''/, 'the embedded database must not listen on TCP');
   assert.match(start, new RegExp(`-k ${sb.sock}\\b`), 'the socket directory must be the one the app is told about');
   assert.match(start, /\s-w\b/, 'start must wait for the server, or the app races recovery');
+  // Reintroduce by dropping these -c flags: Postgres runs on initdb's 128MB/4MB defaults, and a large library's
+  // window sort spills to disk on every page.
+  assert.match(start, /-c shared_buffers=\d+MB\b/, 'shared_buffers must be sized, not left at 128MB');
+  assert.match(start, /-c work_mem=32MB\b/, 'work_mem must be raised from 4MB');
+  assert.match(start, /-c effective_cache_size=\d+MB\b/, 'effective_cache_size must be sized');
   // The server keeps the container's stdout/stderr: no -l, and pg_ctl's output is not thrown away. Reintroduce
   // `-l /dev/stdout ... start >/dev/null`: the server opened that same /dev/null, so no Postgres error ever reached
   // the container log. (`-l /dev/stderr` is worse: as the PUID user the server may not reopen it and never starts.)
@@ -204,4 +209,25 @@ test('if Postgres dies underneath the app, the app is stopped so the container r
   assert.match(r.err, /Postgres has stopped; stopping the app/);
   assert.ok(r.calls.includes('app got TERM'), 'the app was not told');
   assert.ok(r.ms < 20000, `took ${r.ms} ms; the watcher did not act`);
+});
+
+test('the embedded database memory can be pinned, and says so in the log', async () => {
+  const sb = sandbox();
+  const r = await run(sb, {
+    DATABASE_URL: undefined,
+    PG_SHARED_BUFFERS: '256MB',
+    PG_WORK_MEM: '16MB',
+    PG_EFFECTIVE_CACHE_SIZE: '1GB',
+  });
+  // Reintroduce by echoing the computed defaults instead of the effective values: an operator who pins the
+  // cache reads a log line that contradicts the server they just started.
+  const start = r.calls.find((c) => /^pg_ctl .* start/.test(c))!;
+  assert.match(start, /-c shared_buffers=256MB\b/, `pinned shared_buffers was dropped:\n${start}`);
+  assert.match(start, /-c work_mem=16MB\b/, `pinned work_mem was dropped:\n${start}`);
+  assert.match(start, /-c effective_cache_size=1GB\b/, `pinned effective_cache_size was dropped:\n${start}`);
+  assert.match(
+    r.out,
+    /embedded Postgres memory: shared_buffers=256MB work_mem=16MB effective_cache_size=1GB/,
+    `the log must show the values the server got:\n${r.out}`,
+  );
 });

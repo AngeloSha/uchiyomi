@@ -86,6 +86,12 @@ The ones worth knowing:
   database*), and moving between the two is a dump and a restore, written down in both directions in
   [MIGRATING.md](MIGRATING.md). How to open a `psql` shell on either, and how to restore, is in
   [USAGE §12](USAGE.md#12-backups--restore).
+- **Embedded database memory** — `PG_SHARED_BUFFERS`, `PG_WORK_MEM`, `PG_EFFECTIVE_CACHE_SIZE` (embedded only;
+  ignored when `DATABASE_URL` is set). Unset, they are sized from the host's `MemTotal`: a quarter of it for
+  `shared_buffers` (128MB–1GB), half for `effective_cache_size` (512MB–4GB), and 32MB of `work_mem`. The
+  values are Postgres units (`256MB`, `1GB`) — a bare number means blocks, not MB. The entrypoint logs what it
+  chose at start (`embedded Postgres memory: …`). Postgres's defaults (128MB cache, 4MB sort) made a large
+  library's window sort spill to disk and kept the buffer hit rate near 83% on a 189k-series install.
 - `TRANSLATE_DIR`: where the optional translation engine goes when an admin downloads it (default
   `<CONFIG_DIR>/translate`). See [Translated pages](#translated-pages).
 
