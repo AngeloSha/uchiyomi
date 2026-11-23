@@ -756,7 +756,9 @@ export function startDownloadJob(input: DownloadJobInput, reserved?: DownloadJob
             j.partial = (j.partial ?? 0) + 1;
             tell(j, say('job.partial', { number: ch.number, n: out.missing.length }));
           }
-          if (j.done % 5 === 0) await persistScan().catch(logScanError);
+          // This folder, not the library: a full pass is hours on a large library, and until it reaches this
+          // folder the series has no row -- Discover offers it again, and adding it again finds the file on disk.
+          if (j.done % 5 === 0) await persistScan(folder).catch(logScanError);
         }
         await settle(ch, true);
       } else if (out.kind === 'skipped') {
@@ -839,7 +841,9 @@ export function startDownloadJob(input: DownloadJobInput, reserved?: DownloadJob
     }
     // Settled BEFORE the scan, so a copy the hook puts back is on disk when the scanner looks.
     for (const ch of chapters) if (!settled.has(ch)) await settle(ch, false);
-    await persistScan().catch((e) => console.warn(`[download] ${folder}: the library scan after the job threw: ${(e as Error)?.message || e}`));
+    // This folder, not the library (see persistScan): the row must exist before the check below reads it, and
+    // on a large library a full pass is hours away.
+    await persistScan(folder).catch((e) => console.warn(`[download] ${folder}: the library scan after the job threw: ${(e as Error)?.message || e}`));
     // On disk and still not in the library after that scan: the file is there and the scanner did not index it.
     // Said on the card, because a Fetch that ends in a second with nothing added looks exactly like a Fetch that
     // worked (#109). EVERY chapter this job put there -- landed or found already on disk -- and by its FILE:
@@ -2134,7 +2138,8 @@ export async function addSeriesFromSource(opts: {
     }
     const j0 = jobs.get(folder); if (j0) j0.done = 1;
     let runArchive: AddResult['archive'];
-    await persistScan().catch(logScanError);
+    // This folder, not the library: an inline add must not wait for a full pass to reach it (see persistScan).
+    await persistScan(folder).catch(logScanError);
     await setBookDates(folder, selected).catch(() => {});
     await setBookMeta(folder, landed).catch(() => {});
     // The numbering before the routing below, as on the branch above: routed means numbered.
@@ -2214,7 +2219,7 @@ export async function addSeriesFromSource(opts: {
               j.partial = (j.partial ?? 0) + 1;
               tell(j, say('job.partial', { number: ch.number, n: out.missing.length }));
             }
-            if (j.done % 5 === 0) await persistScan().catch(logScanError);
+            if (j.done % 5 === 0) await persistScan(folder).catch(logScanError);
           }
           continue;
         }
@@ -2223,7 +2228,7 @@ export async function addSeriesFromSource(opts: {
           // alternate source the latter leaves every remaining chapter nowhere to go, so stop at one strike.
           if (out.why === 'on_disk') {
             onDisk.push(ch.number);
-            if (j) { j.done++; if (j.done % 5 === 0) await persistScan().catch(logScanError); }
+            if (j) { j.done++; if (j.done % 5 === 0) await persistScan(folder).catch(logScanError); }
             continue;
           }
           if (j) {
@@ -2263,7 +2268,7 @@ export async function addSeriesFromSource(opts: {
         if (j) tell(j, say('job.failed', { n: failures, error: String(out.err?.message || out.err).slice(0, 120) }));
       }
       noteLeft();
-      await persistScan().catch(logScanError);
+      await persistScan(folder).catch(logScanError);
       await setBookDates(folder, selected).catch(() => {});
       await setBookMeta(folder, landed).catch(() => {});
       const j = jobs.get(folder);

@@ -826,6 +826,13 @@ let lastScan: ScanReport | null = null;
  * nothing. Null until the first scan since the server started.
  */
 export const lastScanReport = (): ScanReport | null => lastScan;
+/**
+ * The error the last pass threw on a downloads folder, by folderRel, until a pass indexes it. A restricted pass
+ * (a download's own folder) writes no report, so the job card's reason and Health would otherwise have nothing
+ * to name; the report's `skipped` says the same for a full pass.
+ */
+const refusals = new Map<string, string>();
+export const scanRefusal = (folderRel: string): string | null => refusals.get(folderRel) ?? null;
 
 export type ScanResult = { series: number; books: number; ms: number; skipped: number };
 let scanning: Promise<ScanResult> | null = null;
@@ -876,6 +883,26 @@ async function notSetAside(root: string, folderRel: string, folderAbs: string, f
 }
 
 /**
+ * Folders a download asked the NEXT pass to index (v0.108.2): a series added while a full pass is walking the
+ * library has no row until another pass reaches it, and a pass is hours on a large library -- so Discover kept
+ * offering it as addable and a second add found the file on disk and did nothing. `persistScan(folder)` takes
+ * the next pass down to that folder alone; a full pass already walking indexes it at its next folder and carries
+ * on -- stopping for it would let a download queue cut a full pass short all day, and the folders added by hand
+ * would never be reached.
+ */
+const onlyNext = new Set<string>();
+/** A full pass was asked for while a restricted one was queued: it still runs, once, after it. */
+let fullWanted = false;
+/** Callers waiting for one folder: answered when a pass has indexed it, or found nothing there to index. */
+const folderWaits = new Map<string, Array<() => void>>();
+function folderDone(folderRel: string): void {
+  const waiting = folderWaits.get(folderRel);
+  if (!waiting) return;
+  folderWaits.delete(folderRel);
+  for (const done of waiting) done();
+}
+
+/**
  * Scan every root into lib_series/lib_books. One scan at a time.
  *
  * ⚠️ A caller that arrives while a scan is running waits for ONE more scan after it, never for the running
@@ -885,12 +912,30 @@ async function notSetAside(root: string, folderRel: string, folderAbs: string, f
  * two scans racing one folder is how a series gets minted twice.
  * Reintroduce by returning `scanOnce()` every time: "requests during a scan share one follow-up" in
  * scanResilience.int.test.ts finds three scans and a follow-up that is not the same promise.
+ *
+ * `only` is a folder the caller just wrote (lib_books.root, so relative to DL_ROOT): the next pass indexes that
+ * folder instead of walking both roots, and a full pass in flight indexes it at its next folder without stopping.
+ * A full request that arrived meanwhile is not lost -- it runs after (see `fullWanted`).
  */
-export function persistScan(): Promise<ScanResult> {
+export function persistScan(): Promise<ScanResult>;
+export function persistScan(only: string): Promise<void>;
+export function persistScan(only?: string): Promise<ScanResult | void> {
+  if (only) onlyNext.add(only); else fullWanted = true;
   if (!scanning) {
-    scanning = tracked(scanOnce()).finally(() => { scanning = null; });
+    scanning = tracked(scanOnce()).finally(() => {
+      scanning = null;
+      // A pass that died before it reached a folder leaves its caller waiting: answered here, so the job card
+      // says what it found instead of hanging. Folders still queued are answered by the follow-up below.
+      for (const folderRel of [...folderWaits.keys()]) if (!onlyNext.has(folderRel)) folderDone(folderRel);
+      // A folder that arrived after the pass walked, or after its last folder: one more pass for it, unless a
+      // follow-up is already queued -- that one takes it too.
+      if (onlyNext.size && !again) void persistScan([...onlyNext][0]).catch(() => {});
+    });
     return scanning;
   }
+  // A folder the caller just wrote is answered when the running pass has indexed it, not when the pass ends:
+  // a full pass is hours on a large library, and the job card asks right after its chapter landed.
+  if (only) return new Promise<void>((done) => { folderWaits.set(only, [...(folderWaits.get(only) ?? []), done]); });
   // `scanning ??`: by the time this runs the scan it waited for has ended, so a scan running NOW was started
   // after every caller sharing this follow-up made its call -- a caller that asked again the moment its own scan
   // ended starts one before this line runs, and chaining another behind that would be a third scan for nothing.
@@ -939,7 +984,26 @@ export async function withScansHeld<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+/** One folder's walk result, for a pass taken down to what a download just wrote (persistScan's `only`). */
+async function walkOneFolder(folderRel: string): Promise<WalkResult> {
+  const folderAbs = join(DL_ROOT, folderRel);
+  const listing = await listDir(folderAbs);
+  if (listing.error) return { found: [], issues: [], sharedIds: 0 };
+  const chapters = await listChapters(folderAbs, { fsx: nodeFs, listing });
+  if (!chapters.length) return { found: [], issues: [], sharedIds: 0 };
+  return {
+    found: [{ folderRel, folderAbs, source: folderRel.split('/').slice(-2, -1)[0] || 'Library', chapters }],
+    issues: [], sharedIds: 0,
+  };
+}
+
 async function scanOnce(): Promise<ScanResult> {
+  // A full request outranks a folder one: a full pass indexes the folder too, at the folder's turn or the moment
+  // it is asked for (see the drain in the loop below).
+  const full = fullWanted || !onlyNext.size;
+  fullWanted = false;
+  const only = full ? [] : [...onlyNext];
+  onlyNext.clear();
   const held = hold;
   progress = { startedAt: new Date().toISOString(), phase: held ? 'waiting' : 'walking', done: 0, total: 0 };
   if (held) await held.catch(() => undefined);
@@ -961,6 +1025,8 @@ async function scanOnce(): Promise<ScanResult> {
   const skipped: ScanSkip[] = [];
   let skippedTotal = 0;
   let removed = 0;
+  /** Folders this pass has been through, indexed or passed over: a folder a download asks for meanwhile is not walked twice. */
+  const visited = new Set<string>();
   // folderRel -> series id, so the second root reuses the row the first root created. The same relative
   // folder legitimately exists under both roots (a series part-fetched by the engine, part downloaded here),
   // and merging them into one series is deliberate.
@@ -969,21 +1035,27 @@ async function scanOnce(): Promise<ScanResult> {
   // The walk reports rather than throws; the catch is the last word: a walk that fails outright costs its root,
   // named, never the scan.
   const walks: Array<{ root: string; label: 'library' | 'downloads' } & WalkResult> = [];
-  // Each root watched for in the other's walk (v0.52.0, #134): Health says so when one is met inside the other.
-  const marks = new Map([[LIBRARY_ROOT, await rootMark(DL_ROOT).catch(() => null)], [DL_ROOT, await rootMark(LIBRARY_ROOT).catch(() => null)]]);
-  for (const root of [LIBRARY_ROOT, DL_ROOT]) {
-    const label = root === DL_ROOT ? 'downloads' as const : 'library' as const;
-    walks.push({
-      root, label,
-      ...(await findSeriesDirs(root, nodeFs, process.platform, marks.get(root) ?? null).catch((e): WalkResult => ({
-        found: [], sharedIds: 0, issues: [{ folder: '', reason: 'unreadable', detail: `the walk failed: ${errCode(e)}`, params: { failed: errCode(e) } }],
-      }))),
-    });
+  if (only.length) {
+    // A pass a download asked for: its folder, not the library. Downloads land under DL_ROOT (lib_books.root).
+    for (const folderRel of only) walks.push({ root: DL_ROOT, label: 'downloads', ...(await walkOneFolder(folderRel)) });
+  } else {
+    // Each root watched for in the other's walk (v0.52.0, #134): Health says so when one is met inside the other.
+    const marks = new Map([[LIBRARY_ROOT, await rootMark(DL_ROOT).catch(() => null)], [DL_ROOT, await rootMark(LIBRARY_ROOT).catch(() => null)]]);
+    for (const root of [LIBRARY_ROOT, DL_ROOT]) {
+      const label = root === DL_ROOT ? 'downloads' as const : 'library' as const;
+      walks.push({
+        root, label,
+        ...(await findSeriesDirs(root, nodeFs, process.platform, marks.get(root) ?? null).catch((e): WalkResult => ({
+          found: [], sharedIds: 0, issues: [{ folder: '', reason: 'unreadable', detail: `the walk failed: ${errCode(e)}`, params: { failed: errCode(e) } }],
+        }))),
+      });
+    }
   }
   const walkIssues: ScanWalkIssue[] = walks.flatMap((w) => w.issues.map((i) => ({ ...i, root: w.label })));
   // Every folder that exists on disk this pass. A series still sitting at its own path has not moved, so it
   // must never be offered as the answer for a different folder.
   const onDisk = walks.flatMap((w) => w.found.map((f) => f.folderRel));
+  const walked = new Set(onDisk);
   // Loaded once per scan. Longest prefix wins, so a declared subdirectory beats library zero.
   const libs = await libraryRows();
   progress = { ...progress!, phase: 'indexing', total: walks.reduce((n, w) => n + w.found.length, 0) };
@@ -994,8 +1066,26 @@ async function scanOnce(): Promise<ScanResult> {
   const setAside = await setAsideByRoot();
   for (const { root, found: foundInRoot } of walks) {
     const aside = setAside.get(root);
-    for (const found of foundInRoot) {
+    for (let i = 0; i < foundInRoot.length; i++) {
+      // A download asked for its folder while this pass walks (v0.108.2): take it here, between two folders, and
+      // carry on. The pass is not stopped for it -- a server downloading all day would never finish one, and the
+      // folders added by hand would never be indexed. Asked for after its turn, or already indexed: answered now.
+      if (root === DL_ROOT && onlyNext.size) {
+        for (const folderRel of onlyNext) {
+          if (visited.has(folderRel)) { onlyNext.delete(folderRel); folderDone(folderRel); continue; }
+          if (walked.has(folderRel)) continue;
+          const asked = await walkOneFolder(folderRel);
+          const one = asked.found[0];
+          if (!one) { onlyNext.delete(folderRel); folderDone(folderRel); continue; }
+          onDisk.push(folderRel);
+          walked.add(folderRel);
+          progress!.total++;
+          foundInRoot.splice(i + 1, 0, one);
+        }
+      }
+      const found = foundInRoot[i];
       const { folderRel, folderAbs, source: srcName } = found;
+      visited.add(folderRel);
       progress!.done++;
       const files = aside?.size ? await notSetAside(root, folderRel, folderAbs, found.chapters, aside) : found.chapters;
       if (!files.length) continue;
@@ -1048,7 +1138,9 @@ async function scanOnce(): Promise<ScanResult> {
         // in it was ever indexed again. Reintroduce by dropping `!known`: "a folder that has its own series is never
         // rematched onto another" in rematch.int.test.ts finds the folder skipped.
         let rematched: { id: string; oldFolder: string } | null = null;
-        if (env.LIBRARY_REMATCH !== 'off' && !known && !seenFolders.has(folderRel)) {
+        // Not for a one-folder pass: `onDisk` holds only the folder it was asked for, so every other folder
+        // would look gone and a new one could be paired with it (lib/rescan.ts).
+        if (!only.length && env.LIBRARY_REMATCH !== 'off' && !known && !seenFolders.has(folderRel)) {
           rematched = await tryRematch(folderRel, folderAbs, files, root, onDisk, privateScope?.libraryId ?? libraryIdFor(folderRel, libs));
         }
 
@@ -1231,10 +1323,12 @@ async function scanOnce(): Promise<ScanResult> {
         // A local-art failure never loses an indexed chapter or changes provider artwork.
         await refreshLocalSeriesArt(seriesId, root, folderRel, root === DL_ROOT ? 1 : 0)
           .catch(e => console.warn('[scan] local artwork:', String((e as Error)?.message || e).slice(0, 120)));
+        if (root === DL_ROOT) refusals.delete(folderRel);
       } catch (e) {
         skippedTotal++;
         const error = String((e as Error)?.message || e).slice(0, 300);
         if (skipped.length < SKIPS_KEPT) skipped.push({ root: root === DL_ROOT ? 'downloads' : 'library', folder: folderRel, error });
+        if (root === DL_ROOT) refusals.set(folderRel, error);
         console.warn(`[scan] skipped ${root}/${folderRel}: ${error}`);
       }
     }
@@ -1262,16 +1356,23 @@ async function scanOnce(): Promise<ScanResult> {
   const ms = Date.now() - t0;
   const loud = walkIssues.filter((i) => !QUIET_WALK.has(i.reason));
   const meeting = walks.find((w) => w.met !== undefined);
-  lastFailure = null;
-  lastScan = {
-    at: new Date().toISOString(), startedAt: new Date(t0).toISOString(), series: seenFolders.size, books: nBooks, ms, skipped, skippedTotal,
-    walk: [...loud, ...walkIssues.filter((i) => QUIET_WALK.has(i.reason))].slice(0, SKIPS_KEPT),
-    walkTotal: walkIssues.length, walkProblems: loud.length,
-    sharedIds: walks.reduce((n, w) => n + w.sharedIds, 0), removed,
-    ...(meeting ? { nested: { root: meeting.label, folder: meeting.met! } } : {}),
-  };
-  if (loud.length) console.warn(`[scan] ${loud.length} folder(s) or file(s) were left out by the walk; Admin → Health → Library scan lists them`);
-  if (skippedTotal) console.warn(`[scan] ${skippedTotal} folder(s) could not be indexed; Admin → Health → Library scan lists them`);
+  // A restricted pass is not the library's report: the last full pass is what the Health page and the Tasks row
+  // describe.
+  if (!only.length) {
+    lastFailure = null;
+    lastScan = {
+      at: new Date().toISOString(), startedAt: new Date(t0).toISOString(), series: seenFolders.size, books: nBooks, ms, skipped, skippedTotal,
+      walk: [...loud, ...walkIssues.filter((i) => QUIET_WALK.has(i.reason))].slice(0, SKIPS_KEPT),
+      walkTotal: walkIssues.length, walkProblems: loud.length,
+      sharedIds: walks.reduce((n, w) => n + w.sharedIds, 0), removed,
+      ...(meeting ? { nested: { root: meeting.label, folder: meeting.met! } } : {}),
+    };
+    if (loud.length) console.warn(`[scan] ${loud.length} folder(s) or file(s) were left out by the walk; Admin → Health → Library scan lists them`);
+    if (skippedTotal) console.warn(`[scan] ${skippedTotal} folder(s) could not be indexed; Admin → Health → Library scan lists them`);
+  }
+  // A folder whose turn this pass has already taken is answered here; one that arrived after the walk is left
+  // for the follow-up persistScan's finally starts.
+  for (const folderRel of [...onlyNext]) if (visited.has(folderRel)) { onlyNext.delete(folderRel); folderDone(folderRel); }
   return { series: seenFolders.size, books: nBooks, ms, skipped: skippedTotal };
 }
 

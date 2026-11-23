@@ -275,6 +275,47 @@ test('requests during a scan share one follow-up, and nobody waits for a third s
   assert.equal(scanCount() - n0, 3);
 });
 
+test("a download's scan indexes its folder, not the library", { skip }, async () => {
+  // v0.108.2: an add downloads and then asks for a scan. A full pass is hours on a large library, and the one
+  // running had already walked past the folder -- so the series had no row, Discover offered it again, and a
+  // second add found the file on disk and did nothing. Reintroduce by calling persistScan() with no folder at
+  // the end of a job: the second folder is indexed too and the library's report moves.
+  const folder = 'Zsr/Added Now';
+  const other = 'Zsr/Not Yet';
+  cbz(join(DL, folder, 'Chapter 1.cbz'), 'Added Now');
+  cbz(join(DL, other, 'Chapter 1.cbz'), 'Not Yet');
+  const report = lastScanReport();
+  await persistScan(folder);
+  assert.deepEqual((await books(folder)).map((b) => b.n), [1], 'the folder the job wrote was not indexed');
+  assert.equal((await books(other)).length, 0, 'the pass walked the library anyway');
+  assert.equal(lastScanReport(), report, 'a one-folder pass rewrote the library scan report');
+});
+
+test('a folder asked for during a full pass is indexed by that pass, which still finishes', { skip }, async () => {
+  // #469 review: a server that downloads all day asks for a folder every few chapters. Cutting the full pass
+  // short each time would leave the folders added by hand unindexed and the Health report at the last pass that
+  // completed. Reintroduce by stopping the pass on `onlyNext`: the report below is the previous pass's and a
+  // second scan runs for the folder.
+  const { scanCount } = (await import('../src/lib/library')) as any;
+  const folder = 'Zsr/Asked Now';
+  const later = 'Zsr/Asked Twice';
+  const other = 'Zsr/Still Walking';
+  cbz(join(DL, folder, 'Chapter 1.cbz'), 'Asked Now');
+  cbz(join(DL, later, 'Chapter 1.cbz'), 'Asked Twice');
+  cbz(join(DL, other, 'Chapter 1.cbz'), 'Still Walking');
+  const report = lastScanReport();
+  const n0 = scanCount();
+  const full = persistScan();
+  const only = persistScan(folder);
+  const only2 = persistScan(later);
+  await Promise.all([full, only, only2]);
+  assert.deepEqual((await books(folder)).map((b) => b.n), [1], 'the folder the download asked for was not indexed');
+  assert.deepEqual((await books(later)).map((b) => b.n), [1], 'the second folder asked for was not indexed');
+  assert.deepEqual((await books(other)).map((b) => b.n), [1], 'the full pass stopped for the folder');
+  assert.notEqual(lastScanReport(), report, 'the full pass wrote no report of its own');
+  assert.equal(scanCount() - n0, 1, 'a second scan ran for a folder the first one indexed');
+});
+
 test('a Fetch whose download the scan never indexes ends as an error that says so', { skip }, async () => {
   // v0.48.0 checked only chapters it FOUND on disk. One that downloaded into a folder the scan never indexed
   // ended "done" -- the card green, the chapter nowhere. Reintroduce by checking `onDisk` alone in
