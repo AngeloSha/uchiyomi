@@ -167,9 +167,23 @@ fi
 # embedded rollback drill; the watcher only ever said the database had stopped). `-l /dev/stderr` is no
 # answer either: as the PUID user the server may not reopen the container's stderr, and the container never
 # starts. Started with -w so the app never races a database that is still recovering.
+# initdb's defaults are sized for a toy database: 128MB shared_buffers and 4MB work_mem. On a 189k-series
+# library that spilled the library's own window sort to disk (28MB per grid page) and left an 82.9% buffer
+# hit rate against a 392MB lib_series. Size from MemTotal, capped so a small box is not starved, and let the
+# operator pin any of the three (Postgres units: MB/GB, never a bare number -- that is blocks).
+clamp_mb() { # clamp_mb value floor cap
+  if [ "$1" -lt "$2" ]; then echo "$2"; elif [ "$1" -gt "$3" ]; then echo "$3"; else echo "$1"; fi
+}
+mem_mb="$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo 2>/dev/null)"
+case "$mem_mb" in ''|*[!0-9]*) mem_mb=2048 ;; esac
+PG_SHARED_BUFFERS="${PG_SHARED_BUFFERS:-$(clamp_mb $((mem_mb / 4)) 128 1024)MB}"
+PG_WORK_MEM="${PG_WORK_MEM:-32MB}"
+PG_EFFECTIVE_CACHE_SIZE="${PG_EFFECTIVE_CACHE_SIZE:-$(clamp_mb $((mem_mb / 2)) 512 4096)MB}"
+echo "[entrypoint] embedded Postgres memory: shared_buffers=$PG_SHARED_BUFFERS work_mem=$PG_WORK_MEM effective_cache_size=$PG_EFFECTIVE_CACHE_SIZE (MemTotal ${mem_mb}MB)"
+
 echo "[entrypoint] starting embedded Postgres $SERVER_MAJOR (socket $PGSOCK)"
 as_app pg_ctl -D "$PGDATA" -w -t 60 -s \
-  -o "-c listen_addresses='' -k $PGSOCK -c log_min_messages=warning" start
+  -o "-c listen_addresses='' -k $PGSOCK -c log_min_messages=warning -c shared_buffers=$PG_SHARED_BUFFERS -c work_mem=$PG_WORK_MEM -c effective_cache_size=$PG_EFFECTIVE_CACHE_SIZE" start
 if ! as_app psql -h "$PGSOCK" -U yomi -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='yomi'" | grep -q 1; then
   as_app createdb -h "$PGSOCK" -U yomi yomi
 fi
