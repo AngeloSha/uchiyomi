@@ -19,6 +19,8 @@ final class ReaderModel: ObservableObject {
     @Published var showingServers = false
     @Published var addingServer = false
     @Published private(set) var showServerFallback = false
+    @Published private(set) var navigation: ReaderNavigationPresentation?
+    private(set) var navigationBridge: NativeNavigationBridge?
     private(set) var appActions: NativeAppActionsBridge?
     private var appControlsReady = false
     private var appControlsDocument = UUID()
@@ -164,6 +166,7 @@ final class ReaderModel: ObservableObject {
         appControlsFallbackTask?.cancel(); appControlsFallbackTask = nil
         appControlsDocument = UUID(); appControlsReady = false; showServerFallback = false
         appActions?.retire(); appActions = nil
+        navigationBridge?.retire(); navigationBridge = nil; navigation = nil
         dismissStatus()
         startupTask?.cancel(); startupTask = nil
         weak var retired = webView
@@ -250,8 +253,13 @@ final class ReaderModel: ObservableObject {
                     self.appControlsFallbackTask?.cancel(); self.appControlsFallbackTask = nil
                 }
             }
+            let navigationBridge = NativeNavigationBridge(origin: selected.localOrigin) { [weak self] state in
+                guard let self, self.readerID == readerID else { return }
+                self.navigation = state
+            }
+            self.navigationBridge = navigationBridge
             self.appActions = appActions
-            let view = try await NativeWebView.make(profile: selected, policy: gateway.policy, appActions: appActions) { [weak self] in
+            let view = try await NativeWebView.make(profile: selected, policy: gateway.policy, appActions: appActions, navigation: navigationBridge) { [weak self] in
                 Task { await self?.confirmUI(readerID: readerID) }
             }
             serverName = selected.origin.host ?? "Uchiyomi"
@@ -285,6 +293,7 @@ final class ReaderModel: ObservableObject {
     func readerDocumentStarted(_ view: WKWebView) {
         guard webView === view else { return }
         appActions?.reset()
+        navigationBridge?.reset()
         appControlsDocument = UUID(); appControlsReady = false; showServerFallback = false
         scheduleAppControlsFallback()
     }

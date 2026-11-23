@@ -21,23 +21,25 @@ enum NativeWebView {
             }
         }
     }
-    static func make(profile: ServerProfile, policy: GatewayPolicy, appActions: NativeAppActionsBridge? = nil, onReady: @escaping () -> Void = {}) async throws -> WKWebView {
+    static func make(profile: ServerProfile, policy: GatewayPolicy, appActions: NativeAppActionsBridge? = nil, navigation: NativeNavigationBridge? = nil, onReady: @escaping () -> Void = {}) async throws -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = WKWebsiteDataStore(forIdentifier: profile.id)
         configuration.limitsNavigationsToAppBoundDomains = true
         let marker: [String: Any] = ["platform": "ios", "protocolVersion": 2, "serverOrigin": profile.origin.absoluteString]
         let json = String(data: try JSONSerialization.data(withJSONObject: marker), encoding: .utf8)!
-        let controls = appActions == nil ? "" : NativeAppActionsBridge.script
-        let optionalControls = appActions == nil ? "" : ", appActions"
+        let controls = (appActions == nil ? "" : NativeAppActionsBridge.script) + (navigation == nil ? "" : NativeNavigationBridge.script)
+        let optionalControls = (appActions == nil ? "" : ", appActions") + (navigation == nil ? "" : ", navigation")
         let script = "(() => { \(controls) Object.defineProperty(window, 'uchiyomiNative', {value:Object.freeze(Object.assign(\(json), {ready:()=>window.webkit.messageHandlers.readerReady.postMessage(null)\(optionalControls)})), writable:false, configurable:false}); })();"
         configuration.userContentController.add(NativeReadyHandler(origin: profile.localOrigin, ready: onReady), name: "readerReady")
         if let appActions { configuration.userContentController.add(appActions, name: "appActions") }
+        if let navigation { configuration.userContentController.add(navigation, name: "navigation") }
         configuration.userContentController.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let cookie = HTTPCookie(properties: [.name: policy.cookieName, .value: policy.token,
             .domain: "localhost", .path: "/", HTTPCookiePropertyKey("HttpOnly"): "TRUE", HTTPCookiePropertyKey("SameSite"): "Strict"])!
         await configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
         let view = WKWebView(frame: .zero, configuration: configuration)
         appActions?.attach(view)
+        navigation?.attach(view)
         view.allowsBackForwardNavigationGestures = true
         view.isOpaque = false
         view.backgroundColor = .systemBackground
