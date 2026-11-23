@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.109.0 — 2026-11-23
+
+**The Duo's side dock wears Uchiyomi's own look, Komga apps can browse with filters, big libraries scan further and faster, and cover-title extraction matches more logos.**
+
+### Themed navigation in the Duo dock
+
+- On the iPhone Duo's side layout, the navigation dock now draws Uchiyomi's own icons, colours and selection marker instead of plain system glyphs ([#443](https://github.com/AngeloSha/uchiyomi/pull/443), **nVitius**). Phones, other layouts and the web app are unchanged.
+
+### Komga apps
+
+- The Komga-compatible API answers `POST /api/v1/series/list` and `POST /api/v1/books/list`, the filtered lists the Komga extension browses with ([#453](https://github.com/AngeloSha/uchiyomi/pull/453), **TIGamingTV**). Each reader still sees only what they may: private series, age limits and library access apply as on every other Komga route.
+
+### Library scans
+
+- The scan's folder lookup has its own index, which saves a database scan per folder on large libraries ([#463](https://github.com/AngeloSha/uchiyomi/pull/463), **Baine**).
+- The walk stops at 500,000 folders instead of 200,000, and `LIBRARY_MAX_DIRS` raises it further ([#459](https://github.com/AngeloSha/uchiyomi/pull/459), **Baine**).
+- Adding a series whose folder the scanner had already found (an add cut off by a restart, or a folder already on disk) now links it to its source instead of answering "already in library" ([#465](https://github.com/AngeloSha/uchiyomi/pull/465), **Baine**).
+- Home's hero no longer waits for its title logo lookups ([#460](https://github.com/AngeloSha/uchiyomi/pull/460), **Baine**).
+
+### Cover-title extraction
+
+- A logo whose words are joined by a hyphen, underscore or dot (LIAR-GAME) matches its title, and an author credit beside the title no longer lowers its confidence; it still sends the cut for review ([#457](https://github.com/AngeloSha/uchiyomi/pull/457), **Baine**).
+- The worker uses a GPU when its image has CUDA PyTorch (`TITLE_EXTRACTOR_DEVICE` overrides) ([#455](https://github.com/AngeloSha/uchiyomi/pull/455)), and slower hosts can give it more time and threads with `TITLE_EXTRACTOR_TIMEOUT_MS` and `INFERENCE_THREADS` ([#454](https://github.com/AngeloSha/uchiyomi/pull/454), **Baine**).
+
+### Upgrading
+
+- One new database index is built on the first start; on a very large library this takes a few seconds. The Umbrel package pins the published v0.108.1. Dependency updates for the server, web and desktop app are included.
+
 ## v0.108.1 — 2026-11-14
 
 **Title logos arrive without the written title flashing first, and Find missing chapters writes chapter numbers as they are.**
