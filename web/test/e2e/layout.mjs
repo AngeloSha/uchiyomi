@@ -173,6 +173,30 @@ try {
       else if (h.sliver) bad(`header @${w} ${lang}: the search shows a sliver (${h.sliver})`);
       else ok(`header @${w} ${lang}: fits, every round button 40 px, the search whole or its icon alone`);
     }
+    // Native navigation removes the main content's bottom-bar clearance. TopNav
+    // also contains a .shell: its height must still match the sticky controls' offset.
+    const nativeHeader = await page.evaluate(() => {
+      const root = document.documentElement, header = document.querySelector('[data-topbar]');
+      const main = document.querySelector('main.shell');
+      if (!header || !main) return null;
+      const previous = root.getAttribute('data-host-navigation');
+      const before = header.getBoundingClientRect().height;
+      root.setAttribute('data-host-navigation', 'true');
+      try {
+        const style = getComputedStyle(root);
+        return { before, height: header.getBoundingClientRect().height,
+          offset: parseFloat(style.getPropertyValue('--topbar-h')),
+          padding: parseFloat(getComputedStyle(main).paddingBottom), minimumPadding: 3 * parseFloat(style.fontSize) };
+      } finally {
+        if (previous === null) root.removeAttribute('data-host-navigation');
+        else root.setAttribute('data-host-navigation', previous);
+      }
+    });
+    if (!nativeHeader) bad(`native header @${w}: missing header or main shell`);
+    else if (Math.abs(nativeHeader.height - nativeHeader.before) > 0.5 || Math.abs(nativeHeader.height - nativeHeader.offset) > 0.5)
+      bad(`native header @${w}: height ${nativeHeader.height}px differs from ordinary ${nativeHeader.before}px or sticky offset ${nativeHeader.offset}px`);
+    else if (nativeHeader.padding < nativeHeader.minimumPadding) bad(`native main @${w}: lost its bottom clearance`);
+    else ok(`native header @${w}: unchanged height, sticky offset aligned, main clearance retained`);
   }
   await page.evaluate(() => localStorage.removeItem('uchiyomi.lang'));
 

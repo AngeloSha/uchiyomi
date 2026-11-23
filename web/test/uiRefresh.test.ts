@@ -114,7 +114,8 @@ test('the shell: wide or supported native side navigation, with hooks before any
   assert.ok(at('const wide = useWideViewport();') > 0 && at('const wide = useWideViewport();') < at("if (status === 'loading') return"), 'the viewport hook runs after an early return');
   const rail = at('{sideNavigation && <Sidebar nativeCompact={nativeSide && !wide} />}');
   assert.ok(at('const nativeLayout = useNativeNavigationLayout(') > 0 && at('const nativeLayout = useNativeNavigationLayout(') < at("if (status === 'loading') return"), 'native layout hook runs after an early return');
-  assert.match(shell, /const sideNavigation = usesSideNavigation\(wide, nativeLayout\);/);
+  assert.match(shell, /const sideNavigation = !hostNavigation && usesSideNavigation\(wide, nativeLayout\);/);
+  assert.match(shell, /!hostNavigation && <BottomNav/, 'web navigation remains the fallback until the native renderer acknowledges');
   assert.match(shell, /<BottomNav nativeSide=\{nativeSide\} \/>/, 'native side layout leaves the bottom bar mounted');
   assert.ok(at('<HealthBanner />') < at('<TopNav ') && at('<TopNav ') < rail && rail < at('<main '),
     'not banner, bar, sidebar, page -- in that order');

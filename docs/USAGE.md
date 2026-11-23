@@ -4063,6 +4063,8 @@ MangaUpdates only, never to Uchiyomi. Uchiyomi asks MangaUpdates at most once a 
 
 ## 11. Install as an app & offline
 
+In compatible [iOS wrappers](IOS.md), navigation uses the Duo's system side rail, including when folded, with Uchiyomi's own icons, rounded selection tiles and your chosen accent colour. Regular iPhones keep the web app's navigation. **More** opens the secondary destinations. Navigation disappears while reading; browser and Home Screen PWA navigation stay unchanged.
+
 Uchiyomi is a **PWA**. In your browser's menu choose **Install app** (or "Add to Home Screen" on mobile) to get a
 standalone, full-screen app icon; **Profile → Settings → This device → Install Uchiyomi** offers the same, with the
 steps for the browser you are in.
