@@ -126,8 +126,9 @@ Do not use `down -v` to disable this feature: that would also remove the existin
 ## Connect the app
 
 Run the worker only on a private internal Docker network shared with the app. Publish no worker port. Its default
-port is 3081. Use a read-only container filesystem, a bounded writable `/tmp`, no Linux capabilities, three CPU
-threads and a memory limit of at least 4 GiB. The worker runs as uid/gid 10002 and accepts one inference at a time.
+port is 3081. Use a read-only container filesystem, a bounded writable `/tmp`, no Linux capabilities,
+`INFERENCE_THREADS` CPU threads (default 3, at most 16) with container CPU and memory limits to match, and a memory
+limit of at least 4 GiB. The worker runs as uid/gid 10002 and accepts one inference at a time.
 
 Set these on the app:
 
@@ -137,6 +138,7 @@ Set these on the app:
 | `TITLE_EXTRACTOR_TOKEN` | Random shared secret, at least 32 characters |
 | `TITLE_EXTRACTOR_OCR_DIR` | Read-only OCR pack directory inside the app |
 | `TITLE_EXTRACTOR_CALIBRATION_FILE` | Optional approved verification JSON inside that directory |
+| `TITLE_EXTRACTOR_TIMEOUT_MS` | Optional extraction budget, 15000–900000; default 90000 |
 
 Set the same token on the worker and mount the two checkpoint files at `/models`. Store the token in a mode-0600
 environment file used only by these two containers. Do not add other app credentials to the worker. The worker's
