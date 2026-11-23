@@ -114,28 +114,64 @@ export interface ArtOverviewRow {
   override_v: number | null;
 }
 
+export type ArtFilter = 'all' | 'nobanner' | 'nocover' | 'fixed';
+export interface ArtOverviewCounts { all: number; nobanner: number; nocover: number; fixed: number }
+export interface ArtPage { content: ArtOverviewRow[]; total: number; counts: ArtOverviewCounts }
+
+/** The same rule the tab's chips mean, in SQL: an override counts as fixed, not missing. */
+const FILTERED: Record<ArtFilter, string> = {
+  all: 'TRUE',
+  nobanner: `NOT (a.banner IS NOT NULL AND a.banner <> '') AND o.banner IS NULL`,
+  nocover: `NOT (a.cover IS NOT NULL AND a.cover <> '') AND o.cover IS NULL`,
+  fixed: `o.banner IS NOT NULL OR o.cover IS NOT NULL`,
+};
+const artFilter = (f: unknown): ArtFilter => (f === 'nobanner' || f === 'nocover' || f === 'fixed' ? f : 'all');
+
 /**
- * Every visible series with its art status, worst-first. Feeds the admin Art Review gallery.
+ * One page of the admin Art Review gallery, worst-first, with the counts its chips show.
  *
  * This lives here rather than inline in the route because it shipped in v0.6.0 with ORDER BY written above
  * WHERE, which Postgres rejects outright: the endpoint 500'd and the Art tab was dead in a published
  * release. Nothing in the suite ran the query, so the only thing between a typo in an admin SQL string and
  * a broken tab reaching users was somebody happening to open it. A function can be called from a test; a
  * template literal buried in a route handler cannot.
+ *
+ * Paged since 0.108.2: it returned every visible series (53 MB on a 189k library, 7 s), which the tab then
+ * rendered and refetched in full after every single art change.
  */
-export const artOverview = () =>
-  q<ArtOverviewRow>(
-    `SELECT s.id, s.title, s.books_count,
-            (a.banner IS NOT NULL AND a.banner <> '') AS has_banner,
-            (a.cover  IS NOT NULL AND a.cover  <> '') AS has_cover,
-            (o.banner IS NOT NULL) AS override_banner,
-            (o.cover  IS NOT NULL) AS override_cover,
-            COALESCE(o.cover = $1, false) AS first_page,
-            EXTRACT(EPOCH FROM o.updated_at) * 1000 AS override_v
-       FROM lib_series s
-       LEFT JOIN series_art a ON a.series_id = s.id
-       LEFT JOIN series_overrides o ON o.series_id = s.id
-      WHERE ${visibleToAll('s')}
-      ORDER BY (o.banner IS NOT NULL OR o.cover IS NOT NULL), (a.banner IS NOT NULL AND a.banner <> ''),
-               (a.cover IS NOT NULL AND a.cover <> ''), s.title`, [FIRST_PAGE],
-  );
+export const artOverview = async (
+  { filter = 'all', limit = 60, offset = 0 }: { filter?: ArtFilter; limit?: number; offset?: number } = {},
+): Promise<ArtPage> => {
+  const f = artFilter(filter);
+  const size = Math.min(Math.max(Math.trunc(limit) || 60, 1), 200);
+  const skip = Math.max(Math.trunc(offset) || 0, 0);
+  const [content, counts] = await Promise.all([
+    q<ArtOverviewRow>(
+      `SELECT s.id, s.title, s.books_count,
+              (a.banner IS NOT NULL AND a.banner <> '') AS has_banner,
+              (a.cover  IS NOT NULL AND a.cover  <> '') AS has_cover,
+              (o.banner IS NOT NULL) AS override_banner,
+              (o.cover  IS NOT NULL) AS override_cover,
+              COALESCE(o.cover = $1, false) AS first_page,
+              EXTRACT(EPOCH FROM o.updated_at) * 1000 AS override_v
+         FROM lib_series s
+         LEFT JOIN series_art a ON a.series_id = s.id
+         LEFT JOIN series_overrides o ON o.series_id = s.id
+        WHERE ${visibleToAll('s')} AND (${FILTERED[f]})
+        ORDER BY (o.banner IS NOT NULL OR o.cover IS NOT NULL), (a.banner IS NOT NULL AND a.banner <> ''),
+                 (a.cover IS NOT NULL AND a.cover <> ''), s.title
+        LIMIT $2 OFFSET $3`, [FIRST_PAGE, size, skip],
+    ),
+    q<ArtOverviewCounts>(
+      `SELECT count(*)::int AS "all",
+              (count(*) FILTER (WHERE ${FILTERED.nobanner}))::int AS nobanner,
+              (count(*) FILTER (WHERE ${FILTERED.nocover}))::int AS nocover,
+              (count(*) FILTER (WHERE ${FILTERED.fixed}))::int AS fixed
+         FROM lib_series s
+         LEFT JOIN series_art a ON a.series_id = s.id
+         LEFT JOIN series_overrides o ON o.series_id = s.id
+        WHERE ${visibleToAll('s')}`,
+    ).then((r) => r[0] ?? { all: 0, nobanner: 0, nocover: 0, fixed: 0 }),
+  ]);
+  return { content, total: counts[f], counts };
+};

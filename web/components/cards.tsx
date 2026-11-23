@@ -408,10 +408,10 @@ export function SeriesTile({ series, eager = false, selectable, selected, onTogg
     </>
   );
   if (selectable) {
-    return <button type="button" onClick={onToggle} onMouseDown={noShiftSelect} aria-pressed={!!selected} className="group block w-full text-start">{body}</button>;
+    return <button type="button" onClick={onToggle} onMouseDown={noShiftSelect} aria-pressed={!!selected} className="series-tile group block w-full text-start">{body}</button>;
   }
   return (
-    <div className="group relative">
+    <div className="series-tile group relative">
       <Link href={`/series/?id=${series.id}`} className="block" {...menu.bind}>{body}</Link>
       {/* The cover's box, lifted and tilted with it, so the ⋯ stays on its corner. */}
       <div style={{ transform: tilt.style?.transform, transition: tilt.style?.transition }}

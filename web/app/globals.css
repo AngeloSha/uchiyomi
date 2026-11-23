@@ -348,6 +348,13 @@
     @apply relative overflow-hidden bg-ink-800;
     content-visibility: auto;
   }
+  /* A Library tile the same way (v0.108.2, #464): Firefox/Zen spent its scroll frames on cards nobody could see.
+     The tile's height is fixed by its cover's aspect ratio and its two text lines, so a skipped one moves nothing;
+     `auto` makes the browser remember each tile's real height after its first paint. */
+  .series-tile {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 20rem;
+  }
   .skeleton::after {
     content: '';
     @apply absolute inset-0 animate-shimmer;

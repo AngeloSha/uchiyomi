@@ -1234,18 +1234,9 @@ export async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<Healt
             sh.stages, sh.live_at, sh.live_by, sh.live_state, sh.live_code, sh.live_stage,
             -- The engine's name for an extension source that is not registered right now (sourceLabel).
             (SELECT sn.name FROM suwayomi_sources sn WHERE 'sw:' || sn.source_id = sh.source_id LIMIT 1) AS engine_name,
-            -- ls.source_id, NOT ls.source: the former is the adapter id ('aqua'), the latter is the
-            -- display name as it was at add time ('Aqua Manga (EN)'). This compared a name to an id, so it
-            -- matched nothing and every row of this check has always reported "0 series use it".
-            -- Followers count as well as primaries (series_sources), and a series counts ONCE however many
-            -- ways it reaches this source: since v0.31.0 a series can follow several sources, so counting
-            -- primaries alone called a source nobody-uses while it was the only one carrying ten series --
-            -- and this check now greys a source on exactly that number.
-            (SELECT count(*) FROM lib_series ls
-              WHERE ${visibleToAll('ls')}
-                AND (ls.source_id = sh.source_id
-                     OR EXISTS (SELECT 1 FROM series_sources ss2
-                                 WHERE ss2.series_id = ls.id AND ss2.source_id = sh.source_id)))::int AS series
+            -- The series count is filled in below, in one pass for every listed source: as a correlated
+            -- subquery this scanned lib_series once per row, ~250 ms each on a 189k library.
+            0::int AS series
        FROM source_health sh
       WHERE sh.status <> 'ok' OR sh.disabled = true OR sh.empty_streak >= 3 OR sh.slow_streak >= 3
          OR sh.live_state IN ('fail', 'inconclusive') OR sh.stages::text LIKE '%failAt%'
@@ -1257,6 +1248,21 @@ export async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<Healt
     [slowed],
   );
   const now = Date.now();
+  // A series counts ONCE however many ways it reaches a source, and followers count as well as primaries: since
+  // v0.31.0 a series can follow several sources, so counting primaries alone called a source nobody-uses while it
+  // was the only one carrying ten series. One grouped pass rather than a correlated count per source.
+  // ls.source_id, NOT ls.source: the former is the adapter id ('aqua'), the latter is the display name as it was
+  // at add time ('Aqua Manga (EN)'), and comparing that to an id matched nothing.
+  const usedBy = new Map((await q<{ source_id: string; n: number }>(
+    `SELECT x.source_id, count(DISTINCT x.series_id)::int AS n FROM (
+       SELECT s.id AS series_id, s.source_id FROM lib_series s
+        WHERE ${visibleToAll('s')} AND s.source_id = ANY($1::text[])
+       UNION ALL
+       SELECT ss.series_id, ss.source_id FROM series_sources ss JOIN lib_series s ON s.id = ss.series_id
+        WHERE ${visibleToAll('s')} AND ss.source_id = ANY($1::text[])
+     ) x GROUP BY x.source_id`, [rows.map((r) => r.source_id)],
+  ).catch(() => [])).map((r) => [r.source_id, Number(r.n)] as const));
+  for (const row of rows) row.series = usedBy.get(row.source_id) ?? 0;
   // v0.49.1: how many series each source is the MAIN source of -- what Find other sources on its row would search for.
   const mainCounts = await mainSourceCounts(rows.map((r) => r.source_id)).catch(() => new Map<string, number>());
   // A source the operator switched off themselves is not a fault, and reading it as one is how a health

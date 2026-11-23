@@ -164,6 +164,10 @@ CREATE TABLE IF NOT EXISTS series_art (
   cover      text,
   fetched_at timestamptz NOT NULL DEFAULT now()
 );
+-- The art backfill's last look at this series, hit or miss (v0.108.2). A row this old is asked again after
+-- MISS_DAYS; a miss is not re-hunted on the next run, and a restart of the multi-day backfill resumes instead
+-- of starting over. NULL on rows written by an add or autoDetails: those were not a backfill look.
+ALTER TABLE series_art ADD COLUMN IF NOT EXISTS looked_at timestamptz;
 
 -- Owned library (replaces Komga's file catalog). Populated by the CBZ scanner (lib/library.ts).
 CREATE TABLE IF NOT EXISTS lib_series (

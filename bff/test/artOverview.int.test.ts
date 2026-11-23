@@ -57,26 +57,37 @@ after(async () => { if (DSN) await wipe().catch(() => {}); });
 
 test('THE BUG: the query is valid SQL and actually runs', { skip }, async () => {
   // v0.6.0 failed exactly here, with: syntax error at or near "WHERE".
-  const rows = await artOverview();
+  const rows = (await artOverview()).content;
   assert.ok(Array.isArray(rows), 'artOverview did not return rows');
 });
 
 test('a deleted series is not offered for art review', { skip }, async () => {
-  const rows = await artOverview();
+  const rows = (await artOverview()).content;
   assert.ok(!rows.some((r) => r.id === GONE), 'a hidden series showed up in Art Review');
 });
 
 test('a merged-away series is not offered either', { skip }, async () => {
-  const rows = await artOverview();
+  const rows = (await artOverview()).content;
   assert.ok(!rows.some((r) => r.id === MERGED), 'an absorbed series showed up in Art Review');
 });
 
 test('a live series is present, with its art flags', { skip }, async () => {
-  const row = (await artOverview()).find((r) => r.id === LIVE);
+  const row = (await artOverview()).content.find((r) => r.id === LIVE);
   assert.ok(row, 'the live series was missing from Art Review');
   assert.equal(row.has_banner, false);
   assert.equal(row.has_cover, false);
   assert.equal(row.override_banner, false);
+});
+
+test('a page, not the whole library: limit/offset and the chip counts agree', { skip }, async () => {
+  const all = await artOverview();
+  assert.equal(all.total, all.counts.all, 'the All count is the unfiltered total');
+  const missing = await artOverview({ filter: 'nobanner' });
+  assert.equal(missing.total, missing.counts.nobanner);
+  assert.ok(missing.content.every((r) => !r.has_banner && !r.override_banner), 'a banner that exists is not "missing"');
+  const first = await artOverview({ limit: 1 });
+  assert.equal(first.content.length, 1, 'limit was ignored');
+  assert.equal(first.total, all.total, 'a page must not change the total');
 });
 
 test('series with art sort after series without, so the gallery leads with what needs work', { skip }, async () => {
@@ -91,7 +102,7 @@ test('series with art sort after series without, so the gallery leads with what 
   await q(`DELETE FROM lib_series WHERE id = $1`, [other]);
   await q(`INSERT INTO lib_series (id, source, title, folder, books_count) VALUES ($1,'T!art','Art Bare',$1,1)`, [other]);
   try {
-    const rows = await artOverview();
+    const rows = (await artOverview()).content;
     const bare = rows.findIndex((r) => r.id === other);
     const dressed = rows.findIndex((r) => r.id === LIVE);
     assert.ok(bare >= 0 && dressed >= 0, 'both fixtures should be listed');
