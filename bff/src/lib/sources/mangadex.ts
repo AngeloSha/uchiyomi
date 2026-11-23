@@ -326,6 +326,9 @@ export function makeMangadex(code: string): SourceAdapter {
     lang: app,
     rateGroup: MANGADEX_GROUP,
     imageReferer: 'https://mangadex.org/', // CDN rejects image fetches without the mangadex referer
+    // uploads.mangadex.org now answers a browser user-agent (the cover proxy's default) with a bot-challenge
+    // redirect -- "if this isn't a browser, don't send a browser UA" -- so every uncached cover failed. Same UA as the API.
+    imageHeaders: { 'user-agent': HEADERS['user-agent'] },
     preferredOrder: 10,
 
     async search(query) {
