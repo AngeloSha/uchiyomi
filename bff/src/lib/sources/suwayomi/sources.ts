@@ -6,7 +6,8 @@
 // Suwayomi's own integer ids, and fetchMangaAndChapters/fetchChapterPages take those integer ids rather than any
 // source-native identifier. So a series' sourceId here is Suwayomi's manga id. That is stable for as long as
 // Suwayomi's database lives; wiping it orphans the routing, same as uninstalling an extension would.
-import { UNNUMBERED, type SourceAdapter, type SourceSeries, type SourceChapter } from '../types';
+import { GALLERY, UNNUMBERED, type SourceAdapter, type SourceSeries, type SourceChapter } from '../types';
+import { postingSequence } from '../../postingOrder';
 import { taggedContentRating } from '../../ageRating';
 import { gql as defaultGql, suwayomiUrl, suwayomiImageHeaders, onEngineOrigin, EngineRefusedError, type Gql, type GqlError } from './client';
 import { EngineAuthError } from './auth';
@@ -204,17 +205,18 @@ function toChapter(c: RemoteChapter, position: number, assigned?: number): Sourc
 }
 
 /**
- * Unnumbered rows (a gallery and its parts) as chapters 1..n, oldest first. The engine's order is the
- * posting order; an engine that counts from the newest is caught by the dates at the two ends, as in
- * lib/postingOrder.ts postingSequence.
+ * Unnumbered rows (a gallery and its parts) as chapters 1..n, oldest first. The ordering is
+ * lib/postingOrder.ts postingSequence itself, not a second copy of it: the engine's sourceOrder when every row
+ * has one -- turned round when the dates at the two ends say it counted from the newest -- else date then listing.
+ * (The private copy this replaced mixed ordered and unordered rows in one gallery.)
  */
 function galleryChapters(rows: RemoteChapter[]): SourceChapter[] {
-  const seq = rows.map((c, i) => ({ c, i, order: typeof c.sourceOrder === 'number' && c.sourceOrder > 0 ? c.sourceOrder : i + 1,
-    t: Number(c.uploadDate) > 0 ? Number(c.uploadDate) : null }));
-  seq.sort((a, b) => a.order - b.order || a.i - b.i);
-  const dated = seq.filter((r) => r.t != null);
-  if (dated.length >= 2 && (dated[0].t as number) > (dated[dated.length - 1].t as number)) seq.reverse();
-  return seq.map((r, k) => toChapter(r.c, r.i + 1, k + 1)).filter((c): c is SourceChapter => !!c);
+  const seq = rows
+    .map((c, i) => toChapter(c, i + 1, i + 1)) // assigned: a gallery row has no number, and toChapter drops those
+    .filter((c): c is SourceChapter => !!c);
+  return postingSequence(seq).map((c, k) => ({ ...c, number: k + 1,
+    // toChapter names an unnamed row after the number it was given; that was its position, not its place now.
+    title: c.title === `Chapter ${c.number}` ? `Chapter ${k + 1}` : c.title }));
 }
 
 /**
@@ -366,11 +368,21 @@ export function makeSuwayomiAdapter(remote: RemoteSource, gqlRun: Gql = defaultG
         .map((c, i) => toChapter(c, i + 1))
         .filter((c): c is SourceChapter => !!c)
         .sort((a, b) => a.number - b.number);
-      // A single gallery, or the parts of an NSFW gallery, may have no chapter numbers at all.
-      // Assign posting-order numbers only when no usable number exists. Mixed lists and multi-row
-      // SFW lists keep dropping unnumbered notices rather than inventing chapters for them.
+      // A single gallery, or the parts of an NSFW gallery, may have no chapter numbers at all. Assign
+      // posting-order numbers only when no usable number exists. Mixed lists and multi-row SFW lists keep
+      // dropping unnumbered notices rather than inventing chapters for them.
+      //
+      // A gallery whose parts are all posted as "0" used to slip past this: 0 survives toChapter, so `out` was
+      // never empty and the parts collided on chapter 0. It is a gallery by the same rule (one part, or an adult
+      // source). The numbering is also marked GALLERY now, so the add stores posting numbers (lib/numbering.ts).
       const rows = list.filter((c) => c?.id != null);
-      if (!out.length && rows.length && (rows.length === 1 || remote.isNsfw)) out = galleryChapters(rows);
+      const zeroed = rows.length > 0 && rows.every((c) => Number(c.chapterNumber) === 0);
+      // Same gate as above: one part, or an adult source. A multi-row SFW list of 0s is as unlike a gallery as
+      // a list of -1s, and stays the source's numbers rather than inventing chapters.
+      if ((zeroed || !out.length) && rows.length && (rows.length === 1 || remote.isNsfw)) {
+        out = galleryChapters(rows);
+        Object.defineProperty(out, GALLERY, { value: true });
+      }
       // How many rows toChapter dropped for having no usable number (#115): on the FINAL array, after the sort,
       // so the smoke test can tell "no numbers" from "no chapters". Non-enumerable (types.ts UNNUMBERED).
       const dropped = list.filter((c) => c?.id != null).length - out.length;

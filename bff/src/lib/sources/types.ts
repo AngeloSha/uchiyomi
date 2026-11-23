@@ -100,6 +100,16 @@ export const unnumberedOf = (list: unknown): number => {
   return typeof n === 'number' && n > 0 ? n : 0;
 };
 
+/**
+ * Optional adapter metadata on a `listChapters` answer: this listing is ONE gallery (an artbook's parts, a
+ * single-post gallery), not numbered chapters. Its numbers were assigned by the adapter and carry no meaning
+ * beyond their order; the add and the updater then treat it as posting order (#294), so the numbers are stored
+ * in series_post_numbers and a part deleted at the source leaves a hole instead of renumbering the rest.
+ * Non-enumerable like UNNUMBERED, so spreads and JSON are unaffected.
+ */
+export const GALLERY: unique symbol = Symbol.for('uchiyomi.gallery');
+export const galleryOf = (list: unknown): boolean => (list as { [GALLERY]?: unknown } | null)?.[GALLERY] === true;
+
 export type CreatorField = 'author' | 'artist';
 
 export interface SourceAdapter {

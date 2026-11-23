@@ -33,7 +33,7 @@
 import { randomBytes } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { q, one, tx } from './db';
-import type { SourceChapter } from './sources/types';
+import { galleryOf, type SourceChapter } from './sources/types';
 import { getSource, withTimeout } from './sources';
 import { budgetFor } from './sources/budget';
 import { isSwAdapterId, SW_PREFIX } from './sources/suwayomi/sources';
@@ -118,7 +118,10 @@ export function numberingFor<T extends SourceChapter>(raw: readonly T[], want: N
   { chapters: T[]; detect: SharedNumbering; titles: TitleNumbering; applied: NumberingMode; assignment?: PostingAssignment<T> } {
   const detect = detectSharedNumbering(raw);
   const titles = detectTitleNumbering(raw);
-  const posting = raw.length > 0 && (want === 'posting_order' || (want === 'auto' && detect.verdict === 'strong'));
+  // A gallery's numbers mean nothing but their order (the adapter says so with GALLERY), so adding one is adding
+  // a posting-ordered series: 1..K stored in series_post_numbers, and a part that goes leaves its hole (#294).
+  const posting = raw.length > 0
+    && (want === 'posting_order' || (want === 'auto' && (detect.verdict === 'strong' || galleryOf(raw))));
   if (!posting) {
     if (raw.length > 0 && (want === 'titles' || (want === 'auto' && titles.verdict === 'strong'))) {
       return { chapters: titleNumbered(raw), detect, titles, applied: 'titles' };
@@ -1015,8 +1018,10 @@ export async function addNumbering<T extends SourceChapter>(
   const stored = ctx.existingId ? await storedPosts(ctx.existingId, ctx.sourceId).catch(() => []) : [];
   const books = !!(await one<{ n: number }>(
     'SELECT 1 AS n FROM lib_books b JOIN lib_series s ON s.id = b.series_id WHERE s.folder = $1 LIMIT 1', [ctx.folder]).catch(() => null));
+  // A gallery says its numbers mean nothing but their order (GALLERY), so an add numbers it by posting order and
+  // keeps those numbers in series_post_numbers -- the same as numberingFor.
   const posting = raw.length > 0 && (want === 'posting_order'
-    || (want === 'auto' && (row?.numbering === 'posting_order' || (row?.numbering_by !== 'manual' && detect.verdict === 'strong'))));
+    || (want === 'auto' && (galleryOf(raw) || row?.numbering === 'posting_order' || (row?.numbering_by !== 'manual' && detect.verdict === 'strong'))));
   const kept = { numbering: row?.numbering ?? null, by: row?.numbering_by ?? null };
   if (posting) {
     if (books && (!stored.length || (row?.numbering_source && row.numbering_source !== ctx.sourceId))) {

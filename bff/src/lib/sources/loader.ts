@@ -4,7 +4,7 @@
 // install with no sources mounted is the legal, scraper-free default.
 import { readdirSync } from 'fs';
 import { join } from 'path';
-import { UNNUMBERED, unnumberedOf, type SourceAdapter, type SourceChapter, type SourceHost } from './types';
+import { GALLERY, UNNUMBERED, galleryOf, unnumberedOf, type SourceAdapter, type SourceChapter, type SourceHost } from './types';
 import { cfGet, cfPost, cfSession } from './flaresolverr';
 import { learnImageHosts } from './imageHosts';
 
@@ -34,6 +34,9 @@ export const fileableChapters = (list: SourceChapter[]): SourceChapter[] => {
   // or destructive cleanup can mistake a dropped/unnumbered chapter for a proven absence on the retained source.
   const dropped = unnumberedOf(list) + list.length - out.length;
   if (dropped > 0) Object.defineProperty(out, UNNUMBERED, { value: dropped });
+  // Same for GALLERY (lib/sources/types.ts): the add numbers a gallery by posting order, and losing the mark
+  // here would number it by its adapter-assigned 1..n as if the source had said so.
+  if (galleryOf(list)) Object.defineProperty(out, GALLERY, { value: true });
   return out;
 };
 
