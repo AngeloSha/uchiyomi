@@ -88,6 +88,23 @@ test('unlinked and stale native aliases are reviewable but cannot authorize auto
   }
 });
 
+test('a logo separated by punctuation is the alias, not a different title', () => {
+  for (const read of ['LIAR-GAME', 'LIAR_GAME', 'LIAR·GAME', 'LIAR.GAME']) {
+    const result = assess(input({ aliases: ['LIAR GAME'], sourceOcr: [line(read)], candidateOcr: [line(read)] }), profile);
+    assert.equal(result.matchedAlias, 'LIAR GAME'); assert.equal(result.safeToApply, true);
+  }
+});
+
+test('confidence is judged on the lines that spell the title, not on an unrelated credit', () => {
+  const credit = line('KAIJI TANIGUCHI', .55, [50, 95, 400, 115]);
+  const result = assess(input({ sourceOcr: [line(), credit] }), profile);
+  assert.equal(result.matchedAlias, 'ONE PIECE'); assert.ok(!reasons(result).includes('ocr_low_confidence'));
+  // The cutout still reads as the title plus credits: usable for review, never for automatic use.
+  assert.ok(reasons(result).includes('additional_text')); assert.equal(result.safeToApply, false);
+  const weak = assess(input({ sourceOcr: [line('ONE PIECE', .55)] }), profile);
+  assert.ok(reasons(weak).includes('ocr_low_confidence')); assert.equal(weak.safeToApply, false);
+});
+
 test('credits outside the selected source region are harmless; credits or a volume in the cutout require review', () => {
   const credit = line('EIICHIRO ODA', .99, [50, 900, 300, 950]);
   assert.equal(assess(input({ sourceOcr: [line(), credit] }), profile).safeToApply, true);
