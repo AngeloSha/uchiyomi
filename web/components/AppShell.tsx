@@ -4,6 +4,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { PALETTE_EVENT } from '@/lib/palette';
 import { runSmartOffline } from '@/lib/offlineSync';
+import { HostNavigation } from './HostNavigation';
+import { useHostNavigationActive } from '@/lib/hostNavigation/chrome';
 import { BottomNav } from './BottomNav';
 import { TopNav } from './TopNav';
 import { Sidebar } from './Sidebar';
@@ -69,6 +71,11 @@ function OfflineBanner({ name }: { name: string }) {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  return <><HostNavigation /><AppShellContent>{children}</AppShellContent></>;
+}
+
+function AppShellContent({ children }: { children: React.ReactNode }) {
+  const hostNavigation = useHostNavigationActive();
   const { status, user } = useAuth();
   const path = usePathname();
   const router = useRouter();
@@ -76,9 +83,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [paletteSeed, setPaletteSeed] = useState('');
   // Wide browsers keep their rail. A supported iOS host may ask for that same themed rail when its layout turns vertical.
   const wide = useWideViewport();
-  const nativeLayout = useNativeNavigationLayout((status === 'authed' || status === 'offline') && !path.startsWith('/reader'));
+  const nativeLayout = useNativeNavigationLayout(!hostNavigation && (status === 'authed' || status === 'offline') && !path.startsWith('/reader'));
   const nativeSide = nativeLayout === 'side';
-  const sideNavigation = usesSideNavigation(wide, nativeLayout);
+  const sideNavigation = !hostNavigation && usesSideNavigation(wide, nativeLayout);
   // The iOS wrapper's own Servers button, for when these controls are out of reach (offline, the downloads alone). Loading
   // says nothing yet: the wrapper waits 2 s before offering it, so a quick start shows no button and a start that hangs
   // still gets one, where "unavailable" here flashed it over every splash. A chapter is never covered by it, online or
@@ -171,7 +178,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <main className="shell relative z-[1] pb-28 lg:pb-12">
         <PageTransition>{children}</PageTransition>
       </main>
-      <BottomNav nativeSide={nativeSide} />
+      {!hostNavigation && <BottomNav nativeSide={nativeSide} />}
       {status === 'authed' && <CommandPalette open={palette} seed={paletteSeed} onClose={() => setPalette(false)} />}
     </>
   );

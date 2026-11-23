@@ -288,8 +288,30 @@ export async function purgeRefusal(books: readonly LeftoverBook[]): Promise<{ re
 export async function purgeLeftovers(
   seriesId: string, sourceId: string, left: Leftovers, o: { userId: string | null; req?: FastifyRequest }, query?: Query,
 ): Promise<PurgeResult> {
+  if (!left.books.length && !left.numbers.length) return { removed: 0, bytes: 0, left: [] };
+  const { out, numbers } = await purgeBooks(seriesId, left.books, left.numbers, query);
+  const title = (await (query ?? q)<{ title: string }>('SELECT title FROM lib_series WHERE id = $1', [seriesId]))[0]?.title ?? null;
+  const detail = { id: seriesId, title, source: sourceId, removed: out.removed, bytes: out.bytes, left: out.left.length, numbers: numbers.slice(0, 50) };
+  if (query) {
+    await query('INSERT INTO audit_log (user_id, event, detail, ip, user_agent) VALUES ($1,$2,$3,$4,$5)',
+      [o.userId, 'series.source_leftovers', JSON.stringify(detail), o.req?.ip?.slice(0, 64) ?? null, String(o.req?.headers['user-agent'] ?? '').slice(0, 200) || null]);
+  } else await logAudit('series.source_leftovers', { userId: o.userId, detail, req: o.req });
+  return out;
+}
+
+/**
+ * Take chapter rows off a series as though they had never been fetched: the file (and a set-aside refetch copy), then
+ * the row with its reading progress, bookmarks and offline-download rows, then the by-number read marks and failure
+ * entries of `numbers` that no row left behind still holds. A file that cannot be removed keeps its row, so nothing on
+ * disk is ever unlisted. Only rows in the download folder may be passed. No audit line: the caller writes its own.
+ * Shared by a removed source's leftovers (above) and a blocked group's chapters (lib/blockedPurge.ts).
+ */
+export async function purgeBooks(
+  seriesId: string, books: readonly LeftoverBook[], candidateNumbers: readonly number[], query?: Query,
+): Promise<{ out: PurgeResult; numbers: number[] }> {
   const out: PurgeResult = { removed: 0, bytes: 0, left: [] };
-  if (!left.books.length && !left.numbers.length) return out;
+  const left = { books, numbers: candidateNumbers };
+  if (!left.books.length && !left.numbers.length) return { out, numbers: [] };
   const root = resolve(DL_ROOT);
   const gone: string[] = [];
   for (const b of left.books) {
@@ -349,15 +371,9 @@ export async function purgeLeftovers(
     await (query ?? q)(
       `UPDATE lib_series SET cover_book_id = (
          SELECT id FROM lib_books WHERE series_id = $1 ORDER BY (pruned_at IS NOT NULL), number ASC, file ASC LIMIT 1
-       ) WHERE id = $1`, [seriesId]);
+        ) WHERE id = $1`, [seriesId]);
   }
-  const title = (await (query ?? q)<{ title: string }>('SELECT title FROM lib_series WHERE id = $1', [seriesId]))[0]?.title ?? null;
-  const detail = { id: seriesId, title, source: sourceId, removed: out.removed, bytes: out.bytes, left: out.left.length, numbers: numbers.slice(0, 50) };
-  if (query) {
-    await query('INSERT INTO audit_log (user_id, event, detail, ip, user_agent) VALUES ($1,$2,$3,$4,$5)',
-      [o.userId, 'series.source_leftovers', JSON.stringify(detail), o.req?.ip?.slice(0, 64) ?? null, String(o.req?.headers['user-agent'] ?? '').slice(0, 200) || null]);
-  } else await logAudit('series.source_leftovers', { userId: o.userId, detail, req: o.req });
-  return out;
+  return { out, numbers };
 }
 
 /**
