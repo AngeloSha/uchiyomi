@@ -1651,7 +1651,10 @@ export async function addSeriesFromSource(opts: {
     });
     return typeof r === 'object' ? { lang: r.lang, workId: r.workId } : { lang: edition.lang, unlinked: r };
   };
-  if (existing && !existing.deleted_at) {
+  // A shelf with no source is not this add already done: the scanner mints one from a folder whose add was cut off
+  // (a restart, a crash) or that was already on disk, and "already in library" would leave it sourceless for good --
+  // no floor, no listing, no sweep. It falls through, and the writes below link it and fetch what the folder lacks.
+  if (existing && !existing.deleted_at && existing.source_id) {
     // The edition's own folder, already here: added again, or left on its own by an unlink. It is that edition.
     const linked = await linkHere(existing.id);
     // Added again by someone (#223): their intent is the same as a first add's, and its links are already here.
@@ -1778,8 +1781,9 @@ export async function addSeriesFromSource(opts: {
    * The next sweep (or a person fetching from the series page) creates the folder through the downloader's
    * mkdir, and persistScan then finds the row by folder.
    *
-   * ⚠️ A row this folder already has is REVIVED, not shadowed. `existing` reaches this point only when the
-   * row was deleted and the check above has just un-deleted it -- and the unique index is (library_id,
+   * ⚠️ A row this folder already has is REVIVED, not shadowed. `existing` reaches this point when the row was
+   * deleted and the check above has just un-deleted it, or when it holds no source at all (a shelf the scanner
+   * minted) -- and the unique index is (library_id,
    * folder), so a plain INSERT answered 23505 for a series removed from the library and added back as
    * "nothing yet", AFTER the un-delete had already put it back: the dialog read "Add failed. Try another
    * source." for a series that was in the library again, and the next tap read "already in library". The
