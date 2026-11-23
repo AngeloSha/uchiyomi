@@ -275,6 +275,36 @@ test('requests during a scan share one follow-up, and nobody waits for a third s
   assert.equal(scanCount() - n0, 3);
 });
 
+test("a download's scan indexes its folder, not the library", { skip }, async () => {
+  // v0.108.2: an add downloads and then asks for a scan. A full pass is hours on a large library, and the one
+  // running had already walked past the folder -- so the series had no row, Discover offered it again, and a
+  // second add found the file on disk and did nothing. Reintroduce by calling persistScan() with no folder at
+  // the end of a job: the second folder is indexed too and the library's report moves.
+  const folder = 'Zsr/Added Now';
+  const other = 'Zsr/Not Yet';
+  cbz(join(DL, folder, 'Chapter 1.cbz'), 'Added Now');
+  cbz(join(DL, other, 'Chapter 1.cbz'), 'Not Yet');
+  const report = lastScanReport();
+  await persistScan(folder);
+  assert.deepEqual((await books(folder)).map((b) => b.n), [1], 'the folder the job wrote was not indexed');
+  assert.equal((await books(other)).length, 0, 'the pass walked the library anyway');
+  assert.equal(lastScanReport(), report, 'a one-folder pass rewrote the library scan report');
+});
+
+test('a scan asked for while a full pass walks cuts it short', { skip }, async () => {
+  // The add waits for the folder now, not for the pass in front of it: the full pass stops at its next folder
+  // and the queued pass is the one-folder one. Reintroduce by checking `onlyNext` only after the last folder:
+  // the report below is the cut-short pass's.
+  const folder = 'Zsr/Cut Short';
+  cbz(join(DL, folder, 'Chapter 1.cbz'), 'Cut Short');
+  const report = lastScanReport();
+  const full = persistScan();
+  const only = persistScan(folder);
+  await Promise.all([full, only]);
+  assert.deepEqual((await books(folder)).map((b) => b.n), [1], 'the folder the download asked for was not indexed');
+  assert.equal(lastScanReport(), report, 'the cut-short pass wrote a report of its own');
+});
+
 test('a Fetch whose download the scan never indexes ends as an error that says so', { skip }, async () => {
   // v0.48.0 checked only chapters it FOUND on disk. One that downloaded into a folder the scan never indexed
   // ended "done" -- the card green, the chapter nowhere. Reintroduce by checking `onDisk` alone in
