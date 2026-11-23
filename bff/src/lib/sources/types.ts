@@ -125,6 +125,16 @@ export interface SourceAdapter {
   getSeries(id: string): Promise<SourceSeries | null>;
   listChapters(seriesId: string): Promise<SourceChapter[]>;
   getPageUrls(chapterId: string): Promise<string[]>;
+  /**
+   * optional: a chapter this source serves as ONE finished archive (a CBZ), instead of a list of page images.
+   *
+   * Some sites publish a gallery only as a zip of its pages, and the extension they were read with unzipped it
+   * client-side, so those "pages" existed only inside that process. A pack cannot return them from getPageUrls --
+   * that is a list of image URLs -- so a source with such downloads declares them here and the downloader stores
+   * the archive itself, with the chapter's ComicInfo. `files` are small sidecars (the site's own api.json) to add
+   * when the archive lacks them. Returning null means "not this chapter", and the page path runs as usual.
+   */
+  archive?(chapterId: string): Promise<{ url: string; files?: readonly { name: string; url: string }[] } | null>;
   /** optional: browse the source's newest / recently-updated series (no search query). `page` is 1-based. */
   latest?(page?: number): Promise<SourceSeries[]>;
   /**

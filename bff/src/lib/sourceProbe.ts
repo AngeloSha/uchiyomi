@@ -289,6 +289,29 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number; 
 
   // ── pages: newest first ───────────────────────────────────────────────────────────────────────────────
   const candidates = pageCandidates(chapters);
+  // A source that serves chapters as whole archives has no page list to ask for (SourceAdapter.archive). The
+  // archive link is the check that keeps its Pages column meaningful without downloading a chapter.
+  if (src.archive) {
+    let archiveErr: string | undefined;
+    for (const c of candidates) {
+      if (past(deadline)) return outOfTime('Pages', 'pages', archiveErr);
+      try {
+        const a = await call(() => src.archive!(c.sourceId));
+        if (a) {
+          checks.push({ name: 'Pages', ok: true, detail: `single archive (chapter ${c.number})`, stage: 'pages' });
+          passed.push('pages');
+          return done();
+        }
+      } catch (e) {
+        if (ours(e)) return outOfTime('Pages', 'pages', archiveErr);
+        archiveErr ??= messageOf(e);
+      }
+    }
+    const detail = archiveErr ?? `no archive for any of ${candidates.length} chapter(s)`;
+    checks.push({ name: 'Pages', ok: false, detail: clip(detail), stage: 'pages', kind: archiveErr ? kindOf(archiveErr) : 'empty', error: full(detail) });
+    fail({ stage: 'pages', kind: archiveErr ? kindOf(archiveErr) : 'empty', error: full(detail) });
+    return done();
+  }
   let pagesErr: string | undefined;
   late = undefined;
   empty = false;

@@ -19,7 +19,7 @@ import { drawGap } from './archivePace';
 import { pageName, placeholderPng, PARTIAL_MANIFEST, type PartialManifest } from './partial';
 import { realContainedPath } from './fsGuard';
 import { adultSourceSeries } from './ageRating';
-import { MAX_PAGE_BYTES } from './archiveCaps';
+import { MAX_ARCHIVE_BYTES, MAX_META_BYTES, MAX_PAGE_BYTES } from './archiveCaps';
 import { fetchFollowingPublic, readCapped } from './safeFetch';
 import { isSwAdapterId } from './sources/suwayomi/sources';
 import { numKey } from './postingOrder';
@@ -59,7 +59,7 @@ function winSafe(name: string): string {
   return out || 'untitled';
 }
 
-function comicInfo(d: { series: string; number: number; title?: string; summary?: string; author?: string; genres?: string[]; web?: string; status?: string; scanlator?: string; contentRating?: string }): string {
+function comicInfo(d: { series: string; number: number; title?: string; summary?: string; author?: string; genres?: string[]; web?: string; status?: string; scanlator?: string; contentRating?: string; pages?: number }): string {
   // XML_FORBIDDEN out first: a source's text is copied in verbatim, and a NUL in a description made a file
   // no XML reader should accept and one the scan could not index (#109, lib/library.ts).
   const esc = (x: any = '') => String(x ?? '').replace(XML_FORBIDDEN, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -80,6 +80,9 @@ function comicInfo(d: { series: string; number: number; title?: string; summary?
     // the series' age_rating from the files alone, and so does Komga or Kavita reading this folder.
     ...(adultSourceSeries(d) ? ['  <AgeRating>Adults Only 18+</AgeRating>'] : []),
     `  <Web>${esc(d.web)}</Web>`,
+    // The spec's count is PageCount; <Pages> belongs to a list of Page entries, and a bare number there is
+    // what Suwayomi's own ComicInfo gets wrong. Omitted when the chapter's page count is not known yet.
+    ...(d.pages ? [`  <PageCount>${d.pages}</PageCount>`] : []),
     `  <ty:PublishingStatusTachiyomi xmlns:ty="http://www.w3.org/2001/XMLSchema">${esc(d.status)}</ty:PublishingStatusTachiyomi>`,
     '</ComicInfo>',
   ].join('\n');
@@ -684,6 +687,22 @@ async function fetchChapter(
   act?: number,
 ): Promise<{ file: string; pages: number }> {
   const abs = join(DL_ROOT, rel);
+  // A source that publishes whole archives: one request, no page list, nothing to assemble (see SourceAdapter.archive).
+  if (src.archive) {
+    let archived: Awaited<ReturnType<NonNullable<SourceAdapter['archive']>>> = null;
+    try {
+      archived = await src.archive(input.chapter.sourceId);
+    } catch (e) {
+      const s = classify(e);
+      if (s) await reportFail(input.sourceId, s, (e as Error)?.message || 'archive failed');
+      void noteStage(input.sourceId, 'pages', 'fail', { error: (e as Error)?.message || 'archive failed' });
+      throw e;
+    }
+    if (archived) {
+      void noteStage(input.sourceId, 'pages', 'ok');
+      return fetchArchive(src, input, rel, archived, act);
+    }
+  }
   let urls: string[];
   try {
     urls = await src.getPageUrls(input.chapter.sourceId);
@@ -820,6 +839,75 @@ async function fetchChapter(
   // when the container went down would otherwise be honoured as complete on every later sweep, forever.
   await writeAtomic(abs, zip.toBuffer());
   return { file: rel, pages: n };
+}
+
+/**
+ * A chapter the source hands over as one finished archive: store it, with the metadata the library needs.
+ *
+ * Nothing page-shaped happens here, so none of the page politeness (pace, partial holds, resume rounds) applies: an
+ * archive either arrives whole or the chapter failed. `files` (a site's own api.json) are added only when the archive
+ * does not already carry them, and the site's archive is otherwise kept byte-for-byte. The ComicInfo is written last,
+ * over whatever the archive had, so the file is the chapter the database knows -- with the spec's PageCount, which a
+ * page-based chapter already gets from its own count.
+ */
+async function fetchArchive(
+  src: SourceAdapter,
+  input: DownloadInput,
+  rel: string,
+  archived: { url: string; files?: readonly { name: string; url: string }[] },
+  act?: number,
+): Promise<{ file: string; pages: number }> {
+  const abs = join(DL_ROOT, rel);
+  const headers: Record<string, string> = {
+    referer: archived.url,
+    accept: 'application/vnd.comicbook+zip,application/zip,application/octet-stream,*/*;q=0.8',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+  };
+  if (act != null) pagesProgress(act, 0, 1);
+  // The archive is the whole chapter, so its timeout is its size, not a page's: a 100 MB gallery on a slow link.
+  const r = await fetchFollowingPublic(archived.url, { headers, signal: AbortSignal.timeout(180000) }, { exemptFirst: (t) => !!src.localImages });
+  if (!r.ok) {
+    const status = blameFor(r.status);
+    await reportFail(input.sourceId, status, `archive download failed (HTTP ${r.status})`);
+    void noteStage(input.sourceId, 'images', 'fail', { error: `archive download failed (HTTP ${r.status})` });
+    throw Object.assign(new Error(`archive download failed (HTTP ${r.status})`), { status, blockStatus: status });
+  }
+  const zip = new AdmZip(await readCapped(r, MAX_ARCHIVE_BYTES));
+  const names = new Set(zip.getEntries().map((e: { entryName: string; isDirectory: boolean }) => e.entryName.toLowerCase()));
+  for (const f of archived.files ?? []) {
+    if (names.has(f.name.toLowerCase())) continue;
+    const fr = await fetchFollowingPublic(f.url, { headers, signal: AbortSignal.timeout(45000) }, { exemptFirst: (t) => !!src.localImages });
+    // A sidecar that will not come is not a lost chapter: the archive itself is already in hand.
+    if (fr.ok) zip.addFile(f.name, await readCapped(fr, MAX_META_BYTES));
+  }
+  const pages = zip.getEntries().filter((e: { entryName: string; isDirectory: boolean }) => !e.isDirectory && /\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(e.entryName)).length;
+  if (!pages) {
+    await reportFail(input.sourceId, 'down', 'archive holds no pages');
+    throw new Error('archive holds no pages');
+  }
+  zip.deleteFile('ComicInfo.xml');
+  zip.addFile('ComicInfo.xml', Buffer.from(comicInfo({
+    series: input.meta?.series || input.meta?.title || '',
+    number: input.chapter.number,
+    title: input.chapter.title,
+    summary: input.meta?.summary,
+    author: input.meta?.author,
+    genres: input.meta?.genres,
+    web: input.meta?.url || input.chapter.sourceId,
+    status: input.meta?.status,
+    scanlator: input.chapter.scanlator,
+    contentRating: input.meta?.contentRating,
+    pages,
+  })));
+  if (await realContainedPath(DL_ROOT, rel) !== abs) throw new Error('unsafe download path outside the library root');
+  await mkdir(dirname(abs), { recursive: true });
+  if (await realContainedPath(DL_ROOT, rel) !== abs) throw new Error('unsafe download path outside the library root');
+  await writeAtomic(abs, zip.toBuffer());
+  noteDownloaded(src.id);
+  await reportOk(input.sourceId);
+  void noteStage(input.sourceId, 'images', 'ok');
+  if (act != null) pagesProgress(act, pages, pages);
+  return { file: rel, pages };
 }
 
 /**

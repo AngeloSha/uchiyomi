@@ -270,7 +270,8 @@ export async function completePartial(
   const askable = src && (!ctx.allowed || ctx.allowed(src.id))
     && !(await isDisabled(src.id).catch(() => false))
     && !(await blockedNow(src.id).catch(() => null));
-  sameCopy: if (src && askable) {
+  // An archive chapter has no page slots to fill: it arrives whole or the copy is refetched by the repair.
+  sameCopy: if (src && askable && !src.archive) {
     let urls: string[] | null = null;
     if (!(await admitted())) return result;
     if (!(await automaticallyAllowed(chapter))) break sameCopy;
