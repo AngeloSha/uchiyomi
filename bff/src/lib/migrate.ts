@@ -771,6 +771,9 @@ ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS library_id text NOT NULL DEFAULT
 -- library is a separate mount. lib_books went through this same widening for the same reason.
 ALTER TABLE lib_series DROP CONSTRAINT IF EXISTS lib_series_folder_key;
 CREATE UNIQUE INDEX IF NOT EXISTS lib_series_library_folder_idx ON lib_series (library_id, folder);
+-- The scan looks a folder up by name alone (a row may sit in another library), which the composite index
+-- above cannot serve: 152k rows, a parallel seq scan per folder, ~34 ms of every folder's turn in the pass.
+CREATE INDEX IF NOT EXISTS lib_series_folder_idx ON lib_series (folder);
 
 CREATE TABLE IF NOT EXISTS user_libraries (
   user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
