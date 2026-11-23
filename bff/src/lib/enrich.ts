@@ -178,23 +178,25 @@ export async function enrichSeries(req: FastifyRequest, list: any[]): Promise<an
   // Only a Komga backend reports real per-user counts of its own; in owned mode NATIVE_PROGRESS is false, so
   // admins take the computed path like everyone else.
   const admin = NATIVE_PROGRESS && actsAsAdmin(req);
-  const favs = new Set(
-    (await q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1', [userId])).map((r) => r.series_id),
-  );
-  const ratings = new Map(
-    (await q<{ series_id: string; stars: number }>('SELECT series_id, stars FROM ratings WHERE user_id = $1', [userId])).map(
-      (r) => [r.series_id, r.stars],
-    ),
-  );
-  const progress = admin ? null : await seriesProgress(userId, list.map((s) => s.id));
-  const colors = await seriesColors(list.map((s) => s.id));
-  const seen = await seriesSeen(userId, list.map((s) => s.id));
-  const fresh = await newSinceSeen(seen, await seenCounts(list));
-  const heroes = await autoHeroFor(list.map((s) => s.id));
-  const outside = await anilistScores(list.map((s) => s.id));
-  const radars = await radarsFor(list.map((s) => s.id));
-  const editions = await editionLangs(list, (req as any).viewCtx as ViewCtx | undefined);
-  const titles = await titleArtsFor(list.map((s) => s.id));
+  const ids = list.map((s) => s.id);
+  // Independent reads: eleven round trips one after another were ~50-200ms per list response. Only the
+  // new-since-you-looked count needs two of them (seen and counts), so it stays below.
+  const [favRows, ratingRows, progress, colors, seen, counts, heroes, outside, radars, editions, titles] = await Promise.all([
+    q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1', [userId]),
+    q<{ series_id: string; stars: number }>('SELECT series_id, stars FROM ratings WHERE user_id = $1', [userId]),
+    admin ? Promise.resolve(null) : seriesProgress(userId, ids),
+    seriesColors(ids),
+    seriesSeen(userId, ids),
+    seenCounts(list),
+    autoHeroFor(ids),
+    anilistScores(ids),
+    radarsFor(ids),
+    editionLangs(list, (req as any).viewCtx as ViewCtx | undefined),
+    titleArtsFor(ids),
+  ] as const);
+  const favs = new Set(favRows.map((r) => r.series_id));
+  const ratings = new Map(ratingRows.map((r) => [r.series_id, r.stars]));
+  const fresh = await newSinceSeen(seen, counts);
   return list.map((s) => {
     const p = progress?.get(s.id);
     const total = s.booksCount ?? 0;
