@@ -822,6 +822,13 @@ let lastScan: ScanReport | null = null;
  * nothing. Null until the first scan since the server started.
  */
 export const lastScanReport = (): ScanReport | null => lastScan;
+/**
+ * The error the last pass threw on a downloads folder, by folderRel, until a pass indexes it. A restricted pass
+ * (a download's own folder) writes no report, so the job card's reason and Health would otherwise have nothing
+ * to name; the report's `skipped` says the same for a full pass.
+ */
+const refusals = new Map<string, string>();
+export const scanRefusal = (folderRel: string): string | null => refusals.get(folderRel) ?? null;
 
 export type ScanResult = { series: number; books: number; ms: number; skipped: number };
 let scanning: Promise<ScanResult> | null = null;
@@ -1272,10 +1279,12 @@ async function scanOnce(): Promise<ScanResult> {
         // A local-art failure never loses an indexed chapter or changes provider artwork.
         await refreshLocalSeriesArt(seriesId, root, folderRel, root === DL_ROOT ? 1 : 0)
           .catch(e => console.warn('[scan] local artwork:', String((e as Error)?.message || e).slice(0, 120)));
+        if (root === DL_ROOT) refusals.delete(folderRel);
       } catch (e) {
         skippedTotal++;
         const error = String((e as Error)?.message || e).slice(0, 300);
         if (skipped.length < SKIPS_KEPT) skipped.push({ root: root === DL_ROOT ? 'downloads' : 'library', folder: folderRel, error });
+        if (root === DL_ROOT) refusals.set(folderRel, error);
         console.warn(`[scan] skipped ${root}/${folderRel}: ${error}`);
       }
     }

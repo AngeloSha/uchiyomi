@@ -13,7 +13,7 @@
 import { join, posix } from 'path';
 import { stat, statfs } from 'fs/promises';
 import { q } from './db';
-import { DL_ROOT, SKIP_DIR, SCAN_MAX_DEPTH, listDir, nodeFs, lastScanReport, type WalkFs, type ScanReport, type WalkReason } from './library';
+import { DL_ROOT, SKIP_DIR, SCAN_MAX_DEPTH, listDir, nodeFs, lastScanReport, scanRefusal, type WalkFs, type ScanReport, type WalkReason } from './library';
 import { chapterFileRel } from './downloader';
 import { visibleToAll } from './visibility';
 import { english, joined, say, saidOf, type Part, type Said } from './said';
@@ -135,6 +135,8 @@ export function scanReasonFor(folder: string, report: ScanReport | null = lastSc
 
 /** scanReasonFor's sentence, with its code for the web (lib/said.ts `census.*`). */
 export function scanReasonPart(folder: string, report: ScanReport | null = lastScanReport()): Part | null {
+  const refused = scanRefusal(folder);
+  if (refused) return say('census.refused', { error: refused });
   if (!report) return null;
   const skip = report.skipped.find((s) => s.root === 'downloads' && s.folder === folder);
   if (skip) return say('census.refused', { error: skip.error });
