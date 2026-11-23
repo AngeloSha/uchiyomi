@@ -824,7 +824,18 @@ list, the *{n} not here yet* count and the list Mihon and your trackers read the
 no check needed, and nothing fetches it (the hourly check, the slow archive, *Fetch*). A chapter an unblocked
 group has also released stays, and its copy becomes that group's. **Unblock** brings the hidden chapters back
 just as fast, as chapters you can fetch. The same goes for a group blocked for every series under **Admin →
-Settings → Downloads → Scanlation groups**. A chapter already downloaded from a group you block stays on the shelf.
+Settings → Downloads → Scanlation groups**.
+
+Blocking never deletes a file by itself. When a block leaves chapters on the shelf that only blocked groups released —
+a troll upload numbered 340 on a series at 240, say — the sheet says so under the groups: *2 downloaded chapters are
+only from blocked groups. Remove them completely, as if they had never been downloaded?* (with how many readers lose
+their history on them), and the **Scanlation groups** editor asks the same for every series once you save
+([#396](https://github.com/AngeloSha/uchiyomi/issues/396)). **Remove completely** takes the file, the chapter row,
+everyone's progress, bookmarks and offline copies on it, and its read marks — as if it had never been fetched; the
+number is free again, so unblocking later makes it an ordinary chapter the sources can fetch. **Keep** leaves them:
+they stay readable, and a chapter of theirs you had already deleted stays off the series page and the list Mihon
+reads. Only a file the group's copy put in the download folder goes: a chapter an unblocked group also released, a
+file holding several chapters, and a library you built by hand are never touched.
 
 **In the series' language** (since v0.62.0). A copy known to be in another language than the series' is never
 taken, exactly like a blocked group's: a Spanish copy never fills a chapter of an English series, whichever source

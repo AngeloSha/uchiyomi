@@ -30,6 +30,7 @@ import { sourceLanguage } from './seriesLang';
 import { cleanSourceOrder, rankSources, type SourcePriority } from './sourcePrefs';
 import { refreshRadar } from './releaseRadar';
 import { languageRulesFor, type LanguageRules } from './copyLanguage';
+import { blockedDeletedBookIds } from './deletedGhosts';
 
 /**
  * `covered` (v0.50.0, lib/partAlias.ts R2): another site's split of a chapter on disk -- its 78.1 ... 78.9 where 78
@@ -835,14 +836,9 @@ export async function listingFor(seriesId: string, opts: { floor: number | null;
   // change should show on the page at once and the row's `held` was decided at the last sweep. Absent
   // when nothing survives, and the page falls back to "waiting for a preferred group".
   // Deleted bytes stay deleted, and their history/anti-redownload tombstones stay in place.
-  // Only the series-page display hides a single deleted chapter for which every listed copy
-  // is blocked. Unknown listings and range files remain visible rather than guessing.
-  const blockedDeleted = await q<{ id: string }>(
-    `SELECT b.id FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
-       JOIN series_listing l ON l.series_id = b.series_id AND l.number = COALESCE(ov.number, b.number)
-      WHERE b.series_id = $1 AND b.pruned_at IS NOT NULL AND b.number_end IS NULL AND l.status = 'blocked'`,
-    [seriesId],
-  );
+  // Only the display hides a single deleted chapter for which every listed copy is blocked
+  // (lib/deletedGhosts.ts blockedDeletedBookIds, which the Komga chapter list reads too).
+  const blockedDeleted = await blockedDeletedBookIds(seriesId);
   const prefs = await effectivePrefsFor(await readSeriesPrefs(seriesId));
   const blocked = new Set(prefs.blocked.map(normGroup).filter(Boolean));
   const waitingFor = prefs.priority.find((p) => normGroup(p) && !blocked.has(normGroup(p)));
@@ -851,7 +847,7 @@ export async function listingFor(seriesId: string, opts: { floor: number | null;
   const finish = await finishDownloadsOn();
   return {
     checkedAt: iso(s?.source_checked_at ?? null),
-    blockedDeletedBookIds: blockedDeleted.map(b => b.id),
+    blockedDeletedBookIds: blockedDeleted,
     content: rows.map((r) => {
       const attempts = Number(r.attempts ?? 0);
       const cap = retryCapFor(r.fail_status, finish, CHAPTER_RETRY_CAP);

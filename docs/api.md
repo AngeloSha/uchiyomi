@@ -859,6 +859,15 @@ Cleanup holds its writer claim before eligibility reads and protects the source/
 and row deletion. The audit event is `series.source_leftovers`. `POST
 /api/admin/series/:id/chapters/unlisted {bookIds}` answers `{unlisted}` for the delete dialog's warning.
 
+**A blocked group's downloaded chapters** (#396). Blocking a group hides its chapters at once but never deletes a file.
+`GET /api/admin/blocked-chapters[?seriesId=]` counts what a block left on the shelf, as `{chapters, series, readers,
+books[]}`: one-chapter files in the download folder whose number is listed with every copy blocked (or listed by
+nothing, on a series with a listing) and whose stamped group is blocked under the series' effective blocklist, deleted
+chapters included. `POST /api/admin/blocked-chapters/purge {bookIds}` removes, per series under its writer claim and
+row locks, those of the given ids still eligible -- file, row, progress, bookmarks/offline records and the by-number
+marks/failures no other row holds -- and answers `{ok, removed, bytes, left[], busy[]}`. A series being changed is
+skipped (`busy`); an unwritable download folder is 409 `refused`. The audit event is `series.blocked_purge`.
+
 **Failed chapters follow the series** (since v0.55.3). A failed chapter (one row of the ledger Health's
 `chapter-failures` check reads) that is filed under a source its series no longer uses -- neither its main source nor
 one it follows -- is filed under the series' main source, its attempts back to 0, its first failure (`firstAt`) and
@@ -1956,6 +1965,7 @@ POST   /api/admin/series/bulk/chapters/delete
 GET    /api/admin/series/bulk/chapters/delete
 POST   /api/admin/series/bulk/chapters/delete/cancel
 GET    /api/admin/series/:id/scanlators GET    /api/admin/scanlators
+GET    /api/admin/blocked-chapters POST   /api/admin/blocked-chapters/purge {bookIds}
 POST   /api/admin/series/:id/sources DELETE /api/admin/series/:id/sources/:sourceId
 GET    /api/admin/series/:id/sources/:sourceId/leftovers
 POST   /api/admin/series/:id/sources/:sourceId/cleanup {confirmation}

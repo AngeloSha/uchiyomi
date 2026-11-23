@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4796
+    "strings": 4808
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -4799,5 +4799,17 @@
   "Read to ch. {n}": "Gelesen bis Kap. {n}",
   "Marked 1 chapter read.": "1 Kapitel als gelesen markiert.",
   "Marked {n} chapters read in 1 series.": "{n} Kapitel in 1 Serie als gelesen markiert.",
-  "Marked {n} chapters read in {m} series.": "{n} Kapitel in {m} Serien als gelesen markiert."
+  "Marked {n} chapters read in {m} series.": "{n} Kapitel in {m} Serien als gelesen markiert.",
+  "1 downloaded chapter is only from blocked groups.": "1 heruntergeladenes Kapitel stammt nur von blockierten Gruppen.",
+  "{n} downloaded chapters are only from blocked groups.": "{n} heruntergeladene Kapitel stammen nur von blockierten Gruppen.",
+  "They are in {n} different series.": "Sie verteilen sich auf {n} Serien.",
+  "Remove them completely, as if they had never been downloaded?": "Vollständig entfernen, als wären sie nie heruntergeladen worden?",
+  "Reading history on them goes too, for 1 reader.": "Der Leseverlauf darin geht mit, für 1 Leser.",
+  "Reading history on them goes too, for {n} readers.": "Der Leseverlauf darin geht mit, für {n} Leser.",
+  "Removed 1 chapter": "1 Kapitel entfernt",
+  "Removed {n} chapters": "{n} Kapitel entfernt",
+  "Some chapters could not be removed now. Try again in a moment.": "Einige Kapitel konnten gerade nicht entfernt werden. Versuche es gleich noch einmal.",
+  "Could not remove the chapters": "Die Kapitel konnten nicht entfernt werden",
+  "Remove blocked chapters": "Blockierte Kapitel entfernen",
+  "Remove completely": "Vollständig entfernen"
 }

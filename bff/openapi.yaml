@@ -10639,6 +10639,102 @@ paths:
           description: The series or followed source no longer exists.
         "409":
           description: preview_changed, listing_unavailable, primary_source, numbering_pending, busy, or refused.
+  /api/admin/blocked-chapters:
+    get:
+      tags: [admin]
+      summary: Count a blocked group's chapters still downloaded, in one series or every series.
+      operationId: getApiAdminBlockedChapters
+      description: >-
+        Requires an admin account and admin token scope. Read-only. A chapter qualifies when it is one file in the
+        download folder (never a range or a library built by hand), its number is listed with every copy blocked or
+        listed by nothing on a series that has a listing, and the group stamped on the file is blocked (a file stamped
+        with no group only when the listing proves every copy blocked). Deleted chapters count too. The blocklist is
+        the series' effective one. Nothing qualifies while the series' numbering is changing.
+      parameters:
+        - { name: seriesId, in: query, required: false, schema: { type: string, maxLength: 64 } }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The chapters, how many series they are in, and how many readers have progress on them.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [chapters, series, readers, books]
+                properties:
+                  chapters: { type: integer }
+                  series: { type: integer }
+                  readers: { type: integer }
+                  books:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, seriesId, seriesTitle, number, scanlator, pruned]
+                      properties:
+                        id: { type: string }
+                        seriesId: { type: string }
+                        seriesTitle: { type: string }
+                        number: { type: number }
+                        scanlator: { type: [string, "null"] }
+                        pruned: { type: boolean }
+        "400":
+          description: bad_request
+        "401":
+          description: Not authenticated.
+        "403":
+          description: Admin permission or token scope required.
+  /api/admin/blocked-chapters/purge:
+    post:
+      tags: [admin]
+      summary: Remove a blocked group's downloaded chapters completely.
+      operationId: postApiAdminBlockedChaptersPurge
+      description: >-
+        Requires an admin account and admin token scope. Takes the ids the count showed and removes only those still
+        eligible, per series under its writer claim and row locks: the file, the row, its reading progress, bookmarks
+        and offline records, and the by-number marks and failures of numbers no other row holds. A series another
+        task is changing is skipped and named in busy. Audited per series as series.blocked_purge.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bookIds]
+              additionalProperties: false
+              properties:
+                bookIds: { type: array, minItems: 1, maxItems: 5000, items: { type: string, minLength: 1, maxLength: 128 } }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: What was removed. ok is false when a file could not be removed (left) or a series was busy.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, removed, bytes, left, busy]
+                properties:
+                  ok: { type: boolean }
+                  removed: { type: integer }
+                  bytes: { type: integer }
+                  left:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, reason]
+                      properties:
+                        id: { type: string }
+                        reason: { type: string, enum: [unlink_failed, outside_root, unreachable] }
+                  busy: { type: array, items: { type: string } }
+        "400":
+          description: bad_request
+        "401":
+          description: Not authenticated.
+        "403":
+          description: Admin permission or token scope required.
+        "409":
+          description: refused -- the download folder cannot be written.
   /api/admin/series/{id}/check:
     post:
       tags:
