@@ -60,14 +60,17 @@ export function PageTransition({ children }: { children: React.ReactNode }) {
   // having no exit while AnimatePresence is in `wait` mode: Framer can retain the old keyed page without
   // ever admitting the new one after a client-side navigation (#174).  Keep the same wrapper, but mount the
   // incoming page synchronously and give the outgoing page no exit target at all.
+  //
+  // With the effects on, the new page still fades in, but the old one no longer fades out first. `wait` held every
+  // tab tap for the whole exit (0.26 s) before the next page even began to mount, then mounted it under the entrance:
+  // on a phone, Home and the Library felt slow to answer while Reduce effects -- which already took this path -- did not.
   const reduced = useReduceEffects();
   return (
-    <AnimatePresence mode={reduced ? 'sync' : 'wait'} initial={false}>
+    <AnimatePresence mode="sync" initial={false}>
       <motion.div
         key={path}
         initial={reduced ? false : { opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        exit={reduced ? undefined : { opacity: 0, y: -6 }}
         transition={reduced ? { duration: 0 } : { duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
       >
         <FrozenRoute path={path}>{children}</FrozenRoute>

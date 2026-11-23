@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { downloadedSeriesIds } from './downloads';
+import { downloadedSeriesIds, peekDownloadedSeriesIds } from './downloads';
 
 /**
  * Which series have something saved on this device, for the small badge on a cover.
@@ -13,7 +13,8 @@ import { downloadedSeriesIds } from './downloads';
  * the query client has no persisted cache at all.
  */
 export function useOfflineSeries(): Set<string> {
-  const [ids, setIds] = useState<Set<string>>(new Set());
+  // From the cache when it is already read, so a page of cards does not render twice on every visit.
+  const [ids, setIds] = useState<Set<string>>(() => peekDownloadedSeriesIds() ?? new Set());
 
   useEffect(() => {
     let alive = true;

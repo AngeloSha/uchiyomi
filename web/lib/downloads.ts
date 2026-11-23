@@ -165,13 +165,35 @@ let seriesIdCache: {actor:string;ids:Set<string>} | null = null;
 export async function downloadedSeriesIds(expectedOwnerId?:string|null): Promise<Set<string>> {
   const actor=actorOf(expectedOwnerId);if(!sameActor(actor))return new Set();
   if(seriesIdCache?.actor===actor)return seriesIdCache.ids;
-  const rows=await listDownloads(actor);if(!sameActor(actor))return new Set();
-  seriesIdCache={actor,ids:new Set(rows.map(c=>c.seriesId))};return seriesIdCache.ids;
+  // Every tile on a page mounts at once, before the first read answers: they share that one read rather than each
+  // starting its own index walk.
+  if(seriesIdRead?.actor!==actor){
+    const read={actor,p:listDownloads(actor).then((rows)=>{
+      if(seriesIdRead===read)seriesIdRead=null;
+      if(!sameActor(actor))return new Set<string>();
+      const ids=new Set(rows.map(c=>c.seriesId));
+      // An invalidation while this read was out drops it from seriesIdRead: what it found may be stale, so it is
+      // answered to its callers but not cached.
+      if(stale.has(read)){stale.delete(read);return ids;}
+      seriesIdCache={actor,ids};return ids;
+    })};
+    seriesIdRead=read;
+  }
+  return seriesIdRead.p;
+}
+let seriesIdRead: {actor:string;p:Promise<Set<string>>} | null = null;
+const stale = new WeakSet<object>();
+
+/** The cached set, if this account's is already read: lets a card mount with its badge instead of re-rendering for it. */
+export function peekDownloadedSeriesIds(): Set<string> | null {
+  const actor=actorOf();
+  return sameActor(actor)&&seriesIdCache?.actor===actor?seriesIdCache.ids:null;
 }
 
 /** Called by every write below. Reintroduce by dropping a call: the badges lie until the tab is reloaded. */
 export function invalidateDownloadedSeries(): void {
   seriesIdCache = null;
+  if (seriesIdRead) { stale.add(seriesIdRead); seriesIdRead = null; }
 }
 
 export async function listDownloads(expectedOwnerId?:string|null): Promise<OfflineChapter[]> {

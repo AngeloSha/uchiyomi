@@ -1,5 +1,5 @@
 'use client';
-import { useState, ReactNode, useRef, useEffect, useCallback } from 'react';
+import { useState, ReactNode, useRef, useEffect, useCallback, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { backdropSources, genreBackdrop } from '@/lib/art';
 import { useReduceEffects } from '@/lib/effects';
@@ -257,6 +257,16 @@ export function Img({
   const [failed, setFailed] = useState(false);
   const [fellBack, setFellBack] = useState(false);
   const reduced = useReduceEffects();
+  // A cover the browser already holds (coming back to Home or the Library) is complete the moment its <img> exists: it is
+  // shown as it is, before the first paint, rather than covered by a skeleton and sharpened in again on every visit --
+  // a whole grid of 700 ms filter animations each time a tab was opened. A cover that really loads still sharpens in.
+  const imgRef = useRef<HTMLImageElement>(null);
+  const [cached, setCached] = useState(false);
+  useLayoutEffect(() => {
+    const el = imgRef.current;
+    if (el?.complete && el.naturalWidth > 0) { setCached(true); setLoaded(true); }
+  }, []);
+  const quiet = reduced || cached;
   const error = failed || !src; // no src at all is the same broken tile as a src that 404s
   // A cover changed on this device (#242, lib/coverBust.ts) is fetched again, not read from the browser's day-long copy.
   // Read as the card renders, never subscribed to: a card drawn after the change has it, and the series page and the
@@ -288,6 +298,7 @@ export function Img({
       ) : (
         // eslint-disable-next-line @next/next/no-img-element
         <img
+          ref={imgRef}
           src={shown}
           alt={alt}
           loading={eager ? 'eager' : 'lazy'}
@@ -297,7 +308,7 @@ export function Img({
           // Under Reduce effects (#71) a cover simply appears. The sharpen-in animates `filter`, which is
           // repainted every frame of its 700 ms on the main thread -- in Firefox in particular -- and while
           // a grid scrolls, covers land continuously, so there is always one in flight.
-          className={`h-full w-full object-cover ${imgClassName} ${reduced
+          className={`h-full w-full object-cover ${imgClassName} ${quiet
             ? (loaded ? 'opacity-100' : 'opacity-0')
             : `transition-all duration-700 ease-out ${loaded ? 'scale-100 opacity-100 blur-none' : 'scale-105 opacity-0 blur-md'}`}`}
         />

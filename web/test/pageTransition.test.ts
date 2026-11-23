@@ -27,11 +27,12 @@ test('the outgoing page keeps every context it read its route from', () => {
     'the page is no longer inside FrozenRoute: the next page shows inside the outgoing fade again');
 });
 
-test('the fade itself is unchanged', () => {
-  // The design the owner kept: out up 6 px, in from 10 px below, 260 ms each, one after the other.
-  assert.match(SRC, /<AnimatePresence mode=\{reduced \? 'sync' : 'wait'\} initial=\{false\}>/);
+test('the next page fades in at once', () => {
+  // In from 10 px below over 260 ms. No fade out first: `wait` held every tab tap for the old page's exit before the
+  // next one began to mount, which on a phone read as a slow app.
+  assert.match(SRC, /<AnimatePresence mode="sync" initial=\{false\}>/);
   assert.match(SRC, /initial=\{reduced \? false : \{ opacity: 0, y: 10 \}\}/);
-  assert.match(SRC, /exit=\{reduced \? undefined : \{ opacity: 0, y: -6 \}\}/);
+  assert.doesNotMatch(SRC, /exit=/);
   assert.match(SRC, /transition=\{reduced \? \{ duration: 0 \} : \{ duration: 0\.26, ease: \[0\.22, 1, 0\.36, 1\] \}\}/);
 });
 
