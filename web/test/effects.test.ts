@@ -295,7 +295,8 @@ test('every consumer honours the switch', () => {
   assert.match(code(read('components/cards.tsx')), /if \(!enabled\(\) \|\| effectsReduced\(\)\) return;/, 'cards still tilt under Reduce effects');
   const ui = code(read('components/ui.tsx'));
   assert.match(ui, /const reduced = useReduceEffects\(\);/, 'Img does not read the switch');
-  assert.match(ui, /\$\{reduced\s*\? \(loaded \? 'opacity-100' : 'opacity-0'\)\s*: `transition-all duration-700 ease-out \$\{loaded \? 'scale-100 opacity-100 blur-none' : 'scale-105 opacity-0 blur-md'\}`\}/,
+  assert.match(ui, /const quiet = reduced \|\| cached;/, 'Img no longer lets Reduce effects still its covers');
+  assert.match(ui, /\$\{quiet\s*\? \(loaded \? 'opacity-100' : 'opacity-0'\)\s*: `transition-all duration-700 ease-out \$\{loaded \? 'scale-100 opacity-100 blur-none' : 'scale-105 opacity-0 blur-md'\}`\}/,
     'covers still sharpen in under Reduce effects (or lost the sharpen-in by default)');
   // The notices (v0.49.0) slide up from the bottom edge; under the switch a card simply appears. Reintroduce
   // `initial={{ opacity: 0, y: 16 }}` on NoticeCard: "components/Toast.tsx still animates in" fails.
@@ -319,10 +320,9 @@ test('every consumer honours the switch', () => {
   // Reintroduce `initial={{ opacity: 0, y: 6 }}` on the page: "the console animates in under Reduce effects" fails.
   assert.doesNotMatch(code(read('components/ConsoleLayout.tsx')), /initial=\{\{/, 'the console animates in under Reduce effects');
   const page = code(read('components/PageTransition.tsx'));
-  assert.match(page, /mode=\{reduced \? 'sync' : 'wait'\}/,
-    'PageTransition still waits for a zero-duration exit under Reduce effects');
-  assert.match(page, /exit=\{reduced \? undefined : \{ opacity: 0, y: -\d+ \}\}/,
-    'PageTransition still supplies an exit target under Reduce effects');
+  // A tab tap mounts the next page at once, effects on or off: `wait` held it for the old page's whole fade-out.
+  assert.match(page, /<AnimatePresence mode="sync"/, 'PageTransition waits for the old page to leave before mounting the next');
+  assert.doesNotMatch(page, /exit=/, 'PageTransition fades the old page out before the next one comes in');
   // …and its `reduced` is the switch OR the system's reduced-motion setting, both hooks called on every render.
   // Reintroduce `const reduced = useReduceEffects() || useReducedMotion();`: "Toast.tsx reads the motion
   // settings conditionally" fails -- the second hook is skipped whenever the first is true, which breaks the

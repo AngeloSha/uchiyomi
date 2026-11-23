@@ -125,9 +125,11 @@ export default function HomePage() {
     staleTime: 600000,
   });
 
-  // Auto-scan Komga on open so new Suwayomi chapters surface, then refetch.
+  // Auto-scan Komga on open so new Suwayomi chapters surface, then refetch -- only when a scan actually ran. A refused
+  // one (rate limited, already running) found nothing new, and refetching anyway rebuilt every rail of Home 1.8 s
+  // after each visit, mid-scroll on a phone; the query's own staleTime already refetches a stale Home on arrival.
   useEffect(() => {
-    triggerRefresh().then(() => setTimeout(() => qc.invalidateQueries({ queryKey: ['home'] }), 1800));
+    triggerRefresh().then((r) => { if (r.scanned) setTimeout(() => qc.invalidateQueries({ queryKey: ['home'] }), 1800); });
   }, [qc]);
 
   const onRefresh = async () => {
