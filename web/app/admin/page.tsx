@@ -5,7 +5,7 @@ import { ConsoleLayout, type PageView } from '@/components/ConsoleLayout';
 import { seenText, useNetwork } from '@/components/NetworkSettings';
 import { ADMIN_SETTINGS } from '@/lib/settingsIndex.admin';
 import { useRouter } from 'next/navigation';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, img } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { triggerRefresh } from '@/lib/refresh';
@@ -730,6 +730,9 @@ function NewMemberDefaults({ sso, provider, signup }: { sso?: boolean; provider:
 
 // ---- Art Review: see every series' art at a glance, fix the ugly ones in two clicks ----
 interface ArtRow { id: string; title: string; books_count: number; has_banner: boolean; has_cover: boolean; override_banner: boolean; override_cover: boolean; first_page?: boolean; override_v: number | null }
+type ArtFilter = 'all' | 'nobanner' | 'nocover' | 'fixed';
+interface ArtPage { content: ArtRow[]; total: number; counts: Record<ArtFilter, number> }
+const ART_PAGE = 60;
 interface ArtCandidate { origin: string; title: string; banner: string | null; cover: string | null }
 
 /**
@@ -755,21 +758,25 @@ const backfillLine = (job: { banners: number; covers: number; misses: number }):
 function ArtReview() {
   const toast = useToast();
   const qc = useQueryClient();
-  const [filter, setFilter] = useState<'all' | 'nobanner' | 'nocover' | 'fixed'>('nobanner');
+  const [filter, setFilter] = useState<ArtFilter>('nobanner');
   const [open, setOpen] = useState<ArtRow | null>(null); // series whose candidate sheet is open
   const [bust, setBust] = useState<Record<string, number>>({}); // per-series cache-bust after an apply
-  const { data } = useQuery({ queryKey: ['admin-art'], queryFn: () => api<{ content: ArtRow[] }>('/api/admin/art/overview') });
+  // One page at a time (v0.108.2): the whole 189k-series list was 53 MB and re-downloaded after every art change.
+  const { data, fetchNextPage, isFetchingNextPage } = useInfiniteQuery({
+    queryKey: ['admin-art', filter],
+    queryFn: ({ pageParam }) => api<ArtPage>(`/api/admin/art/overview?filter=${filter}&limit=${ART_PAGE}&offset=${pageParam}`),
+    initialPageParam: 0,
+    getNextPageParam: (last, pages) => (pages.length * ART_PAGE < last.total ? pages.length * ART_PAGE : undefined),
+  });
+  const pages = data?.pages ?? [];
+  const counts = pages[0]?.counts;
+  const total = pages[0]?.total ?? 0;
   const { data: bf } = useQuery({
     queryKey: ['admin-art-backfill'],
     queryFn: () => api<{ job: any }>('/api/admin/art/backfill/status'),
     refetchInterval: (q) => (q.state.data?.job?.running ? 3000 : false),
   });
-  const rows = (data?.content ?? []).filter((r) =>
-    filter === 'all' ? true
-    : filter === 'nobanner' ? !r.has_banner && !r.override_banner
-    : filter === 'nocover' ? !r.has_cover && !r.override_cover
-    : r.override_banner || r.override_cover,
-  );
+  const rows = pages.flatMap((p) => p.content);
   const startBackfill = async () => {
     try {
       const r = await api<{ total: number }>('/api/admin/art/backfill', { method: 'POST' });
@@ -797,7 +804,7 @@ function ArtReview() {
       <div className="hide-scrollbar full flex gap-1.5 overflow-x-auto pb-1">
         {([['nobanner', tr('Missing banner')], ['nocover', tr('Missing cover')], ['fixed', tr('Overridden')], ['all', tr('All')]] as const).map(([k, label]) => (
           <button key={k} onClick={() => setFilter(k)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium ${filter === k ? 'bg-accent text-white' : 'bg-ink-800 text-fog-300'}`}>
-            {label}{k !== 'all' ? ` (${(data?.content ?? []).filter((r) => (k === 'nobanner' ? !r.has_banner && !r.override_banner : k === 'nocover' ? !r.has_cover && !r.override_cover : r.override_banner || r.override_cover)).length})` : ''}
+            {label}{k !== 'all' ? ` (${counts?.[k] ?? '…'})` : ''}
           </button>
         ))}
       </div>
@@ -821,9 +828,15 @@ function ArtReview() {
           </button>
         ))}
       </div>
+      {rows.length < total && (
+        <div className="full flex items-center justify-center gap-3 pb-2">
+          <span className="text-xs text-fog-500">{tr('{shown} of {total}', { shown: rows.length, total })}</span>
+          <button onClick={() => fetchNextPage()} disabled={isFetchingNextPage} className="btn-key px-3 py-1.5 text-xs">{tr('Load more')}</button>
+        </div>
+      )}
       {/* The row as the gallery has it now, not as it was when the picker opened: after Use the first page or a reset the
           picker's keys follow what the series has. */}
-      {open && <ArtPicker row={(data?.content ?? []).find((r) => r.id === open.id) ?? open} onClose={() => setOpen(null)}
+      {open && <ArtPicker row={rows.find((r) => r.id === open.id) ?? open} onClose={() => setOpen(null)}
         onApplied={() => { bustCover(open.id); setBust((b) => ({ ...b, [open.id]: Date.now() })); qc.invalidateQueries({ queryKey: ['admin-art'] }); }} />}
     </div>
   );
@@ -1590,6 +1603,13 @@ function LibrariesSection() {
 
   const openNew = (from = { name: '', paths: [] as string[] }) => { setStart(from); setAdding(true); setEditing(null); };
   const openEdit = (l: LibraryRow) => { setEditing(l); setAdding(false); };
+  const candidateChip = (c: LibraryCandidate) => (
+    <button key={c.path} onClick={() => openNew({ name: c.path.split('/').pop() || c.path, paths: [c.path] })}
+      className={`chip max-w-full text-xs ${c.looksLikeSource ? 'opacity-60' : ''}`}>
+      <bdi className="min-w-0 truncate font-mono">{c.path}</bdi> <span className="text-fog-500">· {c.series}</span>
+      {c.looksLikeSource && <span className="ms-1 text-amber-400">{tr('source?')}</span>}
+    </button>
+  );
   const close = () => { setAdding(false); setEditing(null); };
 
   const remove = async (l: LibraryRow) => {
@@ -1654,15 +1674,14 @@ function LibrariesSection() {
       {candidates.length > 0 && (
         <>
           <p className="mb-1.5 mt-4 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Folders you could split out')}</p>
-          <div className="flex flex-wrap gap-1.5">
-            {candidates.slice(0, 12).map((c) => (
-              <button key={c.path} onClick={() => openNew({ name: c.path.split('/').pop() || c.path, paths: [c.path] })}
-                className={`chip max-w-full text-xs ${c.looksLikeSource ? 'opacity-60' : ''}`}>
-                <bdi className="min-w-0 truncate font-mono">{c.path}</bdi> <span className="text-fog-500">· {c.series}</span>
-                {c.looksLikeSource && <span className="ms-1 text-amber-400">{tr('source?')}</span>}
-              </button>
-            ))}
-          </div>
+          <div className="flex flex-wrap gap-1.5">{candidates.slice(0, 12).map(candidateChip)}</div>
+          {/* The server offers 60, worst-first; 12 used to be all a person could ever reach (#reported). */}
+          {candidates.length > 12 && (
+            <details className="mt-1.5">
+              <summary className="cursor-pointer text-xs text-fog-500">{tr('{n} more folders', { n: candidates.length - 12 })}</summary>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">{candidates.slice(12).map(candidateChip)}</div>
+            </details>
+          )}
         </>
       )}
 

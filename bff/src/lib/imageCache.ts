@@ -199,8 +199,11 @@ async function walk(dir: string): Promise<{ file: string; size: number; atime: n
 }
 
 export async function cacheBytes(): Promise<number> {
+  // The sweeper keeps this exact: it walks on its first run (boot) and after every real sweep, and every write
+  // this process makes updates it. Walking the whole tree here made Admin → Stats a 6 GB read on every open.
+  if (bytesKnown !== null) return bytesKnown;
   const files = await walk(ROOT);
-  return files.reduce((a, f) => a + f.size, 0);
+  return (bytesKnown = files.reduce((a, f) => a + f.size, 0));
 }
 
 /**

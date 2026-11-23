@@ -518,6 +518,9 @@ export const artBackfillTargets = () => q<{ id: string; title: string }>(
      LEFT JOIN series_art a ON a.series_id = s.id
      LEFT JOIN series_overrides o ON o.series_id = s.id
     WHERE ${visibleToAll('s')} AND (a.banner IS NULL OR a.banner = '') AND o.banner IS NULL AND o.cover IS DISTINCT FROM $1
+      -- A look already made holds for a month (looked_at, lib/migrate.ts): a miss is not hunted again on every
+      -- restart, and the restart resumes inside the same alphabetical walk instead of redoing the first misses.
+      AND (a.looked_at IS NULL OR a.looked_at < now() - interval '30 days')
     ORDER BY s.title`, [FIRST_PAGE]);
 
 /**
@@ -534,6 +537,9 @@ export const artBackfillTargets = () => q<{ id: string; title: string }>(
  * series" in onlineMatch.int.test.ts finds the other work's cover.
  */
 export async function huntArt(t: { id: string; title: string }): Promise<'banner' | 'cover' | null> {
+  const looked = () => q(
+    `INSERT INTO series_art (series_id, looked_at) VALUES ($1, now())
+     ON CONFLICT (series_id) DO UPDATE SET looked_at = now()`, [t.id]).catch(() => {});
   const names = await namesOf({ id: t.id });
   if (!names.length) names.push(t.title);
   const none: AniListArt = { banner: null, cover: null };
@@ -557,14 +563,14 @@ export async function huntArt(t: { id: string; title: string }): Promise<'banner
       art.cover = (res ?? []).find((r) => r.coverUrl && namesMatch(names, [r.title]))?.coverUrl || null;
     } catch { /* mangadex miss is fine */ }
   }
-  if (!art.banner && !art.cover) return null;
+  if (!art.banner && !art.cover) { await looked(); return null; }
   // checked_at (lib/matchCheck.ts): a row this writes whole is checked; one it only fills keeps the mark of what it
   // already held.
   await q(
     `INSERT INTO series_art (series_id, banner, cover, checked_at) VALUES ($1, $2, $3, now())
      ON CONFLICT (series_id) DO UPDATE SET
        banner = COALESCE(EXCLUDED.banner, series_art.banner),
-       cover  = COALESCE(EXCLUDED.cover,  series_art.cover), fetched_at = now(),
+       cover  = COALESCE(EXCLUDED.cover,  series_art.cover), fetched_at = now(), looked_at = now(),
        checked_at = CASE WHEN EXCLUDED.banner IS NOT NULL AND EXCLUDED.cover IS NOT NULL THEN now() ELSE series_art.checked_at END`,
     [t.id, art.banner, art.cover],
   );
@@ -3262,19 +3268,24 @@ export default async function adminRoutes(app: FastifyInstance) {
     // EVERY ancestor of every series folder, not just the first segment. The top level of a real library
     // root holds source names written by the downloader -- which this list then flags as such -- so offering
     // only that level meant the one folder an admin actually wanted was unreachable.
-    const seen = new Map<string, number>();
-    for (const r of await q<{ folder: string }>(`SELECT folder FROM lib_series s WHERE ${candidateVisible}`,candidatesParams.values)) {
-      const parts = r.folder.split('/');
-      // Stop before the last segment: that is the series folder itself, and a library of exactly one series
-      // is not a library.
-      for (let i = 1; i < parts.length; i++) {
-        const prefix = parts.slice(0, i).join('/');
-        if (!prefix || reservedPrivateFolder(prefix) || taken.has(prefix)) continue;
-        seen.set(prefix, (seen.get(prefix) ?? 0) + 1);
-      }
-    }
-    const candidates = [...seen.entries()]
-      .map(([path, n]) => ({ path, series: n, looksLikeSource: sources.has(path), depth: path.split('/').length }))
+    //
+    // The prefixes are built in SQL (v0.108.2): splitting 189k folder strings in JS held the Libraries tab for
+    // 2.9 s before it could show a dialog. The inner DISTINCT is what makes count(*) the series a library of
+    // that path would hold -- one row per folder -- and generate_series stops before the last segment, which is
+    // the series folder itself: a library of exactly one series is not a library.
+    const prefixes = await q<{ path: string; series: number }>(
+      `SELECT x.prefix AS path, count(*)::int AS series FROM (
+         SELECT DISTINCT s.folder FROM lib_series s WHERE ${candidateVisible}
+       ) f
+       CROSS JOIN LATERAL (
+         SELECT array_to_string((string_to_array(f.folder, '/'))[1:i], '/') AS prefix
+           FROM generate_series(1, cardinality(string_to_array(f.folder, '/')) - 1) AS i
+       ) x
+       WHERE x.prefix <> ''
+       GROUP BY x.prefix`, candidatesParams.values);
+    const candidates = prefixes
+      .filter((c) => !reservedPrivateFolder(c.path) && !taken.has(c.path))
+      .map((c) => ({ ...c, looksLikeSource: sources.has(c.path), depth: c.path.split('/').length }))
       // Source-named folders sort LAST rather than merely being labelled: they are the ones not to promote,
       // so they should not be the first thing offered.
       .sort((a, b) => Number(a.looksLikeSource) - Number(b.looksLikeSource) || b.series - a.series)
@@ -3669,9 +3680,13 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // ---- art review: per-series art status + candidates + bulk backfill ----
 
-  // Every series with its art status, worst-first — feeds the admin Art Review gallery.
+  // One page of series art status, worst-first — feeds the admin Art Review gallery. `filter`, `limit`, `offset`:
+  // the tab asks for the 60 its chip shows instead of all 189k rows.
   // The query lives in lib/seriesArt so a test can execute it; see the note there.
-  app.get('/api/admin/art/overview', async () => ({ content: await artOverview() }));
+  app.get('/api/admin/art/overview', async (req) => {
+    const { filter, limit, offset } = req.query as { filter?: string; limit?: string; offset?: string };
+    return artOverview({ filter: filter as any, limit: Number(limit) || undefined, offset: Number(offset) || undefined });
+  });
 
   // Art options for one series: AniList matches (banner + cover) and MangaDex covers — the admin picks one.
   app.get('/api/admin/art/candidates/:id', async (req, reply) => {
