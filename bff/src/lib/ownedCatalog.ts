@@ -498,8 +498,9 @@ const mineCte = () => `WITH mine AS (
  * filters and the gates, the one this viewer read most recently, else the oldest -- the original. The window runs
  * over the ALREADY filtered set, so a search that matches only the Spanish title shows the Spanish edition, and a
  * viewer who may browse one edition sees that one. `total` counts works, so the grid's paging agrees with its cards.
- * The outer query reads the per-user CTEs again by the chosen row's id: `sortSql` names `m` and `f`, and a filter
- * already applied inside is not applied twice.
+ * The outer query reads the per-user CTEs again by the chosen row's id, but only when the order names them:
+ * `sortSql` is the only thing that reads `m` and `f` out there, and in the usual title order the joins are a
+ * nested loop over every series nobody looks at (51 M comparisons on this library).
  *
  * Reintroduce by returning the plain search: "the Library shows one card per work" in editions.int.test.ts finds
  * two cards, and none for a title only the Spanish edition carries if the window runs before the filter.
@@ -510,7 +511,7 @@ async function collapsedSearch(cte: string, from: string, where: string, p: Para
     clone(p).values as any[],
   ))?.c ?? 0;
   const mine = perUser ? 'm.last_at DESC NULLS LAST, ' : '';
-  const joins = perUser ? 'LEFT JOIN mine m ON m.series_id = sv.id LEFT JOIN fav f ON f.series_id = sv.id' : '';
+  const joins = perUser && /(^|[\s(])[mf]\./.test(order) ? 'LEFT JOIN mine m ON m.series_id = sv.id LEFT JOIN fav f ON f.series_id = sv.id' : '';
   const rows = await q(
     `${cte} SELECT ${SERIES_COLS} FROM (
        SELECT sv.*, row_number() OVER (PARTITION BY COALESCE(sv.work_id::text, sv.id) ORDER BY ${mine}sv.created_at, sv.id) AS edition_pick
