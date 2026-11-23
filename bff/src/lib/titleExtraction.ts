@@ -20,7 +20,12 @@ import { projectTitleAlpha, sourceRgba } from './titleMaskProjection';
 import { rasterizeTitleMask, type MaskStroke } from './titleMaskRaster';
 
 export const EXTRACTION_DIR = join(env.CACHE_DIR,'title-extractions');
-const MAX_JOBS = 32, MAX_QUEUED = 8, TIMEOUT_MS = 90_000;
+const MAX_JOBS = 32, MAX_QUEUED = 8;
+/** The worker's budget per extraction. 90s assumes three CPU threads on an idle host; slower hardware raises it. */
+const TIMEOUT_MS = (() => {
+  const ms = Number(process.env.TITLE_EXTRACTOR_TIMEOUT_MS);
+  return Number.isFinite(ms) && ms >= 15_000 ? Math.min(ms, 15*60_000) : 90_000;
+})();
 export const BATCH_RETENTION_DAYS=14,BATCH_ASSET_BUDGET=2*1024*1024*1024;
 const hash = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 const validJob = (id: string) => /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(id);
