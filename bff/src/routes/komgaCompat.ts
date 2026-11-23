@@ -28,13 +28,24 @@ import { AUTO_DETAILS, authorOf } from '../lib/autoDetailsSql';
 import { q, one } from '../lib/db';
 import { pushSeriesProgressAsync } from '../lib/trackers';
 import { serveLibSeriesThumb, serveLibBookThumb, serveLibBookPage } from './images';
-import { springPage, komgaSeries, komgaBook, komgaGhostBook, komgaPage, parseSeriesQuery, parseBooksQuery } from '../lib/komgaDto';
+import {
+  springPage, komgaSeries, komgaBook, komgaGhostBook, komgaPage, parseSeriesQuery, parseBooksQuery,
+  parseSeriesSearch, parseBooksSearch, UnsupportedCondition, type SeriesQuery, type BooksQuery,
+} from '../lib/komgaDto';
 import { readProgressV2, readProgressDetail, markReadUpTo } from '../lib/komgaProgress';
 import { ghostsEnabled, ghostBooksFor, ghostBookById, isGhostId } from '../lib/komgaGhosts';
 import { deletedAsGhostsOn, deliberatelyDeleted, blockedDeletedBookIds } from '../lib/deletedGhosts';
 import { editionLabels } from '../lib/editions';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+/**
+ * POSTs that only read: Komga's list API carries its search in a body (#452). A read-only token browses with
+ * them, so they are not writes to the scope check. Matched on the route as registered, never on the raw URL.
+ * Reintroduce the plain method check: "a read-only token can browse through the list API" sees 403.
+ */
+const READ_ONLY_POSTS = new Set(['/api/v1/series/list', '/api/v1/books/list']);
+const isRead = (req: FastifyRequest) =>
+  SAFE_METHODS.has(req.method) || (req.method === 'POST' && READ_ONLY_POSTS.has(req.routeOptions?.url ?? ''));
 
 /** The password half of an HTTP Basic header, or null. The username is ignored, as resolveOpdsBasic does. */
 function basicPassword(header: string | undefined): string | null {
@@ -186,7 +197,7 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
 
     // The same rule as authenticate(): a read-only token may look but not touch. The only write here is the
     // tracker's PUT, so a token minted without `write` browses and reads fine and cannot sync.
-    if (!tok.scopes.includes('write') && !SAFE_METHODS.has(req.method)) {
+    if (!tok.scopes.includes('write') && !isRead(req)) {
       return reply.code(403).send({ error: 'forbidden', message: 'This token is read-only.' });
     }
 
@@ -237,8 +248,20 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
     }
   };
 
-  const listSeries = async (req: FastifyRequest, reply: FastifyReply, forcedSort?: string) => {
-    const parsed = parseSeriesQuery(req.query as Record<string, unknown>);
+  /** A body filter this server cannot express: the same 400 as one condSql refuses. */
+  const unsupported = (reply: FastifyReply, predicate: string) =>
+    reply.code(400).send({ error: 'unsupported_filter', message: `This filter is not supported: ${predicate}.` });
+
+  const listSeries = async (req: FastifyRequest, reply: FastifyReply, forcedSort?: string, fromBody = false) => {
+    let parsed: SeriesQuery;
+    try {
+      parsed = fromBody
+        ? parseSeriesSearch(req.query as Record<string, unknown>, req.body)
+        : parseSeriesQuery(req.query as Record<string, unknown>);
+    } catch (e) {
+      if (e instanceof UnsupportedCondition) return unsupported(reply, e.predicate);
+      throw e;
+    }
     const sort = forcedSort ?? parsed.sort;
     // The extension never asks for an unpaged series list; a client that does gets the largest page instead
     // of two queries per request.
@@ -248,7 +271,7 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
       res = await owned.searchSeries(vc(req), { condition: parsed.condition, fullTextSearch: parsed.fullTextSearch }, parsed.page, size, sort);
     } catch (e) {
       // A filter the query cannot express is refused, never silently widened to the whole library.
-      if (e instanceof UnsupportedFilter) return reply.code(400).send({ error: 'unsupported_filter', message: `This filter is not supported: ${e.predicate}.` });
+      if (e instanceof UnsupportedFilter) return unsupported(reply, e.predicate);
       throw e;
     }
     const labels = await editionLabels(res.content.map((s: any) => s.id), vc(req));
@@ -272,6 +295,11 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
   // Komga has no such path; PR #51 exposed it and the extension's Latest tab is `sort=lastModifiedDate,desc`
   // on /series. Kept as an alias for clients that learned it from the PR's docs.
   app.get('/api/v1/series/latest', (req, reply) => listSeries(req, reply, 'lastModifiedDate,desc'));
+  // Komga 1.19's list API (#452), which the extension's Popular, Latest and search use now: the filters as a JSON
+  // condition tree in the body, the pageable in the query. Without it the whole source view was a 404 while
+  // chapters, opened through ids the phone already held, kept reading. Reintroduce by removing it: "the list API
+  // answers the extension's Popular" in komgaCompat.int.test.ts sees 404.
+  app.post('/api/v1/series/list', (req, reply) => listSeries(req, reply, undefined, true));
 
   // Details, for the extension AND for the tracker's `getTrackSearch` -- which is why the read counts are the
   // real ones: Mihon derives the tracker status from booksCount versus booksRead/UnreadCount.
@@ -350,14 +378,26 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
   // `search` matches a chapter or its series by name; `library_id` and `media_status=READY` read as the chapter list
   // reads them. Reintroduce the empty page: "the books list is every chapter the token may see" in
   // komgaCompat.int.test.ts finds 0.
-  app.get('/api/v1/books', async (req) => {
-    const parsed = parseBooksQuery(req.query as Record<string, unknown>);
+  const listBooks = async (req: FastifyRequest, parsed: BooksQuery) => {
     const res = await owned.allBooks(vc(req), {
       page: parsed.page, size: parsed.size, desc: /desc/i.test(parsed.sort), search: parsed.fullTextSearch,
       libraryIds: parsed.libraryIds, readyOnly: parsed.readyOnly,
     });
     const policy = await absencePolicy();
     return springPage(res.content.map((b: any) => komgaBook(b, { absent: absentBook(b, policy) })), res.totalElements, parsed.page, parsed.size);
+  };
+  app.get('/api/v1/books', async (req) => listBooks(req, parseBooksQuery(req.query as Record<string, unknown>)));
+  // The list API's form of it (#452): the extension's Books type POSTs here. Only the library filter narrows a book
+  // list here, so a read state, tag or author condition on it is a 400 rather than ignored.
+  app.post('/api/v1/books/list', async (req, reply) => {
+    let parsed: BooksQuery;
+    try {
+      parsed = parseBooksSearch(req.query as Record<string, unknown>, req.body);
+    } catch (e) {
+      if (e instanceof UnsupportedCondition) return unsupported(reply, e.predicate);
+      throw e;
+    }
+    return listBooks(req, parsed);
   });
 
   const bookOr404 = async (req: FastifyRequest, reply: FastifyReply, id: string) => {

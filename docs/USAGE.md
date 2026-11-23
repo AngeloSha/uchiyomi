@@ -2553,7 +2553,10 @@ previous cookie is valid (up to 7 days) — revoke the old token instead. Reads 
 do not count towards streaks or Wrapped. Tachimanga's *enhanced tracking* is reported by a contributor to
 work against this too; it was not tested here. The extension's **WebView** opens Uchiyomi itself: on the source, the
 library; on a series, its series page; on a chapter, the reader at that chapter (since v0.90.0, #312; before, all three
-opened the library). Sign in once inside the WebView. The full list of what is and is not carried is in
+opened the library). Sign in once inside the WebView. Current versions of the extension browse and search
+with Komga 1.19's list API; Uchiyomi answers it since this release (#452). On an older server the source view
+fails with *HTTP 404* while chapters you already added still open. A read state, tag or author filter on the
+*Books* type shows *HTTP 400*: only the library filter narrows a chapter list here. The full list of what is and is not carried is in
 [docs/extensions.md](extensions.md#komga-compatible-api).
 
 ## 8. The admin panel
@@ -4070,6 +4073,8 @@ not say when a session ends; when the row says the token no longer works, run th
 MangaUpdates only, never to Uchiyomi. Uchiyomi asks MangaUpdates at most once a second, whoever is asking.
 
 ## 11. Install as an app & offline
+
+In compatible [iOS wrappers](IOS.md), navigation uses the Duo's system side rail, including when folded, with Uchiyomi's own icons, rounded selection tiles and your chosen accent colour. Regular iPhones keep the web app's navigation. **More** opens the secondary destinations. Navigation disappears while reading; browser and Home Screen PWA navigation stay unchanged.
 
 Uchiyomi is a **PWA**. In your browser's menu choose **Install app** (or "Add to Home Screen" on mobile) to get a
 standalone, full-screen app icon; **Profile → Settings → This device → Install Uchiyomi** offers the same, with the

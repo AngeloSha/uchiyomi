@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.108.1
+  version: 0.109.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -15647,6 +15647,54 @@ paths:
           description: Not authenticated
         "429":
           description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+  /api/v1/series/list:
+    post:
+      tags:
+        - komga
+      summary: "Komga 1.19's list API: browse and search with the filters in the body (the extension's Popular, Latest and search, #452)."
+      operationId: postApiV1SeriesList
+      description: >-
+        The same list as GET /api/v1/series, with Komga's split: the pageable (`page`, `size`, `sort`, `unpaged`) in
+        the query, the filters as `{ condition, fullTextSearch }` in the body. `condition` is Komga's tree of
+        `allOf` / `anyOf` and leaves `{ <key>: { operator, value } }`; the keys answered are `deleted` (`isFalse`
+        only, which restricts nothing), `libraryId`, `readStatus`, `seriesStatus` (through the same synonym table as
+        `status`), `genre`, `tag` (matched against genres), `publisher` and `author` (`value` `{ name, role }`; both
+        matched against the author line, the role dropped), each with `is` or `isNot`. Null-valued keys are ignored.
+        `fullTextSearch` has the backslash escapes the extension adds for Lucene removed. Anything else -- a
+        `collectionId`, another operator, a tree deeper than 6 or larger than 128 nodes -- is a 400 rather than a
+        wider list. A read: a read-only token may call it.
+      parameters:
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 0 }, description: 0-based. }
+        - { name: size, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500 }, description: Default 20. }
+        - { name: unpaged, in: query, required: false, schema: { type: boolean } }
+        - { name: sort, in: query, required: false, schema: { type: string }, description: "As GET /api/v1/series." }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                condition: { type: object, nullable: true, description: "Komga's SearchCondition tree." }
+                fullTextSearch: { type: string, nullable: true }
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: A KomgaPage whose content is KomgaSeries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KomgaPage"
+        "400":
+          description: "unsupported_filter { message } -- a condition the query cannot express."
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
   /api/v1/series/latest:
     get:
       tags:
@@ -15810,6 +15858,44 @@ paths:
       responses:
         "200":
           description: A KomgaPage of KomgaBooks; `totalElements` is the whole count.
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+  /api/v1/books/list:
+    post:
+      tags:
+        - komga
+      summary: "Komga 1.19's list API for chapters: the extension's Books type (#452)."
+      operationId: postApiV1BooksList
+      description: >-
+        GET /api/v1/books with the filters in the body, `{ condition, fullTextSearch }`, and the pageable in the
+        query. Only the library narrows a chapter list here: a condition of `deleted: isFalse` and `libraryId is`
+        leaves (alone or in one `anyOf`) is answered, anything else -- a read state, a tag, an author -- is a 400.
+        A read: a read-only token may call it.
+      parameters:
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 0 } }
+        - { name: size, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500 } }
+        - { name: sort, in: query, required: false, schema: { type: string }, description: "`…,desc` reverses the order." }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                condition: { type: object, nullable: true }
+                fullTextSearch: { type: string, nullable: true }
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: A KomgaPage of KomgaBooks.
+        "400":
+          description: "unsupported_filter { message } -- a condition the books list cannot express."
         "401":
           description: Not authenticated
         "429":

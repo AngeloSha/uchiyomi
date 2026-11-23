@@ -3255,6 +3255,7 @@ that. `?w=` is the thumbnails' resize, as before.
 ### Komga-compatible API (Mihon's Komga extension and tracker)
 ```
 GET    /api/v1/libraries          GET    /api/v1/series
+POST   /api/v1/series/list        POST   /api/v1/books/list
 GET    /api/v1/series/latest      GET    /api/v1/series/:id
 GET    /api/v1/series/:id/books   GET    /api/v1/series/:id/thumbnail
 GET    /api/v1/books              GET    /api/v1/books/:id
@@ -3271,8 +3272,8 @@ GET    /api/v2/series/:id/read-progress/tachiyomi
 PUT    /api/v2/series/:id/read-progress/tachiyomi
 ```
 Since v0.38.0. Enough of Komga's API for Mihon's **Komga** extension to browse and read this library
-and for Mihon's **Komga tracker** to sync reading progress back — the set of `GET`s the current extension
-actually calls (it uses none of Komga's newer `POST …/list` forms), plus the two tracker calls. How to set
+and for Mihon's **Komga tracker** to sync reading progress back — the calls the extension makes, including
+Komga 1.19's `POST …/list` search forms it browses with now, plus the two tracker calls. How to set
 the phone up, and what the sync can and cannot do, is in [USAGE.md](USAGE.md#the-other-direction-uchiyomi-inside-mihon-or-tachimanga)
 and [extensions.md](extensions.md#komga-compatible-api); this is the wire contract.
 
@@ -3342,6 +3343,17 @@ and the age cap apply, and an 18+ library is listed only to a token minted with 
 the repeated form are accepted for every one of them and flattened. `tag` filters genres and `publisher` the
 author field, since that is where the DTO presents them; `status=ENDED` also matches *Completed* and
 friends. A filter the query cannot express is **400** `unsupported_filter`, never silently widened.
+`POST /api/v1/series/list` (since this release, #452) is the same list in Komga 1.19's form, which the current
+extension's Popular, Latest and search call — without it the whole source view was a 404 while chapters kept
+reading: the pageable (`page`, `size`, `sort`, `unpaged`) in the query, the filters as `{ condition,
+fullTextSearch }` in the body. `condition` is Komga's `allOf` / `anyOf` tree of `{ <key>: { operator, value } }`
+leaves with `is` or `isNot`: `libraryId`, `readStatus`, `seriesStatus` (the `status` synonyms), `genre`, `tag`
+(genres), `publisher` and `author` (`{ name, role }`; both the author line, the role dropped), and `deleted`
+`isFalse`, which restricts nothing; null-valued keys are ignored, and `fullTextSearch` loses the backslashes the
+extension adds to escape Lucene's reserved characters. Anything else — `collectionId`, another operator, a tree
+deeper than 6 or larger than 128 nodes — is **400** `unsupported_filter`. `POST /api/v1/books/list` is the Books
+type's form of `GET /api/v1/books`, and only a library condition narrows it (anything else is **400**). Both are
+reads: a read-only token may call them.
 `/api/v1/series/latest` is that list with the sort forced (PR #51 exposed it; the extension never calls it).
 `GET /api/v1/series/:id` resolves by id — visible, not browsable, so a series in an 18+ library the token
 does not list still answers — and carries the account's real `booksReadCount / booksUnreadCount /
