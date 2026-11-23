@@ -130,7 +130,7 @@ test('nothing outside the pinned rules restyles a cinematic layer, except the sw
     if (r.ctx.length === 0 && r.sel.split(',').every((s) => s.trim().startsWith('html.reduce-effects '))) continue;
     if (r.ctx.join('|') === '@media (prefers-reduced-motion: reduce)' && r.sel === '.fx-mesh' && flat(r.body) === 'animation: none;') continue;
     // v0.67.3, the owner's call: the grain is out of the page while it moves, and fades back in -- these two exactly.
-    if (r.ctx.length === 0 && r.sel === 'html.lenis-scrolling .fx-grain' && flat(r.body) === 'display: none;') continue;
+    if (r.ctx.join('|') === '@media (hover: hover)' && r.sel === 'html.lenis-scrolling .fx-grain' && flat(r.body) === 'display: none;') continue;
     if (r.ctx.join('|') === '@starting-style' && r.sel === '.fx-grain' && flat(r.body) === 'opacity: 0;') continue;
     assert.fail(`a rule outside the pinned three restyles ${r.sel.match(/\.fx-\w+/)![0]}: ${r.ctx.join(' ')} ${r.sel} { ${flat(r.body)} }`);
   }
@@ -161,9 +161,9 @@ test('the app shell still mounts all three layers, and only the switch removes t
   // Reintroduce by returning null from CinematicFX on a slow-machine guess, or dropping one layer:
   // "CinematicFX no longer renders the three layers" / "CinematicFX has a second way to render nothing" fails.
   const fx = code(read('components/CinematicFX.tsx'));
-  assert.match(fx, /<>\s*<div className="fx-mesh" \/>\s*<div className="fx-grain" \/>\s*<div className="fx-vignette" \/>\s*<\/>/,
+  assert.match(fx, /<>\s*<div ref=\{mesh\} className="fx-mesh" \/>\s*<div className="fx-grain" \/>\s*<div className="fx-vignette" \/>\s*<\/>/,
     'CinematicFX no longer renders the three layers, in order');
-  assert.match(fx, /const reduced = useReduceEffects\(\);\s*if \(reduced\) return null;/, 'CinematicFX does not step aside for the switch');
+  assert.match(fx, /const reduced = useReduceEffects\(\);[\s\S]*?\[reduced\]\);\s*if \(reduced\) return null;/, 'CinematicFX does not step aside for the switch');
   assert.equal((fx.match(/return null/g) || []).length, 1, 'CinematicFX has a second way to render nothing');
   assert.match(code(read('components/AppShell.tsx')), /<CinematicFX \/>/, 'the app shell no longer mounts CinematicFX');
 });
@@ -525,8 +525,11 @@ test('the grain steps aside while the page moves, and only then', async () => {
   // it out of the page, a fast scroll went from 39-55 fps to 60 on Home and the Library (Chrome). It is OUT (display: none)
   // while Lenis marks the page `lenis-scrolling` -- at opacity 0 the blend was still prepared and the Library stayed at 48
   // -- and fades back in over 0.3 s from @starting-style. Reintroduce the always-on grain by deleting the rule: this fails.
+  // Only where there is a hover pointer: on an Android phone the pause itself cost 27-30 fps against 41-44 without it (a
+  // finger scroll is a run of flings, each taking the grain out and back). Drop the media query: "on a touch screen" fails.
   const rules = CSS();
-  const pause = rules.filter((r) => r.ctx.length === 0 && r.sel === 'html.lenis-scrolling .fx-grain');
+  const pause = rules.filter((r) => r.ctx.join('|') === '@media (hover: hover)' && r.sel === 'html.lenis-scrolling .fx-grain');
+  assert.ok(!rules.some((r) => r.ctx.length === 0 && r.sel === 'html.lenis-scrolling .fx-grain'), 'the grain steps aside on a touch screen too, where that is the cost');
   assert.equal(pause.length, 1, 'the grain no longer steps aside while the page moves');
   assert.equal(flat(pause[0].body), 'display: none;', 'paused some cheaper-looking way that still blends: opacity 0 kept the cost');
   const back = rules.filter((r) => r.ctx.join('|') === '@starting-style' && r.sel === '.fx-grain');
@@ -536,8 +539,8 @@ test('the grain steps aside while the page moves, and only then', async () => {
   assert.ok(!rules.some((r) => /lenis-(smooth|stopped|locked)[^,{]*\.fx-/.test(r.sel)), 'another Lenis state hides an fx layer');
   // ⚠️ The minifier is where CSS fixes have vanished before (the backdrop-filter trap above): both rules must survive it.
   const css = read('app/globals.css');
-  const block = css.slice(css.indexOf('html.lenis-scrolling .fx-grain'), css.indexOf('@starting-style { .fx-grain { opacity: 0; } }') + 46);
+  const block = css.slice(css.indexOf('@media (hover: hover) { html.lenis-scrolling .fx-grain'), css.indexOf('@starting-style { .fx-grain { opacity: 0; } }') + 46);
   const out = await minify(`.fx-grain{opacity:.05;transition:opacity .3s ease-out}${block}`);
-  assert.match(out, /html\.lenis-scrolling \.fx-grain\{display:none\}/, `the minifier dropped the pause: ${out}`);
+  assert.match(out, /@media \(hover:hover\)\{html\.lenis-scrolling \.fx-grain\{display:none\}\}/, `the minifier dropped the pause: ${out}`);
   assert.match(out, /@starting-style\{\.fx-grain\{opacity:0\}\}/, `the minifier dropped the fade back in: ${out}`);
 });

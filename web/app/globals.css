@@ -276,6 +276,9 @@
      a tracker to reconnect), and only the FIRST meets an installed app's status bar. A `safe-top` line under another
      one keeps an ordinary line's padding: Health's under Incognito's, or the tracker's under Health's (#246), left a
      phone a notch's worth of empty band between two lines. */
+  /* Positioned, with no z-index of its own (no new stacking context): it paints above the mesh layer, which on a touch
+     screen is an opaque picture (lib/meshBake.ts) that would otherwise cover a banner left in the normal flow. */
+  .banner-stack { position: relative; }
   .banner-stack > .safe-top:not(:first-child) { padding-top: 0.5rem; }
   .safe-bottom { padding-bottom: max(0.8rem, calc(env(safe-area-inset-bottom) + 0.4rem)); }
 
@@ -378,8 +381,12 @@
    fast scroll it was the whole difference between 39-55 fps and a steady 60, on Home and the Library alike. Lenis marks
    the page `lenis-scrolling` while it moves (wheel, keys, touch, a scrollbar), and the grain is out of the page then --
    at opacity 0 the blend was still prepared, and the Library stayed at 48 -- and fades back in over 0.3 s once it stops
-   (and on its first paint). At rest it is exactly as before. Pinned in web/test/effects.test.ts. */
-html.lenis-scrolling .fx-grain { display: none; }
+   (and on its first paint). At rest it is exactly as before. Pinned in web/test/effects.test.ts.
+   Only where there is a hover pointer: on a phone the stepping aside was itself the cost. A finger scroll is a run of
+   short flings, each taking the grain out and fading it back in, and every one of those re-layered the page: measured
+   on an Android phone (Chrome, Home, a real finger scroll) it was 27-30 fps with the pause and 41-44 with the grain left
+   in place, and no other single layer came close. So a touch screen keeps the grain where it is, as it looks at rest. */
+@media (hover: hover) { html.lenis-scrolling .fx-grain { display: none; } }
 @starting-style { .fx-grain { opacity: 0; } }
 .fx-vignette {
   position: fixed; inset: 0; z-index: 2; pointer-events: none;
