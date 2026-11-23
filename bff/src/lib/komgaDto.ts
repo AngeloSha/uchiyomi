@@ -699,3 +699,152 @@ export function parseBooksQuery(q: Record<string, unknown> | undefined | null): 
     deleted: truthy(qs.deleted),
   };
 }
+
+// ---- the list API's request body (#452) --------------------------------------------------------------------
+//
+// Komga 1.19 moved search into `POST /api/v1/series/list` and `POST /api/v1/books/list`, with the filters as a
+// JSON condition tree and only the pageable (`page`, `size`, `sort`, `unpaged`) left in the query string. The
+// keiyoushi extension followed: Popular, Latest and search all POST `{ condition: { allOf: [...] },
+// fullTextSearch }` there (Komga.kt getSearchMangaList, Dto.kt SearchDto/ConditionDto), and a server without the
+// route answered 404 to the whole source view while chapters, read through ids it already held, kept working.
+
+/** A body condition this server cannot express. The route answers 400 `unsupported_filter`, never a wider list. */
+export class UnsupportedCondition extends Error {
+  constructor(public predicate: string) {
+    super(`unsupported filter: ${predicate}`);
+  }
+}
+
+/**
+ * The extension escapes Lucene's reserved characters (Komga.kt LUCENE_RESERVED) so Komga's full-text index matches
+ * them literally. Our search is ILIKE, where the backslash would be one more character to match: "Re\:Zero" found
+ * nothing. Undone here; the lowercased AND/OR/NOT need nothing.
+ */
+export function unescapeLucene(s: string): string {
+  return s.replace(/\\([-+&|!(){}[\]^"~*?:\\/])/g, '$1');
+}
+
+/** Bounds of the tree a body may send, as lib/ownedCatalog's condSql bounds the one it compiles. */
+const BODY_MAX_DEPTH = 6;
+const BODY_MAX_NODES = 128;
+
+/**
+ * Komga's ConditionDto tree into the vocabulary condSql speaks, with the same mapping the GET filters use:
+ * `seriesStatus` runs the status synonym table, `tag` filters genres, `publisher` and `author` (whose value is
+ * `{ name, role }`; the role is dropped) the author line. `deleted: isFalse` is no restriction (a deleted series is
+ * never listed); null means "no restriction" all the way up, so an `anyOf` with an unrestricted branch is none.
+ * Null-valued keys are ignored, so a client that encodes every absent field as null reads as one that omits them.
+ * Anything else -- `collectionId` (there are no collections here), an operator other than `is`/`isNot` -- throws.
+ */
+export function komgaCondition(root: unknown): Condition | null {
+  let nodes = 0;
+  const walk = (c: any, depth: number): Condition | null => {
+    if (c === null || c === undefined) return null;
+    if (typeof c !== 'object' || Array.isArray(c)) throw new UnsupportedCondition('condition');
+    if (depth > BODY_MAX_DEPTH) throw new UnsupportedCondition('condition nested too deep');
+    if (++nodes > BODY_MAX_NODES) throw new UnsupportedCondition('too many conditions');
+    const keys = Object.keys(c).filter((k) => c[k] !== null && c[k] !== undefined);
+    if (keys.length === 0) return null;
+    if (keys.length > 1) throw new UnsupportedCondition(keys.join('+'));
+    const k = keys[0];
+    const v = c[k];
+
+    if (k === 'allOf' || k === 'anyOf') {
+      if (!Array.isArray(v)) throw new UnsupportedCondition(k);
+      const kids = v.map((x: unknown) => walk(x, depth + 1));
+      if (k === 'anyOf' && kids.some((x: Condition | null) => x === null)) return null;
+      const real = kids.filter((x: Condition | null): x is Condition => x !== null);
+      return real.length === 0 ? null : real.length === 1 ? real[0] : { [k]: real };
+    }
+
+    const op = v && typeof v === 'object' ? (v as { operator?: unknown }).operator : undefined;
+    if (typeof op !== 'string') throw new UnsupportedCondition(k);
+    if (k === 'deleted') {
+      if (op === 'isFalse') return null;
+      throw new UnsupportedCondition(`deleted:${op}`);
+    }
+    if (op !== 'is' && op !== 'isNot') throw new UnsupportedCondition(`${k}:${op}`);
+    const rawValue = (v as { value?: unknown }).value;
+    const raw = k === 'author' && rawValue && typeof rawValue === 'object' ? (rawValue as { name?: unknown }).name : rawValue;
+    if (typeof raw !== 'string' || !raw.trim() || raw.length > 200) throw new UnsupportedCondition(k);
+    const value = raw.trim();
+    const leaf = (key: string, val: string): Condition => ({ [key]: { operator: op, value: val } });
+    switch (k) {
+      case 'libraryId': return leaf('libraryId', value);
+      case 'readStatus': return leaf('readStatus', value.toUpperCase());
+      case 'genre':
+      case 'tag': return leaf('genre', value);
+      case 'publisher':
+      case 'author': return leaf('author', value);
+      case 'seriesStatus': {
+        const leaves = statusSynonyms(value.toUpperCase()).map((s) => leaf('status', s));
+        // `isNot ENDED` is "none of its spellings", not "any spelling but one".
+        return leaves.length === 1 ? leaves[0] : op === 'is' ? { anyOf: leaves } : { allOf: leaves };
+      }
+      default: throw new UnsupportedCondition(k);
+    }
+  };
+  return walk(root, 0);
+}
+
+/** `{ condition?, fullTextSearch? }`, or nothing at all. Anything else is a 400, not an unfiltered list. */
+function searchBody(body: unknown): { condition: unknown; fullTextSearch: string | null } {
+  if (body === undefined || body === null || body === '') return { condition: null, fullTextSearch: null };
+  if (typeof body !== 'object' || Array.isArray(body)) throw new UnsupportedCondition('body');
+  const { condition, fullTextSearch } = body as { condition?: unknown; fullTextSearch?: unknown };
+  if (fullTextSearch !== undefined && fullTextSearch !== null && typeof fullTextSearch !== 'string') throw new UnsupportedCondition('fullTextSearch');
+  const term = typeof fullTextSearch === 'string' ? unescapeLucene(fullTextSearch).trim() : '';
+  return { condition: condition ?? null, fullTextSearch: term || null };
+}
+
+/** `POST /api/v1/series/list`: the filters from the body, the pageable from the query, as Komga splits them. */
+export function parseSeriesSearch(query: Record<string, unknown> | undefined | null, body: unknown): SeriesQuery {
+  const qs = query ?? {};
+  const b = searchBody(body);
+  const condition = komgaCondition(b.condition);
+  return {
+    condition,
+    fullTextSearch: b.fullTextSearch,
+    page: clampPage(oneParam(qs.page)),
+    size: clampSize(oneParam(qs.size)),
+    sort: komgaSort(qs.sort),
+    unpaged: truthy(qs.unpaged),
+    needsUser: JSON.stringify(condition ?? {}).includes('"readStatus"'),
+  };
+}
+
+/**
+ * The libraries a translated condition narrows to, for the books list (owned.allBooks filters by library and
+ * nothing else). [] is "every library". A library leaf, or an `anyOf` of them, is what the extension builds from
+ * its Libraries filter and default libraries; any other shape -- a read state, a tag, an author on the Books type --
+ * throws rather than being dropped.
+ */
+function libraryIdsOf(cond: Condition | null): string[] {
+  if (cond === null) return [];
+  const one = (c: any): string => {
+    if (c && c.libraryId && c.libraryId.operator === 'is' && typeof c.libraryId.value === 'string') return c.libraryId.value;
+    throw new UnsupportedCondition(Object.keys(c ?? {})[0] ?? 'condition');
+  };
+  const c = cond as any;
+  if (Array.isArray(c.anyOf)) return c.anyOf.map(one);
+  return [one(c)];
+}
+
+/** `POST /api/v1/books/list`: the extension's Books type, in parseBooksQuery's shape. */
+export function parseBooksSearch(query: Record<string, unknown> | undefined | null, body: unknown): BooksQuery {
+  const qs = query ?? {};
+  const b = searchBody(body);
+  const sortRaw = oneParam(qs.sort) ?? '';
+  const dir = /,\s*desc\s*$/i.test(sortRaw) ? 'desc' : 'asc';
+  return {
+    page: clampPage(oneParam(qs.page)),
+    size: clampSize(oneParam(qs.size)),
+    unpaged: truthy(qs.unpaged),
+    sort: `metadata.numberSort,${dir}`,
+    readyOnly: false,
+    readStatus: [],
+    libraryIds: libraryIdsOf(komgaCondition(b.condition)),
+    fullTextSearch: b.fullTextSearch,
+    deleted: false,
+  };
+}

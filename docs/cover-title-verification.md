@@ -16,8 +16,11 @@ settings before publishing a result.
 - Expected titles are full English, native or romanized titles from the current checked manga identity. Scraped
   synonyms, abbreviations, a stale tracker cache and guesses derived from OCR cannot establish that identity.
 - Source OCR inside the selected region and OCR of the candidate on the actual **dark hero** must read the same
-  complete expected title, in physical reading order, with every nonempty line scoring at least 0.98.
-  Unicode normalization preserves scripts, numbers and meaningful punctuation such as `+99` and `Re:Zero`.
+  complete expected title, in physical reading order, with the lines that spell it scoring at least 0.98.
+  Unicode normalization preserves scripts, numbers and meaningful punctuation such as `+99` and `Re:Zero`; separator
+  marks inside a logo (`LIAR-GAME`, `LIAR_GAME`, `LIAR·GAME`) are folded away because the artwork may hyphenate a
+  title the alias spaces. An unrelated credit line in the same region does not lower the confidence of the title
+  lines, but it still raises `additional_text` and requires review.
 - Candidate author credits, volume labels, contradictory titles and clipped source title lines require review.
   Credits elsewhere on the source cover are harmless. An empty or weak light inspection is permitted because
   white lettering disappears on white; confidently contradictory light OCR still blocks automatic application.

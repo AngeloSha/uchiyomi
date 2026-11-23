@@ -15,6 +15,16 @@ import numpy as np
 
 MAX_PROPOSALS = 4
 MAX_PREPARED_PIXELS = 1200 * 1600
+
+
+def extractor_device(torch):
+    """TITLE_EXTRACTOR_DEVICE wins; otherwise use the GPU when the image has a CUDA build."""
+    choice = os.environ.get('TITLE_EXTRACTOR_DEVICE', '').strip()
+    if choice:
+        return torch.device(choice)
+    return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
 BASE_CHECKPOINT_SHA256 = 'ec2df62732614e57411cdcf32a23ffdf28910380d03139ee0f4fcbe91eb8c912'
 MAX_CHECKPOINT_BYTES = 400 * 1024 * 1024
 
@@ -126,6 +136,8 @@ class SamRefiner:
             block.Space_Adapter = torch.nn.Identity()
             block.MLP_Adapter = torch.nn.Identity()
             block.scale = 0
+        self.device = extractor_device(torch)
+        model = model.to(self.device)
         self.predictor = SamPredictor(model)
 
     def _predict_masks(self, box):

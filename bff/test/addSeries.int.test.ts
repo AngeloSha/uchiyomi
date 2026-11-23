@@ -921,6 +921,19 @@ test('every add answers with the series id it created or revived', { skip }, asy
       assert.equal(r.seriesId, announced);
     });
 
+    await t.test('a shelf the scanner minted is linked by the add, not called "already in library"', async () => {
+      // A restart between the scan that minted the row and the add's own routing leaves a folder with a book and
+      // no source. Reintroduce by returning "already in library" for any undeleted row: the series stays sourceless
+      // for good -- no floor, no listing, no sweep -- however many times it is added again.
+      await q('UPDATE lib_series SET source_id = NULL, source_series_id = NULL, chapter_floor = NULL WHERE id = $1', [announced]);
+      const r = await addSeriesFromSource({ source: IDS, sourceId: `${IDS}-1`, chapterFrom: 'none', wait: true });
+      assert.equal(r.ok, true, r.message);
+      assert.notEqual(r.message, 'already in library', 'an unlinked shelf is not this add already done');
+      assert.equal(r.seriesId, announced, 'and it is the same row, not a second one');
+      const row = (await q<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1', [announced]))[0];
+      assert.equal(row.source_id, IDS, 'the add is what gives the shelf its source');
+    });
+
     await t.test('a series removed and added again answers with the id it revived', async () => {
       const { deleteSeries } = await import('../src/lib/libraryAdmin');
       await deleteSeries(announced);

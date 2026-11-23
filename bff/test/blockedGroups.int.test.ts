@@ -292,3 +292,106 @@ test('a failed listing reapply rolls back both preference routes and returns a r
     await q('DROP FUNCTION IF EXISTS test_blocklist_reapply_failure()').catch(() => {});
   }
 });
+
+test('a deleted chapter only a blocked group released leaves the Komga list too, and comes back on unblock', { skip }, async () => {
+  // #396: the series page hid it (v0.104.0), but Mihon -- under "Show deleted chapters as ghosts" or the Komga ghost
+  // switch, both of which list tombstones as "not downloaded" -- kept it, so blocking the group left the chapter there.
+  const { tombstoneBooks } = await import('../src/lib/chapterCleanup');
+  const BID = 'b_blk_deleted_1';
+  const prior = (await q('SELECT deleted_as_ghosts FROM server_settings WHERE id = 1'))[0]?.deleted_as_ghosts ?? false;
+  await q(`INSERT INTO lib_books (id, series_id, source, file, title, number, scanlator) VALUES ($1,$2,'T!blk',$3,'Chapter 1',1,'Bad')`,
+    [BID, S, `T!blk/${S}/1.cbz`]);
+  await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed)
+           SELECT id, $1, $2, 10, true FROM users WHERE username = $3`, [BID, S, ADMIN]);
+  const all = async () => (await app.inject({
+    method: 'GET', url: `/api/v1/series/${S}/books?unpaged=true`, headers: { 'x-api-key': apiKey },
+  })).json().content.map((b: any) => b.id);
+  try {
+    await tombstoneBooks([BID], 'deleted');
+    for (const [ghosts, deleted] of [[true, false], [false, true]]) {
+      await q('UPDATE server_settings SET komga_ghost_chapters = $1, deleted_as_ghosts = $2 WHERE id = 1', [ghosts, deleted]);
+      assert.ok((await mihon()).includes(1), `PREMISE: the tombstone is listed as not downloaded (ghosts ${ghosts}, deleted ${deleted})`);
+      assert.equal((await patchSeries(['Bad'])).statusCode, 200);
+      assert.ok(!(await mihon()).includes(1), `the blocked group's deleted chapter is still on Mihon (ghosts ${ghosts}, deleted ${deleted})`);
+      assert.ok(!(await all()).includes(BID), 'a client that asks for every book is not handed it either');
+      const listing = (await app.inject({ method: 'GET', url: `/api/series/${S}/listing`, headers: { authorization: tok } })).json();
+      assert.deepEqual(listing.blockedDeletedBookIds, [BID], 'the series page hides it by the same rule');
+      assert.equal((await q('SELECT count(*)::int AS n FROM read_progress WHERE book_id = $1', [BID]))[0].n, 1, 'reading history stays');
+      assert.equal((await patchSeries([])).statusCode, 200);
+      assert.ok((await mihon()).includes(1), 'unblocking lists it again at once');
+    }
+  } finally {
+    await q('DELETE FROM read_progress WHERE book_id = $1', [BID]).catch(() => {});
+    await q('DELETE FROM lib_books WHERE id = $1', [BID]).catch(() => {});
+    await q('UPDATE server_settings SET komga_ghost_chapters = true, deleted_as_ghosts = $1 WHERE id = 1', [prior]).catch(() => {});
+    await patchSeries([]).catch(() => {});
+  }
+});
+
+test('a blocked group\'s downloaded chapters are counted, and removed completely only when confirmed (#396)', { skip }, async () => {
+  // The report: a group uploaded a chapter numbered 340 on a series at 240; blocking the group left the downloaded
+  // file on the shelf. Blocking still only hides; the purge is the confirmed step, and takes only what the admin was
+  // shown that is still that group's alone.
+  const { mkdirSync, writeFileSync, existsSync } = await import('node:fs');
+  const DL = process.env.DL_ROOT!;
+  const ids = { b340: 'b_blkp_340', b1: 'b_blkp_1', b3: 'b_blkp_3', b4: 'b_blkp_4', b77: 'b_blkp_77', lib2: 'b_blkp_lib2', range: 'b_blkp_r' };
+  const file = (n: string) => `${S}/${n}.cbz`;
+  const book = async (id: string, n: number, scanlator: string | null, o: { root?: string; pruned?: boolean; end?: number } = {}) => {
+    const root = o.root ?? DL;
+    if (root === DL && !o.pruned) { mkdirSync(join(DL, S), { recursive: true }); writeFileSync(join(DL, file(id)), 'x'); }
+    await q(`INSERT INTO lib_books (id, series_id, source, file, title, number, number_end, scanlator, root, source_id, pruned_at, pruned_reason)
+             VALUES ($1,$2,'T!blk',$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [id, S, root === DL ? file(id) : `lib/${id}.cbz`, `Chapter ${n}`, n, o.end ?? null, scanlator, root, SRC,
+        o.pruned ? new Date() : null, o.pruned ? 'deleted' : null]);
+  };
+  const c340 = copy(340, ['Bad']);
+  await q(`INSERT INTO series_listing (series_id, number, title, scanlator, groups, source_id, chosen, status, copies)
+           VALUES ($1,340,'Chapter 340','Bad',ARRAY['Bad'],$2,$3::jsonb,'available',$4::jsonb)`,
+    [S, SRC, JSON.stringify({ ...c340, number: 340 }), JSON.stringify([c340])]);
+  await book(ids.b340, 340, 'Bad');                       // the troll upload: listed by Bad alone
+  await book(ids.b1, 1, 'Bad', { pruned: true });         // deleted already: its tombstone goes too
+  await book(ids.b3, 3, 'Bad');                           // Good released 3 as well: stays
+  await book(ids.b4, 4, 'Good');                          // another group's file: stays
+  await book(ids.b77, 77, 'Bad');                         // nothing lists 77 any more: Bad's alone
+  await book(ids.lib2, 2, 'Bad', { root: '/somebody/library' }); // a library built by hand is never touched
+  await book(ids.range, 5, 'Bad', { end: 6 });            // a range file is never a blocked chapter
+  const adminId = (await q('SELECT id FROM users WHERE username = $1', [ADMIN]))[0].id;
+  await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed) VALUES ($1,$2,$3,10,true)`, [adminId, ids.b340, S]);
+  await q(`INSERT INTO listing_progress (user_id, series_id, number) VALUES ($1,$2,340)`, [adminId, S]);
+  const count = async () => (await app.inject({ method: 'GET', url: `/api/admin/blocked-chapters?seriesId=${S}`, headers: { authorization: tok } })).json();
+  const purge = (bookIds: string[]) => app.inject({ method: 'POST', url: '/api/admin/blocked-chapters/purge', headers: { authorization: tok }, payload: { bookIds } });
+  const still = async () => (await q('SELECT id FROM lib_books WHERE series_id = $1 ORDER BY id', [S])).map((r: any) => r.id);
+  try {
+    assert.equal((await count()).chapters, 0, 'PREMISE: nothing is blocked');
+    assert.equal((await patchSeries(['Bad'])).statusCode, 200);
+    assert.ok(existsSync(join(DL, file(ids.b340))), 'blocking alone removes nothing');
+    const found = await count();
+    assert.deepEqual(found.books.map((b: any) => b.id), [ids.b1, ids.b77, ids.b340]);
+    assert.equal(found.readers, 1);
+    // Ids the admin was not shown, or that are not the blocked group's alone, are left whatever is asked.
+    const r = await purge([ids.b340, ids.b1, ids.b4, ids.b3, ids.lib2]);
+    assert.equal(r.statusCode, 200, r.body);
+    assert.equal(r.json().removed, 2);
+    assert.ok(!existsSync(join(DL, file(ids.b340))), 'the file is gone');
+    assert.deepEqual(await still(), [ids.b3, ids.b4, ids.b77, ids.lib2, ids.range].sort());
+    assert.equal((await q('SELECT count(*)::int AS n FROM read_progress WHERE book_id = $1', [ids.b340]))[0].n, 0, 'its reading history goes with it');
+    assert.equal((await q('SELECT count(*)::int AS n FROM listing_progress WHERE series_id = $1 AND number = 340', [S]))[0].n, 0, 'and the mark on its number');
+    assert.deepEqual((await count()).books.map((b: any) => b.id), [ids.b77]);
+    // Unblocked, 340 is a chapter nobody here has ever fetched.
+    assert.equal((await patchSeries([])).statusCode, 200);
+    assert.ok((await shown()).includes(340), 'unblocked, the number is an ordinary chapter not downloaded yet');
+    assert.equal((await purge([ids.b77])).json().removed, 0, 'nothing goes once the group is unblocked');
+    // The Scanlation groups editor counts across every series, by the server's blocklist.
+    const set = (blocked: string[]) => app.inject({ method: 'PATCH', url: '/api/admin/settings', headers: { authorization: tok }, payload: { scanlatorPrefs: { priority: [], blocked, patienceDays: 2 } } });
+    assert.equal((await set(['bad'])).statusCode, 200);
+    const all = (await app.inject({ method: 'GET', url: '/api/admin/blocked-chapters', headers: { authorization: tok } })).json();
+    assert.ok(all.books.some((b: any) => b.id === ids.b77) && all.series >= 1);
+    assert.equal((await set([])).statusCode, 200);
+  } finally {
+    await q('DELETE FROM read_progress WHERE book_id = ANY($1)', [Object.values(ids)]).catch(() => {});
+    await q('DELETE FROM listing_progress WHERE series_id = $1', [S]).catch(() => {});
+    await q('DELETE FROM lib_books WHERE id = ANY($1)', [Object.values(ids)]).catch(() => {});
+    await q('DELETE FROM series_listing WHERE series_id = $1 AND number = 340', [S]).catch(() => {});
+    await patchSeries([]).catch(() => {});
+  }
+});

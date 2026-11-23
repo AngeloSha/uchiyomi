@@ -116,6 +116,7 @@ import { budgetFor } from '../lib/sources/budget';
 import { switchMainSource } from '../lib/mainSource';
 import { refileFailures } from '../lib/chapterFailures';
 import { prepareCleanup, cleanupPreview, cleanupConfirmation, purgeLeftovers, purgeRefusal, unlistedOf, CleanupRefused } from '../lib/sourceLeftovers';
+import { blockedChaptersOf, purgeBlockedChapters, BlockedPurgeRefused } from '../lib/blockedPurge';
 import { mainUses, retireSource } from '../lib/retireSource';
 import { sourcesOverview } from '../lib/sourcesOverview';
 import { titlesFromBackup, entriesFromBackup, type BackupEntry, type BackupTracker } from '../lib/tachibk';
@@ -2182,6 +2183,36 @@ export default async function adminRoutes(app: FastifyInstance) {
   };
   app.get('/api/admin/series/:id/sources/:sourceId/leftovers', (req, reply) => sourceCleanup(req, reply, false));
   app.post('/api/admin/series/:id/sources/:sourceId/cleanup', (req, reply) => sourceCleanup(req, reply, true));
+
+  /**
+   * A blocked group's chapters still on the shelf (#396, lib/blockedPurge.ts): what the Sources & translations sheet
+   * (`seriesId`) and the Scanlation groups editor (none: every series) count before asking to remove them. Read-only.
+   */
+  app.get('/api/admin/blocked-chapters', async (req, reply) => {
+    const p = z.object({ seriesId: z.string().min(1).max(64).optional() }).safeParse(req.query ?? {});
+    if (!p.success) return reply.code(400).send({ error: 'bad_request' });
+    const found = await blockedChaptersOf(p.data.seriesId ?? null);
+    return { chapters: found.books.length, series: found.series, readers: found.readers, books: found.books };
+  });
+
+  /**
+   * Remove them completely: the ids the admin was shown, and of those only what is still a blocked group's under the
+   * series' writer claim and row locks. 409 `refused` when the download folder cannot be written; a series another
+   * task is changing is skipped and named in `busy`.
+   */
+  app.post('/api/admin/blocked-chapters/purge', async (req, reply) => {
+    const b = z.object({ bookIds: z.array(z.string().min(1).max(128)).min(1).max(5000) }).strict().safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Which chapters?' });
+    try {
+      const out = await purgeBlockedChapters(b.data.bookIds, {
+        userId: userIdOf(req), req, claim: (id, folder) => claimSeriesWriter([id], [folder]),
+      });
+      return { ok: out.left.length === 0 && out.busy.length === 0, ...out };
+    } catch (e) {
+      if (e instanceof BlockedPurgeRefused) return reply.code(409).send({ error: e.reason, message: e.message, ...(e.fix ? { fix: e.fix } : {}) });
+      throw e;
+    }
+  });
 
   app.delete('/api/admin/series/:id/sources/:sourceId', async (req, reply) => {
     const { id, sourceId } = req.params as { id: string; sourceId: string };

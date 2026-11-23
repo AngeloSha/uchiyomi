@@ -104,7 +104,7 @@ def main():
     def load():
         try:
             os.nice(10)
-            threads = max(1, min(3, int(os.environ.get('INFERENCE_THREADS', '3'))))
+            threads = max(1, min(16, int(os.environ.get('INFERENCE_THREADS', '3'))))
             state.extractor = Extractor(os.environ.get('HI_SAM_DIR', '/opt/hi-sam'), threads)
             print('Title extractor ready', flush=True)
         except Exception as error:

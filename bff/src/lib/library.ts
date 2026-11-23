@@ -469,7 +469,11 @@ export const DL_ROOT = process.env.DL_ROOT || '/library-dl';
 const MAX_DEPTH = Number(process.env.LIBRARY_MAX_DEPTH) || 6;
 /** For the downloads census (lib/downloadCensus.ts): a folder deeper than this is one the scan never looks in. */
 export const SCAN_MAX_DEPTH = MAX_DEPTH;
-const MAX_DIRS = 200_000; // a pathological mount stops the scan rather than the process
+// A pathological mount stops the scan rather than the process. 200k turned out to be a real library, not a
+// pathological one: a collection of 45k series plus one 144k-folder import passed the cap inside a single
+// top-level folder, and every folder the walk had not reached yet stayed invisible -- indexed on no scan at
+// all, with only the `limit` walk issue to say so. Set LIBRARY_MAX_DIRS to raise it further.
+const MAX_DIRS = Number(process.env.LIBRARY_MAX_DIRS) || 500_000;
 
 // Never library content. @eaDir is the one that matters: Synology fills it with generated thumbnails, and
 // listChapters() already counts it as a chapter folder, so today every series on a Synology has a phantom

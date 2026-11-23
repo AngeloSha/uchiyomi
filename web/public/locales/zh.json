@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4796
+    "strings": 4808
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4799,5 +4799,17 @@
   "Read to ch. {n}": "已读到第{n}话",
   "Marked 1 chapter read.": "已将 1 话标为已读。",
   "Marked {n} chapters read in 1 series.": "已将 1 个系列中的 {n} 话标为已读。",
-  "Marked {n} chapters read in {m} series.": "已将 {m} 个系列中的共 {n} 话标为已读。"
+  "Marked {n} chapters read in {m} series.": "已将 {m} 个系列中的共 {n} 话标为已读。",
+  "1 downloaded chapter is only from blocked groups.": "有 1 个已下载的章节只来自被屏蔽的组。",
+  "{n} downloaded chapters are only from blocked groups.": "有 {n} 个已下载的章节只来自被屏蔽的组。",
+  "They are in {n} different series.": "它们分布在 {n} 部作品中。",
+  "Remove them completely, as if they had never been downloaded?": "要彻底移除它们，就像从未下载过一样吗？",
+  "Reading history on them goes too, for 1 reader.": "这些章节的阅读记录也会一并移除，涉及 1 位读者。",
+  "Reading history on them goes too, for {n} readers.": "这些章节的阅读记录也会一并移除，涉及 {n} 位读者。",
+  "Removed 1 chapter": "已移除 1 个章节",
+  "Removed {n} chapters": "已移除 {n} 个章节",
+  "Some chapters could not be removed now. Try again in a moment.": "部分章节暂时无法移除。请稍后再试。",
+  "Could not remove the chapters": "无法移除这些章节",
+  "Remove blocked chapters": "移除被屏蔽的章节",
+  "Remove completely": "彻底移除"
 }
