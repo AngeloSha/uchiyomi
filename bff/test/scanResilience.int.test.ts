@@ -291,18 +291,29 @@ test("a download's scan indexes its folder, not the library", { skip }, async ()
   assert.equal(lastScanReport(), report, 'a one-folder pass rewrote the library scan report');
 });
 
-test('a scan asked for while a full pass walks cuts it short', { skip }, async () => {
-  // The add waits for the folder now, not for the pass in front of it: the full pass stops at its next folder
-  // and the queued pass is the one-folder one. Reintroduce by checking `onlyNext` only after the last folder:
-  // the report below is the cut-short pass's.
-  const folder = 'Zsr/Cut Short';
-  cbz(join(DL, folder, 'Chapter 1.cbz'), 'Cut Short');
+test('a folder asked for during a full pass is indexed by that pass, which still finishes', { skip }, async () => {
+  // #469 review: a server that downloads all day asks for a folder every few chapters. Cutting the full pass
+  // short each time would leave the folders added by hand unindexed and the Health report at the last pass that
+  // completed. Reintroduce by stopping the pass on `onlyNext`: the report below is the previous pass's and a
+  // second scan runs for the folder.
+  const { scanCount } = (await import('../src/lib/library')) as any;
+  const folder = 'Zsr/Asked Now';
+  const later = 'Zsr/Asked Twice';
+  const other = 'Zsr/Still Walking';
+  cbz(join(DL, folder, 'Chapter 1.cbz'), 'Asked Now');
+  cbz(join(DL, later, 'Chapter 1.cbz'), 'Asked Twice');
+  cbz(join(DL, other, 'Chapter 1.cbz'), 'Still Walking');
   const report = lastScanReport();
+  const n0 = scanCount();
   const full = persistScan();
   const only = persistScan(folder);
-  await Promise.all([full, only]);
+  const only2 = persistScan(later);
+  await Promise.all([full, only, only2]);
   assert.deepEqual((await books(folder)).map((b) => b.n), [1], 'the folder the download asked for was not indexed');
-  assert.equal(lastScanReport(), report, 'the cut-short pass wrote a report of its own');
+  assert.deepEqual((await books(later)).map((b) => b.n), [1], 'the second folder asked for was not indexed');
+  assert.deepEqual((await books(other)).map((b) => b.n), [1], 'the full pass stopped for the folder');
+  assert.notEqual(lastScanReport(), report, 'the full pass wrote no report of its own');
+  assert.equal(scanCount() - n0, 1, 'a second scan ran for a folder the first one indexed');
 });
 
 test('a Fetch whose download the scan never indexes ends as an error that says so', { skip }, async () => {
