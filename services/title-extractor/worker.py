@@ -249,6 +249,14 @@ def contrast_on_dark(rgb, mask):
     return float((np.quantile(luminance, .25) + .05) / (.006 + .05))
 
 
+def extractor_device(torch):
+    """TITLE_EXTRACTOR_DEVICE wins; otherwise use the GPU when the image has a CUDA build."""
+    choice = os.environ.get('TITLE_EXTRACTOR_DEVICE', '').strip()
+    if choice:
+        return torch.device(choice)
+    return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
 class Extractor:
     def __init__(self, source, threads=3):
         cv2.setNumThreads(1)
@@ -269,9 +277,10 @@ class Extractor:
         from hi_sam.modeling.predictor import SamPredictor
         os.chdir(source)
         self.torch = torch
+        self.device = extractor_device(torch)
         self.predictor = SamPredictor(model_registry['vit_b'](SimpleNamespace(
             checkpoint=str(source / 'pretrained_checkpoint/sam_tss_b_textseg.pth'), model_type='vit_b',
-            hier_det=False, attn_layers=1, prompt_len=12)).eval().to('cpu'))
+            hier_det=False, attn_layers=1, prompt_len=12)).eval().to(self.device))
         self.cache = OrderedDict()
         self.weak_cache = OrderedDict()
         self.source = source

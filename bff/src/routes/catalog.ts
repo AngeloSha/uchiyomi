@@ -280,7 +280,9 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const picks = merged.slice(0, 7);
     // pre-generate both hero frames for today's picks so the carousel never waits on sharp/remote fetches
     void warmHeroBackdrops(picks.map((s) => s.id));
-    await queueTitleLogos(picks.map((s) => s.id));
+    // Queued, not awaited: it stats each pick's artwork on the library mount, and the rail is filled for the
+    // next request either way. A failed lookup is retried by the title-art worker, so nothing is lost here.
+    void queueTitleLogos(picks.map((s) => s.id)).catch(() => undefined);
     return { content: await enrichSeries(req, picks) };
   });
 
