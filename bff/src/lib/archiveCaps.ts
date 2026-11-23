@@ -18,6 +18,12 @@ import { join } from 'path';
  * webtoon strip is a few tens of MB -- and far below what it takes to exhaust a small host.
  */
 export const MAX_PAGE_BYTES = 64 * 1024 * 1024;
+/**
+ * The largest one-chapter archive a source may hand over whole (an `archive` source's chapter). AdmZip holds the
+ * buffer, so this is memory as much as disk: far above the biggest gallery seen on this install (112 MB) and far
+ * below what would take the process down.
+ */
+export const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
 /** ComicInfo.xml, an EPUB's container, package and chapter documents, a partial chapter's manifest. */
 export const MAX_META_BYTES = 4 * 1024 * 1024;
 

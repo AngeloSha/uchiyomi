@@ -1103,6 +1103,10 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
           // The chapter's own source answers to the follow, not to the adult rule (v0.55.9, as #177's chosen copy):
           // a clean series on an extension marked NSFW had a short chapter nobody would ever ask about again.
           if (!src || !(sourceId === book.source_id ? !resting(sourceId) : allowed(sourceId))) return null;
+          // An archive chapter's page count exists only inside the archive the source serves whole. Asking for a page
+          // list would be a failure, and reading the empty answer as "this chapter really is short" would confirm
+          // truncation that never happened: silence, like every other unanswered chapter.
+          if (src.archive) return null;
           if (await isDisabled(sourceId).catch(() => false)) return null;
           if (await blockedNow(sourceId).catch(() => null)) return null;
           if (unattended && !(await seriesIsMonitored(seriesId))) return null;
@@ -1445,6 +1449,7 @@ async function pageCount(
   const sourceId = chapter.source ?? '';
   const src = getSource(sourceId);
   if (!src || !allowed(sourceId)) return null;
+  if (src.archive) return null; // no page list to ask for: see the same guard in stepShort
   if (await isDisabled(sourceId).catch(() => false)) return null;
   if (await blockedNow(sourceId).catch(() => null)) return null;
   if (seriesId && !(await seriesIsMonitored(seriesId))) return null;
