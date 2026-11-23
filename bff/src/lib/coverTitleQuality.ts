@@ -69,7 +69,8 @@ export function isCoverTitleCalibration(profile: CoverTitleCalibration | undefin
 const fraction = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1;
 const dimension = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n) && n > 0;
 // Preserve punctuation that can distinguish titles (+99, Re:Zero, numbered sequels). No fuzzy/OCR-confusion folding.
-const key = (s: string) => s.normalize('NFKC').toLowerCase().replace(/[’‘]/g, "'").replace(/[‐‑–—]/g, '-').replace(/\s+/gu, '');
+// Separators inside a logo are decoration, not title text: LIAR-GAME, LIAR_GAME and LIAR·GAME are the same title.
+const key = (s: string) => s.normalize('NFKC').toLowerCase().replace(/[’‘]/g, "'").replace(/[-‐‑–—_.·・]/gu, '').replace(/\s+/gu, '');
 const area = (b: OcrLine['box']) => (b[2] - b[0]) * (b[3] - b[1]);
 const intersection = (a: readonly number[], b: readonly number[]) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0]))
   * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
@@ -88,23 +89,43 @@ function validOcr(lines: readonly OcrLine[], width: number, height: number): boo
       && l.contentBox[0] >= l.box[0] && l.contentBox[1] >= l.box[1] && l.contentBox[2] <= l.box[2] && l.contentBox[3] <= l.box[3])));
 }
 
-function readings(lines: readonly OcrLine[], direction: CoverTitleQualityInput['readingDirection']): string[] {
+function orderLines(lines: readonly OcrLine[], direction: CoverTitleQualityInput['readingDirection']): OcrLine[] {
   const clean = lines.filter((l) => l.text.trim());
   // Never permute fragments or discard author/volume lines to manufacture a match. Reading direction is evidence
   // from the prepared source, not whichever permutation happens to agree with a desired title.
-  const order = [...clean].sort(direction === 'vertical-rtl' ? (a, b) => b.box[0] - a.box[0] || a.box[1] - b.box[1]
+  return [...clean].sort(direction === 'vertical-rtl' ? (a, b) => b.box[0] - a.box[0] || a.box[1] - b.box[1]
     : direction === 'vertical-ltr' ? (a, b) => a.box[0] - b.box[0] || a.box[1] - b.box[1]
     : (a, b) => a.box[1] - b.box[1] || a.box[0] - b.box[0]);
-  return [key(order.map((l) => l.text).join(' '))];
+}
+function readings(lines: readonly OcrLine[], direction: CoverTitleQualityInput['readingDirection']): string[] {
+  return [key(orderLines(lines, direction).map((l) => l.text).join(' '))];
 }
 export const normalizeCoverTitleText = key;
 export const coverTitleOcrReading = (lines: readonly OcrLine[], direction?: CoverTitleQualityInput['readingDirection']) => readings(lines, direction)[0];
 
+/** Confidence belongs to the lines that spell the matched title; an author credit or a stray glyph cannot veto it. */
+function matchConfidence(lines: readonly OcrLine[], direction: CoverTitleQualityInput['readingDirection'], alias: string | null): boolean {
+  const ordered = orderLines(lines, direction);
+  if (!alias) return ordered.every((l) => l.score >= .98);
+  const want = key(alias);
+  let best: { from: number; to: number } | null = null;
+  for (let from = 0; from < ordered.length; from++) {
+    let text = '';
+    for (let to = from; to < ordered.length && text.length <= want.length + 256; to++) {
+      text += key(ordered[to].text);
+      if (text.includes(want)) { if (!best || to - from < best.to - best.from) best = { from, to }; break; }
+    }
+  }
+  const spelled = best ? ordered.slice(best.from, best.to + 1) : ordered;
+  return spelled.every((l) => l.score >= .98);
+}
+
 function evidence(lines: readonly OcrLine[], aliases: readonly string[], direction: CoverTitleQualityInput['readingDirection']) {
-  const read = readings(lines, direction);
+  // readings() answers one joined string per direction; containing an alias is a match, not equality with it.
+  const read = readings(lines, direction).join('');
   const match = aliases.find((alias) => read.includes(key(alias))) ?? null;
-  const extra = !match && aliases.some((alias) => read.some((r) => r.includes(key(alias)) && r !== key(alias)));
-  const confidence = lines.every((l) => !l.text.trim() || l.score >= .98);
+  const extra = aliases.some((alias) => read.includes(key(alias)) && read !== key(alias));
+  const confidence = matchConfidence(lines, direction, match);
   return { match, extra, confidence };
 }
 

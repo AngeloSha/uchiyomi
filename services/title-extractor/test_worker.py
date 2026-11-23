@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from worker import Extractor, ExtractionError, MODEL_FINGERPRINT, clean_added_speckles, complete_region, decode_image, normalized, rectangle
+from worker import Extractor, ExtractionError, MODEL_FINGERPRINT, clean_added_speckles, complete_region, decode_image, extractor_device, normalized, rectangle
 from server import State, handler_for
 
 
@@ -313,6 +313,19 @@ class HttpTest(unittest.TestCase):
         self.state.extractor = SimpleNamespace(extract=lambda body: (_ for _ in ()).throw(RuntimeError('private internal error')))
         self.assertEqual(self.request('POST', '/v1/extract', {})[1], {'error': 'extraction_failed'})
         self.assertEqual(self.request('GET', '/healthz')[0], 200)
+
+
+class DeviceTest(unittest.TestCase):
+    def test_override_and_automatic_fallback(self):
+        def stub(cuda_available):
+            return SimpleNamespace(
+                device=lambda value: SimpleNamespace(type=value),
+                cuda=SimpleNamespace(is_available=lambda: cuda_available))
+        with patch.dict('os.environ', {'TITLE_EXTRACTOR_DEVICE': 'cuda'}):
+            self.assertEqual(extractor_device(stub(False)).type, 'cuda')
+        with patch.dict('os.environ', {'TITLE_EXTRACTOR_DEVICE': ''}):
+            self.assertEqual(extractor_device(stub(True)).type, 'cuda')
+            self.assertEqual(extractor_device(stub(False)).type, 'cpu')
 
 
 if __name__ == '__main__':
