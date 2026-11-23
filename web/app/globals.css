@@ -715,3 +715,15 @@ html.lenis, html.lenis body { height: auto; }
      instead of reserving space for a bottom bar that is no longer present. */
   :root[data-uchiyomi-native-sidebar] [data-notices] { inset-inline-start: var(--rail-w); bottom: var(--notice-bottom-lg); }
 }
+
+/* Acknowledged native controls live outside the web viewport. Remove only the web chrome's clearance;
+   the native container owns the safe area beside the Duo rail. */
+:root[data-host-navigation] { --rail-w: 0px; }
+:root[data-host-navigation] main.shell { padding-bottom: max(3rem, env(safe-area-inset-bottom)); }
+:root[data-host-navigation] :is([data-selection-toolbar], [data-continue-bar]) {
+  inset-inline-start: 0; bottom: 0; padding-bottom: max(.75rem, env(safe-area-inset-bottom));
+}
+:root[data-host-navigation] :is([data-shell-modal], [data-shell-sheet], [data-shell-editor], [data-shell-extraction]) { inset-inline-start: 0; }
+:root[data-host-navigation] [data-shell-modal] { padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
+:root[data-host-navigation] [data-shell-sheet] > div { padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
+:root[data-host-navigation] [data-notices] { inset-inline-start: 0; bottom: var(--notice-bottom-lg); }

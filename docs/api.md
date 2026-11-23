@@ -859,6 +859,15 @@ Cleanup holds its writer claim before eligibility reads and protects the source/
 and row deletion. The audit event is `series.source_leftovers`. `POST
 /api/admin/series/:id/chapters/unlisted {bookIds}` answers `{unlisted}` for the delete dialog's warning.
 
+**A blocked group's downloaded chapters** (#396). Blocking a group hides its chapters at once but never deletes a file.
+`GET /api/admin/blocked-chapters[?seriesId=]` counts what a block left on the shelf, as `{chapters, series, readers,
+books[]}`: one-chapter files in the download folder whose number is listed with every copy blocked (or listed by
+nothing, on a series with a listing) and whose stamped group is blocked under the series' effective blocklist, deleted
+chapters included. `POST /api/admin/blocked-chapters/purge {bookIds}` removes, per series under its writer claim and
+row locks, those of the given ids still eligible -- file, row, progress, bookmarks/offline records and the by-number
+marks/failures no other row holds -- and answers `{ok, removed, bytes, left[], busy[]}`. A series being changed is
+skipped (`busy`); an unwritable download folder is 409 `refused`. The audit event is `series.blocked_purge`.
+
 **Failed chapters follow the series** (since v0.55.3). A failed chapter (one row of the ledger Health's
 `chapter-failures` check reads) that is filed under a source its series no longer uses -- neither its main source nor
 one it follows -- is filed under the series' main source, its attempts back to 0, its first failure (`firstAt`) and
@@ -1956,6 +1965,7 @@ POST   /api/admin/series/bulk/chapters/delete
 GET    /api/admin/series/bulk/chapters/delete
 POST   /api/admin/series/bulk/chapters/delete/cancel
 GET    /api/admin/series/:id/scanlators GET    /api/admin/scanlators
+GET    /api/admin/blocked-chapters POST   /api/admin/blocked-chapters/purge {bookIds}
 POST   /api/admin/series/:id/sources DELETE /api/admin/series/:id/sources/:sourceId
 GET    /api/admin/series/:id/sources/:sourceId/leftovers
 POST   /api/admin/series/:id/sources/:sourceId/cleanup {confirmation}
@@ -3245,6 +3255,7 @@ that. `?w=` is the thumbnails' resize, as before.
 ### Komga-compatible API (Mihon's Komga extension and tracker)
 ```
 GET    /api/v1/libraries          GET    /api/v1/series
+POST   /api/v1/series/list        POST   /api/v1/books/list
 GET    /api/v1/series/latest      GET    /api/v1/series/:id
 GET    /api/v1/series/:id/books   GET    /api/v1/series/:id/thumbnail
 GET    /api/v1/books              GET    /api/v1/books/:id
@@ -3261,8 +3272,8 @@ GET    /api/v2/series/:id/read-progress/tachiyomi
 PUT    /api/v2/series/:id/read-progress/tachiyomi
 ```
 Since v0.38.0. Enough of Komga's API for Mihon's **Komga** extension to browse and read this library
-and for Mihon's **Komga tracker** to sync reading progress back — the set of `GET`s the current extension
-actually calls (it uses none of Komga's newer `POST …/list` forms), plus the two tracker calls. How to set
+and for Mihon's **Komga tracker** to sync reading progress back — the calls the extension makes, including
+Komga 1.19's `POST …/list` search forms it browses with now, plus the two tracker calls. How to set
 the phone up, and what the sync can and cannot do, is in [USAGE.md](USAGE.md#the-other-direction-uchiyomi-inside-mihon-or-tachimanga)
 and [extensions.md](extensions.md#komga-compatible-api); this is the wire contract.
 
@@ -3332,6 +3343,17 @@ and the age cap apply, and an 18+ library is listed only to a token minted with 
 the repeated form are accepted for every one of them and flattened. `tag` filters genres and `publisher` the
 author field, since that is where the DTO presents them; `status=ENDED` also matches *Completed* and
 friends. A filter the query cannot express is **400** `unsupported_filter`, never silently widened.
+`POST /api/v1/series/list` (since this release, #452) is the same list in Komga 1.19's form, which the current
+extension's Popular, Latest and search call — without it the whole source view was a 404 while chapters kept
+reading: the pageable (`page`, `size`, `sort`, `unpaged`) in the query, the filters as `{ condition,
+fullTextSearch }` in the body. `condition` is Komga's `allOf` / `anyOf` tree of `{ <key>: { operator, value } }`
+leaves with `is` or `isNot`: `libraryId`, `readStatus`, `seriesStatus` (the `status` synonyms), `genre`, `tag`
+(genres), `publisher` and `author` (`{ name, role }`; both the author line, the role dropped), and `deleted`
+`isFalse`, which restricts nothing; null-valued keys are ignored, and `fullTextSearch` loses the backslashes the
+extension adds to escape Lucene's reserved characters. Anything else — `collectionId`, another operator, a tree
+deeper than 6 or larger than 128 nodes — is **400** `unsupported_filter`. `POST /api/v1/books/list` is the Books
+type's form of `GET /api/v1/books`, and only a library condition narrows it (anything else is **400**). Both are
+reads: a read-only token may call them.
 `/api/v1/series/latest` is that list with the sort forced (PR #51 exposed it; the extension never calls it).
 `GET /api/v1/series/:id` resolves by id — visible, not browsable, so a series in an 18+ library the token
 does not list still answers — and carries the account's real `booksReadCount / booksUnreadCount /

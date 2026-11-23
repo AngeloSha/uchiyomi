@@ -33,7 +33,8 @@ final class NativeAppActionsTests: XCTestCase {
             web.load(URLRequest(url: URL(string: "/?ack=\(mode)", relativeTo: profile.localOrigin)!.absoluteURL))
             try await waitFor {
                 guard !web.isLoading else { return false }
-                return (try? await web.evaluateJavaScript("document.readyState === 'complete'")) as? Bool == true
+                // A completed previous document is not proof that this navigation finished.
+                return (try? await web.evaluateJavaScript("document.readyState === 'complete' && new URL(location.href).searchParams.get('ack') === '\(mode)'")) as? Bool == true
             }
         }
         do {
@@ -42,7 +43,6 @@ final class NativeAppActionsTests: XCTestCase {
             XCTAssertTrue(actions.isEmpty, "A loading document must not acknowledge before didFinish")
             bridge.documentDidFinish()
             try await waitFor { actions == [.controlsReady] }
-            _ = try await web.evaluateJavaScript("sessionStorage.retired=JSON.stringify({version:1,documentID:uchiyomiNative.appActions.documentID,action:'controls-ready'}); true")
 
             bridge.reset()
             try await load("retired")
@@ -140,7 +140,7 @@ final class NativeAppActionsTests: XCTestCase {
     }
 }
 
-private struct AppControlsEmptyVault: CookieVault {
+struct AppControlsEmptyVault: CookieVault {
     func read() -> Data? { nil }
     func write(_ data: Data) {}
 }
@@ -152,7 +152,7 @@ private final class AppControlsLoadingHandler: NSObject, WKScriptMessageHandler 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) { started() }
 }
 
-private struct AppControlsPage: AssetFetching {
+struct AppControlsPage: AssetFetching {
     private let paths = ["/index.html", "/downloads/index.html", "/reader/index.html", "/index.txt", "/downloads/index.txt", "/reader/index.txt", "/_next/static/reader.js"]
     private let bytes = Data("""
         <!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><h1>App controls fixture</h1><script>
@@ -160,6 +160,9 @@ private struct AppControlsPage: AssetFetching {
         if (mode) {
           const message = mode === 'retired' ? JSON.parse(sessionStorage.retired)
             : {version:1,documentID:uchiyomiNative.appActions.documentID,action:'controls-ready'};
+          // Capture the envelope in its own document, before any later navigation
+          // can retire an asynchronous native JavaScript evaluation.
+          if (mode === 'current') sessionStorage.retired = JSON.stringify(message);
           window.webkit.messageHandlers.appActions.postMessage(message);
           window.webkit.messageHandlers.fixtureLoading.postMessage(null);
           // WebKit's content process holds DOM completion while the native handler receives both messages.

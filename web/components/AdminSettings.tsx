@@ -22,6 +22,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { BlockedChaptersAsk } from '@/components/BlockedChapters';
 import { Switch } from '@/components/Switch';
 import { OnBody } from '@/components/ui';
 import { IcBell, IcDownload, IcFilter, IcRefresh, IcSettings, IcSparkle } from '@/components/icons';
@@ -84,6 +85,8 @@ export function useAdminSettingsViews(extra: Partial<Record<string, ReactNode>> 
     }
     if (body.scanlatorPrefs !== undefined) {
       for (const k of ['series-listing', 'series-versions', 'series-groups', 'series-scanlators']) void qc.invalidateQueries({ queryKey: [k] });
+      // A block counts the blocked groups' chapters still downloaded, in every series (components/BlockedChapters.tsx).
+      void qc.invalidateQueries({ queryKey: ['blocked-chapters'] });
     }
   };
   // Until the settings have answered, each settings page says so where its groups will be.
@@ -998,6 +1001,8 @@ function ScanlatorsSection({ data, save }: { data: any; save: Save }) {
         <div id="blocked-groups">
           <GroupChips label={tr('Blocked groups')} value={cur.blocked} suggestions={suggestions} onChange={(blocked) => set({ blocked, priority: blocked.reduce((p, g) => withoutGroup(p, g), cur.priority) })}
             hint={tr('Never take a release from these groups, in any series. A chapter only they have released is skipped until someone else releases it.')} />
+          {/* After a save: their chapters already downloaded, in every series, removed only when asked (#396). */}
+          <BlockedChaptersAsk />
         </div>
         <div id="group-priority">
           <GroupChips label={tr('Default priority')} ordered value={cur.priority} suggestions={suggestions} onChange={(priority) => set({ priority, blocked: priority.reduce((b, g) => withoutGroup(b, g), cur.blocked) })}
