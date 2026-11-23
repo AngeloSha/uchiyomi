@@ -94,3 +94,16 @@ test('registry filtering preserves dropped-number evidence without mutating the 
   assert.equal(Object.getOwnPropertyDescriptor(filtered, UNNUMBERED)?.enumerable, false);
   assert.equal(unnumberedOf(fileableChapters(filtered)), 3, 'filtering twice counted the evidence twice');
 });
+
+test('registry filtering carries the gallery mark, or an add would trust the adapter numbers as the source\'s', async () => {
+  const { fileableChapters } = await import('../src/lib/sources/loader');
+  const { GALLERY, galleryOf } = await import('../src/lib/sources/types');
+  const raw = [{ sourceId: 'a', number: 1 }, { sourceId: 'b', number: 2 }];
+  Object.defineProperty(raw, GALLERY, { value: true });
+  const filtered = fileableChapters(raw);
+  assert.equal(galleryOf(filtered), true);
+  assert.equal(galleryOf(raw), true);
+  assert.equal(Object.getOwnPropertyDescriptor(filtered, GALLERY)?.enumerable, false);
+  assert.equal(galleryOf(fileableChapters(filtered)), true);
+  assert.equal(galleryOf(fileableChapters([{ sourceId: 'a', number: 1 }])), false);
+});

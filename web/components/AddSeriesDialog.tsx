@@ -63,6 +63,8 @@ interface Detail {
   versions?: number;
   /** The detector's word on this listing (v0.49.0, #116); `count`/`first`/`last` follow `numbering.applied`. */
   numbering?: DetailNumbering;
+  /** Rows the source listed that the add will not take (no chapter number, and not a gallery it can number). */
+  unnumbered?: number;
 }
 interface Job extends JobCardNotes {
   folder: string; title: string; total: number; done: number; status: string;
@@ -789,6 +791,11 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
             {detail.numbering && view!.offer && (
               <AddNumberingNotice n={detail.numbering} count={detail.count} view={view!} flipped={flipNumbering} sourceName={picked.name || picked.source}
                 admin={isAdmin} onFlip={(v) => { setFlippedFor(v ? pickKey : null); setPickChoice(null); }} />
+            )}
+            {!!detail.unnumbered && (
+              <p className="mt-1.5 text-xs text-fog-400">
+                {tr('{n} entries with no chapter number will not be added', { n: detail.unnumbered })}
+              </p>
             )}
             {/* The series page's Translated by section, compressed to what fits a dialog: the five busiest
                 groups and their rhythm, so "is this being translated" is answered before the add, not after.

@@ -548,6 +548,49 @@ test('gallery numbering preserves existing handling: a numbered list, and a mult
   assert.deepEqual(await sfw.listChapters('5'), []);
 });
 
+test('a gallery posted as chapter 0 is one gallery, numbered by order and marked GALLERY (#294)', async () => {
+  // Reintroduce by dropping the `zeroed` half of the branch: three rows all called 0 reach the library as one
+  // chapter 0 apiece, and the add numbers them 0,0,0 -- not 1,2,3 -- because the source number is "usable".
+  const { makeSuwayomiAdapter } = await load();
+  const { galleryOf } = await import('../src/lib/sources/types');
+  const zero = makeSuwayomiAdapter({ ...LOCAL, isNsfw: true }, fakeGql({
+    fetchChapters: { fetchMangaAndChapters: { manga: { sourceId: String(LOCAL.id) }, chapters: [
+      { id: 12, chapterNumber: 0, sourceOrder: 2, uploadDate: '1700000200000', pageCount: 6 },
+      { id: 11, chapterNumber: 0, sourceOrder: 1, uploadDate: '1700000100000', pageCount: 6 },
+    ] } },
+  }));
+  const rows = await zero.listChapters('5');
+  assert.deepEqual(rows.map((c) => [c.sourceId, c.number, c.title]), [['11', 1, 'Chapter 1'], ['12', 2, 'Chapter 2']]);
+  assert.equal(galleryOf(rows), true);
+  // One row at 0 is a one-part gallery too, and one row at 1 is not a gallery at all.
+  const single = makeSuwayomiAdapter({ ...LOCAL, isNsfw: false }, fakeGql({
+    fetchChapters: { fetchMangaAndChapters: { manga: { sourceId: String(LOCAL.id) }, chapters: [{ id: 21, chapterNumber: 0, name: 'Gallery' }] } },
+  }));
+  assert.deepEqual((await single.listChapters('5')).map((c) => c.number), [1]);
+  assert.equal(galleryOf(await single.listChapters('5')), true);
+  const numbered = makeSuwayomiAdapter({ ...LOCAL, isNsfw: false }, fakeGql({
+    fetchChapters: { fetchMangaAndChapters: { manga: { sourceId: String(LOCAL.id) }, chapters: [{ id: 31, chapterNumber: 1, name: 'One' }] } },
+  }));
+  assert.equal(galleryOf(await numbered.listChapters('5')), false);
+  // An all-zero list that lost its ids is not a gallery: there is nothing to number, and the drops are counted.
+  const { unnumberedOf } = await import('../src/lib/sources/types');
+  const none = makeSuwayomiAdapter({ ...LOCAL, isNsfw: false }, fakeGql({
+    fetchChapters: { fetchMangaAndChapters: { manga: { sourceId: String(LOCAL.id) }, chapters: [{ chapterNumber: 0, name: 'x' }, { chapterNumber: 0, name: 'y' }] } },
+  }));
+  const empty = await none.listChapters('5');
+  assert.deepEqual(empty, []);
+  assert.equal(galleryOf(empty), false);
+  assert.equal(unnumberedOf(empty), 0); // id-less rows are not in `rows`, so not counted as dropped
+  // A multi-row SFW list of 0s keeps the source's numbers, as a list of -1s is not turned into chapters.
+  const sfwZero = makeSuwayomiAdapter({ ...LOCAL, isNsfw: false }, fakeGql({
+    fetchChapters: { fetchMangaAndChapters: { manga: { sourceId: String(LOCAL.id) }, chapters: [
+      { id: 41, chapterNumber: 0, name: 'One' }, { id: 42, chapterNumber: 0, name: 'Two' },
+    ] } },
+  }));
+  assert.deepEqual((await sfwZero.listChapters('5')).map((c) => c.number), [0, 0]);
+  assert.equal(galleryOf(await sfwZero.listChapters('5')), false);
+});
+
 test('gallery numbering keeps engine order without dates and preserves chapter metadata', async () => {
   const { makeSuwayomiAdapter } = await load();
   const a = makeSuwayomiAdapter({ ...LOCAL, isNsfw: true }, fakeGql({

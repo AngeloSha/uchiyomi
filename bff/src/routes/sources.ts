@@ -8,7 +8,7 @@ import { withoutHiddenDiscover } from '../lib/discoveryHub';
 import { actsAsAdmin, authenticate, userIdOf, roleOf } from '../lib/auth';
 import { getSource, listSources, isSwAdapterId, SW_PREFIX, swAdapterId, withTimeout } from '../lib/sources';
 import { MANGADEX_GROUP } from '../lib/sources/mangadex';
-import { supportsCreatorSearch, type SourceAdapter, type SourceSeries, type SourceChapter } from '../lib/sources/types';
+import { supportsCreatorSearch, unnumberedOf, type SourceAdapter, type SourceSeries, type SourceChapter } from '../lib/sources/types';
 import { chapterFileRel, sanitize, type DownloadInput } from '../lib/downloader';
 import { downloadWithFallback } from '../lib/chapterFallback';
 import { selectChapters, type ChapterFrom } from '../lib/selectChapters';
@@ -4194,6 +4194,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
       genres: series?.genres || [], status: series?.status || '',
       author: series?.author || '',
       count: chosen.length, first: nums.length ? Math.min(...nums) : null, last: nums.length ? Math.max(...nums) : null,
+      // Listed by the source, not taken by the add: a gallery with parts and no numbers on a non-adult source
+      // (docs/USAGE.md, "Galleries"). Said out loud before the add instead of surfacing later as a Health count.
+      unnumbered: unnumberedOf(raw),
       groups: groupStats(chapters.map((c) => ({ number: c.number, groups: groupsOf(c), scanlator: c.scanlator, publishedAt: c.publishedAt, lang: c.lang, source })), []),
       versions,
       numbering,
