@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4808
+    "strings": 4819
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -4811,5 +4811,16 @@
   "Some chapters could not be removed now. Try again in a moment.": "Algunos capítulos no se pudieron quitar ahora. Inténtalo de nuevo en un momento.",
   "Could not remove the chapters": "No se pudieron quitar los capítulos",
   "Remove blocked chapters": "Quitar capítulos bloqueados",
-  "Remove completely": "Quitar por completo"
+  "Remove completely": "Quitar por completo",
+  "Block group and remove…": "Bloquear grupo y quitar…",
+  "1 downloaded chapter is then only from blocked groups: removed completely.": "1 capítulo descargado queda entonces solo de grupos bloqueados: se quita por completo.",
+  "{n} downloaded chapters are then only from blocked groups: removed completely.": "{n} capítulos descargados quedan entonces solo de grupos bloqueados: se quitan por completo.",
+  "Block the groups of chapter {n}?": "¿Bloquear los grupos del capítulo {n}?",
+  "Block the groups of these chapters?": "¿Bloquear los grupos de estos capítulos?",
+  "No translation group is named for these chapters.": "No se nombra ningún grupo de traducción para estos capítulos.",
+  "Blocked for this series: nothing is fetched from these groups again, and a chapter only they released is hidden.": "Bloqueados para esta serie: no se vuelve a traer nada de estos grupos, y un capítulo que solo ellos publicaron se oculta.",
+  "Tick a group to block.": "Marca un grupo para bloquearlo.",
+  "Could not check which chapters would go": "No se pudo comprobar qué capítulos se irían",
+  "No downloaded chapter is removed: a group that is not blocked still has each of them.": "No se quita ningún capítulo descargado: un grupo no bloqueado todavía tiene cada uno.",
+  "Block and remove": "Bloquear y quitar"
 }

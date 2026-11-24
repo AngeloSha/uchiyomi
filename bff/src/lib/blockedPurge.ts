@@ -20,11 +20,17 @@
 //    chapter the sources can fetch again, like any other not downloaded yet.
 //  - CONFIRMED: the purge takes the ids the admin was shown and removes only those still eligible under the series'
 //    writer claim and row locks, so nothing that changed since the count can go.
+//  - MORE THAN ONE GROUP: a number every listed copy of which is a blocked group's is `blocked` however many groups
+//    listed it, so a wrong number another group copied goes once each of them is blocked -- and not before, while one
+//    unblocked group still lists it (a joint stamp, "A & B", counts only when both are blocked).
+//  - FROM A CHAPTER: blockGroupsFor blocks the groups behind picked chapters for the series and names what that
+//    block leaves to blocked groups alone; its preview is the same transaction, rolled back.
 import type { FastifyRequest } from 'fastify';
 import { q, tx } from './db';
 import { DL_ROOT } from './library';
 import { groupsOf, mergePrefs, normGroup, type StoredPrefs } from './releases';
-import { readGlobalPrefs } from './scanlatorPrefs';
+import { parseStored, readGlobalPrefs } from './scanlatorPrefs';
+import { reapplyBlocklistInTransaction } from './seriesListing';
 import { purgeBooks, purgeRefusal, type LeftoverBook, type PurgeResult } from './sourceLeftovers';
 import { heldBy } from './chapterRanges';
 import { numKey } from './postingOrder';
@@ -108,10 +114,102 @@ export async function blockedChaptersOf(seriesId?: string | null, query: Query =
     if (!(stampBlocked || (keys.length === 0 && r.listed === 'blocked'))) continue;
     books.push({ id: r.id, seriesId: r.series_id, seriesTitle: r.series_title, number: Number(r.number), scanlator: r.scanlator, pruned: !!r.pruned });
   }
+  return summed(books, query);
+}
+
+/** The books with how many series they are in and how many readers have progress on one of them. */
+async function summed(books: BlockedBook[], query: Query): Promise<BlockedChapters> {
   if (!books.length) return { books: [], series: 0, readers: 0 };
   const [readers] = await query<{ n: number }>(
     'SELECT count(DISTINCT user_id)::int AS n FROM read_progress WHERE book_id = ANY($1::text[])', [books.map((b) => b.id)]);
   return { books, series: new Set(books.map((b) => b.seriesId)).size, readers: Number(readers?.n) || 0 };
+}
+
+/** One group a block names, and whether it was blocked already -- for this series, or on the whole server. */
+export interface BlockGroup {
+  name: string;
+  already: 'series' | 'server' | null;
+}
+
+export interface BlockOutcome extends BlockedChapters {
+  /** Every group asked for, deduped by the server's group equality, in the order asked. */
+  groups: BlockGroup[];
+  /** The ones the block adds to the series' own list (the rest were blocked already). */
+  added: string[];
+}
+
+export class BlockRefused extends Error {
+  constructor(public readonly reason: 'not_found' | 'too_many', message: string) { super(message); }
+}
+
+/** Thrown inside the preview's transaction so nothing it wrote commits; carries the answer out. */
+class Rollback extends Error {
+  constructor(public readonly value: BlockOutcome) { super('preview'); }
+}
+
+const MAX_BLOCKED = 200; // prefsSchema's ceiling (lib/scanlatorPrefs.ts)
+
+/**
+ * Block `names` for one series -- its own list, as Block under "Translated by" does: each is un-ranked and added to
+ * the series' blocked groups -- and say which of its chapters the block leaves to blocked groups alone (#396). One
+ * transaction: the series row locked, the chapters counted before, the preference written, the stored listing
+ * re-resolved (reapplyBlocklistInTransaction), the chapters counted again. `books` is what the block MADE removable
+ * plus any of `selected` (the chapters the admin picked it from) that are removable now, so a chapter of a group
+ * blocked earlier and kept is offered again when it is the one asked about; chapters removable before for other
+ * reasons stay with the standing question. `commit: false` is the preview: the same steps, rolled back, so the
+ * answer is the release rules' own and not a second reading of them. Nothing is removed here: the caller purges the
+ * ids it showed through purgeBlockedChapters, which re-checks each.
+ */
+export async function blockGroupsFor(
+  seriesId: string, names: readonly string[], o: { selected?: readonly string[]; commit: boolean },
+): Promise<BlockOutcome> {
+  const global = await readGlobalPrefs();
+  const serverKeys = new Set(global.blocked.map(normGroup).filter(Boolean));
+  const asked: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of names) {
+    const name = raw.trim();
+    const k = normGroup(name);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    asked.push(name);
+  }
+  const selected = new Set(o.selected ?? []);
+  const run = async (qq: Query): Promise<BlockOutcome> => {
+    const [s] = await qq<{ scanlator_prefs: unknown }>('SELECT scanlator_prefs FROM lib_series WHERE id = $1 FOR UPDATE', [seriesId]);
+    if (!s) throw new BlockRefused('not_found', 'No such series.');
+    const before = new Set((await blockedChaptersOf(seriesId, qq)).books.map((b) => b.id));
+    const own = s.scanlator_prefs == null ? null : parseStored(s.scanlator_prefs, { priority: [], blocked: [], patienceDays: null });
+    const ownKeys = new Set((own?.blocked ?? []).map(normGroup));
+    const groups: BlockGroup[] = asked.map((name) => {
+      const k = normGroup(name);
+      return { name, already: serverKeys.has(k) ? 'server' : ownKeys.has(k) ? 'series' : null };
+    });
+    const added = groups.filter((g) => g.already === null).map((g) => g.name);
+    if (added.length) {
+      const addedKeys = new Set(added.map(normGroup));
+      const blocked = [...(own?.blocked ?? []), ...added];
+      if (blocked.length > MAX_BLOCKED) throw new BlockRefused('too_many', `A series can block at most ${MAX_BLOCKED} groups.`);
+      const next = {
+        priority: (own?.priority ?? []).filter((p) => !addedKeys.has(normGroup(p))),
+        blocked,
+        patienceDays: own?.patienceDays ?? null,
+      };
+      await qq('UPDATE lib_series SET scanlator_prefs = $2::jsonb WHERE id = $1', [seriesId, JSON.stringify(next)]);
+      await reapplyBlocklistInTransaction(qq, [seriesId]);
+    }
+    const after = await blockedChaptersOf(seriesId, qq);
+    const books = after.books.filter((b) => !before.has(b.id) || selected.has(b.id));
+    const out: BlockOutcome = { ...(await summed(books, qq)), groups, added };
+    if (!o.commit) throw new Rollback(out);
+    return out;
+  };
+  try {
+    return await tx(run);
+  } catch (e) {
+    if (e instanceof Rollback) return e.value;
+    throw e;
+  }
 }
 
 export class BlockedPurgeRefused extends Error {

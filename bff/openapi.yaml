@@ -122,6 +122,49 @@ components:
         Named UCHIYOMI-SESSION rather than KOMGA-SESSION so a real Komga on the same host does not
         overwrite it in the phone's cookie jar. POST /auth/logout clears it from a browser too.
   schemas:
+    BlockGroupsBody:
+      type: object
+      required: [groups]
+      additionalProperties: false
+      properties:
+        groups: { type: array, minItems: 1, maxItems: 50, items: { type: string, minLength: 1, maxLength: 80 } }
+        selected:
+          description: The chapters the block is asked from; any of them removable after it is offered too.
+          type: array
+          maxItems: 5000
+          items: { type: string, minLength: 1, maxLength: 128 }
+        bookIds:
+          description: Commit only -- the chapters shown, to remove when still only blocked groups hold them.
+          type: array
+          maxItems: 5000
+          items: { type: string, minLength: 1, maxLength: 128 }
+    BlockGroupsPreview:
+      type: object
+      required: [chapters, series, readers, books, groups]
+      properties:
+        chapters: { type: integer }
+        series: { type: integer }
+        readers: { type: integer }
+        books:
+          type: array
+          items:
+            type: object
+            required: [id, seriesId, seriesTitle, number, scanlator, pruned]
+            properties:
+              id: { type: string }
+              seriesId: { type: string }
+              seriesTitle: { type: string }
+              number: { type: number }
+              scanlator: { type: [string, "null"] }
+              pruned: { type: boolean }
+        groups:
+          type: array
+          items:
+            type: object
+            required: [name, already]
+            properties:
+              name: { type: string }
+              already: { type: [string, "null"], enum: [series, server, null] }
     AutofixSaid:
       type: object
       description: >-
@@ -10735,6 +10778,93 @@ paths:
           description: Admin permission or token scope required.
         "409":
           description: refused -- the download folder cannot be written.
+  /api/admin/series/{id}/block-groups/preview:
+    post:
+      tags: [admin]
+      summary: What blocking these groups for one series would leave to blocked groups alone.
+      operationId: postApiAdminSeriesBlockGroupsPreview
+      description: >-
+        Requires an admin account and admin token scope. Runs the block exactly as the commit does -- the series' own
+        blocked list extended, the stored listing re-resolved -- and rolls it back. books is what the block makes
+        removable (see GET /api/admin/blocked-chapters), plus any of selected removable now. groups names each group
+        asked for, deduped by the server's group equality, and whether it was blocked already (series or server).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BlockGroupsBody" }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The chapters the block would leave to blocked groups alone, and the groups.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BlockGroupsPreview" }
+        "400":
+          description: bad_request
+        "401":
+          description: Not authenticated.
+        "403":
+          description: Admin permission or token scope required.
+        "404":
+          description: not_found
+        "409":
+          description: too_many -- the series would block more than 200 groups.
+  /api/admin/series/{id}/block-groups:
+    post:
+      tags: [admin]
+      summary: Block groups for one series, and remove the chapters shown that only blocked groups hold now.
+      operationId: postApiAdminSeriesBlockGroups
+      description: >-
+        Requires an admin account and admin token scope. Adds the groups to the series' own blocked list (each
+        un-ranked; patience kept) and re-resolves its listing in one transaction, audited as series.settings. Then, when
+        bookIds is given, removes those of this series' chapters still a blocked group's alone, as
+        POST /api/admin/blocked-chapters/purge does. found is what the block made removable, before any removal.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BlockGroupsBody" }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The groups blocked, what the block made removable, and what was removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, blocked, found, removed, bytes, left, busy]
+                properties:
+                  ok: { type: boolean }
+                  blocked: { type: array, items: { type: string } }
+                  found: { $ref: "#/components/schemas/BlockGroupsPreview" }
+                  removed: { type: integer }
+                  bytes: { type: integer }
+                  left:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, reason]
+                      properties:
+                        id: { type: string }
+                        reason: { type: string, enum: [unlink_failed, outside_root, unreachable] }
+                  busy: { type: array, items: { type: string } }
+        "400":
+          description: bad_request
+        "401":
+          description: Not authenticated.
+        "403":
+          description: Admin permission or token scope required.
+        "404":
+          description: not_found
+        "409":
+          description: too_many, or refused -- the download folder cannot be written.
   /api/admin/series/{id}/check:
     post:
       tags:

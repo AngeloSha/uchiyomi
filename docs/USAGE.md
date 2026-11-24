@@ -837,6 +837,18 @@ they stay readable, and a chapter of theirs you had already deleted stays off th
 reads. Only a file the group's copy put in the download folder goes: a chapter an unblocked group also released, a
 file holding several chapters, and a library you built by hand are never touched.
 
+The question names the chapters it would remove (*Ch. 340, 341*, by series in the editor, the rest as *+3 more*).
+A wrong number often spreads: other groups copy it. Such a chapter qualifies once **every** group that lists it is
+blocked, and not while one unblocked group still has it. Block the last of them under **Translated by** and the sheet
+asks at once, under that group's row. The question under the groups stays too, for when you decide later.
+
+**Block group and remove…** does both from the chapter itself. It is in a downloaded chapter's **⋯** menu (or
+long-press), and in the select bar for several chapters at once. It lists every group behind the chapters, all ticked:
+the file's own group and every group that lists the same number. Untick any you want to keep. It then shows which
+chapters would go, by number, before anything happens. **Block and remove** blocks the ticked groups for this series
+only, as Block under *Translated by* does, and removes exactly the chapters it showed. If an unblocked group still has
+a chapter, it is not removed, and the button just says **Block**.
+
 **In the series' language** (since v0.62.0). A copy known to be in another language than the series' is never
 taken, exactly like a blocked group's: a Spanish copy never fills a chapter of an English series, whichever source
 ranks first. A copy's language is known when its source names it — MangaDex for each chapter, an extension or a site

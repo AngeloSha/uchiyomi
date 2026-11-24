@@ -18,6 +18,7 @@ import { Img, Backdrop, SectionTitle, useWideViewport } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, actionFailure, listActionFailure, msgOf } from '@/components/ConfirmDialog';
+import { BlockGroupsDialog } from '@/components/BlockGroupsDialog';
 import { MoveToLibrary } from '@/components/MoveToLibrary';
 import { moveSeriesToLibrary } from '@/lib/moveLibrary';
 import { requestFailure } from '@/lib/refusals';
@@ -448,7 +449,7 @@ function ButtonsWrap({ compact, menuOpen, children }: { compact: boolean; menuOp
   return <div className={buttonsClass(menuOpen)}>{children}</div>;
 }
 
-function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, onReader, onToggleDownload, onMark, onEdit, onVersions, onReplaceFrom, onCopyPath, onHide, onRefetch, onDelete, selectable, selected, onToggle, compact, lit, talk, onTalk }: {
+function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, onReader, onToggleDownload, onMark, onEdit, onVersions, onReplaceFrom, onCopyPath, onHide, onRefetch, onDelete, onBlock, selectable, selected, onToggle, compact, lit, talk, onTalk }: {
   book: Book;
   /** v0.87.0: the chapter's talk for the caption, and the menu's Comments, while the household has any. */
   talk?: ChapterTalkCount | null;
@@ -466,6 +467,11 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
    */
   onRefetch?: () => void;
   onDelete?: () => void;
+  /**
+   * Admins only, on a single-chapter file Uchiyomi downloaded (#396): block this chapter's groups for the series and
+   * remove what that leaves to blocked groups alone -- components/BlockGroupsDialog.tsx, which asks first.
+   */
+  onBlock?: () => void;
   /** Lit for a moment: the chapter a `?ch=` link (Health's Open) came to see. */
   lit?: boolean;
   /** The opt-in compact chapter list (lib/compactChapters.ts). Off: the row is exactly as it always was. */
@@ -509,6 +515,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
     ...(onHide ? [{ label: tr('Hide chapter {n}', { n: book.number }), divider: !onEdit && !onCopyPath, hook: 'hide-chapter', onSelect: onHide }] : []),
     ...(onRefetch ? [{ label: tr('Fetch again'), divider: true, onSelect: onRefetch }] : []),
     ...(onDelete ? [{ label: tr('Delete from server'), divider: !onRefetch, danger: true, onSelect: onDelete }] : []),
+    ...(onBlock ? [{ label: tr('Block group and remove…'), divider: !onRefetch && !onDelete, danger: true, hook: 'block-remove', onSelect: onBlock }] : []),
   ], { label: tr('Chapter actions') });
   // Only a name is shown; an id that resolves to nothing (a source since removed) shows no caption at all.
   const altSource = book.sourceId && book.sourceId !== primarySource ? (sourceNames?.[book.sourceId] ?? null) : null;
@@ -840,6 +847,8 @@ function SeriesInner() {
   });
   // #240: the chapter numbers a Hide asks about -- a row's ⋯, or the select bar's -- and More's Show hidden chapters.
   const [hiding, setHiding] = useState<number[] | null>(null);
+  // #396: the chapters a Block & remove asks about -- a row's ⋯, or the select bar's.
+  const [blocking, setBlocking] = useState<Book[] | null>(null);
   const [showHidden, setShowHidden] = useState(false);
   const [started, setStarted] = useState<StartedJob | null>(null);
   const clearPicks = () => { setPickedBooks(new Set()); setPickedGhosts(new Set()); };
@@ -1374,6 +1383,8 @@ function SeriesInner() {
   // delete and the server would say `already_pruned` for every one of them. Reintroduce by adding
   // `b.owned &&` back: pick a /library chapter and the delete says "0 deleted" -- or nothing.
   const deletable = pickedBookList.filter((b) => !b.pruned);
+  // Block & remove (#396): what the purge may take -- single-chapter files Uchiyomi downloaded, deleted ones too.
+  const blockable = pickedBookList.filter((b) => b.owned && b.numberEnd == null);
   // #240: the picked chapters' and grey rows' numbers, each once -- a hide is by number -- never a file holding a range.
   const hideable = useMemo(() => [...new Set([
     ...pickedBookList.filter((b) => b.numberEnd == null).map((b) => b.number),
@@ -1964,6 +1975,7 @@ function SeriesInner() {
                 onHide={isAdmin && b.numberEnd == null ? () => setHiding([b.number]) : undefined}
                 onRefetch={isAdmin && b.owned ? () => setConfirming({ what: 'refetch', books: [b] }) : undefined}
                 onDelete={isAdmin && b.owned && !b.pruned ? () => setConfirming({ what: 'delete', books: [b] }) : undefined}
+                onBlock={isAdmin && b.owned && b.numberEnd == null ? () => setBlocking([b]) : undefined}
                 selectable={selecting} selected={pickedBooks.has(b.id)} onToggle={() => togglePickBook(b.id)}
                 versions={versionsOf.get(b.number)?.length}
                 onVersions={versionsOf.has(b.number) ? () => setChapterSheet({ number: b.number, book: b }) : undefined}
@@ -2073,6 +2085,11 @@ function SeriesInner() {
         {isAdmin && (
           <button disabled={acting || !hideable.length} onClick={() => setHiding(hideable)} data-hide-chapters className="btn-key">
             {hideable.length === 1 ? tr('Hide 1 chapter') : hideable.length ? tr('Hide {n} chapters', { n: hideable.length }) : tr('Hide chapters')}
+          </button>
+        )}
+        {isAdmin && (
+          <button disabled={acting || !blockable.length} onClick={() => setBlocking(blockable)} data-block-chapters className="btn-key text-rose-300">
+            {tr('Block group and remove…')}
           </button>
         )}
         {isAdmin && (
@@ -2378,6 +2395,10 @@ function SeriesInner() {
           onConfirm={() => refetchBooks(confirming.books)}
           onClose={() => setConfirming(null)}
         />
+      )}
+      {blocking && (
+        <BlockGroupsDialog seriesId={id} books={blocking} copiesOf={(n) => versionsOf.get(n) ?? []}
+          onClose={() => setBlocking(null)} onDone={() => { setBlocking(null); leaveSelect(); }} />
       )}
       {/* #240: a hide asks first -- it changes the series for everyone -- but it is no delete: the plain key, not the red. */}
       {hiding && (

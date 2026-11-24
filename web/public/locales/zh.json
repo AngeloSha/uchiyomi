@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 4808
+    "strings": 4819
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -4811,5 +4811,16 @@
   "Some chapters could not be removed now. Try again in a moment.": "部分章节暂时无法移除。请稍后再试。",
   "Could not remove the chapters": "无法移除这些章节",
   "Remove blocked chapters": "移除被屏蔽的章节",
-  "Remove completely": "彻底移除"
+  "Remove completely": "彻底移除",
+  "Block group and remove…": "屏蔽汉化组并移除…",
+  "1 downloaded chapter is then only from blocked groups: removed completely.": "届时有 1 个已下载的章节只来自被屏蔽的组：将彻底移除。",
+  "{n} downloaded chapters are then only from blocked groups: removed completely.": "届时有 {n} 个已下载的章节只来自被屏蔽的组：将彻底移除。",
+  "Block the groups of chapter {n}?": "屏蔽第 {n} 话的汉化组？",
+  "Block the groups of these chapters?": "屏蔽这些章节的汉化组？",
+  "No translation group is named for these chapters.": "这些章节没有注明汉化组。",
+  "Blocked for this series: nothing is fetched from these groups again, and a chapter only they released is hidden.": "在本系列中屏蔽：不再从这些组获取任何内容，只有它们发布的章节会被隐藏。",
+  "Tick a group to block.": "勾选要屏蔽的组。",
+  "Could not check which chapters would go": "无法检查哪些章节会被移除",
+  "No downloaded chapter is removed: a group that is not blocked still has each of them.": "不会移除任何已下载的章节：每一章仍有未被屏蔽的组持有。",
+  "Block and remove": "屏蔽并移除"
 }

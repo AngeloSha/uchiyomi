@@ -8,7 +8,7 @@
 // Prefer / rank / Block controls, the × that stops following a source, Check now, and the patience input in
 // the footer. Nothing here is a draft: every Prefer, Block and rank tap is one PATCH, applied at once, because
 // a sheet is dismissed by a tap outside or Escape and a draft would go with it.
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -19,7 +19,7 @@ import { editionNames } from '@/lib/editions';
 import Link from 'next/link';
 import { useToast } from '@/components/Toast';
 import { msgOf } from '@/components/ConfirmDialog';
-import { BlockedChaptersAsk, blockedChaptersKey } from '@/components/BlockedChapters';
+import { BlockedChaptersAsk, BlockedChaptersPrompt, blockedChaptersKey, type BlockedChapters } from '@/components/BlockedChapters';
 import { Sheet } from '@/components/ui';
 import { GroupAvatar } from '@/components/GroupAvatar';
 import { ActivityDots } from '@/components/ActivityDots';
@@ -655,9 +655,29 @@ export function SourcesSheet({ id, title: seriesTitle, series, groups, admin, er
   const togglePrefer = (name: string) => apply(rankIn(stored.priority, name) >= 0
     ? { ...stored, priority: withoutGroup(stored.priority, name) }
     : { priority: [...stored.priority, name], blocked: withoutGroup(stored.blocked, name) });
-  const toggleBlock = (name: string) => apply(hasGroup(stored.blocked, name)
-    ? { ...stored, blocked: withoutGroup(stored.blocked, name) }
-    : { blocked: [...stored.blocked, name], priority: withoutGroup(stored.priority, name) });
+  // A Block asks at once, under that group's row, when it is what leaves downloaded chapters to blocked groups alone --
+  // the last of the groups that listed a wrong number, say (bff lib/blockedPurge.ts blockGroupsFor answers exactly
+  // those). The standing question under the rows stays for whoever decides later. An unblock is a plain save.
+  const [blockedNow, setBlockedNow] = useState<{ group: string; data: BlockedChapters } | null>(null);
+  const block = async (name: string) => {
+    setLocal({ blocked: [...stored.blocked, name], priority: withoutGroup(stored.priority, name) });
+    setBusy(true);
+    setBlockedNow(null);
+    try {
+      const r = await api<{ found?: BlockedChapters }>(`/api/admin/series/${encodeURIComponent(id)}/block-groups`, { json: { groups: [name] } });
+      toast(tr('Saved'), 'success');
+      for (const k of ['series-scanlators', 'series-groups', 'series-listing', 'series-versions']) qc.invalidateQueries({ queryKey: [k, id] });
+      void qc.invalidateQueries({ queryKey: ['blocked-chapters'] });
+      onSaved();
+      if (r.found?.chapters) setBlockedNow({ group: normGroup(name), data: r.found });
+    } catch (e) { toast(msgOf(e, tr('Could not save')), 'error'); setLocal(undefined); }
+    finally { setBusy(false); }
+  };
+  const toggleBlock = (name: string) => {
+    if (!hasGroup(stored.blocked, name)) return void block(name);
+    if (blockedNow?.group === normGroup(name)) setBlockedNow(null);
+    return apply({ ...stored, blocked: withoutGroup(stored.blocked, name) });
+  };
   const move = (name: string, dir: -1 | 1) => apply({ ...stored, priority: reorder(stored.priority, rankIn(stored.priority, name), dir) });
   // The ranked groups come first, in rank order, so a ranked row's place in the list is its rank: dragging one to
   // where another sits is a move in the ranking. The groups under them are not draggable.
@@ -995,13 +1015,21 @@ export function SourcesSheet({ id, title: seriesTitle, series, groups, admin, er
             </>
           );
           return (
-            <GroupRow key={normGroup(g.name) || g.name} g={g} blocked={blocked} serverBlocked={serverBlocked} haveNumbers={haveNumbers}
-              seriesStatus={series?.metadata?.status} controls={controls || undefined} onJump={jump}
-              dragProps={rank >= 0 ? drag.item(rank) : undefined} />
+            <Fragment key={normGroup(g.name) || g.name}>
+              <GroupRow g={g} blocked={blocked} serverBlocked={serverBlocked} haveNumbers={haveNumbers}
+                seriesStatus={series?.metadata?.status} controls={controls || undefined} onJump={jump}
+                dragProps={rank >= 0 ? drag.item(rank) : undefined} />
+              {/* At once, under the group just blocked, when that block left chapters to blocked groups alone. */}
+              {isAdmin && blocked && blockedNow?.group === normGroup(g.name) && (
+                <BlockedChaptersPrompt hook="now" focus data={blockedNow.data} everySeries={false}
+                  onKeep={() => setBlockedNow(null)} onRemoved={() => setBlockedNow(null)} />
+              )}
+            </Fragment>
           );
         })}
-        {/* A block hides at once; a blocked group's chapters already downloaded are removed only when asked (#396). */}
-        {isAdmin && <BlockedChaptersAsk seriesId={id} />}
+        {/* A block hides at once; a blocked group's chapters already downloaded are removed only when asked (#396) --
+            here, for whoever decides later, while the question under a row just blocked is not already asking. */}
+        {isAdmin && !blockedNow && <BlockedChaptersAsk seriesId={id} />}
       </section>
 
       {/* Last, below Translated by: Prefer and Block live there, and at 390 px every line above them is one they lose.
